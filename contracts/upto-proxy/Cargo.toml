@@ -1,0 +1,17 @@
+[package]
+name = "upto-proxy"
+version = "0.0.0"
+description = "Soroban proxy contract for the x402 upto scheme on Stellar"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

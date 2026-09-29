@@ -1,0 +1,34 @@
+{
+  "name": "stellar-x402",
+  "version": "0.0.0",
+  "private": true,
+  "description": "x402 facilitator with Bazaar discovery for Stellar",
+  "license": "Apache-2.0",
+  "type": "module",
+  "packageManager": "pnpm@11.5.2",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "clean": "turbo run clean",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "contracts:test": "cargo test --manifest-path contracts/Cargo.toml",
+    "contracts:build": "stellar contract build --manifest-path contracts/upto-proxy/Cargo.toml"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.20.4",
+    "eslint": "^10.11.0",
+    "prettier": "^3.9.9",
+    "tsx": "^4.23.15",
+    "turbo": "^2.11.5",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.70.1",
+    "vitest": "^5.0.2"
+  }
+}

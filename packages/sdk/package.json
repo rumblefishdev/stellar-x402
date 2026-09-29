@@ -1,0 +1,43 @@
+{
+  "name": "@stellar-x402/sdk",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Seller, buyer and agent helpers for x402 on Stellar",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./seller": {
+      "types": "./dist/seller.d.ts",
+      "default": "./dist/seller.js"
+    },
+    "./buyer": {
+      "types": "./dist/buyer.d.ts",
+      "default": "./dist/buyer.js"
+    },
+    "./agent": {
+      "types": "./dist/agent.d.ts",
+      "default": "./dist/agent.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@stellar-x402/config": "workspace:*",
+    "@x402/core": "~2.27.0",
+    "@x402/extensions": "~2.27.0",
+    "@x402/stellar": "~2.27.0"
+  }
+}

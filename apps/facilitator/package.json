@@ -1,0 +1,30 @@
+{
+  "name": "@stellar-x402/facilitator",
+  "version": "0.0.0",
+  "private": true,
+  "description": "x402 facilitator service: verify, settle, supported, discovery and MCP",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rm -rf dist .turbo",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.1",
+    "@stellar-x402/bazaar": "workspace:*",
+    "@stellar-x402/config": "workspace:*",
+    "@stellar-x402/mcp": "workspace:*",
+    "@stellar-x402/signer-pool": "workspace:*",
+    "@x402/core": "~2.27.0",
+    "@x402/extensions": "~2.27.0",
+    "@x402/stellar": "~2.27.0",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6"
+  }
+}

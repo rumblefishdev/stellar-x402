@@ -1,0 +1,30 @@
+{
+  "name": "@stellar-x402/signer-pool",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Channel-account signer pool: funding, sequence tracking, retry and fee bump",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@stellar-x402/config": "workspace:*",
+    "@stellar/stellar-sdk": "^16.3.0",
+    "@x402/stellar": "~2.27.0"
+  }
+}

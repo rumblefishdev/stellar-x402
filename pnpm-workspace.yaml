@@ -1,0 +1,8 @@
+packages:
+  - apps/*
+  - packages/*
+  - examples/*
+  - conformance
+
+allowBuilds:
+  esbuild: true

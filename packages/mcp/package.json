@@ -1,0 +1,32 @@
+{
+  "name": "@stellar-x402/mcp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "MCP tools for Bazaar search and paid calls",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.1",
+    "@stellar-x402/config": "workspace:*",
+    "@x402/core": "~2.27.0",
+    "@x402/mcp": "~2.27.0",
+    "zod": "^3.25.76"
+  }
+}

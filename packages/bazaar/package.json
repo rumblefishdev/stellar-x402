@@ -1,0 +1,30 @@
+{
+  "name": "@stellar-x402/bazaar",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Bazaar catalog: validation, storage, ranking and search",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@stellar-x402/config": "workspace:*",
+    "@x402/core": "~2.27.0",
+    "@x402/extensions": "~2.27.0"
+  }
+}
