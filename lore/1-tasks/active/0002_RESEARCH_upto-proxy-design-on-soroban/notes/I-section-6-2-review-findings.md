@@ -1,7 +1,7 @@
 ---
 title: "Review findings on architecture doc §6.2 (UptoProxy)"
 type: idea
-status: seed
+status: mature
 tags: [upto, contracts, review]
 links:
   - ../../../../../docs/rfp/x402-facilitator-bazaar-technical-architecture.md
@@ -11,6 +11,17 @@ history:
     status: seed
     who: claude
     note: "First-pass review of §6.2 against upstream upto/exact specs"
+  - date: "2026-09-30"
+    status: mature
+    who: claude
+    note: "All findings resolved by research and spike; see S- notes and G- spec"
+    spawns:
+      - notes/R-x402-upto-specs.md
+      - notes/R-soroban-auth-model.md
+      - notes/R-sep41-sac-allowance.md
+      - notes/R-exact-stellar-facilitator-rules.md
+      - notes/R-testnet-spike.md
+      - notes/S-immutable.md
 ---
 
 # Review findings on architecture doc §6.2 (UptoProxy)
