@@ -27,7 +27,7 @@ x402 roles.
 | `same_client_tree_settles_any_amount_up_to_max` | One tree settles 0, 1, 400 and 1000 of 1000; leftover allowance = `max - actual` |
 | `over_max_is_rejected` | `Error(Contract, #1)` AmountExceedsMax |
 | `replay_is_rejected` | Contract nonce: `Error(Contract, #5)` NonceUsed |
-| `changed_recipient_does_not_match_client_tree` | Recipient binding |
+| `changed_recipient_does_not_match_client_tree` | Recipient binding: the facilitator's entry carries the new `to`, so only the client's tree can fail; a control run with both trees on the new `to` settles |
 | `missing_facilitator_auth_is_rejected` | Facilitator binding |
 | `approve_before_require_auth_does_not_match_the_same_tree` | Call order matters (F7) |
 | `recorded_tree_has_no_actual_amount` | Exact recorded tree; `transfer_from` needs no auth entry |

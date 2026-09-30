@@ -11,6 +11,10 @@ history:
     who: claude
     note: "Spec drafted from S- decisions and spike evidence; awaiting okarcz approval"
     spawned_from: ["notes/S-allowance-in-auth-tree.md"]
+  - date: "2026-09-30"
+    status: developing
+    who: claude
+    note: "PR #1 review: I4 narrowed to the entry's lifetime plus facilitator nonce record (§8.1); to == proxy rejected (InvalidRecipient)"
 ---
 
 # UptoProxy contract specification (v1)
@@ -96,7 +100,7 @@ back all state.
 
 1. `max_amount <= 0` or `actual_amount < 0` → `InvalidAmount`
 2. `actual_amount > max_amount` → `AmountExceedsMax`
-3. `from == to` → `SelfPayment`
+3. `from == to` → `SelfPayment`, and `to == current_contract_address` → `InvalidRecipient`
 4. `from.require_auth_for_args(<§3 vector>)`. This MUST come before step 9 (R-soroban-auth-model).
 5. `facilitator.require_auth()`
 6. `now = env.ledger().timestamp()`. `now < valid_after` → `NotYetValid`, and `now > deadline` →
@@ -127,6 +131,7 @@ pub enum UptoError {
     Expired = 5,
     InvalidAllowanceExpiration = 6,
     NonceUsed = 7,
+    InvalidRecipient = 8,
 }
 ```
 
@@ -157,6 +162,9 @@ settlements too.
 |---|---|---|---|
 | `DataKey::Nonce(Address, BytesN<32>)` | temporary | `()` | until at least `allowance_expiration_ledger` (S-nonce-storage) |
 
+After the entry expires, `is_nonce_used` returns `false` again. The contract alone does not stop a
+nonce from being reused in a new payload signed later; the facilitator does (§8.1).
+
 There is no instance or persistent storage. The contract instance TTL is kept alive
 operationally by the deploy scripts in 0004.
 
@@ -167,11 +175,22 @@ operationally by the deploy scripts in 0004.
 - **I2** Nothing moves without the client's signature over the §3.1 tree. Changing any signed
   field fails auth.
 - **I3** Nothing moves without the authorization of the signed `facilitator`.
-- **I4** Each `(from, nonce)` settles at most once.
+- **I4** Each `(from, nonce)` settles at most once while its nonce entry lives, that is, until at
+  least the `allowance_expiration_ledger` of the settlement that consumed it. A second settlement
+  in that window fails with `NonceUsed`. Reuse after the entry expires is blocked off-chain (§8.1).
 - **I5** Settlement happens only while `valid_after <= now <= deadline` and
   `seq <= allowance_expiration_ledger`.
 - **I6** The contract calls only `approve` and `transfer_from`, and only on the signed `token`.
 - **I7** There is no privileged role and no code path that changes code or configuration.
+
+### 8.1 Facilitator obligation: reject reused nonces
+
+The facilitator MUST keep a durable record of every `(from, nonce)` it has settled and MUST reject
+a payload whose pair is in that record at verify and again at settle, even when `is_nonce_used`
+returns `false`. The record MUST outlive the contract's nonce entry; the facilitator never deletes
+it. This goes into `scheme_upto_stellar.md` as a verification rule. It covers only settlements
+made through that facilitator; a client that reuses a nonce across facilitators has signed two
+separate payments.
 
 ## 9. Measured cost (spike, testnet, SAC token)
 
@@ -198,5 +217,5 @@ None. Client cancellation was considered and left out of v1 (S-cancellation).
 | D4 | none | `allowance_expiration_ledger` parameter | S-time-bounds-and-expiry |
 | D5 | Time unit not specified | unix seconds, inclusive bounds | S-time-bounds-and-expiry |
 | D6 | Nonce storage not specified | temporary, keyed `(from, nonce)`, `is_nonce_used` view | S-nonce-storage |
-| D7 | none | Zero amount allowed without a transfer; `from == to` rejected | S-zero-amount-and-edge-inputs |
+| D7 | none | Zero amount allowed without a transfer; `from == to` and `to == proxy` rejected | S-zero-amount-and-edge-inputs |
 | D8 | none | Immutable, typed errors, `UptoSettled` event | S-immutable |

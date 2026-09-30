@@ -22,16 +22,23 @@ history:
   least `allowance_expiration_ledger`.
 - **Behaviour.** A nonce that is already present gives `NonceUsed`. A read-only
   `is_nonce_used(from, nonce) -> bool` lets the facilitator verify.
+- **Limit.** The on-chain guarantee holds only while the entry lives. After it expires, a new
+  payload signed with the same nonce and a later expiry would settle again. The facilitator
+  closes this gap with its own durable record of settled `(from, nonce)` pairs and rejects reuse
+  (G- spec §8.1).
 
 ## Reasoning
 
 1. **Two layers of replay protection.** The built-in auth nonce already makes each signed entry
    single-use; spike S2 shows `Error(Auth, ExistingValue)`. The x402 nonce adds protection at the
    payload level:
-   - it covers a client that signs two entries with the same x402 nonce;
-   - it gives the facilitator an on-chain "already settled?" check.
+   - it covers a client that signs two entries with the same x402 nonce, as long as the first
+     settlement's entry still lives;
+   - it gives the facilitator an on-chain "already settled?" check for the same window.
 2. **Why temporary storage.** A payload can't settle after `allowance_expiration_ledger`: the
-   built-in auth expiry and `approve` both reject it. So the entry only has to live that long.
+   built-in auth expiry and `approve` both reject it. So the entry only has to live that long to
+   stop replay of the *same* payload. Reuse of the nonce in a *new* payload is left to the
+   facilitator's record, which is cheaper than keeping every nonce on-chain for good.
    Temporary storage costs less rent than persistent, and expired entries are removed for good.
 3. **The TTL is always allowed.** SAC `approve` already requires
    `live_until <= max_live_until_ledger`, so the TTL extension can never exceed `max_ttl`. The

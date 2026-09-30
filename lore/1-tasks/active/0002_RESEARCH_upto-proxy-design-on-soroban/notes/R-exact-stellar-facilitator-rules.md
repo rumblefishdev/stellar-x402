@@ -35,7 +35,8 @@ Source: [`scheme_exact_stellar.md`](../sources/scheme_exact_stellar.md). This no
 ## New rules that `upto` needs
 
 - **Verify.** The auth entry's root args must equal the recomputed custom args. `nonce` must be
-  unused (`is_nonce_used` is false). The time window must be valid. Simulate with
+  unused: `is_nonce_used` is false **and** `(from, nonce)` is not in the facilitator's own
+  settled-nonce record (the on-chain entry expires; G- spec §8.1). The time window must be valid. Simulate with
   `actual = max_amount` (the worst case), which needs the payer's balance to be at least `max`.
 - **Settle.** Re-verify against the **signed** `max_amount`, not `requirements.amount`. Then
   rebuild the transaction with the actual amount. A zero amount means no transaction:
