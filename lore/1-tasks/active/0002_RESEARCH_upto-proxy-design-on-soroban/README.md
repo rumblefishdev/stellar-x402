@@ -2,7 +2,7 @@
 id: "0002"
 title: "UptoProxy design on Soroban: validate §6.2 and write the contract spec"
 type: RESEARCH
-status: backlog
+status: active
 milestone: 1
 related_adr: []
 related_tasks: ["0003", "0004", "0005"]
@@ -19,6 +19,10 @@ history:
     status: backlog
     who: claude
     note: "Task created with okarcz. First of the four M1 UptoProxy tasks."
+  - date: "2026-09-30"
+    status: active
+    who: okarcz
+    note: "Started. stellar-cli upgraded to 28.1.0 beforehand."
 ---
 
 # UptoProxy design on Soroban: validate §6.2 and write the contract spec
@@ -30,10 +34,19 @@ authorization model, prove the risky auth mechanics with a small testnet spike, 
 contract spec (a G- note) that 0003 implements. We write no production code until the spec is
 approved.
 
-## Status: Backlog
+## Status: Active
 
-> Blocks 0003. Seed findings from the first review are in
-> [notes/I-section-6-2-review-findings.md](notes/I-section-6-2-review-findings.md).
+> Research and the spike are done, and every decision is made. The spec,
+> [notes/G-upto-proxy-contract-spec.md](notes/G-upto-proxy-contract-spec.md), is being reviewed by
+> okarcz. Blocks 0003.
+
+**Notes:** the [I- review findings](notes/I-section-6-2-review-findings.md) led to the R- notes
+(the [x402 upto specs](notes/R-x402-upto-specs.md), the
+[Soroban auth model](notes/R-soroban-auth-model.md),
+[SEP-41/SAC allowance](notes/R-sep41-sac-allowance.md), the
+[exact-Stellar rules](notes/R-exact-stellar-facilitator-rules.md) and the
+[testnet spike](notes/R-testnet-spike.md)), then the S- decisions, then the G- spec.
+The spike code is in [spike/](spike/README.md) and the upstream spec copies are in `sources/`.
 
 ## Context
 
@@ -58,7 +71,7 @@ build on those gaps, the contract, the facilitator's verify/settle logic and the
 - `R-exact-stellar-facilitator-rules`: which `exact` verification rules carry over to `upto` and
   which conflict with it (for example, "facilitator MUST NOT appear in any auth entry").
 
-### Step 2: Testnet spike (throwaway code, not kept)
+### Step 2: Testnet spike (throwaway code, kept in `spike/` as evidence)
 
 Prove on testnet, with a minimal contract:
 1. One signed auth entry settles correctly with different `actual_amount` values, so the signature
@@ -90,14 +103,18 @@ Write one S- note per open decision, then `G-upto-proxy-contract-spec`, which co
    valid_after, deadline)`, with signed args `[token, to, facilitator, max_amount, nonce,
    valid_after, deadline]`. The G- spec fixes the final order.
 
-Still open for the S- notes, decided with testnet evidence: nonce storage and TTL (F5),
-zero-amount handling (F6), `from == to`, and client-side cancellation of an unsettled
-authorization. Any of these that changes the interface goes back to okarcz.
+Decided afterwards in S- notes, from the research and the spike:
+[nonce storage](notes/S-nonce-storage.md) (temporary, lives until the allowance expiry) and
+[zero and edge inputs](notes/S-zero-amount-and-edge-inputs.md) (0 settles with no transfer, and
+`from == to` is rejected). Also [token scope](notes/S-token-scope.md) (any SEP-41 token, no
+allowlist) and the new `allowance_expiration_ledger` parameter
+([S-time-bounds-and-expiry](notes/S-time-bounds-and-expiry.md)). Decided by okarcz afterwards:
+[no cancellation function in v1](notes/S-cancellation.md).
 
 ## Acceptance Criteria
 
-- [ ] R- notes written, each with sources
-- [ ] Spike proves points 1–4 on testnet, with transaction hashes recorded
-- [ ] Every decision (confirmed and still open) has an S- note
-- [ ] `G-upto-proxy-contract-spec` is complete and approved by okarcz
-- [ ] Every deviation from arch doc §6.2 is listed, with its reason, for 0005
+- [x] R- notes written, each with sources (5 notes, and 4 upstream docs in `sources/`)
+- [x] Spike proves points 1–4 on testnet, with transaction hashes recorded (S1–S8 in R-testnet-spike)
+- [x] Every decision (confirmed and still open) has an S- note (8 decided)
+- [ ] `G-upto-proxy-contract-spec` is complete and approved by okarcz (drafted, awaiting review)
+- [x] Every deviation from arch doc §6.2 is listed, with its reason, for 0005 (G- spec §11, D1–D8)

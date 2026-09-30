@@ -1,0 +1,202 @@
+---
+title: "UptoProxy contract specification (v1)"
+type: generation
+status: developing
+tags: [upto, contracts, spec]
+links:
+  - ../../../backlog/0003_FEATURE_upto-proxy-contract.md
+history:
+  - date: "2026-09-30"
+    status: developing
+    who: claude
+    note: "Spec drafted from S- decisions and spike evidence; awaiting okarcz approval"
+    spawned_from: ["notes/S-allowance-in-auth-tree.md"]
+---
+
+# UptoProxy contract specification (v1)
+
+This is the normative spec for `contracts/upto-proxy` (task 0003). "MUST" and "MUST NOT" are
+normative. Every rule points back to an S- or R- note. Anything 0003 needs that this spec does
+not settle goes back to 0002 before it is coded.
+
+## 1. Scope
+
+The contract is one immutable Soroban contract. It settles an x402 `upto` payment: it moves
+`actual_amount <= max_amount` of a SEP-41 token from `from` to `to`. It does this under one
+client-signed authorization and the authorization of the bound facilitator. The contract has no
+admin, constructor arguments, upgrade function, pause or fund custody (S-immutable).
+
+## 2. Interface
+
+```rust
+pub fn settle_upto(
+    env: Env,
+    token: Address,                   // SEP-41 token contract
+    from: Address,                    // payer; signs the client entry
+    to: Address,                      // payTo
+    facilitator: Address,             // must authorize this call
+    max_amount: i128,                 // signed ceiling
+    actual_amount: i128,              // NOT signed by the client; 0 <= actual <= max
+    nonce: BytesN<32>,                // x402 nonce, client-chosen random
+    valid_after: u64,                 // unix seconds, inclusive
+    deadline: u64,                    // unix seconds, inclusive
+    allowance_expiration_ledger: u32, // approve live_until; signed via the approve sub-invocation
+) -> Result<(), UptoError>;
+
+pub fn is_nonce_used(env: Env, from: Address, nonce: BytesN<32>) -> bool;
+```
+
+The contract MUST have no other public functions. There is no cancellation function
+(S-cancellation, decided by okarcz).
+
+## 3. Signed payload (client)
+
+`from.require_auth_for_args` MUST receive exactly this vector, in this order and with these types:
+
+| # | Value | ScVal |
+|---|---|---|
+| 0 | `token` | `Address` |
+| 1 | `to` | `Address` |
+| 2 | `facilitator` | `Address` |
+| 3 | `max_amount` | `I128` |
+| 4 | `nonce` | `Bytes` (32) |
+| 5 | `valid_after` | `U64` |
+| 6 | `deadline` | `U64` |
+
+`actual_amount` and `from` MUST NOT be in it. `from` is the signer of the entry, so it is bound
+already. `allowance_expiration_ledger` is bound through the sub-invocation.
+
+### 3.1 The client's auth entry, which is the only valid shape
+
+```
+credentials: ADDRESS or ADDRESS_V2 (address = from)
+  signatureExpirationLedger == allowance_expiration_ledger   (client rule; the facilitator
+                                                              verifies it; the contract can't see it)
+rootInvocation:
+  contract = <UptoProxy>, fn = "settle_upto", args = §3 vector
+  subInvocations:
+    - contract = token, fn = "approve",
+      args = [from, <UptoProxy>, max_amount, allowance_expiration_ledger]
+      subInvocations: []
+```
+
+The client MUST NOT use its own account as the source of the draft transaction it simulates. It
+would then get source-account credentials (R-soroban-auth-model). Use the facilitator address.
+
+### 3.2 The facilitator's auth
+
+The facilitator's entry covers `settle_upto` with all 10 real args and no sub-invocations. It uses
+either `SOURCE_ACCOUNT` credentials (facilitator is the tx source) or `ADDRESS`/`ADDRESS_V2`
+credentials (channel account as source). Spike S1 and S8 cover both (S-facilitator-binding).
+
+## 4. Execution order
+
+`settle_upto` MUST run these steps in this order. Any error aborts the call, and the host rolls
+back all state.
+
+1. `max_amount <= 0` or `actual_amount < 0` → `InvalidAmount`
+2. `actual_amount > max_amount` → `AmountExceedsMax`
+3. `from == to` → `SelfPayment`
+4. `from.require_auth_for_args(<§3 vector>)`. This MUST come before step 9 (R-soroban-auth-model).
+5. `facilitator.require_auth()`
+6. `now = env.ledger().timestamp()`. `now < valid_after` → `NotYetValid`, and `now > deadline` →
+   `Expired`.
+7. `seq = env.ledger().sequence()`. `allowance_expiration_ledger < seq` → `Expired`, and
+   `allowance_expiration_ledger > env.ledger().max_live_until_ledger()` →
+   `InvalidAllowanceExpiration`.
+8. Nonce: if `Nonce(from, nonce)` exists → `NonceUsed`. Otherwise set it in temporary storage and
+   `extend_ttl(key, live_for, live_for)` with `live_for = allowance_expiration_ledger - seq`.
+   Skip the extension when `live_for == 0`: the minimum temporary TTL already covers it.
+9. `token.approve(from, current_contract_address, max_amount, allowance_expiration_ledger)`
+10. If `actual_amount > 0`: `token.transfer_from(current_contract_address, from, to, actual_amount)`
+11. Emit `UptoSettled` (§6), then return `Ok(())`.
+
+The nonce is written in step 8, before the external token calls in steps 9 and 10. Re-entry is
+impossible anyway, but the write still comes first.
+
+## 5. Errors
+
+```rust
+#[contracterror]
+#[repr(u32)]
+pub enum UptoError {
+    InvalidAmount = 1,
+    AmountExceedsMax = 2,
+    SelfPayment = 3,
+    NotYetValid = 4,
+    Expired = 5,
+    InvalidAllowanceExpiration = 6,
+    NonceUsed = 7,
+}
+```
+
+The facilitator maps these to `invalid_upto_stellar_*` x402 error reasons. The names belong to the
+spec task. Auth failures surface as host `Error(Auth, …)`, not as contract errors.
+
+## 6. Event
+
+```rust
+#[contractevent]
+pub struct UptoSettled {
+    #[topic] pub token: Address,
+    #[topic] pub from: Address,
+    #[topic] pub to: Address,
+    pub facilitator: Address,
+    pub max_amount: i128,
+    pub actual_amount: i128,
+    pub nonce: BytesN<32>,
+}
+```
+
+The fixed topic is `"upto_settled"`, and the data is a map. The event is emitted for zero
+settlements too.
+
+## 7. Storage
+
+| Key | Tier | Value | Lifetime |
+|---|---|---|---|
+| `DataKey::Nonce(Address, BytesN<32>)` | temporary | `()` | until at least `allowance_expiration_ledger` (S-nonce-storage) |
+
+There is no instance or persistent storage. The contract instance TTL is kept alive
+operationally by the deploy scripts in 0004.
+
+## 8. Invariants (every one gets a test in 0003)
+
+- **I1** Tokens move only from `from` to `to`, by exactly `actual_amount`, which is at most
+  `max_amount`. The proxy's own token balance never changes.
+- **I2** Nothing moves without the client's signature over the §3.1 tree. Changing any signed
+  field fails auth.
+- **I3** Nothing moves without the authorization of the signed `facilitator`.
+- **I4** Each `(from, nonce)` settles at most once.
+- **I5** Settlement happens only while `valid_after <= now <= deadline` and
+  `seq <= allowance_expiration_ledger`.
+- **I6** The contract calls only `approve` and `transfer_from`, and only on the signed `token`.
+- **I7** There is no privileged role and no code path that changes code or configuration.
+
+## 9. Measured cost (spike, testnet, SAC token)
+
+| Path | Fee (stroops) |
+|---|---|
+| Facilitator as source, `actual > 0` | ~38,600 |
+| Facilitator as source, `actual = 0` | ~28,000 |
+| Channel as source, plus a signed facilitator entry | ~47,300 |
+
+The production contract (with events and extra checks) is measured again in 0003 and 0004. The
+facilitator's `upto` fee ceiling must allow for the channel path.
+
+## 10. Open items
+
+None. Client cancellation was considered and left out of v1 (S-cancellation).
+
+## 11. Deviations from architecture doc §6.2
+
+| # | §6.2 | This spec | Why |
+|---|---|---|---|
+| D1 | No `token` parameter | `token` added and signed | F1, S-token-scope |
+| D2 | `facilitator` signed but unchecked | `facilitator.require_auth()` | F2, S-facilitator-binding |
+| D3 | Separate client `approve` | `approve` is a sub-invocation of the same auth entry | F3, S-allowance-in-auth-tree |
+| D4 | none | `allowance_expiration_ledger` parameter | S-time-bounds-and-expiry |
+| D5 | Time unit not specified | unix seconds, inclusive bounds | S-time-bounds-and-expiry |
+| D6 | Nonce storage not specified | temporary, keyed `(from, nonce)`, `is_nonce_used` view | S-nonce-storage |
+| D7 | none | Zero amount allowed without a transfer; `from == to` rejected | S-zero-amount-and-edge-inputs |
+| D8 | none | Immutable, typed errors, `UptoSettled` event | S-immutable |
