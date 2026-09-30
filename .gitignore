@@ -32,3 +32,19 @@ Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# Claude Code: per-developer tooling (GSD install, agents, commands, hooks,
+# scripts, worktrees) is local, not shipped. The three shared project skills
+# and settings.json stay tracked — same shape as the .vscode rules above.
+.claude/*
+!.claude/settings.json
+!.claude/skills/
+
+# Lore framework - session-local files
+lore/0-session/current-user.md
+lore/0-session/current-task.md
+lore/0-session/current-task.json
+lore/0-session/next-tasks.md
+lore/README.md
+lore/BOARD.md
+lore/board.json

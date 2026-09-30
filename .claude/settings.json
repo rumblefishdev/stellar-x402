@@ -1,0 +1,13 @@
+{
+  "enabledPlugins": {
+    "lore-framework@rf-claude-marketplace": true
+  },
+  "permissions": {
+    "allow": [
+      "mcp__plugin_lore_lore-framework",
+      "Skill(lore-framework)",
+      "Skill(lore-framework-tasks)",
+      "Skill(lore-framework-git)"
+    ]
+  }
+}
