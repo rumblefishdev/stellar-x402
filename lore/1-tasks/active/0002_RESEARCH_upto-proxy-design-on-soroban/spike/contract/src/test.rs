@@ -172,7 +172,6 @@ fn replay_is_rejected() {
 #[test]
 fn changed_recipient_does_not_match_client_tree() {
     let s = setup();
-    mock_client_and_facilitator(&s, "settle_upto", 10);
     let other = Setup {
         to: Address::generate(&s.env),
         env: s.env.clone(),
@@ -182,7 +181,40 @@ fn changed_recipient_does_not_match_client_tree() {
         facilitator: s.facilitator.clone(),
         nonce: s.nonce.clone(),
     };
+    // The client signed the original `to`; the facilitator authorizes the new one.
+    // Only the client's entry can fail, so this isolates the recipient binding.
+    let approve_args = (s.from.clone(), s.proxy.clone(), MAX, EXP_LEDGER).into_val(&s.env);
+    let approve = MockAuthInvoke {
+        contract: &s.token,
+        fn_name: "approve",
+        args: approve_args,
+        sub_invokes: &[],
+    };
+    s.env.mock_auths(&[
+        MockAuth {
+            address: &s.from,
+            invoke: &MockAuthInvoke {
+                contract: &s.proxy,
+                fn_name: "settle_upto",
+                args: signed_args(&s),
+                sub_invokes: core::slice::from_ref(&approve),
+            },
+        },
+        MockAuth {
+            address: &s.facilitator,
+            invoke: &MockAuthInvoke {
+                contract: &s.proxy,
+                fn_name: "settle_upto",
+                args: full_args(&other, 10),
+                sub_invokes: &[],
+            },
+        },
+    ]);
     assert!(settle(&other, 10).is_err());
+    // Control: once the client's tree also carries the new `to`, the same
+    // facilitator entry settles, so the failure above came from the client.
+    mock_client_and_facilitator(&other, "settle_upto", 10);
+    settle(&other, 10).expect("control settle");
 }
 
 #[test]

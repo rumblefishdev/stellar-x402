@@ -54,7 +54,8 @@ Upgrade stellar-cli to 25.2+ (25.1 is installed, and soroban-sdk 28 needs 25.2+)
 
 - Happy path: `actual < max`, `actual == max`, `actual == 0`.
 - Rejections: `actual > max`, a negative or zero `max`, before `valid_after`, after `deadline`,
-  a replayed nonce, a missing facilitator auth, and insufficient balance.
+  a replayed nonce while its entry lives (I4), `from == to`, `to ==` the proxy, a missing
+  facilitator auth, and insufficient balance.
 - Auth tree: `env.auths()` equals the expected tree, the signed args hold no `actual_amount`, and
   the sub-invocation matches the spec.
 - Real ed25519 signatures (not `mock_all_auths`): one signed entry settles different

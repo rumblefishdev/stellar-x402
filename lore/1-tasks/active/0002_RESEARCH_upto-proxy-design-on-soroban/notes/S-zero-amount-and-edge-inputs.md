@@ -26,6 +26,7 @@ history:
   - `actual_amount < 0` → `InvalidAmount`
   - `actual_amount > max_amount` → `AmountExceedsMax`
   - `from == to` → `SelfPayment` (emerged)
+  - `to == current_contract_address` → `InvalidRecipient` (emerged, from PR #1 review)
 
 ## Reasoning
 
@@ -37,5 +38,8 @@ history:
    the Bazaar ranking, which counts transaction volume and distinct buyers. Rejecting it on-chain
    is free.
    - This does not stop wash trading between two accounts. That is a Bazaar ranking concern.
-4. **No separate check that `valid_after < deadline`.** An empty window can never be satisfied
+4. **Why reject `to == proxy`.** The contract is immutable and has no withdraw function, so tokens
+   paid to it are locked for good. It would also break invariant I1 (the proxy's balance never
+   changes).
+5. **No separate check that `valid_after < deadline`.** An empty window can never be satisfied
    and fails the time check anyway.
