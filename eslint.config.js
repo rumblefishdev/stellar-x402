@@ -6,4 +6,8 @@ export default defineConfig([
   globalIgnores(["**/dist/", "**/node_modules/", "**/.turbo/", "**/coverage/", "contracts/"]),
   js.configs.recommended,
   tseslint.configs.recommended,
+  {
+    files: ["tools/scripts/**/*.mjs"],
+    languageOptions: { globals: { console: "readonly", process: "readonly" } },
+  },
 ]);

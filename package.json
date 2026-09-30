@@ -17,6 +17,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "board": "node tools/scripts/generate-lore-board.mjs",
     "contracts:test": "cargo test --manifest-path contracts/Cargo.toml",
     "contracts:build": "stellar contract build --manifest-path contracts/upto-proxy/Cargo.toml"
   },

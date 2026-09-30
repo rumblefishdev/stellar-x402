@@ -4,3 +4,13 @@ coverage/
 contracts/target/
 pnpm-lock.yaml
 LICENSE
+
+# Lore board page — kept byte-identical to the sibling repos
+lore/board.html
+
+# Lore task/ADR files — YAML frontmatter with inline arrays breaks the board parser
+lore/1-tasks/
+lore/2-adrs/
+
+# Lore-generated instruction files (tables are hand-aligned by the framework)
+CLAUDE.md
