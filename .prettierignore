@@ -14,3 +14,6 @@ lore/2-adrs/
 
 # Lore-generated instruction files (tables are hand-aligned by the framework)
 CLAUDE.md
+
+# Source RFP docs — verbatim copies of the originals in ../pre-X402
+docs/rfp/
