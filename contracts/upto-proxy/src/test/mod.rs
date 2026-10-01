@@ -19,7 +19,8 @@ use soroban_sdk::{
         Ledger, MockAuth, MockAuthInvoke,
     },
     token::{StellarAssetClient, TokenClient},
-    Event, InvokeError, Symbol, Val, Vec,
+    xdr::ScVal,
+    Event, InvokeError, Symbol, TryFromVal, Val, Vec,
 };
 
 const NOW: u64 = 1_500;
@@ -519,16 +520,75 @@ fn recorded_auth_tree_matches_the_spec() {
     }
 }
 
+/// Converts recorded contract-call args to XDR, which, unlike `Val`s, outlive their `Env`.
+fn args_to_xdr(env: &Env, args: &Vec<Val>) -> std::vec::Vec<ScVal> {
+    args.iter()
+        .map(|v| ScVal::try_from_val(env, &v).unwrap())
+        .collect()
+}
+
+fn args_from_xdr(env: &Env, args: &[ScVal]) -> Vec<Val> {
+    let mut out = Vec::new(env);
+    for v in args {
+        out.push_back(Val::try_from_val(env, v).unwrap());
+    }
+    out
+}
+
 #[test]
 fn client_payload_excludes_actual_amount() {
+    // Record the client tree the contract asks for while settling actual = 400.
+    let recorded = setup(TokenKind::Sac);
+    let p = recorded.p.clone();
+    recorded.env.mock_all_auths();
+    try_settle(&recorded, &p, 400).unwrap().unwrap();
+    let (_, client) = recorded
+        .env
+        .auths()
+        .into_iter()
+        .find(|(addr, _)| *addr == p.from)
+        .unwrap();
+    let call_args = |inv: &AuthorizedInvocation| match &inv.function {
+        AuthorizedFunction::Contract((_, _, args)) => args_to_xdr(&recorded.env, args),
+        _ => panic!("expected a contract call"),
+    };
+    let root_args = call_args(&client);
+    let approve = call_args(&client.sub_invocations[0]);
+
+    // In a fresh, identical setup, the client authorizes exactly that recorded tree, and
+    // the facilitator authorizes actual = 10. The settlement must still go through.
     let s = setup(TokenKind::Sac);
     let p = s.p.clone();
-    let args = signed_args(&s.env, &p);
-    assert_eq!(args.len(), 7);
-    // The client tree mocked for actual = 400 settles actual = 10 just as well, as long as
-    // the facilitator authorizes the amount it submits.
-    mock_auth(&s, &p, &p, 10);
+    let approve = MockAuthInvoke {
+        contract: &p.token,
+        fn_name: "approve",
+        args: args_from_xdr(&s.env, &approve),
+        sub_invokes: &[],
+    };
+    let client_root = MockAuthInvoke {
+        contract: &s.proxy,
+        fn_name: "settle_upto",
+        args: args_from_xdr(&s.env, &root_args),
+        sub_invokes: core::slice::from_ref(&approve),
+    };
+    let facilitator_root = MockAuthInvoke {
+        contract: &s.proxy,
+        fn_name: "settle_upto",
+        args: full_args(&s.env, &p, 10),
+        sub_invokes: &[],
+    };
+    s.env.mock_auths(&[
+        MockAuth {
+            address: &p.from,
+            invoke: &client_root,
+        },
+        MockAuth {
+            address: &p.facilitator,
+            invoke: &facilitator_root,
+        },
+    ]);
     assert_eq!(try_settle(&s, &p, 10), Ok(Ok(())));
+    assert_eq!(balance(&s, &p.to), 10);
 }
 
 #[test]
