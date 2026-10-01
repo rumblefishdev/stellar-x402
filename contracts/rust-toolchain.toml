@@ -1,3 +1,6 @@
 [toolchain]
-channel = "stable"
+# Pinned so the release WASM hash is reproducible. Upgrade deliberately, together with the
+# Rust version in .github/workflows/ci.yml, and record the new WASM hash.
+channel = "1.97.1"
 targets = ["wasm32v1-none"]
+components = ["rustfmt", "clippy"]

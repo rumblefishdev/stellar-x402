@@ -30,8 +30,8 @@ auth tree. Produce a reproducible WASM build.
 
 ## Status: Active
 
-> Started 2026-10-01. 0002's spec is approved. Step 1 is likely already done: stellar-cli 28.1.0
-> was installed during 0002 and `pnpm contracts:build` worked then.
+> Contract and tests written (2026-10-01), all quality gates green locally, awaiting okarcz
+> review on branch `lore-0003-upto-proxy-contract`. Not yet run in CI.
 
 ## Context
 
@@ -78,7 +78,61 @@ the WASM size and record it.
 
 ## Acceptance Criteria
 
-- [ ] The contract matches the G- spec: every deviation goes back to 0002 first
-- [ ] Every test listed above passes, including real-signature tests
-- [ ] fmt, clippy and test are clean; the WASM builds with stellar-cli 25.2+
-- [ ] The resource cost per settlement is recorded
+- [x] The contract matches the G- spec: no deviations
+- [x] Every test listed above passes, including real-signature tests (27 + 2 WASM tests)
+- [x] fmt, clippy and test are clean; the WASM builds with stellar-cli 28.1.0
+- [x] The resource cost per settlement is recorded (below)
+
+## Implementation Notes
+
+- `contracts/upto-proxy/src/lib.rs`: `settle_upto` and `is_nonce_used` exactly as spec §2–§7, with
+  the §4 step order, `UptoError` 1–8 and the `UptoSettled` event (`upto_settled` topic, map data).
+- `src/test/mod.rs`: fixture plus mocked-auth tests using the exact §3.1/§3.2 trees, run against
+  both the SAC and the in-repo token. `real_signatures.rs`: ed25519-signed `ADDRESS` entries for
+  classic accounts, verified by the host. `amount_properties.rs`: proptest, 128 cases.
+  `sep41_token.rs`: the non-SAC test token. `wasm.rs`: `#[ignore]`d tests on the release WASM.
+- Mutation check: 12 hand-made mutations (dropped facilitator auth, unsigned facilitator, no nonce
+  write, no TTL extension, exclusive deadline, missing expiry checks, approve before auth, transfer
+  of max, no event, no `to == proxy` check, approve of actual) each fail at least one test.
+- WASM: 4,145 bytes, hash `be2ba121…0b34`, identical after `cargo clean`. Exports only
+  `settle_upto` and `is_nonce_used` (I7, checked from the `contractspecv0` section).
+- Cost (WASM + SAC, mocked auth, `pnpm contracts:test:wasm`):
+
+  | actual | instructions | reads | writes | events | fee without rent |
+  |---|---|---|---|---|---|
+  | 500 | 903,417 | 1 disk + 11 memory | 6 / 1,052 B | 896 B | 31,889 stroops |
+  | 0 | 670,907 | 0 disk + 9 memory | 4 / 604 B | 660 B | 20,462 stroops |
+
+  Rent is left out: mocked auth writes its nonces with `max_live_until_ledger`
+  (soroban-env-host `auth.rs`), so the estimate's rent is not what a real client entry pays.
+  Signature verification is not included either. 0004 measures the real fee on testnet.
+- Scripts: `contracts:lint`, `contracts:test:wasm`. CI's `contracts` job now runs fmt, clippy,
+  tests, `stellar contract build` (via `stellar/stellar-cli@v28.1.0`) and the WASM tests.
+
+## Issues Encountered
+
+- **soroban-sdk 28 refuses plain `cargo build` for WASM**: its build script requires stellar-cli
+  25.2+. CI installs stellar-cli with the official action instead of building with cargo.
+- **Auth-entry objects are per-`Env`**: reusing a `Payment` built in one test `Env` inside another
+  fails with `Error(Object, InternalError)`. Signed entries are XDR and portable; Soroban values
+  are not. Real-signature tests rebuild values in each `Env` from fixed seeds and contract IDs.
+- **Test snapshots**: the SDK writes one JSON per `Env`; proptest alone produced ~200 files
+  (3.5 MB). `contracts/**/test_snapshots/` is gitignored.
+
+## Design Decisions
+
+### Emerged (confirmed by okarcz, 2026-10-01)
+
+1. **Real-signature tests use the in-repo token, not the SAC**: a classic account can hold a SAC
+   balance only through a trustline entry. The SAC with real signatures was already proven on
+   testnet in the 0002 spike (S1–S8) and is covered again by 0004; mocked-tree tests cover the
+   SAC here.
+2. **WASM-level tests are `#[ignore]`d**: they need the release WASM, which needs stellar-cli. CI
+   builds it and runs them with `--ignored`; locally `pnpm contracts:test:wasm`.
+3. **Test snapshots are gitignored**: tests assert state explicitly, so snapshots add no
+   protection, only ~200 churning files.
+4. **Rust toolchain pinned to 1.97.1** in `contracts/rust-toolchain.toml` (with rustfmt and
+   clippy), and CI installs the same version. The `contracts:*` scripts `cd contracts` first,
+   because rustup only reads the toolchain file from the current directory upward. The WASM
+   hash is unchanged (`be2ba121…0b34`). Upgrading Rust is now a deliberate change that records
+   a new hash.

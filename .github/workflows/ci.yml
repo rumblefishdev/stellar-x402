@@ -29,5 +29,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Same version as contracts/rust-toolchain.toml.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.1
+          targets: wasm32v1-none
+          components: rustfmt, clippy
+      - run: cargo fmt --manifest-path contracts/Cargo.toml --all --check
+      - run: cargo clippy --manifest-path contracts/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path contracts/Cargo.toml
+      # The WASM tests check the deployed interface (I7) and print the settlement cost.
+      # soroban-sdk 28 only builds contract WASM through stellar-cli 25.2+.
+      - uses: stellar/stellar-cli@v28.1.0
+      - run: stellar contract build --manifest-path contracts/upto-proxy/Cargo.toml
+      - run: cargo test --manifest-path contracts/Cargo.toml -- --ignored --nocapture
