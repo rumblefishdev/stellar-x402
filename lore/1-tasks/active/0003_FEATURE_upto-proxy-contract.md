@@ -2,7 +2,7 @@
 id: "0003"
 title: "Implement the UptoProxy Soroban contract with unit tests"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: []
 related_tasks: ["0002", "0004", "0005"]
@@ -14,6 +14,10 @@ history:
     status: backlog
     who: claude
     note: "Task created with okarcz. Starts after 0002's spec is approved."
+  - date: "2026-10-01"
+    status: active
+    who: okarcz
+    note: "Started. 0002's spec was approved when PR #1 merged."
 ---
 
 # Implement the UptoProxy Soroban contract with unit tests
@@ -24,9 +28,10 @@ Implement `contracts/upto-proxy` exactly as 0002's `G-upto-proxy-contract-spec` 
 unit tests that prove each of the five `upto` properties, both with real signatures and with the
 auth tree. Produce a reproducible WASM build.
 
-## Status: Backlog
+## Status: Active
 
-> Blocked by 0002 (spec approval).
+> Started 2026-10-01. 0002's spec is approved. Step 1 is likely already done: stellar-cli 28.1.0
+> was installed during 0002 and `pnpm contracts:build` worked then.
 
 ## Context
 
