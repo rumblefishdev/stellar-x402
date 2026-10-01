@@ -18,8 +18,10 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "board": "node tools/scripts/generate-lore-board.mjs",
-    "contracts:test": "cargo test --manifest-path contracts/Cargo.toml",
-    "contracts:build": "stellar contract build --manifest-path contracts/upto-proxy/Cargo.toml"
+    "contracts:test": "cd contracts && cargo test",
+    "contracts:build": "cd contracts && stellar contract build --manifest-path upto-proxy/Cargo.toml",
+    "contracts:lint": "cd contracts && cargo fmt --all --check && cargo clippy --all-targets -- -D warnings",
+    "contracts:test:wasm": "pnpm contracts:build && cd contracts && cargo test -- --ignored --nocapture"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

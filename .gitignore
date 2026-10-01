@@ -9,6 +9,7 @@ coverage/
 
 # Rust / Soroban
 contracts/target/
+contracts/**/test_snapshots/
 target/
 .stellar/
 
