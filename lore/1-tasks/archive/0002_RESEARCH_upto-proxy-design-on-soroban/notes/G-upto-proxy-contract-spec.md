@@ -1,7 +1,7 @@
 ---
 title: "UptoProxy contract specification (v1)"
 type: generation
-status: developing
+status: mature
 tags: [upto, contracts, spec]
 links:
   - ../../../backlog/0003_FEATURE_upto-proxy-contract.md
@@ -15,6 +15,10 @@ history:
     status: developing
     who: claude
     note: "PR #1 review: I4 narrowed to the entry's lifetime plus facilitator nonce record (§8.1); to == proxy rejected (InvalidRecipient)"
+  - date: "2026-10-01"
+    status: mature
+    who: okarcz
+    note: "Approved: PR #1 merged into develop"
 ---
 
 # UptoProxy contract specification (v1)

@@ -2,7 +2,7 @@
 id: "0002"
 title: "UptoProxy design on Soroban: validate §6.2 and write the contract spec"
 type: RESEARCH
-status: active
+status: completed
 milestone: 1
 related_adr: []
 related_tasks: ["0003", "0004", "0005"]
@@ -23,6 +23,13 @@ history:
     status: active
     who: okarcz
     note: "Started. stellar-cli upgraded to 28.1.0 beforehand."
+  - date: "2026-10-01"
+    status: completed
+    who: okarcz
+    note: >
+      Spec approved: PR #1 merged into develop (e0fb014, f698424). 15 notes (1 I-, 5 R-, 8 S-,
+      1 G-), 4 upstream sources, and a testnet spike (S1-S8 with tx hashes). 5 decisions from
+      okarcz, 5 emerged. 8 deviations from arch doc §6.2 (D1-D8) handed to 0005. Unblocks 0003.
 ---
 
 # UptoProxy design on Soroban: validate §6.2 and write the contract spec
@@ -34,11 +41,10 @@ authorization model, prove the risky auth mechanics with a small testnet spike, 
 contract spec (a G- note) that 0003 implements. We write no production code until the spec is
 approved.
 
-## Status: Active
+## Status: Completed
 
-> Research and the spike are done, and every decision is made. The spec,
-> [notes/G-upto-proxy-contract-spec.md](notes/G-upto-proxy-contract-spec.md), is being reviewed by
-> okarcz. Blocks 0003.
+> The spec, [notes/G-upto-proxy-contract-spec.md](notes/G-upto-proxy-contract-spec.md), was
+> approved by okarcz when PR #1 merged into `develop` on 2026-10-01. 0003 implements it.
 
 **Notes:** the [I- review findings](notes/I-section-6-2-review-findings.md) led to the R- notes
 (the [x402 upto specs](notes/R-x402-upto-specs.md), the
@@ -116,5 +122,60 @@ allowlist) and the new `allowance_expiration_ledger` parameter
 - [x] R- notes written, each with sources (5 notes, and 4 upstream docs in `sources/`)
 - [x] Spike proves points 1–4 on testnet, with transaction hashes recorded (S1–S8 in R-testnet-spike)
 - [x] Every decision (confirmed and still open) has an S- note (8 decided)
-- [ ] `G-upto-proxy-contract-spec` is complete and approved by okarcz (drafted, awaiting review)
+- [x] `G-upto-proxy-contract-spec` is complete and approved by okarcz (PR #1, merged 2026-10-01)
 - [x] Every deviation from arch doc §6.2 is listed, with its reason, for 0005 (G- spec §11, D1–D8)
+
+## Implementation Notes
+
+- **Notes:** 1 I- (review of §6.2, findings F1–F9), 5 R-, 8 S- and 1 G- note in `notes/`.
+- **Sources:** `scheme_upto.md`, `scheme_upto_evm.md`, `scheme_exact_stellar.md` and SEP-41
+  copied into `sources/`.
+- **Spike:** a minimal Soroban contract plus a TS client in `spike/` (throwaway, kept as evidence).
+  Scenarios S1–S8 ran on testnet, with transaction hashes in
+  [R-testnet-spike](notes/R-testnet-spike.md). All four points in Step 2 were proven, with both
+  V1 (`ADDRESS`) and V2 (`ADDRESS_V2`) credentials.
+- **PR #1 review:** fixed 3 findings (c095d4f, now f698424): invariant I4 narrowed to the nonce
+  entry's lifetime plus a facilitator nonce record (spec §8.1), `to == proxy` rejected
+  (`InvalidRecipient = 8`), and the spike recipient test isolated with a control run.
+
+## Issues Encountered
+
+- **Client draft source:** if the client is the draft transaction's source, it receives
+  source-account credentials. The draft must use the facilitator address as its source.
+- **Simulation needs balance ≥ max:** simulating with `actual = max` failed with
+  `Error(Contract, #10)` while the client held less than max. This matches the EVM verify rule.
+- **V1/V2 credentials vary between runs:** the testnet RPC returns either kind. Only
+  `@stellar/stellar-sdk` 17.x parses CAP-71 V2; 15.x throws. Testnet is on protocol 29 (mainnet 28).
+- **stellar-cli:** upgraded to 28.1.0 via cargo. A stale 25.0.0 copy remains at
+  `/usr/local/bin/stellar`, shadowed on PATH.
+
+## Design Decisions
+
+### From Plan
+
+1. **Allowance in the auth tree:** `approve` is a sub-invocation in the client's single
+   `settle_upto` auth entry ([S-allowance-in-auth-tree](notes/S-allowance-in-auth-tree.md)).
+2. **Facilitator binding:** `facilitator.require_auth()`
+   ([S-facilitator-binding](notes/S-facilitator-binding.md)).
+3. **Time bounds:** `valid_after`/`deadline` in unix seconds against the ledger timestamp
+   ([S-time-bounds-and-expiry](notes/S-time-bounds-and-expiry.md)).
+4. **Immutable:** no admin and no upgrade entry point ([S-immutable](notes/S-immutable.md)).
+5. **Token in signed args:** `token: Address` is a parameter and is signed (F1).
+
+### Emerged
+
+6. **`allowance_expiration_ledger` parameter:** `approve` needs a ledger number, not a timestamp,
+   so the client signs it explicitly ([S-time-bounds-and-expiry](notes/S-time-bounds-and-expiry.md)).
+7. **Temporary nonce storage until allowance expiry**
+   ([S-nonce-storage](notes/S-nonce-storage.md)).
+8. **Zero and edge inputs:** 0 settles with no transfer; `from == to` and `to == proxy` are rejected
+   ([S-zero-amount-and-edge-inputs](notes/S-zero-amount-and-edge-inputs.md)).
+9. **Any SEP-41 token, no allowlist** ([S-token-scope](notes/S-token-scope.md)).
+10. **No cancellation function in v1:** decided by okarcz ([S-cancellation](notes/S-cancellation.md)).
+
+## Future Work
+
+Already covered by backlog tasks, so none were spawned:
+- 0003: implement the contract from the G- spec.
+- 0004: testnet E2E, deploy scripts, and re-measuring fees.
+- 0005: deviations D1–D8 from §6.2 and the rule list for `scheme_upto_stellar.md`.
