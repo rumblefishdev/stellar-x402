@@ -5,11 +5,12 @@ type: FEATURE
 status: active
 milestone: 1
 related_adr: []
-related_tasks: ["0002", "0004", "0005"]
+related_tasks: ["0002", "0004", "0005", "0006"]
 tags: [layer-contracts, upto, priority-high, effort-medium]
 links:
   - ../../../../contracts/upto-proxy
   - notes/R-manual-testnet-verification.md
+  - notes/S-batching-and-throughput.md
 history:
   - date: "2026-09-30"
     status: backlog
@@ -142,3 +143,9 @@ the WASM size and record it.
    because rustup only reads the toolchain file from the current directory upward. The WASM
    hash is unchanged (`be2ba121…0b34`). Upgrading Rust is now a deliberate change that records
    a new hash.
+
+## Future Work
+
+- Scaling the settlement flow (session aggregation, channel accounts and fee bumps, optional
+  batch router): research task 0006. Background in
+  [S-batching-and-throughput](notes/S-batching-and-throughput.md).
