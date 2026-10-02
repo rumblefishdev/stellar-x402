@@ -8,7 +8,8 @@ related_adr: []
 related_tasks: ["0002", "0004", "0005"]
 tags: [layer-contracts, upto, priority-high, effort-medium]
 links:
-  - ../../../contracts/upto-proxy
+  - ../../../../contracts/upto-proxy
+  - notes/R-manual-testnet-verification.md
 history:
   - date: "2026-09-30"
     status: backlog
@@ -30,8 +31,9 @@ auth tree. Produce a reproducible WASM build.
 
 ## Status: Active
 
-> Contract and tests written (2026-10-01), all quality gates green locally, awaiting okarcz
-> review on branch `lore-0003-upto-proxy-contract`. Not yet run in CI.
+> Contract and tests written (2026-10-01), reviewed in PR #2 (CI green at `f3bd2b5`) and
+> verified by hand on testnet on 2026-10-02
+> ([R-manual-testnet-verification](notes/R-manual-testnet-verification.md)). Awaiting merge.
 
 ## Context
 
@@ -108,6 +110,10 @@ the WASM size and record it.
   Signature verification is not included either. 0004 measures the real fee on testnet.
 - Scripts: `contracts:lint`, `contracts:test:wasm`. CI's `contracts` job now runs fmt, clippy,
   tests, `stellar contract build` (via `stellar/stellar-cli@v28.1.0`) and the WASM tests.
+- Manual testnet run (2026-10-02, proxy `CBEPV3F2…TEGY7`, WASM `be2ba121…0b34`): every `upto`
+  property held on-chain. A normal settlement costs the facilitator 30,090–40,699 stroops; the
+  client's first one through a proxy cost 97,963. Steps, commands and tx hashes are in
+  [R-manual-testnet-verification](notes/R-manual-testnet-verification.md).
 
 ## Issues Encountered
 
