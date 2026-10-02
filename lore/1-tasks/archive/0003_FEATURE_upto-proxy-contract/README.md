@@ -2,7 +2,7 @@
 id: "0003"
 title: "Implement the UptoProxy Soroban contract with unit tests"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: []
 related_tasks: ["0002", "0004", "0005", "0006"]
@@ -20,6 +20,14 @@ history:
     status: active
     who: okarcz
     note: "Started. 0002's spec was approved when PR #1 merged."
+  - date: "2026-10-02"
+    status: completed
+    who: okarcz
+    note: >
+      PR #2 rebase-merged into develop (396088e, cfc0349, ffeae07, 05266c3). Contract matches
+      the G- spec with no deviations. 27 tests + 2 WASM tests, 12 mutations caught, WASM 4,145 B
+      (be2ba121…0b34). Manual testnet run passed (proxy CBEPV3F2…TEGY7, 9 spike scenarios).
+      4 emerged decisions, 1 test changed after review. Scaling follow-up spawned as 0006.
 ---
 
 # Implement the UptoProxy Soroban contract with unit tests
@@ -30,11 +38,11 @@ Implement `contracts/upto-proxy` exactly as 0002's `G-upto-proxy-contract-spec` 
 unit tests that prove each of the five `upto` properties, both with real signatures and with the
 auth tree. Produce a reproducible WASM build.
 
-## Status: Active
+## Status: Completed
 
-> Contract and tests written (2026-10-01), reviewed in PR #2 (CI green at `f3bd2b5`) and
-> verified by hand on testnet on 2026-10-02
-> ([R-manual-testnet-verification](notes/R-manual-testnet-verification.md)). Awaiting merge.
+> Merged into develop via PR #2 on 2026-10-02, after review, green CI and a manual testnet run
+> ([R-manual-testnet-verification](notes/R-manual-testnet-verification.md)). Next: 0004 deploys
+> it and runs the scripted E2E suite.
 
 ## Context
 
@@ -125,6 +133,18 @@ the WASM size and record it.
   are not. Real-signature tests rebuild values in each `Env` from fixed seeds and contract IDs.
 - **Test snapshots**: the SDK writes one JSON per `Env`; proptest alone produced ~200 files
   (3.5 MB). `contracts/**/test_snapshots/` is gitignored.
+- **stellar-cli signs for any address in its keystore**: in the manual run, passing the
+  facilitator as a raw `G…` address still got its auth entry signed silently, so a "wrong
+  submitter" check settled. Negative auth tests must bind an address with no local key (Step 8b
+  used a contract address).
+- **`--cost` is silent with `--send=no`** in stellar-cli 28.1. Real costs came from RPC
+  `simulateTransaction` and the sent transactions' envelopes.
+
+**Broken/modified tests:**
+- `client_payload_excludes_actual_amount` (`src/test/mod.rs`) was rewritten in f3bd2b5 after
+  the PR #2 review: the old version didn't test what its name says. It now records the client
+  tree at `actual = 400`, replays it as XDR in a fresh `Env` and settles 10. A fix to the test,
+  not a contract regression; mutation-checked.
 
 ## Design Decisions
 

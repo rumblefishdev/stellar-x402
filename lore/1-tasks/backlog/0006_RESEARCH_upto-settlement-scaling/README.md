@@ -7,7 +7,7 @@ related_adr: []
 related_tasks: ["0003", "0004", "0005"]
 tags: [upto, facilitator, throughput, priority-medium, effort-medium]
 links:
-  - ../../active/0003_FEATURE_upto-proxy-contract/notes/S-batching-and-throughput.md
+  - ../../archive/0003_FEATURE_upto-proxy-contract/notes/S-batching-and-throughput.md
 history:
   - date: "2026-10-02"
     status: backlog
@@ -29,7 +29,7 @@ which approach to build, with measured numbers, before the facilitator is design
 
 ## Context
 
-0003's [S-batching-and-throughput](../../active/0003_FEATURE_upto-proxy-contract/notes/S-batching-and-throughput.md)
+0003's [S-batching-and-throughput](../../archive/0003_FEATURE_upto-proxy-contract/notes/S-batching-and-throughput.md)
 found:
 
 - Soroban allows one contract call per transaction.

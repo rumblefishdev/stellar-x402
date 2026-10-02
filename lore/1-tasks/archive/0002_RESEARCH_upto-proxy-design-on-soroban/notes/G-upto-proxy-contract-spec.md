@@ -4,7 +4,7 @@ type: generation
 status: mature
 tags: [upto, contracts, spec]
 links:
-  - ../../../active/0003_FEATURE_upto-proxy-contract/README.md
+  - ../../0003_FEATURE_upto-proxy-contract/README.md
 history:
   - date: "2026-09-30"
     status: developing
