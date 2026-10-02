@@ -2,7 +2,7 @@
 id: "0006"
 title: "Research how the upto settlement flow can scale"
 type: RESEARCH
-status: backlog
+status: active
 related_adr: []
 related_tasks: ["0003", "0004", "0005"]
 tags: [upto, facilitator, throughput, priority-medium, effort-medium]
@@ -13,6 +13,10 @@ history:
     status: backlog
     who: okarcz
     note: "Spawned from 0003's batching discussion (S-batching-and-throughput)."
+  - date: "2026-10-02"
+    status: active
+    who: okarcz
+    note: "Started after 0003 closed."
 ---
 
 # Research how the upto settlement flow can scale
@@ -23,9 +27,9 @@ Find out how far the current `upto` flow scales and which changes raise that lim
 payment is one transaction, and the facilitator submits from one account. The answer should say
 which approach to build, with measured numbers, before the facilitator is designed for load.
 
-## Status: Backlog
+## Status: Active
 
-> Not started. Can run in parallel with 0004; its measurements feed 0005.
+> Started 2026-10-02. Can run in parallel with 0004; its measurements feed 0005.
 
 ## Context
 
