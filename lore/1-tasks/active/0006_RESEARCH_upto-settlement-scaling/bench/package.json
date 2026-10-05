@@ -1,0 +1,15 @@
+{
+  "name": "upto-scaling-bench",
+  "private": true,
+  "type": "module",
+  "description": "Testnet load bench for task 0006. Not part of the pnpm workspace.",
+  "scripts": {
+    "bench": "node bench.ts"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "17.2.0"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}
