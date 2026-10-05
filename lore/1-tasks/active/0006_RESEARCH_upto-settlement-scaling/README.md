@@ -30,8 +30,8 @@ which approach to build, with measured numbers, before the facilitator is design
 ## Status: Active
 
 > Started 2026-10-02. Can run in parallel with 0004; its measurements feed 0005.
-> 2026-10-05: all questions answered in notes, with testnet measurements. Awaiting okarcz review
-> of the two S- notes before the follow-up backlog tasks are created.
+> 2026-10-05: all questions answered in notes, with testnet measurements (PR #3, merged).
+> Follow-up 0007 (settlement submitter) is in the backlog.
 
 ## Findings
 
@@ -100,4 +100,5 @@ batching. This task checks that recommendation with evidence and turns it into a
 - [x] Throughput numbers for: single account, N channel accounts, and same-seller concurrency
 - [x] A recommendation (S- note) on what the facilitator builds, and whether the contract or
       spec needs to change
-- [ ] Follow-up implementation tasks created in the backlog
+- [ ] Follow-up implementation tasks created in the backlog: 0007 (settlement submitter) is
+      created; the `batch-settlement` binding research waits for okarcz's scope decision
