@@ -35,6 +35,58 @@ network limit (about 105 per ledger, about 43 free on mainnet today). It serves 
 ## Status: Active
 
 > Started 2026-10-05 on branch `lore-0007-facilitator-settlement-submitter`.
+> 2026-10-05: first slice done (uncommitted). Steps 1–3 are implemented with 17 unit tests and a
+> testnet smoke script. Steps 4–7 are partly open (see Progress).
+
+## Progress
+
+**Done in `packages/signer-pool`:**
+
+| File | What it does |
+|---|---|
+| `src/channel-pool.ts` | `ChannelPool`: one holder per channel, FIFO waiters |
+| `src/submitter.ts` | `SettlementSubmitter`: `delegated-bump` shape; simulate, `checkSimulation` hook, fee cap, sign, fee bump, send, confirm; the sequence rules |
+| `src/ledger-clock.ts` | `LedgerClock`: one shared `getLatestLedger` poll; each pending transaction is checked once per new ledger |
+| `src/setup.ts` | `buildCreateChannelsTx` (1.5 XLM reserve, the facilitator as signer, master key disabled; at most 19 channels per tx because of the 20-signature limit) and `checkChannel` |
+| `src/fees.ts` | `feeStatsInclusionFee`: bids a `getFeeStats` percentile, clamped and cached, with a fallback |
+| `src/signer.ts` | `keypairSigner`: the SEP-43 `signTransaction` shape, the same as `@x402/stellar` |
+| `test/` | 17 tests against a fake RPC that enforces sequence numbers and one pending tx per source. 8 seeded mutations were checked: every real fault was caught, and the one survivor was equivalent (harmless) |
+| `scripts/testnet-smoke.ts` | Creates delegated channels, then settles real UptoProxy payments |
+
+**Testnet results** (2026-10-05, proxy `CBEPV3F2…TEGY7`):
+
+| Channels | Payments | Settled | Per ledger |
+|---|---|---|---|
+| 5 | 25 | 25 | 5, 5, 5, 5, 5 |
+| 50 | 200 | 200 | 50, 50, 50, 36, 14 |
+
+- Channel setup txs: `78ff2f0d…99f5`, `538d52a8…528a`, `98f13e86…9f22`.
+- Example settlement: `df257e4c…abb6`, at 43,941 stroops.
+- **Each channel already lands one payment per ledger,** where the 0006 bench managed one every
+  other ledger. The shared ledger clock removes most of the dead time that step 4 targeted.
+
+**Open:**
+
+- Step 4: pre-building the next transaction. It may not be needed given the result above;
+  measure at saturation (about 100+ channels) before building it.
+- Step 6: an RPC fallback, metrics, and a low-balance alert.
+- Step 7: a recorded load test at 20 channels and with one seller vs many.
+- Wiring into the facilitator app and an `upto` scheme, which is a separate task.
+
+**Emerged:**
+
+1. **Stay on SDK 16.3, not 17.** 16.3 already parses CAP-71 `AddressV2` credentials, fee bumps
+   and protocol 29 meta. That was verified against real testnet transactions and ledgers. It is
+   the version `@x402/stellar` uses, so there is one SDK copy and the classic XDR API.
+   - The "≥ 17" premise came from 0002, which compared 15.x with 17.x.
+2. **Zero-amount skipping belongs to the scheme, not the pool.** The pool submits whatever call
+   it is given; the `upto` scheme decides not to call it for 0. So step 5 moves to the
+   scheme/facilitator task.
+3. **Confirmation uses `getTransaction` per pending hash, triggered by the ledger clock,** not
+   `getTransactions`. The latter returns every transaction in the ledger with full meta (about
+   300 per ledger on mainnet).
+4. **At most 19 channels per setup transaction:** each new channel signs its `setOptions`, and a
+   transaction holds at most 20 signatures. Found by the 50-channel smoke run.
 
 ## Context
 
@@ -49,9 +101,8 @@ network limit (about 105 per ledger, about 43 free on mainnet today). It serves 
   - The `delegated-bump` shape is the cheapest (2,516 B, about 41,000 stroops).
 - The bench code in `0006…/bench/bench.ts` is a working reference for building, simulating,
   fee-bumping and placing transactions. It is research code, not production code.
-- `packages/signer-pool` is an empty placeholder that pins `@stellar/stellar-sdk ^16.3.0`.
-  **Testnet and mainnet are on protocol 29**, which needs SDK ≥ 17 to parse CAP-71 credentials.
-  The bench used 17.2.0.
+- `packages/signer-pool` was an empty placeholder pinning `@stellar/stellar-sdk ^16.3.0`.
+  Testnet and mainnet are on protocol 29. SDK 16.3 handles it (see Emerged 1).
 
 ## Implementation Plan
 
@@ -111,14 +162,14 @@ network limit (about 105 per ledger, about 43 free on mainnet today). It serves 
 
 ## Acceptance Criteria
 
-- [ ] The pool creates, delegates and checks channels; channels hold only their reserve
-- [ ] Settlements use the `delegated-bump` shape, signed with the facilitator key only
-- [ ] At 50 channels on testnet: 50 settlements per ledger, 0 failures from the submitter
+- [x] The pool creates, delegates and checks channels; channels hold only their reserve
+- [x] Settlements use the `delegated-bump` shape, signed with the facilitator key only
+- [x] At 50 channels on testnet: 50 settlements per ledger, 0 failures from the submitter
 - [ ] No sequence-number errors under load, including after RPC errors during polling
 - [ ] Pipelining measured: settlements per channel per ledger, before and after
-- [ ] Zero-amount settlements submit nothing
-- [ ] SDK ≥ 17; unit tests for scheduling and sequence handling; `typecheck`, `lint` and `test`
-      pass
+- [ ] Zero-amount settlements submit nothing (moved to the scheme layer, see Emerged 2)
+- [x] Unit tests for scheduling and sequence handling; `typecheck`, `lint` and `test` pass
+      (SDK 16.3 is enough, see Emerged 1)
 
 ## Notes
 
