@@ -35,8 +35,8 @@ network limit (about 105 per ledger, about 43 free on mainnet today). It serves 
 ## Status: Active
 
 > Started 2026-10-05 on branch `lore-0007-facilitator-settlement-submitter`.
-> 2026-10-05: first slice done (uncommitted). Steps 1–3 are implemented with 17 unit tests and a
-> testnet smoke script. Steps 4–7 are partly open (see Progress).
+> 2026-10-05: first slice in PR #4 (steps 1–3). Step 6 added on the same branch, along with a fix
+> for thrown sends; there are now 30 unit tests. Steps 4 and 7 are still open (see Progress).
 
 ## Progress
 
@@ -50,7 +50,10 @@ network limit (about 105 per ledger, about 43 free on mainnet today). It serves 
 | `src/setup.ts` | `buildCreateChannelsTx` (1.5 XLM reserve, the facilitator as signer, master key disabled; at most 19 channels per tx because of the 20-signature limit) and `checkChannel` |
 | `src/fees.ts` | `feeStatsInclusionFee`: bids a `getFeeStats` percentile, clamped and cached, with a fallback |
 | `src/signer.ts` | `keypairSigner`: the SEP-43 `signTransaction` shape, the same as `@x402/stellar` |
-| `test/` | 17 tests against a fake RPC that enforces sequence numbers and one pending tx per source. 8 seeded mutations were checked: every real fault was caught, and the one survivor was equivalent (harmless) |
+| `src/fallback-rpc.ts` | `FallbackRpc`: tries several endpoints in order, with per-call timeouts; the endpoint that answers becomes active. `sendTransaction` is never retried inside it |
+| `src/stats.ts` | `SubmitterEvent` (`sent`, `send-retry`, `final`, `refused`) through `onEvent`, and `submitter.stats()`: results by status, refusals, error codes, retries, fees, and landings per ledger |
+| `src/balance.ts` | `checkFacilitatorBalance`: spendable XLM after reserve, sponsorships and liabilities; settlements left; a `low` flag |
+| `test/` | 30 tests against a fake RPC that enforces sequence numbers and one pending tx per source. 16 seeded mutations were checked: every real fault was caught, and the one survivor was equivalent (harmless) |
 | `scripts/testnet-smoke.ts` | Creates delegated channels, then settles real UptoProxy payments |
 
 **Testnet results** (2026-10-05, proxy `CBEPV3F2…TEGY7`):
@@ -59,6 +62,7 @@ network limit (about 105 per ledger, about 43 free on mainnet today). It serves 
 |---|---|---|---|
 | 5 | 25 | 25 | 5, 5, 5, 5, 5 |
 | 50 | 200 | 200 | 50, 50, 50, 36, 14 |
+| 20, via `FallbackRpc` with a dead first endpoint | 80 | 80 | 20, 20, 20, 20 |
 
 - Channel setup txs: `78ff2f0d…99f5`, `538d52a8…528a`, `98f13e86…9f22`.
 - Example settlement: `df257e4c…abb6`, at 43,941 stroops.
@@ -69,7 +73,6 @@ network limit (about 105 per ledger, about 43 free on mainnet today). It serves 
 
 - Step 4: pre-building the next transaction. It may not be needed given the result above;
   measure at saturation (about 100+ channels) before building it.
-- Step 6: an RPC fallback, metrics, and a low-balance alert.
 - Step 7: a recorded load test at 20 channels and with one seller vs many.
 - Wiring into the facilitator app and an `upto` scheme, which is a separate task.
 
@@ -87,6 +90,20 @@ network limit (about 105 per ledger, about 43 free on mainnet today). It serves 
    300 per ledger on mainnet).
 4. **At most 19 channels per setup transaction:** each new channel signs its `setOptions`, and a
    transaction holds at most 20 signatures. Found by the 50-channel smoke run.
+5. **Fix: a send that throws is "uncertain", not failed.** The first slice let a thrown
+   `sendTransaction` escape. The channel was then released while the transaction might still
+   land, so a payment could settle while the facilitator reported an error. Now:
+   - the same envelope is resent (same hash, so this is safe);
+   - a `txBadSeq` after an uncertain attempt is resolved by hash, because it may mean "already
+     applied";
+   - an expiry after an uncertain attempt re-reads the sequence.
+
+   Found while designing step 6.
+6. **The fallback never retries `sendTransaction` internally.** A retry there would hide the
+   uncertainty from the submitter. The fallback moves the active endpoint and rethrows.
+7. **Metrics are events, not a metrics library.** The package stays independent of any metrics
+   library; the facilitator app forwards `onEvent` to whatever monitoring it uses.
+
 
 ## Context
 
@@ -165,7 +182,8 @@ network limit (about 105 per ledger, about 43 free on mainnet today). It serves 
 - [x] The pool creates, delegates and checks channels; channels hold only their reserve
 - [x] Settlements use the `delegated-bump` shape, signed with the facilitator key only
 - [x] At 50 channels on testnet: 50 settlements per ledger, 0 failures from the submitter
-- [ ] No sequence-number errors under load, including after RPC errors during polling
+- [x] No sequence-number errors under load, including after RPC errors during polling and
+      sending (unit tests; 0 sequence errors in the testnet runs)
 - [ ] Pipelining measured: settlements per channel per ledger, before and after
 - [ ] Zero-amount settlements submit nothing (moved to the scheme layer, see Emerged 2)
 - [x] Unit tests for scheduling and sequence handling; `typecheck`, `lint` and `test` pass

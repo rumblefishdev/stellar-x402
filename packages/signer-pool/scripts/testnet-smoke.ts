@@ -1,7 +1,8 @@
 // Testnet smoke test for the submitter: creates delegated channels with buildCreateChannelsTx,
 // checks them, then settles real UptoProxy payments through SettlementSubmitter.
 //
-// Env: FACILITATOR_SECRET, TOKEN_ID, PROXY_ID, CLIENTS_FILE (0006 bench secrets/accounts.json)
+// Env: FACILITATOR_SECRET, TOKEN_ID, PROXY_ID, CLIENTS_FILE (0006 bench secrets/accounts.json),
+//      [RPC_URLS] comma-separated, tried in order through FallbackRpc
 // Usage: tsx scripts/testnet-smoke.ts <channels> <payments>
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -15,7 +16,9 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import {
+  FallbackRpc,
   MAX_CHANNELS_PER_TX,
+  checkFacilitatorBalance,
   SettlementSubmitter,
   buildCreateChannelsTx,
   checkChannel,
@@ -28,7 +31,12 @@ const need = (k: string) =>
   (() => {
     throw new Error(`missing ${k}`);
   })();
-const server = new rpc.Server("https://soroban-testnet.stellar.org");
+const rpcUrls = (process.env.RPC_URLS ?? "https://soroban-testnet.stellar.org").split(",");
+const server = FallbackRpc.fromUrls(rpcUrls, {
+  timeoutMs: 5000,
+  onSwitch: (from, to) => console.log(`rpc: ${from} -> ${to}`),
+});
+const raw = new rpc.Server(rpcUrls.at(-1)!); // pollTransaction for the setup step
 const passphrase = Networks.TESTNET;
 const facilitator = Keypair.fromSecret(need("FACILITATOR_SECRET"));
 const TOKEN = need("TOKEN_ID");
@@ -128,8 +136,8 @@ for (let i = 0; i < fresh.length; i += MAX_CHANNELS_PER_TX) {
     fee: 1000,
   });
   setupTx.sign(facilitator, ...batch);
-  const sent = await server.sendTransaction(setupTx);
-  const created = await server.pollTransaction(sent.hash, { attempts: 30 });
+  const sent = await raw.sendTransaction(setupTx);
+  const created = await raw.pollTransaction(sent.hash, { attempts: 30 });
   console.log(`setup ${sent.hash} ${created.status}`);
 }
 const channels = fresh.map((k) => k.publicKey());
@@ -180,6 +188,9 @@ console.log(
         .slice(0, 3)
         .map((r) => ({ hash: r.hash, status: r.status, fee: String(r.feeCharged) })),
       failures: results.filter((r) => r.status !== "success"),
+      stats: submitter.stats(),
+      rpcActive: server.active,
+      facilitatorBalance: await checkFacilitatorBalance(server, facilitator.publicKey()),
     },
     (_k, v) => (typeof v === "bigint" ? String(v) : v),
     2,

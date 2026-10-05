@@ -9,13 +9,20 @@ import {
 } from "@stellar/stellar-sdk";
 import type { SorobanRpc } from "../src/types.js";
 
-type SendScript = "PENDING" | "TRY_AGAIN_LATER" | "ERROR_INSUFFICIENT_FEE" | "THROW";
+type SendScript =
+  | "PENDING"
+  | "TRY_AGAIN_LATER"
+  | "ERROR_INSUFFICIENT_FEE"
+  | "THROW"
+  /** Accepts the transaction, then loses the reply (the caller sees an error). */
+  | "ACCEPT_THEN_THROW";
 type StatusScript = "THROW";
 
 /**
  * An in-memory stand-in for Soroban RPC with the rules the submitter depends on:
  * - a transaction's sequence must be the source account's sequence + 1 (else `txBadSeq`);
  * - at most one pending transaction per source account (else `TRY_AGAIN_LATER`);
+ * - resending a queued transaction gives `DUPLICATE`, an applied one `txBadSeq`;
  * - each `getLatestLedger` call closes one ledger, which includes every pending transaction
  *   whose time bound has not passed, and advances the close time by `ledgerSeconds`.
  */
@@ -94,7 +101,9 @@ export class FakeRpc implements SorobanRpc {
     if (script === "TRY_AGAIN_LATER") return { ...base, status: "TRY_AGAIN_LATER" };
     if (script === "ERROR_INSUFFICIENT_FEE")
       return { ...base, status: "ERROR", errorResult: result("txInsufficientFee") };
-    if (this.pending.has(hash) || this.done.has(hash)) return { ...base, status: "DUPLICATE" };
+    // Still queued: DUPLICATE. Already applied: its sequence is used up, so txBadSeq, as on
+    // the real network.
+    if (this.pending.has(hash)) return { ...base, status: "DUPLICATE" };
     const inner = tx instanceof FeeBumpTransaction ? tx.innerTransaction : tx;
     const seq = BigInt(inner.sequence);
     const current = this.sequences.get(inner.source);
@@ -104,6 +113,7 @@ export class FakeRpc implements SorobanRpc {
       return { ...base, status: "ERROR", errorResult: result("txBadSeq", true) };
     const maxTime = Number(inner.timeBounds?.maxTime ?? 0);
     this.pending.set(hash, { source: inner.source, seq, maxTime });
+    if (script === "ACCEPT_THEN_THROW") throw new Error("connection reset");
     return { ...base, status: "PENDING" };
   }
 
