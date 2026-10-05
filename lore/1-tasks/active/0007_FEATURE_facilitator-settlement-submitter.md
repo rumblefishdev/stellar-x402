@@ -2,7 +2,7 @@
 id: "0007"
 title: "Build the facilitator's settlement submitter on a channel-account pool"
 type: FEATURE
-status: backlog
+status: active
 related_adr: []
 related_tasks: ["0006", "0003"]
 tags: [facilitator, signer-pool, throughput, upto, priority-medium, effort-large]
@@ -16,6 +16,10 @@ history:
     status: backlog
     who: claude
     note: "Spawned from 0006 future work (S-facilitator-scaling), requested by okarcz."
+  - date: "2026-10-05"
+    status: active
+    who: okarcz
+    note: "Started after 0006 closed."
 ---
 
 # Build the facilitator's settlement submitter on a channel-account pool
@@ -27,6 +31,10 @@ on chain. One source account allows only one pending transaction, so one account
 settlement per ledger. A pool of channel accounts gives about 1 per channel per ledger, up to the
 network limit (about 105 per ledger, about 43 free on mainnet today). It serves `upto` now and
 `exact` later, since both submit one Soroban call per payment.
+
+## Status: Active
+
+> Started 2026-10-05 on branch `lore-0007-facilitator-settlement-submitter`.
 
 ## Context
 
