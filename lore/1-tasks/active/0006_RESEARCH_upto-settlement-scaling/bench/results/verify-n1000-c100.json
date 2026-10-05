@@ -1,0 +1,16 @@
+{
+  "ranAt": "2026-10-05T08:29:11.035Z",
+  "rpc": "https://soroban-testnet.stellar.org",
+  "summary": {
+    "count": 1000,
+    "concurrency": 100,
+    "ok": 1000,
+    "errors": {},
+    "simMs": {
+      "p50": 586,
+      "p95": 844,
+      "max": 1723
+    },
+    "simulationsPerSecond": 107.97
+  }
+}

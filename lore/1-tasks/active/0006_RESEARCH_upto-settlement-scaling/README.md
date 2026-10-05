@@ -30,6 +30,37 @@ which approach to build, with measured numbers, before the facilitator is design
 ## Status: Active
 
 > Started 2026-10-02. Can run in parallel with 0004; its measurements feed 0005.
+> 2026-10-05: all questions answered in notes, with testnet measurements. Awaiting okarcz review
+> of the two S- notes before the follow-up backlog tasks are created.
+
+## Findings
+
+- **Single account:** one pending transaction per source account, so about 0.2 settlements per
+  second.
+- **Channel pool:** N channels give N settlements per ledger, up to the network limit. 120
+  channels reached 102–103 per ledger, which is the transaction-size limit (about 105, roughly 20
+  per second network-wide).
+- **Same seller:** no measurable conflict. Every ledger was one stage with one cluster.
+- **Mainnet:** same limits as testnet (both on protocol 29), but about 59% of the Soroban size
+  budget is already used, so about 43 settlements per ledger are free.
+- **Recommended shape:** a channel account as transaction source, with the facilitator as signer
+  and operation source, wrapped in a fee bump the facilitator pays (2,516 B, about 41,000 stroops).
+  It is better than spike S8's address auth.
+- **No change** to the contract or the `upto` spec. Sessions belong in a separate Stellar
+  `batch-settlement` binding, if that is in scope.
+
+## Notes
+
+| Note | Answers |
+|---|---|
+| [R-network-limits-and-mainnet-usage](notes/R-network-limits-and-mainnet-usage.md) | Q5, plus the network ceiling |
+| [R-testnet-throughput-measurements](notes/R-testnet-throughput-measurements.md) | Q2 and Q3 numbers, with tx hashes |
+| [R-verify-cost](notes/R-verify-cost.md) | Q6 |
+| [R-x402-batch-settlement](notes/R-x402-batch-settlement.md) | Q1 background (upstream schemes) |
+| [S-session-aggregation](notes/S-session-aggregation.md) | Q1 |
+| [S-facilitator-scaling](notes/S-facilitator-scaling.md) | Q2 and Q4, and the recommendation |
+
+The bench code and raw results are in [`bench/`](bench/README.md).
 
 ## Context
 
@@ -64,9 +95,9 @@ batching. This task checks that recommendation with evidence and turns it into a
 
 ## Acceptance Criteria
 
-- [ ] Each question answered in a note, with testnet transaction hashes or measurements where
+- [x] Each question answered in a note, with testnet transaction hashes or measurements where
       it applies
-- [ ] Throughput numbers for: single account, N channel accounts, and same-seller concurrency
-- [ ] A recommendation (S- note) on what the facilitator builds, and whether the contract or
+- [x] Throughput numbers for: single account, N channel accounts, and same-seller concurrency
+- [x] A recommendation (S- note) on what the facilitator builds, and whether the contract or
       spec needs to change
 - [ ] Follow-up implementation tasks created in the backlog
