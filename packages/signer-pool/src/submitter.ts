@@ -9,6 +9,12 @@ import {
 } from "@stellar/stellar-sdk";
 import { ChannelPool, type Channel } from "./channel-pool.js";
 import { LedgerClock } from "./ledger-clock.js";
+import {
+  SubmitterStats,
+  type RefusalReason,
+  type SubmitterEvent,
+  type SubmitterStatsSnapshot,
+} from "./stats.js";
 import type { SorobanRpc, SubmitResult, TransactionSigner } from "./types.js";
 
 export interface SubmitterOptions {
@@ -33,6 +39,8 @@ export interface SubmitterOptions {
   timeoutSeconds?: number;
   /** How often the shared ledger clock polls `getLatestLedger`. */
   pollIntervalMs?: number;
+  /** Receives every submitter event, for metrics and logs. Must not throw (errors are ignored). */
+  onEvent?: (event: SubmitterEvent) => void;
   /** Injected for tests. */
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
@@ -57,6 +65,11 @@ export interface SubmitOptions {
 /** Simulation failed or needs a restore; nothing was signed or sent. */
 export class SimulationError extends Error {
   override readonly name = "SimulationError";
+}
+
+/** The caller's `checkSimulation` refused the simulation; nothing was signed or sent. */
+export class SimulationCheckError extends Error {
+  override readonly name = "SimulationCheckError";
 }
 
 /** The simulated fee is above `maxFeeStroops`; nothing was signed or sent. */
@@ -91,6 +104,8 @@ export class SettlementSubmitter {
   private readonly pollIntervalMs: number;
   private readonly now: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly onEvent?: (event: SubmitterEvent) => void;
+  private readonly statsCollector = new SubmitterStats();
 
   constructor(opts: SubmitterOptions) {
     this.rpc = opts.rpc;
@@ -107,15 +122,51 @@ export class SettlementSubmitter {
     this.now = opts.now ?? Date.now;
     this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     this.clock = new LedgerClock(this.rpc, this.pollIntervalMs, this.sleep);
+    this.onEvent = opts.onEvent;
   }
 
   /** Waits for a free channel, then builds, simulates, signs, sends and confirms `call`. */
   async submit(call: ContractCall, opts: SubmitOptions = {}): Promise<SubmitResult> {
+    const start = this.now();
     const channel = await this.pool.acquire();
+    const acquired = this.now();
     try {
-      return await this.submitOn(channel, call, opts);
+      const result = await this.submitOn(channel, call, opts);
+      this.emit({
+        type: "final",
+        result,
+        queuedMs: acquired - start,
+        totalMs: this.now() - start,
+      });
+      return result;
+    } catch (error) {
+      this.emit({
+        type: "refused",
+        channel: channel.address,
+        reason: refusalReason(error),
+        message: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
     } finally {
       this.pool.release(channel);
+    }
+  }
+
+  /** Counters since construction, plus the pool's current load. */
+  stats(): SubmitterStatsSnapshot {
+    return this.statsCollector.snapshot({
+      channels: this.pool.size,
+      busy: this.pool.busy,
+      queued: this.pool.queued,
+    });
+  }
+
+  private emit(event: SubmitterEvent): void {
+    this.statsCollector.record(event);
+    try {
+      this.onEvent?.(event);
+    } catch {
+      // A broken listener must not break settlement.
     }
   }
 
@@ -144,7 +195,13 @@ export class SettlementSubmitter {
       throw new SimulationError("archived entries need a restore before this call");
     if (!rpc.Api.isSimulationSuccess(sim))
       throw new SimulationError("unexpected simulation response");
-    await opts.checkSimulation?.(sim);
+    try {
+      await opts.checkSimulation?.(sim);
+    } catch (error) {
+      throw new SimulationCheckError(error instanceof Error ? error.message : String(error), {
+        cause: error,
+      });
+    }
     // Inner inclusion fee plus the fee bump's own (one operation + the bump).
     const total = BigInt(sim.minResourceFee) + 3n * BigInt(fee);
     if (total > this.maxFee)
@@ -161,23 +218,47 @@ export class SettlementSubmitter {
       ),
     );
     const base = { channel: channel.address };
+    const hash = bump.hash().toString("hex");
+    const pastMaxTime = () => Math.floor(this.now() / 1000) > maxTime;
 
-    // Send. TRY_AGAIN_LATER means the network did not take it (e.g. its queue is full); the
-    // sequence number is untouched, so the same envelope is resent on the next ledger.
-    let hash: string;
-    for (;;) {
-      const sent = await this.rpc.sendTransaction(bump);
-      hash = sent.hash;
-      if (sent.status === "PENDING" || sent.status === "DUPLICATE") break;
-      if (sent.status === "ERROR") {
+    // Send. Resending the same signed envelope is always safe: it has the same hash, so the
+    // network answers DUPLICATE or applies it once. TRY_AGAIN_LATER means the network did not
+    // take it. A thrown send is uncertain: the network may have taken it without our seeing the
+    // reply, so from then on a txBadSeq may mean "already applied" and is settled by its hash.
+    let uncertain = false;
+    let accepted = false;
+    for (let attempt = 1; ; attempt++) {
+      let sent: rpc.Api.SendTransactionResponse | undefined;
+      try {
+        sent = await this.rpc.sendTransaction(bump);
+      } catch {
+        uncertain = true;
+      }
+      if (sent?.status === "PENDING" || sent?.status === "DUPLICATE") {
+        accepted = true;
+        this.emit({ type: "sent", channel: channel.address, hash, attempts: attempt });
+        break;
+      }
+      if (sent?.status === "ERROR") {
         const errorCode = resultCode(sent.errorResult);
-        if (errorCode && BAD_SEQ.has(errorCode)) channel.sequence = undefined;
+        const badSeq = errorCode !== undefined && BAD_SEQ.has(errorCode);
+        if (badSeq && uncertain) break; // an earlier attempt may have landed; confirm by hash
+        if (badSeq) channel.sequence = undefined;
         return { ...base, status: "rejected", hash, errorCode };
       }
-      if (Math.floor(this.now() / 1000) > maxTime) return { ...base, status: "expired", hash };
+      if (pastMaxTime()) {
+        if (uncertain) break;
+        return { ...base, status: "expired", hash };
+      }
+      this.emit({
+        type: "send-retry",
+        channel: channel.address,
+        hash,
+        reason: sent ? "try-again-later" : "send-error",
+      });
       await this.clock.next(this.clock.current);
     }
-    opts.onSent?.(hash);
+    if (accepted) opts.onSent?.(hash);
 
     // Confirm: one status check per new ledger until it is final or provably never will be.
     let seen = this.clock.current;
@@ -190,7 +271,12 @@ export class SettlementSubmitter {
         continue; // The transaction may still land; keep the sequence number and retry.
       }
       if (res.status === rpc.Api.GetTransactionStatus.NOT_FOUND) {
-        if (res.latestLedgerCloseTime > maxTime) return { ...base, status: "expired", hash };
+        if (res.latestLedgerCloseTime > maxTime) {
+          // It can no longer be applied. After an uncertain send the cached sequence may be
+          // stale, and re-reading it is now safe.
+          if (uncertain) channel.sequence = undefined;
+          return { ...base, status: "expired", hash };
+        }
         continue;
       }
       channel.sequence = txSequence;
@@ -216,6 +302,13 @@ export class SettlementSubmitter {
     });
     return TransactionBuilder.fromXDR(signedTxXdr, this.passphrase);
   }
+}
+
+function refusalReason(error: unknown): RefusalReason {
+  if (error instanceof SimulationError) return "simulation";
+  if (error instanceof FeeLimitError) return "fee-limit";
+  if (error instanceof SimulationCheckError) return "check";
+  return "other";
 }
 
 /** The result code name, looking inside a failed fee bump's inner result. */

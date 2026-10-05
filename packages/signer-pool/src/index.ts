@@ -1,4 +1,15 @@
+export {
+  checkFacilitatorBalance,
+  type BalanceCheckOptions,
+  type BalanceReport,
+} from "./balance.js";
 export { ChannelPool, type Channel } from "./channel-pool.js";
+export {
+  FallbackRpc,
+  RpcTimeoutError,
+  type FallbackRpcOptions,
+  type RpcEndpoint,
+} from "./fallback-rpc.js";
 export { feeStatsInclusionFee, type FeeStatsOptions } from "./fees.js";
 export { LedgerClock } from "./ledger-clock.js";
 export {
@@ -11,8 +22,15 @@ export {
 } from "./setup.js";
 export { keypairSigner } from "./signer.js";
 export {
+  SubmitterStats,
+  type RefusalReason,
+  type SubmitterEvent,
+  type SubmitterStatsSnapshot,
+} from "./stats.js";
+export {
   FeeLimitError,
   SettlementSubmitter,
+  SimulationCheckError,
   SimulationError,
   type ContractCall,
   type SubmitOptions,
