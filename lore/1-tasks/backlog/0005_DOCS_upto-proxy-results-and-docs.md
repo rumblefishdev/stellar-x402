@@ -8,9 +8,9 @@ related_adr: []
 related_tasks: ["0002", "0003", "0004", "0006"]
 tags: [layer-contracts, upto, priority-medium, effort-small]
 links:
-  - ../active/0006_RESEARCH_upto-settlement-scaling/notes/R-testnet-throughput-measurements.md
-  - ../active/0006_RESEARCH_upto-settlement-scaling/notes/R-network-limits-and-mainnet-usage.md
-  - ../active/0006_RESEARCH_upto-settlement-scaling/notes/S-facilitator-scaling.md
+  - ../archive/0006_RESEARCH_upto-settlement-scaling/notes/R-testnet-throughput-measurements.md
+  - ../archive/0006_RESEARCH_upto-settlement-scaling/notes/R-network-limits-and-mainnet-usage.md
+  - ../archive/0006_RESEARCH_upto-settlement-scaling/notes/S-facilitator-scaling.md
 history:
   - date: "2026-09-30"
     status: backlog
@@ -54,7 +54,7 @@ reviewers and auditors, the facilitator team, and the future `scheme_upto_stella
 
 Measured on testnet on 2026-10-05 against proxy `CBEPV3F2…TEGY7`. The details and transaction
 hashes are in 0006's
-[R-testnet-throughput-measurements](../active/0006_RESEARCH_upto-settlement-scaling/notes/R-testnet-throughput-measurements.md),
+[R-testnet-throughput-measurements](../archive/0006_RESEARCH_upto-settlement-scaling/notes/R-testnet-throughput-measurements.md),
 and the raw data is in `0006…/bench/results/`.
 
 **Cost per settlement, by transaction shape:**
@@ -85,7 +85,7 @@ and the raw data is in `0006…/bench/results/`.
 **Known limits** to state in the report: one `upto` payment is one transaction, so `upto` cannot
 go beyond the network share above. Higher request rates need off-chain aggregation, a separate
 `batch-settlement` binding (0006's
-[S-session-aggregation](../active/0006_RESEARCH_upto-settlement-scaling/notes/S-session-aggregation.md)).
+[S-session-aggregation](../archive/0006_RESEARCH_upto-settlement-scaling/notes/S-session-aggregation.md)).
 
 The source RFP and architecture docs in `docs/rfp/` are left unchanged. Deviations go in the ADR.
 

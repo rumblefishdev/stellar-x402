@@ -7,9 +7,9 @@ related_adr: []
 related_tasks: ["0006", "0003"]
 tags: [facilitator, signer-pool, throughput, upto, priority-medium, effort-large]
 links:
-  - ../active/0006_RESEARCH_upto-settlement-scaling/notes/S-facilitator-scaling.md
-  - ../active/0006_RESEARCH_upto-settlement-scaling/notes/R-testnet-throughput-measurements.md
-  - ../active/0006_RESEARCH_upto-settlement-scaling/notes/R-verify-cost.md
+  - ../archive/0006_RESEARCH_upto-settlement-scaling/notes/S-facilitator-scaling.md
+  - ../archive/0006_RESEARCH_upto-settlement-scaling/notes/R-testnet-throughput-measurements.md
+  - ../archive/0006_RESEARCH_upto-settlement-scaling/notes/R-verify-cost.md
   - ../../../docs/rfp/x402-facilitator-bazaar-technical-architecture.md
 history:
   - date: "2026-10-05"
@@ -34,7 +34,7 @@ network limit (about 105 per ledger, about 43 free on mainnet today). It serves 
   implementation of our own. **Clean room:** do not use, read or call OpenZeppelin's
   `relayer-plugin-channels` (AGPL).
 - 0006 measured the design on testnet. Its numbers and reasons are in
-  [S-facilitator-scaling](../active/0006_RESEARCH_upto-settlement-scaling/notes/S-facilitator-scaling.md):
+  [S-facilitator-scaling](../archive/0006_RESEARCH_upto-settlement-scaling/notes/S-facilitator-scaling.md):
   - N channels gave N settlements per ledger.
   - 120 channels reached 102–103 per ledger.
   - Same-seller payments had no conflict.
@@ -116,8 +116,8 @@ network limit (about 105 per ledger, about 43 free on mainnet today). It serves 
 
 - **Out of scope:** raising the network ceiling. That needs off-chain aggregation, a possible
   Stellar `batch-settlement` binding
-  ([S-session-aggregation](../active/0006_RESEARCH_upto-settlement-scaling/notes/S-session-aggregation.md)),
+  ([S-session-aggregation](../archive/0006_RESEARCH_upto-settlement-scaling/notes/S-session-aggregation.md)),
   which is not planned yet.
 - **The `/verify` path** (simulation per request) belongs to the facilitator API, not this
-  package. 0006's [R-verify-cost](../active/0006_RESEARCH_upto-settlement-scaling/notes/R-verify-cost.md)
+  package. 0006's [R-verify-cost](../archive/0006_RESEARCH_upto-settlement-scaling/notes/R-verify-cost.md)
   has its costs.
