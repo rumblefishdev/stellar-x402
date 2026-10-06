@@ -5,7 +5,9 @@ import {
   type Account,
   type Keypair,
   type Transaction,
+  type xdr,
 } from "@stellar/stellar-sdk";
+import { isNotFound } from "./errors.js";
 import type { SorobanRpc } from "./types.js";
 
 /** Base reserve (0.5 XLM) x (2 + one extra signer): a channel never pays fees itself. */
@@ -64,33 +66,42 @@ export function buildCreateChannelsTx(opts: CreateChannelsOptions): Transaction 
   return builder.build();
 }
 
-export type ChannelProblem = "missing" | "facilitator-not-signer" | "thresholds-too-high";
+export type ChannelProblem =
+  | "missing"
+  | "facilitator-not-signer"
+  | "thresholds-too-high"
+  | "master-key-active"
+  | "extra-signer";
 
 /**
- * Checks that a channel exists and that the facilitator's signature alone authorizes it
- * (signer weight at least the medium threshold, which transactions and payments need).
+ * Checks that a channel exists and that the facilitator is its only signer: the facilitator's
+ * weight meets the medium threshold (which transactions and payments need), the master key
+ * weight is 0, and no other key can sign. `allowMasterKey` accepts channels created with
+ * `disableMasterKey: false`. Only a not-found answer is reported as `missing`; other RPC errors
+ * are thrown, since they say nothing about the channel.
  */
 export async function checkChannel(
   rpc: Pick<SorobanRpc, "getAccountEntry">,
   channel: string,
   facilitator: string,
+  opts: { allowMasterKey?: boolean } = {},
 ): Promise<ChannelProblem | undefined> {
   let entry;
   try {
     entry = await rpc.getAccountEntry(channel);
-  } catch {
-    return "missing";
+  } catch (error) {
+    if (isNotFound(error)) return "missing";
+    throw error;
   }
-  const signer = entry
-    .signers()
-    .find(
-      (s) =>
-        s.key().switch().name === "signerKeyTypeEd25519" &&
-        StrKey.encodeEd25519PublicKey(s.key().ed25519()) === facilitator,
-    );
+  const isFacilitator = (s: xdr.Signer) =>
+    s.key().switch().name === "signerKeyTypeEd25519" &&
+    StrKey.encodeEd25519PublicKey(s.key().ed25519()) === facilitator;
+  const signer = entry.signers().find(isFacilitator);
   if (!signer) return "facilitator-not-signer";
   // Thresholds are [master weight, low, medium, high]. Most operations need medium.
-  const medium = entry.thresholds()[2] ?? 0;
+  const [masterWeight = 0, , medium = 0] = entry.thresholds();
   if (signer.weight() < Math.max(1, medium)) return "thresholds-too-high";
+  if (!opts.allowMasterKey && masterWeight > 0) return "master-key-active";
+  if (entry.signers().some((s) => !isFacilitator(s) && s.weight() > 0)) return "extra-signer";
   return undefined;
 }

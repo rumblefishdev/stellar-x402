@@ -3,7 +3,7 @@ export {
   type BalanceCheckOptions,
   type BalanceReport,
 } from "./balance.js";
-export { ChannelPool, type Channel } from "./channel-pool.js";
+export { ChannelPool, NoChannelsError, QueueTimeoutError, type Channel } from "./channel-pool.js";
 export {
   FallbackRpc,
   RpcTimeoutError,

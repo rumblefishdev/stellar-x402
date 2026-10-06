@@ -65,6 +65,13 @@ describe("SettlementSubmitter", () => {
     expect(fake.calls.getAccount).toBe(1); // the sequence is tracked locally after the first read
   });
 
+  it("simulates with auth enforced and rejects invalid channel addresses", async () => {
+    const { fake, submitter } = setup({}, 1);
+    await submitter.submit(call());
+    expect(fake.authModes).toEqual(["enforce"]);
+    expect(() => setup({ channels: ["not-a-key"] })).toThrow("invalid channel address");
+  });
+
   it("keeps one transaction in flight per channel and queues the rest", async () => {
     const { fake, submitter } = setup({}, 2);
     const results = await Promise.all(Array.from({ length: 5 }, () => submitter.submit(call())));
@@ -86,10 +93,10 @@ describe("SettlementSubmitter", () => {
     await submitter.submit(call());
     fake.sequences.set(channels[0]!, 5000n); // someone else used the channel
 
-    const bad = await submitter.submit(call());
-    expect(bad).toMatchObject({ status: "rejected", errorCode: "txBadSeq" });
+    // The first envelope (1002) gets txBadSeq; it is rebuilt once with the re-read sequence.
     const ok = await submitter.submit(call());
     expect(ok.status).toBe("success");
+    expect(fake.calls.getAccount).toBe(2);
     expect((fake.sent.at(-1) as FeeBumpTransaction).innerTransaction.sequence).toBe("5001");
 
     fake.sendScript.push("ERROR_INSUFFICIENT_FEE");

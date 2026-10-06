@@ -32,10 +32,19 @@ export type SubmitStatus =
   | "success"
   /** Included in a ledger but failed; the sequence number was consumed. */
   | "failed"
-  /** Rejected before inclusion (e.g. `sendTransaction` returned `ERROR`). */
+  /**
+   * Rejected before inclusion (e.g. `sendTransaction` returned `ERROR`). Nothing was applied, so
+   * the payment is safe to submit again.
+   */
   | "rejected"
   /** Never included before its time bound passed; the sequence number was not consumed. */
-  | "expired";
+  | "expired"
+  /**
+   * No final answer by the time bound plus `confirmGraceSeconds` (the RPC did not answer): the
+   * transaction may still land. The channel stays out of the pool until it is final, and a
+   * `resolved` event reports the outcome.
+   */
+  | "pending";
 
 export interface SubmitResult {
   status: SubmitStatus;
