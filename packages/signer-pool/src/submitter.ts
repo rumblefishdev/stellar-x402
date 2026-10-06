@@ -253,13 +253,33 @@ export class SettlementSubmitter {
       if (!used) prepared = undefined;
     }
     if (!prepared) {
-      if (channel.sequence === undefined) {
-        const account = await this.rpc.getAccount(channel.address);
-        channel.sequence = BigInt(account.sequenceNumber());
-      }
+      channel.sequence ??= await this.readSequence(channel.address);
       prepared = await this.prepare(channel.address, channel.sequence, call, opts);
     }
     return this.sendAndConfirm(channel, prepared, opts, hold);
+  }
+
+  /**
+   * Reads a channel's sequence number, retrying once per new ledger for up to `timeoutSeconds`.
+   * Nothing has been sent yet, so retrying is safe. Under load the public RPC has answered
+   * "Account not found" for existing channels (0007 step 7).
+   */
+  private async readSequence(address: string): Promise<bigint> {
+    const giveUpAt = Math.floor(this.now() / 1000) + this.timeoutSeconds;
+    for (;;) {
+      try {
+        const account = await this.rpc.getAccount(address);
+        return BigInt(account.sequenceNumber());
+      } catch (error) {
+        if (Math.floor(this.now() / 1000) >= giveUpAt) throw error;
+        this.emit({
+          type: "read-retry",
+          channel: address,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        await this.clock.next(this.clock.current);
+      }
+    }
   }
 
   /** Less than half the time bound left: too close to expiry to send a prepared envelope. */

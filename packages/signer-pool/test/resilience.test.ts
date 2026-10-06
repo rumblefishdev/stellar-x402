@@ -94,6 +94,37 @@ describe("uncertain sends", () => {
   });
 });
 
+describe("sequence reads", () => {
+  /** Makes the first `n` getAccount calls throw, as the public RPC did under load. */
+  const failReads = (fake: FakeRpc, n: number) => {
+    const getAccount = fake.getAccount.bind(fake);
+    Object.assign(fake, {
+      getAccount: async (address: string) => {
+        if (n-- > 0) throw new Error(`Account not found: ${address}`);
+        return getAccount(address);
+      },
+    });
+  };
+
+  it("retries a failed sequence read on the next ledger", async () => {
+    const { fake, submitter, events } = setup();
+    failReads(fake, 2);
+    const res = await submitter.submit(call());
+    expect(res.status).toBe("success");
+    expect(innerSeq(fake)).toBe("1001");
+    expect(events.filter((e) => e.type === "read-retry")).toHaveLength(2);
+    expect(submitter.stats().readRetries).toBe(2);
+  });
+
+  it("refuses without sending once the time bound passes", async () => {
+    const { fake, submitter } = setup({ timeoutSeconds: 20 });
+    failReads(fake, Infinity);
+    await expect(submitter.submit(call())).rejects.toThrow("Account not found");
+    expect(fake.calls.sendTransaction ?? 0).toBe(0);
+    expect(submitter.stats()).toMatchObject({ readRetries: 4, refused: { other: 1 }, busy: 0 });
+  });
+});
+
 describe("events and stats", () => {
   it("emits sent, retry, final and refused events and folds them into stats", async () => {
     const { fake, submitter, events } = setup({ maxFeeStroops: 50_000 }, 2);
