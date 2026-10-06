@@ -6,6 +6,8 @@ export type RefusalReason = "simulation" | "check" | "fee-limit" | "other";
 export type SubmitterEvent =
   /** The network accepted the transaction (`PENDING` or `DUPLICATE`). */
   | { type: "sent"; channel: string; hash: string; attempts: number }
+  /** Reading a channel's sequence number failed; it is retried on the next ledger. */
+  | { type: "read-retry"; channel: string; message: string }
   /** A send is retried on the next ledger. */
   | {
       type: "send-retry";
@@ -34,6 +36,8 @@ export interface SubmitterStatsSnapshot {
   /** Result codes of `failed` and `rejected` submissions. */
   errorCodes: Record<string, number>;
   sendRetries: number;
+  /** Failed reads of a channel's sequence number that were retried. */
+  readRetries: number;
   /** Pipelined envelopes sent as prepared, and those rebuilt. */
   preparedAhead: { used: number; rebuilt: number };
   /** Envelopes built with a raised inclusion fee bid, and the highest bid so far. */
@@ -61,6 +65,7 @@ export class SubmitterStats {
   };
   private errorCodes: Record<string, number> = {};
   private sendRetries = 0;
+  private readRetries = 0;
   private preparedAhead = { used: 0, rebuilt: 0 };
   private feeRaises = { count: 0, highestBid: 0 };
   private fees = 0n;
@@ -70,6 +75,9 @@ export class SubmitterStats {
     switch (event.type) {
       case "send-retry":
         this.sendRetries++;
+        break;
+      case "read-retry":
+        this.readRetries++;
         break;
       case "prepared-ahead":
         if (event.used) this.preparedAhead.used++;
@@ -108,6 +116,7 @@ export class SubmitterStats {
       refused: { ...this.refused },
       errorCodes: { ...this.errorCodes },
       sendRetries: this.sendRetries,
+      readRetries: this.readRetries,
       preparedAhead: { ...this.preparedAhead },
       feeRaises: { ...this.feeRaises },
       feesChargedStroops: this.fees,
