@@ -11,6 +11,7 @@ links:
   - ../archive/0006_RESEARCH_upto-settlement-scaling/notes/R-testnet-throughput-measurements.md
   - ../archive/0006_RESEARCH_upto-settlement-scaling/notes/R-verify-cost.md
   - ../../../docs/rfp/x402-facilitator-bazaar-technical-architecture.md
+  - ../../../docs/x402-settlement-scaling-en.md
 history:
   - date: "2026-10-05"
     status: backlog
@@ -27,6 +28,13 @@ history:
       Step 4: the cycle reverted to 2 ledgers above ~50 channels, so pipelining was built
       (handOver to the next waiter). 90 channels: 1-ledger cycles 36% -> 82%, mean 50 -> 64
       per ledger; 120: 68.6 -> 80. 34 tests (+4).
+  - date: "2026-10-06"
+    status: active
+    who: claude
+    note: >
+      Scope updated from docs/x402-settlement-scaling-en.md (Adam): step 8 (queue-aware fee bid,
+      ADR-R2) added; step 7 takes S4's targets; mainnet free capacity corrected to ~20 upto
+      per ledger.
 ---
 
 # Build the facilitator's settlement submitter on a channel-account pool
@@ -36,8 +44,10 @@ history:
 Implement `packages/signer-pool`, the part of the facilitator that puts settlement transactions
 on chain. One source account allows only one pending transaction, so one account gives at most 1
 settlement per ledger. A pool of channel accounts gives about 1 per channel per ledger, up to the
-network limit (about 105 per ledger, about 43 free on mainnet today). It serves `upto` now and
-`exact` later, since both submit one Soroban call per payment.
+network limit (about 105 `upto` per ledger network-wide). Mainnet is about 81% full, mostly with
+KALE bots bidding 100–200 stroops, so at a 200-stroop bid about 20 `upto` per ledger are free on
+average (13 at the median, per the 2026-10-06 analysis). It serves `upto` now and `exact` later,
+since both submit one Soroban call per payment.
 
 ## Status: Active
 
@@ -48,6 +58,13 @@ network limit (about 105 per ledger, about 43 free on mainnet today). It serves 
 > ledgers, so pipelining was built. Up to 90 channels, 82% of channel cycles are now 1 ledger,
 > up from 36%. Also fixed: an `onSent` that throws no longer releases a pending channel.
 > 35 unit tests. Step 7 is still open.
+> 2026-10-06: scope updated from Adam's
+> [settlement scaling analysis](../../../docs/x402-settlement-scaling-en.md):
+> - step 8 added (a queue-aware fee bid);
+> - step 7 now uses its S4 targets;
+> - the mainnet numbers were corrected.
+>
+> Both steps come after the PR #4 review.
 
 ## Progress
 
@@ -111,7 +128,8 @@ network limit (about 105 per ledger, about 43 free on mainnet today). It serves 
 
 **Open:**
 
-- Step 7: a recorded load test at 20 channels and with one seller vs many.
+- Step 7: a recorded load test with S4's targets (see the plan).
+- Step 8: a queue-aware inclusion-fee bid (ADR-R2).
 - Wiring into the facilitator app and an `upto` scheme, which is a separate task.
 
 **Emerged:**
@@ -180,6 +198,17 @@ network limit (about 105 per ledger, about 43 free on mainnet today). It serves 
   - 120 channels reached 102–103 per ledger.
   - Same-seller payments had no conflict.
   - The `delegated-bump` shape is the cheapest (2,516 B, about 41,000 stroops).
+- Adam's [settlement scaling analysis](../../../docs/x402-settlement-scaling-en.md) (2026-10-06)
+  recommends this pool (option A0) as the production path for `exact` and `upto`. Its proposed
+  ADR-R1 to R6 feed this task:
+  - R2: the fee bid regulates throughput. That is step 8.
+  - S4: the load test. That is step 7.
+  - Its mainnet sample: 81% of the Soroban byte budget used on average, 47% of ledgers more than
+    90% full, about 98% of it KALE.
+  - Its `settlement_pending` response and durable settlement registry belong to the facilitator
+    app, not this package. `onSent` already gives the hash early.
+  - It assumes 1.5–2 channels per target settlement per ledger. With pipelining (step 4) it is
+    about 1 up to 90 channels.
 - The bench code in `0006…/bench/bench.ts` is a working reference for building, simulating,
   fee-bumping and placing transactions. It is research code, not production code.
 - `packages/signer-pool` was an empty placeholder pinning `@stellar/stellar-sdk ^16.3.0`.
@@ -235,11 +264,31 @@ network limit (about 105 per ledger, about 43 free on mainnet today). It serves 
   per-ledger landings and failures by result code.
 - Alert when the facilitator's XLM balance falls below a threshold, since it pays every fee.
 
-### Step 7: Testnet load test
+### Step 7: Testnet load test (S4 in the scaling analysis)
 
-- Port the 0006 bench scenarios to the real package: shapes, pool runs at 5, 20 and 50 channels,
-  and one-seller vs many sellers.
-- Record the throughput and the per-channel cycle with and without pipelining.
+- Run the real package through `scripts/testnet-smoke.ts` at 100–200 channels, with one seller
+  and with many sellers, with and without pipelining (`PIPELINE=0`).
+  - The smoke script cycles through all 20 sellers. A "one seller" mode needs a small flag.
+- Target: a steady 100 or more settlements per ledger on testnet, and 0 sequence errors.
+  - Testnet carries other traffic, so record the ledgers' total Soroban usage next to ours.
+- Record the throughput, the per-channel cycle (`cycleGaps`), fees per settlement, and the
+  `stats()` snapshot for each run.
+- The 2026-10-06 run at 120 channels (peaks of 106, a mean of 80, 0 errors) is the first data
+  point.
+
+### Step 8: Queue-aware inclusion fee (ADR-R2 in the scaling analysis)
+
+- **Why:** on mainnet a 200-stroop bid loses in about half the ledgers. Free capacity depends on
+  the bid, not on the protocol.
+- **Today:** `feeStatsInclusionFee` bids a fixed percentile of recent fees. It does not react to
+  our own backlog.
+- **Change:** raise the bid while calls wait in the pool's queue, up to a configured ceiling, and
+  lower it again when the queue drains.
+  - Count every raise in `stats()`, and emit an event for it.
+  - Keep the total under `maxFeeStroops`. A 1,000-stroop bid adds about 2% to an `upto`
+    settlement.
+- **Out of scope:** the mainnet bid-to-delay experiment (S3). This step builds the mechanism and
+  unit-tests it.
 
 ## Acceptance Criteria
 
@@ -250,6 +299,10 @@ network limit (about 105 per ledger, about 43 free on mainnet today). It serves 
       sending (unit tests; 0 sequence errors in the testnet runs)
 - [x] Pipelining measured: settlements per channel per ledger, before and after (2026-10-06,
       90 and 120 channels; see Step 4 under Progress)
+- [ ] Load test with S4's targets on testnet: a steady ≥100 per ledger at 100–200 channels, one
+      seller and many, with and without pipelining, 0 sequence errors (step 7)
+- [ ] The inclusion-fee bid rises with the pool's queue up to a ceiling, and each raise is
+      counted in `stats()` (step 8)
 - [ ] Zero-amount settlements submit nothing (moved to the scheme layer, see Emerged 2)
 - [x] Unit tests for scheduling and sequence handling; `typecheck`, `lint` and `test` pass
       (SDK 16.3 is enough, see Emerged 1)
