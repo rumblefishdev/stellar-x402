@@ -3,7 +3,8 @@
 //
 // Env: FACILITATOR_SECRET, TOKEN_ID, PROXY_ID, CLIENTS_FILE (0006 bench secrets/accounts.json),
 //      [RPC_URLS] comma-separated, tried in order through FallbackRpc,
-//      [PIPELINE=0] to turn pipelining off, [POLL_MS] ledger clock interval (default 1000)
+//      [PIPELINE=0] to turn pipelining off, [POLL_MS] ledger clock interval (default 1000),
+//      [FEE_MAX] turns fee escalation on with this ceiling in stroops
 // Usage: tsx scripts/testnet-smoke.ts <channels> <payments>
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -158,6 +159,7 @@ const submitter = new SettlementSubmitter({
   timeoutSeconds: 60,
   pipeline: process.env.PIPELINE !== "0",
   pollIntervalMs: Number(process.env.POLL_MS ?? 1000),
+  feeEscalation: process.env.FEE_MAX ? { max: Number(process.env.FEE_MAX) } : undefined,
 });
 const expLedger = (await server.getLatestLedger()).sequence + 200;
 const t0 = Date.now();
@@ -198,6 +200,7 @@ console.log(
       channels: nChannels,
       pipeline: process.env.PIPELINE !== "0",
       pollMs: Number(process.env.POLL_MS ?? 1000),
+      feeMax: process.env.FEE_MAX ? Number(process.env.FEE_MAX) : null,
       payments: nPayments,
       wallSeconds: wall,
       byStatus,
