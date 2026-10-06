@@ -42,6 +42,20 @@ history:
       Step 8: feeEscalation in the submitter (base bid x factor per full round of queued calls,
       capped; fee-raised event; feeRaises in stats). Off by default. 40 tests (+5). Testnet
       20x80: 60 raised bids, fees charged unchanged (~43,900).
+  - date: "2026-10-06"
+    status: active
+    who: claude
+    note: >
+      Step 7: 7 testnet runs at 100/150/200 channels (7,050 payments). 200 channels: steady 98.9
+      per ledger with ledgers 94-105% full (the network cap); one seller 95.5; no pipelining
+      75.8. 0 sequence errors. 30 RPC "Account not found" refusals on first sequence reads.
+  - date: "2026-10-06"
+    status: active
+    who: claude
+    note: >
+      Sequence reads retried once per ledger up to timeoutSeconds (read-retry event,
+      readRetries in stats). 42 tests (+2). Testnet rerun, 200 channels and one seller:
+      1,200/1,200, 8 read retries, 0 refusals.
 ---
 
 # Build the facilitator's settlement submitter on a channel-account pool
@@ -72,8 +86,10 @@ since both submit one Soroban call per payment.
 > - the mainnet numbers were corrected.
 >
 > Both steps come after the PR #4 review.
-> 2026-10-06: step 8 built (`feeEscalation`), with 40 unit tests and a testnet check. Only
-> step 7 is still open.
+> 2026-10-06: step 8 built (`feeEscalation`), with 40 unit tests and a testnet check.
+> 2026-10-06: step 7 done. At 200 channels the pool fills testnet's ledgers (a steady 98.9 per
+> ledger, which is the network cap), with 0 sequence errors. It also found RPC "Account not
+> found" refusals, now fixed by retrying the sequence read (Emerged 13).
 
 ## Progress
 
@@ -82,16 +98,16 @@ since both submit one Soroban call per payment.
 | File | What it does |
 |---|---|
 | `src/channel-pool.ts` | `ChannelPool`: one holder per channel, FIFO waiters; `handOver` to the next waiter while the transaction is pending |
-| `src/submitter.ts` | `SettlementSubmitter`: `delegated-bump` shape; simulate, `checkSimulation` hook, fee cap, sign, fee bump, send, confirm; the sequence rules; pipelining (`pipeline`, default on); a queue-aware fee bid (`feeEscalation`, default off) |
+| `src/submitter.ts` | `SettlementSubmitter`: `delegated-bump` shape; simulate, `checkSimulation` hook, fee cap, sign, fee bump, send, confirm; the sequence rules; pipelining (`pipeline`, default on); a queue-aware fee bid (`feeEscalation`, default off); a sequence read retried once per ledger |
 | `src/ledger-clock.ts` | `LedgerClock`: one shared `getLatestLedger` poll; each pending transaction is checked once per new ledger |
 | `src/setup.ts` | `buildCreateChannelsTx` (1.5 XLM reserve, the facilitator as signer, master key disabled; at most 19 channels per tx because of the 20-signature limit) and `checkChannel` |
 | `src/fees.ts` | `feeStatsInclusionFee`: bids a `getFeeStats` percentile, clamped and cached, with a fallback |
 | `src/signer.ts` | `keypairSigner`: the SEP-43 `signTransaction` shape, the same as `@x402/stellar` |
 | `src/fallback-rpc.ts` | `FallbackRpc`: tries several endpoints in order, with per-call timeouts; the endpoint that answers becomes active. `sendTransaction` is never retried inside it |
-| `src/stats.ts` | `SubmitterEvent` (`sent`, `send-retry`, `prepared-ahead`, `fee-raised`, `final`, `refused`) through `onEvent`, and `submitter.stats()`: results by status, refusals, error codes, retries, prepared-ahead used/rebuilt, fee raises and the highest bid, fees, and landings per ledger |
+| `src/stats.ts` | `SubmitterEvent` (`sent`, `send-retry`, `read-retry`, `prepared-ahead`, `fee-raised`, `final`, `refused`) through `onEvent`, and `submitter.stats()`: results by status, refusals, error codes, send and read retries, prepared-ahead used/rebuilt, fee raises and the highest bid, fees, and landings per ledger |
 | `src/balance.ts` | `checkFacilitatorBalance`: spendable XLM after reserve, sponsorships and liabilities; settlements left; a `low` flag |
-| `test/` | 40 tests (4 for pipelining, 5 for fee escalation) against a fake RPC that enforces sequence numbers and one pending tx per source. 26 seeded mutations were checked (16 in the first slice, 4 for pipelining, 6 for fee escalation): every real fault was caught, and the 3 survivors were equivalent (harmless; see Emerged 9 and 11) |
-| `scripts/testnet-smoke.ts` | Creates delegated channels, then settles real UptoProxy payments. Reports the per-channel cycle (`cycleGaps`). `PIPELINE=0` and `POLL_MS` switch pipelining off and set the poll interval. `FEE_MAX` turns fee escalation on |
+| `test/` | 42 tests (4 for pipelining, 5 for fee escalation, 2 for read retries) against a fake RPC that enforces sequence numbers and one pending tx per source. 30 seeded mutations were checked (16 in the first slice, 4 for pipelining, 6 for fee escalation, 4 for read retries): every real fault was caught, and the 3 survivors were equivalent (harmless; see Emerged 9 and 11) |
+| `scripts/testnet-smoke.ts` | Creates delegated channels, then settles real UptoProxy payments. Reports the per-channel cycle (`cycleGaps`). `PIPELINE=0` and `POLL_MS` switch pipelining off and set the poll interval. `FEE_MAX` turns fee escalation on. `SELLERS=1` runs the one-seller scenario. `CHANNELS_FILE` reuses channels across runs. It also reports the steady mean and every ledger's total Soroban use next to ours, and counts refusals |
 
 **Testnet results** (2026-10-05, proxy `CBEPV3F2…TEGY7`):
 
@@ -131,6 +147,10 @@ since both submit one Soroban call per payment.
   submitter.
 - **A 250 ms poll adds little** (82% → 86%) for 4× the `getLatestLedger` calls. The default stays
   at 1,000 ms.
+- **Fees.** The unpipelined 120-channel run averaged 50,442 stroops per settlement, with some
+  charged 81,924, which is probably surge pricing on full ledgers. The pipelined 120 run averaged
+  41,000. One run each; not investigated further.
+
 **Step 8: fee escalation** (2026-10-06): 20 channels × 80 payments, `FEE_MAX=1000`.
 
 - 80 of 80 settled, at 20 per ledger, with 0 errors.
@@ -139,13 +159,54 @@ since both submit one Soroban call per payment.
   ledgers that aren't full, Stellar charges the network's base inclusion fee, not the bid, so a
   raised bid costs extra only in contested ledgers.
 
-- **Fees.** The unpipelined 120-channel run averaged 50,442 stroops per settlement, with some
-  charged 81,924, which is probably surge pricing on full ledgers. The pipelined 120 run averaged
-  41,000. One run each; not investigated further.
+**Step 7: load test** (2026-10-06, S4 in the scaling analysis).
+
+- Pool reused across runs (`CHANNELS_FILE`, 200 channels).
+- "Steady" is the mean per ledger without the first and the last ledger.
+- "Ledger fill" is everyone's Soroban envelope bytes as a share of the 266,240 B limit. It is
+  approximate (it reads above 100% when the ledger is full).
+
+| Channels × payments | Sellers | Pipelining | Settled | Steady per ledger | 1-ledger cycles | Ours / all Soroban txs in a full ledger | Ledger fill | Wall clock |
+|---|---|---|---|---|---|---|---|---|
+| 100 × 800 | 20 | on | 800 | 64.5 | 386 / 700 (55%) | 100 / 113 | up to 102% | 61.5 s |
+| 100 × 800 | 1 | on | 800 | 68.1 | 413 / 700 (59%) | 100 / 107 | up to 102% | 61.0 s |
+| 100 × 800 | 20 | off | 800 | 53.5 | 190 / 700 (27%) | 100 / 110 | up to 102% | 78.6 s |
+| 150 × 1,050 | 20 | on | 1,050 | 87.9 | 319 / 900 (35%) | 106 / 111 | up to 105% | 62.5 s |
+| 200 × 1,200 | 20 | on | 1,200 | **98.9** | 140 / 1,000 (14%) | 108 / 111 | 94–105% | 69.0 s |
+| 200 × 1,200 | 1 | on | 1,186 + 14 refused | **95.5** | 270 / 986 (27%) | 110 / 113 | 91–105% | 68.8 s |
+| 200 × 1,200 | 1 | on, with the read retry | 1,200 | 89.9 | 125 / 1,000 (13%) | 107 / 111 | 86–105% | 76.3 s |
+| 200 × 1,200 | 20 | off | 1,184 + 16 refused | 75.8 | 4 / 984 (0.4%) | 108 / 116 | 0–105%, alternating | 87.6 s |
+
+- **Every run: 0 sequence errors, 0 failed or expired transactions, and 0 rebuilt prepared
+  envelopes.** There was 1 send retry in total.
+- Fees averaged 41,000–41,500 stroops per settlement in every run, so there was no surge.
+- **From 100 channels on, the network cap binds, not the pool.**
+  - A ledger with 100 of ours is at about 100% of the byte limit.
+  - At 200 channels, almost every ledger is full (94–105%), with ours at about 90–97% of its
+    Soroban transactions.
+  - The steady 98.9 per ledger is the ceiling: about 105 transactions fit, and testnet's own
+    traffic takes the rest.
+  - The "1-ledger cycles" share falls as channels grow, because more channels than seats means
+    each one waits its turn.
+- **Pipelining:**
+  - At 100 channels, steady 64.5 vs 53.5 per ledger, and 55% vs 27% 1-ledger cycles.
+  - At 200 channels, 98.9 vs 75.8 per ledger. Without pipelining the ledgers alternate full and
+    nearly empty (108, 92, 97, 93, 10…).
+- **One seller vs many:** no meaningful difference (95.5 vs 98.9 at 200, 68.1 vs 64.5 at 100).
+  This matches 0006.
+- **Refusals: "Account not found" from the public RPC.**
+  - In the two 200-channel reruns, 14 and 16 submissions were refused when the submitter first
+    read a channel's sequence (`getAccount`). That is 200 reads at once from a fresh submitter.
+  - The channels exist (verified on Horizon), and `checkChannel` had passed seconds earlier.
+  - Nothing was sent, so this is safe, but those payments failed when a retry would have
+    succeeded.
+  - The first attempt of these two runs crashed the script, so `Promise.allSettled` now counts
+    refusals instead.
+  - **Fixed** (Emerged 13). The rerun of 200 channels with one seller settled 1,200/1,200: 8
+    failed reads recovered on the next ledger and 0 were refused.
 
 **Open:**
 
-- Step 7: a recorded load test with S4's targets (see the plan).
 - Wiring into the facilitator app and an `upto` scheme, which is a separate task.
 
 **Emerged:**
@@ -216,6 +277,18 @@ since both submit one Soroban call per payment.
       released early. The next call on it then reused the sequence number and was rejected
       with `txBadSeq`.
     - Found while reviewing step 4. A regression test covers it.
+13. **The public testnet RPC can answer "Account not found" for an existing account under
+    load.** Found by the step 7 load test.
+    - It hit the first sequence read of 200 channels at once: 30 of 2,400 submissions.
+    - The submitter refuses such a submission before sending anything, which is safe but loses a
+      payment that would have settled.
+    - **Fix:** `readSequence` retries the read once per new ledger, for up to `timeoutSeconds`,
+      before refusing. This is safe because nothing has been sent.
+      - Each retry emits `read-retry` and is counted in `stats().readRetries`.
+      - A channel that really is gone is refused after `timeoutSeconds`.
+      - On the testnet rerun, 8 reads were retried and 0 were refused.
+      - All 4 seeded mutations were caught.
+    - The smoke script now counts refusals (`Promise.allSettled`) instead of crashing.
 
 
 ## Context
@@ -330,8 +403,13 @@ since both submit one Soroban call per payment.
       sending (unit tests; 0 sequence errors in the testnet runs)
 - [x] Pipelining measured: settlements per channel per ledger, before and after (2026-10-06,
       90 and 120 channels; see Step 4 under Progress)
-- [ ] Load test with S4's targets on testnet: a steady ≥100 per ledger at 100–200 channels, one
-      seller and many, with and without pipelining, 0 sequence errors (step 7)
+- [x] Load test with S4's targets on testnet: a steady ≥100 per ledger at 100–200 channels, one
+      seller and many, with and without pipelining, 0 sequence errors (step 7; 2026-10-06).
+      - 98.9 steady at 200 channels, with the ledgers at 94–105% of the byte limit. This is the
+        network ceiling, so the remaining gap to 100 is testnet's own traffic.
+      - 0 sequence errors in every run.
+      - 30 of 2,400 refused by RPC "Account not found" before the read-retry fix; 0 of 1,200
+        after it (Emerged 13).
 - [x] The inclusion-fee bid rises with the pool's queue up to a ceiling, and each raise is
       counted in `stats()` (step 8: `feeEscalation`, `fee-raised`, `feeRaises`)
 - [ ] Zero-amount settlements submit nothing (moved to the scheme layer, see Emerged 2)

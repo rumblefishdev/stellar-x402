@@ -4,10 +4,13 @@
 // Env: FACILITATOR_SECRET, TOKEN_ID, PROXY_ID, CLIENTS_FILE (0006 bench secrets/accounts.json),
 //      [RPC_URLS] comma-separated, tried in order through FallbackRpc,
 //      [PIPELINE=0] to turn pipelining off, [POLL_MS] ledger clock interval (default 1000),
-//      [FEE_MAX] turns fee escalation on with this ceiling in stroops
+//      [FEE_MAX] turns fee escalation on with this ceiling in stroops,
+//      [SELLERS] how many sellers to pay (default all; 1 = the one-seller scenario),
+//      [CHANNELS_FILE] JSON list of channel addresses reused across runs; missing channels are
+//      created and appended
 // Usage: tsx scripts/testnet-smoke.ts <channels> <payments>
 import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import {
   Address,
   Keypair,
@@ -45,7 +48,9 @@ const TOKEN = need("TOKEN_ID");
 const PROXY = need("PROXY_ID");
 const accounts = JSON.parse(readFileSync(need("CLIENTS_FILE"), "utf8"));
 const clients: Keypair[] = accounts.clients.map((s: string) => Keypair.fromSecret(s));
-const sellers: Keypair[] = accounts.sellers.map((s: string) => Keypair.fromSecret(s));
+const sellers: Keypair[] = accounts.sellers
+  .map((s: string) => Keypair.fromSecret(s))
+  .slice(0, Number(process.env.SELLERS ?? accounts.sellers.length));
 const [nChannels = 5, nPayments = 20] = process.argv.slice(2).map(Number);
 
 const addr = (a: string) => nativeToScVal(Address.fromString(a));
@@ -128,7 +133,10 @@ async function settleCall(client: Keypair, to: string, expLedger: number) {
 }
 
 // 1. Create delegated channels (master key disabled; the secrets are dropped afterwards).
-const fresh = Array.from({ length: nChannels }, () => Keypair.random());
+const channelsFile = process.env.CHANNELS_FILE;
+const known: string[] =
+  channelsFile && existsSync(channelsFile) ? JSON.parse(readFileSync(channelsFile, "utf8")) : [];
+const fresh = Array.from({ length: Math.max(0, nChannels - known.length) }, () => Keypair.random());
 for (let i = 0; i < fresh.length; i += MAX_CHANNELS_PER_TX) {
   const batch = fresh.slice(i, i + MAX_CHANNELS_PER_TX);
   const setupTx = buildCreateChannelsTx({
@@ -142,7 +150,9 @@ for (let i = 0; i < fresh.length; i += MAX_CHANNELS_PER_TX) {
   const created = await raw.pollTransaction(sent.hash, { attempts: 30 });
   console.log(`setup ${sent.hash} ${created.status}`);
 }
-const channels = fresh.map((k) => k.publicKey());
+if (channelsFile && fresh.length > 0)
+  writeFileSync(channelsFile, JSON.stringify([...known, ...fresh.map((k) => k.publicKey())]));
+const channels = [...known, ...fresh.map((k) => k.publicKey())].slice(0, nChannels);
 for (const c of channels) {
   const problem = await checkChannel(server, c, facilitator.publicKey());
   if (problem) throw new Error(`${c}: ${problem}`);
@@ -163,7 +173,7 @@ const submitter = new SettlementSubmitter({
 });
 const expLedger = (await server.getLatestLedger()).sequence + 200;
 const t0 = Date.now();
-const results = await Promise.all(
+const outcomes = await Promise.allSettled(
   Array.from({ length: nPayments }, async (_, i) =>
     submitter.submit(
       await settleCall(
@@ -175,6 +185,11 @@ const results = await Promise.all(
   ),
 );
 const wall = (Date.now() - t0) / 1000;
+// A refused submission (an error before anything was sent) is counted, not fatal.
+const results = outcomes.flatMap((o) => (o.status === "fulfilled" ? [o.value] : []));
+const refusals = outcomes.flatMap((o) =>
+  o.status === "rejected" ? [o.reason instanceof Error ? o.reason.message : String(o.reason)] : [],
+);
 const byStatus: Record<string, number> = {};
 const perLedger: Record<string, number> = {};
 for (const r of results) {
@@ -193,11 +208,57 @@ for (const ls of Object.values(landings)) {
   }
 }
 const ledgers = Object.keys(perLedger).map(Number);
-const span = ledgers.length ? Math.max(...ledgers) - Math.min(...ledgers) + 1 : 0;
+const first = Math.min(...ledgers);
+const last = Math.max(...ledgers);
+const span = ledgers.length ? last - first + 1 : 0;
+// Steady state: the ledgers between the first (ramp-up) and the last (tail), empty ones included.
+const steady = Array.from(
+  { length: Math.max(0, span - 2) },
+  (_, i) => perLedger[first + 1 + i] ?? 0,
+);
+const settled = results.filter((r) => r.feeCharged !== undefined);
+const feeAvg = settled.length
+  ? Number(settled.reduce((sum, r) => sum + r.feeCharged!, 0n)) / settled.length
+  : 0;
+
+// Everyone's Soroban use of the same ledgers, next to ours (envelope XDR bytes; the limit is
+// 266,240 per ledger, counted slightly differently by the network, so the share is approximate).
+const network: { ledger: number; ours: number; soroban: number; bytesPct: number }[] = [];
+for (let start = first; ledgers.length && start <= last;) {
+  const page = await raw.getLedgers({
+    startLedger: start,
+    pagination: { limit: Math.min(20, last - start + 1) },
+  });
+  for (const l of page.ledgers) {
+    if (l.sequence > last) break;
+    const meta = l.metadataXdr;
+    const body = meta.switch() === 2 ? meta.v2() : meta.v1();
+    let soroban = 0;
+    let bytes = 0;
+    for (const phase of body.txSet().v1TxSet().phases()) {
+      if (phase.switch() !== 1) continue; // phase 0 holds classic transactions
+      for (const stage of phase.parallelTxsComponent().executionStages())
+        for (const cluster of stage)
+          for (const env of cluster) {
+            soroban++;
+            bytes += env.toXDR().length;
+          }
+    }
+    network.push({
+      ledger: l.sequence,
+      ours: perLedger[l.sequence] ?? 0,
+      soroban,
+      bytesPct: Math.round((bytes / 266_240) * 100),
+    });
+  }
+  if (page.ledgers.length === 0) break;
+  start = page.ledgers.at(-1)!.sequence + 1;
+}
 console.log(
   JSON.stringify(
     {
       channels: nChannels,
+      sellers: sellers.length,
       pipeline: process.env.PIPELINE !== "0",
       pollMs: Number(process.env.POLL_MS ?? 1000),
       feeMax: process.env.FEE_MAX ? Number(process.env.FEE_MAX) : null,
@@ -207,11 +268,15 @@ console.log(
       perLedger,
       ledgerSpan: span,
       meanPerLedger: span ? (byStatus.success ?? 0) / span : 0,
+      steadyMeanPerLedger: steady.length ? steady.reduce((a, b) => a + b, 0) / steady.length : null,
       cycleGaps,
+      feeAvgStroops: Math.round(feeAvg),
+      network,
       sample: results
         .slice(0, 3)
         .map((r) => ({ hash: r.hash, status: r.status, fee: String(r.feeCharged) })),
       failures: results.filter((r) => r.status !== "success"),
+      refusals,
       stats: submitter.stats(),
       rpcActive: server.active,
       facilitatorBalance: await checkFacilitatorBalance(server, facilitator.publicKey()),
