@@ -121,6 +121,24 @@ describe("SettlementSubmitter", () => {
     expect(next.status).toBe("success");
   });
 
+  it("keeps the channel while pending when onSent throws", async () => {
+    const { fake, submitter } = setup({}, 1);
+    const throwing = {
+      onSent: () => {
+        throw new Error("listener bug");
+      },
+    };
+    const [first, second] = await Promise.all([
+      submitter.submit(call(), throwing),
+      submitter.submit(call()),
+    ]);
+    expect(first.status).toBe("success");
+    // Released early, the second call would have reused 1001 and been rejected with txBadSeq.
+    expect(second.status).toBe("success");
+    const seqs = fake.sent.map((t) => (t as FeeBumpTransaction).innerTransaction.sequence);
+    expect(seqs).toEqual(["1001", "1002"]);
+  });
+
   it("reports failed on-chain transactions and advances the sequence", async () => {
     const { fake, submitter } = setup({}, 1);
     fake.failOnChain = true;
