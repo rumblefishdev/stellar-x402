@@ -114,6 +114,45 @@ describe("pipelining", () => {
     expect(submitter.stats()).toMatchObject({ sendRetries: 0, errorCodes: {}, busy: 0 });
   });
 
+  it("rebuilds when the pending transaction expires while the prepared envelope has time left", async () => {
+    // Adam's case: the first send is accepted only after more than half its bound (3 retries,
+    // 10 s each), then expires. The prepared envelope was built at acceptance, so it still has
+    // more than half its bound left, and only the sequence check stops it.
+    const { fake, submitter } = setup({
+      timeoutSeconds: 40,
+      onEvent: (e) => {
+        if (e.type === "final" && e.result.status === "expired") fake.stalled = false;
+      },
+    });
+    fake.stalled = true;
+    fake.sendScript.push("TRY_AGAIN_LATER", "TRY_AGAIN_LATER", "TRY_AGAIN_LATER");
+    const [first, second] = await Promise.all([submitter.submit(call()), submitter.submit(call())]);
+    expect(first?.status).toBe("expired");
+    expect(second?.status).toBe("success");
+    expect(innerSeqs(fake).at(-1)).toBe("1001");
+    expect(submitter.stats()).toMatchObject({
+      preparedAhead: { used: 0, rebuilt: 1 },
+      sequenceResyncs: 0,
+    });
+  });
+
+  it("rebuilds when the pending transaction lands with less than half the bound left", async () => {
+    const { fake, submitter } = setup({ timeoutSeconds: 40 });
+    fake.stalled = true;
+    const start = fake.closeTime;
+    const close = fake.getLatestLedger.bind(fake);
+    Object.assign(fake, {
+      getLatestLedger: async () => {
+        if (fake.closeTime - start >= 25) fake.stalled = false; // lands late, within its bound
+        return close();
+      },
+    });
+    const results = await Promise.all([submitter.submit(call()), submitter.submit(call())]);
+    expect(results.map((r) => r.status)).toEqual(["success", "success"]);
+    expect(innerSeqs(fake)).toEqual(["1001", "1002"]);
+    expect(submitter.stats().preparedAhead).toEqual({ used: 0, rebuilt: 1 });
+  });
+
   it("can be turned off", async () => {
     const { fake, submitter, events, ahead } = setup({ pipeline: false });
     await Promise.all(Array.from({ length: 3 }, () => submitter.submit(call())));

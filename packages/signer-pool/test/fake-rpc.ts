@@ -13,6 +13,7 @@ type SendScript =
   | "PENDING"
   | "TRY_AGAIN_LATER"
   | "ERROR_INSUFFICIENT_FEE"
+  | "ERROR_TOO_LATE"
   | "THROW"
   /** Accepts the transaction, then loses the reply (the caller sees an error). */
   | "ACCEPT_THEN_THROW";
@@ -23,6 +24,7 @@ type StatusScript = "THROW";
  * - a transaction's sequence must be the source account's sequence + 1 (else `txBadSeq`);
  * - at most one pending transaction per source account (else `TRY_AGAIN_LATER`);
  * - resending a queued transaction gives `DUPLICATE`, an applied one `txBadSeq`;
+ * - a send after the transaction's time bound gives `txTooLate` (checked before the sequence);
  * - each `getLatestLedger` call closes one ledger, which includes every pending transaction
  *   whose time bound has not passed, and advances the close time by `ledgerSeconds`.
  */
@@ -39,6 +41,10 @@ export class FakeRpc implements SorobanRpc {
   sendScript: SendScript[] = [];
   statusScript: StatusScript[] = [];
   simulation: "ok" | "error" | "restore" = "ok";
+  /** The `authMode` of each simulation. */
+  readonly authModes: (string | undefined)[] = [];
+  /** Answer for `getFeeStats`; it throws while unset. */
+  feeStats?: rpc.Api.GetFeeStatsResponse;
   resourceFee = 40_000;
   /** Every included transaction fails on-chain (still consuming its sequence number). */
   failOnChain = false;
@@ -65,11 +71,18 @@ export class FakeRpc implements SorobanRpc {
   }
 
   async getFeeStats(): Promise<rpc.Api.GetFeeStatsResponse> {
-    throw new Error("not used");
+    this.count("getFeeStats");
+    if (!this.feeStats) throw new Error("not used");
+    return this.feeStats;
   }
 
-  async simulateTransaction(): Promise<rpc.Api.SimulateTransactionResponse> {
+  async simulateTransaction(
+    _tx?: unknown,
+    _resources?: unknown,
+    authMode?: rpc.Api.SimulationAuthMode,
+  ): Promise<rpc.Api.SimulateTransactionResponse> {
     this.count("simulateTransaction");
+    this.authModes.push(authMode);
     if (this.simulation === "error")
       return rpc.parseRawSimulation({
         id: "1",
@@ -101,17 +114,21 @@ export class FakeRpc implements SorobanRpc {
     if (script === "TRY_AGAIN_LATER") return { ...base, status: "TRY_AGAIN_LATER" };
     if (script === "ERROR_INSUFFICIENT_FEE")
       return { ...base, status: "ERROR", errorResult: result("txInsufficientFee") };
+    if (script === "ERROR_TOO_LATE")
+      return { ...base, status: "ERROR", errorResult: result("txTooLate") };
     // Still queued: DUPLICATE. Already applied: its sequence is used up, so txBadSeq, as on
     // the real network.
     if (this.pending.has(hash)) return { ...base, status: "DUPLICATE" };
     const inner = tx instanceof FeeBumpTransaction ? tx.innerTransaction : tx;
+    const maxTime = Number(inner.timeBounds?.maxTime ?? 0);
+    if (maxTime !== 0 && this.closeTime > maxTime)
+      return { ...base, status: "ERROR", errorResult: result("txTooLate") };
     const seq = BigInt(inner.sequence);
     const current = this.sequences.get(inner.source);
     if ([...this.pending.values()].some((p) => p.source === inner.source))
       return { ...base, status: "TRY_AGAIN_LATER" };
     if (current === undefined || seq !== current + 1n)
       return { ...base, status: "ERROR", errorResult: result("txBadSeq", true) };
-    const maxTime = Number(inner.timeBounds?.maxTime ?? 0);
     this.pending.set(hash, { source: inner.source, seq, maxTime });
     if (script === "ACCEPT_THEN_THROW") throw new Error("connection reset");
     return { ...base, status: "PENDING" };

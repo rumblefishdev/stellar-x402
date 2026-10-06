@@ -1,4 +1,4 @@
-import { Address, FeeBumpTransaction, StrKey, xdr } from "@stellar/stellar-sdk";
+import { Address, FeeBumpTransaction, StrKey, xdr, type rpc } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
 import {
   SettlementSubmitter,
@@ -83,6 +83,37 @@ describe("fee escalation", () => {
     await Promise.all(Array.from({ length: 3 }, () => high.submitter.submit(call())));
     expect(bids(high.fake)).toEqual([5_000, 5_000, 5_000]);
     expect(raises(high.events)).toEqual([]);
+  });
+
+  it("stops at the default ceiling of 1,000 stroops", async () => {
+    const { fake, submitter } = setup({ feeEscalation: {} });
+    // One channel and six calls: 5 waiting would give 100 x 2^5 = 3,200.
+    await Promise.all(Array.from({ length: 6 }, () => submitter.submit(call())));
+    expect(bids(fake)[0]).toBe(1_000);
+  });
+
+  it("lowers a raised bid to fit maxFeeStroops instead of refusing the call", async () => {
+    // Resource fee 40,000 + 2 x bid must stay within 41,000: the bid can be at most 500.
+    const { fake, submitter, events } = setup({ feeEscalation: {}, maxFeeStroops: 41_000 });
+    const results = await Promise.all(Array.from({ length: 4 }, () => submitter.submit(call())));
+    expect(results.every((r) => r.status === "success")).toBe(true);
+    expect(bids(fake)).toEqual([500, 400, 200, 100]);
+    expect(raises(events)).toEqual([500, 400, 200]);
+  });
+
+  it("counts the bid twice under a fee bump, not three times", async () => {
+    // 40,000 + 2 x 100 = 40,200 fits exactly.
+    const { submitter } = setup({ maxFeeStroops: 40_200 });
+    expect((await submitter.submit(call())).status).toBe("success");
+  });
+
+  it("bids from getFeeStats by default", async () => {
+    const { fake, submitter } = setup({ inclusionFee: undefined });
+    fake.feeStats = {
+      sorobanInclusionFee: { p90: "300" },
+    } as unknown as rpc.Api.GetFeeStatsResponse;
+    await submitter.submit(call());
+    expect(bids(fake)).toEqual([300]);
   });
 
   it("rejects a factor that would not raise the bid", () => {

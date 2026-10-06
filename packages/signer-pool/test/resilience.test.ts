@@ -1,7 +1,9 @@
-import { Address, FeeBumpTransaction, Keypair, StrKey, xdr } from "@stellar/stellar-sdk";
-import { describe, expect, it } from "vitest";
+import { Account, Address, FeeBumpTransaction, Keypair, StrKey, xdr } from "@stellar/stellar-sdk";
+import { describe, expect, it, vi } from "vitest";
 import {
   FallbackRpc,
+  NoChannelsError,
+  QueueTimeoutError,
   RpcTimeoutError,
   SettlementSubmitter,
   SimulationCheckError,
@@ -84,13 +86,21 @@ describe("uncertain sends", () => {
     expect(fake.calls.getAccount).toBe(reads + 1);
   });
 
-  it("still rejects a plain txBadSeq when no send was uncertain", async () => {
+  it("rebuilds once after a plain txBadSeq, and rejects if it repeats", async () => {
     const { fake, submitter } = setup();
     fake.sequences.set(channels[0]!, 7000n);
     await submitter.submit(call()); // primes the cache, lands at 7001
     fake.sequences.set(channels[0]!, 9000n);
     const res = await submitter.submit(call());
-    expect(res).toMatchObject({ status: "rejected", errorCode: "txBadSeq" });
+    expect(res.status).toBe("success");
+    expect(innerSeq(fake)).toBe("9001");
+
+    // A reader that keeps returning a stale sequence: the rebuild is rejected too.
+    fake.sequences.set(channels[0]!, 12_000n);
+    Object.assign(fake, { getAccount: async (a: string) => new Account(a, "1") });
+    const again = await submitter.submit(call());
+    expect(again).toMatchObject({ status: "rejected", errorCode: "txBadSeq" });
+    expect(submitter.stats().sequenceResyncs).toBe(2);
   });
 });
 
@@ -116,12 +126,162 @@ describe("sequence reads", () => {
     expect(submitter.stats().readRetries).toBe(2);
   });
 
-  it("refuses without sending once the time bound passes", async () => {
-    const { fake, submitter } = setup({ timeoutSeconds: 20 });
+  it("refuses without sending once the time bound passes, and quarantines a missing channel", async () => {
+    const { fake, submitter, events } = setup({ timeoutSeconds: 20 }, 2);
     failReads(fake, Infinity);
     await expect(submitter.submit(call())).rejects.toThrow("Account not found");
     expect(fake.calls.sendTransaction ?? 0).toBe(0);
-    expect(submitter.stats()).toMatchObject({ readRetries: 4, refused: { other: 1 }, busy: 0 });
+    expect(submitter.stats()).toMatchObject({
+      readRetries: 2, // each retry waits for a ledger after the current one: 2 polls, 10 s
+      refused: { other: 1 },
+      quarantined: 1,
+      channels: 1,
+      busy: 0,
+    });
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "channel-quarantined", channel: channels[0] }),
+    );
+  });
+
+  it("keeps the channel when reads fail for another reason", async () => {
+    const { fake, submitter } = setup({ timeoutSeconds: 20 });
+    Object.assign(fake, {
+      getAccount: async () => Promise.reject(new Error("fetch failed")),
+    });
+    await expect(submitter.submit(call())).rejects.toThrow("fetch failed");
+    expect(submitter.stats()).toMatchObject({ quarantined: 0, channels: 1, busy: 0 });
+  });
+
+  it("fails waiting calls once the last channel is quarantined", async () => {
+    const { fake, submitter } = setup({ timeoutSeconds: 20 });
+    failReads(fake, Infinity);
+    const [first, second] = await Promise.allSettled([
+      submitter.submit(call()),
+      submitter.submit(call()),
+    ]);
+    expect(first.status === "rejected" && first.reason).toBeInstanceOf(Error);
+    expect(second.status === "rejected" && second.reason).toBeInstanceOf(NoChannelsError);
+    expect(submitter.stats().refused).toMatchObject({ other: 1, "no-channels": 1 });
+  });
+});
+
+describe("uncertain sends, any error", () => {
+  it("confirms by hash when a resend after a lost reply gets txTooLate", async () => {
+    const { fake, submitter } = setup();
+    fake.sendScript.push("ACCEPT_THEN_THROW", "ERROR_TOO_LATE");
+    const res = await submitter.submit(call());
+    expect(res.status).toBe("success"); // the first attempt landed; not "rejected"
+    expect(fake.sequences.get(channels[0]!)).toBe(1001n);
+    // The cached sequence followed the landing, so the next call is not txBadSeq.
+    expect((await submitter.submit(call())).status).toBe("success");
+    expect(innerSeq(fake)).toBe("1002");
+  });
+
+  it("does not resend past the time bound after TRY_AGAIN_LATER", async () => {
+    // Bound 15 s; sends at +0 and +10 get TRY_AGAIN_LATER, and the next wait ends past +15. A
+    // resend then would get txTooLate from the network.
+    const { fake, submitter } = setup({ timeoutSeconds: 15 });
+    fake.sendScript.push("TRY_AGAIN_LATER", "TRY_AGAIN_LATER");
+    const res = await submitter.submit(call());
+    expect(res.status).toBe("expired"); // not "rejected" with txTooLate
+    expect(fake.calls.sendTransaction).toBe(2);
+    expect(fake.sequences.get(channels[0]!)).toBe(1000n);
+  });
+});
+
+describe("unreachable RPC", () => {
+  /** Setup with a clock that also advances on every sleep, so waits end when no ledger closes. */
+  const setupVirtual = (opts: Partial<SubmitterOptions> = {}) => {
+    const live = { fake: undefined as unknown as FakeRpc, extra: 0 };
+    const ctx = setup({
+      now: () => live.fake.closeTime * 1000 + live.extra,
+      sleep: async (ms) => {
+        live.extra += ms;
+      },
+      timeoutSeconds: 20,
+      confirmGraceSeconds: 10,
+      ...opts,
+    });
+    live.fake = ctx.fake;
+    return ctx;
+  };
+  /** Makes `method` on the fake fail while `down.on` is true. */
+  const outage = (fake: FakeRpc, method: "getTransaction" | "getLatestLedger") => {
+    const down = { on: true };
+    const original = (fake[method] as (...a: unknown[]) => Promise<unknown>).bind(fake);
+    Object.assign(fake, {
+      [method]: async (...a: unknown[]) =>
+        down.on ? Promise.reject(new Error("fetch failed")) : original(...a),
+    });
+    return down;
+  };
+
+  it("reports pending when status checks keep failing, then resolves and frees the channel", async () => {
+    const { fake, submitter, events } = setupVirtual();
+    const down = outage(fake, "getTransaction");
+    const res = await submitter.submit(call());
+    expect(res.status).toBe("pending");
+    expect(res.hash).toBeDefined();
+    expect(submitter.pool.busy).toBe(1); // held until the outcome is known
+
+    down.on = false;
+    await vi.waitFor(() => expect(events.some((e) => e.type === "resolved")).toBe(true));
+    expect(events.find((e) => e.type === "resolved")).toMatchObject({
+      result: { status: "success", hash: res.hash },
+    });
+    expect(submitter.stats()).toMatchObject({ busy: 0, resolved: { success: 1 } });
+    expect((await submitter.submit(call())).status).toBe("success");
+    expect(innerSeq(fake)).toBe("1002");
+  });
+
+  it("returns when no ledger can be read at all", async () => {
+    const { fake, submitter } = setupVirtual();
+    const down = outage(fake, "getLatestLedger");
+    const res = await submitter.submit(call());
+    expect(res.status).toBe("pending");
+    expect(submitter.pool.busy).toBe(1);
+    down.on = false;
+    await vi.waitFor(() => expect(submitter.pool.busy).toBe(0));
+  });
+});
+
+describe("deadline and hooks", () => {
+  it("refuses a call still waiting for a channel at its deadline", async () => {
+    const { fake, submitter } = setup({ timeoutSeconds: 20 });
+    fake.stalled = true; // the first call holds the only channel until it expires
+    const [first, second] = await Promise.allSettled([
+      submitter.submit(call()),
+      submitter.submit(call(), { deadline: fake.closeTime * 1000 + 10_000 }),
+    ]);
+    expect(first).toMatchObject({ status: "fulfilled", value: { status: "expired" } });
+    expect(second.status === "rejected" && second.reason).toBeInstanceOf(QueueTimeoutError);
+    expect(submitter.stats().refused["queue-timeout"]).toBe(1);
+    expect(fake.sent).toHaveLength(1);
+  });
+
+  it("refuses a queued call at its deadline without pipelining too", async () => {
+    const { fake, submitter } = setup({ timeoutSeconds: 20, pipeline: false });
+    fake.stalled = true;
+    const [, second] = await Promise.allSettled([
+      submitter.submit(call()),
+      submitter.submit(call(), { deadline: fake.closeTime * 1000 + 10_000 }),
+    ]);
+    expect(second.status === "rejected" && second.reason).toBeInstanceOf(QueueTimeoutError);
+    expect(fake.sent).toHaveLength(1);
+  });
+
+  it("calls onSigned with the hash before the first send, even when the send is uncertain", async () => {
+    const { fake, submitter } = setup();
+    fake.sendScript.push("ACCEPT_THEN_THROW", "ERROR_TOO_LATE");
+    const signed: [string, number][] = [];
+    const sent: string[] = [];
+    const res = await submitter.submit(call(), {
+      onSigned: (h) => signed.push([h, fake.calls.sendTransaction ?? 0]),
+      onSent: (h) => sent.push(h),
+    });
+    expect(res.status).toBe("success");
+    expect(signed).toEqual([[res.hash, 0]]);
+    expect(sent).toEqual([]); // never acknowledged as accepted
   });
 });
 
@@ -161,6 +321,13 @@ describe("events and stats", () => {
       feesChargedStroops: 123000n,
     });
     expect(Object.values(stats.landingsByLedger).reduce((a, b) => a + b, 0)).toBe(3);
+  });
+
+  it("counts refused simulations", async () => {
+    const { fake, submitter } = setup();
+    fake.simulation = "error";
+    await expect(submitter.submit(call())).rejects.toThrow("boom");
+    expect(submitter.stats().refused).toMatchObject({ simulation: 1, other: 0 });
   });
 
   it("keeps settling when a listener throws", async () => {
@@ -244,6 +411,27 @@ describe("FallbackRpc", () => {
     ).rejects.toThrow("sendTransaction failed");
     expect(b).toEqual([]);
     expect(rpc.active).toBe("b");
+  });
+
+  it("wraps around to the first endpoint", async () => {
+    const state = { a: "fail", b: "fail", c: "ok" };
+    const ep = (k: keyof typeof state) =>
+      ({
+        getLatestLedger: async () => {
+          if (state[k] === "fail") throw new Error(`${k} failed`);
+          return { sequence: k.charCodeAt(0) };
+        },
+      }) as unknown as SorobanRpc;
+    const rpc = new FallbackRpc([
+      { name: "a", rpc: ep("a") },
+      { name: "b", rpc: ep("b") },
+      { name: "c", rpc: ep("c") },
+    ]);
+    await rpc.getLatestLedger();
+    expect(rpc.active).toBe("c");
+    Object.assign(state, { a: "ok", c: "fail" });
+    expect(await rpc.getLatestLedger()).toEqual({ sequence: "a".charCodeAt(0) });
+    expect(rpc.active).toBe("a");
   });
 
   it("reports timeouts as RpcTimeoutError", async () => {

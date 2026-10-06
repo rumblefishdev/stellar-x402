@@ -11,10 +11,26 @@ export interface Channel {
   sequence: bigint | undefined;
   /**
    * Set when the channel was handed to its next holder while the previous holder's transaction
-   * was still pending: the sequence number that transaction uses, and a promise that settles once
-   * it is final. The next holder reads `sequence` only after `final`.
+   * was still pending: the sequence number that transaction uses, a promise that settles once it
+   * is final, and when its holder reports `pending` if it is not (ms). The next holder reads
+   * `sequence` only after `final`.
    */
-  pending?: { sequence: bigint; final: Promise<void> };
+  pending?: { sequence: bigint; final: Promise<void>; dueAt: number };
+}
+
+/** No channel became free in time; nothing was sent. */
+export class QueueTimeoutError extends Error {
+  override readonly name = "QueueTimeoutError";
+}
+
+/** Every channel was taken out of the pool; nothing was sent. */
+export class NoChannelsError extends Error {
+  override readonly name = "NoChannelsError";
+}
+
+interface Waiter {
+  resolve: (channel: Channel) => void;
+  reject: (error: Error) => void;
 }
 
 /**
@@ -24,8 +40,8 @@ export interface Channel {
  */
 export class ChannelPool {
   private readonly free: Channel[];
-  private readonly waiters: ((channel: Channel) => void)[] = [];
-  private readonly all: readonly Channel[];
+  private readonly waiters: Waiter[] = [];
+  private readonly all: Channel[];
 
   constructor(addresses: readonly string[]) {
     if (addresses.length === 0) throw new Error("ChannelPool needs at least one channel");
@@ -47,10 +63,38 @@ export class ChannelPool {
     return this.waiters.length;
   }
 
-  acquire(): Promise<Channel> {
+  /**
+   * Resolves with a free channel, or waits for one. When the caller has to wait, `onWait` is
+   * called; if the promise it returns settles before a channel is handed out, the wait ends with
+   * a {@link QueueTimeoutError}.
+   */
+  acquire(onWait?: () => Promise<unknown>): Promise<Channel> {
     const channel = this.free.shift();
     if (channel) return Promise.resolve(channel);
-    return new Promise((resolve) => this.waiters.push(resolve));
+    if (this.all.length === 0) return Promise.reject(new NoChannelsError("no channels left"));
+    return new Promise((resolve, reject) => {
+      const waiter = { resolve, reject };
+      this.waiters.push(waiter);
+      void onWait?.().then(() => {
+        const i = this.waiters.indexOf(waiter);
+        if (i < 0) return; // a channel was handed out first
+        this.waiters.splice(i, 1);
+        reject(new QueueTimeoutError("no channel became free before the deadline"));
+      });
+    });
+  }
+
+  /**
+   * Takes a held channel out of the pool for good, e.g. one that can no longer be read. When the
+   * last channel goes, every waiter fails with {@link NoChannelsError}.
+   */
+  retire(channel: Channel): void {
+    const i = this.all.indexOf(channel);
+    if (i < 0) throw new Error(`unknown channel ${channel.address}`);
+    if (this.free.includes(channel)) throw new Error(`channel ${channel.address} is not held`);
+    this.all.splice(i, 1);
+    if (this.all.length === 0)
+      for (const w of this.waiters.splice(0)) w.reject(new NoChannelsError("no channels left"));
   }
 
   /**
@@ -61,14 +105,14 @@ export class ChannelPool {
     if (!this.all.includes(channel)) throw new Error(`unknown channel ${channel.address}`);
     const next = this.waiters.shift();
     if (!next) throw new Error("no waiter to hand the channel to");
-    next(channel);
+    next.resolve(channel);
   }
 
   release(channel: Channel): void {
     if (!this.all.includes(channel)) throw new Error(`unknown channel ${channel.address}`);
     if (this.free.includes(channel)) throw new Error(`channel ${channel.address} released twice`);
     const next = this.waiters.shift();
-    if (next) next(channel);
+    if (next) next.resolve(channel);
     else this.free.push(channel);
   }
 }
