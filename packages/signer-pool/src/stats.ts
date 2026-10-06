@@ -18,6 +18,8 @@ export type SubmitterEvent =
    * or rebuilt because that transaction did not use its sequence number or time ran short.
    */
   | { type: "prepared-ahead"; channel: string; used: boolean }
+  /** The inclusion fee bid was raised above `base` because `queued` calls were waiting. */
+  | { type: "fee-raised"; channel: string; base: number; bid: number; queued: number }
   /** A submission ended with a result; `queuedMs` is the wait for a free channel. */
   | { type: "final"; result: SubmitResult; queuedMs: number; totalMs: number }
   /** A submission ended with an error before anything was sent. */
@@ -34,6 +36,8 @@ export interface SubmitterStatsSnapshot {
   sendRetries: number;
   /** Pipelined envelopes sent as prepared, and those rebuilt. */
   preparedAhead: { used: number; rebuilt: number };
+  /** Envelopes built with a raised inclusion fee bid, and the highest bid so far. */
+  feeRaises: { count: number; highestBid: number };
   feesChargedStroops: bigint;
   /** Successful and failed landings per ledger, for the most recent ledgers. */
   landingsByLedger: Record<number, number>;
@@ -58,6 +62,7 @@ export class SubmitterStats {
   private errorCodes: Record<string, number> = {};
   private sendRetries = 0;
   private preparedAhead = { used: 0, rebuilt: 0 };
+  private feeRaises = { count: 0, highestBid: 0 };
   private fees = 0n;
   private landings = new Map<number, number>();
 
@@ -69,6 +74,10 @@ export class SubmitterStats {
       case "prepared-ahead":
         if (event.used) this.preparedAhead.used++;
         else this.preparedAhead.rebuilt++;
+        break;
+      case "fee-raised":
+        this.feeRaises.count++;
+        this.feeRaises.highestBid = Math.max(this.feeRaises.highestBid, event.bid);
         break;
       case "refused":
         this.refused[event.reason]++;
@@ -100,6 +109,7 @@ export class SubmitterStats {
       errorCodes: { ...this.errorCodes },
       sendRetries: this.sendRetries,
       preparedAhead: { ...this.preparedAhead },
+      feeRaises: { ...this.feeRaises },
       feesChargedStroops: this.fees,
       landingsByLedger: Object.fromEntries(this.landings),
     };

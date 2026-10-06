@@ -35,6 +35,13 @@ history:
       Scope updated from docs/x402-settlement-scaling-en.md (Adam): step 8 (queue-aware fee bid,
       ADR-R2) added; step 7 takes S4's targets; mainnet free capacity corrected to ~20 upto
       per ledger.
+  - date: "2026-10-06"
+    status: active
+    who: claude
+    note: >
+      Step 8: feeEscalation in the submitter (base bid x factor per full round of queued calls,
+      capped; fee-raised event; feeRaises in stats). Off by default. 40 tests (+5). Testnet
+      20x80: 60 raised bids, fees charged unchanged (~43,900).
 ---
 
 # Build the facilitator's settlement submitter on a channel-account pool
@@ -65,6 +72,8 @@ since both submit one Soroban call per payment.
 > - the mainnet numbers were corrected.
 >
 > Both steps come after the PR #4 review.
+> 2026-10-06: step 8 built (`feeEscalation`), with 40 unit tests and a testnet check. Only
+> step 7 is still open.
 
 ## Progress
 
@@ -73,16 +82,16 @@ since both submit one Soroban call per payment.
 | File | What it does |
 |---|---|
 | `src/channel-pool.ts` | `ChannelPool`: one holder per channel, FIFO waiters; `handOver` to the next waiter while the transaction is pending |
-| `src/submitter.ts` | `SettlementSubmitter`: `delegated-bump` shape; simulate, `checkSimulation` hook, fee cap, sign, fee bump, send, confirm; the sequence rules; pipelining (`pipeline`, default on) |
+| `src/submitter.ts` | `SettlementSubmitter`: `delegated-bump` shape; simulate, `checkSimulation` hook, fee cap, sign, fee bump, send, confirm; the sequence rules; pipelining (`pipeline`, default on); a queue-aware fee bid (`feeEscalation`, default off) |
 | `src/ledger-clock.ts` | `LedgerClock`: one shared `getLatestLedger` poll; each pending transaction is checked once per new ledger |
 | `src/setup.ts` | `buildCreateChannelsTx` (1.5 XLM reserve, the facilitator as signer, master key disabled; at most 19 channels per tx because of the 20-signature limit) and `checkChannel` |
 | `src/fees.ts` | `feeStatsInclusionFee`: bids a `getFeeStats` percentile, clamped and cached, with a fallback |
 | `src/signer.ts` | `keypairSigner`: the SEP-43 `signTransaction` shape, the same as `@x402/stellar` |
 | `src/fallback-rpc.ts` | `FallbackRpc`: tries several endpoints in order, with per-call timeouts; the endpoint that answers becomes active. `sendTransaction` is never retried inside it |
-| `src/stats.ts` | `SubmitterEvent` (`sent`, `send-retry`, `prepared-ahead`, `final`, `refused`) through `onEvent`, and `submitter.stats()`: results by status, refusals, error codes, retries, prepared-ahead used/rebuilt, fees, and landings per ledger |
+| `src/stats.ts` | `SubmitterEvent` (`sent`, `send-retry`, `prepared-ahead`, `fee-raised`, `final`, `refused`) through `onEvent`, and `submitter.stats()`: results by status, refusals, error codes, retries, prepared-ahead used/rebuilt, fee raises and the highest bid, fees, and landings per ledger |
 | `src/balance.ts` | `checkFacilitatorBalance`: spendable XLM after reserve, sponsorships and liabilities; settlements left; a `low` flag |
-| `test/` | 35 tests (4 for pipelining) against a fake RPC that enforces sequence numbers and one pending tx per source. 20 seeded mutations were checked (16 in the first slice, 4 for pipelining): every real fault was caught, and the 2 survivors were equivalent (harmless; see Emerged 9) |
-| `scripts/testnet-smoke.ts` | Creates delegated channels, then settles real UptoProxy payments. Reports the per-channel cycle (`cycleGaps`). `PIPELINE=0` and `POLL_MS` switch pipelining off and set the poll interval |
+| `test/` | 40 tests (4 for pipelining, 5 for fee escalation) against a fake RPC that enforces sequence numbers and one pending tx per source. 26 seeded mutations were checked (16 in the first slice, 4 for pipelining, 6 for fee escalation): every real fault was caught, and the 3 survivors were equivalent (harmless; see Emerged 9 and 11) |
+| `scripts/testnet-smoke.ts` | Creates delegated channels, then settles real UptoProxy payments. Reports the per-channel cycle (`cycleGaps`). `PIPELINE=0` and `POLL_MS` switch pipelining off and set the poll interval. `FEE_MAX` turns fee escalation on |
 
 **Testnet results** (2026-10-05, proxy `CBEPV3F2…TEGY7`):
 
@@ -122,6 +131,14 @@ since both submit one Soroban call per payment.
   submitter.
 - **A 250 ms poll adds little** (82% → 86%) for 4× the `getLatestLedger` calls. The default stays
   at 1,000 ms.
+**Step 8: fee escalation** (2026-10-06): 20 channels × 80 payments, `FEE_MAX=1000`.
+
+- 80 of 80 settled, at 20 per ledger, with 0 errors.
+- 60 envelopes were built with a raised bid, the highest 800 stroops (3 rounds of backlog × 2³).
+- The fee charged stayed at about 43,900 stroops per settlement, as in runs with no raise. In
+  ledgers that aren't full, Stellar charges the network's base inclusion fee, not the bid, so a
+  raised bid costs extra only in contested ledgers.
+
 - **Fees.** The unpipelined 120-channel run averaged 50,442 stroops per settlement, with some
   charged 81,924, which is probably surge pricing on full ledgers. The pipelined 120 run averaged
   41,000. One run each; not investigated further.
@@ -129,7 +146,6 @@ since both submit one Soroban call per payment.
 **Open:**
 
 - Step 7: a recorded load test with S4's targets (see the plan).
-- Step 8: a queue-aware inclusion-fee bid (ADR-R2).
 - Wiring into the facilitator app and an `upto` scheme, which is a separate task.
 
 **Emerged:**
@@ -180,7 +196,22 @@ since both submit one Soroban call per payment.
     trustline. All 1,380 settlements in the pipelined testnet runs succeeded, 1,080 of them
     sent from prepared envelopes. This is the same risk as any Soroban transaction applied
     after other transactions in its ledger.
-11. **Fix: an `onSent` that throws is ignored, like `onEvent`.**
+11. **Fee escalation lives in the submitter, not in the fee provider.**
+    - Only the submitter sees the queue, and it already emits events and keeps stats.
+    - Any `inclusionFee` (a number or `feeStatsInclusionFee`) is the base bid.
+    - The signal is backlog in rounds of the whole pool, `floor(queued / channels)`. One full
+      round waiting means transactions are not landing every ledger.
+    - Each round multiplies the base by `factor` (default 2), up to `max` (default 1,000). The
+      bid never goes below the base, and it falls back as the queue drains (no state is kept).
+    - **Off by default,** so a library user does not pay more without opting in. The
+      facilitator app turns it on.
+    - **Known limit:** if the pool is simply too small for the incoming load, a queue also
+      builds and the bid rises without helping. That is bounded by `max`, and in uncontested
+      ledgers the bid isn't charged (see the step 8 testnet note).
+    - A pending envelope keeps its bid. Only envelopes built afterwards get the raise.
+    - Of 6 seeded mutations, 5 were caught. The survivor was equivalent: removing the
+      "0 rounds" early return, where `factor⁰ = 1` gives the base bid anyway.
+12. **Fix: an `onSent` that throws is ignored, like `onEvent`.**
     - Before the fix, the throw escaped while the transaction was pending, and the channel was
       released early. The next call on it then reused the sequence number and was rejected
       with `txBadSeq`.
@@ -301,8 +332,8 @@ since both submit one Soroban call per payment.
       90 and 120 channels; see Step 4 under Progress)
 - [ ] Load test with S4's targets on testnet: a steady ≥100 per ledger at 100–200 channels, one
       seller and many, with and without pipelining, 0 sequence errors (step 7)
-- [ ] The inclusion-fee bid rises with the pool's queue up to a ceiling, and each raise is
-      counted in `stats()` (step 8)
+- [x] The inclusion-fee bid rises with the pool's queue up to a ceiling, and each raise is
+      counted in `stats()` (step 8: `feeEscalation`, `fee-raised`, `feeRaises`)
 - [ ] Zero-amount settlements submit nothing (moved to the scheme layer, see Emerged 2)
 - [x] Unit tests for scheduling and sequence handling; `typecheck`, `lint` and `test` pass
       (SDK 16.3 is enough, see Emerged 1)

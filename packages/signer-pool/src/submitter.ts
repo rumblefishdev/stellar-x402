@@ -30,6 +30,11 @@ export interface SubmitterOptions {
   /** Inclusion fee bid in stroops, or a provider such as {@link feeStatsInclusionFee}. */
   inclusionFee?: number | (() => Promise<number>);
   /**
+   * Raises the inclusion fee bid while calls wait for a channel (ADR-R2 in
+   * docs/x402-settlement-scaling-en.md). Off by default.
+   */
+  feeEscalation?: FeeEscalation;
+  /**
    * Upper bound on the total fee in stroops (resource fee plus inclusion fees). Simulations
    * above it are refused before signing. 0006 measured ~41,000 per settlement and 151,550 for
    * one that also paid a TTL extension.
@@ -50,6 +55,21 @@ export interface SubmitterOptions {
   /** Injected for tests. */
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+}
+
+/**
+ * A backlog of at least one call per channel means transactions are not landing every ledger:
+ * the ledgers are full and higher bids get in first. Each full round of the pool waiting
+ * multiplies the base bid by `factor`, up to `max`. The bid falls back as the queue drains.
+ */
+export interface FeeEscalation {
+  /** Multiplier per full round of waiting calls. Default 2. */
+  factor?: number;
+  /**
+   * Ceiling of a raised bid, in stroops. Default 1,000; 0006 measured a 200-stroop mainnet
+   * market. A bid already above it is used as is.
+   */
+  max?: number;
 }
 
 /** The contract call to submit. The submitter sets the facilitator as its operation source. */
@@ -130,6 +150,7 @@ export class SettlementSubmitter {
   private readonly signer: TransactionSigner;
   private readonly passphrase: string;
   private readonly inclusionFee: () => Promise<number>;
+  private readonly feeEscalation?: Required<FeeEscalation>;
   private readonly maxFee: bigint;
   private readonly timeoutSeconds: number;
   private readonly pollIntervalMs: number;
@@ -148,6 +169,11 @@ export class SettlementSubmitter {
       throw new Error("the facilitator account cannot also be a channel");
     const fee = opts.inclusionFee ?? 100;
     this.inclusionFee = typeof fee === "number" ? async () => fee : fee;
+    if (opts.feeEscalation) {
+      const { factor = 2, max = 1_000 } = opts.feeEscalation;
+      if (!(factor > 1)) throw new Error("feeEscalation.factor must be above 1");
+      this.feeEscalation = { factor, max };
+    }
     this.maxFee = BigInt(opts.maxFeeStroops ?? 250_000);
     this.timeoutSeconds = opts.timeoutSeconds ?? 60;
     this.pollIntervalMs = opts.pollIntervalMs ?? 1000;
@@ -241,6 +267,20 @@ export class SettlementSubmitter {
     return Math.floor(this.now() / 1000) + this.timeoutSeconds / 2 > prepared.maxTime;
   }
 
+  /** The inclusion fee for the next envelope: the base bid, raised while calls wait. */
+  private async bid(channel: string): Promise<number> {
+    const base = await this.inclusionFee();
+    if (!this.feeEscalation) return base;
+    const { factor, max } = this.feeEscalation;
+    const queued = this.pool.queued;
+    const rounds = Math.floor(queued / this.pool.size);
+    if (rounds < 1) return base;
+    const bid = Math.min(max, Math.round(base * factor ** rounds));
+    if (bid <= base) return base;
+    this.emit({ type: "fee-raised", channel, base, bid, queued });
+    return bid;
+  }
+
   /** Builds, simulates, checks and signs `call` for the sequence after `sequence`. */
   private async prepare(
     source: string,
@@ -248,7 +288,7 @@ export class SettlementSubmitter {
     call: ContractCall,
     opts: SubmitOptions,
   ): Promise<Prepared> {
-    const fee = await this.inclusionFee();
+    const fee = await this.bid(source);
     const maxTime = Math.floor(this.now() / 1000) + this.timeoutSeconds;
     const draft = new TransactionBuilder(new Account(source, sequence.toString()), {
       fee: String(fee),

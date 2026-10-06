@@ -33,6 +33,7 @@ export {
   SimulationCheckError,
   SimulationError,
   type ContractCall,
+  type FeeEscalation,
   type SubmitOptions,
   type SubmitterOptions,
 } from "./submitter.js";
