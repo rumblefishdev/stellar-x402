@@ -13,6 +13,11 @@ export type SubmitterEvent =
       hash: string;
       reason: "try-again-later" | "send-error";
     }
+  /**
+   * An envelope prepared while the channel's previous transaction was pending was sent (`used`)
+   * or rebuilt because that transaction did not use its sequence number or time ran short.
+   */
+  | { type: "prepared-ahead"; channel: string; used: boolean }
   /** A submission ended with a result; `queuedMs` is the wait for a free channel. */
   | { type: "final"; result: SubmitResult; queuedMs: number; totalMs: number }
   /** A submission ended with an error before anything was sent. */
@@ -27,6 +32,8 @@ export interface SubmitterStatsSnapshot {
   /** Result codes of `failed` and `rejected` submissions. */
   errorCodes: Record<string, number>;
   sendRetries: number;
+  /** Pipelined envelopes sent as prepared, and those rebuilt. */
+  preparedAhead: { used: number; rebuilt: number };
   feesChargedStroops: bigint;
   /** Successful and failed landings per ledger, for the most recent ledgers. */
   landingsByLedger: Record<number, number>;
@@ -50,6 +57,7 @@ export class SubmitterStats {
   };
   private errorCodes: Record<string, number> = {};
   private sendRetries = 0;
+  private preparedAhead = { used: 0, rebuilt: 0 };
   private fees = 0n;
   private landings = new Map<number, number>();
 
@@ -57,6 +65,10 @@ export class SubmitterStats {
     switch (event.type) {
       case "send-retry":
         this.sendRetries++;
+        break;
+      case "prepared-ahead":
+        if (event.used) this.preparedAhead.used++;
+        else this.preparedAhead.rebuilt++;
         break;
       case "refused":
         this.refused[event.reason]++;
@@ -87,6 +99,7 @@ export class SubmitterStats {
       refused: { ...this.refused },
       errorCodes: { ...this.errorCodes },
       sendRetries: this.sendRetries,
+      preparedAhead: { ...this.preparedAhead },
       feesChargedStroops: this.fees,
       landingsByLedger: Object.fromEntries(this.landings),
     };

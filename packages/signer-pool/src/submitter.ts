@@ -37,6 +37,12 @@ export interface SubmitterOptions {
   maxFeeStroops?: number;
   /** Time bound of each transaction, in seconds from build. */
   timeoutSeconds?: number;
+  /**
+   * Prepare the next queued call on a channel while its transaction is pending (default true).
+   * The prepared envelope is sent as soon as the pending one is final, so the simulation is off
+   * the critical path. It is rebuilt if the pending one did not use its sequence number.
+   */
+  pipeline?: boolean;
   /** How often the shared ledger clock polls `getLatestLedger`. */
   pollIntervalMs?: number;
   /** Receives every submitter event, for metrics and logs. Must not throw (errors are ignored). */
@@ -55,10 +61,14 @@ export interface ContractCall {
 export interface SubmitOptions {
   /**
    * Inspects the simulation before anything is signed; throw to abort. Schemes put their
-   * balance-change checks here (architecture doc §3.2).
+   * balance-change checks here (architecture doc §3.2). Runs again if a pipelined build is
+   * rebuilt.
    */
   checkSimulation?: (sim: rpc.Api.SimulateTransactionSuccessResponse) => void | Promise<void>;
-  /** Called once the network accepts the transaction (`PENDING`), before it is final. */
+  /**
+   * Called once the network accepts the transaction (`PENDING`), before it is final. Must not
+   * throw (errors are ignored).
+   */
   onSent?: (hash: string) => void;
 }
 
@@ -79,6 +89,22 @@ export class FeeLimitError extends Error {
 
 const BAD_SEQ = new Set(["txBadSeq"]);
 
+/** A signed envelope, ready to send. */
+interface Prepared {
+  bump: Transaction | FeeBumpTransaction;
+  hash: string;
+  txSequence: bigint;
+  maxTime: number;
+}
+
+/** One submission's hold on its channel. */
+interface Hold {
+  /** The channel went to the next holder early; this submission must not release it. */
+  handedOver: boolean;
+  /** Settles the next holder's wait once this submission's transaction is final. */
+  finish?: () => void;
+}
+
 /**
  * Submits Soroban contract calls through a pool of channel accounts, one transaction in flight
  * per channel, in the shape 0006 measured as cheapest ("delegated-bump"):
@@ -91,6 +117,11 @@ const BAD_SEQ = new Set(["txBadSeq"]);
  * Sequence rule: a channel's cached sequence number is advanced only when its transaction is
  * final, and dropped (re-read before next use) only when the network says it is wrong. It is
  * never re-read while a transaction may still be pending, even if status checks fail.
+ *
+ * Pipelining: once a channel's transaction is accepted and calls are queued, the channel goes to
+ * the next one, which prepares its envelope for the following sequence number but sends only
+ * after the pending transaction is final and used that number. A channel returns to the pool
+ * only when every transaction on it is final.
  */
 export class SettlementSubmitter {
   readonly pool: ChannelPool;
@@ -102,6 +133,7 @@ export class SettlementSubmitter {
   private readonly maxFee: bigint;
   private readonly timeoutSeconds: number;
   private readonly pollIntervalMs: number;
+  private readonly pipeline: boolean;
   private readonly now: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly onEvent?: (event: SubmitterEvent) => void;
@@ -119,6 +151,7 @@ export class SettlementSubmitter {
     this.maxFee = BigInt(opts.maxFeeStroops ?? 250_000);
     this.timeoutSeconds = opts.timeoutSeconds ?? 60;
     this.pollIntervalMs = opts.pollIntervalMs ?? 1000;
+    this.pipeline = opts.pipeline ?? true;
     this.now = opts.now ?? Date.now;
     this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     this.clock = new LedgerClock(this.rpc, this.pollIntervalMs, this.sleep);
@@ -130,8 +163,11 @@ export class SettlementSubmitter {
     const start = this.now();
     const channel = await this.pool.acquire();
     const acquired = this.now();
+    const previous = channel.pending;
+    channel.pending = undefined;
+    const hold: Hold = { handedOver: false };
     try {
-      const result = await this.submitOn(channel, call, opts);
+      const result = await this.submitOn(channel, call, opts, previous, hold);
       this.emit({
         type: "final",
         result,
@@ -148,7 +184,11 @@ export class SettlementSubmitter {
       });
       throw error;
     } finally {
-      this.pool.release(channel);
+      hold.finish?.();
+      if (!hold.handedOver) {
+        await previous?.final; // never release while an earlier transaction may be pending
+        this.pool.release(channel);
+      }
     }
   }
 
@@ -174,17 +214,47 @@ export class SettlementSubmitter {
     channel: Channel,
     call: ContractCall,
     opts: SubmitOptions,
+    previous: Channel["pending"],
+    hold: Hold,
   ): Promise<SubmitResult> {
-    if (channel.sequence === undefined) {
-      const account = await this.rpc.getAccount(channel.address);
-      channel.sequence = BigInt(account.sequenceNumber());
+    let prepared: Prepared | undefined;
+    if (previous) {
+      // Prepare against the sequence the pending transaction uses, then wait for it.
+      prepared = await this.prepare(channel.address, previous.sequence, call, opts);
+      await previous.final;
+      const used = channel.sequence === previous.sequence && !this.expiresSoon(prepared);
+      this.emit({ type: "prepared-ahead", channel: channel.address, used });
+      if (!used) prepared = undefined;
     }
+    if (!prepared) {
+      if (channel.sequence === undefined) {
+        const account = await this.rpc.getAccount(channel.address);
+        channel.sequence = BigInt(account.sequenceNumber());
+      }
+      prepared = await this.prepare(channel.address, channel.sequence, call, opts);
+    }
+    return this.sendAndConfirm(channel, prepared, opts, hold);
+  }
+
+  /** Less than half the time bound left: too close to expiry to send a prepared envelope. */
+  private expiresSoon(prepared: Prepared): boolean {
+    return Math.floor(this.now() / 1000) + this.timeoutSeconds / 2 > prepared.maxTime;
+  }
+
+  /** Builds, simulates, checks and signs `call` for the sequence after `sequence`. */
+  private async prepare(
+    source: string,
+    sequence: bigint,
+    call: ContractCall,
+    opts: SubmitOptions,
+  ): Promise<Prepared> {
     const fee = await this.inclusionFee();
     const maxTime = Math.floor(this.now() / 1000) + this.timeoutSeconds;
-    const draft = new TransactionBuilder(
-      new Account(channel.address, channel.sequence.toString()),
-      { fee: String(fee), networkPassphrase: this.passphrase, timebounds: { minTime: 0, maxTime } },
-    )
+    const draft = new TransactionBuilder(new Account(source, sequence.toString()), {
+      fee: String(fee),
+      networkPassphrase: this.passphrase,
+      timebounds: { minTime: 0, maxTime },
+    })
       .addOperation(Operation.invokeHostFunction({ ...call, source: this.signer.address }))
       .build();
     const txSequence = BigInt(draft.sequence);
@@ -217,8 +287,16 @@ export class SettlementSubmitter {
         this.passphrase,
       ),
     );
+    return { bump, hash: bump.hash().toString("hex"), txSequence, maxTime };
+  }
+
+  private async sendAndConfirm(
+    channel: Channel,
+    { bump, hash, txSequence, maxTime }: Prepared,
+    opts: SubmitOptions,
+    hold: Hold,
+  ): Promise<SubmitResult> {
     const base = { channel: channel.address };
-    const hash = bump.hash().toString("hex");
     const pastMaxTime = () => Math.floor(this.now() / 1000) > maxTime;
 
     // Send. Resending the same signed envelope is always safe: it has the same hash, so the
@@ -258,7 +336,19 @@ export class SettlementSubmitter {
       });
       await this.clock.next(this.clock.current);
     }
-    if (accepted) opts.onSent?.(hash);
+    if (accepted) {
+      try {
+        opts.onSent?.(hash);
+      } catch {
+        // The transaction is pending; a broken callback must not release its channel early.
+      }
+    }
+    if (accepted && this.pipeline && this.pool.queued > 0) {
+      const final = new Promise<void>((resolve) => (hold.finish = resolve));
+      channel.pending = { sequence: txSequence, final };
+      this.pool.handOver(channel);
+      hold.handedOver = true;
+    }
 
     // Confirm: one status check per new ledger until it is final or provably never will be.
     let seen = this.clock.current;

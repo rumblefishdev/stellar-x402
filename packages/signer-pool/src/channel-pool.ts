@@ -9,6 +9,12 @@ export interface Channel {
    * from the network before the next build. Only the holder of the channel touches it.
    */
   sequence: bigint | undefined;
+  /**
+   * Set when the channel was handed to its next holder while the previous holder's transaction
+   * was still pending: the sequence number that transaction uses, and a promise that settles once
+   * it is final. The next holder reads `sequence` only after `final`.
+   */
+  pending?: { sequence: bigint; final: Promise<void> };
 }
 
 /**
@@ -45,6 +51,17 @@ export class ChannelPool {
     const channel = this.free.shift();
     if (channel) return Promise.resolve(channel);
     return new Promise((resolve) => this.waiters.push(resolve));
+  }
+
+  /**
+   * Gives a held channel to the next waiter before the holder is done (pipelining). The holder
+   * keeps confirming its transaction but must not release the channel; the new holder does.
+   */
+  handOver(channel: Channel): void {
+    if (!this.all.includes(channel)) throw new Error(`unknown channel ${channel.address}`);
+    const next = this.waiters.shift();
+    if (!next) throw new Error("no waiter to hand the channel to");
+    next(channel);
   }
 
   release(channel: Channel): void {

@@ -2,7 +2,8 @@
 // checks them, then settles real UptoProxy payments through SettlementSubmitter.
 //
 // Env: FACILITATOR_SECRET, TOKEN_ID, PROXY_ID, CLIENTS_FILE (0006 bench secrets/accounts.json),
-//      [RPC_URLS] comma-separated, tried in order through FallbackRpc
+//      [RPC_URLS] comma-separated, tried in order through FallbackRpc,
+//      [PIPELINE=0] to turn pipelining off, [POLL_MS] ledger clock interval (default 1000)
 // Usage: tsx scripts/testnet-smoke.ts <channels> <payments>
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -155,6 +156,8 @@ const submitter = new SettlementSubmitter({
   channels,
   inclusionFee: feeStatsInclusionFee(server),
   timeoutSeconds: 60,
+  pipeline: process.env.PIPELINE !== "0",
+  pollIntervalMs: Number(process.env.POLL_MS ?? 1000),
 });
 const expLedger = (await server.getLatestLedger()).sequence + 200;
 const t0 = Date.now();
@@ -176,14 +179,32 @@ for (const r of results) {
   byStatus[r.status] = (byStatus[r.status] ?? 0) + 1;
   if (r.ledger) perLedger[r.ledger] = (perLedger[r.ledger] ?? 0) + 1;
 }
+// Per-channel cycle: ledgers between a channel's consecutive landings (1 = every ledger).
+const landings: Record<string, number[]> = {};
+for (const r of results) if (r.ledger) (landings[r.channel] ??= []).push(r.ledger);
+const cycleGaps: Record<string, number> = {};
+for (const ls of Object.values(landings)) {
+  ls.sort((a, b) => a - b);
+  for (let i = 1; i < ls.length; i++) {
+    const gap = ls[i]! - ls[i - 1]!;
+    cycleGaps[gap] = (cycleGaps[gap] ?? 0) + 1;
+  }
+}
+const ledgers = Object.keys(perLedger).map(Number);
+const span = ledgers.length ? Math.max(...ledgers) - Math.min(...ledgers) + 1 : 0;
 console.log(
   JSON.stringify(
     {
       channels: nChannels,
+      pipeline: process.env.PIPELINE !== "0",
+      pollMs: Number(process.env.POLL_MS ?? 1000),
       payments: nPayments,
       wallSeconds: wall,
       byStatus,
       perLedger,
+      ledgerSpan: span,
+      meanPerLedger: span ? (byStatus.success ?? 0) / span : 0,
+      cycleGaps,
       sample: results
         .slice(0, 3)
         .map((r) => ({ hash: r.hash, status: r.status, fee: String(r.feeCharged) })),
