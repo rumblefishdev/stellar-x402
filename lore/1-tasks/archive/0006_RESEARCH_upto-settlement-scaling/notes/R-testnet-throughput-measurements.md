@@ -14,6 +14,10 @@ history:
     status: mature
     who: claude
     note: "Bench runs on stellar:testnet against UptoProxy CBEPV3F2…TEGY7 (questions 2 and 3)"
+  - date: "2026-10-07"
+    status: mature
+    who: claude
+    note: "Cited the official sources for the one-transaction-per-account rule (section 2)"
 ---
 
 # Testnet throughput: single account, channel pools and same-seller concurrency
@@ -70,6 +74,24 @@ facilitator account with consecutive sequence numbers and sent them without wait
 settles at most one payment per ledger, about **0.2 per second**. Waiting between payments
 confirms it: [`run … c1`](../bench/results/run-opsource-bump-c1-n8-many.json) settled 8 payments
 in 8 consecutive ledgers.
+
+This matches the documented rule:
+
+- The Stellar docs, [Transaction lifecycle](https://developers.stellar.org/docs/learn/fundamentals/transactions/transaction-lifecycle):
+  "Only one transaction (and one sequence number) for the same account can be consumed per
+  ledger."
+- The SDF blog, [Proposed changes to transaction submission](https://stellar.org/blog/developers/proposed-changes-to-transaction-submission):
+  - "if a Stellar node is currently processing a transaction from account A, any new
+    transaction from A will be rejected". Processing lasts from entering the queue until the
+    transaction is applied or dropped.
+  - stellar-core 19.13.0 enabled the limit by default and 20.0.0 made it mandatory. Protocol 20
+    (Soroban) made it network-wide, because Soroban needs it.
+  - "Users utilizing channel accounts are unaffected, assuming the same channel account does not
+    submit multiple transactions per ledger."
+  - A fee bump whose inner transaction is already queued replaces it instead of being rejected.
+
+The `TRY_AGAIN_LATER` above is that rejection. The 18 `tx_bad_seq` most likely follow from it:
+their sequence numbers no longer continue an accepted transaction.
 
 ## 3. Channel-account pools
 

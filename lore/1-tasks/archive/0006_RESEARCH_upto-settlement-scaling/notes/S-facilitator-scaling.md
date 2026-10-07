@@ -16,6 +16,10 @@ history:
     status: developing
     who: claude
     note: "Recommendation from the 0006 measurements; awaiting okarcz review"
+  - date: "2026-10-07"
+    status: developing
+    who: claude
+    note: "Cited the official sources for the one-transaction-per-account rule"
 ---
 
 # Decision: how the facilitator scales upto settlement
@@ -47,7 +51,7 @@ From [R-testnet-throughput-measurements](R-testnet-throughput-measurements.md):
 
 | Setup | Measured |
 |---|---|
-| Single source account | 1 pending transaction allowed (`TRY_AGAIN_LATER`, then `tx_bad_seq`), so about 0.2 settlements per second |
+| Single source account | 1 pending transaction allowed (`TRY_AGAIN_LATER`, then `tx_bad_seq`), so about 0.2 settlements per second. This is the documented rule: one transaction per account per ledger ([Stellar docs](https://developers.stellar.org/docs/learn/fundamentals/transactions/transaction-lifecycle), [SDF blog](https://stellar.org/blog/developers/proposed-changes-to-transaction-submission)) |
 | N channels, N ≤ 50 | N per ledger, 0 failures |
 | 120 channels | 102–103 per ledger, the network size limit; the surplus queues to the next ledger |
 | Same seller vs many | the same throughput; every ledger was one cluster |
