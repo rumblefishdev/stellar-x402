@@ -5,12 +5,13 @@ type: DOCS
 status: backlog
 milestone: 1
 related_adr: []
-related_tasks: ["0002", "0003", "0004", "0006"]
-tags: [layer-contracts, upto, priority-medium, effort-small]
+related_tasks: ["0002", "0003", "0004", "0006", "0012"]
+tags: [layer-contracts, upto, priority-medium, effort-small, payments]
 links:
   - ../archive/0006_RESEARCH_upto-settlement-scaling/notes/R-testnet-throughput-measurements.md
   - ../archive/0006_RESEARCH_upto-settlement-scaling/notes/R-network-limits-and-mainnet-usage.md
   - ../archive/0006_RESEARCH_upto-settlement-scaling/notes/S-facilitator-scaling.md
+  - ../../../docs/planning/m1-epics.md
 history:
   - date: "2026-09-30"
     status: backlog
@@ -20,6 +21,14 @@ history:
     status: backlog
     who: claude
     note: "Added the throughput numbers from 0006 as input for the testnet report."
+  - date: "2026-10-07"
+    status: backlog
+    who: claude
+    note: "ADR number changed: 0003 is now the channel-pool ADR, so use the next free number."
+  - date: "2026-10-07"
+    status: backlog
+    who: claude
+    note: "Mapped to M1 Story 5.2 (Payments lane) by 0012."
 ---
 
 # Document UptoProxy: design ADR, contract docs, threat model and testnet report
@@ -29,13 +38,15 @@ history:
 Write up the result of 0002–0004 so that three groups can use it without reading the code: the
 reviewers and auditors, the facilitator team, and the future `scheme_upto_stellar.md` author.
 
+**Story:** [M1 Story 5.2](../../../docs/planning/m1-epics.md#story-52-document-uptoproxy-design-adr-contract-docs-threat-model-and-testnet-report) · **Lane:** Payments
+
 ## Status: Backlog
 
 > Blocked by 0004.
 
 ## Implementation Plan
 
-1. **ADR** `docs/adr/0003-upto-proxy-design.md`: the design decisions from 0002's S- notes, and
+1. **ADR** `docs/adr/NNNN-upto-proxy-design.md` (next free number; 0003 is the channel-pool ADR): the design decisions from 0002's S- notes, and
    every deviation from arch doc §6.2 with its reason.
 2. **Contract README** `contracts/upto-proxy/README.md`: the interface, the signed payload, the
    auth tree a client must sign, errors, events and invariants, and how a facilitator builds,

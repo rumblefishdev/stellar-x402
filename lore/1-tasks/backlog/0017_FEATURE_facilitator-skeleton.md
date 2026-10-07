@@ -1,0 +1,48 @@
+---
+id: "0017"
+title: "Facilitator skeleton with store ports, settlement hooks and config"
+type: FEATURE
+status: backlog
+milestone: 1
+related_adr: ["0004"]
+related_tasks: ["0012", "0009", "0013"]
+tags: [facilitator, priority-high, effort-medium, platform]
+links:
+  - ../../../docs/planning/m1-epics.md
+  - ../../../docs/architecture/m1-spine.md
+history:
+  - date: "2026-10-07"
+    status: backlog
+    who: claude
+    note: "Created by 0012 from M1 Story 1.1 (Platform lane)."
+---
+
+# Facilitator skeleton with store ports, settlement hooks and config
+
+## Summary
+
+As a developer on any of the three lanes, I want a facilitator app that boots, validates its config and wires every part through one composition root, with typed store ports and settlement hooks, so that Payments, Discovery and Platform can build and test their parts in parallel against in-memory fakes.
+
+**Story:** [M1 Story 1.1](../../../docs/planning/m1-epics.md#story-11-facilitator-skeleton-with-store-ports-settlement-hooks-and-config) · **Lane:** Platform · **Covers:** enables FR1–FR21; AD-1, AD-7, NFR7, NFR8
+
+## Context
+
+- `apps/facilitator/src/index.ts` is a placeholder today (`export {};`).
+- This story is what lets the three lanes start in parallel: it fixes the seams (ports, hooks, config) on day 1 and the running skeleton by day 3.
+- The spine's layout: `http/`, `settlement/`, `ports/`, `adapters/` under `apps/facilitator/src/` (AD-1, AD-7).
+- Related tasks: 0009, 0013.
+
+## Implementation
+
+- Day 1: types-only PR with ports, hook signatures and the zod config schema (fee settings, budgets, rate limits, `FACILITATOR_SECRET`, `CHANNELS`, RPC URLs).
+- Express 5 app with stub routes; add `zod` to `apps/facilitator`.
+- `src/main.ts` composition root that builds the graph from config and picks memory or real stores.
+- In-memory fakes for the four ports; one boot-level integration test with `fake-rpc`.
+- A small structured logger interface; the backend is chosen in 0014.
+
+## Acceptance Criteria
+
+- [ ] Given a types-only PR with the four store ports (`SettlementStore`, `CatalogStore`, `RateLimitStore`, `SpendStore`) and the operations AD-7 requires, the before-submit and on-success settlement hooks, and the zod config schema, when it is opened on day 1, then all three lanes review and approve it before lane work builds on it
+- [ ] Given a valid environment, when the app starts, then it reads and validates config once with zod, listens on the configured port and answers stub routes for `/verify`, `/settle`, `/supported` and `/discovery/resources`; `src/main.ts` is the only composition root and the only place that reads `process.env`
+- [ ] Given a missing or invalid config value, when the app starts, then it exits with an error that names the value and never prints a secret
+- [ ] Given the test setup, when the integration test boots the app with in-memory fakes of all four ports and `fake-rpc`, then it passes with no network and no database; each port has an in-memory fake in `apps/facilitator`; logs are structured, one event per line, and never contain secrets or full XDR; requests have a body size limit

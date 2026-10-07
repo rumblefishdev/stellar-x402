@@ -5,7 +5,7 @@ type: RESEARCH
 status: backlog
 related_adr: []
 related_tasks: ["0007", "0006"]
-tags: [fees, mainnet, throughput, priority-medium, effort-small]
+tags: [fees, mainnet, throughput, priority-medium, effort-small, payments]
 links:
   - ../archive/0007_FEATURE_facilitator-settlement-submitter.md
   - ../../../docs/x402-settlement-scaling-en.md
@@ -14,6 +14,10 @@ history:
     status: backlog
     who: claude
     note: "Spawned from 0007 future work and the PR #4 review (S3 in the scaling analysis)."
+  - date: "2026-10-07"
+    status: backlog
+    who: claude
+    note: "Tagged Payments lane by 0012 (outside T1)."
 ---
 
 # Measure inclusion-fee bids against inclusion delay on mainnet
