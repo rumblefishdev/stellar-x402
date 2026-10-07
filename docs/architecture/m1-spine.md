@@ -18,7 +18,7 @@ sources:
   - docs/x402-settlement-scaling-en.md
   - https://github.com/x402-foundation/x402/tree/10b2d06/e2e
   - https://github.com/x402-foundation/x402/blob/main/specs/schemes/exact/scheme_exact_stellar.md
-companions: [lore/1-tasks/active/0012_DOCS_m1-plan.md, docs/planning/m1-epics.md]
+companions: [lore/1-tasks/archive/0012_DOCS_m1-plan.md, docs/planning/m1-epics.md]
 adrs:
   [
     docs/adr/0004-facilitator-shape.md,

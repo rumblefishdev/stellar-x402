@@ -2,7 +2,7 @@
 id: "0012"
 title: "Plan Milestone 1 (M1) and turn it into lore tasks"
 type: DOCS
-status: active
+status: completed
 milestone: 1
 related_adr: ["0004", "0005", "0006", "0007", "0008", "0009"]
 related_tasks: ["0004", "0005", "0009", "0010", "0011", "0013", "0014", "0015", "0016", "0017", "0018", "0019", "0020", "0021", "0022", "0023", "0024", "0025", "0026", "0027", "0028", "0029", "0030", "0031", "0032"]
@@ -28,6 +28,14 @@ history:
       All acceptance criteria met. Spine and ADRs 0004-0009 written; no PRD (scope is in
       docs/planning/m1-epics.md); 5 epics, 20 stories, new tasks 0013-0032; every backlog task
       tagged with its lane (payments, discovery, platform).
+  - date: "2026-10-07"
+    status: completed
+    who: okarcz
+    note: >
+      PR #5 rebase-merged into develop (6c8a76d). Delivered the M1 spine (AD-1 to AD-22), ADRs
+      0004-0009, docs/planning/m1-epics.md (FR1-FR21, 5 epics, 20 stories) and backlog tasks
+      0013-0032, with 0004, 0005, 0009 and 0016 mapped to stories. 26 backlog tasks, each tagged
+      payments, discovery or platform. No code changes.
 ---
 
 # Plan Milestone 1 (M1) and turn it into lore tasks
@@ -98,6 +106,25 @@ decisions become ADRs and each story becomes one lore backlog task.
 5. **0009 narrowed**: it became Story 1.4 (`/settle`); its other parts moved to 0018, 0019, 0020,
    0024, 0025 and 0027. 0016 gained the `@x402` 2.28 upgrade, which had no owner.
 
-## Open
+## Implementation Notes
 
-- Lane owners for Discovery and Platform (Adam, Stan) are not decided yet.
+- `docs/architecture/m1-spine.md`: the architecture for Tranche 1, AD-1 to AD-22.
+- `docs/adr/0004`–`0009`: one ADR per group of spine decisions; 0003 covers AD-2.
+- `docs/planning/m1-epics.md`: T1 scope, "Out of T1", FR1–FR21, NFR1–NFR9, coverage map, and
+  20 stories with Given/When/Then acceptance criteria. Each story names its lane and lore task.
+- Backlog: 16 new tasks (0017–0032) generated from the stories with their acceptance criteria;
+  0013 and 0014 added as research tasks; 0015 split from 0009; 0016 gained the `@x402` 2.28
+  upgrade; 0009 narrowed to `/settle`.
+- Every backlog task, in T1 or not, carries one lane tag: `payments`, `discovery` or `platform`.
+
+## Issues Encountered
+
+- **CI format check failed on PR #5**: `docs/planning/m1-epics.md` was not in Prettier style
+  (tables and line breaks). Fixed in a follow-up commit; Prettier had also split an inline code
+  span across lines, which was rewrapped by hand.
+
+## Future Work
+
+- None to spawn: the backlog from this task is 0013–0032 plus the mapped tasks.
+- Still open, as a decision rather than a task: who owns the Discovery and Platform lanes (Adam,
+  Stan). Payments is suggested for okarcz.
