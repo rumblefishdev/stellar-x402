@@ -5,7 +5,7 @@ type: RESEARCH
 status: backlog
 related_adr: []
 related_tasks: ["0006", "0007"]
-tags: [x402, batch-settlement, session, throughput, priority-low, effort-large]
+tags: [x402, batch-settlement, session, throughput, priority-low, effort-large, payments]
 links:
   - ../archive/0006_RESEARCH_upto-settlement-scaling/notes/S-session-aggregation.md
   - ../archive/0006_RESEARCH_upto-settlement-scaling/notes/R-x402-batch-settlement.md
@@ -14,6 +14,10 @@ history:
     status: backlog
     who: claude
     note: "Spawned from 0006 future work (S-session-aggregation). okarcz: park it, revisit after the RFP deliverables or when a high-volume user appears."
+  - date: "2026-10-07"
+    status: backlog
+    who: claude
+    note: "Tagged Payments lane by 0012 (outside T1)."
 ---
 
 # Research a Stellar binding for the x402 batch-settlement scheme
