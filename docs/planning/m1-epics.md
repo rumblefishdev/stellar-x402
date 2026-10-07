@@ -156,8 +156,8 @@ From the spine and ADRs, affecting how the work is split:
 - **Interim values:** fee escalation and `maxFeeStroops` use interim testnet values (mainnet
   values: 0010). Numeric budgets and limits are set in config during the build and recorded with
   the task.
-- **Gate harness (AD-15):** the proxy's `test.config.json` and `run.sh` (port, `Facilitator
-  listening`, `/health`, `/close`, forwarding) live in our repo. A script clones
+- **Gate harness (AD-15):** the proxy's `test.config.json` and `run.sh` (port,
+  `Facilitator listening`, `/health`, `/close`, forwarding) live in our repo. A script clones
   `x402-foundation/x402` read-only at a pinned commit, and nothing is pushed upstream in M1.
 - **Open question:** what `/exact/stellar/upfront` requires from a Stellar facilitator. The gate
   work must confirm it before the first gate run.
@@ -171,39 +171,39 @@ None. T1 has no user interface.
 
 ### FR Coverage Map
 
-| FR | Epic | Story |
-|---|---|---|
-| FR1 `/verify` | Epic 1 | 1.3 |
-| FR2 `/settle` | Epic 1 | 1.4 |
-| FR3 `/supported` | Epic 1 | 1.6 |
-| FR4 any SEP-41 token | Epic 1 | 1.7 (1.3, 1.4 token-agnostic) |
-| FR5 sponsored fees, one fee config | Epic 1 | 1.3 |
-| FR6 one tx through the pool | Epic 1 | 1.4 |
-| FR7 channel-address check | Epic 1 | 1.3 |
-| FR8 minimum validity, `maxLedger` | Epic 1 | 1.2, 1.3 |
-| FR9 claim, dedupe, replay | Epic 1 | 1.4 |
-| FR10 durable records | Epic 1 | 1.2, 1.5 (adapters 2.1) |
-| FR11 channel lease | Epic 2 | 2.4 |
-| FR12 rate limiting, documented | Epic 2 | 2.2 |
-| FR13 spend budgets, breakers | Epic 2 | 2.3 |
-| FR14 alerts | Epic 2 | 2.6 |
-| FR15 cataloging on settle | Epic 4 | 4.2 |
-| FR16 catalog integrity | Epic 4 | 4.1 |
-| FR17 `EXTENSION-RESPONSES` | Epic 4 | 4.2 |
-| FR18 `/discovery/resources` | Epic 4 | 4.3 |
-| FR19 `upto` testnet e2e | Epic 5 | 5.1 |
-| FR20 `upto` docs | Epic 5 | 5.2 |
-| FR21 conformance gate | Epic 3 | 3.1, 3.2 (deploy 2.5) |
+| FR                                 | Epic   | Story                         |
+| ---------------------------------- | ------ | ----------------------------- |
+| FR1 `/verify`                      | Epic 1 | 1.3                           |
+| FR2 `/settle`                      | Epic 1 | 1.4                           |
+| FR3 `/supported`                   | Epic 1 | 1.6                           |
+| FR4 any SEP-41 token               | Epic 1 | 1.7 (1.3, 1.4 token-agnostic) |
+| FR5 sponsored fees, one fee config | Epic 1 | 1.3                           |
+| FR6 one tx through the pool        | Epic 1 | 1.4                           |
+| FR7 channel-address check          | Epic 1 | 1.3                           |
+| FR8 minimum validity, `maxLedger`  | Epic 1 | 1.2, 1.3                      |
+| FR9 claim, dedupe, replay          | Epic 1 | 1.4                           |
+| FR10 durable records               | Epic 1 | 1.2, 1.5 (adapters 2.1)       |
+| FR11 channel lease                 | Epic 2 | 2.4                           |
+| FR12 rate limiting, documented     | Epic 2 | 2.2                           |
+| FR13 spend budgets, breakers       | Epic 2 | 2.3                           |
+| FR14 alerts                        | Epic 2 | 2.6                           |
+| FR15 cataloging on settle          | Epic 4 | 4.2                           |
+| FR16 catalog integrity             | Epic 4 | 4.1                           |
+| FR17 `EXTENSION-RESPONSES`         | Epic 4 | 4.2                           |
+| FR18 `/discovery/resources`        | Epic 4 | 4.3                           |
+| FR19 `upto` testnet e2e            | Epic 5 | 5.1                           |
+| FR20 `upto` docs                   | Epic 5 | 5.2                           |
+| FR21 conformance gate              | Epic 3 | 3.1, 3.2 (deploy 2.5)         |
 
 ## Epic List
 
 **Lanes.** Every story has one owning lane. The lanes run in parallel after a shared day-1 types PR (Story 1.1):
 
-| Lane | Owns |
-|---|---|
-| **Payments** | the settlement module and the chain: verify, settle, records, lease, token matrix, `upto` |
-| **Discovery** | the Bazaar end to end and the state store: 0013, store adapters, validator, cataloging, `/discovery/resources` |
-| **Platform** | the service around the settle path: skeleton, `/supported`, rate limits, spend budgets, 0014, deploy, alerts, the gate |
+| Lane          | Owns                                                                                                                   |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **Payments**  | the settlement module and the chain: verify, settle, records, lease, token matrix, `upto`                              |
+| **Discovery** | the Bazaar end to end and the state store: 0013, store adapters, validator, cataloging, `/discovery/resources`         |
+| **Platform**  | the service around the settle path: skeleton, `/supported`, rate limits, spend budgets, 0014, deploy, alerts, the gate |
 
 Each lore task carries its lane as a tag: `payments`, `discovery` or `platform`.
 
@@ -803,4 +803,3 @@ So that I can use and review it without reading the contract code.
 **When** it is checked  
 **Then** every transaction hash resolves on stellar.expert and the report includes the 0006 throughput numbers and the one-payment-per-transaction limit  
 **And** `format:check` passes
-
