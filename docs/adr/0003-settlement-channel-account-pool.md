@@ -114,7 +114,7 @@ accounts (`packages/signer-pool`).
 ## References
 
 - Task 0007 and its testnet results:
-  [0007_FEATURE_facilitator-settlement-submitter](../../lore/1-tasks/active/0007_FEATURE_facilitator-settlement-submitter.md)
+  [0007_FEATURE_facilitator-settlement-submitter](../../lore/1-tasks/archive/0007_FEATURE_facilitator-settlement-submitter.md)
 - Task 0006 measurements:
   [R-testnet-throughput-measurements](../../lore/1-tasks/archive/0006_RESEARCH_upto-settlement-scaling/notes/R-testnet-throughput-measurements.md),
   [S-facilitator-scaling](../../lore/1-tasks/archive/0006_RESEARCH_upto-settlement-scaling/notes/S-facilitator-scaling.md)

@@ -7,7 +7,7 @@ related_adr: []
 related_tasks: ["0007", "0006"]
 tags: [fees, mainnet, throughput, priority-medium, effort-small]
 links:
-  - ../active/0007_FEATURE_facilitator-settlement-submitter.md
+  - ../archive/0007_FEATURE_facilitator-settlement-submitter.md
   - ../../../docs/x402-settlement-scaling-en.md
 history:
   - date: "2026-10-06"

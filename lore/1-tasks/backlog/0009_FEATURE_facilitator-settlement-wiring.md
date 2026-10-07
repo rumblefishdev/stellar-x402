@@ -7,7 +7,7 @@ related_adr: []
 related_tasks: ["0007", "0006"]
 tags: [facilitator, signer-pool, upto, settlement, priority-high, effort-large]
 links:
-  - ../active/0007_FEATURE_facilitator-settlement-submitter.md
+  - ../archive/0007_FEATURE_facilitator-settlement-submitter.md
   - ../../../docs/x402-settlement-scaling-en.md
 history:
   - date: "2026-10-06"

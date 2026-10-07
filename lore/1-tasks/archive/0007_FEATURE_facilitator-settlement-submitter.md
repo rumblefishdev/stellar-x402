@@ -2,8 +2,8 @@
 id: "0007"
 title: "Build the facilitator's settlement submitter on a channel-account pool"
 type: FEATURE
-status: active
-related_adr: []
+status: completed
+related_adr: ["0003"]
 related_tasks: ["0006", "0003"]
 tags: [facilitator, signer-pool, throughput, upto, priority-medium, effort-large]
 links:
@@ -12,6 +12,7 @@ links:
   - ../archive/0006_RESEARCH_upto-settlement-scaling/notes/R-verify-cost.md
   - ../../../docs/rfp/x402-facilitator-bazaar-technical-architecture.md
   - ../../../docs/x402-settlement-scaling-en.md
+  - ../../../docs/adr/0003-settlement-channel-account-pool.md
 history:
   - date: "2026-10-05"
     status: backlog
@@ -65,6 +66,15 @@ history:
       deadline, txBadSeq resync, onSigned, feeStats default, checkChannel); 6 fixes; 9 test
       gaps. 70 tests (+28), 18/18 seeded mutations caught. Reruns at 200 channels: 90-99
       steady, S4 box unticked. Spawned 0009, 0010, 0011.
+  - date: "2026-10-07"
+    status: completed
+    who: okarcz
+    note: >
+      PR #4 rebase-merged into develop (91e9f5f), without a re-review from Adam. Steps 1-4 and
+      6-8 done; step 5 (zero-amount) moved to 0009. 70 unit tests. Testnet: 50 channels = 50 per
+      ledger; 200 channels steady 90-99 (S4 >=100 not met), 0 sequence errors. ADR 0003 records
+      the channel-pool decision; the 0006 notes now cite the official one-tx-per-account sources.
+      Follow-ups: 0009, 0010, 0011.
 ---
 
 # Build the facilitator's settlement submitter on a channel-account pool
@@ -79,7 +89,7 @@ KALE bots bidding 100–200 stroops, so at a 200-stroop bid about 20 `upto` per 
 average (13 at the median, per the 2026-10-06 analysis). It serves `upto` now and `exact` later,
 since both submit one Soroban call per payment.
 
-## Status: Active
+## Status: Completed
 
 > Started 2026-10-05 on branch `lore-0007-facilitator-settlement-submitter`.
 > 2026-10-05: first slice in PR #4 (steps 1–3). Step 6 added on the same branch, along with a fix
@@ -105,6 +115,9 @@ since both submit one Soroban call per payment.
 > - 7 design decisions, 6 other fixes and Adam's 9 test gaps; 70 unit tests.
 > - Testnet reruns on the final code. The S4 ≥100 steady target is unticked: 90–99 measured.
 > - Follow-ups are in 0009, 0010 and 0011.
+> 2026-10-07: PR #4 rebase-merged into develop (`91e9f5f`), without a re-review. ADR 0003
+> ([docs/adr/0003](../../../docs/adr/0003-settlement-channel-account-pool.md)) records why
+> settlement uses a channel-account pool. Task closed.
 
 ## Progress
 
@@ -261,7 +274,7 @@ since both submit one Soroban call per payment.
 
 **Open:**
 
-- Nothing in the plan. The follow-ups are backlog tasks 0009, 0010 and 0011 (see Future Work).
+- Nothing. The follow-ups are backlog tasks 0009, 0010 and 0011 (see Future Work).
 
 **Emerged:**
 

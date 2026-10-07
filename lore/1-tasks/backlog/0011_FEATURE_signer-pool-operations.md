@@ -7,7 +7,7 @@ related_adr: []
 related_tasks: ["0007"]
 tags: [signer-pool, operations, priority-low, effort-medium]
 links:
-  - ../active/0007_FEATURE_facilitator-settlement-submitter.md
+  - ../archive/0007_FEATURE_facilitator-settlement-submitter.md
 history:
   - date: "2026-10-06"
     status: backlog
