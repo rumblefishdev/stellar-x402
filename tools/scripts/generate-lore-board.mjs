@@ -34,6 +34,9 @@ const LAYER_LABELS = {
 
 const LAYER_ORDER = Object.keys(LAYER_LABELS);
 
+// Work lanes from the M1 plan (docs/planning/m1-epics.md); one tag per task.
+const LANES = ["payments", "discovery", "platform"];
+
 function parseFrontmatter(content) {
   const match = content.match(/^---\n([\s\S]*?)\n---/);
   if (!match) return null;
@@ -181,6 +184,11 @@ function getLayer(task) {
   return layerTag;
 }
 
+function getLane(task) {
+  const tags = Array.isArray(task.tags) ? task.tags : [];
+  return LANES.find((lane) => tags.includes(lane)) || null;
+}
+
 function getPriority(task) {
   const tags = Array.isArray(task.tags) ? task.tags : [];
   const p = tags.find((t) => t.startsWith("priority-"));
@@ -220,6 +228,7 @@ function generateJSON(tasks) {
     status: t._dir,
     milestone: parseInt(t.milestone, 10) || null,
     layer: getLayer(t),
+    lane: getLane(t),
     priority: getPriority(t),
     assignee: getAssignee(t),
     tags: t.tags || [],
