@@ -49,3 +49,6 @@ lore/0-session/next-tasks.md
 lore/README.md
 lore/BOARD.md
 lore/board.json
+# BMAD (local setup and generated planning docs)
+_bmad/
+_bmad-output/
