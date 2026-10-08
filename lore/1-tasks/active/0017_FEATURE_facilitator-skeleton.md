@@ -58,3 +58,48 @@ As a developer on any of the three lanes, I want a facilitator app that boots, v
 - [ ] Given a valid environment, when the app starts, then it reads and validates config once with zod, listens on the configured port and answers stub routes for `/verify`, `/settle`, `/supported` and `/discovery/resources`; `src/main.ts` is the only composition root and the only place that reads `process.env`
 - [ ] Given a missing or invalid config value, when the app starts, then it exits with an error that names the value and never prints a secret
 - [ ] Given the test setup, when the integration test boots the app with in-memory fakes of all four ports and `fake-rpc`, then it passes with no network and no database; each port has an in-memory fake in `apps/facilitator`; logs are structured, one event per line, and never contain secrets or full XDR; requests have a body size limit
+
+## Implementation Notes
+
+### Day-1 types PR (branch `lore-0017-day1-types`)
+
+- `apps/facilitator/src/ports/`: `SettlementStore`, `CatalogStore`, `RateLimitStore`,
+  `SpendStore`, plus a `Stores` bundle for the composition root.
+- `apps/facilitator/src/settlement/hooks.ts`: `SettlementHooks` with `beforeSubmit`, `onFinal`
+  and `onSuccess`.
+- `apps/facilitator/src/config.ts`: zod env schema, `parseConfig()` into a grouped `Config`, and
+  `ConfigError`, which names each bad setting without echoing its value.
+- `apps/facilitator/test/config.test.ts`: 7 tests (defaults, fee settings, blank-as-unset, missing
+  and invalid values, no secret in errors, the pubnet RPC rule).
+- `zod` ^3.25.76 added to `apps/facilitator`.
+
+## Design Decisions
+
+### From Plan
+
+1. **Four ports in `apps/facilitator`** with the operations AD-7 lists: atomic `claim`,
+   `findByHash`, forward-only compare-and-set `transition`, catalog `upsert` by key and `list`
+   with the AD-20 filters, and fixed-window rate-limit counters.
+2. **Upstream types on the wire**: records hold `@x402/core` `PaymentPayload` and
+   `PaymentRequirements`; the catalog stores and returns `@x402/extensions` `DiscoveryResource`.
+
+### Emerged (to confirm in the types review)
+
+3. **The channel lease lives on `SettlementStore`**: AD-7 fixes four ports and lists the lease
+   among the operations the store must support, so there is no fifth port.
+4. **A third hook, `onFinal`**: 0024 must settle or release the spend reservation and feed the
+   breakers on every final outcome, not only on `success`.
+5. **`onSuccess` is synchronous and returns the `EXTENSION-RESPONSES` value**: AD-8 allows only
+   the pure validation before the response, so the hook returns the header value and starts the
+   catalog write fire-and-forget. From `resolved` events the value is ignored.
+6. **`addHash` is separate from `transition`**: a rebuild adds a hash while the record stays
+   `signed`, which a state compare-and-set can't express.
+7. **Records keep the payload and requirements**, so a late `success` (startup re-check or
+   `resolved` event) can still catalog the resource.
+8. **Env names**: `RPC_URLS` (comma-separated, as in the smoke script) replaces
+   `STELLAR_RPC_URL`; `STORE` takes only `memory` until 0022.
+9. **Interim numeric defaults**, to be confirmed by the owning tasks: `MAX_FEE_STROOPS` 250,000
+   (the pool's default), `MIN_VALIDITY_LEDGERS` 12, `SETTLE_TIMEOUT_MS` 30 s, `LEASE_TTL_MS` 30 s,
+   body limit 64 KiB, rate limits per minute 120 verify / 60 settle / 120 discovery, a daily spend
+   window with 500 XLM global, 5 XLM per payer, 50 XLM per `payTo` and 200 XLM per asset, and a
+   breaker after 5 failures with a 10-minute cooldown.
