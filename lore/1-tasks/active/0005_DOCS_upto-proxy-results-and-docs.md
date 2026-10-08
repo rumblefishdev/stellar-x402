@@ -2,7 +2,7 @@
 id: "0005"
 title: "Document UptoProxy: design ADR, contract docs, threat model and testnet report"
 type: DOCS
-status: backlog
+status: active
 milestone: 1
 related_adr: []
 related_tasks: ["0002", "0003", "0004", "0006", "0012"]
@@ -29,6 +29,10 @@ history:
     status: backlog
     who: claude
     note: "Mapped to M1 Story 5.2 (Payments lane) by 0012."
+  - date: "2026-10-08"
+    status: active
+    who: okarcz
+    note: "Started while 0004's PR (#8) waits for review; its results and findings are the input."
 ---
 
 # Document UptoProxy: design ADR, contract docs, threat model and testnet report
@@ -40,9 +44,10 @@ reviewers and auditors, the facilitator team, and the future `scheme_upto_stella
 
 **Story:** [M1 Story 5.2](../../../docs/planning/m1-epics.md#story-52-document-uptoproxy-design-adr-contract-docs-threat-model-and-testnet-report) · **Lane:** Payments
 
-## Status: Backlog
+## Status: Active
 
-> Blocked by 0004.
+> Started 2026-10-08. 0004 is done in code and in review (PR #8); its testnet results, report and
+> findings are on branch `lore-0004-upto-proxy-testnet-e2e` until it merges.
 
 ## Implementation Plan
 
