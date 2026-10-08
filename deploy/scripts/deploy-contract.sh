@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # Builds and deploys one contract from contracts/ to testnet. Idempotent: the salt is the WASM
-# hash, so the contract ID follows from the deployer and the code. A rerun finds the contract and
-# deploys nothing; changed code gets a new ID (the contracts are immutable). After a testnet
-# reset, the deployer is funded again and the contract redeployed under the same ID.
+# hash, so the contract ID follows from the deployer's address and the code. A rerun finds the
+# contract and deploys nothing; changed code gets a new ID (the contracts are immutable). After a
+# testnet reset, the deployer is funded again and the contract redeployed under the same ID.
+#
+# The ID is per deployer: another deployer key, or a WASM build that differs by a byte (another
+# toolchain or stellar-cli version), gives another ID. UPTO_PROXY_CONTRACT_ID in
+# deploy/testnet.env.example is okarcz's deployment.
 #
 # Usage: deploy/scripts/deploy-contract.sh <upto-proxy|test-token>
 # Env:   DEPLOYER  stellar-cli identity that deploys (default x402-testnet-deployer; created and

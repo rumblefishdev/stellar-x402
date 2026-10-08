@@ -2,7 +2,7 @@
 // first, so a rerun only tops up what is missing, and a run after a testnet reset rebuilds it all
 // (except testnet USDC, which only Circle's faucet hands out).
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Address, Asset, Keypair, Operation, nativeToScVal } from "@stellar/stellar-sdk";
@@ -68,6 +68,7 @@ function loadSecrets(): Secrets {
 function saveSecrets(secrets: Secrets): void {
   mkdirSync(dirname(SECRETS), { recursive: true });
   writeFileSync(SECRETS, `${JSON.stringify(secrets, null, 2)}\n`);
+  chmodSync(SECRETS, 0o600);
 }
 
 /** Runs deploy/scripts/deploy-contract.sh and reads its `KEY=value` output. */
@@ -82,6 +83,18 @@ function deploy(name: string): { contractId: string; wasmHash: string } {
     return line.split("=")[1]!.trim();
   };
   return { contractId: value("CONTRACT_ID"), wasmHash: value("WASM_HASH") };
+}
+
+/** Warns when the proxy deployed here isn't the one recorded in deploy/testnet.env.example. */
+function warnIfNotRecorded(contractId: string): void {
+  const env = readFileSync(join(repo, "deploy/testnet.env.example"), "utf8");
+  const recorded = /^UPTO_PROXY_CONTRACT_ID=(\S+)/m.exec(env)?.[1];
+  if (recorded && recorded !== contractId) {
+    console.warn(
+      `UptoProxy deployed at ${contractId}, not the recorded ${recorded}: contract IDs depend on ` +
+        "the deployer key and the exact WASM, so this run tests your own deployment.",
+    );
+  }
 }
 
 async function hasTrustline(account: string, asset: Asset): Promise<boolean> {
@@ -134,6 +147,7 @@ async function ensureChannels(facilitator: Keypair, known: string[], count: numb
     });
     tx.sign(facilitator, ...batch);
     const sent = await server.sendTransaction(tx);
+    if (sent.status !== "PENDING") throw new Error(`channel setup ${sent.hash}: ${sent.status}`);
     const done = await server.pollTransaction(sent.hash, { attempts: 30 });
     if (done.status !== "SUCCESS")
       throw new Error(`channel setup ${sent.hash} ended ${done.status}`);
@@ -144,6 +158,7 @@ async function ensureChannels(facilitator: Keypair, known: string[], count: numb
 /** `needUsdc: false` skips the USDC balance check, for runs without the USDC scenarios. */
 export async function prepareWorld({ needUsdc = true } = {}): Promise<World> {
   const proxy = deploy("upto-proxy");
+  warnIfNotRecorded(proxy.contractId);
   const testToken = deploy("test-token");
 
   const secrets = loadSecrets();
@@ -198,7 +213,9 @@ export async function prepareWorld({ needUsdc = true } = {}): Promise<World> {
     );
   }
 
+  // Saved after each call, so channels already created and funded are never lost.
   secrets.channels = await ensureChannels(facilitator, secrets.channels, 2);
+  saveSecrets(secrets);
   secrets.otherChannels = await ensureChannels(otherFacilitator, secrets.otherChannels, 1);
   saveSecrets(secrets);
 

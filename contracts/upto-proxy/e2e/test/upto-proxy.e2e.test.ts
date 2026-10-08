@@ -72,6 +72,7 @@ beforeAll(async () => {
     channels: world.otherChannels,
   });
   expLedger = (await server.getLatestLedger()).sequence + 500;
+  // Taken after setup, which pays the client's trustline fees: the check covers settlements.
   clientXlmBefore = await xlmBalance(world.client.publicKey());
 });
 
@@ -84,12 +85,15 @@ afterAll(() => {
     proxy: world.proxy,
     testToken: world.testToken,
     tokens: world.tokens,
+    /** The tokens this run covered; a subset run (E2E_TOKENS) leaves the others out. */
+    tokensRun: TOKENS,
     accounts: {
       facilitator: world.facilitator.publicKey(),
       otherFacilitator: world.otherFacilitator.publicKey(),
       client: world.client.publicKey(),
       seller: world.seller.publicKey(),
       channels: world.channels,
+      otherChannels: world.otherChannels,
     },
     passed: results.filter((r) => r.pass).length,
     failed: results.filter((r) => !r.pass).length,
@@ -148,6 +152,53 @@ const balances = async (t: UptoTerms) => {
   };
 };
 
+const allowanceOf = async (t: UptoTerms) =>
+  BigInt(
+    (await readContract(
+      t.token,
+      "allowance",
+      [Address.fromString(t.from).toScVal(), Address.fromString(t.proxy).toScVal()],
+      t.facilitator,
+    )) as bigint,
+  );
+
+/**
+ * Checks what a successful settlement must leave on chain, except the balances: the
+ * delegated-bump shape, the event, the used nonce and, unless another settlement from the same
+ * payer may have run after it, the leftover allowance.
+ */
+async function checkSettled(
+  r: ScenarioResult,
+  t: UptoTerms,
+  hash: string,
+  actual: bigint,
+  { allowance = true } = {},
+): Promise<TxReport> {
+  const tx = await txReport(hash, t.proxy);
+  r.transactions.push(tx);
+
+  // Delegated-bump shape: the facilitator pays, a channel provides the sequence number.
+  expect(tx.feeSource).toBe(t.facilitator);
+  expect(tx.opSource).toBe(t.facilitator);
+  expect(world.channels).toContain(tx.txSource);
+  expect([tx.feeSource, tx.txSource, tx.opSource]).not.toContain(t.from);
+
+  expect(tx.events).toHaveLength(1);
+  const [event] = tx.events as { topics: unknown[]; data: Record<string, unknown> }[];
+  expect(event!.topics).toEqual(["upto_settled", t.token, t.from, t.to]);
+  expect(event!.data.facilitator).toBe(t.facilitator);
+  expect(BigInt(event!.data.max_amount as bigint)).toBe(t.maxAmount);
+  expect(BigInt(event!.data.actual_amount as bigint)).toBe(actual);
+
+  expect(await readContract(t.proxy, "is_nonce_used", nonceArgs(t), t.facilitator)).toBe(true);
+  if (allowance) {
+    const left = await allowanceOf(t);
+    expect(left).toBe(t.maxAmount - actual);
+    r.leftoverAllowance = String(left);
+  }
+  return tx;
+}
+
 /** Submits through the pool and checks everything a successful settlement must leave on chain. */
 async function settleAndCheck(
   r: ScenarioResult,
@@ -159,35 +210,10 @@ async function settleAndCheck(
   const before = await balances(t);
   const result = await submitter.submit(settleCall(auth, t, actual));
   expect(result.status, `submit ${result.hash}: ${result.errorCode ?? ""}`).toBe("success");
-  const tx = await txReport(result.hash!, t.proxy);
-  r.transactions.push(tx);
-
-  // Delegated-bump shape: the facilitator pays, a channel provides the sequence number.
-  expect(tx.feeSource).toBe(t.facilitator);
-  expect(tx.opSource).toBe(t.facilitator);
-  expect(world.channels).toContain(tx.txSource);
-  expect([tx.feeSource, tx.txSource, tx.opSource]).not.toContain(t.from);
-
+  const tx = await checkSettled(r, t, result.hash!, actual);
   const after = await balances(t);
   expect(before.client - after.client).toBe(actual);
   expect(after.seller - before.seller).toBe(actual);
-
-  expect(tx.events).toHaveLength(1);
-  const [event] = tx.events as { topics: unknown[]; data: Record<string, unknown> }[];
-  expect(event!.topics).toEqual(["upto_settled", t.token, t.from, t.to]);
-  expect(event!.data.facilitator).toBe(t.facilitator);
-  expect(BigInt(event!.data.max_amount as bigint)).toBe(t.maxAmount);
-  expect(BigInt(event!.data.actual_amount as bigint)).toBe(actual);
-
-  const src = t.facilitator;
-  expect(await readContract(t.proxy, "is_nonce_used", nonceArgs(t), src)).toBe(true);
-  const allowance = await readContract(
-    t.token,
-    "allowance",
-    [Address.fromString(t.from).toScVal(), Address.fromString(t.proxy).toScVal()],
-    src,
-  );
-  r.leftoverAllowance = String(allowance);
   return tx;
 }
 
@@ -285,13 +311,20 @@ describe.each(TOKENS)("UptoProxy on testnet with %s", (kind) => {
       await expectRefused(r, settleCall(auth, t, 1n), AUTH_MISMATCH, otherSubmitter);
     }));
 
-  const tampers: [string, (t: UptoTerms) => Partial<UptoTerms>][] = [
-    ["recipient", (t) => ({ to: t.facilitator })],
-    ["token", () => ({ token: world.tokens[kind === "sac" ? "sep41" : "sac"] })],
-    ["ceiling", (t) => ({ maxAmount: t.maxAmount * 2n })],
-    ["nonce", () => ({ nonce: Buffer.alloc(32, 9) })],
+  // The facilitator case is sent by the other facilitator, with its own authorization, so only
+  // the client's signature can refuse it.
+  const tampers: [string, (t: UptoTerms) => Partial<UptoTerms>, () => SettlementSubmitter][] = [
+    ["recipient", (t) => ({ to: t.facilitator }), () => submitter],
+    ["token", () => ({ token: world.tokens[kind === "sac" ? "sep41" : "sac"] }), () => submitter],
+    ["ceiling", (t) => ({ maxAmount: t.maxAmount * 2n }), () => submitter],
+    ["nonce", () => ({ nonce: Buffer.alloc(32, 9) }), () => submitter],
+    [
+      "facilitator",
+      () => ({ facilitator: world.otherFacilitator.publicKey() }),
+      () => otherSubmitter,
+    ],
   ];
-  for (const [field, change] of tampers) {
+  for (const [field, change, via] of tampers) {
     const name = `rejects a changed ${field}`;
     it(name, () =>
       scenario(kind, name, "Error(Auth, InvalidAction)", async (r) => {
@@ -299,7 +332,7 @@ describe.each(TOKENS)("UptoProxy on testnet with %s", (kind) => {
         const auth = await clientSign(t, world.client, expLedger);
         const tampered = { ...t, ...change(t) };
         expect(() => checkClientAuth(auth, tampered)).toThrow();
-        await expectRefused(r, settleCall(auth, t, 1n, tampered), AUTH_MISMATCH);
+        await expectRefused(r, settleCall(auth, t, 1n, tampered), AUTH_MISMATCH, via());
       }),
     );
   }
@@ -323,34 +356,50 @@ describe.each(TOKENS)("UptoProxy on testnet with %s", (kind) => {
       "settles two authorizations in the same ledger",
       "both success, one ledger",
       async (r) => {
-        const [a, b] = [terms(kind), terms(kind)];
-        const [authA, authB] = [
-          await clientSign(a, world.client, expLedger),
-          await clientSign(b, world.client, expLedger),
-        ];
-        // Both are signed before either is sent, so each balance check sees the other's transfer;
-        // check the pair as a whole instead.
-        const before = await balances(a);
-        const [ra, rb] = await Promise.all([
-          submitter.submit(settleCall(authA, a, 3_000n)),
-          submitter.submit(settleCall(authB, b, 4_000n)),
-        ]);
-        expect([ra.status, rb.status]).toEqual(["success", "success"]);
-        const txs = [await txReport(ra.hash!, a.proxy), await txReport(rb.hash!, b.proxy)];
-        r.transactions.push(...txs);
-        const after = await balances(a);
-        expect(before.client - after.client).toBe(7_000n);
-        expect(after.seller - before.seller).toBe(7_000n);
-        expect(new Set(txs.map((tx) => tx.txSource)).size).toBe(2);
-        expect(txs[0]!.ledger).toBe(txs[1]!.ledger);
-        r.outcome = `success, both in ledger ${txs[0]!.ledger}`;
+        // Two parallel submits can straddle a ledger close, so try a few times.
+        for (let attempt = 1; ; attempt++) {
+          const [a, b] = [terms(kind), terms(kind)];
+          const [authA, authB] = [
+            await clientSign(a, world.client, expLedger),
+            await clientSign(b, world.client, expLedger),
+          ];
+          checkClientAuth(authA, a);
+          checkClientAuth(authB, b);
+          // Both are signed before either is sent, so each balance check would see the other's
+          // transfer; check the pair as a whole instead.
+          const before = await balances(a);
+          const [ra, rb] = await Promise.all([
+            submitter.submit(settleCall(authA, a, 3_000n)),
+            submitter.submit(settleCall(authB, b, 4_000n)),
+          ]);
+          expect([ra.status, rb.status]).toEqual(["success", "success"]);
+          // Which `approve` ran last is unknown, so the allowance is checked for the pair.
+          const txs = [
+            await checkSettled(r, a, ra.hash!, 3_000n, { allowance: false }),
+            await checkSettled(r, b, rb.hash!, 4_000n, { allowance: false }),
+          ];
+          const left = await allowanceOf(a);
+          expect([MAX - 3_000n, MAX - 4_000n]).toContain(left);
+          r.leftoverAllowance = String(left);
+          const after = await balances(a);
+          expect(before.client - after.client).toBe(7_000n);
+          expect(after.seller - before.seller).toBe(7_000n);
+          expect(new Set(txs.map((tx) => tx.txSource)).size).toBe(2);
+          if (txs[0]!.ledger === txs[1]!.ledger) {
+            r.outcome = `success, both in ledger ${txs[0]!.ledger} (attempt ${attempt})`;
+            return;
+          }
+          if (attempt === 3) {
+            throw new Error(`3 attempts, none landed both settlements in one ledger`);
+          }
+        }
       },
     ));
 });
 
 describe("fees", () => {
   it("never charges the client", () =>
-    scenario("all", "client pays no fee", "client XLM balance unchanged", async (r) => {
+    scenario("all", "client pays no settlement fee", "client XLM balance unchanged", async (r) => {
       const after = await xlmBalance(world.client.publicKey());
       expect(after).toBe(clientXlmBefore);
       r.outcome = `client XLM unchanged at ${after} stroops`;

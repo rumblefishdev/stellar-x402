@@ -82,7 +82,11 @@ const contractFn = (
     subInvocations,
   });
 
-/** The auth tree the client must sign (spec §3.1): every argument but `from` and `actual_amount`. */
+/**
+ * The auth tree the client must sign (spec §3.1). The root covers every argument except `from`
+ * (the signer), `actual_amount` (unsigned) and `allowance_expiration_ledger`, which is bound
+ * through the `approve` sub-invocation.
+ */
 export function expectedClientInvocation(t: UptoTerms): xdr.SorobanAuthorizedInvocation {
   return contractFn(
     t.proxy,
