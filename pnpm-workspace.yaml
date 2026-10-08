@@ -3,6 +3,7 @@ packages:
   - packages/*
   - examples/*
   - conformance
+  - contracts/upto-proxy/e2e
 
 allowBuilds:
   esbuild: true

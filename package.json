@@ -19,9 +19,10 @@
     "format:check": "prettier --check .",
     "board": "node tools/scripts/generate-lore-board.mjs",
     "contracts:test": "cd contracts && cargo test",
-    "contracts:build": "cd contracts && stellar contract build --manifest-path upto-proxy/Cargo.toml",
+    "contracts:build": "cd contracts && stellar contract build",
     "contracts:lint": "cd contracts && cargo fmt --all --check && cargo clippy --all-targets -- -D warnings",
-    "contracts:test:wasm": "pnpm contracts:build && cd contracts && cargo test -- --ignored --nocapture"
+    "contracts:test:wasm": "pnpm contracts:build && cd contracts && cargo test -- --ignored --nocapture",
+    "contracts:e2e": "turbo run build --filter=@stellar-x402/signer-pool && pnpm --filter @stellar-x402/upto-proxy-e2e test:testnet"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
