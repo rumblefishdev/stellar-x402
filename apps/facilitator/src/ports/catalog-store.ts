@@ -13,7 +13,10 @@ export interface CatalogKey {
 
 export interface CatalogEntry {
   key: CatalogKey;
-  /** The upstream discovery shape, as returned by `GET /discovery/resources`. */
+  /**
+   * The upstream discovery shape, as returned by `GET /discovery/resources`. One settlement knows
+   * one requirement, so `accepts` usually holds one entry. The caller stamps `lastUpdated`.
+   */
   resource: DiscoveryResource;
 }
 
@@ -36,7 +39,10 @@ export interface CatalogPage {
 
 /** Bazaar catalog (AD-7, AD-19, AD-20). */
 export interface CatalogStore {
-  /** Idempotent by key; replaces the entry and its `lastUpdated`. */
+  /**
+   * Idempotent by key. Merges `accepts` by `scheme + network + asset`: a matching requirement is
+   * replaced, others are kept. Every other field, `lastUpdated` included, is replaced.
+   */
   upsert(entry: CatalogEntry): Promise<void>;
   /** Matching entries in a stable order, with no ranking. */
   list(query: CatalogQuery): Promise<CatalogPage>;

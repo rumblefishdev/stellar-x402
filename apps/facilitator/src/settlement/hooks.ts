@@ -21,11 +21,20 @@ export interface BeforeSubmitContext {
 
 export type BeforeSubmitResult =
   | { allow: true }
-  /** Nothing is submitted; `/settle` answers `success: false` with this x402 `errorReason`. */
+  /**
+   * Nothing is submitted: the record moves `claimed → rejected` with this x402 `errorReason`,
+   * `/settle` answers `success: false`, and `onFinal` is not called. A hook that throws is
+   * treated the same way.
+   */
   | { allow: false; errorReason: string };
 
 /** Where a record turned final: inline in `/settle`, or later (`resolved` event, startup re-check). */
 export type SettlementOrigin = "settle" | "resolved";
+
+/** The `EXTENSION-RESPONSES` header value of a settle response (AD-8). */
+export interface ExtensionResponses {
+  bazaar: { status: "processing" | "rejected"; reason?: string };
+}
 
 /**
  * Extension points of the settlement module, wired in the composition root. Payments calls them;
@@ -40,13 +49,16 @@ export interface SettlementHooks {
    */
   onFinal(record: SettlementRecord, origin: SettlementOrigin): Promise<void>;
   /**
-   * Runs once when a record turns `success` (AD-8). Must return synchronously and never throw;
-   * slow work such as the catalog write is started fire-and-forget. With origin `settle` the
-   * result becomes the `EXTENSION-RESPONSES` header of the settle response; otherwise it is
-   * ignored. It never changes the response body or status.
+   * Pure and synchronous: the bazaar validation result for a `success` record settled inline,
+   * computed before the response. `/settle` sends it as the `EXTENSION-RESPONSES` header; it
+   * never changes the response body or status. `undefined` when the payload has no
+   * `extensions.bazaar`.
    */
-  onSuccess(
-    record: SettlementRecord,
-    origin: SettlementOrigin,
-  ): Record<string, unknown> | undefined;
+  extensionResponses(record: SettlementRecord): ExtensionResponses | undefined;
+  /**
+   * Runs once when a record turns `success` (AD-8): after the settle response is sent, or when a
+   * `resolved` event or the startup re-check finalizes it. Its result and errors never reach the
+   * caller; the settlement module logs and counts them.
+   */
+  onSuccess(record: SettlementRecord, origin: SettlementOrigin): Promise<void>;
 }

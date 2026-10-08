@@ -19,6 +19,7 @@
     "@stellar-x402/config": "workspace:*",
     "@stellar-x402/mcp": "workspace:*",
     "@stellar-x402/signer-pool": "workspace:*",
+    "@stellar/stellar-sdk": "^16.3.0",
     "@x402/core": "~2.27.0",
     "@x402/extensions": "~2.27.0",
     "@x402/stellar": "~2.27.0",
