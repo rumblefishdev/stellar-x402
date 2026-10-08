@@ -1,7 +1,10 @@
-//! Minimal non-SAC SEP-41 token for tests, written in-repo (no third-party token code).
+#![no_std]
+//! Minimal non-SAC SEP-41 token for tests, written in-repo (no third-party token code). Used by
+//! the `upto-proxy` unit tests and deployed to testnet for its e2e suite (0004).
 //!
 //! Allowances follow SEP-41: `approve` overwrites, carries an expiration ledger, and an
-//! expired allowance reads as 0. `mint` is unauthenticated test scaffolding.
+//! expired allowance reads as 0. `mint` is unauthenticated test scaffolding: anyone can mint, so
+//! never deploy it outside testnet.
 
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String};
 
