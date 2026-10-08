@@ -1,0 +1,1843 @@
+{
+  "runAt": "2026-10-08T09:45:36.052Z",
+  "network": "stellar:testnet",
+  "rpc": "https://soroban-testnet.stellar.org",
+  "proxy": {
+    "contractId": "CC3VX7N6ILD63V7FS2JA7XUDX4DMHYEJXRZDOMU7GVW76XYINOAZ7OYU",
+    "wasmHash": "be2ba12160a7e3e1a93ed0cb457b7e93cd6ed4c725cb51aeeb87313b45dd0b34"
+  },
+  "testToken": {
+    "contractId": "CAFLGBBXESMRLBFNTG3USDML66437G74EACP3LVOUZPUUJDJQT3HMQEO",
+    "wasmHash": "937c707945189efa62e880973214a793208d1b83e88d1c10e25186ddfdcb5973"
+  },
+  "tokens": {
+    "usdc": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+    "sac": "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
+    "sep41": "CAFLGBBXESMRLBFNTG3USDML66437G74EACP3LVOUZPUUJDJQT3HMQEO"
+  },
+  "accounts": {
+    "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+    "otherFacilitator": "GDVTHE3G2JEOLWVJZA2FIGG2C3X75WK6NIEVVT2VJT23VV55A6EKB7VV",
+    "client": "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+    "seller": "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK",
+    "channels": [
+      "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
+      "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2"
+    ]
+  },
+  "passed": 46,
+  "failed": 0,
+  "scenarios": [
+    {
+      "token": "usdc",
+      "scenario": "settles below the ceiling",
+      "expected": "success",
+      "outcome": "success",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "5ab6f75ff1c066b4772885c4c2752e1db5520e122711b5d2a2ec8d6869408310",
+          "link": "https://stellar.expert/explorer/testnet/tx/5ab6f75ff1c066b4772885c4c2752e1db5520e122711b5d2a2ec8d6869408310",
+          "ledger": 5085796,
+          "feeChargedStroops": "43910",
+          "resourceFeeStroops": "55123",
+          "instructions": 1560973,
+          "diskReadBytes": 376,
+          "writeBytes": 776,
+          "envelopeBytes": 2500,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
+          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "250000",
+                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    232,
+                    205,
+                    99,
+                    94,
+                    77,
+                    8,
+                    92,
+                    103,
+                    166,
+                    28,
+                    241,
+                    197,
+                    240,
+                    87,
+                    174,
+                    1,
+                    141,
+                    124,
+                    219,
+                    84,
+                    121,
+                    69,
+                    34,
+                    225,
+                    66,
+                    189,
+                    206,
+                    217,
+                    185,
+                    226,
+                    183,
+                    172
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "leftoverAllowance": "750000"
+    },
+    {
+      "token": "usdc",
+      "scenario": "settles at the ceiling",
+      "expected": "success",
+      "outcome": "success",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "e29f39767074610986f0ecc2046dbc9f71dbc65fc635ee114fe3e9297e1d1fc3",
+          "link": "https://stellar.expert/explorer/testnet/tx/e29f39767074610986f0ecc2046dbc9f71dbc65fc635ee114fe3e9297e1d1fc3",
+          "ledger": 5085798,
+          "feeChargedStroops": "40900",
+          "resourceFeeStroops": "51660",
+          "instructions": 1582440,
+          "diskReadBytes": 376,
+          "writeBytes": 776,
+          "envelopeBytes": 2500,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
+          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "1000000",
+                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    30,
+                    54,
+                    243,
+                    62,
+                    93,
+                    10,
+                    86,
+                    123,
+                    211,
+                    83,
+                    86,
+                    99,
+                    40,
+                    102,
+                    223,
+                    68,
+                    92,
+                    153,
+                    161,
+                    101,
+                    86,
+                    130,
+                    211,
+                    21,
+                    145,
+                    233,
+                    43,
+                    58,
+                    78,
+                    117,
+                    122,
+                    41
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "leftoverAllowance": "0"
+    },
+    {
+      "token": "usdc",
+      "scenario": "settles zero",
+      "expected": "success, no transfer, event and nonce recorded",
+      "outcome": "success",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "1d9ec4ccac597031dc7adf33c5d2e0aa98d1c5c47cff178d2feff4e485ab9c7a",
+          "link": "https://stellar.expert/explorer/testnet/tx/1d9ec4ccac597031dc7adf33c5d2e0aa98d1c5c47cff178d2feff4e485ab9c7a",
+          "ledger": 5085799,
+          "feeChargedStroops": "30384",
+          "resourceFeeStroops": "40962",
+          "instructions": 1374404,
+          "diskReadBytes": 144,
+          "writeBytes": 544,
+          "envelopeBytes": 2332,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
+          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "0",
+                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    123,
+                    43,
+                    26,
+                    171,
+                    91,
+                    25,
+                    90,
+                    225,
+                    197,
+                    28,
+                    198,
+                    175,
+                    100,
+                    227,
+                    190,
+                    163,
+                    178,
+                    195,
+                    245,
+                    120,
+                    233,
+                    171,
+                    30,
+                    250,
+                    215,
+                    132,
+                    157,
+                    84,
+                    30,
+                    223,
+                    201,
+                    175
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "leftoverAllowance": "1000000"
+    },
+    {
+      "token": "usdc",
+      "scenario": "rejects an amount over the ceiling",
+      "expected": "AmountExceedsMax (#2)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Contract, #2)"
+    },
+    {
+      "token": "usdc",
+      "scenario": "rejects a replayed auth entry",
+      "expected": "Error(Auth, ExistingValue)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, ExistingValue)"
+    },
+    {
+      "token": "usdc",
+      "scenario": "rejects a reused nonce with a new signature",
+      "expected": "NonceUsed (#7)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Contract, #7)"
+    },
+    {
+      "token": "usdc",
+      "scenario": "rejects a settlement before valid_after",
+      "expected": "NotYetValid (#4)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Contract, #4)"
+    },
+    {
+      "token": "usdc",
+      "scenario": "rejects a settlement after the deadline",
+      "expected": "Expired (#5)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Contract, #5)"
+    },
+    {
+      "token": "usdc",
+      "scenario": "rejects a different facilitator",
+      "expected": "Error(Auth, InvalidAction)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, InvalidAction)"
+    },
+    {
+      "token": "usdc",
+      "scenario": "rejects a changed recipient",
+      "expected": "Error(Auth, InvalidAction)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, InvalidAction)"
+    },
+    {
+      "token": "usdc",
+      "scenario": "rejects a changed token",
+      "expected": "Error(Auth, InvalidAction)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, InvalidAction)"
+    },
+    {
+      "token": "usdc",
+      "scenario": "rejects a changed ceiling",
+      "expected": "Error(Auth, InvalidAction)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, InvalidAction)"
+    },
+    {
+      "token": "usdc",
+      "scenario": "rejects a changed nonce",
+      "expected": "Error(Auth, InvalidAction)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, InvalidAction)"
+    },
+    {
+      "token": "usdc",
+      "scenario": "settles two authorizations one after the other",
+      "expected": "both success",
+      "outcome": "success in ledgers 5085802 and 5085803",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "cbb79b7ea6af76043c85c46fac020f3b4073a893b2eb633c9e97e3b7531d7edc",
+          "link": "https://stellar.expert/explorer/testnet/tx/cbb79b7ea6af76043c85c46fac020f3b4073a893b2eb633c9e97e3b7531d7edc",
+          "ledger": 5085802,
+          "feeChargedStroops": "40900",
+          "resourceFeeStroops": "51660",
+          "instructions": 1582440,
+          "diskReadBytes": 376,
+          "writeBytes": 776,
+          "envelopeBytes": 2500,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
+          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "1000",
+                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    99,
+                    213,
+                    202,
+                    172,
+                    83,
+                    194,
+                    210,
+                    79,
+                    68,
+                    230,
+                    91,
+                    165,
+                    54,
+                    120,
+                    28,
+                    88,
+                    117,
+                    165,
+                    154,
+                    134,
+                    212,
+                    80,
+                    37,
+                    97,
+                    122,
+                    36,
+                    81,
+                    18,
+                    162,
+                    223,
+                    29,
+                    222
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "hash": "ffab796d6a14f1e73022a42b62ca48cc9d75c684405cc6e45eaa9b7f6ae3698e",
+          "link": "https://stellar.expert/explorer/testnet/tx/ffab796d6a14f1e73022a42b62ca48cc9d75c684405cc6e45eaa9b7f6ae3698e",
+          "ledger": 5085803,
+          "feeChargedStroops": "40900",
+          "resourceFeeStroops": "51660",
+          "instructions": 1582440,
+          "diskReadBytes": 376,
+          "writeBytes": 776,
+          "envelopeBytes": 2500,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
+          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "2000",
+                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    164,
+                    191,
+                    243,
+                    67,
+                    47,
+                    213,
+                    139,
+                    111,
+                    18,
+                    82,
+                    141,
+                    190,
+                    187,
+                    203,
+                    148,
+                    231,
+                    239,
+                    125,
+                    45,
+                    254,
+                    58,
+                    201,
+                    142,
+                    56,
+                    30,
+                    116,
+                    4,
+                    120,
+                    178,
+                    252,
+                    0,
+                    122
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "leftoverAllowance": "998000"
+    },
+    {
+      "token": "usdc",
+      "scenario": "settles two authorizations in the same ledger",
+      "expected": "both success, one ledger",
+      "outcome": "success, both in ledger 5085805",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "2a49346b52aa7ec5547238ceeeed0dd3e985f8431ddf3fca62612ca5ebdf4954",
+          "link": "https://stellar.expert/explorer/testnet/tx/2a49346b52aa7ec5547238ceeeed0dd3e985f8431ddf3fca62612ca5ebdf4954",
+          "ledger": 5085805,
+          "feeChargedStroops": "40900",
+          "resourceFeeStroops": "51660",
+          "instructions": 1582440,
+          "diskReadBytes": 376,
+          "writeBytes": 776,
+          "envelopeBytes": 2500,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
+          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "3000",
+                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    4,
+                    241,
+                    71,
+                    194,
+                    238,
+                    196,
+                    233,
+                    83,
+                    2,
+                    200,
+                    63,
+                    64,
+                    90,
+                    88,
+                    145,
+                    148,
+                    70,
+                    247,
+                    54,
+                    26,
+                    10,
+                    219,
+                    123,
+                    36,
+                    119,
+                    98,
+                    160,
+                    243,
+                    100,
+                    224,
+                    137,
+                    245
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "hash": "8966227e4b335cc4225ae33d3944810f3b87d2982f6f5db95ec6bad5ee28509b",
+          "link": "https://stellar.expert/explorer/testnet/tx/8966227e4b335cc4225ae33d3944810f3b87d2982f6f5db95ec6bad5ee28509b",
+          "ledger": 5085805,
+          "feeChargedStroops": "40900",
+          "resourceFeeStroops": "51660",
+          "instructions": 1582440,
+          "diskReadBytes": 376,
+          "writeBytes": 776,
+          "envelopeBytes": 2500,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
+          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "4000",
+                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    73,
+                    81,
+                    198,
+                    160,
+                    178,
+                    226,
+                    21,
+                    247,
+                    214,
+                    92,
+                    53,
+                    52,
+                    234,
+                    46,
+                    58,
+                    103,
+                    58,
+                    154,
+                    57,
+                    238,
+                    173,
+                    105,
+                    83,
+                    29,
+                    142,
+                    166,
+                    218,
+                    69,
+                    171,
+                    204,
+                    103,
+                    125
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "token": "sac",
+      "scenario": "settles below the ceiling",
+      "expected": "success",
+      "outcome": "success",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "fbba6fce10e4e2e96ce8e17ec99bf92f84667f9e063bc6be1b5ed9411e2e4b16",
+          "link": "https://stellar.expert/explorer/testnet/tx/fbba6fce10e4e2e96ce8e17ec99bf92f84667f9e063bc6be1b5ed9411e2e4b16",
+          "ledger": 5085806,
+          "feeChargedStroops": "43581",
+          "resourceFeeStroops": "54728",
+          "instructions": 1597742,
+          "diskReadBytes": 392,
+          "writeBytes": 792,
+          "envelopeBytes": 2516,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
+          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "250000",
+                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    184,
+                    244,
+                    242,
+                    170,
+                    177,
+                    18,
+                    91,
+                    127,
+                    101,
+                    78,
+                    67,
+                    84,
+                    70,
+                    63,
+                    195,
+                    198,
+                    14,
+                    52,
+                    211,
+                    155,
+                    179,
+                    243,
+                    53,
+                    186,
+                    95,
+                    149,
+                    205,
+                    94,
+                    234,
+                    215,
+                    27,
+                    226
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "leftoverAllowance": "750000"
+    },
+    {
+      "token": "sac",
+      "scenario": "settles at the ceiling",
+      "expected": "success",
+      "outcome": "success",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "f9c7721ca8a4f01201abefadf2a73cd686f6a1a211dd749f16e90cfa1af0fda1",
+          "link": "https://stellar.expert/explorer/testnet/tx/f9c7721ca8a4f01201abefadf2a73cd686f6a1a211dd749f16e90cfa1af0fda1",
+          "ledger": 5085807,
+          "feeChargedStroops": "40993",
+          "resourceFeeStroops": "51753",
+          "instructions": 1587240,
+          "diskReadBytes": 392,
+          "writeBytes": 792,
+          "envelopeBytes": 2516,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
+          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "1000000",
+                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    19,
+                    142,
+                    236,
+                    84,
+                    100,
+                    178,
+                    228,
+                    247,
+                    136,
+                    92,
+                    120,
+                    188,
+                    71,
+                    229,
+                    90,
+                    164,
+                    72,
+                    113,
+                    151,
+                    68,
+                    152,
+                    38,
+                    188,
+                    251,
+                    72,
+                    42,
+                    69,
+                    26,
+                    0,
+                    221,
+                    178,
+                    53
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "leftoverAllowance": "0"
+    },
+    {
+      "token": "sac",
+      "scenario": "settles zero",
+      "expected": "success, no transfer, event and nonce recorded",
+      "outcome": "success",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "b5cfa957be86b7dcd70e56710d9e431556016601a90aeeab0eb8b2f56373a3f1",
+          "link": "https://stellar.expert/explorer/testnet/tx/b5cfa957be86b7dcd70e56710d9e431556016601a90aeeab0eb8b2f56373a3f1",
+          "ledger": 5085809,
+          "feeChargedStroops": "30385",
+          "resourceFeeStroops": "40963",
+          "instructions": 1375766,
+          "diskReadBytes": 144,
+          "writeBytes": 544,
+          "envelopeBytes": 2332,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
+          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "0",
+                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    46,
+                    81,
+                    237,
+                    112,
+                    194,
+                    120,
+                    39,
+                    55,
+                    69,
+                    221,
+                    40,
+                    216,
+                    204,
+                    50,
+                    210,
+                    215,
+                    206,
+                    60,
+                    67,
+                    193,
+                    212,
+                    195,
+                    245,
+                    173,
+                    255,
+                    245,
+                    80,
+                    227,
+                    246,
+                    78,
+                    160,
+                    62
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "leftoverAllowance": "1000000"
+    },
+    {
+      "token": "sac",
+      "scenario": "rejects an amount over the ceiling",
+      "expected": "AmountExceedsMax (#2)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Contract, #2)"
+    },
+    {
+      "token": "sac",
+      "scenario": "rejects a replayed auth entry",
+      "expected": "Error(Auth, ExistingValue)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, ExistingValue)"
+    },
+    {
+      "token": "sac",
+      "scenario": "rejects a reused nonce with a new signature",
+      "expected": "NonceUsed (#7)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Contract, #7)"
+    },
+    {
+      "token": "sac",
+      "scenario": "rejects a settlement before valid_after",
+      "expected": "NotYetValid (#4)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Contract, #4)"
+    },
+    {
+      "token": "sac",
+      "scenario": "rejects a settlement after the deadline",
+      "expected": "Expired (#5)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Contract, #5)"
+    },
+    {
+      "token": "sac",
+      "scenario": "rejects a different facilitator",
+      "expected": "Error(Auth, InvalidAction)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, InvalidAction)"
+    },
+    {
+      "token": "sac",
+      "scenario": "rejects a changed recipient",
+      "expected": "Error(Auth, InvalidAction)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, InvalidAction)"
+    },
+    {
+      "token": "sac",
+      "scenario": "rejects a changed token",
+      "expected": "Error(Auth, InvalidAction)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, InvalidAction)"
+    },
+    {
+      "token": "sac",
+      "scenario": "rejects a changed ceiling",
+      "expected": "Error(Auth, InvalidAction)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, InvalidAction)"
+    },
+    {
+      "token": "sac",
+      "scenario": "rejects a changed nonce",
+      "expected": "Error(Auth, InvalidAction)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, InvalidAction)"
+    },
+    {
+      "token": "sac",
+      "scenario": "settles two authorizations one after the other",
+      "expected": "both success",
+      "outcome": "success in ledgers 5085812 and 5085814",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "78b1ccd59a1b850a918582465f54f81498626b3603d0ad623005f2725bb3fd8d",
+          "link": "https://stellar.expert/explorer/testnet/tx/78b1ccd59a1b850a918582465f54f81498626b3603d0ad623005f2725bb3fd8d",
+          "ledger": 5085812,
+          "feeChargedStroops": "40993",
+          "resourceFeeStroops": "51753",
+          "instructions": 1587240,
+          "diskReadBytes": 392,
+          "writeBytes": 792,
+          "envelopeBytes": 2516,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
+          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "1000",
+                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    165,
+                    181,
+                    155,
+                    77,
+                    122,
+                    254,
+                    118,
+                    243,
+                    27,
+                    223,
+                    212,
+                    58,
+                    78,
+                    194,
+                    41,
+                    213,
+                    229,
+                    36,
+                    156,
+                    72,
+                    194,
+                    62,
+                    62,
+                    199,
+                    23,
+                    180,
+                    41,
+                    93,
+                    243,
+                    137,
+                    21,
+                    242
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "hash": "d0cfb99d5145010c43925ae5eaf66564ca18bdd424e6d91c385b32fda702fcc7",
+          "link": "https://stellar.expert/explorer/testnet/tx/d0cfb99d5145010c43925ae5eaf66564ca18bdd424e6d91c385b32fda702fcc7",
+          "ledger": 5085814,
+          "feeChargedStroops": "40993",
+          "resourceFeeStroops": "51753",
+          "instructions": 1587240,
+          "diskReadBytes": 392,
+          "writeBytes": 792,
+          "envelopeBytes": 2516,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
+          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "2000",
+                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    84,
+                    11,
+                    241,
+                    127,
+                    158,
+                    21,
+                    51,
+                    43,
+                    230,
+                    147,
+                    184,
+                    156,
+                    16,
+                    155,
+                    92,
+                    121,
+                    18,
+                    133,
+                    149,
+                    174,
+                    154,
+                    238,
+                    30,
+                    201,
+                    149,
+                    29,
+                    131,
+                    141,
+                    19,
+                    150,
+                    40,
+                    202
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "leftoverAllowance": "998000"
+    },
+    {
+      "token": "sac",
+      "scenario": "settles two authorizations in the same ledger",
+      "expected": "both success, one ledger",
+      "outcome": "success, both in ledger 5085816",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "fedb6ebe14abbb90c226ea2137b06795ea4b92643975543f9334346065db00c2",
+          "link": "https://stellar.expert/explorer/testnet/tx/fedb6ebe14abbb90c226ea2137b06795ea4b92643975543f9334346065db00c2",
+          "ledger": 5085816,
+          "feeChargedStroops": "40993",
+          "resourceFeeStroops": "51753",
+          "instructions": 1587240,
+          "diskReadBytes": 392,
+          "writeBytes": 792,
+          "envelopeBytes": 2516,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
+          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "3000",
+                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    15,
+                    149,
+                    142,
+                    146,
+                    119,
+                    140,
+                    112,
+                    123,
+                    45,
+                    227,
+                    56,
+                    199,
+                    1,
+                    58,
+                    174,
+                    183,
+                    203,
+                    79,
+                    127,
+                    254,
+                    35,
+                    188,
+                    95,
+                    36,
+                    231,
+                    116,
+                    225,
+                    251,
+                    39,
+                    8,
+                    61,
+                    150
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "hash": "662a78fac210285264eb3725215d91c6c27f2a0ac70013ef243270d5d52b28ba",
+          "link": "https://stellar.expert/explorer/testnet/tx/662a78fac210285264eb3725215d91c6c27f2a0ac70013ef243270d5d52b28ba",
+          "ledger": 5085816,
+          "feeChargedStroops": "40993",
+          "resourceFeeStroops": "51753",
+          "instructions": 1587240,
+          "diskReadBytes": 392,
+          "writeBytes": 792,
+          "envelopeBytes": 2516,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
+          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "4000",
+                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    236,
+                    104,
+                    231,
+                    148,
+                    159,
+                    163,
+                    97,
+                    246,
+                    67,
+                    31,
+                    108,
+                    150,
+                    141,
+                    151,
+                    2,
+                    244,
+                    143,
+                    169,
+                    97,
+                    195,
+                    98,
+                    60,
+                    10,
+                    58,
+                    119,
+                    51,
+                    160,
+                    10,
+                    76,
+                    11,
+                    170,
+                    103
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "token": "sep41",
+      "scenario": "settles below the ceiling",
+      "expected": "success",
+      "outcome": "success",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "26f3b5df128f3d291ff3680adfbbaee51320940fb2ea71db80b56fa7240c2365",
+          "link": "https://stellar.expert/explorer/testnet/tx/26f3b5df128f3d291ff3680adfbbaee51320940fb2ea71db80b56fa7240c2365",
+          "ledger": 5085818,
+          "feeChargedStroops": "38487",
+          "resourceFeeStroops": "49255",
+          "instructions": 2247114,
+          "diskReadBytes": 144,
+          "writeBytes": 800,
+          "envelopeBytes": 2560,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
+          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CAFLGBBXESMRLBFNTG3USDML66437G74EACP3LVOUZPUUJDJQT3HMQEO",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "250000",
+                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    10,
+                    223,
+                    31,
+                    29,
+                    123,
+                    50,
+                    214,
+                    113,
+                    197,
+                    249,
+                    204,
+                    149,
+                    79,
+                    190,
+                    3,
+                    158,
+                    50,
+                    236,
+                    185,
+                    251,
+                    88,
+                    125,
+                    243,
+                    4,
+                    154,
+                    72,
+                    193,
+                    40,
+                    51,
+                    111,
+                    194,
+                    124
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "leftoverAllowance": "750000"
+    },
+    {
+      "token": "sep41",
+      "scenario": "settles at the ceiling",
+      "expected": "success",
+      "outcome": "success",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "027a1320e2410ab11de2ae3c0a7ca0b324a8853c15cf2361dade8af38a9dbe65",
+          "link": "https://stellar.expert/explorer/testnet/tx/027a1320e2410ab11de2ae3c0a7ca0b324a8853c15cf2361dade8af38a9dbe65",
+          "ledger": 5085819,
+          "feeChargedStroops": "35918",
+          "resourceFeeStroops": "46301",
+          "instructions": 2245537,
+          "diskReadBytes": 144,
+          "writeBytes": 800,
+          "envelopeBytes": 2560,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
+          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CAFLGBBXESMRLBFNTG3USDML66437G74EACP3LVOUZPUUJDJQT3HMQEO",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "1000000",
+                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    5,
+                    187,
+                    184,
+                    77,
+                    104,
+                    4,
+                    168,
+                    119,
+                    31,
+                    206,
+                    48,
+                    61,
+                    205,
+                    233,
+                    214,
+                    34,
+                    91,
+                    81,
+                    86,
+                    174,
+                    160,
+                    227,
+                    65,
+                    226,
+                    53,
+                    36,
+                    69,
+                    162,
+                    217,
+                    190,
+                    237,
+                    97
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "leftoverAllowance": "0"
+    },
+    {
+      "token": "sep41",
+      "scenario": "settles zero",
+      "expected": "success, no transfer, event and nonce recorded",
+      "outcome": "success",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "5e4f272ca22086ea51663d2ff2f0bd9daa4986353329536c83ffb8f307958563",
+          "link": "https://stellar.expert/explorer/testnet/tx/5e4f272ca22086ea51663d2ff2f0bd9daa4986353329536c83ffb8f307958563",
+          "ledger": 5085821,
+          "feeChargedStroops": "29228",
+          "resourceFeeStroops": "39612",
+          "instructions": 1637268,
+          "diskReadBytes": 144,
+          "writeBytes": 504,
+          "envelopeBytes": 2328,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
+          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CAFLGBBXESMRLBFNTG3USDML66437G74EACP3LVOUZPUUJDJQT3HMQEO",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "0",
+                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    27,
+                    219,
+                    36,
+                    36,
+                    10,
+                    180,
+                    218,
+                    168,
+                    0,
+                    211,
+                    195,
+                    31,
+                    149,
+                    248,
+                    226,
+                    22,
+                    80,
+                    59,
+                    152,
+                    128,
+                    216,
+                    117,
+                    213,
+                    77,
+                    174,
+                    61,
+                    213,
+                    100,
+                    54,
+                    124,
+                    70,
+                    202
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "leftoverAllowance": "1000000"
+    },
+    {
+      "token": "sep41",
+      "scenario": "rejects an amount over the ceiling",
+      "expected": "AmountExceedsMax (#2)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Contract, #2)"
+    },
+    {
+      "token": "sep41",
+      "scenario": "rejects a replayed auth entry",
+      "expected": "Error(Auth, ExistingValue)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, ExistingValue)"
+    },
+    {
+      "token": "sep41",
+      "scenario": "rejects a reused nonce with a new signature",
+      "expected": "NonceUsed (#7)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Contract, #7)"
+    },
+    {
+      "token": "sep41",
+      "scenario": "rejects a settlement before valid_after",
+      "expected": "NotYetValid (#4)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Contract, #4)"
+    },
+    {
+      "token": "sep41",
+      "scenario": "rejects a settlement after the deadline",
+      "expected": "Expired (#5)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Contract, #5)"
+    },
+    {
+      "token": "sep41",
+      "scenario": "rejects a different facilitator",
+      "expected": "Error(Auth, InvalidAction)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, InvalidAction)"
+    },
+    {
+      "token": "sep41",
+      "scenario": "rejects a changed recipient",
+      "expected": "Error(Auth, InvalidAction)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, InvalidAction)"
+    },
+    {
+      "token": "sep41",
+      "scenario": "rejects a changed token",
+      "expected": "Error(Auth, InvalidAction)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, InvalidAction)"
+    },
+    {
+      "token": "sep41",
+      "scenario": "rejects a changed ceiling",
+      "expected": "Error(Auth, InvalidAction)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, InvalidAction)"
+    },
+    {
+      "token": "sep41",
+      "scenario": "rejects a changed nonce",
+      "expected": "Error(Auth, InvalidAction)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, InvalidAction)"
+    },
+    {
+      "token": "sep41",
+      "scenario": "settles two authorizations one after the other",
+      "expected": "both success",
+      "outcome": "success in ledgers 5085825 and 5085827",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "e63b3b9b4fd9f572b73b33d430e8edd1a2494aaab31488034f540dbfcb3db05b",
+          "link": "https://stellar.expert/explorer/testnet/tx/e63b3b9b4fd9f572b73b33d430e8edd1a2494aaab31488034f540dbfcb3db05b",
+          "ledger": 5085825,
+          "feeChargedStroops": "35918",
+          "resourceFeeStroops": "46301",
+          "instructions": 2245537,
+          "diskReadBytes": 144,
+          "writeBytes": 800,
+          "envelopeBytes": 2560,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
+          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CAFLGBBXESMRLBFNTG3USDML66437G74EACP3LVOUZPUUJDJQT3HMQEO",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "1000",
+                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    155,
+                    161,
+                    185,
+                    120,
+                    227,
+                    73,
+                    117,
+                    152,
+                    216,
+                    67,
+                    107,
+                    152,
+                    168,
+                    124,
+                    123,
+                    39,
+                    135,
+                    70,
+                    11,
+                    148,
+                    144,
+                    55,
+                    110,
+                    139,
+                    246,
+                    236,
+                    217,
+                    39,
+                    97,
+                    230,
+                    3,
+                    143
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "hash": "b350950d973e8c4f594bc6278275cd9e465dda709d941659441f3e07c9dd78ce",
+          "link": "https://stellar.expert/explorer/testnet/tx/b350950d973e8c4f594bc6278275cd9e465dda709d941659441f3e07c9dd78ce",
+          "ledger": 5085827,
+          "feeChargedStroops": "35918",
+          "resourceFeeStroops": "46301",
+          "instructions": 2245537,
+          "diskReadBytes": 144,
+          "writeBytes": 800,
+          "envelopeBytes": 2560,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
+          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CAFLGBBXESMRLBFNTG3USDML66437G74EACP3LVOUZPUUJDJQT3HMQEO",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "2000",
+                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    36,
+                    219,
+                    225,
+                    255,
+                    196,
+                    46,
+                    104,
+                    42,
+                    253,
+                    250,
+                    203,
+                    124,
+                    102,
+                    58,
+                    201,
+                    17,
+                    242,
+                    18,
+                    222,
+                    187,
+                    127,
+                    232,
+                    69,
+                    19,
+                    101,
+                    171,
+                    44,
+                    5,
+                    200,
+                    140,
+                    209,
+                    83
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "leftoverAllowance": "998000"
+    },
+    {
+      "token": "sep41",
+      "scenario": "settles two authorizations in the same ledger",
+      "expected": "both success, one ledger",
+      "outcome": "success, both in ledger 5085829",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "bd991bd1ee2f8b26d6c0520fa159ed6facfbe77f41f4e0e467427a38c5037d70",
+          "link": "https://stellar.expert/explorer/testnet/tx/bd991bd1ee2f8b26d6c0520fa159ed6facfbe77f41f4e0e467427a38c5037d70",
+          "ledger": 5085829,
+          "feeChargedStroops": "35918",
+          "resourceFeeStroops": "46301",
+          "instructions": 2245537,
+          "diskReadBytes": 144,
+          "writeBytes": 800,
+          "envelopeBytes": 2560,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
+          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CAFLGBBXESMRLBFNTG3USDML66437G74EACP3LVOUZPUUJDJQT3HMQEO",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "3000",
+                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    201,
+                    158,
+                    29,
+                    98,
+                    114,
+                    219,
+                    121,
+                    81,
+                    233,
+                    242,
+                    207,
+                    239,
+                    114,
+                    183,
+                    54,
+                    27,
+                    76,
+                    58,
+                    195,
+                    23,
+                    158,
+                    246,
+                    246,
+                    161,
+                    6,
+                    113,
+                    197,
+                    25,
+                    160,
+                    121,
+                    56,
+                    255
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "hash": "ca881dd70e9f4aba005a8cc01e0f4c6e25983e26ab274a79b5c32779d0b558c6",
+          "link": "https://stellar.expert/explorer/testnet/tx/ca881dd70e9f4aba005a8cc01e0f4c6e25983e26ab274a79b5c32779d0b558c6",
+          "ledger": 5085829,
+          "feeChargedStroops": "35918",
+          "resourceFeeStroops": "46301",
+          "instructions": 2245537,
+          "diskReadBytes": 144,
+          "writeBytes": 800,
+          "envelopeBytes": 2560,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
+          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CAFLGBBXESMRLBFNTG3USDML66437G74EACP3LVOUZPUUJDJQT3HMQEO",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "4000",
+                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    72,
+                    19,
+                    95,
+                    105,
+                    226,
+                    32,
+                    91,
+                    26,
+                    109,
+                    2,
+                    194,
+                    101,
+                    47,
+                    241,
+                    16,
+                    244,
+                    238,
+                    53,
+                    129,
+                    13,
+                    233,
+                    168,
+                    246,
+                    94,
+                    153,
+                    240,
+                    233,
+                    151,
+                    30,
+                    68,
+                    114,
+                    232
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "token": "all",
+      "scenario": "client pays no fee",
+      "expected": "client XLM balance unchanged",
+      "outcome": "client XLM unchanged at 99999999800 stroops",
+      "pass": true,
+      "transactions": []
+    }
+  ]
+}

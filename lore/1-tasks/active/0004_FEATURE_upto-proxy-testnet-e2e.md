@@ -88,8 +88,70 @@ hash, stellar.expert link, fee and resources. 0005 builds its report from it.
 
 ## Acceptance Criteria
 
-- [ ] The contract is deployed on testnet, with its ID and WASM hash recorded
-- [ ] Every scenario above runs on-chain with the expected outcome
-- [ ] The client account never pays a fee (checked from the transaction results)
-- [ ] The results file lists every transaction hash
-- [ ] The suite reruns from a clean testnet state with one command
+- [x] The contract is deployed on testnet, with its ID and WASM hash recorded
+- [x] Every scenario above runs on-chain with the expected outcome (rejections in the enforcing
+  simulation against testnet, decision 4)
+- [x] The client account never pays a fee (checked from the transaction results)
+- [x] The results file lists every transaction hash
+- [x] The suite reruns from a clean testnet state with one command (`pnpm contracts:e2e`; after a
+  reset, USDC needs one faucet step, decision 3)
+
+## Implementation Notes
+
+- **Deploy:** `deploy/scripts/deploy-contract.sh <upto-proxy|test-token>`. UptoProxy is at
+  `CC3VX7N6ILD63V7FS2JA7XUDX4DMHYEJXRZDOMU7GVW76XYINOAZ7OYU` (WASM
+  `be2ba121…dd0b34`), recorded in `deploy/testnet.env.example`. The test token is at
+  `CAFLGBBXESMRLBFNTG3USDML66437G74EACP3LVOUZPUUJDJQT3HMQEO` (WASM `937c7079…cb5973`).
+- **Test token crate:** the non-SAC SEP-41 token moved from `upto-proxy/src/test/sep41_token.rs`
+  to its own crate, `contracts/test-token`, so it can be built and deployed; `upto-proxy` uses it
+  as a dev-dependency. `pnpm contracts:build` and CI now build every crate in the workspace.
+- **E2E package:** `contracts/upto-proxy/e2e` (`@stellar-x402/upto-proxy-e2e`):
+  - `src/chain.ts`: RPC helpers and `txReport` (fee, resources, sources, events from the chain).
+  - `src/upto.ts`: the client and facilitator steps of the signing model.
+  - `src/world.ts`: idempotent setup of accounts, trustlines, SACs, top-ups and channels.
+  - `test/upto-proxy.e2e.test.ts`: 13 scenarios per token plus the client-fee check.
+- **One command:** `pnpm contracts:e2e` (`E2E_TOKENS=sac,sep41` for a subset). Results go to
+  `contracts/upto-proxy/e2e/results/testnet-results.json`.
+- **Full run (2026-10-08):** 46/46 passed across USDC, the self-issued SAC and the test token,
+  with 21 settlement transactions recorded. The client was funded with 20 USDC from the faucet.
+  - Fees charged: about 40,900 stroops (USDC), 41,000 (SAC) and 35,900 (test token) per
+    settlement; zero settlements about 30,000; 122,589 for
+    the first test-token payment to the seller, which created its balance entry.
+  - Concurrent settlements from one payer landed in the same ledger through two channels.
+
+## Design Decisions
+
+### From Plan
+
+1. **Deploy script in `deploy/scripts/`**, harness in `contracts/upto-proxy/e2e` with vitest.
+2. **Delegated-bump submission** through `SettlementSubmitter` (ADR 0003, AD-2, AD-4).
+
+### Emerged
+
+3. **USDC comes from a persistent, manually funded client** (okarcz, 2026-10-08): Circle's
+   faucet can't be scripted. Setup opens the trustline and stops with the faucet link when the
+   client holds less than 0.5 USDC.
+4. **Rejections are checked in simulation** (okarcz, 2026-10-08): the submitter's enforcing
+   simulation against live testnet state refuses them, so they have no transaction hash.
+5. **The salt is the WASM hash**: a rerun deploys nothing, changed code gets a new contract ID,
+   and the same code returns under the same ID after a reset.
+6. **The client simulates with the facilitator as the source**: with the client as source, its
+   auth is recorded as source-account credentials and there is no address entry to sign.
+7. **Rejection scenarios sign without simulation** (`clientSignDirect`): recording-mode
+   simulation runs the whole call, so it can't produce entries for terms the contract refuses.
+8. **Exact errors pinned**: a replayed entry fails with `Error(Auth, ExistingValue)`; a different
+   facilitator and every tampered field fail with `Error(Auth, InvalidAction)`.
+9. **The suite is not part of `pnpm test`**: it needs testnet and funded accounts, so its script
+   is `test:testnet`. CI still typechecks and lints it (eslint now ignores `contracts/target/`
+   instead of all of `contracts/`).
+
+## Issues Encountered
+
+- **No client entry from simulation**: the first run simulated with the client as source; fixed
+  by decision 6.
+
+## Findings for 0005
+
+- **Leftover allowance:** after a settlement the proxy keeps `max_amount - actual_amount` of
+  allowance until `allowance_expiration_ledger` (750,000 after settling a quarter of 1,000,000;
+  the full ceiling after a zero settlement). The threat model should cover it.
