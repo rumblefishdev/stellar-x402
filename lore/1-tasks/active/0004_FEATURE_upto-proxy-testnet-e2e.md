@@ -2,7 +2,7 @@
 id: "0004"
 title: "Deploy UptoProxy to testnet and run on-chain end-to-end tests"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: []
 related_tasks: ["0002", "0003", "0005", "0012", "0016"]
@@ -22,6 +22,10 @@ history:
     status: backlog
     who: claude
     note: "Mapped to M1 Story 5.1 (Payments lane) by 0012."
+  - date: "2026-10-08"
+    status: active
+    who: okarcz
+    note: "Started while the 0017 types PR (#7) waits for review."
 ---
 
 # Deploy UptoProxy to testnet and run on-chain end-to-end tests
@@ -33,9 +37,9 @@ the same role split and signing model the x402 facilitator will use. Record ever
 
 **Story:** [M1 Story 5.1](../../../docs/planning/m1-epics.md#story-51-deploy-uptoproxy-to-testnet-and-run-on-chain-e2e-tests) · **Lane:** Payments
 
-## Status: Backlog
+## Status: Active
 
-> Blocked by 0003.
+> Started 2026-10-08 on branch `lore-0004-upto-proxy-testnet-e2e`. 0003 is done.
 
 ## Context
 
