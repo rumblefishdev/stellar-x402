@@ -108,9 +108,9 @@ The source RFP and architecture docs in `docs/rfp/` are left unchanged. Deviatio
 ## Acceptance Criteria
 
 - [x] The ADR, contract README, threat-model section and testnet report are written
-- [ ] Every transaction hash in the report resolves on sorobanscan (`testnet.sorobanscan.rumblefish.dev`)
-  (all 21 hashes return `SUCCESS` from testnet RPC `getTransaction`; the sorobanscan pages still
-  need a check in a browser, see Issues)
+- [x] Every transaction hash in the report resolves on sorobanscan (`testnet.sorobanscan.rumblefish.dev`)
+  (all 21 hashes return `SUCCESS` from testnet RPC `getTransaction`, and okarcz opened the
+  transaction links on sorobanscan in a browser on 2026-10-08)
 - [x] The testnet report includes the 0006 throughput numbers and the one-payment-per-transaction limit
 - [x] `format:check` passes (for every tracked file; the local, untracked `CLAUDE.local.md` fails it)
 
@@ -134,6 +134,8 @@ The source RFP and architecture docs in `docs/rfp/` are left unchanged. Deviatio
   49/49 rerun (21 transactions, all `SUCCESS` on testnet RPC). The 122,589-stroop rent figure,
   which came from an overwritten subset run, is gone from the ADR, threat model and report, and
   "no XLM on fees" became "no settlement fees" (the client pays for its trustlines in setup).
+  The transaction links in the last report table lost their code formatting, so they look like
+  links.
 
 ## Design Decisions
 
@@ -158,5 +160,4 @@ The source RFP and architecture docs in `docs/rfp/` are left unchanged. Deviatio
 ## Issues Encountered
 
 - **Sorobanscan's API can't be scripted**: it needs a bearer token from a browser challenge, so the
-  hashes were checked against testnet RPC instead. Opening a few report links in a browser closes
-  the acceptance criterion.
+  hashes were checked against testnet RPC instead, and the links were opened in a browser.
