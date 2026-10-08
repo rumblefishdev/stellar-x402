@@ -130,6 +130,10 @@ The source RFP and architecture docs in `docs/rfp/` are left unchanged. Deviatio
   `contracts/upto-proxy/e2e/results/testnet-report.md` and extended with **Throughput and
   limits** (0006 cost by shape and throughput) and **Known limits**. Links in the e2e README and
   0034 updated; `docs/README.md` lists the report.
+- **After the PR #8 review**: rebased onto the reworked 0004 branch. The report now shows the
+  49/49 rerun (21 transactions, all `SUCCESS` on testnet RPC). The 122,589-stroop rent figure,
+  which came from an overwritten subset run, is gone from the ADR, threat model and report, and
+  "no XLM on fees" became "no settlement fees" (the client pays for its trustlines in setup).
 
 ## Design Decisions
 

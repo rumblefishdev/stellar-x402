@@ -81,8 +81,8 @@ errors, events and invariants.
 - **It meets all five core properties** with Soroban primitives: the nonce for single use, the
   signed window for time bounds, the signed `to` for recipient binding, the contract check for
   the maximum, and an `actual_amount` that is supplied only at settlement.
-- **The client never pays.** It signs one auth entry and never holds XLM for fees. The 0004
-  testnet run left the client's XLM balance unchanged across every scenario.
+- **The client pays no settlement fees.** It signs one auth entry; the facilitator pays the fee.
+  The 0004 testnet run left the client's XLM balance unchanged across every scenario.
 - **Concurrent payments don't interfere.** `approve` and `transfer_from` run in the same
   invocation. 0004 settled two open authorizations from one payer in the same ledger.
 - **The payer needs only the actual amount** at settlement, because `transfer_from` pulls
@@ -128,9 +128,9 @@ errors, events and invariants.
 - **One payment is one transaction.** `upto` can't exceed the network's share of ledger capacity
   (about 105 settlements per ledger on testnet). Higher rates need off-chain aggregation or a
   `batch-settlement` binding (0008).
-- **Fees.** A settlement costs about 36,000–41,000 stroops in the channel shape, but the one that
-  first creates a ledger entry pays its rent: 122,589 stroops for a seller's first test-token
-  payment in 0004, and 151,550 for a first settlement of the day in 0006. The fee ceiling
+- **Fees.** A settlement costs about 36,000–44,000 stroops in the channel shape, but the one that
+  first creates or extends a ledger entry pays its rent: 151,550 stroops for a first settlement of
+  the day in 0006. The fee ceiling
   (`maxFeeStroops`, 250,000 by default, [ADR 0007](0007-fee-abuse-containment.md)) must leave room
   for that.
 
