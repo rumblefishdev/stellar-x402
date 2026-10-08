@@ -91,6 +91,15 @@ importers:
         specifier: workspace:*
         version: link:../packages/config
 
+  contracts/upto-proxy/e2e:
+    dependencies:
+      '@stellar-x402/signer-pool':
+        specifier: workspace:*
+        version: link:../../../packages/signer-pool
+      '@stellar/stellar-sdk':
+        specifier: ^16.3.0
+        version: 16.3.0
+
   examples/http-api:
     dependencies:
       '@stellar-x402/sdk':
