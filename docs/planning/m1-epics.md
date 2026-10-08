@@ -801,5 +801,5 @@ So that I can use and review it without reading the contract code.
 
 **Given** the testnet report  
 **When** it is checked  
-**Then** every transaction hash resolves on stellar.expert and the report includes the 0006 throughput numbers and the one-payment-per-transaction limit  
+**Then** every transaction hash resolves on sorobanscan (`testnet.sorobanscan.rumblefish.dev`) and the report includes the 0006 throughput numbers and the one-payment-per-transaction limit  
 **And** `format:check` passes

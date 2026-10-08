@@ -84,7 +84,7 @@ the following:
 ### Step 4: Output
 
 A machine-readable results file listing each scenario with its pass or fail result, transaction
-hash, stellar.expert link, fee and resources. 0005 builds its report from it.
+hash, explorer link, fee and resources. 0005 builds its report from it.
 
 ## Acceptance Criteria
 
@@ -144,6 +144,10 @@ hash, stellar.expert link, fee and resources. 0005 builds its report from it.
 9. **The suite is not part of `pnpm test`**: it needs testnet and funded accounts, so its script
    is `test:testnet`. CI still typechecks and lints it (eslint now ignores `contracts/target/`
    instead of all of `contracts/`).
+10. **Explorer links go to sorobanscan** (okarcz, 2026-10-08): `explorerLink` points at
+    `https://testnet.sorobanscan.rumblefish.dev/transactions/<hash>` on testnet and at
+    `https://sorobanscan.rumblefish.dev` on mainnet, picked by the network passphrase. The recorded
+    results file was rewritten to match, so its hashes are unchanged.
 
 ## Issues Encountered
 

@@ -15,7 +15,13 @@ export const PASSPHRASE = Networks.TESTNET;
 export const RPC_URL = process.env.RPC_URL ?? "https://soroban-testnet.stellar.org";
 export const server = new rpc.Server(RPC_URL);
 
-export const explorerLink = (hash: string) => `https://stellar.expert/explorer/testnet/tx/${hash}`;
+/** Sorobanscan, keyed by network passphrase. */
+const EXPLORERS: Record<string, string> = {
+  [Networks.TESTNET]: "https://testnet.sorobanscan.rumblefish.dev",
+  [Networks.PUBLIC]: "https://sorobanscan.rumblefish.dev",
+};
+
+export const explorerLink = (hash: string) => `${EXPLORERS[PASSPHRASE]}/transactions/${hash}`;
 
 /** Read-only contract call through simulation; nothing is signed or sent. */
 export async function readContract(
