@@ -69,9 +69,12 @@ As a developer on any of the three lanes, I want a facilitator app that boots, v
   and `onSuccess`.
 - `apps/facilitator/src/config.ts`: zod env schema, `parseConfig()` into a grouped `Config`, and
   `ConfigError`, which names each bad setting without echoing its value.
-- `apps/facilitator/test/config.test.ts`: 7 tests (defaults, fee settings, blank-as-unset, missing
-  and invalid values, no secret in errors, the pubnet RPC rule).
-- `zod` ^3.25.76 added to `apps/facilitator`.
+- `apps/facilitator/test/config.test.ts`: 8 tests (full `Config` mapping, defaults, trimming,
+  missing and invalid values, no value echoed in errors, key checksums, duplicate channels, strict
+  numbers, RPC URLs).
+- `zod` ^3.25.76 and `@stellar/stellar-sdk` ^16.3.0 (for `StrKey`) added to `apps/facilitator`.
+- `deploy/*.env.example`: `STELLAR_RPC_URL` renamed to `RPC_URLS`. The secret variables are left
+  for 0020.
 
 ## Design Decisions
 
@@ -83,15 +86,17 @@ As a developer on any of the three lanes, I want a facilitator app that boots, v
 2. **Upstream types on the wire**: records hold `@x402/core` `PaymentPayload` and
    `PaymentRequirements`; the catalog stores and returns `@x402/extensions` `DiscoveryResource`.
 
-### Emerged (to confirm in the types review)
+### Emerged (confirmed by Adam in the PR #7 review; 5 and 10–13 come from it)
 
 3. **The channel lease lives on `SettlementStore`**: AD-7 fixes four ports and lists the lease
    among the operations the store must support, so there is no fifth port.
 4. **A third hook, `onFinal`**: 0024 must settle or release the spend reservation and feed the
    breakers on every final outcome, not only on `success`.
-5. **`onSuccess` is synchronous and returns the `EXTENSION-RESPONSES` value**: AD-8 allows only
-   the pure validation before the response, so the hook returns the header value and starts the
-   catalog write fire-and-forget. From `resolved` events the value is ignored.
+5. **`extensionResponses` and `onSuccess` are separate hooks**: the first version had one
+   synchronous `onSuccess` that returned the header and started the catalog write, which then
+   ran before the response. Now a pure, synchronous `extensionResponses(record)` returns a typed
+   `{ bazaar: { status, reason? } }` for the `EXTENSION-RESPONSES` header, and an async
+   `onSuccess` runs after the response (AD-8).
 6. **`addHash` is separate from `transition`**: a rebuild adds a hash while the record stays
    `signed`, which a state compare-and-set can't express.
 7. **Records keep the payload and requirements**, so a late `success` (startup re-check or
@@ -103,3 +108,22 @@ As a developer on any of the three lanes, I want a facilitator app that boots, v
    body limit 64 KiB, rate limits per minute 120 verify / 60 settle / 120 discovery, a daily spend
    window with 500 XLM global, 5 XLM per payer, 50 XLM per `payTo` and 200 XLM per asset, and a
    breaker after 5 failures with a 10-minute cooldown.
+10. **A refusal by `beforeSubmit` ends the record as `rejected`**: `claimed → rejected` with the
+    hook's `errorReason`, also when the hook throws; `onFinal` is not called.
+11. **`CatalogStore.upsert` merges `accepts`** by `scheme + network + asset`, because one
+    settlement knows one requirement; the caller stamps `lastUpdated`. The upstream `scheme`
+    filter is left out of T1.
+12. **Expired leases can't be renewed**: `renewLease` returns `false` once `now > expiresAt`.
+13. **Stricter config**: keys checked with `StrKey`, duplicate channels refused, numbers as plain
+    decimals with upper bounds (timers at most 2^31−1 ms), RPC URLs only http(s) and at least
+    one, values trimmed, and every error message is ours so none echoes a value.
+
+## Deferred from the PR #7 review
+
+These go to the tasks that own them (Adam's review):
+
+- Port contract tests: rest of 0017 (fakes) and 0022.
+- The `SpendStore` reservation lifecycle: 0024.
+- Wrapping `onSuccess` errors in the caller: 0009.
+- A bigint codec for stored amounts: 0022.
+- Redacting RPC URLs in logs: 0014.
