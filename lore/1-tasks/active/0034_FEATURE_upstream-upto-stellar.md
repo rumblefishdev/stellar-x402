@@ -2,7 +2,7 @@
 id: "0034"
 title: "Merge the Stellar upto scheme upstream: scheme_upto_stellar.md and the @x402/stellar classes"
 type: FEATURE
-status: backlog
+status: active
 related_adr: ["0001"]
 related_tasks: ["0002", "0003", "0004", "0005", "0015"]
 tags: [upstream, upto, spec, priority-high, effort-large, payments]
@@ -21,6 +21,10 @@ history:
       Task created with okarcz from the published RFP, which makes the upstream merge a
       deliverable. No earlier task covered it: 0005 only lists the spec input, and M1 leaves the
       merge out.
+  - date: "2026-10-08"
+    status: active
+    who: okarcz
+    note: "Started while 0005's PR (#12) waits for review; work is on a local branch from lore-0005."
 ---
 
 # Merge the Stellar upto scheme upstream: scheme_upto_stellar.md and the @x402/stellar classes

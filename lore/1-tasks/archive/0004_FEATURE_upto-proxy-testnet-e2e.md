@@ -2,7 +2,7 @@
 id: "0004"
 title: "Deploy UptoProxy to testnet and run on-chain end-to-end tests"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: []
 related_tasks: ["0002", "0003", "0005", "0012", "0016"]
@@ -26,6 +26,14 @@ history:
     status: active
     who: okarcz
     note: "Started while the 0017 types PR (#7) waits for review."
+  - date: "2026-10-08"
+    status: completed
+    who: okarcz
+    note: >
+      PR #8 rebase-merged into develop (0a8a0c5). Proxy deployed on testnet; the e2e suite
+      (`pnpm contracts:e2e`) passed 49/49 across USDC, a self-issued SAC and the SEP-41 test
+      token, with 21 settlement transactions. All 12 valid review points from Adam fixed;
+      explorer links moved to sorobanscan. The report and findings went into 0005's docs.
 ---
 
 # Deploy UptoProxy to testnet and run on-chain end-to-end tests
@@ -37,9 +45,11 @@ the same role split and signing model the x402 facilitator will use. Record ever
 
 **Story:** [M1 Story 5.1](../../../docs/planning/m1-epics.md#story-51-deploy-uptoproxy-to-testnet-and-run-on-chain-e2e-tests) · **Lane:** Payments
 
-## Status: Active
+## Status: Completed
 
 > Started 2026-10-08 on branch `lore-0004-upto-proxy-testnet-e2e`. 0003 is done.
+> 2026-10-08: PR #8 rebase-merged into develop. Its testnet report now lives in
+> `docs/upto-proxy-testnet-report.md` (task 0005, PR #12).
 
 ## Context
 
