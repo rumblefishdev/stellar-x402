@@ -33,8 +33,8 @@ The contract IDs depend on the deployer key (see `deploy/README.md`). When the p
 deployed differs from `UPTO_PROXY_CONTRACT_ID` in `deploy/testnet.env.example`, setup prints a
 warning: the run is then testing your own deployment, not the recorded one.
 
-[`results/testnet-report.md`](results/testnet-report.md) summarizes the 2026-10-08 run. It is a
-snapshot: a new run rewrites the JSON but not the report.
+The [testnet report](../../../docs/upto-proxy-testnet-report.md) summarizes the 2026-10-08 run. It
+is a snapshot: a new run rewrites the JSON but not the report.
 
 ### Testnet USDC
 
