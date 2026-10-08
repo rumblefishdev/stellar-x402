@@ -22,14 +22,22 @@ history:
       Started the day-1 part only: the types-only PR with the four store ports, the settlement
       hook signatures and the zod config schema. The rest of the skeleton goes to the Platform
       lane owner once the types PR is approved.
+  - date: "2026-10-08"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      Day-1 types PR #7 approved by all three lanes (Adam for Discovery, Stan for Platform,
+      okarcz as author for Payments) and rebase-merged into develop (993edad). okarcz hands the
+      rest of the skeleton over to Stan, the Platform lane owner.
 ---
 
 # Facilitator skeleton with store ports, settlement hooks and config
 
 ## Status: Active
 
-> Started 2026-10-08 on branch `lore-0017-day1-types`. Scope for now: the day-1 types-only PR
-> (first acceptance criterion).
+> Started 2026-10-08 by okarcz on branch `lore-0017-day1-types` for the day-1 types-only PR
+> (first acceptance criterion). PR #7 merged on 2026-10-08; the rest of the skeleton is now with
+> Stan (stkrolikiewicz).
 
 ## Summary
 
@@ -54,7 +62,7 @@ As a developer on any of the three lanes, I want a facilitator app that boots, v
 
 ## Acceptance Criteria
 
-- [ ] Given a types-only PR with the four store ports (`SettlementStore`, `CatalogStore`, `RateLimitStore`, `SpendStore`) and the operations AD-7 requires, the before-submit and on-success settlement hooks, and the zod config schema, when it is opened on day 1, then all three lanes review and approve it before lane work builds on it
+- [x] Given a types-only PR with the four store ports (`SettlementStore`, `CatalogStore`, `RateLimitStore`, `SpendStore`) and the operations AD-7 requires, the before-submit and on-success settlement hooks, and the zod config schema, when it is opened on day 1, then all three lanes review and approve it before lane work builds on it
 - [ ] Given a valid environment, when the app starts, then it reads and validates config once with zod, listens on the configured port and answers stub routes for `/verify`, `/settle`, `/supported` and `/discovery/resources`; `src/main.ts` is the only composition root and the only place that reads `process.env`
 - [ ] Given a missing or invalid config value, when the app starts, then it exits with an error that names the value and never prints a secret
 - [ ] Given the test setup, when the integration test boots the app with in-memory fakes of all four ports and `fake-rpc`, then it passes with no network and no database; each port has an in-memory fake in `apps/facilitator`; logs are structured, one event per line, and never contain secrets or full XDR; requests have a body size limit
@@ -127,3 +135,11 @@ These go to the tasks that own them (Adam's review):
 - Wrapping `onSuccess` errors in the caller: 0009.
 - A bigint codec for stored amounts: 0022.
 - Redacting RPC URLs in logs: 0014.
+
+From Stan's review:
+
+- `onFinal` errors never reach the caller and `/settle` doesn't wait for it: stated in
+  `hooks.ts` (993edad); the behavior is built in 0009 and 0024.
+- A lost `onFinal` call after a crash leaves the reservation counted until it ages out of the
+  rolling window; acceptable for T1, noted in 0024.
+- A `claimed` record with no hash at startup is closed as `rejected`: added to 0019 (f65fac2).
