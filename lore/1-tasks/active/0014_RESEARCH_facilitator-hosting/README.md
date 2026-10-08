@@ -29,6 +29,13 @@ history:
     status: active
     who: stkrolikiewicz
     note: "Started by the Platform lane owner."
+  - date: "2026-10-08"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      Requirements written (notes/G-hosting-requirements.md); AWS is the company default cloud.
+      Paused behind 0017, whose in-memory fakes the other lanes wait on. The option research keeps
+      running in the background.
 ---
 
 # Choose where the facilitator is hosted and record it in an ADR
