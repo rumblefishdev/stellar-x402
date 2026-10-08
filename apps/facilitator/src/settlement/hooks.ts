@@ -45,7 +45,9 @@ export interface SettlementHooks {
   beforeSubmit(context: BeforeSubmitContext): Promise<BeforeSubmitResult>;
   /**
    * Runs once when a record turns final, in any final state, after `beforeSubmit` allowed it:
-   * settles or releases the spend reservation and feeds the breakers (AD-18).
+   * settles or releases the spend reservation and feeds the breakers (AD-18). Its errors never
+   * reach the caller and never change the settle outcome; `/settle` doesn't wait for it. The
+   * settlement module logs and counts them.
    */
   onFinal(record: SettlementRecord, origin: SettlementOrigin): Promise<void>;
   /**
