@@ -85,7 +85,8 @@ export interface SettlementStore {
   addHash(key: SettlementKey, hash: string, updatedAt: number): Promise<boolean>;
   /**
    * Compare-and-set: applies `update` only while the record is in state `expected`. Resolves
-   * the updated record, or `undefined` if the state had already moved on.
+   * the updated record, or `undefined` if the state had already moved on. An `update.state`
+   * behind `expected` in the lifecycle order is dropped the same way (AD-16).
    */
   transition(
     key: SettlementKey,
@@ -105,7 +106,10 @@ export interface SettlementStore {
     ttlMs: number,
     now: number,
   ): Promise<ChannelLease | undefined>;
-  /** Extends a lease `holder` still holds; resolves `false` if it was lost. */
+  /**
+   * Extends a lease `holder` still holds. Resolves `false` if it was lost, including once
+   * `now > expiresAt`: an expired lease must be acquired again.
+   */
   renewLease(name: string, holder: string, ttlMs: number, now: number): Promise<boolean>;
   /** Releases the lease if `holder` holds it. */
   releaseLease(name: string, holder: string): Promise<void>;

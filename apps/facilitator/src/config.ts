@@ -1,3 +1,4 @@
+import { StrKey } from "@stellar/stellar-sdk";
 import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import { z } from "zod";
 
@@ -10,9 +11,8 @@ import { z } from "zod";
  */
 
 const DEFAULT_TESTNET_RPC = "https://soroban-testnet.stellar.org";
-
-const SECRET_KEY = /^S[A-Z2-7]{55}$/;
-const ACCOUNT_ADDRESS = /^G[A-Z2-7]{55}$/;
+/** Largest delay `setTimeout` accepts; longer ones fire at once. */
+const MAX_TIMER_MS = 2_147_483_647;
 
 const list = z.string().transform((value) =>
   value
@@ -21,7 +21,23 @@ const list = z.string().transform((value) =>
     .filter((item) => item.length > 0),
 );
 
-const int = (min: number) => z.coerce.number().int().min(min);
+const oneOf = <const T extends [string, ...string[]]>(values: T) =>
+  z.enum(values, { errorMap: () => ({ message: `must be one of ${values.join(", ")}` }) });
+
+/** Plain decimal digits only: no hex, exponents, signs or `Infinity`. */
+const int = (min: number, max: number = Number.MAX_SAFE_INTEGER) =>
+  z
+    .string()
+    .regex(/^\d+$/, "must be a whole number")
+    .transform(Number)
+    .refine(
+      (value) => value >= min && value <= max,
+      max === Number.MAX_SAFE_INTEGER
+        ? `must be at least ${min}`
+        : `must be between ${min} and ${max}`,
+    );
+const ms = (min: number) => int(min, MAX_TIMER_MS);
+
 const stroops = (min: bigint) =>
   z
     .string()
@@ -29,57 +45,95 @@ const stroops = (min: bigint) =>
     .transform((value) => BigInt(value))
     .refine((value) => value >= min, `must be at least ${min}`);
 
+function isHttpUrl(value: string): boolean {
+  try {
+    const { protocol } = new URL(value);
+    return protocol === "https:" || protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
 const envSchema = z
   .object({
-    NETWORK: z.enum([STELLAR_NETWORKS.testnet, STELLAR_NETWORKS.pubnet]).default("stellar:testnet"),
-    PORT: int(1).max(65_535).default(4021),
-    LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+    NETWORK: oneOf([STELLAR_NETWORKS.testnet, STELLAR_NETWORKS.pubnet]).default(
+      STELLAR_NETWORKS.testnet,
+    ),
+    PORT: int(1, 65_535).default("4021"),
+    LOG_LEVEL: oneOf(["debug", "info", "warn", "error"]).default("info"),
     /** Comma-separated; the first is primary, the rest are fallbacks. */
-    RPC_URLS: list.pipe(z.array(z.string().url())).optional(),
+    RPC_URLS: list
+      .pipe(
+        z
+          .array(z.string().refine(isHttpUrl, "must be http(s) URLs"))
+          .min(1, "must list at least one URL"),
+      )
+      .optional(),
 
     /** The facilitator key: signs for the channels and pays fee bumps. Never logged. */
-    FACILITATOR_SECRET: z.string().regex(SECRET_KEY, "must be a Stellar secret key (S…)"),
+    FACILITATOR_SECRET: z
+      .string()
+      .refine(
+        (value) => StrKey.isValidEd25519SecretSeed(value),
+        "must be a Stellar secret key (S…)",
+      ),
     /** Comma-separated channel account addresses (never secrets). */
     CHANNELS: list.pipe(
       z
-        .array(z.string().regex(ACCOUNT_ADDRESS, "must be Stellar account addresses (G…)"))
-        .min(1, "must list at least one channel"),
+        .array(
+          z
+            .string()
+            .refine(
+              (value) => StrKey.isValidEd25519PublicKey(value),
+              "must be Stellar account addresses (G…)",
+            ),
+        )
+        .min(1, "must list at least one channel")
+        .refine(
+          (channels) => new Set(channels).size === channels.length,
+          "must not repeat a channel",
+        ),
     ),
 
     /** Which store adapters the composition root builds (0013 adds the durable one). */
-    STORE: z.enum(["memory"]).default("memory"),
+    STORE: oneOf(["memory"]).default("memory"),
 
     /** Fee ceiling for upstream verify and the pool alike (AD-10). */
     MAX_FEE_STROOPS: stroops(100n).default("250000"),
     /** Inclusion bid; unset means the pool's fee-stats provider (at least 100). */
     INCLUSION_FEE_STROOPS: stroops(100n).optional(),
-    FEE_ESCALATION_FACTOR: z.coerce.number().min(1).optional(),
+    FEE_ESCALATION_FACTOR: z
+      .string()
+      .regex(/^\d+(\.\d+)?$/, "must be a decimal number")
+      .transform(Number)
+      .refine((value) => value >= 1 && value <= 100, "must be between 1 and 100")
+      .optional(),
     FEE_ESCALATION_MAX_STROOPS: int(100).optional(),
 
     /** Least ledgers left before the payer's auth expires (AD-22). */
-    MIN_VALIDITY_LEDGERS: int(1).default(12),
+    MIN_VALIDITY_LEDGERS: int(1).default("12"),
     /** How long a repeat `/settle` waits on a pending record (AD-6). */
-    SETTLE_TIMEOUT_MS: int(1).default(30_000),
+    SETTLE_TIMEOUT_MS: ms(1).default("30000"),
     /** Channel lease TTL; renewed well before it runs out (AD-17). */
-    LEASE_TTL_MS: int(1_000).default(30_000),
+    LEASE_TTL_MS: ms(1_000).default("30000"),
 
-    BODY_LIMIT_BYTES: int(1_024).default(65_536),
+    BODY_LIMIT_BYTES: int(1_024).default("65536"),
     /** Proxy hops in front of the service whose `X-Forwarded-For` entries are trusted (AD-11). */
-    TRUSTED_PROXY_HOPS: int(0).default(0),
-    RATE_LIMIT_WINDOW_MS: int(1_000).default(60_000),
-    RATE_LIMIT_VERIFY: int(1).default(120),
-    RATE_LIMIT_SETTLE: int(1).default(60),
-    RATE_LIMIT_DISCOVERY: int(1).default(120),
+    TRUSTED_PROXY_HOPS: int(0, 10).default("0"),
+    RATE_LIMIT_WINDOW_MS: ms(1_000).default("60000"),
+    RATE_LIMIT_VERIFY: int(1).default("120"),
+    RATE_LIMIT_SETTLE: int(1).default("60"),
+    RATE_LIMIT_DISCOVERY: int(1).default("120"),
 
-    /** Rolling window of every spend budget (AD-18). */
-    SPEND_WINDOW_MS: int(60_000).default(86_400_000),
+    /** Rolling window of every spend budget (AD-18); a store window, not a timer. */
+    SPEND_WINDOW_MS: int(60_000).default("86400000"),
     SPEND_GLOBAL_STROOPS: stroops(1n).default("5000000000"),
     SPEND_PER_PAYER_STROOPS: stroops(1n).default("50000000"),
     SPEND_PER_PAY_TO_STROOPS: stroops(1n).default("500000000"),
     SPEND_PER_ASSET_STROOPS: stroops(1n).default("2000000000"),
     /** Consecutive on-chain failures that open an asset or `payTo` breaker. */
-    BREAKER_FAILURES: int(1).default(5),
-    BREAKER_COOLDOWN_MS: int(1_000).default(600_000),
+    BREAKER_FAILURES: int(1).default("5"),
+    BREAKER_COOLDOWN_MS: int(1_000).default("600000"),
   })
   .refine((env) => env.RPC_URLS !== undefined || env.NETWORK === STELLAR_NETWORKS.testnet, {
     message: "is required outside testnet",
@@ -132,20 +186,24 @@ export class ConfigError extends Error {
 }
 
 export function parseConfig(env: Record<string, string | undefined>): Config {
-  // Blank values mean "unset", as in the deploy env examples.
+  // Values are trimmed (a secret read from a file keeps its newline); blank means "unset", as in
+  // the deploy env examples.
   const present = Object.fromEntries(
-    Object.entries(env).filter(([, value]) => value !== undefined && value.trim() !== ""),
+    Object.entries(env)
+      .map(([name, value]) => [name, value?.trim()] as const)
+      .filter(([, value]) => value !== undefined && value !== ""),
   );
   const result = envSchema.safeParse(present);
   if (!result.success) {
-    throw new ConfigError(
-      result.error.issues.map((issue) => {
-        const name = String(issue.path[0] ?? "environment");
-        return issue.code === "invalid_type" && issue.received === "undefined"
-          ? `${name} is required`
-          : `${name} ${issue.code === "custom" || issue.code === "invalid_string" ? issue.message : "is invalid"}`;
-      }),
-    );
+    // Every message is ours, so none can echo a value.
+    const problems = result.error.issues.map((issue) => {
+      const name = String(issue.path[0] ?? "environment");
+      if (issue.code === "invalid_type") {
+        return `${name} ${issue.received === "undefined" ? "is required" : "is invalid"}`;
+      }
+      return `${name} ${issue.message}`;
+    });
+    throw new ConfigError([...new Set(problems)]);
   }
   const e = result.data;
   const escalation =
