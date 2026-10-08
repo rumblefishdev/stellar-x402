@@ -41,5 +41,5 @@ jobs:
       # The WASM tests check the deployed interface (I7) and print the settlement cost.
       # soroban-sdk 28 only builds contract WASM through stellar-cli 25.2+.
       - uses: stellar/stellar-cli@v28.1.0
-      - run: stellar contract build --manifest-path contracts/upto-proxy/Cargo.toml
+      - run: stellar contract build --manifest-path contracts/Cargo.toml
       - run: cargo test --manifest-path contracts/Cargo.toml -- --ignored --nocapture
