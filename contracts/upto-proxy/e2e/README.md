@@ -29,6 +29,9 @@ friendbot. Every run then:
 
 After a testnet reset, the same command rebuilds everything, except for USDC.
 
+[`results/testnet-report.md`](results/testnet-report.md) summarizes the 2026-10-08 run. It is a
+snapshot: a new run rewrites the JSON but not the report.
+
 ### Testnet USDC
 
 Only Circle's faucet hands out testnet USDC. When the client holds less than 0.5 USDC, setup stops
