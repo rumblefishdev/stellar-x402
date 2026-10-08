@@ -37,7 +37,8 @@ history:
 
 > Started 2026-10-08 by okarcz on branch `lore-0017-day1-types` for the day-1 types-only PR
 > (first acceptance criterion). PR #7 merged on 2026-10-08; the rest of the skeleton is now with
-> Stan (stkrolikiewicz).
+> Stan (stkrolikiewicz), on branch `lore-0017-facilitator-skeleton`: in-memory adapters, port
+> contract tests, the HTTP app with stub routes, `src/main.ts` and the boot tests.
 
 ## Summary
 
@@ -63,9 +64,9 @@ As a developer on any of the three lanes, I want a facilitator app that boots, v
 ## Acceptance Criteria
 
 - [x] Given a types-only PR with the four store ports (`SettlementStore`, `CatalogStore`, `RateLimitStore`, `SpendStore`) and the operations AD-7 requires, the before-submit and on-success settlement hooks, and the zod config schema, when it is opened on day 1, then all three lanes review and approve it before lane work builds on it
-- [ ] Given a valid environment, when the app starts, then it reads and validates config once with zod, listens on the configured port and answers stub routes for `/verify`, `/settle`, `/supported` and `/discovery/resources`; `src/main.ts` is the only composition root and the only place that reads `process.env`
-- [ ] Given a missing or invalid config value, when the app starts, then it exits with an error that names the value and never prints a secret
-- [ ] Given the test setup, when the integration test boots the app with in-memory fakes of all four ports and `fake-rpc`, then it passes with no network and no database; each port has an in-memory fake in `apps/facilitator`; logs are structured, one event per line, and never contain secrets or full XDR; requests have a body size limit
+- [x] Given a valid environment, when the app starts, then it reads and validates config once with zod, listens on the configured port and answers stub routes for `/verify`, `/settle`, `/supported` and `/discovery/resources`; `src/main.ts` is the only composition root and the only place that reads `process.env`
+- [x] Given a missing or invalid config value, when the app starts, then it exits with an error that names the value and never prints a secret
+- [x] Given the test setup, when the integration test boots the app with in-memory fakes of all four ports and `fake-rpc`, then it passes with no network and no database; each port has an in-memory fake in `apps/facilitator`; logs are structured, one event per line, and never contain secrets or full XDR; requests have a body size limit (no RPC is in the graph yet, so the boot test needs no `fake-rpc`; see decision 14)
 
 ## Implementation Notes
 
@@ -83,6 +84,26 @@ As a developer on any of the three lanes, I want a facilitator app that boots, v
 - `zod` ^3.25.76 and `@stellar/stellar-sdk` ^16.3.0 (for `StrKey`) added to `apps/facilitator`.
 - `deploy/*.env.example`: `STELLAR_RPC_URL` renamed to `RPC_URLS`. The secret variables are left
   for 0020.
+
+### Running skeleton (branch `lore-0017-facilitator-skeleton`)
+
+- `apps/facilitator/src/adapters/memory.ts`: in-memory adapters of the four ports and
+  `memoryStores()`, used for `STORE=memory` and in tests.
+- `apps/facilitator/src/logger.ts`: `Logger` interface and `jsonLogger()`, one JSON object per
+  line on stdout.
+- `apps/facilitator/src/http/app.ts`: `createApp(deps)` with the four routes answering 501, a
+  JSON 404, a body size limit (413), 400 for malformed JSON and a logged 500. `AppDeps` is the
+  graph the composition root hands over; lanes add their services to it.
+- `apps/facilitator/src/main.ts`: `main()` reads `process.env` once, parses the config and starts
+  the server; `start(deps)` is what tests call. A startup failure logs `startup_failed` with the
+  config problems and exits with code 1. `src/index.ts` is gone; `dev` and `start` run `main`.
+- `apps/facilitator/test/port-contracts.ts`: one contract suite per port, for 0022 to run
+  against the durable adapters. `memory.test.ts` runs them against the in-memory adapters.
+- `apps/facilitator/test/main.test.ts`: boots the app on memory stores (stub routes, no CORS,
+  413, 400, 404, JSON-lines logs without the secret) and spawns `src/main.ts` with a bad config
+  to check the exit code and that no value is printed.
+- 33 facilitator tests pass (8 config, 21 contract, 4 boot); typecheck, lint, Prettier and build
+  pass.
 
 ## Design Decisions
 
@@ -126,11 +147,33 @@ As a developer on any of the three lanes, I want a facilitator app that boots, v
     decimals with upper bounds (timers at most 2^31−1 ms), RPC URLs only http(s) and at least
     one, values trimmed, and every error message is ours so none echoes a value.
 
+### Emerged (running skeleton, Stan)
+
+14. **No RPC and no `fake-rpc` in the skeleton**: nothing in the graph calls RPC yet, so the boot
+    test proves "no network" without one. The pool and its RPC join the graph with 0009 and
+    0020, and those tasks decide how facilitator tests get `FakeRpc` (it sits in
+    `packages/signer-pool/test/` and isn't exported; a `./testing` subpath export is the
+    suggestion).
+15. **A final state is terminal in `transition`**: the port doc said a backward move is dropped;
+    a final → final move (e.g. `rejected → success`) is dropped too. The port doc and the
+    contract test now say so.
+16. **`FEE_ESCALATION_FACTOR` must be above 1**: the pool's constructor refuses a factor of 1 or
+    less, so a value of 1 passed the config and then crashed startup with a non-config error.
+17. **Stub routes answer 501** with `{ error: "not_implemented" }` until their tasks land; unknown
+    routes get a JSON 404.
+18. **Hand-rolled JSON-lines logger** instead of pino: enough for T1; 0014 picks the backend and
+    may switch.
+19. **In-memory spend semantics** (0024 may refine them): `commit` moves the reservation's time
+    to `now`, and a window counts reservations with `now - windowMs < time ≤ now`. A lease is
+    expired once `now > expiresAt`, matching `renewLease`. The in-memory maps are never pruned
+    (marked with `ponytail:` comments).
+
 ## Deferred from the PR #7 review
 
 These go to the tasks that own them (Adam's review):
 
-- Port contract tests: rest of 0017 (fakes) and 0022.
+- Port contract tests: rest of 0017 (fakes) and 0022. Done in `test/port-contracts.ts`; 0022
+  runs the same suites against the durable adapters.
 - The `SpendStore` reservation lifecycle: 0024.
 - Wrapping `onSuccess` errors in the caller: 0009.
 - A bigint codec for stored amounts: 0022.
