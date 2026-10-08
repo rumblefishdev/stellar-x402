@@ -22,7 +22,8 @@
     "@x402/core": "~2.27.0",
     "@x402/extensions": "~2.27.0",
     "@x402/stellar": "~2.27.0",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/express": "^5.0.6"
