@@ -141,5 +141,5 @@ From Stan's review:
 - `onFinal` errors never reach the caller and `/settle` doesn't wait for it: stated in
   `hooks.ts` (993edad); the behavior is built in 0009 and 0024.
 - A lost `onFinal` call after a crash leaves the reservation counted until it ages out of the
-  rolling window; acceptable for T1, noted in 0024.
+  rolling window; acceptable for T1. Stan will note it in 0024.
 - A `claimed` record with no hash at startup is closed as `rejected`: added to 0019 (f65fac2).
