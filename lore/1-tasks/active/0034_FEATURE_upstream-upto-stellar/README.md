@@ -11,8 +11,8 @@ links:
   - https://github.com/x402-foundation/x402/blob/main/specs/CONTRIBUTING.md
   - https://github.com/x402-foundation/x402/blob/main/CONTRIBUTING.md
   - https://github.com/x402-foundation/x402/blob/main/specs/schemes/upto/scheme_upto.md
-  - ../../../docs/adr/0001-repo-layout.md
-  - ../../../docs/rfp/07-x402-facilitator-bazaar.md
+  - ../../../../docs/adr/0001-repo-layout.md
+  - ../../../../docs/rfp/07-x402-facilitator-bazaar.md
 history:
   - date: "2026-10-08"
     status: backlog
@@ -36,6 +36,12 @@ the matching `upto` classes merged into `x402-foundation/x402`. The RFP counts t
 once it is **merged**, not when it is proposed.
 
 **Lane:** Payments
+
+## Status: Active
+
+> Started 2026-10-08 on local branch `lore-0034-upstream-upto-stellar`, cut from
+> `lore-0005-upto-proxy-docs` (PR #12) and rebased onto develop, because the spec builds on 0005's
+> docs. Not pushed yet. Drafts are in [`drafts/`](drafts/).
 
 ## Context
 
@@ -63,7 +69,7 @@ What we have:
   (`archive/0002_RESEARCH_upto-proxy-design-on-soroban/notes/G-upto-proxy-contract-spec.md`).
 - **Contract:** `contracts/upto-proxy` (0003). It enforces the recipient binding and single
   settlement, so we do ship a Soroban contract.
-- **On-chain proof:** 0004 ran 46 scenarios on testnet across Circle USDC, a SAC asset and a
+- **On-chain proof:** 0004 ran 49 scenarios on testnet across Circle USDC, a SAC asset and a
   non-SAC SEP-41 token (`docs/upto-proxy-testnet-report.md`).
 - **Spec input:** 0005 step 5 lists the rules the spec needs, and its threat model covers the
   leftover allowance.
@@ -168,10 +174,10 @@ it twice:
 ## Acceptance Criteria
 
 - [ ] An upstream issue proposes Stellar `upto`, and a maintainer or the Technical Steering
-  Committee has acknowledged it
+      Committee has acknowledged it
 - [ ] `specs/schemes/upto/scheme_upto_stellar.md` is merged into `x402-foundation/x402`
 - [ ] The Stellar `upto` client, server and facilitator classes are merged into
-  `@x402/stellar`, with tests and a changeset
+      `@x402/stellar`, with tests and a changeset
 - [ ] The spec states that the design ships a Soroban contract and explains why
 - [ ] The monorepo depends on the published `@x402/stellar` with `upto`, not the local fork build
 - [ ] `docs/rfp/07-x402-facilitator-bazaar.md` matches the published RFP's `upto` wording
@@ -183,3 +189,50 @@ it twice:
 - **An audit or security review of UptoProxy:** maintainers may ask for one before merging code
   that moves value.
 - Step 1 can start now. Steps 2–4 follow 0005 and 0015.
+
+## Implementation Notes
+
+Local work so far, steps 1 and 2 as drafts. Nothing is sent upstream.
+
+- **Upstream checked** at `x402-foundation/x402` `7f2b2f1` (shallow clone, read-only): the
+  template, `scheme_upto.md`, `scheme_upto_evm.md`, `scheme_exact_stellar.md`, and the Stellar
+  `exact` client and facilitator (`maxTransactionFeeStroops` default 50,000; error reasons
+  `invalid_exact_stellar_*`).
+- [`drafts/scheme_upto_stellar.md`](drafts/scheme_upto_stellar.md): the network spec, in upstream
+  style (unwrapped lines, like `scheme_exact_stellar.md`). It covers every item of 0005's spec-input
+  list: requirements with `extra.facilitatorAddress`, the payload, the exact auth tree, verification,
+  settlement with zero settlement, fees, 15 error codes, security considerations including why a
+  contract is needed, and an appendix with the interface, errors, event, canonical deployments
+  and the 0004 testnet evidence.
+- [`drafts/issue-proposal.md`](drafts/issue-proposal.md): the step 1 issue. It states the problem,
+  why `exact` and plain allowances fall short, the approach and status, and asks maintainers four
+  questions: contract location, payload shape, a spec-pinned proxy address, and the PR split.
+
+## Design Decisions
+
+### Emerged
+
+1. **Payload is the signed entry alone** (`payload.authorization`, base64
+   `SorobanAuthorizationEntry`), not `exact`'s `payload.transaction`. Every signed argument can be
+   read from the entry, and a client-built transaction would add source, fee and sequence fields
+   the facilitator must ignore. This closes item 1 of 0005's spec-input list for the draft; it is
+   question 2 to the maintainers.
+2. **Proxy address pinned in the spec**, not a requirements field, like EVM's fixed
+   `x402UptoPermit2Proxy`. A resource server must not be able to point a client's `approve` at
+   another contract.
+3. **The client may skip simulation.** The tree is fully determined by the requirements, so the
+   client can build it directly (as the 0004 suite's `clientSignDirect` does); simulating with the
+   facilitator as source stays an option for preflight.
+4. **Fee ceiling note**: the spec says `exact`'s 50,000-stroop default is too low for `upto`
+   because of rent (151,550 measured in 0006) and suggests 250,000, our ADR 0007 default.
+5. **Links point to `develop`** in our public repo. ADR 0010 and the testnet report only reach
+   develop when PR #12 merges, so the issue waits for that.
+6. **Task converted to a directory** to hold the drafts.
+
+## Open Before Anything Goes Upstream
+
+- Create the fork of `x402-foundation/x402` in our org (ADR 0001); it doesn't exist yet.
+- Review both drafts, fill the issue's placeholders (fork link, audit status, AI-use disclosure),
+  then open the issue.
+- The mainnet deployment row stays TBD until there is one (and a decision on the deployer key,
+  0026).
