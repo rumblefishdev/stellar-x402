@@ -107,7 +107,52 @@ The source RFP and architecture docs in `docs/rfp/` are left unchanged. Deviatio
 
 ## Acceptance Criteria
 
-- [ ] The ADR, contract README, threat-model section and testnet report are written
+- [x] The ADR, contract README, threat-model section and testnet report are written
 - [ ] Every transaction hash in the report resolves on sorobanscan (`testnet.sorobanscan.rumblefish.dev`)
-- [ ] The testnet report includes the 0006 throughput numbers and the one-payment-per-transaction limit
-- [ ] `format:check` passes
+  (all 21 hashes return `SUCCESS` from testnet RPC `getTransaction`; the sorobanscan pages still
+  need a check in a browser, see Issues)
+- [x] The testnet report includes the 0006 throughput numbers and the one-payment-per-transaction limit
+- [x] `format:check` passes (for every tracked file; the local, untracked `CLAUDE.local.md` fails it)
+
+## Implementation Notes
+
+- **ADR** `docs/adr/0010-upto-proxy-design.md`: the decision, the deviations from §6.2 (D1–D9),
+  rationale, alternatives (separate approve, escrow, ledger-number window, persistent nonces,
+  auth nonce only, allowlist, admin, `cancel`, batch entry point) and consequences.
+- **Contract README** `contracts/upto-proxy/README.md`: deployments, interface, the client's auth
+  tree and how to get it from simulation, the facilitator's auth, execution order, errors (contract
+  codes and the two host auth errors), event, storage, invariants I1–I7, a facilitator guide
+  (verify, settle, recommended `delegated-bump` shape with the 0006 costs), build and test
+  commands, and the spec input (step 5).
+- **Threat model**: the `upto contract` section of `docs/threat-model.md`: assets and trust, then
+  15 threats, each with attack, mitigation and residual risk.
+- **Testnet report** `docs/upto-proxy-testnet-report.md`: 0004's run report moved from
+  `contracts/upto-proxy/e2e/results/testnet-report.md` and extended with **Throughput and
+  limits** (0006 cost by shape and throughput) and **Known limits**. Links in the e2e README and
+  0034 updated; `docs/README.md` lists the report.
+
+## Design Decisions
+
+### From Plan
+
+1. **Five deliverables**: the ADR, the contract README, the threat-model section, the testnet
+   report and the spec input.
+
+### Emerged
+
+2. **ADR number 0010**: the next free number on develop on 2026-10-08. 0013 (Adam) and 0014
+   (Stan) may also write ADRs, so re-check the number before merging.
+3. **One testnet report, not two**: 0004's `testnet-report.md` became `docs/upto-proxy-testnet-report.md`
+   instead of a second copy next to the results JSON.
+4. **Spec input lives in the contract README** (last section), next to the facilitator guide it
+   extends, rather than in its own file. 0034 points to it.
+5. **D9 added to the deviations**: §6.2 doesn't fix the order of `require_auth_for_args` and
+   `approve`; the contract needs the auth first (finding F7).
+6. **Threats as sections, not a table**: each has an attack, mitigation and residual risk, which
+   were unreadable as a four-column table.
+
+## Issues Encountered
+
+- **Sorobanscan's API can't be scripted**: it needs a bearer token from a browser challenge, so the
+  hashes were checked against testnet RPC instead. Opening a few report links in a browser closes
+  the acceptance criterion.
