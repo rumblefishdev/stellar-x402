@@ -2,7 +2,7 @@
 id: "0014"
 title: "Choose where the facilitator is hosted and record it in an ADR"
 type: RESEARCH
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0006", "0009"]
 related_tasks: ["0012", "0013"]
@@ -25,6 +25,10 @@ history:
     status: backlog
     who: claude
     note: "Tagged Platform lane by 0012; decision task feeding M1 Epic 2."
+  - date: "2026-10-08"
+    status: active
+    who: stkrolikiewicz
+    note: "Started by the Platform lane owner."
 ---
 
 # Choose where the facilitator is hosted and record it in an ADR
