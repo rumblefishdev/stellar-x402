@@ -2,7 +2,7 @@
 id: "0017"
 title: "Facilitator skeleton with store ports, settlement hooks and config"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0004"]
 related_tasks: ["0012", "0009", "0013"]
@@ -15,9 +15,21 @@ history:
     status: backlog
     who: claude
     note: "Created by 0012 from M1 Story 1.1 (Platform lane)."
+  - date: "2026-10-08"
+    status: active
+    who: okarcz
+    note: >
+      Started the day-1 part only: the types-only PR with the four store ports, the settlement
+      hook signatures and the zod config schema. The rest of the skeleton goes to the Platform
+      lane owner once the types PR is approved.
 ---
 
 # Facilitator skeleton with store ports, settlement hooks and config
+
+## Status: Active
+
+> Started 2026-10-08 on branch `lore-0017-day1-types`. Scope for now: the day-1 types-only PR
+> (first acceptance criterion).
 
 ## Summary
 
