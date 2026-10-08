@@ -15,6 +15,12 @@ history:
     status: backlog
     who: claude
     note: "Created by 0012 from M1 Story 1.5 (Payments lane)."
+  - date: "2026-10-08"
+    status: backlog
+    who: claude
+    note: >
+      Added the rule for claimed records with no hash at startup, from Stan's (stkrolikiewicz)
+      PR #7 follow-up, with okarcz.
 ---
 
 # Settlement records survive restarts
@@ -35,8 +41,21 @@ As a facilitator operator, I want settlement records that are written before sen
 
 - Settlement module in `settlement/` owning all `SettlementStore` writes, with forward-only compare-and-set.
 - Multi-hash records and lookup by any hash.
-- Startup reconciliation that runs before the HTTP server accepts traffic.
-- Tests with the in-memory store and `fake-rpc`, including a simulated crash between sign and send.
+- Startup reconciliation that runs before the HTTP server accepts traffic, while holding the
+  channel lease (AD-17).
+- **A `claimed` record with no hash at startup** (raised by Stan on PR #7): the process died
+  between the claim and the first `onSigned`, for example while waiting for a channel or during
+  simulation. The re-check has no hash to look up, and a retry with the same payload would find
+  the stuck record forever. Since 0016 the pool sends only after `onSigned` succeeds, so no hash
+  means nothing reached the network and the client's nonce is unused. Reconciliation closes it as
+  `rejected` with `errorReason` "interrupted before signing", and the client can sign again.
+  - It runs `onFinal`, unlike a `beforeSubmit` refusal: `beforeSubmit` may already have reserved
+    spend budget, and only `onFinal` releases it. Releasing a reservation that doesn't exist does
+    nothing (0024).
+  - A live process that later tries to store a hash for the closed record gets `false` from
+    `addHash`, which refuses final records, so it sends nothing.
+- Tests with the in-memory store and `fake-rpc`, including a simulated crash between sign and send and one between the claim and the first
+  `onSigned`.
 
 ## Acceptance Criteria
 
@@ -44,4 +63,5 @@ As a facilitator operator, I want settlement records that are written before sen
 - [ ] Given a rebuild that produces a new hash, when it is signed, then the record keeps every hash and can be found by any of them
 - [ ] Given a write that would move a record backwards, such as `pending` after `success`, when it arrives late, then the compare-and-set drops it; states only move `claimed → signed → pending → success | failed | rejected | expired`
 - [ ] Given non-final records in the store, when the app starts, then before accepting traffic it checks each one on chain by its hashes and finalizes it; a record that turns `success` this way fires the on-success hook
+- [ ] Given a `claimed` record with no hashes at startup, when reconciliation runs while holding the lease, then it is closed as `rejected` with reason "interrupted before signing" and `onFinal` runs to release any spend reservation; nothing was sent, because 0016 sends only after `onSigned` succeeds
 - [ ] Given any handler or event listener, when it needs to change a record, then it calls the single settlement module, which owns every write to `SettlementStore`
