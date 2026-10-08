@@ -109,15 +109,17 @@ hash, explorer link, fee and resources. 0005 builds its report from it.
   - `src/chain.ts`: RPC helpers and `txReport` (fee, resources, sources, events from the chain).
   - `src/upto.ts`: the client and facilitator steps of the signing model.
   - `src/world.ts`: idempotent setup of accounts, trustlines, SACs, top-ups and channels.
-  - `test/upto-proxy.e2e.test.ts`: 13 scenarios per token plus the client-fee check.
+  - `test/upto-proxy.e2e.test.ts`: 16 scenarios per token (3 settlements, 6 rejections, 5
+    tampering cases, 2 concurrency cases) plus the client-fee check.
 - **One command:** `pnpm contracts:e2e` (`E2E_TOKENS=sac,sep41` for a subset). Results go to
   `contracts/upto-proxy/e2e/results/testnet-results.json`.
-- **Full run (2026-10-08):** 46/46 passed across USDC, the self-issued SAC and the test token,
-  with 21 settlement transactions recorded. The client was funded with 20 USDC from the faucet.
-  - Fees charged: about 40,900 stroops (USDC), 41,000 (SAC) and 35,900 (test token) per
-    settlement; zero settlements about 30,000; 122,589 for
-    the first test-token payment to the seller, which created its balance entry.
-  - Concurrent settlements from one payer landed in the same ledger through two channels.
+- **Full run (2026-10-08, 13:41 UTC, after the PR #8 review):** 49/49 passed across USDC, the
+  self-issued SAC and the test token, with 21 settlement transactions recorded. The client was
+  funded with 20 USDC from the faucet. The first full run (46/46, 09:45 UTC) is replaced by it.
+  - Fees charged at the ceiling: 40,907 stroops (USDC), 41,000 (SAC) and 35,925 (test token);
+    zero settlements about 30,000.
+  - Concurrent settlements from one payer landed in the same ledger through two channels, on the
+    first attempt for every token.
 
 ## Design Decisions
 
@@ -134,7 +136,10 @@ hash, explorer link, fee and resources. 0005 builds its report from it.
 4. **Rejections are checked in simulation** (okarcz, 2026-10-08): the submitter's enforcing
    simulation against live testnet state refuses them, so they have no transaction hash.
 5. **The salt is the WASM hash**: a rerun deploys nothing, changed code gets a new contract ID,
-   and the same code returns under the same ID after a reset.
+   and the same code returns under the same ID after a reset, for the same deployer. The ID is
+   per deployer (PR #8 review, okarcz chose to document it): another key or a build that differs
+   by a byte gives another ID, and setup warns when the proxy differs from
+   `UPTO_PROXY_CONTRACT_ID`. A shared deployer key is for 0026 to decide.
 6. **The client simulates with the facilitator as the source**: with the client as source, its
    auth is recorded as source-account credentials and there is no address entry to sign.
 7. **Rejection scenarios sign without simulation** (`clientSignDirect`): recording-mode
@@ -146,8 +151,19 @@ hash, explorer link, fee and resources. 0005 builds its report from it.
    instead of all of `contracts/`).
 10. **Explorer links go to sorobanscan** (okarcz, 2026-10-08): `explorerLink` points at
     `https://testnet.sorobanscan.rumblefish.dev/transactions/<hash>` on testnet and at
-    `https://sorobanscan.rumblefish.dev` on mainnet, picked by the network passphrase. The recorded
-    results file was rewritten to match, so its hashes are unchanged.
+    `https://sorobanscan.rumblefish.dev` on mainnet, picked by the network passphrase.
+11. **PR #8 review (Adam), all valid points applied** (okarcz, 2026-10-08):
+    - the same-ledger scenario now runs the full per-settlement checks through `checkSettled`,
+      and retries up to 3 times when the two submits straddle a ledger close;
+    - every settlement asserts the leftover allowance (`max_amount - actual_amount`; for the
+      same-ledger pair, either value, since which `approve` ran last is unknown);
+    - a fifth tampering case: another facilitator rewrites the `facilitator` argument to itself
+      and submits with its own authorization, so only the client's signature refuses it;
+    - setup checks `sendTransaction` status for channels, saves secrets after each channel call
+      and writes `accounts.json` with mode 600;
+    - the results file records `tokensRun` and `otherChannels`;
+    - "the client pays nothing" now reads "no settlement fees": setup pays its trustline fees
+      (200 stroops), before the fee check's baseline.
 
 ## Issues Encountered
 
@@ -158,4 +174,5 @@ hash, explorer link, fee and resources. 0005 builds its report from it.
 
 - **Leftover allowance:** after a settlement the proxy keeps `max_amount - actual_amount` of
   allowance until `allowance_expiration_ledger` (750,000 after settling a quarter of 1,000,000;
-  the full ceiling after a zero settlement). The threat model should cover it.
+  the full ceiling after a zero settlement). Every settlement asserts it. The threat model should
+  cover it.
