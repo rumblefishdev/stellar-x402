@@ -29,6 +29,10 @@ friendbot. Every run then:
 
 After a testnet reset, the same command rebuilds everything, except for USDC.
 
+The contract IDs depend on the deployer key (see `deploy/README.md`). When the proxy the suite
+deployed differs from `UPTO_PROXY_CONTRACT_ID` in `deploy/testnet.env.example`, setup prints a
+warning: the run is then testing your own deployment, not the recorded one.
+
 [`results/testnet-report.md`](results/testnet-report.md) summarizes the 2026-10-08 run. It is a
 snapshot: a new run rewrites the JSON but not the report.
 
@@ -48,9 +52,13 @@ SEP-41 `test-token`):
   and sources.
 - **Rejected:** an amount over the ceiling, a replayed auth entry, a reused nonce with a new
   signature, before `valid_after`, after the deadline, and a different facilitator.
-- **Tampering:** changing the recipient, token, ceiling or nonce breaks the client's signature.
-- **Concurrency:** two authorizations from one payer, one after the other and in the same ledger.
+- **Tampering:** changing the recipient, token, ceiling or nonce breaks the client's signature, and
+  so does another facilitator rewriting the `facilitator` argument to itself.
+- **Concurrency:** two authorizations from one payer, one after the other and in the same ledger
+  (up to 3 attempts, since two parallel submits can straddle a ledger close). Both get the same
+  checks as any settlement.
 
 Rejections are checked in the submitter's enforcing simulation against live testnet state, the
 same path the facilitator uses, so they have no transaction hash. A final check confirms the
-client's XLM balance did not change.
+client's XLM balance did not change during the scenarios: it pays no settlement fees (setup pays
+the fees for its trustlines).
