@@ -87,13 +87,18 @@ allows cataloging on verify), #2281 / #3266 / #3281 / #3677 (opaque CDP rejectio
 
 - **RT1/RT2 — provenance.** Anyone can settle a payment to a victim's `payTo` in a worthless
   self-issued token (AD-9 allows any SEP-41 token) and overwrite the victim's listing or pollute
-  its `accepts`. The `payTo` in the key does not stop it.
-- **RT3 — same route, two keys.** Templates that differ only by parameter names.
+  its `accepts`. The `payTo` in the key does not stop it. → **To raise in review:** catalog only
+  settlements in a configured eligible-asset set above a minimum amount (ADR 0008 amendment + 0031).
+- **RT3 — same route, two keys.** Templates that differ only by parameter names. → **Decided:**
+  erase parameter names in the key; keep the original template for display only.
 - **RT4/RT5 — catalog inflation.** Wildcard subdomains, and IDs in paths when there is no template.
-- **RT6 — stack overflow.** A recursive depth walk over a 32 KiB nested payload overflows.
+  → **To raise in review:** per-`payTo` and per-host listing caps (0031 / 0022). Stellar
+  auto-templating is a follow-up.
+- **RT6 — stack overflow.** A recursive depth walk over a 32 KiB nested payload overflows. →
+  **Decided:** walk the schema iteratively with early stop at the depth / node caps.
 
-Proposed fixes are in the 0030 open questions and in
-[G-day1-contract-and-tests](G-day1-contract-and-tests.md).
+Decisions are reflected in the 0030 [README](../README.md#decisions); cross-task items stay open
+for the day-1 review.
 
 ## Not verified
 

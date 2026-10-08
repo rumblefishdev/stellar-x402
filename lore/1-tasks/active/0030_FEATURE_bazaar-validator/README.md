@@ -68,35 +68,55 @@ As an agent looking for paid services, I want only well-formed, safe listings to
 - Unit tests for both input types, soft-drop cases, SSRF cases and route templates. Reuse the
   upstream test cases where they exist, so we stay in sync with the TS/Python/Go implementations.
 
-## Open Questions
+## Decisions
 
-**Status: proposed — to confirm in the day-1 review** with Payments (0017) and the 0031 owner.
-Evidence for each answer is in the [R note](notes/R-bazaar-validation-landscape.md); the full
-contract is in the [G note](notes/G-day1-contract-and-tests.md).
+Resolved for this package by the research session (2026-10-08). Evidence is in the
+[R note](notes/R-bazaar-validation-landscape.md); the full contract is in the
+[G note](notes/G-day1-contract-and-tests.md). Items that reach outside `packages/bazaar` are
+listed separately below and stay open for the day-1 review.
 
-- **URL normalization in the key.** Proposed: WHATWG parse; https only; reject userinfo, IP
-  literals, `localhost` / `*.localhost` and trailing-dot hosts; drop the default port, query and
-  fragment; resolve dot segments and normalize percent-encoding (RFC 3986 §6.2.2); **keep** path
-  case and the trailing slash (RFC 9110: only scheme and host are case-insensitive; merging
-  distinct resources is worse than a duplicate). Changed from the earlier bracketed proposal.
-- **MCP entries.** Proposed: key `(network, payTo, method = toolName, canonical URL)`, as the spec
-  requires (`resource.url` + `toolName`) and PR #7 encodes; `routeTemplate` ignored for MCP.
-- **Template mismatch.** Proposed: the template must match the concrete path segment by segment,
-  have at least one static segment and pass a stricter grammar; otherwise it is discarded and the
-  concrete path is used, as the spec says, and counted in metrics. Parameter names are erased in
-  the key. Open: CDP rejects instead; we follow the spec unless the review prefers rejecting.
-- **Reason codes.** Proposed closed set, sent as the value of the spec's `rejectedReason`:
+### Settled for `packages/bazaar`
+
+- **URL normalization in the key.** WHATWG parse; https only; reject userinfo, IP literals,
+  `localhost` / `*.localhost` and trailing-dot hosts; drop the default port, query and fragment;
+  resolve dot segments and normalize percent-encoding (RFC 3986 §6.2.2); **keep** path case and
+  the trailing slash (RFC 9110: only scheme and host are case-insensitive; merging distinct
+  resources is worse than a duplicate).
+- **MCP entries.** Key `(network, payTo, method = toolName, canonical URL)`, as the spec requires
+  (`resource.url` + `toolName`) and PR #7 encodes; `routeTemplate` ignored for MCP.
+- **Template mismatch — spec fallback (decided).** The template must match the concrete path
+  segment by segment, have at least one static segment and pass the stricter grammar; otherwise it
+  is **discarded and the concrete path is used**, as the x402 spec mandates, and the fallback is
+  counted as `route_template_ignored` in metrics. We chose this over CDP's reject-the-listing
+  behaviour to stay interoperable with the ecosystem (ADR 0008); seller feedback on a dropped
+  template is a follow-up (a dry-run validate endpoint, see Future Work).
+- **Parameter names erased in the key (decided, red-team RT3).** `/users/:id` and `/users/:userId`
+  produce one key; the original template is kept for display only.
+- **Reason codes.** Closed set, sent as the value of the spec's `rejectedReason`:
   `invalid_extension`, `invalid_info`, `invalid_resource_url`, `too_large`, `schema_too_complex`,
-  `unsupported_version`, `internal_error`. Needs PR #7's `reason` renamed to `rejectedReason`.
-- **Size limits.** Proposed: extension ≤ 32 KiB, description ≤ 500 chars (CDP parity, rejects the
-  listing, never the payment), schema depth ≤ 10 and ≤ 1,000 nodes, `routeTemplate` ≤ 256,
-  `toolName` ≤ 128, URL ≤ 2048.
-- **x402 v1 payloads.** Proposed: catalog v2 only (the spec does not expect v1); anything else is
+  `unsupported_version`, `internal_error`.
+- **Size limits.** Extension ≤ 32 KiB, description ≤ 500 chars (CDP parity; rejects the listing,
+  never the payment), schema depth ≤ 10 and ≤ 1,000 nodes, `routeTemplate` ≤ 256, `toolName`
+  ≤ 128, URL ≤ 2048.
+- **Bounded schema handling (decided, red-team RT6).** The schema is walked **iteratively** for
+  the caps above, so a deeply-nested payload cannot overflow our own stack, and it is never
+  compiled in-process.
+- **`keyVersion` on every entry (decided).** The normalized entry carries `keyVersion = 1`, so a
+  later change to the normalization rules can be migrated rather than silently re-keying. (Storage
+  of the field is 0022's concern.)
+- **x402 v1 payloads.** Catalog v2 only (the spec does not expect v1); anything else is
   `unsupported_version`.
-- **New, from the red team: provenance.** Anyone can settle a payment to a victim's `payTo` in a
-  worthless self-issued token and overwrite the victim's listing. Proposed: catalog only
-  settlements in eligible assets above a minimum amount. Decision needed; touches ADR 0008 and
-  0031, not this package.
+
+### To raise in the day-1 review (reach beyond `packages/bazaar`)
+
+- **Rename `ExtensionResponses.reason` → `rejectedReason`**, typed as the closed reason set. Owner:
+  0017 / PR #7.
+- **Provenance — eligible assets + minimum amount (red-team RT1/RT2).** Anyone can settle a payment
+  to a victim's `payTo` in a worthless self-issued token and overwrite their listing. Proposed:
+  catalog only settlements in a configured eligible-asset set above a minimum amount. Owner: ADR
+  0008 amendment + 0031. (Settlement itself stays allowlist-free per AD-9.)
+- **Listing caps per `payTo` and per host (red-team RT4).** Bound catalog inflation from wildcard
+  subdomains and per-ID paths. Owner: 0031 / 0022.
 
 ## Acceptance Criteria
 
@@ -107,3 +127,13 @@ contract is in the [G note](notes/G-day1-contract-and-tests.md).
 - [ ] Given the upstream helpers, when the package is reviewed, then validation and sanitizing call `@x402/extensions` instead of reimplementing its rules
 - [ ] Given a rejected listing, when the result is returned, then it carries a reason code from the fixed set that 0031 uses
 - [ ] Given a payload whose JSON Schema exceeds our size, depth or node-count caps, when it is validated, then the result is `schema_too_complex` and the schema is never compiled in-process
+
+## Future Work
+
+Out of scope for 0030; spawn as backlog tasks when 0030 ships.
+
+- **Auto-template Stellar identifiers** (G…/M…/C… StrKeys, 64-hex tx hashes, UUIDs) when a seller
+  gives no `routeTemplate`, so per-ID paths don't inflate the catalog (red-team RT5). CDP does this
+  for EVM/Solana but not Stellar.
+- **Dry-run validate endpoint** so a seller can check a listing (and see why a template was
+  dropped) before paying — CDP offers `/x402/validate`.

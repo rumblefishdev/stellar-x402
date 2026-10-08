@@ -121,12 +121,14 @@ The payload schema is walked iteratively for limits only, never compiled.
 | `mimeType` | ≤ 127, RFC 6838 grammar | RFC 6838 |
 | `serviceName`, `tags`, `iconUrl` | upstream soft-drop rules, plus: store the canonical `href`, reject `\`, trailing dot, `*.localhost`, http | spec l.384-391 and gap G7 |
 
-## Needs agreement outside 0030
+## Needs agreement outside 0030 (day-1 review)
 
-1. Rename `ExtensionResponses.bazaar.reason` to `rejectedReason`, and type it as `BazaarRejectReason`. This affects 0017 / PR #7.
-2. Catalog only settlements in eligible assets above a minimum amount (red team RT1/RT2). This affects an ADR 0008 amendment and 0031. **Decision pending.**
-3. Listing caps per `payTo` and per host (RT4). This affects 0031 / 0022.
-4. Store `keyVersion` with each entry (pre-mortem). This affects 0022.
+These reach beyond `packages/bazaar`, so they stay open for the review with 0017 / 0031.
+
+1. Rename `ExtensionResponses.bazaar.reason` to `rejectedReason`, typed as `BazaarRejectReason`. Owner: 0017 / PR #7.
+2. Catalog only settlements in a configured eligible-asset set above a minimum amount (red team RT1/RT2). Owner: ADR 0008 amendment + 0031.
+3. Listing caps per `payTo` and per host (RT4). Owner: 0031 / 0022.
+4. Persist `keyVersion` with each entry so a normalization change can be migrated. The field is decided and lives in our `NormalizedEntry`; its storage is 0022's concern.
 
 ## Test plan
 
