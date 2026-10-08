@@ -35,7 +35,8 @@ What each party must trust:
 - **Mitigation:** The client signs `facilitator`, and the contract calls
   `facilitator.require_auth()`; the facilitator's authorization covers `actual_amount`. Another
   submitter fails with `Error(Auth, InvalidAction)` (spike S5, and the 0004 "different facilitator"
-  scenario).
+  scenario). Another facilitator that rewrites `facilitator` to itself breaks the client's
+  signature (0004 tampering scenario).
 - **Residual risk:** None found.
 
 #### Replay of a signed entry
@@ -119,8 +120,8 @@ What each party must trust:
 - **Mitigation:** The facilitator computes fees from a fresh simulation and caps them with
   `maxFeeStroops` (250,000 by default, ADR 0007). The nonce TTL is bounded by
   `allowance_expiration_ledger`.
-- **Residual risk:** A first payment to a seller costs about 3× a normal one (122,589 stroops in
-  0004).
+- **Residual risk:** A settlement that pays rent costs several times a normal one: 151,550 stroops
+  for the first settlement of the day in 0006, against about 41,000 for a normal one.
 
 #### Nonce griefing
 
