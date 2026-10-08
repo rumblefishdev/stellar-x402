@@ -86,7 +86,8 @@ export interface SettlementStore {
   /**
    * Compare-and-set: applies `update` only while the record is in state `expected`. Resolves
    * the updated record, or `undefined` if the state had already moved on. An `update.state`
-   * behind `expected` in the lifecycle order is dropped the same way (AD-16).
+   * behind `expected` in the lifecycle order is dropped the same way, and a record in a final
+   * state never moves on (AD-16).
    */
   transition(
     key: SettlementKey,
