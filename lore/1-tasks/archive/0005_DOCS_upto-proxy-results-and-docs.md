@@ -2,10 +2,10 @@
 id: "0005"
 title: "Document UptoProxy: design ADR, contract docs, threat model and testnet report"
 type: DOCS
-status: active
+status: completed
 milestone: 1
-related_adr: []
-related_tasks: ["0002", "0003", "0004", "0006", "0012"]
+related_adr: ["0010"]
+related_tasks: ["0002", "0003", "0004", "0006", "0012", "0035", "0034"]
 tags: [layer-contracts, upto, priority-medium, effort-small, payments]
 links:
   - ../archive/0006_RESEARCH_upto-settlement-scaling/notes/R-testnet-throughput-measurements.md
@@ -33,7 +33,14 @@ history:
     status: active
     who: okarcz
     note: "Started while 0004's PR (#8) waits for review; its results and findings are the input."
----
+  - date: "2026-10-09"
+    status: completed
+    who: okarcz
+    note: >
+      Done. All 4 acceptance criteria met; Stan's 15 review comments applied. PR #12 never merged
+      on its own: PR #14 (0035) was built on its branch and rebase-merged into develop (938f1eb)
+      with all of #12's commits, then #12 was closed with its branch at develop. The docs on
+      develop are #14's updated versions (ADR 0010 D10/D11, threat model, 58/58 report).
 
 # Document UptoProxy: design ADR, contract docs, threat model and testnet report
 
@@ -44,10 +51,10 @@ reviewers and auditors, the facilitator team, and the future `scheme_upto_stella
 
 **Story:** [M1 Story 5.2](../../../docs/planning/m1-epics.md#story-52-document-uptoproxy-design-adr-contract-docs-threat-model-and-testnet-report) · **Lane:** Payments
 
-## Status: Active
+## Status: Completed
 
-> Started 2026-10-08. 0004 is done in code and in review (PR #8); its testnet results, report and
-> findings are on branch `lore-0004-upto-proxy-testnet-e2e` until it merges.
+> Completed 2026-10-09. The work landed through PR #14 (task 0035), which was built on this
+> task's branch; PR #12 was closed with no remaining diff.
 
 ## Implementation Plan
 
@@ -175,7 +182,7 @@ The source RFP and architecture docs in `docs/rfp/` are left unchanged. Deviatio
 
 ## Future Work
 
-- **Extend the proxy's instance and WASM TTL**: nothing in `deploy/` or the e2e suite does it
-  (threat model, "Proxy archived"). Backlog task 0035.
+- **Extend the proxy's instance and WASM TTL**: done in 0035 (self-extension and the deploy-time
+  extension).
 - **Sync the 0034 drafts** with the review outcome: ledger close time, zero-settlement record,
-  rent wording.
+  rent wording, and 0035's new proxy, expiry cap and verify rules. Tracked in 0034 itself.
