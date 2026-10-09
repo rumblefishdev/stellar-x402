@@ -1,9 +1,12 @@
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { memoryStores } from "./adapters/memory.js";
+import { createCataloger } from "./catalog/cataloger.js";
 import { parseConfig } from "./config.js";
 import { createApp, type AppDeps } from "./http/app.js";
 import { jsonLogger } from "./logger.js";
+import { memoryMetrics } from "./metrics.js";
+import { noopHooks } from "./settlement/hooks.js";
 
 export interface Started {
   port: number;
@@ -35,5 +38,14 @@ export async function main(env: Record<string, string | undefined> = process.env
   const config = parseConfig(env);
   const logger = jsonLogger(config.logLevel);
   // STORE=memory is the only option until the durable adapters land (0022).
-  return start({ config, logger, stores: memoryStores() });
+  const stores = memoryStores();
+  const metrics = memoryMetrics();
+  const cataloger = createCataloger({ store: stores.catalog, logger, metrics });
+  // 0024 adds its `beforeSubmit` and `onFinal` the same way.
+  const hooks = {
+    ...noopHooks,
+    extensionResponses: cataloger.extensionResponses,
+    onSuccess: cataloger.onSuccess,
+  };
+  return start({ config, logger, stores, hooks, metrics });
 }

@@ -45,6 +45,8 @@ never charged twice.
 
 ## Context
 
+- Call the cataloging hooks by the caller rules in 0031's Design Decisions (header before the
+  body; `onSuccess` after the response, `res.closed`-aware).
 - 0007 built the pool and measured it on testnet: about 1 settlement per channel per ledger, up
   to the network ceiling.
 - ADR 0003: one payment = one transaction through this pool, in the delegated-bump shape, with

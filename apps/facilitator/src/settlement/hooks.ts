@@ -1,5 +1,6 @@
 import type { StellarNetwork } from "@stellar-x402/config";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
+import type { ExtensionResponses } from "@stellar-x402/bazaar";
 import type { SettlementKey, SettlementRecord } from "../ports/index.js";
 
 /** A verified, claimed settlement about to be submitted. */
@@ -31,10 +32,8 @@ export type BeforeSubmitResult =
 /** Where a record turned final: inline in `/settle`, or later (`resolved` event, startup re-check). */
 export type SettlementOrigin = "settle" | "resolved";
 
-/** The `EXTENSION-RESPONSES` header value of a settle response (AD-8). */
-export interface ExtensionResponses {
-  bazaar: { status: "processing" | "rejected"; reason?: string };
-}
+/** The `EXTENSION-RESPONSES` header value of a settle response (AD-8), as `packages/bazaar` builds it. */
+export type { ExtensionResponses } from "@stellar-x402/bazaar";
 
 /**
  * Extension points of the settlement module, wired in the composition root. Payments calls them;
@@ -64,3 +63,11 @@ export interface SettlementHooks {
    */
   onSuccess(record: SettlementRecord, origin: SettlementOrigin): Promise<void>;
 }
+
+/** Hooks that allow everything and do nothing; lanes override the methods they own in `main.ts`. */
+export const noopHooks: SettlementHooks = {
+  beforeSubmit: async () => ({ allow: true }),
+  onFinal: async () => {},
+  extensionResponses: () => undefined,
+  onSuccess: async () => {},
+};
