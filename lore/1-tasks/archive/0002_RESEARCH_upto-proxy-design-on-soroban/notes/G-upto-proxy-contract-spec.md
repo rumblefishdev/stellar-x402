@@ -110,8 +110,9 @@ back all state.
 6. `now = env.ledger().timestamp()`. `now < valid_after` → `NotYetValid`, and `now > deadline` →
    `Expired`.
 7. `seq = env.ledger().sequence()`. `allowance_expiration_ledger < seq` → `Expired`, and
-   `allowance_expiration_ledger > env.ledger().max_live_until_ledger()` →
-   `InvalidAllowanceExpiration`.
+   `allowance_expiration_ledger > env.ledger().max_live_until_ledger()` or
+   `> seq + MAX_ALLOWANCE_LEDGERS` (17,280, about a day) → `InvalidAllowanceExpiration`. The cap was
+   added by task 0035 (ADR 0010, D11).
 8. Nonce: if `Nonce(from, nonce)` exists → `NonceUsed`. Otherwise set it in temporary storage and
    `extend_ttl(key, live_for, live_for)` with `live_for = allowance_expiration_ledger - seq`.
    Skip the extension when `live_for == 0`: the minimum temporary TTL already covers it.

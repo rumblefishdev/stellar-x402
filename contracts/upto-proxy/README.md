@@ -16,10 +16,14 @@ reasoning are in [ADR 0010](../../docs/adr/0010-upto-proxy-design.md); the norma
 
 | Network | Contract ID                                                | WASM hash                                                          |
 | ------- | ---------------------------------------------------------- | ------------------------------------------------------------------ |
-| testnet | `CDSWGHBULAYAQX77CPHYOUDDUFMT6ZJBCY5FPUK7N3B2JFS32VNYHEPD` | `8019c086e6e1aabe8295c010f1167a87e33d23c3292e3e4620e82c273ac9ed6d` |
+| testnet | `CAL7SBTOECJ6HXXO3ST43LM2HJJFSZ3ZDEEZBIWHJPB7DRF5MXS5V2VC` | `00a06b1683557a60d2822bbab4e1fee9012e9b521d52b22a8ab22fd47cd4b79c` |
 
-The previous testnet deployment, `CC3VX7N6…Z7OYU` (WASM `be2ba121…0b34`), is the code without
-self-extension that the first 0004 run tested; it is retired and left to expire.
+Retired testnet deployments, left to expire:
+
+- `CDSWGHBU…HEPD` (WASM `8019c086…ed6d`): self-extending, without the cap on
+  `allowance_expiration_ledger` (task 0035's first deployment).
+- `CC3VX7N6…Z7OYU` (WASM `be2ba121…0b34`): the code without self-extension that the first 0004 run
+  tested.
 
 `deploy/scripts/deploy-contract.sh upto-proxy` deploys it with the WASM hash as the salt. The
 contract ID follows from the deployer's address and the salt, so the same code deployed by the
@@ -105,7 +109,8 @@ otherwise.
 5. `facilitator.require_auth()`
 6. `now < valid_after` → `NotYetValid`; `now > deadline` → `Expired` (ledger timestamp)
 7. `allowance_expiration_ledger < sequence` → `Expired`;
-   `allowance_expiration_ledger > max_live_until_ledger` → `InvalidAllowanceExpiration`
+   `allowance_expiration_ledger > max_live_until_ledger` or
+   `> sequence + MAX_ALLOWANCE_LEDGERS` (17,280) → `InvalidAllowanceExpiration`
 8. `(from, nonce)` already stored → `NonceUsed`; otherwise store it in temporary storage and
    extend its TTL to `allowance_expiration_ledger`
 9. `token.approve(from, UptoProxy, max_amount, allowance_expiration_ledger)`
@@ -126,7 +131,7 @@ The nonce is written before the token calls. Soroban forbids re-entry anyway.
 | 3    | `SelfPayment`                | `from == to`                                                             |
 | 4    | `NotYetValid`                | the ledger time is before `valid_after`                                  |
 | 5    | `Expired`                    | the ledger time is after `deadline`, or the ledger is past the allowance |
-| 6    | `InvalidAllowanceExpiration` | `allowance_expiration_ledger` is beyond the network's maximum TTL        |
+| 6    | `InvalidAllowanceExpiration` | `allowance_expiration_ledger` is over a day ahead, or beyond the max TTL |
 | 7    | `NonceUsed`                  | `(from, nonce)` was already settled and its entry is still live          |
 | 8    | `InvalidRecipient`           | `to` is the proxy itself                                                 |
 
@@ -188,7 +193,8 @@ Every invariant has a test in `src/test/` (§8):
    `allowance_expiration_ledger` up to `currentLedger + ceil(maxTimeoutSeconds / closeTime)` plus
    a small margin, and no further: the facilitator pays rent on the nonce and the allowance until
    that ledger, so a far expiry is a cost the payer picks (threat model, "Fee inflation by
-   rent").
+   rent"). The contract refuses anything over `MAX_ALLOWANCE_LEDGERS` (17,280 ledgers, about a
+   day) ahead as a backstop, so `maxTimeoutSeconds` can't exceed about a day.
 3. The nonce is unused: `is_nonce_used(from, nonce)` is `false` **and** `(from, nonce)` is not in
    the facilitator's own settled-nonce record (§8.1).
 4. Simulate with `actual_amount = max_amount`, the worst case. The only balance changes are
@@ -297,7 +303,9 @@ spec is task 0034.
    own authorization for the call.
 7. **Expiry.** `allowance_expiration_ledger` equals `signatureExpirationLedger` and lasts until
    `deadline`; `deadline` is at most `now + maxTimeoutSeconds`. Seconds convert to ledgers with
-   the network's target close time (CAP-0070), not a fixed 5 s.
+   the network's target close time (CAP-0070), not a fixed 5 s. The facilitator refuses an expiry
+   past the window, since it pays the nonce's and allowance's rent until then; the contract caps it
+   at 17,280 ledgers ahead, so `maxTimeoutSeconds` is at most about a day.
 8. **Verify** with `max_amount == requirements.amount`, and simulate the full ceiling.
 9. **Settle** against the signed `max_amount`, with `actual_amount` set to `requirements.amount`,
    which must not exceed it.

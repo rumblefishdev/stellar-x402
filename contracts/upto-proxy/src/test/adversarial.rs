@@ -2,7 +2,7 @@
 //! the spec's own cases. Each test names the attack and pins the outcome.
 
 use super::*;
-use soroban_sdk::{contract, contractimpl, testutils::Deployer as _};
+use soroban_sdk::{contract, contractimpl};
 
 /// A facilitator alone settles with the proxy itself as payer, to take tokens sent to the proxy
 /// by mistake. The proxy can't authorize itself as `from`, so the host refuses.
@@ -170,11 +170,12 @@ fn a_nonce_is_reusable_only_after_its_entry_expired() {
 }
 
 /// The facilitator pays temporary rent on the nonce and the allowance until
-/// `allowance_expiration_ledger`, which the payer picks. Pins how much a far expiry costs, so the
-/// window rule in the facilitator's `/verify` has a measured reason (threat model, "Fee inflation
-/// by rent").
+/// `allowance_expiration_ledger`, which the payer picks. The contract caps it at
+/// `MAX_ALLOWANCE_LEDGERS` past the current ledger, so the furthest expiry the network allows is
+/// refused and the costliest accepted one pays a bounded rent (threat model, "Fee inflation by
+/// rent").
 #[test]
-fn a_far_allowance_expiration_costs_the_facilitator_rent() {
+fn a_far_allowance_expiration_is_capped() {
     let rent = |exp_of: fn(&Env) -> u32| {
         let s = setup(TokenKind::Sac);
         // At the target already, so no instance extension in the measurement.
@@ -188,16 +189,17 @@ fn a_far_allowance_expiration_costs_the_facilitator_rent() {
             exp_ledger: exp_of(&s.env),
             ..s.p.clone()
         };
-        settle(&s, &p, 10).unwrap().unwrap();
-        assert_eq!(
-            s.env.deployer().get_contract_instance_ttl(&s.proxy),
-            TTL_EXTEND_TO
-        );
-        s.env.cost_estimate().fee().temporary_entry_rent
+        let result = settle(&s, &p, 10);
+        (result, s.env.cost_estimate().fee().temporary_entry_rent)
     };
-    let short = rent(|_| SEQ + 12);
-    let far = rent(|env| env.ledger().max_live_until_ledger());
-    std::println!("temporary rent: {short} at SEQ + 12, {far} at max_live_until_ledger");
-    // Mocked auth adds its own nonces to both runs; the difference is the two entries' rent.
-    assert!(far - short > 1_000_000, "{far} - {short}");
+    let (far, _) = rent(|env| env.ledger().max_live_until_ledger());
+    assert_contract_error(far, UptoError::InvalidAllowanceExpiration);
+
+    let (short, short_rent) = rent(|_| SEQ + 12);
+    let (capped, capped_rent) = rent(|_| SEQ + MAX_ALLOWANCE_LEDGERS);
+    assert_eq!((short, capped), (Ok(Ok(())), Ok(Ok(()))));
+    // Mocked auth adds its own nonces to both runs; the difference is the two entries' rent for
+    // the cap, a fraction of what the far expiry would cost (about 14 million here).
+    std::println!("temporary rent: {short_rent} at SEQ + 12, {capped_rent} at the cap");
+    assert!(capped_rent > short_rent && capped_rent - short_rent < 1_000_000);
 }

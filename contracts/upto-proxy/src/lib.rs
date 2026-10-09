@@ -54,6 +54,15 @@ pub const TTL_EXTEND_TO: u32 = 518_400;
 pub const TTL_MIN_EXTENSION: u32 = 120;
 pub const TTL_MAX_EXTENSION: u32 = 720;
 
+/// The furthest `allowance_expiration_ledger` a settlement accepts, in ledgers after the current
+/// one: 17,280 (about 1 day at 5 s ledgers). The facilitator pays temporary rent on the nonce entry
+/// and the token's allowance until that ledger, and the payer picks it, so without a cap a payer
+/// could make one settlement pay for up to `max_entry_ttl` (about 180 days, 3.9 million stroops on
+/// testnet). A day costs about 25,000 stroops (1.3 per ledger, measured on testnet). The
+/// facilitator's `/verify` holds expiries to the payment window; this is defence in depth if it
+/// doesn't.
+pub const MAX_ALLOWANCE_LEDGERS: u32 = 17_280;
+
 /// Storage keys (§7). Only temporary storage is used.
 #[contracttype]
 #[derive(Clone)]
@@ -131,7 +140,9 @@ impl UptoProxy {
         if allowance_expiration_ledger < seq {
             return Err(UptoError::Expired);
         }
-        if allowance_expiration_ledger > env.ledger().max_live_until_ledger() {
+        if allowance_expiration_ledger > env.ledger().max_live_until_ledger()
+            || allowance_expiration_ledger > seq.saturating_add(MAX_ALLOWANCE_LEDGERS)
+        {
             return Err(UptoError::InvalidAllowanceExpiration);
         }
 
