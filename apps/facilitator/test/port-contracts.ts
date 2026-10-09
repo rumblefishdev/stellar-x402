@@ -349,7 +349,10 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
       });
       await store.upsert({
         key: key("https://b.example", "GOTHER"),
-        resource: resource("https://b.example", { type: "mcp", extensions: { bazaar: {} } }),
+        resource: resource("https://b.example", {
+          type: "mcp",
+          extensions: { bazaar: {}, unset: undefined },
+        }),
       });
       await store.upsert({
         key: key("https://c.example", PAY_TO, "stellar:pubnet"),
@@ -379,8 +382,10 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
       expect(await urls({ extensions: "bazaar", limit: 10, offset: 0 })).toEqual([
         "https://b.example",
       ]);
-      // The value comes from the query string: a key from Object's prototype matches nothing.
+      // The value comes from the query string: a key from Object's prototype matches nothing, and
+      // neither does a key without a value (JSON storage drops it).
       expect(await urls({ extensions: "constructor", limit: 10, offset: 0 })).toEqual([]);
+      expect(await urls({ extensions: "unset", limit: 10, offset: 0 })).toEqual([]);
       const page = await store.list({ limit: 1, offset: 1 });
       expect(page).toMatchObject({ total: 3, items: [{ resource: "https://b.example" }] });
     });

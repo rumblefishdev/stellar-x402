@@ -12,17 +12,23 @@ export interface Logger {
 
 const LEVELS: readonly LogLevel[] = ["debug", "info", "warn", "error"];
 
+const plain = ({ name, message, stack }: Error) => ({ name, message, stack });
+
 /**
  * Bigints as decimal strings, errors with their name, message, stack and `Error` cause
  * (`JSON.stringify` drops all of them). A stack adds code locations, not data: its first line is
  * the message.
+ *
+ * ponytail: one level of cause, so a cyclic chain can't recurse; walk the chain with a seen-set if
+ * deeper causes turn out to matter.
  */
 function replacer(_key: string, value: unknown): unknown {
   if (typeof value === "bigint") return value.toString();
-  if (value instanceof Error) {
-    const { name, message, stack, cause } = value;
-    return { name, message, stack, cause: cause instanceof Error ? cause : undefined };
-  }
+  if (value instanceof Error)
+    return {
+      ...plain(value),
+      cause: value.cause instanceof Error ? plain(value.cause) : undefined,
+    };
   return value;
 }
 

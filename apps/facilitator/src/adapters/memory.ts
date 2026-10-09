@@ -164,8 +164,10 @@ export class MemoryCatalogStore implements CatalogStore {
         (type === undefined || resource.type === type) &&
         (payTo === undefined || key.payTo === payTo) &&
         (network === undefined || key.network === network) &&
+        // An own key with a value: not a prototype key, and not one JSON storage would drop.
         (extensions === undefined ||
-          (resource.extensions !== undefined && Object.hasOwn(resource.extensions, extensions))),
+          (resource.extensions?.[extensions] !== undefined &&
+            Object.hasOwn(resource.extensions, extensions))),
     );
     return {
       items: matches.slice(offset, offset + limit).map(({ resource }) => structuredClone(resource)),
