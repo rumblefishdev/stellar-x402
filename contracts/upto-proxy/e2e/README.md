@@ -34,7 +34,8 @@ deployed differs from `UPTO_PROXY_CONTRACT_ID` in `deploy/testnet.env.example`, 
 warning: the run is then testing your own deployment, not the recorded one.
 
 The [testnet report](../../../docs/upto-proxy-testnet-report.md) summarizes the 2026-10-09 run. It
-is a snapshot: a new run rewrites the JSON but not the report.
+is a snapshot: a new run rewrites the JSON but not the report. An interactive version of the same run, with the
+TTL measurements, is at <https://claude.ai/artifact/TNurkGqjefJWXtKCNPwkcE>.
 
 `EXTEND_TTL=0` skips the deploy-time extension, so a fresh proxy starts at the network's minimum
 TTL and its first settlements pay for the contract's own extension. Task 0035 used it to measure
