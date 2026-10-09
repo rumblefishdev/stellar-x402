@@ -49,9 +49,10 @@ pub struct UptoSettled {
 /// about 1 hour per call. The facilitator pays the rent inside the settlement fee: 198.8 stroops
 /// per ledger plus about 5,800 per extension on testnet. With the allowance expiry at
 /// `MAX_ALLOWANCE_LEDGERS`, the costliest settlement is about 215,000 stroops, 86% of the default
-/// 250,000-stroop fee ceiling. Rent the token charges in the same settlement (a SAC instance
-/// extending its own TTL cost 116,316 in task 0006) is not bounded here and can push a valid
-/// payment over the ceiling, so the facilitator's ceiling for `upto` needs room for it. Below the
+/// 250,000-stroop fee ceiling. Rent the token charges in the same settlement is not bounded here
+/// and does push a valid payment over it: with a SAC instance extending itself, the stack measured
+/// 330,032 stroops on testnet. The facilitator's `upto` ceiling and token keeper (task 0015) cover
+/// it. Below the
 /// target every settlement extends; once the TTL is at the target, the minimum keeps extensions to
 /// about one per 10 minutes under steady traffic.
 pub const TTL_EXTEND_TO: u32 = 518_400;

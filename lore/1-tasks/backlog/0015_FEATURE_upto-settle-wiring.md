@@ -24,6 +24,12 @@ history:
       Added the upto /verify rules from the 0035 security review: the allowance window bound
       (fee inflation by rent), the signature-expiry match, from != facilitator, the token from
       the requirements. related_tasks += 0035.
+  - date: "2026-10-09"
+    status: backlog
+    who: claude
+    note: >
+      Added the stacked-rent measures from 0035 (330,032 stroops measured on testnet): a separate,
+      higher upto fee ceiling and a keeper for the accepted tokens' instances.
 ---
 
 # Wire upto settlement into the facilitator's /settle (post-T1)
@@ -61,12 +67,21 @@ after T1.
   - a `token` other than the requirements' asset; take it from the requirements, never the
     payload, and check balance changes in the simulation, not only events (a no-op token
     "settles" with an event and no transfer).
-  - Size `maxFeeStroops` for `upto` for the stacked worst case: the proxy's extension and a capped
-    expiry (about 215,000) plus the token extending its own instance (116,316 in 0006). Measure it
-    or raise the ceiling (PR #14 review).
   - Estimate ledgers from a fresh `getLatestLedger()`, never a stale anchor (PR #14 review).
   - Port `checkClientAuth` and its e2e scenarios ("facilitator refuses an allowance that outlives
     the window", "... a signature expiry that differs") as unit tests.
+- **Stacked rent: don't refuse valid payments over rent** (measured in 0035, testnet report
+  "The stacked worst case, measured"). A settlement where the proxy extends itself (+720) and the
+  SAC extends its own instance (+54,689 ledgers), with an expiry at the cap, cost 330,032 stroops,
+  over the default 250,000 ceiling; up to about 480,000 is possible for a SAC instance close to
+  expiry. Two measures, both needed:
+  1. **A separate, higher `maxFeeStroops` for `upto`,** about 500,000 by default, or sized per
+     token from its instance TTL. The facilitator pays it only on the rare settlement that
+     extends; ADR 0007's spend budgets still bound the total.
+  2. **A keeper for the accepted tokens' instances.** For every asset in `/supported`, extend the
+     token's contract instance (and the proxy's, while it's at it) in a separate transaction
+     whenever its TTL drops under its own threshold, so settlements never carry that rent. It
+     helps `exact` too. Fits the operator jobs of 0025 and an alert in 0027.
 - Build the `settle_upto` call from the payload and submit it through the pool (AD-2, AD-4).
 - **Zero-amount `upto`:** submit nothing and return `transaction: ""`, as the spec allows.
   Document that the client's nonce stays unused until its deadline. This was 0007 step 5
@@ -82,4 +97,7 @@ after T1.
 - [ ] `/verify` refuses an `upto` allowance that outlives the payment window or ends before the
       deadline, a signature expiry that differs from it, `from` equal to the facilitator, and a
       token other than the asset
+- [ ] `upto` settlements use their own fee ceiling (about 500,000 by default), and a keeper
+      extends the accepted tokens' instances outside settlements, so the measured 330,032-stroop
+      stacked case settles
 - [ ] `/supported` lists `upto` on testnet
