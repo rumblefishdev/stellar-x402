@@ -92,18 +92,23 @@ As a developer on any of the three lanes, I want a facilitator app that boots, v
 - `apps/facilitator/src/logger.ts`: `Logger` interface and `jsonLogger()`, one JSON object per
   line on stdout.
 - `apps/facilitator/src/http/app.ts`: `createApp(deps)` with the four routes answering 501, a
-  JSON 404, a body size limit (413), 400 for malformed JSON and a logged 500. `AppDeps` is the
-  graph the composition root hands over; lanes add their services to it.
+  JSON 404, a body size limit (413), the client's own body errors (400, 413, 415) passed through
+  unlogged, and a logged 500 for anything else. `AppDeps` is the graph the composition root hands
+  over; lanes add their services to it.
 - `apps/facilitator/src/main.ts`: `main()` reads `process.env` once, parses the config and starts
-  the server; `start(deps)` is what tests call. A startup failure logs `startup_failed` with the
-  config problems and exits with code 1. `src/index.ts` is gone; `dev` and `start` run `main`.
+  the server; `start(deps)` is what tests call. It only exports.
+- `apps/facilitator/src/server.ts`: the process entry point. It calls `main()`; a startup failure
+  logs `startup_failed` with the config problems and exits with code 1. `src/index.ts` is gone;
+  `dev` and `start` run `server`.
 - `apps/facilitator/test/port-contracts.ts`: one contract suite per port, for 0022 to run
   against the durable adapters. `memory.test.ts` runs them against the in-memory adapters.
 - `apps/facilitator/test/main.test.ts`: boots the app on memory stores (stub routes, no CORS,
-  413, 400, 404, JSON-lines logs without the secret) and spawns `src/main.ts` with a bad config
-  to check the exit code and that no value is printed.
-- 33 facilitator tests pass (8 config, 21 contract, 4 boot); typecheck, lint, Prettier and build
-  pass.
+  413, 400, 415 without an `http_error` log, 404, JSON-lines logs without the secret) and spawns
+  `src/server.ts` with a bad config to check the exit code and that no value is printed.
+- `apps/facilitator/test/logger.test.ts`: the envelope wins over fields; errors keep stack and
+  cause.
+- 34 facilitator tests pass (8 config, 21 contract, 4 boot, 1 logger); typecheck, lint, Prettier
+  and build pass.
 
 ## Design Decisions
 
@@ -168,6 +173,26 @@ As a developer on any of the three lanes, I want a facilitator app that boots, v
     expired once `now > expiresAt`, matching `renewLease`. The in-memory maps are never pruned
     (marked with `ponytail:` comments).
 
+### Emerged (PR #11 review, Adam)
+
+20. **Every exposable 4xx from body-parser passes through**: only 400 and 413 did, so a client
+    could get a logged 500 with `charset=latin1` or an unknown `Content-Encoding` (415) and fill
+    the error log. Now `expose` and `4xx` decide.
+21. **The `extensions` catalog filter checks own keys** (`Object.hasOwn`):
+    `?extensions=constructor` matched every resource with an `extensions` object. A contract case
+    makes 0022 behave the same.
+22. **`CatalogStore.list` is in insertion order**, and an upsert keeps an entry's place. The test
+    already pinned it; the port doc now says so, so offset paging doesn't shift each time a
+    resource settles again. 0022 needs a serial or `created_at` order for it.
+23. **The log envelope wins over fields**: a field named `level`, `event` or `time` could
+    overwrite it.
+24. **Logged errors keep `stack` and an `Error` `cause`**: a logged 500 had only name and message
+    to debug from. A stack adds code locations, not data (its first line is the message);
+    non-`Error` causes are left out, since they may hold anything.
+25. **`src/server.ts` is the entry point; `main.ts` only exports**: the
+    `import.meta.url === argv[1]` check failed through a symlink (Node resolves the module path
+    but not `argv[1]`), so the process exited 0 without starting.
+
 ## Deferred from the PR #7 review
 
 These go to the tasks that own them (Adam's review):
@@ -185,4 +210,9 @@ From Stan's review:
   `hooks.ts` (993edad); the behavior is built in 0009 and 0024.
 - A lost `onFinal` call after a crash leaves the reservation counted until it ages out of the
   rolling window; acceptable for T1. Stan will note it in 0024.
+
+## Deferred from the PR #11 review
+
+- Closing the server on SIGTERM/SIGINT (stop new requests, finish in-flight work, release the
+  lease): 0025 already has it as an acceptance criterion.
 - A `claimed` record with no hash at startup is closed as `rejected`: added to 0019 (f65fac2).
