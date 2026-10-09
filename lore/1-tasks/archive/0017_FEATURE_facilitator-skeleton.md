@@ -2,7 +2,7 @@
 id: "0017"
 title: "Facilitator skeleton with store ports, settlement hooks and config"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0004"]
 related_tasks: ["0012", "0009", "0013"]
@@ -29,16 +29,27 @@ history:
       Day-1 types PR #7 approved by all three lanes (Adam for Discovery, Stan for Platform,
       okarcz as author for Payments) and rebase-merged into develop (993edad). okarcz hands the
       rest of the skeleton over to Stan, the Platform lane owner.
+  - date: "2026-10-09"
+    status: completed
+    who: stkrolikiewicz
+    note: >
+      Running skeleton merged in PR #11 (1a872ba) after reviews by Adam (approved) and Oskar:
+      in-memory adapters of the four ports with shared contract suites for 0022, the HTTP app
+      with stub routes, src/main.ts as the composition root and src/server.ts as the entry
+      point. 38 facilitator tests (8 config, 22 contract, 5 boot, 3 logger). The reviews found
+      an XDR leak through an AxiosError's toJSON, a same-state compare-and-set, a lost SIGTERM
+      and client 4xx answers turned into 500s, all fixed. Deferred items are noted in 0009,
+      0014, 0019, 0020, 0022, 0024 and 0025.
 ---
 
 # Facilitator skeleton with store ports, settlement hooks and config
 
-## Status: Active
+## Status: Completed
 
 > Started 2026-10-08 by okarcz on branch `lore-0017-day1-types` for the day-1 types-only PR
-> (first acceptance criterion). PR #7 merged on 2026-10-08; the rest of the skeleton is now with
-> Stan (stkrolikiewicz), on branch `lore-0017-facilitator-skeleton`: in-memory adapters, port
-> contract tests, the HTTP app with stub routes, `src/main.ts` and the boot tests.
+> (first acceptance criterion, PR #7). Stan (stkrolikiewicz) built the rest on branch
+> `lore-0017-facilitator-skeleton` (PR #11), merged on 2026-10-09 after reviews by Adam and
+> Oskar. Every acceptance criterion is met; the deferred items live in the tasks that own them.
 
 ## Summary
 
@@ -219,16 +230,35 @@ As a developer on any of the three lanes, I want a facilitator app that boots, v
 31. **Client error bodies name the status**: `payload_too_large`, `unsupported_media_type`,
     `bad_request`, from `http.STATUS_CODES`, like `not_found` and `not_implemented`.
 
+## Issues Encountered
+
+- **The entry-point check missed through a symlink**: `import.meta.url` is the resolved path
+  while `process.argv[1]` isn't, so `main()` never ran and the process exited 0. Fixed by the
+  separate `src/server.ts` (25).
+- **`JSON.stringify` calls `toJSON` before the replacer**: an AxiosError skipped the logger's
+  `instanceof Error` branch and logged its snapshot, signed XDR included (26).
+- **A cyclic error cause overflowed the stack** in `JSON.stringify` once causes were logged (24).
+- **A SIGTERM right after startup was lost**: the handlers were registered once the server
+  listened, and the new boot test failed only under the full suite's load (29).
+- **Modified tests, all intentional**: the boot test for a bad body became "answers a client's
+  bad body with a 4xx and doesn't log it as an error" (415 and body codes added); the
+  bad-config test spawns `src/server.ts` instead of `src/main.ts`; the catalog contract gained
+  the prototype-key and unset-key cases and the transition contract the same-state case.
+- **Tooling**: `gh pr edit` fails on this repo (its GraphQL query asks for the retired Projects
+  classic cards), so PR edits went through the REST API. Locally, `pnpm lint` also lints
+  `.claude/worktrees/` and `pnpm format:check` the git-excluded `onboarding/`; CI is unaffected,
+  so the checks ran on the tracked files.
+
 ## Deferred from the PR #7 review
 
-These go to the tasks that own them (Adam's review):
+These went to the tasks that own them (Adam's review):
 
-- Port contract tests: rest of 0017 (fakes) and 0022. Done in `test/port-contracts.ts`; 0022
-  runs the same suites against the durable adapters.
+- Port contract tests: rest of 0017 (fakes) and 0022. Done in `test/port-contracts.ts`; noted
+  in 0022, which runs the same suites against the durable adapters.
 - The `SpendStore` reservation lifecycle: 0024.
-- Wrapping `onSuccess` errors in the caller: 0009.
-- A bigint codec for stored amounts: 0022.
-- Redacting RPC URLs in logs: 0014.
+- Wrapping `onSuccess` errors in the caller: noted in 0009.
+- A bigint codec for stored amounts: noted in 0022.
+- Redacting RPC URLs in logs: noted in 0014.
 
 From Stan's review:
 
@@ -249,3 +279,7 @@ From Stan's review:
   The `ponytail:` comment names the fix.
 - A rate-limit window of 0 makes the in-memory counter useless (Oskar): the config schema holds
   `RATE_LIMIT_WINDOW_MS` at 1 s or more, and the port doc now says the window is positive.
+- The durable catalog needs a serial or `created_at` order for insertion-order listing (22):
+  noted in 0022.
+- `transition` refuses a same-state update (28): noted in 0009 for the settlement module.
+- How facilitator tests get `FakeRpc` (14): noted in 0009 and 0020.
