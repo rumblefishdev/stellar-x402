@@ -179,12 +179,11 @@ for the mainnet milestone as `deploy/README.md` currently says.
     Prices API answers from Frankfurt IPs, so it's the default, not a fixed choice.
 12. **Testnet deploys on every push to `develop`.** Each deploy is 1–3 min of downtime, so gate
     runs avoid merge times; mainnet deploys by hand.
-13. **Same AWS account as sorobanscan and the Prices API, no shared compute.** Stan decided the
-    account. From outside, sorobanscan is S3 + CloudFront and the Prices API is API Gateway, so
-    there is no container platform to join. The facilitator holds a hot signing key, so its
-    testnet and mainnet stacks get their own roles and secret paths, and the mainnet KMS key
-    policy admits only the mainnet task role. The original idea of a separate mainnet account is
-    dropped.
+13. **Same AWS account as sorobanscan and the Prices API, no shared compute.** From outside,
+    sorobanscan is S3 + CloudFront and the Prices API is API Gateway, so there is no container
+    platform to join. The facilitator holds a hot signing key, so its testnet and mainnet stacks
+    get their own roles and secret paths, and the mainnet KMS key policy admits only the mainnet
+    task role. The original idea of a separate mainnet account is dropped.
 
 14. **CloudWatch over Grafana Cloud Free.** R-observability-backends leaned towards Grafana
     Cloud Free ($0, portable); Stan chose CloudWatch to stay with one vendor in the shared

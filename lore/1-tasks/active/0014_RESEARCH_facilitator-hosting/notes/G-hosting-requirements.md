@@ -71,6 +71,5 @@ One Node 22 (Express 5) container per network: `apps/facilitator`. It holds the 
 
 - **Rumble Fish's default cloud is AWS**, with an existing company account. Other options are
   still compared, but AWS needs a reason not to be used.
-- **Same account as sorobanscan and the Stellar Prices API** (Stan, 2026-10-09), for testnet and
-  mainnet alike.
+- **Same account as sorobanscan and the Stellar Prices API,** for testnet and mainnet alike.
 - Domain for the public URL: open, being checked with the team.
