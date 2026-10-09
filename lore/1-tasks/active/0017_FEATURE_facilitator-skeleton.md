@@ -105,8 +105,8 @@ As a developer on any of the three lanes, I want a facilitator app that boots, v
 - `apps/facilitator/test/main.test.ts`: boots the app on memory stores (stub routes, no CORS,
   413, 400, 415 without an `http_error` log, 404, JSON-lines logs without the secret) and spawns
   `src/server.ts` with a bad config to check the exit code and that no value is printed.
-- `apps/facilitator/test/logger.test.ts`: the envelope wins over fields; errors keep stack and
-  cause.
+- `apps/facilitator/test/logger.test.ts`: the envelope wins over fields; errors keep their stack
+  and one level of cause, also when the cause chain is cyclic.
 - 34 facilitator tests pass (8 config, 21 contract, 4 boot, 1 logger); typecheck, lint, Prettier
   and build pass.
 
@@ -178,17 +178,19 @@ As a developer on any of the three lanes, I want a facilitator app that boots, v
 20. **Every exposable 4xx from body-parser passes through**: only 400 and 413 did, so a client
     could get a logged 500 with `charset=latin1` or an unknown `Content-Encoding` (415) and fill
     the error log. Now `expose` and `4xx` decide.
-21. **The `extensions` catalog filter checks own keys** (`Object.hasOwn`):
-    `?extensions=constructor` matched every resource with an `extensions` object. A contract case
-    makes 0022 behave the same.
+21. **The `extensions` catalog filter needs an own key with a value**: `?extensions=constructor`
+    matched every resource with an `extensions` object. `Object.hasOwn` alone would have let a key
+    set to `undefined` match in memory but not in JSON storage, which drops it, so the filter
+    checks both. Two contract cases make 0022 behave the same.
 22. **`CatalogStore.list` is in insertion order**, and an upsert keeps an entry's place. The test
     already pinned it; the port doc now says so, so offset paging doesn't shift each time a
     resource settles again. 0022 needs a serial or `created_at` order for it.
 23. **The log envelope wins over fields**: a field named `level`, `event` or `time` could
     overwrite it.
-24. **Logged errors keep `stack` and an `Error` `cause`**: a logged 500 had only name and message
-    to debug from. A stack adds code locations, not data (its first line is the message);
-    non-`Error` causes are left out, since they may hold anything.
+24. **Logged errors keep `stack` and one level of `Error` `cause`**: a logged 500 had only name
+    and message to debug from. A stack adds code locations, not data (its first line is the
+    message); non-`Error` causes are left out, since they may hold anything. Only one level,
+    because a cyclic cause chain made `JSON.stringify` overflow the stack and the logger throw.
 25. **`src/server.ts` is the entry point; `main.ts` only exports**: the
     `import.meta.url === argv[1]` check failed through a symlink (Node resolves the module path
     but not `argv[1]`), so the process exited 0 without starting.
