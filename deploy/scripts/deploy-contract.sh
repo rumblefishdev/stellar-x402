@@ -8,9 +8,14 @@
 # toolchain or stellar-cli version), gives another ID. UPTO_PROXY_CONTRACT_ID in
 # deploy/testnet.env.example is okarcz's deployment.
 #
+# Every run then extends the contract instance and its WASM to the network's maximum TTL (about
+# 180 days on testnet), so a deployment that nobody settles on isn't archived. UptoProxy also
+# extends itself on every settlement (task 0035).
+#
 # Usage: deploy/scripts/deploy-contract.sh <upto-proxy|test-token>
-# Env:   DEPLOYER  stellar-cli identity that deploys (default x402-testnet-deployer; created and
-#                  funded with friendbot when missing)
+# Env:   DEPLOYER    stellar-cli identity that deploys (default x402-testnet-deployer; created and
+#                    funded with friendbot when missing)
+#        EXTEND_TTL  0 skips the TTL extension, e.g. to measure the contract's own extension
 # Prints: <NAME>_WASM_HASH=… and <NAME>_CONTRACT_ID=… on stdout, e.g. UPTO_PROXY_CONTRACT_ID.
 set -euo pipefail
 
@@ -42,6 +47,21 @@ else
   stellar contract deploy --wasm "$wasm" --salt "$hash" --source "$deployer" \
     --network "$network" --quiet >/dev/null
   echo "$name: deployed at $id" >&2
+fi
+
+if [[ ${EXTEND_TTL:-1} != 0 ]]; then
+  # The highest TTL an entry can have is max_entry_ttl - 1 ledgers.
+  max=$(stellar network settings --network "$network" | grep -o '"max_entry_ttl":[0-9]*' | cut -d: -f2)
+  [[ -n $max ]] || {
+    echo "could not read max_entry_ttl from the network settings" >&2
+    exit 1
+  }
+  for target in "--id $id" "--wasm $wasm"; do
+    # shellcheck disable=SC2086 # $target is two words on purpose
+    until=$(stellar contract extend $target --ledgers-to-extend $((max - 1)) --ttl-ledger-only \
+      --source "$deployer" --network "$network" --quiet)
+    echo "$name: ${target%% *} live until ledger $until" >&2
+  done
 fi
 echo "${var}_WASM_HASH=$hash"
 echo "${var}_CONTRACT_ID=$id"
