@@ -106,7 +106,8 @@ const envSchema = z
       .string()
       .regex(/^\d+(\.\d+)?$/, "must be a decimal number")
       .transform(Number)
-      .refine((value) => value >= 1 && value <= 100, "must be between 1 and 100")
+      // The pool refuses a factor of 1 or less at construction.
+      .refine((value) => value > 1 && value <= 100, "must be above 1 and at most 100")
       .optional(),
     FEE_ESCALATION_MAX_STROOPS: int(100).optional(),
 

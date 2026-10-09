@@ -161,6 +161,9 @@ describe("parseConfig", () => {
     expect(problems({ ...minimal, FEE_ESCALATION_FACTOR: "Infinity" })).toEqual([
       "FEE_ESCALATION_FACTOR must be a decimal number",
     ]);
+    expect(problems({ ...minimal, FEE_ESCALATION_FACTOR: "1" })).toEqual([
+      "FEE_ESCALATION_FACTOR must be above 1 and at most 100",
+    ]);
     expect(problems({ ...minimal, INCLUSION_FEE_STROOPS: "99" })).toEqual([
       "INCLUSION_FEE_STROOPS must be at least 100",
     ]);
