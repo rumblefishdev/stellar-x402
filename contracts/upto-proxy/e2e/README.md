@@ -22,7 +22,7 @@ The first run creates the accounts in `secrets/accounts.json` (git-ignored) and 
 friendbot. Every run then:
 
 1. deploys the proxy and the test token with `deploy/scripts/deploy-contract.sh` (a no-op when
-   they're already there);
+   they're already there) and extends both to the network's maximum TTL;
 2. opens the trustlines, deploys the SACs and tops up the self-issued asset and the test token;
 3. reuses or creates the facilitators' channel accounts;
 4. runs the scenarios and writes `results/testnet-results.json`.
@@ -33,8 +33,12 @@ The contract IDs depend on the deployer key (see `deploy/README.md`). When the p
 deployed differs from `UPTO_PROXY_CONTRACT_ID` in `deploy/testnet.env.example`, setup prints a
 warning: the run is then testing your own deployment, not the recorded one.
 
-The [testnet report](../../../docs/upto-proxy-testnet-report.md) summarizes the 2026-10-08 run. It
+The [testnet report](../../../docs/upto-proxy-testnet-report.md) summarizes the 2026-10-09 run. It
 is a snapshot: a new run rewrites the JSON but not the report.
+
+`EXTEND_TTL=0` skips the deploy-time extension, so a fresh proxy starts at the network's minimum
+TTL and its first settlements pay for the contract's own extension. Task 0035 used it to measure
+that cost; a run like that fails the availability check by design.
 
 ### Testnet USDC
 
@@ -59,6 +63,7 @@ SEP-41 `test-token`):
   checks as any settlement.
 
 Rejections are checked in the submitter's enforcing simulation against live testnet state, the
-same path the facilitator uses, so they have no transaction hash. A final check confirms the
-client's XLM balance did not change during the scenarios: it pays no settlement fees (setup pays
-the fees for its trustlines).
+same path the facilitator uses, so they have no transaction hash. Two final checks confirm
+that the client's XLM balance did not change during the scenarios (it pays no settlement fees;
+setup pays the fees for its trustlines) and that the proxy's instance and code TTL is at least the
+contract's own target, less its minimum extension.

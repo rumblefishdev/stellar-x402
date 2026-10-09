@@ -14,6 +14,7 @@ import {
   PASSPHRASE,
   RPC_URL,
   type TxReport,
+  contractTtls,
   readContract,
   server,
   tokenBalance,
@@ -33,6 +34,9 @@ import { type TokenKind, type World, prepareWorld } from "../src/world.js";
 
 const RESULTS = join(dirname(fileURLToPath(import.meta.url)), "../results/testnet-results.json");
 const MAX = 1_000_000n; // 0.1 of a 7-decimal token
+// The contract's own TTL targets (lib.rs, task 0035), in ledgers.
+const TTL_EXTEND_TO = 518_400;
+const TTL_MIN_EXTENSION = 120;
 // E2E_TOKENS=sac,sep41 runs a subset; a full run (the default) covers all three.
 const TOKENS = (process.env.E2E_TOKENS?.split(",") ?? ["usdc", "sac", "sep41"]) as TokenKind[];
 
@@ -393,6 +397,24 @@ describe.each(TOKENS)("UptoProxy on testnet with %s", (kind) => {
             throw new Error(`3 attempts, none landed both settlements in one ledger`);
           }
         }
+      },
+    ));
+});
+
+describe("availability", () => {
+  // After a full run the proxy's TTL is at least the contract's own target, less the skip window:
+  // the deploy script set it to the network maximum, or, with EXTEND_TTL=0, the settlements
+  // extended it themselves.
+  it("keeps the proxy's instance and code alive", () =>
+    scenario(
+      "all",
+      "proxy instance and code stay alive",
+      `TTL >= ${TTL_EXTEND_TO - TTL_MIN_EXTENSION} ledgers`,
+      async (r) => {
+        const t = await contractTtls(world.proxy.contractId, world.proxy.wasmHash);
+        expect(t.instance).toBeGreaterThanOrEqual(TTL_EXTEND_TO - TTL_MIN_EXTENSION);
+        expect(t.code).toBeGreaterThanOrEqual(TTL_EXTEND_TO - TTL_MIN_EXTENSION);
+        r.outcome = `instance ${t.instance}, code ${t.code} ledgers left at ledger ${t.latest}`;
       },
     ));
 });
