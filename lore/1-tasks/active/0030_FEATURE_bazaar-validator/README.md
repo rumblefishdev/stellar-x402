@@ -161,8 +161,9 @@ listed separately below and stay open for the day-1 review.
    is never compiled).
 6. **Hosts and schemas (PR #15 review).** Upstream's icon host rules apply to resource URLs too,
    plus single-label hosts and private suffixes (`.local`, `.internal`, `.home.arpa`, …). The
-   schema limits also cover `info.input` (`inputSchema`, `body`, `queryParams`, `pathParams`), and
-   keyword rules skip property names and `enum`/`default`/`const`/`examples` data.
+   schema limits also cover mcp `inputSchema`; http `body`, `queryParams` and `pathParams` are
+   example values (upstream), bounded by the size cap only. Keyword rules skip property names and
+   `enum`/`default`/`const`/`examples` data.
 
 ## Future Work
 

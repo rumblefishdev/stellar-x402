@@ -66,11 +66,21 @@ describe("packages/bazaar", () => {
   });
 
   it("stores the paid path when the template doesn't match it (G4)", () => {
-    const e = entry(pay("https://x.com/cheap", { info: http, routeTemplate: "/premium" }));
+    const p = pay("https://x.com/cheap", { info: http, routeTemplate: "/premium" });
+    expect(validate(p, req)).toMatchObject({ routeTemplateIgnored: true });
+    const e = entry(p);
     expect([e.key.resourceUrl, e.resource.resource]).toEqual([
       "https://x.com/cheap",
       "https://x.com/cheap",
     ]);
+  });
+
+  it("treats an http body as example data, not a schema", () => {
+    const body = { $ref: "order-42", pattern: "x".repeat(257) };
+    const p = pay("https://x.com/a", {
+      info: { input: { type: "http", method: "POST", bodyType: "json", body } },
+    });
+    expect(reason(p)).toBe("ok");
   });
 
   it.each([
@@ -105,7 +115,7 @@ describe("packages/bazaar", () => {
       "schema_too_complex",
     ],
     [
-      "unserializably deep block (RT6)",
+      "100k-deep block, over the size cap (RT6)",
       pay("https://x.com/a", { info: http, schema: deep(100_000) }),
       "too_large",
     ],
@@ -124,13 +134,6 @@ describe("packages/bazaar", () => {
       "mcp inputSchema external $ref",
       pay("https://x.com/a", {
         info: { input: { ...mcp.input, inputSchema: { $ref: "https://e.com/s" } } },
-      }),
-      "schema_too_complex",
-    ],
-    [
-      "http body pattern over 256",
-      pay("https://x.com/a", {
-        info: { input: { ...http.input, body: { pattern: "x".repeat(257) } } },
       }),
       "schema_too_complex",
     ],
