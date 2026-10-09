@@ -51,7 +51,8 @@ fi
 
 if [[ ${EXTEND_TTL:-1} != 0 ]]; then
   # The highest TTL an entry can have is max_entry_ttl - 1 ledgers.
-  max=$(stellar network settings --network "$network" | grep -o '"max_entry_ttl":[0-9]*' | cut -d: -f2)
+  # `|| true`: under pipefail a grep with no match would exit before the message below.
+  max=$(stellar network settings --network "$network" | grep -o '"max_entry_ttl":[0-9]*' | cut -d: -f2 || true)
   [[ -n $max ]] || {
     echo "could not read max_entry_ttl from the network settings" >&2
     exit 1

@@ -5,8 +5,10 @@
 
 extern crate std;
 
+mod adversarial;
 mod amount_properties;
 mod real_signatures;
+mod settlement_properties;
 mod signing;
 mod ttl;
 mod wasm;

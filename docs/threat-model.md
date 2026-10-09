@@ -61,6 +61,19 @@ What each party must trust:
   This doesn't move extra funds, but it leaves the second seller unpaid; see
   [Seller not paid](#seller-not-paid).
 
+#### Blind signing by the client
+
+- **Attack:** The client gets its entry from a simulation run by an RPC or a facilitator it
+  doesn't control. A lying simulation returns a different tree, for example a plain
+  `token.transfer` of the payer's balance, and a client that signs whatever came back authorizes
+  it.
+- **Mitigation:** The client compares the simulated tree with the one it builds from the payment
+  terms and refuses to sign anything else, or builds the entry from the terms without simulation
+  (README, "Getting the entry from simulation"). The e2e client does this (`signSimulatedEntry`),
+  and the "client refuses a simulated tree" scenario checks it; the `@x402/stellar` client classes
+  (0034) must do the same.
+- **Residual risk:** None, for a client that checks.
+
 #### Recipient substitution
 
 - **Attack:** The facilitator or a relayer redirects the payment.
@@ -137,10 +150,18 @@ What each party must trust:
   client's first allowance entry, a nonce entry with a long TTL) or extend an entry's TTL (a token
   instance whose TTL runs low, or the proxy's own instance and code) pay rent on top of the normal
   fee.
+  The payer picks `allowance_expiration_ledger`, and the facilitator pays temporary rent on the
+  nonce entry and the token's allowance entry until then: in the unit test
+  `a_far_allowance_expiration_costs_the_facilitator_rent`, the furthest expiry the network allows
+  costs about 14 million stroops more than one 12 ledgers ahead. Over the fee ceiling, the
+  settlement is refused after the seller has served; under it, every settlement can be made to
+  cost up to the ceiling.
 - **Mitigation:** The facilitator computes fees from a fresh simulation and caps them with
-  `maxFeeStroops` (250,000 by default, ADR 0007). The nonce TTL is bounded by
-  `allowance_expiration_ledger`. The proxy's own extension is capped at 720 ledgers per
-  settlement, about 149,000 stroops on testnet (ADR 0010, D10).
+  `maxFeeStroops` (250,000 by default, ADR 0007). At verify it refuses an
+  `allowance_expiration_ledger` beyond the payment window (README, Verify step 2), which bounds
+  the nonce and allowance rent; the facilitator's `/verify` for `upto` is task 0015, and until
+  then the rule is enforced only by the e2e suite's `checkClientAuth`. The proxy's own extension
+  is capped at 720 ledgers per settlement, about 149,000 stroops on testnet (ADR 0010, D10).
 - **Residual risk:** Rent depends on the entry's size and the length of the extension, so there
   is no fixed bound. A settlement that pays it can cost several times a normal one; the
   [testnet report](upto-proxy-testnet-report.md#known-limits) has the measured case.

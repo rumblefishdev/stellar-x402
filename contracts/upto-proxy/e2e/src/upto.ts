@@ -65,7 +65,7 @@ export function settleArgs(t: UptoTerms, actual: bigint): xdr.ScVal[] {
   ];
 }
 
-const contractFn = (
+export const contractFn = (
   contract: string,
   fn: string,
   args: xdr.ScVal[],
@@ -131,7 +131,6 @@ const entryAddress = (entry: xdr.SorobanAuthorizationEntry): string | undefined 
 export async function clientSign(
   t: UptoTerms,
   client: Keypair,
-  signatureExpirationLedger: number,
 ): Promise<xdr.SorobanAuthorizationEntry> {
   // The facilitator is the simulation source, as it is the operation source on chain: with the
   // client as source, its auth would be recorded as source-account credentials, not a signable
@@ -149,8 +148,40 @@ export async function clientSign(
   }
   const entry = sim.result.auth.find((e) => entryAddress(e) === t.from);
   if (!entry) throw new Error("simulation returned no auth entry for the client");
-  return authorizeEntry(entry, client, signatureExpirationLedger, PASSPHRASE);
+  return signSimulatedEntry(entry, t, client);
 }
+
+/**
+ * Client side: signs a simulated entry only if it is exactly the tree the terms call for. The
+ * simulation comes from an RPC (or a facilitator) the client doesn't control; signing its output
+ * blindly would sign whatever call it returned, a plain `token.transfer` included. The signature
+ * expires with the allowance (spec §3.1: `signatureExpirationLedger == allowance_expiration_ledger`).
+ */
+export function signSimulatedEntry(
+  entry: xdr.SorobanAuthorizationEntry,
+  t: UptoTerms,
+  client: Keypair,
+): Promise<xdr.SorobanAuthorizationEntry> {
+  if (entryAddress(entry) !== t.from) throw new Error("simulated entry is not for the payer");
+  if (entry.rootInvocation().toXDR("base64") !== expectedClientInvocation(t).toXDR("base64")) {
+    throw new Error("simulated auth tree does not match the payment terms; not signing");
+  }
+  return authorizeEntry(entry, client, t.allowanceExpirationLedger, PASSPHRASE);
+}
+
+/** An unsigned address-credential entry for `from` with `invocation` as its root. */
+export const unsignedEntry = (from: string, invocation: xdr.SorobanAuthorizedInvocation) =>
+  new xdr.SorobanAuthorizationEntry({
+    credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(
+      new xdr.SorobanAddressCredentials({
+        address: Address.fromString(from).toScAddress(),
+        nonce: xdr.Int64.fromString(randomBytes(8).readBigInt64BE().toString()),
+        signatureExpirationLedger: 0,
+        signature: xdr.ScVal.scvVoid(),
+      }),
+    ),
+    rootInvocation: invocation,
+  });
 
 /**
  * Client side, without simulation: builds the entry from the terms and signs it. Recording-mode
@@ -160,28 +191,39 @@ export async function clientSign(
 export function clientSignDirect(
   t: UptoTerms,
   client: Keypair,
-  signatureExpirationLedger: number,
 ): Promise<xdr.SorobanAuthorizationEntry> {
-  const entry = new xdr.SorobanAuthorizationEntry({
-    credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(
-      new xdr.SorobanAddressCredentials({
-        address: Address.fromString(t.from).toScAddress(),
-        nonce: xdr.Int64.fromString(randomBytes(8).readBigInt64BE().toString()),
-        signatureExpirationLedger: 0,
-        signature: xdr.ScVal.scvVoid(),
-      }),
-    ),
-    rootInvocation: expectedClientInvocation(t),
-  });
-  return authorizeEntry(entry, client, signatureExpirationLedger, PASSPHRASE);
+  const entry = unsignedEntry(t.from, expectedClientInvocation(t));
+  return authorizeEntry(entry, client, t.allowanceExpirationLedger, PASSPHRASE);
 }
 
-/** Facilitator side: refuse an entry that isn't exactly the tree the terms call for. */
-export function checkClientAuth(entry: xdr.SorobanAuthorizationEntry, t: UptoTerms): void {
+/**
+ * Facilitator side: refuse an entry that isn't exactly the tree the terms call for, whose
+ * signature doesn't expire with the allowance, or whose allowance outlives the payment window.
+ * The facilitator pays rent on the nonce and the allowance until `allowance_expiration_ledger`,
+ * so a payer-chosen far expiry would make it pay for months (threat model, "Fee inflation by
+ * rent"). `maxLedgers` is the window in ledgers: `ceil(maxTimeoutSeconds / 5)` plus a margin.
+ */
+export function checkClientAuth(
+  entry: xdr.SorobanAuthorizationEntry,
+  t: UptoTerms,
+  window?: { latestLedger: number; maxLedgers: number },
+): void {
   if (entryAddress(entry) !== t.from) throw new Error("auth entry is not from the payer");
   const signed = entry.rootInvocation().toXDR("base64");
   if (signed !== expectedClientInvocation(t).toXDR("base64")) {
     throw new Error("client auth tree does not match the payment terms");
+  }
+  const creds = entry.credentials();
+  const address =
+    creds.switch().name === "sorobanCredentialsAddressV2" ? creds.addressV2() : creds.address();
+  if (address.signatureExpirationLedger() !== t.allowanceExpirationLedger) {
+    throw new Error("signature expiry differs from allowance_expiration_ledger");
+  }
+  if (window && t.allowanceExpirationLedger > window.latestLedger + window.maxLedgers) {
+    throw new Error(
+      `allowance_expiration_ledger ${t.allowanceExpirationLedger} is more than ` +
+        `${window.maxLedgers} ledgers past ${window.latestLedger}`,
+    );
   }
 }
 

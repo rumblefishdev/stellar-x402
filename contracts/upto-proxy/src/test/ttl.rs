@@ -91,3 +91,28 @@ fn failed_settlement_extends_nothing() {
     );
     assert_eq!(ttls(&s), before);
 }
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(256))]
+
+    /// For any TTL and any ledger, a settlement leaves the instance and code exactly where
+    /// `extend_ttl_with_limits` says: unchanged under the minimum gain, otherwise up by the gap
+    /// capped at `TTL_MAX_EXTENSION`, and never past `TTL_EXTEND_TO`. The host's initial TTL in
+    /// tests is 4,095, so the start can't be lower.
+    #[test]
+    fn ttl_follows_the_model(start in 4_096u32..=TTL_EXTEND_TO, advance in 0u32..2_000) {
+        let s = setup(TokenKind::Sac);
+        set_ttl(&s, start);
+        let advance = advance.min(start - 1);
+        let seq = SEQ + advance;
+        s.env.ledger().set_sequence_number(seq);
+        let before = start - advance;
+        let p = Payment { exp_ledger: seq + 10, ..fresh(&s, 1) };
+        settle(&s, &p, 1).unwrap().unwrap();
+
+        let gap = TTL_EXTEND_TO - before;
+        let expected = if gap < TTL_MIN_EXTENSION { before } else { before + gap.min(TTL_MAX_EXTENSION) };
+        proptest::prop_assert_eq!(ttls(&s), (expected, expected));
+        proptest::prop_assert!(expected <= TTL_EXTEND_TO);
+    }
+}

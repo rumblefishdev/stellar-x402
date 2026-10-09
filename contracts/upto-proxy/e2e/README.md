@@ -63,6 +63,17 @@ SEP-41 `test-token`):
   (up to 3 attempts, since two parallel submits can straddle a ledger close). Both get the same
   checks as any settlement.
 
+Every authorization expires with its payment window: the deadline is 900 s ahead, and the
+allowance and the signature expire at the deadline's ledger plus 12. Before each settlement the
+facilitator's `checkClientAuth` checks the tree, that the signature expires with the allowance, and
+that the allowance ends at most 204 ledgers (the window plus margins) after the current ledger.
+
+Once, with the first token:
+
+- **Client and facilitator checks:** the client refuses to sign a simulated tree that differs from
+  the terms (a forged `token.transfer`), and the facilitator refuses an allowance that outlives the
+  window and a signature that expires apart from the allowance. These run off chain.
+
 Rejections are checked in the submitter's enforcing simulation against live testnet state, the
 same path the facilitator uses, so they have no transaction hash. Two final checks confirm
 that the client's XLM balance did not change during the scenarios (it pays no settlement fees;
