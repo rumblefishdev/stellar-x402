@@ -81,6 +81,11 @@ simulation returns source-account credentials and there is nothing to sign. Reco
 the whole call, so it only works for terms the contract accepts; the client also needs a balance
 of at least `max_amount` for it to succeed.
 
+**Never sign the simulated entry blindly.** The simulation comes from an RPC or a facilitator the
+client doesn't control. Compare its tree with the one above, built from the payment terms, and
+refuse anything else; or skip simulation and build the entry from the terms directly. Both give
+the same entry (threat model, "Blind signing by the client").
+
 ## What the facilitator signs
 
 The facilitator authorizes the full call: `settle_upto` with all ten arguments, including
@@ -173,14 +178,17 @@ Every invariant has a test in `src/test/` (§8):
 1. The client's entry has `ADDRESS` or `ADDRESS_V2` credentials for `from`, and its tree is
    exactly the one above for the payment terms: the proxy is the canonical one, `token` is the
    required asset, `to` is `payTo`, `facilitator` is this facilitator, `max_amount` equals the
-   required amount.
+   required amount. `from` is not the facilitator: the same address can't authorize twice in one
+   call, so the host would refuse the settlement.
 2. `signatureExpirationLedger == allowance_expiration_ledger`; `deadline` is at most
    `now + maxTimeoutSeconds`; the window is open now. The allowance must last until `deadline`,
    or a settlement late in the window fails with `Expired` (#5) before the deadline has passed.
    Convert seconds to ledgers with the network's current target ledger close time, which is a
    network setting since protocol 23 (CAP-0070), not a fixed 5 s. Allow
    `allowance_expiration_ledger` up to `currentLedger + ceil(maxTimeoutSeconds / closeTime)` plus
-   a small margin.
+   a small margin, and no further: the facilitator pays rent on the nonce and the allowance until
+   that ledger, so a far expiry is a cost the payer picks (threat model, "Fee inflation by
+   rent").
 3. The nonce is unused: `is_nonce_used(from, nonce)` is `false` **and** `(from, nonce)` is not in
    the facilitator's own settled-nonce record (§8.1).
 4. Simulate with `actual_amount = max_amount`, the worst case. The only balance changes are
