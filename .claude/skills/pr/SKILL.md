@@ -103,13 +103,14 @@ If something fails, fix it in a new commit (through `/lore-framework-git`) and r
 
 ### 6. Push and open the PR
 
-Reviewers default to the two other team members. `team.yaml` ids map to GitHub logins like this:
+Reviewers default to the other team members. `team.yaml` ids map to GitHub logins like this:
 
 | team.yaml        | GitHub           |
 | ---------------- | ---------------- |
 | `okarcz`         | `karczuRF`       |
 | `akot`           | `adamkoot`       |
 | `stkrolikiewicz` | `stkrolikiewicz` |
+| `karolkow`       | `karolko9`       |
 
 ```bash
 git push -u origin {branch}
