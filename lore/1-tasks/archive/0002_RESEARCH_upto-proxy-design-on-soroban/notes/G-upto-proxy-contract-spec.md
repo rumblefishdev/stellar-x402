@@ -170,8 +170,9 @@ After the entry expires, `is_nonce_used` returns `false` again. The contract alo
 nonce from being reused in a new payload signed later; the facilitator does (§8.1).
 
 There is no instance or persistent storage. The contract instance and WASM entries still have a
-TTL. This spec said the 0004 deploy scripts would keep it alive; they don't (PR #12 review), so it
-is an open operational item, tracked in the threat model ("Proxy archived").
+TTL. This spec said the 0004 deploy scripts would keep it alive; they didn't (PR #12 review).
+Task 0035 made the contract extend itself on every settlement and the deploy script extend each
+deployment to the maximum (ADR 0010, D10).
 
 ## 8. Invariants (every one gets a test in 0003)
 

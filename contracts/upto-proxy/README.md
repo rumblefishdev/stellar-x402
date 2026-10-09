@@ -6,8 +6,8 @@ transaction the client never pays for.
 
 The contract is immutable: no admin, no constructor arguments, no upgrade, no pause, no
 cancellation, and it never holds funds. Its only contract data is used nonces. Its instance and
-WASM code are persistent ledger entries with their own TTL; if they are archived, every settlement
-needs a restore first (see [Availability](#availability) below). The design and its
+WASM code are persistent ledger entries with their own TTL, and every settlement keeps them alive
+(see [Availability](#availability) below). The design and its
 reasoning are in [ADR 0010](../../docs/adr/0010-upto-proxy-design.md); the normative spec is
 [G-upto-proxy-contract-spec](../../lore/1-tasks/archive/0002_RESEARCH_upto-proxy-design-on-soroban/notes/G-upto-proxy-contract-spec.md)
 (section numbers below, §N, refer to it).
@@ -16,14 +16,17 @@ reasoning are in [ADR 0010](../../docs/adr/0010-upto-proxy-design.md); the norma
 
 | Network | Contract ID                                                | WASM hash                                                          |
 | ------- | ---------------------------------------------------------- | ------------------------------------------------------------------ |
-| testnet | `CC3VX7N6ILD63V7FS2JA7XUDX4DMHYEJXRZDOMU7GVW76XYINOAZ7OYU` | `be2ba12160a7e3e1a93ed0cb457b7e93cd6ed4c725cb51aeeb87313b45dd0b34` |
+| testnet | `CDSWGHBULAYAQX77CPHYOUDDUFMT6ZJBCY5FPUK7N3B2JFS32VNYHEPD` | `8019c086e6e1aabe8295c010f1167a87e33d23c3292e3e4620e82c273ac9ed6d` |
+
+The previous testnet deployment, `CC3VX7N6…Z7OYU` (WASM `be2ba121…0b34`), is the code without
+self-extension that the first 0004 run tested; it is retired and left to expire.
 
 `deploy/scripts/deploy-contract.sh upto-proxy` deploys it with the WASM hash as the salt. The
 contract ID follows from the deployer's address and the salt, so the same code deployed by the
 same key always lands at the same address, and a code change gets a new one. Another deployer gets
-another ID for the same WASM: 0006's bench ran this code at `CBEPV3F2…TEGY7`. Testnet resets wipe
-it; rerunning the script with the same deployer restores it at the same ID. There is no mainnet
-deployment yet.
+another ID for the same WASM: 0006's bench ran the previous code at `CBEPV3F2…TEGY7`. The script
+then extends the instance and WASM to the network's maximum TTL. Testnet resets wipe it; rerunning
+the script with the same deployer restores it at the same ID. There is no mainnet deployment yet.
 
 ## Interface
 
@@ -102,7 +105,10 @@ otherwise.
    extend its TTL to `allowance_expiration_ledger`
 9. `token.approve(from, UptoProxy, max_amount, allowance_expiration_ledger)`
 10. if `actual_amount > 0`: `token.transfer_from(UptoProxy, from, to, actual_amount)`
-11. emit `UptoSettled`
+11. extend the instance and WASM TTL:
+    `extend_ttl_with_limits(TTL_EXTEND_TO, TTL_MIN_EXTENSION, TTL_MAX_EXTENSION)`
+    (see [Availability](#availability))
+12. emit `UptoSettled`
 
 The nonce is written before the token calls. Soroban forbids re-entry anyway.
 
@@ -143,7 +149,8 @@ belong to `scheme_upto_stellar.md`.
 
 After the entry expires, `is_nonce_used` returns `false` again. The contract alone doesn't stop
 the same nonce in a payload signed later; the facilitator does (below). There is no instance or
-persistent storage.
+persistent contract data; the instance and code entries themselves are kept alive by step 11 of
+the execution order.
 
 ## Invariants
 
@@ -211,11 +218,41 @@ extension, so the fee ceiling needs room above a normal settlement's fee.
 
 ## Availability
 
-The instance and WASM entries expire like any persistent entry. Nothing extends their TTL yet:
-not the deploy script, not the e2e suite. If they are archived, every settlement needs a restore
-first, paid by the facilitator and possibly above its fee ceiling, or it fails. Open
-authorizations are bound to this address, so a redeployment can't take over. Whoever operates a
-deployment must keep its TTL extended.
+The instance and WASM entries expire like any persistent entry. If they were archived, every
+settlement would need a restore first, paid by the facilitator and possibly above its fee
+ceiling, and open authorizations are bound to this address, so a redeployment couldn't take over.
+Two things keep them alive (task 0035):
+
+- **The deploy script** extends both to the network's maximum TTL (about 180 days on testnet).
+- **Every successful settlement** calls `extend_ttl_with_limits` with these constants:
+
+  | Constant            | Ledgers | About (5 s ledgers) | Meaning                      |
+  | ------------------- | ------: | ------------------- | ---------------------------- |
+  | `TTL_EXTEND_TO`     | 518,400 | 30 days             | the target TTL               |
+  | `TTL_MIN_EXTENSION` |     120 | 10 minutes          | smaller gains are skipped    |
+  | `TTL_MAX_EXTENSION` |     720 | 1 hour              | the most one settlement adds |
+
+  The facilitator pays the rent inside the settlement fee, never the client. It does nothing
+  while the TTL is above about 30 days, so for months after a deployment it costs only the check
+  (23 stroops).
+
+**Why with limits.** Rent is about 198.8 stroops per ledger extended, almost all for the WASM
+code, plus about 5,800 per extension (measured in the
+[testnet report](../../docs/upto-proxy-testnet-report.md#keeping-the-contract-alive)). A plain
+`extend_ttl(threshold, extend_to)` would make one settlement refill the whole gap after a quiet
+period: 7 days of rent is about 24 million stroops, a hundred times the facilitator's default
+250,000-stroop fee ceiling, so the facilitator would refuse a valid payment. The cap keeps the
+costliest settlement near 193,000 stroops (77% of the ceiling); the minimum keeps extensions to at
+most one per 10 minutes under steady traffic, so the fixed cost per extension isn't paid on every
+settlement. The total rent, about 0.34 XLM a day on testnet, is the same either way.
+
+**What isn't covered.** With fewer than about one settlement an hour, each settlement adds at most
+an hour and the TTL still runs down. The deploy-time extension covers that for about 180 days; a
+deployment nobody settles on for longer must be extended again by its operator, or restored
+(anyone can, and since protocol 23 a settlement restores it by itself, at extra cost). The
+constants are in ledgers, so a faster ledger close time shortens them in time but keeps the fee
+bound. The rent rate rises with the network's total state, so the cap's margin should be checked
+again before mainnet.
 
 ## Build and test
 
@@ -265,7 +302,8 @@ spec is task 0034.
 12. **Balance checks.** The settle-time simulation shows only `from` −actual and `to` +actual, plus
     the `(from, proxy)` allowance write. Events alone aren't enough for non-SAC tokens.
 13. **Fees.** A fresh simulation plus a buffer; the client's fee is ignored. The fee ceiling must
-    allow for rent on a first settlement.
+    allow for rent on a first settlement and for the proxy's own extension, at most 720 ledgers
+    of rent (about 149,000 stroops on testnet today).
 14. **Error reasons.** One `invalid_upto_stellar_*` reason per `UptoError` code and per auth
     failure.
 15. **Canonical address.** How the proxy's address is published and versioned, since every fix is a
