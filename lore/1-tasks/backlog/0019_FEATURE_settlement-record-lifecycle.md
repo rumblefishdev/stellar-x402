@@ -33,6 +33,8 @@ As a facilitator operator, I want settlement records that are written before sen
 
 ## Context
 
+- A `resolved` event or the startup re-check that wins the `success` transition calls
+  `onSuccess(record, "resolved")` (0031).
 - 0009 claims and submits; this story makes the record durable and correct across restarts and late events.
 - Needs the awaited `onSigned` from 0016.
 - Related tasks: 0009, 0016.

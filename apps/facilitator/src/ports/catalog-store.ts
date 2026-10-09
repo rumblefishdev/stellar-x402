@@ -13,6 +13,8 @@ export interface CatalogKey {
 
 export interface CatalogEntry {
   key: CatalogKey;
+  /** `CATALOG_KEY_VERSION` of the rules that built `key`; stored so a rule change can be migrated. */
+  keyVersion: number;
   /**
    * The upstream discovery shape, as returned by `GET /discovery/resources`. One settlement knows
    * one requirement, so `accepts` usually holds one entry. The caller stamps `lastUpdated`.
@@ -37,13 +39,18 @@ export interface CatalogPage {
   total: number;
 }
 
+/** `stale`: the stored entry is newer, so nothing changed. */
+export type UpsertOutcome = "inserted" | "updated" | "stale";
+
 /** Bazaar catalog (AD-7, AD-19, AD-20). */
 export interface CatalogStore {
   /**
    * Idempotent by key. Merges `accepts` by `scheme + network + asset`: a matching requirement is
-   * replaced, others are kept. Every other field, `lastUpdated` included, is replaced.
+   * replaced, others are kept. Every other field, `lastUpdated` included, is replaced. A write
+   * whose `lastUpdated` is earlier than the stored one (compared as instants) changes nothing,
+   * so a late or reordered success can't regress a newer listing.
    */
-  upsert(entry: CatalogEntry): Promise<void>;
+  upsert(entry: CatalogEntry): Promise<UpsertOutcome>;
   /**
    * Matching entries in insertion order, with no ranking. An upsert of an existing key keeps its
    * place, so offset paging doesn't shift each time a resource settles again.

@@ -2,13 +2,18 @@ import { STATUS_CODES } from "node:http";
 import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
+import type { Metrics } from "../metrics.js";
 import type { Stores } from "../ports/index.js";
+import type { SettlementHooks } from "../settlement/hooks.js";
 
 /** What the composition root hands to the HTTP adapter. Lanes add their services here. */
 export interface AppDeps {
   config: Config;
   logger: Logger;
   stores: Stores;
+  /** What `/settle` (0009) and the settlement module call; built in `main.ts`. */
+  hooks: SettlementHooks;
+  metrics: Metrics;
 }
 
 /** The status as a body code, like `not_found`: 413 → `payload_too_large`. */

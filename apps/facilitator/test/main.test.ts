@@ -7,6 +7,8 @@ import { memoryStores } from "../src/adapters/memory.js";
 import { parseConfig } from "../src/config.js";
 import { jsonLogger } from "../src/logger.js";
 import { start, type Started } from "../src/main.js";
+import { memoryMetrics } from "../src/metrics.js";
+import { noopHooks } from "../src/settlement/hooks.js";
 
 const secret = Keypair.random().secret();
 const env = {
@@ -24,7 +26,13 @@ describe("facilitator boot", () => {
     // Port 0 picks a free port; the schema itself requires 1–65535.
     const config = { ...parseConfig(env), port: 0 };
     const logger = jsonLogger("debug", (line) => lines.push(line));
-    app = await start({ config, logger, stores: memoryStores() });
+    app = await start({
+      config,
+      logger,
+      stores: memoryStores(),
+      hooks: noopHooks,
+      metrics: memoryMetrics(),
+    });
     url = `http://127.0.0.1:${app.port}`;
   });
   afterAll(() => app.close());
