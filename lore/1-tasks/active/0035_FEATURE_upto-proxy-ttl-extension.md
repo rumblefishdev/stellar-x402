@@ -2,7 +2,7 @@
 id: "0035"
 title: "Keep the UptoProxy instance and WASM alive: TTL extension"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0010"]
 related_tasks: ["0005", "0004", "0026", "0027"]
@@ -15,6 +15,10 @@ history:
     status: backlog
     who: claude
     note: "Spawned from 0005 future work (PR #12 review, Stan)."
+  - date: "2026-10-09"
+    status: active
+    who: okarcz
+    note: "Promoted and assigned to okarcz."
 ---
 
 # Keep the UptoProxy instance and WASM alive: TTL extension
@@ -28,6 +32,10 @@ it fails. This task adds the extension to the deploy script and a scheduled chec
 both entries alive and alerts before they run low.
 
 **Lane:** Payments
+
+## Status: Active
+
+> Started 2026-10-09 by okarcz. Nothing built yet.
 
 ## Context
 
