@@ -93,21 +93,24 @@ As a developer on any of the three lanes, I want a facilitator app that boots, v
   line on stdout.
 - `apps/facilitator/src/http/app.ts`: `createApp(deps)` with the four routes answering 501, a
   JSON 404, a body size limit (413), the client's own body errors (400, 413, 415) passed through
-  unlogged, and a logged 500 for anything else. `AppDeps` is the graph the composition root hands
+  unlogged with a body code named after the status, and a logged 500 for anything else. An
+  answer that already started goes to Express. `AppDeps` is the graph the composition root hands
   over; lanes add their services to it.
 - `apps/facilitator/src/main.ts`: `main()` reads `process.env` once, parses the config and starts
   the server; `start(deps)` is what tests call. It only exports.
-- `apps/facilitator/src/server.ts`: the process entry point. It calls `main()`; a startup failure
-  logs `startup_failed` with the config problems and exits with code 1. `src/index.ts` is gone;
-  `dev` and `start` run `server`.
+- `apps/facilitator/src/server.ts`: the process entry point. It calls `main()` and closes the
+  server on SIGTERM or SIGINT; a startup failure logs `startup_failed` with the config problems
+  and exits with code 1. `src/index.ts` is gone; `dev` and `start` run `server`.
 - `apps/facilitator/test/port-contracts.ts`: one contract suite per port, for 0022 to run
   against the durable adapters. `memory.test.ts` runs them against the in-memory adapters.
 - `apps/facilitator/test/main.test.ts`: boots the app on memory stores (stub routes, no CORS,
-  413, 400, 415 without an `http_error` log, 404, JSON-lines logs without the secret) and spawns
-  `src/server.ts` with a bad config to check the exit code and that no value is printed.
+  413, 400, 415 with their body codes and without an `http_error` log, 404, JSON-lines logs
+  without the secret), spawns `src/server.ts` with a bad config to check the exit code and that
+  no value is printed, and checks it exits 0 on SIGTERM.
 - `apps/facilitator/test/logger.test.ts`: the envelope wins over fields; errors keep their stack
-  and one level of cause, also when the cause chain is cyclic.
-- 34 facilitator tests pass (8 config, 21 contract, 4 boot, 1 logger); typecheck, lint, Prettier
+  and one level of cause, also when the cause chain is cyclic; an error's `toJSON` snapshot is
+  never logged; an unserializable field keeps the event instead of throwing.
+- 38 facilitator tests pass (8 config, 22 contract, 5 boot, 3 logger); typecheck, lint, Prettier
   and build pass.
 
 ## Design Decisions
@@ -195,6 +198,27 @@ As a developer on any of the three lanes, I want a facilitator app that boots, v
     `import.meta.url === argv[1]` check failed through a symlink (Node resolves the module path
     but not `argv[1]`), so the process exited 0 without starting.
 
+### Emerged (PR #11 review, Oskar)
+
+26. **The logger recognizes an error before its `toJSON`**: `JSON.stringify` calls `toJSON`
+    before the replacer, so an AxiosError (stellar-sdk 16's RPC client uses axios 1.18) was logged
+    as its snapshot, which holds the request body: the full signed transaction XDR. The replacer
+    now checks the holder's original value.
+27. **A log call never throws**: a cyclic or otherwise unserializable field logs the event with
+    `fields: "unserializable"`. A throw in the HTTP error handler would hand the error to Express,
+    which answers with an HTML stack trace while `NODE_ENV` is unset.
+28. **`transition` only moves forward, never to the same state**: a same-state update let two
+    concurrent callers both win, the second overwriting `channel`. ADR 0006 already says states
+    only move forward; the port doc says so now, and two contract cases cover it for 0022.
+29. **`server.ts` closes the server on SIGTERM and SIGINT**: Node as PID 1 in a container ignores
+    SIGTERM without a handler. The handlers are registered before `main()` runs: the first version
+    registered them once the server listened and lost a signal sent right after startup (the boot
+    test caught it under load). The drain and the lease release stay in 0025.
+30. **The error handler hands an answer that already started to Express** (`res.headersSent` →
+    `next(error)`), which ends the connection.
+31. **Client error bodies name the status**: `payload_too_large`, `unsupported_media_type`,
+    `bad_request`, from `http.STATUS_CODES`, like `not_found` and `not_implemented`.
+
 ## Deferred from the PR #7 review
 
 These go to the tasks that own them (Adam's review):
@@ -211,10 +235,17 @@ From Stan's review:
 - `onFinal` errors never reach the caller and `/settle` doesn't wait for it: stated in
   `hooks.ts` (993edad); the behavior is built in 0009 and 0024.
 - A lost `onFinal` call after a crash leaves the reservation counted until it ages out of the
-  rolling window; acceptable for T1. Stan will note it in 0024.
+  rolling window; acceptable for T1. Noted in 0024.
+- A `claimed` record with no hash at startup is closed as `rejected`: added to 0019 (f65fac2).
 
 ## Deferred from the PR #11 review
 
-- Closing the server on SIGTERM/SIGINT (stop new requests, finish in-flight work, release the
-  lease): 0025 already has it as an acceptance criterion.
-- A `claimed` record with no hash at startup is closed as `rejected`: added to 0019 (f65fac2).
+- The drain on SIGTERM/SIGINT (refuse new `/settle`, wait for in-flight work, release the lease):
+  0025 already has it as an acceptance criterion. The plain close is in `server.ts` (29).
+- `SpendStore.commit` for an id with no reservation is a no-op the port doesn't define (Oskar):
+  noted in 0024, which owns the reservation lifecycle.
+- The in-memory spend and rate-limit maps are never pruned, so each `sum` scan grows with the
+  process (Oskar): fine for tests and dev runs, since deployments use the 0022 stores (0026).
+  The `ponytail:` comment names the fix.
+- A rate-limit window of 0 makes the in-memory counter useless (Oskar): the config schema holds
+  `RATE_LIMIT_WINDOW_MS` at 1 s or more, and the port doc now says the window is positive.

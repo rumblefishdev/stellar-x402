@@ -36,6 +36,12 @@ As a facilitator operator, I want fee spending capped and failing assets or reci
 - `SpendBudgets` policy module behind `SpendStore`, wired to the before-submit hook in the composition root.
 - Breakers per asset and per `payTo`, fed by settlement outcomes.
 - Tests with the in-memory store and a fake settle.
+- Decide what `SpendStore.commit` does for an id with no reservation (0017, Oskar's PR #11
+  review): the in-memory store ignores it and the port says nothing. `onFinal` is its only
+  caller and runs once at a final state, so it only happens after a bug or a lost store.
+  Resolving `false` lets the caller log it; inserting the spend needs the scopes.
+- A lost `onFinal` call after a crash leaves the reservation counted until it ages out of the
+  rolling window; acceptable for T1 (0017, Stan's PR #7 review).
 
 ## Acceptance Criteria
 
