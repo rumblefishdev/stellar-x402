@@ -1,4 +1,12 @@
 {
+  "extraKnownMarketplaces": {
+    "rf-claude-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "rumblefishdev/rf-claude-marketplace"
+      }
+    }
+  },
   "enabledPlugins": {
     "lore-framework@rf-claude-marketplace": true
   },
