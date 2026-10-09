@@ -36,6 +36,12 @@ As a facilitator operator, I want durable implementations of the four store port
 - Shared contract-test suite per port, run against both the fake and the real adapter.
 - Adapters and migrations for the store chosen in 0013.
 - Config switch in the composition root.
+- From 0017: the suites are `apps/facilitator/test/port-contracts.ts`; `test/memory.test.ts`
+  shows how to run them against an adapter. They include concurrent claims and transitions,
+  so the durable compare-and-set must be atomic.
+- From 0017: a bigint codec for stored amounts (`feeCharged`, spend reservations and limits).
+- From 0017: `CatalogStore.list` is in insertion order and an upsert keeps an entry's place, so
+  the durable catalog needs a serial or `created_at` order.
 
 ## Acceptance Criteria
 
