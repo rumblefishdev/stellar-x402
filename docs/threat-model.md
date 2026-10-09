@@ -135,10 +135,12 @@ What each party must trust:
 
 - **Attack:** Payments that create ledger entries (a recipient's first balance in a token, a
   client's first allowance entry, a nonce entry with a long TTL) or extend an entry's TTL (a token
-  instance whose TTL runs low) pay rent on top of the normal fee.
+  instance whose TTL runs low, or the proxy's own instance and code) pay rent on top of the normal
+  fee.
 - **Mitigation:** The facilitator computes fees from a fresh simulation and caps them with
   `maxFeeStroops` (250,000 by default, ADR 0007). The nonce TTL is bounded by
-  `allowance_expiration_ledger`.
+  `allowance_expiration_ledger`. The proxy's own extension is capped at 720 ledgers per
+  settlement, about 149,000 stroops on testnet (ADR 0010, D10).
 - **Residual risk:** Rent depends on the entry's size and the length of the extension, so there
   is no fixed bound. A settlement that pays it can cost several times a normal one; the
   [testnet report](upto-proxy-testnet-report.md#known-limits) has the measured case.
@@ -154,11 +156,14 @@ What each party must trust:
 
 - **Attack:** Not an attack: the proxy's instance and WASM entries are persistent and expire when
   their TTL runs out.
-- **Mitigation:** None yet. Nothing in `deploy/` or the e2e suite extends their TTL. The operator of
-  a deployment must extend it on a schedule and alert before it runs low.
-- **Residual risk:** If the entries are archived, every settlement needs a restore first, paid by
-  the facilitator and possibly above `maxFeeStroops`, or it fails. Open authorizations are bound to
-  this address, so a new deployment can't settle them.
+- **Mitigation:** The deploy script extends both to the network's maximum TTL (about 180 days),
+  and every successful settlement extends them toward 30 days, at most 720 ledgers (about an
+  hour) at a time (task 0035, ADR 0010 D10). The 0035 testnet run ended with both at the maximum.
+- **Residual risk:** A deployment with fewer than about one settlement an hour runs down after
+  the deploy-time extension, about 180 days; its operator must extend it again. If it is archived
+  anyway, anyone can restore it, and a settlement restores it by itself at extra cost, possibly
+  above `maxFeeStroops`. Open authorizations are bound to the address, so a new deployment can't
+  settle them.
 
 #### Contract bug
 
