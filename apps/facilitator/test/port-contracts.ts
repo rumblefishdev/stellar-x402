@@ -1,3 +1,4 @@
+import type { StellarNetwork } from "@stellar-x402/config";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -32,7 +33,7 @@ const requirements = (overrides: Partial<PaymentRequirements> = {}): PaymentRequ
   ...overrides,
 });
 
-function settlement(nonce: string, network = "stellar:testnet" as const): NewSettlement {
+function settlement(nonce: string, network: StellarNetwork = "stellar:testnet"): NewSettlement {
   const accepted = requirements({ network });
   const paymentPayload: PaymentPayload = { x402Version: 2, accepted, payload: { tx: "AAAA" } };
   return {
@@ -143,7 +144,7 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
     it("lists non-final records of one network", async () => {
       await store.claim(settlement("1"));
       await store.claim(settlement("2"));
-      await store.claim(settlement("3", "stellar:pubnet" as "stellar:testnet"));
+      await store.claim(settlement("3", "stellar:pubnet"));
       await store.transition(settlement("2").key, "claimed", {
         state: "expired",
         updatedAt: 2_000,
@@ -310,7 +311,7 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
       lastUpdated: "2026-10-08T00:00:00.000Z",
       ...overrides,
     });
-    const key = (url: string, payTo = PAY_TO, network = "stellar:testnet" as const) => ({
+    const key = (url: string, payTo = PAY_TO, network: StellarNetwork = "stellar:testnet") => ({
       network,
       payTo,
       method: "GET",
@@ -351,7 +352,7 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
         resource: resource("https://b.example", { type: "mcp", extensions: { bazaar: {} } }),
       });
       await store.upsert({
-        key: key("https://c.example", PAY_TO, "stellar:pubnet" as "stellar:testnet"),
+        key: key("https://c.example", PAY_TO, "stellar:pubnet"),
         resource: resource("https://c.example"),
       });
       // An update keeps the entry's place in the order.
@@ -378,6 +379,8 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
       expect(await urls({ extensions: "bazaar", limit: 10, offset: 0 })).toEqual([
         "https://b.example",
       ]);
+      // The value comes from the query string: a key from Object's prototype matches nothing.
+      expect(await urls({ extensions: "constructor", limit: 10, offset: 0 })).toEqual([]);
       const page = await store.list({ limit: 1, offset: 1 });
       expect(page).toMatchObject({ total: 3, items: [{ resource: "https://b.example" }] });
     });

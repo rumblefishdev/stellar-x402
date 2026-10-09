@@ -44,6 +44,9 @@ export interface CatalogStore {
    * replaced, others are kept. Every other field, `lastUpdated` included, is replaced.
    */
   upsert(entry: CatalogEntry): Promise<void>;
-  /** Matching entries in a stable order, with no ranking. */
+  /**
+   * Matching entries in insertion order, with no ranking. An upsert of an existing key keeps its
+   * place, so offset paging doesn't shift each time a resource settles again.
+   */
   list(query: CatalogQuery): Promise<CatalogPage>;
 }

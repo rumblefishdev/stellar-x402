@@ -1,8 +1,7 @@
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
-import { pathToFileURL } from "node:url";
 import { memoryStores } from "./adapters/memory.js";
-import { ConfigError, parseConfig } from "./config.js";
+import { parseConfig } from "./config.js";
 import { createApp, type AppDeps } from "./http/app.js";
 import { jsonLogger } from "./logger.js";
 
@@ -37,13 +36,4 @@ export async function main(env: Record<string, string | undefined> = process.env
   const logger = jsonLogger(config.logLevel);
   // STORE=memory is the only option until the durable adapters land (0022).
   return start({ config, logger, stores: memoryStores() });
-}
-
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  main().catch((error: unknown) => {
-    // A ConfigError names each bad setting and never echoes a value.
-    const fields = error instanceof ConfigError ? { problems: error.problems } : { error };
-    jsonLogger("error").error("startup_failed", fields);
-    process.exitCode = 1;
-  });
 }

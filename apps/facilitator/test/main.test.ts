@@ -47,15 +47,20 @@ describe("facilitator boot", () => {
     expect((await fetch(`${url}/unknown`)).status).toBe(404);
   });
 
-  it("refuses a body over the limit and malformed JSON", async () => {
-    const post = (body: string) =>
+  it("answers a client's bad body with a 4xx and doesn't log it as an error", async () => {
+    const post = (body: string, headers: Record<string, string> = {}) =>
       fetch(`${url}/settle`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...headers },
         body,
       });
     expect((await post(JSON.stringify({ pad: "x".repeat(2_000) }))).status).toBe(413);
     expect((await post("{")).status).toBe(400);
+    expect((await post("{}", { "content-type": "application/json; charset=latin1" })).status).toBe(
+      415,
+    );
+    expect((await post("{}", { "content-encoding": "x-foo" })).status).toBe(415);
+    expect(lines.join("")).not.toContain("http_error");
   });
 
   it("logs one JSON event per line and never the secret", () => {
@@ -71,7 +76,7 @@ describe("facilitator boot", () => {
 describe("startup with a bad config", () => {
   it("exits with 1 and names each bad value without printing it", () => {
     const bad = `${secret.slice(0, -1)}${secret.endsWith("A") ? "B" : "A"}`;
-    const result = spawnSync(process.execPath, ["--import", "tsx", "src/main.ts"], {
+    const result = spawnSync(process.execPath, ["--import", "tsx", "src/server.ts"], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),
       env: { FACILITATOR_SECRET: bad },
       encoding: "utf8",

@@ -12,10 +12,17 @@ export interface Logger {
 
 const LEVELS: readonly LogLevel[] = ["debug", "info", "warn", "error"];
 
-/** Bigints as decimal strings, errors as their name and message (`JSON.stringify` drops both). */
+/**
+ * Bigints as decimal strings, errors with their name, message, stack and `Error` cause
+ * (`JSON.stringify` drops all of them). A stack adds code locations, not data: its first line is
+ * the message.
+ */
 function replacer(_key: string, value: unknown): unknown {
   if (typeof value === "bigint") return value.toString();
-  if (value instanceof Error) return { name: value.name, message: value.message };
+  if (value instanceof Error) {
+    const { name, message, stack, cause } = value;
+    return { name, message, stack, cause: cause instanceof Error ? cause : undefined };
+  }
   return value;
 }
 
@@ -32,8 +39,9 @@ export function jsonLogger(
     (logLevel: LogLevel) =>
     (event: string, fields: LogFields = {}) => {
       if (LEVELS.indexOf(logLevel) < LEVELS.indexOf(level)) return;
-      const entry = { time: new Date().toISOString(), level: logLevel, event, ...fields };
-      write(`${JSON.stringify(entry, replacer)}\n`);
+      // The envelope comes first and is spread again last, so no field can overwrite it.
+      const envelope = { time: new Date().toISOString(), level: logLevel, event };
+      write(`${JSON.stringify({ ...envelope, ...fields, ...envelope }, replacer)}\n`);
     };
   return { debug: at("debug"), info: at("info"), warn: at("warn"), error: at("error") };
 }

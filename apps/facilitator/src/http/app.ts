@@ -36,8 +36,10 @@ export function createApp({ config, logger }: AppDeps): Express {
   // Express tells an error handler apart by its four parameters, so `_next` must stay.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const onError: ErrorRequestHandler = (error, _req, res, _next) => {
-    // body-parser sets `status`: 413 for a body over the limit, 400 for malformed JSON.
-    const status: number = error?.status === 413 || error?.status === 400 ? error.status : 500;
+    // body-parser marks the client's mistakes as `expose` (400 malformed JSON, 413 body over the
+    // limit, 415 charset or encoding); anything else is ours.
+    const status: number =
+      error?.expose && error.status >= 400 && error.status < 500 ? error.status : 500;
     if (status === 500) logger.error("http_error", { error });
     res.status(status).json({ error: status === 500 ? "internal_error" : "bad_request" });
   };
