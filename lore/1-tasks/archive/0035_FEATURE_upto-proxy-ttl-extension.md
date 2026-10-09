@@ -2,10 +2,10 @@
 id: "0035"
 title: "Keep the UptoProxy instance and WASM alive: TTL extension"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0010"]
-related_tasks: ["0005", "0004", "0034", "0026", "0015"]
+related_tasks: ["0005", "0004", "0034", "0026", "0015", "0027"]
 tags: [upto, contract, deploy, priority-medium, effort-medium, payments]
 links:
   - ../../../contracts/upto-proxy/README.md
@@ -44,7 +44,15 @@ history:
     note: >
       Stacked rent measured on testnet: 330,032 stroops, over the 250,000 ceiling. Recorded in the
       report, threat model and README; the upto fee ceiling and a token keeper added to 0015.
----
+  - date: "2026-10-09"
+    status: completed
+    who: okarcz
+    note: >
+      PR #14 rebase-merged into develop (938f1eb), carrying 0005's PR #12 commits too. All 6
+      acceptance criteria met. Contract: self-extension (D10) and the allowance-expiry cap (D11),
+      proxy CAL7SBTO…V2VC. 42 unit tests (+11), e2e 58/58. Follow-ups live in 0015 (verify MUST
+      rules, upto fee ceiling, token keeper), 0034 (spec and client rules, draft sync) and 0027
+      (proxy TTL alert).
 
 # Keep the UptoProxy instance and WASM alive: TTL extension
 
@@ -59,12 +67,10 @@ testnet deployment.
 
 **Lane:** Payments
 
-## Status: Active
+## Status: Completed
 
-> Started 2026-10-09 by okarcz on `lore-0035-upto-proxy-ttl`, rebased onto
-> `lore-0005-upto-proxy-docs` (PR #12) because the docs it changes exist only there. Built,
-> measured and deployed on testnet; e2e 50/50. In review as PR #14. A security review on
-> 2026-10-09 added the allowance-expiry cap: the proxy is now `CAL7SBTO…V2VC`, e2e 57/57.
+> Completed 2026-10-09. PR #14 was rebase-merged into develop (938f1eb), with 0005's PR #12
+> commits it was built on. The proxy on testnet is `CAL7SBTO…V2VC`; the last e2e run was 58/58.
 
 ## Context
 
@@ -270,7 +276,18 @@ no contract change (the WASM hash is unchanged):
    one deploy and leaves an instance that expires in about 7 days; the alternative, a second
    deployer key, would keep one long-lived instance that is eventually above the target too.
 
+## Future Work
+
+Each item is recorded in its task; no new tasks were needed.
+
+- **0015** (facilitator `upto` path): the `/verify` MUST rules (signature expiry equals the
+  allowance, allowance no earlier than the deadline and no later than the window), a separate
+  `upto` fee ceiling of about 500,000, and a keeper for the accepted tokens' instances.
+- **0034** (upstream spec and client classes): the same verify rules, the expiry cap, no blind
+  signing of simulated entries, and syncing the drafts with the new proxy.
+- **0027** (alerts): an alert when the proxy's instance or code TTL runs low (added there).
+
 ## Notes
 
-- Mainnet: the deploy-time extension runs under the deployer key decided in 0026.
-- A facilitator-side warning when the proxy's TTL runs low would still help; it belongs in 0027.
+- Mainnet: the deploy-time extension runs under the deployer key decided in 0026, and
+  `extend_ttl_with_limits` needs protocol 26 or later.

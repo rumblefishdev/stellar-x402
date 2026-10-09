@@ -15,6 +15,10 @@ history:
     status: backlog
     who: claude
     note: "Created by 0012 from M1 Story 2.6 (Platform lane)."
+  - date: "2026-10-09"
+    status: backlog
+    who: okarcz
+    note: "Added the UptoProxy TTL alert from 0035's future work."
 ---
 
 # Alerts and metrics
@@ -34,6 +38,10 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
 
 - Metrics adapter in `adapters/` fed by pool events and the HTTP layer.
 - Alert rules for the five conditions; a balance check on a timer.
+- **UptoProxy TTL (from 0035):** read the proxy's instance and code TTL on the balance timer and
+  alert when either drops below about 30 days (`TTL_EXTEND_TO`, 518,400 ledgers). The contract
+  extends itself on settlements, so a low TTL means little traffic; an operator then extends it
+  with `stellar contract extend` before it is archived.
 - Update `docs/monitoring.md`.
 
 ## Acceptance Criteria
