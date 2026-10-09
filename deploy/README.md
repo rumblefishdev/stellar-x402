@@ -15,4 +15,6 @@ Testnet and mainnet run as separate deployments. They never share keys.
     `UPTO_PROXY_CONTRACT_ID` in `testnet.env.example` is the deployment from task 0004; whether
     the team shares one deployer key is decided with the public testnet deployment (0026).
 
-Hosting and the container setup are chosen in the mainnet milestone.
+Hosting: ECS on Fargate in the company AWS account, one service per network, with
+stop-before-start deploys ([ADR 0011](../docs/adr/0011-facilitator-hosting.md)). Task 0026 builds
+the Dockerfile, the CDK stack under `infra/` and the deploy workflow.

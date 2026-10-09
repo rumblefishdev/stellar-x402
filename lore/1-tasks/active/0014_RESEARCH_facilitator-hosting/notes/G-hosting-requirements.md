@@ -1,18 +1,26 @@
 ---
 title: "Hosting requirements for T1 and mainnet"
 type: generation
-status: developing
+status: mature
 spawned_from: README.md
-spawns: []
+spawns:
+  - R-cloud-container-options.md
+  - R-paas-and-vm-options.md
+  - R-observability-backends.md
+  - S-hosting-decision.md
 tags: [hosting, requirements]
 links:
   - ../../../../../docs/architecture/m1-spine.md
   - ../../../../../packages/signer-pool/src/submitter.ts
 history:
-  - date: 2026-10-08
+  - date: "2026-10-08"
     status: developing
     who: stkrolikiewicz
     note: "Requirements written from the M1 spine, the signer-pool defaults and the company context."
+  - date: "2026-10-09"
+    status: mature
+    who: stkrolikiewicz
+    note: "Used for the comparison; the decision is ADR 0011."
 ---
 
 # Hosting requirements for T1 and mainnet
@@ -63,4 +71,6 @@ One Node 22 (Express 5) container per network: `apps/facilitator`. It holds the 
 
 - **Rumble Fish's default cloud is AWS**, with an existing company account. Other options are
   still compared, but AWS needs a reason not to be used.
+- **Same account as sorobanscan and the Stellar Prices API** (Stan, 2026-10-09), for testnet and
+  mainnet alike.
 - Domain for the public URL: open, being checked with the team.
