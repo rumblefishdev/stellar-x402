@@ -14,7 +14,8 @@ itself is covered separately.
 
 - **The payer's tokens.** The client authorizes up to `max_amount` of one token, to one
   recipient, through one facilitator, within a time window.
-- **The seller's payment.** The seller relies on the facilitator to settle the amount it asks for.
+- **The seller's payment.** The seller serves first and relies on the facilitator to settle the
+  amount it asks for afterwards.
 - **The facilitator's XLM.** It pays every transaction fee and fee bump.
 
 What each party must trust:
@@ -53,8 +54,12 @@ What each party must trust:
 - **Mitigation:** The contract stores `(from, nonce)` until at least `allowance_expiration_ledger`
   and refuses a second settlement with `NonceUsed` (shown in 0004). After the entry expires, the
   facilitator's durable record of settled pairs refuses reuse at verify and settle (spec §8.1).
-- **Residual risk:** A client that reuses a nonce across two facilitators has signed two separate
-  payments; each facilitator settles one. Payload-level uniqueness is per facilitator.
+- **Residual risk:** The contract keys the nonce by `(from, nonce)`, without the facilitator, and
+  each facilitator's record covers only its own settlements. A client can sign the same nonce for
+  two sellers on different facilitators: both pass `/verify`, both sellers serve, the first
+  settles, and the second's `settle_upto` fails with `NonceUsed` while the first entry is live.
+  This doesn't move extra funds, but it leaves the second seller unpaid; see
+  [Seller not paid](#seller-not-paid).
 
 #### Recipient substitution
 
@@ -102,6 +107,19 @@ What each party must trust:
 - **Residual risk:** A bad token can only harm the payer and seller who chose it, for example a
   seller receiving less than `actual_amount` from a fee-on-transfer token.
 
+#### Seller not paid
+
+- **Attack:** In `upto` the seller serves before settlement, so a client can receive the service
+  and then make the settlement fail: move its balance away between `/verify` and `/settle`, or
+  reuse its nonce with another facilitator so the second settlement fails with `NonceUsed`.
+- **Mitigation:** Short windows (`maxTimeoutSeconds`) and settling soon after serving. At settle,
+  the facilitator re-simulates against current state, which shows a balance below the actual
+  amount, and refuses before sending, so it pays no fee. Sellers can settle per request or in
+  small ceilings, and refuse payers whose settlements failed.
+- **Residual risk:** This is the credit risk of `upto` on every network: the seller is exposed to
+  at most one ceiling per open authorization. The protocol can't prevent it; sellers price it in
+  through the ceiling and the window.
+
 #### Fee griefing
 
 - **Attack:** A client sends payloads that pass `/verify` but fail on chain, for example by moving
@@ -115,13 +133,15 @@ What each party must trust:
 
 #### Fee inflation by rent
 
-- **Attack:** Payments that create new ledger entries (a recipient's first balance in a token, a
-  fresh nonce entry with a long TTL) cost more.
+- **Attack:** Payments that create ledger entries (a recipient's first balance in a token, a
+  client's first allowance entry, a nonce entry with a long TTL) or extend an entry's TTL (a token
+  instance whose TTL runs low) pay rent on top of the normal fee.
 - **Mitigation:** The facilitator computes fees from a fresh simulation and caps them with
   `maxFeeStroops` (250,000 by default, ADR 0007). The nonce TTL is bounded by
   `allowance_expiration_ledger`.
-- **Residual risk:** A settlement that pays rent costs several times a normal one: 151,550 stroops
-  for the first settlement of the day in 0006, against about 41,000 for a normal one.
+- **Residual risk:** Rent depends on the entry's size and the length of the extension, so there
+  is no fixed bound. A settlement that pays it can cost several times a normal one; the
+  [testnet report](upto-proxy-testnet-report.md#known-limits) has the measured case.
 
 #### Nonce griefing
 
@@ -129,6 +149,16 @@ What each party must trust:
 - **Mitigation:** Storing a nonce requires the client's signature and the facilitator's
   authorization. Nonces are keyed per payer, so payers can't collide.
 - **Residual risk:** None.
+
+#### Proxy archived
+
+- **Attack:** Not an attack: the proxy's instance and WASM entries are persistent and expire when
+  their TTL runs out.
+- **Mitigation:** None yet. Nothing in `deploy/` or the e2e suite extends their TTL. The operator of
+  a deployment must extend it on a schedule and alert before it runs low.
+- **Residual risk:** If the entries are archived, every settlement needs a restore first, paid by
+  the facilitator and possibly above `maxFeeStroops`, or it fails. Open authorizations are bound to
+  this address, so a new deployment can't settle them.
 
 #### Contract bug
 
@@ -151,9 +181,13 @@ What each party must trust:
 #### Facilitator key rotation
 
 - **Attack:** The facilitator changes its key while authorizations are open.
-- **Mitigation:** Authorizations bind the facilitator's address, so only the old address can settle
-  them; they expire within the window.
-- **Residual risk:** Rotating mid-window drops the open authorizations bound to the old key.
+- **Mitigation:** Authorizations bind the facilitator's address, not its key. A G-account can
+  rotate signers and keep its address: add the new key as a signer, remove the old one. Open
+  authorizations stay valid. The channel accounts must get the same change, since the facilitator
+  key is their only signer: add the new key to each channel before removing the old one.
+- **Residual risk:** Only an address change drops open authorizations, and they expire within the
+  window. A careless rotation that removes the old key from a channel before adding the new one
+  locks that channel.
 
 #### Smart-wallet policy
 

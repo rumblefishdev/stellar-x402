@@ -64,6 +64,9 @@ errors, events and invariants.
 
 ### Deviations from architecture doc §6.2
 
+This is the canonical list. The contract spec's §11 points here; D9 was found after the spec was
+written.
+
 | #   | §6.2                                                | This design                                                                 | Why                                                                                                                                                                                                                |
 | --- | --------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | D1  | No `token` parameter                                | `token` is the first parameter and is signed                                | The contract must know which token to move, and an unsigned token lets a facilitator settle in any token the payer has approved to the proxy. EVM signs it too.                                                    |
@@ -85,16 +88,20 @@ errors, events and invariants.
   The 0004 testnet run left the client's XLM balance unchanged across every scenario.
 - **Concurrent payments don't interfere.** `approve` and `transfer_from` run in the same
   invocation. 0004 settled two open authorizations from one payer in the same ledger.
-- **The payer needs only the actual amount** at settlement, because `transfer_from` pulls
-  `actual_amount`, not the ceiling.
+- **The payer needs the full ceiling at verify and only the actual amount at settle.** The
+  client's draft simulation and `/verify` simulate `actual_amount = max_amount`, so the payer must
+  hold the ceiling when it pays. At settlement, `transfer_from` pulls only `actual_amount`, so
+  spending part of the balance in between doesn't fail the settlement as long as the actual
+  amount is still there.
 - **It mirrors the EVM reference**, so `scheme_upto_stellar.md` can follow `scheme_upto_evm.md`
   closely.
 
 ## Alternatives considered
 
 - **A separate `approve` transaction, as §6.2 is written.** Rejected: see D3.
-- **Escrow** (pull the ceiling, pay the actual amount, refund the rest). Rejected: the payer needs
-  the full ceiling at settlement, and each payment makes three transfers instead of one.
+- **Escrow** (pull the ceiling, pay the actual amount, refund the rest). Rejected: the payer's
+  ceiling would be locked from payment to settlement instead of only checked at verify, and each
+  payment makes three transfers instead of one.
 - **Ledger numbers for the whole window.** Consistent with Stellar, but departs from x402
   semantics. Rejected by okarcz.
 - **Persistent nonce storage.** Needs rent or restoration and gives nothing once the allowance has
@@ -117,7 +124,7 @@ errors, events and invariants.
   client signature with an unused nonce. The [threat model](../threat-model.md#upto-contract)
   covers it.
 - **Facilitator obligations.** The facilitator keeps a durable record of settled `(from, nonce)`
-  pairs and refuses reuse at verify and settle (spec §8.1).
+  pairs, zero settlements included, and refuses reuse at verify and settle (spec §8.1).
 - **The `exact` rules need narrowing for `upto`.** "The facilitator must not appear in any auth
   entry" becomes "in no client-signed entry, except as the signed `facilitator` value"; the client
   tree has one sub-invocation instead of none.
@@ -128,11 +135,10 @@ errors, events and invariants.
 - **One payment is one transaction.** `upto` can't exceed the network's share of ledger capacity
   (about 105 settlements per ledger on testnet). Higher rates need off-chain aggregation or a
   `batch-settlement` binding (0008).
-- **Fees.** A settlement costs about 36,000–44,000 stroops in the channel shape, but the one that
-  first creates or extends a ledger entry pays its rent: 151,550 stroops for a first settlement of
-  the day in 0006. The fee ceiling
-  (`maxFeeStroops`, 250,000 by default, [ADR 0007](0007-fee-abuse-containment.md)) must leave room
-  for that.
+- **Fees.** The [testnet report](../upto-proxy-testnet-report.md#cost-per-settlement) has the
+  measured cost of a settlement and of a zero settlement. A settlement that creates a ledger entry
+  or extends a TTL also pays rent, so the fee ceiling (`maxFeeStroops`, 250,000 by default,
+  [ADR 0007](0007-fee-abuse-containment.md)) must leave room above a normal settlement.
 
 ## References
 

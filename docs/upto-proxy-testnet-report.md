@@ -12,7 +12,6 @@ specifies, and the paying client paid no settlement fees.
 - Data: [`testnet-results.json`](../contracts/upto-proxy/e2e/results/testnet-results.json),
   written by `pnpm contracts:e2e`. This report is a snapshot of the 2026-10-08 run; a new run
   rewrites the JSON, not this page.
-- Interactive version of the run: <https://claude.ai/artifact/67u2tEX1kTCkcJLQAYgfKY>.
 
 |                     |                                                                                                                                                                             |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
