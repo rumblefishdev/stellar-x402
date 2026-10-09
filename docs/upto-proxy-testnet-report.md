@@ -16,6 +16,9 @@ the network's maximum TTL.
 - Data: [`testnet-results.json`](../contracts/upto-proxy/e2e/results/testnet-results.json),
   written by `pnpm contracts:e2e`. This report is a snapshot of the 2026-10-09 run; a new run
   rewrites the JSON, not this page.
+- Interactive version of this run, with the TTL measurements:
+  <https://claude.ai/artifact/TNurkGqjefJWXtKCNPwkcE>. It is a claude.ai page shared by link; the
+  JSON above is the source of record.
 
 |                     |                                                                                                                                                                             |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
