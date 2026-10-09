@@ -3,6 +3,7 @@ import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import { beforeEach, describe, expect, it } from "vitest";
 import type {
+  CatalogEntry,
   CatalogStore,
   NewSettlement,
   RateLimitStore,
@@ -329,6 +330,8 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
       lastUpdated: "2026-10-08T00:00:00.000Z",
       ...overrides,
     });
+    const upsert = (entry: Omit<CatalogEntry, "keyVersion">) =>
+      store.upsert({ keyVersion: 1, ...entry });
     const key = (url: string, payTo = PAY_TO, network: StellarNetwork = "stellar:testnet") => ({
       network,
       payTo,
@@ -338,8 +341,8 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
 
     it("upserts by key, merging accepts by scheme, network and asset", async () => {
       const url = "https://seller.example/data";
-      await store.upsert({ key: key(url), resource: resource(url, { description: "old" }) });
-      await store.upsert({
+      await upsert({ key: key(url), resource: resource(url, { description: "old" }) });
+      await upsert({
         key: key(url),
         resource: resource(url, {
           description: "new",
@@ -347,9 +350,13 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
           lastUpdated: "2026-10-09T00:00:00.000Z",
         }),
       });
-      await store.upsert({
+      await upsert({
         key: key(url),
-        resource: resource(url, { description: "new", accepts: [requirements({ amount: "200" })] }),
+        resource: resource(url, {
+          description: "new",
+          accepts: [requirements({ amount: "200" })],
+          lastUpdated: "2026-10-09T00:00:00.000Z",
+        }),
       });
       const page = await store.list({ limit: 10, offset: 0 });
       expect(page.total).toBe(1);
@@ -360,24 +367,36 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
       ]);
     });
 
+    it("reports the outcome and ignores a write older than the stored one", async () => {
+      const url = "https://seller.example/data";
+      const at = (lastUpdated: string, description: string) =>
+        upsert({ key: key(url), resource: resource(url, { lastUpdated, description }) });
+      expect(await at("2026-10-09T00:00:00.000Z", "new")).toBe("inserted");
+      expect(await at("2026-10-08T23:00:00.000+00:00", "old")).toBe("stale");
+      expect(await at("2026-10-09T02:00:00+02:00", "same instant")).toBe("updated");
+      expect((await store.list({ limit: 10, offset: 0 })).items[0]?.description).toBe(
+        "same instant",
+      );
+    });
+
     it("filters, pages and keeps a stable order", async () => {
-      await store.upsert({
+      await upsert({
         key: key("https://a.example"),
         resource: resource("https://a.example"),
       });
-      await store.upsert({
+      await upsert({
         key: key("https://b.example", "GOTHER"),
         resource: resource("https://b.example", {
           type: "mcp",
           extensions: { bazaar: {}, unset: undefined },
         }),
       });
-      await store.upsert({
+      await upsert({
         key: key("https://c.example", PAY_TO, "stellar:pubnet"),
         resource: resource("https://c.example"),
       });
       // An update keeps the entry's place in the order.
-      await store.upsert({
+      await upsert({
         key: key("https://a.example"),
         resource: resource("https://a.example"),
       });
