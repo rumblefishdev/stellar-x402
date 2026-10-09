@@ -173,6 +173,37 @@ steady traffic, paying about 30,000 extra. Keeping the proxy alive costs about 3
 rent a day, whoever pays it. The first design, a 7-day cap, made one settlement cost 24 million
 stroops, and the submitter refused it.
 
+**The stacked worst case, measured.** Rent the token charges comes on top of the proxy's. Three
+real settlements on 2026-10-09 (ledgers 5,105,712–5,105,714) measured it, with the fee ceiling
+raised so the first could go through:
+
+- **Proxy:** a fresh instance and a fresh code entry of the same contract (a 4,260-byte build
+  with one extra metadata entry, so it has its own code entry), both at the network's minimum
+  TTL, so every settlement extends both by 720 ledgers.
+- **Token:** the 0006 bench SAC (`CCH46PUS…`), whose instance had 3.84 days left, below its own
+  6-day threshold.
+- **Accounts:** 0006 bench accounts as payer and seller, settling 1 unit.
+
+| Settlement                                                                                                                                          | Paid for                                                                                           | Fee charged | Of which rent |
+| --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ----------: | ------------: |
+| [A: everything stacked](https://testnet.sorobanscan.rumblefish.dev/transactions/ee7c200af14ac4878f81b317f5bdb8c2c098d51e12fcd59a0c5b322987fa6ac7)   | proxy and code +720, SAC instance +54,689 ledgers, a new allowance entry, expiry at the 17,280 cap |     330,032 |       294,530 |
+| [B: SAC already extended](https://testnet.sorobanscan.rumblefish.dev/transactions/af64c124bdd6958d0b08436f5a8110ed7c6b66224c469cef70d21a0388ecbaa6) | proxy and code +720, expiry at the cap                                                             |     185,818 |       150,295 |
+| [C: short expiry](https://testnet.sorobanscan.rumblefish.dev/transactions/12eedf4c668018b740382e3feb3657bfffeea72014f52fc1404f211d31a1ec31)         | proxy and code +720, expiry 200 ledgers ahead                                                      |     173,317 |       137,803 |
+
+- **The stack is over the ceiling.** A costs 330,032 stroops, 132% of the default 250,000-stroop
+  ceiling: with default settings the facilitator refuses this valid payment before sending it.
+- **Where it comes from.** About 132,000 is the proxy's own extension (C less a normal 41,000
+  settlement), a little under the 149,000 estimate above. About 12,500 is the expiry at the cap
+  (B − C). About 144,000 is the SAC extending its 480-byte instance plus the new allowance entry
+  (A − B): 2.4 stroops per ledger of SAC extension.
+- **It can be worse.** A SAC instance close to expiry extends by up to 7 days (120,960 ledgers),
+  about 290,000 on its own; stacked with B that is about 480,000. That is an extrapolation, not a
+  measurement.
+- **It isn't specific to `upto`.** Any call into a SAC pays its instance extension, `exact`
+  included; the proxy's extension is what takes the total over. Busy tokens rarely hit it:
+  Circle's testnet USDC instance had 120 days left. Task 0015 sizes the `upto` fee ceiling for it
+  and keeps the accepted tokens' instances alive outside settlements.
+
 ## Throughput and limits
 
 Measured on testnet on 2026-10-05 in task 0006, against an earlier deployment of the same WASM
@@ -218,8 +249,8 @@ which the 0004 run above used.
 - **The proxy's own extension.** Once its TTL is below 30 days, a settlement can pay up to about
   149,000 stroops for it; every settlement while the TTL is well below the target, and about once
   per 10 minutes under steady traffic once it is there (above). If the token extends its own
-  instance in the same settlement (116,316 stroops in 0006), the total can pass 250,000 and a
-  valid payment is refused; that combination was not measured. The rent rate
+  instance in the same settlement, the total passes 250,000 and a valid payment is refused:
+  330,032 measured, up to about 480,000 extrapolated (above). The rent rate
   rises with the network's total state, so the cap's margin under the fee ceiling should be
   checked again before mainnet.
 - **Rent on the allowance window.** The facilitator pays temporary rent on the nonce entry and the

@@ -262,9 +262,12 @@ code, plus about 5,800 per extension (measured in the
 period: 7 days of rent is about 24 million stroops, a hundred times the facilitator's default
 250,000-stroop fee ceiling, so the facilitator would refuse a valid payment. The cap keeps the
 costliest settlement near 215,000 stroops (86% of the ceiling), counting an allowance expiry at the
-17,280-ledger cap. Rent the token charges in the same settlement, such as a SAC instance extending
-its own TTL (116,316 stroops in task 0006), comes on top and can push a valid payment over the
-ceiling, so the facilitator's ceiling for `upto` needs room for it. Below the target every
+17,280-ledger cap. Rent the token charges in the same settlement comes on top. Measured on testnet
+with a SAC instance extending itself by 54,689 ledgers, the stack cost 330,032 stroops, over the
+ceiling, and a facilitator with default settings would refuse that valid payment. Up to about
+480,000 is possible (extrapolated). The facilitator's `upto` ceiling and a keeper for the accepted
+tokens' instances are in task 0015
+([testnet report](../../docs/upto-proxy-testnet-report.md#keeping-the-contract-alive)). Below the target every
 settlement extends by 720; once the TTL is at the target, the minimum keeps extensions to about
 one per 10 minutes under steady traffic, so the fixed cost per extension isn't paid on every
 settlement. The total rent, about 0.34 XLM a day on testnet, is the same either way.

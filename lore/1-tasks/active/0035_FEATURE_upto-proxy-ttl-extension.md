@@ -38,6 +38,12 @@ history:
       PR #14 review (Adam approved; Stan's follow-up): all 10 points fixed without a contract
       change: re-entry test with a positive control, the window's lower bound, per-test ledger
       anchor, and the fee and signature-nonce claims corrected in the docs. e2e 58/58.
+  - date: "2026-10-09"
+    status: active
+    who: okarcz
+    note: >
+      Stacked rent measured on testnet: 330,032 stroops, over the 250,000 ceiling. Recorded in the
+      report, threat model and README; the upto fee ceiling and a token keeper added to 0015.
 ---
 
 # Keep the UptoProxy instance and WASM alive: TTL extension
@@ -190,9 +196,16 @@ no contract change (the WASM hash is unchanged):
 - **Lower bound on the window (Stan 2).** An allowance that ends before the deadline passes verify
   and then fails with `Expired` after the seller has served. `checkClientAuth` now refuses it; new
   e2e scenario; MUST in 0015 and 0034.
-- **Stacked rent (Stan 3, Adam 1).** The worst case is about 215,000 (86%), not 193,000 (77%), and
-  token-side rent in the same settlement (116,316 in 0006) can push it to about 330,000, over the
-  ceiling. "Never refused" dropped; sizing the `upto` ceiling is in 0015. Not measured.
+- **Stacked rent (Stan 3, Adam 1).** The worst case without token rent is about 215,000 (86%),
+  not 193,000 (77%). "Never refused" dropped. Then measured on testnet with three real
+  settlements on a fresh proxy and code (a 4,260-byte build with one extra metadata entry, so it
+  has its own code entry) and the 0006 bench SAC, whose instance was below its 6-day threshold:
+  **330,032 stroops** with everything stacked (proxy and code +720, SAC instance +54,689 ledgers,
+  expiry at the cap), 185,818 without the SAC extension, 173,317 with a short expiry as well.
+  About 480,000 is possible for a SAC instance close to expiry (extrapolated). Not a contract
+  fix: 0015 gets a separate `upto` fee ceiling (about 500,000) and a keeper for the accepted
+  tokens' instances. The measurement script was temporary and not committed; its results are in
+  the testnet report.
 - **Re-entry test (Stan 4).** It passed for the wrong reason (`facilitator == from`). It now runs
   the same inner call against another proxy instance as a positive control (it settles) and
   against the proxy on the stack (host error).

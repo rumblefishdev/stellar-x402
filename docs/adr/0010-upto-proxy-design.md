@@ -143,8 +143,10 @@ written.
 - **Facilitators pay to keep the proxy alive.** About 0.34 XLM of rent a day on testnet, paid by
   whichever settlement extends, at most 720 ledgers (about 149,000 stroops) at a time, and once the
   TTL is at the target at most once per 10 minutes. Whichever facilitator settles at that moment pays for everyone; the spec
-  should say so. The cap's margin under the fee ceiling depends on the rent rate and on rent the
-  token charges in the same settlement, and must be checked again before mainnet, as must the
+  should say so. Stacked with a SAC instance extending itself, one settlement measured 330,032
+  stroops, over the default ceiling (testnet report); task 0015 raises the `upto` ceiling and keeps
+  the accepted tokens' instances alive. The cap's margin under the fee ceiling depends on the rent
+  rate and on rent the token charges in the same settlement, and must be checked again before mainnet, as must the
   protocol version (`extend_ttl_with_limits` needs protocol 26 or later).
 - **Windows of at most a day.** D11 limits `maxTimeoutSeconds` for `upto` on this deployment to
   about a day (17,280 ledgers at 5 s). A longer window needs a new deployment.

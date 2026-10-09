@@ -167,10 +167,12 @@ What each party must trust:
   pays at most about 25,000 stroops of it (ADR 0010, D11). The proxy's own extension
   is capped at 720 ledgers per settlement, about 149,000 stroops on testnet (ADR 0010, D10).
 - **Residual risk:** Rent depends on the entry's size and the length of the extension, so there
-  is no fixed bound. The proxy's extension and a capped expiry come to about 215,000 stroops; if
-  the token extends its own instance in the same settlement (116,316 in task 0006), the total is
-  about 330,000, over the default ceiling, and a valid payment is refused. Not measured; the
-  ceiling for `upto` is sized in 0015. A settlement that pays it can cost several times a normal one; the
+  is no fixed bound. When the token extends its own instance in the same settlement as the
+  proxy's extension, the total goes over the default ceiling, and a valid payment is refused
+  before sending. Measured on testnet: 330,032 stroops for a SAC instance extended by 54,689
+  ledgers, the proxy and code by 720, and an expiry at the cap. Up to about 480,000 is possible for
+  a SAC instance close to expiry (extrapolated). Task 0015 raises the `upto` ceiling and keeps the
+  accepted tokens' instances alive outside settlements. A settlement that pays it can cost several times a normal one; the
   [testnet report](upto-proxy-testnet-report.md#known-limits) has the measured case.
 
 #### Nonce griefing
