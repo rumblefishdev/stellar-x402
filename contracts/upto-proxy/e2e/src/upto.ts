@@ -157,7 +157,7 @@ export async function clientSign(
  * blindly would sign whatever call it returned, a plain `token.transfer` included. The signature
  * expires with the allowance (spec §3.1: `signatureExpirationLedger == allowance_expiration_ledger`).
  */
-export function signSimulatedEntry(
+export async function signSimulatedEntry(
   entry: xdr.SorobanAuthorizationEntry,
   t: UptoTerms,
   client: Keypair,
@@ -201,12 +201,16 @@ export function clientSignDirect(
  * signature doesn't expire with the allowance, or whose allowance outlives the payment window.
  * The facilitator pays rent on the nonce and the allowance until `allowance_expiration_ledger`,
  * so a payer-chosen far expiry would make it pay for months (threat model, "Fee inflation by
- * rent"). `maxLedgers` is the window in ledgers: `ceil(maxTimeoutSeconds / 5)` plus a margin.
+ * rent"). The signature check also bounds the rent on the host's own nonce for the client's
+ * entry, which lives until `signatureExpirationLedger` and which the contract never sees.
+ * `maxLedgers` is the window in ledgers: `ceil(maxTimeoutSeconds / 5)` plus a margin. `minLedger`
+ * is the deadline's ledger less a margin: an allowance that ends sooner would pass verify and then
+ * fail the settlement with `Expired` after the seller has served.
  */
 export function checkClientAuth(
   entry: xdr.SorobanAuthorizationEntry,
   t: UptoTerms,
-  window?: { latestLedger: number; maxLedgers: number },
+  window?: { latestLedger: number; maxLedgers: number; minLedger: number },
 ): void {
   if (entryAddress(entry) !== t.from) throw new Error("auth entry is not from the payer");
   const signed = entry.rootInvocation().toXDR("base64");
@@ -223,6 +227,12 @@ export function checkClientAuth(
     throw new Error(
       `allowance_expiration_ledger ${t.allowanceExpirationLedger} is more than ` +
         `${window.maxLedgers} ledgers past ${window.latestLedger}`,
+    );
+  }
+  if (window && t.allowanceExpirationLedger < window.minLedger) {
+    throw new Error(
+      `allowance_expiration_ledger ${t.allowanceExpirationLedger} ends before the deadline ` +
+        `(ledger ${window.minLedger} or later)`,
     );
   }
 }

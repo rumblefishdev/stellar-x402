@@ -2,7 +2,7 @@
 //! the spec's own cases. Each test names the attack and pins the outcome.
 
 use super::*;
-use soroban_sdk::{contract, contractimpl};
+use soroban_sdk::{contract, contractimpl, contracttype};
 
 /// A facilitator alone settles with the proxy itself as payer, to take tokens sent to the proxy
 /// by mistake. The proxy can't authorize itself as `from`, so the host refuses.
@@ -59,47 +59,91 @@ fn leftover_allowance_needs_a_new_client_signature() {
     assert_eq!(balance(&s, &s.p.from), MINTED - 10);
 }
 
-/// A token whose `approve` calls `settle_upto` again. Soroban refuses re-entry into a contract
-/// already on the call stack.
+/// A token whose `approve` makes one more `settle_upto` call, on `target`, with its own valid
+/// arguments: another token (so the inner call doesn't come back into this one), distinct
+/// recipient and facilitator, a fresh nonce. Records the inner call's
+/// outcome: 0 settled, 1 contract error, 2 host error.
 #[contract]
 pub struct ReentrantToken;
 
+#[contracttype]
+#[derive(Clone)]
+enum ReentryKey {
+    Armed,
+    Outcome,
+}
+
 #[contractimpl]
 impl ReentrantToken {
-    pub fn approve(env: Env, from: Address, spender: Address, amount: i128, expiration: u32) {
-        let reentered = UptoProxyClient::new(&env, &spender)
-            .try_settle_upto(
-                &env.current_contract_address(),
-                &from,
-                &env.current_contract_address(),
-                &from,
-                &amount,
-                &0,
-                &BytesN::from_array(&env, &[1; 32]),
-                &0,
-                &u64::MAX,
-                &expiration,
-            )
-            .is_ok();
-        env.storage().instance().set(&(), &reentered);
+    pub fn arm(env: Env, target: Address, token: Address, to: Address, facilitator: Address) {
+        env.storage()
+            .instance()
+            .set(&ReentryKey::Armed, &(target, token, to, facilitator));
     }
 
-    pub fn reentered(env: Env) -> bool {
-        env.storage().instance().get(&()).unwrap_or(false)
+    pub fn approve(env: Env, from: Address, _spender: Address, amount: i128, expiration: u32) {
+        let armed: Option<(Address, Address, Address, Address)> =
+            env.storage().instance().get(&ReentryKey::Armed);
+        let Some((target, token, to, facilitator)) = armed else {
+            return;
+        };
+        env.storage().instance().remove(&ReentryKey::Armed);
+        let outcome: u32 = match UptoProxyClient::new(&env, &target).try_settle_upto(
+            &token,
+            &from,
+            &to,
+            &facilitator,
+            &amount,
+            &0,
+            &BytesN::from_array(&env, &[1; 32]),
+            &0,
+            &u64::MAX,
+            &expiration,
+        ) {
+            Ok(_) => 0,
+            Err(Ok(_)) => 1,
+            Err(Err(_)) => 2,
+        };
+        env.storage().instance().set(&ReentryKey::Outcome, &outcome);
+    }
+
+    pub fn outcome(env: Env) -> Option<u32> {
+        env.storage().instance().get(&ReentryKey::Outcome)
     }
 }
 
+/// The token's inner call settles when it targets another proxy instance, so its arguments and
+/// auth are valid; aimed at the proxy already on the call stack, the same call fails with a host
+/// error. Re-entry is the only difference.
 #[test]
 fn a_token_cannot_reenter_the_proxy() {
-    let s = setup(TokenKind::Sac);
-    let token = s.env.register(ReentrantToken, ());
-    let p = Payment {
-        token: token.clone(),
-        ..s.p.clone()
-    };
-    s.env.mock_all_auths_allowing_non_root_auth();
-    assert_eq!(try_settle(&s, &p, 0), Ok(Ok(())));
-    assert!(!ReentrantTokenClient::new(&s.env, &token).reentered());
+    for reenter in [false, true] {
+        let s = setup(TokenKind::Sac);
+        let token = s.env.register(ReentrantToken, ());
+        let target = if reenter {
+            s.proxy.clone()
+        } else {
+            s.env.register(UptoProxy, ())
+        };
+        let client = ReentrantTokenClient::new(&s.env, &token);
+        client.arm(
+            &target,
+            &s.p.token,
+            &Address::generate(&s.env),
+            &Address::generate(&s.env),
+        );
+        let p = Payment {
+            token: token.clone(),
+            ..s.p.clone()
+        };
+        s.env.mock_all_auths_allowing_non_root_auth();
+        assert_eq!(try_settle(&s, &p, 0), Ok(Ok(())));
+        assert_eq!(
+            client.outcome(),
+            Some(if reenter { 2 } else { 0 }),
+            "reenter = {reenter}"
+        );
+    }
 }
 
 /// A token that ignores `approve` and `transfer_from`: the settlement succeeds and emits its event

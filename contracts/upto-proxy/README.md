@@ -185,13 +185,18 @@ Every invariant has a test in `src/test/` (§8):
    required asset, `to` is `payTo`, `facilitator` is this facilitator, `max_amount` equals the
    required amount. `from` is not the facilitator: the same address can't authorize twice in one
    call, so the host would refuse the settlement.
-2. `signatureExpirationLedger == allowance_expiration_ledger`; `deadline` is at most
+2. `signatureExpirationLedger == allowance_expiration_ledger`. This check is required: the host
+   keeps a nonce entry for the client's signature until `signatureExpirationLedger`, the
+   facilitator pays its rent, and the contract never sees that value, so nothing else bounds it.
+   `deadline` is at most
    `now + maxTimeoutSeconds`; the window is open now. The allowance must last until `deadline`,
    or a settlement late in the window fails with `Expired` (#5) before the deadline has passed.
    Convert seconds to ledgers with the network's current target ledger close time, which is a
    network setting since protocol 23 (CAP-0070), not a fixed 5 s. Allow
-   `allowance_expiration_ledger` up to `currentLedger + ceil(maxTimeoutSeconds / closeTime)` plus
-   a small margin, and no further: the facilitator pays rent on the nonce and the allowance until
+   `allowance_expiration_ledger` from the deadline's ledger (less a margin for the estimate) up to
+   `currentLedger + ceil(maxTimeoutSeconds / closeTime)` plus a small margin. An earlier expiry
+   would pass verify and fail the settlement after the seller has served; a later one is refused
+   because the facilitator pays rent on the nonce and the allowance until
    that ledger, so a far expiry is a cost the payer picks (threat model, "Fee inflation by
    rent"). The contract refuses anything over `MAX_ALLOWANCE_LEDGERS` (17,280 ledgers, about a
    day) ahead as a backstop, so `maxTimeoutSeconds` can't exceed about a day.
@@ -256,8 +261,12 @@ code, plus about 5,800 per extension (measured in the
 `extend_ttl(threshold, extend_to)` would make one settlement refill the whole gap after a quiet
 period: 7 days of rent is about 24 million stroops, a hundred times the facilitator's default
 250,000-stroop fee ceiling, so the facilitator would refuse a valid payment. The cap keeps the
-costliest settlement near 193,000 stroops (77% of the ceiling); the minimum keeps extensions to at
-most one per 10 minutes under steady traffic, so the fixed cost per extension isn't paid on every
+costliest settlement near 215,000 stroops (86% of the ceiling), counting an allowance expiry at the
+17,280-ledger cap. Rent the token charges in the same settlement, such as a SAC instance extending
+its own TTL (116,316 stroops in task 0006), comes on top and can push a valid payment over the
+ceiling, so the facilitator's ceiling for `upto` needs room for it. Below the target every
+settlement extends by 720; once the TTL is at the target, the minimum keeps extensions to about
+one per 10 minutes under steady traffic, so the fixed cost per extension isn't paid on every
 settlement. The total rent, about 0.34 XLM a day on testnet, is the same either way.
 
 **What isn't covered.** With fewer than about one settlement an hour, each settlement adds at most
@@ -266,7 +275,8 @@ deployment nobody settles on for longer must be extended again by its operator, 
 (anyone can, and since protocol 23 a settlement restores it by itself, at extra cost). The
 constants are in ledgers, so a faster ledger close time shortens them in time but keeps the fee
 bound. The rent rate rises with the network's total state, so the cap's margin should be checked
-again before mainnet.
+again before mainnet. `extend_ttl_with_limits` needs protocol 26 or later (testnet runs 29);
+confirm mainnet's version before deploying there.
 
 ## Build and test
 

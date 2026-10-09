@@ -31,6 +31,13 @@ history:
       review fixes and 10 new unit tests; the contract's one-day cap on allowance_expiration_ledger
       (ADR 0010 D11, new deployment CAL7SBTO…V2VC); the self-extension e2e on a fresh instance.
       42 unit tests, e2e 57/57. Verify rules added to 0015 and 0034.
+  - date: "2026-10-09"
+    status: active
+    who: okarcz
+    note: >
+      PR #14 review (Adam approved; Stan's follow-up): all 10 points fixed without a contract
+      change: re-entry test with a positive control, the window's lower bound, per-test ledger
+      anchor, and the fee and signature-nonce claims corrected in the docs. e2e 58/58.
 ---
 
 # Keep the UptoProxy instance and WASM alive: TTL extension
@@ -169,6 +176,31 @@ informational findings. All fixed or documented on this branch:
   `mod.rs`. 42 unit tests. e2e: 7 new scenarios, 57/57 on 2026-10-09 11:58 UTC.
 - **Deployment:** `CAL7SBTOECJ6HXXO3ST43LM2HJJFSZ3ZDEEZBIWHJPB7DRF5MXS5V2VC`, WASM
   `00a06b16…b79c` (4,211 bytes); `CDSWGHBU…HEPD` retired.
+
+### PR #14 review (2026-10-09)
+
+Adam approved with six comments; Stan added four. All were valid and fixed in one commit, with
+no contract change (the WASM hash is unchanged):
+
+- **Signature nonce rent (Stan 1).** The host keeps a nonce for the client's entry until
+  `signatureExpirationLedger`, which the contract never sees, so D11 doesn't bound it. The
+  facilitator's `signatureExpirationLedger == allowance_expiration_ledger` check is required, not
+  defence in depth: said in D11, the threat model, `lib.rs`, the README, and as a MUST in 0015
+  and 0034.
+- **Lower bound on the window (Stan 2).** An allowance that ends before the deadline passes verify
+  and then fails with `Expired` after the seller has served. `checkClientAuth` now refuses it; new
+  e2e scenario; MUST in 0015 and 0034.
+- **Stacked rent (Stan 3, Adam 1).** The worst case is about 215,000 (86%), not 193,000 (77%), and
+  token-side rent in the same settlement (116,316 in 0006) can push it to about 330,000, over the
+  ceiling. "Never refused" dropped; sizing the `upto` ceiling is in 0015. Not measured.
+- **Re-entry test (Stan 4).** It passed for the wrong reason (`facilitator == from`). It now runs
+  the same inner call against another proxy instance as a positive control (it settles) and
+  against the proxy on the stack (host error).
+- **"Once per 10 minutes" (Adam 2)** only holds at the target; corrected everywhere.
+- **`EXTEND_TTL=0` (Adam 3):** the availability check is skipped in that mode, comment fixed.
+- **Ledger estimate (Adam 4):** re-anchored with `getLatestLedger()` before every test.
+- **`signSimulatedEntry` (Adam 5)** is now `async`.
+- **Protocol (Adam 6):** `extend_ttl_with_limits` needs protocol 26+; noted for mainnet.
 
 ## Issues Encountered
 

@@ -47,9 +47,13 @@ pub struct UptoSettled {
 /// TTL that `settle_upto` keeps on the contract instance and its WASM code, in ledgers (task
 /// 0035). At 5 s ledgers: extend toward 30 days, skip gains under about 10 minutes, add at most
 /// about 1 hour per call. The facilitator pays the rent inside the settlement fee: 198.8 stroops
-/// per ledger plus about 5,800 per extension on testnet. The cap keeps the costliest settlement
-/// near 77% of the default 250,000-stroop fee ceiling, so a valid payment is never refused over
-/// rent; the minimum keeps extensions to one per 10 minutes under steady traffic.
+/// per ledger plus about 5,800 per extension on testnet. With the allowance expiry at
+/// `MAX_ALLOWANCE_LEDGERS`, the costliest settlement is about 215,000 stroops, 86% of the default
+/// 250,000-stroop fee ceiling. Rent the token charges in the same settlement (a SAC instance
+/// extending its own TTL cost 116,316 in task 0006) is not bounded here and can push a valid
+/// payment over the ceiling, so the facilitator's ceiling for `upto` needs room for it. Below the
+/// target every settlement extends; once the TTL is at the target, the minimum keeps extensions to
+/// about one per 10 minutes under steady traffic.
 pub const TTL_EXTEND_TO: u32 = 518_400;
 pub const TTL_MIN_EXTENSION: u32 = 120;
 pub const TTL_MAX_EXTENSION: u32 = 720;
@@ -60,7 +64,10 @@ pub const TTL_MAX_EXTENSION: u32 = 720;
 /// could make one settlement pay for up to `max_entry_ttl` (about 180 days, 3.9 million stroops on
 /// testnet). A day costs about 25,000 stroops (1.3 per ledger, measured on testnet). The
 /// facilitator's `/verify` holds expiries to the payment window; this is defence in depth if it
-/// doesn't.
+/// doesn't. It does not bound the host's own nonce entry for the client's signature, which lives
+/// until `signatureExpirationLedger` and which the contract never sees: only the facilitator's
+/// `signatureExpirationLedger == allowance_expiration_ledger` check bounds that, so the check is
+/// required.
 pub const MAX_ALLOWANCE_LEDGERS: u32 = 17_280;
 
 /// Storage keys (§7). Only temporary storage is used.
