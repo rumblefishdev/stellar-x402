@@ -2,7 +2,7 @@
 id: "0031"
 title: "Catalog resources after successful settlements"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0008", "0004"]
 related_tasks: ["0012", "0030", "0017", "0009"]
@@ -15,6 +15,10 @@ history:
     status: backlog
     who: claude
     note: "Created by 0012 from M1 Story 4.2 (Discovery lane)."
+  - date: "2026-10-09"
+    status: active
+    who: akot
+    note: "Started by the Discovery lane, on top of the 0030 validator (PR #15)."
 ---
 
 # Catalog resources after successful settlements
