@@ -136,6 +136,11 @@ The source RFP and architecture docs in `docs/rfp/` are left unchanged. Deviatio
   "no XLM on fees" became "no settlement fees" (the client pays for its trustlines in setup).
   The transaction links in the last report table lost their code formatting, so they look like
   links.
+- **After the PR #12 review** (Stan, 15 comments, all applied): new threats "Seller not paid"
+  and "Proxy archived"; the cross-facilitator nonce risk and key rotation rewritten; zero
+  settlements now enter the facilitator's nonce record; the 5 s ledger constant replaced by the
+  network's target close time (CAP-0070); cost and rent numbers kept only in the testnet report;
+  the D1–D9 table kept only in ADR 0010; the G spec's §7 TTL claim and §8.1 corrected.
 
 ## Design Decisions
 
@@ -156,8 +161,21 @@ The source RFP and architecture docs in `docs/rfp/` are left unchanged. Deviatio
    `approve`; the contract needs the auth first (finding F7).
 6. **Threats as sections, not a table**: each has an attack, mitigation and residual risk, which
    were unreadable as a four-column table.
+7. **Zero settlements are recorded as settled** (PR #12 review): otherwise a second `/settle` on
+   the same payload with a non-zero amount would pass. 0015 must implement it.
+8. **No ledger-time constant**: seconds convert to ledgers with the network's target close time,
+   and the allowance must last until `deadline`. The 0034 spec draft still has `/ 5`.
+9. **Archived research edited in place**: the G spec's §7 claim was wrong and §11 duplicated the
+   ADR, so both now point to the canonical docs instead of being left stale.
 
 ## Issues Encountered
 
 - **Sorobanscan's API can't be scripted**: it needs a bearer token from a browser challenge, so the
   hashes were checked against testnet RPC instead, and the links were opened in a browser.
+
+## Future Work
+
+- **Extend the proxy's instance and WASM TTL**: nothing in `deploy/` or the e2e suite does it
+  (threat model, "Proxy archived"). Backlog task waiting on okarcz's go-ahead.
+- **Sync the 0034 drafts** with the review outcome: ledger close time, zero-settlement record,
+  rent wording.
