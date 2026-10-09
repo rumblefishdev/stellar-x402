@@ -44,6 +44,16 @@ pub struct UptoSettled {
     pub nonce: BytesN<32>,
 }
 
+/// TTL that `settle_upto` keeps on the contract instance and its WASM code, in ledgers (task
+/// 0035). At 5 s ledgers: extend toward 30 days, skip gains under about 10 minutes, add at most
+/// about 1 hour per call. The facilitator pays the rent inside the settlement fee: 198.8 stroops
+/// per ledger plus about 5,800 per extension on testnet. The cap keeps the costliest settlement
+/// near 77% of the default 250,000-stroop fee ceiling, so a valid payment is never refused over
+/// rent; the minimum keeps extensions to one per 10 minutes under steady traffic.
+pub const TTL_EXTEND_TO: u32 = 518_400;
+pub const TTL_MIN_EXTENSION: u32 = 120;
+pub const TTL_MAX_EXTENSION: u32 = 720;
+
 /// Storage keys (§7). Only temporary storage is used.
 #[contracttype]
 #[derive(Clone)]
@@ -145,6 +155,14 @@ impl UptoProxy {
         if actual_amount > 0 {
             token_client.transfer_from(&proxy, &from, &to, &actual_amount);
         }
+
+        // Keep the instance and code alive (task 0035). Without it, an archived proxy makes
+        // every settlement pay for a restore first.
+        env.storage().instance().extend_ttl_with_limits(
+            TTL_EXTEND_TO,
+            TTL_MIN_EXTENSION,
+            TTL_MAX_EXTENSION,
+        );
 
         // §4 step 11.
         UptoSettled {
