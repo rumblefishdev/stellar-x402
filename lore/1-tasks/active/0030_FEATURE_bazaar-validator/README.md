@@ -34,7 +34,7 @@ history:
     note: >
       Implemented packages/bazaar to the G-note contract: validate() with the 8-step check order,
       normalize(), catalogKey(), canonicalizeUrl(), toExtensionResponses() and the iterative schema
-      walk. 6 test files, 131 tests; `allowHttp` dev option. Shaped for 0031 (CatalogEntry types from 0017).
+      walk. One committed test file covering the ACs; the wider suite (154 tests) runs locally. Shaped for 0031 (CatalogEntry types from 0017).
 ---
 
 # Bazaar validator and normalizer
@@ -146,37 +146,17 @@ listed separately below and stay open for the day-1 review.
 - [x] Given a rejected listing, when the result is returned, then it carries a reason code from the fixed set that 0031 uses
 - [x] Given a payload whose JSON Schema exceeds our size, depth or node-count caps, when it is validated, then the result is `schema_too_complex` and the schema is never compiled in-process
 
-## Implementation Notes
-
-- `src/limits.ts`: `CATALOG_KEY_VERSION`, `LIMITS`, the closed `REJECT_REASONS` set.
-- `src/url.ts`: `canonicalizeUrl`, `sanitizeIconUrl` (on top of upstream `isValidIconUrl`),
-  `matchRouteTemplate` (upstream `isValidRouteTemplate` plus our grammar and segment match),
-  `catalogKey`.
-- `src/schema.ts`: `isSchemaWithinLimits`, an explicit-stack walk; nothing is compiled.
-- `src/validate.ts`: `validate()` (raw-payload checks first, `extractDiscoveryInfo(…, false)`
-  last, never throws) and `toExtensionResponses()`.
-- `src/normalize.ts`: `normalize()` → `NormalizedEntry` (`key`, `keyVersion`, `resource` in the
-  upstream `DiscoveryResource` shape without `lastUpdated`).
-- Tests: `url`, `schema`, `validate`, `normalize`, `upstream-cases` (ported from the upstream TS
-  suite) and `purity` (no `node:` imports, env, clock, fetch or compile in `src/`).
-
 ## Design Decisions (emerged in implementation)
 
-1. **Shown URL vs key.** With an accepted template, `resource.resource` is `origin + template`
-   (`/users/:userId`); without one, the concrete canonical URL. The key always erases parameter
-   names. Showing the concrete ID would rewrite the listing on every payment.
-2. **Only `bazaar` is echoed.** Upstream copies all of `payload.extensions`; `validate()` keeps
-   only the bazaar block (with the template removed when discarded), so other client extensions
-   never reach the catalog.
-3. **`mimeType` allows parameters** (`application/json; charset=utf-8`) after the RFC 6838
-   `type/subtype`; anything else is `invalid_info`.
-4. **A block too deep to serialize is `too_large`**, caught at step 3, so later steps never see it.
-5. **`http` dev flag as an option, not env.** `validate()`, `normalize()`, `canonicalizeUrl()` and
-   `catalogKey()` take `{ allowHttp?: boolean }`, off by default; the package reads no env, so the
-   facilitator passes it from its config. Host rules still apply (no IP or `localhost`), and icons
-   stay https-only. Kept for later steps (local and gate runs).
-6. **Recursive `$ref`** is detected when the pointer targets an ancestor of the reference
-   (including `#`); indirect cycles are out of scope, since the schema is never compiled.
+1. **Shown URL vs key.** With an accepted template, `resource.resource` is `origin + template`; the
+   key always erases parameter names. Showing the paid ID would rewrite the listing each payment.
+2. **Only `bazaar` is echoed**, minus a discarded template; other client extensions never reach
+   the catalog.
+3. **`mimeType` may carry parameters** (`; charset=utf-8`).
+4. **`allowHttp` option**, off by default and passed by the caller (no env); host rules still
+   apply and icons stay https-only.
+5. **Recursive `$ref`** is caught when it targets an ancestor; indirect cycles are not (the schema
+   is never compiled).
 
 ## Future Work
 
