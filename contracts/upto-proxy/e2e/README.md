@@ -74,6 +74,11 @@ Once, with the first token:
 - **Client and facilitator checks:** the client refuses to sign a simulated tree that differs from
   the terms (a forged `token.transfer`), and the facilitator refuses an allowance that outlives the
   window and a signature that expires apart from the allowance. These run off chain.
+- **Self-extension:** a fresh instance of the proxy's WASM, deployed under a random salt without the
+  deploy-time extension, starts at the network's minimum TTL; each of two settlements on it must
+  add exactly 720 ledgers to its instance and leave the shared code entry alone. The main proxy
+  sits above the contract's target, so its own settlements never extend it. Each run leaves one
+  such instance behind to expire.
 
 Rejections are checked in the submitter's enforcing simulation against live testnet state, the
 same path the facilitator uses, so they have no transaction hash. Two final checks confirm

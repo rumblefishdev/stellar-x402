@@ -34,13 +34,14 @@ import {
   signSimulatedEntry,
   unsignedEntry,
 } from "../src/upto.js";
-import { type TokenKind, type World, prepareWorld } from "../src/world.js";
+import { type TokenKind, type World, deployFreshInstance, prepareWorld } from "../src/world.js";
 
 const RESULTS = join(dirname(fileURLToPath(import.meta.url)), "../results/testnet-results.json");
 const MAX = 1_000_000n; // 0.1 of a 7-decimal token
 // The contract's own TTL targets (lib.rs, task 0035), in ledgers.
 const TTL_EXTEND_TO = 518_400;
 const TTL_MIN_EXTENSION = 120;
+const TTL_MAX_EXTENSION = 720;
 // The contract's cap on allowance_expiration_ledger, in ledgers past the current one (lib.rs).
 const MAX_ALLOWANCE_LEDGERS = 17_280;
 // The payment window: newTerms sets deadline = now + 900 s, as a seller's maxTimeoutSeconds would.
@@ -508,9 +509,42 @@ describe("client and facilitator checks", () => {
 });
 
 describe("availability", () => {
-  // After a full run the proxy's TTL is at least the contract's own target, less the skip window:
-  // the deploy script set it to the network maximum, or, with EXTEND_TTL=0, the settlements
-  // extended it themselves.
+  // The main proxy sits at the network's maximum TTL from the deploy script, above the contract's
+  // own target, so its settlements never extend it. A fresh instance of the same WASM starts at
+  // the network's minimum TTL and shows the self-extension: each settlement adds exactly the cap
+  // to the instance. The code entry is shared with the main proxy and already above the target,
+  // so it doesn't move.
+  it("a fresh proxy extends its own instance on every settlement", () =>
+    scenario(
+      "all",
+      "fresh proxy extends its instance by the cap per settlement",
+      `instance +${TTL_MAX_EXTENSION} ledgers per settlement, code unchanged`,
+      async (r) => {
+        const proxy = deployFreshInstance(world.proxy.wasmHash);
+        const liveUntil = async () => {
+          const t = await contractTtls(proxy, world.proxy.wasmHash);
+          return { instance: t.latest + t.instance, code: t.latest + t.code, ttl: t.instance };
+        };
+        const start = await liveUntil();
+        expect(start.ttl).toBeLessThan(TTL_EXTEND_TO - TTL_MAX_EXTENSION);
+        let last = start;
+        for (let i = 0; i < 2; i++) {
+          const t = terms(TOKENS[0]!, { proxy });
+          await settleAndCheck(r, t, await clientSign(t, world.client), 1n);
+          const now = await liveUntil();
+          expect(now.instance).toBe(last.instance + TTL_MAX_EXTENSION);
+          expect(now.code).toBe(start.code);
+          last = now;
+        }
+        r.outcome =
+          `${proxy}: instance live until ${start.instance} → ${last.instance} ` +
+          `after 2 settlements, code unchanged at ${start.code}`;
+      },
+    ));
+
+  // After a full run the main proxy's TTL is at least the contract's own target, less the skip
+  // window: the deploy script set it to the network maximum, or, with EXTEND_TTL=0, the
+  // settlements extended it themselves.
   it("keeps the proxy's instance and code alive", () =>
     scenario(
       "all",

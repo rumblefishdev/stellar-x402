@@ -5,7 +5,7 @@ type: FEATURE
 status: active
 milestone: 1
 related_adr: ["0010"]
-related_tasks: ["0005", "0004", "0034", "0026"]
+related_tasks: ["0005", "0004", "0034", "0026", "0015"]
 tags: [upto, contract, deploy, priority-medium, effort-medium, payments]
 links:
   - ../../../contracts/upto-proxy/README.md
@@ -23,6 +23,14 @@ history:
     status: active
     who: okarcz
     note: "Plan changed from a keeper cron to contract self-extension (okarcz). Branch rebased onto lore-0005-upto-proxy-docs (PR #12)."
+  - date: "2026-10-09"
+    status: active
+    who: okarcz
+    note: >
+      Security review of the branch (no fund-moving bug found) and its fixes, in three commits:
+      review fixes and 10 new unit tests; the contract's one-day cap on allowance_expiration_ledger
+      (ADR 0010 D11, new deployment CAL7SBTO…V2VC); the self-extension e2e on a fresh instance.
+      42 unit tests, e2e 57/57. Verify rules added to 0015 and 0034.
 ---
 
 # Keep the UptoProxy instance and WASM alive: TTL extension
@@ -42,7 +50,8 @@ testnet deployment.
 
 > Started 2026-10-09 by okarcz on `lore-0035-upto-proxy-ttl`, rebased onto
 > `lore-0005-upto-proxy-docs` (PR #12) because the docs it changes exist only there. Built,
-> measured and deployed on testnet (`CDSWGHBU…HEPD`); e2e 50/50. In review as a draft PR.
+> measured and deployed on testnet; e2e 50/50. In review as PR #14. A security review on
+> 2026-10-09 added the allowance-expiry cap: the proxy is now `CAL7SBTO…V2VC`, e2e 57/57.
 
 ## Context
 
@@ -102,6 +111,9 @@ testnet deployment.
       report shows it
 - [x] ADR 0010 (D10), the contract README and the threat model explain the self-extension and
       why it uses limits
+- [x] Security review findings fixed: the client checks the simulated tree, the facilitator
+      check bounds the allowance window, the contract caps the expiry (D11), the self-extension
+      is shown on chain
 
 ## Implementation Notes
 
@@ -128,6 +140,35 @@ testnet deployment.
   (deployments, execution order step 11, Availability), ADR 0010 (D10, two rejected alternatives,
   consequence), threat model ("Proxy archived", "Fee inflation by rent"), `deploy/README.md`,
   `testnet.env.example`, e2e README, G spec §7.
+
+### Security review (2026-10-09)
+
+An adversarial review of the branch found no way to move funds without the payer's signature.
+The report (local page, then a private claude.ai artifact) listed 2 medium, 3 low and 4
+informational findings. All fixed or documented on this branch:
+
+- **M1, rent by allowance expiry.** The payer picks `allowance_expiration_ledger` and the
+  facilitator pays temporary rent on the nonce and the allowance until then. Measured by
+  simulation on testnet: 1.3 stroops per ledger (+2,200 fixed above the 720-ledger minimum);
+  17,280 ledgers ≈ 25,000, the network maximum ≈ 3.9 million. Fixed three ways: the e2e
+  `checkClientAuth` refuses expiries past the window (204 ledgers); the contract refuses more than
+  `MAX_ALLOWANCE_LEDGERS` = 17,280 ahead (`InvalidAllowanceExpiration`, D11); `/verify` rules
+  added to 0015 and 0034.
+- **M2, blind signing.** `clientSign` signed whatever simulation returned. Now
+  `signSimulatedEntry` compares the tree with the terms first; e2e scenario with a forged
+  `token.transfer` tree.
+- **L1.** The availability check passed on the deploy-time extension alone. New scenario: a fresh
+  instance (random salt, no deploy-time extension) gains exactly 720 ledgers per settlement.
+- **L2.** The e2e allowance lived 42 minutes for a 15-minute window; it now expires with each
+  payment's deadline (+12 ledgers), and the signature with it.
+- **L3.** The deploy script's `max_entry_ttl` error was unreachable under `pipefail`.
+- **Info.** `from == facilitator` is refused by the host (documented in the README's Verify);
+  no-op tokens and nonce reuse after expiry are pinned by tests.
+- **Tests added:** `src/test/adversarial.rs` (7 tests), `settlement_properties.rs` (window check
+  order, value conservation), a TTL model property in `ttl.rs`, the network-limit case in
+  `mod.rs`. 42 unit tests. e2e: 7 new scenarios, 57/57 on 2026-10-09 11:58 UTC.
+- **Deployment:** `CAL7SBTOECJ6HXXO3ST43LM2HJJFSZ3ZDEEZBIWHJPB7DRF5MXS5V2VC`, WASM
+  `00a06b16…b79c` (4,211 bytes); `CDSWGHBU…HEPD` retired.
 
 ## Issues Encountered
 
@@ -171,6 +212,18 @@ testnet deployment.
    quiet periods.
 6. **An e2e availability check** was added, making the run 50 scenarios, so every run shows the
    proxy's TTL.
+7. **Allowance expiry cap of 17,280 ledgers (a day)** (okarcz asked for the contract cap as
+   defence in depth; Claude picked N from the testnet measurement). 4,320 (6 h) was the
+   alternative: ~8,000 instead of ~25,000 stroops of rent. A day was chosen because the contract
+   is immutable and `/verify`'s window is the real bound, so the cap should not restrict longer
+   legitimate windows. The costliest settlement, extension plus a day of expiry, is about
+   218,000 stroops (87% of the ceiling); only a facilitator that skips the window check reaches it.
+8. **The verify notes went to 0015 and 0034, not 0016 and 0027.** The review page said "0016/0027"
+   by mistake: 0016 is the signer-pool prerequisites and 0027 alerts. 0015 owns the facilitator's
+   `upto` path, 0034 the scheme spec and the client classes.
+9. **The fresh-instance e2e deploys a new contract every run** (random salt, same WASM). It costs
+   one deploy and leaves an instance that expires in about 7 days; the alternative, a second
+   deployer key, would keep one long-lived instance that is eventually above the target too.
 
 ## Notes
 
