@@ -70,6 +70,16 @@ never charged twice.
 - **Wire mapping (AD-6):** `pending` → `{success:false, errorReason:"settlement_pending", transaction, network}`, plus a fixed `errorReason` for each submitter error class.
 - **Hooks:** call the before-submit hook (spend budgets, 0024) before `submit()` and the
   on-success hook (cataloging, 0031) when the record turns `success`.
+- **From 0017 (reviews of PRs #7 and #11):**
+  - Wrap `onSuccess` errors in the caller: log and count them, they never reach the client.
+    `/settle` doesn't wait for `onFinal`, and its errors never reach the caller either
+    (`apps/facilitator/src/settlement/hooks.ts`).
+  - `SettlementStore.transition` only moves forward and refuses a same-state update, so exactly
+    one of several concurrent callers wins (ADR 0006). Changing fields without moving the state
+    would need its own store operation.
+  - Decide with 0020 how facilitator tests get `FakeRpc`: it sits in
+    `packages/signer-pool/test/` and isn't exported; a `./testing` subpath export is the
+    suggestion.
 
 ## Acceptance Criteria
 

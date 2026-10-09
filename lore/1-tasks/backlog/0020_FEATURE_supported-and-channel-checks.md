@@ -36,6 +36,9 @@ As a resource server, and as the operator, I want `GET /supported` to describe e
 - `/supported` route with `@x402/core` v2 types.
 - Startup check using signer-pool's `checkChannel` for every configured channel.
 - `keypairSigner` adapter for `FACILITATOR_SECRET`; update both env examples and `deploy/README.md`.
+- From 0017: decide with 0009 how facilitator tests get `FakeRpc` (it sits in
+  `packages/signer-pool/test/` and isn't exported; a `./testing` subpath export is the
+  suggestion). The 0017 boot test runs without one, since nothing in its graph calls RPC.
 
 ## Acceptance Criteria
 
