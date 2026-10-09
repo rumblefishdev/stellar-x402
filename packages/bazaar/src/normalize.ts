@@ -1,7 +1,7 @@
 import type { PaymentRequirements } from "@x402/core/types";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import { CATALOG_KEY_VERSION } from "./limits.js";
-import { catalogKey, type CatalogKey, type UrlOptions } from "./url.js";
+import { eraseParamNames, type CatalogKey } from "./url.js";
 import type { ValidationResult } from "./validate.js";
 
 export interface NormalizedEntry {
@@ -19,31 +19,25 @@ export interface NormalizedEntry {
 export function normalize(
   result: Extract<ValidationResult, { ok: true }>,
   requirements: PaymentRequirements,
-  /** Pass the same options as to `validate()`. */
-  options: UrlOptions = {},
 ): NormalizedEntry {
   const { discovered } = result;
   const type = discovered.discoveryInfo.input.type === "mcp" ? "mcp" : "http";
-  const key = catalogKey(
-    {
-      network: requirements.network,
-      payTo: requirements.payTo,
-      type,
-      method: "method" in discovered ? discovered.method : undefined,
-      toolName: "toolName" in discovered ? discovered.toolName : undefined,
-      resourceUrl: result.resourceUrl,
-      routeTemplate: result.routeTemplate,
-    },
-    options,
-  );
-  if (!key) throw new Error("normalize: the validation result is not catalogable");
-
-  // A listing with an accepted template shows the template, so each paid ID doesn't rewrite it.
-  const shown = result.routeTemplate
-    ? `${new URL(result.resourceUrl).origin}${result.routeTemplate}`
+  const method = "toolName" in discovered ? discovered.toolName : discovered.method;
+  if (!method) throw new Error("normalize: the validation result has no method or tool name");
+  // Built from the validated URL and template, not re-validated, so `validate()` options carry.
+  // The listing shows the erased template too, so payments that name the parameter differently
+  // don't keep rewriting it.
+  const resourceUrl = result.routeTemplate
+    ? `${new URL(result.resourceUrl).origin}${eraseParamNames(result.routeTemplate)}`
     : result.resourceUrl;
+  const key: CatalogKey = {
+    network: requirements.network,
+    payTo: requirements.payTo,
+    method,
+    resourceUrl,
+  };
   const resource: Omit<DiscoveryResource, "lastUpdated"> = {
-    resource: shown,
+    resource: resourceUrl,
     type,
     x402Version: discovered.x402Version,
     accepts: [requirements],

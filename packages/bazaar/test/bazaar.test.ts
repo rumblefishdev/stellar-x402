@@ -42,6 +42,8 @@ function deep(n: number): unknown {
   return value;
 }
 
+type Case = [string, PaymentPayload, string];
+
 describe("packages/bazaar", () => {
   it("normalizes http and mcp listings, keyed with the verified network and payTo", () => {
     expect(entry(pay("https://API.x.com:443/a?q=1", { info: http })).key).toEqual({
@@ -53,11 +55,14 @@ describe("packages/bazaar", () => {
     expect(entry(pay("https://x.com/mcp", { info: mcp })).key.method).toBe("weather");
   });
 
-  it("gives /users/42 and /users/7 one key under /users/:userId, and erases param names", () => {
+  it("gives /users/42 and /users/7 one key and one listing, with param names erased", () => {
     const a = entry(pay("https://x.com/users/42", { info: http, routeTemplate: "/users/:userId" }));
     const b = entry(pay("https://x.com/users/7", { info: http, routeTemplate: "/users/:id" }));
     expect(a.key).toEqual(b.key);
-    expect(a.key.resourceUrl).toBe("https://x.com/users/:");
+    expect([a.key.resourceUrl, a.resource.resource]).toEqual([
+      "https://x.com/users/:",
+      "https://x.com/users/:",
+    ]);
   });
 
   it("stores the paid path when the template doesn't match it (G4)", () => {
@@ -104,8 +109,86 @@ describe("packages/bazaar", () => {
       pay("https://x.com/a", { info: http, schema: deep(100_000) }),
       "too_large",
     ],
-  ])("rejects %s with its own reason, never internal_error", (_, p, expected) => {
+    ...[
+      "ip6-localhost",
+      "localhost.localdomain",
+      "metadata.google.internal",
+      "intranet",
+      "printer.local",
+    ].map((host) => [
+      `private host ${host}`,
+      pay(`https://${host}/a`, { info: http }),
+      "invalid_resource_url",
+    ]),
+    [
+      "mcp inputSchema external $ref",
+      pay("https://x.com/a", {
+        info: { input: { ...mcp.input, inputSchema: { $ref: "https://e.com/s" } } },
+      }),
+      "schema_too_complex",
+    ],
+    [
+      "http body pattern over 256",
+      pay("https://x.com/a", {
+        info: { input: { ...http.input, body: { pattern: "x".repeat(257) } } },
+      }),
+      "schema_too_complex",
+    ],
+    [
+      "percent-encoded self $ref",
+      pay("https://x.com/a", {
+        info: http,
+        schema: { properties: { a: { $ref: "#/%70roperties" } } },
+      }),
+      "schema_too_complex",
+    ],
+    [
+      "1,001 schema nodes",
+      pay("https://x.com/a", { info: http, schema: { allOf: Array(1_000).fill(true) } }),
+      "schema_too_complex",
+    ],
+    [
+      "mimeType with CRLF",
+      pay("https://x.com/a", { info: http }, { mimeType: 'text/plain; a="x\r\nSet-Cookie: s=1"' }),
+      "invalid_info",
+    ],
+    [
+      "mimeType without subtype",
+      pay("https://x.com/a", { info: http }, { mimeType: "text" }),
+      "invalid_info",
+    ],
+    [
+      "description with NUL",
+      pay("https://x.com/a", { info: http }, { description: "a\u0000b" }),
+      "invalid_info",
+    ],
+  ] as Case[])("rejects %s with its own reason, never internal_error", (_, p, expected) => {
     expect(reason(p)).toBe(expected);
+  });
+
+  it("applies keyword rules to keywords only, not property names or enum data", () => {
+    const schema = { properties: { $id: { type: "string" } }, enum: [{ $ref: "https://e.com/s" }] };
+    expect(reason(pay("https://x.com/a", { info: http, schema }))).toBe("ok");
+  });
+
+  it.each([
+    ["/a/%7Euser", undefined, "https://x.com/a/~user"],
+    ["/users/42", "/users/..", "https://x.com/users/42"],
+    ["/users/42", "/:a/:b", "https://x.com/users/42"],
+  ])("keys %s with template %j as %s", (path, routeTemplate, expected) => {
+    expect(entry(pay(`https://x.com${path}`, { info: http, routeTemplate })).key.resourceUrl).toBe(
+      expected,
+    );
+  });
+
+  it("caps tags at 5, drops icon fragments and icons that outgrow the URL limit", () => {
+    const d = (resource: object) => {
+      const r = validate(pay("https://x.com/a", { info: http }, resource), req);
+      return r?.ok ? r.discovered : undefined;
+    };
+    expect(d({ tags: ["a", "b", "c", "d", "e", "f"] })?.tags).toHaveLength(5);
+    expect(d({ iconUrl: "https://cdn.x.com/i.png#f" })?.iconUrl).toBe("https://cdn.x.com/i.png");
+    expect(d({ iconUrl: `https://cdn.x.com/${" ".repeat(1_900)}x` })?.iconUrl).toBeUndefined();
   });
 
   it("returns undefined only when there is no bazaar key", () => {
@@ -140,10 +223,10 @@ describe("packages/bazaar", () => {
     });
   });
 
-  it("accepts http only behind the allowHttp option", () => {
-    expect(validate(pay("http://x.com/a", { info: http }), req, { allowHttp: true })?.ok).toBe(
-      true,
-    );
+  it("accepts http only behind the allowHttp option, through normalize too", () => {
+    const r = validate(pay("http://x.com/a", { info: http }), req, { allowHttp: true });
+    if (!r?.ok) throw new Error("expected ok");
+    expect(normalize(r, req).key.resourceUrl).toBe("http://x.com/a");
   });
 
   it("does no I/O, reads no env or clock, and compiles no schema", () => {

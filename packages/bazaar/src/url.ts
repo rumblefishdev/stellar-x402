@@ -6,18 +6,21 @@ const UNRESERVED = /[A-Za-z0-9\-._~]/;
 const STATIC_SEGMENT = /^[A-Za-z0-9_.~-]+$/;
 const PARAM_SEGMENT = /^:[A-Za-z_][A-Za-z0-9_]*$/;
 
+/** Special-use and private names (RFC 6761, 6762, 8375; ICANN `.internal`) and their subdomains. */
+const PRIVATE_SUFFIXES = ["localhost", "localdomain", "local", "internal", "home.arpa", "invalid"];
+
 /**
- * Hosts we never catalog: IP literals (WHATWG has already turned decimal, hex and octal IPv4 forms
- * into dotted quads), `localhost` and its subdomains, and trailing-dot names.
+ * Hosts we never catalog, on top of upstream's icon host rules: IP literals (WHATWG has already
+ * turned decimal, hex and octal IPv4 forms into dotted quads), single-label names such as
+ * `intranet`, trailing-dot names, and private suffixes.
  */
 function isForbiddenHost(hostname: string): boolean {
   return (
-    hostname === "" ||
     hostname.startsWith("[") ||
     IPV4.test(hostname) ||
-    hostname === "localhost" ||
-    hostname.endsWith(".localhost") ||
-    hostname.endsWith(".")
+    !hostname.includes(".") ||
+    hostname.endsWith(".") ||
+    PRIVATE_SUFFIXES.some((suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`))
   );
 }
 
@@ -49,15 +52,16 @@ function parseWebUrl(raw: string, allowHttp = false): URL | undefined {
   }
   const schemeOk = url.protocol === "https:" || (allowHttp && url.protocol === "http:");
   if (!schemeOk || url.username !== "" || url.password !== "") return undefined;
-  if (isForbiddenHost(url.hostname)) return undefined;
+  // Upstream's host rules (loopback names, IP forms), then ours.
+  if (!isValidIconUrl(url.href) || isForbiddenHost(url.hostname)) return undefined;
   return url;
 }
 
 /**
  * The canonical form of a resource URL, or `undefined` when it can't be cataloged.
  *
- * https only (unless `allowHttp`); no userinfo, IP literal, `localhost` or trailing-dot host; the default port, query
- * and fragment are dropped; dot segments are resolved and percent-encoding normalized. Path case
+ * https only (unless `allowHttp`); no userinfo, IP literal, loopback, private or single-label
+ * host; the default port, query and fragment are dropped; dot segments are resolved and percent-encoding normalized. Path case
  * and the trailing slash are kept (RFC 9110: only scheme and host are case-insensitive).
  */
 export function canonicalizeUrl(raw: string, options: UrlOptions = {}): string | undefined {
@@ -69,12 +73,16 @@ export function canonicalizeUrl(raw: string, options: UrlOptions = {}): string |
 
 /**
  * Our checks on top of upstream `isValidIconUrl`: https only, no backslash (parser differential),
- * no trailing-dot or `*.localhost` host. Returns the canonical `href` to store, or `undefined` to
- * drop the field.
+ * the host rules of resource URLs. Returns the canonical `href` without the fragment, or
+ * `undefined` to drop the field.
  */
 export function sanitizeIconUrl(raw: string | undefined): string | undefined {
   if (!isValidIconUrl(raw) || raw.includes("\\")) return undefined;
-  return parseWebUrl(raw)?.href;
+  const url = parseWebUrl(raw);
+  if (!url) return undefined;
+  url.hash = "";
+  // Checked again after parsing: the parser percent-encodes, so the href can outgrow the input.
+  return url.href.length > LIMITS.urlChars ? undefined : url.href;
 }
 
 /**

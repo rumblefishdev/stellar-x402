@@ -148,8 +148,10 @@ listed separately below and stay open for the day-1 review.
 
 ## Design Decisions (emerged in implementation)
 
-1. **Shown URL vs key.** With an accepted template, `resource.resource` is `origin + template`; the
-   key always erases parameter names. Showing the paid ID would rewrite the listing each payment.
+1. **Shown URL = key URL.** With an accepted template, `resource.resource` is the erased template
+   (`/users/:`), the same as the key, so payments naming the parameter differently don't rewrite
+   the listing (PR #15 review). `normalize()` builds the key from the validated result, without
+   re-validating the URL.
 2. **Only `bazaar` is echoed**, minus a discarded template; other client extensions never reach
    the catalog.
 3. **`mimeType` may carry parameters** (`; charset=utf-8`).
@@ -157,6 +159,10 @@ listed separately below and stay open for the day-1 review.
    apply and icons stay https-only.
 5. **Recursive `$ref`** is caught when it targets an ancestor; indirect cycles are not (the schema
    is never compiled).
+6. **Hosts and schemas (PR #15 review).** Upstream's icon host rules apply to resource URLs too,
+   plus single-label hosts and private suffixes (`.local`, `.internal`, `.home.arpa`, …). The
+   schema limits also cover `info.input` (`inputSchema`, `body`, `queryParams`, `pathParams`), and
+   keyword rules skip property names and `enum`/`default`/`const`/`examples` data.
 
 ## Future Work
 

@@ -73,13 +73,17 @@ function checkShape(
     }
   }
   const { description, mimeType } = resource;
-  if (description !== undefined && typeof description !== "string") {
-    return "resource.description must be a string";
+  if (
+    description !== undefined &&
+    (typeof description !== "string" || CONTROL_CHARS.test(description.replace(/[\t\n\r]/g, "")))
+  ) {
+    return "resource.description must be a string without control characters";
   }
   if (
     mimeType !== undefined &&
     (typeof mimeType !== "string" ||
       mimeType.length > LIMITS.mimeTypeChars ||
+      CONTROL_CHARS.test(mimeType) ||
       !MIME_TYPE.test(mimeType))
   ) {
     return "resource.mimeType is not a valid media type";
@@ -125,7 +129,16 @@ function run(
   ) {
     return reject("too_large", "description");
   }
-  if (!isSchemaWithinLimits(raw.schema)) return reject("schema_too_complex");
+  // The extension schema, and the schemas the seller puts in `info.input` (mcp `inputSchema`,
+  // http `body`; `queryParams` and `pathParams` map names to schemas).
+  const schemas = [
+    raw.schema,
+    input.inputSchema,
+    input.body,
+    { properties: input.queryParams },
+    { properties: input.pathParams },
+  ];
+  if (!schemas.every(isSchemaWithinLimits)) return reject("schema_too_complex");
 
   // 7. Upstream extraction, only now that it can't hit its known throws. `validate = false`:
   //    `true` would compile the seller's schema in-process.
