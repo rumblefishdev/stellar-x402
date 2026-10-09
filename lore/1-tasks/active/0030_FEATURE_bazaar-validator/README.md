@@ -34,7 +34,7 @@ history:
     note: >
       Implemented packages/bazaar to the G-note contract: validate() with the 8-step check order,
       normalize(), catalogKey(), canonicalizeUrl(), toExtensionResponses() and the iterative schema
-      walk. 6 test files, 127 tests. Shaped for 0031 (CatalogEntry types from 0017).
+      walk. 6 test files, 131 tests; `allowHttp` dev option. Shaped for 0031 (CatalogEntry types from 0017).
 ---
 
 # Bazaar validator and normalizer
@@ -171,7 +171,10 @@ listed separately below and stay open for the day-1 review.
 3. **`mimeType` allows parameters** (`application/json; charset=utf-8`) after the RFC 6838
    `type/subtype`; anything else is `invalid_info`.
 4. **A block too deep to serialize is `too_large`**, caught at step 3, so later steps never see it.
-5. **No `http` dev flag.** The contract mentioned one, off by default; nothing needs it yet.
+5. **`http` dev flag as an option, not env.** `validate()`, `normalize()`, `canonicalizeUrl()` and
+   `catalogKey()` take `{ allowHttp?: boolean }`, off by default; the package reads no env, so the
+   facilitator passes it from its config. Host rules still apply (no IP or `localhost`), and icons
+   stay https-only. Kept for later steps (local and gate runs).
 6. **Recursive `$ref`** is detected when the pointer targets an ancestor of the reference
    (including `#`); indirect cycles are out of scope, since the schema is never compiled.
 

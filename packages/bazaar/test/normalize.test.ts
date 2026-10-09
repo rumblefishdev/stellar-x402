@@ -64,3 +64,15 @@ describe("normalize", () => {
     expect(e.resource.type).toBe("mcp");
   });
 });
+
+describe("allowHttp through validate and normalize", () => {
+  it("catalogs an http resource only with the flag", () => {
+    const p = payload({ url: "http://api.example.com/users/42" });
+    expect(validate(p, requirements)).toMatchObject({ ok: false, reason: "invalid_resource_url" });
+    const result = validate(p, requirements, { allowHttp: true });
+    if (!result?.ok) throw new Error("expected ok");
+    expect(normalize(result, requirements, { allowHttp: true }).key.resourceUrl).toBe(
+      "http://api.example.com/users/42",
+    );
+  });
+});

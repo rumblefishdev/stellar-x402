@@ -29,7 +29,17 @@ function normalizePercentEncoding(path: string): string {
   });
 }
 
-function parseHttps(raw: string): URL | undefined {
+/** Options shared by the URL checks. */
+export interface UrlOptions {
+  /**
+   * Development only: also accept `http:` resource URLs. Host rules still apply (no IP literal,
+   * `localhost` or trailing dot), and icons stay https-only. Off by default; the facilitator sets
+   * it from its own config, since this package reads no env.
+   */
+  allowHttp?: boolean;
+}
+
+function parseWebUrl(raw: string, allowHttp = false): URL | undefined {
   if (raw.length > LIMITS.urlChars) return undefined;
   let url: URL;
   try {
@@ -37,7 +47,8 @@ function parseHttps(raw: string): URL | undefined {
   } catch {
     return undefined;
   }
-  if (url.protocol !== "https:" || url.username !== "" || url.password !== "") return undefined;
+  const schemeOk = url.protocol === "https:" || (allowHttp && url.protocol === "http:");
+  if (!schemeOk || url.username !== "" || url.password !== "") return undefined;
   if (isForbiddenHost(url.hostname)) return undefined;
   return url;
 }
@@ -45,12 +56,12 @@ function parseHttps(raw: string): URL | undefined {
 /**
  * The canonical form of a resource URL, or `undefined` when it can't be cataloged.
  *
- * https only; no userinfo, IP literal, `localhost` or trailing-dot host; the default port, query
+ * https only (unless `allowHttp`); no userinfo, IP literal, `localhost` or trailing-dot host; the default port, query
  * and fragment are dropped; dot segments are resolved and percent-encoding normalized. Path case
  * and the trailing slash are kept (RFC 9110: only scheme and host are case-insensitive).
  */
-export function canonicalizeUrl(raw: string): string | undefined {
-  const url = parseHttps(raw);
+export function canonicalizeUrl(raw: string, options: UrlOptions = {}): string | undefined {
+  const url = parseWebUrl(raw, options.allowHttp);
   if (!url || url.pathname.includes("//")) return undefined;
   const canonical = `${url.origin}${normalizePercentEncoding(url.pathname)}`;
   return canonical.length > LIMITS.urlChars ? undefined : canonical;
@@ -63,7 +74,7 @@ export function canonicalizeUrl(raw: string): string | undefined {
  */
 export function sanitizeIconUrl(raw: string | undefined): string | undefined {
   if (!isValidIconUrl(raw) || raw.includes("\\")) return undefined;
-  return parseHttps(raw)?.href;
+  return parseWebUrl(raw)?.href;
 }
 
 /**
@@ -117,8 +128,11 @@ export interface CatalogKeyInput {
 }
 
 /** The catalog key, or `undefined` when the input can't be cataloged. */
-export function catalogKey(input: CatalogKeyInput): CatalogKey | undefined {
-  const canonical = canonicalizeUrl(input.resourceUrl);
+export function catalogKey(
+  input: CatalogKeyInput,
+  options: UrlOptions = {},
+): CatalogKey | undefined {
+  const canonical = canonicalizeUrl(input.resourceUrl, options);
   if (!canonical || !input.network || !input.payTo) return undefined;
   const method = input.type === "mcp" ? input.toolName : input.method;
   if (!method) return undefined;

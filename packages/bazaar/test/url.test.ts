@@ -154,3 +154,22 @@ describe("sanitizeIconUrl (G7)", () => {
     expect(sanitizeIconUrl(input)).toBeUndefined();
   });
 });
+
+describe("allowHttp (development flag, off by default)", () => {
+  it("accepts http only when enabled", () => {
+    expect(canonicalizeUrl("http://api.example.com/x")).toBeUndefined();
+    expect(canonicalizeUrl("http://API.example.com:80/x?q=1", { allowHttp: true })).toBe(
+      "http://api.example.com/x",
+    );
+  });
+
+  it("keeps the host rules and other schemes rejected", () => {
+    for (const url of ["http://localhost/x", "http://127.0.0.1/x", "ftp://api.example.com/x"]) {
+      expect(canonicalizeUrl(url, { allowHttp: true })).toBeUndefined();
+    }
+  });
+
+  it("keeps icons https-only", () => {
+    expect(sanitizeIconUrl("http://cdn.example.com/i.png")).toBeUndefined();
+  });
+});

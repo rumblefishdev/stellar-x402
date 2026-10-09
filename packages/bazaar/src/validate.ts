@@ -6,7 +6,7 @@ import {
 } from "@x402/extensions/bazaar";
 import { LIMITS, type BazaarRejectReason } from "./limits.js";
 import { isSchemaWithinLimits } from "./schema.js";
-import { canonicalizeUrl, matchRouteTemplate, sanitizeIconUrl } from "./url.js";
+import { canonicalizeUrl, matchRouteTemplate, sanitizeIconUrl, type UrlOptions } from "./url.js";
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
@@ -90,6 +90,7 @@ function checkShape(
 function run(
   payload: PaymentPayload,
   requirements: PaymentRequirements,
+  options: UrlOptions,
 ): ValidationResult | undefined {
   // 1. Presence, read from the raw payload: upstream's `null` mixes several cases.
   const extensions: unknown = payload.extensions;
@@ -113,7 +114,8 @@ function run(
   if (shapeError) return reject("invalid_info", shapeError);
 
   // 5. Resource URL. This is also what keeps upstream's unguarded `new URL()` from throwing.
-  const resourceUrl = typeof resource.url === "string" ? canonicalizeUrl(resource.url) : undefined;
+  const resourceUrl =
+    typeof resource.url === "string" ? canonicalizeUrl(resource.url, options) : undefined;
   if (!resourceUrl) return reject("invalid_resource_url");
 
   // 6. Content limits. The schema is data: walked for limits, never compiled.
@@ -168,9 +170,10 @@ function run(
 export function validate(
   payload: PaymentPayload,
   requirements: PaymentRequirements,
+  options: UrlOptions = {},
 ): ValidationResult | undefined {
   try {
-    return run(payload, requirements);
+    return run(payload, requirements, options);
   } catch (error) {
     return reject("internal_error", error instanceof Error ? error.message : String(error));
   }

@@ -1,7 +1,7 @@
 import type { PaymentRequirements } from "@x402/core/types";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import { CATALOG_KEY_VERSION } from "./limits.js";
-import { catalogKey, type CatalogKey } from "./url.js";
+import { catalogKey, type CatalogKey, type UrlOptions } from "./url.js";
 import type { ValidationResult } from "./validate.js";
 
 export interface NormalizedEntry {
@@ -19,18 +19,23 @@ export interface NormalizedEntry {
 export function normalize(
   result: Extract<ValidationResult, { ok: true }>,
   requirements: PaymentRequirements,
+  /** Pass the same options as to `validate()`. */
+  options: UrlOptions = {},
 ): NormalizedEntry {
   const { discovered } = result;
   const type = discovered.discoveryInfo.input.type === "mcp" ? "mcp" : "http";
-  const key = catalogKey({
-    network: requirements.network,
-    payTo: requirements.payTo,
-    type,
-    method: "method" in discovered ? discovered.method : undefined,
-    toolName: "toolName" in discovered ? discovered.toolName : undefined,
-    resourceUrl: result.resourceUrl,
-    routeTemplate: result.routeTemplate,
-  });
+  const key = catalogKey(
+    {
+      network: requirements.network,
+      payTo: requirements.payTo,
+      type,
+      method: "method" in discovered ? discovered.method : undefined,
+      toolName: "toolName" in discovered ? discovered.toolName : undefined,
+      resourceUrl: result.resourceUrl,
+      routeTemplate: result.routeTemplate,
+    },
+    options,
+  );
   if (!key) throw new Error("normalize: the validation result is not catalogable");
 
   // A listing with an accepted template shows the template, so each paid ID doesn't rewrite it.

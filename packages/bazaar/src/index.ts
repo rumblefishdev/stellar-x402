@@ -12,6 +12,7 @@ export {
   sanitizeIconUrl,
   type CatalogKey,
   type CatalogKeyInput,
+  type UrlOptions,
 } from "./url.js";
 export {
   toExtensionResponses,
