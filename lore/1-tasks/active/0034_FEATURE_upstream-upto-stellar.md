@@ -63,7 +63,7 @@ What we have:
   (`archive/0002_RESEARCH_upto-proxy-design-on-soroban/notes/G-upto-proxy-contract-spec.md`).
 - **Contract:** `contracts/upto-proxy` (0003). It enforces the recipient binding and single
   settlement, so we do ship a Soroban contract.
-- **On-chain proof:** 0004 ran 46 scenarios on testnet across Circle USDC, a SAC asset and a
+- **On-chain proof:** 0004 ran 49 scenarios on testnet across Circle USDC, a SAC asset and a
   non-SAC SEP-41 token (`docs/upto-proxy-testnet-report.md`).
 - **Spec input:** 0005 step 5 lists the rules the spec needs, and its threat model covers the
   leftover allowance.

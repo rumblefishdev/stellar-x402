@@ -5,7 +5,9 @@ the facilitator it chose then settles any actual amount from 0 up to that ceilin
 transaction the client never pays for.
 
 The contract is immutable: no admin, no constructor arguments, no upgrade, no pause, no
-cancellation, and it never holds funds. Its only state is used nonces. The design and its
+cancellation, and it never holds funds. Its only contract data is used nonces. Its instance and
+WASM code are persistent ledger entries with their own TTL; if they are archived, every settlement
+needs a restore first (see [Availability](#availability) below). The design and its
 reasoning are in [ADR 0010](../../docs/adr/0010-upto-proxy-design.md); the normative spec is
 [G-upto-proxy-contract-spec](../../lore/1-tasks/archive/0002_RESEARCH_upto-proxy-design-on-soroban/notes/G-upto-proxy-contract-spec.md)
 (section numbers below, §N, refer to it).
@@ -16,9 +18,12 @@ reasoning are in [ADR 0010](../../docs/adr/0010-upto-proxy-design.md); the norma
 | ------- | ---------------------------------------------------------- | ------------------------------------------------------------------ |
 | testnet | `CC3VX7N6ILD63V7FS2JA7XUDX4DMHYEJXRZDOMU7GVW76XYINOAZ7OYU` | `be2ba12160a7e3e1a93ed0cb457b7e93cd6ed4c725cb51aeeb87313b45dd0b34` |
 
-`deploy/scripts/deploy-contract.sh upto-proxy` deploys it with the WASM hash as the salt, so the
-same code always lands at the same address, and a code change gets a new one. Testnet resets wipe
-it; rerunning the script restores it at the same ID. There is no mainnet deployment yet.
+`deploy/scripts/deploy-contract.sh upto-proxy` deploys it with the WASM hash as the salt. The
+contract ID follows from the deployer's address and the salt, so the same code deployed by the
+same key always lands at the same address, and a code change gets a new one. Another deployer gets
+another ID for the same WASM: 0006's bench ran this code at `CBEPV3F2…TEGY7`. Testnet resets wipe
+it; rerunning the script with the same deployer restores it at the same ID. There is no mainnet
+deployment yet.
 
 ## Interface
 
@@ -162,9 +167,13 @@ Every invariant has a test in `src/test/` (§8):
    exactly the one above for the payment terms: the proxy is the canonical one, `token` is the
    required asset, `to` is `payTo`, `facilitator` is this facilitator, `max_amount` equals the
    required amount.
-2. `signatureExpirationLedger == allowance_expiration_ledger`, at most
-   `currentLedger + ceil(maxTimeoutSeconds / 5)`; `deadline` is at most
-   `now + maxTimeoutSeconds`; the window is open now.
+2. `signatureExpirationLedger == allowance_expiration_ledger`; `deadline` is at most
+   `now + maxTimeoutSeconds`; the window is open now. The allowance must last until `deadline`,
+   or a settlement late in the window fails with `Expired` (#5) before the deadline has passed.
+   Convert seconds to ledgers with the network's current target ledger close time, which is a
+   network setting since protocol 23 (CAP-0070), not a fixed 5 s. Allow
+   `allowance_expiration_ledger` up to `currentLedger + ceil(maxTimeoutSeconds / closeTime)` plus
+   a small margin.
 3. The nonce is unused: `is_nonce_used(from, nonce)` is `false` **and** `(from, nonce)` is not in
    the facilitator's own settled-nonce record (§8.1).
 4. Simulate with `actual_amount = max_amount`, the worst case. The only balance changes are
@@ -174,9 +183,12 @@ Every invariant has a test in `src/test/` (§8):
 
 1. Verify again, against the **signed** `max_amount`, not `requirements.amount`, which now holds
    the actual charge.
-2. If the actual amount is 0, send nothing: the response has `transaction: ""` and `amount: "0"`.
-   The client's nonce stays unused until its deadline. The contract accepts 0 too, which uses the
-   authorization up explicitly; on testnet that costs about 30,000 stroops.
+2. If the actual amount is 0, send nothing, but record `(from, nonce)` durably as settled first,
+   exactly as in step 4. The response has `transaction: ""` and `amount: "0"`. Without the record,
+   a second `/settle` on the same payload with a non-zero amount would pass, because the contract
+   never saw the nonce. On chain the nonce stays unused until the deadline, but only this
+   facilitator can settle it. The contract accepts 0 too, which uses the authorization up on chain;
+   the [testnet report](../../docs/upto-proxy-testnet-report.md#cost-per-settlement) has its cost.
 3. Build `settle_upto` with the actual amount, the client's signed entry unchanged, and the
    facilitator's own entry. Re-simulate in enforcing mode and check that the client's tree is
    unchanged and the balance changes are `from` −actual and `to` +actual. A non-SAC token may
@@ -191,18 +203,19 @@ authorization is source-account credentials) and pays a fee bump. Each channel's
 disabled and the facilitator key is its only signer. `packages/signer-pool`'s
 `SettlementSubmitter` builds this shape.
 
-Measured in 0006 against the same contract code:
-
-| Shape                                                                | Size        | Fee charged (stroops) |
-| -------------------------------------------------------------------- | ----------- | --------------------- |
-| Facilitator as transaction source                                    | 2,352 B     | 40,709                |
-| **Channel source, facilitator as op source, fee bump (recommended)** | **2,516 B** | **40,965**            |
-| Channel source, facilitator address auth entry                       | 2,680 B     | 49,368                |
-
 With N channels, N settlements can land per ledger; one source account allows only one. The
-first settlement that creates a ledger entry also pays its rent, up to about 150,000 stroops, so
-the fee ceiling must allow for it. Costs and limits are in the
-[testnet report](../../docs/upto-proxy-testnet-report.md).
+cost of each shape, the throughput and the limits are measured in the
+[testnet report](../../docs/upto-proxy-testnet-report.md). A settlement that creates a ledger
+entry or extends a TTL also pays rent, which depends on the entry's size and the length of the
+extension, so the fee ceiling needs room above a normal settlement's fee.
+
+## Availability
+
+The instance and WASM entries expire like any persistent entry. Nothing extends their TTL yet:
+not the deploy script, not the e2e suite. If they are archived, every settlement needs a restore
+first, paid by the facilitator and possibly above its fee ceiling, or it fails. Open
+authorizations are bound to this address, so a redeployment can't take over. Whoever operates a
+deployment must keep its TTL extended.
 
 ## Build and test
 
@@ -217,7 +230,7 @@ pnpm contracts:e2e         # the on-chain suite on testnet (see e2e/README.md)
 
 The mocked-auth tests run against both a Stellar Asset Contract and the non-SAC SEP-41 token in
 `contracts/test-token`; the real-signature tests use the test token, and the e2e suite covers
-real signatures with the SAC and Circle USDC.
+real signatures on testnet with Circle USDC, a self-issued SAC asset and the non-SAC test token.
 
 ## Input for `scheme_upto_stellar.md`
 
@@ -237,14 +250,18 @@ spec is task 0034.
 6. **The facilitator in auth entries.** Narrow `exact`'s rule: the facilitator must not appear in
    any **client-signed** entry except as the signed `facilitator` value, and it must provide its
    own authorization for the call.
-7. **Expiry.** `allowance_expiration_ledger` equals `signatureExpirationLedger` and is at most
-   `currentLedger + ceil(maxTimeoutSeconds / 5)`; `deadline` is at most `now + maxTimeoutSeconds`.
+7. **Expiry.** `allowance_expiration_ledger` equals `signatureExpirationLedger` and lasts until
+   `deadline`; `deadline` is at most `now + maxTimeoutSeconds`. Seconds convert to ledgers with
+   the network's target close time (CAP-0070), not a fixed 5 s.
 8. **Verify** with `max_amount == requirements.amount`, and simulate the full ceiling.
 9. **Settle** against the signed `max_amount`, with `actual_amount` set to `requirements.amount`,
    which must not exceed it.
-10. **Zero amount.** No transaction, `transaction: ""`, `amount: "0"`.
-11. **Nonce reuse.** The facilitator keeps a durable record of settled `(from, nonce)` pairs and
-    refuses reuse at verify and settle, even when `is_nonce_used` is `false`.
+10. **Zero amount.** No transaction, `transaction: ""`, `amount: "0"`, and the pair is recorded
+    as settled (item 11).
+11. **Nonce reuse.** The facilitator keeps a durable record of settled `(from, nonce)` pairs,
+    zero settlements included, and refuses reuse at verify and settle, even when `is_nonce_used`
+    is `false`. The record is per facilitator; reuse across facilitators is the seller's credit
+    risk (threat model).
 12. **Balance checks.** The settle-time simulation shows only `from` −actual and `to` +actual, plus
     the `(from, proxy)` allowance write. Events alone aren't enough for non-SAC tokens.
 13. **Fees.** A fresh simulation plus a buffer; the client's fee is ignored. The fee ceiling must

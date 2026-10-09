@@ -169,8 +169,9 @@ settlements too.
 After the entry expires, `is_nonce_used` returns `false` again. The contract alone does not stop a
 nonce from being reused in a new payload signed later; the facilitator does (§8.1).
 
-There is no instance or persistent storage. The contract instance TTL is kept alive
-operationally by the deploy scripts in 0004.
+There is no instance or persistent storage. The contract instance and WASM entries still have a
+TTL. This spec said the 0004 deploy scripts would keep it alive; they don't (PR #12 review), so it
+is an open operational item, tracked in the threat model ("Proxy archived").
 
 ## 8. Invariants (every one gets a test in 0003)
 
@@ -192,9 +193,10 @@ operationally by the deploy scripts in 0004.
 The facilitator MUST keep a durable record of every `(from, nonce)` it has settled and MUST reject
 a payload whose pair is in that record at verify and again at settle, even when `is_nonce_used`
 returns `false`. The record MUST outlive the contract's nonce entry; the facilitator never deletes
-it. This goes into `scheme_upto_stellar.md` as a verification rule. It covers only settlements
-made through that facilitator; a client that reuses a nonce across facilitators has signed two
-separate payments.
+it. Zero settlements, which send no transaction, are recorded too. This goes into
+`scheme_upto_stellar.md` as a verification rule. It covers only settlements made through that
+facilitator; reuse across facilitators leaves the second seller unpaid (threat model, "Seller not
+paid").
 
 ## 9. Measured cost (spike, testnet, SAC token)
 
@@ -213,13 +215,10 @@ None. Client cancellation was considered and left out of v1 (S-cancellation).
 
 ## 11. Deviations from architecture doc §6.2
 
-| # | §6.2 | This spec | Why |
-|---|---|---|---|
-| D1 | No `token` parameter | `token` added and signed | F1, S-token-scope |
-| D2 | `facilitator` signed but unchecked | `facilitator.require_auth()` | F2, S-facilitator-binding |
-| D3 | Separate client `approve` | `approve` is a sub-invocation of the same auth entry | F3, S-allowance-in-auth-tree |
-| D4 | none | `allowance_expiration_ledger` parameter | S-time-bounds-and-expiry |
-| D5 | Time unit not specified | unix seconds, inclusive bounds | S-time-bounds-and-expiry |
-| D6 | Nonce storage not specified | temporary, keyed `(from, nonce)`, `is_nonce_used` view | S-nonce-storage |
-| D7 | none | Zero amount allowed without a transfer; `from == to` and `to == proxy` rejected | S-zero-amount-and-edge-inputs |
-| D8 | none | Immutable, typed errors, `UptoSettled` event | S-immutable |
+Moved to [ADR 0010](../../../../../docs/adr/0010-upto-proxy-design.md#deviations-from-architecture-doc-62),
+which is the canonical list. It keeps D1–D8 from this spec and adds D9 (`require_auth_for_args`
+runs before `approve`).
+
+The notes behind D1–D8: D1 F1 and S-token-scope, D2 F2 and S-facilitator-binding, D3 F3 and
+S-allowance-in-auth-tree, D4 and D5 S-time-bounds-and-expiry, D6 S-nonce-storage, D7
+S-zero-amount-and-edge-inputs, D8 S-immutable.
