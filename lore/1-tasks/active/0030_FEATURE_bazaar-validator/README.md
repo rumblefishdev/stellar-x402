@@ -28,6 +28,13 @@ history:
       Research session (no code): spike against @x402/extensions 2.28.0, red team /
       pre-mortem. Converted to a directory with notes R- and G-.
       Open questions now carry proposed answers; added an AC on bounded schema handling.
+  - date: "2026-10-09"
+    status: active
+    who: akot
+    note: >
+      Implemented packages/bazaar to the G-note contract: validate() with the 8-step check order,
+      normalize(), catalogKey(), canonicalizeUrl(), toExtensionResponses() and the iterative schema
+      walk. One committed test file covering the ACs; the wider suite (154 tests) runs locally. Shaped for 0031 (CatalogEntry types from 0017).
 ---
 
 # Bazaar validator and normalizer
@@ -131,13 +138,32 @@ listed separately below and stay open for the day-1 review.
 
 ## Acceptance Criteria
 
-- [ ] Given an `extensions.bazaar` block with an `http` or `mcp` input type, when it is validated, then a valid block becomes a normalized entry typed with `@x402/extensions`
-- [ ] Given a malformed required field, when it is validated, then the listing is rejected with a reason; a malformed optional field (`serviceName`, `tags`, `iconUrl`) is dropped and the listing kept
-- [ ] Given an `iconUrl`, when it is validated, then it is kept only if it is absolute https with no IP literal and no loopback or private host
-- [ ] Given calls to `/users/42` and `/users/7` with `routeTemplate` `/users/:userId`, when their catalog keys are computed, then both produce one key: `network + payTo + method + normalized URL`; `packages/bazaar` does no I/O and reads no env, and is fully unit-tested
-- [ ] Given the upstream helpers, when the package is reviewed, then validation and sanitizing call `@x402/extensions` instead of reimplementing its rules
-- [ ] Given a rejected listing, when the result is returned, then it carries a reason code from the fixed set that 0031 uses
-- [ ] Given a payload whose JSON Schema exceeds our size, depth or node-count caps, when it is validated, then the result is `schema_too_complex` and the schema is never compiled in-process
+- [x] Given an `extensions.bazaar` block with an `http` or `mcp` input type, when it is validated, then a valid block becomes a normalized entry typed with `@x402/extensions`
+- [x] Given a malformed required field, when it is validated, then the listing is rejected with a reason; a malformed optional field (`serviceName`, `tags`, `iconUrl`) is dropped and the listing kept
+- [x] Given an `iconUrl`, when it is validated, then it is kept only if it is absolute https with no IP literal and no loopback or private host
+- [x] Given calls to `/users/42` and `/users/7` with `routeTemplate` `/users/:userId`, when their catalog keys are computed, then both produce one key: `network + payTo + method + normalized URL`; `packages/bazaar` does no I/O and reads no env, and is fully unit-tested
+- [x] Given the upstream helpers, when the package is reviewed, then validation and sanitizing call `@x402/extensions` instead of reimplementing its rules
+- [x] Given a rejected listing, when the result is returned, then it carries a reason code from the fixed set that 0031 uses
+- [x] Given a payload whose JSON Schema exceeds our size, depth or node-count caps, when it is validated, then the result is `schema_too_complex` and the schema is never compiled in-process
+
+## Design Decisions (emerged in implementation)
+
+1. **Shown URL = key URL.** With an accepted template, `resource.resource` is the erased template
+   (`/users/:`), the same as the key, so payments naming the parameter differently don't rewrite
+   the listing (PR #15 review). `normalize()` builds the key from the validated result, without
+   re-validating the URL.
+2. **Only `bazaar` is echoed**, minus a discarded template; other client extensions never reach
+   the catalog.
+3. **`mimeType` may carry parameters** (`; charset=utf-8`).
+4. **`allowHttp` option**, off by default and passed by the caller (no env); host rules still
+   apply and icons stay https-only.
+5. **Recursive `$ref`** is caught when it targets an ancestor; indirect cycles are not (the schema
+   is never compiled).
+6. **Hosts and schemas (PR #15 review).** Upstream's icon host rules apply to resource URLs too,
+   plus single-label hosts and private suffixes (`.local`, `.internal`, `.home.arpa`, …). The
+   schema limits also cover mcp `inputSchema`; http `body`, `queryParams` and `pathParams` are
+   example values (upstream), bounded by the size cap only. Keyword rules skip property names and
+   `enum`/`default`/`const`/`examples` data.
 
 ## Future Work
 
