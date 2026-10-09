@@ -98,7 +98,8 @@ export class MemorySettlementStore implements SettlementStore {
     const record = this.records.get(key);
     // A final state is the end of the lifecycle: nothing moves on from it.
     if (!record || record.state !== expected || isFinal(expected)) return undefined;
-    if (ORDER[update.state] < ORDER[expected]) return undefined;
+    // Only forward: a same-state update would let two concurrent callers both win.
+    if (ORDER[update.state] <= ORDER[expected]) return undefined;
     Object.assign(record, structuredClone(update));
     return structuredClone(record);
   }
@@ -196,7 +197,9 @@ interface Reservation {
 }
 
 export class MemorySpendStore implements SpendStore {
-  // ponytail: reservations are never pruned; add a sweep past the longest window if memory grows.
+  // ponytail: reservations are never pruned, so memory and each `sum` scan grow with the process's
+  // settlements. Fine for tests and dev runs (deployments use the 0022 stores); prune past the
+  // longest window if a memory store ever runs for long.
   private readonly reservations = new Map<string, Reservation>();
   private readonly failures = new Map<SpendScope, number>();
   private readonly breakers = new Map<SpendScope, number>();

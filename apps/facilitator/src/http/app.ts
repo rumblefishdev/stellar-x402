@@ -1,3 +1,4 @@
+import { STATUS_CODES } from "node:http";
 import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
@@ -9,6 +10,10 @@ export interface AppDeps {
   logger: Logger;
   stores: Stores;
 }
+
+/** The status as a body code, like `not_found`: 413 → `payload_too_large`. */
+const code = (status: number) =>
+  (STATUS_CODES[status] ?? "error").toLowerCase().replace(/[^a-z]+/g, "_");
 
 const notImplemented: RequestHandler = (_req, res) => {
   res.status(501).json({ error: "not_implemented" });
@@ -33,15 +38,16 @@ export function createApp({ config, logger }: AppDeps): Express {
     res.status(404).json({ error: "not_found" });
   });
 
-  // Express tells an error handler apart by its four parameters, so `_next` must stay.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const onError: ErrorRequestHandler = (error, _req, res, _next) => {
+  const onError: ErrorRequestHandler = (error, _req, res, next) => {
     // body-parser marks the client's mistakes as `expose` (400 malformed JSON, 413 body over the
     // limit, 415 charset or encoding); anything else is ours.
     const status: number =
       error?.expose && error.status >= 400 && error.status < 500 ? error.status : 500;
     if (status === 500) logger.error("http_error", { error });
-    res.status(status).json({ error: status === 500 ? "internal_error" : "bad_request" });
+    // A route that already started its answer can't switch to an error: Express ends the
+    // connection.
+    if (res.headersSent) return next(error);
+    res.status(status).json({ error: status === 500 ? "internal_error" : code(status) });
   };
   app.use(onError);
   return app;

@@ -1,4 +1,5 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { Keypair } from "@stellar/stellar-sdk";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -54,12 +55,16 @@ describe("facilitator boot", () => {
         headers: { "content-type": "application/json", ...headers },
         body,
       });
-    expect((await post(JSON.stringify({ pad: "x".repeat(2_000) }))).status).toBe(413);
-    expect((await post("{")).status).toBe(400);
-    expect((await post("{}", { "content-type": "application/json; charset=latin1" })).status).toBe(
-      415,
-    );
-    expect((await post("{}", { "content-encoding": "x-foo" })).status).toBe(415);
+    const cases = [
+      [413, "payload_too_large", JSON.stringify({ pad: "x".repeat(2_000) }), {}],
+      [400, "bad_request", "{", {}],
+      [415, "unsupported_media_type", "{}", { "content-type": "application/json; charset=latin1" }],
+      [415, "unsupported_media_type", "{}", { "content-encoding": "x-foo" }],
+    ] as const;
+    for (const [status, error, body, headers] of cases) {
+      const response = await post(body, headers);
+      expect([response.status, await response.json()]).toEqual([status, { error }]);
+    }
     expect(lines.join("")).not.toContain("http_error");
   });
 
@@ -86,5 +91,22 @@ describe("startup with a bad config", () => {
     expect(output).toContain("FACILITATOR_SECRET must be a Stellar secret key");
     expect(output).toContain("CHANNELS is required");
     expect(output).not.toContain(bad);
+  }, 20_000);
+});
+
+describe("process signals", () => {
+  it("closes the server and exits 0 on SIGTERM", async () => {
+    const child = spawn(process.execPath, ["--import", "tsx", "src/server.ts"], {
+      cwd: fileURLToPath(new URL("..", import.meta.url)),
+      env: { ...env, PORT: "47129" },
+    });
+    let output = "";
+    child.stdout.on("data", (chunk) => {
+      output += chunk;
+      if (output.includes('"listening"')) child.kill("SIGTERM");
+    });
+    const [code, signal] = await once(child, "exit");
+    // Without a handler the process dies by the signal: code null, signal "SIGTERM".
+    expect([code, signal], output).toEqual([0, null]);
   }, 20_000);
 });

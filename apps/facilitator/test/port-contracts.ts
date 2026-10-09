@@ -99,6 +99,10 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       expect(await store.transition(key, "claimed", { state: "pending", updatedAt: 3_000 })).toBe(
         undefined,
       );
+      // The same state isn't a move: it would let two callers both win.
+      expect(
+        await store.transition(key, "signed", { state: "signed", channel: "GX", updatedAt: 2_500 }),
+      ).toBe(undefined);
       const pending = await store.transition(key, "signed", {
         state: "pending",
         channel: "GCHANNEL",
@@ -116,6 +120,20 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       });
       expect(success).toMatchObject({ state: "success", ledger: 42, feeCharged: 41_000n });
       expect(await store.get(key)).toMatchObject({ state: "success", feeCharged: 41_000n });
+    });
+
+    it("lets exactly one of several concurrent transitions from a state win", async () => {
+      const { key } = settlement("1");
+      await store.claim(settlement("1"));
+      await store.addHash(key, "h1", 2_000);
+      const results = await Promise.all(
+        ["GA", "GB", "GC"].map((channel) =>
+          store.transition(key, "signed", { state: "pending", channel, updatedAt: 3_000 }),
+        ),
+      );
+      const winners = results.filter((record) => record !== undefined);
+      expect(winners).toHaveLength(1);
+      expect((await store.get(key))?.channel).toBe(winners[0]?.channel);
     });
 
     it("never moves a record on from a final state", async () => {

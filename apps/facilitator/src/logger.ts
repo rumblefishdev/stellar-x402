@@ -19,16 +19,21 @@ const plain = ({ name, message, stack }: Error) => ({ name, message, stack });
  * (`JSON.stringify` drops all of them). A stack adds code locations, not data: its first line is
  * the message.
  *
+ * An error is recognized by the holder's original value: `JSON.stringify` calls `toJSON` before
+ * the replacer, and the snapshot an AxiosError (stellar-sdk's RPC client) returns holds the
+ * request body, i.e. a signed transaction's XDR.
+ *
  * ponytail: one level of cause, so a cyclic chain can't recurse; walk the chain with a seen-set if
  * deeper causes turn out to matter.
  */
-function replacer(_key: string, value: unknown): unknown {
-  if (typeof value === "bigint") return value.toString();
-  if (value instanceof Error)
+function replacer(this: Record<string, unknown>, key: string, value: unknown): unknown {
+  const original = this[key];
+  if (original instanceof Error)
     return {
-      ...plain(value),
-      cause: value.cause instanceof Error ? plain(value.cause) : undefined,
+      ...plain(original),
+      cause: original.cause instanceof Error ? plain(original.cause) : undefined,
     };
+  if (typeof value === "bigint") return value.toString();
   return value;
 }
 
@@ -47,7 +52,15 @@ export function jsonLogger(
       if (LEVELS.indexOf(logLevel) < LEVELS.indexOf(level)) return;
       // The envelope comes first and is spread again last, so no field can overwrite it.
       const envelope = { time: new Date().toISOString(), level: logLevel, event };
-      write(`${JSON.stringify({ ...envelope, ...fields, ...envelope }, replacer)}\n`);
+      let line: string;
+      try {
+        line = JSON.stringify({ ...envelope, ...fields, ...envelope }, replacer);
+      } catch {
+        // A cyclic or otherwise unserializable field. A log call must not throw: in the HTTP
+        // error handler that would hand the error to Express, which answers with its stack.
+        line = JSON.stringify({ ...envelope, fields: "unserializable" });
+      }
+      write(`${line}\n`);
     };
   return { debug: at("debug"), info: at("info"), warn: at("warn"), error: at("error") };
 }
