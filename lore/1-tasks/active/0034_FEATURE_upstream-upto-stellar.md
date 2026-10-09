@@ -133,9 +133,10 @@ Base it on 0005's spec-input list. It covers:
   - credential types (`Address` / `AddressV2`);
   - simulation;
   - the validity window against the current ledger;
-  - `allowance_expiration_ledger` no further than the window (`maxTimeoutSeconds` in ledgers plus
-    a margin) and equal to `signatureExpirationLedger`: the facilitator pays the nonce's and the
-    allowance's rent until then. The contract refuses anything over 17,280 ledgers ahead
+  - `allowance_expiration_ledger` no earlier than the deadline's ledger and no further than the
+    window (`maxTimeoutSeconds` in ledgers plus a margin), and equal to `signatureExpirationLedger`
+    (a MUST: the host's nonce for the client's signature lives until then, and the contract never
+    sees it). The facilitator pays all three entries' rent. The contract refuses anything over 17,280 ledgers ahead
     (ADR 0010, D11), so `maxTimeoutSeconds` for `upto` is at most about a day;
   - `from` is not the facilitator;
   - the nonce is unused.

@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Address, authorizeEntry, nativeToScVal, type xdr } from "@stellar/stellar-sdk";
 import { type ContractCall, SettlementSubmitter, keypairSigner } from "@stellar-x402/signer-pool";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   PASSPHRASE,
   RPC_URL,
@@ -70,9 +70,9 @@ interface ScenarioResult {
 let world: World;
 let submitter: SettlementSubmitter;
 let otherSubmitter: SettlementSubmitter;
-/** Ledger and unix time at the start of the run, to convert deadlines to ledgers. */
-let startLedger: number;
-let startTime: number;
+/** A recent ledger and its unix time, to convert deadlines to ledgers; refreshed before each test. */
+let anchorLedger: number;
+let anchorTime: number;
 let clientXlmBefore: bigint;
 const results: ScenarioResult[] = [];
 /** The last successful settlement per token, replayed by the replay scenarios. */
@@ -91,8 +91,6 @@ beforeAll(async () => {
     signer: keypairSigner(world.otherFacilitator),
     channels: world.otherChannels,
   });
-  startLedger = (await server.getLatestLedger()).sequence;
-  startTime = Math.floor(Date.now() / 1000);
   // Taken after setup, which pays the client's trustline fees: the check covers settlements.
   clientXlmBefore = await xlmBalance(world.client.publicKey());
 });
@@ -127,7 +125,14 @@ afterAll(() => {
 });
 
 /** The ledger expected to close at `unix`, estimated from the run's start at 5 s a ledger. */
-const ledgerAt = (unix: number) => startLedger + Math.ceil((unix - startTime) / LEDGER_SECONDS);
+const ledgerAt = (unix: number) => anchorLedger + Math.ceil((unix - anchorTime) / LEDGER_SECONDS);
+
+// Re-anchor before every test: an estimate from the run's start drifts when ledgers close slower
+// than 5 s, and the facilitator's window has only a few ledgers of slack.
+beforeEach(async () => {
+  anchorLedger = (await server.getLatestLedger()).sequence;
+  anchorTime = Math.floor(Date.now() / 1000);
+});
 
 /**
  * Payment terms whose allowance expires with the deadline. A deadline in the past still gets a
@@ -152,11 +157,19 @@ const terms = (kind: TokenKind, overrides: Partial<UptoTerms> = {}): UptoTerms =
   return { ...t, allowanceExpirationLedger: until + MARGIN_LEDGERS };
 };
 
-/** The facilitator's window check, against the current ledger. */
-const facilitatorWindow = async () => ({
-  latestLedger: (await server.getLatestLedger()).sequence,
-  maxLedgers: MAX_WINDOW_LEDGERS,
-});
+/**
+ * The facilitator's window for `t`, against the current ledger: the allowance may end no later
+ * than the window and no earlier than the deadline's ledger, both with a margin.
+ */
+const facilitatorWindow = async (t: UptoTerms) => {
+  const latestLedger = (await server.getLatestLedger()).sequence;
+  const secondsLeft = Number(t.deadline) - Math.floor(Date.now() / 1000);
+  return {
+    latestLedger,
+    maxLedgers: MAX_WINDOW_LEDGERS,
+    minLedger: latestLedger + Math.floor(secondsLeft / LEDGER_SECONDS) - MARGIN_LEDGERS,
+  };
+};
 
 /** Runs `body`, recording its outcome whether it passes or throws. */
 async function scenario(
@@ -245,7 +258,7 @@ async function settleAndCheck(
   auth: xdr.SorobanAuthorizationEntry,
   actual: bigint,
 ): Promise<TxReport> {
-  checkClientAuth(auth, t, await facilitatorWindow());
+  checkClientAuth(auth, t, await facilitatorWindow(t));
   const before = await balances(t);
   const result = await submitter.submit(settleCall(auth, t, actual));
   expect(result.status, `submit ${result.hash}: ${result.errorCode ?? ""}`).toBe("success");
@@ -413,9 +426,8 @@ describe.each(TOKENS)("UptoProxy on testnet with %s", (kind) => {
             await clientSign(a, world.client),
             await clientSign(b, world.client),
           ];
-          const window = await facilitatorWindow();
-          checkClientAuth(authA, a, window);
-          checkClientAuth(authB, b, window);
+          checkClientAuth(authA, a, await facilitatorWindow(a));
+          checkClientAuth(authB, b, await facilitatorWindow(b));
           // Both are signed before either is sent, so each balance check would see the other's
           // transfer; check the pair as a whole instead.
           const before = await balances(a);
@@ -464,9 +476,9 @@ describe("client and facilitator checks", () => {
           Address.fromString(t.facilitator).toScVal(),
           nativeToScVal(t.maxAmount, { type: "i128" }),
         ]);
-        expect(() => signSimulatedEntry(unsignedEntry(t.from, transfer), t, world.client)).toThrow(
-          /does not match the payment terms/,
-        );
+        await expect(
+          signSimulatedEntry(unsignedEntry(t.from, transfer), t, world.client),
+        ).rejects.toThrow(/does not match the payment terms/);
         const honest = unsignedEntry(t.from, expectedClientInvocation(t));
         await expect(signSimulatedEntry(honest, t, world.client)).resolves.toBeDefined();
         r.outcome = "forged tree refused, honest tree signed";
@@ -479,11 +491,29 @@ describe("client and facilitator checks", () => {
       "facilitator refuses an allowance that outlives the window",
       "refused before settlement",
       async (r) => {
-        const window = await facilitatorWindow();
-        const far = terms(kind, { allowanceExpirationLedger: window.latestLedger + 100_000 });
+        const latest = (await server.getLatestLedger()).sequence;
+        const far = terms(kind, { allowanceExpirationLedger: latest + 100_000 });
         const auth = await clientSignDirect(far, world.client);
+        const window = await facilitatorWindow(far);
         expect(() => checkClientAuth(auth, far, window)).toThrow(/ledgers past/);
-        r.outcome = `refused: ${window.latestLedger + 100_000} is over ${window.maxLedgers} ledgers ahead`;
+        r.outcome = `refused: ${latest + 100_000} is over ${window.maxLedgers} ledgers ahead`;
+      },
+    ));
+
+  it("facilitator refuses an allowance that ends before the deadline", () =>
+    scenario(
+      "all",
+      "facilitator refuses an allowance that ends before the deadline",
+      "refused before settlement",
+      async (r) => {
+        // A 15-minute deadline with an allowance 2 ledgers long: verify would pass, the seller
+        // would serve, and the settlement would fail with Expired (#5).
+        const latest = (await server.getLatestLedger()).sequence;
+        const short = terms(kind, { allowanceExpirationLedger: latest + 2 });
+        const auth = await clientSignDirect(short, world.client);
+        const window = await facilitatorWindow(short);
+        expect(() => checkClientAuth(auth, short, window)).toThrow(/ends before the deadline/);
+        r.outcome = `refused: ${latest + 2} is before ledger ${window.minLedger}`;
       },
     ));
 
@@ -543,9 +573,10 @@ describe("availability", () => {
     ));
 
   // After a full run the main proxy's TTL is at least the contract's own target, less the skip
-  // window: the deploy script set it to the network maximum, or, with EXTEND_TTL=0, the
-  // settlements extended it themselves.
-  it("keeps the proxy's instance and code alive", () =>
+  // window, because the deploy script set it to the network maximum. With EXTEND_TTL=0 the proxy
+  // starts at the network minimum (120,960 ledgers) and a run's settlements add only about 16,000,
+  // so the check is skipped.
+  it.skipIf(process.env.EXTEND_TTL === "0")("keeps the proxy's instance and code alive", () =>
     scenario(
       "all",
       "proxy instance and code stay alive",
@@ -556,7 +587,8 @@ describe("availability", () => {
         expect(t.code).toBeGreaterThanOrEqual(TTL_EXTEND_TO - TTL_MIN_EXTENSION);
         r.outcome = `instance ${t.instance}, code ${t.code} ledgers left at ledger ${t.latest}`;
       },
-    ));
+    ),
+  );
 });
 
 describe("fees", () => {

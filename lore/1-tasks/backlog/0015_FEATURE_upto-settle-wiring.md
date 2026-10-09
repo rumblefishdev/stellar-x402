@@ -51,11 +51,20 @@ after T1.
     allowance until then, about 1.3 stroops per ledger on testnet; the furthest the network
     allows is 3.9 million stroops, refused by the fee ceiling after the seller has served. The
     contract caps it at 17,280 ledgers (ADR 0010, D11) only as a backstop.
-  - a `signatureExpirationLedger` that differs from `allowance_expiration_ledger`;
+  - **MUST:** a `signatureExpirationLedger` that differs from `allowance_expiration_ledger`. The
+    host keeps a nonce entry for the client's signature until then and the contract never sees
+    it, so this check is its only bound (PR #14 review);
+  - **MUST:** `allowance_expiration_ledger` before the deadline's ledger, less a margin. It would
+    pass verify and then fail the settlement with `Expired` after the seller has served (PR #14
+    review);
   - `from` equal to the facilitator's address (the host refuses it on chain anyway);
   - a `token` other than the requirements' asset; take it from the requirements, never the
     payload, and check balance changes in the simulation, not only events (a no-op token
     "settles" with an event and no transfer).
+  - Size `maxFeeStroops` for `upto` for the stacked worst case: the proxy's extension and a capped
+    expiry (about 215,000) plus the token extending its own instance (116,316 in 0006). Measure it
+    or raise the ceiling (PR #14 review).
+  - Estimate ledgers from a fresh `getLatestLedger()`, never a stale anchor (PR #14 review).
   - Port `checkClientAuth` and its e2e scenarios ("facilitator refuses an allowance that outlives
     the window", "... a signature expiry that differs") as unit tests.
 - Build the `settle_upto` call from the payload and submit it through the pool (AD-2, AD-4).
@@ -70,6 +79,7 @@ after T1.
 
 - [ ] `/settle` settles `upto` through the pool with the same record and budget rules as `exact`
 - [ ] A zero-amount `upto` settlement submits nothing
-- [ ] `/verify` refuses an `upto` allowance that outlives the payment window, a signature expiry
-      that differs from it, `from` equal to the facilitator, and a token other than the asset
+- [ ] `/verify` refuses an `upto` allowance that outlives the payment window or ends before the
+      deadline, a signature expiry that differs from it, `from` equal to the facilitator, and a
+      token other than the asset
 - [ ] `/supported` lists `upto` on testnet

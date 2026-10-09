@@ -39,7 +39,8 @@ TTL measurements, is at <https://claude.ai/artifact/TNurkGqjefJWXtKCNPwkcE>.
 
 `EXTEND_TTL=0` skips the deploy-time extension, so a fresh proxy starts at the network's minimum
 TTL and its first settlements pay for the contract's own extension. Task 0035 used it to measure
-that cost; a run like that fails the availability check by design.
+that cost; a run like that skips the availability check, since its settlements can't bring the
+proxy up to the contract's target.
 
 ### Testnet USDC
 
@@ -67,13 +68,14 @@ SEP-41 `test-token`):
 Every authorization expires with its payment window: the deadline is 900 s ahead, and the
 allowance and the signature expire at the deadline's ledger plus 12. Before each settlement the
 facilitator's `checkClientAuth` checks the tree, that the signature expires with the allowance, and
-that the allowance ends at most 204 ledgers (the window plus margins) after the current ledger.
+that the allowance ends no earlier than the deadline's ledger and at most 204 ledgers (the window
+plus margins) after the current ledger. The ledger estimate is re-anchored before every test.
 
 Once, with the first token:
 
 - **Client and facilitator checks:** the client refuses to sign a simulated tree that differs from
   the terms (a forged `token.transfer`), and the facilitator refuses an allowance that outlives the
-  window and a signature that expires apart from the allowance. These run off chain.
+  window or ends before the deadline, and a signature that expires apart from the allowance. These run off chain.
 - **Self-extension:** a fresh instance of the proxy's WASM, deployed under a random salt without the
   deploy-time extension, starts at the network's minimum TTL; each of two settlements on it must
   add exactly 720 ledgers to its instance and leave the shared code entry alone. The main proxy

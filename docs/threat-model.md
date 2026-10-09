@@ -153,19 +153,24 @@ What each party must trust:
   The payer picks `allowance_expiration_ledger`, and the facilitator pays temporary rent on the
   nonce entry and the token's allowance entry until then: in the unit test
   `a_far_allowance_expiration_costs_the_facilitator_rent`, the furthest expiry the network allows
-  costs about 14 million stroops more than one 12 ledgers ahead. Over the fee ceiling, the
-  settlement is refused after the seller has served; under it, every settlement can be made to
-  cost up to the ceiling.
+  costs about 14 million stroops more than one 12 ledgers ahead. The host also keeps a nonce
+  entry for the client's signature until `signatureExpirationLedger`, which the payer picks too
+  and the contract never sees. Over the fee ceiling, the settlement is refused after the seller
+  has served; under it, every settlement can be made to cost up to the ceiling.
 - **Mitigation:** The facilitator computes fees from a fresh simulation and caps them with
   `maxFeeStroops` (250,000 by default, ADR 0007). At verify it refuses an
-  `allowance_expiration_ledger` beyond the payment window (README, Verify step 2), which bounds
-  the nonce and allowance rent; the facilitator's `/verify` for `upto` is task 0015, and until
+  `allowance_expiration_ledger` beyond the payment window and a `signatureExpirationLedger` that
+  differs from it (README, Verify step 2). The second check is the only bound on the signature
+  nonce's rent, so it is required, not defence in depth; the facilitator's `/verify` for `upto` is task 0015, and until
   then the rule is enforced only by the e2e suite's `checkClientAuth`. The contract refuses an
   expiry more than 17,280 ledgers (about a day) ahead, so even a facilitator that skips the check
   pays at most about 25,000 stroops of it (ADR 0010, D11). The proxy's own extension
   is capped at 720 ledgers per settlement, about 149,000 stroops on testnet (ADR 0010, D10).
 - **Residual risk:** Rent depends on the entry's size and the length of the extension, so there
-  is no fixed bound. A settlement that pays it can cost several times a normal one; the
+  is no fixed bound. The proxy's extension and a capped expiry come to about 215,000 stroops; if
+  the token extends its own instance in the same settlement (116,316 in task 0006), the total is
+  about 330,000, over the default ceiling, and a valid payment is refused. Not measured; the
+  ceiling for `upto` is sized in 0015. A settlement that pays it can cost several times a normal one; the
   [testnet report](upto-proxy-testnet-report.md#known-limits) has the measured case.
 
 #### Nonce griefing
