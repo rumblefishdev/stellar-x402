@@ -176,6 +176,6 @@ The source RFP and architecture docs in `docs/rfp/` are left unchanged. Deviatio
 ## Future Work
 
 - **Extend the proxy's instance and WASM TTL**: nothing in `deploy/` or the e2e suite does it
-  (threat model, "Proxy archived"). Backlog task waiting on okarcz's go-ahead.
+  (threat model, "Proxy archived"). Backlog task 0035.
 - **Sync the 0034 drafts** with the review outcome: ledger close time, zero-settlement record,
   rent wording.
