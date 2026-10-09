@@ -7,12 +7,10 @@ extern crate std;
 
 mod amount_properties;
 mod real_signatures;
-mod sep41_token;
 mod signing;
 mod wasm;
 
 use super::*;
-use sep41_token::{TestToken, TestTokenClient};
 use soroban_sdk::{
     testutils::{
         storage::Temporary as _, Address as _, AuthorizedFunction, AuthorizedInvocation, Events,
@@ -22,6 +20,7 @@ use soroban_sdk::{
     xdr::ScVal,
     Event, InvokeError, Symbol, TryFromVal, Val, Vec,
 };
+use test_token::{TestToken, TestTokenClient};
 
 const NOW: u64 = 1_500;
 const SEQ: u32 = 100;

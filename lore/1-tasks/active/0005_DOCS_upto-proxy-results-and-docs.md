@@ -108,6 +108,6 @@ The source RFP and architecture docs in `docs/rfp/` are left unchanged. Deviatio
 ## Acceptance Criteria
 
 - [ ] The ADR, contract README, threat-model section and testnet report are written
-- [ ] Every transaction hash in the report resolves on stellar.expert
+- [ ] Every transaction hash in the report resolves on sorobanscan (`testnet.sorobanscan.rumblefish.dev`)
 - [ ] The testnet report includes the 0006 throughput numbers and the one-payment-per-transaction limit
 - [ ] `format:check` passes

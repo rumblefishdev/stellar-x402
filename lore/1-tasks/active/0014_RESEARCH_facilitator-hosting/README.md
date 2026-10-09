@@ -78,6 +78,9 @@ for the mainnet milestone as `deploy/README.md` currently says.
 - Secret handling for the facilitator key: env secrets versus a KMS; the pool's
   `TransactionSigner` is already KMS-pluggable.
 - Find out whether there is a team or company default platform or an existing account.
+- From 0017: logs must not carry RPC URLs as they are, since an RPC URL can hold an API key.
+  The platform's log pipeline also decides the logger backend: 0017's `jsonLogger` writes JSON
+  lines to stdout by hand; switch to pino if transports or redaction need it.
 
 ### Step 2: Compare options
 
