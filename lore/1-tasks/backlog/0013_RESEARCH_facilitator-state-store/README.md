@@ -72,8 +72,13 @@ Options raised in the session:
 - **SQLite on a persistent volume:** no database service to run; we'd migrate later.
 - **In-memory:** ruled out for the settlement record, which must survive restarts.
 
-The store is closely tied to hosting, which is still open, so the research should note what each
-option needs from the host.
+The store is closely tied to hosting, so the research should note what each option needs from
+the host.
+
+From 0014 ([ADR 0011](../../../../docs/adr/0011-facilitator-hosting.md)): the host is ECS on
+Fargate in AWS. RDS PostgreSQL fits (db.t4g.micro ~$14/mo single-AZ, ~$27/mo Multi-AZ). SQLite
+doesn't: Fargate's only persistent volume is EFS, an NFS mount that SQLite advises against, so
+SQLite would move the facilitator to EC2 with EBS.
 
 ## Implementation Plan
 

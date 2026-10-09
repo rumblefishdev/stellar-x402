@@ -35,6 +35,15 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
 - Metrics adapter in `adapters/` fed by pool events and the HTTP layer.
 - Alert rules for the five conditions; a balance check on a timer.
 - Update `docs/monitoring.md`.
+- From 0014 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md)): the backend is
+  CloudWatch. The metrics adapter writes Embedded Metric Format lines to stdout (namespace
+  `x402-facilitator`), and `awslogs` turns them into metrics; no SDK or agent. Dimensions stay
+  low-cardinality (`network`, route, outcome, event name), never payer or `payTo`. Check once that
+  extraction works, since some setups report it failing.
+- From 0014: alarms → SNS → Amazon Q Developer in chat applications → the team's Slack channel;
+  a Route 53 HTTPS health check on the public `/supported` measures uptime.
+- From 0014: export "lease held" as a metric with an alarm. The health check doesn't look at the
+  lease (ADR 0011), so this is how a process stuck without the lease is noticed.
 
 ## Acceptance Criteria
 
