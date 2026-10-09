@@ -5,21 +5,21 @@ status: mature
 spawns: [notes/G-day1-contract-and-tests.md]
 tags: [bazaar, discovery, security, research]
 links:
-  - https://github.com/x402-foundation/x402/blob/main/specs/extensions/bazaar.md
+  - https://github.com/x402-foundation/x402/blob/7f2b2f1/specs/extensions/bazaar.md
   - https://docs.cdp.coinbase.com/x402/seller/get-discovered.md
 history:
   - date: "2026-10-08"
     status: mature
     who: akot
-    note: "bmad-deep-recon run (technical + competitive), spike against @x402/extensions 2.28.0, party-mode and red team / pre-mortem pressure test."
+    note: "Research session: technical and competitive research, spike against @x402/extensions 2.28.0, red team / pre-mortem."
 ---
 
 # Bazaar validation landscape
 
 Research for 0030, run on 2026-10-08. Upstream read at `x402-foundation/x402@7f2b2f1`
 (2026-10-07); the bazaar code in `@x402/extensions` 2.27.0 and 2.28.0 is byte-identical, so the
-0016 upgrade does not change it. The raw run folder (digests, spike scripts, transcripts) is local
-and gitignored: `_bmad-output/planning-artifacts/research/technical-x402-bazaar-validation-and-catalog-keys-2026-10-08/`.
+0016 upgrade does not change it. The raw run material (digests, spike scripts, transcripts) is kept
+locally.
 
 ## Key findings
 
@@ -68,7 +68,7 @@ Classification:
 |---|---|---|---|
 | G1 | Seller-supplied schema handling on the extract path (details withheld) | private security note, not committed | a + b (private, coordinated disclosure) |
 | G2 | `info` validated only against its own schema; `schema: {}` admits method TRACE or an object `toolName` | spec validator unused on extract path, dist 711-765 vs 783 | a + b |
-| G3 | Throws on missing/invalid `resource.url` and missing `info.input` | dist 809, 838 | a + b |
+| G3 | Throws on missing/invalid `resource.url` and missing `info.input`; returns `null` both for no `info` and for `x402Version` ∉ {1, 2}. So our checks must read the raw payload before extraction (G note, implementation rule) | dist 809, 838 | a + b |
 | G4 | `routeTemplate` never matched to the URL (`/premium` can stand in for `/cheap`) | dist 810; CDP enforces it (#3019) | a + b |
 | G5 | `routeTemplate` applied to MCP URLs | dist 810 before type branch | a + b |
 | G6 | Loose template grammar: `//evil.com`, `%00`, CRLF, bidi, 100k chars | regex dist 548 | a + b |
@@ -110,7 +110,7 @@ for the day-1 review.
 
 ## Sources
 
-- [x402 bazaar spec @ 7f2b2f1](https://github.com/x402-foundation/x402/blob/main/specs/extensions/bazaar.md):
+- [x402 bazaar spec @ 7f2b2f1](https://github.com/x402-foundation/x402/blob/7f2b2f1/specs/extensions/bazaar.md):
   - l.282 MCP key;
   - l.384-391 sanitizing;
   - l.487-516 `EXTENSION-RESPONSES`;

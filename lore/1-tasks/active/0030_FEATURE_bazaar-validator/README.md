@@ -25,8 +25,8 @@ history:
     status: active
     who: akot
     note: >
-      Research session (no code): bmad-deep-recon, a spike against @x402/extensions 2.28.0,
-      party mode and red team / pre-mortem. Converted to a directory with notes R- and G-.
+      Research session (no code): spike against @x402/extensions 2.28.0, red team /
+      pre-mortem. Converted to a directory with notes R- and G-.
       Open questions now carry proposed answers; added an AC on bounded schema handling.
 ---
 
@@ -91,13 +91,24 @@ listed separately below and stay open for the day-1 review.
   behaviour to stay interoperable with the ecosystem (ADR 0008); seller feedback on a dropped
   template is a follow-up (a dry-run validate endpoint, see Future Work).
 - **Parameter names erased in the key (decided, red-team RT3).** `/users/:id` and `/users/:userId`
-  produce one key; the original template is kept for display only.
+  produce one key; the original template is kept for display only. **Accepted limit:** erasure
+  applies only to an accepted template, so `/users/42` without one (or with a discarded one) is a
+  second key for the same resource. Bounded by the RT4 caps; RT5 auto-templating (Future Work)
+  removes most of it.
+- **Checks run on the raw payload before upstream extraction (decided).** `extractDiscoveryInfo`
+  throws on a bad `resource.url` or missing `info.input` and returns `null` for several distinct
+  cases, so presence, version, shape, URL and limits are checked first and it is called last. Its
+  `resourceUrl` (`origin + routeTemplate`) is never stored. Order and codes are in the G note.
 - **Reason codes.** Closed set, sent as the value of the spec's `rejectedReason`:
   `invalid_extension`, `invalid_info`, `invalid_resource_url`, `too_large`, `schema_too_complex`,
   `unsupported_version`, `internal_error`.
-- **Size limits.** Extension ≤ 32 KiB, description ≤ 500 chars (CDP parity; rejects the listing,
-  never the payment), schema depth ≤ 10 and ≤ 1,000 nodes, `routeTemplate` ≤ 256, `toolName`
-  ≤ 128, URL ≤ 2048.
+- **Size limits.** Extension ≤ 32 KiB and description ≤ 500 chars (`too_large`; CDP parity;
+  rejects the listing, never the payment), schema depth ≤ 10 and ≤ 1,000 nodes
+  (`schema_too_complex`), `toolName` ≤ 128 (`invalid_info`), URL ≤ 2048
+  (`invalid_resource_url`). `routeTemplate` ≤ 256 is part of the template grammar: a longer one is
+  discarded with the spec fallback, not rejected.
+- **`http` requires `method` (decided).** Upstream allows it to be absent; we reject with
+  `invalid_info` rather than default it.
 - **Bounded schema handling (decided, red-team RT6).** The schema is walked **iteratively** for
   the caps above, so a deeply-nested payload cannot overflow our own stack, and it is never
   compiled in-process.
