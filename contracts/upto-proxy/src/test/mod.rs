@@ -386,14 +386,15 @@ fn time_window_is_inclusive() {
 
 #[test]
 fn allowance_expiration_ledger_bounds() {
-    let max_live = setup(TokenKind::Sac).env.ledger().max_live_until_ledger();
+    let cap = SEQ + MAX_ALLOWANCE_LEDGERS;
+    assert!(cap < setup(TokenKind::Sac).env.ledger().max_live_until_ledger());
     for kind in TOKEN_KINDS {
         for (exp, expected) in [
             (SEQ - 1, Err(Ok(UptoError::Expired))),
             (SEQ, Ok(Ok(()))),
             (SEQ + 1, Ok(Ok(()))),
-            (max_live, Ok(Ok(()))),
-            (max_live + 1, Err(Ok(UptoError::InvalidAllowanceExpiration))),
+            (cap, Ok(Ok(()))),
+            (cap + 1, Err(Ok(UptoError::InvalidAllowanceExpiration))),
         ] {
             let s = setup(kind);
             let p = Payment {
@@ -402,6 +403,26 @@ fn allowance_expiration_ledger_bounds() {
             };
             assert_eq!(settle(&s, &p, 10), expected, "{kind:?} exp = {exp}");
         }
+    }
+}
+
+/// On a network whose `max_entry_ttl` is shorter than the cap, the network limit applies.
+#[test]
+fn allowance_expiration_ledger_stops_at_the_network_limit() {
+    let s = setup(TokenKind::Sac);
+    s.env.ledger().with_mut(|l| l.max_entry_ttl = 1_000);
+    let max_live = s.env.ledger().max_live_until_ledger();
+    assert!(max_live < SEQ + MAX_ALLOWANCE_LEDGERS);
+    for (exp, expected) in [
+        (max_live, Ok(Ok(()))),
+        (max_live + 1, Err(Ok(UptoError::InvalidAllowanceExpiration))),
+    ] {
+        let p = Payment {
+            exp_ledger: exp,
+            nonce: BytesN::from_array(&s.env, &[exp as u8; 32]),
+            ..s.p.clone()
+        };
+        assert_eq!(settle(&s, &p, 10), expected, "exp = {exp}");
     }
 }
 

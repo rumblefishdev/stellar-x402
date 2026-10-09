@@ -56,7 +56,8 @@ SEP-41 `test-token`):
   `upto_settled` event, the used nonce, the leftover allowance and the transaction's fee payer
   and sources.
 - **Rejected:** an amount over the ceiling, a replayed auth entry, a reused nonce with a new
-  signature, before `valid_after`, after the deadline, and a different facilitator.
+  signature, before `valid_after`, after the deadline, an allowance expiry past the contract's
+  17,280-ledger cap, and a different facilitator.
 - **Tampering:** changing the recipient, token, ceiling or nonce breaks the client's signature, and
   so does another facilitator rewriting the `facilitator` argument to itself.
 - **Concurrency:** two authorizations from one payer, one after the other and in the same ledger

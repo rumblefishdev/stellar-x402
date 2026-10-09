@@ -41,6 +41,8 @@ const MAX = 1_000_000n; // 0.1 of a 7-decimal token
 // The contract's own TTL targets (lib.rs, task 0035), in ledgers.
 const TTL_EXTEND_TO = 518_400;
 const TTL_MIN_EXTENSION = 120;
+// The contract's cap on allowance_expiration_ledger, in ledgers past the current one (lib.rs).
+const MAX_ALLOWANCE_LEDGERS = 17_280;
 // The payment window: newTerms sets deadline = now + 900 s, as a seller's maxTimeoutSeconds would.
 // The allowance (and the signature, spec §3.1) expires with it: the deadline in ledgers, plus a
 // margin for the estimate. The facilitator refuses expiries further out than the window.
@@ -339,6 +341,20 @@ describe.each(TOKENS)("UptoProxy on testnet with %s", (kind) => {
       const auth = await clientSignDirect(t, world.client);
       await expectRefused(r, settleCall(auth, t, 1n), CONTRACT(5));
     }));
+
+  it("rejects an allowance expiry beyond the contract's cap", () =>
+    scenario(
+      kind,
+      "rejects an allowance expiry beyond the contract's cap",
+      "InvalidAllowanceExpiration (#6)",
+      async (r) => {
+        // Past the facilitator's window too; this checks the contract's own defence.
+        const latest = (await server.getLatestLedger()).sequence;
+        const t = terms(kind, { allowanceExpirationLedger: latest + MAX_ALLOWANCE_LEDGERS + 100 });
+        const auth = await clientSignDirect(t, world.client);
+        await expectRefused(r, settleCall(auth, t, 1n), CONTRACT(6));
+      },
+    ));
 
   it("rejects a different facilitator", () =>
     scenario(kind, "rejects a different facilitator", "Error(Auth, InvalidAction)", async (r) => {

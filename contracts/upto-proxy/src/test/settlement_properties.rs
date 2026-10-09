@@ -7,13 +7,13 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(256))]
 
     /// Any time window and expiry ledger gives exactly the result of the spec's check order
-    /// (§4 steps 6–7), and the nonce and allowance are written only on success.
+    /// (§4 steps 6–7, with the `MAX_ALLOWANCE_LEDGERS` cap), and the nonce and allowance are written only on success.
     #[test]
     fn window_follows_the_check_order(
         now in 0u64..4_000,
         valid_after in 0u64..4_000,
         deadline in 0u64..4_000,
-        exp_offset in -50i64..5_000,
+        exp_offset in -50i64..20_000,
     ) {
         let s = setup(TokenKind::Sac);
         s.env.ledger().set_timestamp(now);
@@ -25,7 +25,7 @@ proptest! {
             Err(Ok(UptoError::NotYetValid))
         } else if now > deadline || exp < SEQ {
             Err(Ok(UptoError::Expired))
-        } else if exp > max_live {
+        } else if exp > max_live || exp > SEQ + MAX_ALLOWANCE_LEDGERS {
             Err(Ok(UptoError::InvalidAllowanceExpiration))
         } else {
             Ok(Ok(()))

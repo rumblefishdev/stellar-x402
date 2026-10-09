@@ -160,7 +160,9 @@ What each party must trust:
   `maxFeeStroops` (250,000 by default, ADR 0007). At verify it refuses an
   `allowance_expiration_ledger` beyond the payment window (README, Verify step 2), which bounds
   the nonce and allowance rent; the facilitator's `/verify` for `upto` is task 0015, and until
-  then the rule is enforced only by the e2e suite's `checkClientAuth`. The proxy's own extension
+  then the rule is enforced only by the e2e suite's `checkClientAuth`. The contract refuses an
+  expiry more than 17,280 ledgers (about a day) ahead, so even a facilitator that skips the check
+  pays at most about 25,000 stroops of it (ADR 0010, D11). The proxy's own extension
   is capped at 720 ledgers per settlement, about 149,000 stroops on testnet (ADR 0010, D10).
 - **Residual risk:** Rent depends on the entry's size and the length of the extension, so there
   is no fixed bound. A settlement that pays it can cost several times a normal one; the
