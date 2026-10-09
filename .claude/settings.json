@@ -7,7 +7,10 @@
       "mcp__plugin_lore_lore-framework",
       "Skill(lore-framework)",
       "Skill(lore-framework-tasks)",
-      "Skill(lore-framework-git)"
+      "Skill(lore-framework-git)",
+      "Skill(promote-task)",
+      "Skill(branch)",
+      "Skill(pr)"
     ]
   }
 }
