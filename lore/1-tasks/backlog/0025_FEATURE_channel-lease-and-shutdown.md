@@ -36,6 +36,11 @@ As a facilitator operator, I want only one process at a time to settle through a
 - Lease acquire, renew and release through the store port (fake first, real adapter from 0022).
 - Shutdown handler that drains the pool.
 - Tests for a second process, a crash and a clean stop.
+- From 0014 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md)): Fargate sends SIGKILL
+  120 s after SIGTERM, a hard limit. The drain and the lease release must finish within about
+  110 s. The pool's 60 s + 30 s fits; longer timeouts don't.
+- From 0014: `GET /health` must not depend on the lease, so a process without it stays healthy
+  and isn't restarted in a loop.
 
 ## Acceptance Criteria
 

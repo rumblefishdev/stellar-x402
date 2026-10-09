@@ -34,6 +34,19 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 
 - Dockerfile, image build and the deploy trigger from 0014.
 - Secrets and stores configured on the platform; runbook updated.
+- From 0014 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md)): ECS on Fargate, one
+  service with `desiredCount` 1, `minimumHealthyPercent` 0, `maximumPercent` 100 and
+  `stopTimeout` 120, behind an ALB (idle timeout 120 s, deregistration delay 10 s,
+  `TRUSTED_PROXY_HOPS=1`). ARM64 image built on `ubuntu-24.04-arm`, pushed to ECR by SHA,
+  deployed through OIDC with `wait-for-service-stability`. Infrastructure as a CDK stack in
+  `deploy/infra/`.
+- From 0014: add `GET /health`, answering 200 while the HTTP server is up and checking nothing
+  else; the ALB uses it.
+- From 0014: `FACILITATOR_SECRET` as an SSM SecureString under `/x402/testnet/`, readable only by
+  the task execution role.
+- From 0014: the AWS account is the one that runs sorobanscan and the Prices API. Still open with
+  the team: the region (eu-central-1 assumed), the `rumblefish.dev` subdomain (proposed `testnet.x402.rumblefish.dev`) and access to its Route 53
+  zone. Without DNS, put CloudFront's default domain in front of the ALB.
 
 ## Acceptance Criteria
 
