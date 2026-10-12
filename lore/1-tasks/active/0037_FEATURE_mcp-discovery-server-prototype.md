@@ -81,7 +81,7 @@ RFP's MCP discovery server, outside T1)
 
 ## Acceptance Criteria
 
-- [ ] Given a catalog (the fake one or a real `/discovery/resources`), when `list_resources` is
+- [x] Given a catalog (the fake one or a real `/discovery/resources`), when `list_resources` is
       called with any combination of the filters, then it returns only matching entries with
       their price, asset, network and description, in a stable structured shape
 - [ ] Given a paid HTTP resource on testnet within the limits, when `call_paid_http` is called,
