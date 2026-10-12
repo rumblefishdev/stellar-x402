@@ -6,6 +6,7 @@ import {
   type CatalogPage,
   type CatalogQuery,
   type CatalogStore,
+  type UpsertOutcome,
   type ChannelLease,
   type ClaimResult,
   type NewSettlement,
@@ -141,21 +142,28 @@ export class MemoryCatalogStore implements CatalogStore {
   /** Insertion order is the stable listing order. */
   private readonly entries = new Map<string, CatalogEntry>();
 
-  async upsert(entry: CatalogEntry): Promise<void> {
+  async upsert(entry: CatalogEntry): Promise<UpsertOutcome> {
+    if (!Number.isSafeInteger(entry.ledger) || entry.ledger < 0)
+      throw new RangeError("catalog entry ledger must be a non-negative integer");
     const { network, payTo, method, resourceUrl } = entry.key;
     const id = JSON.stringify([network, payTo, method, resourceUrl]);
+    const stored = this.entries.get(id);
+    const stale = stored !== undefined && entry.ledger < stored.ledger;
     const accepts = new Map<string, PaymentRequirements>();
-    for (const requirement of this.entries.get(id)?.resource.accepts ?? [])
+    for (const requirement of stored?.resource.accepts ?? [])
       accepts.set(requirementKey(requirement), requirement);
     for (const requirement of entry.resource.accepts)
-      accepts.set(requirementKey(requirement), requirement);
+      if (!stale || !accepts.has(requirementKey(requirement)))
+        accepts.set(requirementKey(requirement), requirement);
+    const latest = stale ? stored : entry;
     this.entries.set(
       id,
       structuredClone({
-        key: entry.key,
-        resource: { ...entry.resource, accepts: [...accepts.values()] },
+        ...latest,
+        resource: { ...latest.resource, accepts: [...accepts.values()] },
       }),
     );
+    return stale ? "stale" : stored ? "updated" : "inserted";
   }
 
   async list(query: CatalogQuery): Promise<CatalogPage> {

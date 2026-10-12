@@ -9,6 +9,7 @@ export type {
   CatalogPage,
   CatalogQuery,
   CatalogStore,
+  UpsertOutcome,
 } from "./catalog-store.js";
 export type { RateLimitHit, RateLimitStore } from "./rate-limit-store.js";
 export {
