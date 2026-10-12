@@ -126,6 +126,8 @@ export interface FakeCatalog {
   failWith?: number;
   /** Behave like a catalog without the `resource` filter: drop it before filtering. */
   ignoreResourceFilter?: boolean;
+  /** Answer 200 with a body that is not a discovery page. */
+  malformed?: boolean;
   close(): Promise<void>;
 }
 
@@ -143,6 +145,10 @@ export async function startFakeCatalog(items: DiscoveryResource[] = CATALOG): Pr
       return;
     }
     res.writeHead(200, { "content-type": "application/json" });
+    if (fake.malformed) {
+      res.end(JSON.stringify({ items: "not a list" }));
+      return;
+    }
     const query = new URLSearchParams(url.searchParams);
     if (fake.ignoreResourceFilter) query.delete("resource");
     res.end(JSON.stringify(filter(items, query)));
