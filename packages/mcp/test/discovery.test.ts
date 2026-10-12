@@ -130,6 +130,13 @@ describe("list_resources", () => {
     // The cause goes to the server log, not to the agent.
     expect(logs).toEqual([expect.stringContaining("503")]);
   });
+
+  it("returns upstream_error, with the cause in the log, when the catalog answers a malformed page", async () => {
+    catalog.malformed = true;
+    const { structuredContent } = await call("list_resources", {});
+    expect(structuredContent.error.code).toBe("upstream_error");
+    expect(logs).toEqual([expect.stringContaining("items")]);
+  });
 });
 
 describe("get_resource", () => {
@@ -170,6 +177,32 @@ describe("get_resource", () => {
     expect(structuredContent.items).toHaveLength(count);
   });
 
+  it("matches an HTTP method in any case", async () => {
+    const { structuredContent } = await call("get_resource", {
+      resource: "https://weather.example.com/cities/:",
+      method: "get",
+    });
+    expect(structuredContent.items).toHaveLength(1);
+  });
+
+  it.each([["not a url"], ["http://weather.example.com/forecast"], ["https://127.0.0.1/x"]])(
+    "returns invalid_input, without asking the catalog, for %s",
+    async (resource) => {
+      const { structuredContent } = await call("get_resource", { resource });
+      expect(structuredContent.error.code).toBe("invalid_input");
+      expect(catalog.queries).toHaveLength(0);
+    },
+  );
+
+  it("returns upstream_error, with the cause in the log, when the catalog answers a malformed page", async () => {
+    catalog.malformed = true;
+    const { structuredContent } = await call("get_resource", {
+      resource: "https://weather.example.com/forecast",
+    });
+    expect(structuredContent.error.code).toBe("upstream_error");
+    expect(logs).toEqual([expect.stringContaining("items")]);
+  });
+
   it.each([
     ["a URL that is not in the catalog", { resource: "https://nowhere.example.com/" }],
     ["a method the URL does not have", { resource: "https://quotes.example.com/mcp", method: "x" }],
@@ -201,15 +234,31 @@ describe("get_resource", () => {
     expect(logs).toEqual([expect.stringContaining("30 entries")]);
   });
 
-  it("returns invalid_catalog_entry for an entry over the catalog's extension size limit", async () => {
-    const huge = {
-      bazaar: { info: { input: { type: "http", method: "GET" }, note: "x".repeat(40_000) } },
+  it("cuts the seller's mimeType and iconUrl to the catalog's limits", async () => {
+    const long = {
+      mimeType: "m".repeat(300),
+      iconUrl: `https://x.example.com/${"i".repeat(3_000)}`,
     };
-    await reconnect([{ ...CATALOG[0]!, extensions: huge }]);
+    await reconnect([{ ...CATALOG[0]!, ...long }]);
     const { structuredContent } = await call("get_resource", {
       resource: "https://weather.example.com/forecast",
     });
-    expect(structuredContent.error.code).toBe("invalid_catalog_entry");
+    const [item] = structuredContent.items as unknown as { mimeType: string; iconUrl: string }[];
+    expect(item!.mimeType).toHaveLength(127);
+    expect(item!.iconUrl).toHaveLength(2_048);
+  });
+
+  it.each([
+    [32_768, false],
+    [32_769, true],
+  ])("rejects an extensions.bazaar of %d bytes: %s", async (bytes, rejected) => {
+    const bazaar = { info: { input: { type: "http", method: "GET" } }, pad: "" };
+    bazaar.pad = "x".repeat(bytes - JSON.stringify(bazaar).length);
+    await reconnect([{ ...CATALOG[0]!, extensions: { bazaar } }]);
+    const { structuredContent } = await call("get_resource", {
+      resource: "https://weather.example.com/forecast",
+    });
+    expect(structuredContent.error?.code).toBe(rejected ? "invalid_catalog_entry" : undefined);
   });
 
   it("returns upstream_error, with the cause in the log, when the catalog fails", async () => {
