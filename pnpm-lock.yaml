@@ -168,6 +168,9 @@ importers:
       '@x402/extensions':
         specifier: ~2.27.0
         version: 2.27.0(typescript@6.0.3)
+      '@x402/fetch':
+        specifier: ~2.27.0
+        version: 2.27.0
       '@x402/mcp':
         specifier: ~2.27.0
         version: 2.27.0
