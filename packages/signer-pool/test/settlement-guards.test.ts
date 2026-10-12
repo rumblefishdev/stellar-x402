@@ -1,5 +1,5 @@
 import { Address, FeeBumpTransaction, StrKey, xdr } from "@stellar/stellar-sdk";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   LedgerBoundError,
   SettlementSubmitter,
@@ -124,6 +124,56 @@ describe("onSigned", () => {
     ).rejects.toBeInstanceOf(SignedHookError);
     expect(fake.sent.length - before).toBe(1); // the first envelope only, rejected as txBadSeq
   });
+
+  it("gives up on a hook that never settles at the time bound, and sends nothing", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { fake, submitter } = setup({ timeoutSeconds: 30 });
+      const error = submitter
+        .submit(call(), { onSigned: () => new Promise<void>(() => {}) })
+        .catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(await error).toBeInstanceOf(SignedHookError);
+      expect(fake.sent).toHaveLength(0);
+      expect(submitter.stats()).toMatchObject({ busy: 0, refused: { "on-signed": 1 } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports expired, sending nothing, when the time bound passes while it runs", async () => {
+    const { fake, submitter } = setup({ timeoutSeconds: 60 });
+    const res = await submitter.submit(call(), {
+      onSigned: () => void (fake.closeTime += 120),
+    });
+    expect(res.status).toBe("expired");
+    expect(fake.sent).toHaveLength(0);
+  });
+
+  it("rejects a pipelined call's send and hands the channel on at the right sequence", async () => {
+    const events: string[] = [];
+    const { fake, submitter } = setup({
+      onEvent: (e) => {
+        if (e.type === "prepared-ahead") events.push(`prepared-ahead used=${e.used}`);
+      },
+    });
+    // One channel: the second call is prepared ahead while the first is pending, then its hook
+    // rejects. The third must get the channel only after that, at the sequence after the first.
+    const first = submitter.submit(call());
+    const second = submitter
+      .submit(call(), { onSigned: () => Promise.reject(new Error("store down")) })
+      .catch((e: unknown) => e);
+    const third = submitter.submit(call());
+    expect((await first).status).toBe("success");
+    expect(await second).toBeInstanceOf(SignedHookError);
+    expect((await third).status).toBe("success");
+    expect(events).toEqual(["prepared-ahead used=true"]);
+    expect(fake.sent.map((t) => (t as FeeBumpTransaction).innerTransaction.sequence)).toEqual([
+      "1001",
+      "1002",
+    ]);
+    expect(submitter.stats()).toMatchObject({ busy: 0, queued: 0, refused: { "on-signed": 1 } });
+  });
 });
 
 describe("maxLedger", () => {
@@ -149,11 +199,15 @@ describe("maxLedger", () => {
     await expect(submitter.submit(call(), { maxLedger: fake.ledger })).rejects.toBeInstanceOf(
       LedgerBoundError,
     );
+    // 101 is its last ledger: one spare ledger is kept, so that is refused too.
+    await expect(submitter.submit(call(), { maxLedger: fake.ledger + 1 })).rejects.toBeInstanceOf(
+      LedgerBoundError,
+    );
     expect(signer.signs).toBe(0);
     expect(fake.sent).toHaveLength(0);
-    expect(submitter.stats()).toMatchObject({ busy: 0, refused: { "ledger-bound": 1 } });
+    expect(submitter.stats()).toMatchObject({ busy: 0, refused: { "ledger-bound": 2 } });
 
-    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 1 });
+    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 2 });
     expect(res.status).toBe("success");
   });
 
@@ -173,7 +227,7 @@ describe("maxLedger", () => {
     expect(inner(fake).sequence).toBe("1001");
   });
 
-  it("rebuilds a pipelined envelope that would land past its bound, then refuses it", async () => {
+  it("rebuilds a pipelined envelope with no spare ledger left, then refuses it", async () => {
     const events: string[] = [];
     const { fake, submitter } = setup({
       onEvent: (e) => {
@@ -181,15 +235,41 @@ describe("maxLedger", () => {
       },
     });
     // One channel: the second call is prepared while the first is pending, which the fake
-    // includes in ledger 101 (the prepared envelope is simulated there). Its last ledger is 102,
-    // already closed when the first is final, so the prepared envelope can't be sent.
+    // includes in ledger 101 (the prepared envelope is simulated there). Its last ledger is 105,
+    // and the clock is at 104 when it is checked: no spare ledger, so it isn't sent.
     const first = submitter.submit(call());
     const second = submitter
-      .submit(call(), { maxLedger: fake.ledger + 2 })
+      .submit(call(), { maxLedger: fake.ledger + 5 })
       .catch((e: unknown) => e);
     expect((await first).status).toBe("success");
     expect(await second).toBeInstanceOf(LedgerBoundError);
     expect(events).toEqual(["prepared-ahead used=false"]);
     expect(fake.sent).toHaveLength(1);
+  });
+
+  it("reports expired, not rejected, when the ledger bound passes between signing and sending", async () => {
+    const { fake, submitter } = setup();
+    // The simulation sees 100, so 102 leaves a spare ledger; the hook lets three ledgers close
+    // behind the clock's back.
+    const res = await submitter.submit(call(), {
+      maxLedger: fake.ledger + 2,
+      onSigned: async () => {
+        for (let i = 0; i < 3; i++) await fake.getLatestLedger();
+      },
+    });
+    expect(res.status).toBe("expired");
+    expect(fake.sent).toHaveLength(1); // the network refused it with txTooLate
+
+    // Nothing was applied, so the channel is reused at the same sequence.
+    const next = await submitter.submit(call());
+    expect(next.status).toBe("success");
+    expect(inner(fake).sequence).toBe("1001");
+  });
+
+  it.each([Number.NaN, 1.5, 0, -1, 2 ** 32 - 1])("throws for maxLedger %s", async (maxLedger) => {
+    const { fake, submitter } = setup();
+    await expect(submitter.submit(call(), { maxLedger })).rejects.toBeInstanceOf(RangeError);
+    expect(fake.calls.simulateTransaction).toBeUndefined();
+    expect(submitter.stats()).toMatchObject({ busy: 0 });
   });
 });
