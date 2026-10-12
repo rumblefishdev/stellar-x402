@@ -24,7 +24,13 @@ history:
     who: akot
     note: >
       Cataloger, header encoder, metrics seam and CatalogStore stale guard built on the hooks.
-      Plan from parallel GSD and BMAD runs, merged. /settle and resolved wiring stay with 0009/0019.
+      Plan from two parallel planning runs, merged. /settle and resolved wiring stay with 0009/0019.
+  - date: "2026-10-12"
+    status: active
+    who: akot
+    note: >
+      PR #17 review: writes ordered by ledger, a stale write still adds new requirements, upsert
+      timeout, main drains on close, CATALOG_ALLOW_HTTP wired. Rebased onto develop.
 ---
 
 # Catalog resources after successful settlements
@@ -59,21 +65,30 @@ The criteria are met on the hook side; the real `/settle` route (0009) and the `
 ## Design Decisions
 
 1. **Plugs in only through `SettlementHooks`** (`src/catalog/cataloger.ts`): `extensionResponses`
-   runs `validate()` synchronously; `onSuccess` validates again, then `normalize()` and upsert. It
-   never rejects; `drain()` waits for in-flight writes (0025 shutdown).
+   runs `validate()` synchronously; `onSuccess` validates again (off the response path), then
+   `normalize()` and upsert, bounded by a 10 s timeout. It never rejects, and neither does its
+   logging; `drain()` waits for in-flight writes and `main`'s `close()` calls it.
 2. **Caller rules for 0009 and 0019.** Set the header (`encodeExtensionResponses`) on every
    `success: true` settle answer, replays included, never on `success: false`. Call
    `onSuccess(record, "settle")` once, by the transition that won, after the response:
    `if (res.closed) dispatch(); else res.once("close", dispatch)`; a plain `once("close")` misses a
    client that left before the write. A `resolved` event or the startup re-check calls
-   `onSuccess(record, "resolved")`. `/verify` and replays never call it.
+   `onSuccess(record, "resolved")`. `/verify` and replays never call it. A `success` record
+   carries `ledger`; without it nothing is cataloged (`no_ledger` internal error).
 3. **`lastUpdated` = when the record turned `success`**, so a repeated call writes the same state.
-4. **Stale guard in the port (emerged).** `upsert` resolves `inserted | updated | stale`; an older
-   `lastUpdated` changes nothing, so a late success can't regress a newer listing. 0022 inherits
-   the contract case (a conditional upsert). `keyVersion` is stored with each entry.
+4. **Stale guard in the port, ordered by `ledger` (emerged).** `upsert` resolves
+   `inserted | updated | stale`. A write from an earlier ledger only adds requirements the entry
+   lacks, so a late success can't regress a newer listing and no paid asset is lost. Ledger, not
+   `updatedAt`: a pending record resolved after a restart turns `success` later than a newer
+   payment, and every instance agrees on the ledger. An invalid `ledger` is rejected. 0022
+   inherits the contract case (a conditional upsert on an integer). `keyVersion` and `ledger` are
+   stored with each entry.
 5. **`rejectedReason`** replaces `reason` in `ExtensionResponses` (the spec's field; day-1 item).
 6. **Metrics seam** (`src/metrics.ts`) until 0027: `catalog_upserts_total{origin,outcome}`,
    `catalog_rejections_total{origin,reason}`, `catalog_upsert_failures_total{origin}`,
-   `catalog_internal_errors_total{stage}`, `catalog_route_template_ignored_total{origin}`.
-7. **Not built until the day-1 review agrees:** the eligible-asset gate (RT1/RT2) and listing caps
+   `catalog_internal_errors_total{stage,origin}` (a library `internal_error` from `validate()`
+   counts here, not as a rejection), `catalog_route_template_ignored_total{origin}` (after a
+   non-stale write).
+7. **`CATALOG_ALLOW_HTTP`** (testnet only, off by default) sets the bazaar `allowHttp` option.
+8. **Not built until the day-1 review agrees:** the eligible-asset gate (RT1/RT2) and listing caps
    (RT4).

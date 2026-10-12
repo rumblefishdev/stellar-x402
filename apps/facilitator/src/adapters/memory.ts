@@ -143,25 +143,27 @@ export class MemoryCatalogStore implements CatalogStore {
   private readonly entries = new Map<string, CatalogEntry>();
 
   async upsert(entry: CatalogEntry): Promise<UpsertOutcome> {
+    if (!Number.isSafeInteger(entry.ledger) || entry.ledger < 0)
+      throw new RangeError("catalog entry ledger must be a non-negative integer");
     const { network, payTo, method, resourceUrl } = entry.key;
     const id = JSON.stringify([network, payTo, method, resourceUrl]);
     const stored = this.entries.get(id);
-    if (stored && Date.parse(entry.resource.lastUpdated) < Date.parse(stored.resource.lastUpdated))
-      return "stale";
+    const stale = stored !== undefined && entry.ledger < stored.ledger;
     const accepts = new Map<string, PaymentRequirements>();
     for (const requirement of stored?.resource.accepts ?? [])
       accepts.set(requirementKey(requirement), requirement);
     for (const requirement of entry.resource.accepts)
-      accepts.set(requirementKey(requirement), requirement);
+      if (!stale || !accepts.has(requirementKey(requirement)))
+        accepts.set(requirementKey(requirement), requirement);
+    const latest = stale ? stored : entry;
     this.entries.set(
       id,
       structuredClone({
-        key: entry.key,
-        keyVersion: entry.keyVersion,
-        resource: { ...entry.resource, accepts: [...accepts.values()] },
+        ...latest,
+        resource: { ...latest.resource, accepts: [...accepts.values()] },
       }),
     );
-    return stored ? "updated" : "inserted";
+    return stale ? "stale" : stored ? "updated" : "inserted";
   }
 
   async list(query: CatalogQuery): Promise<CatalogPage> {

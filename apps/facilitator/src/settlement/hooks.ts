@@ -63,11 +63,3 @@ export interface SettlementHooks {
    */
   onSuccess(record: SettlementRecord, origin: SettlementOrigin): Promise<void>;
 }
-
-/** Hooks that allow everything and do nothing; lanes override the methods they own in `main.ts`. */
-export const noopHooks: SettlementHooks = {
-  beforeSubmit: async () => ({ allow: true }),
-  onFinal: async () => {},
-  extensionResponses: () => undefined,
-  onSuccess: async () => {},
-};

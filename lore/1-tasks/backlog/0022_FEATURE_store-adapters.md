@@ -42,6 +42,9 @@ As a facilitator operator, I want durable implementations of the four store port
 - From 0017: a bigint codec for stored amounts (`feeCharged`, spend reservations and limits).
 - From 0017: `CatalogStore.list` is in insertion order and an upsert keeps an entry's place, so
   the durable catalog needs a serial or `created_at` order.
+- From 0031: `CatalogStore.upsert` is conditional on `ledger` (an earlier one only adds missing
+  requirements) and stores `keyVersion`, which the port can't read back, so the adapter's own
+  test checks that column.
 
 ## Acceptance Criteria
 

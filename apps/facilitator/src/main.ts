@@ -6,7 +6,6 @@ import { parseConfig } from "./config.js";
 import { createApp, type AppDeps } from "./http/app.js";
 import { jsonLogger } from "./logger.js";
 import { memoryMetrics } from "./metrics.js";
-import { noopHooks } from "./settlement/hooks.js";
 
 export interface Started {
   port: number;
@@ -39,13 +38,20 @@ export async function main(env: Record<string, string | undefined> = process.env
   const logger = jsonLogger(config.logLevel);
   // STORE=memory is the only option until the durable adapters land (0022).
   const stores = memoryStores();
-  const metrics = memoryMetrics();
-  const cataloger = createCataloger({ store: stores.catalog, logger, metrics });
-  // 0024 adds its `beforeSubmit` and `onFinal` the same way.
-  const hooks = {
-    ...noopHooks,
-    extensionResponses: cataloger.extensionResponses,
-    onSuccess: cataloger.onSuccess,
+  // 0009 hands its `extensionResponses` and `onSuccess` to `/settle` as `SettlementHooks`.
+  const cataloger = createCataloger({
+    store: stores.catalog,
+    logger,
+    metrics: memoryMetrics(),
+    allowHttp: config.catalog.allowHttp,
+  });
+  const started = await start({ config, logger, stores });
+  return {
+    ...started,
+    // Catalog writes already under way finish before the process exits.
+    close: async () => {
+      await started.close();
+      await cataloger.drain();
+    },
   };
-  return start({ config, logger, stores, hooks, metrics });
 }

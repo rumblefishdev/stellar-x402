@@ -28,6 +28,7 @@ function record(bazaar: unknown, overrides: Partial<SettlementRecord> = {}): Set
     fingerprint: "f",
     state: "success",
     hashes: ["tx1"],
+    ledger: 100,
     paymentPayload: {
       x402Version: 2,
       resource: { url: "https://seller.example/users/42" },
@@ -88,10 +89,10 @@ describe("cataloger", () => {
     );
   });
 
-  it("keeps a newer listing when an older success arrives late", async () => {
+  it("keeps a newer listing when a success from an earlier ledger resolves later", async () => {
     const { cataloger, metrics } = setup();
     await cataloger.onSuccess(record(valid), "settle");
-    await cataloger.onSuccess(record(valid, { updatedAt: 0 }), "resolved");
+    await cataloger.onSuccess(record(valid, { ledger: 99, updatedAt: Date.now() }), "resolved");
     expect(metrics.value("catalog_upserts_total", { origin: "resolved", outcome: "stale" })).toBe(
       1,
     );
@@ -106,23 +107,45 @@ describe("cataloger", () => {
     ).toBe(1);
   });
 
-  it("never rejects: a failing store or library is logged and counted", async () => {
+  it("never rejects: a failing or hung store, or a failing library, is logged and counted", async () => {
     const failing = setup();
     vi.spyOn(failing.store, "upsert").mockRejectedValue(new Error("down"));
     await expect(failing.cataloger.onSuccess(record(valid), "settle")).resolves.toBeUndefined();
     expect(failing.metrics.value("catalog_upsert_failures_total", { origin: "settle" })).toBe(1);
+
+    const hung = setup({ upsertTimeoutMs: 5 });
+    vi.spyOn(hung.store, "upsert").mockReturnValue(new Promise(() => {}));
+    await hung.cataloger.onSuccess(record(valid), "resolved");
+    await hung.cataloger.drain();
+    expect(hung.metrics.value("catalog_upsert_failures_total", { origin: "resolved" })).toBe(1);
 
     const boom = () => {
       throw new Error("boom");
     };
     const broken = setup({
       bazaar: { validate: boom, normalize: boom, toExtensionResponses: boom },
+      logger: { debug: boom, info: boom, warn: boom, error: boom },
     });
+    vi.spyOn(console, "error").mockImplementation(() => {});
     expect(broken.cataloger.extensionResponses(record(valid))).toEqual({
       bazaar: { status: "rejected", rejectedReason: "internal_error" },
     });
     await expect(broken.cataloger.onSuccess(record(valid), "settle")).resolves.toBeUndefined();
-    await broken.cataloger.drain();
-    expect(broken.metrics.value("catalog_internal_errors_total", { stage: "validate" })).toBe(1);
+
+    const internal = setup({
+      bazaar: {
+        validate: () => ({ ok: false, reason: "internal_error" }),
+        normalize: boom,
+        toExtensionResponses: boom,
+      },
+    });
+    await internal.cataloger.onSuccess(record(valid), "resolved");
+    expect(
+      internal.metrics.value("catalog_internal_errors_total", {
+        stage: "validate",
+        origin: "resolved",
+      }),
+    ).toBe(1);
+    expect(internal.logger.info).not.toHaveBeenCalled();
   });
 });

@@ -1,3 +1,4 @@
+import { CATALOG_KEY_VERSION } from "@stellar-x402/bazaar";
 import type { StellarNetwork } from "@stellar-x402/config";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
@@ -330,8 +331,8 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
       lastUpdated: "2026-10-08T00:00:00.000Z",
       ...overrides,
     });
-    const upsert = (entry: Omit<CatalogEntry, "keyVersion">) =>
-      store.upsert({ keyVersion: 1, ...entry });
+    const upsert = (entry: Omit<CatalogEntry, "keyVersion" | "ledger">, ledger = 1) =>
+      store.upsert({ keyVersion: CATALOG_KEY_VERSION, ledger, ...entry });
     const key = (url: string, payTo = PAY_TO, network: StellarNetwork = "stellar:testnet") => ({
       network,
       payTo,
@@ -352,11 +353,7 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
       });
       await upsert({
         key: key(url),
-        resource: resource(url, {
-          description: "new",
-          accepts: [requirements({ amount: "200" })],
-          lastUpdated: "2026-10-09T00:00:00.000Z",
-        }),
+        resource: resource(url, { description: "new", accepts: [requirements({ amount: "200" })] }),
       });
       const page = await store.list({ limit: 10, offset: 0 });
       expect(page.total).toBe(1);
@@ -367,16 +364,30 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
       ]);
     });
 
-    it("reports the outcome and ignores a write older than the stored one", async () => {
+    it("reports the outcome; a write from an earlier ledger only adds what is missing", async () => {
       const url = "https://seller.example/data";
-      const at = (lastUpdated: string, description: string) =>
-        upsert({ key: key(url), resource: resource(url, { lastUpdated, description }) });
-      expect(await at("2026-10-09T00:00:00.000Z", "new")).toBe("inserted");
-      expect(await at("2026-10-08T23:00:00.000+00:00", "old")).toBe("stale");
-      expect(await at("2026-10-09T02:00:00+02:00", "same instant")).toBe("updated");
-      expect((await store.list({ limit: 10, offset: 0 })).items[0]?.description).toBe(
-        "same instant",
-      );
+      const at = (ledger: number, description: string, asset = "CASSET") =>
+        upsert(
+          {
+            key: key(url),
+            resource: resource(url, {
+              description,
+              accepts: [requirements({ asset, amount: String(ledger) })],
+            }),
+          },
+          ledger,
+        );
+      expect(await at(10, "new")).toBe("inserted");
+      expect(await at(10, "same ledger")).toBe("updated");
+      expect(await at(9, "old", "COTHER")).toBe("stale");
+      expect(await at(9, "old")).toBe("stale");
+      const [item] = (await store.list({ limit: 10, offset: 0 })).items;
+      expect(item?.description).toBe("same ledger");
+      expect(item?.accepts.map((a) => [a.asset, a.amount])).toEqual([
+        ["CASSET", "10"],
+        ["COTHER", "9"],
+      ]);
+      await expect(at(Number.NaN, "bad")).rejects.toThrow();
     });
 
     it("filters, pages and keeps a stable order", async () => {
