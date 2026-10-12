@@ -101,8 +101,9 @@ export interface SubmitOptions {
    * Called with each signed envelope's hash before it is first sent, so the caller can store
    * it durably before anything can land (crash recovery, AD-16). The submitter awaits it before
    * every send, a rebuild included: a rebuild produces a new hash and a new call. If it throws or
-   * rejects, nothing is sent, the channel is freed, and `submit()` rejects with
-   * {@link SignedHookError}.
+   * rejects, or has not settled by the transaction's time bound, nothing is sent, the channel is
+   * freed, and `submit()` rejects with {@link SignedHookError}. If a bound passed while it ran, the
+   * result is `expired` and nothing is sent.
    */
   onSigned?: (hash: string) => void | Promise<void>;
   /**
@@ -119,8 +120,9 @@ export interface SubmitOptions {
   /**
    * Last ledger the transaction may land in (inclusive). Set it from the client's
    * `signatureExpirationLedger`, so the transaction never outlives its authorization (AD-22).
-   * The envelope carries it as a ledger bound, and a call that can no longer land by then is
-   * refused with {@link LedgerBoundError} before anything is signed.
+   * The envelope carries it as a ledger bound, and a call with fewer than two ledgers left to
+   * land in is refused with {@link LedgerBoundError} before anything is signed. A value that is not a
+   * ledger sequence (a positive integer below 2^32 - 1) throws a `RangeError`.
    */
   maxLedger?: number;
 }
@@ -140,7 +142,7 @@ export class FeeLimitError extends Error {
   override readonly name = "FeeLimitError";
 }
 
-/** The next ledger is past the call's `maxLedger`; nothing was signed or sent. */
+/** Fewer than two ledgers are left before the call's `maxLedger`; nothing was signed or sent. */
 export class LedgerBoundError extends Error {
   override readonly name = "LedgerBoundError";
 }
@@ -151,6 +153,12 @@ export class SignedHookError extends Error {
 }
 
 const BAD_SEQ = new Set(["txBadSeq"]);
+
+/**
+ * Ledgers kept in hand beyond the earliest one a call can land in. Signing, `onSigned` and the
+ * send take time; a call down to its last ledger is refused rather than sent to miss it.
+ */
+const SPARE_LEDGERS = 1;
 
 /** A signed envelope, ready to send. */
 interface Prepared {
@@ -244,6 +252,13 @@ export class SettlementSubmitter {
 
   /** Waits for a free channel, then builds, simulates, signs, sends and confirms `call`. */
   async submit(call: ContractCall, opts: SubmitOptions = {}): Promise<SubmitResult> {
+    const { maxLedger } = opts;
+    // A NaN would silently turn the guard off; the envelope's bound (maxLedger + 1) is a uint32.
+    if (
+      maxLedger !== undefined &&
+      !(Number.isInteger(maxLedger) && maxLedger > 0 && maxLedger < 2 ** 32 - 1)
+    )
+      throw new RangeError(`maxLedger must be a ledger sequence, got ${maxLedger}`);
     const start = this.now();
     let channel: Channel;
     try {
@@ -406,12 +421,20 @@ export class SettlementSubmitter {
   }
 
   /**
-   * Less than half the time bound left, or the next ledger is past its ledger bound: too close
-   * to expiry to send a prepared envelope.
+   * Less than half the time bound left, or too few ledgers left before its ledger bound: too
+   * close to expiry to send a prepared envelope.
    */
   private expiresSoon(prepared: Prepared): boolean {
-    if (this.pastLedgerBound(prepared.maxLedger, this.clock.current)) return true;
+    // `current` is fresh here: the previous holder's confirmation was polling the clock until its
+    // transaction was final. A ledger closed since then can still slip through; its send gets
+    // txTooLate and is reported `expired`.
+    if (this.tooCloseToBound(prepared.maxLedger, this.clock.current)) return true;
     return Math.floor(this.now() / 1000) + this.timeoutSeconds / 2 > prepared.maxTime;
+  }
+
+  /** Whether a call bounded by `maxLedger` has too few ledgers left after `latest` to start. */
+  private tooCloseToBound(maxLedger: number | undefined, latest: number): boolean {
+    return maxLedger !== undefined && latest + SPARE_LEDGERS >= maxLedger;
   }
 
   /** Whether a transaction bounded by `maxLedger` can no longer land after `latest` closed. */
@@ -463,9 +486,9 @@ export class SettlementSubmitter {
     if (!rpc.Api.isSimulationSuccess(sim))
       throw new SimulationError("unexpected simulation response");
     // The earliest it can land is the ledger after the one the simulation saw.
-    if (this.pastLedgerBound(maxLedger, sim.latestLedger))
+    if (this.tooCloseToBound(maxLedger, sim.latestLedger))
       throw new LedgerBoundError(
-        `ledger ${sim.latestLedger + 1} is past the call's maxLedger ${maxLedger}`,
+        `ledger ${sim.latestLedger + 1} leaves too few ledgers before the call's maxLedger ${maxLedger}`,
       );
     try {
       await opts.checkSimulation?.(sim);
@@ -502,22 +525,22 @@ export class SettlementSubmitter {
 
   private async sendAndConfirm(
     channel: Channel,
-    { bump, hash, txSequence, maxTime, maxLedger }: Prepared,
+    prepared: Prepared,
     opts: SubmitOptions,
     hold: Hold,
   ): Promise<SubmitResult> {
+    const { bump, hash, txSequence, maxTime, maxLedger } = prepared;
     const base = { channel: channel.address };
+    // `current` may lag the network; a send it lets through past the ledger bound gets txTooLate,
+    // which is reported as `expired` below.
     const pastBounds = () =>
       Math.floor(this.now() / 1000) > maxTime ||
       this.pastLedgerBound(maxLedger, this.clock.current);
     // Nothing is sent until the caller has the hash: a store write that fails must stop the send.
-    try {
-      await opts.onSigned?.(hash);
-    } catch (error) {
-      throw new SignedHookError(
-        `onSigned failed, so ${hash} was not sent: ${error instanceof Error ? error.message : String(error)}`,
-        { cause: error },
-      );
+    if (opts.onSigned) {
+      await this.awaitSigned(opts.onSigned, hash, maxTime);
+      // The write took time: an envelope already past a bound can only get txTooLate.
+      if (pastBounds()) return { ...base, status: "expired", hash };
     }
 
     // Send. Resending the same signed envelope is always safe: it has the same hash, so the
@@ -543,6 +566,8 @@ export class SettlementSubmitter {
       if (sent?.status === "ERROR") {
         if (uncertain) break; // an earlier attempt may have landed; confirm by hash
         const errorCode = resultCode(sent.errorResult);
+        // A bound passed before the send (signing and onSigned take time); nothing was applied.
+        if (errorCode === "txTooLate") return { ...base, status: "expired", hash };
         if (errorCode !== undefined && BAD_SEQ.has(errorCode)) channel.sequence = undefined;
         return { ...base, status: "rejected", hash, errorCode };
       }
@@ -574,19 +599,47 @@ export class SettlementSubmitter {
 
     // Confirm by hash, but report `pending` if there is no answer by the time bound plus grace.
     // The confirmation keeps running, and the channel is let go only when it is final.
-    const confirmation = this.confirm(channel, hash, txSequence, maxTime, maxLedger, uncertain);
+    const confirmation = this.confirm(channel, prepared, uncertain);
     if (await this.settlesBy(confirmation, dueAt)) return confirmation;
     hold.late = confirmation.then((result) => this.emit({ type: "resolved", result }));
     return { ...base, status: "pending", hash };
   }
 
+  /**
+   * Awaits the caller's `onSigned`, but not past the envelope's time bound: a store write that
+   * never settles must not hold the channel. A timer, not the ledger clock, so a quick write costs
+   * no `getLatestLedger` poll.
+   */
+  private async awaitSigned(
+    onSigned: (hash: string) => void | Promise<void>,
+    hash: string,
+    maxTime: number,
+  ): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => resolve("timeout"), Math.max(0, maxTime * 1000 - this.now()));
+    });
+    try {
+      const written = Promise.resolve().then(() => onSigned(hash)); // a synchronous throw too
+      const outcome = await Promise.race([written, timedOut]).catch((error: unknown) => {
+        throw new SignedHookError(
+          `onSigned failed, so ${hash} was not sent: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
+        );
+      });
+      if (outcome === "timeout")
+        throw new SignedHookError(
+          `onSigned did not finish by the time bound, so ${hash} was not sent`,
+        );
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   /** One status check per new ledger until the transaction is final or provably never will be. */
   private async confirm(
     channel: Channel,
-    hash: string,
-    txSequence: bigint,
-    maxTime: number,
-    maxLedger: number | undefined,
+    { hash, txSequence, maxTime, maxLedger }: Prepared,
     uncertain: boolean,
   ): Promise<SubmitResult> {
     const base = { channel: channel.address };
