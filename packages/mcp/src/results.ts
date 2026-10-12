@@ -1,7 +1,7 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 /** Closed set of error codes; an agent branches on `error.code`, never on the message. */
-type ErrorCode = "resource_not_found" | "upstream_error";
+type ErrorCode = "resource_not_found" | "upstream_error" | "invalid_catalog_entry";
 
 export function toolError(code: ErrorCode, message: string): CallToolResult {
   const error = { code, message };
