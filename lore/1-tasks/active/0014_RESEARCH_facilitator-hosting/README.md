@@ -245,6 +245,18 @@ for the mainnet milestone, as `deploy/README.md` said before this task.
 25. **Mainnet is sized at one task** (~$150/mo). Scaling out follows the
     R-cloud-container-options §A2 model.
 
+### Emerged (Step Functions question and ADR 0012)
+
+26. **Step Functions with Lambda is a rejected alternative.** It would mean rewriting
+    `signer-pool`: channel sequence numbers, the queue and pipelining live in one process's
+    memory. It would also need RDS Proxy and per-step billing. Timeouts aren't the blocker: a REST
+    API or an ALB can wait for `/settle`. It fits side jobs, such as topping up the fee balance
+    and rebuilding channels after a testnet reset.
+27. **Two tasks with separate channel sets in two zones are an option for mainnet, not a
+    requirement** (Stan). The mainnet launch decides on them together with the WAF rule.
+28. **The deploy role may run the migration task** that ADR 0012 (task 0013) adds before each
+    service update.
+
 ## Issues Encountered
 
 - **App Runner closed to new customers on 2026-04-30,** and its successor, ECS Express Mode, only

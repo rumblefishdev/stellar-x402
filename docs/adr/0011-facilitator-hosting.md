@@ -155,8 +155,8 @@ One request or one stop must never outlast the layer in front of it:
 
 - **Two deploy roles, assumed through OIDC,** with no AWS keys in GitHub:
   - **testnet:** trusts only `repo:rumblefishdev/stellar-x402:ref:refs/heads/develop`. It may
-    push to ECR, deploy the testnet service stack, and pass only the testnet task and execution
-    roles;
+    push to ECR, run the testnet migration task, deploy the testnet service stack, and pass only
+    the testnet task and execution roles;
   - **mainnet:** trusts only `repo:rumblefishdev/stellar-x402:environment:mainnet`. That
     environment allows `v*` tags only and needs a reviewer other than the person deploying. The
     role may pull from ECR, not push.
@@ -174,6 +174,11 @@ One request or one stop must never outlast the layer in front of it:
 
 - **Whatever 0013 chooses must run here.** RDS PostgreSQL in the same VPC fits: db.t4g.micro
   single-AZ on testnet, db.t4g.small Multi-AZ on mainnet.
+- **Task 0013 proposes one RDS PostgreSQL instance per network** (ADR 0012, in review). It adds
+  to this ADR:
+  - isolated private subnets for the database;
+  - a one-off migration task. The deploy workflow runs it from the new image before each service
+    update. The old task keeps serving while it runs, so every migration is expand/contract.
 - **SQLite would need EC2 with EBS.** Fargate's only persistent volume is EFS, an NFS mount, and
   SQLite advises against network filesystems.
 
@@ -239,6 +244,24 @@ One request or one stop must never outlast the layer in front of it:
   - Rejected.
 - **EKS.** $73/mo for the control plane alone, for one container. Rejected.
 - **Lambda behind API Gateway** (the Prices API's stack). No long-lived process. Rejected.
+- **Step Functions with Lambda:** a workflow per payment, with channel state in the database.
+  - What it would bring: deploys without downtime, and payments in flight survive restarts
+    without our own code.
+  - **It means rewriting the settlement engine.** `signer-pool` keeps each channel's sequence
+    number, the queue of payments and the next prepared transaction in one process's memory.
+    Lambdas share no memory, so all of that moves into the database with a lock per payment.
+    - AD-2, AD-16, AD-17 and AD-22 change with it.
+    - Pipelining is lost: at 90 channels it raised the mean from 50 to 64 per ledger (ADR 0003).
+  - **It fights the store design.** Lambdas need RDS Proxy in front of PostgreSQL, against a
+    small fixed pool per task, and the in-process rate-limit counters (0023) go away.
+  - **Every step is billed:** $0.025 per 1,000 transitions on Standard workflows, a visible share
+    of a sub-cent payment. Express workflows are cheaper but run a step at least once, which
+    risks a second send.
+  - **Timeouts are not the blocker.** An HTTP API stops at 30 s, but a REST API with a raised
+    limit or an ALB in front of the Lambdas can wait for `/settle`.
+  - Rejected for the facilitator.
+  - It still fits side jobs, such as topping up the fee balance and rebuilding channels after a
+    testnet reset.
 - **CloudFront's default domain in front of the ALB,** for HTTPS without our own subdomain.
   Rejected:
   - the CloudFront-to-ALB hop would be plain HTTP;
@@ -290,9 +313,17 @@ One request or one stop must never outlast the layer in front of it:
     CloudWatch and the health check a few dollars.
   - Mainnet is about $150/mo: one 1 vCPU / 2 GB task, Multi-AZ db.t4g.small, KMS and CloudWatch.
     A NAT gateway would add $38–76, and a WAF a few dollars plus per-request fees.
-- **Scaling out later** follows the model in `R-cloud-container-options` §A2: one service with
-  `desiredCount` N and `minimumHealthyPercent` (N−1)/N, where each task takes a free channel set's
-  lease. It changes AD-17's one channel set per network and removes deploy downtime.
+- **Option for mainnet, not a requirement: two tasks with separate channel sets in two
+  Availability Zones.**
+  - It follows the model in `R-cloud-container-options` §A2: one service with `desiredCount` 2
+    and `minimumHealthyPercent` 50, where each task takes a free channel set's lease.
+  - A deploy then replaces the tasks one at a time: no downtime, only half the channels for a
+    few minutes.
+  - It also rides out task retirement, a host or zone failure, a crash, an out-of-memory kill or
+    a flood that starves one task. With one task, each of these means a few minutes of downtime.
+  - It costs a second task and a second channel set, and changes AD-17's one channel set per
+    network.
+  - The mainnet launch decides on it, together with the WAF rule.
 - **Slack is not a pager.** On mainnet, the alerts that cost money (breaker open, low balance,
   pending settlements) also need a phone or SMS route.
 - **The key's isolation rests on IAM and the key policies.** An account administrator can still

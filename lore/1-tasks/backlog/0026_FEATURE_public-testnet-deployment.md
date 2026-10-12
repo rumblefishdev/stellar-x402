@@ -65,6 +65,8 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     hand, in a `concurrency` group;
   - actions are pinned by commit SHA. `permissions: {}` is set at the top, and the deploy job
     gets only `id-token: write` and `contents: read`;
+  - before the service update, it runs the one-off migration task from ADR 0012 (task 0013),
+    and the deploy role may run it;
   - the last step waits for `ready: true` from `/health`.
 - From 0014, secrets:
   - `FACILITATOR_SECRET` is a SecureString under `/x402/testnet/`, created by hand with
