@@ -53,6 +53,7 @@ export const CATALOG: DiscoveryResource[] = [
     accepts: accepts("stellar:testnet", "GSELLERB", "50000"),
     lastUpdated: "2026-10-02T00:00:00.000Z",
     description: "x".repeat(2_000),
+    serviceName: "y".repeat(2_000),
     extensions: {
       bazaar: {
         info: {

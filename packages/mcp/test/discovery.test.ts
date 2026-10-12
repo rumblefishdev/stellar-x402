@@ -7,7 +7,12 @@ import { CATALOG, startFakeCatalog, type FakeCatalog } from "./fake-catalog.js";
 
 /** What the tools return, loosely typed for assertions. */
 interface Payload {
-  items: { method?: string; description?: string; accepts: { network: string }[] }[];
+  items: {
+    method?: string;
+    description?: string;
+    serviceName?: string;
+    accepts: { network: string }[];
+  }[];
   pagination: unknown;
   error: { code: string };
 }
@@ -99,9 +104,17 @@ describe("list_resources", () => {
     },
   );
 
-  it("cuts seller-written text to the catalog's description limit", async () => {
+  it("cuts seller-written text to the catalog's limits", async () => {
     const { structuredContent } = await call("list_resources", { type: "mcp" });
     expect(structuredContent.items[0]!.description).toHaveLength(500);
+    expect(structuredContent.items[0]!.serviceName).toHaveLength(500);
+  });
+
+  it("cuts a long tool name to the catalog's tool name limit", async () => {
+    const input = { type: "mcp", toolName: "t".repeat(300), inputSchema: {} };
+    await reconnect([{ ...CATALOG[2]!, extensions: { bazaar: { info: { input } } } }]);
+    const { structuredContent } = await call("list_resources", {});
+    expect(structuredContent.items[0]!.method).toHaveLength(128);
   });
 
   it("rejects malformed input before calling the catalog", async () => {
@@ -140,6 +153,8 @@ describe("get_resource", () => {
       resource: "https://quotes.example.com/mcp",
     });
     expect(structuredContent.items).toHaveLength(2);
+    // get_resource cuts seller text too, not only list_resources.
+    expect(structuredContent.items[0]!.description).toHaveLength(500);
   });
 
   it.each([
@@ -167,6 +182,8 @@ describe("get_resource", () => {
       resource: "https://many.example.com/119",
     });
     expect(structuredContent.error.code).toBe("upstream_error");
+    // It stops at the first empty page instead of asking for more.
+    expect(catalog.queries).toHaveLength(2);
   });
 
   it("returns resource_not_found for a URL that is not in the catalog", async () => {
