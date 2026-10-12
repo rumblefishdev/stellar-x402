@@ -29,7 +29,9 @@ export {
 } from "./stats.js";
 export {
   FeeLimitError,
+  LedgerBoundError,
   SettlementSubmitter,
+  SignedHookError,
   SimulationCheckError,
   SimulationError,
   type ContractCall,

@@ -2,7 +2,14 @@ import type { SubmitResult, SubmitStatus } from "./types.js";
 
 /** Why a submission ended before anything was sent. */
 export type RefusalReason =
-  "simulation" | "check" | "fee-limit" | "queue-timeout" | "no-channels" | "other";
+  | "simulation"
+  | "check"
+  | "fee-limit"
+  | "ledger-bound"
+  | "queue-timeout"
+  | "no-channels"
+  | "on-signed"
+  | "other";
 
 export type SubmitterEvent =
   /** The network accepted the transaction (`PENDING` or `DUPLICATE`). */
@@ -73,8 +80,10 @@ export class SubmitterStats {
     simulation: 0,
     check: 0,
     "fee-limit": 0,
+    "ledger-bound": 0,
     "queue-timeout": 0,
     "no-channels": 0,
+    "on-signed": 0,
     other: 0,
   };
   private sequenceResyncs = 0;
