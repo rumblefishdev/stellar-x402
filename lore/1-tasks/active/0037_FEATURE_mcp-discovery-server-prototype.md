@@ -2,7 +2,7 @@
 id: "0037"
 title: "MCP discovery server prototype: list, inspect and pay for Bazaar resources"
 type: FEATURE
-status: backlog
+status: active
 milestone: 2
 related_adr: ["0008"]
 related_tasks: ["0032", "0031", "0016"]
@@ -19,6 +19,11 @@ history:
     note: >
       Created at okarcz's request as a self-contained head start on the post-T1 MCP deliverable,
       intended for the team's fourth developer. Tagged Discovery as the closest board lane.
+  - date: "2026-10-12"
+    status: active
+    who: karolkow
+    note: >
+      Work started.
 ---
 
 # MCP discovery server prototype: list, inspect and pay for Bazaar resources
