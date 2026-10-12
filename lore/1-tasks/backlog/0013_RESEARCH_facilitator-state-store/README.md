@@ -4,8 +4,8 @@ title: "Choose the facilitator's state store and record it in an ADR"
 type: RESEARCH
 status: backlog
 milestone: 1
-related_adr: ["0003", "0006", "0007", "0008"]
-related_tasks: ["0012", "0009"]
+related_adr: ["0003", "0006", "0007", "0008", "0011"]
+related_tasks: ["0012", "0009", "0014"]
 tags: [facilitator, persistence, bazaar, priority-high, effort-small, discovery]
 links:
   - ../../../../docs/adr/0003-settlement-channel-account-pool.md
@@ -76,7 +76,8 @@ The store is closely tied to hosting, so the research should note what each opti
 the host.
 
 From 0014 ([ADR 0011](../../../../docs/adr/0011-facilitator-hosting.md)): the host is ECS on
-Fargate in AWS. RDS PostgreSQL fits (db.t4g.micro ~$14/mo single-AZ, ~$27/mo Multi-AZ). SQLite
+Fargate in AWS. RDS PostgreSQL fits: db.t4g.micro single-AZ on testnet (~$17/mo with storage),
+db.t4g.small Multi-AZ on mainnet (~$68/mo). SQLite
 doesn't: Fargate's only persistent volume is EFS, an NFS mount that SQLite advises against, so
 SQLite would move the facilitator to EC2 with EBS.
 

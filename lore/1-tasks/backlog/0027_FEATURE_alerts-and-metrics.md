@@ -4,8 +4,8 @@ title: "Alerts and metrics"
 type: FEATURE
 status: backlog
 milestone: 1
-related_adr: ["0007"]
-related_tasks: ["0012", "0014", "0024", "0026"]
+related_adr: ["0007", "0011"]
+related_tasks: ["0012", "0014", "0024", "0026", "0020"]
 tags: [facilitator, operations, monitoring, priority-medium, effort-small, platform]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -35,18 +35,32 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
 - Metrics adapter in `adapters/` fed by pool events and the HTTP layer.
 - Alert rules for the five conditions; a balance check on a timer.
 - Update `docs/monitoring.md`.
-- From 0014 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md)): the backend is
-  CloudWatch. The metrics adapter writes Embedded Metric Format lines to stdout (namespace
-  `x402-facilitator`), and `awslogs` turns them into metrics; no SDK or agent. Dimensions stay
-  low-cardinality (`network`, route, outcome, event name), never payer or `payTo`. Check once that
-  extraction works, since some setups report it failing.
-- From 0014: alarms → SNS → Amazon Q Developer in chat applications → the team's Slack channel;
-  a Route 53 HTTPS health check on the public `/supported` measures uptime.
-- From 0014: export "lease held" as a metric with an alarm. The health check doesn't look at the
-  lease (ADR 0011), so this is how a process stuck without the lease is noticed.
+- From 0014 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md)): the backend is CloudWatch.
+  - The adapter writes Embedded Metric Format lines to stdout (namespace `x402-facilitator`), and
+    `awslogs` turns them into metrics; no SDK or agent.
+  - Dimensions stay low-cardinality (`network`, route, outcome, event name), never payer or
+    `payTo`, and the adapter emits only listed fields.
+  - Check once that extraction works, since some setups report it failing.
+- From 0014: alarms go through SNS and Amazon Q Developer in chat applications to the team's
+  Slack channel. Besides the five AD-18 conditions:
+  - "ready to settle" (lease held, reconciliation done);
+  - CloudTrail events on the testnet KMS key: use by another principal, a policy change, a
+    scheduled deletion;
+  - AWS Health task-retirement notices.
+- From 0014: uptime is a Route 53 HTTPS health check.
+  - Its metrics exist only in us-east-1, so the alarm and its SNS topic go in a small us-east-1
+    stack subscribed to the same Slack channel.
+  - The alarm needs more failing minutes than a deploy's downtime (about 6).
+  - Check `/supported` once 0020 lands, `/health` before.
+  - The 99% figure counts a minute as up only when the check passes and the facilitator is ready
+    to settle.
+- From 0014: RPC URLs are logged by host only. signer-pool's `FallbackRpc.fromUrls` names
+  endpoints by their full URL, which reaches `onSwitch`; name them by host before wiring it to logs
+  or metrics.
 
 ## Acceptance Criteria
 
 - [ ] Given the running facilitator, when it serves traffic, then pool `onEvent` events, per-route request counts and settle outcomes are exported as metrics
 - [ ] Given each alert condition: budget nearly used, breaker open, low facilitator balance (`checkFacilitatorBalance`), quarantined channel, pending settlements, when it occurs, then an alert fires on the backend chosen in 0014; each alert has been triggered once on testnet or with a fake
+- [ ] Given a process that stays not ready to settle (no lease, or reconciliation unfinished) longer than the alarm window, when the alarm evaluates, then it fires (ADR 0011)
 - [ ] Given `docs/monitoring.md`, when this story is done, then it lists every metric and alert

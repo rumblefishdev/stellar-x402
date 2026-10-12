@@ -41,7 +41,19 @@ signatures are valid on Stellar and adds a `TransactionSigner` backed by KMS.
 - Spike on testnet: sign a transaction hash with KMS and verify it with `stellar-base`; derive the
   G-address from `GetPublicKey` (the last 32 bytes of the SPKI).
 - A KMS `TransactionSigner` in `apps/facilitator/src/adapters/`, chosen by config.
-- Key policy: only the mainnet task role may `Sign`.
+- Key policy:
+  - an explicit deny on `kms:Sign` for every principal but the mainnet task role;
+  - key administrators can't sign;
+  - only a break-glass role may `DisableKey` or `ScheduleKeyDeletion`;
+  - the stack keeps the key on delete (`RETAIN`).
+- A KMS interface VPC endpoint and an `aws:SourceVpce` condition on `Sign`, so leaked task-role
+  credentials can't sign from elsewhere (about $9/mo per AZ).
+- CloudTrail alarms on `Sign` by another principal, key-policy changes, `CreateGrant`,
+  `DisableKey` and `ScheduleKeyDeletion`.
+- Decide recovery. A KMS key can't be exported, so losing it locks every channel and the fee
+  account. The options:
+  - an offline backup signer on each account;
+  - small balances topped up from an offline account.
 - Measure the added latency per settlement.
 
 ## Acceptance Criteria
@@ -51,3 +63,4 @@ signatures are valid on Stellar and adds a `TransactionSigner` backed by KMS.
 - [ ] Given the config, when the facilitator starts with the KMS signer, then no secret seed is
       read from the environment
 - [ ] Given the key policy, when any role but the mainnet task role calls `Sign`, then it is denied
+- [ ] Given a key administrator, when they call `DisableKey` or `ScheduleKeyDeletion`, then it is denied; only the break-glass role may
