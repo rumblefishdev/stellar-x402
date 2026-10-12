@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createServer } from "../src/index.js";
 import { CATALOG, startFakeCatalog, type FakeCatalog } from "./fake-catalog.js";
@@ -14,13 +15,27 @@ interface Payload {
 let catalog: FakeCatalog;
 let client: Client;
 
-beforeEach(async () => {
-  catalog = await startFakeCatalog();
+async function connect(items = CATALOG) {
+  catalog = await startFakeCatalog(items);
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   await createServer({ discoveryUrl: catalog.url }).connect(serverSide);
   client = new Client({ name: "test", version: "0.0.0" });
   await client.connect(clientSide);
-});
+}
+
+async function reconnect(items: DiscoveryResource[]) {
+  await client.close();
+  await catalog.close();
+  await connect(items);
+}
+
+const many = (n: number) =>
+  Array.from({ length: n }, (_, i) => ({
+    ...CATALOG[1]!,
+    resource: `https://many.example.com/${i}`,
+  }));
+
+beforeEach(() => connect());
 
 afterEach(async () => {
   await client.close();
@@ -67,7 +82,7 @@ describe("list_resources", () => {
     [{ type: "mcp" }, 1],
     [{ type: "http", network: "stellar:pubnet" }, 1],
     [{ payTo: "GSELLERB" }, 1],
-    [{ scheme: "exact", network: "stellar:testnet" }, 2],
+    [{ type: "http", network: "stellar:testnet" }, 1],
     [{ extensions: "bazaar" }, 2],
     [{ type: "mcp", network: "stellar:pubnet" }, 0],
     [{ limit: 1, offset: 1 }, 1],
@@ -88,7 +103,7 @@ describe("list_resources", () => {
   });
 
   it("rejects malformed input before calling the catalog", async () => {
-    // The MCP SDK validates input against the schema and answers with its own protocol error.
+    // The MCP SDK checks input against the schema before the handler runs and answers in free text.
     const result = await client.callTool({ name: "list_resources", arguments: { limit: -1 } });
     expect(result.isError).toBe(true);
     expect(catalog.queries).toHaveLength(0);
@@ -125,23 +140,21 @@ describe("get_resource", () => {
   });
 
   it("finds an entry on a later page when the catalog returns short pages", async () => {
-    await catalog.close();
-    const many = Array.from({ length: 250 }, (_, i) => ({
-      ...CATALOG[1]!,
-      resource: `https://many.example.com/${i}`,
-    }));
-    catalog = await startFakeCatalog(many);
-    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-    await createServer({ discoveryUrl: catalog.url }).connect(serverSide);
-    await client.close();
-    client = new Client({ name: "test", version: "0.0.0" });
-    await client.connect(clientSide);
-
+    await reconnect(many(250));
     const { structuredContent } = await call("get_resource", {
       resource: "https://many.example.com/249",
     });
     expect(structuredContent.items).toHaveLength(1);
     expect(catalog.queries.map((q) => q.get("offset"))).toEqual(["0", "50", "100", "150", "200"]);
+  });
+
+  it("returns upstream_error, not resource_not_found, when the catalog is too large to scan", async () => {
+    await reconnect(many(2_600));
+    const { structuredContent } = await call("get_resource", {
+      resource: "https://nowhere.example.com/",
+    });
+    expect(structuredContent.error.code).toBe("upstream_error");
+    expect(catalog.queries).toHaveLength(50);
   });
 
   it("returns upstream_error when the catalog fails", async () => {
