@@ -2,10 +2,10 @@
 id: "0014"
 title: "Choose where the facilitator is hosted and record it in an ADR"
 type: RESEARCH
-status: active
+status: completed
 milestone: 1
 related_adr: ["0006", "0009", "0011"]
-related_tasks: ["0012", "0013", "0025", "0026", "0027", "0036", "0009", "0019", "0023"]
+related_tasks: ["0012", "0013", "0025", "0026", "0027", "0036", "0009", "0019", "0023", "0038"]
 tags: [facilitator, deploy, hosting, operations, priority-high, effort-small, platform]
 links:
   - ../../../../deploy/README.md
@@ -56,9 +56,27 @@ history:
       - on-chain key rotation and the image handling.
       The CloudFront fallback was dropped. Hand-offs updated in 0009, 0013, 0019, 0023, 0025,
       0026, 0027 and 0036.
+  - date: "2026-10-12"
+    status: completed
+    who: stkrolikiewicz
+    note: >
+      PR #16 merged (b39c1bb) after reviews by Oskar and Adam. ADR 0011 puts the facilitator on
+      ECS Fargate in the company AWS account, with CloudWatch logs, EMF metrics and alarms to
+      Slack.
+      - Research: four notes plus the S- comparison.
+      - Hand-offs to 0009, 0013, 0019, 0023, 0025, 0026, 0027 and 0036.
+      - Step Functions with Lambda is a rejected alternative.
+      - The two-task mainnet option is spawned as 0038.
 ---
 
 # Choose where the facilitator is hosted and record it in an ADR
+
+## Status: Completed
+
+> Started 2026-10-08 by Stan (stkrolikiewicz). Paused behind 0017, then finished in PR #16,
+> merged on 2026-10-12 after reviews by Oskar and Adam. Every acceptance criterion is met. The
+> follow-ups live in the tasks that own them, and two mainnet items are their own tasks (0036,
+> 0038).
 
 ## Summary
 
@@ -276,3 +294,5 @@ for the mainnet milestone, as `deploy/README.md` said before this task.
 ## Future Work
 
 - Mainnet KMS signer spike → 0036.
+- Mainnet availability, as an option: two tasks with separate channel sets in two zones, plus
+  the WAF rule → 0038.
