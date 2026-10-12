@@ -62,6 +62,34 @@ export const CATALOG: DiscoveryResource[] = [
       },
     },
   },
+  {
+    resource: "https://quotes.example.com/mcp",
+    type: "mcp",
+    x402Version: 2,
+    accepts: accepts("stellar:testnet", "GSELLERB", "20000"),
+    lastUpdated: "2026-10-02T00:00:00.000Z",
+    description: "Price history",
+    extensions: {
+      bazaar: {
+        info: {
+          input: { type: "mcp", toolName: "history", inputSchema: { type: "object" } },
+          output: { type: "json" },
+        },
+      },
+    },
+  },
+  {
+    // A templated route: the catalog lists it with the parameter name erased (ADR 0008).
+    resource: "https://weather.example.com/cities/:",
+    type: "http",
+    x402Version: 2,
+    accepts: accepts("stellar:testnet", "GSELLERA", "5000"),
+    lastUpdated: "2026-10-03T00:00:00.000Z",
+    description: "City details",
+    extensions: {
+      bazaar: { info: { input: { type: "http", method: "GET" }, output: { type: "json" } } },
+    },
+  },
 ];
 
 function filter(items: DiscoveryResource[], query: URLSearchParams): DiscoveryResourcesResponse {
@@ -70,7 +98,10 @@ function filter(items: DiscoveryResource[], query: URLSearchParams): DiscoveryRe
     (item) =>
       want("type", item.type) &&
       item.accepts.some((a) => want("payTo", a.payTo) && want("network", a.network)) &&
-      (!query.has("extensions") || query.get("extensions")! in (item.extensions ?? {})),
+      // Same rule as the memory catalog store: an own key with a value.
+      (!query.has("extensions") ||
+        (item.extensions?.[query.get("extensions")!] !== undefined &&
+          Object.hasOwn(item.extensions, query.get("extensions")!))),
   );
   const offset = Number(query.get("offset") ?? 0);
   // A real catalog bounds the page size (ADR 0008), so callers must page by what they receive.
@@ -88,6 +119,8 @@ export interface FakeCatalog {
   queries: URLSearchParams[];
   /** Answer with this status instead of the catalog. */
   failWith?: number;
+  /** Answer empty pages from this offset on, while still reporting the full total. */
+  emptyFrom?: number;
   close(): Promise<void>;
 }
 
@@ -105,7 +138,9 @@ export async function startFakeCatalog(items: DiscoveryResource[] = CATALOG): Pr
       return;
     }
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify(filter(items, url.searchParams)));
+    const page = filter(items, url.searchParams);
+    if (fake.emptyFrom !== undefined && page.pagination.offset >= fake.emptyFrom) page.items = [];
+    res.end(JSON.stringify(page));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const fake: FakeCatalog = {
