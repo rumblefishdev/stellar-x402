@@ -2,7 +2,7 @@
 id: "0016"
 title: "Signer pool T1 prerequisites and the @x402 2.28 upgrade"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0003", "0006"]
 related_tasks: ["0007", "0009", "0011", "0012"]
@@ -22,6 +22,11 @@ history:
     status: backlog
     who: claude
     note: "Mapped to M1 Story 1.2 (Payments lane) by 0012. Added the workspace @x402 2.28 upgrade (AD-14)."
+  - date: "2026-10-12"
+    status: active
+    who: okarcz
+    note: >
+      Work started.
 ---
 
 # Signer pool T1 prerequisites and the @x402 2.28 upgrade
