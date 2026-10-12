@@ -7,13 +7,14 @@
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Address, type xdr } from "@stellar/stellar-sdk";
+import { Address, authorizeEntry, nativeToScVal, type xdr } from "@stellar/stellar-sdk";
 import { type ContractCall, SettlementSubmitter, keypairSigner } from "@stellar-x402/signer-pool";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   PASSPHRASE,
   RPC_URL,
   type TxReport,
+  contractTtls,
   readContract,
   server,
   tokenBalance,
@@ -25,14 +26,31 @@ import {
   checkClientAuth,
   clientSign,
   clientSignDirect,
+  contractFn,
+  expectedClientInvocation,
   newTerms,
   nonceArgs,
   settleCall,
+  signSimulatedEntry,
+  unsignedEntry,
 } from "../src/upto.js";
-import { type TokenKind, type World, prepareWorld } from "../src/world.js";
+import { type TokenKind, type World, deployFreshInstance, prepareWorld } from "../src/world.js";
 
 const RESULTS = join(dirname(fileURLToPath(import.meta.url)), "../results/testnet-results.json");
 const MAX = 1_000_000n; // 0.1 of a 7-decimal token
+// The contract's own TTL targets (lib.rs, task 0035), in ledgers.
+const TTL_EXTEND_TO = 518_400;
+const TTL_MIN_EXTENSION = 120;
+const TTL_MAX_EXTENSION = 720;
+// The contract's cap on allowance_expiration_ledger, in ledgers past the current one (lib.rs).
+const MAX_ALLOWANCE_LEDGERS = 17_280;
+// The payment window: newTerms sets deadline = now + 900 s, as a seller's maxTimeoutSeconds would.
+// The allowance (and the signature, spec §3.1) expires with it: the deadline in ledgers, plus a
+// margin for the estimate. The facilitator refuses expiries further out than the window.
+const WINDOW_SECONDS = 900;
+const LEDGER_SECONDS = 5;
+const MARGIN_LEDGERS = 12;
+const MAX_WINDOW_LEDGERS = Math.ceil(WINDOW_SECONDS / LEDGER_SECONDS) + 2 * MARGIN_LEDGERS;
 // E2E_TOKENS=sac,sep41 runs a subset; a full run (the default) covers all three.
 const TOKENS = (process.env.E2E_TOKENS?.split(",") ?? ["usdc", "sac", "sep41"]) as TokenKind[];
 
@@ -52,7 +70,9 @@ interface ScenarioResult {
 let world: World;
 let submitter: SettlementSubmitter;
 let otherSubmitter: SettlementSubmitter;
-let expLedger: number;
+/** A recent ledger and its unix time, to convert deadlines to ledgers; refreshed before each test. */
+let anchorLedger: number;
+let anchorTime: number;
 let clientXlmBefore: bigint;
 const results: ScenarioResult[] = [];
 /** The last successful settlement per token, replayed by the replay scenarios. */
@@ -71,7 +91,6 @@ beforeAll(async () => {
     signer: keypairSigner(world.otherFacilitator),
     channels: world.otherChannels,
   });
-  expLedger = (await server.getLatestLedger()).sequence + 500;
   // Taken after setup, which pays the client's trustline fees: the check covers settlements.
   clientXlmBefore = await xlmBalance(world.client.publicKey());
 });
@@ -105,8 +124,22 @@ afterAll(() => {
   );
 });
 
-const terms = (kind: TokenKind, overrides: Partial<UptoTerms> = {}) =>
-  newTerms(
+/** The ledger expected to close at `unix`, estimated from the run's start at 5 s a ledger. */
+const ledgerAt = (unix: number) => anchorLedger + Math.ceil((unix - anchorTime) / LEDGER_SECONDS);
+
+// Re-anchor before every test: an estimate from the run's start drifts when ledgers close slower
+// than 5 s, and the facilitator's window has only a few ledgers of slack.
+beforeEach(async () => {
+  anchorLedger = (await server.getLatestLedger()).sequence;
+  anchorTime = Math.floor(Date.now() / 1000);
+});
+
+/**
+ * Payment terms whose allowance expires with the deadline. A deadline in the past still gets a
+ * future expiry, so the contract's own deadline check is what refuses it, not the signature.
+ */
+const terms = (kind: TokenKind, overrides: Partial<UptoTerms> = {}): UptoTerms => {
+  const t = newTerms(
     {
       proxy: world.proxy.contractId,
       token: world.tokens[kind],
@@ -114,10 +147,29 @@ const terms = (kind: TokenKind, overrides: Partial<UptoTerms> = {}) =>
       to: world.seller.publicKey(),
       facilitator: world.facilitator.publicKey(),
       maxAmount: MAX,
-      allowanceExpirationLedger: expLedger,
+      allowanceExpirationLedger: 0,
     },
     overrides,
   );
+  if (overrides.allowanceExpirationLedger !== undefined) return t;
+  const now = Math.floor(Date.now() / 1000);
+  const until = Math.max(ledgerAt(Number(t.deadline)), ledgerAt(now));
+  return { ...t, allowanceExpirationLedger: until + MARGIN_LEDGERS };
+};
+
+/**
+ * The facilitator's window for `t`, against the current ledger: the allowance may end no later
+ * than the window and no earlier than the deadline's ledger, both with a margin.
+ */
+const facilitatorWindow = async (t: UptoTerms) => {
+  const latestLedger = (await server.getLatestLedger()).sequence;
+  const secondsLeft = Number(t.deadline) - Math.floor(Date.now() / 1000);
+  return {
+    latestLedger,
+    maxLedgers: MAX_WINDOW_LEDGERS,
+    minLedger: latestLedger + Math.floor(secondsLeft / LEDGER_SECONDS) - MARGIN_LEDGERS,
+  };
+};
 
 /** Runs `body`, recording its outcome whether it passes or throws. */
 async function scenario(
@@ -206,7 +258,7 @@ async function settleAndCheck(
   auth: xdr.SorobanAuthorizationEntry,
   actual: bigint,
 ): Promise<TxReport> {
-  checkClientAuth(auth, t);
+  checkClientAuth(auth, t, await facilitatorWindow(t));
   const before = await balances(t);
   const result = await submitter.submit(settleCall(auth, t, actual));
   expect(result.status, `submit ${result.hash}: ${result.errorCode ?? ""}`).toBe("success");
@@ -251,7 +303,7 @@ describe.each(TOKENS)("UptoProxy on testnet with %s", (kind) => {
     it(name, () =>
       scenario(kind, name, "success", async (r) => {
         const t = terms(kind);
-        const auth = await clientSign(t, world.client, expLedger);
+        const auth = await clientSign(t, world.client);
         await settleAndCheck(r, t, auth, MAX / fraction);
         settled.set(kind, { terms: t, auth });
         r.outcome = "success";
@@ -262,14 +314,14 @@ describe.each(TOKENS)("UptoProxy on testnet with %s", (kind) => {
   it("settles zero", () =>
     scenario(kind, "settles zero", "success, no transfer, event and nonce recorded", async (r) => {
       const t = terms(kind);
-      await settleAndCheck(r, t, await clientSign(t, world.client, expLedger), 0n);
+      await settleAndCheck(r, t, await clientSign(t, world.client), 0n);
       r.outcome = "success";
     }));
 
   it("rejects an amount over the ceiling", () =>
     scenario(kind, "rejects an amount over the ceiling", "AmountExceedsMax (#2)", async (r) => {
       const t = terms(kind);
-      const auth = await clientSign(t, world.client, expLedger);
+      const auth = await clientSign(t, world.client);
       await expectRefused(r, settleCall(auth, t, MAX + 1n), CONTRACT(2));
     }));
 
@@ -284,7 +336,7 @@ describe.each(TOKENS)("UptoProxy on testnet with %s", (kind) => {
     scenario(kind, "rejects a reused nonce with a new signature", "NonceUsed (#7)", async (r) => {
       const last = settled.get(kind);
       if (!last) throw new Error("no earlier settlement to replay");
-      const auth = await clientSignDirect(last.terms, world.client, expLedger);
+      const auth = await clientSignDirect(last.terms, world.client);
       await expectRefused(r, settleCall(auth, last.terms, 1n), CONTRACT(7));
     }));
 
@@ -292,7 +344,7 @@ describe.each(TOKENS)("UptoProxy on testnet with %s", (kind) => {
     scenario(kind, "rejects a settlement before valid_after", "NotYetValid (#4)", async (r) => {
       const now = BigInt(Math.floor(Date.now() / 1000));
       const t = terms(kind, { validAfter: now + 3600n, deadline: now + 7200n });
-      const auth = await clientSignDirect(t, world.client, expLedger);
+      const auth = await clientSignDirect(t, world.client);
       await expectRefused(r, settleCall(auth, t, 1n), CONTRACT(4));
     }));
 
@@ -300,14 +352,28 @@ describe.each(TOKENS)("UptoProxy on testnet with %s", (kind) => {
     scenario(kind, "rejects a settlement after the deadline", "Expired (#5)", async (r) => {
       const now = BigInt(Math.floor(Date.now() / 1000));
       const t = terms(kind, { validAfter: now - 7200n, deadline: now - 3600n });
-      const auth = await clientSignDirect(t, world.client, expLedger);
+      const auth = await clientSignDirect(t, world.client);
       await expectRefused(r, settleCall(auth, t, 1n), CONTRACT(5));
     }));
+
+  it("rejects an allowance expiry beyond the contract's cap", () =>
+    scenario(
+      kind,
+      "rejects an allowance expiry beyond the contract's cap",
+      "InvalidAllowanceExpiration (#6)",
+      async (r) => {
+        // Past the facilitator's window too; this checks the contract's own defence.
+        const latest = (await server.getLatestLedger()).sequence;
+        const t = terms(kind, { allowanceExpirationLedger: latest + MAX_ALLOWANCE_LEDGERS + 100 });
+        const auth = await clientSignDirect(t, world.client);
+        await expectRefused(r, settleCall(auth, t, 1n), CONTRACT(6));
+      },
+    ));
 
   it("rejects a different facilitator", () =>
     scenario(kind, "rejects a different facilitator", "Error(Auth, InvalidAction)", async (r) => {
       const t = terms(kind);
-      const auth = await clientSign(t, world.client, expLedger);
+      const auth = await clientSign(t, world.client);
       await expectRefused(r, settleCall(auth, t, 1n), AUTH_MISMATCH, otherSubmitter);
     }));
 
@@ -329,7 +395,7 @@ describe.each(TOKENS)("UptoProxy on testnet with %s", (kind) => {
     it(name, () =>
       scenario(kind, name, "Error(Auth, InvalidAction)", async (r) => {
         const t = terms(kind);
-        const auth = await clientSign(t, world.client, expLedger);
+        const auth = await clientSign(t, world.client);
         const tampered = { ...t, ...change(t) };
         expect(() => checkClientAuth(auth, tampered)).toThrow();
         await expectRefused(r, settleCall(auth, t, 1n, tampered), AUTH_MISMATCH, via());
@@ -340,10 +406,7 @@ describe.each(TOKENS)("UptoProxy on testnet with %s", (kind) => {
   it("settles two authorizations one after the other", () =>
     scenario(kind, "settles two authorizations one after the other", "both success", async (r) => {
       const [a, b] = [terms(kind), terms(kind)];
-      const [authA, authB] = [
-        await clientSign(a, world.client, expLedger),
-        await clientSign(b, world.client, expLedger),
-      ];
+      const [authA, authB] = [await clientSign(a, world.client), await clientSign(b, world.client)];
       const first = await settleAndCheck(r, a, authA, 1_000n);
       const second = await settleAndCheck(r, b, authB, 2_000n);
       expect(second.ledger).toBeGreaterThan(first.ledger);
@@ -360,11 +423,11 @@ describe.each(TOKENS)("UptoProxy on testnet with %s", (kind) => {
         for (let attempt = 1; ; attempt++) {
           const [a, b] = [terms(kind), terms(kind)];
           const [authA, authB] = [
-            await clientSign(a, world.client, expLedger),
-            await clientSign(b, world.client, expLedger),
+            await clientSign(a, world.client),
+            await clientSign(b, world.client),
           ];
-          checkClientAuth(authA, a);
-          checkClientAuth(authB, b);
+          checkClientAuth(authA, a, await facilitatorWindow(a));
+          checkClientAuth(authB, b, await facilitatorWindow(b));
           // Both are signed before either is sent, so each balance check would see the other's
           // transfer; check the pair as a whole instead.
           const before = await balances(a);
@@ -395,6 +458,137 @@ describe.each(TOKENS)("UptoProxy on testnet with %s", (kind) => {
         }
       },
     ));
+});
+
+describe("client and facilitator checks", () => {
+  const kind = TOKENS[0]!;
+
+  it("client refuses to sign a tree that differs from the terms", () =>
+    scenario(
+      "all",
+      "client refuses a simulated tree that differs from the terms",
+      "not signed",
+      async (r) => {
+        const t = terms(kind);
+        // What a lying RPC could return: the payer's whole ceiling sent to the facilitator.
+        const transfer = contractFn(t.token, "transfer", [
+          Address.fromString(t.from).toScVal(),
+          Address.fromString(t.facilitator).toScVal(),
+          nativeToScVal(t.maxAmount, { type: "i128" }),
+        ]);
+        await expect(
+          signSimulatedEntry(unsignedEntry(t.from, transfer), t, world.client),
+        ).rejects.toThrow(/does not match the payment terms/);
+        const honest = unsignedEntry(t.from, expectedClientInvocation(t));
+        await expect(signSimulatedEntry(honest, t, world.client)).resolves.toBeDefined();
+        r.outcome = "forged tree refused, honest tree signed";
+      },
+    ));
+
+  it("facilitator refuses an allowance that outlives the window", () =>
+    scenario(
+      "all",
+      "facilitator refuses an allowance that outlives the window",
+      "refused before settlement",
+      async (r) => {
+        const latest = (await server.getLatestLedger()).sequence;
+        const far = terms(kind, { allowanceExpirationLedger: latest + 100_000 });
+        const auth = await clientSignDirect(far, world.client);
+        const window = await facilitatorWindow(far);
+        expect(() => checkClientAuth(auth, far, window)).toThrow(/ledgers past/);
+        r.outcome = `refused: ${latest + 100_000} is over ${window.maxLedgers} ledgers ahead`;
+      },
+    ));
+
+  it("facilitator refuses an allowance that ends before the deadline", () =>
+    scenario(
+      "all",
+      "facilitator refuses an allowance that ends before the deadline",
+      "refused before settlement",
+      async (r) => {
+        // A 15-minute deadline with an allowance 2 ledgers long: verify would pass, the seller
+        // would serve, and the settlement would fail with Expired (#5).
+        const latest = (await server.getLatestLedger()).sequence;
+        const short = terms(kind, { allowanceExpirationLedger: latest + 2 });
+        const auth = await clientSignDirect(short, world.client);
+        const window = await facilitatorWindow(short);
+        expect(() => checkClientAuth(auth, short, window)).toThrow(/ends before the deadline/);
+        r.outcome = `refused: ${latest + 2} is before ledger ${window.minLedger}`;
+      },
+    ));
+
+  it("facilitator refuses a signature that expires apart from the allowance", () =>
+    scenario(
+      "all",
+      "facilitator refuses a signature expiry that differs from the allowance",
+      "refused before settlement",
+      async (r) => {
+        const t = terms(kind);
+        // The right tree, signed to expire one ledger after the allowance.
+        const entry = unsignedEntry(t.from, expectedClientInvocation(t));
+        const auth = await authorizeEntry(
+          entry,
+          world.client,
+          t.allowanceExpirationLedger + 1,
+          PASSPHRASE,
+        );
+        expect(() => checkClientAuth(auth, t)).toThrow(/signature expiry differs/);
+        r.outcome = "refused";
+      },
+    ));
+});
+
+describe("availability", () => {
+  // The main proxy sits at the network's maximum TTL from the deploy script, above the contract's
+  // own target, so its settlements never extend it. A fresh instance of the same WASM starts at
+  // the network's minimum TTL and shows the self-extension: each settlement adds exactly the cap
+  // to the instance. The code entry is shared with the main proxy and already above the target,
+  // so it doesn't move.
+  it("a fresh proxy extends its own instance on every settlement", () =>
+    scenario(
+      "all",
+      "fresh proxy extends its instance by the cap per settlement",
+      `instance +${TTL_MAX_EXTENSION} ledgers per settlement, code unchanged`,
+      async (r) => {
+        const proxy = deployFreshInstance(world.proxy.wasmHash);
+        const liveUntil = async () => {
+          const t = await contractTtls(proxy, world.proxy.wasmHash);
+          return { instance: t.latest + t.instance, code: t.latest + t.code, ttl: t.instance };
+        };
+        const start = await liveUntil();
+        expect(start.ttl).toBeLessThan(TTL_EXTEND_TO - TTL_MAX_EXTENSION);
+        let last = start;
+        for (let i = 0; i < 2; i++) {
+          const t = terms(TOKENS[0]!, { proxy });
+          await settleAndCheck(r, t, await clientSign(t, world.client), 1n);
+          const now = await liveUntil();
+          expect(now.instance).toBe(last.instance + TTL_MAX_EXTENSION);
+          expect(now.code).toBe(start.code);
+          last = now;
+        }
+        r.outcome =
+          `${proxy}: instance live until ${start.instance} → ${last.instance} ` +
+          `after 2 settlements, code unchanged at ${start.code}`;
+      },
+    ));
+
+  // After a full run the main proxy's TTL is at least the contract's own target, less the skip
+  // window, because the deploy script set it to the network maximum. With EXTEND_TTL=0 the proxy
+  // starts at the network minimum (120,960 ledgers) and a run's settlements add only about 16,000,
+  // so the check is skipped.
+  it.skipIf(process.env.EXTEND_TTL === "0")("keeps the proxy's instance and code alive", () =>
+    scenario(
+      "all",
+      "proxy instance and code stay alive",
+      `TTL >= ${TTL_EXTEND_TO - TTL_MIN_EXTENSION} ledgers`,
+      async (r) => {
+        const t = await contractTtls(world.proxy.contractId, world.proxy.wasmHash);
+        expect(t.instance).toBeGreaterThanOrEqual(TTL_EXTEND_TO - TTL_MIN_EXTENSION);
+        expect(t.code).toBeGreaterThanOrEqual(TTL_EXTEND_TO - TTL_MIN_EXTENSION);
+        r.outcome = `instance ${t.instance}, code ${t.code} ledgers left at ledger ${t.latest}`;
+      },
+    ),
+  );
 });
 
 describe("fees", () => {

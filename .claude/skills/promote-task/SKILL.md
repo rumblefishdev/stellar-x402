@@ -42,7 +42,7 @@ git worktree add --detach "$SCRATCH/promote-0042" origin/develop
 
 **Use `/lore-framework-tasks`. Never edit the frontmatter by hand.** It sets the status, `git mv`s the task to the matching directory (`active/`, `blocked/`, `archive/`) and, for **completed**, runs its completion checklist and spawns follow-up tasks.
 
-The new `history` entry sets the assignee: the board shows the last entry's `who`. So `who` is **the user's lore id**, a key of `lore/0-session/team.yaml` (`okarcz`, `akot`, `stkrolikiewicz`). Read it from `LORE_SESSION_CURRENT_USER` or `lore-framework_show-session`. It is not `claude`, and not the git user name: Oskar commits as `karczuRF` but is `okarcz`.
+The new `history` entry sets the assignee: the board shows the last entry's `who`. So `who` is **the user's lore id**, a key of `lore/0-session/team.yaml` (`okarcz`, `akot`, `stkrolikiewicz`, `karolkow`). Read it from `LORE_SESSION_CURRENT_USER` or `lore-framework_show-session`. It is not `claude`, and not the git user name: Oskar commits as `karczuRF` but is `okarcz`.
 
 ### 4. Commit with /lore-framework-git
 

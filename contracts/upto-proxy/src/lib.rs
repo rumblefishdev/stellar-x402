@@ -44,6 +44,33 @@ pub struct UptoSettled {
     pub nonce: BytesN<32>,
 }
 
+/// TTL that `settle_upto` keeps on the contract instance and its WASM code, in ledgers (task
+/// 0035). At 5 s ledgers: extend toward 30 days, skip gains under about 10 minutes, add at most
+/// about 1 hour per call. The facilitator pays the rent inside the settlement fee: 198.8 stroops
+/// per ledger plus about 5,800 per extension on testnet. With the allowance expiry at
+/// `MAX_ALLOWANCE_LEDGERS`, the costliest settlement is about 215,000 stroops, 86% of the default
+/// 250,000-stroop fee ceiling. Rent the token charges in the same settlement is not bounded here
+/// and does push a valid payment over it: with a SAC instance extending itself, the stack measured
+/// 330,032 stroops on testnet. The facilitator's `upto` ceiling and token keeper (task 0015) cover
+/// it. Below the
+/// target every settlement extends; once the TTL is at the target, the minimum keeps extensions to
+/// about one per 10 minutes under steady traffic.
+pub const TTL_EXTEND_TO: u32 = 518_400;
+pub const TTL_MIN_EXTENSION: u32 = 120;
+pub const TTL_MAX_EXTENSION: u32 = 720;
+
+/// The furthest `allowance_expiration_ledger` a settlement accepts, in ledgers after the current
+/// one: 17,280 (about 1 day at 5 s ledgers). The facilitator pays temporary rent on the nonce entry
+/// and the token's allowance until that ledger, and the payer picks it, so without a cap a payer
+/// could make one settlement pay for up to `max_entry_ttl` (about 180 days, 3.9 million stroops on
+/// testnet). A day costs about 25,000 stroops (1.3 per ledger, measured on testnet). The
+/// facilitator's `/verify` holds expiries to the payment window; this is defence in depth if it
+/// doesn't. It does not bound the host's own nonce entry for the client's signature, which lives
+/// until `signatureExpirationLedger` and which the contract never sees: only the facilitator's
+/// `signatureExpirationLedger == allowance_expiration_ledger` check bounds that, so the check is
+/// required.
+pub const MAX_ALLOWANCE_LEDGERS: u32 = 17_280;
+
 /// Storage keys (§7). Only temporary storage is used.
 #[contracttype]
 #[derive(Clone)]
@@ -121,7 +148,9 @@ impl UptoProxy {
         if allowance_expiration_ledger < seq {
             return Err(UptoError::Expired);
         }
-        if allowance_expiration_ledger > env.ledger().max_live_until_ledger() {
+        if allowance_expiration_ledger > env.ledger().max_live_until_ledger()
+            || allowance_expiration_ledger > seq.saturating_add(MAX_ALLOWANCE_LEDGERS)
+        {
             return Err(UptoError::InvalidAllowanceExpiration);
         }
 
@@ -145,6 +174,14 @@ impl UptoProxy {
         if actual_amount > 0 {
             token_client.transfer_from(&proxy, &from, &to, &actual_amount);
         }
+
+        // Keep the instance and code alive (task 0035). Without it, an archived proxy makes
+        // every settlement pay for a restore first.
+        env.storage().instance().extend_ttl_with_limits(
+            TTL_EXTEND_TO,
+            TTL_MIN_EXTENSION,
+            TTL_MAX_EXTENSION,
+        );
 
         // §4 step 11.
         UptoSettled {

@@ -2,6 +2,7 @@
 // first, so a rerun only tops up what is missing, and a run after a testnet reset rebuilds it all
 // (except testnet USDC, which only Circle's faucet hands out).
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -83,6 +84,28 @@ function deploy(name: string): { contractId: string; wasmHash: string } {
     return line.split("=")[1]!.trim();
   };
   return { contractId: value("CONTRACT_ID"), wasmHash: value("WASM_HASH") };
+}
+
+/**
+ * Deploys another instance of an uploaded WASM under a random salt, without the deploy script's
+ * TTL extension: the instance starts at the network's minimum persistent TTL (about 7 days), far
+ * below the contract's own target, so every settlement on it extends it. The code entry is
+ * shared with the main deployment.
+ */
+export function deployFreshInstance(wasmHash: string): string {
+  const deployer = process.env.DEPLOYER ?? "x402-testnet-deployer";
+  const salt = randomBytes(32).toString("hex");
+  return execFileSync(
+    "stellar",
+    ["contract", "deploy", "--wasm-hash", wasmHash, "--salt", salt].concat([
+      "--source",
+      deployer,
+      "--network",
+      "testnet",
+      "--quiet",
+    ]),
+    { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
+  ).trim();
 }
 
 /** Warns when the proxy deployed here isn't the one recorded in deploy/testnet.env.example. */

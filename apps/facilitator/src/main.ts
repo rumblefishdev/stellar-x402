@@ -1,9 +1,11 @@
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { memoryStores } from "./adapters/memory.js";
+import { createCataloger } from "./catalog/cataloger.js";
 import { parseConfig } from "./config.js";
 import { createApp, type AppDeps } from "./http/app.js";
 import { jsonLogger } from "./logger.js";
+import { memoryMetrics } from "./metrics.js";
 
 export interface Started {
   port: number;
@@ -35,5 +37,21 @@ export async function main(env: Record<string, string | undefined> = process.env
   const config = parseConfig(env);
   const logger = jsonLogger(config.logLevel);
   // STORE=memory is the only option until the durable adapters land (0022).
-  return start({ config, logger, stores: memoryStores() });
+  const stores = memoryStores();
+  // 0009 hands its `extensionResponses` and `onSuccess` to `/settle` as `SettlementHooks`.
+  const cataloger = createCataloger({
+    store: stores.catalog,
+    logger,
+    metrics: memoryMetrics(),
+    allowHttp: config.catalog.allowHttp,
+  });
+  const started = await start({ config, logger, stores });
+  return {
+    ...started,
+    // Catalog writes already under way finish before the process exits.
+    close: async () => {
+      await started.close();
+      await cataloger.drain();
+    },
+  };
 }

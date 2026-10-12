@@ -2,7 +2,7 @@
 id: "0022"
 title: "Durable adapters for the four store ports"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0004", "0006"]
 related_tasks: ["0012", "0013", "0017"]
@@ -15,6 +15,10 @@ history:
     status: backlog
     who: claude
     note: "Created by 0012 from M1 Story 2.1 (Discovery lane)."
+  - date: "2026-10-12"
+    status: active
+    who: akot
+    note: "Started by the Discovery lane on the 0013 decision (ADR 0012, PR #20): PostgreSQL adapters from the spike."
 ---
 
 # Durable adapters for the four store ports
@@ -42,6 +46,9 @@ As a facilitator operator, I want durable implementations of the four store port
 - From 0017: a bigint codec for stored amounts (`feeCharged`, spend reservations and limits).
 - From 0017: `CatalogStore.list` is in insertion order and an upsert keeps an entry's place, so
   the durable catalog needs a serial or `created_at` order.
+- From 0031: `CatalogStore.upsert` is conditional on `ledger` (an earlier one only adds missing
+  requirements) and stores `keyVersion`, which the port can't read back, so the adapter's own
+  test checks that column.
 
 ## Acceptance Criteria
 

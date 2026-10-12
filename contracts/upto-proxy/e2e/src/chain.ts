@@ -44,6 +44,30 @@ export async function readContract(
   return scValToNative(sim.result.retval);
 }
 
+/** Ledgers left before the contract's instance and its WASM code are archived. */
+export async function contractTtls(
+  contractId: string,
+  wasmHash: string,
+): Promise<{ latest: number; instance: number; code: number }> {
+  const instanceKey = xdr.LedgerKey.contractData(
+    new xdr.LedgerKeyContractData({
+      contract: Address.fromString(contractId).toScAddress(),
+      key: xdr.ScVal.scvLedgerKeyContractInstance(),
+      durability: xdr.ContractDataDurability.persistent(),
+    }),
+  );
+  const codeKey = xdr.LedgerKey.contractCode(
+    new xdr.LedgerKeyContractCode({ hash: Buffer.from(wasmHash, "hex") }),
+  );
+  const res = await server.getLedgerEntries(instanceKey, codeKey);
+  const left = (key: xdr.LedgerKey) => {
+    const entry = res.entries.find((e) => e.key.toXDR("base64") === key.toXDR("base64"));
+    if (entry?.liveUntilLedgerSeq === undefined) throw new Error(`no live entry for ${contractId}`);
+    return entry.liveUntilLedgerSeq - res.latestLedger;
+  };
+  return { latest: res.latestLedger, instance: left(instanceKey), code: left(codeKey) };
+}
+
 export const tokenBalance = async (token: string, id: string, source: string) =>
   BigInt(
     (await readContract(token, "balance", [Address.fromString(id).toScVal()], source)) as bigint,

@@ -45,6 +45,7 @@ describe("parseConfig", () => {
         breakerFailures: 5,
         breakerCooldownMs: 600_000,
       },
+      catalog: { allowHttp: false },
     });
   });
 
@@ -107,6 +108,7 @@ describe("parseConfig", () => {
         breakerFailures: 7,
         breakerCooldownMs: 5_000,
       },
+      catalog: { allowHttp: false },
     });
   });
 
@@ -167,6 +169,18 @@ describe("parseConfig", () => {
     expect(problems({ ...minimal, INCLUSION_FEE_STROOPS: "99" })).toEqual([
       "INCLUSION_FEE_STROOPS must be at least 100",
     ]);
+  });
+
+  it("allows http catalog URLs on testnet only", () => {
+    expect(parseConfig({ ...minimal, CATALOG_ALLOW_HTTP: "true" }).catalog.allowHttp).toBe(true);
+    expect(
+      problems({
+        ...minimal,
+        NETWORK: "stellar:pubnet",
+        RPC_URLS: "https://rpc.example",
+        CATALOG_ALLOW_HTTP: "true",
+      }),
+    ).toEqual(["CATALOG_ALLOW_HTTP is only allowed on testnet"]);
   });
 
   it("checks RPC URLs", () => {

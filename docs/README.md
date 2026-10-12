@@ -5,6 +5,7 @@
 - [runbook.md](runbook.md): operating the testnet and mainnet services
 - [monitoring.md](monitoring.md): metrics, alerts and uptime measurement
 - [threat-model.md](threat-model.md): assets, threats and mitigations
+- [upto-proxy-testnet-report.md](upto-proxy-testnet-report.md): `UptoProxy` on testnet: scenarios, transactions, cost and throughput
 - [security/](security/): security review reports and resolved findings
 
 The role-based developer guide is written as a PR to `stellar/stellar-docs`.

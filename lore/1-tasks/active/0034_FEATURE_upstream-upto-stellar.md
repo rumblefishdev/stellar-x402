@@ -25,6 +25,13 @@ history:
     status: active
     who: okarcz
     note: "Started while 0005's PR (#12) waits for review; work is on a local branch from lore-0005."
+  - date: "2026-10-09"
+    status: active
+    who: claude
+    note: >
+      Added the 0035 security review's rules for the spec and the client: the allowance window
+      bound and the contract's 17,280-ledger cap (D11), and that the client never signs a
+      simulated tree without comparing it to the terms. The proxy is now CAL7SBTO…V2VC.
 ---
 
 # Merge the Stellar upto scheme upstream: scheme_upto_stellar.md and the @x402/stellar classes
@@ -63,8 +70,8 @@ What we have:
   (`archive/0002_RESEARCH_upto-proxy-design-on-soroban/notes/G-upto-proxy-contract-spec.md`).
 - **Contract:** `contracts/upto-proxy` (0003). It enforces the recipient binding and single
   settlement, so we do ship a Soroban contract.
-- **On-chain proof:** 0004 ran 46 scenarios on testnet across Circle USDC, a SAC asset and a
-  non-SAC SEP-41 token (`contracts/upto-proxy/e2e/results/testnet-report.md`).
+- **On-chain proof:** 0004 ran 49 scenarios on testnet across Circle USDC, a SAC asset and a
+  non-SAC SEP-41 token (`docs/upto-proxy-testnet-report.md`).
 - **Spec input:** 0005 step 5 lists the rules the spec needs, and its threat model covers the
   leftover allowance.
 - **Facilitator settlement:** 0015 wires `upto` into our `/settle`.
@@ -126,6 +133,12 @@ Base it on 0005's spec-input list. It covers:
   - credential types (`Address` / `AddressV2`);
   - simulation;
   - the validity window against the current ledger;
+  - `allowance_expiration_ledger` no earlier than the deadline's ledger and no further than the
+    window (`maxTimeoutSeconds` in ledgers plus a margin), and equal to `signatureExpirationLedger`
+    (a MUST: the host's nonce for the client's signature lives until then, and the contract never
+    sees it). The facilitator pays all three entries' rent. The contract refuses anything over 17,280 ledgers ahead
+    (ADR 0010, D11), so `maxTimeoutSeconds` for `upto` is at most about a day;
+  - `from` is not the facilitator;
   - the nonce is unused.
 - **Settlement:**
   - the facilitator swaps in the actual amount and re-simulates;
@@ -148,7 +161,9 @@ In the fork, add `typescript/packages/mechanisms/stellar/src/upto/` with `client
 it twice:
 
 - **Client:** build and sign the auth entry (from `contracts/upto-proxy/e2e/src/upto.ts`,
-  `clientSign`).
+  `clientSign` and `signSimulatedEntry`). Never sign a simulated tree without comparing it to the
+  one built from the terms: the simulation comes from an RPC or facilitator the client doesn't
+  control (threat model, "Blind signing by the client"). Include a unit test with a forged tree.
 - **Facilitator:** verify the tree and settle the actual amount (`checkClientAuth`, `settleCall`,
   and the 0015 settle path). Keep the facilitator's own submission pluggable, as `exact` does.
 - **Server:** price and build `PaymentRequirements` for `upto`.
