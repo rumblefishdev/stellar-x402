@@ -4,14 +4,15 @@ title: "Choose where the facilitator is hosted and record it in an ADR"
 type: RESEARCH
 status: active
 milestone: 1
-related_adr: ["0006", "0009"]
-related_tasks: ["0012", "0013"]
+related_adr: ["0006", "0009", "0011"]
+related_tasks: ["0012", "0013", "0025", "0026", "0027", "0036", "0009", "0019", "0023"]
 tags: [facilitator, deploy, hosting, operations, priority-high, effort-small, platform]
 links:
   - ../../../../deploy/README.md
   - ../../../../docs/runbook.md
   - ../../../../docs/monitoring.md
   - ../../../../docs/planning/m1-epics.md
+  - ../../../../docs/adr/0011-facilitator-hosting.md
 history:
   - date: "2026-10-07"
     status: backlog
@@ -29,6 +30,32 @@ history:
     status: active
     who: stkrolikiewicz
     note: "Started by the Platform lane owner."
+  - date: "2026-10-08"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      Requirements written (notes/G-hosting-requirements.md); AWS is the company default cloud.
+      Paused behind 0017, whose in-memory fakes the other lanes wait on. The option research keeps
+      running in the background.
+  - date: "2026-10-09"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      Resumed after 0017 merged. The 2026-10-08 research notes (R-cloud-container-options,
+      R-paas-and-vm-options, R-observability-backends) checked again and compared in
+      S-hosting-decision; ECS on Fargate in the company AWS account chosen and
+      recorded as ADR 0011, with CloudWatch logs, EMF metrics and alarms to Slack. Follow-ups
+      handed to 0013, 0025, 0026 and 0027; the mainnet KMS signer spike spawned as 0036.
+  - date: "2026-10-12"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      PR #16 review (Oskar, Adam) addressed in ADR 0011:
+      - the timing chain, readiness to settle and a circuit breaker at one failed task;
+      - two CDK stacks, the key's own KMS key and a hand-made parameter, two OIDC roles;
+      - on-chain key rotation and the image handling.
+      The CloudFront fallback was dropped. Hand-offs updated in 0009, 0013, 0019, 0023, 0025,
+      0026, 0027 and 0036.
 ---
 
 # Choose where the facilitator is hosted and record it in an ADR
@@ -37,7 +64,7 @@ history:
 
 Research where the facilitator service runs, pick a hosting platform and a container setup, and
 record the choice in an ADR. The T1 gate needs a public testnet facilitator, so this can't wait
-for the mainnet milestone as `deploy/README.md` currently says.
+for the mainnet milestone, as `deploy/README.md` said before this task.
 
 ## Context
 
@@ -106,10 +133,146 @@ for the mainnet milestone as `deploy/README.md` currently says.
 
 ## Acceptance Criteria
 
-- [ ] T1 and mainnet hosting requirements written down
-- [ ] At least three options compared against the criteria above, with sources
-- [ ] Platform and container setup chosen, including stop-before-start deploys
-- [ ] Logger, metrics and alerting backend chosen
-- [ ] ADR in `docs/adr/` documenting the decision and explaining why it was made over the
+- [x] T1 and mainnet hosting requirements written down
+- [x] At least three options compared against the criteria above, with sources
+- [x] Platform and container setup chosen, including stop-before-start deploys
+- [x] Logger, metrics and alerting backend chosen
+- [x] ADR in `docs/adr/` documenting the decision and explaining why it was made over the
       alternatives, linked from this task's `related_adr`
-- [ ] `deploy/README.md` and the 0012 architecture spine updated to reference the ADR
+- [x] `deploy/README.md` and the 0012 architecture spine updated to reference the ADR
+
+## Implementation Notes
+
+- **Notes:** `G-hosting-requirements` (what the host must do), `R-cloud-container-options` (ECS
+  Fargate and the rest of AWS, Cloud Run, Azure, Kubernetes, KMS and Ed25519),
+  `R-paas-and-vm-options` (Fly.io, Railway, Render, a single VM), `R-observability-backends`
+  (logger, metrics, alerting, uptime), `S-hosting-decision` (criteria table, the 2026-10-09
+  re-check and the PR #16 corrections). The three R- notes were written on 2026-10-08 and sat untracked in the main checkout
+  until this session moved them in.
+- **ADR:** [0011](../../../../docs/adr/0011-facilitator-hosting.md). `deploy/README.md` and the
+  spine's Deferred section and ADR table point to it.
+- **Handed on:**
+  - 0026: service and ALB settings, image, CDK stacks, deploy workflow, secrets, runbook, the
+    subdomain prerequisite;
+  - 0027: EMF, alarms including "ready to settle" and key events, the us-east-1 uptime stack, RPC
+    host names;
+  - 0025: drain within 110 s with a pool `close()`, readiness and lease re-acquisition;
+  - 0019: reconciliation before `/settle`, transaction time bounds;
+  - 0009: the 90 s `/settle` budget;
+  - 0023: `trust proxy` semantics;
+  - 0013: RDS fits, SQLite means EC2;
+  - 0036: KMS key policy and recovery.
+
+## Design Decisions
+
+### From Plan
+
+1. **ECS on Fargate, one service per network**, `minimumHealthyPercent` 0 and `maximumPercent`
+   100 for stop-before-start, `stopTimeout` 120 s. AWS is the company default and meets both
+   hard rules; Fly.io was the only close alternative (S-hosting-decision).
+2. **CloudWatch for logs, metrics and alerts**: stdout JSON through `awslogs`, EMF lines for
+   metrics, alarms → SNS → Amazon Q Developer in chat applications → Slack.
+3. **Secrets from SSM Parameter Store, KMS for mainnet**: the testnet key is a SecureString
+   injected by the task definition; mainnet moves it into AWS KMS (Ed25519) behind the pool's
+   `TransactionSigner`.
+
+### Emerged
+
+4. **`GET /health` checks nothing but the HTTP server.** Not in the plan. A health check on the
+   lease, RPC or store would make ECS restart the task in a loop during an outage. Readiness to
+   settle is separate (decision 16).
+5. **ARM64, 0.25 vCPU / 0.5 GB to start.** 20% cheaper than x86, and the repo is public, so
+   GitHub's `ubuntu-24.04-arm` runner builds natively for free.
+6. **AWS CDK in TypeScript** for the infrastructure. Stan didn't know the company's tool and let
+   the ADR pick; CDK keeps one language and package manager. Swappable for Terraform.
+7. **SSM Parameter Store over Secrets Manager**: free, and we don't use rotation functions.
+8. **A public subnet with a task public IP** instead of a NAT gateway ($38/mo saved); the
+   security group admits only the ALB.
+9. **The hand-rolled `jsonLogger` stays** (no pino): stdout is the only transport. RPC URLs are
+   logged by host only (the 0017 item).
+10. **A `rumblefish.dev` subdomain** (proposed `testnet.x402.rumblefish.dev`), as a record in the
+    company zone or a delegated subzone. It is a prerequisite for 0026; the CloudFront fallback
+    was dropped (decision 23). The zone is on Route 53 (checked by DNS).
+11. **Region eu-central-1 as a stack parameter.** Stan doesn't know the account's region yet; the
+    Prices API answers from Frankfurt IPs, so it's the default, not a fixed choice.
+12. **Testnet deploys on a push to `develop` unless only `lore/**`, `docs/**` or Markdown
+    changed,** one at a time. Each deploy is about 3 min of downtime, so gate runs avoid merge
+    times; mainnet deploys by hand.
+13. **Same AWS account as sorobanscan and the Prices API, no shared compute.** From outside,
+    sorobanscan is S3 + CloudFront and the Prices API is API Gateway, so there is no container
+    platform to join. The facilitator holds a hot signing key, so its testnet and mainnet stacks
+    get their own roles and secret paths, and the mainnet KMS key policy admits only the mainnet
+    task role. The original idea of a separate mainnet account is dropped.
+
+14. **CloudWatch over Grafana Cloud Free.** R-observability-backends leaned towards Grafana
+    Cloud Free ($0, portable); Stan chose CloudWatch to stay with one vendor in the shared
+    account. Grafana is recorded in the ADR as a rejected alternative.
+
+### Emerged (PR #16 review, Oskar and Adam)
+
+15. **One timing chain.**
+    - `/settle` budget 90 s, deregistration delay 100 s, ALB idle timeout 120 s, Node
+      `keepAliveTimeout` 125 s, health check 10 s × 2 (3 to fail).
+    - Oskar found the 10 s delay cut `/settle`. Adam showed SIGTERM comes only after
+      deregistration.
+    - The ALB docs show the delay is paid in full on every stop, so it is sized to the budget, not
+      rounded up.
+16. **Ready to settle is separate from liveness.** `/settle` answers 503 until the lease is held
+    and reconciliation is done. A process without the lease keeps trying. Readiness is reported
+    in `/health`'s body, alarmed (0027) and checked by the deploy workflow. This extends Oskar's
+    503-without-lease point.
+17. **Circuit breaker at one failed task.** The default for one task is three, each a full outage.
+18. **CDK in two stacks.**
+    - An infra stack is applied by a person.
+    - A service stack is applied by the workflow; it is the only owner of the task definition, so
+      there is no `amazon-ecs-deploy-task-definition`.
+    - CDK uses its own bootstrap qualifier in the shared account.
+19. **The key's own KMS key and a hand-made parameter.** `aws/ssm` lets anyone allowed
+    `ssm:GetParameter` decrypt, and CloudFormation can't create SecureStrings.
+20. **Two OIDC roles.** One trusts `develop`, one the `mainnet` environment. Actions are pinned by
+    SHA, with minimal token permissions.
+21. **Key rotation is an on-chain signer change** (AD-12), not a parameter update.
+22. **Image handling.**
+    - One ECR repository with digest promotion to mainnet, and skip-if-built.
+    - `injectWorkspacePackages: true` (tested), `"files": ["dist"]` and `.dockerignore`.
+    - A base image pinned by digest and a read-only root filesystem.
+23. **The CloudFront fallback is dropped** (Stan). It would have meant a plain-HTTP origin, a
+    forgeable `X-Forwarded-For`, a timeout quota and cache defaults to fix. A subdomain avoids all
+    of it.
+24. **The uptime alarm lives in us-east-1** (Route 53 metrics exist only there).
+    - `/supported` is static, so it measures what `/health` does.
+    - The 99% figure needs the check and "ready to settle" together.
+25. **Mainnet is sized at one task** (~$150/mo). Scaling out follows the
+    R-cloud-container-options §A2 model.
+
+### Emerged (Step Functions question and ADR 0012)
+
+26. **Step Functions with Lambda is a rejected alternative.** It would mean rewriting
+    `signer-pool`: channel sequence numbers, the queue and pipelining live in one process's
+    memory. It would also need RDS Proxy and per-step billing. Timeouts aren't the blocker: a REST
+    API or an ALB can wait for `/settle`. It fits side jobs, such as topping up the fee balance
+    and rebuilding channels after a testnet reset.
+27. **Two tasks with separate channel sets in two zones are an option for mainnet, not a
+    requirement** (Stan). The mainnet launch decides on them together with the WAF rule.
+28. **The deploy role may run the migration task** that ADR 0012 (task 0013) adds before each
+    service update.
+
+## Issues Encountered
+
+- **App Runner closed to new customers on 2026-04-30,** and its successor, ECS Express Mode, only
+  does canary deploys. Both overlap old and new tasks.
+- **Fargate's 120 s `stopTimeout` is a hard ceiling,** so the drain has no headroom past the
+  pool's 60 s + 30 s.
+- **An ALB's default name can't get an ACM certificate,** so HTTPS on AWS needs our domain. The
+  CloudFront route around it was dropped.
+- **ECS waits out the whole deregistration delay, even when idle.** The early-completion premise
+  in R-cloud-container-options and in a review thread was wrong (ALB docs).
+- **`pnpm deploy` refuses non-injected workspaces on pnpm 10 and later**
+  (`ERR_PNPM_DEPLOY_NONINJECTED_WORKSPACE`); `injectWorkspacePackages: true` fixes it.
+- **Cloud Run's 10 s SIGTERM grace is fixed,** which rules it out outright.
+- **`fly deploy` creates two Machines by default,** which would break the lease on day one.
+- **The KMS Ed25519 output encoding isn't documented** (expected raw 64 bytes); 0036 proves it.
+
+## Future Work
+
+- Mainnet KMS signer spike → 0036.

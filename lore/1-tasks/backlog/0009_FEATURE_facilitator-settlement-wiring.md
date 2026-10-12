@@ -4,8 +4,8 @@ title: "Settle exact payments once through the channel pool"
 type: FEATURE
 status: backlog
 milestone: 1
-related_adr: ["0003", "0004", "0005", "0006", "0007"]
-related_tasks: ["0007", "0006", "0012", "0015", "0016", "0017", "0018", "0019", "0020", "0024", "0025", "0027"]
+related_adr: ["0003", "0004", "0005", "0006", "0007", "0011"]
+related_tasks: ["0007", "0006", "0012", "0015", "0016", "0017", "0018", "0019", "0020", "0024", "0025", "0027", "0014"]
 tags: [facilitator, signer-pool, exact, settlement, priority-high, effort-medium, payments]
 links:
   - ../archive/0007_FEATURE_facilitator-settlement-submitter.md
@@ -82,6 +82,12 @@ never charged twice.
   - Decide with 0020 how facilitator tests get `FakeRpc`: it sits in
     `packages/signer-pool/test/` and isn't exported; a `./testing` subpath export is the
     suggestion.
+- From 0014 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md)): `/settle` answers within a 90 s budget, below the
+  ALB's 120 s idle timeout and 100 s deregistration delay.
+  - Pass the pool a `deadline`, so the wait for a channel counts too.
+  - When the budget runs out after the transaction was sent, answer `settlement_pending` with its
+    hash (AD-6).
+  - When nothing was sent, answer with a failure the resource server can retry.
 
 ## Acceptance Criteria
 
