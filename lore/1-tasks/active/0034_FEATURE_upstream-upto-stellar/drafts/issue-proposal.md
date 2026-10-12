@@ -24,6 +24,7 @@ settle_upto(token, from, to, facilitator, max_amount, actual_amount, nonce,
 - The **client** signs one Soroban authorization entry for `settle_upto` over everything except `from` (the signer) and `actual_amount`, with a nested `token.approve(from, proxy, max_amount, allowance_expiration_ledger)`. It never builds, signs or pays for a transaction, as in `exact`.
 - The **facilitator** puts in the actual amount (`0..=max_amount`), adds its own authorization (the contract calls `facilitator.require_auth()`), and submits, paying the fees.
 - The contract checks the amount, the window and a single-use `(from, nonce)`, then runs `approve` and `transfer_from` to the signed recipient. It has no admin, no upgrade path and never holds funds.
+- The contract caps the allowance expiry at about a day ahead, since the facilitator pays rent until then, and every settlement extends the contract's own TTL by at most about an hour, so it stays live under traffic without one settlement paying a large rent bill.
 
 It maps to the five core properties: the nonce for single use; `valid_after` and `deadline` for time bounds; the signed `to` for recipient binding; the contract check for the maximum; and `requirements.amount` at settle time for the phase-dependent amount, as in EVM.
 
@@ -32,9 +33,10 @@ The draft spec is attached: <link to scheme_upto_stellar.md in our fork>.
 ## Status
 
 - Contract, unit, property and real-signature tests: <https://github.com/rumblefishdev/stellar-x402/tree/develop/contracts/upto-proxy>
-- Deployed on testnet (`CC3VX7N6ILD63V7FS2JA7XUDX4DMHYEJXRZDOMU7GVW76XYINOAZ7OYU`); a 49-scenario end-to-end run with 21 settlement transactions across Circle testnet USDC, a SAC asset and a non-SAC SEP-41 token: <https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/upto-proxy-testnet-report.md>
-- Design record and threat model: <https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/adr/0010-upto-proxy-design.md>
-- Security review / audit: <status>
+- Deployed on testnet (`CAL7SBTOECJ6HXXO3ST43LM2HJJFSZ3ZDEEZBIWHJPB7DRF5MXS5V2VC`); a 58-scenario end-to-end run with 23 settlement transactions across Circle testnet USDC, a SAC asset and a non-SAC SEP-41 token, plus the measured rent of keeping the contract alive: <https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/upto-proxy-testnet-report.md>
+- Design record: <https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/adr/0010-upto-proxy-design.md>
+- Threat model: <https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/threat-model.md>
+- Security review: an internal review found no way to move funds without the payer's signature; its fixes (the one-day cap on the allowance expiry, the client's check of simulated trees, the facilitator's expiry rules) are in the contract, the draft and the tests. External audit: <status>
 
 ## Questions for maintainers
 

@@ -46,9 +46,9 @@ once it is **merged**, not when it is proposed.
 
 ## Status: Active
 
-> Started 2026-10-08 on local branch `lore-0034-upstream-upto-stellar`, cut from
-> `lore-0005-upto-proxy-docs` (PR #12) and rebased onto develop, because the spec builds on 0005's
-> docs. Not pushed yet. Drafts are in [`drafts/`](drafts/).
+> Started 2026-10-08 on branch `lore-0034-upstream-upto-stellar`, cut from
+> `lore-0005-upto-proxy-docs` (PR #12). Rebased onto develop on 2026-10-12, after 0005 and 0035
+> merged. No PR yet. Drafts are in [`drafts/`](drafts/).
 
 ## Context
 
@@ -223,7 +223,24 @@ Local work so far, steps 1 and 2 as drafts. Nothing is sent upstream.
   why `exact` and plain allowances fall short, the approach and status, and asks maintainers four
   questions: contract location, payload shape, a spec-pinned proxy address, and the PR split.
 
+- **Synced with 0035 (2026-10-12):** both drafts now match the deployed proxy `CAL7SBTO…V2VC`
+  (WASM `00a06b16…b79c`) and the 58/58 testnet run. The spec adds the TTL self-extension (an
+  Availability appendix with 518,400 / 120 / 720), the 17,280-ledger expiry cap with error #6 and
+  the `maxTimeoutSeconds` limit it implies, the verify MUSTs (`signatureExpirationLedger ==
+  allowance_expiration_ledger`, the allowance from the deadline's ledger to the window, `from` not
+  a facilitator address), the client's refusal to sign a simulated tree that differs from the
+  terms, the network's close time instead of a fixed 5 s (CAP-0070), a required settled-nonce
+  record for zero settlements, the rent breakdown and fee numbers, and the seller's credit risk in
+  the security section.
+
 ## Design Decisions
+
+### Planned
+
+- **okarcz confirmed emerged decisions 1, 2 and 4 on 2026-10-12:** the payload is the signed
+  entry alone, the proxy address is pinned in the spec, and the spec suggests an `upto` fee
+  ceiling of about 500,000 plus a keeper for the accepted tokens' instances. Decisions 1 and 2
+  remain open questions to the maintainers in the issue.
 
 ### Emerged
 
@@ -239,9 +256,11 @@ Local work so far, steps 1 and 2 as drafts. Nothing is sent upstream.
    client can build it directly (as the 0004 suite's `clientSignDirect` does); simulating with the
    facilitator as source stays an option for preflight.
 4. **Fee ceiling note**: the spec says `exact`'s 50,000-stroop default is too low for `upto`
-   because of rent (151,550 measured in 0006) and suggests 250,000, our ADR 0007 default.
-5. **Links point to `develop`** in our public repo. ADR 0010 and the testnet report only reach
-   develop when PR #12 merges, so the issue waits for that.
+   because of rent, and suggests a separate `upto` ceiling of about 500,000 plus keeping the
+   accepted tokens' instances extended, as 0015 plans (330,032 measured in 0035 when a SAC
+   instance extends itself in the same settlement; up to about 480,000 extrapolated).
+5. **Links point to `develop`** in our public repo. ADR 0010, the testnet report and the threat
+   model are all on develop since PR #14 merged.
 6. **Task converted to a directory** to hold the drafts.
 
 ## Open Before Anything Goes Upstream
