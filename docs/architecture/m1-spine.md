@@ -425,12 +425,12 @@ The rationale and rejected alternatives for these ADs are in ADRs:
 | [0007](../adr/0007-fee-abuse-containment.md)                  | AD-9, AD-10, AD-11, AD-18, AD-21   |
 | [0008](../adr/0008-bazaar-catalog-integrity.md)               | AD-8 (header), AD-19, AD-20        |
 | [0009](../adr/0009-conformance-gate-harness.md)               | AD-13, AD-15                       |
-| [0011](../adr/0011-facilitator-hosting.md)                    | AD-15, AD-17 (deploys)             |
+| [0011](../adr/0011-facilitator-hosting.md)                    | AD-11, AD-12, AD-15, AD-17         |
 
 ## Deferred
 
 - **State store:** task 0013 decides, with an ADR. Only the ports and their required operations (AD-7) are fixed here.
-- **Hosting, container setup, key custody, logger, metrics and alert backend:** decided in [ADR 0011](../adr/0011-facilitator-hosting.md) (task 0014): ECS on Fargate in AWS, CloudWatch logs, EMF metrics and alarms to Slack. Constraints it meets:
+- **Hosting, container setup, key custody, logger, metrics and alert backend:** decided in [ADR 0011](../adr/0011-facilitator-hosting.md) (task 0014): ECS on Fargate in AWS, the key in SSM under its own KMS key (in KMS on mainnet), CloudWatch logs, EMF metrics and alarms to Slack. Constraints it meets:
   - the process is long-lived, and scale-to-zero is not allowed
   - the lease and stop-before-start deploys from AD-17 apply
 - **Mainnet fee values** (`feeEscalation`, `maxFeeStroops`): task 0010. T1 uses interim testnet values.

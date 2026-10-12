@@ -14,6 +14,10 @@ history:
     status: mature
     who: stkrolikiewicz
     note: "Options compared on the requirements; ECS on Fargate chosen, recorded as ADR 0011."
+  - date: "2026-10-12"
+    status: mature
+    who: stkrolikiewicz
+    note: "Corrections from the PR #16 review added; the CloudFront fallback dropped."
 ---
 
 # Decision: ECS on Fargate in the company AWS account
@@ -77,15 +81,50 @@ The R- notes date from 2026-10-08. A second pass confirmed them and added:
 3. **Fargate over EC2:** AWS patches the host and replaces a failed task; on EC2 we would own the
    OS, the deploy script and recovery for ~$30/mo less.
 4. **CloudWatch for logs, metrics and alerts,** not the Grafana Cloud Free stack that
-   R-observability-backends leaned towards. Stan chose one vendor in the shared account: the hand-rolled JSON logger already writes the
-   right shape to stdout, EMF turns metric lines into metrics with no SDK or agent, and alarms
-   reach Slack through SNS. Nothing new to run.
+   R-observability-backends leaned towards. Stan chose one vendor in the shared account:
+   - the hand-rolled JSON logger already writes the right shape to stdout;
+   - EMF turns metric lines into metrics with no SDK or agent;
+   - alarms reach Slack through SNS.
+
+   Nothing new to run.
 
 ## What it costs us
 
 - **120 s is a hard ceiling** for the drain. The pool's 60 s + 30 s fits; raising
   `timeoutSeconds` past ~80 s would not.
-- **Every deploy is 1–3 min of downtime.** Any stop-first host has this.
-- **We need a domain** for HTTPS. `rumblefish.dev` is on Route 53, so a subdomain is likely; if
-  not, CloudFront's default domain is the fallback.
+- **Every deploy is about 3 min of downtime,** up to 5–6 min with work in flight. Any stop-first
+  host has this; on ECS the full deregistration delay adds to it (see below).
+- **A `rumblefish.dev` subdomain is a prerequisite** for HTTPS. It can be a record in the company
+  zone or a delegated subzone. The CloudFront fallback was dropped after the PR #16 review.
 - **SQLite would push us to EC2** (Fargate has only EFS). This feeds 0013.
+
+## Corrections from the PR #16 review
+
+Checked on 2026-10-12. They change ADR 0011, not the platform choice.
+
+- **The deregistration delay is paid in full on every stop.**
+  - The ALB shows a deregistering target as `draining` until the delay ends, even when nothing is
+    in flight, and ECS waits for `unused`.
+  - R-cloud-container-options and a review thread assumed it ended early.
+  - [ALB docs](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/edit-target-group-attributes.html#deregistration-delay)
+- **The circuit breaker's default threshold is three failed tasks for one task.** With stop-first
+  each is a full outage; `thresholdConfiguration` `COUNT` sets it to one.
+  [ECS docs](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/deployment-circuit-breaker.html)
+- **CloudFormation can't create SecureString parameters,** so a person creates the key's parameter.
+  [`AWS::SSM::Parameter`](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-ssm-parameter.html)
+- **The default `aws/ssm` key lets anyone allowed `ssm:GetParameter` decrypt.** "Only this role"
+  needs a customer-managed key per network.
+- **`/settle` isn't bounded by the pool's 60 s + 30 s alone.** The wait for a channel has no
+  bound without a `deadline` (`packages/signer-pool/src/submitter.ts`, `acquire`).
+- **Node's default `keepAliveTimeout` (5 s) is below the ALB idle timeout,** which gives sporadic
+  502s.
+- **The CloudFront fallback doesn't hold up:**
+  - the hop to the ALB is plain HTTP;
+  - any distribution can reach the ALB, so `X-Forwarded-For` can be forged;
+  - a 90 s origin timeout needs a quota increase;
+  - the default cache and method settings break a JSON API.
+
+  Dropped.
+- **`pnpm deploy` needs `injectWorkspacePackages: true`** on pnpm 10 and later. Checked with
+  11.5.2: workspace packages stay symlinked in dev, and both deploy modes resolve the same 145
+  packages.

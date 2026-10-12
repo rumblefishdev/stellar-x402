@@ -17,4 +17,4 @@ Testnet and mainnet run as separate deployments. They never share keys.
 
 Hosting: ECS on Fargate in the company AWS account, one service per network, with
 stop-before-start deploys ([ADR 0011](../docs/adr/0011-facilitator-hosting.md)). Task 0026 builds
-the Dockerfile, the CDK stack under `infra/` and the deploy workflow.
+the Dockerfile, the CDK stacks under `infra/` and the deploy workflow.
