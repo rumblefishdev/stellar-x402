@@ -4,8 +4,8 @@ title: "Public testnet deployment"
 type: FEATURE
 status: backlog
 milestone: 1
-related_adr: []
-related_tasks: ["0012", "0014", "0022", "0017"]
+related_adr: ["0011"]
+related_tasks: ["0012", "0014", "0022", "0017", "0020"]
 tags: [facilitator, deploy, priority-high, effort-medium, platform]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -34,6 +34,55 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 
 - Dockerfile, image build and the deploy trigger from 0014.
 - Secrets and stores configured on the platform; runbook updated.
+- From 0014 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md)), the service: ECS on Fargate in the account
+  that runs sorobanscan and the Prices API.
+  - One service, `desiredCount` 1, `minimumHealthyPercent` 0, `maximumPercent` 100,
+    `stopTimeout` 120.
+  - The circuit breaker rolls back, with a threshold of one failed task (`thresholdConfiguration`;
+    use the ECS API if CDK doesn't expose it yet).
+  - The ALB is HTTPS only, with `SslPolicy.RECOMMENDED_TLS` or newer, idle timeout 120 s and
+    deregistration delay 100 s.
+  - The target health check is `/health` every 10 s, 2 checks to pass and 3 to fail.
+  - `TRUSTED_PROXY_HOPS=1`.
+  - Node `keepAliveTimeout` is 125 s, with `headersTimeout` above it.
+- From 0014, the image:
+  - `pnpm deploy --prod` with `injectWorkspacePackages: true` in `pnpm-workspace.yaml`;
+  - `"files": ["dist"]` in `apps/facilitator/package.json` and a `.dockerignore` that excludes
+    `.env*`;
+  - `node:22-slim` pinned by digest, user `node`, read-only root filesystem, ECS Exec off;
+  - one ECR repository for both networks: immutable SHA tags, scan on push, a lifecycle rule
+    that keeps rollback images. The workflow skips the build when the SHA exists.
+- From 0014, the infrastructure: CDK with its own bootstrap qualifier.
+  - An infra stack (VPC, ALB, certificate, DNS, KMS key, roles), applied by a person.
+  - A service stack (task definition and service, image digest as a parameter), applied by the
+    workflow. Its execution policy covers only ECS, its log group and passing the two roles.
+  - No `amazon-ecs-deploy-task-definition`: the service stack is the only owner of the task
+    definition.
+- From 0014, the workflow:
+  - an OIDC role that trusts only `refs/heads/develop` and may push to ECR, deploy the testnet
+    service stack and pass only the testnet roles;
+  - it runs on a push to `develop` unless only `lore/**`, `docs/**` or Markdown changed, and by
+    hand, in a `concurrency` group;
+  - actions are pinned by commit SHA. `permissions: {}` is set at the top, and the deploy job
+    gets only `id-token: write` and `contents: read`;
+  - before the service update, it runs the one-off migration task from ADR 0012 (task 0013),
+    and the deploy role may run it;
+  - the last step waits for `ready: true` from `/health`.
+- From 0014, secrets:
+  - `FACILITATOR_SECRET` is a SecureString under `/x402/testnet/`, created by hand with
+    `aws ssm put-parameter`;
+  - it is encrypted with the testnet KMS key, whose policy gives `kms:Decrypt` only to the task
+    execution role;
+  - a keyed RPC URL and the database credentials go the same way.
+- From 0014: `GET /health` answers 200 and reports `ready` in its body.
+- From 0014, the runbook: deploy, rollback (redeploy an earlier SHA) and key rotation as an
+  on-chain signer change.
+- From 0014, prerequisites:
+  - a `rumblefish.dev` subdomain (proposed `testnet.x402.rumblefish.dev`), as a record in the
+    company zone or a delegated subzone, with Route 53 access;
+  - the region (eu-central-1 assumed).
+
+  There is no CloudFront fallback.
 
 ## Acceptance Criteria
 

@@ -2,7 +2,7 @@
 id: "0022"
 title: "Durable adapters for the four store ports"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0004", "0006"]
 related_tasks: ["0012", "0013", "0017"]
@@ -15,6 +15,10 @@ history:
     status: backlog
     who: claude
     note: "Created by 0012 from M1 Story 2.1 (Discovery lane)."
+  - date: "2026-10-12"
+    status: active
+    who: akot
+    note: "Started by the Discovery lane on the 0013 decision (ADR 0012, PR #20): PostgreSQL adapters from the spike."
 ---
 
 # Durable adapters for the four store ports

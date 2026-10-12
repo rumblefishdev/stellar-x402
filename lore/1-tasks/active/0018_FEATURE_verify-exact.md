@@ -2,7 +2,7 @@
 id: "0018"
 title: "Verify exact payments"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0004", "0005", "0006", "0007"]
 related_tasks: ["0012", "0017", "0009"]
@@ -15,6 +15,11 @@ history:
     status: backlog
     who: claude
     note: "Created by 0012 from M1 Story 1.3 (Payments lane)."
+  - date: "2026-10-12"
+    status: active
+    who: okarcz
+    note: >
+      Work started.
 ---
 
 # Verify `exact` payments
