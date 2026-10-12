@@ -5,8 +5,6 @@ import type { DiscoveryResource, DiscoveryResourcesResponse } from "@x402/extens
 /** Stands in for `GET /discovery/resources` (task 0032) until our facilitator serves it. */
 
 const USDC = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
-const SELLER_A = "GSELLERA";
-const SELLER_B = "GSELLERB";
 
 function accepts(network: string, payTo: string, amount: string) {
   return [
@@ -27,7 +25,7 @@ export const CATALOG: DiscoveryResource[] = [
     resource: "https://weather.example.com/forecast",
     type: "http",
     x402Version: 2,
-    accepts: accepts("stellar:testnet", SELLER_A, "10000"),
+    accepts: accepts("stellar:testnet", "GSELLERA", "10000"),
     lastUpdated: "2026-10-01T00:00:00.000Z",
     description: "Hourly forecast for a city",
     serviceName: "Weather",
@@ -44,7 +42,7 @@ export const CATALOG: DiscoveryResource[] = [
     resource: "https://weather.example.com/forecast",
     type: "http",
     x402Version: 2,
-    accepts: accepts("stellar:pubnet", SELLER_A, "10000"),
+    accepts: accepts("stellar:pubnet", "GSELLERA", "10000"),
     lastUpdated: "2026-10-01T00:00:00.000Z",
     description: "Hourly forecast for a city",
   },
@@ -52,7 +50,7 @@ export const CATALOG: DiscoveryResource[] = [
     resource: "https://quotes.example.com/mcp",
     type: "mcp",
     x402Version: 2,
-    accepts: accepts("stellar:testnet", SELLER_B, "50000"),
+    accepts: accepts("stellar:testnet", "GSELLERB", "50000"),
     lastUpdated: "2026-10-02T00:00:00.000Z",
     description: "x".repeat(2_000),
     extensions: {
@@ -66,17 +64,12 @@ export const CATALOG: DiscoveryResource[] = [
   },
 ];
 
-export function filter(
-  items: DiscoveryResource[],
-  query: URLSearchParams,
-): DiscoveryResourcesResponse {
+function filter(items: DiscoveryResource[], query: URLSearchParams): DiscoveryResourcesResponse {
   const want = (key: string, value: string) => !query.has(key) || query.get(key) === value;
   const matching = items.filter(
     (item) =>
       want("type", item.type) &&
-      item.accepts.some(
-        (a) => want("payTo", a.payTo) && want("scheme", a.scheme) && want("network", a.network),
-      ) &&
+      item.accepts.some((a) => want("payTo", a.payTo) && want("network", a.network)) &&
       (!query.has("extensions") || query.get("extensions")! in (item.extensions ?? {})),
   );
   const offset = Number(query.get("offset") ?? 0);
@@ -99,14 +92,14 @@ export interface FakeCatalog {
 }
 
 export async function startFakeCatalog(items: DiscoveryResource[] = CATALOG): Promise<FakeCatalog> {
-  const fake: FakeCatalog = { url: "", queries: [], close: async () => {} };
+  const queries: URLSearchParams[] = [];
   const server: Server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     if (url.pathname !== "/discovery/resources") {
       res.writeHead(404).end();
       return;
     }
-    fake.queries.push(url.searchParams);
+    queries.push(url.searchParams);
     if (fake.failWith) {
       res.writeHead(fake.failWith).end("catalog body that must not reach the agent");
       return;
@@ -115,7 +108,10 @@ export async function startFakeCatalog(items: DiscoveryResource[] = CATALOG): Pr
     res.end(JSON.stringify(filter(items, url.searchParams)));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  fake.url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  fake.close = () => new Promise((resolve) => server.close(() => resolve()));
+  const fake: FakeCatalog = {
+    url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    queries,
+    close: () => new Promise((resolve) => server.close(() => resolve())),
+  };
   return fake;
 }
