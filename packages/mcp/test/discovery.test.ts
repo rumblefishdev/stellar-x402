@@ -7,7 +7,7 @@ import { CATALOG, startFakeCatalog, type FakeCatalog } from "./fake-catalog.js";
 
 /** What the tools return, loosely typed for assertions. */
 interface Payload {
-  items: { description?: string; accepts: { network: string }[] }[];
+  items: { method?: string; description?: string; accepts: { network: string }[] }[];
   pagination: unknown;
   error: { code: string };
 }
@@ -59,10 +59,11 @@ describe("list_resources", () => {
       network: "stellar:testnet",
     });
     expect(isError).toBeFalsy();
-    expect(structuredContent.pagination).toEqual({ limit: 20, offset: 0, total: 2 });
+    expect(structuredContent.pagination).toEqual({ limit: 20, offset: 0, total: 4 });
     expect(structuredContent.items[0]).toEqual({
       resource: "https://weather.example.com/forecast",
       type: "http",
+      method: "GET",
       description: "Hourly forecast for a city",
       serviceName: "Weather",
       accepts: [
@@ -78,12 +79,13 @@ describe("list_resources", () => {
   });
 
   it.each([
-    [{}, 3],
-    [{ type: "mcp" }, 1],
+    [{}, 5],
+    [{ type: "mcp" }, 2],
     [{ type: "http", network: "stellar:pubnet" }, 1],
-    [{ payTo: "GSELLERB" }, 1],
-    [{ type: "http", network: "stellar:testnet" }, 1],
-    [{ extensions: "bazaar" }, 2],
+    [{ payTo: "GSELLERB" }, 2],
+    [{ type: "http", network: "stellar:testnet" }, 2],
+    [{ extensions: "bazaar" }, 4],
+    [{ extensions: "constructor" }, 0],
     [{ type: "mcp", network: "stellar:pubnet" }, 0],
     [{ limit: 1, offset: 1 }, 1],
   ])(
@@ -129,6 +131,42 @@ describe("get_resource", () => {
       "stellar:pubnet",
     ]);
     expect(structuredContent.items[0]).toEqual(CATALOG[0]);
+  });
+
+  it("tells apart the tools of one MCP server by their name", async () => {
+    const listed = await call("list_resources", { type: "mcp" });
+    expect(listed.structuredContent.items.map((i) => i.method)).toEqual(["quote", "history"]);
+    const { structuredContent } = await call("get_resource", {
+      resource: "https://quotes.example.com/mcp",
+    });
+    expect(structuredContent.items).toHaveLength(2);
+  });
+
+  it.each([
+    ["a non-canonical form of the URL", "HTTPS://Weather.Example.com:443/forecast?city=Warsaw", 2],
+    ["a templated route as listed", "https://weather.example.com/cities/:", 1],
+  ])("finds %s", async (_, resource, count) => {
+    const { structuredContent } = await call("get_resource", { resource });
+    expect(structuredContent.items).toHaveLength(count);
+  });
+
+  it("passes the filters to every page it scans", async () => {
+    await call("get_resource", {
+      resource: "https://weather.example.com/forecast",
+      network: "stellar:testnet",
+      payTo: "GSELLERA",
+    });
+    expect(catalog.queries[0]!.get("network")).toBe("stellar:testnet");
+    expect(catalog.queries[0]!.get("payTo")).toBe("GSELLERA");
+  });
+
+  it("returns upstream_error when the catalog sends an empty page before its end", async () => {
+    await reconnect(many(120));
+    catalog.emptyFrom = 50;
+    const { structuredContent } = await call("get_resource", {
+      resource: "https://many.example.com/119",
+    });
+    expect(structuredContent.error.code).toBe("upstream_error");
   });
 
   it("returns resource_not_found for a URL that is not in the catalog", async () => {
