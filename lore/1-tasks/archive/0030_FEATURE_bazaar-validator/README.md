@@ -2,7 +2,7 @@
 id: "0030"
 title: "Bazaar validator and normalizer"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0008"]
 related_tasks: ["0012", "0017", "0016", "0031"]
@@ -35,9 +35,21 @@ history:
       Implemented packages/bazaar to the G-note contract: validate() with the 8-step check order,
       normalize(), catalogKey(), canonicalizeUrl(), toExtensionResponses() and the iterative schema
       walk. One committed test file covering the ACs; the wider suite (154 tests) runs locally. Shaped for 0031 (CatalogEntry types from 0017).
+  - date: "2026-10-12"
+    status: completed
+    who: akot
+    note: >
+      PR #15 merged into develop (080b555) after Oskar's review. All 7 acceptance criteria met:
+      packages/bazaar with validate(), normalize(), catalogKey() and the bounded schema walk, 11
+      committed tests and the wider local suite. 0031 builds the cataloger on it (PR #17); the
+      Future Work items stay listed below for backlog grooming.
 ---
 
 # Bazaar validator and normalizer
+
+## Status: Completed
+
+> Completed 2026-10-12. PR #15 was merged into develop (080b555); 0031 consumes the package.
 
 ## Summary
 
