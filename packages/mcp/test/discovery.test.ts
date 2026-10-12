@@ -19,11 +19,14 @@ interface Payload {
 
 let catalog: FakeCatalog;
 let client: Client;
+let logs: string[];
 
 async function connect(items = CATALOG) {
   catalog = await startFakeCatalog(items);
+  logs = [];
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-  await createServer({ discoveryUrl: catalog.url }).connect(serverSide);
+  const log = (message: string) => logs.push(message);
+  await createServer({ discoveryUrl: catalog.url, log }).connect(serverSide);
   client = new Client({ name: "test", version: "0.0.0" });
   await client.connect(clientSide);
 }
@@ -33,12 +36,6 @@ async function reconnect(items: DiscoveryResource[]) {
   await catalog.close();
   await connect(items);
 }
-
-const many = (n: number) =>
-  Array.from({ length: n }, (_, i) => ({
-    ...CATALOG[1]!,
-    resource: `https://many.example.com/${i}`,
-  }));
 
 beforeEach(() => connect());
 
@@ -130,11 +127,13 @@ describe("list_resources", () => {
     expect(isError).toBe(true);
     expect(structuredContent.error.code).toBe("upstream_error");
     expect(JSON.stringify(structuredContent)).not.toContain("catalog body");
+    // The cause goes to the server log, not to the agent.
+    expect(logs).toEqual([expect.stringContaining("503")]);
   });
 });
 
 describe("get_resource", () => {
-  it("returns every entry for the URL, with full payment terms and the input schema", async () => {
+  it("returns every entry for the URL, with full payment terms and the input schema, in one request", async () => {
     const { isError, structuredContent } = await call("get_resource", {
       resource: "https://weather.example.com/forecast",
     });
@@ -144,17 +143,23 @@ describe("get_resource", () => {
       "stellar:pubnet",
     ]);
     expect(structuredContent.items[0]).toEqual(CATALOG[0]);
+    expect(catalog.queries.map((q) => q.get("resource"))).toEqual([
+      "https://weather.example.com/forecast",
+    ]);
   });
 
-  it("tells apart the tools of one MCP server by their name", async () => {
+  it("tells apart the tools of one MCP server by their name, and picks one by method", async () => {
     const listed = await call("list_resources", { type: "mcp" });
     expect(listed.structuredContent.items.map((i) => i.method)).toEqual(["quote", "history"]);
-    const { structuredContent } = await call("get_resource", {
-      resource: "https://quotes.example.com/mcp",
-    });
-    expect(structuredContent.items).toHaveLength(2);
+    const both = await call("get_resource", { resource: "https://quotes.example.com/mcp" });
+    expect(both.structuredContent.items).toHaveLength(2);
     // get_resource cuts seller text too, not only list_resources.
-    expect(structuredContent.items[0]!.description).toHaveLength(500);
+    expect(both.structuredContent.items[0]!.description).toHaveLength(500);
+    const one = await call("get_resource", {
+      resource: "https://quotes.example.com/mcp",
+      method: "history",
+    });
+    expect(one.structuredContent.items.map((i) => i.description)).toEqual(["Price history"]);
   });
 
   it.each([
@@ -165,58 +170,54 @@ describe("get_resource", () => {
     expect(structuredContent.items).toHaveLength(count);
   });
 
-  it("passes the filters to every page it scans", async () => {
-    await call("get_resource", {
-      resource: "https://weather.example.com/forecast",
-      network: "stellar:testnet",
-      payTo: "GSELLERA",
-    });
-    expect(catalog.queries[0]!.get("network")).toBe("stellar:testnet");
-    expect(catalog.queries[0]!.get("payTo")).toBe("GSELLERA");
-  });
-
-  it("returns upstream_error when the catalog sends an empty page before its end", async () => {
-    await reconnect(many(120));
-    catalog.emptyFrom = 50;
-    const { structuredContent } = await call("get_resource", {
-      resource: "https://many.example.com/119",
-    });
-    expect(structuredContent.error.code).toBe("upstream_error");
-    // It stops at the first empty page instead of asking for more.
-    expect(catalog.queries).toHaveLength(2);
-  });
-
-  it("returns resource_not_found for a URL that is not in the catalog", async () => {
-    const { isError, structuredContent } = await call("get_resource", {
-      resource: "https://nowhere.example.com/",
-    });
+  it.each([
+    ["a URL that is not in the catalog", { resource: "https://nowhere.example.com/" }],
+    ["a method the URL does not have", { resource: "https://quotes.example.com/mcp", method: "x" }],
+  ])("returns resource_not_found for %s", async (_, args) => {
+    const { isError, structuredContent } = await call("get_resource", args);
     expect(isError).toBe(true);
     expect(structuredContent.error.code).toBe("resource_not_found");
   });
 
-  it("finds an entry on a later page when the catalog returns short pages", async () => {
-    await reconnect(many(250));
+  it("returns upstream_error, not other entries, when the catalog ignores the resource filter", async () => {
+    catalog.ignoreResourceFilter = true;
     const { structuredContent } = await call("get_resource", {
-      resource: "https://many.example.com/249",
-    });
-    expect(structuredContent.items).toHaveLength(1);
-    expect(catalog.queries.map((q) => q.get("offset"))).toEqual(["0", "50", "100", "150", "200"]);
-  });
-
-  it("returns upstream_error, not resource_not_found, when the catalog is too large to scan", async () => {
-    await reconnect(many(2_600));
-    const { structuredContent } = await call("get_resource", {
-      resource: "https://nowhere.example.com/",
+      resource: "https://weather.example.com/forecast",
     });
     expect(structuredContent.error.code).toBe("upstream_error");
-    expect(catalog.queries).toHaveLength(50);
+    expect(logs).toEqual([expect.stringContaining("ignored resource=")]);
   });
 
-  it("returns upstream_error when the catalog fails", async () => {
+  it("returns upstream_error when one page does not hold every entry for the URL", async () => {
+    const sellers = Array.from({ length: 30 }, (_, i) => ({
+      ...CATALOG[0]!,
+      accepts: [{ ...CATALOG[0]!.accepts[0]!, payTo: `G${i}` }],
+    }));
+    await reconnect(sellers);
+    const { structuredContent } = await call("get_resource", {
+      resource: "https://weather.example.com/forecast",
+    });
+    expect(structuredContent.error.code).toBe("upstream_error");
+    expect(logs).toEqual([expect.stringContaining("30 entries")]);
+  });
+
+  it("returns invalid_catalog_entry for an entry over the catalog's extension size limit", async () => {
+    const huge = {
+      bazaar: { info: { input: { type: "http", method: "GET" }, note: "x".repeat(40_000) } },
+    };
+    await reconnect([{ ...CATALOG[0]!, extensions: huge }]);
+    const { structuredContent } = await call("get_resource", {
+      resource: "https://weather.example.com/forecast",
+    });
+    expect(structuredContent.error.code).toBe("invalid_catalog_entry");
+  });
+
+  it("returns upstream_error, with the cause in the log, when the catalog fails", async () => {
     catalog.failWith = 500;
     const { structuredContent } = await call("get_resource", {
       resource: "https://x.example.com/",
     });
     expect(structuredContent.error.code).toBe("upstream_error");
+    expect(logs).toEqual([expect.stringContaining("500")]);
   });
 });
