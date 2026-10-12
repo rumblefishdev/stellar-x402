@@ -2,7 +2,7 @@
 id: "0013"
 title: "Choose the facilitator's state store and record it in an ADR"
 type: RESEARCH
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0003", "0006", "0007", "0008"]
 related_tasks: ["0012", "0009"]
@@ -24,6 +24,10 @@ history:
     status: backlog
     who: claude
     note: "Tagged Discovery lane by 0012; decision task feeding M1 Epic 2."
+  - date: "2026-10-12"
+    status: active
+    who: akot
+    note: "Started by the Discovery lane; picks the one database the team agreed on, for the 0014 host."
 ---
 
 # Choose the facilitator's state store and record it in an ADR
