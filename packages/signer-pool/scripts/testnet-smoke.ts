@@ -172,6 +172,13 @@ const submitter = new SettlementSubmitter({
   feeEscalation: process.env.FEE_MAX ? { max: Number(process.env.FEE_MAX) } : undefined,
 });
 const expLedger = (await server.getLatestLedger()).sequence + 200;
+// Every hash is "stored" (a short async write) before its send, as the facilitator's settlement
+// record will be (AD-16), and no transaction may land past the client's auth expiry (AD-22).
+const stored = new Set<string>();
+const storeHash = async (hash: string) => {
+  await new Promise((r) => setTimeout(r, 20));
+  stored.add(hash);
+};
 const t0 = Date.now();
 const outcomes = await Promise.allSettled(
   Array.from({ length: nPayments }, async (_, i) =>
@@ -181,6 +188,7 @@ const outcomes = await Promise.allSettled(
         sellers[i % sellers.length]!.publicKey(),
         expLedger,
       ),
+      { onSigned: storeHash, maxLedger: expLedger },
     ),
   ),
 );
@@ -254,6 +262,31 @@ for (let start = first; ledgers.length && start <= last;) {
   if (page.ledgers.length === 0) break;
   start = page.ledgers.at(-1)!.sequence + 1;
 }
+// 3. The two guards (task 0016) against the real network: a call that can no longer land by its
+// maxLedger is refused before signing, and a failed hash write stops the send.
+const errorName = (p: Promise<unknown>) =>
+  p.then(
+    () => "sent",
+    (e: unknown) => (e instanceof Error ? e.name : String(e)),
+  );
+const guardCall = () => settleCall(clients[0]!, sellers[0]!.publicKey(), expLedger);
+const sentBefore = submitter.stats().byStatus;
+const guards = {
+  hashesStoredBeforeSend: results.every((r) => r.hash !== undefined && stored.has(r.hash)),
+  landedByMaxLedger: results.every((r) => r.ledger === undefined || r.ledger <= expLedger),
+  pastMaxLedger: await errorName(
+    submitter.submit(await guardCall(), {
+      maxLedger: (await server.getLatestLedger()).sequence,
+    }),
+  ),
+  failedHashWrite: await errorName(
+    submitter.submit(await guardCall(), {
+      onSigned: () => Promise.reject(new Error("store down")),
+    }),
+  ),
+  nothingSentByGuards: JSON.stringify(submitter.stats().byStatus) === JSON.stringify(sentBefore),
+};
+
 console.log(
   JSON.stringify(
     {
@@ -277,6 +310,7 @@ console.log(
         .map((r) => ({ hash: r.hash, status: r.status, fee: String(r.feeCharged) })),
       failures: results.filter((r) => r.status !== "success"),
       refusals,
+      guards,
       stats: submitter.stats(),
       rpcActive: server.active,
       facilitatorBalance: await checkFacilitatorBalance(server, facilitator.publicKey()),
