@@ -44,7 +44,7 @@ adrs:
 | ------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
 | Adapters (inbound)  | `apps/facilitator/src/http/`                                 | x402 v2 routes, request validation, rate limiting, harness endpoints                                   |
 | Application         | `apps/facilitator/src/`                                      | verify/settle orchestration, the settlement record lifecycle, spend budgets, cataloging trigger, ports |
-| Adapters (outbound) | `apps/facilitator/src/adapters/`                             | store implementations (0013), signer, RPC, metrics                                                     |
+| Adapters (outbound) | `apps/facilitator/src/adapters/`                             | store implementations (ADR 0012), signer, RPC, metrics                                                 |
 | Domain libraries    | `packages/signer-pool`, `packages/bazaar`, `packages/config` | settlement submission, catalog validation and normalization, network constants                         |
 | On-chain            | `contracts/upto-proxy`                                       | `upto` settlement contract                                                                             |
 
@@ -136,7 +136,7 @@ graph TD
 - **Rule:**
   - All state goes through four interfaces defined in `apps/facilitator`: `SettlementStore`, `CatalogStore`, `RateLimitStore` and `SpendStore`.
   - Concrete adapters live in `apps/facilitator/src/adapters/`, and there is an in-memory fake of each for tests.
-  - The backing store is chosen by task 0013. It must support:
+  - The backing store is one RDS for PostgreSQL database ([ADR 0012](../adr/0012-facilitator-state-store.md), task 0013). It must support:
     - the atomic claim (AD-6)
     - lookup by any of a settlement's hashes (AD-16)
     - the channel lease (AD-17)
@@ -321,7 +321,7 @@ graph TD
 | Files and modules     | kebab-case file names; ESM with `.js` suffixes on local imports                                                                                                                                      |
 | Errors in libraries   | typed `Error` subclasses with `override readonly name`; never thrown strings                                                                                                                         |
 | HTTP status           | verify and settle outcomes are x402 bodies (`isValid` / `success` with a reason) with status 200; 400 for malformed requests, 429 for rate limits, 500 for unexpected errors                         |
-| Amounts               | `bigint` in code (token base units, fees in stroops); decimal strings on the wire and in the store                                                                                                   |
+| Amounts               | `bigint` in code (token base units, fees in stroops); decimal strings on the wire; `bigint` stroops in the store, other amounts as strings in `jsonb`                                                |
 | Identifiers           | networks as CAIP-2 strings from `packages/config`; transaction hashes as 64-character lowercase hex; settlement key as in AD-6                                                                       |
 | Config                | read and validated once at startup in `apps/facilitator` (zod); passed down through constructors. RPC URLs come from config, a fallback list is allowed, and public testnet RPC is acceptable for T1 |
 | Time and I/O in tests | `rpc`, `now` and `sleep` injected; store ports faked in memory                                                                                                                                       |
@@ -358,7 +358,7 @@ graph LR
     api[HTTP: /verify /settle /supported /discovery/resources] --> app[settlement module]
     app --> pool[signer-pool SettlementSubmitter]
     app -. on success .-> catalog[bazaar validate + catalog]
-    app --> stores[(Settlement / Catalog / RateLimit / Spend stores, per 0013)]
+    app --> stores[(Settlement / Catalog / RateLimit / Spend stores, PostgreSQL per ADR 0012)]
     catalog --> stores
   end
   pool -- Soroban RPC --> chain[Stellar testnet]
@@ -427,10 +427,11 @@ The rationale and rejected alternatives for these ADs are in ADRs:
 | [0008](../adr/0008-bazaar-catalog-integrity.md)               | AD-8 (header), AD-19, AD-20        |
 | [0009](../adr/0009-conformance-gate-harness.md)               | AD-13, AD-15                       |
 | [0011](../adr/0011-facilitator-hosting.md)                    | AD-11, AD-12, AD-15, AD-17         |
+| [0012](../adr/0012-facilitator-state-store.md)                | AD-7 (store)                       |
 
 ## Deferred
 
-- **State store:** task 0013 decides, with an ADR. Only the ports and their required operations (AD-7) are fixed here.
+- **State store:** decided in [ADR 0012](../adr/0012-facilitator-state-store.md) (task 0013): one RDS for PostgreSQL database for all four ports and Tranche 2 search.
 - **Hosting, container setup, key custody, logger, metrics and alert backend:** decided in [ADR 0011](../adr/0011-facilitator-hosting.md) (task 0014): ECS on Fargate in AWS, the key in SSM under its own KMS key (in KMS on mainnet), CloudWatch logs, EMF metrics and alarms to Slack. Constraints it meets:
   - the process is long-lived, and scale-to-zero is not allowed
   - the lease and stop-before-start deploys from AD-17 apply
