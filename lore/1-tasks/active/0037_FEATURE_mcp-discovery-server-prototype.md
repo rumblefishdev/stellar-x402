@@ -133,9 +133,12 @@ Settled on 2026-10-12, before the rework of PR #21. Each line: what was decided 
   signing and released only on a confirmed failure; atomic units per asset.
 - **Testnet only:** the server refuses to start with `stellar:pubnet`; the README says to use a
   testnet-only key.
-- **Errors are loud:** a fixed code list (adds `invalid_input` for malformed tool input); the
-  cause of a catalog failure goes to the server log, never to the agent; our own bugs are not
-  reported as `upstream_error`.
+- **Errors are loud:** a fixed code list; the cause of a catalog failure goes to the server log,
+  never to the agent; our own bugs are not reported as `upstream_error`. The catalog's answer is
+  parsed, so a malformed page is an `upstream_error`; a `resource` the catalog cannot hold is
+  `invalid_input`; a `get_resource` answer with more entries than its page is an `upstream_error`.
+  Exception: input that fails a tool's schema is rejected by the MCP SDK before our handler runs,
+  as a loud error without our code (its validation path is private).
 - **Seller-written fields** are bounded with the `packages/bazaar` limits; an entry over the
   extension size limit is rejected with a code. Every tool declares an `outputSchema`.
 - **Logic stays in `packages/mcp`.** The SDK buyer/agent helpers are a later tranche.
@@ -144,6 +147,8 @@ Settled on 2026-10-12, before the rework of PR #21. Each line: what was decided 
 ## Not yet decided
 
 - Page size and maximum for `/discovery/resources` (0032); the fake uses 20 and 50.
+- The `resource` filter's contract in 0032: exact match on the stored canonical URL, the query
+  canonicalized with `canonicalizeUrl`; to be agreed with the Discovery lane and recorded there.
 
 ## Out of scope
 
