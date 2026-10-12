@@ -14,6 +14,7 @@ export type {
 export type { RateLimitHit, RateLimitStore } from "./rate-limit-store.js";
 export {
   FINAL_SETTLEMENT_STATES,
+  HashConflictError,
   type ChannelLease,
   type ClaimResult,
   type NewSettlement,

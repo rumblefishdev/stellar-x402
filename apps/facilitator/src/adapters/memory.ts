@@ -1,7 +1,6 @@
 import type { StellarNetwork } from "@stellar-x402/config";
-import type { PaymentRequirements } from "@x402/core/types";
 import {
-  FINAL_SETTLEMENT_STATES,
+  HashConflictError,
   type CatalogEntry,
   type CatalogPage,
   type CatalogQuery,
@@ -23,11 +22,12 @@ import {
   type SpendStore,
   type Stores,
 } from "../ports/index.js";
+import { assertLedger, isFinal, isForward, mergeCatalogEntry } from "./rules.js";
 
 /**
  * In-memory adapters of the four ports (AD-7), for `STORE=memory` and for tests. State lives in
- * the process and a restart loses it; the durable adapters come in 0022. Reads and writes copy,
- * so a caller can't change stored state by mutating an object, just as with a real store.
+ * the process and a restart loses it. Reads and writes copy, so a caller can't change stored state
+ * by mutating an object, just as with a real store.
  *
  * Each method finishes its check and its write without an `await` in between, which makes it
  * atomic on Node's single thread.
@@ -41,20 +41,10 @@ export function memoryStores(): Stores {
   };
 }
 
-const ORDER: Record<SettlementState, number> = {
-  claimed: 0,
-  signed: 1,
-  pending: 2,
-  success: 3,
-  failed: 3,
-  rejected: 3,
-  expired: 3,
-};
-
-const isFinal = (state: SettlementState) => FINAL_SETTLEMENT_STATES.includes(state);
-
 export class MemorySettlementStore implements SettlementStore {
   private readonly records = new Map<SettlementKey, SettlementRecord>();
+  /** The record each hash belongs to. */
+  private readonly hashes = new Map<string, SettlementKey>();
   private readonly leases = new Map<string, ChannelLease>();
 
   async claim(settlement: NewSettlement): Promise<ClaimResult> {
@@ -75,16 +65,17 @@ export class MemorySettlementStore implements SettlementStore {
   }
 
   async findByHash(hash: string): Promise<SettlementRecord | undefined> {
-    // ponytail: linear scan, fine for tests and one testnet process; durable adapters index hashes.
-    for (const record of this.records.values())
-      if (record.hashes.includes(hash)) return structuredClone(record);
-    return undefined;
+    const key = this.hashes.get(hash);
+    return key === undefined ? undefined : structuredClone(this.records.get(key));
   }
 
   async addHash(key: SettlementKey, hash: string, updatedAt: number): Promise<boolean> {
     const record = this.records.get(key);
     if (!record || isFinal(record.state)) return false;
-    if (record.hashes.includes(hash)) return true;
+    const owner = this.hashes.get(hash);
+    if (owner === key) return true;
+    if (owner !== undefined) throw new HashConflictError(hash);
+    this.hashes.set(hash, key);
     record.hashes.push(hash);
     if (record.state === "claimed") record.state = "signed";
     record.updatedAt = updatedAt;
@@ -97,10 +88,8 @@ export class MemorySettlementStore implements SettlementStore {
     update: SettlementUpdate,
   ): Promise<SettlementRecord | undefined> {
     const record = this.records.get(key);
-    // A final state is the end of the lifecycle: nothing moves on from it.
-    if (!record || record.state !== expected || isFinal(expected)) return undefined;
-    // Only forward: a same-state update would let two concurrent callers both win.
-    if (ORDER[update.state] <= ORDER[expected]) return undefined;
+    if (!record || record.state !== expected || !isForward(expected, update.state))
+      return undefined;
     Object.assign(record, structuredClone(update));
     return structuredClone(record);
   }
@@ -136,33 +125,17 @@ export class MemorySettlementStore implements SettlementStore {
   }
 }
 
-const requirementKey = (r: PaymentRequirements) => `${r.scheme}|${r.network}|${r.asset}`;
-
 export class MemoryCatalogStore implements CatalogStore {
   /** Insertion order is the stable listing order. */
   private readonly entries = new Map<string, CatalogEntry>();
 
   async upsert(entry: CatalogEntry): Promise<UpsertOutcome> {
-    if (!Number.isSafeInteger(entry.ledger) || entry.ledger < 0)
-      throw new RangeError("catalog entry ledger must be a non-negative integer");
+    assertLedger(entry.ledger);
     const { network, payTo, method, resourceUrl } = entry.key;
     const id = JSON.stringify([network, payTo, method, resourceUrl]);
     const stored = this.entries.get(id);
-    const stale = stored !== undefined && entry.ledger < stored.ledger;
-    const accepts = new Map<string, PaymentRequirements>();
-    for (const requirement of stored?.resource.accepts ?? [])
-      accepts.set(requirementKey(requirement), requirement);
-    for (const requirement of entry.resource.accepts)
-      if (!stale || !accepts.has(requirementKey(requirement)))
-        accepts.set(requirementKey(requirement), requirement);
-    const latest = stale ? stored : entry;
-    this.entries.set(
-      id,
-      structuredClone({
-        ...latest,
-        resource: { ...latest.resource, accepts: [...accepts.values()] },
-      }),
-    );
+    const { merged, stale } = mergeCatalogEntry(stored, entry);
+    this.entries.set(id, structuredClone(merged));
     return stale ? "stale" : stored ? "updated" : "inserted";
   }
 
@@ -191,10 +164,14 @@ export class MemoryRateLimitStore implements RateLimitStore {
 
   async hit(key: string, windowMs: number, now: number): Promise<RateLimitHit> {
     const resetAt = (Math.floor(now / windowMs) + 1) * windowMs;
-    const current = this.windows.get(key);
-    const count = current?.resetAt === resetAt ? current.count + 1 : 1;
-    this.windows.set(key, { count, resetAt });
-    return { count, resetAt };
+    const stored = this.windows.get(key);
+    // A hit from an older window (a lagging clock) counts in the stored, newer one.
+    const counted =
+      stored && stored.resetAt >= resetAt
+        ? { count: stored.count + 1, resetAt: stored.resetAt }
+        : { count: 1, resetAt };
+    this.windows.set(key, counted);
+    return { ...counted };
   }
 }
 
@@ -206,7 +183,7 @@ interface Reservation {
 
 export class MemorySpendStore implements SpendStore {
   // ponytail: reservations are never pruned, so memory and each `sum` scan grow with the process's
-  // settlements. Fine for tests and dev runs (deployments use the 0022 stores); prune past the
+  // settlements. Fine for tests and dev runs (deployments use the PostgreSQL stores); prune past the
   // longest window if a memory store ever runs for long.
   private readonly reservations = new Map<string, Reservation>();
   private readonly failures = new Map<SpendScope, number>();

@@ -3,23 +3,27 @@ import type { StellarNetwork } from "@stellar-x402/config";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import { beforeEach, describe, expect, it } from "vitest";
-import type {
-  CatalogEntry,
-  CatalogStore,
-  NewSettlement,
-  RateLimitStore,
-  SettlementKey,
-  SettlementStore,
-  SpendLimit,
-  SpendStore,
+import {
+  HashConflictError,
+  type CatalogEntry,
+  type CatalogStore,
+  type NewSettlement,
+  type RateLimitStore,
+  type SettlementKey,
+  type SettlementStore,
+  type SpendLimit,
+  type SpendStore,
 } from "../src/ports/index.js";
 
 /**
  * Behaviour every adapter of the four ports must have (AD-6, AD-7, AD-11, AD-16 to AD-20). The
- * in-memory adapters run these in `memory.test.ts`; the durable adapters (0022) run the same
- * suites. `make` must return an empty store.
+ * in-memory adapters run these in `memory.test.ts`, the PostgreSQL adapters in `postgres.test.ts`.
+ * `make` must return an empty store.
  */
 type Make<T> = () => T | Promise<T>;
+
+/** The largest stroop amount a durable store's int64 column holds. */
+const INT64_MAX = 2n ** 63n - 1n;
 
 const PAYER = "GPAYER";
 const PAY_TO = "GPAYTO";
@@ -82,16 +86,63 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       expect(await store.findByHash("h3")).toBeUndefined();
     });
 
-    it("refuses a hash for a missing or final record", async () => {
-      const { key } = settlement("1");
-      expect(await store.addHash(key, "h1", 2_000)).toBe(false);
+    it("rejects a hash another record has, and changes neither record", async () => {
+      const k1 = settlement("1").key;
+      const k2 = settlement("2").key;
       await store.claim(settlement("1"));
-      await store.transition(key, "claimed", {
-        state: "rejected",
-        errorReason: "x",
+      await store.claim(settlement("2"));
+      expect(await store.addHash(k1, "h1", 2_000)).toBe(true);
+      const conflict = store.addHash(k2, "h1", 3_000);
+      await expect(conflict).rejects.toBeInstanceOf(HashConflictError);
+      await expect(conflict).rejects.toMatchObject({ name: "HashConflictError", hash: "h1" });
+      expect(await store.get(k2)).toMatchObject({ state: "claimed", hashes: [], updatedAt: 1_000 });
+      expect(await store.get(k1)).toMatchObject({
+        state: "signed",
+        hashes: ["h1"],
         updatedAt: 2_000,
       });
-      expect(await store.addHash(key, "h1", 3_000)).toBe(false);
+      expect((await store.findByHash("h1"))?.key).toBe(k1);
+      expect(await store.addHash(k1, "h1", 4_000)).toBe(true);
+      expect((await store.get(k1))?.hashes).toEqual(["h1"]);
+    });
+
+    it("gives a hash two records add concurrently to exactly one", async () => {
+      const k1 = settlement("1").key;
+      const k2 = settlement("2").key;
+      await store.claim(settlement("1"));
+      await store.claim(settlement("2"));
+      const results = await Promise.allSettled([
+        store.addHash(k1, "h1", 2_000),
+        store.addHash(k2, "h1", 2_000),
+      ]);
+      expect(results.filter((r) => r.status === "fulfilled")).toEqual([
+        { status: "fulfilled", value: true },
+      ]);
+      const won = results.findIndex((r) => r.status === "fulfilled");
+      const lost = results[1 - won];
+      expect(lost?.status === "rejected" && lost.reason).toBeInstanceOf(HashConflictError);
+      const [winner, loser] = won === 0 ? [k1, k2] : [k2, k1];
+      expect((await store.findByHash("h1"))?.key).toBe(winner);
+      expect((await store.get(loser))?.hashes).toEqual([]);
+    });
+
+    it("refuses a hash for a missing or final record", async () => {
+      const k1 = settlement("1").key;
+      const k2 = settlement("2").key;
+      expect(await store.addHash(k1, "h1", 2_000)).toBe(false);
+      await store.claim(settlement("1"));
+      await store.claim(settlement("2"));
+      await store.addHash(k1, "h1", 2_000);
+      await store.transition(k1, "signed", { state: "success", ledger: 1, updatedAt: 3_000 });
+      // A final record refuses before the hash is looked up: its own hash, or another record's.
+      expect(await store.addHash(k1, "h1", 4_000)).toBe(false);
+      await store.addHash(k2, "h2", 2_000);
+      await store.transition(k2, "signed", {
+        state: "rejected",
+        errorReason: "x",
+        updatedAt: 3_000,
+      });
+      expect(await store.addHash(k2, "h1", 4_000)).toBe(false);
     });
 
     it("applies a transition only from the expected state, and only forward", async () => {
@@ -152,6 +203,19 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       expect((await store.get(key))?.state).toBe("rejected");
     });
 
+    it("keeps a fee at the int64 maximum exactly", async () => {
+      const { key } = settlement("1");
+      await store.claim(settlement("1"));
+      const success = await store.transition(key, "claimed", {
+        state: "success",
+        ledger: 1,
+        feeCharged: INT64_MAX,
+        updatedAt: 2_000,
+      });
+      expect(success?.feeCharged).toBe(INT64_MAX);
+      expect((await store.get(key))?.feeCharged).toBe(INT64_MAX);
+    });
+
     it("returns copies, not live state", async () => {
       const { key } = settlement("1");
       const claimed = await store.claim(settlement("1"));
@@ -201,6 +265,23 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
         expect(await store.renewLease(NAME, "a", 1_000, 1_001)).toBe(false);
       });
 
+      it("gives a contested lease to exactly one holder", async () => {
+        const leases = await Promise.all(
+          Array.from({ length: 10 }, (_, i) => store.acquireLease(NAME, `h${i}`, 1_000, 0)),
+        );
+        const winners = leases.filter((lease) => lease !== undefined);
+        expect(winners).toHaveLength(1);
+        expect(await store.renewLease(NAME, winners[0]!.holder, 1_000, 500)).toBe(true);
+      });
+
+      it("gives an expired, contested lease to exactly one holder", async () => {
+        await store.acquireLease(NAME, "a", 1_000, 0);
+        const leases = await Promise.all(
+          Array.from({ length: 10 }, (_, i) => store.acquireLease(NAME, `h${i}`, 1_000, 1_001)),
+        );
+        expect(leases.filter((lease) => lease !== undefined)).toHaveLength(1);
+      });
+
       it("releases only for the holder", async () => {
         await store.acquireLease(NAME, "a", 1_000, 0);
         await store.releaseLease(NAME, "b");
@@ -248,6 +329,38 @@ export function spendStoreContract(make: Make<SpendStore>) {
       );
       expect(results.filter((r) => r.reserved)).toHaveLength(3);
       expect(await store.used("global", DAY, 0)).toBe(90n);
+    });
+
+    it("never goes over a limit when reservations list their scopes in different orders", async () => {
+      const results = await Promise.all(
+        Array.from({ length: 10 }, (_, i) =>
+          store.reserve({
+            id: `r${i}`,
+            amount: 30n,
+            limits: i % 2 ? limits(100n, 100n).reverse() : limits(100n, 100n),
+            now: 0,
+          }),
+        ),
+      );
+      expect(results.filter((r) => r.reserved)).toHaveLength(3);
+      expect(await store.used("global", DAY, 0)).toBe(90n);
+      expect(await store.used(`payer:${PAYER}`, DAY, 0)).toBe(90n);
+    });
+
+    it("reserves an amount at the int64 maximum exactly", async () => {
+      expect(
+        await store.reserve({
+          id: "a",
+          amount: INT64_MAX,
+          limits: limits(INT64_MAX, INT64_MAX),
+          now: 0,
+        }),
+      ).toEqual({ reserved: true });
+      expect(await store.used("global", DAY, 0)).toBe(INT64_MAX);
+      expect(await store.used(`payer:${PAYER}`, DAY, 0)).toBe(INT64_MAX);
+      expect(
+        await store.reserve({ id: "b", amount: 1n, limits: limits(INT64_MAX, INT64_MAX), now: 0 }),
+      ).toEqual({ reserved: false, scope: "global" });
     });
 
     it("treats a repeated id as a no-op", async () => {
@@ -304,6 +417,11 @@ export function rateLimitStoreContract(make: Make<RateLimitStore>) {
         count: 1,
         resetAt: 120_000,
       });
+    });
+
+    it("counts a hit from an older window in the stored one", async () => {
+      expect(await store.hit("k", 60_000, 60_000)).toEqual({ count: 1, resetAt: 120_000 });
+      expect(await store.hit("k", 60_000, 59_999)).toEqual({ count: 2, resetAt: 120_000 });
     });
 
     it("counts concurrent hits exactly", async () => {
@@ -390,6 +508,22 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
       await expect(at(Number.NaN, "bad")).rejects.toThrow();
     });
 
+    it("merges concurrent upserts of one key without losing a requirement", async () => {
+      const url = "https://seller.example/data";
+      const assets = Array.from({ length: 10 }, (_, i) => `C${i}`);
+      await Promise.all(
+        assets.map((asset) =>
+          upsert({
+            key: key(url),
+            resource: resource(url, { accepts: [requirements({ asset })] }),
+          }),
+        ),
+      );
+      const page = await store.list({ limit: 10, offset: 0 });
+      expect(page.total).toBe(1);
+      expect(page.items[0]?.accepts.map((a) => a.asset).sort()).toEqual(assets.sort());
+    });
+
     it("filters, pages and keeps a stable order", async () => {
       await upsert({
         key: key("https://a.example"),
@@ -436,6 +570,7 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
       expect(await urls({ extensions: "unset", limit: 10, offset: 0 })).toEqual([]);
       const page = await store.list({ limit: 1, offset: 1 });
       expect(page).toMatchObject({ total: 3, items: [{ resource: "https://b.example" }] });
+      expect(await store.list({ limit: 10, offset: 5 })).toEqual({ items: [], total: 3 });
     });
   });
 }

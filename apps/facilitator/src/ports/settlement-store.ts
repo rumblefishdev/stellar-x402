@@ -58,6 +58,14 @@ export type SettlementUpdate = Partial<
   Pick<SettlementRecord, "channel" | "ledger" | "feeCharged" | "errorReason">
 > & { state: SettlementState; updatedAt: number };
 
+/** `addHash` was given a hash another settlement already has; neither record changed. */
+export class HashConflictError extends Error {
+  override readonly name = "HashConflictError";
+  constructor(readonly hash: string) {
+    super("transaction hash already belongs to another settlement");
+  }
+}
+
 /** An exclusive, renewable lease on one network's channel set (AD-17). */
 export interface ChannelLease {
   /** What is leased, e.g. `stellar:testnet:channels`. */
@@ -79,8 +87,12 @@ export interface SettlementStore {
   /** Finds a record by any of its hashes. */
   findByHash(hash: string): Promise<SettlementRecord | undefined>;
   /**
-   * Appends a signed hash, durably, before it is first sent. Moves `claimed` to `signed`; a
-   * hash that is already there is a no-op. Resolves `false` if the record is final or missing.
+   * Appends a signed hash, durably, before it is first sent, and moves `claimed` to `signed`.
+   * In order of precedence:
+   * 1. a missing or final record resolves `false`;
+   * 2. a hash already on this record resolves `true`, a no-op;
+   * 3. a hash on another record rejects with `HashConflictError`, and neither record changes;
+   * 4. otherwise the hash is appended and it resolves `true`.
    */
   addHash(key: SettlementKey, hash: string, updatedAt: number): Promise<boolean>;
   /**
