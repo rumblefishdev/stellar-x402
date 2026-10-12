@@ -179,6 +179,17 @@ const storeHash = async (hash: string) => {
   await new Promise((r) => setTimeout(r, 20));
   stored.add(hash);
 };
+// The ordering is checked at the send itself: a hash that reaches the network before its write
+// finished is recorded here. Checking `stored` after the run would pass without the await.
+const sentUnstored: string[] = [];
+let sends = 0;
+const send = server.sendTransaction;
+server.sendTransaction = (tx) => {
+  sends++;
+  const hash = tx.hash().toString("hex");
+  if (!stored.has(hash)) sentUnstored.push(hash);
+  return send(tx);
+};
 const t0 = Date.now();
 const outcomes = await Promise.allSettled(
   Array.from({ length: nPayments }, async (_, i) =>
@@ -270,9 +281,11 @@ const errorName = (p: Promise<unknown>) =>
     (e: unknown) => (e instanceof Error ? e.name : String(e)),
   );
 const guardCall = () => settleCall(clients[0]!, sellers[0]!.publicKey(), expLedger);
-const sentBefore = submitter.stats().byStatus;
+// Counted at the RPC: a guard that sent and then threw would leave no final result behind.
+const sendsBefore = sends;
 const guards = {
-  hashesStoredBeforeSend: results.every((r) => r.hash !== undefined && stored.has(r.hash)),
+  hashesStoredBeforeSend:
+    sentUnstored.length === 0 && results.every((r) => r.hash !== undefined && stored.has(r.hash)),
   landedByMaxLedger: results.every((r) => r.ledger === undefined || r.ledger <= expLedger),
   pastMaxLedger: await errorName(
     submitter.submit(await guardCall(), {
@@ -284,7 +297,7 @@ const guards = {
       onSigned: () => Promise.reject(new Error("store down")),
     }),
   ),
-  nothingSentByGuards: JSON.stringify(submitter.stats().byStatus) === JSON.stringify(sentBefore),
+  nothingSentByGuards: sends === sendsBefore,
 };
 
 console.log(
