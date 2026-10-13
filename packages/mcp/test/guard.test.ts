@@ -9,7 +9,7 @@ vi.mock("undici", async (importOriginal) => ({
   fetch: undiciFetch,
 }));
 
-const { guardedFetch, publicOnlyLookup } = await import("../src/guard.js");
+const { checkUrl, guardedFetch, publicOnlyLookup } = await import("../src/guard.js");
 
 function resolve(hostname: string, all: boolean) {
   return new Promise<{ error: Error | null; address: unknown }>((done) =>
@@ -26,6 +26,21 @@ describe("publicOnlyLookup", () => {
   it("answers a public address in the shape the caller asked for", async () => {
     expect((await resolve("8.8.8.8", true)).address).toEqual([{ address: "8.8.8.8", family: 4 }]);
     expect((await resolve("8.8.8.8", false)).address).toBe("8.8.8.8");
+  });
+});
+
+describe("checkUrl", () => {
+  it("with allowInsecureLocal, passes http to a *.localhost name, which only this machine answers", () => {
+    expect(checkUrl("http://x.localhost:8080/", true).hostname).toBe("x.localhost");
+    expect(() => checkUrl("http://x.localhost:8080/", false)).toThrow(
+      expect.objectContaining({ code: "unsafe_url" }),
+    );
+  });
+
+  it("with allowInsecureLocal, still refuses a scheme other than http and https on this machine", () => {
+    expect(() => checkUrl("ftp://localhost/x", true)).toThrow(
+      expect.objectContaining({ code: "unsafe_url" }),
+    );
   });
 });
 
