@@ -1,12 +1,15 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { SchemeNetworkClient } from "@x402/core/types";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { fork } from "node:child_process";
+import { chmod, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { countDaily } from "../src/daily.js";
 import { createServer } from "../src/index.js";
-import { fakeScheme, startFakeSeller, USDC, type FakeSeller } from "./fake-seller.js";
+import { fakeScheme, NO_TRUSTLINE, startFakeSeller, USDC, type FakeSeller } from "./fake-seller.js";
 
 let seller: FakeSeller;
 let dir: string;
@@ -111,6 +114,38 @@ describe("daily budget", () => {
   });
 
   it.each([
+    ["allows a day spent exactly to the limit", 20_000n, ["paid", "paid", "over_budget"]],
+    ["refuses one atomic unit over it", 19_999n, ["paid", "over_budget"]],
+  ])("%s", async (_, daily, expected) => {
+    const call = await startProcess({ daily });
+    const results: string[] = [];
+    while (results.length < expected.length) results.push(await call());
+    expect(results).toEqual(expected);
+  });
+
+  it("logs a refund it cannot write, and the amount stays counted", async () => {
+    const state = join(dir, "state");
+    const failing: SchemeNetworkClient = {
+      scheme: "exact",
+      async createPaymentPayload() {
+        // The amount is counted by now; a record that cannot be written stops the refund.
+        await chmod(state, 0o500);
+        throw new Error(NO_TRUSTLINE);
+      },
+    };
+    const call = await startProcess({ scheme: failing });
+    try {
+      expect(await call()).toBe("insufficient_funds");
+    } finally {
+      await chmod(state, 0o700);
+    }
+    expect(logs.join()).toContain("could not give back 10000 to the daily budget");
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+      "2026-10-13": { [USDC]: "10000" },
+    });
+  });
+
+  it.each([
     ["is not JSON", "{"],
     ["holds an amount that is not a number", JSON.stringify({ "2026-10-13": { [USDC]: "-1" } })],
   ])("refuses to pay, and logs why, when the record %s", async (_, content) => {
@@ -143,4 +178,32 @@ describe("daily budget", () => {
     };
     expect(() => createServer(config)).toThrow("dailyFile");
   });
+});
+
+describe("daily record", () => {
+  const day = "2026-10-13";
+  const log = (message: string) => logs.push(message);
+
+  it("counts exactly up to the limit, and refuses one atomic unit more", async () => {
+    expect(await countDaily(file, day, USDC, 10n, 10n, log)).toBe(true);
+    expect(await countDaily(file, day, USDC, 1n, 10n, log)).toBe(false);
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ [day]: { [USDC]: "10" } });
+  });
+
+  it("is counted once by each of 20 processes, starting from a stale lock", async () => {
+    await mkdir(join(dir, "state"));
+    // Left by a process that died ten seconds ago: older than the five a lock may live.
+    await writeFile(`${file}.lock`, "");
+    const past = new Date(Date.now() - 10_000);
+    await utimes(`${file}.lock`, past, past);
+    const script = fileURLToPath(new URL("./count-daily-process.ts", import.meta.url));
+    const exits = await Promise.all(
+      Array.from({ length: 20 }, () => {
+        const child = fork(script, [file], { execArgv: ["--import", "tsx"] });
+        return new Promise<number | null>((resolve) => child.on("exit", resolve));
+      }),
+    );
+    expect(exits).toEqual(Array(20).fill(0));
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ [day]: { CASSET: "20" } });
+  }, 30_000);
 });
