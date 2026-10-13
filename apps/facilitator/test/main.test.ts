@@ -35,22 +35,30 @@ describe("facilitator boot", () => {
     const config = { ...parseConfig(env), port: 0 };
     const logger = jsonLogger("debug", (line) => lines.push(line));
     const verify = async () => ({ isValid: true });
-    app = await start({ config, logger, stores: memoryStores(), verify });
+    const settle = async () => ({
+      response: { success: false, transaction: "", network: config.network },
+    });
+    app = await start({
+      config,
+      logger,
+      stores: memoryStores(),
+      verify,
+      settle,
+      extensionResponses: () => undefined,
+    });
     url = `http://127.0.0.1:${app.port}`;
   });
   afterAll(() => app.close());
 
   it("answers the stub routes, with no CORS headers", async () => {
     const routes = [
-      ["POST", "/settle"],
       ["GET", "/supported"],
       ["GET", "/discovery/resources"],
     ] as const;
     for (const [method, path] of routes) {
       const response = await fetch(`${url}${path}`, {
         method,
-        headers: { "content-type": "application/json", origin: "https://other.example" },
-        body: method === "POST" ? "{}" : undefined,
+        headers: { origin: "https://other.example" },
       });
       expect(response.status, path).toBe(501);
       expect(response.headers.get("access-control-allow-origin"), path).toBeNull();

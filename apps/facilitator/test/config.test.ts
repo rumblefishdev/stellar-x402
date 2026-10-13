@@ -36,7 +36,12 @@ describe("parseConfig", () => {
       channels: [CHANNEL_A, CHANNEL_B],
       store: "memory",
       fees: { maxFeeStroops: 250_000n, inclusionFeeStroops: undefined, escalation: undefined },
-      settlement: { minValidityLedgers: 4, settleTimeoutMs: 30_000, leaseTtlMs: 30_000 },
+      settlement: {
+        minValidityLedgers: 4,
+        settleTimeoutMs: 30_000,
+        settleBudgetMs: 90_000,
+        leaseTtlMs: 30_000,
+      },
       http: {
         bodyLimitBytes: 65_536,
         trustedProxyHops: 0,
@@ -72,6 +77,7 @@ describe("parseConfig", () => {
       FEE_ESCALATION_MAX_STROOPS: "1002",
       MIN_VALIDITY_LEDGERS: "13",
       SETTLE_TIMEOUT_MS: "31000",
+      SETTLE_BUDGET_MS: "60000",
       LEASE_TTL_MS: "32000",
       BODY_LIMIT_BYTES: "70000",
       TRUSTED_PROXY_HOPS: "2",
@@ -101,7 +107,12 @@ describe("parseConfig", () => {
         inclusionFeeStroops: 201n,
         escalation: { factor: 1.5, max: 1002 },
       },
-      settlement: { minValidityLedgers: 13, settleTimeoutMs: 31_000, leaseTtlMs: 32_000 },
+      settlement: {
+        minValidityLedgers: 13,
+        settleTimeoutMs: 31_000,
+        settleBudgetMs: 60_000,
+        leaseTtlMs: 32_000,
+      },
       http: {
         bodyLimitBytes: 70_000,
         trustedProxyHops: 2,
