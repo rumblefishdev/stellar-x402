@@ -34,6 +34,9 @@ with the transaction hash, instead of leaving it unknown.
 
 ## Implementation (to decide)
 
+- First step, cheap: the `payment_unknown` result names what was signed (payTo, asset, amount,
+  the authorization's expiry) and tells the agent not to retry but to check after the expiry (W314).
+
 - Where to look: Horizon or RPC, by payer → payTo transfer of that amount after the signing time,
   or by the authorization's nonce.
 - Within the call's deadline (a short lookup), or a separate read-only tool `check_payment`.
