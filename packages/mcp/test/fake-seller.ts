@@ -37,6 +37,8 @@ export interface FakeSeller {
     | "slow"
     | "error"
     | "garbled";
+  /** How long the seller waits before each answer of a priced resource, unpaid and paid alike. */
+  delayMs: number;
   /** Status of a settled answer. */
   paidStatus: number;
   /** The resource description in the 402 answer. */
@@ -94,6 +96,10 @@ export async function startFakeSeller(): Promise<FakeSeller> {
       return;
     }
     const signature = req.headers["payment-signature"];
+    // A payment counts as received as soon as it arrives, even if the answer comes too late.
+    if (typeof signature === "string")
+      seller.payments.push(decodePaymentSignatureHeader(signature));
+    await new Promise((done) => setTimeout(done, seller.delayMs));
     if (typeof signature !== "string") {
       const required: PaymentRequired = {
         x402Version: 2,
@@ -127,7 +133,6 @@ export async function startFakeSeller(): Promise<FakeSeller> {
       res.writeHead(402, { "payment-required": encodePaymentRequiredHeader(required) }).end("{}");
       return;
     }
-    seller.payments.push(decodePaymentSignatureHeader(signature));
     if (seller.settle === "slow") return;
     if (seller.settle === "missing") {
       res.writeHead(200, { "content-type": seller.contentType }).end(seller.body);
@@ -169,6 +174,7 @@ export async function startFakeSeller(): Promise<FakeSeller> {
     maxTimeoutSeconds: 60,
     otherOffers: [],
     settle: "success",
+    delayMs: 0,
     paidStatus: 200,
     description: "Forecast",
     contentType: "application/json",
@@ -202,6 +208,20 @@ export function fakeScheme(failures = 0, error = NO_TRUSTLINE): SchemeNetworkCli
       calls += 1;
       if (calls <= failures) throw new Error(error);
       return { x402Version, payload: { fake: true, amount: requirements.amount } };
+    },
+  };
+}
+
+/** Stands in for `ExactStellarScheme` whose RPC is slow: the first call takes `delayMs` to sign. */
+export function slowScheme(delayMs: number): SchemeNetworkClient {
+  const scheme = fakeScheme();
+  let calls = 0;
+  return {
+    scheme: "exact",
+    async createPaymentPayload(...args) {
+      calls += 1;
+      if (calls === 1) await new Promise((done) => setTimeout(done, delayMs));
+      return scheme.createPaymentPayload(...args);
     },
   };
 }
