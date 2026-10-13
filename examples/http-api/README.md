@@ -4,6 +4,9 @@
 (`declareDiscoveryExtension`), so a facilitator that catalogs on settle lists it after the first
 payment. Payments are verified and settled by the public x402.org facilitator.
 
+A payment is verified before the route answers and settled only after it; a request without
+`city` gets `400` and is not charged.
+
 ```bash
 SELLER_ADDRESS=G... pnpm --filter @stellar-x402/example-http-api dev
 curl -i "http://localhost:4021/weather?city=Warsaw"   # 402 with the PAYMENT-REQUIRED header

@@ -39,9 +39,15 @@ export function createApp({ payTo, facilitatorUrl }: SellerConfig): Express {
     ),
   );
   app.get("/weather", (req, res) => {
-    // A fixed answer: the example shows the payment, not a weather service. The payment is
-    // settled before this runs, so a missing city still gets an answer rather than an error.
-    res.json({ city: String(req.query.city ?? ""), tempC: 14 });
+    // The payment is verified before this runs and settled only after it answers; an error
+    // status cancels the settlement, so a request without a city is refused and costs nothing.
+    const city = req.query.city;
+    if (typeof city !== "string" || city === "") {
+      res.status(400).json({ error: "city is required" });
+      return;
+    }
+    // A fixed answer: the example shows the payment, not a weather service.
+    res.json({ city, tempC: 14 });
   });
   return app;
 }
