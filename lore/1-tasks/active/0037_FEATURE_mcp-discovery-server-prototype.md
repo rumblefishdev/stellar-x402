@@ -148,6 +148,9 @@ and existing servers. Each line: what was decided and why.
 - **Targets the fake catalog, then ours.** No handling for foreign catalogs that ignore filters;
   the 0030 validator bounds entries on intake. An empty or unparseable `discoveryUrl` stops the
   server, since the upstream client would fall back to x402.org's catalog.
+- **The catalog is trusted as the operator's choice:** its request has a time limit but no address
+  guard or size cap, unlike seller requests; revisit if a shared or third-party catalog is used
+  (PR #28 review, 2026-10-13).
 - **Prices come only from the live 402,** and `call_paid_http` returns only the paid price: the
   agent saw the catalog price in `list_resources`.
 - **Which offer is paid:** of the seller's offers, those in an allowed asset and within the
@@ -204,8 +207,14 @@ and existing servers. Each line: what was decided and why.
   `server.ts` only registers the tools; `catalog.ts` holds `list_resources`; `guard.ts` the address
   guard and `guardedFetch`, shared by preview and payment; `preview.ts` holds `get_resource`;
   `pay.ts` and `results.ts` stay. Moves only, proven by unchanged tests and `moved.sh`.
+- **One deadline per paid call (PR #28 devil's advocate), a fix PR after PR C:** the time limit
+  applies per seller request, and a paid call makes two, so it can outlast the MCP client's 60 s
+  (SDK default); the agent then sees a timeout without the transaction hash and may pay again.
+  One deadline for the whole call, under 60 s. The same PR lets `allowInsecureLocal` open only
+  loopback hosts, not every http host.
 - **Budget per process and per day (W235 C), in the PR after PR C:** the per-process budget stays;
   a daily budget is added, kept in a local file so a restart does not reset it.
+  The file is updated under a lock, since parallel sessions run parallel processes.
 - **Comparison with existing x402 MCP servers.** A table of `nirholas/x402-bridge` and
   `jamesbachini/x402-mcp-stellar` against ours (networks, limits and budget, error codes, address
   guard, how seller text reaches the model), so the choice of an own server stays checkable.
