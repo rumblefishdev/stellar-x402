@@ -122,6 +122,8 @@ RFP's MCP discovery server, outside T1)
       on the stderr of three CLI runs on testnet; a malformed key is refused without repeating it
 - [ ] Given the locally built `stellar-x402-mcp` CLI and the README's config, when it is added to an MCP client such as
       Claude Desktop, then an agent can list a resource and pay for it end to end on testnet
+      (deferred to 0042: needs a catalog a README reader can reach, which 0032 provides; the same
+      flow passed over MCP stdio with the SDK client, W279)
 - [x] Unit tests cover the filters, the limits, the error mapping and the 402 retry, against fakes
 
 ## Decisions so far
