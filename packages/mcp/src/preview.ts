@@ -18,7 +18,7 @@ export async function previewPayment(
   checkBody(request.method, request.body);
   // A price can depend on the body (e.g. how many results are asked for), so the body is sent too.
   const headers = request.body === undefined ? undefined : { "content-type": "application/json" };
-  const response = await guardedFetch(limits)(url, {
+  const response = await guardedFetch(limits, AbortSignal.timeout(limits.timeoutMs))(url, {
     method: request.method,
     headers,
     body: request.body,

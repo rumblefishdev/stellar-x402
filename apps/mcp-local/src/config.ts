@@ -40,7 +40,8 @@ const ENV = z.object({
       }),
     }),
   ),
-  // The MCP client gives up on a request after 60 s (SDK default), so a call must end before that.
+  // The MCP client gives up on a request after 60 s (SDK default); a whole tool call, its unpaid
+  // request and paid retry together, ends within this, so the agent gets its answer before that.
   STELLAR_X402_TIMEOUT_MS: orDefault(POSITIVE, "30000"),
   // A response body goes into the model's context: 100 kB is about 25k tokens.
   STELLAR_X402_MAX_RESPONSE_BYTES: orDefault(POSITIVE, "100000"),

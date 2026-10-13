@@ -55,9 +55,9 @@ Without `STELLAR_X402_SECRET_KEY` the server only lists and previews.
 | `STELLAR_X402_DAILY_BUDGET`         | none                             | the most one key may spend in one UTC day, all its processes together, in atomic units             |
 | `STELLAR_X402_STATE_FILE`           | `~/.stellar-x402-mcp/spent.json` | where the daily budget records what was spent; only with `STELLAR_X402_DAILY_BUDGET`               |
 | `STELLAR_X402_NETWORK`              | `stellar:testnet`                | anything else stops the server: it pays on testnet only                                            |
-| `STELLAR_X402_TIMEOUT_MS`           | `30000`                          | a catalog or seller request gives up after this long                                               |
+| `STELLAR_X402_TIMEOUT_MS`           | `30000`                          | a tool call gives up after this long, all its requests together                                    |
 | `STELLAR_X402_MAX_RESPONSE_BYTES`   | `100000`                         | a seller response larger than this is refused (`response_too_large`)                               |
-| `STELLAR_X402_ALLOW_INSECURE_LOCAL` | `0`                              | `1` allows `http` and local addresses — **only** for a seller you run on your own machine in tests |
+| `STELLAR_X402_ALLOW_INSECURE_LOCAL` | `0`                              | `1` also allows `http` to this machine only (below) — **only** for a seller you run on it in tests |
 
 ## What to know
 
@@ -88,7 +88,9 @@ Without `STELLAR_X402_SECRET_KEY` the server only lists and previews.
   payment that could not be signed (for example, too little USDC) does not.
 - **Sellers are reached only at public addresses over https.** A host whose DNS name points into a
   private network — even with a public certificate — is refused (`unsafe_url`), and so is a name
-  with both a public and a private address.
+  with both a public and a private address. `STELLAR_X402_ALLOW_INSECURE_LOCAL=1` opens only this
+  machine (`localhost`, `*.localhost`, `127.0.0.0/8`, `::1`), over http too; every other host still
+  needs https and a public address.
 - **`get_resource` sends a real request** without paying. On a path the seller charges for, it gets
   the 402 terms; on a path the seller does not charge for, the seller runs the request.
 - The server writes logs to stderr; stdout carries the MCP protocol. The secret key never appears

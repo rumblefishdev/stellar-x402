@@ -1,5 +1,6 @@
 import { LIMITS } from "@stellar-x402/bazaar";
 import { x402Client, x402HTTPClient, type SchemeRegistration } from "@x402/core/client";
+import type { SchemeNetworkClient } from "@x402/core/types";
 import { wrapFetchWithPayment } from "@x402/fetch";
 import { ToolError } from "./results.js";
 import { checkBody, checkUrl, guardedFetch, type SellerLimits } from "./guard.js";
@@ -50,6 +51,33 @@ function dailyUnreadable(error: unknown): ToolError {
   );
 }
 
+/**
+ * The scheme client with its signing bounded by the call's deadline. `@x402/stellar` asks Soroban RPC
+ * for the latest ledger and a simulation while signing, with no time limit of its own; past the
+ * deadline the signature is dropped and nothing is sent.
+ */
+function signWithin(scheme: SchemeNetworkClient, deadline: AbortSignal): SchemeNetworkClient {
+  return {
+    scheme: scheme.scheme,
+    ...(scheme.schemeHooks && { schemeHooks: scheme.schemeHooks }),
+    ...(scheme.findDefaultAsset && { findDefaultAsset: scheme.findDefaultAsset.bind(scheme) }),
+    createPaymentPayload: (version, requirements, context) => {
+      const late = new Promise<never>((_, reject) => {
+        const refuse = () =>
+          reject(
+            new ToolError(
+              "upstream_error",
+              "The payment was not signed within the time limit; nothing was sent.",
+            ),
+          );
+        if (deadline.aborted) refuse();
+        deadline.addEventListener("abort", refuse, { once: true });
+      });
+      return Promise.race([scheme.createPaymentPayload(version, requirements, context), late]);
+    },
+  };
+}
+
 export async function callPaidHttp(
   request: { url: string; method: string; headers?: Record<string, string>; body?: string },
   config: PaymentConfig,
@@ -60,14 +88,33 @@ export async function callPaidHttp(
   const url = checkUrl(request.url, limits.allowInsecureLocal);
   checkBody(request.method, request.body);
 
+  // One deadline for the whole call: the unpaid request, signing and the paid retry.
+  const deadline = AbortSignal.timeout(limits.timeoutMs);
   // One client per call, so its hooks know which payment is this call's.
-  const client = x402Client.fromConfig({ schemes: config.schemes, spendControls: false });
+  const schemes = config.schemes.map((s) => ({ ...s, client: signWithin(s.client, deadline) }));
+  const client = x402Client.fromConfig({ schemes, spendControls: false });
   let refusal: ToolError | undefined;
   let paid: { network: string; asset: string; amount: bigint } | undefined;
   let signingError: Error | undefined;
   /** Where this call's amount was counted in the daily record, so a refund finds it. */
   let countedIn: DailyEntry | undefined;
   const now = config.now ?? (() => new Date());
+  // True once the request carrying the signed payment has been handed to the network.
+  let paymentSent = false;
+  // Nothing was sent, so the amount goes back to the process budget and, if counted, to today's.
+  const giveBack = async () => {
+    if (!paid) return;
+    spent.set(paid.asset, (spent.get(paid.asset) ?? 0n) - paid.amount);
+    if (countedIn === undefined) return;
+    try {
+      await refundDaily(config.dailyFile!, countedIn, paid.amount, log);
+    } catch (refundError) {
+      // The amount stays counted for today: too strict, never too loose.
+      log(
+        `call_paid_http: could not give back ${paid.amount} to the daily budget (${String(refundError)})`,
+      );
+    }
+  };
 
   // Of the seller's offers, keep those in an allowed asset, with a short enough authorization, within
   // the per-call limit and the remaining budgets; the library pays the first one left.
@@ -114,9 +161,9 @@ export async function callPaidHttp(
   });
   client.onBeforePaymentCreation(async ({ selectedRequirements: offer }) => {
     const amount = BigInt(offer.amount);
-    const limits = config.assets[offer.asset]!;
+    const asset = config.assets[offer.asset]!;
     const already = spent.get(offer.asset) ?? 0n;
-    if (already + amount > limits.budget) {
+    if (already + amount > asset.budget) {
       refusal = new ToolError("over_budget", "The payment would exceed the budget.");
       return { abort: true, reason: refusal.code };
     }
@@ -125,12 +172,12 @@ export async function callPaidHttp(
     // cannot both pass even if the library puts an await in between. Once signed it is never given
     // back, so a seller cannot return it to the budget by claiming the payment failed.
     spent.set(offer.asset, already + amount);
-    if (limits.daily !== undefined) {
+    if (asset.daily !== undefined) {
       // Counted under the file's lock, so other processes paying at once see this amount.
       const entry = { day: utcDay(now()), payer: config.payer, asset: offer.asset };
       let counted = false;
       try {
-        counted = await countDaily(config.dailyFile!, entry, amount, limits.daily, log);
+        counted = await countDaily(config.dailyFile!, entry, amount, asset.daily, log);
       } catch (error) {
         refusal = dailyUnreadable(error);
       }
@@ -144,24 +191,30 @@ export async function callPaidHttp(
     }
     paid = { network: offer.network, asset: offer.asset, amount };
   });
-  // Nothing was sent: signing failed (an unfunded payer fails here, in simulation), so the amount
-  // goes back to the budgets.
+  // Nothing was sent: signing failed (an unfunded payer fails here, in simulation) or ran past the
+  // deadline, so the amount goes back to the budgets.
   client.onPaymentCreationFailure(async ({ error }) => {
     signingError = error;
-    if (!paid) return;
-    spent.set(paid.asset, (spent.get(paid.asset) ?? 0n) - paid.amount);
-    if (countedIn === undefined) return;
-    try {
-      await refundDaily(config.dailyFile!, countedIn, paid.amount, log);
-    } catch (refundError) {
-      // The amount stays counted for today: too strict, never too loose.
-      log(
-        `call_paid_http: could not give back ${paid.amount} to the daily budget (${String(refundError)})`,
-      );
-    }
+    await giveBack();
   });
 
-  const pay = wrapFetchWithPayment(guardedFetch(limits), client);
+  const sellerFetch = guardedFetch(limits, deadline);
+  const pay = wrapFetchWithPayment(async (input, init) => {
+    const outgoing = new Request(input, init);
+    if (outgoing.headers.has("PAYMENT-SIGNATURE")) {
+      // Past the deadline the request would be refused before it connects: nothing is sent, so this
+      // is a refusal with the amount given back, not a payment of unknown outcome.
+      if (deadline.aborted) {
+        await giveBack();
+        throw new ToolError(
+          "upstream_error",
+          "The time limit passed before the payment was sent; nothing was sent.",
+        );
+      }
+      paymentSent = true;
+    }
+    return sellerFetch(outgoing);
+  }, client);
   let response: Response;
   try {
     response = await pay(url, {
@@ -170,7 +223,7 @@ export async function callPaidHttp(
       body: request.body,
     });
   } catch (error) {
-    if (paid && !signingError) {
+    if (paymentSent) {
       // The signed payment left this process; whether the seller settled it is unknown.
       const detail =
         error instanceof ToolError
@@ -184,6 +237,8 @@ export async function callPaidHttp(
     }
     if (error instanceof ToolError) throw error;
     if (refusal) throw refusal;
+    // Signing ran past the deadline; its own code says so.
+    if (signingError instanceof ToolError) throw signingError;
     if (signingError) {
       // The payer's simulation fails in the asset contract: #10 is a balance too low, #13 a missing
       // trustline (both measured on testnet: `#13` for an account without a USDC trustline, `#10` for one

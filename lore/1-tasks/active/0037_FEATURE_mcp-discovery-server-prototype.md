@@ -153,6 +153,10 @@ and existing servers. Each line: what was decided and why.
 - **The catalog is trusted as the operator's choice:** its request has a time limit but no address
   guard or size cap, unlike seller requests; revisit if a shared or third-party catalog is used
   (PR #28 review, 2026-10-13).
+- **Daily budget (PR #32, W331 A, W332 B):** optional, per key and asset, in a local file under an
+  own lock file (no lock package in the workspace; SQLite judged too heavy); calendar UTC day.
+  Known bound: in a rare race at a dead process's lock the day can be passed by one payment, never
+  more than the per-call limit; the record is synced to disk before it replaces the old one.
 - **Prices come only from the live 402,** and `call_paid_http` returns only the paid price: the
   agent saw the catalog price in `list_resources`.
 - **Which offer is paid:** of the seller's offers, those in an allowed asset and within the

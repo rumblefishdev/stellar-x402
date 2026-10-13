@@ -6,10 +6,17 @@ import { chmod, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { countDaily, refundDaily } from "../src/daily.js";
 import { createServer } from "../src/index.js";
-import { fakeScheme, NO_TRUSTLINE, startFakeSeller, USDC, type FakeSeller } from "./fake-seller.js";
+import {
+  fakeScheme,
+  NO_TRUSTLINE,
+  slowScheme,
+  startFakeSeller,
+  USDC,
+  type FakeSeller,
+} from "./fake-seller.js";
 
 /** Two buyers' public addresses; the daily record keys their spending apart. */
 const BUYER = "GBUYERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -30,10 +37,11 @@ async function startProcess({
   scheme = fakeScheme(),
   daily = 25_000n,
   payer = BUYER,
-}: { scheme?: SchemeNetworkClient; daily?: bigint; payer?: string } = {}) {
+  timeoutMs = 5_000,
+}: { scheme?: SchemeNetworkClient; daily?: bigint; payer?: string; timeoutMs?: number } = {}) {
   const server = createServer({
     discoveryUrl: "http://unused",
-    timeoutMs: 5_000,
+    timeoutMs,
     maxResponseBytes: 1_000,
     allowInsecureLocal: true,
     log: (message) => logs.push(message),
@@ -131,6 +139,40 @@ describe("daily budget", () => {
     });
     expect(await call()).toBe("paid");
     expect(await call()).toBe("paid");
+  });
+
+  it("gives the amount back when signing runs past the call's deadline", async () => {
+    const call = await startProcess({ scheme: slowScheme(1_000), timeoutMs: 300 });
+    expect(await call()).toBe("upstream_error");
+    expect(seller.payments).toHaveLength(0);
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+      "2026-10-13": { [BUYER]: { [USDC]: "0" } },
+    });
+  });
+
+  it("gives the amount back when the deadline passes before the payment is sent", async () => {
+    const deadline = new AbortController();
+    vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    const call = await startProcess({
+      scheme: {
+        scheme: "exact",
+        // Signed just as the deadline passes: the paid request is the first to see it gone.
+        createPaymentPayload(x402Version, requirements) {
+          const signed = Promise.resolve({ x402Version, payload: { amount: requirements.amount } });
+          deadline.abort();
+          return signed;
+        },
+      },
+    });
+    try {
+      expect(await call()).toBe("upstream_error");
+    } finally {
+      vi.restoreAllMocks();
+    }
+    expect(seller.payments).toHaveLength(0);
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+      "2026-10-13": { [BUYER]: { [USDC]: "0" } },
+    });
   });
 
   it.each([
