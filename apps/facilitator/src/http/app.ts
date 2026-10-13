@@ -5,7 +5,10 @@ import express, { type ErrorRequestHandler, type Express, type RequestHandler } 
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
 import type { Stores } from "../ports/index.js";
+import type { SettlementHooks } from "../settlement/hooks.js";
+import type { Settle } from "../settlement/settle.js";
 import type { Verify } from "../settlement/verify.js";
+import { EXTENSION_RESPONSES_HEADER, encodeExtensionResponses } from "./extension-responses.js";
 
 /** What the composition root hands to the HTTP adapter. Lanes add their services here. */
 export interface AppDeps {
@@ -13,6 +16,9 @@ export interface AppDeps {
   logger: Logger;
   stores: Stores;
   verify: Verify;
+  settle: Settle;
+  /** The `EXTENSION-RESPONSES` header of a `success` settle answer (AD-8). */
+  extensionResponses: SettlementHooks["extensionResponses"];
 }
 
 /** The status as a body code, like `not_found`: 413 → `payload_too_large`. */
@@ -43,11 +49,17 @@ export function parsePaymentRequest(body: unknown): VerifyRequest | undefined {
 }
 
 /**
- * The inbound HTTP adapter (AD-13). The routes answer 501 until their tasks land: `/settle`
- * (0009), `/supported` (0020) and `/discovery/resources` (0032). There is a body size limit and
+ * The inbound HTTP adapter (AD-13). The routes answer 501 until their tasks land: `/supported`
+ * (0020) and `/discovery/resources` (0032). There is a body size limit and
  * no CORS anywhere (spine "HTTP hardening"); rate limits come in 0023.
  */
-export function createApp({ config, logger, verify }: AppDeps): Express {
+export function createApp({
+  config,
+  logger,
+  verify,
+  settle,
+  extensionResponses,
+}: AppDeps): Express {
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: config.http.bodyLimitBytes }));
@@ -70,7 +82,40 @@ export function createApp({ config, logger, verify }: AppDeps): Express {
     });
     res.json(response);
   });
-  app.post("/settle", notImplemented);
+  // Like `/verify`: any settle outcome is a 200 with an x402 body (AD-6).
+  app.post("/settle", async (req, res) => {
+    const request = parsePaymentRequest(req.body);
+    if (!request) {
+      res.status(400).json({ error: code(400) });
+      return;
+    }
+    const { response, record, afterResponse } = await settle(
+      request.paymentPayload,
+      request.paymentRequirements,
+    );
+    // Every `success` answer, replays included, carries the header; it never changes the body.
+    if (response.success && record) {
+      try {
+        const header = extensionResponses(record);
+        if (header) res.setHeader(EXTENSION_RESPONSES_HEADER, encodeExtensionResponses(header));
+      } catch (error) {
+        logger.error("extension_responses_failed", { settlementKey: record.key, error });
+      }
+    }
+    logger.info("settled", {
+      network: response.network,
+      success: response.success,
+      errorReason: response.errorReason,
+      payer: response.payer,
+      transaction: response.transaction || undefined,
+    });
+    res.json(response);
+    // `onSuccess` after the response; a client that already left has closed it (0031).
+    if (afterResponse) {
+      if (res.closed) afterResponse();
+      else res.once("close", afterResponse);
+    }
+  });
   app.get("/supported", notImplemented);
   app.get("/discovery/resources", notImplemented);
 
