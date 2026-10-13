@@ -1,0 +1,48 @@
+---
+id: "0042"
+title: "Prune old rate-limit windows and spend reservations"
+type: FEATURE
+status: backlog
+milestone: 1
+related_adr: ["0012"]
+related_tasks: ["0022", "0023", "0024"]
+tags: [facilitator, persistence, priority-medium, effort-small, discovery]
+links:
+  - ../../../docs/adr/0012-facilitator-state-store.md
+history:
+  - date: "2026-10-13"
+    status: backlog
+    who: akot
+    note: "Spawned from 0022 future work: pruning was kept out of 0022."
+---
+
+# Prune old rate-limit windows and spend reservations
+
+## Summary
+
+The PostgreSQL stores from 0022 never delete anything. Rate-limit rows are keyed per client IP and
+spend reservations are kept forever, so both tables grow without bound on a public endpoint, and
+the spend-window sum gets slower on every settlement.
+
+## Context
+
+- 0022 built the four PostgreSQL adapters. The user decided pruning was out of its scope.
+- `reserve` sums each window by joining `spend_reservation_scopes (scope, id)` to
+  `spend_reservations` and then filtering on `at`. For the `global` scope it visits every
+  reservation ever made, while holding that scope's row lock (0022 final review).
+
+## Implementation
+
+- Delete `rate_limits` rows whose `reset_at` has passed, and spend reservations older than the
+  longest configured spend window. Their scope rows go with them through the cascade.
+- Run it in small batches from the service on a timer, or as a scheduled job (pick one with 0026).
+- Make the window sum use an index: copy `at` into `spend_reservation_scopes` and index
+  `(scope, at)`, as a new expand-only migration.
+- A contract or adapter case: pruning never removes a reservation still inside a window.
+
+## Acceptance Criteria
+
+- [ ] Expired rate-limit rows and reservations past the longest window are deleted, in bounded
+      batches
+- [ ] Nothing inside a live window is ever pruned (pinned by a test)
+- [ ] The spend-window sum reads only the window's rows (an index on `(scope, at)` or equivalent)
