@@ -64,7 +64,10 @@ export async function countDaily(
   });
 }
 
-/** Gives back an amount counted on `day` whose payment was never signed. A day already dropped is over. */
+/**
+ * Gives back an amount counted on `day` whose payment was never signed. A day already dropped is over,
+ * so nothing is given back to it; like a count, the write keeps only `day`.
+ */
 export async function refundDaily(
   file: string,
   day: string,
@@ -74,12 +77,14 @@ export async function refundDaily(
 ): Promise<void> {
   await locked(file, log, async () => {
     const days = parse(await readOrNothing(file), file);
-    const already = BigInt(days[day]?.[asset] ?? "0");
-    if (already < amount) return;
-    await replace(file, {
-      ...days,
-      [day]: { ...days[day], [asset]: (already - amount).toString() },
-    });
+    if (days[day] === undefined) return;
+    const already = BigInt(days[day][asset] ?? "0");
+    if (already < amount) {
+      // Something else changed the record since this amount was counted: leave it as it is.
+      log(`daily budget: cannot give back ${amount} of ${asset}, the record holds only ${already}`);
+      return;
+    }
+    await replace(file, { [day]: { ...days[day], [asset]: (already - amount).toString() } });
   });
 }
 

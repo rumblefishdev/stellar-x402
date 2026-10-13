@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { countDaily } from "../src/daily.js";
+import { countDaily, refundDaily } from "../src/daily.js";
 import { createServer } from "../src/index.js";
 import { fakeScheme, NO_TRUSTLINE, startFakeSeller, USDC, type FakeSeller } from "./fake-seller.js";
 
@@ -188,6 +188,20 @@ describe("daily record", () => {
     expect(await countDaily(file, day, USDC, 10n, 10n, log)).toBe(true);
     expect(await countDaily(file, day, USDC, 1n, 10n, log)).toBe(false);
     expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ [day]: { [USDC]: "10" } });
+  });
+
+  it("logs a refund larger than what the record holds, and leaves the record as it is", async () => {
+    await countDaily(file, day, USDC, 5n, 10n, log);
+    await refundDaily(file, day, USDC, 10n, log);
+    expect(logs.join()).toContain("cannot give back 10");
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ [day]: { [USDC]: "5" } });
+  });
+
+  it("gives nothing back, silently, to a day already dropped", async () => {
+    await countDaily(file, "2026-10-14", USDC, 5n, 10n, log);
+    await refundDaily(file, day, USDC, 5n, log);
+    expect(logs).toEqual([]);
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ "2026-10-14": { [USDC]: "5" } });
   });
 
   it("is counted once by each of 20 processes, starting from a stale lock", async () => {
