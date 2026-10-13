@@ -106,19 +106,23 @@ RFP's MCP discovery server, outside T1)
 - [x] Given a catalog (the fake one or a real `/discovery/resources`), when `list_resources` is
       called with any combination of the filters, then it returns only matching entries with
       their price, asset, network and description, in a stable structured shape
-- [ ] Given a paid HTTP resource on testnet within the limits, when `call_paid_http` is called,
+- [x] Given a paid HTTP resource on testnet within the limits, when `call_paid_http` is called,
       then the server pays in testnet USDC, returns the resource's response, and the settlement
-      transaction hash is recorded in the task
-- [ ] Given a resource priced above the per-call limit, or a call that would exceed the budget,
+      transaction hash is recorded in the task — 2026-10-13, built CLI over MCP stdio, example
+      seller, x402.org facilitator: `1278142d1a64faa121958756e45d50ffb2e860966968cf02afe49f758ba713ad`
+      and `07e0e4e97ed3c80548e315c3866119ebacfd2140cd0b97192838ded091317f78` (both successful on
+      Horizon; buyer 20 → 19.998 USDC, seller 0 → 0.002 USDC, fees paid by the facilitator)
+- [x] Given a resource priced above the per-call limit, or a call that would exceed the budget,
       when it is called, then the tool returns `over_price_limit` or `over_budget` and nothing is
-      signed or sent
+      signed or sent — unit tests, and on testnet with the built CLI
 - [ ] Given any failure (unfunded payer, expired authorization, unknown resource, facilitator
       rejection), when it happens, then the tool returns a code from the fixed list, never only
       free text
-- [ ] Given any tool output or log line, then the buyer's secret never appears in it
+- [x] Given any tool output or log line, then the buyer's secret never appears in it — checked
+      on the stderr of three CLI runs on testnet; a malformed key is refused without repeating it
 - [ ] Given the locally built `stellar-x402-mcp` CLI and the README's config, when it is added to an MCP client such as
       Claude Desktop, then an agent can list a resource and pay for it end to end on testnet
-- [ ] Unit tests cover the filters, the limits, the error mapping and the 402 retry, against fakes
+- [x] Unit tests cover the filters, the limits, the error mapping and the 402 retry, against fakes
 
 ## Decisions so far
 
