@@ -128,7 +128,7 @@ export async function callPaidHttp(
       const day = utcDay(now());
       let counted = false;
       try {
-        counted = await countDaily(config.dailyFile!, day, offer.asset, amount, limits.daily);
+        counted = await countDaily(config.dailyFile!, day, offer.asset, amount, limits.daily, log);
       } catch (error) {
         refusal = dailyUnreadable(error);
       }
@@ -150,7 +150,7 @@ export async function callPaidHttp(
     spent.set(paid.asset, (spent.get(paid.asset) ?? 0n) - paid.amount);
     if (countedDay === undefined) return;
     try {
-      await refundDaily(config.dailyFile!, countedDay, paid.asset, paid.amount);
+      await refundDaily(config.dailyFile!, countedDay, paid.asset, paid.amount, log);
     } catch (refundError) {
       // The amount stays counted for today: too strict, never too loose.
       log(

@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { link, mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
 
@@ -53,8 +53,9 @@ export async function countDaily(
   asset: string,
   amount: bigint,
   daily: bigint,
+  log: (message: string) => void,
 ): Promise<boolean> {
-  return locked(file, async () => {
+  return locked(file, log, async () => {
     const days = parse(await readOrNothing(file), file);
     const already = BigInt(days[day]?.[asset] ?? "0");
     if (already + amount > daily) return false;
@@ -69,8 +70,9 @@ export async function refundDaily(
   day: string,
   asset: string,
   amount: bigint,
+  log: (message: string) => void,
 ): Promise<void> {
-  await locked(file, async () => {
+  await locked(file, log, async () => {
     const days = parse(await readOrNothing(file), file);
     const already = BigInt(days[day]?.[asset] ?? "0");
     if (already < amount) return;
@@ -105,9 +107,13 @@ const LOCK_RETRY_MS = 20;
 
 /**
  * Runs `work` while holding `<file>.lock`, a file only one process can create (`wx`). A lock left by
- * a process that died is removed once it is older than STALE_LOCK_MS.
+ * a process that died is taken over once it is older than STALE_LOCK_MS.
  */
-async function locked<T>(file: string, work: () => Promise<T>): Promise<T> {
+async function locked<T>(
+  file: string,
+  log: (message: string) => void,
+  work: () => Promise<T>,
+): Promise<T> {
   const lock = `${file}.lock`;
   await mkdir(dirname(file), { recursive: true });
   const giveUp = Date.now() + LOCK_WAIT_MS;
@@ -119,9 +125,9 @@ async function locked<T>(file: string, work: () => Promise<T>): Promise<T> {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
     try {
-      if (Date.now() - (await stat(lock)).mtimeMs > STALE_LOCK_MS) await unlink(lock);
+      await removeIfStale(lock);
     } catch (error) {
-      // Its holder removed it between the two steps: try again.
+      // Its holder, or another waiter, removed it first: try again.
       if (!missing(error)) throw error;
     }
     if (Date.now() > giveUp) throw new Error(`${lock} is held by another process`);
@@ -130,6 +136,39 @@ async function locked<T>(file: string, work: () => Promise<T>): Promise<T> {
   try {
     return await work();
   } finally {
+    await release(lock, log);
+  }
+}
+
+async function release(lock: string, log: (message: string) => void): Promise<void> {
+  try {
     await unlink(lock);
+  } catch (error) {
+    if (!missing(error)) throw error;
+    // Another process took our lock over as stale; what `work` did is done and stays done.
+    log(`daily budget: ${lock} was already gone when its holder released it`);
+  }
+}
+
+/**
+ * Removes `lock` if it is older than STALE_LOCK_MS. Two waiters can both find it stale, and between
+ * their checks one of them may already hold a fresh lock under the same name. So the lock is first
+ * renamed to a name only this process uses: one rename wins, and the file it took is checked to be
+ * the same stale one before it is deleted; a fresh lock taken by mistake is put back.
+ */
+async function removeIfStale(lock: string): Promise<void> {
+  const seen = await stat(lock);
+  if (Date.now() - seen.mtimeMs <= STALE_LOCK_MS) return;
+  const taken = `${lock}.${process.pid}.${Math.random().toString(36).slice(2)}.stale`;
+  await rename(lock, taken);
+  try {
+    const got = await stat(taken);
+    if (got.ino !== seen.ino || got.dev !== seen.dev) {
+      // Another waiter already removed the stale lock and holds a fresh one. `link` puts it back
+      // and fails, loudly, rather than replace a lock a third process created in that instant.
+      await link(taken, lock);
+    }
+  } finally {
+    await unlink(taken);
   }
 }
