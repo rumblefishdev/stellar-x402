@@ -52,7 +52,7 @@ Without `STELLAR_X402_SECRET_KEY` the server only lists and previews.
 | `STELLAR_X402_SECRET_KEY`           | none                             | the buyer's Stellar secret key; enables `call_paid_http`                                           |
 | `STELLAR_X402_MAX_PER_CALL`         | required with a key              | the largest price one call may pay, in atomic units (`10000` = 0.001 USDC)                         |
 | `STELLAR_X402_BUDGET`               | required with a key              | the most this process may spend, in atomic units                                                   |
-| `STELLAR_X402_DAILY_BUDGET`         | none                             | the most all processes together may spend in one UTC day, in atomic units                          |
+| `STELLAR_X402_DAILY_BUDGET`         | none                             | the most one key may spend in one UTC day, all its processes together, in atomic units             |
 | `STELLAR_X402_STATE_FILE`           | `~/.stellar-x402-mcp/spent.json` | where the daily budget records what was spent; only with `STELLAR_X402_DAILY_BUDGET`               |
 | `STELLAR_X402_NETWORK`              | `stellar:testnet`                | anything else stops the server: it pays on testnet only                                            |
 | `STELLAR_X402_TIMEOUT_MS`           | `30000`                          | a catalog or seller request gives up after this long                                               |
@@ -69,9 +69,9 @@ Without `STELLAR_X402_SECRET_KEY` the server only lists and previews.
 - **Each server process has its own budget.** Two Claude sessions start two processes, and each may
   spend the full budget. Set `STELLAR_X402_DAILY_BUDGET` for a limit they share.
 - **The daily budget survives restarts and is shared.** With `STELLAR_X402_DAILY_BUDGET` set, every
-  process using the same `STELLAR_X402_STATE_FILE` counts against one amount per day; the day is
-  the UTC date, so it starts again at midnight UTC. If that file cannot be read, the server refuses
-  to pay (`payment_failed`) rather than guess.
+  process paying from the same key and using the same `STELLAR_X402_STATE_FILE` counts against
+  one amount per day; the day is the UTC date, so it starts again at midnight UTC. If that file
+  cannot be read, the server refuses to pay (`payment_failed`) rather than guess.
 - **Every payment sent counts against the budget**, even one the seller refuses afterwards; a
   payment that could not be signed (for example, too little USDC) does not.
 - **Sellers are reached only at public addresses over https.** A host whose DNS name points into a

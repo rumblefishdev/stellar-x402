@@ -11,6 +11,10 @@ import { countDaily, refundDaily } from "../src/daily.js";
 import { createServer } from "../src/index.js";
 import { fakeScheme, NO_TRUSTLINE, startFakeSeller, USDC, type FakeSeller } from "./fake-seller.js";
 
+/** Two buyers' public addresses; the daily record keys their spending apart. */
+const BUYER = "GBUYERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+const OTHER_BUYER = "GOTHERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
 let seller: FakeSeller;
 let dir: string;
 let file: string;
@@ -25,7 +29,8 @@ let clock: Date;
 async function startProcess({
   scheme = fakeScheme(),
   daily = 25_000n,
-}: { scheme?: SchemeNetworkClient; daily?: bigint } = {}) {
+  payer = BUYER,
+}: { scheme?: SchemeNetworkClient; daily?: bigint; payer?: string } = {}) {
   const server = createServer({
     discoveryUrl: "http://unused",
     timeoutMs: 5_000,
@@ -34,6 +39,7 @@ async function startProcess({
     log: (message) => logs.push(message),
     payment: {
       schemes: [{ network: "stellar:testnet", client: scheme }],
+      payer,
       assets: { [USDC]: { maxPerCall: 20_000n, budget: 50_000n, daily } },
       dailyFile: file,
       now: () => clock,
@@ -82,7 +88,19 @@ describe("daily budget", () => {
     expect(await (await startProcess())()).toBe("over_budget");
     expect(seller.payments).toHaveLength(2);
     expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
-      "2026-10-13": { [USDC]: "20000" },
+      "2026-10-13": { [BUYER]: { [USDC]: "20000" } },
+    });
+  });
+
+  it("keeps a separate daily limit for each wallet sharing the file", async () => {
+    const first = await startProcess();
+    expect(await first()).toBe("paid");
+    expect(await first()).toBe("paid");
+    expect(await first()).toBe("over_budget");
+    const other = await startProcess({ payer: OTHER_BUYER });
+    expect(await other()).toBe("paid");
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+      "2026-10-13": { [BUYER]: { [USDC]: "20000" }, [OTHER_BUYER]: { [USDC]: "10000" } },
     });
   });
 
@@ -101,14 +119,16 @@ describe("daily budget", () => {
     clock = new Date("2026-10-14T00:00:00Z");
     expect(await call()).toBe("paid");
     expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
-      "2026-10-14": { [USDC]: "10000" },
+      "2026-10-14": { [BUYER]: { [USDC]: "10000" } },
     });
   });
 
   it("gives the amount back when signing fails", async () => {
     const call = await startProcess({ scheme: fakeScheme(1) });
     expect(await call()).toBe("insufficient_funds");
-    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ "2026-10-13": { [USDC]: "0" } });
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+      "2026-10-13": { [BUYER]: { [USDC]: "0" } },
+    });
     expect(await call()).toBe("paid");
     expect(await call()).toBe("paid");
   });
@@ -141,13 +161,16 @@ describe("daily budget", () => {
     }
     expect(logs.join()).toContain("could not give back 10000 to the daily budget");
     expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
-      "2026-10-13": { [USDC]: "10000" },
+      "2026-10-13": { [BUYER]: { [USDC]: "10000" } },
     });
   });
 
   it.each([
     ["is not JSON", "{"],
-    ["holds an amount that is not a number", JSON.stringify({ "2026-10-13": { [USDC]: "-1" } })],
+    [
+      "holds an amount that is not a number",
+      JSON.stringify({ "2026-10-13": { [BUYER]: { [USDC]: "-1" } } }),
+    ],
   ])("refuses to pay, and logs why, when the record %s", async (_, content) => {
     const call = await startProcess();
     await mkdir(join(dir, "state"));
@@ -173,6 +196,7 @@ describe("daily budget", () => {
       log: () => {},
       payment: {
         schemes: [],
+        payer: BUYER,
         assets: { [USDC]: { maxPerCall: 1n, budget: 1n, daily: 1n } },
       },
     };
@@ -182,26 +206,33 @@ describe("daily budget", () => {
 
 describe("daily record", () => {
   const day = "2026-10-13";
+  const entry = { day, payer: BUYER, asset: USDC };
   const log = (message: string) => logs.push(message);
 
   it("counts exactly up to the limit, and refuses one atomic unit more", async () => {
-    expect(await countDaily(file, day, USDC, 10n, 10n, log)).toBe(true);
-    expect(await countDaily(file, day, USDC, 1n, 10n, log)).toBe(false);
-    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ [day]: { [USDC]: "10" } });
+    expect(await countDaily(file, entry, 10n, 10n, log)).toBe(true);
+    expect(await countDaily(file, entry, 1n, 10n, log)).toBe(false);
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+      [day]: { [BUYER]: { [USDC]: "10" } },
+    });
   });
 
   it("logs a refund larger than what the record holds, and leaves the record as it is", async () => {
-    await countDaily(file, day, USDC, 5n, 10n, log);
-    await refundDaily(file, day, USDC, 10n, log);
+    await countDaily(file, entry, 5n, 10n, log);
+    await refundDaily(file, entry, 10n, log);
     expect(logs.join()).toContain("cannot give back 10");
-    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ [day]: { [USDC]: "5" } });
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+      [day]: { [BUYER]: { [USDC]: "5" } },
+    });
   });
 
   it("gives nothing back, silently, to a day already dropped", async () => {
-    await countDaily(file, "2026-10-14", USDC, 5n, 10n, log);
-    await refundDaily(file, day, USDC, 5n, log);
+    await countDaily(file, { ...entry, day: "2026-10-14" }, 5n, 10n, log);
+    await refundDaily(file, entry, 5n, log);
     expect(logs).toEqual([]);
-    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ "2026-10-14": { [USDC]: "5" } });
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+      "2026-10-14": { [BUYER]: { [USDC]: "5" } },
+    });
   });
 
   it("is counted once by each of 20 processes, starting from a stale lock", async () => {
@@ -218,6 +249,8 @@ describe("daily record", () => {
       }),
     );
     expect(exits).toEqual(Array(20).fill(0));
-    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ [day]: { CASSET: "20" } });
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+      [day]: { GBUYER: { CASSET: "20" } },
+    });
   }, 30_000);
 });

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { z } from "zod";
 
 /** What `createServer` needs, read from the environment; only the log is added by the caller. */
-export type CliConfig = Omit<ServerConfig, "log"> & { buyer?: string };
+export type CliConfig = Omit<ServerConfig, "log">;
 
 /** An unset variable and an empty one mean the same: not given. */
 const blank = (value: unknown) => (value === "" ? undefined : value);
@@ -97,9 +97,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): CliConfig {
   }
   return {
     ...config,
-    buyer: signer.address,
     payment: {
       schemes: [{ network: STELLAR_NETWORKS.testnet, client: new ExactStellarScheme(signer) }],
+      payer: signer.address,
       assets: {
         [USDC_TESTNET_ADDRESS]: {
           maxPerCall: vars.STELLAR_X402_MAX_PER_CALL,

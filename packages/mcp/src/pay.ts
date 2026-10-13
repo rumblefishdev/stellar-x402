@@ -3,11 +3,13 @@ import { x402Client, x402HTTPClient, type SchemeRegistration } from "@x402/core/
 import { wrapFetchWithPayment } from "@x402/fetch";
 import { ToolError } from "./results.js";
 import { checkBody, checkUrl, guardedFetch, type SellerLimits } from "./guard.js";
-import { countDaily, refundDaily, spentOn, utcDay } from "./daily.js";
+import { countDaily, refundDaily, spentOn, utcDay, type DailyEntry } from "./daily.js";
 
 export interface PaymentConfig {
   /** Scheme clients holding the buyer's key; the CLI registers `ExactStellarScheme` for testnet only. */
   schemes: SchemeRegistration[];
+  /** The buyer's public address, the address those schemes sign for; it keys the daily record. */
+  payer: string;
   /**
    * Per asset contract, in atomic units: the largest price one call may pay, the budget for this
    * process and, optionally, the budget for one UTC day shared by every process using `dailyFile`.
@@ -63,8 +65,8 @@ export async function callPaidHttp(
   let refusal: ToolError | undefined;
   let paid: { network: string; asset: string; amount: bigint } | undefined;
   let signingError: Error | undefined;
-  /** The day this call's amount was counted against in the daily record, so a refund finds it. */
-  let countedDay: string | undefined;
+  /** Where this call's amount was counted in the daily record, so a refund finds it. */
+  let countedIn: DailyEntry | undefined;
   const now = config.now ?? (() => new Date());
 
   // Of the seller's offers, keep those in an allowed asset, with a short enough authorization, within
@@ -84,7 +86,7 @@ export async function callPaidHttp(
     let today = new Map<string, bigint>();
     if (inBudget.some((offer) => config.assets[offer.asset]!.daily !== undefined)) {
       try {
-        today = spentOn(config.dailyFile!, utcDay(now()));
+        today = spentOn(config.dailyFile!, utcDay(now()), config.payer);
       } catch (error) {
         refusal = dailyUnreadable(error);
         return [];
@@ -125,10 +127,10 @@ export async function callPaidHttp(
     spent.set(offer.asset, already + amount);
     if (limits.daily !== undefined) {
       // Counted under the file's lock, so other processes paying at once see this amount.
-      const day = utcDay(now());
+      const entry = { day: utcDay(now()), payer: config.payer, asset: offer.asset };
       let counted = false;
       try {
-        counted = await countDaily(config.dailyFile!, day, offer.asset, amount, limits.daily, log);
+        counted = await countDaily(config.dailyFile!, entry, amount, limits.daily, log);
       } catch (error) {
         refusal = dailyUnreadable(error);
       }
@@ -138,7 +140,7 @@ export async function callPaidHttp(
         refusal ??= new ToolError("over_budget", "The payment would exceed the daily budget.");
         return { abort: true, reason: refusal.code };
       }
-      countedDay = day;
+      countedIn = entry;
     }
     paid = { network: offer.network, asset: offer.asset, amount };
   });
@@ -148,9 +150,9 @@ export async function callPaidHttp(
     signingError = error;
     if (!paid) return;
     spent.set(paid.asset, (spent.get(paid.asset) ?? 0n) - paid.amount);
-    if (countedDay === undefined) return;
+    if (countedIn === undefined) return;
     try {
-      await refundDaily(config.dailyFile!, countedDay, paid.asset, paid.amount, log);
+      await refundDaily(config.dailyFile!, countedIn, paid.amount, log);
     } catch (refundError) {
       // The amount stays counted for today: too strict, never too loose.
       log(

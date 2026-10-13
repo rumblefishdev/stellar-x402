@@ -36,7 +36,7 @@ describe("loadConfig", () => {
 
   it("pays in testnet USDC within the limits when a key is given", () => {
     const config = loadConfig(PAYING);
-    expect(config.buyer).toBe(BUYER.publicKey());
+    expect(config.payment?.payer).toBe(BUYER.publicKey());
     expect(config.payment?.schemes.map((s) => s.network)).toEqual(["stellar:testnet"]);
     expect(config.payment?.assets).toEqual({
       [USDC_TESTNET_ADDRESS]: { maxPerCall: 10_000n, budget: 50_000n },

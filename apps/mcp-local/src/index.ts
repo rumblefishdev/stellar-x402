@@ -13,10 +13,9 @@ try {
   log(error instanceof Error ? error.message : String(error));
   process.exit(1);
 }
-const { buyer, ...serverConfig } = config;
-await createServer({ ...serverConfig, log }).connect(new StdioServerTransport());
+await createServer({ ...config, log }).connect(new StdioServerTransport());
 log(
-  buyer
-    ? `paying from ${buyer} on stellar:testnet; catalog ${config.discoveryUrl}`
+  config.payment
+    ? `paying from ${config.payment.payer} on stellar:testnet; catalog ${config.discoveryUrl}`
     : `browsing only (no STELLAR_X402_SECRET_KEY); catalog ${config.discoveryUrl}`,
 );

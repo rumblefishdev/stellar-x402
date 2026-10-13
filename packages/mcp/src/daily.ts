@@ -4,12 +4,21 @@ import { dirname } from "node:path";
 import { z } from "zod";
 
 /**
- * What was spent per UTC day and asset, in atomic units: `{"2026-10-13": {"C…": "20000"}}`. One file
- * is shared by every server process of a buyer, so a restart or a second Claude session does not
- * start the day again from zero. Only today's entry counts; older days are dropped on the next count.
+ * What was spent per UTC day, buyer and asset, in atomic units:
+ * `{"2026-10-13": {"G…": {"C…": "20000"}}}`. One file is shared by every server process of a buyer,
+ * so a restart or a second Claude session does not start the day again from zero; keyed by the
+ * buyer's address, so two wallets using one file each keep their own limit. Only today's entry
+ * counts; older days are dropped on the next count.
  */
-const SPENT = z.record(z.record(z.string().regex(/^\d+$/)));
+const SPENT = z.record(z.record(z.record(z.string().regex(/^\d+$/))));
 type SpentDays = z.infer<typeof SPENT>;
+
+/** Where an amount is counted: the day, the buyer's address and the asset contract. */
+export interface DailyEntry {
+  day: string;
+  payer: string;
+  asset: string;
+}
 
 /** The day a payment counts against: the UTC date, the same for every process whatever its zone. */
 export function utcDay(now: Date): string {
@@ -29,62 +38,68 @@ function missing(error: unknown): boolean {
 }
 
 /**
- * Spent on `day` per asset, read without the lock: a write replaces the file whole, so a reader sees
- * the old or the new record, never half of one. Synchronous, for the library's offer filter.
+ * Spent by `payer` on `day` per asset, read without the lock: a write replaces the file whole, so a
+ * reader sees the old or the new record, never half of one. Synchronous, for the library's offer filter.
  */
-export function spentOn(file: string, day: string): Map<string, bigint> {
+export function spentOn(file: string, day: string, payer: string): Map<string, bigint> {
   let text: string | undefined;
   try {
     text = readFileSync(file, "utf8");
   } catch (error) {
     if (!missing(error)) throw error;
   }
-  const amounts = parse(text, file)[day] ?? {};
+  const amounts = parse(text, file)[day]?.[payer] ?? {};
   return new Map(Object.entries(amounts).map(([asset, amount]) => [asset, BigInt(amount)]));
 }
 
 /**
- * Counts `amount` against `day` if it stays within `daily`; false when it would not. Runs under the
+ * Counts `amount` against `entry` if it stays within `daily`; false when it would not. Runs under the
  * lock, so two processes paying at once cannot both fit in the last part of the budget.
  */
 export async function countDaily(
   file: string,
-  day: string,
-  asset: string,
+  { day, payer, asset }: DailyEntry,
   amount: bigint,
   daily: bigint,
   log: (message: string) => void,
 ): Promise<boolean> {
   return locked(file, log, async () => {
     const days = parse(await readOrNothing(file), file);
-    const already = BigInt(days[day]?.[asset] ?? "0");
+    const already = BigInt(days[day]?.[payer]?.[asset] ?? "0");
     if (already + amount > daily) return false;
-    await replace(file, { [day]: { ...days[day], [asset]: (already + amount).toString() } });
+    const payers = {
+      ...days[day],
+      [payer]: { ...days[day]?.[payer], [asset]: (already + amount).toString() },
+    };
+    await replace(file, { [day]: payers });
     return true;
   });
 }
 
 /**
- * Gives back an amount counted on `day` whose payment was never signed. A day already dropped is over,
+ * Gives back an amount counted on `entry` whose payment was never signed. A day already dropped is over,
  * so nothing is given back to it; like a count, the write keeps only `day`.
  */
 export async function refundDaily(
   file: string,
-  day: string,
-  asset: string,
+  { day, payer, asset }: DailyEntry,
   amount: bigint,
   log: (message: string) => void,
 ): Promise<void> {
   await locked(file, log, async () => {
     const days = parse(await readOrNothing(file), file);
     if (days[day] === undefined) return;
-    const already = BigInt(days[day][asset] ?? "0");
+    const already = BigInt(days[day][payer]?.[asset] ?? "0");
     if (already < amount) {
       // Something else changed the record since this amount was counted: leave it as it is.
       log(`daily budget: cannot give back ${amount} of ${asset}, the record holds only ${already}`);
       return;
     }
-    await replace(file, { [day]: { ...days[day], [asset]: (already - amount).toString() } });
+    const payers = {
+      ...days[day],
+      [payer]: { ...days[day][payer], [asset]: (already - amount).toString() },
+    };
+    await replace(file, { [day]: payers });
   });
 }
 
