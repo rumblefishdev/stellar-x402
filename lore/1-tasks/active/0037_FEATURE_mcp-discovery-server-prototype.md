@@ -194,6 +194,8 @@ and existing servers. Each line: what was decided and why.
   (settled through x402.org), fake sellers for cases a live seller cannot produce (a stalled body,
   a broken settlement header, a redirect), and the buyer's balance on Horizon after each paid
   scenario. The result is a table scenario · expected · got, with transaction hashes.
+- **Budget per process and per day (W235 C), in the PR after PR C:** the per-process budget stays;
+  a daily budget is added, kept in a local file so a restart does not reset it.
 - **Comparison with existing x402 MCP servers.** A table of `nirholas/x402-bridge` and
   `jamesbachini/x402-mcp-stellar` against ours (networks, limits and budget, error codes, address
   guard, how seller text reaches the model), so the choice of an own server stays checkable.
