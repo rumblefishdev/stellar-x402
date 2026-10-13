@@ -40,6 +40,12 @@ history:
       two tools (get_resource dropped, list_resources carries the input description), budget
       counted before signing and never given back, no DNS check (https is the guard),
       insufficient_funds from the payer's simulation. Source 567 -> 487 lines; 52 tests.
+  - date: "2026-10-13"
+    status: active
+    who: karolkow
+    note: >
+      get_resource is back, as a preview of the seller's 402 answer before paying rather than a
+      catalog lookup; no catalog filter is needed.
 ---
 
 # MCP discovery server prototype: list, inspect and pay for Bazaar resources
@@ -119,11 +125,14 @@ RFP's MCP discovery server, outside T1)
 Settled on 2026-10-12 and revised on 2026-10-13, after a review of the whole task against the RFP
 and existing servers. Each line: what was decided and why.
 
-- **Two tools: `list_resources` and `call_paid_http`.** The RFP asks for search and paid-call
-  tools (§5); `get_resource` was this task's own addition. `list_resources` returns summaries with
-  the entry's input description (`extensions.bazaar.info.input`), so an agent knows how to call a
-  resource without a second tool: on 100 live Bazaar entries the input is 93 characters at the
-  median and 967 at most, against 3.7k for a full entry.
+- **Three tools: `list_resources`, `get_resource`, `call_paid_http`.** `list_resources` returns
+  summaries with the entry's input description (`extensions.bazaar.info.input`; 93 characters at
+  the median on 100 live Bazaar entries, 967 at most). `get_resource` shows everything before
+  paying: it asks the seller without paying and returns its 402 answer, the same terms
+  `call_paid_http` would pay and the seller's input and output description. The catalog cannot
+  return one entry (the upstream list only filters by type, payTo, network and extension), so
+  the seller is asked instead of adding a `resource` filter to 0032; the answer is always current.
+  HTTP resources only, as paid MCP tools are out of scope.
 - **An own server, kept thin.** `nirholas/x402-bridge` (Apache-2.0) does the same job for EVM and
   Solana, with the same guards; it has no Stellar, answers failures in free text, and turns each
   catalog entry into its own tool, which puts seller text into tool descriptions. The RFP needs
