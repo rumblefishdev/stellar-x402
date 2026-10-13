@@ -1,20 +1,24 @@
-import { createServer, type Server } from "node:http";
+import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { decodePaymentRequiredHeader, encodePaymentSignatureHeader } from "@x402/core/http";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  decodePaymentRequiredHeader,
+  decodePaymentResponseHeader,
+  encodePaymentSignatureHeader,
+} from "@x402/core/http";
+import { type DiscoveryExtension, validateDiscoveryExtension } from "@x402/extensions/bazaar";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 
 const PAY_TO = "GAS7JQRKLXPO5L7OFYDEILAM6AZGPHFJKQ2UJV7TAT5BNXPCXX54L5IF";
+const BUYER = "GCPXX7YPXXKAFT2356FXZV3WUNMD35WYSCBTO5V62XV5YIIVSH64N66K";
 const USDC = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
+const TRANSACTION = "a".repeat(64);
 
-/**
- * Answers `/supported` like the x402.org facilitator does for Stellar testnet, accepts every
- * payment at `/verify`, and records which paths were called.
- */
 let facilitator: Server;
-const facilitatorCalls: string[] = [];
 let seller: Server;
 let sellerUrl: string;
+/** The paths the seller called on the facilitator, reset before each test. */
+let facilitatorCalls: string[] = [];
 
 function listen(server: Server): Promise<string> {
   return new Promise((resolve) =>
@@ -24,28 +28,56 @@ function listen(server: Server): Promise<string> {
   );
 }
 
+function json(res: ServerResponse, body: unknown): void {
+  res.writeHead(200, { "content-type": "application/json" });
+  res.end(JSON.stringify(body));
+}
+
+/** Signs nothing: the fake facilitator accepts any payload, so the shape is all that matters. */
+async function paymentFor(path: string): Promise<string> {
+  const terms = await fetch(`${sellerUrl}${path}`);
+  const [accepted] = decodePaymentRequiredHeader(terms.headers.get("payment-required")!).accepts;
+  return encodePaymentSignatureHeader({
+    x402Version: 2,
+    accepted: accepted!,
+    payload: { transaction: "signed-by-the-buyer" },
+  });
+}
+
 beforeAll(async () => {
+  // Answers `/supported` like the x402.org facilitator does for Stellar testnet, accepts every
+  // payment at `/verify` and settles it at `/settle`.
   facilitator = createServer((req, res) => {
     facilitatorCalls.push(req.url!);
-    if (req.url === "/verify") {
-      res.writeHead(200, { "content-type": "application/json" });
-      return void res.end(JSON.stringify({ isValid: true, payer: PAY_TO }));
+    if (req.url === "/supported") {
+      const kinds = [
+        {
+          x402Version: 2,
+          scheme: "exact",
+          network: "stellar:testnet",
+          extra: { areFeesSponsored: true },
+        },
+      ];
+      return json(res, { kinds, extensions: [], signers: {} });
     }
-    if (req.url !== "/supported") return void res.writeHead(404).end();
-    const kinds = [
-      {
-        x402Version: 2,
-        scheme: "exact",
+    if (req.url === "/verify") return json(res, { isValid: true, payer: BUYER });
+    if (req.url === "/settle") {
+      return json(res, {
+        success: true,
+        payer: BUYER,
+        transaction: TRANSACTION,
         network: "stellar:testnet",
-        extra: { areFeesSponsored: true },
-      },
-    ];
-    res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ kinds, extensions: [], signers: {} }));
+      });
+    }
+    res.writeHead(404).end();
   });
   const facilitatorUrl = await listen(facilitator);
   seller = createServer(createApp({ payTo: PAY_TO, facilitatorUrl }));
   sellerUrl = await listen(seller);
+});
+
+beforeEach(() => {
+  facilitatorCalls = [];
 });
 
 afterAll(() => {
@@ -68,7 +100,9 @@ describe("GET /weather", () => {
         extra: expect.objectContaining({ areFeesSponsored: true }),
       }),
     ]);
-    expect(required.extensions?.bazaar).toMatchObject({
+    const bazaar = required.extensions?.bazaar as DiscoveryExtension;
+    expect(validateDiscoveryExtension(bazaar)).toEqual({ valid: true });
+    expect(bazaar).toMatchObject({
       info: {
         input: { type: "http", method: "GET", queryParams: { city: "Warsaw" } },
         output: { example: { city: "Warsaw", tempC: 14 } },
@@ -76,17 +110,21 @@ describe("GET /weather", () => {
     });
   });
 
-  it("refuses a paid request without a city and does not settle it", async () => {
-    const terms = await fetch(`${sellerUrl}/weather`);
-    const [accepted] = decodePaymentRequiredHeader(terms.headers.get("payment-required")!).accepts;
-    const signature = encodePaymentSignatureHeader({
-      x402Version: 2,
-      accepted: accepted!,
-      payload: { transaction: "signed-by-the-buyer" },
+  it("answers a paid request and settles it", async () => {
+    const response = await fetch(`${sellerUrl}/weather?city=Warsaw`, {
+      headers: { "payment-signature": await paymentFor("/weather?city=Warsaw") },
     });
 
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ city: "Warsaw", tempC: 14 });
+    const settlement = decodePaymentResponseHeader(response.headers.get("payment-response")!);
+    expect(settlement).toMatchObject({ success: true, transaction: TRANSACTION });
+    expect(facilitatorCalls).toContain("/settle");
+  });
+
+  it("refuses a paid request without a city and does not settle it", async () => {
     const response = await fetch(`${sellerUrl}/weather`, {
-      headers: { "payment-signature": signature },
+      headers: { "payment-signature": await paymentFor("/weather") },
     });
 
     expect(response.status).toBe(400);
