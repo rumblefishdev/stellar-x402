@@ -57,6 +57,11 @@ describe("loadConfig", () => {
 
   it.each([
     ["no catalog URL", {}, "STELLAR_X402_DISCOVERY_URL is required"],
+    [
+      "a catalog address that is not a URL",
+      { STELLAR_X402_DISCOVERY_URL: "catalog.example.com" },
+      "STELLAR_X402_DISCOVERY_URL must be a URL",
+    ],
     ["pubnet", { ...BASE, STELLAR_X402_NETWORK: "stellar:pubnet" }, "stellar:testnet only"],
     [
       "a key without a per-call limit",

@@ -25,7 +25,10 @@ const ATOMIC = z
   .transform(BigInt);
 
 const ENV = z.object({
-  STELLAR_X402_DISCOVERY_URL: z.string({ required_error: "is required" }).min(1, "is required"),
+  STELLAR_X402_DISCOVERY_URL: z
+    .string({ required_error: "is required" })
+    .min(1, "is required")
+    .url("must be a URL, such as https://catalog.example.com"),
   STELLAR_X402_NETWORK: optional(
     z.literal(STELLAR_NETWORKS.testnet, {
       errorMap: () => ({
