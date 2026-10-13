@@ -24,9 +24,10 @@ type StatusScript = "THROW";
  * - a transaction's sequence must be the source account's sequence + 1 (else `txBadSeq`);
  * - at most one pending transaction per source account (else `TRY_AGAIN_LATER`);
  * - resending a queued transaction gives `DUPLICATE`, an applied one `txBadSeq`;
- * - a send after the transaction's time bound gives `txTooLate` (checked before the sequence);
+ * - a send after the transaction's time bound or ledger bound gives `txTooLate` (checked before
+ *   the sequence);
  * - each `getLatestLedger` call closes one ledger, which includes every pending transaction
- *   whose time bound has not passed, and advances the close time by `ledgerSeconds`.
+ *   whose time and ledger bounds have not passed, and advances the close time by `ledgerSeconds`.
  */
 export class FakeRpc implements SorobanRpc {
   ledger = 100;
@@ -35,7 +36,10 @@ export class FakeRpc implements SorobanRpc {
   readonly sequences = new Map<string, bigint>();
   readonly sent: (Transaction | FeeBumpTransaction)[] = [];
   readonly calls: Record<string, number> = {};
-  private pending = new Map<string, { source: string; seq: bigint; maxTime: number }>();
+  private pending = new Map<
+    string,
+    { source: string; seq: bigint; maxTime: number; maxLedger: number }
+  >();
   private done = new Map<string, { ledger: number; ok: boolean }>();
   /** Scripted results, consumed one per call before the default behaviour. */
   sendScript: SendScript[] = [];
@@ -121,7 +125,12 @@ export class FakeRpc implements SorobanRpc {
     if (this.pending.has(hash)) return { ...base, status: "DUPLICATE" };
     const inner = tx instanceof FeeBumpTransaction ? tx.innerTransaction : tx;
     const maxTime = Number(inner.timeBounds?.maxTime ?? 0);
-    if (maxTime !== 0 && this.closeTime > maxTime)
+    // Exclusive, as on the network: the transaction can land only in ledgers below it.
+    const maxLedger = inner.ledgerBounds?.maxLedger ?? 0;
+    if (
+      (maxTime !== 0 && this.closeTime > maxTime) ||
+      (maxLedger !== 0 && this.ledger + 1 >= maxLedger)
+    )
       return { ...base, status: "ERROR", errorResult: result("txTooLate") };
     const seq = BigInt(inner.sequence);
     const current = this.sequences.get(inner.source);
@@ -129,7 +138,7 @@ export class FakeRpc implements SorobanRpc {
       return { ...base, status: "TRY_AGAIN_LATER" };
     if (current === undefined || seq !== current + 1n)
       return { ...base, status: "ERROR", errorResult: result("txBadSeq", true) };
-    this.pending.set(hash, { source: inner.source, seq, maxTime });
+    this.pending.set(hash, { source: inner.source, seq, maxTime, maxLedger });
     if (script === "ACCEPT_THEN_THROW") throw new Error("connection reset");
     return { ...base, status: "PENDING" };
   }
@@ -167,16 +176,18 @@ export class FakeRpc implements SorobanRpc {
     this.count("getLatestLedger");
     this.ledger += 1;
     this.closeTime += this.ledgerSeconds;
+    const expired = (p: { maxTime: number; maxLedger: number }) =>
+      (p.maxTime !== 0 && this.closeTime > p.maxTime) ||
+      (p.maxLedger !== 0 && this.ledger >= p.maxLedger);
     if (!this.stalled) {
       for (const [hash, p] of this.pending) {
         this.pending.delete(hash);
-        if (p.maxTime !== 0 && this.closeTime > p.maxTime) continue; // expired, seq untouched
+        if (expired(p)) continue; // expired, seq untouched
         this.sequences.set(p.source, p.seq);
         this.done.set(hash, { ledger: this.ledger, ok: !this.failOnChain });
       }
     } else {
-      for (const [hash, p] of this.pending)
-        if (p.maxTime !== 0 && this.closeTime > p.maxTime) this.pending.delete(hash);
+      for (const [hash, p] of this.pending) if (expired(p)) this.pending.delete(hash);
     }
     return {
       id: String(this.ledger),

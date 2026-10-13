@@ -18,7 +18,7 @@ import {
   type SubmitterEvent,
   type SubmitterStatsSnapshot,
 } from "./stats.js";
-import type { SorobanRpc, SubmitResult, TransactionSigner } from "./types.js";
+import type { Attempt, SorobanRpc, SubmitResult, TransactionSigner } from "./types.js";
 
 export interface SubmitterOptions {
   rpc: SorobanRpc;
@@ -53,6 +53,12 @@ export interface SubmitterOptions {
    * `pending` (default 30). Only an RPC that stops answering gets this far.
    */
   confirmGraceSeconds?: number;
+  /**
+   * Longest wait for a caller's `onSigned`, in milliseconds (default 5,000). The wait also ends at
+   * the envelope's time bound and ledger bound, whichever comes first. A store that hangs rather
+   * than fails then holds a channel for this long, not for the whole time bound.
+   */
+  onSignedTimeoutMs?: number;
   /**
    * Prepare the next queued call on a channel while its transaction is pending (default true).
    * The prepared envelope is sent as soon as the pending one is final, so the simulation is off
@@ -99,10 +105,20 @@ export interface SubmitOptions {
   checkSimulation?: (sim: rpc.Api.SimulateTransactionSuccessResponse) => void | Promise<void>;
   /**
    * Called with each signed envelope's hash before it is first sent, so the caller can store
-   * it before anything can land (crash recovery). A rebuild produces a new hash and a new call.
-   * Must not throw (errors are ignored).
+   * it durably before anything can land (crash recovery, AD-16). The submitter awaits it before
+   * every send, a rebuild included: a rebuild produces a new hash and a new call. If it throws or
+   * rejects, or has not settled within `onSignedTimeoutMs` or by the transaction's time bound or
+   * ledger bound, that envelope is
+   * not sent, the channel is freed, and `submit()` rejects with {@link SignedHookError}. If a bound
+   * passed while it ran, the result is `expired` and that envelope is not sent.
+   *
+   * A hash passed here is an attempt: it may or may not have been sent, whatever `submit()` ends
+   * with. After a `txBadSeq` the first envelope was sent before the rebuild's hook runs; a hook that
+   * timed out may still finish its write after the channel has reused the sequence. An attempt
+   * cannot land once its time bound or ledger bound has passed, so the caller can resolve each
+   * stored hash with `getTransaction` and the bounds.
    */
-  onSigned?: (hash: string) => void;
+  onSigned?: (hash: string) => void | Promise<void>;
   /**
    * Called once the network accepts the transaction (`PENDING`), before it is final. Must not
    * throw (errors are ignored).
@@ -114,6 +130,16 @@ export interface SubmitOptions {
    * signature expiry, so a payment is not held until it can no longer settle.
    */
   deadline?: number;
+  /**
+   * Last ledger the transaction may land in (inclusive). Set it from the client's
+   * `signatureExpirationLedger`, so the transaction never outlives its authorization (AD-22).
+   * The envelope carries it as a ledger bound, and a call with fewer than two ledgers left to
+   * land in is refused with {@link LedgerBoundError} before anything is signed. A value that is not a
+   * ledger sequence (a positive integer below 2^32 - 1) throws a `RangeError`. It does not bound
+   * the wait for a channel: set `deadline` too, or a call can queue past its bound and only then
+   * be refused, after a simulation.
+   */
+  maxLedger?: number;
 }
 
 /** Simulation failed or needs a restore; nothing was signed or sent. */
@@ -131,7 +157,45 @@ export class FeeLimitError extends Error {
   override readonly name = "FeeLimitError";
 }
 
+/**
+ * Fewer than two ledgers are left before the call's `maxLedger`, so no new envelope was signed.
+ * An earlier one for the same call may exist: one prepared ahead and dropped (never sent), or one
+ * sent and refused with `txBadSeq` before the rebuild ({@link attemptsOf} lists the sent ones).
+ */
+export class LedgerBoundError extends Error {
+  override readonly name = "LedgerBoundError";
+}
+
+/**
+ * The caller's `onSigned` threw, rejected, or did not finish within `onSignedTimeoutMs` or by the
+ * time bound or ledger bound; the envelope it was given was not sent. After a `txBadSeq` rebuild an
+ * earlier envelope for the same call was sent ({@link attemptsOf} lists them).
+ */
+export class SignedHookError extends Error {
+  override readonly name = "SignedHookError";
+}
+
+/** A submission's outcome before its attempts are attached. */
+type Outcome = Omit<SubmitResult, "attempts">;
+
+const errorAttempts = new WeakMap<object, Attempt[]>();
+
+/**
+ * The attempts of a submission that `submit()` rejected with `error`, so the caller can tell
+ * whether anything may have reached the network (see `onSigned`). Empty when nothing was signed
+ * for it, or for an error `submit()` did not throw.
+ */
+export function attemptsOf(error: unknown): Attempt[] {
+  return (typeof error === "object" && error !== null && errorAttempts.get(error)) || [];
+}
+
 const BAD_SEQ = new Set(["txBadSeq"]);
+
+/**
+ * Ledgers kept in hand beyond the earliest one a call can land in. Signing, `onSigned` and the
+ * send take time; a call down to its last ledger is refused rather than sent to miss it.
+ */
+const SPARE_LEDGERS = 1;
 
 /** A signed envelope, ready to send. */
 interface Prepared {
@@ -139,6 +203,8 @@ interface Prepared {
   hash: string;
   txSequence: bigint;
   maxTime: number;
+  /** The caller's `maxLedger`: the last ledger the envelope may land in. */
+  maxLedger?: number;
 }
 
 /** One submission's hold on its channel. */
@@ -153,6 +219,8 @@ interface Hold {
   finish?: () => void;
   /** The confirmation still running after a `pending` result. */
   late?: Promise<unknown>;
+  /** Every envelope given to `onSigned` or sent, in order. */
+  attempts: Attempt[];
 }
 
 /**
@@ -187,6 +255,7 @@ export class SettlementSubmitter {
   private readonly maxFee: bigint;
   private readonly timeoutSeconds: number;
   private readonly confirmGraceSeconds: number;
+  private readonly onSignedTimeoutMs: number;
   private readonly pollIntervalMs: number;
   private readonly pipeline: boolean;
   private readonly now: () => number;
@@ -213,6 +282,8 @@ export class SettlementSubmitter {
     this.maxFee = BigInt(opts.maxFeeStroops ?? 250_000);
     this.timeoutSeconds = opts.timeoutSeconds ?? 60;
     this.confirmGraceSeconds = opts.confirmGraceSeconds ?? 30;
+    this.onSignedTimeoutMs = opts.onSignedTimeoutMs ?? 5_000;
+    if (!(this.onSignedTimeoutMs > 0)) throw new Error("onSignedTimeoutMs must be above 0");
     this.pollIntervalMs = opts.pollIntervalMs ?? 1000;
     this.pipeline = opts.pipeline ?? true;
     this.now = opts.now ?? Date.now;
@@ -223,6 +294,13 @@ export class SettlementSubmitter {
 
   /** Waits for a free channel, then builds, simulates, signs, sends and confirms `call`. */
   async submit(call: ContractCall, opts: SubmitOptions = {}): Promise<SubmitResult> {
+    const { maxLedger } = opts;
+    // A NaN would silently turn the guard off; the envelope's bound (maxLedger + 1) is a uint32.
+    if (
+      maxLedger !== undefined &&
+      !(Number.isInteger(maxLedger) && maxLedger > 0 && maxLedger < 2 ** 32 - 1)
+    )
+      throw new RangeError(`maxLedger must be a ledger sequence, got ${maxLedger}`);
     const start = this.now();
     let channel: Channel;
     try {
@@ -234,9 +312,15 @@ export class SettlementSubmitter {
     const acquired = this.now();
     const previous = channel.pending;
     channel.pending = undefined;
-    const hold: Hold = { handedOver: false, previousSettled: !previous, retired: false };
+    const hold: Hold = {
+      handedOver: false,
+      previousSettled: !previous,
+      retired: false,
+      attempts: [],
+    };
     try {
-      const result = await this.submitOn(channel, call, opts, previous, hold);
+      const outcome = await this.submitOn(channel, call, opts, previous, hold);
+      const result = { ...outcome, attempts: [...hold.attempts] };
       this.emit({
         type: "final",
         result,
@@ -245,6 +329,7 @@ export class SettlementSubmitter {
       });
       return result;
     } catch (error) {
+      if (typeof error === "object" && error !== null) errorAttempts.set(error, [...hold.attempts]);
       this.refused(channel.address, error);
       throw error;
     } finally {
@@ -314,7 +399,7 @@ export class SettlementSubmitter {
     opts: SubmitOptions,
     previous: Channel["pending"],
     hold: Hold,
-  ): Promise<SubmitResult> {
+  ): Promise<Outcome> {
     let prepared: Prepared | undefined;
     if (previous) {
       // Prepare against the sequence the pending transaction uses, then wait for it: until it is
@@ -326,6 +411,11 @@ export class SettlementSubmitter {
       hold.previousSettled = true;
       const used = channel.sequence === previous.sequence && !this.expiresSoon(prepared);
       this.emit({ type: "prepared-ahead", channel: channel.address, used });
+      // A rebuild's simulation can only see a later ledger, so it would be refused too.
+      if (this.tooCloseToBound(prepared.maxLedger, this.clock.current))
+        throw new LedgerBoundError(
+          `ledger ${this.clock.current + 1} leaves too few ledgers before the call's maxLedger ${prepared.maxLedger}`,
+        );
       if (!used) prepared = undefined;
     }
     for (let resynced = false; ; resynced = true) {
@@ -384,9 +474,26 @@ export class SettlementSubmitter {
     }
   }
 
-  /** Less than half the time bound left: too close to expiry to send a prepared envelope. */
+  /**
+   * Less than half the time bound left, or too few ledgers left before its ledger bound: too
+   * close to expiry to send a prepared envelope.
+   */
   private expiresSoon(prepared: Prepared): boolean {
+    // `current` is fresh here: the previous holder's confirmation was polling the clock until its
+    // transaction was final. A ledger closed since then can still slip through; its send gets
+    // txTooLate and is reported `expired`.
+    if (this.tooCloseToBound(prepared.maxLedger, this.clock.current)) return true;
     return Math.floor(this.now() / 1000) + this.timeoutSeconds / 2 > prepared.maxTime;
+  }
+
+  /** Whether a call bounded by `maxLedger` has too few ledgers left after `latest` to start. */
+  private tooCloseToBound(maxLedger: number | undefined, latest: number): boolean {
+    return maxLedger !== undefined && latest + SPARE_LEDGERS >= maxLedger;
+  }
+
+  /** Whether a transaction bounded by `maxLedger` can no longer land after `latest` closed. */
+  private pastLedgerBound(maxLedger: number | undefined, latest: number): boolean {
+    return maxLedger !== undefined && latest >= maxLedger;
   }
 
   /** The bid for the next envelope: `base`, raised while calls wait for a channel. */
@@ -409,11 +516,16 @@ export class SettlementSubmitter {
     const queued = this.pool.queued;
     let fee = this.raise(base);
     const maxTime = Math.floor(this.now() / 1000) + this.timeoutSeconds;
+    const { maxLedger } = opts;
     const build = (bid: number) =>
       new TransactionBuilder(new Account(source, sequence.toString()), {
         fee: String(bid),
         networkPassphrase: this.passphrase,
         timebounds: { minTime: 0, maxTime },
+        // A ledger bound's maxLedger is exclusive; ours is the last ledger it may land in.
+        ...(maxLedger !== undefined && {
+          ledgerbounds: { minLedger: 0, maxLedger: maxLedger + 1 },
+        }),
       })
         .addOperation(Operation.invokeHostFunction({ ...call, source: this.signer.address }))
         .build();
@@ -427,6 +539,11 @@ export class SettlementSubmitter {
       throw new SimulationError("archived entries need a restore before this call");
     if (!rpc.Api.isSimulationSuccess(sim))
       throw new SimulationError("unexpected simulation response");
+    // The earliest it can land is the ledger after the one the simulation saw.
+    if (this.tooCloseToBound(maxLedger, sim.latestLedger))
+      throw new LedgerBoundError(
+        `ledger ${sim.latestLedger + 1} leaves too few ledgers before the call's maxLedger ${maxLedger}`,
+      );
     try {
       await opts.checkSimulation?.(sim);
     } catch (error) {
@@ -457,18 +574,30 @@ export class SettlementSubmitter {
         this.passphrase,
       ),
     );
-    return { bump, hash: bump.hash().toString("hex"), txSequence, maxTime };
+    return { bump, hash: bump.hash().toString("hex"), txSequence, maxTime, maxLedger };
   }
 
   private async sendAndConfirm(
     channel: Channel,
-    { bump, hash, txSequence, maxTime }: Prepared,
+    prepared: Prepared,
     opts: SubmitOptions,
     hold: Hold,
-  ): Promise<SubmitResult> {
+  ): Promise<Outcome> {
+    const { bump, hash, txSequence, maxTime, maxLedger } = prepared;
     const base = { channel: channel.address };
-    const pastMaxTime = () => Math.floor(this.now() / 1000) > maxTime;
-    callSafely(opts.onSigned, hash);
+    const tried: Attempt = { hash, sent: "no" };
+    hold.attempts.push(tried);
+    // `current` may lag the network; a send it lets through past the ledger bound gets txTooLate,
+    // which is reported as `expired` below.
+    const pastBounds = () =>
+      Math.floor(this.now() / 1000) > maxTime ||
+      this.pastLedgerBound(maxLedger, this.clock.current);
+    // Nothing is sent until the caller has the hash: a store write that fails must stop the send.
+    if (opts.onSigned) {
+      await this.awaitSigned(opts.onSigned, hash, maxTime, maxLedger);
+      // The write took time: an envelope already past a bound can only get txTooLate.
+      if (pastBounds()) return { ...base, status: "expired", hash };
+    }
 
     // Send. Resending the same signed envelope is always safe: it has the same hash, so the
     // network answers DUPLICATE or applies it once. TRY_AGAIN_LATER means the network did not
@@ -484,7 +613,9 @@ export class SettlementSubmitter {
         sent = await this.rpc.sendTransaction(bump);
       } catch {
         uncertain = true;
+        if (tried.sent === "no") tried.sent = "unknown";
       }
+      if (sent && sent.status !== "TRY_AGAIN_LATER") tried.sent = "yes";
       if (sent?.status === "PENDING" || sent?.status === "DUPLICATE") {
         accepted = true;
         this.emit({ type: "sent", channel: channel.address, hash, attempts: attempt });
@@ -493,10 +624,12 @@ export class SettlementSubmitter {
       if (sent?.status === "ERROR") {
         if (uncertain) break; // an earlier attempt may have landed; confirm by hash
         const errorCode = resultCode(sent.errorResult);
+        // A bound passed before the send (signing and onSigned take time); nothing was applied.
+        if (errorCode === "txTooLate") return { ...base, status: "expired", hash, errorCode };
         if (errorCode !== undefined && BAD_SEQ.has(errorCode)) channel.sequence = undefined;
         return { ...base, status: "rejected", hash, errorCode };
       }
-      if (pastMaxTime()) {
+      if (pastBounds()) {
         if (uncertain) break;
         return { ...base, status: "expired", hash };
       }
@@ -507,8 +640,8 @@ export class SettlementSubmitter {
         reason: sent ? "try-again-later" : "send-error",
       });
       await this.clock.following((maxTime + 1) * 1000);
-      if (pastMaxTime()) {
-        // The bound passed during the wait: a resend can only be txTooLate.
+      if (pastBounds()) {
+        // A bound passed during the wait: a resend can only be txTooLate.
         if (uncertain) break;
         return { ...base, status: "expired", hash };
       }
@@ -524,20 +657,82 @@ export class SettlementSubmitter {
 
     // Confirm by hash, but report `pending` if there is no answer by the time bound plus grace.
     // The confirmation keeps running, and the channel is let go only when it is final.
-    const confirmation = this.confirm(channel, hash, txSequence, maxTime, uncertain);
+    const confirmation = this.confirm(channel, prepared, uncertain);
     if (await this.settlesBy(confirmation, dueAt)) return confirmation;
-    hold.late = confirmation.then((result) => this.emit({ type: "resolved", result }));
+    hold.late = confirmation.then((result) =>
+      this.emit({ type: "resolved", result: { ...result, attempts: [...hold.attempts] } }),
+    );
     return { ...base, status: "pending", hash };
+  }
+
+  /**
+   * Awaits the caller's `onSigned`, but not past `onSignedTimeoutMs` or the envelope's time bound
+   * or ledger bound: a store write that never settles must not hold the channel. Timers, not the
+   * ledger clock, until the write has run for a poll interval, so a quick write costs no
+   * `getLatestLedger` poll.
+   */
+  private async awaitSigned(
+    onSigned: (hash: string) => void | Promise<void>,
+    hash: string,
+    maxTime: number,
+    maxLedger: number | undefined,
+  ): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let watchTimer: ReturnType<typeof setTimeout> | undefined;
+    let settled = false;
+    const toTimeBound = Math.max(0, maxTime * 1000 - this.now());
+    const timedOut = new Promise<"timeout" | "time-bound">((resolve) => {
+      timer =
+        this.onSignedTimeoutMs < toTimeBound
+          ? setTimeout(() => resolve("timeout"), this.onSignedTimeoutMs)
+          : setTimeout(() => resolve("time-bound"), toTimeBound);
+    });
+    // The ledger bound can come long before the time bound (a few ledgers against 60 s).
+    const pastLedger = new Promise<"ledger-bound">((resolve) => {
+      if (maxLedger === undefined) return;
+      watchTimer = setTimeout(async () => {
+        const deadlineMs = maxTime * 1000;
+        let seen = await this.clock.following(deadlineMs);
+        while (!settled && !this.pastLedgerBound(maxLedger, seen) && this.now() < deadlineMs)
+          seen = await this.clock.next(seen, deadlineMs);
+        if (this.pastLedgerBound(maxLedger, seen)) resolve("ledger-bound");
+      }, this.pollIntervalMs);
+    });
+    try {
+      const written = Promise.resolve().then(() => onSigned(hash)); // a synchronous throw too
+      const outcome = await Promise.race([written, timedOut, pastLedger]).catch(
+        (error: unknown) => {
+          throw new SignedHookError(
+            `onSigned failed, so ${hash} was not sent: ${error instanceof Error ? error.message : String(error)}`,
+            { cause: error },
+          );
+        },
+      );
+      if (outcome === "timeout")
+        throw new SignedHookError(
+          `onSigned did not finish in ${this.onSignedTimeoutMs} ms, so ${hash} was not sent`,
+        );
+      if (outcome === "time-bound")
+        throw new SignedHookError(
+          `onSigned did not finish by the time bound, so ${hash} was not sent`,
+        );
+      if (outcome === "ledger-bound")
+        throw new SignedHookError(
+          `onSigned did not finish by the ledger bound ${maxLedger}, so ${hash} was not sent`,
+        );
+    } finally {
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(watchTimer);
+    }
   }
 
   /** One status check per new ledger until the transaction is final or provably never will be. */
   private async confirm(
     channel: Channel,
-    hash: string,
-    txSequence: bigint,
-    maxTime: number,
+    { hash, txSequence, maxTime, maxLedger }: Prepared,
     uncertain: boolean,
-  ): Promise<SubmitResult> {
+  ): Promise<Outcome> {
     const base = { channel: channel.address };
     let seen = this.clock.current;
     for (;;) {
@@ -549,7 +744,10 @@ export class SettlementSubmitter {
         continue; // The transaction may still land; keep the sequence number and retry.
       }
       if (res.status === rpc.Api.GetTransactionStatus.NOT_FOUND) {
-        if (res.latestLedgerCloseTime > maxTime) {
+        if (
+          res.latestLedgerCloseTime > maxTime ||
+          this.pastLedgerBound(maxLedger, res.latestLedger)
+        ) {
           // It can no longer be applied. After an uncertain send the cached sequence may be
           // stale, and re-reading it is now safe.
           if (uncertain) channel.sequence = undefined;
@@ -596,6 +794,8 @@ function refusalReason(error: unknown): RefusalReason {
   if (error instanceof FeeLimitError) return "fee-limit";
   if (error instanceof SimulationCheckError) return "check";
   if (error instanceof QueueTimeoutError) return "queue-timeout";
+  if (error instanceof LedgerBoundError) return "ledger-bound";
+  if (error instanceof SignedHookError) return "on-signed";
   if (error instanceof NoChannelsError) return "no-channels";
   return "other";
 }

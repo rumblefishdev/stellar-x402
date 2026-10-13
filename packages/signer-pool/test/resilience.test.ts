@@ -276,7 +276,7 @@ describe("deadline and hooks", () => {
     const signed: [string, number][] = [];
     const sent: string[] = [];
     const res = await submitter.submit(call(), {
-      onSigned: (h) => signed.push([h, fake.calls.sendTransaction ?? 0]),
+      onSigned: (h) => void signed.push([h, fake.calls.sendTransaction ?? 0]),
       onSent: (h) => sent.push(h),
     });
     expect(res.status).toBe("success");
