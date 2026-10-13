@@ -1,9 +1,10 @@
-import { Address, FeeBumpTransaction, StrKey, xdr } from "@stellar/stellar-sdk";
+import { Address, FeeBumpTransaction, StrKey, rpc, xdr } from "@stellar/stellar-sdk";
 import { describe, expect, it, vi } from "vitest";
 import {
   LedgerBoundError,
   SettlementSubmitter,
   SignedHookError,
+  attemptsOf,
   keypairSigner,
   type SubmitterOptions,
   type TransactionSigner,
@@ -112,33 +113,100 @@ describe("onSigned", () => {
     expect(hashes[1]).toBe(res.hash);
     expect(hashes[0]).not.toBe(hashes[1]);
 
+    expect(res.attempts).toEqual([
+      { hash: hashes[0], sent: "yes" }, // refused with txBadSeq
+      { hash: hashes[1], sent: "yes" },
+    ]);
+
     fake.sequences.set(channels[0]!, 12_000n);
     const before = fake.sent.length;
-    let calls = 0;
-    await expect(
-      submitter.submit(call(), {
-        onSigned: async () => {
-          if (++calls === 2) throw new Error("store down");
+    const stored: string[] = [];
+    const error = await submitter
+      .submit(call(), {
+        onSigned: async (h) => {
+          stored.push(h);
+          if (stored.length === 2) throw new Error("store down");
         },
-      }),
-    ).rejects.toBeInstanceOf(SignedHookError);
+      })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SignedHookError);
     expect(fake.sent.length - before).toBe(1); // the first envelope only, rejected as txBadSeq
+    // The rejection says one envelope reached the network and the rebuild's did not.
+    expect(attemptsOf(error)).toEqual([
+      { hash: stored[0], sent: "yes" },
+      { hash: stored[1], sent: "no" },
+    ]);
   });
 
   it("gives up on a hook that never settles at the time bound, and sends nothing", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      const { fake, submitter } = setup({ timeoutSeconds: 30 });
+      const { fake, submitter } = setup({ timeoutSeconds: 30, onSignedTimeoutMs: 60_000 });
       const error = submitter
         .submit(call(), { onSigned: () => new Promise<void>(() => {}) })
         .catch((e: unknown) => e);
       await vi.advanceTimersByTimeAsync(30_000);
       expect(await error).toBeInstanceOf(SignedHookError);
+      expect((await error) as SignedHookError).toHaveProperty(
+        "message",
+        expect.stringMatching(/time bound/),
+      );
+      expect(attemptsOf(await error)).toEqual([{ hash: expect.any(String), sent: "no" }]);
       expect(fake.sent).toHaveLength(0);
       expect(submitter.stats()).toMatchObject({ busy: 0, refused: { "on-signed": 1 } });
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("gives up on a hook that never settles at the ledger bound, long before the time bound", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { fake, submitter } = setup({ timeoutSeconds: 600, onSignedTimeoutMs: 60_000 });
+      const maxLedger = fake.ledger + 3;
+      const error = submitter
+        .submit(call(), { maxLedger, onSigned: () => new Promise<void>(() => {}) })
+        .catch((e: unknown) => e);
+      // One poll interval in, the wait follows the ledger clock to the bound.
+      await vi.advanceTimersByTimeAsync(1000);
+      const e = await error;
+      expect(e).toBeInstanceOf(SignedHookError);
+      expect((e as SignedHookError).message).toMatch(/ledger bound/);
+      expect(fake.ledger).toBe(maxLedger);
+      expect(fake.sent).toHaveLength(0);
+      expect(submitter.stats()).toMatchObject({ busy: 0, refused: { "on-signed": 1 } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives up on a hook that never settles after onSignedTimeoutMs, 5 s by default", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { fake, submitter } = setup({ timeoutSeconds: 600 });
+      const error = submitter
+        .submit(call(), { onSigned: () => new Promise<void>(() => {}) })
+        .catch((e: unknown) => e);
+      let done = false;
+      void error.then(() => (done = true));
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(done).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await error).toBeInstanceOf(SignedHookError);
+      expect((await error) as SignedHookError).toHaveProperty(
+        "message",
+        expect.stringMatching(/5000 ms/),
+      );
+      expect(fake.sent).toHaveLength(0);
+      expect(submitter.stats()).toMatchObject({ busy: 0, refused: { "on-signed": 1 } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects an onSignedTimeoutMs that is not above 0", () => {
+    for (const onSignedTimeoutMs of [0, -1, Number.NaN])
+      expect(() => setup({ onSignedTimeoutMs })).toThrow(/onSignedTimeoutMs/);
   });
 
   it("reports expired, sending nothing, when the time bound passes while it runs", async () => {
@@ -217,8 +285,8 @@ describe("maxLedger", () => {
     const start = fake.ledger;
     const res = await submitter.submit(call(), { maxLedger: start + 3 });
     expect(res.status).toBe("expired");
-    // 600 s is 120 ledgers at 5 s; the ledger bound ended the wait after a few.
-    expect(fake.ledger - start).toBeLessThan(10);
+    // 600 s is 120 ledgers at 5 s; the ledger bound ended the wait as soon as it closed.
+    expect(fake.ledger).toBe(start + 3);
 
     // The sequence was not used, so the channel is reused at the same number.
     fake.stalled = false;
@@ -227,7 +295,63 @@ describe("maxLedger", () => {
     expect(inner(fake).sequence).toBe("1001");
   });
 
-  it("rebuilds a pipelined envelope with no spare ledger left, then refuses it", async () => {
+  it("waits for a transaction that lands in exactly maxLedger", async () => {
+    const { fake, submitter } = setup({ timeoutSeconds: 600 });
+    const maxLedger = fake.ledger + 3;
+    // The network includes nothing before maxLedger, and closes maxLedger only once the
+    // submitter has seen the transaction still missing in the ledger before it.
+    let missingBefore = false;
+    const getTransaction = fake.getTransaction.bind(fake);
+    fake.getTransaction = async (hash) => {
+      const res = await getTransaction(hash);
+      if (res.latestLedger === maxLedger - 1) missingBefore = true;
+      return res;
+    };
+    const close = fake.getLatestLedger.bind(fake);
+    fake.getLatestLedger = async () => {
+      if (fake.ledger === maxLedger - 1 && !missingBefore)
+        return {
+          id: String(fake.ledger),
+          sequence: fake.ledger,
+          protocolVersion: "29",
+          closeTime: String(fake.closeTime),
+        } as rpc.Api.GetLatestLedgerResponse;
+      fake.stalled = fake.ledger + 1 < maxLedger;
+      return close();
+    };
+    const res = await submitter.submit(call(), { maxLedger });
+    expect(missingBefore).toBe(true);
+    expect(res).toMatchObject({ status: "success", ledger: maxLedger });
+  });
+
+  it("stops resending once the ledger bound closes", async () => {
+    const { fake, submitter } = setup({ timeoutSeconds: 600 });
+    const maxLedger = fake.ledger + 3;
+    fake.sendScript = Array(20).fill("TRY_AGAIN_LATER");
+    const sentAt: number[] = [];
+    const send = fake.sendTransaction.bind(fake);
+    fake.sendTransaction = (tx) => {
+      sentAt.push(fake.ledger);
+      return send(tx);
+    };
+    const res = await submitter.submit(call(), { maxLedger });
+    expect(res.status).toBe("expired");
+    expect(res.errorCode).toBeUndefined(); // ended by the submitter, not by a txTooLate
+    expect(res.attempts).toEqual([{ hash: res.hash, sent: "no" }]); // never taken
+    // Retried on new ledgers, and never once the clock reached the bound.
+    expect(sentAt.length).toBeGreaterThan(1);
+    expect(sentAt.every((l) => l < maxLedger)).toBe(true);
+  });
+
+  it("marks an attempt whose sends all threw as unknown", async () => {
+    const { fake, submitter } = setup({ timeoutSeconds: 600 });
+    fake.sendScript = Array(20).fill("THROW");
+    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 3 });
+    expect(res.status).toBe("expired"); // confirmed by hash: it never landed
+    expect(res.attempts).toEqual([{ hash: res.hash, sent: "unknown" }]);
+  });
+
+  it("refuses a pipelined envelope with no spare ledger left, without simulating again", async () => {
     const events: string[] = [];
     const { fake, submitter } = setup({
       onEvent: (e) => {
@@ -243,8 +367,10 @@ describe("maxLedger", () => {
       .catch((e: unknown) => e);
     expect((await first).status).toBe("success");
     expect(await second).toBeInstanceOf(LedgerBoundError);
+    expect(attemptsOf(await second)).toEqual([]); // signed ahead, but never sent
     expect(events).toEqual(["prepared-ahead used=false"]);
     expect(fake.sent).toHaveLength(1);
+    expect(fake.calls.simulateTransaction).toBe(2); // the first call and the one prepared ahead
   });
 
   it("reports expired, not rejected, when the ledger bound passes between signing and sending", async () => {
@@ -257,7 +383,7 @@ describe("maxLedger", () => {
         for (let i = 0; i < 3; i++) await fake.getLatestLedger();
       },
     });
-    expect(res.status).toBe("expired");
+    expect(res).toMatchObject({ status: "expired", errorCode: "txTooLate" });
     expect(fake.sent).toHaveLength(1); // the network refused it with txTooLate
 
     // Nothing was applied, so the channel is reused at the same sequence.
