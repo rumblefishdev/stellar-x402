@@ -1,5 +1,6 @@
 import { lookup } from "node:dns";
-import { BlockList, isIP, type LookupFunction } from "node:net";
+import { isIP, type LookupFunction } from "node:net";
+import ipaddr from "ipaddr.js";
 import { Agent, fetch as undiciFetch } from "undici";
 import { ToolError } from "./results.js";
 
@@ -14,46 +15,17 @@ export interface SellerLimits {
 }
 
 /**
- * Loopback, private, link-local, carrier-grade NAT, benchmarking, multicast, reserved and unspecified
- * ranges: a host in one of these would make the buyer's machine call into its own network.
+ * Only an ordinary public address passes: `ipaddr.js` names every special range (private, loopback,
+ * link-local, multicast, reserved, unique-local, carrier-grade NAT, NAT64, 6to4, …) and calls a plain
+ * public one `unicast`. A range nobody listed is refused by default.
  */
-const PRIVATE = new BlockList();
-for (const [address, prefix] of [
-  ["0.0.0.0", 8],
-  ["10.0.0.0", 8],
-  ["100.64.0.0", 10],
-  ["127.0.0.0", 8],
-  ["169.254.0.0", 16],
-  ["172.16.0.0", 12],
-  ["192.168.0.0", 16],
-  ["192.0.0.0", 24],
-  ["198.18.0.0", 15],
-  ["224.0.0.0", 4],
-  ["240.0.0.0", 4],
-] as const) {
-  PRIVATE.addSubnet(address, prefix, "ipv4");
-}
-// IPv4-mapped (`::ffff:a.b.c.d`) addresses are matched against the IPv4 rules by `BlockList` itself;
-// NAT64 (64:ff9b::/96) and 6to4 (2002::/16) embed an IPv4 address that could be private.
-for (const [address, prefix] of [
-  // IPv4-compatible (`::a.b.c.d`, deprecated) and IPv4-translated (`::ffff:0:a.b.c.d`) forms, `::1`
-  // and `::` included.
-  ["::", 96],
-  ["::ffff:0:0:0", 96],
-  ["100::", 64],
-  ["2001::", 32],
-  ["fec0::", 10],
-  ["fc00::", 7],
-  ["fe80::", 10],
-  ["64:ff9b::", 96],
-  ["2002::", 16],
-  ["ff00::", 8],
-] as const) {
-  PRIVATE.addSubnet(address, prefix, "ipv6");
-}
-
-function isPrivate(ip: string): boolean {
-  return PRIVATE.check(ip, isIP(ip) === 6 ? "ipv6" : "ipv4");
+function isNotPublic(ip: string): boolean {
+  const address = ipaddr.process(ip);
+  // ipaddr.js calls the deprecated IPv4-compatible form (`::a.b.c.d`) `unicast`; it is not a public
+  // address, so it is refused too.
+  const ipv4Compatible =
+    address.kind() === "ipv6" && (address as ipaddr.IPv6).match(ipaddr.IPv6.parse("::"), 96);
+  return ipv4Compatible || address.range() !== "unicast";
 }
 
 /**
@@ -65,10 +37,10 @@ function isPrivate(ip: string): boolean {
 export const publicOnlyLookup: LookupFunction = (hostname, options, callback) => {
   lookup(hostname, { ...options, all: true }, (error, addresses) => {
     if (error) return callback(error, "");
-    if (addresses.some((a) => isPrivate(a.address))) {
+    if (addresses.some((a) => isNotPublic(a.address))) {
       const refused = new ToolError(
         "unsafe_url",
-        "The URL's host resolves to a loopback or private address.",
+        "The URL's host resolves to an address that is not public.",
       );
       return callback(refused as NodeJS.ErrnoException, "");
     }
@@ -76,9 +48,6 @@ export const publicOnlyLookup: LookupFunction = (hostname, options, callback) =>
     callback(null, addresses[0]!.address, addresses[0]!.family);
   });
 };
-
-/** Connections to sellers go through this, so every name is checked where it is connected to. */
-const PUBLIC_ONLY = new Agent({ connect: { lookup: publicOnlyLookup } });
 
 /**
  * https only, and no private IP address written in the URL: an address is connected to without a
@@ -90,8 +59,8 @@ export function checkUrl(raw: string, allowInsecureLocal: boolean): URL {
   if (allowInsecureLocal) return url;
   if (url.protocol !== "https:") throw new ToolError("unsafe_url", "Only https URLs are called.");
   const host = url.hostname.replace(/^\[|\]$/g, "");
-  const local = isIP(host) !== 0 && isPrivate(host);
-  if (local) throw new ToolError("unsafe_url", "The URL points at a loopback or private address.");
+  const local = isIP(host) !== 0 && isNotPublic(host);
+  if (local) throw new ToolError("unsafe_url", "The URL points at an address that is not public.");
   return url;
 }
 
@@ -108,6 +77,11 @@ export function checkBody(method: string, body: string | undefined): void {
  * the body arrives.
  */
 export function guardedFetch(limits: SellerLimits): typeof fetch {
+  // Every name is checked where it is connected to. undici's own `maxResponseSize` is not used: it
+  // counts the bytes on the wire, so a small gzip body that unpacks to gigabytes would pass it.
+  const dispatcher = new Agent({
+    connect: limits.allowInsecureLocal ? {} : { lookup: publicOnlyLookup },
+  });
   return async (input, init) => {
     const request = new Request(input, init);
     // Every request the payment wrapper makes passes here, so the guard holds whoever calls this.
@@ -120,7 +94,7 @@ export function guardedFetch(limits: SellerLimits): typeof fetch {
         body: request.body ? await request.arrayBuffer() : undefined,
         redirect: "manual",
         signal: AbortSignal.timeout(limits.timeoutMs),
-        dispatcher: limits.allowInsecureLocal ? undefined : PUBLIC_ONLY,
+        dispatcher,
       });
     } catch (error) {
       // A refusal from publicOnlyLookup comes back as the cause of undici's "fetch failed".
@@ -133,6 +107,7 @@ export function guardedFetch(limits: SellerLimits): typeof fetch {
         "The seller answered with a redirect, which is not followed.",
       );
     }
+    // Counted after decompression, as the body is read: the limit holds for what reaches the agent.
     const chunks: Uint8Array[] = [];
     let size = 0;
     try {
@@ -144,8 +119,8 @@ export function guardedFetch(limits: SellerLimits): typeof fetch {
         chunks.push(chunk);
       }
     } catch (error) {
-      // The timeout covers the body too: a seller that sends its headers and then stalls ends here.
       if (error instanceof ToolError) throw error;
+      // The timeout covers the body too: a seller that sends its headers and then stalls ends here.
       throw new ToolError(
         "upstream_error",
         "The seller's response did not arrive in full.",

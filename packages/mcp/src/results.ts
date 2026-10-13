@@ -29,12 +29,14 @@ export class ToolError extends Error {
   }
 }
 
+/**
+ * An error is text only: MCP clients check `structuredContent` against the tool's output schema even
+ * on an error, so the code travels as JSON in the text, `{"error":{"code":…,"message":…}}`.
+ */
 export function toolError(code: ErrorCode, message: string): CallToolResult {
-  const error = { code, message };
   return {
     isError: true,
-    content: [{ type: "text", text: JSON.stringify({ error }) }],
-    structuredContent: { error },
+    content: [{ type: "text", text: JSON.stringify({ error: { code, message } }) }],
   };
 }
 

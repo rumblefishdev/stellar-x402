@@ -33,6 +33,8 @@ async function connect() {
   }).connect(serverSide);
   client = new Client({ name: "test", version: "0.0.0" });
   await client.connect(clientSide);
+  // A real MCP client lists the tools first, and then checks results against their output schemas.
+  await client.listTools();
 }
 
 beforeEach(() => connect());
@@ -46,11 +48,10 @@ async function call(name: string, args: Record<string, unknown>) {
   const result = await client.callTool({ name, arguments: args });
   // Text content mirrors the structured result for clients that only read text.
   const [first] = result.content as { type: string; text: string }[];
-  expect(JSON.parse(first!.text)).toEqual(result.structuredContent);
-  return {
-    isError: result.isError,
-    structuredContent: result.structuredContent as unknown as Payload,
-  };
+  const data = JSON.parse(first!.text) as Payload;
+  // A result carries the same data as structured content; an error carries it as text only.
+  if (!result.isError) expect(data).toEqual(result.structuredContent);
+  return { isError: result.isError, structuredContent: data };
 }
 
 describe("list_resources", () => {
