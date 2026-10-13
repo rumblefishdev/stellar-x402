@@ -130,7 +130,7 @@ CREATE TABLE spend_scopes (scope text PRIMARY KEY, failures integer NOT NULL DEF
      a no-op.
   2. Insert any missing scope rows in sorted order, then lock them with
      `SELECT … ORDER BY scope FOR UPDATE`.
-  3. Sum each rolling window, `at > now - windowMs AND at <= now`.
+  3. Sum each rolling window, `at > now - windowMs` (0022 dropped the `at <= now` bound; see below).
   4. If any limit is exceeded, roll back and return that scope. Otherwise insert the
      reservation-scope rows.
 
@@ -153,7 +153,8 @@ CREATE TABLE spend_scopes (scope text PRIMARY KEY, failures integer NOT NULL DEF
 - `jsonb` reorders payload keys, so a fingerprint must never be recomputed from the stored payload.
   A `\u0000` in a payload makes the jsonb insert throw, while memory accepts it.
 - The spend window should be `at > now - windowMs` with no upper bound. A reservation stamped by an
-  ECS task whose clock runs ahead must still count.
+  ECS task whose clock runs ahead must still count. So must one on the same task that took `now`
+  first but lost the scope lock (applied in 0022).
 - `openBreaker` should keep the later `until` (`GREATEST`), so another ECS task can't close a
   breaker early.
 - `resource->'extensions' ? $key` also matches arrays and strings. Guard it with

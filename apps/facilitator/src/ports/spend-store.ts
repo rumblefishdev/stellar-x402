@@ -6,7 +6,11 @@ export type SpendScope = "global" | `payer:${string}` | `payTo:${string}` | `ass
 
 export interface SpendLimit {
   scope: SpendScope;
-  /** Most stroops that can be reserved or spent in the rolling window. */
+  /**
+   * Most stroops that can be reserved or spent in the rolling window: everything stamped after
+   * `now - windowMs`, including a reservation stamped after `now` (another task, or one that won
+   * the scope lock first).
+   */
   maxStroops: bigint;
   windowMs: number;
 }
@@ -34,7 +38,7 @@ export interface SpendStore {
   commit(id: string, feeCharged: bigint, now: number): Promise<void>;
   /** Drops a reservation that was never spent. */
   release(id: string): Promise<void>;
-  /** Stroops reserved or spent in the window ending at `now`, for alerts. */
+  /** Stroops reserved or spent after `now - windowMs`, for alerts. */
   used(scope: SpendScope, windowMs: number, now: number): Promise<bigint>;
 
   /** Counts an on-chain failure; resolves the consecutive failures for `scope`. */

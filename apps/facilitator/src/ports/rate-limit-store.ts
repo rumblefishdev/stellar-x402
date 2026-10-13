@@ -10,7 +10,8 @@ export interface RateLimitStore {
   /**
    * Counts one hit for `key` (e.g. `settle:ip:203.0.113.7`) in the window of `windowMs` that
    * contains `now`, atomically. `windowMs` is positive: it comes from `RATE_LIMIT_WINDOW_MS`,
-   * which the config schema holds at 1 s or more.
+   * which the config schema holds at 1 s or more. A hit whose window is older than the stored one
+   * (a caller with a lagging clock) counts in the stored window and keeps its `resetAt`.
    */
   hit(key: string, windowMs: number, now: number): Promise<RateLimitHit>;
 }
