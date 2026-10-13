@@ -160,9 +160,9 @@ and existing servers. Each line: what was decided and why.
   default): a longer one could be settled long after the agent got its answer.
 - **Buyer-side address guard for every seller request** (`get_resource` and `call_paid_http`):
   https only; the address a name resolves to is checked when the connection is made (an undici
-  Agent with its own lookup), and loopback, private, link-local, multicast and reserved
-  (non-documentation) addresses are refused, IP literals included; no automatic redirects; a time limit and a response size limit
-  counted while the body arrives; an `allowInsecureLocal` switch, off by default, only for the local
+  Agent with its own lookup), and only an ordinary public address passes (`ipaddr.js` names
+  every special range, documentation ones included), IP literals included; no automatic redirects;
+  a time limit and a response size limit counted after decompression while the body arrives; an `allowInsecureLocal` switch, off by default, only for the local
   test seller. https alone was not enough: an internal service can have a public name and a public
   certificate (W197, after the security review).
 - **Testnet only:** only a testnet scheme is registered, so a seller asking for pubnet gets
@@ -213,8 +213,9 @@ and existing servers. Each line: what was decided and why.
   default; README notes that the budget resets on restart and that a host with both public and
   private DNS records is refused.
 - **Libraries instead of own code, for PR C (W217, W219):** the private-address list becomes
-  `ipaddr.js` with "only `unicast` passes"; the streamed size cap becomes undici's
-  `maxResponseSize` (its error mapped to `response_too_large`); the CLI's env parsing uses `zod`.
+  `ipaddr.js` with "only `unicast` passes"; the CLI's env parsing uses `zod`. The streamed size cap
+  stays own code: undici's `maxResponseSize` counts bytes on the wire, so a 9,751-byte gzip body
+  that unpacks to 10 MB passed a 100,000-byte limit (measured in the PR #28 review).
 
 ## Out of scope
 
