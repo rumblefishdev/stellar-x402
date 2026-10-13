@@ -217,6 +217,9 @@ and existing servers. Each line: what was decided and why.
 - **Budget per process and per day (W235 C), in the PR after PR C:** the per-process budget stays;
   a daily budget is added, kept in a local file so a restart does not reset it.
   The file is updated under a lock, since parallel sessions run parallel processes.
+- **Tool schemas out of `server.ts` (W299 A), a `[structure only]` step, no PR yet:** the input and
+  output schemas of `get_resource` and `call_paid_http` move to `preview.ts` and `pay.ts`, as
+  `list_resources`' already live in `catalog.ts`; `server.ts` only registers.
 - **Comparison with existing x402 MCP servers.** A table of `nirholas/x402-bridge` and
   `jamesbachini/x402-mcp-stellar` against ours (networks, limits and budget, error codes, address
   guard, how seller text reaches the model), so the choice of an own server stays checkable.
