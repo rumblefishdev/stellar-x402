@@ -11,8 +11,9 @@ links:
   - https://github.com/x402-foundation/x402/blob/main/specs/CONTRIBUTING.md
   - https://github.com/x402-foundation/x402/blob/main/CONTRIBUTING.md
   - https://github.com/x402-foundation/x402/blob/main/specs/schemes/upto/scheme_upto.md
-  - ../../../docs/adr/0001-repo-layout.md
-  - ../../../docs/rfp/07-x402-facilitator-bazaar.md
+  - https://github.com/x402-foundation/x402/pull/3781
+  - ../../../../docs/adr/0001-repo-layout.md
+  - ../../../../docs/rfp/07-x402-facilitator-bazaar.md
 history:
   - date: "2026-10-08"
     status: backlog
@@ -32,6 +33,13 @@ history:
       Added the 0035 security review's rules for the spec and the client: the allowance window
       bound and the contract's 17,280-ledger cap (D11), and that the client never signs a
       simulated tree without comparing it to the terms. The proxy is now CAL7SBTO…V2VC.
+  - date: "2026-10-13"
+    status: active
+    who: okarcz
+    note: >
+      Spec PR x402-foundation/x402#3781 opened on 2026-10-12 from okarcz's fork, in place of the
+      issue: upstream proposes new schemes through the spec PR itself. Competing PRs #3098, #3134
+      and #3428 recorded; the first criterion now tracks maintainer acknowledgement on #3781.
 ---
 
 # Merge the Stellar upto scheme upstream: scheme_upto_stellar.md and the @x402/stellar classes
@@ -43,6 +51,13 @@ the matching `upto` classes merged into `x402-foundation/x402`. The RFP counts t
 once it is **merged**, not when it is proposed.
 
 **Lane:** Payments
+
+## Status: Active
+
+> Started 2026-10-08 on branch `lore-0034-upstream-upto-stellar`. The spec is upstream for review
+> as [x402-foundation/x402#3781](https://github.com/x402-foundation/x402/pull/3781) (opened
+> 2026-10-12, no maintainer review yet). The code PR waits on 0015. Drafts are in
+> [`drafts/`](drafts/).
 
 ## Context
 
@@ -182,11 +197,12 @@ it twice:
 
 ## Acceptance Criteria
 
-- [ ] An upstream issue proposes Stellar `upto`, and a maintainer or the Technical Steering
-  Committee has acknowledged it
+- [ ] A maintainer or the Technical Steering Committee has acknowledged the Stellar `upto`
+      proposal on the spec PR (#3781). It replaces the planned issue: upstream proposes new
+      schemes through the spec PR itself
 - [ ] `specs/schemes/upto/scheme_upto_stellar.md` is merged into `x402-foundation/x402`
 - [ ] The Stellar `upto` client, server and facilitator classes are merged into
-  `@x402/stellar`, with tests and a changeset
+      `@x402/stellar`, with tests and a changeset
 - [ ] The spec states that the design ships a Soroban contract and explains why
 - [ ] The monorepo depends on the published `@x402/stellar` with `upto`, not the local fork build
 - [ ] `docs/rfp/07-x402-facilitator-bazaar.md` matches the published RFP's `upto` wording
@@ -198,3 +214,91 @@ it twice:
 - **An audit or security review of UptoProxy:** maintainers may ask for one before merging code
   that moves value.
 - Step 1 can start now. Steps 2–4 follow 0005 and 0015.
+
+## Implementation Notes
+
+Local work so far, steps 1 and 2 as drafts. Nothing is sent upstream.
+
+- **Upstream checked** at `x402-foundation/x402` `7f2b2f1` (shallow clone, read-only): the
+  template, `scheme_upto.md`, `scheme_upto_evm.md`, `scheme_exact_stellar.md`, and the Stellar
+  `exact` client and facilitator (`maxTransactionFeeStroops` default 50,000; error reasons
+  `invalid_exact_stellar_*`).
+- [`drafts/scheme_upto_stellar.md`](drafts/scheme_upto_stellar.md): the network spec, in upstream
+  style (unwrapped lines, like `scheme_exact_stellar.md`). It covers every item of 0005's spec-input
+  list: requirements with `extra.facilitatorAddress`, the payload, the exact auth tree, verification,
+  settlement with zero settlement, fees, 15 error codes, security considerations including why a
+  contract is needed, and an appendix with the interface, errors, event, canonical deployments
+  and the 0004 testnet evidence.
+- [`drafts/issue-proposal.md`](drafts/issue-proposal.md): the step 1 issue. It states the problem,
+  why `exact` and plain allowances fall short, the approach and status, and asks maintainers four
+  questions: contract location, payload shape, a spec-pinned proxy address, and the PR split.
+
+- **Synced with 0035 (2026-10-12):** both drafts now match the deployed proxy `CAL7SBTO…V2VC`
+  (WASM `00a06b16…b79c`) and the 58/58 testnet run. The spec adds the TTL self-extension (an
+  Availability appendix with 518,400 / 120 / 720), the 17,280-ledger expiry cap with error #6 and
+  the `maxTimeoutSeconds` limit it implies, the verify MUSTs (`signatureExpirationLedger ==
+  allowance_expiration_ledger`, the allowance from the deadline's ledger to the window, `from` not
+  a facilitator address), the client's refusal to sign a simulated tree that differs from the
+  terms, the network's close time instead of a fixed 5 s (CAP-0070), a required settled-nonce
+  record for zero settlements, the rent breakdown and fee numbers, and the seller's credit risk in
+  the security section.
+
+### Upstream spec PR (2026-10-12)
+
+- **[x402-foundation/x402#3781](https://github.com/x402-foundation/x402/pull/3781)**, "docs(specs):
+  add upto scheme for Stellar": one signed commit (`f31b9d9e`) adding
+  `specs/schemes/upto/scheme_upto_stellar.md`, byte-identical to
+  [`drafts/scheme_upto_stellar.md`](drafts/scheme_upto_stellar.md) (blob `eddeea8`). Opened from
+  okarcz's personal fork `karczuRF/x402`, branch `feature/upto-stellar-spec`, with maintainer
+  edits allowed. Labels `specs` and `stellar`; no review or maintainer comment as of 2026-10-13.
+  Vercel's preview deploy waits for a Coinbase team member, as for any outside contributor.
+- **No issue was opened.** Upstream takes new schemes through the spec PR, so the issue's content
+  went into the PR description. [`drafts/issue-proposal.md`](drafts/issue-proposal.md) stays as
+  the source of the four maintainer questions, which can still go in as a first comment.
+- **Competing PRs** for the same file, all open with no reviews: #3098 (Eras256, stateful nonce
+  and profiles), #3134 (Iam0TI, stateless) and #3428 (davedumto, interoperability requirements).
+  #3781's description names all three and offers to converge. AutoLayer, another RFP respondent,
+  said it won't open a competing spec PR.
+
+## Design Decisions
+
+### Planned
+
+- **okarcz confirmed emerged decisions 1, 2 and 4 on 2026-10-12:** the payload is the signed
+  entry alone, the proxy address is pinned in the spec, and the spec suggests an `upto` fee
+  ceiling of about 500,000 plus a keeper for the accepted tokens' instances. Decisions 1 and 2
+  remain open questions to the maintainers in the issue.
+
+### Emerged
+
+1. **Payload is the signed entry alone** (`payload.authorization`, base64
+   `SorobanAuthorizationEntry`), not `exact`'s `payload.transaction`. Every signed argument can be
+   read from the entry, and a client-built transaction would add source, fee and sequence fields
+   the facilitator must ignore. This closes item 1 of 0005's spec-input list for the draft; it is
+   question 2 to the maintainers.
+2. **Proxy address pinned in the spec**, not a requirements field, like EVM's fixed
+   `x402UptoPermit2Proxy`. A resource server must not be able to point a client's `approve` at
+   another contract.
+3. **The client may skip simulation.** The tree is fully determined by the requirements, so the
+   client can build it directly (as the 0004 suite's `clientSignDirect` does); simulating with the
+   facilitator as source stays an option for preflight.
+4. **Fee ceiling note**: the spec says `exact`'s 50,000-stroop default is too low for `upto`
+   because of rent, and suggests a separate `upto` ceiling of about 500,000 plus keeping the
+   accepted tokens' instances extended, as 0015 plans (330,032 measured in 0035 when a SAC
+   instance extends itself in the same settlement; up to about 480,000 extrapolated).
+5. **Links point to `develop`** in our public repo. ADR 0010, the testnet report and the threat
+   model are all on develop since PR #14 merged.
+6. **Task converted to a directory** to hold the drafts.
+7. **The spec PR comes from the personal fork** `karczuRF/x402`, not an org fork: the commit must
+   be signed by its author, and an org fork can still carry the code PR later (ADR 0001).
+
+## Open
+
+- **#3781:** answer maintainer review when it comes; ask through the Technical Steering Committee,
+  or SDF's board seat, if it stalls. Optionally post the four maintainer questions as a first
+  comment and point #3098 and #3134 at #3781.
+- **Code PR:** the `upto` classes wait on 0015. The org fork of `x402-foundation/x402` (ADR 0001)
+  can be created for it.
+- The mainnet deployment row stays TBD until there is one (and a decision on the deployer key,
+  0026).
+- `docs/rfp/07` wording: only with okarcz's go-ahead.

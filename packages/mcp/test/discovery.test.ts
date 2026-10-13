@@ -25,7 +25,12 @@ async function connect() {
   logs = [];
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   const log = (message: string) => logs.push(message);
-  await createServer({ discoveryUrl: catalog.url, timeoutMs: 500, log }).connect(serverSide);
+  await createServer({
+    discoveryUrl: catalog.url,
+    timeoutMs: 500,
+    maxResponseBytes: 1_000,
+    log,
+  }).connect(serverSide);
   client = new Client({ name: "test", version: "0.0.0" });
   await client.connect(clientSide);
 }
@@ -146,9 +151,9 @@ describe("createServer", () => {
   it.each([[""], ["not a url"]])(
     "refuses the discovery URL %j instead of using another catalog",
     (url) => {
-      expect(() => createServer({ discoveryUrl: url, timeoutMs: 500, log: () => {} })).toThrow(
-        "discoveryUrl is not a URL",
-      );
+      expect(() =>
+        createServer({ discoveryUrl: url, timeoutMs: 500, maxResponseBytes: 1_000, log: () => {} }),
+      ).toThrow("discoveryUrl is not a URL");
     },
   );
 });
