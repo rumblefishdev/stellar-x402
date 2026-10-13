@@ -77,9 +77,9 @@ export function checkBody(method: string, body: string | undefined): void {
  * the body arrives.
  */
 export function guardedFetch(limits: SellerLimits): typeof fetch {
-  // Every name is checked where it is connected to, and undici stops reading a body over the limit.
+  // Every name is checked where it is connected to. undici's own `maxResponseSize` is not used: it
+  // counts the bytes on the wire, so a small gzip body that unpacks to gigabytes would pass it.
   const dispatcher = new Agent({
-    maxResponseSize: limits.maxResponseBytes,
     connect: limits.allowInsecureLocal ? {} : { lookup: publicOnlyLookup },
   });
   return async (input, init) => {
@@ -99,9 +99,6 @@ export function guardedFetch(limits: SellerLimits): typeof fetch {
     } catch (error) {
       // A refusal from publicOnlyLookup comes back as the cause of undici's "fetch failed".
       if (error instanceof Error && error.cause instanceof ToolError) throw error.cause;
-      if (tooLarge(error)) {
-        throw new ToolError("response_too_large", "The seller's response is too large.");
-      }
       throw new ToolError("upstream_error", "The request to the seller failed.", String(error));
     }
     if (response.status >= 300 && response.status < 400) {
@@ -110,13 +107,19 @@ export function guardedFetch(limits: SellerLimits): typeof fetch {
         "The seller answered with a redirect, which is not followed.",
       );
     }
-    let bytes: ArrayBuffer;
+    // Counted after decompression, as the body is read: the limit holds for what reaches the agent.
+    const chunks: Uint8Array[] = [];
+    let size = 0;
     try {
-      bytes = await response.arrayBuffer();
-    } catch (error) {
-      if (tooLarge(error)) {
-        throw new ToolError("response_too_large", "The seller's response is too large.");
+      for await (const chunk of response.body ?? []) {
+        size += chunk.byteLength;
+        if (size > limits.maxResponseBytes) {
+          throw new ToolError("response_too_large", "The seller's response is too large.");
+        }
+        chunks.push(chunk);
       }
+    } catch (error) {
+      if (error instanceof ToolError) throw error;
       // The timeout covers the body too: a seller that sends its headers and then stalls ends here.
       throw new ToolError(
         "upstream_error",
@@ -125,13 +128,7 @@ export function guardedFetch(limits: SellerLimits): typeof fetch {
       );
     }
     // A 204 or 304 must not be given a body, not even an empty one.
-    const body = bytes.byteLength === 0 ? null : bytes;
+    const body = size === 0 ? null : Buffer.concat(chunks);
     return new Response(body, { status: response.status, headers: [...response.headers] });
   };
-}
-
-/** undici's own size limit, reported directly or as the cause of a failed fetch or read. */
-function tooLarge(error: unknown): boolean {
-  const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
-  return (cause as { code?: string } | undefined)?.code === "UND_ERR_RES_EXCEEDED_MAX_SIZE";
 }

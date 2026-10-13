@@ -1,3 +1,6 @@
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { gzipSync } from "node:zlib";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const undiciFetch = vi.hoisted(() => vi.fn());
@@ -43,5 +46,24 @@ describe("guardedFetch", () => {
     undiciFetch.mockRejectedValue(new TypeError("fetch failed", { cause: refused }));
     const limits = { timeoutMs: 1_000, maxResponseBytes: 1_000, allowInsecureLocal: false };
     await expect(guardedFetch(limits)("https://seller.example/x")).rejects.toBe(refused);
+  });
+
+  it("counts the size after decompression, so a small gzip body cannot unpack past the limit", async () => {
+    const { fetch: realFetch } = await vi.importActual<typeof import("undici")>("undici");
+    undiciFetch.mockImplementation(realFetch);
+    // About 10 kB on the wire, 10 MB unpacked.
+    const packed = gzipSync(Buffer.alloc(10_000_000, 97));
+    const seller = createServer((_req, res) => {
+      res.writeHead(200, { "content-encoding": "gzip", "content-type": "text/plain" });
+      res.end(packed);
+    });
+    await new Promise<void>((done) => seller.listen(0, "127.0.0.1", done));
+    const url = `http://127.0.0.1:${(seller.address() as AddressInfo).port}/`;
+    const limits = { timeoutMs: 5_000, maxResponseBytes: 100_000, allowInsecureLocal: true };
+    try {
+      await expect(guardedFetch(limits)(url)).rejects.toMatchObject({ code: "response_too_large" });
+    } finally {
+      seller.close();
+    }
   });
 });
