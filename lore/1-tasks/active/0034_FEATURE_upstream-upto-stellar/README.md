@@ -11,6 +11,7 @@ links:
   - https://github.com/x402-foundation/x402/blob/main/specs/CONTRIBUTING.md
   - https://github.com/x402-foundation/x402/blob/main/CONTRIBUTING.md
   - https://github.com/x402-foundation/x402/blob/main/specs/schemes/upto/scheme_upto.md
+  - https://github.com/x402-foundation/x402/pull/3781
   - ../../../../docs/adr/0001-repo-layout.md
   - ../../../../docs/rfp/07-x402-facilitator-bazaar.md
 history:
@@ -32,6 +33,13 @@ history:
       Added the 0035 security review's rules for the spec and the client: the allowance window
       bound and the contract's 17,280-ledger cap (D11), and that the client never signs a
       simulated tree without comparing it to the terms. The proxy is now CAL7SBTO…V2VC.
+  - date: "2026-10-13"
+    status: active
+    who: okarcz
+    note: >
+      Spec PR x402-foundation/x402#3781 opened on 2026-10-12 from okarcz's fork, in place of the
+      issue: upstream proposes new schemes through the spec PR itself. Competing PRs #3098, #3134
+      and #3428 recorded; the first criterion now tracks maintainer acknowledgement on #3781.
 ---
 
 # Merge the Stellar upto scheme upstream: scheme_upto_stellar.md and the @x402/stellar classes
@@ -46,9 +54,10 @@ once it is **merged**, not when it is proposed.
 
 ## Status: Active
 
-> Started 2026-10-08 on branch `lore-0034-upstream-upto-stellar`, cut from
-> `lore-0005-upto-proxy-docs` (PR #12). Rebased onto develop on 2026-10-12, after 0005 and 0035
-> merged. No PR yet. Drafts are in [`drafts/`](drafts/).
+> Started 2026-10-08 on branch `lore-0034-upstream-upto-stellar`. The spec is upstream for review
+> as [x402-foundation/x402#3781](https://github.com/x402-foundation/x402/pull/3781) (opened
+> 2026-10-12, no maintainer review yet). The code PR waits on 0015. Drafts are in
+> [`drafts/`](drafts/).
 
 ## Context
 
@@ -188,8 +197,9 @@ it twice:
 
 ## Acceptance Criteria
 
-- [ ] An upstream issue proposes Stellar `upto`, and a maintainer or the Technical Steering
-      Committee has acknowledged it
+- [ ] A maintainer or the Technical Steering Committee has acknowledged the Stellar `upto`
+      proposal on the spec PR (#3781). It replaces the planned issue: upstream proposes new
+      schemes through the spec PR itself
 - [ ] `specs/schemes/upto/scheme_upto_stellar.md` is merged into `x402-foundation/x402`
 - [ ] The Stellar `upto` client, server and facilitator classes are merged into
       `@x402/stellar`, with tests and a changeset
@@ -233,6 +243,23 @@ Local work so far, steps 1 and 2 as drafts. Nothing is sent upstream.
   record for zero settlements, the rent breakdown and fee numbers, and the seller's credit risk in
   the security section.
 
+### Upstream spec PR (2026-10-12)
+
+- **[x402-foundation/x402#3781](https://github.com/x402-foundation/x402/pull/3781)**, "docs(specs):
+  add upto scheme for Stellar": one signed commit (`f31b9d9e`) adding
+  `specs/schemes/upto/scheme_upto_stellar.md`, byte-identical to
+  [`drafts/scheme_upto_stellar.md`](drafts/scheme_upto_stellar.md) (blob `eddeea8`). Opened from
+  okarcz's personal fork `karczuRF/x402`, branch `feature/upto-stellar-spec`, with maintainer
+  edits allowed. Labels `specs` and `stellar`; no review or maintainer comment as of 2026-10-13.
+  Vercel's preview deploy waits for a Coinbase team member, as for any outside contributor.
+- **No issue was opened.** Upstream takes new schemes through the spec PR, so the issue's content
+  went into the PR description. [`drafts/issue-proposal.md`](drafts/issue-proposal.md) stays as
+  the source of the four maintainer questions, which can still go in as a first comment.
+- **Competing PRs** for the same file, all open with no reviews: #3098 (Eras256, stateful nonce
+  and profiles), #3134 (Iam0TI, stateless) and #3428 (davedumto, interoperability requirements).
+  #3781's description names all three and offers to converge. AutoLayer, another RFP respondent,
+  said it won't open a competing spec PR.
+
 ## Design Decisions
 
 ### Planned
@@ -262,11 +289,16 @@ Local work so far, steps 1 and 2 as drafts. Nothing is sent upstream.
 5. **Links point to `develop`** in our public repo. ADR 0010, the testnet report and the threat
    model are all on develop since PR #14 merged.
 6. **Task converted to a directory** to hold the drafts.
+7. **The spec PR comes from the personal fork** `karczuRF/x402`, not an org fork: the commit must
+   be signed by its author, and an org fork can still carry the code PR later (ADR 0001).
 
-## Open Before Anything Goes Upstream
+## Open
 
-- Create the fork of `x402-foundation/x402` in our org (ADR 0001); it doesn't exist yet.
-- Review both drafts, fill the issue's placeholders (fork link, audit status, AI-use disclosure),
-  then open the issue.
+- **#3781:** answer maintainer review when it comes; ask through the Technical Steering Committee,
+  or SDF's board seat, if it stalls. Optionally post the four maintainer questions as a first
+  comment and point #3098 and #3134 at #3781.
+- **Code PR:** the `upto` classes wait on 0015. The org fork of `x402-foundation/x402` (ADR 0001)
+  can be created for it.
 - The mainnet deployment row stays TBD until there is one (and a decision on the deployer key,
   0026).
+- `docs/rfp/07` wording: only with okarcz's go-ahead.
