@@ -311,7 +311,8 @@ graph TD
 - **Prevents:** paying the fee for a transaction whose authorization expires before it can land.
 - **Rule:**
   - A payload whose auth expiration ledger is less than `minValidityLedgers` ahead of the current ledger is rejected.
-  - The transaction's time bound never extends past the auth expiry. This needs a `maxLedger` submit option in `signer-pool`, a T1 prerequisite.
+  - The transaction never stays valid past the auth expiry. `signer-pool`'s `maxLedger` submit option (task 0016) sets the expiry ledger as the envelope's ledger bound, next to its time bound.
+  - `signer-pool` keeps one spare ledger: it refuses, after simulation, a call that could land only in the ledger after the one simulated. So `minValidityLedgers` must be at least 2 plus the expected wait for a channel, or a payload `/verify` accepts can fail at `/settle` with `LedgerBoundError` after a simulation.
 
 ## Consistency Conventions
 

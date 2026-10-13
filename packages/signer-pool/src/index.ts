@@ -29,12 +29,21 @@ export {
 } from "./stats.js";
 export {
   FeeLimitError,
+  LedgerBoundError,
   SettlementSubmitter,
+  SignedHookError,
   SimulationCheckError,
   SimulationError,
+  attemptsOf,
   type ContractCall,
   type FeeEscalation,
   type SubmitOptions,
   type SubmitterOptions,
 } from "./submitter.js";
-export type { SorobanRpc, SubmitResult, SubmitStatus, TransactionSigner } from "./types.js";
+export type {
+  Attempt,
+  SorobanRpc,
+  SubmitResult,
+  SubmitStatus,
+  TransactionSigner,
+} from "./types.js";

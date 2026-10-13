@@ -16,7 +16,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.1",
     "@stellar-x402/sdk": "workspace:*",
-    "@x402/mcp": "~2.27.0",
+    "@x402/mcp": "~2.28.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {}

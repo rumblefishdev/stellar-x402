@@ -1,8 +1,18 @@
 import type { SubmitResult, SubmitStatus } from "./types.js";
 
-/** Why a submission ended before anything was sent. */
+/**
+ * Why a submission ended without a result. Usually nothing was sent; after a `txBadSeq` rebuild an
+ * earlier envelope for the same call was (see `onSigned`).
+ */
 export type RefusalReason =
-  "simulation" | "check" | "fee-limit" | "queue-timeout" | "no-channels" | "other";
+  | "simulation"
+  | "check"
+  | "fee-limit"
+  | "ledger-bound"
+  | "queue-timeout"
+  | "no-channels"
+  | "on-signed"
+  | "other";
 
 export type SubmitterEvent =
   /** The network accepted the transaction (`PENDING` or `DUPLICATE`). */
@@ -32,8 +42,8 @@ export type SubmitterEvent =
   /** A submission ended with a result; `queuedMs` is the wait for a free channel. */
   | { type: "final"; result: SubmitResult; queuedMs: number; totalMs: number }
   /**
-   * A submission ended with an error before anything was sent. `channel` is missing when no
-   * channel was acquired.
+   * A submission ended with an error instead of a result (see {@link RefusalReason}). `channel` is
+   * missing when no channel was acquired.
    */
   | { type: "refused"; channel?: string; reason: RefusalReason; message: string };
 
@@ -73,8 +83,10 @@ export class SubmitterStats {
     simulation: 0,
     check: 0,
     "fee-limit": 0,
+    "ledger-bound": 0,
     "queue-timeout": 0,
     "no-channels": 0,
+    "on-signed": 0,
     other: 0,
   };
   private sequenceResyncs = 0;
