@@ -26,22 +26,29 @@ export interface FakeSeller {
    * What the seller answers to a signed retry: settled; refused by its facilitator; no settlement
    * header; 402 again without a settlement; a settlement without a transaction; no answer in time.
    */
-  settle: "success" | "rejected" | "missing" | "refused" | "no-transaction" | "slow";
+  settle: "success" | "rejected" | "missing" | "refused" | "no-transaction" | "slow" | "error";
   /** Status of a settled answer. */
   paidStatus: number;
   /** The resource description in the 402 answer. */
   description: string;
   /** The `error` field of the 402 answer. */
   termsError?: string;
+  /** `extensions.bazaar.schema` of the 402 answer. */
+  inputSchema?: unknown;
   contentType: string;
   body: string;
   /** Payment payloads received, in order. */
   payments: unknown[];
+  /** Request bodies received, in order. */
+  bodies: string[];
   close(): Promise<void>;
 }
 
 export async function startFakeSeller(): Promise<FakeSeller> {
-  const server: Server = createServer((req, res) => {
+  const server: Server = createServer(async (req, res) => {
+    let received = "";
+    for await (const chunk of req) received += String(chunk);
+    seller.bodies.push(received);
     const url = new URL(req.url ?? "/", "http://localhost");
     if (url.pathname === "/free") {
       res.writeHead(200, { "content-type": seller.contentType }).end(seller.body);
@@ -49,6 +56,15 @@ export async function startFakeSeller(): Promise<FakeSeller> {
     }
     if (url.pathname === "/slow") {
       setTimeout(() => res.writeHead(200).end("{}"), 1_000);
+      return;
+    }
+    if (url.pathname === "/stall") {
+      // Headers, then part of the body, then nothing.
+      res.writeHead(200, { "content-type": "text/plain" }).write("part");
+      return;
+    }
+    if (url.pathname === "/empty-terms") {
+      res.writeHead(402, { "payment-required": Buffer.from("{}").toString("base64") }).end();
       return;
     }
     if (url.pathname === "/missing") {
@@ -94,6 +110,7 @@ export async function startFakeSeller(): Promise<FakeSeller> {
               input: { type: "http", method: "GET", queryParams: { city: "Warsaw" } },
               output: { type: "json", example: { tempC: 14 } },
             },
+            schema: seller.inputSchema,
           },
         },
       };
@@ -104,6 +121,10 @@ export async function startFakeSeller(): Promise<FakeSeller> {
     if (seller.settle === "slow") return;
     if (seller.settle === "missing") {
       res.writeHead(200, { "content-type": seller.contentType }).end(seller.body);
+      return;
+    }
+    if (seller.settle === "error") {
+      res.writeHead(502).end();
       return;
     }
     if (seller.settle === "refused") {
@@ -138,6 +159,7 @@ export async function startFakeSeller(): Promise<FakeSeller> {
     contentType: "application/json",
     body: '{"tempC":14}',
     payments: [],
+    bodies: [],
     close: () =>
       new Promise((resolve) => {
         server.close(() => resolve());

@@ -15,8 +15,11 @@ export interface PaidResponse {
   status: number;
   contentType: string | null;
   body: string;
-  /** Present when a payment was made and settled. */
-  payment?: { transaction: string; network: string; asset: string; amount: string };
+  /**
+   * Present when a payment was sent. `transaction` is null when the seller answered without a
+   * settlement it could show: the response is still what was paid for.
+   */
+  payment?: { transaction: string | null; network: string; asset: string; amount: string };
 }
 
 /** What every call has paid so far, per asset; shared by all calls of one process. */
@@ -58,13 +61,16 @@ export async function callPaidHttp(
       return { abort: true, reason: refusal.code };
     }
     // Counted as spent now, in the same synchronous step as the check, so two calls at once cannot
-    // both pass; never given back, so a seller cannot get it back into the budget by claiming failure.
+    // both pass. Once signed it is never given back, so a seller cannot return it to the budget by
+    // claiming the payment failed.
     spent.set(offer.asset, already + amount);
     paid = { network: offer.network, asset: offer.asset, amount };
   });
-  // Nothing was sent: signing failed (an unfunded payer fails here, in simulation).
+  // Nothing was sent: signing failed (an unfunded payer fails here, in simulation), so the amount
+  // goes back to the budget.
   client.onPaymentCreationFailure(async ({ error }) => {
     signingError = error;
+    if (paid) spent.set(paid.asset, (spent.get(paid.asset) ?? 0n) - paid.amount);
   });
 
   const pay = wrapFetchWithPayment(guardedFetch(limits.maxResponseBytes, limits.timeoutMs), client);
@@ -116,13 +122,19 @@ export async function callPaidHttp(
 
   const body = await response.text();
   const contentType = response.headers.get("content-type")?.slice(0, LIMITS.mimeTypeChars) ?? null;
-  if (!paid) return { status: response.status, contentType, body };
+  if (!paid) {
+    if (response.ok) return { status: response.status, contentType, body };
+    if (response.status === 404) {
+      throw new ToolError("resource_not_found", "The seller has no resource at this URL.");
+    }
+    throw new ToolError("upstream_error", `The seller answered ${response.status}.`);
+  }
   let settle;
   try {
     settle = new x402HTTPClient(client).getPaymentSettleResponse((name) =>
       response.headers.get(name),
     );
-  } catch (error) {
+  } catch {
     // A seller that answers 402 again without a settlement refused the payment before settling it.
     if (response.status === 402) {
       throw new ToolError(
@@ -131,13 +143,8 @@ export async function callPaidHttp(
         body.slice(0, 500),
       );
     }
-    throw new ToolError(
-      "payment_unknown",
-      "The payment's outcome is unknown; it counts as spent.",
-      String(error),
-    );
   }
-  if (!settle.success) {
+  if (settle && !settle.success) {
     throw new ToolError(
       "payment_rejected",
       "The seller's facilitator refused the payment.",
@@ -145,10 +152,13 @@ export async function callPaidHttp(
     );
   }
   // A Stellar transaction hash is 64 hex characters; anything else is not a settlement we can show.
-  if (!/^[0-9a-f]{64}$/i.test(settle.transaction)) {
+  const transaction =
+    settle && /^[0-9a-f]{64}$/i.test(settle.transaction) ? settle.transaction : null;
+  if (transaction === null && !response.ok) {
     throw new ToolError(
       "payment_unknown",
-      "The seller reported a settlement without a transaction.",
+      "The payment's outcome is unknown; it counts as spent.",
+      `status ${response.status} without a settlement`,
     );
   }
   return {
@@ -156,7 +166,7 @@ export async function callPaidHttp(
     contentType,
     body,
     payment: {
-      transaction: settle.transaction,
+      transaction,
       network: paid.network,
       asset: paid.asset,
       amount: paid.amount.toString(),

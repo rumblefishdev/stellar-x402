@@ -1,6 +1,7 @@
 import { BlockList, isIP } from "node:net";
-import { LIMITS } from "@stellar-x402/bazaar";
+import { isSchemaWithinLimits, LIMITS } from "@stellar-x402/bazaar";
 import { decodePaymentRequiredHeader } from "@x402/core/http";
+import { PaymentRequiredV2Schema } from "@x402/core/schemas";
 import type { PaymentRequired } from "@x402/core/types";
 import { ToolError } from "./results.js";
 
@@ -52,7 +53,8 @@ export function checkUrl(raw: string, allowInsecureLocal: boolean): URL {
   const url = new URL(raw);
   if (allowInsecureLocal) return url;
   if (url.protocol !== "https:") throw new ToolError("unsafe_url", "Only https URLs are called.");
-  const host = url.hostname.replace(/^\[|\]$/g, "");
+  // `localhost.` is the same host as `localhost`: a name may end with the root's dot.
+  const host = url.hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "");
   const family = isIP(host);
   const local =
     host === "localhost" ||
@@ -85,12 +87,22 @@ export function guardedFetch(maxResponseBytes: number, timeoutMs: number): typeo
     }
     const chunks: Uint8Array[] = [];
     let size = 0;
-    for await (const chunk of response.body ?? []) {
-      size += chunk.byteLength;
-      if (size > maxResponseBytes) {
-        throw new ToolError("response_too_large", "The seller's response is too large.");
+    try {
+      for await (const chunk of response.body ?? []) {
+        size += chunk.byteLength;
+        if (size > maxResponseBytes) {
+          throw new ToolError("response_too_large", "The seller's response is too large.");
+        }
+        chunks.push(chunk);
       }
-      chunks.push(chunk);
+    } catch (error) {
+      // The timeout covers the body too: a seller that sends its headers and then stalls ends here.
+      if (error instanceof ToolError) throw error;
+      throw new ToolError(
+        "upstream_error",
+        "The seller's response did not arrive in full.",
+        String(error),
+      );
     }
     // A 204 or 304 must not be given a body, not even an empty one.
     const body = size === 0 ? null : Buffer.concat(chunks);
@@ -100,15 +112,20 @@ export function guardedFetch(maxResponseBytes: number, timeoutMs: number): typeo
 
 /**
  * What a seller asks for a resource, read from its 402 answer to an unpaid request: the payment terms
- * and the seller's own description of how to call it and what it returns. Nothing is signed.
+ * and the seller's own description of how to call it and what it returns. Nothing is signed. The
+ * request is real: on a method and path the seller does not charge for, the seller runs it.
  */
 export async function previewPayment(
-  request: { url: string; method: string },
+  request: { url: string; method: string; body?: string },
   limits: SellerLimits,
 ): Promise<{ status: number; paymentRequired: PaymentRequired | null }> {
   const url = checkUrl(request.url, limits.allowInsecureLocal);
+  // A price can depend on the body (e.g. how many results are asked for), so the body is sent too.
+  const headers = request.body === undefined ? undefined : { "content-type": "application/json" };
   const response = await guardedFetch(limits.maxResponseBytes, limits.timeoutMs)(url, {
     method: request.method,
+    headers,
+    body: request.body,
   });
   if (response.ok) return { status: response.status, paymentRequired: null };
   if (response.status === 404) {
@@ -128,6 +145,24 @@ export async function previewPayment(
       "unsupported_payment",
       "The seller's 402 carries no payment terms this server can read.",
       String(error),
+    );
+  }
+  // Decoding checks the encoding only; the upstream schema checks the shape.
+  const parsed = PaymentRequiredV2Schema.safeParse(paymentRequired);
+  if (!parsed.success) {
+    throw new ToolError(
+      "unsupported_payment",
+      "The seller's 402 carries no payment terms this server can read.",
+      parsed.error.message,
+    );
+  }
+  // The terms come in a header, which Node's HTTP client caps at 16 KiB; inside that, the input
+  // schema gets the depth and size bounds our catalog puts on a listing.
+  const bazaar = paymentRequired.extensions?.bazaar as { schema?: unknown } | undefined;
+  if (!isSchemaWithinLimits(bazaar?.schema)) {
+    throw new ToolError(
+      "unsupported_payment",
+      "The seller's input schema is over the catalog's limits.",
     );
   }
   // The seller writes these; keep its free text short before it reaches the model.

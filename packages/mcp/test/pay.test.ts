@@ -158,7 +158,23 @@ describe("call_paid_http", () => {
   it.each([
     ["no settlement header", "missing"],
     ["a settlement without a transaction", "no-transaction"],
+  ] as const)(
+    "returns what was paid for, without a transaction, when the paid answer has %s",
+    async (_, settle) => {
+      seller.settle = settle;
+      const result = await pay();
+      expect(result.status).toBe(200);
+      expect(JSON.parse(result.body)).toEqual({ tempC: 14 });
+      expect(result.payment).toMatchObject({ transaction: null, amount: "10000" });
+      expect(logs.join()).toContain("no settlement it could show");
+      seller.settle = "success";
+      expect((await pay()).error.code).toBe("over_budget");
+    },
+  );
+
+  it.each([
     ["no answer in time", "slow"],
+    ["an error status without a settlement", "error"],
   ] as const)("returns payment_unknown when the paid retry gets %s", async (_, settle) => {
     await reconnect({}, { timeoutMs: 300 });
     seller.settle = settle;
@@ -166,6 +182,20 @@ describe("call_paid_http", () => {
     expect(seller.payments).toHaveLength(1);
     seller.settle = "success";
     expect((await pay()).error.code).toBe("over_budget");
+  });
+
+  it.each([
+    ["/missing", "resource_not_found"],
+    ["/broken", "upstream_error"],
+    ["/empty-terms", "unsupported_payment"],
+  ])("returns a code, not a response, for an unpaid answer from %s", async (path, code) => {
+    expect((await pay(path)).error.code).toBe(code);
+    expect(seller.payments).toHaveLength(0);
+  });
+
+  it("returns upstream_error when the seller stops sending its response before paying", async () => {
+    await reconnect({}, { timeoutMs: 300 });
+    expect((await pay("/stall")).error.code).toBe("upstream_error");
   });
 
   it.each([
@@ -181,6 +211,8 @@ describe("call_paid_http", () => {
       expect(result.error.message).not.toContain(cause);
       expect(logs.join()).toContain(cause);
       expect(seller.payments).toHaveLength(0);
+      // Nothing was sent, so the amount went back: 10,000 of 15,000 fits again.
+      expect((await pay()).payment).toBeDefined();
     },
   );
 
@@ -201,6 +233,7 @@ describe("call_paid_http", () => {
     ["http://127.0.0.1/forecast"],
     ["https://127.0.0.1/forecast"],
     ["https://localhost/forecast"],
+    ["https://localhost./forecast"],
     ["https://api.localhost/forecast"],
     ["https://[::1]/forecast"],
     ["https://169.254.169.254/latest"],
@@ -280,9 +313,36 @@ describe("get_resource", () => {
     ["/missing", "resource_not_found"],
     ["/broken", "upstream_error"],
     ["/no-terms", "unsupported_payment"],
+    ["/empty-terms", "unsupported_payment"],
     ["/redirect", "unsafe_url"],
   ])("returns a code for %s", async (path, code) => {
     expect((await preview(path)).error.code).toBe(code);
+  });
+
+  it("refuses an input schema deeper than the catalog allows", async () => {
+    let schema: Record<string, unknown> = { type: "string" };
+    for (let i = 0; i < 12; i++) schema = { type: "object", properties: { a: schema } };
+    seller.inputSchema = schema;
+    expect((await preview()).error.code).toBe("unsupported_payment");
+  });
+
+  it("returns upstream_error for terms larger than an HTTP header can carry", async () => {
+    seller.description = "d".repeat(40_000);
+    expect((await preview()).error.code).toBe("upstream_error");
+  });
+
+  it("returns upstream_error when the seller stops sending its response", async () => {
+    await reconnect({}, { timeoutMs: 300 });
+    expect((await preview("/stall")).error.code).toBe("upstream_error");
+  });
+
+  it("sends the body, for a price that depends on it", async () => {
+    await client.callTool({
+      name: "get_resource",
+      arguments: { url: `${seller.url}/forecast`, method: "POST", body: '{"days":3}' },
+    });
+    expect(seller.bodies.at(-1)).toBe('{"days":3}');
+    expect(seller.payments).toHaveLength(0);
   });
 
   it("refuses an unsafe URL without calling it", async () => {
