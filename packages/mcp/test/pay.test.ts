@@ -1,7 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { SchemeNetworkClient } from "@x402/core/types";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer, type PaymentConfig } from "../src/index.js";
 import {
   fakeScheme,
@@ -279,6 +279,36 @@ describe("call_paid_http", () => {
     expect(performance.now() - started).toBeLessThan(300 + 150);
     expect(seller.payments).toHaveLength(0);
     // 10,000 of a 15,000 budget fits again: the late signature was never sent.
+    expect((await pay()).payment).toBeDefined();
+  });
+
+  it("does not send a payment signed after the deadline passed, and gives the amount back", async () => {
+    const deadline = new AbortController();
+    vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    await reconnect(
+      {},
+      {
+        scheme: {
+          scheme: "exact",
+          // The signature is ready just as the deadline passes: signing wins the race, and the paid
+          // request is the first to see the deadline gone.
+          createPaymentPayload(x402Version, requirements) {
+            const signed = Promise.resolve({
+              x402Version,
+              payload: { amount: requirements.amount },
+            });
+            deadline.abort();
+            return signed;
+          },
+        },
+      },
+    );
+    try {
+      expect((await pay()).error.code).toBe("upstream_error");
+    } finally {
+      vi.restoreAllMocks();
+    }
+    expect(seller.payments).toHaveLength(0);
     expect((await pay()).payment).toBeDefined();
   });
 

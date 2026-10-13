@@ -77,6 +77,11 @@ export async function callPaidHttp(
   let refusal: ToolError | undefined;
   let paid: { network: string; asset: string; amount: bigint } | undefined;
   let signingError: Error | undefined;
+  // True once the request carrying the signed payment has been handed to the network.
+  let paymentSent = false;
+  const giveBack = () => {
+    if (paid) spent.set(paid.asset, (spent.get(paid.asset) ?? 0n) - paid.amount);
+  };
 
   // Of the seller's offers, keep those in an allowed asset, with a short enough authorization, within
   // the per-call limit and the remaining budget; the library pays the first one left.
@@ -124,10 +129,26 @@ export async function callPaidHttp(
   // deadline, so the amount goes back to the budget.
   client.onPaymentCreationFailure(async ({ error }) => {
     signingError = error;
-    if (paid) spent.set(paid.asset, (spent.get(paid.asset) ?? 0n) - paid.amount);
+    giveBack();
   });
 
-  const pay = wrapFetchWithPayment(guardedFetch(limits, deadline), client);
+  const sellerFetch = guardedFetch(limits, deadline);
+  const pay = wrapFetchWithPayment(async (input, init) => {
+    const outgoing = new Request(input, init);
+    if (outgoing.headers.has("PAYMENT-SIGNATURE")) {
+      // Past the deadline the request would be refused before it connects: nothing is sent, so this
+      // is a refusal with the amount given back, not a payment of unknown outcome.
+      if (deadline.aborted) {
+        giveBack();
+        throw new ToolError(
+          "upstream_error",
+          "The time limit passed before the payment was sent; nothing was sent.",
+        );
+      }
+      paymentSent = true;
+    }
+    return sellerFetch(outgoing);
+  }, client);
   let response: Response;
   try {
     response = await pay(url, {
@@ -136,7 +157,7 @@ export async function callPaidHttp(
       body: request.body,
     });
   } catch (error) {
-    if (paid && !signingError) {
+    if (paymentSent) {
       // The signed payment left this process; whether the seller settled it is unknown.
       const detail =
         error instanceof ToolError
