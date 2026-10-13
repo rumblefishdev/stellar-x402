@@ -5,7 +5,7 @@ type: RESEARCH
 status: active
 milestone: 1
 related_adr: ["0003", "0006", "0007", "0008", "0011"]
-related_tasks: ["0012", "0009", "0014"]
+related_tasks: ["0012", "0009", "0014", "0039"]
 tags: [facilitator, persistence, bazaar, priority-high, effort-small, discovery]
 links:
   - ../../../../docs/adr/0003-settlement-channel-account-pool.md
@@ -79,11 +79,14 @@ Options raised in the session:
 The store is closely tied to hosting, so the research should note what each option needs from
 the host.
 
-From 0014 ([ADR 0011](../../../../docs/adr/0011-facilitator-hosting.md)): the host is ECS on
-Fargate in AWS. RDS PostgreSQL fits: db.t4g.micro single-AZ on testnet (~$17/mo with storage),
-db.t4g.small Multi-AZ on mainnet (~$68/mo). SQLite
-doesn't: Fargate's only persistent volume is EFS, an NFS mount that SQLite advises against, so
-SQLite would move the facilitator to EC2 with EBS.
+From 0039 ([ADR 0011](../../../../docs/adr/0011-facilitator-hosting.md), revised): the facilitator
+runs on the company Hetzner server, so PostgreSQL runs as a container per network on that server
+instead of RDS.
+- The schema, adapter rules and migrations of ADR 0012 hold.
+- Backups (a daily base backup and a WAL archive off the server), upgrades and restore drills are
+  ours.
+- ClickHouse on the same server is not a fit: no enforced unique keys, no conditional updates and
+  no transactions.
 
 ## Implementation Plan
 

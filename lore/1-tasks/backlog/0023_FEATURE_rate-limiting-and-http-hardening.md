@@ -36,7 +36,7 @@ As a facilitator operator, I want per-route rate limits and basic HTTP hardening
 - One rate-limit middleware with per-route budgets, keyed by trusted-proxy IP or API key.
 - Body size limit and CORS policy in `http/`.
 - A short doc on caller authentication and limits.
-- From 0014 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md)): behind the ALB, `TRUSTED_PROXY_HOPS` is 1.
+- From 0014 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md)): behind Caddy, `TRUSTED_PROXY_HOPS` is 1 (0039).
   - Implement it as Express's numeric `trust proxy` (`app.set("trust proxy", hops)`): 1 takes the
     rightmost `X-Forwarded-For` entry, and 0 the socket address.
   - Test both.

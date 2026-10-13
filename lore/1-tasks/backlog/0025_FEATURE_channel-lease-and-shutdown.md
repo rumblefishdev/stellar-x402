@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 milestone: 1
 related_adr: ["0006", "0011"]
-related_tasks: ["0012", "0009", "0019", "0022", "0014"]
+related_tasks: ["0012", "0009", "0019", "0022", "0014", "0039"]
 tags: [facilitator, signer-pool, operations, priority-high, effort-small, payments]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -36,18 +36,18 @@ As a facilitator operator, I want only one process at a time to settle through a
 - Lease acquire, renew and release through the store port (fake first, real adapter from 0022).
 - Shutdown handler that drains the pool.
 - Tests for a second process, a crash and a clean stop.
-- From 0014 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md)): ECS takes the task out of the ALB for 100 s before SIGTERM,
-  so in-flight HTTP has finished; Fargate then sends SIGKILL 120 s after SIGTERM, a hard limit.
-  The drain must finish within about 110 s:
-  - refuse every call not yet signed and sent: waiting for a channel, prepared ahead, or still
+- From 0039 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md), revised for the Hetzner server): a deploy stops the old
+  container first. Docker sends SIGTERM, then SIGKILL after `stop_grace_period` 180 s. There's no
+  load-balancer deregistration, so on SIGTERM the process itself:
+  - answers new `/settle` with 503 and lets open requests finish (90 s budget);
+  - refuses every call not yet signed and sent: waiting for a channel, prepared ahead, or still
     reading a sequence. The pool can't cancel those today, so signer-pool needs a `close()` that
     rejects them;
-  - wait until sent submissions are final or recorded as pending, then release the lease.
+  - waits until sent submissions are final or recorded as pending, then releases the lease.
 - From 0014: `GET /health` never looks at the lease. `/settle` answers 503 at once until the
   process holds the lease and the 0019 startup reconciliation has finished. A process without the
   lease keeps trying to take it and never exits; one whose renewal fails stops new submissions
-  until it holds the lease again. ECS may start the new task while the old one is still
-  deregistering, so the lease, not ECS, keeps them apart.
+  until it holds the lease again. The lease, not the deploy order, keeps two processes apart.
 
 ## Acceptance Criteria
 
@@ -56,4 +56,4 @@ As a facilitator operator, I want only one process at a time to settle through a
 - [ ] Given a shutdown signal, when the process stops, then it refuses new `/settle` calls, waits until every in-flight submission is final or recorded as pending, then releases the lease
 - [ ] Given a process that dies without releasing, when the lease TTL passes, then a new process can take the lease
 - [ ] Given a process without the lease or still reconciling, when `/settle` is called, then it answers 503 at once, and the process keeps trying to take the lease without exiting (ADR 0011)
-- [ ] Given a shutdown signal with calls still waiting for a channel, when the process drains, then those calls are refused unsent and the drain finishes within 110 s (ADR 0011)
+- [ ] Given a shutdown signal with calls still waiting for a channel, when the process drains, then those calls are refused unsent and the drain finishes within the 180 s stop grace period (ADR 0011)

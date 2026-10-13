@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 milestone: 1
 related_adr: ["0011"]
-related_tasks: ["0012", "0014", "0022", "0017", "0020"]
+related_tasks: ["0012", "0014", "0022", "0017", "0020", "0036", "0039"]
 tags: [facilitator, deploy, priority-high, effort-medium, platform]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -34,59 +34,43 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 
 - Dockerfile, image build and the deploy trigger from 0014.
 - Secrets and stores configured on the platform; runbook updated.
-- From 0014 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md)), the service: ECS on Fargate in the account
-  that runs sorobanscan and the Prices API.
-  - One service, `desiredCount` 1, `minimumHealthyPercent` 0, `maximumPercent` 100,
-    `stopTimeout` 120.
-  - The circuit breaker rolls back, with a threshold of one failed task (`thresholdConfiguration`;
-    use the ECS API if CDK doesn't expose it yet).
-  - The ALB is HTTPS only, with `SslPolicy.RECOMMENDED_TLS` or newer, idle timeout 120 s and
-    deregistration delay 100 s.
-  - The target health check is `/health` every 10 s, 2 checks to pass and 3 to fail.
-  - `TRUSTED_PROXY_HOPS=1`.
-  - Node `keepAliveTimeout` is 125 s, with `headersTimeout` above it.
-- From 0014, the image:
-  - `pnpm deploy --prod` with `injectWorkspacePackages: true` in `pnpm-workspace.yaml`;
-  - `"files": ["dist"]` in `apps/facilitator/package.json` and a `.dockerignore` that excludes
-    `.env*`;
-  - `node:22-slim` pinned by digest, user `node`, read-only root filesystem, ECS Exec off;
-  - one ECR repository for both networks: immutable SHA tags, scan on push, a lifecycle rule
-    that keeps rollback images. The workflow skips the build when the SHA exists.
-- From 0014, the infrastructure: CDK with its own bootstrap qualifier.
-  - An infra stack (VPC, ALB, certificate, DNS, KMS key, roles), applied by a person.
-  - A service stack (task definition and service, image digest as a parameter), applied by the
-    workflow. Its execution policy covers only ECS, its log group and passing the two roles.
-  - No `amazon-ecs-deploy-task-definition`: the service stack is the only owner of the task
-    definition.
-- From 0014, the workflow:
-  - an OIDC role that trusts only `refs/heads/develop` and may push to ECR, deploy the testnet
-    service stack and pass only the testnet roles;
+- From 0039 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md), revised): Docker Compose on the company Hetzner server
+  (`ch-prod-01`, x86_64), project `x402`, owned by its own Linux user, apart from ClickHouse's
+  `app` project.
+  - `facilitator-testnet`: memory limit 512 MiB, one CPU, `restart: unless-stopped`,
+    `stop_grace_period` 180 s, healthcheck on `/health` every 10 s, no published port.
+  - `postgres-testnet`: PostgreSQL 18, memory limit 1 GiB, data on a volume, reachable only from
+    the facilitator.
+  - Node `keepAliveTimeout` 125 s, with `headersTimeout` above it; `TRUSTED_PROXY_HOPS=1`.
+- From 0039, the image: `pnpm deploy --prod` with `injectWorkspacePackages: true`;
+  `"files": ["dist"]` in `apps/facilitator/package.json` and a `.dockerignore` that excludes
+  `.env*`; `node:22-slim` pinned by digest, `linux/amd64`, user `node`, read-only root filesystem.
+  Images go to GHCR, tagged with the git SHA; the workflow skips the build when the SHA exists.
+- From 0039, the deploy:
+  - GitHub Actions connects over SSH as a deploy user whose key runs one forced command, a deploy
+    script in `deploy/`;
+  - the script pulls the image and runs the migration task (ADR 0012), then stops the old
+    container, starts the new one and waits for `ready: true` from `/health`;
   - it runs on a push to `develop` unless only `lore/**`, `docs/**` or Markdown changed, and by
     hand, in a `concurrency` group;
-  - actions are pinned by commit SHA. `permissions: {}` is set at the top, and the deploy job
-    gets only `id-token: write` and `contents: read`;
-  - before the service update, it runs the one-off migration task from ADR 0012 (task 0013),
-    and the deploy role may run it;
-  - the last step waits for `ready: true` from `/health`.
-- From 0014, secrets:
-  - `FACILITATOR_SECRET` is a SecureString under `/x402/testnet/`, created by hand with
-    `aws ssm put-parameter`;
-  - it is encrypted with the testnet KMS key, whose policy gives `kms:Decrypt` only to the task
-    execution role;
-  - a keyed RPC URL and the database credentials go the same way.
-- From 0014: `GET /health` answers 200 and reports `ready` in its body.
-- From 0014, the runbook: deploy, rollback (redeploy an earlier SHA) and key rotation as an
-  on-chain signer change.
-- From 0014, prerequisites:
-  - a `rumblefish.dev` subdomain (proposed `testnet.x402.rumblefish.dev`), as a record in the
-    company zone or a delegated subzone, with Route 53 access;
-  - the region (eu-central-1 assumed).
-
-  There is no CloudFront fallback.
+  - actions are pinned by commit SHA, with minimal token permissions, and the SSH key is an
+    environment secret.
+- From 0039, keys and secrets:
+  - the facilitator signs through the testnet AWS KMS key (0036, a prerequisite);
+  - the server gets short-lived AWS credentials through IAM Roles Anywhere;
+  - the database password and any keyed RPC URL are files of mode 0600, mounted as Compose
+    secrets.
+- From 0039: backups of `postgres-testnet` go off the server (a daily base backup and a WAL
+  archive), with a restore drill.
+- From 0039: the Caddy site block for the subdomain is agreed with the owner of the ClickHouse
+  project, and an A record in Route 53 points at the server.
+- From 0039: `GET /health` answers 200 and reports `ready` in its body.
+- From 0039, the runbook: deploy, rollback (redeploy an earlier digest), key rotation as an
+  on-chain signer change, and restoring the service on another machine.
 
 ## Acceptance Criteria
 
 - [ ] Given the platform chosen in the 0014 ADR, when a deploy runs, then a container image built from the repo is deployed to it as the ADR describes, and the service answers `/supported` at a public HTTPS URL
 - [ ] Given a running instance, when a new version is deployed, then the old process stops before the new one starts; the process is long-lived and never scaled to zero
-- [ ] Given the facilitator key, when the service is deployed, then it comes from the platform's secret store, never from the image or the logs, and is a testnet-only key
+- [ ] Given the facilitator key, when the service is deployed, then it signs through the testnet KMS key, and the key never reaches the server, the image or the logs (ADR 0011)
 - [ ] Given the durable stores from 0022, when the service runs, then it uses them, and `docs/runbook.md` has the deploy and rollback steps
