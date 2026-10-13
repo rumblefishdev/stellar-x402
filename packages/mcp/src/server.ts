@@ -15,7 +15,7 @@ export interface ServerConfig {
   timeoutMs: number;
   /** Refuse a seller response body larger than this. */
   maxResponseBytes: number;
-  /** Also allow `http` to this machine (localhost, 127.0.0.0/8, ::1): only for a seller run locally in tests. */
+  /** Also allow `http` to this machine (localhost, *.localhost, 127.0.0.0/8, ::1): only for a seller run locally in tests. */
   allowInsecureLocal?: boolean;
   /** Receives the cause of every failure; the agent only gets an error code and a short message. */
   log: (message: string) => void;
