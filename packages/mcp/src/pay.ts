@@ -2,7 +2,7 @@ import { LIMITS } from "@stellar-x402/bazaar";
 import { x402Client, x402HTTPClient, type SchemeRegistration } from "@x402/core/client";
 import { wrapFetchWithPayment } from "@x402/fetch";
 import { ToolError } from "./results.js";
-import { checkUrl, guardedFetch, type SellerLimits } from "./seller.js";
+import { checkBody, checkUrl, guardedFetch, type SellerLimits } from "./seller.js";
 
 export interface PaymentConfig {
   /** Scheme clients holding the buyer's key; the CLI registers `ExactStellarScheme` for testnet only. */
@@ -22,6 +22,12 @@ export interface PaidResponse {
   payment?: { transaction: string | null; network: string; asset: string; amount: string };
 }
 
+/**
+ * The longest a seller may keep our signed payment valid: 300 s is the `@x402/express` default (seen in
+ * the 402 of examples/http-api). A longer one could be settled long after the agent got its answer.
+ */
+const MAX_AUTHORIZATION_SECONDS = 300;
+
 /** What every call has paid so far, per asset; shared by all calls of one process. */
 export type Spent = Map<string, bigint>;
 
@@ -30,8 +36,10 @@ export async function callPaidHttp(
   config: PaymentConfig,
   spent: Spent,
   limits: SellerLimits,
+  log: (message: string) => void,
 ): Promise<PaidResponse> {
   const url = checkUrl(request.url, limits.allowInsecureLocal);
+  checkBody(request.method, request.body);
 
   // One client per call, so its hooks know which payment is this call's.
   const client = x402Client.fromConfig({ schemes: config.schemes, spendControls: false });
@@ -39,19 +47,33 @@ export async function callPaidHttp(
   let paid: { network: string; asset: string; amount: bigint } | undefined;
   let signingError: Error | undefined;
 
-  // Of the seller's offers, keep those in an allowed asset and within the per-call limit; the library
-  // pays the first one left.
+  // Of the seller's offers, keep those in an allowed asset, with a short enough authorization, within
+  // the per-call limit and the remaining budget; the library pays the first one left.
   client.registerPolicy((_version, offers) => {
-    const allowed = offers.filter((offer) => config.assets[offer.asset]);
-    const affordable = allowed.filter(
+    const allowed = offers.filter((offer) => Object.hasOwn(config.assets, offer.asset));
+    const shortLived = allowed.filter(
+      (offer) => offer.maxTimeoutSeconds <= MAX_AUTHORIZATION_SECONDS,
+    );
+    const affordable = shortLived.filter(
       (offer) => BigInt(offer.amount) <= config.assets[offer.asset]!.maxPerCall,
+    );
+    const inBudget = affordable.filter(
+      (offer) =>
+        (spent.get(offer.asset) ?? 0n) + BigInt(offer.amount) <= config.assets[offer.asset]!.budget,
     );
     if (allowed.length === 0) {
       refusal = new ToolError("asset_not_allowed", "The seller asks for an asset not allowed.");
+    } else if (shortLived.length === 0) {
+      refusal = new ToolError(
+        "unsupported_payment",
+        `The seller wants the payment valid for more than ${MAX_AUTHORIZATION_SECONDS} s.`,
+      );
     } else if (affordable.length === 0) {
       refusal = new ToolError("over_price_limit", "The price is over the per-call limit.");
+    } else if (inBudget.length === 0) {
+      refusal = new ToolError("over_budget", "The payment would exceed the budget.");
     }
-    return affordable;
+    return inBudget;
   });
   client.onBeforePaymentCreation(async ({ selectedRequirements: offer }) => {
     const amount = BigInt(offer.amount);
@@ -60,8 +82,9 @@ export async function callPaidHttp(
       refusal = new ToolError("over_budget", "The payment would exceed the budget.");
       return { abort: true, reason: refusal.code };
     }
-    // Counted as spent now, in the same synchronous step as the check, so two calls at once cannot
-    // both pass. Once signed it is never given back, so a seller cannot return it to the budget by
+    // The policy already kept offers within the budget, and today it runs in the same synchronous
+    // step as this hook; the check stays here, where the amount is counted, so two calls at once
+    // cannot both pass even if the library puts an await in between. Once signed it is never given back, so a seller cannot return it to the budget by
     // claiming the payment failed.
     spent.set(offer.asset, already + amount);
     paid = { network: offer.network, asset: offer.asset, amount };
@@ -73,7 +96,7 @@ export async function callPaidHttp(
     if (paid) spent.set(paid.asset, (spent.get(paid.asset) ?? 0n) - paid.amount);
   });
 
-  const pay = wrapFetchWithPayment(guardedFetch(limits.maxResponseBytes, limits.timeoutMs), client);
+  const pay = wrapFetchWithPayment(guardedFetch(limits), client);
   let response: Response;
   try {
     response = await pay(url, {
@@ -98,7 +121,8 @@ export async function callPaidHttp(
     if (refusal) throw refusal;
     if (signingError) {
       // The payer's simulation fails in the asset contract: #10 is a balance too low, #13 a missing
-      // trustline (measured on testnet: `HostError: Error(Contract, #13)` for an account without USDC).
+      // trustline (both measured on testnet: `#13` for an account without a USDC trustline, `#10` for one
+      // with a trustline and no USDC).
       if (/Error\(Contract, #(10|13)\)/.test(String(signingError))) {
         throw new ToolError(
           "insufficient_funds",
@@ -112,12 +136,19 @@ export async function callPaidHttp(
         String(signingError),
       );
     }
-    // The seller's 402 named no network, scheme or price this server can pay with.
-    throw new ToolError(
-      "unsupported_payment",
-      "The seller asks for a payment this server cannot make.",
-      String(error),
-    );
+    // wrapFetchWithPayment adds these prefixes when it cannot read the seller's 402 or finds no offer
+    // this server can pay with (an unregistered network, scheme or version). Anything else is a bug.
+    if (
+      error instanceof Error &&
+      /^Failed to (parse payment requirements|create payment payload):/.test(error.message)
+    ) {
+      throw new ToolError(
+        "unsupported_payment",
+        "The seller asks for a payment this server cannot make.",
+        error.message,
+      );
+    }
+    throw error;
   }
 
   const body = await response.text();
@@ -134,7 +165,10 @@ export async function callPaidHttp(
     settle = new x402HTTPClient(client).getPaymentSettleResponse((name) =>
       response.headers.get(name),
     );
-  } catch {
+  } catch (error) {
+    if (response.headers.has("PAYMENT-RESPONSE")) {
+      log(`call_paid_http: ${url} sent a settlement that cannot be read (${String(error)})`);
+    }
     // A seller that answers 402 again without a settlement refused the payment before settling it.
     if (response.status === 402) {
       throw new ToolError(
@@ -154,6 +188,9 @@ export async function callPaidHttp(
   // A Stellar transaction hash is 64 hex characters; anything else is not a settlement we can show.
   const transaction =
     settle && /^[0-9a-f]{64}$/i.test(settle.transaction) ? settle.transaction : null;
+  if (transaction === null && response.ok) {
+    log(`call_paid_http: paid ${url} but the seller sent no settlement it could show`);
+  }
   if (transaction === null && !response.ok) {
     throw new ToolError(
       "payment_unknown",

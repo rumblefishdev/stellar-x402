@@ -117,6 +117,55 @@ describe("call_paid_http", () => {
     expect(seller.payments).toHaveLength(1);
   });
 
+  it.each([
+    ["GET", "call_paid_http"],
+    ["GET", "get_resource"],
+  ])(
+    "returns invalid_input for a %s with a body in %s, without calling the seller",
+    async (method, name) => {
+      const result = await client.callTool({
+        name,
+        arguments: { url: `${seller.url}/forecast`, method, body: "{}" },
+      });
+      expect((result.structuredContent as unknown as Paid).error.code).toBe("invalid_input");
+      expect(seller.bodies).toHaveLength(0);
+    },
+  );
+
+  it("refuses an asset name that is only a property of every object", async () => {
+    seller.asset = "constructor";
+    expect((await pay()).error.code).toBe("asset_not_allowed");
+  });
+
+  it("refuses a payment the seller wants valid for longer than 300 s", async () => {
+    seller.maxTimeoutSeconds = 301;
+    expect((await pay()).error.code).toBe("unsupported_payment");
+    expect(seller.payments).toHaveLength(0);
+    seller.maxTimeoutSeconds = 300;
+    expect((await pay()).payment).toBeDefined();
+  });
+
+  it("pays in another allowed asset when the first one's budget is spent", async () => {
+    await reconnect({
+      assets: {
+        [USDC]: { maxPerCall: 20_000n, budget: 15_000n },
+        COTHER: { maxPerCall: 10n, budget: 100n },
+      },
+    });
+    seller.otherOffers = [{ asset: USDC, amount: "10000" }];
+    seller.asset = "COTHER";
+    seller.price = "1";
+    expect((await pay()).payment).toMatchObject({ asset: USDC });
+    expect((await pay()).payment).toMatchObject({ asset: "COTHER", amount: "1" });
+  });
+
+  it("logs why a settlement header cannot be read, and returns what was paid for", async () => {
+    seller.settle = "garbled";
+    const result = await pay();
+    expect(result.payment).toMatchObject({ transaction: null });
+    expect(logs.join()).toContain("cannot be read");
+  });
+
   it("refuses an asset that is not allowed", async () => {
     seller.asset = "CSOMEOTHERTOKEN";
     expect((await pay()).error.code).toBe("asset_not_allowed");
@@ -237,6 +286,8 @@ describe("call_paid_http", () => {
     ["https://api.localhost/forecast"],
     ["https://[::1]/forecast"],
     ["https://169.254.169.254/latest"],
+    ["https://224.0.0.1/forecast"],
+    ["https://[ff02::1]/forecast"],
     ["https://[::ffff:7f00:1]/forecast"],
     ["https://[::ffff:10.0.0.1]/forecast"],
     ["not a url"],

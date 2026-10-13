@@ -20,13 +20,23 @@ export interface FakeSeller {
   price: string;
   asset: string;
   network: string;
+  /** How long the seller asks our signed payment to stay valid. */
+  maxTimeoutSeconds: number;
   /** Offers listed before the main one, in other assets or at other prices. */
   otherOffers: { asset: string; amount: string }[];
   /**
    * What the seller answers to a signed retry: settled; refused by its facilitator; no settlement
    * header; 402 again without a settlement; a settlement without a transaction; no answer in time.
    */
-  settle: "success" | "rejected" | "missing" | "refused" | "no-transaction" | "slow" | "error";
+  settle:
+    | "success"
+    | "rejected"
+    | "missing"
+    | "refused"
+    | "no-transaction"
+    | "slow"
+    | "error"
+    | "garbled";
   /** Status of a settled answer. */
   paidStatus: number;
   /** The resource description in the 402 answer. */
@@ -100,7 +110,7 @@ export async function startFakeSeller(): Promise<FakeSeller> {
             amount,
             asset,
             payTo: "GSELLERA",
-            maxTimeoutSeconds: 60,
+            maxTimeoutSeconds: seller.maxTimeoutSeconds,
             extra: { areFeesSponsored: true },
           }),
         ),
@@ -121,6 +131,10 @@ export async function startFakeSeller(): Promise<FakeSeller> {
     if (seller.settle === "slow") return;
     if (seller.settle === "missing") {
       res.writeHead(200, { "content-type": seller.contentType }).end(seller.body);
+      return;
+    }
+    if (seller.settle === "garbled") {
+      res.writeHead(200, { "payment-response": "not base64 json" }).end(seller.body);
       return;
     }
     if (seller.settle === "error") {
@@ -152,6 +166,7 @@ export async function startFakeSeller(): Promise<FakeSeller> {
     price: "10000",
     asset: USDC,
     network: "stellar:testnet",
+    maxTimeoutSeconds: 60,
     otherOffers: [],
     settle: "success",
     paidStatus: 200,

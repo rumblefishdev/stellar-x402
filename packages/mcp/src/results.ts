@@ -2,6 +2,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 /** Closed set of error codes; an agent branches on `error.code`, never on the message. */
 export type ErrorCode =
   | "upstream_error"
+  | "invalid_input"
   | "resource_not_found"
   | "unsafe_url"
   | "unsupported_payment"
