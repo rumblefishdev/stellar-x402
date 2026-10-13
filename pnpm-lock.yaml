@@ -115,21 +115,27 @@ importers:
 
   examples/http-api:
     dependencies:
-      '@stellar-x402/sdk':
-        specifier: workspace:*
-        version: link:../../packages/sdk
+      '@stellar/stellar-sdk':
+        specifier: ^16.3.0
+        version: 16.3.0
+      '@x402/core':
+        specifier: ~2.28.0
+        version: 2.28.0
       '@x402/express':
         specifier: ~2.28.0
         version: 2.28.0(express@5.2.1)(typescript@6.0.3)
-      '@x402/fetch':
+      '@x402/extensions':
         specifier: ~2.28.0
-        version: 2.28.0
+        version: 2.28.0(typescript@6.0.3)
       '@x402/stellar':
         specifier: ~2.28.0
         version: 2.28.0
       express:
         specifier: ^5.2.1
         version: 5.2.1
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
     devDependencies:
       '@types/express':
         specifier: ^5.0.6

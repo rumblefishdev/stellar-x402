@@ -106,19 +106,25 @@ RFP's MCP discovery server, outside T1)
 - [x] Given a catalog (the fake one or a real `/discovery/resources`), when `list_resources` is
       called with any combination of the filters, then it returns only matching entries with
       their price, asset, network and description, in a stable structured shape
-- [ ] Given a paid HTTP resource on testnet within the limits, when `call_paid_http` is called,
+- [x] Given a paid HTTP resource on testnet within the limits, when `call_paid_http` is called,
       then the server pays in testnet USDC, returns the resource's response, and the settlement
-      transaction hash is recorded in the task
-- [ ] Given a resource priced above the per-call limit, or a call that would exceed the budget,
+      transaction hash is recorded in the task — 2026-10-13, built CLI over MCP stdio, example
+      seller, x402.org facilitator: `1278142d1a64faa121958756e45d50ffb2e860966968cf02afe49f758ba713ad`
+      and `07e0e4e97ed3c80548e315c3866119ebacfd2140cd0b97192838ded091317f78` (both successful on
+      Horizon; buyer 20 → 19.998 USDC, seller 0 → 0.002 USDC, fees paid by the facilitator)
+- [x] Given a resource priced above the per-call limit, or a call that would exceed the budget,
       when it is called, then the tool returns `over_price_limit` or `over_budget` and nothing is
-      signed or sent
+      signed or sent — unit tests, and on testnet with the built CLI
 - [ ] Given any failure (unfunded payer, expired authorization, unknown resource, facilitator
       rejection), when it happens, then the tool returns a code from the fixed list, never only
       free text
-- [ ] Given any tool output or log line, then the buyer's secret never appears in it
+- [x] Given any tool output or log line, then the buyer's secret never appears in it — checked
+      on the stderr of three CLI runs on testnet; a malformed key is refused without repeating it
 - [ ] Given the locally built `stellar-x402-mcp` CLI and the README's config, when it is added to an MCP client such as
       Claude Desktop, then an agent can list a resource and pay for it end to end on testnet
-- [ ] Unit tests cover the filters, the limits, the error mapping and the 402 retry, against fakes
+      (deferred to 0042: needs a catalog a README reader can reach, which 0032 provides; the same
+      flow passed over MCP stdio with the SDK client, W279)
+- [x] Unit tests cover the filters, the limits, the error mapping and the 402 retry, against fakes
 
 ## Decisions so far
 
@@ -144,6 +150,9 @@ and existing servers. Each line: what was decided and why.
 - **Targets the fake catalog, then ours.** No handling for foreign catalogs that ignore filters;
   the 0030 validator bounds entries on intake. An empty or unparseable `discoveryUrl` stops the
   server, since the upstream client would fall back to x402.org's catalog.
+- **The catalog is trusted as the operator's choice:** its request has a time limit but no address
+  guard or size cap, unlike seller requests; revisit if a shared or third-party catalog is used
+  (PR #28 review, 2026-10-13).
 - **Prices come only from the live 402,** and `call_paid_http` returns only the paid price: the
   agent saw the catalog price in `list_resources`.
 - **Which offer is paid:** of the seller's offers, those in an allowed asset and within the
@@ -156,9 +165,9 @@ and existing servers. Each line: what was decided and why.
   default): a longer one could be settled long after the agent got its answer.
 - **Buyer-side address guard for every seller request** (`get_resource` and `call_paid_http`):
   https only; the address a name resolves to is checked when the connection is made (an undici
-  Agent with its own lookup), and loopback, private, link-local, multicast and reserved
-  (non-documentation) addresses are refused, IP literals included; no automatic redirects; a time limit and a response size limit
-  counted while the body arrives; an `allowInsecureLocal` switch, off by default, only for the local
+  Agent with its own lookup), and only an ordinary public address passes (`ipaddr.js` names
+  every special range, documentation ones included), IP literals included; no automatic redirects;
+  a time limit and a response size limit counted after decompression while the body arrives; an `allowInsecureLocal` switch, off by default, only for the local
   test seller. https alone was not enough: an internal service can have a public name and a public
   certificate (W197, after the security review).
 - **Testnet only:** only a testnet scheme is registered, so a seller asking for pubnet gets
@@ -194,12 +203,23 @@ and existing servers. Each line: what was decided and why.
   (settled through x402.org), fake sellers for cases a live seller cannot produce (a stalled body,
   a broken settlement header, a redirect), and the buyer's balance on Horizon after each paid
   scenario. The result is a table scenario · expected · got, with transaction hashes.
+  The scenarios stay in the repo as a script run by hand (`pnpm e2e:testnet`, not in CI: it
+  needs a funded testnet wallet), so the run can be repeated on our own facilitator later (W270 A).
 - **One topic per file (W237, W238 A), a `[structure only]` PR after PR #23 and before PR C:**
   `server.ts` only registers the tools; `catalog.ts` holds `list_resources`; `guard.ts` the address
   guard and `guardedFetch`, shared by preview and payment; `preview.ts` holds `get_resource`;
   `pay.ts` and `results.ts` stay. Moves only, proven by unchanged tests and `moved.sh`.
+- **One deadline per paid call (PR #28 devil's advocate), a fix PR after PR C:** the time limit
+  applies per seller request, and a paid call makes two, so it can outlast the MCP client's 60 s
+  (SDK default); the agent then sees a timeout without the transaction hash and may pay again.
+  One deadline for the whole call, under 60 s. The same PR lets `allowInsecureLocal` open only
+  loopback hosts, not every http host.
 - **Budget per process and per day (W235 C), in the PR after PR C:** the per-process budget stays;
   a daily budget is added, kept in a local file so a restart does not reset it.
+  The file is updated under a lock, since parallel sessions run parallel processes.
+- **Tool schemas out of `server.ts` (W299 A), a `[structure only]` step, no PR yet:** the input and
+  output schemas of `get_resource` and `call_paid_http` move to `preview.ts` and `pay.ts`, as
+  `list_resources`' already live in `catalog.ts`; `server.ts` only registers.
 - **Comparison with existing x402 MCP servers.** A table of `nirholas/x402-bridge` and
   `jamesbachini/x402-mcp-stellar` against ours (networks, limits and budget, error codes, address
   guard, how seller text reaches the model), so the choice of an own server stays checkable.
@@ -207,8 +227,9 @@ and existing servers. Each line: what was decided and why.
   default; README notes that the budget resets on restart and that a host with both public and
   private DNS records is refused.
 - **Libraries instead of own code, for PR C (W217, W219):** the private-address list becomes
-  `ipaddr.js` with "only `unicast` passes"; the streamed size cap becomes undici's
-  `maxResponseSize` (its error mapped to `response_too_large`); the CLI's env parsing uses `zod`.
+  `ipaddr.js` with "only `unicast` passes"; the CLI's env parsing uses `zod`. The streamed size cap
+  stays own code: undici's `maxResponseSize` counts bytes on the wire, so a 9,751-byte gzip body
+  that unpacks to 10 MB passed a 100,000-byte limit (measured in the PR #28 review).
 
 ## Out of scope
 
