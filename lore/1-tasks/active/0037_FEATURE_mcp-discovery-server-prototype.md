@@ -32,6 +32,20 @@ history:
       through a `resource` filter instead of paging the catalog; prices come only from the live
       402; buyer-side address guard, reserved budget and testnet-only; search and paid MCP tools
       stay out of this task.
+  - date: "2026-10-13"
+    status: active
+    who: karolkow
+    note: >
+      Shape revised after reviewing the whole task against the RFP and existing x402 MCP servers:
+      two tools (get_resource dropped, list_resources carries the input description), budget
+      counted before signing and never given back, no DNS check (https is the guard),
+      insufficient_funds from the payer's simulation. Source 567 -> 487 lines; 52 tests.
+  - date: "2026-10-13"
+    status: active
+    who: karolkow
+    note: >
+      get_resource is back, as a preview of the seller's 402 answer before paying rather than a
+      catalog lookup; no catalog filter is needed.
 ---
 
 # MCP discovery server prototype: list, inspect and pay for Bazaar resources
@@ -65,8 +79,8 @@ RFP's MCP discovery server, outside T1)
   still pins 2.27).
 - **Tools** in `packages/mcp`:
   - `list_resources`: `GET /discovery/resources` with the `type`, `payTo`, `network`,
-    `extensions`, `limit` and `offset` filters; returns price, asset, network and description.
-  - `get_resource`: one entry's full payment terms and input schema.
+    `extensions`, `limit` and `offset` filters; returns price, asset, network, description and
+    the input description.
   - `call_paid_http`: calls an HTTP resource; on 402 checks the terms against the limits, signs
     the Soroban auth entry with the upstream `@x402/stellar` client and retries; returns the
     response and the settlement transaction hash.
@@ -108,36 +122,53 @@ RFP's MCP discovery server, outside T1)
 
 ## Decisions so far
 
-Settled on 2026-10-12, before the rework of PR #21. Each line: what was decided and why.
+Settled on 2026-10-12 and revised on 2026-10-13, after a review of the whole task against the RFP
+and existing servers. Each line: what was decided and why.
 
-- **Tools stay `list_resources`, `get_resource`, `call_paid_http`.** `list_resources` returns
-  summaries; `get_resource` returns the full entries. A full entry is about 6x a summary
-  (median 3.5k vs 0.6k characters, measured on 100 live Bazaar entries), so browsing stays cheap.
-- **`get_resource` makes one request: `GET /discovery/resources?resource=<canonical URL>`.**
-  It returns every entry under that URL (one URL can hold several tools, methods or networks)
-  and checks that each returned entry has that URL, failing loudly otherwise. No paging of the
-  catalog: the earlier scan needed up to 50 requests and could not reach most of a large
-  catalog. The `resource` filter is asked of 0032; the fake catalog serves it until then.
+- **Three tools: `list_resources`, `get_resource`, `call_paid_http`.** `list_resources` returns
+  summaries with the entry's input description (`extensions.bazaar.info.input`; 93 characters at
+  the median on 100 live Bazaar entries, 967 at most). `get_resource` shows everything before
+  paying: it asks the seller without paying and returns its 402 answer, the same terms
+  `call_paid_http` would pay and the seller's input and output description. The catalog cannot
+  return one entry (the upstream list only filters by type, payTo, network and extension), so
+  the seller is asked instead of adding a `resource` filter to 0032; the answer is always current.
+  HTTP resources only, as paid MCP tools are out of scope.
+- **An own server, kept thin.** `nirholas/x402-bridge` (Apache-2.0) does the same job for EVM and
+  Solana, with the same guards; it has no Stellar, answers failures in free text, and turns each
+  catalog entry into its own tool, which puts seller text into tool descriptions. The RFP needs
+  machine-readable codes and an audited server in this repo.
 - **Paging of `list_resources` is driven by the agent** (`limit`, `offset`, `total`); a tool
   never loops over pages by itself.
 - **No text search in this task.** `query` is added when our catalog serves
   `GET /discovery/search` (spec v2 §8.2; ranking belongs to the Discovery lane).
-- **Targets the fake catalog, then ours.** No handling for foreign catalogs that ignore filters.
-- **Prices come only from the live 402.** The catalog is a snapshot refreshed on settle; a call
-  never blocks on a catalog/402 difference (that would stop a seller from ever being paid after
-  a price change). The catalog price is returned beside the paid price for information.
-- **Buyer-side address guard in `call_paid_http`:** https only; no loopback, private or
-  link-local hosts, checked on the resolved IP; no automatic redirects; response size and time
-  limits; an `allowInsecureLocal` switch, off by default, only for the local test seller.
-- **Budget:** a per-call price cap and a budget for the life of the process, reserved before
-  signing and released only on a confirmed failure; atomic units per asset.
-- **Testnet only:** the server refuses to start with `stellar:pubnet`; the README says to use a
-  testnet-only key.
-- **Errors are loud:** a fixed code list (adds `invalid_input` for malformed tool input); the
-  cause of a catalog failure goes to the server log, never to the agent; our own bugs are not
-  reported as `upstream_error`.
-- **Seller-written fields** are bounded with the `packages/bazaar` limits; an entry over the
-  extension size limit is rejected with a code. Every tool declares an `outputSchema`.
+- **Targets the fake catalog, then ours.** No handling for foreign catalogs that ignore filters;
+  the 0030 validator bounds entries on intake. An empty or unparseable `discoveryUrl` stops the
+  server, since the upstream client would fall back to x402.org's catalog.
+- **Prices come only from the live 402,** and `call_paid_http` returns only the paid price: the
+  agent saw the catalog price in `list_resources`.
+- **Which offer is paid:** of the seller's offers, those in an allowed asset and within the
+  per-call limit, through an upstream client policy; the library pays the first one left.
+- **Budget:** a per-call price cap and a budget for the life of the process, per asset, in atomic
+  units. The amount is counted before signing and never given back: a seller cannot return it to
+  the budget by claiming the payment failed.
+- **Buyer-side address guard in `call_paid_http`:** https only; no `localhost` and no loopback,
+  private or link-local IP written in the URL; no automatic redirects; a time limit and a
+  response size limit counted while the body arrives; an `allowInsecureLocal` switch, off by
+  default, only for the local test seller. Names are not resolved: a device on the buyer's
+  network cannot present a certificate for a public name.
+- **Testnet only:** only a testnet scheme is registered, so a seller asking for pubnet gets
+  `unsupported_payment`; the CLI refuses to start with `stellar:pubnet`, and the README says to
+  use a testnet-only key.
+- **Errors are loud:** a fixed code list; causes go to the server log, never to the agent. After
+  the signed payment leaves the process, any failure is `payment_unknown`. An unfunded payer is
+  `insufficient_funds`: its simulation fails in the asset contract (`Error(Contract, #13)` for a
+  missing trustline, measured on testnet; `#10` for a low balance). An expired authorization
+  cannot be told apart: the Stellar facilitator reports it as a failed simulation, so it is
+  `payment_rejected` with the reason in the log.
+  Exception: input that fails a tool's schema is rejected by the MCP SDK before our handler runs,
+  as a loud error without our code (its validation path is private).
+- **Seller-written text** is cut with the `packages/bazaar` limits. Every tool declares an
+  `outputSchema`.
 - **Logic stays in `packages/mcp`.** The SDK buyer/agent helpers are a later tranche.
 - **`@x402/*` follows the workspace:** 2.27 until PR #22 (0016) merges, then 2.28.
 
