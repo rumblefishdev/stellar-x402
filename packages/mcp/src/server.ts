@@ -119,6 +119,8 @@ export function createServer(config: ServerConfig): McpServer {
   );
   if (config.payment) {
     const payment = config.payment;
+    const hasDaily = Object.values(payment.assets).some((asset) => asset.daily !== undefined);
+    if (hasDaily && !payment.dailyFile) throw new Error("a daily budget needs payment.dailyFile");
     const spent: Spent = new Map();
     server.registerTool(
       "call_paid_http",
