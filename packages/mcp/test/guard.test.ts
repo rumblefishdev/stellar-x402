@@ -6,7 +6,7 @@ vi.mock("undici", async (importOriginal) => ({
   fetch: undiciFetch,
 }));
 
-const { guardedFetch, publicOnlyLookup } = await import("../src/seller.js");
+const { guardedFetch, publicOnlyLookup } = await import("../src/guard.js");
 
 function resolve(hostname: string, all: boolean) {
   return new Promise<{ error: Error | null; address: unknown }>((done) =>

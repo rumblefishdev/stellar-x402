@@ -2,7 +2,7 @@ import { LIMITS } from "@stellar-x402/bazaar";
 import { x402Client, x402HTTPClient, type SchemeRegistration } from "@x402/core/client";
 import { wrapFetchWithPayment } from "@x402/fetch";
 import { ToolError } from "./results.js";
-import { checkBody, checkUrl, guardedFetch, type SellerLimits } from "./seller.js";
+import { checkBody, checkUrl, guardedFetch, type SellerLimits } from "./guard.js";
 
 export interface PaymentConfig {
   /** Scheme clients holding the buyer's key; the CLI registers `ExactStellarScheme` for testnet only. */
