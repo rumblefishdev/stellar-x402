@@ -1,11 +1,16 @@
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
+import { FallbackRpc } from "@stellar-x402/signer-pool";
+import { createEd25519Signer } from "@x402/stellar";
+import { ExactStellarScheme } from "@x402/stellar/exact/facilitator";
 import { memoryStores } from "./adapters/memory.js";
 import { createCataloger } from "./catalog/cataloger.js";
 import { parseConfig } from "./config.js";
 import { createApp, type AppDeps } from "./http/app.js";
 import { jsonLogger } from "./logger.js";
 import { memoryMetrics } from "./metrics.js";
+import { feeSettings, upstreamAtCurrentBid } from "./settlement/fees.js";
+import { createVerifier } from "./settlement/verify.js";
 
 export interface Started {
   port: number;
@@ -45,7 +50,29 @@ export async function main(env: Record<string, string | undefined> = process.env
     metrics: memoryMetrics(),
     allowHttp: config.catalog.allowHttp,
   });
-  const started = await start({ config, logger, stores });
+  const rpc = FallbackRpc.fromUrls(config.rpcUrls);
+  // 0009 builds the pool from `fees.pool`, which shares the bid with `/verify` (AD-10).
+  const fees = feeSettings(config.fees, rpc);
+  // Upstream knows only the facilitator key; the channels are `createVerifier`'s check (AD-5).
+  // It reads the first RPC URL only.
+  const signer = createEd25519Signer(config.facilitatorSecret, config.network);
+  const upstream = upstreamAtCurrentBid(
+    fees.inclusionFee,
+    (inclusionFeeStroops) =>
+      new ExactStellarScheme([signer], {
+        rpcConfig: { url: config.rpcUrls[0] },
+        maxTransactionFeeStroops: fees.maxFeeStroops,
+        inclusionFeeStroops,
+      }),
+  );
+  const verify = createVerifier({
+    network: config.network,
+    upstream,
+    channels: config.channels,
+    minValidityLedgers: config.settlement.minValidityLedgers,
+    latestLedger: async () => (await rpc.getLatestLedger()).sequence,
+  });
+  const started = await start({ config, logger, stores, verify });
   return {
     ...started,
     // Catalog writes already under way finish before the process exits.

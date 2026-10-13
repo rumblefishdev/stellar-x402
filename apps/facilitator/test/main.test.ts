@@ -24,14 +24,14 @@ describe("facilitator boot", () => {
     // Port 0 picks a free port; the schema itself requires 1–65535.
     const config = { ...parseConfig(env), port: 0 };
     const logger = jsonLogger("debug", (line) => lines.push(line));
-    app = await start({ config, logger, stores: memoryStores() });
+    const verify = async () => ({ isValid: true });
+    app = await start({ config, logger, stores: memoryStores(), verify });
     url = `http://127.0.0.1:${app.port}`;
   });
   afterAll(() => app.close());
 
   it("answers the stub routes, with no CORS headers", async () => {
     const routes = [
-      ["POST", "/verify"],
       ["POST", "/settle"],
       ["GET", "/supported"],
       ["GET", "/discovery/resources"],
