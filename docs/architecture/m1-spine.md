@@ -313,6 +313,7 @@ graph TD
   - A payload whose auth expiration ledger is less than `minValidityLedgers` ahead of the current ledger is rejected.
   - The transaction never stays valid past the auth expiry. `signer-pool`'s `maxLedger` submit option (task 0016) sets the expiry ledger as the envelope's ledger bound, next to its time bound.
   - `signer-pool` keeps one spare ledger: it refuses, after simulation, a call that could land only in the ledger after the one simulated. So `minValidityLedgers` must be at least 2 plus the expected wait for a channel, or a payload `/verify` accepts can fail at `/settle` with `LedgerBoundError` after a simulation.
+  - `minValidityLedgers` must also stay well below the client's signing window. Upstream's client signs its auth to expire `maxTimeoutSeconds` after signing, about 12 ledgers at the usual 60 s, and at least a ledger passes before `/verify`. So a minimum of 12 rejects nearly every payment; the default is 4: 2 for the pool plus about 2 of channel wait.
 
 ## Consistency Conventions
 

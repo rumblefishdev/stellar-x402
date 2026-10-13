@@ -116,8 +116,11 @@ const envSchema = z
       .optional(),
     FEE_ESCALATION_MAX_STROOPS: int(100).optional(),
 
-    /** Least ledgers left before the payer's auth expires (AD-22). */
-    MIN_VALIDITY_LEDGERS: int(1).default("12"),
+    /**
+     * Least ledgers left before the payer's auth expires (AD-22): 2 for the pool plus about 2 of
+     * channel wait. A client signs for only `maxTimeoutSeconds` (12 ledgers at 60 s).
+     */
+    MIN_VALIDITY_LEDGERS: int(1).default("4"),
     /** How long a repeat `/settle` waits on a pending record (AD-6). */
     SETTLE_TIMEOUT_MS: ms(1).default("30000"),
     /** Channel lease TTL; renewed well before it runs out (AD-17). */

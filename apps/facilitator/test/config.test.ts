@@ -30,7 +30,7 @@ describe("parseConfig", () => {
       channels: [CHANNEL_A, CHANNEL_B],
       store: "memory",
       fees: { maxFeeStroops: 250_000n, inclusionFeeStroops: undefined, escalation: undefined },
-      settlement: { minValidityLedgers: 12, settleTimeoutMs: 30_000, leaseTtlMs: 30_000 },
+      settlement: { minValidityLedgers: 4, settleTimeoutMs: 30_000, leaseTtlMs: 30_000 },
       http: {
         bodyLimitBytes: 65_536,
         trustedProxyHops: 0,
