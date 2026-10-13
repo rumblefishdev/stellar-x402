@@ -34,7 +34,9 @@ describe("guardedFetch", () => {
 
   it("refuses a private IP address written in the URL before connecting", async () => {
     const limits = { timeoutMs: 1_000, maxResponseBytes: 1_000, allowInsecureLocal: false };
-    await expect(guardedFetch(limits)("https://10.0.0.5/x")).rejects.toMatchObject({
+    await expect(
+      guardedFetch(limits, AbortSignal.timeout(limits.timeoutMs))("https://10.0.0.5/x"),
+    ).rejects.toMatchObject({
       code: "unsafe_url",
     });
     expect(undiciFetch).not.toHaveBeenCalled();
@@ -44,7 +46,9 @@ describe("guardedFetch", () => {
     "with allowInsecureLocal, still refuses %s: the switch opens only this machine",
     async (url) => {
       const limits = { timeoutMs: 1_000, maxResponseBytes: 1_000, allowInsecureLocal: true };
-      await expect(guardedFetch(limits)(url)).rejects.toMatchObject({ code: "unsafe_url" });
+      await expect(
+        guardedFetch(limits, AbortSignal.timeout(limits.timeoutMs))(url),
+      ).rejects.toMatchObject({ code: "unsafe_url" });
       expect(undiciFetch).not.toHaveBeenCalled();
     },
   );
@@ -57,9 +61,18 @@ describe("guardedFetch", () => {
     const { port } = seller.address() as AddressInfo;
     const limits = { timeoutMs: 5_000, maxResponseBytes: 1_000, allowInsecureLocal: true };
     try {
-      expect((await guardedFetch(limits)(`http://localhost:${port}/`)).status).toBe(200);
+      expect(
+        (
+          await guardedFetch(
+            limits,
+            AbortSignal.timeout(limits.timeoutMs),
+          )(`http://localhost:${port}/`)
+        ).status,
+      ).toBe(200);
       // "localhost." is not a loopback name to the switch, so its lookup is checked and refused.
-      await expect(guardedFetch(limits)(`https://localhost.:${port}/`)).rejects.toMatchObject({
+      await expect(
+        guardedFetch(limits, AbortSignal.timeout(limits.timeoutMs))(`https://localhost.:${port}/`),
+      ).rejects.toMatchObject({
         code: "unsafe_url",
       });
     } finally {
@@ -72,7 +85,9 @@ describe("guardedFetch", () => {
     const refused = new ToolError("unsafe_url", "refused");
     undiciFetch.mockRejectedValue(new TypeError("fetch failed", { cause: refused }));
     const limits = { timeoutMs: 1_000, maxResponseBytes: 1_000, allowInsecureLocal: false };
-    await expect(guardedFetch(limits)("https://seller.example/x")).rejects.toBe(refused);
+    await expect(
+      guardedFetch(limits, AbortSignal.timeout(limits.timeoutMs))("https://seller.example/x"),
+    ).rejects.toBe(refused);
   });
 
   it("counts the size after decompression, so a small gzip body cannot unpack past the limit", async () => {
@@ -88,7 +103,9 @@ describe("guardedFetch", () => {
     const url = `http://127.0.0.1:${(seller.address() as AddressInfo).port}/`;
     const limits = { timeoutMs: 5_000, maxResponseBytes: 100_000, allowInsecureLocal: true };
     try {
-      await expect(guardedFetch(limits)(url)).rejects.toMatchObject({ code: "response_too_large" });
+      await expect(
+        guardedFetch(limits, AbortSignal.timeout(limits.timeoutMs))(url),
+      ).rejects.toMatchObject({ code: "response_too_large" });
     } finally {
       seller.close();
     }

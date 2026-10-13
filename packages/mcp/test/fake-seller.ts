@@ -211,3 +211,17 @@ export function fakeScheme(failures = 0, error = NO_TRUSTLINE): SchemeNetworkCli
     },
   };
 }
+
+/** Stands in for `ExactStellarScheme` whose RPC is slow: the first call takes `delayMs` to sign. */
+export function slowScheme(delayMs: number): SchemeNetworkClient {
+  const scheme = fakeScheme();
+  let calls = 0;
+  return {
+    scheme: "exact",
+    async createPaymentPayload(...args) {
+      calls += 1;
+      if (calls === 1) await new Promise((done) => setTimeout(done, delayMs));
+      return scheme.createPaymentPayload(...args);
+    },
+  };
+}

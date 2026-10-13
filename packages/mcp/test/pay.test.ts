@@ -3,7 +3,14 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { SchemeNetworkClient } from "@x402/core/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createServer, type PaymentConfig } from "../src/index.js";
-import { fakeScheme, NO_TRUSTLINE, startFakeSeller, USDC, type FakeSeller } from "./fake-seller.js";
+import {
+  fakeScheme,
+  NO_TRUSTLINE,
+  slowScheme,
+  startFakeSeller,
+  USDC,
+  type FakeSeller,
+} from "./fake-seller.js";
 
 /** What a tool answered: its JSON text, which holds the result or `{error}` alike. */
 function payload<T = Paid>(result: Awaited<ReturnType<Client["callTool"]>>): T {
@@ -263,6 +270,16 @@ describe("call_paid_http", () => {
     expect((await pay()).error.code).toBe("payment_unknown");
     expect(performance.now() - started).toBeLessThan(400 + 100);
     expect(seller.payments).toHaveLength(1);
+  });
+
+  it("bounds signing by the call's deadline: nothing is sent and the amount goes back", async () => {
+    await reconnect({}, { scheme: slowScheme(1_000), timeoutMs: 300 });
+    const started = performance.now();
+    expect((await pay()).error.code).toBe("upstream_error");
+    expect(performance.now() - started).toBeLessThan(300 + 150);
+    expect(seller.payments).toHaveLength(0);
+    // 10,000 of a 15,000 budget fits again: the late signature was never sent.
+    expect((await pay()).payment).toBeDefined();
   });
 
   it("returns upstream_error when the seller stops sending its response before paying", async () => {

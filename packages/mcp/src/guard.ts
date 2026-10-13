@@ -92,11 +92,11 @@ export function checkBody(method: string, body: string | undefined): void {
 /**
  * The fetch the payment wrapper uses: only public addresses, no redirects (the paid retry carries the
  * signed payment, which must not reach another host), a deadline, and a body size cap counted while
- * the body arrives. Build one per tool call: the deadline starts here and covers every request made
- * through it, so a payment's unpaid request, signing and paid retry together end within `timeoutMs`.
+ * the body arrives. `deadline` is the tool call's, `AbortSignal.timeout(timeoutMs)` made once when the
+ * call starts: it covers every request made through this fetch, and a payment's signing too, so a
+ * payment's unpaid request, signing and paid retry together end within `timeoutMs`.
  */
-export function guardedFetch(limits: SellerLimits): typeof fetch {
-  const deadline = AbortSignal.timeout(limits.timeoutMs);
+export function guardedFetch(limits: SellerLimits, deadline: AbortSignal): typeof fetch {
   // Every name is checked where it is connected to. undici's own `maxResponseSize` is not used: it
   // counts the bytes on the wire, so a small gzip body that unpacks to gigabytes would pass it.
   // A loopback name opened by allowInsecureLocal resolves as usual; every other name is checked.
