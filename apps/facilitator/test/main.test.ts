@@ -92,6 +92,18 @@ describe("startup with a bad config", () => {
     expect(output).toContain("CHANNELS is required");
     expect(output).not.toContain(bad);
   }, 20_000);
+
+  it("fails pnpm migrate with 1 and never prints the URL", () => {
+    const result = spawnSync(process.execPath, ["--import", "tsx", "src/migrate.ts"], {
+      cwd: fileURLToPath(new URL("..", import.meta.url)),
+      env: { DATABASE_URL: "mysql://u:secret@db/x" },
+      encoding: "utf8",
+    });
+    const output = result.stdout + result.stderr;
+    expect(result.status, output).toBe(1);
+    expect(output).toContain("DATABASE_URL must be a postgres:// URL");
+    expect(output).not.toContain("secret");
+  }, 20_000);
 });
 
 describe("process signals", () => {

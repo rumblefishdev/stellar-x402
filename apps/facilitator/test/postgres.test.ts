@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createPool, postgresStores } from "../src/adapters/postgres.js";
 import { MIGRATIONS, migrate } from "../src/adapters/postgres-schema.js";
 import { NON_FINAL_STATES } from "../src/adapters/rules.js";
+import { migrateMain } from "../src/main.js";
 import type { Stores } from "../src/ports/index.js";
 import {
   catalogStoreContract,
@@ -23,14 +24,17 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
   let applied: string[];
   let truncate: string;
 
-  /** A pool whose connections use `searchPath`. */
-  const poolFor = (searchPath: string, max: number) => {
+  /** The test database's URL, its connections using `searchPath`. */
+  const urlFor = (searchPath: string) => {
     const base = process.env.TEST_DATABASE_URL;
     if (!base) throw new Error("TEST_DATABASE_URL is required to run the PostgreSQL stores");
     const url = new URL(base);
     url.searchParams.set("options", `-c search_path=${searchPath}`);
-    return createPool(url.toString(), () => {}, max);
+    return url.toString();
   };
+  /** A pool whose connections use `searchPath`. */
+  const poolFor = (searchPath: string, max: number) =>
+    createPool(urlFor(searchPath), () => {}, max);
 
   beforeAll(async () => {
     // More connections than the contracts' 10-way concurrent cases, so each runs on its own.
@@ -88,6 +92,22 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
       expect(runs).toContainEqual([]);
     } finally {
       await racing.end();
+      await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
+    }
+  });
+
+  it("migrates through pnpm migrate's entry, once", async () => {
+    const fresh = `${schema}_main`;
+    await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
+    await pool.query(`CREATE SCHEMA ${fresh}`);
+    try {
+      await migrateMain({ DATABASE_URL: urlFor(fresh) });
+      await migrateMain({ DATABASE_URL: urlFor(fresh) });
+      const { rows } = await pool.query<{ name: string }>(
+        `SELECT name FROM ${fresh}.schema_migrations ORDER BY name`,
+      );
+      expect(rows.map((row) => row.name)).toEqual(MIGRATIONS.map((migration) => migration.name));
+    } finally {
       await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
     }
   });

@@ -54,6 +54,18 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
+function isPostgresUrl(value: string): boolean {
+  try {
+    const { protocol } = new URL(value);
+    return protocol === "postgres:" || protocol === "postgresql:";
+  } catch {
+    return false;
+  }
+}
+
+/** Holds a password, so it is never logged and no message echoes it. */
+const databaseUrl = z.string().refine(isPostgresUrl, "must be a postgres:// URL");
+
 const envSchema = z
   .object({
     NETWORK: oneOf([STELLAR_NETWORKS.testnet, STELLAR_NETWORKS.pubnet]).default(
@@ -95,8 +107,9 @@ const envSchema = z
         ),
     ),
 
-    /** Which store adapters the composition root builds (0013 adds the durable one). */
-    STORE: oneOf(["memory"]).default("memory"),
+    /** Which store adapters the composition root builds; `postgres` needs `DATABASE_URL`. */
+    STORE: oneOf(["memory", "postgres"]).default("memory"),
+    DATABASE_URL: databaseUrl.optional(),
 
     /** Fee ceiling for upstream verify and the pool alike (AD-10). */
     MAX_FEE_STROOPS: stroops(100n).default("250000"),
@@ -148,7 +161,14 @@ const envSchema = z
   .refine((env) => !env.CATALOG_ALLOW_HTTP || env.NETWORK === STELLAR_NETWORKS.testnet, {
     message: "is only allowed on testnet",
     path: ["CATALOG_ALLOW_HTTP"],
+  })
+  .refine((env) => env.DATABASE_URL !== undefined || env.STORE !== "postgres", {
+    message: "is required when STORE=postgres",
+    path: ["DATABASE_URL"],
   });
+
+/** `pnpm migrate` needs only the database. */
+const migrateEnvSchema = z.object({ DATABASE_URL: databaseUrl });
 
 export type Env = z.input<typeof envSchema>;
 
@@ -160,7 +180,9 @@ export interface Config {
   rpcUrls: string[];
   facilitatorSecret: string;
   channels: string[];
-  store: "memory";
+  store: "memory" | "postgres";
+  /** Set when `store` is `postgres`. Never logged. */
+  databaseUrl?: string;
   fees: {
     maxFeeStroops: bigint;
     inclusionFeeStroops?: bigint;
@@ -196,7 +218,11 @@ export class ConfigError extends Error {
   }
 }
 
-export function parseConfig(env: Record<string, string | undefined>): Config {
+/** Parses `env` with `schema`, or throws a {@link ConfigError} naming each bad setting. */
+function parseEnv<S extends z.ZodTypeAny>(
+  schema: S,
+  env: Record<string, string | undefined>,
+): z.output<S> {
   // Values are trimmed (a secret read from a file keeps its newline); blank means "unset", as in
   // the deploy env examples.
   const present = Object.fromEntries(
@@ -204,7 +230,7 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
       .map(([name, value]) => [name, value?.trim()] as const)
       .filter(([, value]) => value !== undefined && value !== ""),
   );
-  const result = envSchema.safeParse(present);
+  const result = schema.safeParse(present);
   if (!result.success) {
     // Every message is ours, so none can echo a value.
     const problems = result.error.issues.map((issue) => {
@@ -216,7 +242,11 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
     });
     throw new ConfigError([...new Set(problems)]);
   }
-  const e = result.data;
+  return result.data;
+}
+
+export function parseConfig(env: Record<string, string | undefined>): Config {
+  const e = parseEnv(envSchema, env);
   const escalation =
     e.FEE_ESCALATION_FACTOR !== undefined || e.FEE_ESCALATION_MAX_STROOPS !== undefined
       ? { factor: e.FEE_ESCALATION_FACTOR, max: e.FEE_ESCALATION_MAX_STROOPS }
@@ -229,6 +259,7 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
     facilitatorSecret: e.FACILITATOR_SECRET,
     channels: e.CHANNELS,
     store: e.STORE,
+    databaseUrl: e.DATABASE_URL,
     fees: {
       maxFeeStroops: e.MAX_FEE_STROOPS,
       inclusionFeeStroops: e.INCLUSION_FEE_STROOPS,
@@ -260,4 +291,11 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
     },
     catalog: { allowHttp: e.CATALOG_ALLOW_HTTP },
   };
+}
+
+/** The config of `pnpm migrate`: only `DATABASE_URL`, which it requires. */
+export function parseMigrateConfig(env: Record<string, string | undefined>): {
+  databaseUrl: string;
+} {
+  return { databaseUrl: parseEnv(migrateEnvSchema, env).DATABASE_URL };
 }

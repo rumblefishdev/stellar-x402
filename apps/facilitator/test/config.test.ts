@@ -1,6 +1,6 @@
 import { Keypair } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
-import { type Config, ConfigError, parseConfig } from "../src/config.js";
+import { type Config, ConfigError, parseConfig, parseMigrateConfig } from "../src/config.js";
 
 const keypair = (byte: number) => Keypair.fromRawEd25519Seed(Buffer.alloc(32, byte));
 const SECRET = keypair(1).secret();
@@ -183,6 +183,28 @@ describe("parseConfig", () => {
     ).toEqual(["CATALOG_ALLOW_HTTP is only allowed on testnet"]);
   });
 
+  it("selects the PostgreSQL store with its URL", () => {
+    const url = "postgres://u:pw@db.internal:5432/x402";
+    const config = parseConfig({ ...minimal, STORE: "postgres", DATABASE_URL: url });
+    expect(config.store).toBe("postgres");
+    expect(config.databaseUrl).toBe(url);
+  });
+
+  it("requires a postgres:// DATABASE_URL for STORE=postgres, without echoing it", () => {
+    expect(problems({ ...minimal, STORE: "postgres" })).toEqual([
+      "DATABASE_URL is required when STORE=postgres",
+    ]);
+    const found = problems({
+      ...minimal,
+      STORE: "postgres",
+      DATABASE_URL: "mysql://u:secret@db/x",
+    });
+    expect(found).toEqual(["DATABASE_URL must be a postgres:// URL"]);
+    expect(() =>
+      parseConfig({ ...minimal, STORE: "postgres", DATABASE_URL: "mysql://u:secret@db/x" }),
+    ).toThrow(expect.objectContaining({ message: expect.not.stringContaining("secret") }));
+  });
+
   it("checks RPC URLs", () => {
     expect(problems({ ...minimal, RPC_URLS: "ftp://rpc.example" })).toEqual([
       "RPC_URLS must be http(s) URLs",
@@ -196,5 +218,27 @@ describe("parseConfig", () => {
     expect(problems({ ...minimal, NETWORK: "stellar:pubnet" })).toEqual([
       "RPC_URLS is required outside testnet",
     ]);
+  });
+});
+
+describe("parseMigrateConfig", () => {
+  it("requires DATABASE_URL", () => {
+    for (const env of [{}, { DATABASE_URL: " " }]) {
+      const error = (() => {
+        try {
+          parseMigrateConfig(env);
+        } catch (thrown) {
+          return thrown;
+        }
+      })();
+      expect(error).toBeInstanceOf(ConfigError);
+      expect((error as ConfigError).problems).toEqual(["DATABASE_URL is required"]);
+    }
+  });
+
+  it("trims a postgres:// URL", () => {
+    expect(parseMigrateConfig({ DATABASE_URL: " postgresql://db/x402\n" })).toEqual({
+      databaseUrl: "postgresql://db/x402",
+    });
   });
 });
