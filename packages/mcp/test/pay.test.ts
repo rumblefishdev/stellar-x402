@@ -22,22 +22,20 @@ async function connect(
   {
     scheme = fakeScheme(),
     timeoutMs = 5_000,
-  }: { scheme?: SchemeNetworkClient; timeoutMs?: number } = {},
+    allowInsecureLocal = true,
+  }: { scheme?: SchemeNetworkClient; timeoutMs?: number; allowInsecureLocal?: boolean } = {},
 ) {
   logs = [];
   const payment: PaymentConfig = {
     // Testnet only, as the CLI registers it.
     schemes: [{ network: "stellar:testnet", client: scheme }],
     assets: { [USDC]: { maxPerCall: 20_000n, budget: 15_000n } },
-    maxResponseBytes: 1_000,
-    allowInsecureLocal: true,
     ...overrides,
   };
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   const log = (message: string) => logs.push(message);
-  await createServer({ discoveryUrl: "http://unused", timeoutMs, log, payment }).connect(
-    serverSide,
-  );
+  const config = { discoveryUrl: "http://unused", timeoutMs, maxResponseBytes: 1_000, log };
+  await createServer({ ...config, allowInsecureLocal, payment }).connect(serverSide);
   client = new Client({ name: "test", version: "0.0.0" });
   await client.connect(clientSide);
 }
@@ -210,7 +208,7 @@ describe("call_paid_http", () => {
     ["https://[::ffff:10.0.0.1]/forecast"],
     ["not a url"],
   ])("refuses %s as unsafe without calling it", async (url) => {
-    await reconnect({ allowInsecureLocal: false });
+    await reconnect({}, { allowInsecureLocal: false });
     const result = await client.callTool({
       name: "call_paid_http",
       arguments: { url, method: "GET" },
@@ -288,7 +286,7 @@ describe("get_resource", () => {
   });
 
   it("refuses an unsafe URL without calling it", async () => {
-    await reconnect({ allowInsecureLocal: false });
+    await reconnect({}, { allowInsecureLocal: false });
     expect((await preview("", "https://127.0.0.1/forecast")).error.code).toBe("unsafe_url");
   });
 
@@ -299,15 +297,26 @@ describe("get_resource", () => {
 });
 
 describe("without payment config", () => {
-  it("offers no call_paid_http tool", async () => {
+  beforeEach(async () => {
     await client.close();
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-    await createServer({ discoveryUrl: "http://unused", timeoutMs: 5_000, log: () => {} }).connect(
-      serverSide,
-    );
+    const config = { discoveryUrl: "http://unused", timeoutMs: 5_000, maxResponseBytes: 1_000 };
+    await createServer({ ...config, allowInsecureLocal: true, log: () => {} }).connect(serverSide);
     client = new Client({ name: "test", version: "0.0.0" });
     await client.connect(clientSide);
+  });
+
+  it("lists and previews, but offers no call_paid_http tool", async () => {
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name)).toEqual(["list_resources"]);
+    expect(tools.map((t) => t.name)).toEqual(["list_resources", "get_resource"]);
+  });
+
+  it("previews a resource's terms without a key", async () => {
+    const result = await client.callTool({
+      name: "get_resource",
+      arguments: { url: `${seller.url}/forecast`, method: "GET" },
+    });
+    expect((result.structuredContent as { status: number }).status).toBe(402);
+    expect(seller.payments).toHaveLength(0);
   });
 });
