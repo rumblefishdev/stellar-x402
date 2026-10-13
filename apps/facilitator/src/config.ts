@@ -44,6 +44,11 @@ const stroops = (min: bigint) =>
     .regex(/^\d+$/, "must be a whole number of stroops")
     .transform((value) => BigInt(value))
     .refine((value) => value >= min, `must be at least ${min}`);
+/** Fee settings reach upstream and the pool as a `number`. */
+const feeStroops = stroops(100n).refine(
+  (value) => value <= BigInt(Number.MAX_SAFE_INTEGER),
+  `must be at most ${Number.MAX_SAFE_INTEGER}`,
+);
 
 function isHttpUrl(value: string): boolean {
   try {
@@ -99,9 +104,9 @@ const envSchema = z
     STORE: oneOf(["memory"]).default("memory"),
 
     /** Fee ceiling for upstream verify and the pool alike (AD-10). */
-    MAX_FEE_STROOPS: stroops(100n).default("250000"),
+    MAX_FEE_STROOPS: feeStroops.default("250000"),
     /** Inclusion bid; unset means the pool's fee-stats provider (at least 100). */
-    INCLUSION_FEE_STROOPS: stroops(100n).optional(),
+    INCLUSION_FEE_STROOPS: feeStroops.optional(),
     FEE_ESCALATION_FACTOR: z
       .string()
       .regex(/^\d+(\.\d+)?$/, "must be a decimal number")
