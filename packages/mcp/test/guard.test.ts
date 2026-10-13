@@ -29,20 +29,6 @@ describe("publicOnlyLookup", () => {
 describe("guardedFetch", () => {
   afterEach(() => undiciFetch.mockReset());
 
-  it.each([
-    [false, true],
-    [true, false],
-  ])(
-    "with allowInsecureLocal %s, connects through the public-only agent: %s",
-    async (local, checked) => {
-      undiciFetch.mockResolvedValue(new Response("{}", { status: 200 }));
-      const limits = { timeoutMs: 1_000, maxResponseBytes: 1_000, allowInsecureLocal: local };
-      await guardedFetch(limits)("https://seller.example/x");
-      const [, init] = undiciFetch.mock.calls[0]!;
-      expect(init.dispatcher !== undefined).toBe(checked);
-    },
-  );
-
   it("refuses a private IP address written in the URL before connecting", async () => {
     const limits = { timeoutMs: 1_000, maxResponseBytes: 1_000, allowInsecureLocal: false };
     await expect(guardedFetch(limits)("https://10.0.0.5/x")).rejects.toMatchObject({

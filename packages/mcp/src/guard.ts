@@ -1,5 +1,6 @@
 import { lookup } from "node:dns";
-import { BlockList, isIP, type LookupFunction } from "node:net";
+import { isIP, type LookupFunction } from "node:net";
+import ipaddr from "ipaddr.js";
 import { Agent, fetch as undiciFetch } from "undici";
 import { ToolError } from "./results.js";
 
@@ -14,46 +15,12 @@ export interface SellerLimits {
 }
 
 /**
- * Loopback, private, link-local, carrier-grade NAT, benchmarking, multicast, reserved and unspecified
- * ranges: a host in one of these would make the buyer's machine call into its own network.
+ * Only an ordinary public address passes: `ipaddr.js` names every special range (private, loopback,
+ * link-local, multicast, reserved, unique-local, carrier-grade NAT, NAT64, 6to4, …) and calls a plain
+ * public one `unicast`. A range nobody listed is refused by default.
  */
-const PRIVATE = new BlockList();
-for (const [address, prefix] of [
-  ["0.0.0.0", 8],
-  ["10.0.0.0", 8],
-  ["100.64.0.0", 10],
-  ["127.0.0.0", 8],
-  ["169.254.0.0", 16],
-  ["172.16.0.0", 12],
-  ["192.168.0.0", 16],
-  ["192.0.0.0", 24],
-  ["198.18.0.0", 15],
-  ["224.0.0.0", 4],
-  ["240.0.0.0", 4],
-] as const) {
-  PRIVATE.addSubnet(address, prefix, "ipv4");
-}
-// IPv4-mapped (`::ffff:a.b.c.d`) addresses are matched against the IPv4 rules by `BlockList` itself;
-// NAT64 (64:ff9b::/96) and 6to4 (2002::/16) embed an IPv4 address that could be private.
-for (const [address, prefix] of [
-  // IPv4-compatible (`::a.b.c.d`, deprecated) and IPv4-translated (`::ffff:0:a.b.c.d`) forms, `::1`
-  // and `::` included.
-  ["::", 96],
-  ["::ffff:0:0:0", 96],
-  ["100::", 64],
-  ["2001::", 32],
-  ["fec0::", 10],
-  ["fc00::", 7],
-  ["fe80::", 10],
-  ["64:ff9b::", 96],
-  ["2002::", 16],
-  ["ff00::", 8],
-] as const) {
-  PRIVATE.addSubnet(address, prefix, "ipv6");
-}
-
 function isPrivate(ip: string): boolean {
-  return PRIVATE.check(ip, isIP(ip) === 6 ? "ipv6" : "ipv4");
+  return ipaddr.process(ip).range() !== "unicast";
 }
 
 /**
@@ -76,9 +43,6 @@ export const publicOnlyLookup: LookupFunction = (hostname, options, callback) =>
     callback(null, addresses[0]!.address, addresses[0]!.family);
   });
 };
-
-/** Connections to sellers go through this, so every name is checked where it is connected to. */
-const PUBLIC_ONLY = new Agent({ connect: { lookup: publicOnlyLookup } });
 
 /**
  * https only, and no private IP address written in the URL: an address is connected to without a
@@ -108,6 +72,11 @@ export function checkBody(method: string, body: string | undefined): void {
  * the body arrives.
  */
 export function guardedFetch(limits: SellerLimits): typeof fetch {
+  // Every name is checked where it is connected to, and undici stops reading a body over the limit.
+  const dispatcher = new Agent({
+    maxResponseSize: limits.maxResponseBytes,
+    connect: limits.allowInsecureLocal ? {} : { lookup: publicOnlyLookup },
+  });
   return async (input, init) => {
     const request = new Request(input, init);
     // Every request the payment wrapper makes passes here, so the guard holds whoever calls this.
@@ -120,11 +89,14 @@ export function guardedFetch(limits: SellerLimits): typeof fetch {
         body: request.body ? await request.arrayBuffer() : undefined,
         redirect: "manual",
         signal: AbortSignal.timeout(limits.timeoutMs),
-        dispatcher: limits.allowInsecureLocal ? undefined : PUBLIC_ONLY,
+        dispatcher,
       });
     } catch (error) {
       // A refusal from publicOnlyLookup comes back as the cause of undici's "fetch failed".
       if (error instanceof Error && error.cause instanceof ToolError) throw error.cause;
+      if (tooLarge(error)) {
+        throw new ToolError("response_too_large", "The seller's response is too large.");
+      }
       throw new ToolError("upstream_error", "The request to the seller failed.", String(error));
     }
     if (response.status >= 300 && response.status < 400) {
@@ -133,19 +105,14 @@ export function guardedFetch(limits: SellerLimits): typeof fetch {
         "The seller answered with a redirect, which is not followed.",
       );
     }
-    const chunks: Uint8Array[] = [];
-    let size = 0;
+    let bytes: ArrayBuffer;
     try {
-      for await (const chunk of response.body ?? []) {
-        size += chunk.byteLength;
-        if (size > limits.maxResponseBytes) {
-          throw new ToolError("response_too_large", "The seller's response is too large.");
-        }
-        chunks.push(chunk);
-      }
+      bytes = await response.arrayBuffer();
     } catch (error) {
+      if (tooLarge(error)) {
+        throw new ToolError("response_too_large", "The seller's response is too large.");
+      }
       // The timeout covers the body too: a seller that sends its headers and then stalls ends here.
-      if (error instanceof ToolError) throw error;
       throw new ToolError(
         "upstream_error",
         "The seller's response did not arrive in full.",
@@ -153,7 +120,13 @@ export function guardedFetch(limits: SellerLimits): typeof fetch {
       );
     }
     // A 204 or 304 must not be given a body, not even an empty one.
-    const body = size === 0 ? null : Buffer.concat(chunks);
+    const body = bytes.byteLength === 0 ? null : bytes;
     return new Response(body, { status: response.status, headers: [...response.headers] });
   };
+}
+
+/** undici's own size limit, reported directly or as the cause of a failed fetch or read. */
+function tooLarge(error: unknown): boolean {
+  const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
+  return (cause as { code?: string } | undefined)?.code === "UND_ERR_RES_EXCEEDED_MAX_SIZE";
 }

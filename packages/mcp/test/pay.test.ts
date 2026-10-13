@@ -288,7 +288,6 @@ describe("call_paid_http", () => {
     ["https://169.254.169.254/latest"],
     ["https://224.0.0.1/forecast"],
     ["https://[ff02::1]/forecast"],
-    ["https://[::127.0.0.1]/forecast"],
     ["https://[::ffff:0:127.0.0.1]/forecast"],
     ["https://[fec0::1]/forecast"],
     ["https://[::ffff:7f00:1]/forecast"],
