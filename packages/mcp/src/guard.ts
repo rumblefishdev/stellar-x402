@@ -13,7 +13,10 @@ export interface SellerLimits {
   timeoutMs: number;
   /** Refuse a seller response body larger than this. */
   maxResponseBytes: number;
-  /** Allow `http` and loopback or private hosts: only for a seller run locally in tests. */
+  /**
+   * Also allow `http` to this machine (`localhost`, `*.localhost`, 127.0.0.0/8, `::1`): only for a
+   * seller run locally in tests. Every other host keeps the https and public-address rules.
+   */
   allowInsecureLocal: boolean;
 }
 
@@ -29,6 +32,16 @@ function isNotPublic(ip: string): boolean {
   const ipv4Compatible =
     address.kind() === "ipv6" && (address as ipaddr.IPv6).match(ipaddr.IPv6.parse("::"), 96);
   return ipv4Compatible || address.range() !== "unicast";
+}
+
+/**
+ * This machine: `localhost` and `*.localhost` (names reserved for loopback, RFC 6761) or a loopback
+ * address. The only hosts `allowInsecureLocal` opens, so a test seller on this machine is reachable
+ * while the buyer's network and plain http elsewhere stay closed.
+ */
+function isLoopback(host: string): boolean {
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  return isIP(host) !== 0 && ipaddr.process(host).range() === "loopback";
 }
 
 /**
@@ -55,13 +68,15 @@ export const publicOnlyLookup: LookupFunction = (hostname, options, callback) =>
 /**
  * https only, and no private IP address written in the URL: an address is connected to without a
  * lookup, so it is checked here; a name, `localhost` included, when it is resolved (`publicOnlyLookup`).
+ * With `allowInsecureLocal`, http or https to this machine passes too.
  */
 export function checkUrl(raw: string, allowInsecureLocal: boolean): URL {
   if (!URL.canParse(raw)) throw new ToolError("unsafe_url", "url is not a URL.");
   const url = new URL(raw);
-  if (allowInsecureLocal) return url;
-  if (url.protocol !== "https:") throw new ToolError("unsafe_url", "Only https URLs are called.");
   const host = url.hostname.replace(/^\[|\]$/g, "");
+  const web = url.protocol === "http:" || url.protocol === "https:";
+  if (allowInsecureLocal && web && isLoopback(host)) return url;
+  if (url.protocol !== "https:") throw new ToolError("unsafe_url", "Only https URLs are called.");
   const local = isIP(host) !== 0 && isNotPublic(host);
   if (local) throw new ToolError("unsafe_url", "The URL points at an address that is not public.");
   return url;
@@ -84,9 +99,12 @@ export function guardedFetch(limits: SellerLimits): typeof fetch {
   const deadline = AbortSignal.timeout(limits.timeoutMs);
   // Every name is checked where it is connected to. undici's own `maxResponseSize` is not used: it
   // counts the bytes on the wire, so a small gzip body that unpacks to gigabytes would pass it.
-  const dispatcher = new Agent({
-    connect: limits.allowInsecureLocal ? {} : { lookup: publicOnlyLookup },
-  });
+  // A loopback name opened by allowInsecureLocal resolves as usual; every other name is checked.
+  const guardedLookup: LookupFunction = (hostname, options, callback) =>
+    limits.allowInsecureLocal && isLoopback(hostname)
+      ? lookup(hostname, options, callback)
+      : publicOnlyLookup(hostname, options, callback);
+  const dispatcher = new Agent({ connect: { lookup: guardedLookup } });
   return async (input, init) => {
     const request = new Request(input, init);
     // Every request the payment wrapper makes passes here, so the guard holds whoever calls this.

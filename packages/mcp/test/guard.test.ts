@@ -40,6 +40,33 @@ describe("guardedFetch", () => {
     expect(undiciFetch).not.toHaveBeenCalled();
   });
 
+  it.each([["https://10.0.0.5/x"], ["http://example.com/x"]])(
+    "with allowInsecureLocal, still refuses %s: the switch opens only this machine",
+    async (url) => {
+      const limits = { timeoutMs: 1_000, maxResponseBytes: 1_000, allowInsecureLocal: true };
+      await expect(guardedFetch(limits)(url)).rejects.toMatchObject({ code: "unsafe_url" });
+      expect(undiciFetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it("with allowInsecureLocal, reaches this machine by name and still checks every other name", async () => {
+    const { fetch: realFetch } = await vi.importActual<typeof import("undici")>("undici");
+    undiciFetch.mockImplementation(realFetch);
+    const seller = createServer((_req, res) => res.end("ok"));
+    await new Promise<void>((done) => seller.listen(0, "127.0.0.1", done));
+    const { port } = seller.address() as AddressInfo;
+    const limits = { timeoutMs: 5_000, maxResponseBytes: 1_000, allowInsecureLocal: true };
+    try {
+      expect((await guardedFetch(limits)(`http://localhost:${port}/`)).status).toBe(200);
+      // "localhost." is not a loopback name to the switch, so its lookup is checked and refused.
+      await expect(guardedFetch(limits)(`https://localhost.:${port}/`)).rejects.toMatchObject({
+        code: "unsafe_url",
+      });
+    } finally {
+      seller.close();
+    }
+  });
+
   it("passes on a refusal from the lookup with its own code", async () => {
     const { ToolError } = await import("../src/results.js");
     const refused = new ToolError("unsafe_url", "refused");
