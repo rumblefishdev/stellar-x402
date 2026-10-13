@@ -1,0 +1,86 @@
+import type { ServerConfig } from "@stellar-x402/mcp";
+import { STELLAR_NETWORKS } from "@stellar-x402/config";
+import { createEd25519Signer, USDC_TESTNET_ADDRESS } from "@x402/stellar";
+import { ExactStellarScheme } from "@x402/stellar/exact/client";
+import { z } from "zod";
+
+/** What `createServer` needs, read from the environment; only the log is added by the caller. */
+export type CliConfig = Omit<ServerConfig, "log"> & { buyer?: string };
+
+/** An unset variable and an empty one mean the same: not given. */
+const optional = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((value) => (value === "" ? undefined : value), schema.optional());
+
+const POSITIVE = z.coerce
+  .number({ invalid_type_error: "must be a positive integer" })
+  .int("must be a positive integer")
+  .positive("must be a positive integer");
+/** An amount in the asset's smallest unit: 10000 is 0.001 USDC. */
+const ATOMIC = z
+  .string()
+  .regex(/^\d+$/, "must be an amount in atomic units (10000 = 0.001 USDC)")
+  .transform(BigInt);
+
+const ENV = z.object({
+  STELLAR_X402_DISCOVERY_URL: z.string({ required_error: "is required" }).min(1, "is required"),
+  STELLAR_X402_NETWORK: optional(
+    z.literal(STELLAR_NETWORKS.testnet, {
+      errorMap: () => ({
+        message: "must be stellar:testnet; this server pays on stellar:testnet only",
+      }),
+    }),
+  ),
+  // The MCP client gives up on a request after 60 s (SDK default), so a call must end before that.
+  STELLAR_X402_TIMEOUT_MS: optional(POSITIVE).default(30_000),
+  // A response body goes into the model's context: 100 kB is about 25k tokens.
+  STELLAR_X402_MAX_RESPONSE_BYTES: optional(POSITIVE).default(100_000),
+  STELLAR_X402_ALLOW_INSECURE_LOCAL: optional(z.enum(["0", "1"], { message: "must be 0 or 1" })),
+  STELLAR_X402_SECRET_KEY: optional(z.string()),
+  STELLAR_X402_MAX_PER_CALL: optional(ATOMIC),
+  STELLAR_X402_BUDGET: optional(ATOMIC),
+});
+
+/**
+ * Reads the server's settings from environment variables, as an MCP client such as Claude Desktop
+ * passes them. Any missing or wrong value stops the start with a message naming the variable.
+ */
+export function loadConfig(env: NodeJS.ProcessEnv): CliConfig {
+  const parsed = ENV.safeParse(env);
+  if (!parsed.success) {
+    const [issue] = parsed.error.issues;
+    throw new Error(`${issue!.path.join(".")} ${issue!.message}.`);
+  }
+  const vars = parsed.data;
+  const config: CliConfig = {
+    discoveryUrl: vars.STELLAR_X402_DISCOVERY_URL,
+    timeoutMs: vars.STELLAR_X402_TIMEOUT_MS,
+    maxResponseBytes: vars.STELLAR_X402_MAX_RESPONSE_BYTES,
+    allowInsecureLocal: vars.STELLAR_X402_ALLOW_INSECURE_LOCAL === "1",
+  };
+  if (vars.STELLAR_X402_SECRET_KEY === undefined) return config;
+  // Spending needs both limits: the server never guesses how much it may pay.
+  if (vars.STELLAR_X402_MAX_PER_CALL === undefined) {
+    throw new Error("STELLAR_X402_MAX_PER_CALL is required.");
+  }
+  if (vars.STELLAR_X402_BUDGET === undefined) throw new Error("STELLAR_X402_BUDGET is required.");
+  let signer;
+  try {
+    signer = createEd25519Signer(vars.STELLAR_X402_SECRET_KEY, STELLAR_NETWORKS.testnet);
+  } catch {
+    // The library's message could quote the key, so it is not passed on.
+    throw new Error("STELLAR_X402_SECRET_KEY is not a Stellar secret key.");
+  }
+  return {
+    ...config,
+    buyer: signer.address,
+    payment: {
+      schemes: [{ network: STELLAR_NETWORKS.testnet, client: new ExactStellarScheme(signer) }],
+      assets: {
+        [USDC_TESTNET_ADDRESS]: {
+          maxPerCall: vars.STELLAR_X402_MAX_PER_CALL,
+          budget: vars.STELLAR_X402_BUDGET,
+        },
+      },
+    },
+  };
+}

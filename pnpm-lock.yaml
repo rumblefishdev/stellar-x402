@@ -90,6 +90,9 @@ importers:
       '@x402/stellar':
         specifier: ~2.28.0
         version: 2.28.0
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
     devDependencies:
       '@stellar/stellar-sdk':
         specifier: ^16.3.0
