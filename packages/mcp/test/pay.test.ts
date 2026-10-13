@@ -38,10 +38,15 @@ async function connect(
     assets: { [USDC]: { maxPerCall: 20_000n, budget: 15_000n } },
     ...overrides,
   };
-  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   const log = (message: string) => logs.push(message);
   const config = { discoveryUrl: "http://unused", timeoutMs, maxResponseBytes: 1_000, log };
-  await createServer({ ...config, allowInsecureLocal, payment }).connect(serverSide);
+  await connectTo(createServer({ ...config, allowInsecureLocal, payment }));
+}
+
+/** Connects the test client the way a real MCP client does. */
+async function connectTo(server: ReturnType<typeof createServer>) {
+  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverSide);
   client = new Client({ name: "test", version: "0.0.0" });
   await client.connect(clientSide);
   // A real MCP client lists the tools first, and then checks results against their output schemas.
@@ -421,13 +426,8 @@ describe("get_resource", () => {
 describe("default settings", () => {
   it("refuses http and local sellers unless allowInsecureLocal is set", async () => {
     await client.close();
-    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
     const config = { discoveryUrl: "http://unused", timeoutMs: 5_000, maxResponseBytes: 1_000 };
-    await createServer({ ...config, log: () => {} }).connect(serverSide);
-    client = new Client({ name: "test", version: "0.0.0" });
-    await client.connect(clientSide);
-    // A real MCP client lists the tools first, and then checks results against their output schemas.
-    await client.listTools();
+    await connectTo(createServer({ ...config, log: () => {} }));
     const result = await client.callTool({
       name: "get_resource",
       arguments: { url: `${seller.url}/forecast`, method: "GET" },
@@ -440,13 +440,8 @@ describe("default settings", () => {
 describe("without payment config", () => {
   beforeEach(async () => {
     await client.close();
-    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
     const config = { discoveryUrl: "http://unused", timeoutMs: 5_000, maxResponseBytes: 1_000 };
-    await createServer({ ...config, allowInsecureLocal: true, log: () => {} }).connect(serverSide);
-    client = new Client({ name: "test", version: "0.0.0" });
-    await client.connect(clientSide);
-    // A real MCP client lists the tools first, and then checks results against their output schemas.
-    await client.listTools();
+    await connectTo(createServer({ ...config, allowInsecureLocal: true, log: () => {} }));
   });
 
   it("lists and previews, but offers no call_paid_http tool", async () => {

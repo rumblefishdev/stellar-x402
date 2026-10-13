@@ -19,7 +19,7 @@ export interface SellerLimits {
  * link-local, multicast, reserved, unique-local, carrier-grade NAT, NAT64, 6to4, …) and calls a plain
  * public one `unicast`. A range nobody listed is refused by default.
  */
-function isPrivate(ip: string): boolean {
+function isNotPublic(ip: string): boolean {
   const address = ipaddr.process(ip);
   // ipaddr.js calls the deprecated IPv4-compatible form (`::a.b.c.d`) `unicast`; it is not a public
   // address, so it is refused too.
@@ -37,10 +37,10 @@ function isPrivate(ip: string): boolean {
 export const publicOnlyLookup: LookupFunction = (hostname, options, callback) => {
   lookup(hostname, { ...options, all: true }, (error, addresses) => {
     if (error) return callback(error, "");
-    if (addresses.some((a) => isPrivate(a.address))) {
+    if (addresses.some((a) => isNotPublic(a.address))) {
       const refused = new ToolError(
         "unsafe_url",
-        "The URL's host resolves to a loopback or private address.",
+        "The URL's host resolves to an address that is not public.",
       );
       return callback(refused as NodeJS.ErrnoException, "");
     }
@@ -59,8 +59,8 @@ export function checkUrl(raw: string, allowInsecureLocal: boolean): URL {
   if (allowInsecureLocal) return url;
   if (url.protocol !== "https:") throw new ToolError("unsafe_url", "Only https URLs are called.");
   const host = url.hostname.replace(/^\[|\]$/g, "");
-  const local = isIP(host) !== 0 && isPrivate(host);
-  if (local) throw new ToolError("unsafe_url", "The URL points at a loopback or private address.");
+  const local = isIP(host) !== 0 && isNotPublic(host);
+  if (local) throw new ToolError("unsafe_url", "The URL points at an address that is not public.");
   return url;
 }
 
