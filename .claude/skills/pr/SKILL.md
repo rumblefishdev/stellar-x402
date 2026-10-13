@@ -1,6 +1,6 @@
 ---
 name: pr
-description: Run the CI checks, push the branch and open a GitHub pull request to develop for the active lore task, with a house-style body, testnet evidence and reviewers requested. Use for "zrób PR", "otwórz PR", "wystaw PR", "open a PR", "create a pull request".
+description: Run the CI checks, push the branch and open a GitHub pull request to develop for the active lore task, with a house-style body, testnet evidence and reviewers requested (one for docs-only PRs, two otherwise, picked at random unless named). Use for "zrób PR", "otwórz PR", "wystaw PR", "open a PR", "create a pull request".
 metadata:
   internal: true
 ---
@@ -11,7 +11,7 @@ metadata:
 
 - `--base <branch>`: a different base than `develop`
 - `--draft`: open it as a draft
-- `--reviewer <login,…>`: different reviewers than the default
+- `--reviewer <login,…>`: the reviewers the PR's creator chose; skips the random pick in step 6
 - `/pr <title>`: use this title instead of building one
 
 ## Steps
@@ -27,6 +27,8 @@ git fetch origin develop
 git log --format='%h %s' origin/develop..HEAD
 git diff --stat origin/develop...HEAD
 ```
+
+If the diff mixes risk classes (formatting, moved code, refactors, behavior changes) and is over ~100 lines, or its `logic` part is over ~400, suggest `/risk-split-pr` before going on. A PR that is part of such a stack takes the title and the `Risk class` section that `/risk-split-pr` describes.
 
 ### 2. Check every commit message
 
@@ -59,6 +61,10 @@ The description is short, lowercase and says what the PR does. Don't copy the ta
 
 - **<Part>** (`path`): what it does. One bullet per real change, 3–6 bullets.
 
+Reviewers, please confirm:
+
+- **@<login>** (<task id>): <the one thing this PR changes for their task, to confirm>.
+
 ## Please confirm
 
 1. **<Decision>** (<lanes it affects>): what was decided and why, one paragraph each.
@@ -72,6 +78,15 @@ The description is short, lowercase and says what the PR does. Don't copy the ta
 - **No AI attribution**, in the body or in any commit: no "Generated with Claude Code" line and no `Co-Authored-By: Claude` trailer. It breaks the house convention.
 - **Please confirm** lists the decisions reviewers must agree to, usually the task's "Emerged" design decisions. Call it **Please note** when they're findings rather than decisions. Leave it out when there are none.
 - Say WHAT changed, not HOW. Name the tasks that inherit deferred work (`0022 runs the same suites…`).
+- **Reviewers, please confirm** goes at the end of the Summary, as in PR #23. It has one bullet per other team member whose task this PR affects: a task it edits, a task in the current task's `related_tasks`, or a task the body names as inheriting work. That task's owner is the last `who` in its `history` (the board's assignee). A backlog task whose last `who` is `claude` belongs to its lane's owner, from its tags:
+
+  | Lane tag    | Owner            |
+  | ----------- | ---------------- |
+  | `payments`  | `okarcz`         |
+  | `discovery` | `akot`           |
+  | `platform`  | `stkrolikiewicz` |
+
+  Skip tasks of the PR's creator. Each bullet says in one sentence what the PR changes for that task and what to confirm, e.g. `**@adamkoot** (0032): no resource filter is needed; details before paying come from the seller's 402 answer.` Leave the list out when no one else's task is affected. These people are always requested as reviewers (step 6).
 
 **Testing includes a run against the real thing.** Unit tests show the code matches our understanding; they don't show the understanding is right. Use the check that fits the change:
 
@@ -103,7 +118,19 @@ If something fails, fix it in a new commit (through `/lore-framework-git`) and r
 
 ### 6. Push and open the PR
 
-Reviewers default to the other team members. `team.yaml` ids map to GitHub logins like this:
+**Reviewers.** Everyone in the body's "Reviewers, please confirm" list is requested, since they own an affected task. If the PR's creator named reviewers (`--reviewer`, or in the request), add exactly those. Otherwise fill up to the count below at random from the other team members, never the creator (`LORE_SESSION_CURRENT_USER`). More confirmers than the count means all of them, and no random pick:
+
+| The PR changes                                                         | Reviewers |
+| ---------------------------------------------------------------------- | --------- |
+| docs only: every changed file is Markdown, or under `docs/` or `lore/` | 1         |
+| anything else (code, config, CI, contracts)                            | 2         |
+
+```bash
+git diff --name-only origin/develop...HEAD | grep -Ev '\.md$|^docs/|^lore/' # empty → docs only
+printf '%s\n' {logins of the other members} | shuf -n {1 or 2}
+```
+
+Say who was picked, and that the pick was random. `team.yaml` ids map to GitHub logins like this:
 
 | team.yaml        | GitHub           |
 | ---------------- | ---------------- |
