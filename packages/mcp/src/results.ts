@@ -2,12 +2,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { PaymentErrorCode } from "./pay.js";
 
 /** Closed set of error codes; an agent branches on `error.code`, never on the message. */
-type ErrorCode =
-  | "resource_not_found"
-  | "upstream_error"
-  | "invalid_catalog_entry"
-  | "invalid_input"
-  | PaymentErrorCode;
+type ErrorCode = "upstream_error" | PaymentErrorCode;
 
 export function toolError(code: ErrorCode, message: string): CallToolResult {
   const error = { code, message };
