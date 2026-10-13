@@ -11,7 +11,7 @@ import { previewPayment } from "./preview.js";
 export interface ServerConfig {
   /** Base URL of a server with `GET /discovery/resources`: our facilitator, or a fake catalog. */
   discoveryUrl: string;
-  /** Give up on a catalog or seller request after this long, so a call always ends. */
+  /** Give up on a tool call after this long, all its catalog or seller requests together. */
   timeoutMs: number;
   /** Refuse a seller response body larger than this. */
   maxResponseBytes: number;

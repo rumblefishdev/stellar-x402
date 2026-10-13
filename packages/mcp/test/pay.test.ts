@@ -255,6 +255,16 @@ describe("call_paid_http", () => {
     expect(seller.payments).toHaveLength(0);
   });
 
+  it("gives the whole call one deadline, so a paid retry that would end past it is cut short", async () => {
+    await reconnect({}, { timeoutMs: 400 });
+    // Each answer alone fits in the deadline; the unpaid one and the paid retry together do not.
+    seller.delayMs = 250;
+    const started = performance.now();
+    expect((await pay()).error.code).toBe("payment_unknown");
+    expect(performance.now() - started).toBeLessThan(400 + 100);
+    expect(seller.payments).toHaveLength(1);
+  });
+
   it("returns upstream_error when the seller stops sending its response before paying", async () => {
     await reconnect({}, { timeoutMs: 300 });
     expect((await pay("/stall")).error.code).toBe("upstream_error");

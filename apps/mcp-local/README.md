@@ -53,7 +53,7 @@ Without `STELLAR_X402_SECRET_KEY` the server only lists and previews.
 | `STELLAR_X402_MAX_PER_CALL`         | required with a key | the largest price one call may pay, in atomic units (`10000` = 0.001 USDC)                         |
 | `STELLAR_X402_BUDGET`               | required with a key | the most this process may spend, in atomic units                                                   |
 | `STELLAR_X402_NETWORK`              | `stellar:testnet`   | anything else stops the server: it pays on testnet only                                            |
-| `STELLAR_X402_TIMEOUT_MS`           | `30000`             | a catalog or seller request gives up after this long                                               |
+| `STELLAR_X402_TIMEOUT_MS`           | `30000`             | a tool call gives up after this long, all its requests together                                    |
 | `STELLAR_X402_MAX_RESPONSE_BYTES`   | `100000`            | a seller response larger than this is refused (`response_too_large`)                               |
 | `STELLAR_X402_ALLOW_INSECURE_LOCAL` | `0`                 | `1` allows `http` and local addresses — **only** for a seller you run on your own machine in tests |
 

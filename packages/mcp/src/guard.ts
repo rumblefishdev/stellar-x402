@@ -6,7 +6,10 @@ import { ToolError } from "./results.js";
 
 /** How this server talks to sellers, for a preview and a payment alike. */
 export interface SellerLimits {
-  /** Give up on a seller request after this long, so a call always ends. */
+  /**
+   * Give up on a tool call after this long, all its seller requests together, so a call ends before
+   * the MCP client stops waiting and the agent always gets an answer.
+   */
   timeoutMs: number;
   /** Refuse a seller response body larger than this. */
   maxResponseBytes: number;
@@ -73,10 +76,12 @@ export function checkBody(method: string, body: string | undefined): void {
 
 /**
  * The fetch the payment wrapper uses: only public addresses, no redirects (the paid retry carries the
- * signed payment, which must not reach another host), a timeout, and a body size cap counted while
- * the body arrives.
+ * signed payment, which must not reach another host), a deadline, and a body size cap counted while
+ * the body arrives. Build one per tool call: the deadline starts here and covers every request made
+ * through it, so a payment's unpaid request, signing and paid retry together end within `timeoutMs`.
  */
 export function guardedFetch(limits: SellerLimits): typeof fetch {
+  const deadline = AbortSignal.timeout(limits.timeoutMs);
   // Every name is checked where it is connected to. undici's own `maxResponseSize` is not used: it
   // counts the bytes on the wire, so a small gzip body that unpacks to gigabytes would pass it.
   const dispatcher = new Agent({
@@ -93,7 +98,7 @@ export function guardedFetch(limits: SellerLimits): typeof fetch {
         headers: [...request.headers],
         body: request.body ? await request.arrayBuffer() : undefined,
         redirect: "manual",
-        signal: AbortSignal.timeout(limits.timeoutMs),
+        signal: deadline,
         dispatcher,
       });
     } catch (error) {
@@ -120,7 +125,7 @@ export function guardedFetch(limits: SellerLimits): typeof fetch {
       }
     } catch (error) {
       if (error instanceof ToolError) throw error;
-      // The timeout covers the body too: a seller that sends its headers and then stalls ends here.
+      // The deadline covers the body too: a seller that sends its headers and then stalls ends here.
       throw new ToolError(
         "upstream_error",
         "The seller's response did not arrive in full.",
