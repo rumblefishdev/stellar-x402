@@ -45,7 +45,7 @@ As a resource server, I want `POST /verify` to check an `exact` payment the way 
 
 ## Acceptance Criteria
 
-- [ ] Given a valid `exact` payload on `stellar:testnet`, when `/verify` is called, then it returns 200 with `{isValid: true, payer}`, using upstream `ExactStellarScheme.verify()`; we never re-implement upstream's signature, scope, simulation or event checks
+- [x] Given a valid `exact` payload on `stellar:testnet`, when `/verify` is called, then it returns 200 with `{isValid: true, payer}`, using upstream `ExactStellarScheme.verify()`; we never re-implement upstream's signature, scope, simulation or event checks
 - [x] Given a payload where a channel account appears as the transaction source, an operation source, `from`, or the address of any auth entry (`Address` or `AddressV2`), when `/verify` is called, then it returns `isValid: false` with a reason (AD-5)
 - [x] Given a payload whose auth expires fewer than `minValidityLedgers` ledgers ahead, when `/verify` is called, then it returns `isValid: false` with a reason (AD-22)
 - [x] Given a malformed request body, when `/verify` is called, then it returns 400, and an unexpected error returns 500
@@ -66,9 +66,15 @@ As a resource server, I want `POST /verify` to check an `exact` payment the way 
 - **`main.ts`**: builds `ExactStellarScheme` with the facilitator key as its only signer, the first RPC URL, `MAX_FEE_STROOPS` and the current bid. The latest ledger comes from `FallbackRpc` over all `RPC_URLS`.
 - **`config.ts`**: `MAX_FEE_STROOPS` and `INCLUSION_FEE_STROOPS` are capped at `Number.MAX_SAFE_INTEGER`, because both components take a `number`.
 - **Tests**: facilitator 46 → 74 (`verify.test.ts` 13, `verify-route.test.ts` 10, `fees.test.ts` 5). The verifier tests build real XDR transactions against a fake upstream. Mutating the muxed normalization, the off-by-one, earliest-vs-latest, the auth check or the operation-source check each fails a test.
-- **Local testnet run**: the server on testnet answers a well-formed request through real upstream with 200 `invalid_exact_stellar_payload_malformed`, and `{}` with 400. A valid signed payment (AC 1) is not run yet: it needs a funded client key.
+- **Testnet smoke** (`scripts/verify-smoke.ts`): a client signs a real `exact` XLM-SAC payment with upstream's client, and two facilitators built by `main()` verify it.
+  - With `MIN_VALIDITY_LEDGERS` 4, the payment is `isValid: true` with the right payer (AC 1), and a facilitator that lists the client as a channel rejects it with `extra.reason` set.
+  - With the old default 12, the valid payment was rejected: "auth expires at ledger 5175791, 11 ledgers after ledger 5175780; at least 12 are required".
+  - Nothing is submitted, because `/verify` only simulates.
+- A well-formed but malformed payload gets 200 `invalid_exact_stellar_payload_malformed` from real upstream, and `{}` gets 400.
 
-**Modified test:** `main.test.ts` no longer expects 501 from `/verify`, and passes a stub `verify` to `start()`.
+**Modified tests:**
+- `main.test.ts` no longer expects 501 from `/verify`, and passes a stub `verify` to `start()`.
+- `config.test.ts` expects the new `MIN_VALIDITY_LEDGERS` default of 4.
 
 ## Issues Encountered
 
@@ -91,4 +97,4 @@ As a resource server, I want `POST /verify` to check an `exact` payment the way 
 
    Fee escalation under load can still raise the pool's bid after `/verify`; the pool checks its own total before signing.
 6. **Verification is injected as `Verify` in `AppDeps`,** so the HTTP tests need no RPC, and `/settle` can reuse the same function.
-
+7. **`MIN_VALIDITY_LEDGERS` defaults to 4, not 12** (Oskar, 2026-10-13). 12 was the interim value from 0017. Upstream's client signs auth for exactly `maxTimeoutSeconds` (12 ledgers at 60 s), so at least one ledger later only 11 are left, and 12 rejected nearly every payment on testnet. 4 is AD-22's floor: 2 for the pool plus about 2 of channel wait. AD-22 now says the minimum must stay well below the client's signing window.
