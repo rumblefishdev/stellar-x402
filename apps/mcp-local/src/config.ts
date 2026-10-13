@@ -8,8 +8,11 @@ import { z } from "zod";
 export type CliConfig = Omit<ServerConfig, "log"> & { buyer?: string };
 
 /** An unset variable and an empty one mean the same: not given. */
-const optional = <T extends z.ZodTypeAny>(schema: T) =>
-  z.preprocess((value) => (value === "" ? undefined : value), schema.optional());
+const blank = (value: unknown) => (value === "" ? undefined : value);
+const optional = <T extends z.ZodTypeAny>(schema: T) => z.preprocess(blank, schema.optional());
+/** The default goes inside the preprocessing, so an empty value gets it too. */
+const orDefault = <T extends z.ZodTypeAny>(schema: T, value: z.input<T>) =>
+  z.preprocess(blank, schema.default(value));
 
 const POSITIVE = z.coerce
   .number({ invalid_type_error: "must be a positive integer" })
@@ -31,9 +34,9 @@ const ENV = z.object({
     }),
   ),
   // The MCP client gives up on a request after 60 s (SDK default), so a call must end before that.
-  STELLAR_X402_TIMEOUT_MS: optional(POSITIVE).default(30_000),
+  STELLAR_X402_TIMEOUT_MS: orDefault(POSITIVE, 30_000),
   // A response body goes into the model's context: 100 kB is about 25k tokens.
-  STELLAR_X402_MAX_RESPONSE_BYTES: optional(POSITIVE).default(100_000),
+  STELLAR_X402_MAX_RESPONSE_BYTES: orDefault(POSITIVE, 100_000),
   STELLAR_X402_ALLOW_INSECURE_LOCAL: optional(z.enum(["0", "1"], { message: "must be 0 or 1" })),
   STELLAR_X402_SECRET_KEY: optional(z.string()),
   STELLAR_X402_MAX_PER_CALL: optional(ATOMIC),

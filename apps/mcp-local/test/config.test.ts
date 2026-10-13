@@ -22,6 +22,16 @@ describe("loadConfig", () => {
     });
   });
 
+  it("uses the defaults for empty values", () => {
+    const config = loadConfig({
+      ...BASE,
+      STELLAR_X402_TIMEOUT_MS: "",
+      STELLAR_X402_MAX_RESPONSE_BYTES: "",
+      STELLAR_X402_ALLOW_INSECURE_LOCAL: "",
+    });
+    expect(config).toEqual(loadConfig(BASE));
+  });
+
   it("pays in testnet USDC within the limits when a key is given", () => {
     const config = loadConfig(PAYING);
     expect(config.buyer).toBe(BUYER.publicKey());
