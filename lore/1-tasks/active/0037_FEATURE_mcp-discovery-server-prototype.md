@@ -194,6 +194,10 @@ and existing servers. Each line: what was decided and why.
   (settled through x402.org), fake sellers for cases a live seller cannot produce (a stalled body,
   a broken settlement header, a redirect), and the buyer's balance on Horizon after each paid
   scenario. The result is a table scenario · expected · got, with transaction hashes.
+- **One topic per file (W237, W238 A), a `[structure only]` PR after PR #23 and before PR C:**
+  `server.ts` only registers the tools; `catalog.ts` holds `list_resources`; `guard.ts` the address
+  guard and `guardedFetch`, shared by preview and payment; `preview.ts` holds `get_resource`;
+  `pay.ts` and `results.ts` stay. Moves only, proven by unchanged tests and `moved.sh`.
 - **Budget per process and per day (W235 C), in the PR after PR C:** the per-process budget stays;
   a daily budget is added, kept in a local file so a restart does not reset it.
 - **Comparison with existing x402 MCP servers.** A table of `nirholas/x402-bridge` and
