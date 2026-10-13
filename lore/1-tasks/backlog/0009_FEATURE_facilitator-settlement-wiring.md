@@ -83,7 +83,7 @@ never charged twice.
     `packages/signer-pool/test/` and isn't exported; a `./testing` subpath export is the
     suggestion.
 - From 0014 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md)): `/settle` answers within a 90 s budget, below the
-  ALB's 120 s idle timeout and 100 s deregistration delay.
+  180 s stop grace period (revised for the Hetzner server in 0039).
   - Pass the pool a `deadline`, so the wait for a channel counts too.
   - When the budget runs out after the transaction was sent, answer `settlement_pending` with its
     hash (AD-6).
