@@ -156,8 +156,8 @@ and existing servers. Each line: what was decided and why.
   default): a longer one could be settled long after the agent got its answer.
 - **Buyer-side address guard for every seller request** (`get_resource` and `call_paid_http`):
   https only; the address a name resolves to is checked when the connection is made (an undici
-  Agent with its own lookup), and loopback, private, link-local, multicast and reserved addresses
-  are refused, IP literals included; no automatic redirects; a time limit and a response size limit
+  Agent with its own lookup), and loopback, private, link-local, multicast and reserved
+  (non-documentation) addresses are refused, IP literals included; no automatic redirects; a time limit and a response size limit
   counted while the body arrives; an `allowInsecureLocal` switch, off by default, only for the local
   test seller. https alone was not enough: an internal service can have a public name and a public
   certificate (W197, after the security review).
@@ -165,14 +165,19 @@ and existing servers. Each line: what was decided and why.
   `unsupported_payment`; the CLI refuses to start with `stellar:pubnet`, and the README says to
   use a testnet-only key.
 - **Errors are loud:** a fixed code list; causes go to the server log, never to the agent. After
-  the signed payment leaves the process, any failure is `payment_unknown`. An unfunded payer is
+  the signed payment leaves the process, any failure is `payment_unknown`, except a refusal: a
+  facilitator saying `success: false`, or a seller answering 402 again without a settlement, is
+  `payment_rejected` (the amount stays spent either way). An unfunded payer is
   `insufficient_funds`: its simulation fails in the asset contract (`Error(Contract, #13)` for a
   missing trustline, measured on testnet; `#10` for a low balance). An expired authorization
   cannot be told apart: the Stellar facilitator reports it as a failed simulation, so it is
   `payment_rejected` with the reason in the log.
   Exception: input that fails a tool's schema is rejected by the MCP SDK before our handler runs,
   as a loud error without our code (its validation path is private).
-- **Seller-written text** is cut with the `packages/bazaar` limits. Every tool declares an
+- **Seller-written text** is cut with the `packages/bazaar` limits where it is free text
+  (descriptions, mime types, error messages); the rest of a seller's 402 is bounded by the HTTP
+  header limit of Node's client (16 KiB), and its input schema by the catalog's depth and size
+  rules. Every tool declares an
   `outputSchema`.
 - **Logic stays in `packages/mcp`.** The SDK buyer/agent helpers are a later tranche.
 - **`@x402/*` follows the workspace:** 2.27 until PR #22 (0016) merges, then 2.28.
@@ -180,6 +185,18 @@ and existing servers. Each line: what was decided and why.
 ## Not yet decided
 
 - Page size and maximum for `/discovery/resources` (0032); the fake uses 20 and 50.
+
+## Plan for the end of the task
+
+- **Black-box end-to-end test (W209).** After PR C, an agent that has not seen the code writes
+  scenarios with expected results from the tool descriptions, the README and the acceptance
+  criteria only, then runs them against the built CLI over MCP: the example seller on testnet
+  (settled through x402.org), fake sellers for cases a live seller cannot produce (a stalled body,
+  a broken settlement header, a redirect), and the buyer's balance on Horizon after each paid
+  scenario. The result is a table scenario · expected · got, with transaction hashes.
+- **Follow-ups from the PR #23 review, for PR C:** a test that `allowInsecureLocal` is off by
+  default; README notes that the budget resets on restart and that a host with both public and
+  private DNS records is refused.
 
 ## Out of scope
 
