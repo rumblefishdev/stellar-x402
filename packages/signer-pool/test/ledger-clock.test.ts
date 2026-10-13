@@ -52,7 +52,7 @@ describe("SubmitterStats", () => {
     for (let ledger = 1; ledger <= 25; ledger++)
       stats.record({
         type: "final",
-        result: { status: "success", channel: "C", ledger },
+        result: { status: "success", channel: "C", ledger, attempts: [] },
         queuedMs: 0,
         totalMs: 0,
       });
