@@ -2,10 +2,10 @@
 id: "0016"
 title: "Signer pool T1 prerequisites and the @x402 2.28 upgrade"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0003", "0006"]
-related_tasks: ["0007", "0009", "0011", "0012"]
+related_tasks: ["0007", "0009", "0011", "0012", "0018", "0019"]
 tags: [signer-pool, settlement, priority-high, effort-small, payments]
 links:
   - ../archive/0007_FEATURE_facilitator-settlement-submitter.md
@@ -27,6 +27,14 @@ history:
     who: okarcz
     note: >
       Work started.
+  - date: "2026-10-13"
+    status: completed
+    who: okarcz
+    note: >
+      PR #22 rebase-merged into develop (b8f21a5..ffbd907) after two review rounds (Stan and
+      Adam approved). signer-pool 98 tests (+28); facilitator 46, bazaar 40 and mcp 18 on 2.28.
+      Second round added onSignedTimeoutMs (5 s), SubmitResult.attempts and attemptsOf(error), and
+      the maxLedger boundary tests. The state model went to 0019 as an open question.
 ---
 
 # Signer pool T1 prerequisites and the @x402 2.28 upgrade
@@ -37,11 +45,11 @@ Three small changes to `packages/signer-pool` that the T1 facilitator (0009) dep
 workspace move to `@x402` 2.28. The M1 architecture review found that the spine's settlement rules
 can't be met with the library as it is.
 
-## Status: Active
+## Status: Completed
 
-> Started 2026-10-12 on branch `lore-0016-signer-pool-t1-prerequisites`. Code, tests and the
-> testnet smoke run done; in review (PR #22). The review's findings are fixed and the smoke run
-> was repeated.
+> Completed 2026-10-13. PR #22 was rebase-merged into develop (b8f21a5..ffbd907) after two
+> review rounds. The last testnet smoke run (20/20) predates the second round; the smoke script's
+> stricter guards have not been run on testnet yet.
 
 **Story:** [M1 Story 1.2](../../../docs/planning/m1-epics.md#story-12-signer-pool-prerequisites-and-the-x402-228-upgrade) · **Lane:** Payments
 
@@ -222,3 +230,12 @@ lint and format pass.
 13. **A prepared-ahead envelope past the ledger bound is refused directly.** A rebuild's
     simulation can only see the same ledger or a later one, so it would be refused too; this
     saves that simulation.
+
+## Future Work
+
+Each item is recorded in its task; no new tasks were needed.
+
+- **0019** (settlement record): Adam's attempt/settlement state model, as an open question. It
+  can build on `SubmitResult.attempts` and `attemptsOf(error)`.
+- **0018** (`/verify`) and **0009** (`/settle`): pass `signatureExpirationLedger` as `maxLedger`,
+  set `deadline` too, and keep `minValidityLedgers` at least 2 plus the channel wait (AD-22).
