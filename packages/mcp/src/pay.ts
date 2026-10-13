@@ -1,17 +1,13 @@
-import { lookup } from "node:dns/promises";
 import { BlockList, isIP } from "node:net";
-import { STELLAR_NETWORKS } from "@stellar-x402/config";
+import { LIMITS } from "@stellar-x402/bazaar";
 import { x402Client, x402HTTPClient, type SchemeRegistration } from "@x402/core/client";
-import type { PaymentRequirements } from "@x402/core/types";
 import { wrapFetchWithPayment } from "@x402/fetch";
 
 export interface PaymentConfig {
-  /** Scheme clients holding the buyer's key; the CLI registers `ExactStellarScheme` for testnet. */
+  /** Scheme clients holding the buyer's key; the CLI registers `ExactStellarScheme` for testnet only. */
   schemes: SchemeRegistration[];
   /** Per asset contract: the largest price one call may pay and the budget for this process, in atomic units. */
   assets: Record<string, { maxPerCall: bigint; budget: bigint }>;
-  /** Abort a seller request after this long, so a call always ends. */
-  timeoutMs: number;
   /** Refuse a seller response body larger than this. */
   maxResponseBytes: number;
   /** Allow `http` and loopback or private hosts: only for a seller run locally in tests. */
@@ -20,10 +16,11 @@ export interface PaymentConfig {
 
 export type PaymentErrorCode =
   | "unsafe_url"
-  | "network_not_allowed"
+  | "unsupported_payment"
   | "asset_not_allowed"
   | "over_price_limit"
   | "over_budget"
+  | "insufficient_funds"
   | "payment_failed"
   | "payment_rejected"
   | "payment_unknown"
@@ -31,7 +28,7 @@ export type PaymentErrorCode =
   | "upstream_error";
 
 /**
- * A failure with its code. `message` is safe to show the agent; `cause` (a library or seller error)
+ * A failure with its code. `message` is safe to show the agent; `detail` (a library or seller error)
  * goes only to the server log.
  */
 export class PaymentError extends Error {
@@ -49,15 +46,15 @@ export interface PaidResponse {
   contentType: string | null;
   body: string;
   /** Present when a payment was made and settled. */
-  payment?: { transaction: string; network: string; asset: string; amount: string; payer?: string };
+  payment?: { transaction: string; network: string; asset: string; amount: string };
 }
 
 /** What every call has paid so far, per asset; shared by all calls of one process. */
 export type Spent = Map<string, bigint>;
 
 /**
- * Loopback, private, link-local, carrier-grade NAT and unspecified ranges: a catalog entry naming one
- * of these would make the buyer's machine call into its own network.
+ * Loopback, private, link-local, carrier-grade NAT and unspecified ranges: a URL naming one of these
+ * would make the buyer's machine call into its own network.
  */
 const PRIVATE = new BlockList();
 for (const [address, prefix] of [
@@ -84,119 +81,109 @@ for (const [address, prefix] of [
   PRIVATE.addSubnet(address, prefix, "ipv6");
 }
 
-function isPrivate(ip: string): boolean {
-  const family = isIP(ip);
-  // An address in a form we cannot classify is treated as unsafe.
-  if (family === 0) return true;
-  return PRIVATE.check(ip, family === 6 ? "ipv6" : "ipv4");
-}
-
-/** https only, and every address the host resolves to must be public. */
-async function checkUrl(raw: string, allowInsecureLocal: boolean): Promise<URL> {
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch (error) {
-    throw new PaymentError("unsafe_url", "url is not a URL.", String(error));
-  }
+/**
+ * https only, and no local host named in the URL. A name that resolves to a private address is not
+ * looked up: a device on the buyer's network cannot present a certificate for a public name.
+ */
+function checkUrl(raw: string, allowInsecureLocal: boolean): URL {
+  if (!URL.canParse(raw)) throw new PaymentError("unsafe_url", "url is not a URL.");
+  const url = new URL(raw);
   if (allowInsecureLocal) return url;
   if (url.protocol !== "https:")
     throw new PaymentError("unsafe_url", "Only https URLs are called.");
   const host = url.hostname.replace(/^\[|\]$/g, "");
-  const addresses = isIP(host) ? [host] : (await lookup(host, { all: true })).map((a) => a.address);
-  if (addresses.some(isPrivate)) {
+  const family = isIP(host);
+  const local =
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    (family !== 0 && PRIVATE.check(host, family === 6 ? "ipv6" : "ipv4"));
+  if (local)
     throw new PaymentError("unsafe_url", "The URL points at a loopback or private address.");
-  }
   return url;
 }
 
 /**
  * The fetch the payment wrapper uses: no redirects (the paid retry carries the signed payment, which
- * must not reach another host), a timeout, and a body size cap.
+ * must not reach another host), a timeout, and a body size cap counted while the body arrives.
  */
-function guardedFetch(config: PaymentConfig): typeof fetch {
+function guardedFetch(maxResponseBytes: number, timeoutMs: number): typeof fetch {
   return async (input, init) => {
-    const request = new Request(input, init);
-    const response = await fetch(request, {
-      redirect: "manual",
-      signal: AbortSignal.timeout(config.timeoutMs),
-    });
+    let response: Response;
+    try {
+      response = await fetch(new Request(input, init), {
+        redirect: "manual",
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (error) {
+      throw new PaymentError("upstream_error", "The request to the seller failed.", String(error));
+    }
     if (response.status >= 300 && response.status < 400) {
       throw new PaymentError(
         "unsafe_url",
         "The seller answered with a redirect, which is not followed.",
       );
     }
-    const body = await response.arrayBuffer();
-    if (body.byteLength > config.maxResponseBytes) {
-      throw new PaymentError("response_too_large", "The seller's response is too large.");
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    for await (const chunk of response.body ?? []) {
+      size += chunk.byteLength;
+      if (size > maxResponseBytes) {
+        throw new PaymentError("response_too_large", "The seller's response is too large.");
+      }
+      chunks.push(chunk);
     }
+    // A 204 or 304 must not be given a body, not even an empty one.
+    const body = size === 0 ? null : Buffer.concat(chunks);
     return new Response(body, { status: response.status, headers: response.headers });
   };
-}
-
-/** The price check every payment passes before anything is signed. */
-function admit(requirements: PaymentRequirements, config: PaymentConfig, spent: Spent): bigint {
-  if (requirements.network !== STELLAR_NETWORKS.testnet) {
-    throw new PaymentError("network_not_allowed", `Only ${STELLAR_NETWORKS.testnet} is paid.`);
-  }
-  const limits = config.assets[requirements.asset];
-  if (!limits)
-    throw new PaymentError("asset_not_allowed", "The seller asks for an asset not allowed.");
-  const amount = BigInt(requirements.amount);
-  if (amount > limits.maxPerCall) {
-    throw new PaymentError("over_price_limit", "The price is over the per-call limit.");
-  }
-  const already = spent.get(requirements.asset) ?? 0n;
-  if (already + amount > limits.budget) {
-    throw new PaymentError("over_budget", "The payment would exceed the budget.");
-  }
-  // Reserved now, in the same synchronous step as the check, so two calls at once cannot both pass.
-  spent.set(requirements.asset, already + amount);
-  return amount;
 }
 
 export async function callPaidHttp(
   request: { url: string; method: string; headers?: Record<string, string>; body?: string },
   config: PaymentConfig,
   spent: Spent,
+  timeoutMs: number,
 ): Promise<PaidResponse> {
-  const url = await checkUrl(request.url, config.allowInsecureLocal ?? false);
+  const url = checkUrl(request.url, config.allowInsecureLocal ?? false);
 
-  // One client per call, so its hooks know which reservation is this call's.
+  // One client per call, so its hooks know which payment is this call's.
   const client = x402Client.fromConfig({ schemes: config.schemes, spendControls: false });
-  let reserved: { asset: string; amount: bigint } | undefined;
-  // Set once a payment passed the limits; `reserved` is cleared again if it is given back.
-  let attempted = false;
   let refusal: PaymentError | undefined;
+  let paid: { network: string; asset: string; amount: bigint } | undefined;
   let signingError: Error | undefined;
-  client.onBeforePaymentCreation(async ({ selectedRequirements }) => {
-    try {
-      const amount = admit(selectedRequirements, config, spent);
-      reserved = { asset: selectedRequirements.asset, amount };
-      attempted = true;
-    } catch (error) {
-      if (!(error instanceof PaymentError)) throw error;
-      refusal = error;
-      return { abort: true, reason: error.code };
+
+  // Of the seller's offers, keep those in an allowed asset and within the per-call limit; the library
+  // pays the first one left.
+  client.registerPolicy((_version, offers) => {
+    const allowed = offers.filter((offer) => config.assets[offer.asset]);
+    const affordable = allowed.filter(
+      (offer) => BigInt(offer.amount) <= config.assets[offer.asset]!.maxPerCall,
+    );
+    if (allowed.length === 0) {
+      refusal = new PaymentError("asset_not_allowed", "The seller asks for an asset not allowed.");
+    } else if (affordable.length === 0) {
+      refusal = new PaymentError("over_price_limit", "The price is over the per-call limit.");
     }
+    return affordable;
   });
-  const release = () => {
-    if (!reserved) return;
-    spent.set(reserved.asset, (spent.get(reserved.asset) ?? 0n) - reserved.amount);
-    reserved = undefined;
-  };
-  // Nothing was signed or sent: signing failed (an unfunded payer fails here, in simulation).
+  client.onBeforePaymentCreation(async ({ selectedRequirements: offer }) => {
+    const amount = BigInt(offer.amount);
+    const already = spent.get(offer.asset) ?? 0n;
+    if (already + amount > config.assets[offer.asset]!.budget) {
+      refusal = new PaymentError("over_budget", "The payment would exceed the budget.");
+      return { abort: true, reason: refusal.code };
+    }
+    // Counted as spent now, in the same synchronous step as the check, so two calls at once cannot
+    // both pass; never given back, so a seller cannot get it back into the budget by claiming failure.
+    spent.set(offer.asset, already + amount);
+    paid = { network: offer.network, asset: offer.asset, amount };
+  });
+  // Nothing was sent: signing failed (an unfunded payer fails here, in simulation).
   client.onPaymentCreationFailure(async ({ error }) => {
     signingError = error;
-    release();
-  });
-  client.onPaymentResponse(async ({ settleResponse, paymentRequired }) => {
-    // Released only when the seller's facilitator says no money moved; an unknown outcome stays spent.
-    if (settleResponse?.success === false || (!settleResponse && paymentRequired)) release();
   });
 
-  const pay = wrapFetchWithPayment(guardedFetch(config), client);
+  const pay = wrapFetchWithPayment(guardedFetch(config.maxResponseBytes, timeoutMs), client);
   let response: Response;
   try {
     response = await pay(url, {
@@ -205,30 +192,47 @@ export async function callPaidHttp(
       body: request.body,
     });
   } catch (error) {
-    if (refusal) throw refusal;
-    if (error instanceof PaymentError) throw error;
-    const detail = String(error);
-    if (signingError) {
-      throw new PaymentError(
-        "payment_failed",
-        "The payment could not be created.",
-        String(signingError),
-      );
-    }
-    if (reserved) {
+    if (paid && !signingError) {
+      // The signed payment left this process; whether the seller settled it is unknown.
+      const detail =
+        error instanceof PaymentError
+          ? `${error.code}: ${error.detail ?? error.message}`
+          : String(error);
       throw new PaymentError(
         "payment_unknown",
         "The payment's outcome is unknown; it counts as spent.",
         detail,
       );
     }
-    throw new PaymentError("upstream_error", "The request to the seller failed.", detail);
+    if (error instanceof PaymentError) throw error;
+    if (refusal) throw refusal;
+    if (signingError) {
+      // The payer's simulation fails in the asset contract: #10 is a balance too low, #13 a missing
+      // trustline (measured on testnet: `HostError: Error(Contract, #13)` for an account without USDC).
+      if (/Error\(Contract, #(10|13)\)/.test(String(signingError))) {
+        throw new PaymentError(
+          "insufficient_funds",
+          "The payer does not hold enough of the asset.",
+          String(signingError),
+        );
+      }
+      throw new PaymentError(
+        "payment_failed",
+        "The payment could not be created.",
+        String(signingError),
+      );
+    }
+    // The seller's 402 named no network, scheme or price this server can pay with.
+    throw new PaymentError(
+      "unsupported_payment",
+      "The seller asks for a payment this server cannot make.",
+      String(error),
+    );
   }
 
   const body = await response.text();
-  if (!attempted) {
-    return { status: response.status, contentType: response.headers.get("content-type"), body };
-  }
+  const contentType = response.headers.get("content-type")?.slice(0, LIMITS.mimeTypeChars) ?? null;
+  if (!paid) return { status: response.status, contentType, body };
   let settle;
   try {
     settle = new x402HTTPClient(client).getPaymentSettleResponse((name) =>
@@ -249,23 +253,29 @@ export async function callPaidHttp(
       String(error),
     );
   }
-  if (!settle.success || !reserved) {
+  if (!settle.success) {
     throw new PaymentError(
       "payment_rejected",
       "The seller's facilitator refused the payment.",
       settle.errorReason,
     );
   }
+  // A Stellar transaction hash is 64 hex characters; anything else is not a settlement we can show.
+  if (!/^[0-9a-f]{64}$/i.test(settle.transaction)) {
+    throw new PaymentError(
+      "payment_unknown",
+      "The seller reported a settlement without a transaction.",
+    );
+  }
   return {
     status: response.status,
-    contentType: response.headers.get("content-type"),
+    contentType,
     body,
     payment: {
       transaction: settle.transaction,
-      network: settle.network,
-      asset: reserved.asset,
-      amount: reserved.amount.toString(),
-      payer: settle.payer,
+      network: paid.network,
+      asset: paid.asset,
+      amount: paid.amount.toString(),
     },
   };
 }
