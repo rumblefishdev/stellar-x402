@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createServer } from "@stellar-x402/mcp";
-import { loadConfig } from "./config.js";
+import { type CliConfig, loadConfig } from "./config.js";
 
 // stdout carries the MCP protocol, so everything else goes to stderr.
 const log = (message: string) => console.error(`stellar-x402-mcp: ${message}`);
 
-let config;
+let config: CliConfig;
 try {
   config = loadConfig(process.env);
 } catch (error) {

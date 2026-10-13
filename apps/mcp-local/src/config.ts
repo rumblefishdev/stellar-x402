@@ -14,10 +14,12 @@ const optional = <T extends z.ZodTypeAny>(schema: T) => z.preprocess(blank, sche
 const orDefault = <T extends z.ZodTypeAny>(schema: T, value: z.input<T>) =>
   z.preprocess(blank, schema.default(value));
 
-const POSITIVE = z.coerce
-  .number({ invalid_type_error: "must be a positive integer" })
-  .int("must be a positive integer")
-  .positive("must be a positive integer");
+/** Plain decimal digits only, like the amounts: no `1e3`, hex or spaces. */
+const POSITIVE = z
+  .string()
+  .regex(/^\d+$/, "must be a positive integer")
+  .transform(Number)
+  .refine((value) => value > 0, "must be a positive integer");
 /** An amount in the asset's smallest unit: 10000 is 0.001 USDC. */
 const ATOMIC = z
   .string()
@@ -37,9 +39,9 @@ const ENV = z.object({
     }),
   ),
   // The MCP client gives up on a request after 60 s (SDK default), so a call must end before that.
-  STELLAR_X402_TIMEOUT_MS: orDefault(POSITIVE, 30_000),
+  STELLAR_X402_TIMEOUT_MS: orDefault(POSITIVE, "30000"),
   // A response body goes into the model's context: 100 kB is about 25k tokens.
-  STELLAR_X402_MAX_RESPONSE_BYTES: orDefault(POSITIVE, 100_000),
+  STELLAR_X402_MAX_RESPONSE_BYTES: orDefault(POSITIVE, "100000"),
   STELLAR_X402_ALLOW_INSECURE_LOCAL: optional(z.enum(["0", "1"], { message: "must be 0 or 1" })),
   STELLAR_X402_SECRET_KEY: optional(z.string()),
   STELLAR_X402_MAX_PER_CALL: optional(ATOMIC),
@@ -48,9 +50,15 @@ const ENV = z.object({
 
 /**
  * Reads the server's settings from environment variables, as an MCP client such as Claude Desktop
- * passes them. Any missing or wrong value stops the start with a message naming the variable.
+ * passes them. Any missing, wrong or unknown `STELLAR_X402_` value stops the start with a message
+ * naming the variable.
  */
 export function loadConfig(env: NodeJS.ProcessEnv): CliConfig {
+  // A misspelt name would otherwise leave its setting at the default without a word.
+  const unknown = Object.keys(env).find(
+    (name) => name.startsWith("STELLAR_X402_") && !(name in ENV.shape),
+  );
+  if (unknown) throw new Error(`${unknown} is not a setting of this server.`);
   const parsed = ENV.safeParse(env);
   if (!parsed.success) {
     const [issue] = parsed.error.issues;

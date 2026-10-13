@@ -58,6 +58,13 @@ describe("loadConfig", () => {
   it.each([
     ["no catalog URL", {}, "STELLAR_X402_DISCOVERY_URL is required"],
     [
+      "a misspelt setting",
+      { ...BASE, STELLAR_X402_TIMEOUT: "5000" },
+      "STELLAR_X402_TIMEOUT is not a setting of this server",
+    ],
+    ["a timeout in exponent form", { ...BASE, STELLAR_X402_TIMEOUT_MS: "1e3" }, "positive integer"],
+    ["a zero size limit", { ...BASE, STELLAR_X402_MAX_RESPONSE_BYTES: "0" }, "positive integer"],
+    [
       "a catalog address that is not a URL",
       { STELLAR_X402_DISCOVERY_URL: "catalog.example.com" },
       "STELLAR_X402_DISCOVERY_URL must be a URL",

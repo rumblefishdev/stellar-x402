@@ -64,6 +64,8 @@ Without `STELLAR_X402_SECRET_KEY` the server only lists and previews.
   trustline.
 - **The budget lasts until the server restarts.** Claude Desktop starts the server again each time
   it starts, so the budget starts again from zero; the key's balance is the hard limit.
+- **Each server process has its own budget.** Two Claude sessions start two processes, and each may
+  spend the full budget.
 - **Every payment sent counts against the budget**, even one the seller refuses afterwards; a
   payment that could not be signed (for example, too little USDC) does not.
 - **Sellers are reached only at public addresses over https.** A host whose DNS name points into a
