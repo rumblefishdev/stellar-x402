@@ -107,7 +107,10 @@ const envSchema = z
         ),
     ),
 
-    /** Which store adapters the composition root builds; `postgres` needs `DATABASE_URL`. */
+    /**
+     * Which store adapters the composition root builds; `postgres` needs `DATABASE_URL`. Memory
+     * loses settlements on restart, so it is testnet only.
+     */
     STORE: oneOf(["memory", "postgres"]).default("memory"),
     DATABASE_URL: databaseUrl.optional(),
 
@@ -162,8 +165,17 @@ const envSchema = z
     message: "is only allowed on testnet",
     path: ["CATALOG_ALLOW_HTTP"],
   })
+  .refine((env) => env.STORE !== "memory" || env.NETWORK === STELLAR_NETWORKS.testnet, {
+    message: "must be postgres outside testnet",
+    path: ["STORE"],
+  })
   .refine((env) => env.DATABASE_URL !== undefined || env.STORE !== "postgres", {
     message: "is required when STORE=postgres",
+    path: ["DATABASE_URL"],
+  })
+  // A URL with the memory store would look durable and isn't.
+  .refine((env) => env.DATABASE_URL === undefined || env.STORE === "postgres", {
+    message: "is only used with STORE=postgres",
     path: ["DATABASE_URL"],
   });
 

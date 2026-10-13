@@ -31,9 +31,10 @@ import { NON_FINAL_STATES, assertLedger, isFinal, isForward, mergeCatalogEntry }
  * They share one pool, so concurrent calls run on separate connections.
  *
  * - Every time comes from the caller; the SQL never reads the database's clock.
- * - Every transaction runs at Read Committed, set explicitly so a role or server default can't
- *   change it. Each statement sees what committed before it started, which is why a value read
- *   after a lock wait is read in a new statement.
+ * - Every statement runs at Read Committed, so a role or server default can't change it: each
+ *   connection sets it as its session default, and each transaction sets it again explicitly.
+ *   Each statement sees what committed before it started, which is why a value read after a lock
+ *   wait is read in a new statement.
  * - int8 columns come back as strings: `BigInt()` for stroops, `Number()` for times, ledgers and
  *   counts. No global type parser is installed.
  */
@@ -49,7 +50,9 @@ export function postgresStores(pool: pg.Pool): Stores {
 /**
  * A pool with the facilitator's limits: a statement runs at most 10 s on the server and a query
  * waits at most 15 s in the client. `onError` receives errors of idle connections, which would
- * otherwise crash the process.
+ * otherwise crash the process. Every connection runs at Read Committed and keeps an error
+ * listener while checked out, where pg-pool removes its own: a connection lost mid-transaction
+ * then fails its queries instead of crashing the process.
  */
 export function createPool(
   connectionString: string,
@@ -68,6 +71,13 @@ export function createPool(
     application_name: "x402-facilitator",
   });
   pool.on("error", onError);
+  pool.on("connect", (client) => {
+    client.on("error", () => {});
+    // Queued before the first query the pool hands this client.
+    client
+      .query("SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL READ COMMITTED")
+      .catch(onError);
+  });
   return pool;
 }
 
@@ -446,10 +456,10 @@ export class PostgresSpendStore implements SpendStore {
            CROSS JOIN LATERAL (
              SELECT coalesce(sum(r.amount), 0)::text AS used
              FROM spend_reservation_scopes rs JOIN spend_reservations r ON r.id = rs.id
-             WHERE rs.scope = l.scope AND r.at > l.since AND r.at <= $3
+             WHERE rs.scope = l.scope AND r.at > l.since
            ) w
            ORDER BY l.ord`,
-          [limits.map((limit) => limit.scope), limits.map((limit) => now - limit.windowMs), now],
+          [limits.map((limit) => limit.scope), limits.map((limit) => now - limit.windowMs)],
         );
         for (const [i, limit] of limits.entries())
           if (BigInt(rows[i]!.used) + amount > limit.maxStroops)
@@ -483,8 +493,8 @@ export class PostgresSpendStore implements SpendStore {
     const { rows } = await this.pool.query<{ used: string }>(
       `SELECT coalesce(sum(r.amount), 0)::text AS used
        FROM spend_reservation_scopes rs JOIN spend_reservations r ON r.id = rs.id
-       WHERE rs.scope = $1 AND r.at > $2 AND r.at <= $3`,
-      [scope, now - windowMs, now],
+       WHERE rs.scope = $1 AND r.at > $2`,
+      [scope, now - windowMs],
     );
     return BigInt(rows[0]!.used);
   }

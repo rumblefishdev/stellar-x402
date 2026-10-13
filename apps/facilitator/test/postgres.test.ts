@@ -5,10 +5,11 @@ import { createPool, postgresStores } from "../src/adapters/postgres.js";
 import { MIGRATIONS, migrate } from "../src/adapters/postgres-schema.js";
 import { NON_FINAL_STATES } from "../src/adapters/rules.js";
 import { migrateMain } from "../src/main.js";
-import type { Stores } from "../src/ports/index.js";
+import { HashConflictError, type Stores } from "../src/ports/index.js";
 import {
   catalogStoreContract,
   rateLimitStoreContract,
+  settlement,
   settlementStoreContract,
   spendStoreContract,
 } from "./port-contracts.js";
@@ -24,17 +25,17 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
   let applied: string[];
   let truncate: string;
 
-  /** The test database's URL, its connections using `searchPath`. */
-  const urlFor = (searchPath: string) => {
+  /** The test database's URL, its connections using `searchPath` and any further `options`. */
+  const urlFor = (searchPath: string, options = "") => {
     const base = process.env.TEST_DATABASE_URL;
     if (!base) throw new Error("TEST_DATABASE_URL is required to run the PostgreSQL stores");
     const url = new URL(base);
-    url.searchParams.set("options", `-c search_path=${searchPath}`);
+    url.searchParams.set("options", `-c search_path=${searchPath} ${options}`.trim());
     return url.toString();
   };
   /** A pool whose connections use `searchPath`. */
-  const poolFor = (searchPath: string, max: number) =>
-    createPool(urlFor(searchPath), () => {}, max);
+  const poolFor = (searchPath: string, max: number, options?: string) =>
+    createPool(urlFor(searchPath, options), () => {}, max);
 
   beforeAll(async () => {
     // More connections than the contracts' 10-way concurrent cases, so each runs on its own.
@@ -66,6 +67,94 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
   spendStoreContract(async () => (await stores()).spend);
   rateLimitStoreContract(async () => (await stores()).rateLimits);
   catalogStoreContract(async () => (await stores()).catalog);
+
+  /** Resolves the pid of a backend waiting on a lock, once one is. */
+  const lockWaiter = async (): Promise<number> => {
+    for (;;) {
+      const { rows } = await pool.query<{ pid: number }>(
+        `SELECT pid FROM pg_stat_activity
+         WHERE datname = current_database() AND wait_event_type = 'Lock'`,
+      );
+      if (rows[0]) return rows[0].pid;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  };
+
+  /** Runs `fn` in a transaction on its own connection; `fn` decides when it ends. */
+  const holding = async (fn: (client: pg.PoolClient) => Promise<void>) => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await fn(client);
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+  };
+
+  it("rejects a hash another record's insert commits while addHash waits on it", async () => {
+    const { settlements } = await stores();
+    const [s1, s2] = [settlement("1"), settlement("2")];
+    await settlements.claim(s1);
+    await settlements.claim(s2);
+    await holding(async (client) => {
+      await client.query("INSERT INTO settlement_hashes (hash, key) VALUES ('h1', $1)", [s1.key]);
+      const adding = settlements.addHash(s2.key, "h1", 3_000);
+      await lockWaiter();
+      await client.query("COMMIT");
+      await expect(adding).rejects.toBeInstanceOf(HashConflictError);
+    });
+  });
+
+  it("returns the hashes committed while transition waited on the record", async () => {
+    const { settlements } = await stores();
+    const { key } = settlement("1");
+    await settlements.claim(settlement("1"));
+    await settlements.addHash(key, "h1", 2_000);
+    await settlements.transition(key, "signed", { state: "pending", updatedAt: 2_500 });
+    await holding(async (client) => {
+      await client.query("SELECT 1 FROM settlements WHERE key = $1 FOR UPDATE", [key]);
+      await client.query("INSERT INTO settlement_hashes (hash, key) VALUES ('h2', $1)", [key]);
+      const moving = settlements.transition(key, "pending", {
+        state: "success",
+        ledger: 1,
+        updatedAt: 3_000,
+      });
+      await lockWaiter();
+      await client.query("COMMIT");
+      expect(await moving).toMatchObject({ state: "success", hashes: ["h1", "h2"] });
+    });
+  });
+
+  it("fails a transaction whose connection drops, and the process keeps running", async () => {
+    const { spend } = await stores();
+    await holding(async (client) => {
+      await client.query("INSERT INTO spend_scopes (scope) VALUES ('global')");
+      const reserving = spend.reserve({
+        id: "a",
+        amount: 1n,
+        limits: [{ scope: "global", maxStroops: 10n, windowMs: 1_000 }],
+        now: 0,
+      });
+      await pool.query("SELECT pg_terminate_backend($1)", [await lockWaiter()]);
+      await expect(reserving).rejects.toThrow();
+    });
+  });
+
+  it("runs every statement at Read Committed under a stricter server default", async () => {
+    await stores();
+    const strict = poolFor(schema, 20, "-c default_transaction_isolation=serializable");
+    try {
+      const { rows } = await strict.query("SHOW transaction_isolation");
+      expect(rows).toEqual([{ transaction_isolation: "read committed" }]);
+      const { settlements } = postgresStores(strict);
+      const s = settlement("1");
+      const results = await Promise.all(Array.from({ length: 10 }, () => settlements.claim(s)));
+      expect(results.filter((result) => result.claimed)).toHaveLength(1);
+    } finally {
+      await strict.end();
+    }
+  });
 
   it("ran the concurrent cases on separate connections", () => {
     expect(connections).toBeGreaterThanOrEqual(10);

@@ -233,7 +233,7 @@ export class MemorySpendStore implements SpendStore {
   private sum(scope: SpendScope, windowMs: number, now: number): bigint {
     let total = 0n;
     for (const { amount, at, scopes } of this.reservations.values())
-      if (scopes.includes(scope) && at > now - windowMs && at <= now) total += amount;
+      if (scopes.includes(scope) && at > now - windowMs) total += amount;
     return total;
   }
 }

@@ -39,7 +39,10 @@ const requirements = (overrides: Partial<PaymentRequirements> = {}): PaymentRequ
   ...overrides,
 });
 
-function settlement(nonce: string, network: StellarNetwork = "stellar:testnet"): NewSettlement {
+export function settlement(
+  nonce: string,
+  network: StellarNetwork = "stellar:testnet",
+): NewSettlement {
   const accepted = requirements({ network });
   const paymentPayload: PaymentPayload = { x402Version: 2, accepted, payload: { tx: "AAAA" } };
   return {
@@ -371,6 +374,28 @@ export function spendStoreContract(make: Make<SpendStore>) {
       expect(await store.used("global", DAY, 1)).toBe(60n);
     });
 
+    it("reserves a previously rejected id once budget frees up", async () => {
+      await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 0 });
+      expect(await store.reserve({ id: "b", amount: 60n, limits: limits(100n), now: 1 })).toEqual({
+        reserved: false,
+        scope: "global",
+      });
+      await store.release("a");
+      expect(await store.reserve({ id: "b", amount: 60n, limits: limits(100n), now: 2 })).toEqual({
+        reserved: true,
+      });
+      expect(await store.used("global", DAY, 2)).toBe(60n);
+    });
+
+    it("counts a reservation stamped after now", async () => {
+      // A caller takes `now` before waiting on the scope lock, so a later stamp can win it first.
+      await store.reserve({ id: "b", amount: 60n, limits: limits(100n), now: 1_001 });
+      expect(
+        await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 1_000 }),
+      ).toEqual({ reserved: false, scope: "global" });
+      expect(await store.used("global", DAY, 1_000)).toBe(60n);
+    });
+
     it("commits the fee actually paid and releases what was never spent", async () => {
       await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 0 });
       await store.reserve({ id: "b", amount: 30n, limits: limits(100n), now: 0 });
@@ -379,7 +404,7 @@ export function spendStoreContract(make: Make<SpendStore>) {
       expect(await store.used("global", DAY, 10)).toBe(20n);
     });
 
-    it("counts only the rolling window ending at now", async () => {
+    it("counts only the rolling window", async () => {
       await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 0 });
       expect(await store.used("global", DAY, DAY - 1)).toBe(60n);
       expect(await store.used("global", DAY, DAY)).toBe(0n);
