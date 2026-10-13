@@ -71,20 +71,45 @@ export type Verify = (
  * `unexpected_verify_error`, and an upstream call past `upstreamTimeoutMs`.
  */
 export function createVerifier(deps: VerifierDeps): Verify {
+  const check = createChecker(deps);
+  return async (payload, requirements) => (await check(payload, requirements)).response;
+}
+
+/** A payment that passed every check, as `/settle` needs it. */
+export interface Verified {
+  transaction: Transaction;
+  payer: string;
+  /** The earliest `signatureExpirationLedger` of the auth entries. */
+  expirationLedger: number;
+  /** The ledger the validity check read. */
+  currentLedger: number;
+}
+
+export type Check = (
+  payload: PaymentPayload,
+  requirements: PaymentRequirements,
+) => Promise<{ response: VerifyResponse; verified?: Verified }>;
+
+/** {@link createVerifier}'s checks, also returning what they parsed and read when they pass. */
+export function createChecker(deps: VerifierDeps): Check {
   const accounts = new Set([...deps.channels, deps.facilitator]);
   const timeoutMs = deps.upstreamTimeoutMs ?? 10_000;
   return async (payload, requirements) => {
     // Upstream would verify against any Stellar network's default RPC; this process serves one.
     if (requirements.network !== deps.network) {
-      return invalid("invalid_network", undefined, `this facilitator serves ${deps.network}`);
+      return {
+        response: invalid("invalid_network", undefined, `this facilitator serves ${deps.network}`),
+      };
     }
     // Upstream parses a V0 envelope, and its simulation result then can't be assembled onto it.
     if (isV0Envelope(payload)) {
-      return invalid(
-        "invalid_exact_stellar_payload_malformed",
-        undefined,
-        "the transaction must be a v1 envelope",
-      );
+      return {
+        response: invalid(
+          "invalid_exact_stellar_payload_malformed",
+          undefined,
+          "the transaction must be a v1 envelope",
+        ),
+      };
     }
     const upstream = withStringPayer(
       await withTimeout(deps.upstream.verify(payload, requirements), timeoutMs),
@@ -94,7 +119,9 @@ export function createVerifier(deps: VerifierDeps): Verify {
     if (upstream.invalidReason === UNEXPECTED_VERIFY_ERROR) {
       throw new Error(`upstream verify failed with ${UNEXPECTED_VERIFY_ERROR}`);
     }
-    if (!upstream.isValid) return upstream;
+    if (!upstream.isValid) return { response: upstream };
+    // Upstream always names the payer of a valid payment; without one, nothing below can run.
+    if (upstream.payer === undefined) throw new Error("upstream verify named no payer");
 
     // Upstream accepted it, so the payload is a parsed, one-operation `transfer` call.
     const transaction = new Transaction(
@@ -104,7 +131,7 @@ export function createVerifier(deps: VerifierDeps): Verify {
     const problem = channelProblem(transaction, accounts);
     if (problem) {
       const isFacilitator = problem.account === deps.facilitator;
-      return {
+      const response = {
         ...invalid(
           problem.invalidReason,
           upstream.payer,
@@ -114,6 +141,7 @@ export function createVerifier(deps: VerifierDeps): Verify {
         ),
         extra: { reason: isFacilitator ? MUXED_FACILITATOR_REASON : CHANNEL_ACCOUNT_REASON },
       };
+      return { response };
     }
 
     const expiration = authExpiration(transaction);
@@ -127,14 +155,24 @@ export function createVerifier(deps: VerifierDeps): Verify {
           ? `; maxTimeoutSeconds ${requirements.maxTimeoutSeconds} is about ${signed} ledgers, ` +
             `so it should be well above ${floor}`
           : "";
-      return invalid(
-        "invalid_exact_stellar_signature_expiration_too_soon",
-        upstream.payer,
-        `auth expires at ledger ${expiration}, ${expiration - current} ledgers after ledger ` +
-          `${current}; at least ${deps.minValidityLedgers} are required${hint}`,
-      );
+      return {
+        response: invalid(
+          "invalid_exact_stellar_signature_expiration_too_soon",
+          upstream.payer,
+          `auth expires at ledger ${expiration}, ${expiration - current} ledgers after ledger ` +
+            `${current}; at least ${deps.minValidityLedgers} are required${hint}`,
+        ),
+      };
     }
-    return upstream;
+    return {
+      response: upstream,
+      verified: {
+        transaction,
+        payer: upstream.payer,
+        expirationLedger: expiration,
+        currentLedger: current,
+      },
+    };
   };
 }
 
