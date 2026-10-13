@@ -149,13 +149,18 @@ and existing servers. Each line: what was decided and why.
 - **Which offer is paid:** of the seller's offers, those in an allowed asset and within the
   per-call limit, through an upstream client policy; the library pays the first one left.
 - **Budget:** a per-call price cap and a budget for the life of the process, per asset, in atomic
-  units. The amount is counted before signing and never given back: a seller cannot return it to
-  the budget by claiming the payment failed.
-- **Buyer-side address guard in `call_paid_http`:** https only; no `localhost` and no loopback,
-  private or link-local IP written in the URL; no automatic redirects; a time limit and a
-  response size limit counted while the body arrives; an `allowInsecureLocal` switch, off by
-  default, only for the local test seller. Names are not resolved: a device on the buyer's
-  network cannot present a certificate for a public name.
+  units. The amount is counted before signing and never given back once signed: a seller cannot
+  return it to the budget by claiming the payment failed. When signing fails nothing was sent, and
+  the amount goes back (W170).
+- **Which offers are paid** also leaves out an authorization longer than 300 s (the `@x402/express`
+  default): a longer one could be settled long after the agent got its answer.
+- **Buyer-side address guard for every seller request** (`get_resource` and `call_paid_http`):
+  https only; the address a name resolves to is checked when the connection is made (an undici
+  Agent with its own lookup), and loopback, private, link-local, multicast and reserved addresses
+  are refused, IP literals included; no automatic redirects; a time limit and a response size limit
+  counted while the body arrives; an `allowInsecureLocal` switch, off by default, only for the local
+  test seller. https alone was not enough: an internal service can have a public name and a public
+  certificate (W197, after the security review).
 - **Testnet only:** only a testnet scheme is registered, so a seller asking for pubnet gets
   `unsupported_payment`; the CLI refuses to start with `stellar:pubnet`, and the README says to
   use a testnet-only key.
