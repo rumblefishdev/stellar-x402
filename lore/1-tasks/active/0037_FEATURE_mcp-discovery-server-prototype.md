@@ -198,6 +198,8 @@ and existing servers. Each line: what was decided and why.
   (settled through x402.org), fake sellers for cases a live seller cannot produce (a stalled body,
   a broken settlement header, a redirect), and the buyer's balance on Horizon after each paid
   scenario. The result is a table scenario · expected · got, with transaction hashes.
+  The scenarios stay in the repo as a script run by hand (`pnpm e2e:testnet`, not in CI: it
+  needs a funded testnet wallet), so the run can be repeated on our own facilitator later (W270 A).
 - **One topic per file (W237, W238 A), a `[structure only]` PR after PR #23 and before PR C:**
   `server.ts` only registers the tools; `catalog.ts` holds `list_resources`; `guard.ts` the address
   guard and `guardedFetch`, shared by preview and payment; `preview.ts` holds `get_resource`;
