@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { link, mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { link, mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
 
@@ -115,7 +115,15 @@ async function readOrNothing(file: string): Promise<string | undefined> {
 /** Writes beside the file, then renames over it: a reader never sees half a record. */
 async function replace(file: string, days: SpentDays): Promise<void> {
   const temporary = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
-  await writeFile(temporary, JSON.stringify(days));
+  const handle = await open(temporary, "w");
+  try {
+    await handle.writeFile(JSON.stringify(days));
+    // On disk before the rename: after a power loss the record is the old one or the new one, never
+    // an empty file that would block every payment until it is deleted by hand.
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
   await rename(temporary, file);
 }
 

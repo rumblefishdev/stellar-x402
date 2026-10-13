@@ -76,6 +76,9 @@ Without `STELLAR_X402_SECRET_KEY` the server only lists and previews.
   budget; one key with two different `STELLAR_X402_STATE_FILE` paths gets it twice.
 - **The day is a calendar day, not the last 24 hours.** A full daily budget spent just before
   midnight UTC and another just after it means up to twice the daily budget within minutes.
+- **In a rare race the daily budget can be passed by one payment.** If a process dies while it
+  holds the state file's lock and two others pay at that very moment, both may count; the overshoot
+  is one payment, never more than `STELLAR_X402_MAX_PER_CALL`, which every process enforces on its own.
 - **To reset the daily budget, delete the state file.** It then forgets everything spent today,
   for every key that uses it.
 - **A refund that cannot be written stays counted.** When a payment fails before it is signed, its
