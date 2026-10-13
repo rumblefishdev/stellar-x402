@@ -53,7 +53,8 @@ export async function main(env: Record<string, string | undefined> = process.env
   const rpc = FallbackRpc.fromUrls(config.rpcUrls);
   // 0009 builds the pool from `fees.pool`, which shares the bid with `/verify` (AD-10).
   const fees = feeSettings(config.fees, rpc);
-  // Upstream knows only the facilitator key; the channels are `createVerifier`'s check (AD-5).
+  // Upstream knows only the facilitator key, and only in plain form; the channels and the muxed
+  // facilitator are `createVerifier`'s check (AD-5).
   // It reads the first RPC URL only.
   const signer = createEd25519Signer(config.facilitatorSecret, config.network);
   const upstream = upstreamAtCurrentBid(
@@ -68,6 +69,7 @@ export async function main(env: Record<string, string | undefined> = process.env
   const verify = createVerifier({
     network: config.network,
     upstream,
+    facilitator: signer.address,
     channels: config.channels,
     minValidityLedgers: config.settlement.minValidityLedgers,
     latestLedger: async () => (await rpc.getLatestLedger()).sequence,

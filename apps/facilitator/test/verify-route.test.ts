@@ -65,6 +65,20 @@ describe("POST /verify", () => {
     },
   );
 
+  it("logs our own reason next to upstream's", async () => {
+    verify.mockResolvedValueOnce({
+      isValid: false,
+      invalidReason: "invalid_exact_stellar_payload_unsafe_tx_or_op_source",
+      extra: { reason: "invalid_exact_stellar_payload_channel_account" },
+    });
+    await post(request);
+    const verified = lines.map((line) => JSON.parse(line)).find((l) => l.event === "verified");
+    expect(verified).toMatchObject({
+      invalidReason: "invalid_exact_stellar_payload_unsafe_tx_or_op_source",
+      reason: "invalid_exact_stellar_payload_channel_account",
+    });
+  });
+
   it.each([
     ["an empty object", {}],
     ["an array", [request]],

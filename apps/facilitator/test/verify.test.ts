@@ -15,6 +15,7 @@ import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/
 import { describe, expect, it, vi } from "vitest";
 import {
   CHANNEL_ACCOUNT_REASON,
+  MUXED_FACILITATOR_REASON,
   createVerifier,
   type UpstreamVerifier,
 } from "../src/settlement/verify.js";
@@ -25,6 +26,7 @@ const payer = Keypair.random().publicKey();
 const payTo = Keypair.random().publicKey();
 const channel = Keypair.random().publicKey();
 const otherChannel = Keypair.random().publicKey();
+const facilitator = Keypair.random().publicKey();
 const CURRENT = 1_000;
 const MIN_VALIDITY = 12;
 
@@ -105,6 +107,7 @@ function setup(upstreamResponse: VerifyResponse = { isValid: true, payer }) {
   const verify = createVerifier({
     network,
     upstream,
+    facilitator,
     channels: [channel, otherChannel],
     minValidityLedgers: MIN_VALIDITY,
     latestLedger,
@@ -194,6 +197,54 @@ describe("createVerifier", () => {
         );
       },
     );
+  });
+
+  describe("the facilitator's muxed address", () => {
+    // Upstream rejects the plain address; a muxed one differs as a string and gets past it.
+    const muxed = new MuxedAccount(new Account(facilitator, "1"), "7");
+    const facilitatorRejected = (invalidReason: string) =>
+      expect.objectContaining({
+        isValid: false,
+        invalidReason,
+        payer,
+        extra: { reason: MUXED_FACILITATOR_REASON },
+      });
+
+    it("rejects it as the transaction source", async () => {
+      const { verify } = setup();
+      await expect(verify(payload({ txSource: muxed }), requirements)).resolves.toEqual(
+        facilitatorRejected("invalid_exact_stellar_payload_unsafe_tx_or_op_source"),
+      );
+    });
+
+    it("rejects it as the operation source", async () => {
+      const { verify } = setup();
+      await expect(verify(payload({ opSource: muxed.accountId() }), requirements)).resolves.toEqual(
+        facilitatorRejected("invalid_exact_stellar_payload_unsafe_tx_or_op_source"),
+      );
+    });
+
+    it("rejects it as `from`", async () => {
+      const { verify } = setup();
+      const p = payload({
+        from: muxed.accountId(),
+        auth: [authEntry(payer, CURRENT + MIN_VALIDITY)],
+      });
+      await expect(verify(p, requirements)).resolves.toEqual(
+        facilitatorRejected("invalid_exact_stellar_payload_facilitator_is_payer"),
+      );
+    });
+
+    it("rejects it as the address of an auth entry", async () => {
+      const { verify } = setup();
+      const auth = [
+        authEntry(payer, CURRENT + MIN_VALIDITY),
+        authEntry(muxed.accountId(), CURRENT + MIN_VALIDITY),
+      ];
+      await expect(verify(payload({ auth }), requirements)).resolves.toEqual(
+        facilitatorRejected("invalid_exact_stellar_payload_facilitator_in_auth"),
+      );
+    });
   });
 
   describe("remaining validity (AD-22)", () => {

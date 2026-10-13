@@ -16,8 +16,8 @@ export interface FeeStatsOptions {
 /**
  * An inclusion-fee provider that bids a percentile of recent Soroban inclusion fees from
  * `getFeeStats`, clamped to [min, max]. 0006 saw mainnet at 200 stroops for p10–p99.
- * Falls back to the last good reading (or `min`) when the RPC call fails, and reuses the fallback
- * for `failureCacheMs`. Concurrent callers share one `getFeeStats` call.
+ * Falls back to the last good reading (or `min`) when the RPC call fails or reports a percentile
+ * that isn't a number, and reuses the fallback for `failureCacheMs`. Concurrent callers share one `getFeeStats` call.
  */
 export function feeStatsInclusionFee(
   rpc: Pick<SorobanRpc, "getFeeStats">,
@@ -36,7 +36,10 @@ export function feeStatsInclusionFee(
   const read = async () => {
     try {
       const stats = await rpc.getFeeStats();
-      const value = Math.min(max, Math.max(min, Number(stats.sorobanInclusionFee[percentile])));
+      const reading = Number(stats.sorobanInclusionFee[percentile]);
+      // NaN would pass through the clamp and turn every fee ceiling check off.
+      if (!Number.isFinite(reading)) throw new Error(`fee stats ${percentile} is not a number`);
+      const value = Math.min(max, Math.max(min, reading));
       cached = { value, until: now() + cacheMs };
       return value;
     } catch {

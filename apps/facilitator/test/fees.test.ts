@@ -37,7 +37,7 @@ describe("feeSettings (AD-10)", () => {
     await expect(fees.inclusionFee()).resolves.toBe(500);
     expect(fees.pool).toEqual({
       maxFeeStroops: 300_000,
-      inclusionFee: 500,
+      inclusionFee: fees.inclusionFee,
       feeEscalation: { factor: 2, max: 2000 },
     });
     expect(rpc.getFeeStats).not.toHaveBeenCalled();

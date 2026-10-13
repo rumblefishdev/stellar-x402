@@ -152,6 +152,23 @@ describe("feeStatsInclusionFee", () => {
     expect(await cold()).toBe(100);
   });
 
+  it("treats a percentile that isn't a number as a failed read", async () => {
+    let p90 = "300";
+    let t = 0;
+    const fee = feeStatsInclusionFee(
+      { getFeeStats: async () => stats(p90) },
+      { cacheMs: 0, failureCacheMs: 0, now: () => t++ },
+    );
+    expect(await fee()).toBe(300);
+    p90 = "n/a";
+    expect(await fee()).toBe(300);
+    const missing = feeStatsInclusionFee({
+      getFeeStats: async () =>
+        ({ sorobanInclusionFee: {} }) as unknown as rpc.Api.GetFeeStatsResponse,
+    });
+    expect(await missing()).toBe(100);
+  });
+
   it("raises a low reading to the floor and reads the chosen percentile", async () => {
     const low = feeStatsInclusionFee({ getFeeStats: async () => stats("50") });
     expect(await low()).toBe(100);

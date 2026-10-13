@@ -12,6 +12,8 @@ export interface VerifierDeps {
   /** The one network this process serves. */
   network: StellarNetwork;
   upstream: UpstreamVerifier;
+  /** The facilitator's own address. Upstream checks it as a plain string, so not in muxed form. */
+  facilitator: string;
   /** Channel account addresses (AD-5). */
   channels: readonly string[];
   /** Least ledgers left before the payer's auth expires (AD-22). */
@@ -25,6 +27,11 @@ export interface VerifierDeps {
  * `invalidReason`: it tells our check apart from upstream's facilitator-address check.
  */
 export const CHANNEL_ACCOUNT_REASON = "invalid_exact_stellar_payload_channel_account";
+/**
+ * Our code for the facilitator's own address in muxed form, which upstream's plain-string check
+ * misses; upstream rejects the plain address itself.
+ */
+export const MUXED_FACILITATOR_REASON = "invalid_exact_stellar_payload_facilitator_muxed";
 
 export type Verify = (
   payload: PaymentPayload,
@@ -33,12 +40,12 @@ export type Verify = (
 
 /**
  * The `exact` verification `/verify` answers with and `/settle` (0009) runs again (AD-3):
- * upstream `verify()`, then the channel check (AD-5), then the validity check (AD-22). The first
+ * upstream `verify()`, then the channel check (AD-5, with the facilitator's muxed address), then the validity check (AD-22). The first
  * failure is the answer. Upstream reports its own errors as `isValid: false`; an error of ours
  * (the ledger read) is thrown.
  */
 export function createVerifier(deps: VerifierDeps): Verify {
-  const channels = new Set(deps.channels);
+  const accounts = new Set([...deps.channels, deps.facilitator]);
   return async (payload, requirements) => {
     // Upstream would verify against any Stellar network's default RPC; this process serves one.
     if (requirements.network !== deps.network) {
@@ -52,11 +59,18 @@ export function createVerifier(deps: VerifierDeps): Verify {
       (payload.payload as { transaction: string }).transaction,
       getNetworkPassphrase(deps.network),
     );
-    const reason = channelProblem(transaction, channels);
-    if (reason) {
+    const problem = channelProblem(transaction, accounts);
+    if (problem) {
+      const isFacilitator = problem.account === deps.facilitator;
       return {
-        ...invalid(reason, upstream.payer, "the payload uses a facilitator channel account"),
-        extra: { reason: CHANNEL_ACCOUNT_REASON },
+        ...invalid(
+          problem.invalidReason,
+          upstream.payer,
+          isFacilitator
+            ? "the payload uses the facilitator's account"
+            : "the payload uses a facilitator channel account",
+        ),
+        extra: { reason: isFacilitator ? MUXED_FACILITATOR_REASON : CHANNEL_ACCOUNT_REASON },
       };
     }
 
@@ -75,35 +89,51 @@ export function createVerifier(deps: VerifierDeps): Verify {
 }
 
 /**
- * Where a channel account appears in the payload, as the upstream reason for the same problem
- * with the facilitator's own address (ADR 0005: channels count as the facilitator). Muxed
- * addresses count as their base account.
+ * Where one of `accounts` (the channels and the facilitator) appears in the payload, as the
+ * upstream reason for the same problem with the facilitator's own address (ADR 0005: channels
+ * count as the facilitator), and which account it is. Muxed addresses count as their base account.
  */
 export function channelProblem(
   transaction: Transaction,
-  channels: ReadonlySet<string>,
-): string | undefined {
-  const isChannel = (address: string | undefined) =>
-    address !== undefined && channels.has(baseAccount(address));
-  if (
-    isChannel(transaction.source) ||
-    transaction.operations.some((operation) => isChannel(operation.source))
-  ) {
-    return "invalid_exact_stellar_payload_unsafe_tx_or_op_source";
+  accounts: ReadonlySet<string>,
+): { invalidReason: string; account: string } | undefined {
+  const found = (address: string | undefined) => {
+    const account = address === undefined ? undefined : baseAccount(address);
+    return account !== undefined && accounts.has(account) ? account : undefined;
+  };
+  const source =
+    found(transaction.source) ??
+    transaction.operations.map((operation) => found(operation.source)).find(Boolean);
+  if (source) {
+    return {
+      invalidReason: "invalid_exact_stellar_payload_unsafe_tx_or_op_source",
+      account: source,
+    };
   }
   for (const operation of transaction.operations) {
     if (operation.type !== "invokeHostFunction") continue;
     const func = operation.func;
     if (func.switch() === xdr.HostFunctionType.hostFunctionTypeInvokeContract()) {
       const from = func.invokeContract().args()[0];
-      if (from?.switch() === xdr.ScValType.scvAddress() && isChannel(addressOf(from.address()))) {
-        return "invalid_exact_stellar_payload_facilitator_is_payer";
+      const payer =
+        from?.switch() === xdr.ScValType.scvAddress()
+          ? found(addressOf(from.address()))
+          : undefined;
+      if (payer) {
+        return {
+          invalidReason: "invalid_exact_stellar_payload_facilitator_is_payer",
+          account: payer,
+        };
       }
     }
     for (const entry of operation.auth ?? []) {
       const credentials = getAddressCredentials(entry.credentials());
-      if (credentials && isChannel(addressOf(credentials.address()))) {
-        return "invalid_exact_stellar_payload_facilitator_in_auth";
+      const signer = credentials ? found(addressOf(credentials.address())) : undefined;
+      if (signer) {
+        return {
+          invalidReason: "invalid_exact_stellar_payload_facilitator_in_auth",
+          account: signer,
+        };
       }
     }
   }

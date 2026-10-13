@@ -118,9 +118,10 @@ const envSchema = z
 
     /**
      * Least ledgers left before the payer's auth expires (AD-22): 2 for the pool plus about 2 of
-     * channel wait. A client signs for only `maxTimeoutSeconds` (12 ledgers at 60 s).
+     * channel wait. A client signs for only `maxTimeoutSeconds` (12 ledgers at 60 s). Below 2 the
+     * pool refuses at `/settle` what `/verify` accepted (its one spare ledger).
      */
-    MIN_VALIDITY_LEDGERS: int(1).default("4"),
+    MIN_VALIDITY_LEDGERS: int(2).default("4"),
     /** How long a repeat `/settle` waits on a pending record (AD-6). */
     SETTLE_TIMEOUT_MS: ms(1).default("30000"),
     /** Channel lease TTL; renewed well before it runs out (AD-17). */
@@ -153,6 +154,13 @@ const envSchema = z
     message: "is required outside testnet",
     path: ["RPC_URLS"],
   })
+  // The ceiling also pays the resource fee, which is never 0, so a bid at the ceiling fails every
+  // payment.
+  .refine(
+    (env) =>
+      env.INCLUSION_FEE_STROOPS === undefined || env.INCLUSION_FEE_STROOPS < env.MAX_FEE_STROOPS,
+    { message: "must be below MAX_FEE_STROOPS", path: ["INCLUSION_FEE_STROOPS"] },
+  )
   .refine((env) => !env.CATALOG_ALLOW_HTTP || env.NETWORK === STELLAR_NETWORKS.testnet, {
     message: "is only allowed on testnet",
     path: ["CATALOG_ALLOW_HTTP"],

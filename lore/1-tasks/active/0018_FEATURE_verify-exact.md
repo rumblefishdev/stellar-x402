@@ -71,10 +71,16 @@ As a resource server, I want `POST /verify` to check an `exact` payment the way 
   - With the old default 12, the valid payment was rejected: "auth expires at ledger 5175791, 11 ledgers after ledger 5175780; at least 12 are required".
   - Nothing is submitted, because `/verify` only simulates.
 - A well-formed but malformed payload gets 200 `invalid_exact_stellar_payload_malformed` from real upstream, and `{}` gets 400.
+- **PR #33 review follow-up** (`/code-review`, 10 findings, each checked against `@x402/stellar` 2.28.0 and `@stellar/stellar-sdk` 16.3.0):
+  - Fixed: the facilitator's muxed address (decision 8), a NaN fee-stats bid (9), a fixed bid at or above the ceiling (10), `MIN_VALIDITY_LEDGERS` 1 (11), and the `verified` log now carries `extra.reason` as `reason`.
+  - Simplified: `fees.pool.inclusionFee` is always the provider function; the pool turns a number into the same function anyway.
+  - Not changed, with reasons: decisions 12 and 13, and two findings that didn't hold. `addressOf` can't throw on a client's address: SDK 16.3.0's `Address.fromScAddress` reads all five ScAddress kinds (G, C, M, B, L, measured), and upstream has already read the same addresses inside its own `try`. The smoke script's `freePort()` race stays: it is a hand-run testnet script, not in CI, and `main()` requires `PORT` 1–65535; a clash shows as EADDRINUSE and a rerun fixes it.
+  - Tests: facilitator 74 → 80, signer-pool 98 → 99. Removing the facilitator from the checked set fails the 4 new muxed tests; removing the NaN guard fails the new signer-pool test. The testnet smoke still passes both checks.
 
 **Modified tests:**
 - `main.test.ts` no longer expects 501 from `/verify`, and passes a stub `verify` to `start()`.
 - `config.test.ts` expects the new `MIN_VALIDITY_LEDGERS` default of 4.
+- `fees.test.ts` expects `fees.pool.inclusionFee` to be the provider function with a fixed bid too, not the number 500 (review simplification).
 
 ## Issues Encountered
 
@@ -98,3 +104,9 @@ As a resource server, I want `POST /verify` to check an `exact` payment the way 
    Fee escalation under load can still raise the pool's bid after `/verify`; the pool checks its own total before signing.
 6. **Verification is injected as `Verify` in `AppDeps`,** so the HTTP tests need no RPC, and `/settle` can reuse the same function.
 7. **`MIN_VALIDITY_LEDGERS` defaults to 4, not 12** (Oskar, 2026-10-13). 12 was the interim value from 0017. Upstream's client signs auth for exactly `maxTimeoutSeconds` (12 ledgers at 60 s), so at least one ledger later only 11 are left, and 12 rejected nearly every payment on testnet. 4 is AD-22's floor: 2 for the pool plus about 2 of channel wait. AD-22 now says the minimum must stay well below the client's signing window.
+8. **The facilitator's own address is checked in muxed form too** (Oskar, 2026-10-13, PR #33 review). Upstream compares the facilitator address as a plain string, so an `M…` form of it passed as the transaction source, an operation source and `from` (measured). `createVerifier` takes `facilitator` and checks it with the channels. A hit keeps upstream's `invalidReason` and carries our own `extra.reason`, `invalid_exact_stellar_payload_facilitator_muxed`, so the logs tell it apart from a channel hit.
+9. **A fee-stats percentile that isn't a number counts as a failed read** (Oskar, 2026-10-13), fixed in `signer-pool`'s `feeStatsInclusionFee`, not only in the facilitator. `Math.max(100, NaN)` is NaN, which turned upstream's fee-ceiling check off and would also have reached the pool's bid. The provider falls back to the last good reading or the 100-stroop floor, as on an RPC error.
+10. **`INCLUSION_FEE_STROOPS` must be below `MAX_FEE_STROOPS`.** The ceiling also covers the resource fee, which a Soroban transaction always pays, so a fixed bid at or above it rejected every payment at runtime. It is now a `ConfigError` at boot. A fee-stats bid (up to 10,000) is not checked against the ceiling: there a low ceiling is a deliberate cap, not a sure failure.
+11. **`MIN_VALIDITY_LEDGERS` is at least 2.** `signer-pool` refuses a call when `latest + 1 >= maxLedger` (`SPARE_LEDGERS` = 1), so with 1 the pool would refuse at `/settle` what `/verify` accepted, as AD-22 says.
+12. **The channel check stays after upstream `verify()`,** although running it first would skip a simulation for a payload that uses a channel. AD-3 and the spine fix the order (upstream first, the first failure is the answer), `channelProblem` relies on upstream having checked the payload's shape, and running it first saves nothing against abuse: anyone can make us simulate with a payload that uses no channel. Rate limits (0023) cover that.
+13. **`parsePaymentRequest` passes the client's objects on, not zod's output.** Measured on `@x402/core`'s v2 schemas: the only transform is `resource: null` → `undefined`, and the other difference is that unknown keys are stripped. Upstream reads neither, so the parsed output would change nothing; the docstring states the contract.

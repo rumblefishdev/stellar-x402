@@ -169,6 +169,21 @@ describe("parseConfig", () => {
     expect(problems({ ...minimal, INCLUSION_FEE_STROOPS: "99" })).toEqual([
       "INCLUSION_FEE_STROOPS must be at least 100",
     ]);
+    // The pool keeps one spare ledger, so 1 lets `/verify` accept what `/settle` refuses.
+    expect(problems({ ...minimal, MIN_VALIDITY_LEDGERS: "1" })).toEqual([
+      "MIN_VALIDITY_LEDGERS must be at least 2",
+    ]);
+  });
+
+  it("keeps the inclusion bid below the fee ceiling", () => {
+    for (const bid of ["1000", "5000"]) {
+      expect(problems({ ...minimal, MAX_FEE_STROOPS: "1000", INCLUSION_FEE_STROOPS: bid })).toEqual(
+        ["INCLUSION_FEE_STROOPS must be below MAX_FEE_STROOPS"],
+      );
+    }
+    expect(
+      parseConfig({ ...minimal, MAX_FEE_STROOPS: "1000", INCLUSION_FEE_STROOPS: "999" }).fees,
+    ).toMatchObject({ maxFeeStroops: 1000n, inclusionFeeStroops: 999n });
   });
 
   it("allows http catalog URLs on testnet only", () => {

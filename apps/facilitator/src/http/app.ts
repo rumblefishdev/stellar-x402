@@ -59,6 +59,8 @@ export function createApp({ config, logger, verify }: AppDeps): Express {
       network: request.paymentRequirements.network,
       isValid: response.isValid,
       invalidReason: response.invalidReason,
+      // Our own code next to upstream's, e.g. for a channel account.
+      reason: response.extra?.reason,
       payer: response.payer,
     });
     res.json(response);

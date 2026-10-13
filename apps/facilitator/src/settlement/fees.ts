@@ -34,7 +34,7 @@ export function feeSettings(
   return {
     maxFeeStroops,
     inclusionFee,
-    pool: { maxFeeStroops, inclusionFee: fixed ?? inclusionFee, feeEscalation: fees.escalation },
+    pool: { maxFeeStroops, inclusionFee, feeEscalation: fees.escalation },
   };
 }
 
