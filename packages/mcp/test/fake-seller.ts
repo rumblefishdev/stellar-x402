@@ -29,6 +29,10 @@ export interface FakeSeller {
   settle: "success" | "rejected" | "missing" | "refused" | "no-transaction" | "slow";
   /** Status of a settled answer. */
   paidStatus: number;
+  /** The resource description in the 402 answer. */
+  description: string;
+  /** The `error` field of the 402 answer. */
+  termsError?: string;
   contentType: string;
   body: string;
   /** Payment payloads received, in order. */
@@ -47,6 +51,14 @@ export async function startFakeSeller(): Promise<FakeSeller> {
       setTimeout(() => res.writeHead(200).end("{}"), 1_000);
       return;
     }
+    if (url.pathname === "/missing") {
+      res.writeHead(404).end();
+      return;
+    }
+    if (url.pathname === "/broken") {
+      res.writeHead(500).end();
+      return;
+    }
     if (url.pathname === "/no-terms") {
       res.writeHead(402).end("{}");
       return;
@@ -61,9 +73,10 @@ export async function startFakeSeller(): Promise<FakeSeller> {
         x402Version: 2,
         resource: {
           url: `${seller.url}${url.pathname}`,
-          description: "Forecast",
-          mimeType: "application/json",
+          description: seller.description,
+          mimeType: seller.contentType,
         },
+        error: seller.termsError,
         accepts: [...seller.otherOffers, { asset: seller.asset, amount: seller.price }].map(
           ({ asset, amount }) => ({
             scheme: "exact",
@@ -75,6 +88,14 @@ export async function startFakeSeller(): Promise<FakeSeller> {
             extra: { areFeesSponsored: true },
           }),
         ),
+        extensions: {
+          bazaar: {
+            info: {
+              input: { type: "http", method: "GET", queryParams: { city: "Warsaw" } },
+              output: { type: "json", example: { tempC: 14 } },
+            },
+          },
+        },
       };
       res.writeHead(402, { "payment-required": encodePaymentRequiredHeader(required) }).end("{}");
       return;
@@ -113,6 +134,7 @@ export async function startFakeSeller(): Promise<FakeSeller> {
     otherOffers: [],
     settle: "success",
     paidStatus: 200,
+    description: "Forecast",
     contentType: "application/json",
     body: '{"tempC":14}',
     payments: [],

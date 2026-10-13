@@ -1,6 +1,8 @@
 import { BlockList, isIP } from "node:net";
 import { LIMITS } from "@stellar-x402/bazaar";
 import { x402Client, x402HTTPClient, type SchemeRegistration } from "@x402/core/client";
+import { decodePaymentRequiredHeader } from "@x402/core/http";
+import type { PaymentRequired } from "@x402/core/types";
 import { wrapFetchWithPayment } from "@x402/fetch";
 
 export interface PaymentConfig {
@@ -15,6 +17,7 @@ export interface PaymentConfig {
 }
 
 export type PaymentErrorCode =
+  | "resource_not_found"
   | "unsafe_url"
   | "unsupported_payment"
   | "asset_not_allowed"
@@ -135,6 +138,55 @@ function guardedFetch(maxResponseBytes: number, timeoutMs: number): typeof fetch
     // A 204 or 304 must not be given a body, not even an empty one.
     const body = size === 0 ? null : Buffer.concat(chunks);
     return new Response(body, { status: response.status, headers: response.headers });
+  };
+}
+
+/**
+ * What a seller asks for a resource, read from its 402 answer to an unpaid request: the payment terms
+ * and the seller's own description of how to call it and what it returns. Nothing is signed.
+ */
+export async function previewPayment(
+  request: { url: string; method: string },
+  config: PaymentConfig,
+  timeoutMs: number,
+): Promise<{ status: number; paymentRequired: PaymentRequired | null }> {
+  const url = checkUrl(request.url, config.allowInsecureLocal ?? false);
+  const response = await guardedFetch(config.maxResponseBytes, timeoutMs)(url, {
+    method: request.method,
+  });
+  if (response.ok) return { status: response.status, paymentRequired: null };
+  if (response.status === 404) {
+    throw new PaymentError("resource_not_found", "The seller has no resource at this URL.");
+  }
+  if (response.status !== 402) {
+    throw new PaymentError(
+      "upstream_error",
+      `The seller answered ${response.status} instead of its payment terms.`,
+    );
+  }
+  let paymentRequired: PaymentRequired;
+  try {
+    paymentRequired = decodePaymentRequiredHeader(response.headers.get("PAYMENT-REQUIRED") ?? "");
+  } catch (error) {
+    throw new PaymentError(
+      "unsupported_payment",
+      "The seller's 402 carries no payment terms this server can read.",
+      String(error),
+    );
+  }
+  // The seller writes these; keep its free text short before it reaches the model.
+  const { resource } = paymentRequired;
+  return {
+    status: response.status,
+    paymentRequired: {
+      ...paymentRequired,
+      error: paymentRequired.error?.slice(0, LIMITS.descriptionChars),
+      resource: {
+        ...resource,
+        description: resource.description?.slice(0, LIMITS.descriptionChars),
+        mimeType: resource.mimeType?.slice(0, LIMITS.mimeTypeChars),
+      },
+    },
   };
 }
 

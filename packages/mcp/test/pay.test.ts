@@ -231,6 +231,73 @@ describe("call_paid_http", () => {
   });
 });
 
+describe("get_resource", () => {
+  async function preview(path = "/forecast?city=Warsaw", url = `${seller.url}${path}`) {
+    const result = await client.callTool({
+      name: "get_resource",
+      arguments: { url, method: "GET" },
+    });
+    return result.structuredContent as unknown as {
+      status: number;
+      paymentRequired: {
+        resource: { description: string; mimeType: string };
+        error: string;
+        accepts: { amount: string; asset: string; maxTimeoutSeconds: number }[];
+        extensions: { bazaar: { info: { output: unknown } } };
+      } | null;
+      error: { code: string };
+    };
+  }
+
+  it("returns the seller's terms and description without paying or touching the budget", async () => {
+    const result = await preview();
+    expect(result.status).toBe(402);
+    expect(result.paymentRequired!.accepts).toEqual([
+      expect.objectContaining({ amount: "10000", asset: USDC, maxTimeoutSeconds: 60 }),
+    ]);
+    expect(result.paymentRequired!.extensions.bazaar.info.output).toEqual({
+      type: "json",
+      example: { tempC: 14 },
+    });
+    expect(seller.payments).toHaveLength(0);
+    // 10,000 of a 15,000 budget still fits: the preview spent nothing.
+    expect((await pay()).payment).toBeDefined();
+  });
+
+  it("says a free resource needs no payment", async () => {
+    expect(await preview("/free")).toEqual({ status: 200, paymentRequired: null });
+  });
+
+  it("cuts the seller's text to the catalog's limits", async () => {
+    seller.description = "d".repeat(2_000);
+    seller.termsError = "e".repeat(2_000);
+    seller.contentType = `text/${"x".repeat(300)}`;
+    const { paymentRequired } = await preview();
+    expect(paymentRequired!.resource.description).toHaveLength(500);
+    expect(paymentRequired!.resource.mimeType).toHaveLength(127);
+    expect(paymentRequired!.error).toHaveLength(500);
+  });
+
+  it.each([
+    ["/missing", "resource_not_found"],
+    ["/broken", "upstream_error"],
+    ["/no-terms", "unsupported_payment"],
+    ["/redirect", "unsafe_url"],
+  ])("returns a code for %s", async (path, code) => {
+    expect((await preview(path)).error.code).toBe(code);
+  });
+
+  it("refuses an unsafe URL without calling it", async () => {
+    await reconnect({ allowInsecureLocal: false });
+    expect((await preview("", "https://127.0.0.1/forecast")).error.code).toBe("unsafe_url");
+  });
+
+  it("gives up on a seller slower than the timeout", async () => {
+    await reconnect({}, { timeoutMs: 200 });
+    expect((await preview("/slow")).error.code).toBe("upstream_error");
+  });
+});
+
 describe("without payment config", () => {
   it("offers no call_paid_http tool", async () => {
     await client.close();
