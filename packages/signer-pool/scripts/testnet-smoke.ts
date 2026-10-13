@@ -13,6 +13,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import {
   Address,
+  FeeBumpTransaction,
   Keypair,
   Networks,
   authorizeEntry,
@@ -182,12 +183,17 @@ const storeHash = async (hash: string) => {
 // The ordering is checked at the send itself: a hash that reaches the network before its write
 // finished is recorded here. Checking `stored` after the run would pass without the await.
 const sentUnstored: string[] = [];
+// Likewise the ledger bound is checked in the envelope: with `expLedger` this far ahead the time
+// bound alone keeps every landing under it, so the landings can't show the bound is there.
+const sentUnbounded: string[] = [];
 let sends = 0;
 const send = server.sendTransaction;
 server.sendTransaction = (tx) => {
   sends++;
   const hash = tx.hash().toString("hex");
   if (!stored.has(hash)) sentUnstored.push(hash);
+  const inner = tx instanceof FeeBumpTransaction ? tx.innerTransaction : tx;
+  if (inner.ledgerBounds?.maxLedger !== expLedger + 1) sentUnbounded.push(hash);
   return send(tx);
 };
 const t0 = Date.now();
@@ -286,7 +292,10 @@ const sendsBefore = sends;
 const guards = {
   hashesStoredBeforeSend:
     sentUnstored.length === 0 && results.every((r) => r.hash !== undefined && stored.has(r.hash)),
-  landedByMaxLedger: results.every((r) => r.ledger === undefined || r.ledger <= expLedger),
+  ledgerBoundInEnvelope: sends > 0 && sentUnbounded.length === 0,
+  landedByMaxLedger: results.every(
+    (r) => (r.status !== "success" && r.status !== "failed") || (r.ledger ?? Infinity) <= expLedger,
+  ),
   pastMaxLedger: await errorName(
     submitter.submit(await guardCall(), {
       maxLedger: (await server.getLatestLedger()).sequence,
@@ -299,6 +308,12 @@ const guards = {
   ),
   nothingSentByGuards: sends === sendsBefore,
 };
+const expectedErrors = { pastMaxLedger: "LedgerBoundError", failedHashWrite: "SignedHookError" };
+const failedGuards = Object.entries(guards)
+  .filter(([k, v]) =>
+    k in expectedErrors ? v !== expectedErrors[k as keyof typeof expectedErrors] : v !== true,
+  )
+  .map(([k]) => k);
 
 console.log(
   JSON.stringify(
@@ -324,6 +339,7 @@ console.log(
       failures: results.filter((r) => r.status !== "success"),
       refusals,
       guards,
+      failedGuards,
       stats: submitter.stats(),
       rpcActive: server.active,
       facilitatorBalance: await checkFacilitatorBalance(server, facilitator.publicKey()),
@@ -332,3 +348,5 @@ console.log(
     2,
   ),
 );
+// A guard that does not hold fails the run.
+if (failedGuards.length > 0) process.exitCode = 1;
