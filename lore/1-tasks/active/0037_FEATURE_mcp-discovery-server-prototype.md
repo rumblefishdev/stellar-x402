@@ -197,6 +197,9 @@ and existing servers. Each line: what was decided and why.
 - **Follow-ups from the PR #23 review, for PR C:** a test that `allowInsecureLocal` is off by
   default; README notes that the budget resets on restart and that a host with both public and
   private DNS records is refused.
+- **Libraries instead of own code, for PR C (W217, W219):** the private-address list becomes
+  `ipaddr.js` with "only `unicast` passes"; the streamed size cap becomes undici's
+  `maxResponseSize` (its error mapped to `response_too_large`); the CLI's env parsing uses `zod`.
 
 ## Out of scope
 
