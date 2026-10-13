@@ -154,6 +154,11 @@ const envSchema = z
     MIN_VALIDITY_LEDGERS: int(2).default("4"),
     /** How long a repeat `/settle` waits on a pending record (AD-6). */
     SETTLE_TIMEOUT_MS: ms(1).default("30000"),
+    /**
+     * Longest `/settle` call, the wait for a channel included; below the load balancer's 120 s
+     * idle timeout (ADR 0011).
+     */
+    SETTLE_BUDGET_MS: ms(1_000).default("90000"),
     /** Channel lease TTL; renewed well before it runs out (AD-17). */
     LEASE_TTL_MS: ms(1_000).default("30000"),
 
@@ -251,6 +256,7 @@ export interface Config {
   settlement: {
     minValidityLedgers: number;
     settleTimeoutMs: number;
+    settleBudgetMs: number;
     leaseTtlMs: number;
   };
   http: {
@@ -328,6 +334,7 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
     settlement: {
       minValidityLedgers: e.MIN_VALIDITY_LEDGERS,
       settleTimeoutMs: e.SETTLE_TIMEOUT_MS,
+      settleBudgetMs: e.SETTLE_BUDGET_MS,
       leaseTtlMs: e.LEASE_TTL_MS,
     },
     http: {
