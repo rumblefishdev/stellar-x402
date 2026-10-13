@@ -21,6 +21,12 @@ history:
     note: >
       Added the rule for claimed records with no hash at startup, from Stan's (stkrolikiewicz)
       PR #7 follow-up, with okarcz.
+  - date: "2026-10-13"
+    status: backlog
+    who: okarcz
+    note: >
+      Added Adam's (adamkoot) attempt/settlement state model from the PR #22 review as an open
+      question.
 ---
 
 # Settlement records survive restarts
@@ -74,3 +80,25 @@ As a facilitator operator, I want settlement records that are written before sen
 - [ ] Given non-final records in the store, when the app starts, then before serving `/settle` it checks each one on chain by its hashes and finalizes it; a record that turns `success` this way fires the on-success hook
 - [ ] Given a `claimed` record with no hashes at startup, when reconciliation runs while holding the lease, then it is closed as `rejected` with reason "interrupted before signing" and `onFinal` runs to release any spend reservation; nothing was sent, because 0016 sends only after `onSigned` succeeds
 - [ ] Given any handler or event listener, when it needs to change a record, then it calls the single settlement module, which owns every write to `SettlementStore`
+
+## Open Questions
+
+- **Should the record keep attempt state apart from settlement state?** Raised by Adam on the
+  [PR #22 review](https://github.com/rumblefishdev/stellar-x402/pull/22#pullrequestreview-5491880790).
+  A hash given to `onSigned` is an attempt, not a send: after a `txBadSeq` rebuild the first
+  envelope reached the network even if `submit()` then rejects, a bound can pass while the hook
+  runs, and a timed-out write can commit after the channel reused the sequence. Since 0016,
+  `SubmitResult.attempts` and `attemptsOf(error)` say for each hash whether it was sent (`yes`,
+  `no` or `unknown`). His proposal, after card reversals (ISO 8583 0400), SEPA Inst status
+  requests (pacs.028), Stripe's recovery points and CDP's `settlement_pending`:
+  - Per hash: `stored` (`onSigned` resolved) → `sent` (`onSent`) → `landed` (`getTransaction`
+    SUCCESS or FAILED), or `dead` (a send `ERROR` on a certain send, or NOT_FOUND once
+    `latestLedger >= maxLedger` or the close time is past `maxTime`). The bounds are our reversal:
+    past them an attempt provably can't land.
+  - Per settlement, keeping AD-16's forward-only CAS: `signed` means at least one attempt is
+    neither `landed` nor `dead`; `success`/`failed` come from the attempt that landed;
+    `rejected`/`expired` only once every attempt is `dead`.
+  - Never build a new attempt for a nonce while one is `stored` or `sent`: a retried `/settle`
+    reconciles the existing attempts.
+  - Startup reconciliation treats every `stored` attempt as possibly sent and resolves it by
+    `getTransaction` plus the bounds.
