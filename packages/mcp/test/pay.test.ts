@@ -5,6 +5,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createServer, type PaymentConfig } from "../src/index.js";
 import { fakeScheme, NO_TRUSTLINE, startFakeSeller, USDC, type FakeSeller } from "./fake-seller.js";
 
+/** What a tool answered: its JSON text, which holds the result or `{error}` alike. */
+function payload<T = Paid>(result: Awaited<ReturnType<Client["callTool"]>>): T {
+  const [first] = result.content as { type: string; text: string }[];
+  return JSON.parse(first!.text) as T;
+}
+
 interface Paid {
   status: number;
   contentType: string | null;
@@ -38,6 +44,8 @@ async function connect(
   await createServer({ ...config, allowInsecureLocal, payment }).connect(serverSide);
   client = new Client({ name: "test", version: "0.0.0" });
   await client.connect(clientSide);
+  // A real MCP client lists the tools first, and then checks results against their output schemas.
+  await client.listTools();
 }
 
 async function reconnect(...args: Parameters<typeof connect>) {
@@ -60,7 +68,7 @@ async function pay(path = "/forecast?city=Warsaw", method = "GET") {
     name: "call_paid_http",
     arguments: { url: `${seller.url}${path}`, method },
   });
-  return { isError: result.isError, ...(result.structuredContent as unknown as Paid) };
+  return { isError: result.isError, ...payload(result) };
 }
 
 describe("call_paid_http", () => {
@@ -127,7 +135,7 @@ describe("call_paid_http", () => {
         name,
         arguments: { url: `${seller.url}/forecast`, method, body: "{}" },
       });
-      expect((result.structuredContent as unknown as Paid).error.code).toBe("invalid_input");
+      expect(payload(result).error.code).toBe("invalid_input");
       expect(seller.bodies).toHaveLength(0);
     },
   );
@@ -289,6 +297,7 @@ describe("call_paid_http", () => {
     ["https://224.0.0.1/forecast"],
     ["https://[ff02::1]/forecast"],
     ["https://[::ffff:0:127.0.0.1]/forecast"],
+    ["https://[::127.0.0.1]/forecast"],
     ["https://[fec0::1]/forecast"],
     ["https://[::ffff:7f00:1]/forecast"],
     ["https://[::ffff:10.0.0.1]/forecast"],
@@ -299,7 +308,7 @@ describe("call_paid_http", () => {
       name: "call_paid_http",
       arguments: { url, method: "GET" },
     });
-    expect((result.structuredContent as unknown as Paid).error.code).toBe("unsafe_url");
+    expect(payload(result).error.code).toBe("unsafe_url");
   });
 
   it("does not follow a redirect", async () => {
@@ -321,7 +330,7 @@ describe("get_resource", () => {
       name: "get_resource",
       arguments: { url, method: "GET" },
     });
-    return result.structuredContent as unknown as {
+    return payload<{
       status: number;
       paymentRequired: {
         resource: { description: string; mimeType: string };
@@ -330,7 +339,7 @@ describe("get_resource", () => {
         extensions: { bazaar: { info: { output: unknown } } };
       } | null;
       error: { code: string };
-    };
+    }>(result);
   }
 
   it("returns the seller's terms and description without paying or touching the budget", async () => {
@@ -409,6 +418,25 @@ describe("get_resource", () => {
   });
 });
 
+describe("default settings", () => {
+  it("refuses http and local sellers unless allowInsecureLocal is set", async () => {
+    await client.close();
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    const config = { discoveryUrl: "http://unused", timeoutMs: 5_000, maxResponseBytes: 1_000 };
+    await createServer({ ...config, log: () => {} }).connect(serverSide);
+    client = new Client({ name: "test", version: "0.0.0" });
+    await client.connect(clientSide);
+    // A real MCP client lists the tools first, and then checks results against their output schemas.
+    await client.listTools();
+    const result = await client.callTool({
+      name: "get_resource",
+      arguments: { url: `${seller.url}/forecast`, method: "GET" },
+    });
+    expect(payload(result).error.code).toBe("unsafe_url");
+    expect(seller.bodies).toHaveLength(0);
+  });
+});
+
 describe("without payment config", () => {
   beforeEach(async () => {
     await client.close();
@@ -417,6 +445,8 @@ describe("without payment config", () => {
     await createServer({ ...config, allowInsecureLocal: true, log: () => {} }).connect(serverSide);
     client = new Client({ name: "test", version: "0.0.0" });
     await client.connect(clientSide);
+    // A real MCP client lists the tools first, and then checks results against their output schemas.
+    await client.listTools();
   });
 
   it("lists and previews, but offers no call_paid_http tool", async () => {
@@ -429,7 +459,7 @@ describe("without payment config", () => {
       name: "get_resource",
       arguments: { url: `${seller.url}/forecast`, method: "GET" },
     });
-    expect((result.structuredContent as { status: number }).status).toBe(402);
+    expect(payload<{ status: number }>(result).status).toBe(402);
     expect(seller.payments).toHaveLength(0);
   });
 });

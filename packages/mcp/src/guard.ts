@@ -20,7 +20,12 @@ export interface SellerLimits {
  * public one `unicast`. A range nobody listed is refused by default.
  */
 function isPrivate(ip: string): boolean {
-  return ipaddr.process(ip).range() !== "unicast";
+  const address = ipaddr.process(ip);
+  // ipaddr.js calls the deprecated IPv4-compatible form (`::a.b.c.d`) `unicast`; it is not a public
+  // address, so it is refused too.
+  const ipv4Compatible =
+    address.kind() === "ipv6" && (address as ipaddr.IPv6).match(ipaddr.IPv6.parse("::"), 96);
+  return ipv4Compatible || address.range() !== "unicast";
 }
 
 /**
