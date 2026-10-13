@@ -40,8 +40,13 @@ for (const [address, prefix] of [
 // IPv4-mapped (`::ffff:a.b.c.d`) addresses are matched against the IPv4 rules by `BlockList` itself;
 // NAT64 (64:ff9b::/96) and 6to4 (2002::/16) embed an IPv4 address that could be private.
 for (const [address, prefix] of [
-  ["::", 128],
-  ["::1", 128],
+  // IPv4-compatible (`::a.b.c.d`, deprecated) and IPv4-translated (`::ffff:0:a.b.c.d`) forms, `::1`
+  // and `::` included.
+  ["::", 96],
+  ["::ffff:0:0:0", 96],
+  ["100::", 64],
+  ["2001::", 32],
+  ["fec0::", 10],
   ["fc00::", 7],
   ["fe80::", 10],
   ["64:ff9b::", 96],
@@ -109,6 +114,8 @@ export function checkBody(method: string, body: string | undefined): void {
 export function guardedFetch(limits: SellerLimits): typeof fetch {
   return async (input, init) => {
     const request = new Request(input, init);
+    // Every request the payment wrapper makes passes here, so the guard holds whoever calls this.
+    checkUrl(request.url, limits.allowInsecureLocal);
     let response;
     try {
       response = await undiciFetch(request.url, {

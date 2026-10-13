@@ -43,6 +43,14 @@ describe("guardedFetch", () => {
     },
   );
 
+  it("refuses a private IP address written in the URL before connecting", async () => {
+    const limits = { timeoutMs: 1_000, maxResponseBytes: 1_000, allowInsecureLocal: false };
+    await expect(guardedFetch(limits)("https://10.0.0.5/x")).rejects.toMatchObject({
+      code: "unsafe_url",
+    });
+    expect(undiciFetch).not.toHaveBeenCalled();
+  });
+
   it("passes on a refusal from the lookup with its own code", async () => {
     const { ToolError } = await import("../src/results.js");
     const refused = new ToolError("unsafe_url", "refused");
