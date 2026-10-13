@@ -72,6 +72,15 @@ Without `STELLAR_X402_SECRET_KEY` the server only lists and previews.
   process paying from the same key and using the same `STELLAR_X402_STATE_FILE` counts against
   one amount per day; the day is the UTC date, so it starts again at midnight UTC. If that file
   cannot be read, the server refuses to pay (`payment_failed`) rather than guess.
+- **The daily limit is per key and per file.** Two keys sharing one file each get the full daily
+  budget; one key with two different `STELLAR_X402_STATE_FILE` paths gets it twice.
+- **The day is a calendar day, not the last 24 hours.** A full daily budget spent just before
+  midnight UTC and another just after it means up to twice the daily budget within minutes.
+- **To reset the daily budget, delete the state file.** It then forgets everything spent today,
+  for every key that uses it.
+- **A refund that cannot be written stays counted.** When a payment fails before it is signed, its
+  amount goes back to the daily budget; if the file cannot be written at that moment, the amount
+  stays counted for the day (the log says so). Too strict, never too loose.
 - **Every payment sent counts against the budget**, even one the seller refuses afterwards; a
   payment that could not be signed (for example, too little USDC) does not.
 - **Sellers are reached only at public addresses over https.** A host whose DNS name points into a
