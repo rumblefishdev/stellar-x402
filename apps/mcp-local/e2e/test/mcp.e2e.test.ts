@@ -34,7 +34,15 @@ import {
   startFakeSeller,
   withOffers,
 } from "../src/fakes.js";
-import { friendbot, succeeded, usdcBalance, usdcTransfer, xlmBalance } from "../src/horizon.js";
+import {
+  friendbot,
+  latestLedger,
+  openUsdcTrustline,
+  succeeded,
+  usdcBalance,
+  usdcTransfer,
+  xlmBalance,
+} from "../src/horizon.js";
 import { type Keys, readKeys } from "../src/keys.js";
 import { row, writeResults } from "../src/results.js";
 import { type ExampleSeller, startExampleSeller } from "../src/seller.js";
@@ -51,6 +59,8 @@ let example: ExampleSeller;
 /** The example seller's 402; the fake sellers answer copies of it, so a real key signs them. */
 let terms: PaymentRequired;
 let setupError: unknown;
+/** The secret of E-14b's account, searched for by E-23 too. */
+let drained = "";
 const scratch = mkdtempSync(join(tmpdir(), "mcp-e2e-"));
 let dirs = 0;
 
@@ -221,14 +231,8 @@ describe("start-up", () => {
     ];
     for (const [id, env, says] of cases) {
       const { code: exit, stderr } = await failedStart(env);
-      // The exit code is undocumented (F-01): recorded in the row, and only "it stopped by itself,
-      // not killed after 10 s, and not with 0" is checked.
-      row(
-        `E-01${id}`,
-        `stops by itself (exit ${exit}), stderr says "${says}"`,
-        [true, true],
-        [exit !== null && exit !== 0, stderr.includes(says)],
-      );
+      // Exit code 1 (README); a server killed after 10 s would show null.
+      row(`E-01${id}`, `exit 1, stderr says "${says}"`, [1, true], [exit, stderr.includes(says)]);
     }
   });
 
@@ -314,12 +318,11 @@ describe("catalog", () => {
     const all = (await server.call("list_resources", {})).value as {
       items: { description: string }[];
     };
-    // F-06: whether a long description is cut is undocumented; its returned length is recorded.
     row(
       "E-04",
-      `H2's 10,000-character description comes back with ${all.items[1]!.description.length} (recorded)`,
-      true,
-      true,
+      "a 10,000-character description is cut to 500 (README)",
+      500,
+      all.items[1]!.description.length,
     );
     await server.close();
   });
@@ -516,6 +519,16 @@ describe("get_resource", () => {
       "unsafe_url",
       code(await strictServer.call("get_resource", httpArgs(`${fake.url}/free`))),
     );
+    // The production path, with the switch off: a public https name resolved and checked by the
+    // guard, then TLS. No seller of ours runs there; any 200 shows the request went through.
+    row(
+      "E-09h",
+      "https://example.com/ without the switch passes the guard",
+      ["ok", 200],
+      await strictServer
+        .call("get_resource", httpArgs("https://example.com/"))
+        .then((answer) => [code(answer), (answer.value as { status?: number })?.status]),
+    );
     await strictServer.close();
     row(
       "E-09",
@@ -579,10 +592,9 @@ describe("call_paid_http refusals before signing", () => {
       "invalid_input",
       code(await server.call("call_paid_http", withBody)),
     );
-    // F-10: undocumented for get_resource; the code that came back is the one checked.
     row(
       "E-10",
-      "get_resource GET with a body (recorded)",
+      "get_resource GET with a body (README: either seller tool)",
       "invalid_input",
       code(await server.call("get_resource", withBody)),
     );
@@ -603,14 +615,25 @@ describe("call_paid_http after signing (fake seller, no money moves)", () => {
     const server = await startServer(paying());
     const answer = await server.call("call_paid_http", httpArgs(`${fake.url}/two`));
     const payment = (answer.value as Partial<PaidResult>).payment;
+    const ledger = await latestLedger();
     const offer = terms.accepts[0]!;
+    const signed = fake.requests.filter((r) => r.paid).map((r) => r.signed!);
     row(
       "E-13b",
-      "the seller received one payment, signed for 5000 to its payTo in USDC",
-      [{ amount: "5000", asset: offer.asset, payTo: offer.payTo }],
-      fake.requests.filter((r) => r.paid).map((r) => r.signed),
+      "one payment, the signed transfer: 5000 USDC from the buyer to the seller's payTo",
+      [{ asset: offer.asset, from: keys.buyerPublic, to: offer.payTo, amount: "5000" }],
+      signed.map(({ asset, from, to, amount }) => ({ asset, from, to, amount })),
     );
-    // F-11: a well-formed hash the fake made up is returned as is.
+    // A ledger closes about every 5 s: the signature must stop being valid within the offer's own
+    // time limit, and never later than 300 s (the server's cap), counted in ledgers.
+    const ledgersLeft = signed[0]!.expirationLedger - ledger;
+    row(
+      "E-13b",
+      `signature valid for ${ledgersLeft} more ledgers: within the offer's ${offer.maxTimeoutSeconds} s and 300 s`,
+      [true, true],
+      [ledgersLeft <= Math.ceil(offer.maxTimeoutSeconds / 5) + 1, ledgersLeft <= 61],
+    );
+    // A well-formed hash the fake made up is returned as is: the seller's word (W435).
     row(
       "E-13b",
       "result: ok, 5000, the settlement's hash",
@@ -647,6 +670,65 @@ describe("call_paid_http after signing (fake seller, no money moves)", () => {
       [server.stderr().includes("Contract"), first.text.includes("Contract")],
     );
     row("E-14", "XLM unchanged", String(xlmBefore), String(await xlmBalance(unfunded.publicKey())));
+  });
+
+  it("E-14b a payer with a USDC trustline and nothing on it is insufficient_funds", async () => {
+    // The common case on mainnet, a drained wallet: the asset contract fails with #10, not #13.
+    const empty = Keypair.random();
+    drained = empty.secret();
+    await friendbot(empty.publicKey());
+    await openUsdcTrustline(empty);
+    const server = await startServer(
+      paying({ STELLAR_X402_SECRET_KEY: empty.secret(), STELLAR_X402_TIMEOUT_MS: "30000" }),
+    );
+    const answer = await server.call("call_paid_http", httpArgs(weather()));
+    await server.close();
+    row(
+      "E-14b",
+      "insufficient_funds, the contract's #10 in the log only",
+      ["insufficient_funds", true, false],
+      [code(answer), server.stderr().includes("#10"), answer.text.includes("#10")],
+    );
+  });
+
+  it("E-14c a seller that does not pay the network fees is refused before signing", async () => {
+    // The exact scheme on Stellar requires the facilitator to pay the fees; upstream refuses to sign
+    // otherwise. Today that is payment_failed (W434 asks whether it should be unsupported_payment).
+    const fake = await startFakeSeller(terms, {
+      "/unsponsored": {
+        unpaid: (res, t) => answer402(withOffers(t, { extra: { areFeesSponsored: false } }))(res),
+      },
+    });
+    const dir = freshDir();
+    const server = await startServer(paying({ STELLAR_X402_STATE_DIR: dir }));
+    const answer = await server.call("call_paid_http", httpArgs(`${fake.url}/unsponsored`));
+    await server.close();
+    row(
+      "E-14c",
+      "refused, nothing sent, the amount given back",
+      ["payment_failed", 0, "0"],
+      [code(answer), paidAt(fake), counted(dir)],
+    );
+    await fake.close();
+  });
+
+  it("E-24 a paid POST carries its body on the paid request too", async () => {
+    const fake = await startFakeSeller(terms, { "/post": {} });
+    const server = await startServer(paying());
+    const body = '{"city":"Warsaw","days":3}';
+    const answer = await server.call("call_paid_http", {
+      url: `${fake.url}/post`,
+      method: "POST",
+      body,
+    });
+    await server.close();
+    row(
+      "E-24",
+      "ok; the unpaid and the paid request both carry the body",
+      ["ok", [body, body]],
+      [code(answer), fake.requests.map((r) => r.body)],
+    );
+    await fake.close();
   });
 
   it("E-15 a refused payment is payment_rejected, without a hash, and stays counted", async () => {
@@ -783,7 +865,7 @@ describe("call_paid_http after signing (fake seller, no money moves)", () => {
       [c.code, c.status, c.payment?.transaction],
     );
     const d = await result("/text");
-    row("E-17d", `content type comes back as ${d.contentType} (recorded)`, "ok", d.code);
+    row("E-17d", "content type passed on", ["ok", "text/plain"], [d.code, d.contentType]);
     await server.close();
     await fake.close();
   });
@@ -979,9 +1061,10 @@ it("E-23 no secret appears in anything the servers wrote", () => {
     buyer: keys.buyerSecret,
     "buyer without its S": keys.buyerSecret.slice(1),
     unfunded: unfunded.secret(),
+    "drained (E-14b)": drained,
     "malformed key of E-01l": "SNOTAVALIDKEY0123456789",
   };
-  for (const [name, secret] of Object.entries(secrets))
+  for (const [name, secret] of Object.entries(secrets).filter(([, value]) => value !== ""))
     row(
       "E-23",
       `no ${name} secret in ${captured.length} captures from ${started.count} processes`,

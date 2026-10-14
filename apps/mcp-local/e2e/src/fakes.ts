@@ -6,12 +6,47 @@ import {
   encodePaymentResponseHeader,
 } from "@x402/core/http";
 import type { PaymentRequired } from "@x402/core/types";
+import {
+  Address,
+  Networks,
+  type Operation,
+  scValToNative,
+  type Transaction,
+  TransactionBuilder,
+} from "@stellar/stellar-sdk";
 
 /**
  * A local seller for the cases the example seller cannot produce. Its 402 is a copy of the example
  * seller's own, so a real key signs it: the asset and `payTo` are real testnet ones. It never
  * forwards a signed payment to a facilitator, so no money moves.
  */
+
+/**
+ * What the buyer signed, read from the signed transaction itself, not from the offer it names: the
+ * asset contract, the transfer's from, to and amount, and the ledger after which the signature
+ * stops being valid.
+ */
+export interface Signed {
+  asset: string;
+  from: string;
+  to: string;
+  amount: string;
+  expirationLedger: number;
+}
+
+function signedTransfer(transactionXdr: string): Signed {
+  const tx = TransactionBuilder.fromXDR(transactionXdr, Networks.TESTNET) as Transaction;
+  const op = tx.operations[0] as Operation.InvokeHostFunction;
+  const call = op.func.invokeContract();
+  const [from, to, amount] = call.args().map((arg) => scValToNative(arg) as unknown);
+  return {
+    asset: Address.fromScAddress(call.contractAddress()).toString(),
+    from: String(from),
+    to: String(to),
+    amount: String(amount),
+    expirationLedger: op.auth![0]!.credentials().address().signatureExpirationLedger(),
+  };
+}
 
 /** What one path answers: to the unpaid request, and to the request carrying a signed payment. */
 export interface Route {
@@ -22,14 +57,10 @@ export interface Route {
 export interface FakeSeller {
   url: string;
   /**
-   * Requests received, in order: the path, and the offer the buyer signed when the request carried a
-   * payment, decoded from its header (the seller's own record, not the buyer's report).
+   * Requests received, in order: the path, the body, and, when the request carried a payment, what
+   * the buyer signed, decoded from the signed transaction (the seller's record, not the buyer's).
    */
-  requests: {
-    path: string;
-    paid: boolean;
-    signed?: { amount: string; asset: string; payTo: string };
-  }[];
+  requests: { path: string; paid: boolean; body: string; signed?: Signed }[];
   close(): Promise<void>;
 }
 
@@ -68,15 +99,18 @@ export async function startFakeSeller(
   routes: Record<string, Route>,
 ): Promise<FakeSeller> {
   const requests: FakeSeller["requests"] = [];
-  const server: Server = createServer((req: IncomingMessage, res: ServerResponse) => {
+  const server: Server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const path = new URL(req.url ?? "/", "http://localhost").pathname;
+    let body = "";
+    for await (const chunk of req) body += String(chunk);
     const header = req.headers["payment-signature"];
     const paid = typeof header === "string";
-    const signed = paid ? decodePaymentSignatureHeader(header).accepted : undefined;
+    const payload = paid ? decodePaymentSignatureHeader(header).payload : undefined;
     requests.push({
       path,
       paid,
-      signed: signed && { amount: signed.amount, asset: signed.asset, payTo: signed.payTo },
+      body,
+      signed: payload && signedTransfer((payload as { transaction: string }).transaction),
     });
     const route = routes[path];
     if (!route) {

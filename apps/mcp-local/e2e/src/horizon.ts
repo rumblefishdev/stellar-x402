@@ -1,3 +1,13 @@
+import {
+  Asset,
+  BASE_FEE,
+  Horizon,
+  type Keypair,
+  Networks,
+  Operation,
+  TransactionBuilder,
+} from "@stellar/stellar-sdk";
+
 /** Testnet balances and transactions, read from Horizon. */
 
 const HORIZON = "https://horizon-testnet.stellar.org";
@@ -54,6 +64,26 @@ export async function usdcTransfer(
 export async function succeeded(hash: string): Promise<boolean> {
   const { successful } = (await get(`/transactions/${hash}`)) as { successful: boolean };
   return successful;
+}
+
+/** The sequence of the latest closed ledger. */
+export async function latestLedger(): Promise<number> {
+  const { _embedded } = (await get("/ledgers?order=desc&limit=1")) as {
+    _embedded: { records: { sequence: number }[] };
+  };
+  return _embedded.records[0]!.sequence;
+}
+
+/** Opens a testnet USDC trustline on a friendbot account, so it can hold USDC but holds none. */
+export async function openUsdcTrustline(account: Keypair): Promise<void> {
+  const server = new Horizon.Server(HORIZON);
+  const source = await server.loadAccount(account.publicKey());
+  const tx = new TransactionBuilder(source, { fee: BASE_FEE, networkPassphrase: Networks.TESTNET })
+    .addOperation(Operation.changeTrust({ asset: new Asset("USDC", USDC_ISSUER) }))
+    .setTimeout(60)
+    .build();
+  tx.sign(account);
+  await server.submitTransaction(tx);
 }
 
 /** Creates and funds a new testnet account with friendbot: XLM only, no USDC trustline. */

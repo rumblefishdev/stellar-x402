@@ -76,6 +76,9 @@ export async function startServer(env: Record<string, string>): Promise<RunningS
   });
   const client = new Client({ name: "stellar-x402-e2e", version: "0.0.0" });
   await client.connect(transport);
+  // As Claude Desktop does: listing the tools makes the SDK check every result against its tool's
+  // output schema.
+  await client.listTools();
   const server: RunningServer = {
     async call(name, args) {
       let isError: boolean;
