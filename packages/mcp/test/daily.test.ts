@@ -169,6 +169,22 @@ describe("daily budget", () => {
     expect(await call()).toBe("paid");
   });
 
+  it("gives the amount back to the day it was counted on, after midnight too", async () => {
+    const call = await startProcess({
+      scheme: {
+        scheme: "exact",
+        async createPaymentPayload() {
+          // Counted at 23:59 on the 13th; signing fails once the clock has passed midnight.
+          clock = new Date("2026-10-14T00:00:01Z");
+          throw new Error(NO_TRUSTLINE);
+        },
+      },
+    });
+    expect(await call()).toBe("insufficient_funds");
+    expect(await spent("2026-10-13")).toBe(0n);
+    expect(await readdir(state)).toEqual(["spent-2026-10-13.jsonl"]);
+  });
+
   it("gives the amount back when signing runs past the call's deadline", async () => {
     const call = await startProcess({ scheme: slowScheme(1_000), timeoutMs: 300 });
     expect(await call()).toBe("upstream_error");
