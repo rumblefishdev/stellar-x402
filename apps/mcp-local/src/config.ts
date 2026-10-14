@@ -2,10 +2,12 @@ import type { ServerConfig } from "@stellar-x402/mcp";
 import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import { createEd25519Signer, USDC_TESTNET_ADDRESS } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/client";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { z } from "zod";
 
 /** What `createServer` needs, read from the environment; only the log is added by the caller. */
-export type CliConfig = Omit<ServerConfig, "log"> & { buyer?: string };
+export type CliConfig = Omit<ServerConfig, "log">;
 
 /** An unset variable and an empty one mean the same: not given. */
 const blank = (value: unknown) => (value === "" ? undefined : value);
@@ -47,7 +49,12 @@ const ENV = z.object({
   STELLAR_X402_SECRET_KEY: optional(z.string()),
   STELLAR_X402_MAX_PER_CALL: optional(ATOMIC),
   STELLAR_X402_BUDGET: optional(ATOMIC),
+  STELLAR_X402_DAILY_BUDGET: optional(ATOMIC),
+  STELLAR_X402_STATE_FILE: optional(z.string()),
 });
+
+/** Outside any project, so every Claude session of the user counts against the same day. */
+const DEFAULT_STATE_FILE = join(homedir(), ".stellar-x402-mcp", "spent.json");
 
 /**
  * Reads the server's settings from environment variables, as an MCP client such as Claude Desktop
@@ -66,6 +73,10 @@ export function loadConfig(env: NodeJS.ProcessEnv): CliConfig {
     throw new Error(`${issue!.path.join(".")} ${issue!.message}.`);
   }
   const vars = parsed.data;
+  // The file only records the daily budget; set alone it would do nothing.
+  if (vars.STELLAR_X402_STATE_FILE !== undefined && vars.STELLAR_X402_DAILY_BUDGET === undefined) {
+    throw new Error("STELLAR_X402_STATE_FILE needs STELLAR_X402_DAILY_BUDGET.");
+  }
   const config: CliConfig = {
     discoveryUrl: vars.STELLAR_X402_DISCOVERY_URL,
     timeoutMs: vars.STELLAR_X402_TIMEOUT_MS,
@@ -87,15 +98,20 @@ export function loadConfig(env: NodeJS.ProcessEnv): CliConfig {
   }
   return {
     ...config,
-    buyer: signer.address,
     payment: {
       schemes: [{ network: STELLAR_NETWORKS.testnet, client: new ExactStellarScheme(signer) }],
+      payer: signer.address,
       assets: {
         [USDC_TESTNET_ADDRESS]: {
           maxPerCall: vars.STELLAR_X402_MAX_PER_CALL,
           budget: vars.STELLAR_X402_BUDGET,
+          daily: vars.STELLAR_X402_DAILY_BUDGET,
         },
       },
+      dailyFile:
+        vars.STELLAR_X402_DAILY_BUDGET === undefined
+          ? undefined
+          : (vars.STELLAR_X402_STATE_FILE ?? DEFAULT_STATE_FILE),
     },
   };
 }

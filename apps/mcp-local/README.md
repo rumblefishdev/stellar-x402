@@ -46,16 +46,18 @@ Without `STELLAR_X402_SECRET_KEY` the server only lists and previews.
 
 ## Settings
 
-| Variable                            | Default             | Meaning                                                                                            |
-| ----------------------------------- | ------------------- | -------------------------------------------------------------------------------------------------- |
-| `STELLAR_X402_DISCOVERY_URL`        | required            | base URL of a server with `GET /discovery/resources`                                               |
-| `STELLAR_X402_SECRET_KEY`           | none                | the buyer's Stellar secret key; enables `call_paid_http`                                           |
-| `STELLAR_X402_MAX_PER_CALL`         | required with a key | the largest price one call may pay, in atomic units (`10000` = 0.001 USDC)                         |
-| `STELLAR_X402_BUDGET`               | required with a key | the most this process may spend, in atomic units                                                   |
-| `STELLAR_X402_NETWORK`              | `stellar:testnet`   | anything else stops the server: it pays on testnet only                                            |
-| `STELLAR_X402_TIMEOUT_MS`           | `30000`             | a tool call gives up after this long, all its requests together                                    |
-| `STELLAR_X402_MAX_RESPONSE_BYTES`   | `100000`            | a seller response larger than this is refused (`response_too_large`)                               |
-| `STELLAR_X402_ALLOW_INSECURE_LOCAL` | `0`                 | `1` also allows `http` to this machine only (below) — **only** for a seller you run on it in tests |
+| Variable                            | Default                          | Meaning                                                                                            |
+| ----------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `STELLAR_X402_DISCOVERY_URL`        | required                         | base URL of a server with `GET /discovery/resources`                                               |
+| `STELLAR_X402_SECRET_KEY`           | none                             | the buyer's Stellar secret key; enables `call_paid_http`                                           |
+| `STELLAR_X402_MAX_PER_CALL`         | required with a key              | the largest price one call may pay, in atomic units (`10000` = 0.001 USDC)                         |
+| `STELLAR_X402_BUDGET`               | required with a key              | the most this process may spend, in atomic units                                                   |
+| `STELLAR_X402_DAILY_BUDGET`         | none                             | the most one key may spend in one UTC day, all its processes together, in atomic units             |
+| `STELLAR_X402_STATE_FILE`           | `~/.stellar-x402-mcp/spent.json` | where the daily budget records what was spent; only with `STELLAR_X402_DAILY_BUDGET`               |
+| `STELLAR_X402_NETWORK`              | `stellar:testnet`                | anything else stops the server: it pays on testnet only                                            |
+| `STELLAR_X402_TIMEOUT_MS`           | `30000`                          | a tool call gives up after this long, all its requests together                                    |
+| `STELLAR_X402_MAX_RESPONSE_BYTES`   | `100000`                         | a seller response larger than this is refused (`response_too_large`)                               |
+| `STELLAR_X402_ALLOW_INSECURE_LOCAL` | `0`                              | `1` also allows `http` to this machine only (below) — **only** for a seller you run on it in tests |
 
 ## What to know
 
@@ -65,7 +67,23 @@ Without `STELLAR_X402_SECRET_KEY` the server only lists and previews.
 - **The budget lasts until the server restarts.** Claude Desktop starts the server again each time
   it starts, so the budget starts again from zero; the key's balance is the hard limit.
 - **Each server process has its own budget.** Two Claude sessions start two processes, and each may
-  spend the full budget.
+  spend the full budget. Set `STELLAR_X402_DAILY_BUDGET` for a limit they share.
+- **The daily budget survives restarts and is shared.** With `STELLAR_X402_DAILY_BUDGET` set, every
+  process paying from the same key and using the same `STELLAR_X402_STATE_FILE` counts against
+  one amount per day; the day is the UTC date, so it starts again at midnight UTC. If that file
+  cannot be read, the server refuses to pay (`payment_failed`) rather than guess.
+- **The daily limit is per key and per file.** Two keys sharing one file each get the full daily
+  budget; one key with two different `STELLAR_X402_STATE_FILE` paths gets it twice.
+- **The day is a calendar day, not the last 24 hours.** A full daily budget spent just before
+  midnight UTC and another just after it means up to twice the daily budget within minutes.
+- **In a rare race the daily budget can be passed by one payment.** If a process dies while it
+  holds the state file's lock and two others pay at that very moment, both may count; the overshoot
+  is one payment, never more than `STELLAR_X402_MAX_PER_CALL`, which every process enforces on its own.
+- **To reset the daily budget, delete the state file.** It then forgets everything spent today,
+  for every key that uses it.
+- **A refund that cannot be written stays counted.** When a payment fails before it is signed, its
+  amount goes back to the daily budget; if the file cannot be written at that moment, the amount
+  stays counted for the day (the log says so). Too strict, never too loose.
 - **Every payment sent counts against the budget**, even one the seller refuses afterwards; a
   payment that could not be signed (for example, too little USDC) does not.
 - **Sellers are reached only at public addresses over https.** A host whose DNS name points into a

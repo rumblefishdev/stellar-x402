@@ -1,5 +1,7 @@
 import { Keypair } from "@stellar/stellar-sdk";
 import { USDC_TESTNET_ADDRESS } from "@x402/stellar";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 
@@ -34,11 +36,28 @@ describe("loadConfig", () => {
 
   it("pays in testnet USDC within the limits when a key is given", () => {
     const config = loadConfig(PAYING);
-    expect(config.buyer).toBe(BUYER.publicKey());
+    expect(config.payment?.payer).toBe(BUYER.publicKey());
     expect(config.payment?.schemes.map((s) => s.network)).toEqual(["stellar:testnet"]);
     expect(config.payment?.assets).toEqual({
       [USDC_TESTNET_ADDRESS]: { maxPerCall: 10_000n, budget: 50_000n },
     });
+  });
+
+  it("keeps no daily record without a daily budget", () => {
+    expect(loadConfig(PAYING).payment?.dailyFile).toBeUndefined();
+  });
+
+  it("adds a daily budget, recorded in the home directory unless a file is named", () => {
+    const daily = { ...PAYING, STELLAR_X402_DAILY_BUDGET: "200000" };
+    const config = loadConfig(daily);
+    expect(config.payment?.assets[USDC_TESTNET_ADDRESS]).toEqual({
+      maxPerCall: 10_000n,
+      budget: 50_000n,
+      daily: 200_000n,
+    });
+    expect(config.payment?.dailyFile).toBe(join(homedir(), ".stellar-x402-mcp", "spent.json"));
+    const named = loadConfig({ ...daily, STELLAR_X402_STATE_FILE: "/var/tmp/spent.json" });
+    expect(named.payment?.dailyFile).toBe("/var/tmp/spent.json");
   });
 
   it("reads the optional settings", () => {
@@ -84,6 +103,16 @@ describe("loadConfig", () => {
       "a limit in USDC instead of atomic units",
       { ...PAYING, STELLAR_X402_BUDGET: "0.5" },
       "atomic units",
+    ],
+    [
+      "a daily budget in USDC instead of atomic units",
+      { ...PAYING, STELLAR_X402_DAILY_BUDGET: "1.5" },
+      "STELLAR_X402_DAILY_BUDGET must be an amount in atomic units",
+    ],
+    [
+      "a record file without a daily budget",
+      { ...PAYING, STELLAR_X402_STATE_FILE: "/var/tmp/spent.json" },
+      "STELLAR_X402_STATE_FILE needs STELLAR_X402_DAILY_BUDGET",
     ],
     [
       "a timeout that is not a number",

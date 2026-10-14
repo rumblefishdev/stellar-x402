@@ -42,6 +42,7 @@ async function connect(
   const payment: PaymentConfig = {
     // Testnet only, as the CLI registers it.
     schemes: [{ network: "stellar:testnet", client: scheme }],
+    payer: "GBUYERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     assets: { [USDC]: { maxPerCall: 20_000n, budget: 15_000n } },
     ...overrides,
   };
