@@ -69,9 +69,8 @@ key stop the start, so a key left out by mistake is not taken for a server that 
 Every value is read when the server starts. An empty value means the same as an unset one (the
 default applies, a required one is missing). Numbers are plain decimal digits: no `1e3`, hex, sign or
 spaces; the time limit and the response limit must be above 0, the two amounts may be 0. A missing
-or wrong value, or an unknown `STELLAR_X402_` variable (a misspelt name), stops the server with a message on stderr naming the variable. A malformed key is refused without
-repeating it. Without a key, `STELLAR_X402_MAX_PER_CALL` and `STELLAR_X402_DAILY_BUDGET` are not
-used.
+or wrong value, or an unknown `STELLAR_X402_` variable (a misspelt name), stops the server with a
+message on stderr naming the variable. A malformed key is refused without repeating it.
 
 ## What to know
 
