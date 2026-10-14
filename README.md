@@ -23,7 +23,7 @@ package. Status: skeleton, nothing implemented yet.
 
 ## Requirements
 
-- Node.js 22.13+ and pnpm 11 (`corepack enable`)
+- Node.js 22.12+ and pnpm 11 (`corepack enable`)
 - Rust stable with the `wasm32v1-none` target, and stellar-cli 25.2+ for contract builds
 
 ## Commands

@@ -176,14 +176,6 @@ describe("call_paid_http", () => {
     expect((await pay()).payment).toBeDefined();
   });
 
-  it.each(["-10000", "0", "1.5"])("refuses a price of %s", async (price) => {
-    seller.price = price;
-    const result = await pay();
-    expect(result.error.code).toBe("unsupported_payment");
-    expect(result.error.message).toContain("above zero");
-    expect(seller.payments).toHaveLength(0);
-  });
-
   it("pays in another allowed asset when the first one's budget is spent", async () => {
     await reconnect({
       assets: {

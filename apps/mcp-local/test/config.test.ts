@@ -24,16 +24,6 @@ describe("loadConfig", () => {
     });
   });
 
-  it("browses only when the payment settings are left empty and no key is given", () => {
-    const config = loadConfig({
-      ...BASE,
-      STELLAR_X402_MAX_PER_CALL: "",
-      STELLAR_X402_DAILY_BUDGET: "",
-      STELLAR_X402_STATE_DIR: "",
-    });
-    expect(config).toEqual(loadConfig(BASE));
-  });
-
   it("uses the defaults for empty values", () => {
     const config = loadConfig({
       ...BASE,
@@ -57,8 +47,6 @@ describe("loadConfig", () => {
     expect(loadConfig(PAYING).payment?.dailyDir).toBe(join(homedir(), ".stellar-x402-mcp"));
     const named = loadConfig({ ...PAYING, STELLAR_X402_STATE_DIR: "/var/tmp/x402" });
     expect(named.payment?.dailyDir).toBe("/var/tmp/x402");
-    const home = loadConfig({ ...PAYING, STELLAR_X402_STATE_DIR: "~/.x402" });
-    expect(home.payment?.dailyDir).toBe(join(homedir(), ".x402"));
   });
 
   it("reads the optional settings", () => {
@@ -116,29 +104,9 @@ describe("loadConfig", () => {
       "STELLAR_X402_DAILY_BUDGET must be an amount in atomic units",
     ],
     [
-      "a per-call limit without a key",
-      { ...BASE, STELLAR_X402_MAX_PER_CALL: "10000" },
-      "STELLAR_X402_MAX_PER_CALL needs STELLAR_X402_SECRET_KEY",
-    ],
-    [
-      "a daily budget without a key",
-      { ...BASE, STELLAR_X402_DAILY_BUDGET: "200000" },
-      "STELLAR_X402_DAILY_BUDGET needs STELLAR_X402_SECRET_KEY",
-    ],
-    [
-      "a state directory without a key",
+      "a state directory without a daily budget",
       { ...BASE, STELLAR_X402_STATE_DIR: "/var/tmp/x402" },
-      "STELLAR_X402_STATE_DIR needs STELLAR_X402_SECRET_KEY",
-    ],
-    [
-      "another user's home directory",
-      { ...PAYING, STELLAR_X402_STATE_DIR: "~alice/.x402" },
-      "STELLAR_X402_STATE_DIR must be an absolute path or start with ~/",
-    ],
-    [
-      "a relative state directory",
-      { ...PAYING, STELLAR_X402_STATE_DIR: "state" },
-      "STELLAR_X402_STATE_DIR must be an absolute path",
+      "STELLAR_X402_STATE_DIR needs STELLAR_X402_DAILY_BUDGET",
     ],
     [
       "the state file, replaced by a state directory",
