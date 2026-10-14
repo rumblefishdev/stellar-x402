@@ -63,11 +63,15 @@ Measured facts it rests on:
 
 Decided:
 
-- **The chain is the clock after signing (W451 A):** the authorization is valid for **6 ledgers**,
-  a constant: 6 × 9 s, the slowest ledger seen in a year, is 54 s, under the MCP client's 60 s. The
-  call waits for the seller's answer until that ledger closes, never by a timer. The 300 s offer
-  filter goes away (a seller's longer limit is only a ceiling). `STELLAR_X402_TIMEOUT_MS` stays for
-  the catalog, the preview and the unpaid request (W443 A: its default becomes 45 s).
+- **The chain is the clock after signing (W451 A, W452 C):** the authorization is valid for as many
+  ledgers as fit before 57 s from the call's start at the slowest ledger seen in a year (9 s):
+  `floor((57 s − time used before signing) / 9 s)`, usually 6 (~30 s at today's 5 s); none fits →
+  nothing is signed. The MCP client gives up at 60 s, and 3 s are left for the lookup. Never longer
+  than the seller asks. The call waits for the seller's answer until that ledger closes, never by a
+  timer. The 300 s offer filter goes away. `STELLAR_X402_TIMEOUT_MS` stays at 30 s for the catalog,
+  the preview and the unpaid request (W443 superseded). A `payment_pending` result with a
+  `check_payment` tool, which would let the authorization live longer than one call, is left for
+  when expiries prove common (W454 C).
 - **The chain decides every sent payment's outcome (W446 A, W444 A):** after the expiry ledger,
   the nonce says settled or not, whatever the seller said:
   - used → the result with the transaction hash, found by our nonce in the transaction, or
@@ -77,8 +81,9 @@ Decided:
     pass (W435 A);
   - RPC unreachable → `payment_unknown` naming the expiry ledger, and the seller's hash passed on
     marked unverified (W445 B); the only case left without certainty.
-- **Two PRs:** (1) the 6-ledger authorization without the 300 s filter; (2) the outcome from the
-  chain for every sent payment.
+- **Two PRs (W456 A):** (1) the short authorization without the 300 s filter, worth deploying alone:
+  a seller can no longer settle minutes after the agent got its answer; (2) the outcome from the
+  chain for every sent payment, which needs (1).
 - **Dropped:** a payment journal (W447 A: a local file proves nothing; the chain does); budget
   guards against a seller that keeps refusing (W448 A: the agent sees what was paid and can stop).
 - **Upstream ideas, not in this task:** a request-bound nonce in `exact` on Stellar, receipts with
@@ -89,8 +94,8 @@ Decided:
 
 - [ ] Given a paid call whose seller answers in time, nothing changes for the agent: the response
       and a hash that matches our nonce on chain
-- [ ] Given a signed payment, its authorization expires 6 ledgers after signing; the seller still
-      sees its own terms in `accepted`; tested on testnet
+- [ ] Given a signed payment, its authorization expires within the ledgers that fit before 57 s
+      (6 on a fast call); the seller still sees its own terms in `accepted`; tested on testnet
 - [ ] Given a paid call cut off, or refused by the seller, after the payment settled, the agent gets
       the transaction hash found by our nonce; tested with a fake seller and on testnet
 - [ ] Given a paid call whose authorization expires unused, the agent gets `payment_expired` and the
