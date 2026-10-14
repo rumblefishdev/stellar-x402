@@ -33,6 +33,21 @@ export const CHANNEL_ACCOUNT_REASON = "invalid_exact_stellar_payload_channel_acc
  */
 export const MUXED_FACILITATOR_REASON = "invalid_exact_stellar_payload_facilitator_muxed";
 
+/** Upstream's code for an exception inside its `verify()`. */
+const UNEXPECTED_VERIFY_ERROR = "unexpected_verify_error";
+
+/** Ledger close time as upstream's client estimates it when Horizon doesn't answer. */
+const LEDGER_SECONDS = 5;
+
+/**
+ * The shortest `maxTimeoutSeconds` whose payments can pass the validity check (AD-22). Upstream's
+ * client signs its auth to expire ⌈maxTimeoutSeconds / ledger time⌉ ledgers ahead, and at least
+ * one ledger passes before `/verify`.
+ */
+export function shortestTimeoutSeconds(minValidityLedgers: number): number {
+  return (minValidityLedgers + 1) * LEDGER_SECONDS;
+}
+
 export type Verify = (
   payload: PaymentPayload,
   requirements: PaymentRequirements,
@@ -40,9 +55,9 @@ export type Verify = (
 
 /**
  * The `exact` verification `/verify` answers with and `/settle` (0009) runs again (AD-3):
- * upstream `verify()`, then the channel check (AD-5, with the facilitator's muxed address), then the validity check (AD-22). The first
- * failure is the answer. Upstream reports its own errors as `isValid: false`; an error of ours
- * (the ledger read) is thrown.
+ * upstream `verify()`, then the channel check (AD-5, with the facilitator's muxed address), then
+ * the validity check (AD-22). The first failure is the answer. An error is thrown, not answered:
+ * ours (the ledger read), and upstream's, which it reports as `unexpected_verify_error`.
  */
 export function createVerifier(deps: VerifierDeps): Verify {
   const accounts = new Set([...deps.channels, deps.facilitator]);
@@ -52,6 +67,11 @@ export function createVerifier(deps: VerifierDeps): Verify {
       return invalid("invalid_network", undefined, `this facilitator serves ${deps.network}`);
     }
     const upstream = await deps.upstream.verify(payload, requirements);
+    // Upstream catches every exception, a failed RPC call included, and answers with this code.
+    // It says nothing about the payment, so it is our error: a 500, logged as one.
+    if (upstream.invalidReason === UNEXPECTED_VERIFY_ERROR) {
+      throw new Error(`upstream verify failed with ${UNEXPECTED_VERIFY_ERROR}`);
+    }
     if (!upstream.isValid) return upstream;
 
     // Upstream accepted it, so the payload is a parsed, one-operation `transfer` call.
@@ -77,11 +97,17 @@ export function createVerifier(deps: VerifierDeps): Verify {
     const expiration = authExpiration(transaction);
     const current = await deps.latestLedger();
     if (expiration - current < deps.minValidityLedgers) {
+      const shortest = shortestTimeoutSeconds(deps.minValidityLedgers);
+      const hint =
+        requirements.maxTimeoutSeconds < shortest
+          ? `; maxTimeoutSeconds must be at least ${shortest}, ` +
+            `not ${requirements.maxTimeoutSeconds}`
+          : "";
       return invalid(
         "invalid_exact_stellar_signature_expiration_too_soon",
         upstream.payer,
         `auth expires at ledger ${expiration}, ${expiration - current} ledgers after ledger ` +
-          `${current}; at least ${deps.minValidityLedgers} are required`,
+          `${current}; at least ${deps.minValidityLedgers} are required${hint}`,
       );
     }
     return upstream;

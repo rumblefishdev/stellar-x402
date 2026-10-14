@@ -89,6 +89,8 @@ graph TD
   - **Upstream owns verification.** Auth signature and scope checks, `Address`/`AddressV2` credentials, simulation and the event checks all belong to `@x402/stellar` `ExactStellarScheme.verify()`. We never re-implement them.
   - **Construction.** `ExactStellarScheme` is constructed with the fee values from AD-10.
   - **`/verify`** = upstream `verify()`, then the AD-5 channel check, then the AD-22 validity check. Any failure returns `isValid: false` with its reason.
+    - A network check runs first: a process serves one network, and upstream would verify another network's payload against that network's default RPC.
+    - Upstream answers its own exceptions, such as a failed RPC call, with `unexpected_verify_error`. That is an error of ours, not a verdict on the payment, so `/verify` answers 500.
   - **`/settle`** runs the same three checks again. It then claims the record (AD-6), builds `{func, auth}` from the client's payload and submits it as in AD-2. The pool's `checkSimulation` hook enforces the spec's balance-change check.
   - Upstream's `ExactStellarScheme.settle()` is never called.
 
@@ -169,6 +171,7 @@ graph TD
   - unbounded fee spend
 - **Rule:**
   - **Fee.** It is the simulation resource fee plus our inclusion bid, which is at least 100 stroops. The client's fee is never used.
+  - **The bid counts twice.** The pool settles under a fee bump, where the inner operation and the bump each pay the bid (CAP-15). So the total is the resource fee plus twice the bid, and upstream's `inclusionFeeStroops` is twice the bid, or `/verify` accepts payments the pool refuses. Twice the bid, or twice the fee-stats floor without a fixed bid, must stay below `maxFeeStroops`.
   - **One config value per setting:**
     - `maxFeeStroops` feeds both the upstream `maxTransactionFeeStroops` and the pool's `maxFeeStroops`.
     - `inclusionFeeStroops` feeds both components.
@@ -314,6 +317,7 @@ graph TD
   - The transaction never stays valid past the auth expiry. `signer-pool`'s `maxLedger` submit option (task 0016) sets the expiry ledger as the envelope's ledger bound, next to its time bound.
   - `signer-pool` keeps one spare ledger: it refuses, after simulation, a call that could land only in the ledger after the one simulated. So `minValidityLedgers` must be at least 2 plus the expected wait for a channel, or a payload `/verify` accepts can fail at `/settle` with `LedgerBoundError` after a simulation.
   - `minValidityLedgers` must also stay well below the client's signing window. Upstream's client signs its auth to expire `maxTimeoutSeconds` after signing, about 12 ledgers at the usual 60 s, and at least a ledger passes before `/verify`. So a minimum of 12 rejects nearly every payment; the default is 4: 2 for the pool plus about 2 of channel wait.
+  - So a resource needs `maxTimeoutSeconds` of at least `(minValidityLedgers + 1) × 5` seconds, 25 s at the default. Below that, every payment is rejected as too soon, and the reason names the bound.
 
 ## Consistency Conventions
 

@@ -45,6 +45,9 @@ const stroops = (min: bigint) =>
     .transform((value) => BigInt(value))
     .refine((value) => value >= min, `must be at least ${min}`);
 /** Fee settings reach upstream and the pool as a `number`. */
+/** The floor of `signer-pool`'s `feeStatsInclusionFee` bid, used when no bid is set. */
+const FEE_STATS_MIN_BID_STROOPS = 100n;
+
 const feeStroops = stroops(100n).refine(
   (value) => value <= BigInt(Number.MAX_SAFE_INTEGER),
   `must be at most ${Number.MAX_SAFE_INTEGER}`,
@@ -105,7 +108,10 @@ const envSchema = z
 
     /** Fee ceiling for upstream verify and the pool alike (AD-10). */
     MAX_FEE_STROOPS: feeStroops.default("250000"),
-    /** Inclusion bid; unset means the pool's fee-stats provider (at least 100). */
+    /**
+     * Inclusion bid; unset means the pool's fee-stats provider (at least 100). A settlement pays
+     * it twice, so twice the bid must stay below `MAX_FEE_STROOPS`.
+     */
     INCLUSION_FEE_STROOPS: feeStroops.optional(),
     FEE_ESCALATION_FACTOR: z
       .string()
@@ -154,12 +160,23 @@ const envSchema = z
     message: "is required outside testnet",
     path: ["RPC_URLS"],
   })
-  // The ceiling also pays the resource fee, which is never 0, so a bid at the ceiling fails every
-  // payment.
+  // Under the fee bump the bid is paid twice (AD-10), and the ceiling also pays the resource fee,
+  // which is never 0: twice the bid at the ceiling fails every payment.
   .refine(
     (env) =>
-      env.INCLUSION_FEE_STROOPS === undefined || env.INCLUSION_FEE_STROOPS < env.MAX_FEE_STROOPS,
-    { message: "must be below MAX_FEE_STROOPS", path: ["INCLUSION_FEE_STROOPS"] },
+      env.INCLUSION_FEE_STROOPS === undefined ||
+      2n * env.INCLUSION_FEE_STROOPS < env.MAX_FEE_STROOPS,
+    { message: "must be below half of MAX_FEE_STROOPS", path: ["INCLUSION_FEE_STROOPS"] },
+  )
+  // The same for the fee-stats bid, which is never below its floor.
+  .refine(
+    (env) =>
+      env.INCLUSION_FEE_STROOPS !== undefined ||
+      2n * FEE_STATS_MIN_BID_STROOPS < env.MAX_FEE_STROOPS,
+    {
+      message: `must be above ${2n * FEE_STATS_MIN_BID_STROOPS}, twice the fee-stats bid's floor`,
+      path: ["MAX_FEE_STROOPS"],
+    },
   )
   .refine((env) => !env.CATALOG_ALLOW_HTTP || env.NETWORK === STELLAR_NETWORKS.testnet, {
     message: "is only allowed on testnet",

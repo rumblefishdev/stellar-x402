@@ -6,11 +6,12 @@ import { ExactStellarScheme } from "@x402/stellar/exact/facilitator";
 import { memoryStores } from "./adapters/memory.js";
 import { createCataloger } from "./catalog/cataloger.js";
 import { parseConfig } from "./config.js";
+import type { Config } from "./config.js";
 import { createApp, type AppDeps } from "./http/app.js";
 import { jsonLogger } from "./logger.js";
 import { memoryMetrics } from "./metrics.js";
 import { feeSettings, upstreamAtCurrentBid } from "./settlement/fees.js";
-import { createVerifier } from "./settlement/verify.js";
+import { createVerifier, type UpstreamVerifier, type Verify } from "./settlement/verify.js";
 
 export interface Started {
   port: number;
@@ -34,6 +35,45 @@ export async function start(deps: AppDeps): Promise<Started> {
   };
 }
 
+/** What `buildVerifier` passes to `ExactStellarScheme`, besides the facilitator's signer. */
+export type SchemeOptions = NonNullable<ConstructorParameters<typeof ExactStellarScheme>[1]>;
+
+/**
+ * `/verify`'s verifier from the config (AD-3, AD-5, AD-10, AD-22): upstream `ExactStellarScheme`
+ * with the fee ceiling and the fee a settlement pays at the shared bid, then our checks. Tests
+ * pass their own `makeScheme`.
+ */
+export function buildVerifier(
+  config: Config,
+  rpc: Pick<FallbackRpc, "getFeeStats" | "getLatestLedger">,
+  makeScheme: (
+    signer: ReturnType<typeof createEd25519Signer>,
+    options: SchemeOptions,
+  ) => UpstreamVerifier = (signer, options) => new ExactStellarScheme([signer], options),
+): Verify {
+  // 0009 builds the pool from `fees.pool`, which shares the bid with `/verify` (AD-10).
+  const fees = feeSettings(config.fees, rpc);
+  // Upstream knows only the facilitator key, and only in plain form; the channels and the muxed
+  // facilitator are `createVerifier`'s check (AD-5).
+  // It reads the first RPC URL only.
+  const signer = createEd25519Signer(config.facilitatorSecret, config.network);
+  const upstream = upstreamAtCurrentBid(fees.inclusionFee, (inclusionFeeStroops) =>
+    makeScheme(signer, {
+      rpcConfig: { url: config.rpcUrls[0] },
+      maxTransactionFeeStroops: fees.maxFeeStroops,
+      inclusionFeeStroops,
+    }),
+  );
+  return createVerifier({
+    network: config.network,
+    upstream,
+    facilitator: signer.address,
+    channels: config.channels,
+    minValidityLedgers: config.settlement.minValidityLedgers,
+    latestLedger: async () => (await rpc.getLatestLedger()).sequence,
+  });
+}
+
 /**
  * The composition root (AD-1): the only module that reads `process.env`. It validates the config
  * once and builds every part from it.
@@ -50,30 +90,7 @@ export async function main(env: Record<string, string | undefined> = process.env
     metrics: memoryMetrics(),
     allowHttp: config.catalog.allowHttp,
   });
-  const rpc = FallbackRpc.fromUrls(config.rpcUrls);
-  // 0009 builds the pool from `fees.pool`, which shares the bid with `/verify` (AD-10).
-  const fees = feeSettings(config.fees, rpc);
-  // Upstream knows only the facilitator key, and only in plain form; the channels and the muxed
-  // facilitator are `createVerifier`'s check (AD-5).
-  // It reads the first RPC URL only.
-  const signer = createEd25519Signer(config.facilitatorSecret, config.network);
-  const upstream = upstreamAtCurrentBid(
-    fees.inclusionFee,
-    (inclusionFeeStroops) =>
-      new ExactStellarScheme([signer], {
-        rpcConfig: { url: config.rpcUrls[0] },
-        maxTransactionFeeStroops: fees.maxFeeStroops,
-        inclusionFeeStroops,
-      }),
-  );
-  const verify = createVerifier({
-    network: config.network,
-    upstream,
-    facilitator: signer.address,
-    channels: config.channels,
-    minValidityLedgers: config.settlement.minValidityLedgers,
-    latestLedger: async () => (await rpc.getLatestLedger()).sequence,
-  });
+  const verify = buildVerifier(config, FallbackRpc.fromUrls(config.rpcUrls));
   const started = await start({ config, logger, stores, verify });
   return {
     ...started,

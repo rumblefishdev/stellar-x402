@@ -39,11 +39,21 @@ export function feeSettings(
 }
 
 /**
- * Upstream `ExactStellarScheme` takes its inclusion bid as a constructor value, and `verify()`
- * checks the simulated resource fee plus that bid against the ceiling. This verifier reads the
- * current bid on each call and builds a scheme for it when the bid has changed, so `/verify`
- * checks with the bid the pool would use now. Fee escalation under load can still raise the
- * pool's bid later; the pool checks its own total again before signing.
+ * The inclusion fee a settlement pays at bid `bid`. The pool settles under a fee bump, where the
+ * inner operation and the bump each pay the bid (CAP-15), so its total is the resource fee plus
+ * twice the bid (`signer-pool`'s `FeeLimitError` check).
+ */
+export function settlementInclusionFee(bid: number): number {
+  return 2 * bid;
+}
+
+/**
+ * Upstream `ExactStellarScheme` takes its inclusion fee as a constructor value, and `verify()`
+ * checks the simulated resource fee plus that value against the ceiling. This verifier reads the
+ * current bid on each call and builds a scheme for the fee a settlement pays at that bid when the
+ * bid has changed, so `/verify` refuses exactly what the pool would refuse now. Fee escalation
+ * under load can still raise the pool's bid later; the pool checks its own total again before
+ * signing.
  */
 export function upstreamAtCurrentBid(
   inclusionFee: () => Promise<number>,
@@ -53,7 +63,7 @@ export function upstreamAtCurrentBid(
   return {
     async verify(payload, requirements) {
       const bid = await inclusionFee();
-      if (current?.bid !== bid) current = { bid, scheme: build(bid) };
+      if (current?.bid !== bid) current = { bid, scheme: build(settlementInclusionFee(bid)) };
       return current.scheme.verify(payload, requirements);
     },
   };

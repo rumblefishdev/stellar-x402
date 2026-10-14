@@ -175,15 +175,28 @@ describe("parseConfig", () => {
     ]);
   });
 
-  it("keeps the inclusion bid below the fee ceiling", () => {
-    for (const bid of ["1000", "5000"]) {
+  it("keeps twice the inclusion bid below the fee ceiling, as the fee bump pays it twice", () => {
+    for (const bid of ["500", "999", "5000"]) {
       expect(problems({ ...minimal, MAX_FEE_STROOPS: "1000", INCLUSION_FEE_STROOPS: bid })).toEqual(
-        ["INCLUSION_FEE_STROOPS must be below MAX_FEE_STROOPS"],
+        ["INCLUSION_FEE_STROOPS must be below half of MAX_FEE_STROOPS"],
       );
     }
     expect(
-      parseConfig({ ...minimal, MAX_FEE_STROOPS: "1000", INCLUSION_FEE_STROOPS: "999" }).fees,
-    ).toMatchObject({ maxFeeStroops: 1000n, inclusionFeeStroops: 999n });
+      parseConfig({ ...minimal, MAX_FEE_STROOPS: "1000", INCLUSION_FEE_STROOPS: "499" }).fees,
+    ).toMatchObject({ maxFeeStroops: 1000n, inclusionFeeStroops: 499n });
+  });
+
+  it("keeps twice the fee-stats floor below the fee ceiling without a fixed bid", () => {
+    for (const max of ["100", "200"]) {
+      expect(problems({ ...minimal, MAX_FEE_STROOPS: max })).toEqual([
+        "MAX_FEE_STROOPS must be above 200, twice the fee-stats bid's floor",
+      ]);
+    }
+    expect(parseConfig({ ...minimal, MAX_FEE_STROOPS: "201" }).fees.maxFeeStroops).toBe(201n);
+    // A fixed bid replaces the floor: 2 × 100 < 201.
+    expect(
+      parseConfig({ ...minimal, MAX_FEE_STROOPS: "201", INCLUSION_FEE_STROOPS: "100" }).fees,
+    ).toMatchObject({ maxFeeStroops: 201n, inclusionFeeStroops: 100n });
   });
 
   it("allows http catalog URLs on testnet only", () => {

@@ -17,6 +17,7 @@ import {
   CHANNEL_ACCOUNT_REASON,
   MUXED_FACILITATOR_REASON,
   createVerifier,
+  shortestTimeoutSeconds,
   type UpstreamVerifier,
 } from "../src/settlement/verify.js";
 
@@ -124,6 +125,18 @@ describe("createVerifier", () => {
     const p = payload();
     await expect(verify(p, requirements)).resolves.toEqual({ isValid: true, payer });
     expect(upstream.verify).toHaveBeenCalledWith(p, requirements);
+  });
+
+  it("throws upstream's unexpected_verify_error, which is a failure of ours, not a verdict", async () => {
+    const { verify, latestLedger } = setup({
+      isValid: false,
+      invalidReason: "unexpected_verify_error",
+      payer,
+    });
+    await expect(verify(payload(), requirements)).rejects.toThrow(
+      "upstream verify failed with unexpected_verify_error",
+    );
+    expect(latestLedger).not.toHaveBeenCalled();
   });
 
   it("returns upstream's rejection as is, without the checks of its own", async () => {
@@ -267,11 +280,27 @@ describe("createVerifier", () => {
         authEntry(payer, CURRENT + 100),
         authEntry(Keypair.random().publicKey(), CURRENT + 5),
       ];
-      const answer = await verify(payload({ auth }), requirements);
+      const answer = await verify(payload({ auth }), { ...requirements, maxTimeoutSeconds: 300 });
       expect(answer).toEqual(rejected("invalid_exact_stellar_signature_expiration_too_soon"));
       expect(answer.invalidMessage).toBe(
         "auth expires at ledger 1005, 5 ledgers after ledger 1000; at least 12 are required",
       );
+    });
+
+    it("names the shortest maxTimeoutSeconds when the resource's is too short to ever pass", async () => {
+      expect(shortestTimeoutSeconds(12)).toBe(65);
+      expect(shortestTimeoutSeconds(4)).toBe(25);
+      const { verify } = setup();
+      const auth = [authEntry(payer, CURRENT + 11)];
+      for (const [maxTimeoutSeconds, hint] of [
+        [64, "; maxTimeoutSeconds must be at least 65, not 64"],
+        [65, ""],
+      ] as const) {
+        const answer = await verify(payload({ auth }), { ...requirements, maxTimeoutSeconds });
+        expect(answer.invalidMessage).toBe(
+          `auth expires at ledger 1011, 11 ledgers after ledger 1000; at least 12 are required${hint}`,
+        );
+      }
     });
 
     it("throws when the current ledger can't be read", async () => {

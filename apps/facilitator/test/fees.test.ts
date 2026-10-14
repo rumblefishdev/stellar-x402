@@ -69,7 +69,7 @@ describe("upstreamAtCurrentBid", () => {
   const payload = {} as PaymentPayload;
   const requirements = {} as PaymentRequirements;
 
-  it("verifies with a scheme built for the current bid, rebuilt only when the bid changes", async () => {
+  it("verifies with a scheme built for twice the current bid, rebuilt only when the bid changes", async () => {
     let bid = 250;
     const built: number[] = [];
     const build = vi.fn((inclusionFeeStroops: number): UpstreamVerifier => {
@@ -78,18 +78,19 @@ describe("upstreamAtCurrentBid", () => {
     });
     const upstream = upstreamAtCurrentBid(async () => bid, build);
 
+    // The fee bump pays the bid twice (settlementInclusionFee).
     await expect(upstream.verify(payload, requirements)).resolves.toEqual({
       isValid: true,
-      payer: "at 250",
+      payer: "at 500",
     });
     await upstream.verify(payload, requirements);
-    expect(built).toEqual([250]);
+    expect(built).toEqual([500]);
 
     bid = 400;
     await expect(upstream.verify(payload, requirements)).resolves.toMatchObject({
-      payer: "at 400",
+      payer: "at 800",
     });
-    expect(built).toEqual([250, 400]);
+    expect(built).toEqual([500, 800]);
   });
 
   it("passes the request to the scheme as is", async () => {
