@@ -63,6 +63,9 @@ Without `STELLAR_X402_SECRET_KEY` the server only lists and previews.
 - **Use a testnet-only key** that holds only what you are willing to spend. The asset paid is
   testnet USDC; get some at <https://faucet.circle.com> (Stellar Testnet) after adding a USDC
   trustline.
+- **Any program running under your user can read the key**, other MCP servers in the same client
+  config included: it sits in plain text there. Keep only a small amount on it; a keychain or an
+  external signer is planned before mainnet.
 - **Two limits, as on a payment card:** `STELLAR_X402_MAX_PER_CALL` for one payment and
   `STELLAR_X402_DAILY_BUDGET` for one day. `STELLAR_X402_BUDGET`, a budget per server process,
   was replaced by the daily budget; a server started with it stops and says so.
