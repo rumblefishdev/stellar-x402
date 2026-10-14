@@ -94,6 +94,8 @@ export async function main(env: Record<string, string | undefined> = process.env
   // 0009 builds the pool from `fees.pool`, so `/verify` and the pool share one bid (AD-10).
   const fees = feeSettings(config.fees, rpc);
   const verify = buildVerifier(config, rpc, fees);
+  // For the life of the process: an upstream call cut off by the deadline keeps running after
+  // `close()`, and its error would reach stderr with the RPC URL in it.
   const restoreConsole = captureConsoleError(logger);
   const started = await start({ config, logger, stores, verify }).catch((error: unknown) => {
     restoreConsole();
@@ -105,7 +107,6 @@ export async function main(env: Record<string, string | undefined> = process.env
     close: async () => {
       await started.close();
       await cataloger.drain();
-      restoreConsole();
     },
   };
 }

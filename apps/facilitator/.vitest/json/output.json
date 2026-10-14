@@ -1,0 +1,1243 @@
+{
+  "numTotalTestSuites": 29,
+  "numPassedTestSuites": 29,
+  "numFailedTestSuites": 0,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 102,
+  "numPassedTests": 102,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1791976222769,
+  "success": true,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["buildVerifier (the /verify wiring in main)"],
+          "fullName": "buildVerifier (the /verify wiring in main) gives upstream the facilitator key, the first RPC URL, the ceiling and twice the shared bid",
+          "status": "passed",
+          "title": "gives upstream the facilitator key, the first RPC URL, the ceiling and twice the shared bid",
+          "duration": 31.560103000000026,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["buildVerifier (the /verify wiring in main)"],
+          "fullName": "buildVerifier (the /verify wiring in main) rejects a configured channel through the built verifier",
+          "status": "passed",
+          "title": "rejects a configured channel through the built verifier",
+          "duration": 6.046373000000131,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["buildVerifier (the /verify wiring in main)"],
+          "fullName": "buildVerifier (the /verify wiring in main) rejects the facilitator's muxed address, which upstream's plain-string check misses",
+          "status": "passed",
+          "title": "rejects the facilitator's muxed address, which upstream's plain-string check misses",
+          "duration": 7.109605999999985,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["buildVerifier (the /verify wiring in main)"],
+          "fullName": "buildVerifier (the /verify wiring in main) checks the auth expiry against the latest ledger and MIN_VALIDITY_LEDGERS (default 4)",
+          "status": "passed",
+          "title": "checks the auth expiry against the latest ledger and MIN_VALIDITY_LEDGERS (default 4)",
+          "duration": 8.195031999999856,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["buildVerifier (the /verify wiring in main)"],
+          "fullName": "buildVerifier (the /verify wiring in main) throws when upstream reports unexpected_verify_error",
+          "status": "passed",
+          "title": "throws when upstream reports unexpected_verify_error",
+          "duration": 5.83989500000007,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        }
+      ],
+      "startTime": 1791976224570,
+      "endTime": 1791976224628.8398,
+      "status": "passed",
+      "message": "",
+      "name": "/home/oski/Projects/stellar/stellar-x402-0018/apps/facilitator/test/build-verifier.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["cataloger"],
+          "fullName": "cataloger answers the header synchronously: processing, rejected or none",
+          "status": "passed",
+          "title": "answers the header synchronously: processing, rejected or none",
+          "duration": 15.117923000000019,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["cataloger"],
+          "fullName": "cataloger encodes the header as base64 JSON that upstream decodes",
+          "status": "passed",
+          "title": "encodes the header as base64 JSON that upstream decodes",
+          "duration": 1.2348630000000185,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["cataloger"],
+          "fullName": "cataloger catalogs a success once per key, with the bazaar block only and the record's time",
+          "status": "passed",
+          "title": "catalogs a success once per key, with the bazaar block only and the record's time",
+          "duration": 8.133874999999989,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["cataloger"],
+          "fullName": "cataloger keeps a newer listing when a success from an earlier ledger resolves later",
+          "status": "passed",
+          "title": "keeps a newer listing when a success from an earlier ledger resolves later",
+          "duration": 2.191320000000019,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["cataloger"],
+          "fullName": "cataloger writes nothing for a rejected listing, and counts it",
+          "status": "passed",
+          "title": "writes nothing for a rejected listing, and counts it",
+          "duration": 0.9702519999999595,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["cataloger"],
+          "fullName": "cataloger never rejects: a failing or hung store, or a failing library, is logged and counted",
+          "status": "passed",
+          "title": "never rejects: a failing or hung store, or a failing library, is logged and counted",
+          "duration": 12.39497700000004,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        }
+      ],
+      "startTime": 1791976223899,
+      "endTime": 1791976223940.395,
+      "status": "passed",
+      "message": "",
+      "name": "/home/oski/Projects/stellar/stellar-x402-0018/apps/facilitator/test/cataloger.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["parseConfig"],
+          "fullName": "parseConfig applies testnet defaults to a minimal environment",
+          "status": "passed",
+          "title": "applies testnet defaults to a minimal environment",
+          "duration": 13.299144999999953,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["parseConfig"],
+          "fullName": "parseConfig maps every setting to its own field",
+          "status": "passed",
+          "title": "maps every setting to its own field",
+          "duration": 3.003238999999894,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["parseConfig"],
+          "fullName": "parseConfig trims values and treats blank ones as unset",
+          "status": "passed",
+          "title": "trims values and treats blank ones as unset",
+          "duration": 2.135515999999825,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["parseConfig"],
+          "fullName": "parseConfig names missing required values",
+          "status": "passed",
+          "title": "names missing required values",
+          "duration": 3.1682949999999437,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["parseConfig"],
+          "fullName": "parseConfig names invalid values without echoing them",
+          "status": "passed",
+          "title": "names invalid values without echoing them",
+          "duration": 3.275376000000051,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["parseConfig"],
+          "fullName": "parseConfig checks channel addresses",
+          "status": "passed",
+          "title": "checks channel addresses",
+          "duration": 4.137482999999975,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["parseConfig"],
+          "fullName": "parseConfig accepts only plain decimal numbers in range",
+          "status": "passed",
+          "title": "accepts only plain decimal numbers in range",
+          "duration": 9.880893000000015,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["parseConfig"],
+          "fullName": "parseConfig keeps twice the inclusion bid below the fee ceiling, as the fee bump pays it twice",
+          "status": "passed",
+          "title": "keeps twice the inclusion bid below the fee ceiling, as the fee bump pays it twice",
+          "duration": 6.905083999999988,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["parseConfig"],
+          "fullName": "parseConfig keeps twice the fee-stats floor below the fee ceiling without a fixed bid",
+          "status": "passed",
+          "title": "keeps twice the fee-stats floor below the fee ceiling without a fixed bid",
+          "duration": 6.507057999999915,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["parseConfig"],
+          "fullName": "parseConfig allows http catalog URLs on testnet only",
+          "status": "passed",
+          "title": "allows http catalog URLs on testnet only",
+          "duration": 2.733118999999988,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["parseConfig"],
+          "fullName": "parseConfig checks RPC URLs",
+          "status": "passed",
+          "title": "checks RPC URLs",
+          "duration": 5.6676729999999225,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        }
+      ],
+      "startTime": 1791976224220,
+      "endTime": 1791976224281.6677,
+      "status": "passed",
+      "message": "",
+      "name": "/home/oski/Projects/stellar/stellar-x402-0018/apps/facilitator/test/config.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["the fee ceiling at /verify and in the pool (AD-10)"],
+          "fullName": "the fee ceiling at /verify and in the pool (AD-10) agrees on a resource fee well below (100000 stroops)",
+          "status": "passed",
+          "title": "agrees on a resource fee well below (100000 stroops)",
+          "duration": 115.85690499999987,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["the fee ceiling at /verify and in the pool (AD-10)"],
+          "fullName": "the fee ceiling at /verify and in the pool (AD-10) agrees on a resource fee exactly at the ceiling with twice the bid (248000 stroops)",
+          "status": "passed",
+          "title": "agrees on a resource fee exactly at the ceiling with twice the bid (248000 stroops)",
+          "duration": 26.340740000000096,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["the fee ceiling at /verify and in the pool (AD-10)"],
+          "fullName": "the fee ceiling at /verify and in the pool (AD-10) agrees on a resource fee one stroop above the ceiling with twice the bid (248001 stroops)",
+          "status": "passed",
+          "title": "agrees on a resource fee one stroop above the ceiling with twice the bid (248001 stroops)",
+          "duration": 11.923402000000124,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["the fee ceiling at /verify and in the pool (AD-10)"],
+          "fullName": "the fee ceiling at /verify and in the pool (AD-10) agrees on a resource fee at the ceiling with one bid (249000 stroops)",
+          "status": "passed",
+          "title": "agrees on a resource fee at the ceiling with one bid (249000 stroops)",
+          "duration": 14.071329000000105,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        }
+      ],
+      "startTime": 1791976224549,
+      "endTime": 1791976224718.0713,
+      "status": "passed",
+      "message": "",
+      "name": "/home/oski/Projects/stellar/stellar-x402-0018/apps/facilitator/test/fee-agreement.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["feeSettings (AD-10)"],
+          "fullName": "feeSettings (AD-10) feeds one ceiling and one fixed inclusion bid to upstream and the pool",
+          "status": "passed",
+          "title": "feeds one ceiling and one fixed inclusion bid to upstream and the pool",
+          "duration": 20.69752500000004,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["feeSettings (AD-10)"],
+          "fullName": "feeSettings (AD-10) shares one fee-stats provider between upstream and the pool without a fixed bid",
+          "status": "passed",
+          "title": "shares one fee-stats provider between upstream and the pool without a fixed bid",
+          "duration": 3.95408899999984,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["feeSettings (AD-10)"],
+          "fullName": "feeSettings (AD-10) refuses fee settings a number can't hold",
+          "status": "passed",
+          "title": "refuses fee settings a number can't hold",
+          "duration": 8.688746000000037,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["upstreamAtCurrentBid"],
+          "fullName": "upstreamAtCurrentBid verifies with a scheme built for twice the current bid, rebuilt only when the bid changes",
+          "status": "passed",
+          "title": "verifies with a scheme built for twice the current bid, rebuilt only when the bid changes",
+          "duration": 3.520373999999947,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["upstreamAtCurrentBid"],
+          "fullName": "upstreamAtCurrentBid passes the request to the scheme as is",
+          "status": "passed",
+          "title": "passes the request to the scheme as is",
+          "duration": 1.3699320000000625,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        }
+      ],
+      "startTime": 1791976224228,
+      "endTime": 1791976224267.3699,
+      "status": "passed",
+      "message": "",
+      "name": "/home/oski/Projects/stellar/stellar-x402-0018/apps/facilitator/test/fees.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "keeps the envelope over fields and logs an error's stack and one level of cause",
+          "status": "passed",
+          "title": "keeps the envelope over fields and logs an error's stack and one level of cause",
+          "duration": 32.625118999999984,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "never logs the toJSON snapshot of an error",
+          "status": "passed",
+          "title": "never logs the toJSON snapshot of an error",
+          "duration": 3.6762690000000475,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "keeps the event when a field can't be serialized, instead of throwing",
+          "status": "passed",
+          "title": "keeps the event when a field can't be serialized, instead of throwing",
+          "duration": 1.4173409999999649,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "reduces URLs to their host, so an RPC key in the path or query stays out of the logs",
+          "status": "passed",
+          "title": "reduces URLs to their host, so an RPC key in the path or query stays out of the logs",
+          "duration": 2.352659000000017,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "logs upstream's console.error as one event, an error as name and message only",
+          "status": "passed",
+          "title": "logs upstream's console.error as one event, an error as name and message only",
+          "duration": 3.7095729999999776,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        }
+      ],
+      "startTime": 1791976223466,
+      "endTime": 1791976223510.7095,
+      "status": "passed",
+      "message": "",
+      "name": "/home/oski/Projects/stellar/stellar-x402-0018/apps/facilitator/test/logger.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["facilitator boot"],
+          "fullName": "facilitator boot answers the stub routes, with no CORS headers",
+          "status": "passed",
+          "title": "answers the stub routes, with no CORS headers",
+          "duration": 93.4451919999999,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["facilitator boot"],
+          "fullName": "facilitator boot answers a client's bad body with a 4xx and doesn't log it as an error",
+          "status": "passed",
+          "title": "answers a client's bad body with a 4xx and doesn't log it as an error",
+          "duration": 28.161305000000084,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["facilitator boot"],
+          "fullName": "facilitator boot logs one JSON event per line and never the secret",
+          "status": "passed",
+          "title": "logs one JSON event per line and never the secret",
+          "duration": 1.3069070000001375,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["startup with a bad config"],
+          "fullName": "startup with a bad config exits with 1 and names each bad value without printing it",
+          "status": "passed",
+          "title": "exits with 1 and names each bad value without printing it",
+          "duration": 1272.7010710000002,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["main()"],
+          "fullName": "main() answers /verify with the real verifier, then exits 0 on SIGTERM",
+          "status": "passed",
+          "title": "answers /verify with the real verifier, then exits 0 on SIGTERM",
+          "duration": 1315.8213479999995,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        }
+      ],
+      "startTime": 1791976224584,
+      "endTime": 1791976227299.8213,
+      "status": "passed",
+      "message": "",
+      "name": "/home/oski/Projects/stellar/stellar-x402-0018/apps/facilitator/test/main.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["SettlementStore contract"],
+          "fullName": "SettlementStore contract claims a key once, also under concurrent claims",
+          "status": "passed",
+          "title": "claims a key once, also under concurrent claims",
+          "duration": 15.575079000000073,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["SettlementStore contract"],
+          "fullName": "SettlementStore contract keeps every hash, finds the record by any of them, and moves claimed to signed",
+          "status": "passed",
+          "title": "keeps every hash, finds the record by any of them, and moves claimed to signed",
+          "duration": 3.1514889999999696,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["SettlementStore contract"],
+          "fullName": "SettlementStore contract refuses a hash for a missing or final record",
+          "status": "passed",
+          "title": "refuses a hash for a missing or final record",
+          "duration": 1.4695870000000468,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["SettlementStore contract"],
+          "fullName": "SettlementStore contract applies a transition only from the expected state, and only forward",
+          "status": "passed",
+          "title": "applies a transition only from the expected state, and only forward",
+          "duration": 1.9864019999999982,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["SettlementStore contract"],
+          "fullName": "SettlementStore contract lets exactly one of several concurrent transitions from a state win",
+          "status": "passed",
+          "title": "lets exactly one of several concurrent transitions from a state win",
+          "duration": 2.166733999999906,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["SettlementStore contract"],
+          "fullName": "SettlementStore contract never moves a record on from a final state",
+          "status": "passed",
+          "title": "never moves a record on from a final state",
+          "duration": 1.4266880000000128,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["SettlementStore contract"],
+          "fullName": "SettlementStore contract returns copies, not live state",
+          "status": "passed",
+          "title": "returns copies, not live state",
+          "duration": 1.465422999999987,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["SettlementStore contract"],
+          "fullName": "SettlementStore contract lists non-final records of one network",
+          "status": "passed",
+          "title": "lists non-final records of one network",
+          "duration": 2.013396000000057,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["SettlementStore contract", "channel lease"],
+          "fullName": "SettlementStore contract channel lease gives the lease to one holder until it expires",
+          "status": "passed",
+          "title": "gives the lease to one holder until it expires",
+          "duration": 1.8207150000000638,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["SettlementStore contract", "channel lease"],
+          "fullName": "SettlementStore contract channel lease lets the holder take it again and renew it while it is valid",
+          "status": "passed",
+          "title": "lets the holder take it again and renew it while it is valid",
+          "duration": 1.6407010000000355,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["SettlementStore contract", "channel lease"],
+          "fullName": "SettlementStore contract channel lease refuses to renew an expired lease or someone else's",
+          "status": "passed",
+          "title": "refuses to renew an expired lease or someone else's",
+          "duration": 0.9260170000000016,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["SettlementStore contract", "channel lease"],
+          "fullName": "SettlementStore contract channel lease releases only for the holder",
+          "status": "passed",
+          "title": "releases only for the holder",
+          "duration": 0.8024480000000267,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["SpendStore contract"],
+          "fullName": "SpendStore contract reserves against every limit, or against none",
+          "status": "passed",
+          "title": "reserves against every limit, or against none",
+          "duration": 1.5532269999999926,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["SpendStore contract"],
+          "fullName": "SpendStore contract never goes over a limit under concurrent reservations",
+          "status": "passed",
+          "title": "never goes over a limit under concurrent reservations",
+          "duration": 1.1850789999999733,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["SpendStore contract"],
+          "fullName": "SpendStore contract treats a repeated id as a no-op",
+          "status": "passed",
+          "title": "treats a repeated id as a no-op",
+          "duration": 0.5546940000000404,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["SpendStore contract"],
+          "fullName": "SpendStore contract commits the fee actually paid and releases what was never spent",
+          "status": "passed",
+          "title": "commits the fee actually paid and releases what was never spent",
+          "duration": 0.5058769999999413,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["SpendStore contract"],
+          "fullName": "SpendStore contract counts only the rolling window ending at now",
+          "status": "passed",
+          "title": "counts only the rolling window ending at now",
+          "duration": 0.4145730000000185,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["SpendStore contract"],
+          "fullName": "SpendStore contract counts consecutive failures and opens a breaker until a time",
+          "status": "passed",
+          "title": "counts consecutive failures and opens a breaker until a time",
+          "duration": 0.5793770000000222,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["RateLimitStore contract"],
+          "fullName": "RateLimitStore contract counts hits per key in fixed windows",
+          "status": "passed",
+          "title": "counts hits per key in fixed windows",
+          "duration": 1.1469769999999926,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["RateLimitStore contract"],
+          "fullName": "RateLimitStore contract counts concurrent hits exactly",
+          "status": "passed",
+          "title": "counts concurrent hits exactly",
+          "duration": 0.6964440000000423,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["CatalogStore contract"],
+          "fullName": "CatalogStore contract upserts by key, merging accepts by scheme, network and asset",
+          "status": "passed",
+          "title": "upserts by key, merging accepts by scheme, network and asset",
+          "duration": 2.332059000000072,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["CatalogStore contract"],
+          "fullName": "CatalogStore contract reports the outcome; a write from an earlier ledger only adds what is missing",
+          "status": "passed",
+          "title": "reports the outcome; a write from an earlier ledger only adds what is missing",
+          "duration": 4.453450999999973,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["CatalogStore contract"],
+          "fullName": "CatalogStore contract filters, pages and keeps a stable order",
+          "status": "passed",
+          "title": "filters, pages and keeps a stable order",
+          "duration": 1.8538290000000188,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        }
+      ],
+      "startTime": 1791976223869,
+      "endTime": 1791976223920.8538,
+      "status": "passed",
+      "message": "",
+      "name": "/home/oski/Projects/stellar/stellar-x402-0018/apps/facilitator/test/memory.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["POST /verify"],
+          "fullName": "POST /verify answers 200 with the verifier's body when isValid is true",
+          "status": "passed",
+          "title": "answers 200 with the verifier's body when isValid is true",
+          "duration": 80.87057099999993,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["POST /verify"],
+          "fullName": "POST /verify answers 200 with the verifier's body when isValid is false",
+          "status": "passed",
+          "title": "answers 200 with the verifier's body when isValid is false",
+          "duration": 10.107543999999962,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["POST /verify"],
+          "fullName": "POST /verify logs our own reason next to upstream's",
+          "status": "passed",
+          "title": "logs our own reason next to upstream's",
+          "duration": 8.188308000000006,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["POST /verify"],
+          "fullName": "POST /verify answers 400 for an empty object, without verifying",
+          "status": "passed",
+          "title": "answers 400 for an empty object, without verifying",
+          "duration": 8.061221999999816,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["POST /verify"],
+          "fullName": "POST /verify answers 400 for an array, without verifying",
+          "status": "passed",
+          "title": "answers 400 for an array, without verifying",
+          "duration": 8.442600999999968,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["POST /verify"],
+          "fullName": "POST /verify answers 400 for x402 v1, without verifying",
+          "status": "passed",
+          "title": "answers 400 for x402 v1, without verifying",
+          "duration": 5.7524389999998675,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["POST /verify"],
+          "fullName": "POST /verify answers 400 for a v1 payment payload, without verifying",
+          "status": "passed",
+          "title": "answers 400 for a v1 payment payload, without verifying",
+          "duration": 5.377397999999857,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["POST /verify"],
+          "fullName": "POST /verify answers 400 for no requirements, without verifying",
+          "status": "passed",
+          "title": "answers 400 for no requirements, without verifying",
+          "duration": 5.11954999999989,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["POST /verify"],
+          "fullName": "POST /verify answers 400 for requirements without payTo, without verifying",
+          "status": "passed",
+          "title": "answers 400 for requirements without payTo, without verifying",
+          "duration": 5.766096999999945,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["POST /verify"],
+          "fullName": "POST /verify answers 400 for a non-numeric timeout, without verifying",
+          "status": "passed",
+          "title": "answers 400 for a non-numeric timeout, without verifying",
+          "duration": 6.537437999999838,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["POST /verify"],
+          "fullName": "POST /verify answers 400 for the amount \"1.5\", without verifying",
+          "status": "passed",
+          "title": "answers 400 for the amount \"1.5\", without verifying",
+          "duration": 5.263433999999961,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["POST /verify"],
+          "fullName": "POST /verify answers 400 for the amount \"1e3\", without verifying",
+          "status": "passed",
+          "title": "answers 400 for the amount \"1e3\", without verifying",
+          "duration": 3.931716999999935,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["POST /verify"],
+          "fullName": "POST /verify answers 400 for the amount \"abc\", without verifying",
+          "status": "passed",
+          "title": "answers 400 for the amount \"abc\", without verifying",
+          "duration": 4.303182000000106,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["POST /verify"],
+          "fullName": "POST /verify answers 400 for the amount \"-5\", without verifying",
+          "status": "passed",
+          "title": "answers 400 for the amount \"-5\", without verifying",
+          "duration": 3.879132000000027,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["POST /verify"],
+          "fullName": "POST /verify answers 400 for the amount \" 1\", without verifying",
+          "status": "passed",
+          "title": "answers 400 for the amount \" 1\", without verifying",
+          "duration": 4.102613000000019,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["POST /verify"],
+          "fullName": "POST /verify answers 500 and logs the error when verification throws",
+          "status": "passed",
+          "title": "answers 500 and logs the error when verification throws",
+          "duration": 10.335912000000008,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        }
+      ],
+      "startTime": 1791976224600,
+      "endTime": 1791976224777.336,
+      "status": "passed",
+      "message": "",
+      "name": "/home/oski/Projects/stellar/stellar-x402-0018/apps/facilitator/test/verify-route.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["createVerifier"],
+          "fullName": "createVerifier returns upstream's valid answer when no channel appears and the auth lasts long enough",
+          "status": "passed",
+          "title": "returns upstream's valid answer when no channel appears and the auth lasts long enough",
+          "duration": 40.48624199999995,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["createVerifier"],
+          "fullName": "createVerifier throws upstream's unexpected_verify_error, which is a failure of ours, not a verdict",
+          "status": "passed",
+          "title": "throws upstream's unexpected_verify_error, which is a failure of ours, not a verdict",
+          "duration": 10.217444999999998,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["createVerifier"],
+          "fullName": "createVerifier returns upstream's rejection as is, without the checks of its own",
+          "status": "passed",
+          "title": "returns upstream's rejection as is, without the checks of its own",
+          "duration": 9.761201999999912,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["createVerifier"],
+          "fullName": "createVerifier passes upstream's payer on only when it is a string",
+          "status": "passed",
+          "title": "passes upstream's payer on only when it is a string",
+          "duration": 18.69864800000005,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["createVerifier"],
+          "fullName": "createVerifier throws when upstream gives no answer within upstreamTimeoutMs",
+          "status": "passed",
+          "title": "throws when upstream gives no answer within upstreamTimeoutMs",
+          "duration": 27.46125700000016,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["createVerifier"],
+          "fullName": "createVerifier rejects a V0 envelope as malformed before upstream sees it",
+          "status": "passed",
+          "title": "rejects a V0 envelope as malformed before upstream sees it",
+          "duration": 10.551025999999865,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["createVerifier"],
+          "fullName": "createVerifier rejects another network before upstream sees it",
+          "status": "passed",
+          "title": "rejects another network before upstream sees it",
+          "duration": 4.59105999999997,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["createVerifier", "channel accounts (AD-5)"],
+          "fullName": "createVerifier channel accounts (AD-5) rejects a channel as the transaction source",
+          "status": "passed",
+          "title": "rejects a channel as the transaction source",
+          "duration": 4.567011000000093,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["createVerifier", "channel accounts (AD-5)"],
+          "fullName": "createVerifier channel accounts (AD-5) rejects a muxed channel as the transaction source",
+          "status": "passed",
+          "title": "rejects a muxed channel as the transaction source",
+          "duration": 6.591935999999805,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["createVerifier", "channel accounts (AD-5)"],
+          "fullName": "createVerifier channel accounts (AD-5) rejects a channel as the operation source",
+          "status": "passed",
+          "title": "rejects a channel as the operation source",
+          "duration": 4.303308999999899,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["createVerifier", "channel accounts (AD-5)"],
+          "fullName": "createVerifier channel accounts (AD-5) rejects a channel as `from`",
+          "status": "passed",
+          "title": "rejects a channel as `from`",
+          "duration": 4.771158999999898,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["createVerifier", "channel accounts (AD-5)"],
+          "fullName": "createVerifier channel accounts (AD-5) rejects a channel as the address of an auth entry with address credentials",
+          "status": "passed",
+          "title": "rejects a channel as the address of an auth entry with address credentials",
+          "duration": 5.517781000000014,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["createVerifier", "channel accounts (AD-5)"],
+          "fullName": "createVerifier channel accounts (AD-5) rejects a channel as the address of an auth entry with addressV2 credentials",
+          "status": "passed",
+          "title": "rejects a channel as the address of an auth entry with addressV2 credentials",
+          "duration": 4.215983000000051,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["createVerifier", "the facilitator's muxed address"],
+          "fullName": "createVerifier the facilitator's muxed address rejects it as the transaction source",
+          "status": "passed",
+          "title": "rejects it as the transaction source",
+          "duration": 4.804476000000022,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["createVerifier", "the facilitator's muxed address"],
+          "fullName": "createVerifier the facilitator's muxed address rejects it as the operation source",
+          "status": "passed",
+          "title": "rejects it as the operation source",
+          "duration": 4.578015999999934,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["createVerifier", "the facilitator's muxed address"],
+          "fullName": "createVerifier the facilitator's muxed address rejects it as `from`",
+          "status": "passed",
+          "title": "rejects it as `from`",
+          "duration": 7.538176999999905,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["createVerifier", "the facilitator's muxed address"],
+          "fullName": "createVerifier the facilitator's muxed address rejects it as the address of an auth entry",
+          "status": "passed",
+          "title": "rejects it as the address of an auth entry",
+          "duration": 4.590268999999807,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["createVerifier", "remaining validity (AD-22)"],
+          "fullName": "createVerifier remaining validity (AD-22) accepts auth exactly minValidityLedgers ahead and rejects one ledger less, with address credentials",
+          "status": "passed",
+          "title": "accepts auth exactly minValidityLedgers ahead and rejects one ledger less, with address credentials",
+          "duration": 5.832051000000092,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["createVerifier", "remaining validity (AD-22)"],
+          "fullName": "createVerifier remaining validity (AD-22) accepts auth exactly minValidityLedgers ahead and rejects one ledger less, with addressV2 credentials",
+          "status": "passed",
+          "title": "accepts auth exactly minValidityLedgers ahead and rejects one ledger less, with addressV2 credentials",
+          "duration": 4.980624000000034,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["createVerifier", "remaining validity (AD-22)"],
+          "fullName": "createVerifier remaining validity (AD-22) counts the earliest expiring auth entry",
+          "status": "passed",
+          "title": "counts the earliest expiring auth entry",
+          "duration": 5.64486399999987,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["createVerifier", "remaining validity (AD-22)"],
+          "fullName": "createVerifier remaining validity (AD-22) says when the resource's maxTimeoutSeconds signs for about minValidityLedgers or fewer",
+          "status": "passed",
+          "title": "says when the resource's maxTimeoutSeconds signs for about minValidityLedgers or fewer",
+          "duration": 6.117011000000048,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": ["createVerifier", "remaining validity (AD-22)"],
+          "fullName": "createVerifier remaining validity (AD-22) throws when the current ledger can't be read",
+          "status": "passed",
+          "title": "throws when the current ledger can't be read",
+          "duration": 4.265558999999939,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        }
+      ],
+      "startTime": 1791976224047,
+      "endTime": 1791976224250.2656,
+      "status": "passed",
+      "message": "",
+      "name": "/home/oski/Projects/stellar/stellar-x402-0018/apps/facilitator/test/verify.test.ts"
+    }
+  ]
+}

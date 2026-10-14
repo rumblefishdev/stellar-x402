@@ -59,24 +59,51 @@ it("reduces URLs to their host, so an RPC key in the path or query stays out of 
   ).toBe("GET rpc.example failed; also node:8000");
 });
 
-it("logs upstream's console.error as one event, an error as name and message only", () => {
+it("logs every console.error as one error event, with URLs reduced to their host", () => {
   const { lines, logger } = capture();
   const restore = captureConsoleError(logger);
   try {
     const error = Object.assign(new Error("Request failed with status code 503"), {
       config: { url: "https://rpc.example/?apikey=K", data: "AAAA" },
+      cause: new Error("socket hang up at https://rpc.example/?apikey=K"),
     });
     console.error("Unexpected verification error:", error, "at https://rpc.example/?apikey=K");
+    // The SDK throws a JSON-RPC error as a plain object.
+    console.error("Unexpected verification error:", { code: -32001, message: "quota exceeded" });
+    // Neither may make `console.error` throw.
+    console.error(Object.create(null), 1n);
+    console.error({
+      toString() {
+        throw new Error("no");
+      },
+      toJSON() {
+        throw new Error("no");
+      },
+    });
   } finally {
     restore();
   }
-  expect(lines.map((line) => JSON.parse(line))).toEqual([
+  const entries = lines.map((line) => JSON.parse(line));
+  expect(entries).toEqual([
     expect.objectContaining({
-      level: "warn",
-      event: "upstream_console_error",
+      level: "error",
+      event: "console_error",
       message:
         "Unexpected verification error: Error: Request failed with status code 503 at rpc.example",
+      errors: [
+        expect.objectContaining({
+          name: "Error",
+          message: "Request failed with status code 503",
+          stack: expect.stringContaining("Request failed"),
+          cause: expect.objectContaining({ message: "socket hang up at rpc.example" }),
+        }),
+      ],
     }),
+    expect.objectContaining({
+      message: 'Unexpected verification error: {"code":-32001,"message":"quota exceeded"}',
+    }),
+    expect.objectContaining({ message: "{} 1" }),
+    expect.objectContaining({ message: "unformattable console.error arguments" }),
   ]);
   expect(lines.join("")).not.toContain("apikey");
 });

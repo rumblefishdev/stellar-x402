@@ -76,19 +76,54 @@ export function redactUrls(text: string): string {
   });
 }
 
+/** An error as its name, message and stack, URLs reduced to their host, with one level of cause. */
+function redactedError(error: Error, depth = 0): LogFields {
+  return {
+    name: error.name,
+    message: redactUrls(String(error.message)),
+    stack: error.stack === undefined ? undefined : redactUrls(error.stack),
+    cause: depth === 0 && error.cause instanceof Error ? redactedError(error.cause, 1) : undefined,
+  };
+}
+
+/** A non-error `console.error` argument as text: JSON when it can be, else `String`. */
+function text(arg: unknown): string {
+  if (typeof arg === "string") return arg;
+  try {
+    const json = JSON.stringify(arg);
+    if (json !== undefined) return json;
+  } catch {
+    // A bigint or a cycle; `String` below.
+  }
+  return String(arg);
+}
+
 /**
- * Sends `console.error`, where upstream `@x402/stellar` writes its errors, through `logger` as
- * one `upstream_console_error` event. An error becomes its name and message: the whole object,
- * an AxiosError for a failed RPC call, holds the request URL and body. URLs keep only their host.
+ * Sends every `console.error` in the process through `logger`, as one `console_error` event at
+ * error level. Upstream `@x402/stellar` writes its errors there, and the whole object of a failed
+ * RPC call, an AxiosError, holds the request URL and body. So an error becomes its name, message,
+ * stack and cause, other arguments become JSON or text, and every URL keeps only its host (an RPC
+ * URL can carry an API key, ADR 0011). Formatting never throws, as `console.error` doesn't.
  * Returns the function that puts the original `console.error` back.
  */
 export function captureConsoleError(logger: Logger): () => void {
   const original = console.error;
   console.error = (...args: unknown[]) => {
-    const text = args
-      .map((arg) => (arg instanceof Error ? `${arg.name}: ${arg.message}` : String(arg)))
-      .join(" ");
-    logger.warn("upstream_console_error", { message: redactUrls(text) });
+    let fields: LogFields;
+    try {
+      const errors = args.filter((arg): arg is Error => arg instanceof Error);
+      fields = {
+        message: redactUrls(
+          args
+            .map((arg) => (arg instanceof Error ? `${arg.name}: ${arg.message}` : text(arg)))
+            .join(" "),
+        ),
+        errors: errors.length > 0 ? errors.map((error) => redactedError(error)) : undefined,
+      };
+    } catch {
+      fields = { message: "unformattable console.error arguments" };
+    }
+    logger.error("console_error", fields);
   };
   return () => {
     console.error = original;
