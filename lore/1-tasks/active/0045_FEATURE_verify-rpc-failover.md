@@ -2,7 +2,7 @@
 id: "0045"
 title: "Fail over upstream verify across RPC_URLS before pubnet"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0004", "0011"]
 related_tasks: ["0018"]
@@ -14,6 +14,10 @@ history:
     status: backlog
     who: okarcz
     note: "Spawned from 0018 (Adam's PR #33 review): upstream verify reads only the first RPC URL."
+  - date: "2026-10-14"
+    status: active
+    who: okarcz
+    note: "Work started while 0009 (PR #41) is in review."
 ---
 
 # Fail over upstream verify across `RPC_URLS` before pubnet
