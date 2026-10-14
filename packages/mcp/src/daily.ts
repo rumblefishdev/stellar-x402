@@ -35,10 +35,10 @@ export function utcDay(now: Date): string {
 function open(dir: string): DatabaseSync {
   mkdirSync(dir, { recursive: true });
   const db = new DatabaseSync(join(dir, "spent.sqlite"));
-  // Wait for another process's transaction instead of failing; readers do not wait for a writer
-  // (WAL); a counted payment survives a power cut.
+  // Wait for another process's transaction instead of failing; a counted payment survives a power cut.
+  // The default rollback journal is kept: switching a new file to WAL is not covered by the wait, and
+  // failed for one of 500 processes creating the database at once.
   db.exec("PRAGMA busy_timeout = 5000");
-  db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA synchronous = FULL");
   db.exec(
     "CREATE TABLE IF NOT EXISTS spent (day TEXT NOT NULL, payer TEXT NOT NULL, asset TEXT NOT NULL, amount INTEGER NOT NULL);" +

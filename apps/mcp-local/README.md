@@ -103,10 +103,10 @@ used.
   daily budget; one key with two different `STELLAR_X402_STATE_DIR` paths gets it twice.
 - **The day is a calendar day, not the last 24 hours.** A full daily budget spent just before
   midnight UTC and another just after it means up to twice the daily budget within minutes.
-- **To reset the daily budget, delete `spent.sqlite`** (with its `-wal` and `-shm` files, if
-  present), at a moment no payment is being made. It then forgets everything spent today and on the
-  days kept before it, for every key that uses that directory. A running server opens the database
-  for each payment, so after the reset it counts in the new file with every other server.
+- **To reset the daily budget, delete `spent.sqlite`**, at a moment no payment is being made. It
+  then forgets everything spent today and on the days kept before it, for every key that uses that
+  directory. A running server opens the database for each payment, so after the reset it counts in
+  the new file with every other server.
 - **A refund that cannot be written stays counted.** When a payment fails before it is signed, its
   amount goes back to the daily budget, on the day the payment was counted on (a payment counted at
   23:59 UTC and refunded after midnight goes back to the day before). If the database cannot be
