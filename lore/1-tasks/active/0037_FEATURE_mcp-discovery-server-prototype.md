@@ -161,8 +161,9 @@ and existing servers. Each line: what was decided and why.
   agent saw the catalog price in `list_resources`.
 - **Which offer is paid:** of the seller's offers, those in an allowed asset and within the
   per-call limit, through an upstream client policy; the library pays the first one left.
-- **Budget:** a per-call price cap and a budget for the life of the process, per asset, in atomic
-  units. The amount is counted before signing and never given back once signed: a seller cannot
+- **Budget (revised by W350 A, PR #34):** a per-call price cap and a required daily budget per key
+  and asset, in atomic units; the per-process budget is gone (it reset on restart and was not shared
+  between sessions). The amount is counted before signing and never given back once signed: a seller cannot
   return it to the budget by claiming the payment failed. When signing fails nothing was sent, and
   the amount goes back (W170).
 - **Which offers are paid** also leaves out an authorization longer than 300 s (the `@x402/express`
