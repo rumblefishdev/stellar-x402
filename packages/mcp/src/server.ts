@@ -4,7 +4,7 @@ import { HTTPFacilitatorClient } from "@x402/core/http";
 import { withBazaar } from "@x402/extensions/bazaar";
 import { z } from "zod";
 import { deadline, PAGE, PAGINATION, SUMMARY, summary } from "./catalog.js";
-import { callPaidHttp, type PaymentConfig, type Spent } from "./pay.js";
+import { callPaidHttp, type PaymentConfig } from "./pay.js";
 import { toolError, ToolError, toolResult } from "./results.js";
 import { previewPayment } from "./preview.js";
 
@@ -119,9 +119,6 @@ export function createServer(config: ServerConfig): McpServer {
   );
   if (config.payment) {
     const payment = config.payment;
-    const hasDaily = Object.values(payment.assets).some((asset) => asset.daily !== undefined);
-    if (hasDaily && !payment.dailyFile) throw new Error("a daily budget needs payment.dailyFile");
-    const spent: Spent = new Map();
     server.registerTool(
       "call_paid_http",
       {
@@ -160,13 +157,7 @@ export function createServer(config: ServerConfig): McpServer {
         const headers = body === undefined ? undefined : { "content-type": "application/json" };
         try {
           return toolResult({
-            ...(await callPaidHttp(
-              { url, method, headers, body },
-              payment,
-              spent,
-              sellerLimits,
-              log,
-            )),
+            ...(await callPaidHttp({ url, method, headers, body }, payment, sellerLimits, log)),
           });
         } catch (error) {
           if (!(error instanceof ToolError)) throw error;

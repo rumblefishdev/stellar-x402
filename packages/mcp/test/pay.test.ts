@@ -1,6 +1,9 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { SchemeNetworkClient } from "@x402/core/types";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer, type PaymentConfig } from "../src/index.js";
 import {
@@ -29,6 +32,8 @@ interface Paid {
 let seller: FakeSeller;
 let client: Client;
 let logs: string[];
+/** Each test's own daily record, so no test sees another's spending. */
+let stateDir: string;
 
 async function connect(
   overrides: Partial<PaymentConfig> = {},
@@ -43,7 +48,10 @@ async function connect(
     // Testnet only, as the CLI registers it.
     schemes: [{ network: "stellar:testnet", client: scheme }],
     payer: "GBUYERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-    assets: { [USDC]: { maxPerCall: 20_000n, budget: 15_000n } },
+    assets: { [USDC]: { maxPerCall: 20_000n, daily: 15_000n } },
+    dailyFile: join(stateDir, "spent.json"),
+    // A fixed day, so a test running across midnight UTC does not start a new budget.
+    now: () => new Date("2026-10-13T12:00:00Z"),
     ...overrides,
   };
   const log = (message: string) => logs.push(message);
@@ -68,12 +76,14 @@ async function reconnect(...args: Parameters<typeof connect>) {
 
 beforeEach(async () => {
   seller = await startFakeSeller();
+  stateDir = await mkdtemp(join(tmpdir(), "pay-test-"));
   await connect();
 });
 
 afterEach(async () => {
   await client.close();
   await seller.close();
+  await rm(stateDir, { recursive: true, force: true });
 });
 
 async function pay(path = "/forecast?city=Warsaw", method = "GET") {
@@ -169,8 +179,8 @@ describe("call_paid_http", () => {
   it("pays in another allowed asset when the first one's budget is spent", async () => {
     await reconnect({
       assets: {
-        [USDC]: { maxPerCall: 20_000n, budget: 15_000n },
-        COTHER: { maxPerCall: 10n, budget: 100n },
+        [USDC]: { maxPerCall: 20_000n, daily: 15_000n },
+        COTHER: { maxPerCall: 10n, daily: 100n },
       },
     });
     seller.otherOffers = [{ asset: USDC, amount: "10000" }];
@@ -337,7 +347,7 @@ describe("call_paid_http", () => {
   );
 
   it("pays a price equal to the per-call limit, and up to the whole budget", async () => {
-    await reconnect({ assets: { [USDC]: { maxPerCall: 10_000n, budget: 20_000n } } });
+    await reconnect({ assets: { [USDC]: { maxPerCall: 10_000n, daily: 20_000n } } });
     expect((await pay()).payment).toBeDefined();
     expect((await pay()).payment).toBeDefined();
     expect((await pay()).error.code).toBe("over_budget");

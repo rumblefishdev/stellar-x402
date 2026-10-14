@@ -30,8 +30,8 @@ let logs: string[];
 let clock: Date;
 
 /**
- * One server process of the buyer, with its own per-process budget and the shared daily record.
- * The seller asks 10,000 a call: the daily budget of 25,000 fits two calls, each process budget five.
+ * One server process of the buyer, with the shared daily record.
+ * The seller asks 10,000 a call: the daily budget of 25,000 fits two calls.
  */
 async function startProcess({
   scheme = fakeScheme(),
@@ -48,7 +48,7 @@ async function startProcess({
     payment: {
       schemes: [{ network: "stellar:testnet", client: scheme }],
       payer,
-      assets: { [USDC]: { maxPerCall: 20_000n, budget: 50_000n, daily } },
+      assets: { [USDC]: { maxPerCall: 20_000n, daily } },
       dailyFile: file,
       now: () => clock,
     },
@@ -228,21 +228,6 @@ describe("daily budget", () => {
     expect(results.filter((result) => result === "paid")).toHaveLength(2);
     expect(results.filter((result) => result === "over_budget")).toHaveLength(4);
     expect(seller.payments).toHaveLength(2);
-  });
-
-  it("refuses to start with a daily budget but no record file", () => {
-    const config = {
-      discoveryUrl: "http://unused",
-      timeoutMs: 5_000,
-      maxResponseBytes: 1_000,
-      log: () => {},
-      payment: {
-        schemes: [],
-        payer: BUYER,
-        assets: { [USDC]: { maxPerCall: 1n, budget: 1n, daily: 1n } },
-      },
-    };
-    expect(() => createServer(config)).toThrow("dailyFile");
   });
 });
 

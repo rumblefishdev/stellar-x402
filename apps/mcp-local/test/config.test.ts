@@ -11,7 +11,7 @@ const PAYING = {
   ...BASE,
   STELLAR_X402_SECRET_KEY: BUYER.secret(),
   STELLAR_X402_MAX_PER_CALL: "10000",
-  STELLAR_X402_BUDGET: "50000",
+  STELLAR_X402_DAILY_BUDGET: "200000",
 };
 
 describe("loadConfig", () => {
@@ -39,24 +39,15 @@ describe("loadConfig", () => {
     expect(config.payment?.payer).toBe(BUYER.publicKey());
     expect(config.payment?.schemes.map((s) => s.network)).toEqual(["stellar:testnet"]);
     expect(config.payment?.assets).toEqual({
-      [USDC_TESTNET_ADDRESS]: { maxPerCall: 10_000n, budget: 50_000n },
+      [USDC_TESTNET_ADDRESS]: { maxPerCall: 10_000n, daily: 200_000n },
     });
   });
 
-  it("keeps no daily record without a daily budget", () => {
-    expect(loadConfig(PAYING).payment?.dailyFile).toBeUndefined();
-  });
-
-  it("adds a daily budget, recorded in the home directory unless a file is named", () => {
-    const daily = { ...PAYING, STELLAR_X402_DAILY_BUDGET: "200000" };
-    const config = loadConfig(daily);
-    expect(config.payment?.assets[USDC_TESTNET_ADDRESS]).toEqual({
-      maxPerCall: 10_000n,
-      budget: 50_000n,
-      daily: 200_000n,
-    });
-    expect(config.payment?.dailyFile).toBe(join(homedir(), ".stellar-x402-mcp", "spent.json"));
-    const named = loadConfig({ ...daily, STELLAR_X402_STATE_FILE: "/var/tmp/spent.json" });
+  it("records the daily budget in the home directory unless a file is named", () => {
+    expect(loadConfig(PAYING).payment?.dailyFile).toBe(
+      join(homedir(), ".stellar-x402-mcp", "spent.json"),
+    );
+    const named = loadConfig({ ...PAYING, STELLAR_X402_STATE_FILE: "/var/tmp/spent.json" });
     expect(named.payment?.dailyFile).toBe("/var/tmp/spent.json");
   });
 
@@ -95,13 +86,18 @@ describe("loadConfig", () => {
       "STELLAR_X402_MAX_PER_CALL is required",
     ],
     [
-      "a key without a budget",
-      { ...PAYING, STELLAR_X402_BUDGET: undefined },
-      "STELLAR_X402_BUDGET is required",
+      "a key without a daily budget",
+      { ...PAYING, STELLAR_X402_DAILY_BUDGET: undefined },
+      "STELLAR_X402_DAILY_BUDGET is required",
+    ],
+    [
+      "the per-process budget, replaced by the daily one",
+      { ...PAYING, STELLAR_X402_BUDGET: "50000" },
+      "STELLAR_X402_BUDGET is not a setting of this server; it was replaced by STELLAR_X402_DAILY_BUDGET",
     ],
     [
       "a limit in USDC instead of atomic units",
-      { ...PAYING, STELLAR_X402_BUDGET: "0.5" },
+      { ...PAYING, STELLAR_X402_MAX_PER_CALL: "0.5" },
       "atomic units",
     ],
     [
@@ -111,7 +107,7 @@ describe("loadConfig", () => {
     ],
     [
       "a record file without a daily budget",
-      { ...PAYING, STELLAR_X402_STATE_FILE: "/var/tmp/spent.json" },
+      { ...BASE, STELLAR_X402_STATE_FILE: "/var/tmp/spent.json" },
       "STELLAR_X402_STATE_FILE needs STELLAR_X402_DAILY_BUDGET",
     ],
     [

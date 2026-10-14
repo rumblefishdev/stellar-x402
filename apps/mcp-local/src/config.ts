@@ -48,7 +48,6 @@ const ENV = z.object({
   STELLAR_X402_ALLOW_INSECURE_LOCAL: optional(z.enum(["0", "1"], { message: "must be 0 or 1" })),
   STELLAR_X402_SECRET_KEY: optional(z.string()),
   STELLAR_X402_MAX_PER_CALL: optional(ATOMIC),
-  STELLAR_X402_BUDGET: optional(ATOMIC),
   STELLAR_X402_DAILY_BUDGET: optional(ATOMIC),
   STELLAR_X402_STATE_FILE: optional(z.string()),
 });
@@ -66,6 +65,11 @@ export function loadConfig(env: NodeJS.ProcessEnv): CliConfig {
   const unknown = Object.keys(env).find(
     (name) => name.startsWith("STELLAR_X402_") && !(name in ENV.shape),
   );
+  if (unknown === "STELLAR_X402_BUDGET") {
+    throw new Error(
+      "STELLAR_X402_BUDGET is not a setting of this server; it was replaced by STELLAR_X402_DAILY_BUDGET.",
+    );
+  }
   if (unknown) throw new Error(`${unknown} is not a setting of this server.`);
   const parsed = ENV.safeParse(env);
   if (!parsed.success) {
@@ -88,7 +92,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): CliConfig {
   if (vars.STELLAR_X402_MAX_PER_CALL === undefined) {
     throw new Error("STELLAR_X402_MAX_PER_CALL is required.");
   }
-  if (vars.STELLAR_X402_BUDGET === undefined) throw new Error("STELLAR_X402_BUDGET is required.");
+  if (vars.STELLAR_X402_DAILY_BUDGET === undefined) {
+    throw new Error("STELLAR_X402_DAILY_BUDGET is required.");
+  }
   let signer;
   try {
     signer = createEd25519Signer(vars.STELLAR_X402_SECRET_KEY, STELLAR_NETWORKS.testnet);
@@ -104,14 +110,10 @@ export function loadConfig(env: NodeJS.ProcessEnv): CliConfig {
       assets: {
         [USDC_TESTNET_ADDRESS]: {
           maxPerCall: vars.STELLAR_X402_MAX_PER_CALL,
-          budget: vars.STELLAR_X402_BUDGET,
           daily: vars.STELLAR_X402_DAILY_BUDGET,
         },
       },
-      dailyFile:
-        vars.STELLAR_X402_DAILY_BUDGET === undefined
-          ? undefined
-          : (vars.STELLAR_X402_STATE_FILE ?? DEFAULT_STATE_FILE),
+      dailyFile: vars.STELLAR_X402_STATE_FILE ?? DEFAULT_STATE_FILE,
     },
   };
 }
