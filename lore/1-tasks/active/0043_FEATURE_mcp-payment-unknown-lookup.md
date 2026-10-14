@@ -2,16 +2,21 @@
 id: "0043"
 title: "Find the settlement on chain when a paid MCP call ends as payment_unknown"
 type: FEATURE
-status: backlog
+status: active
 related_adr: []
 related_tasks: ["0037"]
-tags: [mcp, payments, priority-low, effort-small]
+tags: [mcp, payments, priority-medium, effort-medium]
 links: []
 history:
   - date: "2026-10-13"
     status: backlog
     who: karolkow
     note: "Spawned from 0037 (W315): payment_unknown leaves the agent without a transaction hash."
+  - date: "2026-10-14"
+    status: active
+    who: karolkow
+    note: >
+      Work started after 0037 closed. Effort raised to medium: three PRs on the payment path.
 ---
 
 # Find the settlement on chain when a paid MCP call ends as payment_unknown

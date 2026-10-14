@@ -2,7 +2,7 @@
 id: "0037"
 title: "MCP discovery server prototype: list, inspect and pay for Bazaar resources"
 type: FEATURE
-status: done
+status: completed
 milestone: 2
 related_adr: ["0008"]
 related_tasks: ["0032", "0031", "0016", "0042", "0043", "0044", "0046"]
@@ -47,7 +47,7 @@ history:
       get_resource is back, as a preview of the seller's 402 answer before paying rather than a
       catalog lookup; no catalog filter is needed.
   - date: "2026-10-14"
-    status: done
+    status: completed
     who: karolkow
     note: >
       Done. Three tools over MCP stdio, a buyer-side address guard, one deadline per paid call, a
