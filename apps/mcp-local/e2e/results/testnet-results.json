@@ -1,174 +1,174 @@
 {
-  "ranAt": "2026-10-14T11:47:04.697Z",
-  "commit": "5d32f16a4db427ae136bd75a5bc3d198538f22d1",
-  "rows": 118,
+  "ranAt": "2026-10-14T11:58:54.914Z",
+  "commit": "3e90b3e874c747085354604bcd18b88bfd4d5de9",
+  "rows": 124,
   "failed": 0,
   "results": [
     {
       "id": "E-01a",
-      "check": "stops by itself (exit 1), stderr says \"STELLAR_X402_DISCOVERY_URL\"",
+      "check": "exit 1, stderr says \"STELLAR_X402_DISCOVERY_URL\"",
       "expected": [
-        true,
+        1,
         true
       ],
       "got": [
-        true,
+        1,
         true
       ],
       "pass": true
     },
     {
       "id": "E-01b",
-      "check": "stops by itself (exit 1), stderr says \"STELLAR_X402_DISCOVERY_URL\"",
+      "check": "exit 1, stderr says \"STELLAR_X402_DISCOVERY_URL\"",
       "expected": [
-        true,
+        1,
         true
       ],
       "got": [
-        true,
+        1,
         true
       ],
       "pass": true
     },
     {
       "id": "E-01c",
-      "check": "stops by itself (exit 1), stderr says \"STELLAR_X402_MAX_PER_CALL\"",
+      "check": "exit 1, stderr says \"STELLAR_X402_MAX_PER_CALL\"",
       "expected": [
-        true,
+        1,
         true
       ],
       "got": [
-        true,
+        1,
         true
       ],
       "pass": true
     },
     {
       "id": "E-01d",
-      "check": "stops by itself (exit 1), stderr says \"STELLAR_X402_DAILY_BUDGET\"",
+      "check": "exit 1, stderr says \"STELLAR_X402_DAILY_BUDGET\"",
       "expected": [
-        true,
+        1,
         true
       ],
       "got": [
-        true,
+        1,
         true
       ],
       "pass": true
     },
     {
       "id": "E-01e",
-      "check": "stops by itself (exit 1), stderr says \"STELLAR_X402_DAILY_BUDGET needs STELLAR_X402_SECRET_KEY\"",
+      "check": "exit 1, stderr says \"STELLAR_X402_DAILY_BUDGET needs STELLAR_X402_SECRET_KEY\"",
       "expected": [
-        true,
+        1,
         true
       ],
       "got": [
-        true,
+        1,
         true
       ],
       "pass": true
     },
     {
       "id": "E-01f",
-      "check": "stops by itself (exit 1), stderr says \"STELLAR_X402_NETWORK\"",
+      "check": "exit 1, stderr says \"STELLAR_X402_NETWORK\"",
       "expected": [
-        true,
+        1,
         true
       ],
       "got": [
-        true,
+        1,
         true
       ],
       "pass": true
     },
     {
       "id": "E-01g",
-      "check": "stops by itself (exit 1), stderr says \"STELLAR_X402_MAX_PER_CALL\"",
+      "check": "exit 1, stderr says \"STELLAR_X402_MAX_PER_CALL\"",
       "expected": [
-        true,
+        1,
         true
       ],
       "got": [
-        true,
+        1,
         true
       ],
       "pass": true
     },
     {
       "id": "E-01h",
-      "check": "stops by itself (exit 1), stderr says \"STELLAR_X402_TIMEOUT_MS\"",
+      "check": "exit 1, stderr says \"STELLAR_X402_TIMEOUT_MS\"",
       "expected": [
-        true,
+        1,
         true
       ],
       "got": [
-        true,
+        1,
         true
       ],
       "pass": true
     },
     {
       "id": "E-01i",
-      "check": "stops by itself (exit 1), stderr says \"STELLAR_X402_MAX_PERCALL\"",
+      "check": "exit 1, stderr says \"STELLAR_X402_MAX_PERCALL\"",
       "expected": [
-        true,
+        1,
         true
       ],
       "got": [
-        true,
+        1,
         true
       ],
       "pass": true
     },
     {
       "id": "E-01j",
-      "check": "stops by itself (exit 1), stderr says \"replaced by STELLAR_X402_DAILY_BUDGET\"",
+      "check": "exit 1, stderr says \"replaced by STELLAR_X402_DAILY_BUDGET\"",
       "expected": [
-        true,
+        1,
         true
       ],
       "got": [
-        true,
+        1,
         true
       ],
       "pass": true
     },
     {
       "id": "E-01k",
-      "check": "stops by itself (exit 1), stderr says \"replaced by STELLAR_X402_STATE_DIR\"",
+      "check": "exit 1, stderr says \"replaced by STELLAR_X402_STATE_DIR\"",
       "expected": [
-        true,
+        1,
         true
       ],
       "got": [
-        true,
+        1,
         true
       ],
       "pass": true
     },
     {
       "id": "E-01l",
-      "check": "stops by itself (exit 1), stderr says \"STELLAR_X402_SECRET_KEY\"",
+      "check": "exit 1, stderr says \"STELLAR_X402_SECRET_KEY\"",
       "expected": [
-        true,
+        1,
         true
       ],
       "got": [
-        true,
+        1,
         true
       ],
       "pass": true
     },
     {
       "id": "E-01m",
-      "check": "stops by itself (exit 1), stderr says \"STELLAR_X402_STATE_DIR\"",
+      "check": "exit 1, stderr says \"STELLAR_X402_STATE_DIR\"",
       "expected": [
-        true,
+        1,
         true
       ],
       "got": [
-        true,
+        1,
         true
       ],
       "pass": true
@@ -430,9 +430,9 @@
     },
     {
       "id": "E-04",
-      "check": "H2's 10,000-character description comes back with 500 (recorded)",
-      "expected": true,
-      "got": true,
+      "check": "a 10,000-character description is cut to 500 (README)",
+      "expected": 500,
+      "got": 500,
       "pass": true
     },
     {
@@ -523,7 +523,7 @@
     },
     {
       "id": "E-06",
-      "check": "call_paid_http {\"url\":\"http://127.0.0.1:55924/ok\",\"method\":\"HEAD\"}: -32602",
+      "check": "call_paid_http {\"url\":\"http://127.0.0.1:56541/ok\",\"method\":\"HEAD\"}: -32602",
       "expected": [
         true,
         true
@@ -574,8 +574,8 @@
     {
       "id": "E-07",
       "check": "buyer balance unchanged",
-      "expected": "199800000",
-      "got": "199800000",
+      "expected": "199760000",
+      "got": "199760000",
       "pass": true
     },
     {
@@ -772,7 +772,7 @@
     },
     {
       "id": "E-09g",
-      "check": "get_resource http://127.0.0.1.nip.io:55939/free",
+      "check": "get_resource http://127.0.0.1.nip.io:56556/free",
       "expected": "unsafe_url",
       "got": "unsafe_url",
       "pass": true
@@ -795,6 +795,19 @@
       "check": "127.0.0.1 without the switch",
       "expected": "unsafe_url",
       "got": "unsafe_url",
+      "pass": true
+    },
+    {
+      "id": "E-09h",
+      "check": "https://example.com/ without the switch passes the guard",
+      "expected": [
+        "ok",
+        200
+      ],
+      "got": [
+        "ok",
+        200
+      ],
       "pass": true
     },
     {
@@ -890,7 +903,7 @@
     },
     {
       "id": "E-10",
-      "check": "get_resource GET with a body (recorded)",
+      "check": "get_resource GET with a body (README: either seller tool)",
       "expected": "invalid_input",
       "got": "invalid_input",
       "pass": true
@@ -904,20 +917,35 @@
     },
     {
       "id": "E-13b",
-      "check": "the seller received one payment, signed for 5000 to its payTo in USDC",
+      "check": "one payment, the signed transfer: 5000 USDC from the buyer to the seller's payTo",
       "expected": [
         {
-          "amount": "5000",
           "asset": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
-          "payTo": "GAS7JQRKLXPO5L7OFYDEILAM6AZGPHFJKQ2UJV7TAT5BNXPCXX54L5IF"
+          "from": "GDUFPEXV27XLNI2UNEIOY4HQAMAGSNIHV2QHPZRPFPK5QGK6S3AD5AFK",
+          "to": "GAS7JQRKLXPO5L7OFYDEILAM6AZGPHFJKQ2UJV7TAT5BNXPCXX54L5IF",
+          "amount": "5000"
         }
       ],
       "got": [
         {
-          "amount": "5000",
           "asset": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
-          "payTo": "GAS7JQRKLXPO5L7OFYDEILAM6AZGPHFJKQ2UJV7TAT5BNXPCXX54L5IF"
+          "from": "GDUFPEXV27XLNI2UNEIOY4HQAMAGSNIHV2QHPZRPFPK5QGK6S3AD5AFK",
+          "to": "GAS7JQRKLXPO5L7OFYDEILAM6AZGPHFJKQ2UJV7TAT5BNXPCXX54L5IF",
+          "amount": "5000"
         }
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-13b",
+      "check": "signature valid for 60 more ledgers: within the offer's 300 s and 300 s",
+      "expected": [
+        true,
+        true
+      ],
+      "got": [
+        true,
+        true
       ],
       "pass": true
     },
@@ -967,6 +995,55 @@
       "check": "XLM unchanged",
       "expected": "100000000000",
       "got": "100000000000",
+      "pass": true
+    },
+    {
+      "id": "E-14b",
+      "check": "insufficient_funds, the contract's #10 in the log only",
+      "expected": [
+        "insufficient_funds",
+        true,
+        false
+      ],
+      "got": [
+        "insufficient_funds",
+        true,
+        false
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-14c",
+      "check": "refused, nothing sent, the amount given back",
+      "expected": [
+        "payment_failed",
+        0,
+        "0"
+      ],
+      "got": [
+        "payment_failed",
+        0,
+        "0"
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-24",
+      "check": "ok; the unpaid and the paid request both carry the body",
+      "expected": [
+        "ok",
+        [
+          "{\"city\":\"Warsaw\",\"days\":3}",
+          "{\"city\":\"Warsaw\",\"days\":3}"
+        ]
+      ],
+      "got": [
+        "ok",
+        [
+          "{\"city\":\"Warsaw\",\"days\":3}",
+          "{\"city\":\"Warsaw\",\"days\":3}"
+        ]
+      ],
       "pass": true
     },
     {
@@ -1165,9 +1242,15 @@
     },
     {
       "id": "E-17d",
-      "check": "content type comes back as text/plain (recorded)",
-      "expected": "ok",
-      "got": "ok",
+      "check": "content type passed on",
+      "expected": [
+        "ok",
+        "text/plain"
+      ],
+      "got": [
+        "ok",
+        "text/plain"
+      ],
       "pass": true
     },
     {
@@ -1359,7 +1442,7 @@
         true
       ],
       "pass": true,
-      "transaction": "8ae1fc46947d1ed43b04a4a8a356cf228b5016a6dc722e9824fe493a07de07b8"
+      "transaction": "708705c28c361d1dfaf0ae7ff6ef67ddbd70e44b5391aa4ed399a56c78d20dc1"
     },
     {
       "id": "E-21",
@@ -1381,7 +1464,7 @@
         }
       ],
       "pass": true,
-      "transaction": "8ae1fc46947d1ed43b04a4a8a356cf228b5016a6dc722e9824fe493a07de07b8"
+      "transaction": "708705c28c361d1dfaf0ae7ff6ef67ddbd70e44b5391aa4ed399a56c78d20dc1"
     },
     {
       "id": "E-21",
@@ -1397,7 +1480,7 @@
         "0"
       ],
       "pass": true,
-      "transaction": "8ae1fc46947d1ed43b04a4a8a356cf228b5016a6dc722e9824fe493a07de07b8"
+      "transaction": "708705c28c361d1dfaf0ae7ff6ef67ddbd70e44b5391aa4ed399a56c78d20dc1"
     },
     {
       "id": "E-22a",
@@ -1421,7 +1504,7 @@
         true
       ],
       "pass": true,
-      "transaction": "aa27b81fc4a409e865c1d527d807ac192d0f9a05941c99f0b417770786b90078"
+      "transaction": "18be0325b6b50417ac9088011737d976f35211a0006206e3a367dcf09009f94e"
     },
     {
       "id": "E-22a",
@@ -1443,7 +1526,7 @@
         }
       ],
       "pass": true,
-      "transaction": "aa27b81fc4a409e865c1d527d807ac192d0f9a05941c99f0b417770786b90078"
+      "transaction": "18be0325b6b50417ac9088011737d976f35211a0006206e3a367dcf09009f94e"
     },
     {
       "id": "E-22a",
@@ -1459,7 +1542,7 @@
         "0"
       ],
       "pass": true,
-      "transaction": "aa27b81fc4a409e865c1d527d807ac192d0f9a05941c99f0b417770786b90078"
+      "transaction": "18be0325b6b50417ac9088011737d976f35211a0006206e3a367dcf09009f94e"
     },
     {
       "id": "E-22b",
@@ -1479,39 +1562,46 @@
       "id": "E-22",
       "check": "buyer balance unchanged after b and after c",
       "expected": [
-        "199780000",
-        "199780000"
+        "199740000",
+        "199740000"
       ],
       "got": [
-        "199780000",
-        "199780000"
+        "199740000",
+        "199740000"
       ],
       "pass": true
     },
     {
       "id": "E-23",
-      "check": "no buyer secret in 257 captures from 53 processes",
+      "check": "no buyer secret in 268 captures from 56 processes",
       "expected": false,
       "got": false,
       "pass": true
     },
     {
       "id": "E-23",
-      "check": "no buyer without its S secret in 257 captures from 53 processes",
+      "check": "no buyer without its S secret in 268 captures from 56 processes",
       "expected": false,
       "got": false,
       "pass": true
     },
     {
       "id": "E-23",
-      "check": "no unfunded secret in 257 captures from 53 processes",
+      "check": "no unfunded secret in 268 captures from 56 processes",
       "expected": false,
       "got": false,
       "pass": true
     },
     {
       "id": "E-23",
-      "check": "no malformed key of E-01l secret in 257 captures from 53 processes",
+      "check": "no drained (E-14b) secret in 268 captures from 56 processes",
+      "expected": false,
+      "got": false,
+      "pass": true
+    },
+    {
+      "id": "E-23",
+      "check": "no malformed key of E-01l secret in 268 captures from 56 processes",
       "expected": false,
       "got": false,
       "pass": true
