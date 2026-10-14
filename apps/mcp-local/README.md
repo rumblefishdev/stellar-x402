@@ -10,8 +10,10 @@ resources on **Stellar testnet**, within limits you set.
 | `call_paid_http` | calls the resource, pays the 402 price within the limits, returns the response and the transaction hash | yes         |
 
 Without `STELLAR_X402_SECRET_KEY`, `call_paid_http` is not offered: the client's tool list does not
-have it. Every failure comes back as a code from a fixed list ([Error codes](#error-codes)); causes
-go to stderr only.
+have it. `list_resources` makes one catalog request per call and never loops over pages: the agent
+pages with `limit` and `offset`. Seller-written text is returned as data and cut to the catalog's
+limits: descriptions to 500 characters, MIME types to 127. Every failure comes back as a code from
+a fixed list ([Error codes](#error-codes)); causes go to stderr only.
 
 To try it locally, run the example seller in [`examples/http-api`](../../examples/http-api)
 (`http://localhost:4021/weather?city=Warsaw`, 0.001 testnet USDC) and start this server with
@@ -69,8 +71,10 @@ key stop the start, so a key left out by mistake is not taken for a server that 
 Every value is read when the server starts. An empty value means the same as an unset one (the
 default applies, a required one is missing). Numbers are plain decimal digits: no `1e3`, hex, sign or
 spaces; the time limit and the response limit must be above 0, the two amounts may be 0. A missing
-or wrong value, or an unknown `STELLAR_X402_` variable (a misspelt name), stops the server with a
-message on stderr naming the variable. A malformed key is refused without repeating it.
+or wrong value, or an unknown `STELLAR_X402_` variable (a misspelt name), stops the server before
+it answers the client: exit code 1 and a message on stderr naming the variable. The state
+directory's path is checked then too, the directory itself is made at the first payment. A
+malformed key is refused without repeating it.
 
 ## What to know
 
@@ -86,16 +90,22 @@ message on stderr naming the variable. A malformed key is refused without repeat
 - **The daily budget survives restarts and is shared.** Every process paying from the same key and
   using the same `STELLAR_X402_STATE_DIR` counts against one amount per day; the day is the UTC
   date, so it starts again at midnight UTC. What was spent is kept in a SQLite database,
-  `spent.sqlite`, in that directory. Each payment is counted in a transaction, so the count is exact
-  across processes: processes paying at the very same moment never pass the daily budget together.
+  `spent.sqlite`, in that directory: a table `spent` with one row per counted amount (day, payer,
+  asset, amount in atomic units), a refund being a negative row. Each payment is counted in a
+  transaction, so the count is exact across processes: processes paying at the very same moment
+  never pass the daily budget together.
   Each time a payment is counted, rows dated more than seven days before that day are deleted. If
   the database cannot be read or written, the server refuses to pay (`payment_failed`) rather than
-  guess. The same happens when another server holds the database for more than 5 seconds; a
-  counted payment takes milliseconds, so a retry normally passes. `STELLAR_X402_STATE_FILE`, a
+  guess. The same happens when another server holds the database for more than 5 seconds (a wait
+  that is part of the call's time limit); a counted payment takes milliseconds, so a retry
+  normally passes. `STELLAR_X402_STATE_FILE`, a
   single file, was replaced by this directory; a server started with it stops and says so.
 - **Keep the state directory on a local disk** — not a network drive or a synced folder (iCloud,
   Dropbox). SQLite's own guidance is not to use it over a network filesystem, whose locks it cannot
   rely on.
+- **Signing needs the network:** the payment is simulated on the public Stellar testnet RPC before
+  it is signed, so the server must reach it; an unfunded payer is found there
+  (`insufficient_funds`).
 - **Node may print `ExperimentalWarning: SQLite is an experimental feature`** on stderr at start.
   It comes from Node's built-in `node:sqlite`, which keeps the database; it is harmless.
 - **The daily limit is per key and per directory.** Two keys sharing one directory each get the full
@@ -137,7 +147,10 @@ message on stderr naming the variable. A malformed key is refused without repeat
   terms as the seller gives them, without checking them against your limits, asset or network; only
   `call_paid_http` does that. It is stricter in two checks a payment does not make: the
   `PAYMENT-REQUIRED` header must match the x402 v2 shape exactly, and the seller's input schema must
-  be within the catalog's depth and size limits. Terms it refuses (`unsupported_payment`) may still
+  be within the catalog's limits (depth 10, 1,000 nodes, 32 KiB for the whole Bazaar extension).
+  `paymentRequired` is the decoded header as x402 v2 defines it: `x402Version`, `resource`,
+  `accepts` (each offer's `scheme`, `network`, `amount`, `asset`, `payTo`, `maxTimeoutSeconds`,
+  `extra`) and `extensions`. Terms it refuses (`unsupported_payment`) may still
   be paid.
 
 ## Error codes
@@ -153,7 +166,7 @@ input that does not match the tool's input schema (a missing `url`, an unknown `
 
 | Code                  | When                                                                                                                                                                                                                                                                                                                                                                                                       | Money may have moved | Daily budget keeps the amount | Retry                                                                      |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- | ----------------------------- | -------------------------------------------------------------------------- |
-| `invalid_input`       | a `GET` with a `body`                                                                                                                                                                                                                                                                                                                                                                                      | no                   | no                            | with the input fixed                                                       |
+| `invalid_input`       | a `GET` with a `body`, in either seller tool                                                                                                                                                                                                                                                                                                                                                               | no                   | no                            | with the input fixed                                                       |
 | `unsafe_url`          | the `url` does not parse; it is not https; its host is an IP address, or a name resolving to an address, that is not public; the seller answers a redirect (3xx) before any payment was sent                                                                                                                                                                                                               | no                   | no                            | not the same URL                                                           |
 | `resource_not_found`  | the seller answers 404 to the unpaid request                                                                                                                                                                                                                                                                                                                                                               | no                   | no                            | no                                                                         |
 | `response_too_large`  | a seller's body is over `STELLAR_X402_MAX_RESPONSE_BYTES` before any payment was sent                                                                                                                                                                                                                                                                                                                      | no                   | no                            | no                                                                         |
@@ -180,8 +193,10 @@ is returned (the log has the cause, not a hash). Do not pay again for the same t
 checking: look at the payer's account on Horizon or stellar.expert for a USDC payment to the
 seller's `payTo` address, after the authorization time has passed.
 
-A successful call can still carry `payment.transaction: null`: the seller answered 2xx without a
-settlement this server can read, or with one whose hash is not a Stellar transaction hash. The
+The settlement is the x402 v2 `PAYMENT-RESPONSE` header (base64 JSON with `success` and
+`transaction`). A successful call can still carry `payment.transaction: null`: the seller answered
+2xx without a settlement this server can read, or with one whose `transaction` is not 64 hex
+characters, the form of a Stellar transaction hash. The
 response is what was paid for; the amount counts as spent and the log notes it. An answer other
 than 2xx that does carry a successful settlement is returned as a normal result with its `status`
 and transaction.
