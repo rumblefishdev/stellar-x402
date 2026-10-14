@@ -43,8 +43,13 @@ the outcome is found by the authorization's nonce (its temporary ledger entry ex
 0.1–0.5 s via RPC `getLedgerEntries`; the tx hash via the transfer event and the envelope's nonce),
 not by payer/payTo/amount alone (three identical transfers in one 7-ledger range).
 
-- The buyer signs with a short expiry: **25 s** (5 ledgers), whatever the seller's
-  `maxTimeoutSeconds`; the seller still sees its own terms in `accepted`.
+- The buyer signs with an expiry of **what is left of the call's window** (about 45 s after a fast
+  402; the MCP client waits 60 s), never longer than the seller's `maxTimeoutSeconds`; the seller
+  still sees its own terms in `accepted` (W351 A, 2026-10-14). Measured on mainnet (read-only, 272
+  settlements of the main Stellar seller in the Bazaar catalog): signing → settlement median 11 s,
+  p90 18 s, p99 36 s, max 182 s; 45 s covers 98.9%. The rest expire unused: nothing is paid, the
+  budget comes back (`payment_expired`), the agent may retry. The 300 s offer filter goes away: the
+  seller's value is only a ceiling.
 - `call_paid_http` waits for the paid answer up to **35 s** after signing.
 - No answer: wait until the latest ledger passes the expiry ledger (≤ 5 s), then look the nonce up:
   - used → `payment_settled_no_response` with the transaction hash; the amount stays spent;

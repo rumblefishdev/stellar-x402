@@ -153,10 +153,13 @@ and existing servers. Each line: what was decided and why.
 - **The catalog is trusted as the operator's choice:** its request has a time limit but no address
   guard or size cap, unlike seller requests; revisit if a shared or third-party catalog is used
   (PR #28 review, 2026-10-13).
-- **Daily budget (PR #32, W331 A, W332 B):** optional, per key and asset, in a local file under an
-  own lock file (no lock package in the workspace; SQLite judged too heavy); calendar UTC day.
-  Known bound: in a rare race at a dead process's lock the day can be passed by one payment, never
-  more than the per-call limit; the record is synced to disk before it replaces the old one.
+- **Daily budget (PR #32, revised by PR #34: W350 A, W372 A, W373 A):** required with a key, per key
+  and asset, calendar UTC day; an append-only log, one file per day
+  (`~/.stellar-x402-mcp/spent-YYYY-MM-DD.jsonl`), one `O_APPEND` write + `fsync` per payment, a
+  refund as a negative line, no lock. Known bound: processes paying at the very same moment can each
+  pass the day by one payment, never more than the per-call limit. It guards against bugs and a
+  looping agent, not against an agent with access to the files (W383 C: documented, not prevented;
+  the real limit for mainnet is in 0044).
 - **Prices come only from the live 402,** and `call_paid_http` returns only the paid price: the
   agent saw the catalog price in `list_resources`.
 - **Which offer is paid:** of the seller's offers, those in an allowed asset and within the
@@ -220,8 +223,7 @@ and existing servers. Each line: what was decided and why.
   One deadline for the whole call, under 60 s. The same PR lets `allowInsecureLocal` open only
   loopback hosts, not every http host.
 - **Budget per process and per day (W235 C), in the PR after PR C:** the per-process budget stays;
-  a daily budget is added, kept in a local file so a restart does not reset it.
-  The file is updated under a lock, since parallel sessions run parallel processes.
+  done in PR #32 and #34: a daily budget in a local log replaces the per-process one.
 - **Tool schemas out of `server.ts` (W299 A), a `[structure only]` step, no PR yet:** the input and
   output schemas of `get_resource` and `call_paid_http` move to `preview.ts` and `pay.ts`, as
   `list_resources`' already live in `catalog.ts`; `server.ts` only registers.
