@@ -2,7 +2,7 @@
 id: "0018"
 title: "Verify exact payments"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0004", "0005", "0006", "0007"]
 related_tasks: ["0012", "0017", "0009", "0045"]
@@ -20,6 +20,15 @@ history:
     who: okarcz
     note: >
       Work started.
+  - date: "2026-10-14"
+    status: completed
+    who: okarcz
+    note: >
+      PR #33 merged after four review rounds (Adam approved). `POST /verify` checks `exact`
+      payments: network and envelope checks, upstream verify with a 10 s deadline, the channel
+      check and the validity check. Facilitator 46 → 103 tests, signer-pool 98 → 99. 24 design
+      decisions; spine AD-3, AD-10, AD-22 and ADRs 0004, 0007 amended. AC 5 deferred to 0009 (the
+      pool half); follow-up 0045 spawned.
 ---
 
 # Verify `exact` payments
@@ -49,7 +58,7 @@ As a resource server, I want `POST /verify` to check an `exact` payment the way 
 - [x] Given a payload where a channel account appears as the transaction source, an operation source, `from`, or the address of any auth entry (`Address` or `AddressV2`), when `/verify` is called, then it returns `isValid: false` with a reason (AD-5)
 - [x] Given a payload whose auth expires fewer than `minValidityLedgers` ledgers ahead, when `/verify` is called, then it returns `isValid: false` with a reason (AD-22)
 - [x] Given a malformed request body, when `/verify` is called, then it returns 400, and an unexpected error returns 500
-- [ ] Given the fee configuration, when the app wires `ExactStellarScheme` and the pool, then one `maxFeeStroops` and one `inclusionFeeStroops` value feed both, and the client's fee is never used (AD-10). `/verify` half done: `main()` builds one `fees` and passes it to `buildVerifier`; open until 0009 builds the pool from the same `fees.pool`
+- [ ] Given the fee configuration, when the app wires `ExactStellarScheme` and the pool, then one `maxFeeStroops` and one `inclusionFeeStroops` value feed both, and the client's fee is never used (AD-10). `/verify` half done: `main()` builds one `fees` and passes it to `buildVerifier`. The pool half is deferred to 0009, which builds the pool from the same `fees.pool` (added to its criteria)
 
 ## Implementation Notes
 
