@@ -57,6 +57,8 @@ describe("loadConfig", () => {
     expect(loadConfig(PAYING).payment?.dailyDir).toBe(join(homedir(), ".stellar-x402-mcp"));
     const named = loadConfig({ ...PAYING, STELLAR_X402_STATE_DIR: "/var/tmp/x402" });
     expect(named.payment?.dailyDir).toBe("/var/tmp/x402");
+    const home = loadConfig({ ...PAYING, STELLAR_X402_STATE_DIR: "~/.x402" });
+    expect(home.payment?.dailyDir).toBe(join(homedir(), ".x402"));
   });
 
   it("reads the optional settings", () => {
@@ -129,9 +131,9 @@ describe("loadConfig", () => {
       "STELLAR_X402_STATE_DIR needs STELLAR_X402_SECRET_KEY",
     ],
     [
-      "a state directory starting with ~",
-      { ...PAYING, STELLAR_X402_STATE_DIR: "~/.stellar-x402-mcp" },
-      "STELLAR_X402_STATE_DIR must be an absolute path (`~` is not expanded)",
+      "another user's home directory",
+      { ...PAYING, STELLAR_X402_STATE_DIR: "~alice/.x402" },
+      "STELLAR_X402_STATE_DIR must be an absolute path or start with ~/",
     ],
     [
       "a relative state directory",

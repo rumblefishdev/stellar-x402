@@ -49,10 +49,16 @@ const ENV = z.object({
   STELLAR_X402_SECRET_KEY: optional(z.string()),
   STELLAR_X402_MAX_PER_CALL: optional(ATOMIC),
   STELLAR_X402_DAILY_BUDGET: optional(ATOMIC),
-  // An MCP client passes env values as written: `~` is not expanded, and a relative path would
-  // follow each server's working directory, giving every project its own daily budget.
+  // An MCP client passes env values as written, with no shell to expand `~`; it is expanded here,
+  // as the reference MCP servers do. A relative path would follow each server's working directory,
+  // giving every project its own daily budget.
   STELLAR_X402_STATE_DIR: optional(
-    z.string().refine(isAbsolute, "must be an absolute path (`~` is not expanded)"),
+    z
+      .string()
+      .transform((path) =>
+        path === "~" || path.startsWith("~/") ? homedir() + path.slice(1) : path,
+      )
+      .refine(isAbsolute, "must be an absolute path or start with ~/"),
   ),
 });
 
