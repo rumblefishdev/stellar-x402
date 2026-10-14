@@ -48,6 +48,15 @@ is decided with the owner (options and a recommendation) before it is built.
 - **Catalog guard.** The catalog request has a time limit but no address guard or size cap (0037,
   "the catalog is trusted as the operator's choice"); a public catalog needs both.
 
+## From the comparison with other servers (lore/3-wiki/mcp/x402-mcp-server-comparison.md)
+
+- **Idempotency and "do not resubmit":** agentpay-mcp keeps a settlement history and an
+  idempotency key, so a retried call cannot pay twice.
+- **A daily limit enforced on chain** by a smart wallet, which a compromised server process cannot
+  exceed (agentpay-mcp; its contract enforcement not yet confirmed).
+- **A cap on `STELLAR_X402_TIMEOUT_MS`:** today any value is accepted, also one past the MCP
+  client's 60 s.
+
 ## Acceptance Criteria
 
 - [ ] Each item above has an owner decision recorded here, and the chosen ones are built
