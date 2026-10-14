@@ -74,9 +74,12 @@ key stop the start, so a key left out by mistake is not taken for a server that 
 - **The daily budget survives restarts and is shared.** Every process paying from the same key and
   using the same `STELLAR_X402_STATE_DIR` counts against one amount per day; the day is the UTC
   date, so it starts again at midnight UTC. Each day is its own file, `spent-YYYY-MM-DD.jsonl`, with
-  one line per payment; files older than seven days are deleted. If today's file cannot be read, the
-  server refuses to pay (`payment_failed`) rather than guess. `STELLAR_X402_STATE_FILE`, a single
-  file, was replaced by this directory; a server started with it stops and says so.
+  one line per payment; files older than seven days are deleted. If today's file cannot be read or
+  written, the server refuses to pay (`payment_failed`) rather than guess. `STELLAR_X402_STATE_FILE`,
+  a single file, was replaced by this directory; a server started with it stops and says so.
+- **Keep the state directory on a local disk only** — not a network drive or a synced folder
+  (iCloud, Dropbox). Processes writing at the same moment rely on a local filesystem appending each
+  line whole. That is checked with 20 processes at once on macOS and Linux only; Windows is untested.
 - **The daily limit is per key and per directory.** Two keys sharing one directory each get the full
   daily budget; one key with two different `STELLAR_X402_STATE_DIR` paths gets it twice.
 - **The day is a calendar day, not the last 24 hours.** A full daily budget spent just before
@@ -88,8 +91,10 @@ key stop the start, so a key left out by mistake is not taken for a server that 
 - **To reset the daily budget, delete today's file** in the state directory. It then forgets
   everything spent today, for every key that uses that directory.
 - **A refund that cannot be written stays counted.** When a payment fails before it is signed, its
-  amount goes back to the daily budget; if today's file cannot be written at that moment, the amount
-  stays counted for the day (the log says so). Too strict, never too loose.
+  amount goes back to the daily budget, in the file of the day the payment was counted on (a payment
+  counted at 23:59 UTC and refunded after midnight goes back to the day before). If that file cannot
+  be written at that moment, the amount stays counted for that day (the log says so). Too strict,
+  never too loose.
 - **Every payment sent counts against the budget**, even one the seller refuses afterwards; a
   payment that could not be signed (for example, too little USDC) does not.
 - **Sellers are reached only at public addresses over https.** A host whose DNS name points into a
