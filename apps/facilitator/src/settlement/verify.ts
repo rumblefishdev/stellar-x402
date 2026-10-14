@@ -62,7 +62,7 @@ export const EXPIRATION_TOO_FAR_REASON = "invalid_exact_stellar_signature_expira
 const MAX_EXPIRATION_LEDGER = 2 ** 32 - 2;
 
 /** Upstream's code for an exception inside its `verify()`. */
-const UNEXPECTED_VERIFY_ERROR = "unexpected_verify_error";
+export const UNEXPECTED_VERIFY_ERROR = "unexpected_verify_error";
 
 export class UpstreamTimeoutError extends Error {
   override readonly name = "UpstreamTimeoutError";
@@ -351,7 +351,7 @@ function withStringPayer(response: VerifyResponse): VerifyResponse {
     : { ...response, payer: undefined };
 }
 
-async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+export async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(
