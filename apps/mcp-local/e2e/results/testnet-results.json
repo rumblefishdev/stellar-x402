@@ -1,8 +1,8 @@
 {
-  "ranAt": "2026-10-14T11:21:04.351Z",
-  "commit": "ffaf4f17bd83cab81f8d7f2c9f6be54cdd147cb1",
+  "ranAt": "2026-10-14T11:47:04.697Z",
+  "commit": "5d32f16a4db427ae136bd75a5bc3d198538f22d1",
   "rows": 118,
-  "failed": 1,
+  "failed": 0,
   "results": [
     {
       "id": "E-01a",
@@ -15,8 +15,7 @@
         true,
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-01b",
@@ -29,8 +28,7 @@
         true,
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-01c",
@@ -43,8 +41,7 @@
         true,
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-01d",
@@ -57,8 +54,7 @@
         true,
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-01e",
@@ -71,8 +67,7 @@
         true,
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-01f",
@@ -85,8 +80,7 @@
         true,
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-01g",
@@ -99,8 +93,7 @@
         true,
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-01h",
@@ -113,8 +106,7 @@
         true,
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-01i",
@@ -127,8 +119,7 @@
         true,
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-01j",
@@ -141,8 +132,7 @@
         true,
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-01k",
@@ -155,8 +145,7 @@
         true,
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-01l",
@@ -169,8 +158,7 @@
         true,
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-01m",
@@ -183,8 +171,7 @@
         true,
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-02",
@@ -203,8 +190,7 @@
         ],
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-02",
@@ -221,8 +207,7 @@
         "<undefined>",
         0
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-03",
@@ -243,24 +228,21 @@
         ],
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-03",
       "check": "call_paid_http is destructive",
       "expected": true,
       "got": true,
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-03",
       "check": "stderr names the buyer's public address",
       "expected": true,
       "got": true,
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-04",
@@ -289,8 +271,7 @@
         true,
         1
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-04",
@@ -315,8 +296,7 @@
         true,
         1
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-04",
@@ -337,8 +317,7 @@
         true,
         1
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-04",
@@ -359,8 +338,7 @@
         true,
         1
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-04",
@@ -383,8 +361,7 @@
         true,
         1
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-04",
@@ -407,8 +384,7 @@
         true,
         1
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-04",
@@ -429,8 +405,7 @@
         true,
         1
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-04",
@@ -451,16 +426,14 @@
         true,
         1
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-04",
       "check": "H2's 10,000-character description comes back with 500 (recorded)",
       "expected": true,
       "got": true,
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-05a",
@@ -475,8 +448,7 @@
         "upstream_error",
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-05b",
@@ -491,8 +463,7 @@
         "upstream_error",
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-05c",
@@ -507,8 +478,7 @@
         "upstream_error",
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-05d",
@@ -523,8 +493,7 @@
         "upstream_error",
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-06",
@@ -537,8 +506,7 @@
         true,
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-06",
@@ -551,12 +519,11 @@
         true,
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-06",
-      "check": "call_paid_http {\"url\":\"http://127.0.0.1:54980/ok\",\"method\":\"HEAD\"}: -32602",
+      "check": "call_paid_http {\"url\":\"http://127.0.0.1:55924/ok\",\"method\":\"HEAD\"}: -32602",
       "expected": [
         true,
         true
@@ -565,8 +532,7 @@
         true,
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-06",
@@ -576,19 +542,17 @@
         true
       ],
       "got": [
-        false,
-        false
+        true,
+        true
       ],
-      "pass": false,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-06",
       "check": "requests reaching the seller",
       "expected": 0,
       "got": 0,
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-07",
@@ -605,16 +569,14 @@
         "stellar:testnet",
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-07",
       "check": "buyer balance unchanged",
-      "expected": "199820000",
-      "got": "199820000",
-      "pass": true,
-      "transaction": "<undefined>"
+      "expected": "199800000",
+      "got": "199800000",
+      "pass": true
     },
     {
       "id": "E-08a",
@@ -627,8 +589,7 @@
         "ok",
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-08b",
@@ -641,8 +602,7 @@
         "unsupported_payment",
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-08c",
@@ -655,8 +615,7 @@
         "unsupported_payment",
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-08d",
@@ -669,8 +628,7 @@
         "resource_not_found",
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-08e",
@@ -683,8 +641,7 @@
         "upstream_error",
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-08f",
@@ -697,8 +654,7 @@
         "response_too_large",
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-08g",
@@ -711,8 +667,7 @@
         "response_too_large",
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-08h",
@@ -725,8 +680,7 @@
         "upstream_error",
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-08i",
@@ -739,16 +693,14 @@
         "unsafe_url",
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-08i",
       "check": "redirect not followed",
       "expected": 1,
       "got": 1,
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-08j",
@@ -761,8 +713,7 @@
         "ok",
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-08j",
@@ -775,64 +726,56 @@
         402,
         "stellar:pubnet"
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-08c",
       "check": "the log names the input schema",
       "expected": true,
       "got": true,
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-09a",
       "check": "get_resource not a url",
       "expected": "unsafe_url",
       "got": "unsafe_url",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-09b",
       "check": "get_resource http://example.com/",
       "expected": "unsafe_url",
       "got": "unsafe_url",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-09c",
       "check": "get_resource https://10.0.0.1/x",
       "expected": "unsafe_url",
       "got": "unsafe_url",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-09d",
       "check": "get_resource http://192.168.1.1/x",
       "expected": "unsafe_url",
       "got": "unsafe_url",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-09e",
       "check": "call_paid_http https://169.254.169.254/latest",
       "expected": "unsafe_url",
       "got": "unsafe_url",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-09g",
-      "check": "get_resource http://127.0.0.1.nip.io:54996/free",
+      "check": "get_resource http://127.0.0.1.nip.io:55939/free",
       "expected": "unsafe_url",
       "got": "unsafe_url",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-09",
@@ -845,136 +788,119 @@
         "ok",
         "ok"
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-09f",
       "check": "127.0.0.1 without the switch",
       "expected": "unsafe_url",
       "got": "unsafe_url",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-09",
       "check": "nothing counted",
       "expected": false,
       "got": false,
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-09",
       "check": "requests reaching the seller: the two controls only",
       "expected": 2,
       "got": 2,
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-11",
       "check": "call_paid_http /othasset",
       "expected": "asset_not_allowed",
       "got": "asset_not_allowed",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-12a",
       "check": "call_paid_http /pubnet",
       "expected": "unsupported_payment",
       "got": "unsupported_payment",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-12b",
       "check": "call_paid_http /long",
       "expected": "unsupported_payment",
       "got": "unsupported_payment",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-12c",
       "check": "call_paid_http /negative",
       "expected": "unsupported_payment",
       "got": "unsupported_payment",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-12d",
       "check": "call_paid_http /zero",
       "expected": "unsupported_payment",
       "got": "unsupported_payment",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-12e",
       "check": "call_paid_http /upto",
       "expected": "unsupported_payment",
       "got": "unsupported_payment",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-12f",
       "check": "call_paid_http /long-pricey",
       "expected": "unsupported_payment",
       "got": "unsupported_payment",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-12g",
       "check": "call_paid_http /other-then-long",
       "expected": "unsupported_payment",
       "got": "unsupported_payment",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-13a",
       "check": "call_paid_http /pricey",
       "expected": "over_price_limit",
       "got": "over_price_limit",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-11…13a",
       "check": "signed payments the seller received",
       "expected": 0,
       "got": 0,
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-10",
       "check": "call_paid_http GET with a body",
       "expected": "invalid_input",
       "got": "invalid_input",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-10",
       "check": "get_resource GET with a body (recorded)",
       "expected": "invalid_input",
       "got": "invalid_input",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-10",
       "check": "requests reaching /paid",
       "expected": 0,
       "got": 0,
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-13b",
@@ -993,8 +919,7 @@
           "payTo": "GAS7JQRKLXPO5L7OFYDEILAM6AZGPHFJKQ2UJV7TAT5BNXPCXX54L5IF"
         }
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-13b",
@@ -1009,8 +934,7 @@
         "5000",
         "abababababababababababababababababababababababababababababababab"
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-14",
@@ -1023,8 +947,7 @@
         "insufficient_funds",
         "insufficient_funds"
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-14",
@@ -1037,16 +960,14 @@
         true,
         false
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-14",
       "check": "XLM unchanged",
       "expected": "100000000000",
       "got": "100000000000",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-15",
@@ -1061,8 +982,7 @@
         "payment_rejected",
         "over_budget"
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-15",
@@ -1075,8 +995,7 @@
         false,
         false
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-15",
@@ -1091,8 +1010,7 @@
         1,
         0
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-16a",
@@ -1107,8 +1025,7 @@
         1,
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-16b",
@@ -1123,8 +1040,7 @@
         1,
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-16c",
@@ -1139,8 +1055,7 @@
         1,
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-16d",
@@ -1155,8 +1070,7 @@
         1,
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-16e",
@@ -1171,24 +1085,21 @@
         1,
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-16b",
       "check": "redirect not followed",
       "expected": 0,
       "got": 0,
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-16",
       "check": "every amount stays counted",
       "expected": "50000",
       "got": "50000",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-16f",
@@ -1203,8 +1114,7 @@
         1,
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-17a",
@@ -1223,8 +1133,7 @@
         "10000",
         "{\"ok\":true}"
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-17b",
@@ -1237,8 +1146,7 @@
         "ok",
         null
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-17c",
@@ -1253,24 +1161,21 @@
         500,
         "abababababababababababababababababababababababababababababababab"
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-17d",
       "check": "content type comes back as text/plain (recorded)",
       "expected": "ok",
       "got": "ok",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-18",
       "check": "first payment creates the database",
       "expected": "ok",
       "got": "ok",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-18",
@@ -1285,24 +1190,21 @@
         true,
         true
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-18",
       "check": "after the lock is gone",
       "expected": "ok",
       "got": "ok",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-18",
       "check": "signed payments received: not the locked one",
       "expected": 2,
       "got": 2,
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-19",
@@ -1325,8 +1227,7 @@
         "ok",
         "ok"
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-19",
@@ -1339,8 +1240,7 @@
         true,
         0
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-20.1",
@@ -1359,8 +1259,7 @@
         ],
         1
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-20.2",
@@ -1379,8 +1278,7 @@
         ],
         1
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-20.3",
@@ -1399,8 +1297,7 @@
         ],
         1
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-20.4",
@@ -1419,8 +1316,7 @@
         ],
         1
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-20.5",
@@ -1439,8 +1335,7 @@
         ],
         1
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-21",
@@ -1464,7 +1359,7 @@
         true
       ],
       "pass": true,
-      "transaction": "63c81900264d435d94e330fcb88fc5b6a76194cc0ea78d47bab223f56ba7e24c"
+      "transaction": "8ae1fc46947d1ed43b04a4a8a356cf228b5016a6dc722e9824fe493a07de07b8"
     },
     {
       "id": "E-21",
@@ -1486,7 +1381,7 @@
         }
       ],
       "pass": true,
-      "transaction": "63c81900264d435d94e330fcb88fc5b6a76194cc0ea78d47bab223f56ba7e24c"
+      "transaction": "8ae1fc46947d1ed43b04a4a8a356cf228b5016a6dc722e9824fe493a07de07b8"
     },
     {
       "id": "E-21",
@@ -1502,7 +1397,7 @@
         "0"
       ],
       "pass": true,
-      "transaction": "63c81900264d435d94e330fcb88fc5b6a76194cc0ea78d47bab223f56ba7e24c"
+      "transaction": "8ae1fc46947d1ed43b04a4a8a356cf228b5016a6dc722e9824fe493a07de07b8"
     },
     {
       "id": "E-22a",
@@ -1526,7 +1421,7 @@
         true
       ],
       "pass": true,
-      "transaction": "2273a1a221e0188dadbf900f34b011aca9109d72f66c60cbc62b4ef27e154696"
+      "transaction": "aa27b81fc4a409e865c1d527d807ac192d0f9a05941c99f0b417770786b90078"
     },
     {
       "id": "E-22a",
@@ -1548,7 +1443,7 @@
         }
       ],
       "pass": true,
-      "transaction": "2273a1a221e0188dadbf900f34b011aca9109d72f66c60cbc62b4ef27e154696"
+      "transaction": "aa27b81fc4a409e865c1d527d807ac192d0f9a05941c99f0b417770786b90078"
     },
     {
       "id": "E-22a",
@@ -1564,69 +1459,62 @@
         "0"
       ],
       "pass": true,
-      "transaction": "2273a1a221e0188dadbf900f34b011aca9109d72f66c60cbc62b4ef27e154696"
+      "transaction": "aa27b81fc4a409e865c1d527d807ac192d0f9a05941c99f0b417770786b90078"
     },
     {
       "id": "E-22b",
       "check": "another process, same directory",
       "expected": "over_budget",
       "got": "over_budget",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-22c",
       "check": "per-call limit under the price",
       "expected": "over_price_limit",
       "got": "over_price_limit",
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-22",
       "check": "buyer balance unchanged after b and after c",
       "expected": [
-        "199800000",
-        "199800000"
+        "199780000",
+        "199780000"
       ],
       "got": [
-        "199800000",
-        "199800000"
+        "199780000",
+        "199780000"
       ],
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-23",
       "check": "no buyer secret in 257 captures from 53 processes",
       "expected": false,
       "got": false,
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-23",
       "check": "no buyer without its S secret in 257 captures from 53 processes",
       "expected": false,
       "got": false,
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-23",
       "check": "no unfunded secret in 257 captures from 53 processes",
       "expected": false,
       "got": false,
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     },
     {
       "id": "E-23",
       "check": "no malformed key of E-01l secret in 257 captures from 53 processes",
       "expected": false,
       "got": false,
-      "pass": true,
-      "transaction": "<undefined>"
+      "pass": true
     }
   ]
 }
