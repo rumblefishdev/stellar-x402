@@ -109,11 +109,15 @@ export async function callPaidHttp(
     }
   };
 
-  // Of the seller's offers, keep those in an allowed asset, with a short enough authorization, within
-  // the per-call limit and what is left of today's budget; the library pays the first one left.
+  // Of the seller's offers, keep those in an allowed asset, at a price above zero, with a short enough
+  // authorization, within the per-call limit and what is left of today's budget; the library pays the
+  // first one left.
   client.registerPolicy((_version, offers) => {
     const allowed = offers.filter((offer) => Object.hasOwn(config.assets, offer.asset));
-    const shortLived = allowed.filter(
+    // A zero or negative price would be counted before the library refuses to sign it, and a negative
+    // count raises the day's budget for every process until it is given back.
+    const priced = allowed.filter((offer) => /^[1-9][0-9]*$/.test(offer.amount));
+    const shortLived = priced.filter(
       (offer) => offer.maxTimeoutSeconds <= MAX_AUTHORIZATION_SECONDS,
     );
     const affordable = shortLived.filter(
@@ -134,6 +138,11 @@ export async function callPaidHttp(
     );
     if (allowed.length === 0) {
       refusal = new ToolError("asset_not_allowed", "The seller asks for an asset not allowed.");
+    } else if (priced.length === 0) {
+      refusal = new ToolError(
+        "unsupported_payment",
+        "The seller's price is not a whole number of atomic units above zero.",
+      );
     } else if (shortLived.length === 0) {
       refusal = new ToolError(
         "unsupported_payment",
