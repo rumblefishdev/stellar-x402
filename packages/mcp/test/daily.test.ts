@@ -215,17 +215,19 @@ describe("daily budget", () => {
   });
 
   it("logs a refund it cannot write, and the amount stays counted", async () => {
-    /** Renames the table through a connection of the test's own, so the server's insert fails. */
-    const renameTable = (from: string, to: string) => {
+    /** Fails every refund row from here on, through a connection of the test's own. */
+    const failRefunds = (sql: string) => {
       const db = new DatabaseSync(join(state, "spent.sqlite"));
-      db.exec(`ALTER TABLE ${from} RENAME TO ${to}`);
+      db.exec(sql);
       db.close();
     };
     const failing: SchemeNetworkClient = {
       scheme: "exact",
       async createPaymentPayload() {
-        // The amount is counted by now; a table that cannot be written stops the refund.
-        renameTable("spent", "spent_away");
+        // The amount is counted by now; from here on the refund's insert fails.
+        failRefunds(
+          "CREATE TRIGGER no_refund BEFORE INSERT ON spent WHEN NEW.amount < 0 BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+        );
         throw new Error(NO_TRUSTLINE);
       },
     };
@@ -233,7 +235,7 @@ describe("daily budget", () => {
     try {
       expect(await call()).toBe("insufficient_funds");
     } finally {
-      renameTable("spent_away", "spent");
+      failRefunds("DROP TRIGGER IF EXISTS no_refund");
     }
     expect(logs.join()).toContain("could not give back 10000 to the daily budget");
     expect(spent()).toBe(10_000n);
@@ -259,7 +261,7 @@ describe("daily budget", () => {
     expect(await call()).toBe("payment_failed");
     expect(logs.join()).toContain("disk full");
     expect(seller.payments).toHaveLength(1);
-    // The failed transaction was rolled back, so the same connection counts the next payment.
+    // The failed transaction was rolled back, so the next payment is counted.
     db.exec("DROP TRIGGER no_insert");
     db.close();
     expect(await call()).toBe("paid");
@@ -281,6 +283,19 @@ describe("daily budget", () => {
     expect(seller.payments).toHaveLength(1);
     expect(await call()).toBe("paid");
   }, 20_000);
+
+  it("keeps one budget for running and new servers after the database is deleted", async () => {
+    const running = await startProcess();
+    expect(await running()).toBe("paid");
+    // A reset: the files are deleted while a server still runs.
+    await rm(state, { recursive: true });
+    const started = await startProcess();
+    expect(await running()).toBe("paid");
+    expect(await started()).toBe("paid");
+    expect(await running()).toBe("over_budget");
+    expect(await started()).toBe("over_budget");
+    expect(spent()).toBe(20_000n);
+  });
 
   it("never lets six servers in one process paying at once exceed the budget", async () => {
     const calls = await Promise.all([1, 2, 3, 4, 5, 6].map(() => startProcess()));

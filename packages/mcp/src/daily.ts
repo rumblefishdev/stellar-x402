@@ -28,13 +28,13 @@ export function utcDay(now: Date): string {
   return now.toISOString().slice(0, 10);
 }
 
-const opened = new Map<string, DatabaseSync>();
-
-function database(dir: string): DatabaseSync {
-  let db = opened.get(dir);
-  if (db) return db;
+/**
+ * Opens the database for one read or count and is closed after it. A connection kept open would
+ * keep counting into a deleted file after a reset, while new servers count in a fresh one.
+ */
+function open(dir: string): DatabaseSync {
   mkdirSync(dir, { recursive: true });
-  db = new DatabaseSync(join(dir, "spent.sqlite"));
+  const db = new DatabaseSync(join(dir, "spent.sqlite"));
   // Wait for another process's transaction instead of failing; readers do not wait for a writer
   // (WAL); a counted payment survives a power cut.
   db.exec("PRAGMA busy_timeout = 5000");
@@ -44,18 +44,17 @@ function database(dir: string): DatabaseSync {
     "CREATE TABLE IF NOT EXISTS spent (day TEXT NOT NULL, payer TEXT NOT NULL, asset TEXT NOT NULL, amount INTEGER NOT NULL);" +
       "CREATE INDEX IF NOT EXISTS spent_by_day ON spent (day, payer, asset)",
   );
-  opened.set(dir, db);
   return db;
 }
 
 /** Spent by `payer` on `day` per asset. */
 export function spentOn(dir: string, day: string, payer: string): Map<string, bigint> {
-  const query = database(dir).prepare(
-    "SELECT asset, SUM(amount) AS total FROM spent WHERE day = ? AND payer = ? GROUP BY asset",
-  );
-  query.setReadBigInts(true);
-  const rows = query.all(day, payer) as { asset: string; total: bigint }[];
-  return new Map(rows.map((row) => [row.asset, row.total]));
+  const db = open(dir);
+  try {
+    return sum(db, day, payer);
+  } finally {
+    db.close();
+  }
 }
 
 /**
@@ -63,33 +62,53 @@ export function spentOn(dir: string, day: string, payer: string): Map<string, bi
  * takes the write lock before the read, so another process cannot count between the read and the insert.
  */
 export function countDaily(dir: string, entry: DailyEntry, amount: bigint, daily: bigint): boolean {
-  const db = database(dir);
-  db.exec("BEGIN IMMEDIATE");
+  const db = open(dir);
   try {
-    const spent = spentOn(dir, entry.day, entry.payer).get(entry.asset) ?? 0n;
-    if (spent + amount > daily) {
-      db.exec("ROLLBACK");
-      return false;
-    }
-    insert(db, entry, amount);
-    const oldest = utcDay(new Date(Date.parse(entry.day) - KEEP_DAYS * 86_400_000));
-    db.prepare("DELETE FROM spent WHERE day < ?").run(oldest);
-    db.exec("COMMIT");
-    return true;
-  } catch (error) {
-    // Some errors (a full disk) end the transaction themselves; then ROLLBACK fails too, and both show.
+    db.exec("BEGIN IMMEDIATE");
     try {
-      db.exec("ROLLBACK");
-    } catch (rollbackError) {
-      throw new Error(`${String(error)}, then ${String(rollbackError)}`, { cause: rollbackError });
+      const spent = sum(db, entry.day, entry.payer).get(entry.asset) ?? 0n;
+      if (spent + amount > daily) {
+        db.exec("ROLLBACK");
+        return false;
+      }
+      insert(db, entry, amount);
+      const oldest = utcDay(new Date(Date.parse(entry.day) - KEEP_DAYS * 86_400_000));
+      db.prepare("DELETE FROM spent WHERE day < ?").run(oldest);
+      db.exec("COMMIT");
+      return true;
+    } catch (error) {
+      // Some errors (a full disk) end the transaction themselves; then ROLLBACK fails too, and both show.
+      try {
+        db.exec("ROLLBACK");
+      } catch (rollbackError) {
+        throw new Error(`${String(error)}, then ${String(rollbackError)}`, {
+          cause: rollbackError,
+        });
+      }
+      throw error;
     }
-    throw error;
+  } finally {
+    db.close();
   }
 }
 
 /** Gives back an amount whose payment was never signed, in the day it was counted on. */
 export function refundDaily(dir: string, entry: DailyEntry, amount: bigint): void {
-  insert(database(dir), entry, -amount);
+  const db = open(dir);
+  try {
+    insert(db, entry, -amount);
+  } finally {
+    db.close();
+  }
+}
+
+function sum(db: DatabaseSync, day: string, payer: string): Map<string, bigint> {
+  const query = db.prepare(
+    "SELECT asset, SUM(amount) AS total FROM spent WHERE day = ? AND payer = ? GROUP BY asset",
+  );
+  query.setReadBigInts(true);
+  const rows = query.all(day, payer) as { asset: string; total: bigint }[];
+  return new Map(rows.map((row) => [row.asset, row.total]));
 }
 
 function insert(db: DatabaseSync, { day, payer, asset }: DailyEntry, amount: bigint): void {

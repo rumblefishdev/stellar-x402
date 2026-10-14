@@ -54,17 +54,17 @@ key stop the start, so a key left out by mistake is not taken for a server that 
 
 ## Settings
 
-| Variable                            | Default                | Meaning                                                                                            |
-| ----------------------------------- | ---------------------- | -------------------------------------------------------------------------------------------------- |
-| `STELLAR_X402_DISCOVERY_URL`        | required               | base URL of a server with `GET /discovery/resources`                                               |
-| `STELLAR_X402_SECRET_KEY`           | none                   | the buyer's Stellar secret key; enables `call_paid_http`                                           |
-| `STELLAR_X402_MAX_PER_CALL`         | required with a key    | the largest price one call may pay, in atomic units (`10000` = 0.001 USDC)                         |
-| `STELLAR_X402_DAILY_BUDGET`         | required with a key    | the most one key may spend in one UTC day, all its processes together, in atomic units             |
-| `STELLAR_X402_STATE_DIR`            | `~/.stellar-x402-mcp/` | where the daily budget keeps what was spent, the SQLite database `spent.sqlite`                    |
-| `STELLAR_X402_NETWORK`              | `stellar:testnet`      | anything else stops the server: it pays on testnet only                                            |
-| `STELLAR_X402_TIMEOUT_MS`           | `30000`                | a tool call gives up after this long, all its requests together                                    |
-| `STELLAR_X402_MAX_RESPONSE_BYTES`   | `100000`               | a seller response larger than this is refused (`response_too_large`)                               |
-| `STELLAR_X402_ALLOW_INSECURE_LOCAL` | `0`                    | `1` also allows `http` to this machine only (below) — **only** for a seller you run on it in tests |
+| Variable                            | Default                | Meaning                                                                                                                   |
+| ----------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `STELLAR_X402_DISCOVERY_URL`        | required               | base URL of a server with `GET /discovery/resources`                                                                      |
+| `STELLAR_X402_SECRET_KEY`           | none                   | the buyer's Stellar secret key; enables `call_paid_http`                                                                  |
+| `STELLAR_X402_MAX_PER_CALL`         | required with a key    | the largest price one call may pay, in atomic units (`10000` = 0.001 USDC)                                                |
+| `STELLAR_X402_DAILY_BUDGET`         | required with a key    | the most one key may spend in one UTC day, all its processes together, in atomic units                                    |
+| `STELLAR_X402_STATE_DIR`            | `~/.stellar-x402-mcp/` | where the daily budget keeps what was spent, the SQLite database `spent.sqlite`; an absolute path, as `~` is not expanded |
+| `STELLAR_X402_NETWORK`              | `stellar:testnet`      | anything else stops the server: it pays on testnet only                                                                   |
+| `STELLAR_X402_TIMEOUT_MS`           | `30000`                | a tool call gives up after this long, all its requests together                                                           |
+| `STELLAR_X402_MAX_RESPONSE_BYTES`   | `100000`               | a seller response larger than this is refused (`response_too_large`)                                                      |
+| `STELLAR_X402_ALLOW_INSECURE_LOCAL` | `0`                    | `1` also allows `http` to this machine only (below) — **only** for a seller you run on it in tests                        |
 
 Every value is read when the server starts. An empty value means the same as an unset one (the
 default applies, a required one is missing). Numbers are plain decimal digits: no `1e3`, hex, sign or
@@ -104,10 +104,9 @@ used.
 - **The day is a calendar day, not the last 24 hours.** A full daily budget spent just before
   midnight UTC and another just after it means up to twice the daily budget within minutes.
 - **To reset the daily budget, delete `spent.sqlite`** (with its `-wal` and `-shm` files, if
-  present) while no server is running. It then forgets everything spent today and on the days kept
-  before it, for every key that uses that directory. Quit every MCP client first (Claude Desktop
-  starts its servers by itself): a server still running keeps counting into the deleted file, so
-  it and the servers started after the reset would each get the full daily budget.
+  present), at a moment no payment is being made. It then forgets everything spent today and on the
+  days kept before it, for every key that uses that directory. A running server opens the database
+  for each payment, so after the reset it counts in the new file with every other server.
 - **A refund that cannot be written stays counted.** When a payment fails before it is signed, its
   amount goes back to the daily budget, on the day the payment was counted on (a payment counted at
   23:59 UTC and refunded after midnight goes back to the day before). If the database cannot be
