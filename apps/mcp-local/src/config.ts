@@ -99,8 +99,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): CliConfig {
       "STELLAR_X402_DAILY_BUDGET",
       "STELLAR_X402_STATE_DIR",
     ] as const;
-    const set = paymentOnly.find((name) => vars[name] !== undefined);
-    if (set) throw new Error(`${set} needs STELLAR_X402_SECRET_KEY.`);
+    const orphan = paymentOnly.find((name) => vars[name] !== undefined);
+    if (orphan) throw new Error(`${orphan} needs STELLAR_X402_SECRET_KEY.`);
   }
   const config: CliConfig = {
     discoveryUrl: vars.STELLAR_X402_DISCOVERY_URL,

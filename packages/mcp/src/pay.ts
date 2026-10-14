@@ -40,7 +40,7 @@ export interface PaidResponse {
 const MAX_AUTHORIZATION_SECONDS = 300;
 
 /** The daily database could not be read or written, so how much is left today is unknown: pay nothing. */
-function dailyRecordFailed(error: unknown): ToolError {
+function dailyDatabaseFailed(error: unknown): ToolError {
   return new ToolError(
     "payment_failed",
     "The daily budget database cannot be read or written, so nothing is paid.",
@@ -128,7 +128,7 @@ export async function callPaidHttp(
       try {
         today = spentOn(config.dailyDir, utcDay(now()), config.payer);
       } catch (error) {
-        refusal = dailyRecordFailed(error);
+        refusal = dailyDatabaseFailed(error);
         return [];
       }
     }
@@ -166,7 +166,7 @@ export async function callPaidHttp(
     try {
       counted = countDaily(config.dailyDir, countedIn, amount, config.assets[offer.asset]!.daily);
     } catch (error) {
-      refusal = dailyRecordFailed(error);
+      refusal = dailyDatabaseFailed(error);
     }
     if (!counted) {
       refusal ??= new ToolError("over_budget", "The payment would exceed the daily budget.");
