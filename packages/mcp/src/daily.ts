@@ -134,7 +134,14 @@ function append(
   const fd = openSync(dayFile(dir, day), "a");
   try {
     // One write of a line far below 4 KiB: appended whole, never mixed with another process's line.
-    writeSync(fd, `${gap}${JSON.stringify({ payer, asset, amount: amount.toString() })}\n`);
+    const line = `${gap}${JSON.stringify({ payer, asset, amount: amount.toString() })}\n`;
+    const written = writeSync(fd, line);
+    // A full disk or quota can write part of the line and still return; that amount is not counted.
+    if (written !== Buffer.byteLength(line)) {
+      throw new Error(
+        `wrote ${written} of ${Buffer.byteLength(line)} bytes to ${dayFile(dir, day)}`,
+      );
+    }
     fsyncSync(fd);
   } finally {
     closeSync(fd);

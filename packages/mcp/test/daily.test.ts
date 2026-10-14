@@ -2,6 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { SchemeNetworkClient } from "@x402/core/types";
 import { fork } from "node:child_process";
+import { writeSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +18,12 @@ import {
   USDC,
   type FakeSeller,
 } from "./fake-seller.js";
+
+// The real writeSync, wrapped so a test can make one write come back short, as on a full disk.
+vi.mock("node:fs", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs")>();
+  return { ...fs, writeSync: vi.fn(fs.writeSync) };
+});
 
 /** Two buyers' public addresses; the daily log keys their spending apart. */
 const BUYER = "GBUYERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -274,6 +281,19 @@ describe("daily log", () => {
     expect(countDaily(state, entry, 4n, 10n, log)).toBe(true);
     refundDaily(state, entry, 4n, log);
     expect(spentOn(state, day, BUYER, log)).toEqual(new Map([[USDC, 3n]]));
+  });
+
+  it("refuses to count, and counts nothing, when a write comes back short", async () => {
+    const realWrite = vi.mocked(writeSync).getMockImplementation()!;
+    // A full disk: only the first 10 bytes of the line reach the file.
+    vi.mocked(writeSync).mockImplementationOnce((fd: number, line: unknown) =>
+      realWrite(fd, String(line).slice(0, 10)),
+    );
+    expect(() => countDaily(state, entry, 4n, 10n, log)).toThrow("wrote 10 of");
+    expect(await readFile(join(state, `spent-${day}.jsonl`), "utf8")).toHaveLength(10);
+    // The cut line is ignored; the next payment is counted as the only one.
+    expect(countDaily(state, entry, 4n, 10n, log)).toBe(true);
+    expect(spentOn(state, day, BUYER, log)).toEqual(new Map([[USDC, 4n]]));
   });
 
   it("deletes day files older than seven days when it appends", async () => {
