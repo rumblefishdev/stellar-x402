@@ -51,9 +51,10 @@ export function settlementInclusionFee(bid: number): number {
  * Upstream `ExactStellarScheme` takes its inclusion fee as a constructor value, and `verify()`
  * checks the simulated resource fee plus that value against the ceiling. This verifier reads the
  * current bid on each call and builds a scheme for the fee a settlement pays at that bid when the
- * bid has changed, so `/verify` refuses exactly what the pool would refuse now. Fee escalation
- * under load can still raise the pool's bid later; the pool checks its own total again before
- * signing.
+ * bid has changed, so `/verify` refuses exactly what the pool would refuse at the same bid. A
+ * fee-stats bid stays the same only within one 30 s reading, so a `/settle` after the next reading
+ * can pay a different one. Fee escalation under load can also raise the pool's bid later; the pool
+ * checks its own total again before signing.
  */
 export function upstreamAtCurrentBid(
   inclusionFee: () => Promise<number>,

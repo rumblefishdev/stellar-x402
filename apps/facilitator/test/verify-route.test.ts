@@ -16,9 +16,10 @@ const requirements: PaymentRequirements = {
   maxTimeoutSeconds: 60,
   extra: {},
 };
+// `accepted` differs from the requirements, so the test sees which one reaches the verifier.
 const paymentPayload = {
   x402Version: 2,
-  accepted: requirements,
+  accepted: { ...requirements, amount: "1" },
   payload: { transaction: "AAAA" },
 };
 const request = { x402Version: 2, paymentPayload, paymentRequirements: requirements };
@@ -57,7 +58,13 @@ describe("POST /verify", () => {
     async (isValid) => {
       const answer: VerifyResponse = isValid
         ? { isValid, payer: "GPAYER" }
-        : { isValid, invalidReason: "invalid_exact_stellar_payload_wrong_amount" };
+        : {
+            isValid,
+            invalidReason: "invalid_exact_stellar_payload_unsafe_tx_or_op_source",
+            invalidMessage: "the payload uses a facilitator channel account",
+            payer: "GPAYER",
+            extra: { reason: "invalid_exact_stellar_payload_channel_account" },
+          };
       verify.mockResolvedValueOnce(answer);
       const response = await post(request);
       expect([response.status, await response.json()]).toEqual([200, answer]);
@@ -98,6 +105,16 @@ describe("POST /verify", () => {
     expect([response.status, await response.json()]).toEqual([400, { error: "bad_request" }]);
     expect(verify).not.toHaveBeenCalled();
   });
+
+  // Upstream's `BigInt(amount)` would throw on these, which is a 500, not a verdict.
+  it.each(["1.5", "1e3", "abc", "-5", " 1"])(
+    "answers 400 for the amount %j, without verifying",
+    async (amount) => {
+      const response = await post({ ...request, paymentRequirements: { ...requirements, amount } });
+      expect([response.status, await response.json()]).toEqual([400, { error: "bad_request" }]);
+      expect(verify).not.toHaveBeenCalled();
+    },
+  );
 
   it("answers 500 and logs the error when verification throws", async () => {
     verify.mockRejectedValueOnce(new Error("rpc down"));

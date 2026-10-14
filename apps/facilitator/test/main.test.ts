@@ -94,18 +94,49 @@ describe("startup with a bad config", () => {
   }, 20_000);
 });
 
-describe("process signals", () => {
-  it("closes the server and exits 0 on SIGTERM", async () => {
+describe("main()", () => {
+  it("answers /verify with the real verifier, then exits 0 on SIGTERM", async () => {
     const child = spawn(process.execPath, ["--import", "tsx", "src/server.ts"], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),
       env: { ...env, PORT: "47129" },
     });
+    // A pubnet payment: the real verifier rejects it before any RPC call; a stub wouldn't.
+    const requirements = {
+      scheme: "exact",
+      network: "stellar:pubnet",
+      asset: "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+      amount: "1000",
+      payTo: Keypair.random().publicKey(),
+      maxTimeoutSeconds: 60,
+      extra: {},
+    };
+    const body = {
+      x402Version: 2,
+      paymentPayload: { x402Version: 2, accepted: requirements, payload: { transaction: "AAAA" } },
+      paymentRequirements: requirements,
+    };
     let output = "";
+    let answer: Promise<unknown> | undefined;
     child.stdout.on("data", (chunk) => {
       output += chunk;
-      if (output.includes('"listening"')) child.kill("SIGTERM");
+      if (answer || !output.includes('"listening"')) return;
+      answer = fetch("http://127.0.0.1:47129/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      })
+        .then(async (response) => [response.status, await response.json()])
+        .finally(() => child.kill("SIGTERM"));
     });
     const [code, signal] = await once(child, "exit");
+    expect(await answer).toEqual([
+      200,
+      {
+        isValid: false,
+        invalidReason: "invalid_network",
+        invalidMessage: "this facilitator serves stellar:testnet",
+      },
+    ]);
     // Without a handler the process dies by the signal: code null, signal "SIGTERM".
     expect([code, signal], output).toEqual([0, null]);
   }, 20_000);

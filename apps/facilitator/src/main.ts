@@ -8,9 +8,9 @@ import { createCataloger } from "./catalog/cataloger.js";
 import { parseConfig } from "./config.js";
 import type { Config } from "./config.js";
 import { createApp, type AppDeps } from "./http/app.js";
-import { jsonLogger } from "./logger.js";
+import { captureConsoleError, jsonLogger } from "./logger.js";
 import { memoryMetrics } from "./metrics.js";
-import { feeSettings, upstreamAtCurrentBid } from "./settlement/fees.js";
+import { feeSettings, upstreamAtCurrentBid, type FeeSettings } from "./settlement/fees.js";
 import { createVerifier, type UpstreamVerifier, type Verify } from "./settlement/verify.js";
 
 export interface Started {
@@ -40,19 +40,19 @@ export type SchemeOptions = NonNullable<ConstructorParameters<typeof ExactStella
 
 /**
  * `/verify`'s verifier from the config (AD-3, AD-5, AD-10, AD-22): upstream `ExactStellarScheme`
- * with the fee ceiling and the fee a settlement pays at the shared bid, then our checks. Tests
- * pass their own `makeScheme`.
+ * with the fee ceiling and the fee a settlement pays at the shared bid, then our checks. `fees` is
+ * the caller's, so the pool can be built from the same `fees.pool` and share its bid. Tests pass
+ * their own `makeScheme`.
  */
 export function buildVerifier(
   config: Config,
-  rpc: Pick<FallbackRpc, "getFeeStats" | "getLatestLedger">,
+  rpc: Pick<FallbackRpc, "getLatestLedger">,
+  fees: FeeSettings,
   makeScheme: (
     signer: ReturnType<typeof createEd25519Signer>,
     options: SchemeOptions,
   ) => UpstreamVerifier = (signer, options) => new ExactStellarScheme([signer], options),
 ): Verify {
-  // 0009 builds the pool from `fees.pool`, which shares the bid with `/verify` (AD-10).
-  const fees = feeSettings(config.fees, rpc);
   // Upstream knows only the facilitator key, and only in plain form; the channels and the muxed
   // facilitator are `createVerifier`'s check (AD-5).
   // It reads the first RPC URL only.
@@ -90,14 +90,22 @@ export async function main(env: Record<string, string | undefined> = process.env
     metrics: memoryMetrics(),
     allowHttp: config.catalog.allowHttp,
   });
-  const verify = buildVerifier(config, FallbackRpc.fromUrls(config.rpcUrls));
-  const started = await start({ config, logger, stores, verify });
+  const rpc = FallbackRpc.fromUrls(config.rpcUrls);
+  // 0009 builds the pool from `fees.pool`, so `/verify` and the pool share one bid (AD-10).
+  const fees = feeSettings(config.fees, rpc);
+  const verify = buildVerifier(config, rpc, fees);
+  const restoreConsole = captureConsoleError(logger);
+  const started = await start({ config, logger, stores, verify }).catch((error: unknown) => {
+    restoreConsole();
+    throw error;
+  });
   return {
     ...started,
     // Catalog writes already under way finish before the process exits.
     close: async () => {
       await started.close();
       await cataloger.drain();
+      restoreConsole();
     },
   };
 }

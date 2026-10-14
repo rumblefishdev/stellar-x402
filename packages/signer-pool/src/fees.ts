@@ -1,5 +1,8 @@
 import type { SorobanRpc } from "./types.js";
 
+/** The bid's default floor, in stroops: the network's minimum inclusion fee. */
+export const FEE_STATS_MIN_STROOPS = 100;
+
 export interface FeeStatsOptions {
   /** Which percentile of recent Soroban inclusion fees to bid. */
   percentile?: "p50" | "p70" | "p90" | "p95" | "p99";
@@ -26,7 +29,7 @@ export function feeStatsInclusionFee(
 ): () => Promise<number> {
   const {
     percentile = "p90",
-    min = 100,
+    min = FEE_STATS_MIN_STROOPS,
     max = 10_000,
     cacheMs = 30_000,
     failureCacheMs = 5_000,

@@ -64,3 +64,33 @@ export function jsonLogger(
     };
   return { debug: at("debug"), info: at("info"), warn: at("warn"), error: at("error") };
 }
+
+/** Each URL in `text` as its host only: an RPC URL can carry an API key (ADR 0011). */
+export function redactUrls(text: string): string {
+  return text.replace(/\b[a-z][a-z\d+.-]*:\/\/[^\s"'<>]+/gi, (url) => {
+    try {
+      return new URL(url).host;
+    } catch {
+      return "[url]";
+    }
+  });
+}
+
+/**
+ * Sends `console.error`, where upstream `@x402/stellar` writes its errors, through `logger` as
+ * one `upstream_console_error` event. An error becomes its name and message: the whole object,
+ * an AxiosError for a failed RPC call, holds the request URL and body. URLs keep only their host.
+ * Returns the function that puts the original `console.error` back.
+ */
+export function captureConsoleError(logger: Logger): () => void {
+  const original = console.error;
+  console.error = (...args: unknown[]) => {
+    const text = args
+      .map((arg) => (arg instanceof Error ? `${arg.name}: ${arg.message}` : String(arg)))
+      .join(" ");
+    logger.warn("upstream_console_error", { message: redactUrls(text) });
+  };
+  return () => {
+    console.error = original;
+  };
+}

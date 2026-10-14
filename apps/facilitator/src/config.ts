@@ -1,4 +1,5 @@
 import { StrKey } from "@stellar/stellar-sdk";
+import { FEE_STATS_MIN_STROOPS } from "@stellar-x402/signer-pool";
 import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import { z } from "zod";
 
@@ -44,19 +45,23 @@ const stroops = (min: bigint) =>
     .regex(/^\d+$/, "must be a whole number of stroops")
     .transform((value) => BigInt(value))
     .refine((value) => value >= min, `must be at least ${min}`);
-/** Fee settings reach upstream and the pool as a `number`. */
 /** The floor of `signer-pool`'s `feeStatsInclusionFee` bid, used when no bid is set. */
-const FEE_STATS_MIN_BID_STROOPS = 100n;
+const FEE_STATS_MIN_BID_STROOPS = BigInt(FEE_STATS_MIN_STROOPS);
 
+/** Fee settings reach upstream and the pool as a `number`. */
 const feeStroops = stroops(100n).refine(
   (value) => value <= BigInt(Number.MAX_SAFE_INTEGER),
   `must be at most ${Number.MAX_SAFE_INTEGER}`,
 );
 
+/**
+ * An http(s) URL without credentials. Upstream's RPC client refuses `user:pass@`, and it writes
+ * the whole URL to stderr on a failed call.
+ */
 function isHttpUrl(value: string): boolean {
   try {
-    const { protocol } = new URL(value);
-    return protocol === "https:" || protocol === "http:";
+    const { protocol, username, password } = new URL(value);
+    return (protocol === "https:" || protocol === "http:") && !username && !password;
   } catch {
     return false;
   }
@@ -69,11 +74,14 @@ const envSchema = z
     ),
     PORT: int(1, 65_535).default("4021"),
     LOG_LEVEL: oneOf(["debug", "info", "warn", "error"]).default("info"),
-    /** Comma-separated; the first is primary, the rest are fallbacks. */
+    /**
+     * Comma-separated; the first is primary, the rest are fallbacks for the pool and the ledger
+     * reads. Upstream verify uses only the first, so `/verify` fails while it is down.
+     */
     RPC_URLS: list
       .pipe(
         z
-          .array(z.string().refine(isHttpUrl, "must be http(s) URLs"))
+          .array(z.string().refine(isHttpUrl, "must be http(s) URLs without credentials"))
           .min(1, "must list at least one URL"),
       )
       .optional(),
@@ -160,6 +168,13 @@ const envSchema = z
     message: "is required outside testnet",
     path: ["RPC_URLS"],
   })
+  // Upstream's RPC client refuses http outside testnet, which would make every `/verify` a 500.
+  .refine(
+    (env) =>
+      env.NETWORK === STELLAR_NETWORKS.testnet ||
+      (env.RPC_URLS ?? []).every((url) => url.startsWith("https:")),
+    { message: "must be https outside testnet", path: ["RPC_URLS"] },
+  )
   // Under the fee bump the bid is paid twice (AD-10), and the ceiling also pays the resource fee,
   // which is never 0: twice the bid at the ceiling fails every payment.
   .refine(

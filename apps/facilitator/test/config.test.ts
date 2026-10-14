@@ -55,7 +55,7 @@ describe("parseConfig", () => {
       NETWORK: "stellar:pubnet",
       PORT: "8080",
       LOG_LEVEL: "debug",
-      RPC_URLS: "https://a.example, http://b.example",
+      RPC_URLS: "https://a.example, https://b.example",
       FACILITATOR_SECRET: SECRET,
       CHANNELS: CHANNEL_B,
       STORE: "memory",
@@ -84,7 +84,7 @@ describe("parseConfig", () => {
       network: "stellar:pubnet",
       port: 8080,
       logLevel: "debug",
-      rpcUrls: ["https://a.example", "http://b.example"],
+      rpcUrls: ["https://a.example", "https://b.example"],
       facilitatorSecret: SECRET,
       channels: [CHANNEL_B],
       store: "memory",
@@ -212,12 +212,22 @@ describe("parseConfig", () => {
   });
 
   it("checks RPC URLs", () => {
-    expect(problems({ ...minimal, RPC_URLS: "ftp://rpc.example" })).toEqual([
-      "RPC_URLS must be http(s) URLs",
+    for (const url of ["ftp://rpc.example", "not a url", "https://user:pass@rpc.example"]) {
+      expect(problems({ ...minimal, RPC_URLS: url })).toEqual([
+        "RPC_URLS must be http(s) URLs without credentials",
+      ]);
+    }
+    // Upstream's client allows http on testnet only.
+    expect(parseConfig({ ...minimal, RPC_URLS: "http://rpc:8000" }).rpcUrls).toEqual([
+      "http://rpc:8000",
     ]);
-    expect(problems({ ...minimal, RPC_URLS: "not a url, also not" })).toEqual([
-      "RPC_URLS must be http(s) URLs",
-    ]);
+    expect(
+      problems({
+        ...minimal,
+        NETWORK: "stellar:pubnet",
+        RPC_URLS: "https://a.example,http://rpc:8000",
+      }),
+    ).toEqual(["RPC_URLS must be https outside testnet"]);
     expect(problems({ ...minimal, NETWORK: "stellar:pubnet", RPC_URLS: "," })).toEqual([
       "RPC_URLS must list at least one URL",
     ]);

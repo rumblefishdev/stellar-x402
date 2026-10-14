@@ -26,14 +26,19 @@ const notImplemented: RequestHandler = (_req, res) => {
 /**
  * An x402 v2 verify or settle request (AD-13), checked with `@x402/core`'s schemas. The objects
  * pass on as the client sent them; `undefined` means a 400.
+ *
+ * The schema takes any non-empty `amount`, and upstream's `BigInt(amount)` throws on anything but
+ * an integer, which it reports as `unexpected_verify_error`: our 500. So `amount` must be digits.
  */
 export function parsePaymentRequest(body: unknown): VerifyRequest | undefined {
   if (typeof body !== "object" || body === null) return undefined;
   const { x402Version, paymentPayload, paymentRequirements } = body as Record<string, unknown>;
+  const requirements = PaymentRequirementsV2Schema.safeParse(paymentRequirements);
   const valid =
     x402Version === 2 &&
     PaymentPayloadV2Schema.safeParse(paymentPayload).success &&
-    PaymentRequirementsV2Schema.safeParse(paymentRequirements).success;
+    requirements.success &&
+    /^\d+$/.test(requirements.data.amount);
   return valid ? (body as VerifyRequest) : undefined;
 }
 

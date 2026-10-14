@@ -2,6 +2,7 @@ import {
   Account,
   Address,
   Keypair,
+  MuxedAccount,
   Networks,
   Operation,
   StrKey,
@@ -14,7 +15,12 @@ import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/
 import { describe, expect, it, vi } from "vitest";
 import { parseConfig } from "../src/config.js";
 import { buildVerifier, type SchemeOptions } from "../src/main.js";
-import { CHANNEL_ACCOUNT_REASON, type UpstreamVerifier } from "../src/settlement/verify.js";
+import { feeSettings } from "../src/settlement/fees.js";
+import {
+  CHANNEL_ACCOUNT_REASON,
+  MUXED_FACILITATOR_REASON,
+  type UpstreamVerifier,
+} from "../src/settlement/verify.js";
 
 const secret = Keypair.random().secret();
 const channel = Keypair.random().publicKey();
@@ -40,14 +46,17 @@ const requirements: PaymentRequirements = {
   extra: {},
 };
 
-/** A `transfer` from the payer, signed for 12 ledgers, with `source` as the transaction source. */
-function payload(source = payer): PaymentPayload {
+/** A `transfer` from the payer, with auth to `expiration` and `source` as the transaction source. */
+function payload(
+  source: Account | MuxedAccount = new Account(payer, "1"),
+  expiration = CURRENT + 12,
+): PaymentPayload {
   const auth = new xdr.SorobanAuthorizationEntry({
     credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(
       new xdr.SorobanAddressCredentials({
         address: new Address(payer).toScAddress(),
         nonce: xdr.Int64.fromString("1"),
-        signatureExpirationLedger: CURRENT + 12,
+        signatureExpirationLedger: expiration,
         signature: xdr.ScVal.scvVoid(),
       }),
     ),
@@ -62,7 +71,7 @@ function payload(source = payer): PaymentPayload {
       subInvocations: [],
     }),
   });
-  const transaction = new TransactionBuilder(new Account(source, "1"), {
+  const transaction = new TransactionBuilder(source, {
     fee: "100",
     networkPassphrase: Networks.TESTNET,
   })
@@ -101,7 +110,7 @@ function setup(answer: VerifyResponse = { isValid: true, payer }) {
     schemes.push({ signer: signer.address, options });
     return { verify: async () => answer } satisfies UpstreamVerifier;
   });
-  return { verify: buildVerifier(config, rpc, makeScheme), schemes };
+  return { verify: buildVerifier(config, rpc, feeSettings(config.fees, rpc), makeScheme), schemes };
 }
 
 describe("buildVerifier (the /verify wiring in main)", () => {
@@ -123,10 +132,32 @@ describe("buildVerifier (the /verify wiring in main)", () => {
 
   it("rejects a configured channel through the built verifier", async () => {
     const { verify } = setup();
-    await expect(verify(payload(channel), requirements)).resolves.toMatchObject({
+    await expect(verify(payload(new Account(channel, "1")), requirements)).resolves.toMatchObject({
       isValid: false,
       invalidReason: "invalid_exact_stellar_payload_unsafe_tx_or_op_source",
       extra: { reason: CHANNEL_ACCOUNT_REASON },
+    });
+  });
+
+  it("rejects the facilitator's muxed address, which upstream's plain-string check misses", async () => {
+    const { verify } = setup();
+    const muxed = new MuxedAccount(new Account(Keypair.fromSecret(secret).publicKey(), "1"), "7");
+    await expect(verify(payload(muxed), requirements)).resolves.toMatchObject({
+      isValid: false,
+      invalidReason: "invalid_exact_stellar_payload_unsafe_tx_or_op_source",
+      extra: { reason: MUXED_FACILITATOR_REASON },
+    });
+  });
+
+  it("checks the auth expiry against the latest ledger and MIN_VALIDITY_LEDGERS (default 4)", async () => {
+    const { verify } = setup();
+    await expect(verify(payload(undefined, CURRENT + 4), requirements)).resolves.toEqual({
+      isValid: true,
+      payer,
+    });
+    await expect(verify(payload(undefined, CURRENT + 3), requirements)).resolves.toMatchObject({
+      isValid: false,
+      invalidReason: "invalid_exact_stellar_signature_expiration_too_soon",
     });
   });
 

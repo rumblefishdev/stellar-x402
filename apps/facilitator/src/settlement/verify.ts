@@ -1,6 +1,10 @@
 import { Address, MuxedAccount, StrKey, Transaction, xdr } from "@stellar/stellar-sdk";
 import type { StellarNetwork } from "@stellar-x402/config";
-import { getAddressCredentials, getNetworkPassphrase } from "@x402/stellar";
+import {
+  DEFAULT_ESTIMATED_LEDGER_SECONDS,
+  getAddressCredentials,
+  getNetworkPassphrase,
+} from "@x402/stellar";
 import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/core/types";
 
 /** Upstream `ExactStellarScheme` as `/verify` uses it: only `verify()`, never `settle()` (AD-3). */
@@ -20,6 +24,11 @@ export interface VerifierDeps {
   minValidityLedgers: number;
   /** Sequence of the latest closed ledger. */
   latestLedger: () => Promise<number>;
+  /**
+   * How long upstream `verify()` may take, in milliseconds; 10,000 by default, as `FallbackRpc`.
+   * Upstream's RPC and Horizon clients have no timeout of their own.
+   */
+  upstreamTimeoutMs?: number;
 }
 
 /**
@@ -36,16 +45,17 @@ export const MUXED_FACILITATOR_REASON = "invalid_exact_stellar_payload_facilitat
 /** Upstream's code for an exception inside its `verify()`. */
 const UNEXPECTED_VERIFY_ERROR = "unexpected_verify_error";
 
-/** Ledger close time as upstream's client estimates it when Horizon doesn't answer. */
-const LEDGER_SECONDS = 5;
+export class UpstreamTimeoutError extends Error {
+  override readonly name = "UpstreamTimeoutError";
+}
 
 /**
- * The shortest `maxTimeoutSeconds` whose payments can pass the validity check (AD-22). Upstream's
- * client signs its auth to expire ⌈maxTimeoutSeconds / ledger time⌉ ledgers ahead, and at least
- * one ledger passes before `/verify`.
+ * About how many ledgers upstream's client signs a resource's `maxTimeoutSeconds` for (AD-22):
+ * ⌈maxTimeoutSeconds / ledger time⌉, with upstream's default ledger time. The client takes the
+ * time from Horizon when it can, so this is an estimate.
  */
-export function shortestTimeoutSeconds(minValidityLedgers: number): number {
-  return (minValidityLedgers + 1) * LEDGER_SECONDS;
+export function signedLedgers(maxTimeoutSeconds: number): number {
+  return Math.ceil(maxTimeoutSeconds / DEFAULT_ESTIMATED_LEDGER_SECONDS);
 }
 
 export type Verify = (
@@ -54,19 +64,31 @@ export type Verify = (
 ) => Promise<VerifyResponse>;
 
 /**
- * The `exact` verification `/verify` answers with and `/settle` (0009) runs again (AD-3):
- * upstream `verify()`, then the channel check (AD-5, with the facilitator's muxed address), then
- * the validity check (AD-22). The first failure is the answer. An error is thrown, not answered:
- * ours (the ledger read), and upstream's, which it reports as `unexpected_verify_error`.
+ * The `exact` verification `/verify` answers with and `/settle` (0009) runs again (AD-3): the
+ * network and envelope checks, upstream `verify()`, then the channel check (AD-5, with the
+ * facilitator's muxed address), then the validity check (AD-22). The first rejection is the
+ * answer. Errors are thrown, not answered: ours (the ledger read), upstream's, which it reports as
+ * `unexpected_verify_error`, and an upstream call past `upstreamTimeoutMs`.
  */
 export function createVerifier(deps: VerifierDeps): Verify {
   const accounts = new Set([...deps.channels, deps.facilitator]);
+  const timeoutMs = deps.upstreamTimeoutMs ?? 10_000;
   return async (payload, requirements) => {
     // Upstream would verify against any Stellar network's default RPC; this process serves one.
     if (requirements.network !== deps.network) {
       return invalid("invalid_network", undefined, `this facilitator serves ${deps.network}`);
     }
-    const upstream = await deps.upstream.verify(payload, requirements);
+    // Upstream parses a V0 envelope, and its simulation result then can't be assembled onto it.
+    if (isV0Envelope(payload)) {
+      return invalid(
+        "invalid_exact_stellar_payload_malformed",
+        undefined,
+        "the transaction must be a v1 envelope",
+      );
+    }
+    const upstream = withStringPayer(
+      await withTimeout(deps.upstream.verify(payload, requirements), timeoutMs),
+    );
     // Upstream catches every exception, a failed RPC call included, and answers with this code.
     // It says nothing about the payment, so it is our error: a 500, logged as one.
     if (upstream.invalidReason === UNEXPECTED_VERIFY_ERROR) {
@@ -97,11 +119,13 @@ export function createVerifier(deps: VerifierDeps): Verify {
     const expiration = authExpiration(transaction);
     const current = await deps.latestLedger();
     if (expiration - current < deps.minValidityLedgers) {
-      const shortest = shortestTimeoutSeconds(deps.minValidityLedgers);
+      // A client signs for about this many ledgers, and some pass before `/verify`.
+      const signed = signedLedgers(requirements.maxTimeoutSeconds);
+      const floor = deps.minValidityLedgers * DEFAULT_ESTIMATED_LEDGER_SECONDS;
       const hint =
-        requirements.maxTimeoutSeconds < shortest
-          ? `; maxTimeoutSeconds must be at least ${shortest}, ` +
-            `not ${requirements.maxTimeoutSeconds}`
+        signed <= deps.minValidityLedgers
+          ? `; maxTimeoutSeconds ${requirements.maxTimeoutSeconds} is about ${signed} ledgers, ` +
+            `so it should be well above ${floor}`
           : "";
       return invalid(
         "invalid_exact_stellar_signature_expiration_too_soon",
@@ -179,6 +203,42 @@ export function authExpiration(transaction: Transaction): number {
   // Upstream rejects a payload without address-credential auth entries.
   if (earliest === Number.POSITIVE_INFINITY) throw new Error("the payload has no auth entries");
   return earliest;
+}
+
+/** Whether the payload's transaction decodes as a V0 envelope; anything else is upstream's. */
+function isV0Envelope(payload: PaymentPayload): boolean {
+  const transaction = (payload.payload as { transaction?: unknown } | undefined)?.transaction;
+  if (typeof transaction !== "string") return false;
+  try {
+    return (
+      xdr.TransactionEnvelope.fromXDR(transaction, "base64").switch() ===
+      xdr.EnvelopeType.envelopeTypeTxV0()
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Upstream's answer with `payer` only when it is a string. Upstream takes it from `from` before
+ * any signature check, so the client chooses its type: a number breaks x402 clients, and an i128
+ * breaks `res.json`.
+ */
+function withStringPayer(response: VerifyResponse): VerifyResponse {
+  return response.payer === undefined || typeof response.payer === "string"
+    ? response
+    : { ...response, payer: undefined };
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new UpstreamTimeoutError(`upstream verify gave no answer within ${ms} ms`)),
+      ms,
+    );
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 function addressOf(address: xdr.ScAddress): string {

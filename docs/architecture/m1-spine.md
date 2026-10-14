@@ -88,10 +88,12 @@ graph TD
 - **Rule:**
   - **Upstream owns verification.** Auth signature and scope checks, `Address`/`AddressV2` credentials, simulation and the event checks all belong to `@x402/stellar` `ExactStellarScheme.verify()`. We never re-implement them.
   - **Construction.** `ExactStellarScheme` is constructed with the fee values from AD-10.
-  - **`/verify`** = upstream `verify()`, then the AD-5 channel check, then the AD-22 validity check. Any failure returns `isValid: false` with its reason.
-    - A network check runs first: a process serves one network, and upstream would verify another network's payload against that network's default RPC.
-    - Upstream answers its own exceptions, such as a failed RPC call, with `unexpected_verify_error`. That is an error of ours, not a verdict on the payment, so `/verify` answers 500.
-  - **`/settle`** runs the same three checks again. It then claims the record (AD-6), builds `{func, auth}` from the client's payload and submits it as in AD-2. The pool's `checkSimulation` hook enforces the spec's balance-change check.
+  - **`/verify`** = upstream `verify()`, then the AD-5 channel check, then the AD-22 validity check. The first rejection returns `isValid: false` with its reason.
+    - A network check runs first: a process serves one network, and upstream would verify another network's payload against that network's default RPC. A V0 envelope is rejected as malformed there too: upstream parses it, but can't assemble its simulation onto it.
+    - Upstream answers its own exceptions, such as a failed RPC call, with `unexpected_verify_error`. That is an error of ours, not a verdict on the payment, so `/verify` answers 500. So does an upstream call with no answer within 10 s: upstream's RPC and Horizon clients have no timeout.
+    - A request whose `amount` isn't a whole number is a 400: upstream's `BigInt(amount)` would throw, which would be a 500.
+    - Upstream's `payer` passes on only as a string. Upstream reads it from the client's `from` before any signature check.
+  - **`/settle`** runs the same checks again, with the AD-22 floor of the pool (see AD-22). It then claims the record (AD-6), builds `{func, auth}` from the client's payload and submits it as in AD-2. The pool's `checkSimulation` hook enforces the spec's balance-change check.
   - Upstream's `ExactStellarScheme.settle()` is never called.
 
 ### AD-4: Channel accounts count as the facilitator
@@ -170,7 +172,7 @@ graph TD
   - verify and settle using different fee ceilings
   - unbounded fee spend
 - **Rule:**
-  - **Fee.** It is the simulation resource fee plus our inclusion bid, which is at least 100 stroops. The client's fee is never used.
+  - **Fee.** It is the simulation resource fee plus our inclusion bid (at least 100 stroops), paid twice under the fee bump (below). The client's fee is never used.
   - **The bid counts twice.** The pool settles under a fee bump, where the inner operation and the bump each pay the bid (CAP-15). So the total is the resource fee plus twice the bid, and upstream's `inclusionFeeStroops` is twice the bid, or `/verify` accepts payments the pool refuses. Twice the bid, or twice the fee-stats floor without a fixed bid, must stay below `maxFeeStroops`.
   - **One config value per setting:**
     - `maxFeeStroops` feeds both the upstream `maxTransactionFeeStroops` and the pool's `maxFeeStroops`.
@@ -316,8 +318,9 @@ graph TD
   - A payload whose auth expiration ledger is less than `minValidityLedgers` ahead of the current ledger is rejected.
   - The transaction never stays valid past the auth expiry. `signer-pool`'s `maxLedger` submit option (task 0016) sets the expiry ledger as the envelope's ledger bound, next to its time bound.
   - `signer-pool` keeps one spare ledger: it refuses, after simulation, a call that could land only in the ledger after the one simulated. So `minValidityLedgers` must be at least 2 plus the expected wait for a channel, or a payload `/verify` accepts can fail at `/settle` with `LedgerBoundError` after a simulation.
-  - `minValidityLedgers` must also stay well below the client's signing window. Upstream's client signs its auth to expire `maxTimeoutSeconds` after signing, about 12 ledgers at the usual 60 s, and at least a ledger passes before `/verify`. So a minimum of 12 rejects nearly every payment; the default is 4: 2 for the pool plus about 2 of channel wait.
-  - So a resource needs `maxTimeoutSeconds` of at least `(minValidityLedgers + 1) × 5` seconds, 25 s at the default. Below that, every payment is rejected as too soon, and the reason names the bound.
+  - `minValidityLedgers` must also stay well below the client's signing window. Upstream's client signs its auth to expire ⌈`maxTimeoutSeconds` / ledger time⌉ ledgers after signing, with the ledger time from Horizon (5 s when Horizon doesn't answer): about 12 ledgers at the usual 60 s. Ledgers usually pass before `/verify`. So a minimum of 12 rejects nearly every payment; the default is 4: 2 for the pool plus about 2 of channel wait.
+  - So a resource needs a `maxTimeoutSeconds` well above `minValidityLedgers × 5` seconds, 20 s at the default. Near that bound, most payments are rejected as too soon. When ⌈`maxTimeoutSeconds` / 5⌉ is at most the minimum, the reason says so.
+  - `/settle` rechecks the expiry at the pool's floor of 2 ledgers, not at `minValidityLedgers`: a payload `/verify` accepted has used part of its margin by then, and the pool refuses only below 2.
 
 ## Consistency Conventions
 

@@ -16,8 +16,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CHANNEL_ACCOUNT_REASON,
   MUXED_FACILITATOR_REASON,
+  UpstreamTimeoutError,
   createVerifier,
-  shortestTimeoutSeconds,
+  signedLedgers,
   type UpstreamVerifier,
 } from "../src/settlement/verify.js";
 
@@ -97,7 +98,8 @@ function payload(shape: Shape = {}): PaymentPayload {
     .build();
   return {
     x402Version: 2,
-    accepted: requirements,
+    // Differs from the requirements, so the tests see which one reaches upstream.
+    accepted: { ...requirements, amount: "1" },
     payload: { transaction: transaction.toXDR() },
   };
 }
@@ -144,6 +146,64 @@ describe("createVerifier", () => {
     const { verify, latestLedger } = setup(answer);
     await expect(verify(payload({ from: channel }), requirements)).resolves.toBe(answer);
     expect(latestLedger).not.toHaveBeenCalled();
+  });
+
+  it("passes upstream's payer on only when it is a string", async () => {
+    // Upstream reads `payer` from `from` before any signature check; the client picks its type.
+    for (const notString of [5, 5n]) {
+      const { verify } = setup({
+        isValid: false,
+        invalidReason: "invalid_exact_stellar_payload_wrong_recipient",
+        payer: notString as unknown as string,
+      });
+      await expect(verify(payload(), requirements)).resolves.toEqual({
+        isValid: false,
+        invalidReason: "invalid_exact_stellar_payload_wrong_recipient",
+      });
+    }
+  });
+
+  it("throws when upstream gives no answer within upstreamTimeoutMs", async () => {
+    const verify = createVerifier({
+      network,
+      upstream: { verify: () => new Promise<never>(() => {}) },
+      facilitator,
+      channels: [channel],
+      minValidityLedgers: MIN_VALIDITY,
+      latestLedger: async () => CURRENT,
+      upstreamTimeoutMs: 20,
+    });
+    await expect(verify(payload(), requirements)).rejects.toThrow(UpstreamTimeoutError);
+  });
+
+  it("rejects a V0 envelope as malformed before upstream sees it", async () => {
+    const { verify, upstream } = setup();
+    const v1 = xdr.TransactionEnvelope.fromXDR(
+      (payload().payload as { transaction: string }).transaction,
+      "base64",
+    )
+      .v1()
+      .tx();
+    const v0 = xdr.TransactionEnvelope.envelopeTypeTxV0(
+      new xdr.TransactionV0Envelope({
+        tx: new xdr.TransactionV0({
+          sourceAccountEd25519: v1.sourceAccount().ed25519(),
+          fee: v1.fee(),
+          seqNum: v1.seqNum(),
+          timeBounds: v1.cond().timeBounds(),
+          memo: v1.memo(),
+          operations: v1.operations(),
+          ext: new xdr.TransactionV0Ext(0),
+        }),
+        signatures: [],
+      }),
+    );
+    const p = { ...payload(), payload: { transaction: v0.toXDR("base64") } };
+    await expect(verify(p, requirements)).resolves.toMatchObject({
+      isValid: false,
+      invalidReason: "invalid_exact_stellar_payload_malformed",
+    });
+    expect(upstream.verify).not.toHaveBeenCalled();
   });
 
   it("rejects another network before upstream sees it", async () => {
@@ -287,14 +347,13 @@ describe("createVerifier", () => {
       );
     });
 
-    it("names the shortest maxTimeoutSeconds when the resource's is too short to ever pass", async () => {
-      expect(shortestTimeoutSeconds(12)).toBe(65);
-      expect(shortestTimeoutSeconds(4)).toBe(25);
+    it("says when the resource's maxTimeoutSeconds signs for about minValidityLedgers or fewer", async () => {
+      expect([signedLedgers(20), signedLedgers(21), signedLedgers(60)]).toEqual([4, 5, 12]);
       const { verify } = setup();
       const auth = [authEntry(payer, CURRENT + 11)];
       for (const [maxTimeoutSeconds, hint] of [
-        [64, "; maxTimeoutSeconds must be at least 65, not 64"],
-        [65, ""],
+        [60, "; maxTimeoutSeconds 60 is about 12 ledgers, so it should be well above 60"],
+        [61, ""],
       ] as const) {
         const answer = await verify(payload({ auth }), { ...requirements, maxTimeoutSeconds });
         expect(answer.invalidMessage).toBe(

@@ -49,7 +49,9 @@ function simulation() {
   } satisfies rpc.Api.RawSimulateTransactionResponse;
 }
 
-/** Answers upstream's `simulateTransaction`; upstream makes no other RPC call before its fee check. */
+/**
+ * Answers upstream's `simulateTransaction`; upstream makes no other RPC call before its fee check.
+ */
 let server: Server;
 let rpcUrl: string;
 beforeAll(async () => {
@@ -122,10 +124,12 @@ describe("the fee ceiling at /verify and in the pool (AD-10)", () => {
     MAX_FEE_STROOPS: String(MAX_FEE),
     INCLUSION_FEE_STROOPS: String(BID),
   });
+  // One fee configuration for both, as `main()` builds it.
+  const fees = feeSettings(config.fees, poolRpc);
 
   /** Real upstream `ExactStellarScheme`, as `main()` wires it: did it refuse the fee? */
   async function verifyRefuses(): Promise<boolean> {
-    const verify = buildVerifier({ ...config, rpcUrls: [rpcUrl] }, poolRpc);
+    const verify = buildVerifier({ ...config, rpcUrls: [rpcUrl] }, poolRpc, fees);
     const answer = await verify(payload(), requirements);
     // A fee it accepts goes on to the event check, which an empty simulation fails.
     expect(answer.invalidReason).toMatch(/fee_exceeds_maximum|no_transfer_events/);
@@ -139,7 +143,7 @@ describe("the fee ceiling at /verify and in the pool (AD-10)", () => {
       networkPassphrase: Networks.TESTNET,
       signer: keypairSigner(facilitator),
       channels: [channel],
-      ...feeSettings(config.fees, poolRpc).pool,
+      ...fees.pool,
       sleep: async () => {},
     });
     const op = transfer();

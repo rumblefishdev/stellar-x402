@@ -10,7 +10,7 @@ export {
   type FallbackRpcOptions,
   type RpcEndpoint,
 } from "./fallback-rpc.js";
-export { feeStatsInclusionFee, type FeeStatsOptions } from "./fees.js";
+export { FEE_STATS_MIN_STROOPS, feeStatsInclusionFee, type FeeStatsOptions } from "./fees.js";
 export { LedgerClock } from "./ledger-clock.js";
 export {
   CHANNEL_STARTING_BALANCE,
