@@ -35,7 +35,7 @@ import {
   type SettlerDeps,
   type Submitter,
 } from "../src/settlement/settle.js";
-import type { Check } from "../src/settlement/verify.js";
+import { createChecker, type Check } from "../src/settlement/verify.js";
 
 // `attemptsOf` reads a private WeakMap that only the real submitter fills; tests put the attempts
 // on the error instead.
@@ -111,7 +111,8 @@ function transaction(auth = [authEntry(payer, "7")]) {
 
 const payload = (auth?: xdr.SorobanAuthorizationEntry[]): PaymentPayload => ({
   x402Version: 2,
-  accepted: requirements,
+  // Differs from the requirements, so the tests see which one the settler uses.
+  accepted: { ...requirements, amount: "1" },
   payload: { transaction: transaction(auth).toXDR() },
 });
 
@@ -405,6 +406,61 @@ describe("createSettler", () => {
     });
     expect(await store.get(key)).toMatchObject({ state: "rejected", errorReason: reason });
     expect(hooks.onFinal).toHaveBeenCalledTimes(1);
+  });
+
+  it("warns and counts a fee or ledger refusal, which means the pool disagreed with /verify", async () => {
+    for (const [error, reason] of [
+      [new FeeLimitError("x"), "settle_exact_stellar_fee_exceeds_maximum"],
+      [new LedgerBoundError("x"), "settle_exact_stellar_signature_expiration_too_soon"],
+    ] as const) {
+      const { settle, lines, metrics } = setup(async () => {
+        throw error;
+      });
+      await settle(payload(), requirements);
+      expect(lines.map((line) => JSON.parse(line))).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          event: "settlement_refused_after_verify",
+          errorReason: reason,
+        }),
+      );
+      expect(metrics.value("settle_refused_after_verify_total", { reason })).toBe(1);
+    }
+    // Other refusals are not a drift between the two.
+    const { settle, lines } = setup(async () => {
+      throw new SimulationError("x");
+    });
+    await settle(payload(), requirements);
+    expect(lines.join("")).not.toContain("settlement_refused_after_verify");
+  });
+
+  it("passes the payer on only as a string, through the real /verify checks", async () => {
+    // Upstream reads `payer` from `from` before any signature check; the client picks its type.
+    const check = createChecker({
+      network,
+      upstream: {
+        verify: async () => ({
+          isValid: false,
+          invalidReason: "invalid_exact_stellar_payload_wrong_recipient",
+          payer: 5 as unknown as string,
+        }),
+      },
+      facilitator: Keypair.random().publicKey(),
+      channels: [Keypair.random().publicKey()],
+      minValidityLedgers: 2,
+      latestLedger: async () => CURRENT,
+    });
+    const { settle, submit } = setup(landing(), { check });
+    const { response } = await settle(payload(), requirements);
+    expect(response).toEqual({
+      success: false,
+      errorReason: "invalid_exact_stellar_payload_wrong_recipient",
+      transaction: "",
+      network,
+    });
+    // As the route sends it: `payer` is left out, not a number.
+    expect(JSON.parse(JSON.stringify(response))).not.toHaveProperty("payer");
+    expect(submit).not.toHaveBeenCalled();
   });
 
   it("keeps the record open and answers pending when a thrown send may have reached the network", async () => {
