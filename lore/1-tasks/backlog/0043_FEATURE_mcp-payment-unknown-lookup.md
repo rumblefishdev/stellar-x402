@@ -10,7 +10,7 @@ links: []
 history:
   - date: "2026-10-13"
     status: backlog
-    who: claude
+    who: karolkow
     note: "Spawned from 0037 (W315): payment_unknown leaves the agent without a transaction hash."
 ---
 

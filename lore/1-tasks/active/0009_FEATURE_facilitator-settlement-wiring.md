@@ -2,7 +2,7 @@
 id: "0009"
 title: "Settle exact payments once through the channel pool"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0003", "0004", "0005", "0006", "0007", "0011"]
 related_tasks: ["0007", "0006", "0012", "0015", "0016", "0017", "0018", "0019", "0020", "0024", "0025", "0027", "0014"]
@@ -31,6 +31,11 @@ history:
       /verify and the fee config to 0018, the record lifecycle and startup check to 0019,
       /supported and the channel hardening check to 0020, spend budgets to 0024, the channel
       lease to 0025, alerts to 0027.
+  - date: "2026-10-13"
+    status: active
+    who: okarcz
+    note: >
+      Work started, stacked on 0018 (PR #33) for the reusable verify checks and fee settings.
 ---
 
 # Settle exact payments once through the channel pool

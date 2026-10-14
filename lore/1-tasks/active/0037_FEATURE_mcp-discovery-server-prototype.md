@@ -161,8 +161,9 @@ and existing servers. Each line: what was decided and why.
   agent saw the catalog price in `list_resources`.
 - **Which offer is paid:** of the seller's offers, those in an allowed asset and within the
   per-call limit, through an upstream client policy; the library pays the first one left.
-- **Budget:** a per-call price cap and a budget for the life of the process, per asset, in atomic
-  units. The amount is counted before signing and never given back once signed: a seller cannot
+- **Budget (revised by W350 A, PR #34):** a per-call price cap and a required daily budget per key
+  and asset, in atomic units; the per-process budget is gone (it reset on restart and was not shared
+  between sessions). The amount is counted before signing and never given back once signed: a seller cannot
   return it to the budget by claiming the payment failed. When signing fails nothing was sent, and
   the amount goes back (W170).
 - **Which offers are paid** also leaves out an authorization longer than 300 s (the `@x402/express`
@@ -224,9 +225,10 @@ and existing servers. Each line: what was decided and why.
 - **Tool schemas out of `server.ts` (W299 A), a `[structure only]` step, no PR yet:** the input and
   output schemas of `get_resource` and `call_paid_http` move to `preview.ts` and `pay.ts`, as
   `list_resources`' already live in `catalog.ts`; `server.ts` only registers.
-- **Comparison with existing x402 MCP servers.** A table of `nirholas/x402-bridge` and
-  `jamesbachini/x402-mcp-stellar` against ours (networks, limits and budget, error codes, address
-  guard, how seller text reaches the model), so the choice of an own server stays checkable.
+- **Comparison with existing x402 MCP servers (W229, done 2026-10-14):**
+  `lore/3-wiki/mcp/x402-mcp-server-comparison.md` — six servers, nine rows, a source per cell. None
+  could replace ours: the only other Stellar one has no limits, guard or catalog; the gaps it shows
+  (payee allowlist, idempotency, on-chain daily limit, timeout cap) went to 0044.
 - **Follow-ups from the PR #23 review, for PR C:** a test that `allowInsecureLocal` is off by
   default; README notes that the budget resets on restart and that a host with both public and
   private DNS records is refused.

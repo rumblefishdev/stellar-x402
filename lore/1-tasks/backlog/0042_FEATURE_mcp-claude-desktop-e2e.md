@@ -10,7 +10,7 @@ links: []
 history:
   - date: "2026-10-13"
     status: backlog
-    who: claude
+    who: karolkow
     note: >
       Spawned from 0037: its acceptance criterion on Claude Desktop needs a catalog a README reader
       can point at, and none exists until 0032 serves /discovery/resources.
