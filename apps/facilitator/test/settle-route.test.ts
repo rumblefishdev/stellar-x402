@@ -18,7 +18,12 @@ const requirements: PaymentRequirements = {
   maxTimeoutSeconds: 60,
   extra: {},
 };
-const paymentPayload = { x402Version: 2, accepted: requirements, payload: { transaction: "AAAA" } };
+// `accepted` differs from the requirements, so the test sees which one reaches the settler.
+const paymentPayload = {
+  x402Version: 2,
+  accepted: { ...requirements, amount: "1" },
+  payload: { transaction: "AAAA" },
+};
 const request = { x402Version: 2, paymentPayload, paymentRequirements: requirements };
 const success = {
   success: true,
