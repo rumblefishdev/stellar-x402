@@ -104,11 +104,11 @@ never charged twice.
 - [x] Given the hooks from 1.1, when a settlement runs, then the before-submit hook runs before `submit()` and the on-success hook runs when the record turns `success`
 - [x] Given the fee configuration, when `main()` builds the pool, then it uses the same `fees.pool` that `buildVerifier` gets, so `/verify` and the pool share one ceiling and one bid (AD-10; deferred from 0018's AC 5). `main()` builds one `fees`, then `buildChecks` (for `/verify` and `/settle`) and the pool from it
 
-**From 0018's PR #33 review (Adam), still to do after the rebase:**
-- the `/settle` expiry recheck uses the pool's floor of 2 ledgers, not `minValidityLedgers` (spine AD-22);
-- `SettleResponse.payer` passes on only as a string, as in `/verify` (0018 decision 20);
-- the `/settle` tests use an `accepted` that differs from the requirements;
-- define the answer for `FeeLimitError` and `LedgerBoundError` after `/verify` accepted.
+**From 0018's PR #33 review (Adam), done after the rebase:**
+- [x] the `/settle` expiry recheck uses the pool's floor of 2 ledgers, not `minValidityLedgers` (spine AD-22; decision 8);
+- [x] `SettleResponse.payer` passes on only as a string, as in `/verify` (0018 decision 20; decision 9);
+- [x] the `/settle` tests use an `accepted` that differs from the requirements;
+- [x] define the answer for `FeeLimitError` and `LedgerBoundError` after `/verify` accepted (decision 10).
 
 ## Implementation Notes
 
@@ -128,7 +128,7 @@ never charged twice.
 - **Settle budget** (`SETTLE_BUDGET_MS`, default 90 s, ADR 0011): when it runs out, the answer is `settlement_pending` with the hash if one was signed, or `settle_exact_stellar_timeout` if not. The submission carries on. A late success runs `onFinal`, and `onSuccess(record, "resolved")`.
 - **`http/app.ts`**: `POST /settle` takes the same body check as `/verify`. It sets the `EXTENSION-RESPONSES` header on every `success` answer, replays included, and calls `afterResponse` (`onSuccess(record, "settle")`) after the response, `res.closed`-aware (0031's caller rules). It logs one `settled` event.
 - **`main.ts`**: builds the `SettlementSubmitter` from `fees.pool`, with `keypairSigner(FACILITATOR_SECRET)` and the channels. The hooks are `beforeSubmit` allow-all and `onFinal` no-op until 0024, plus the cataloger's `onSuccess`/`extensionResponses`. The pool's `resolved` events are only logged (0019).
-- **Rebased onto develop after 0018 merged** (2026-10-14). `main.ts` now has `buildChecks(config, rpc, fees)`, from which `createVerifier` (`/verify`) and `createChecker` (`/settle`) are built, and the pool takes the same `fees.pool`. `createChecker` keeps 0018's envelope check, upstream deadline and string `payer`, and throws when upstream names no payer for a valid payment, as 0018 does for `unexpected_verify_error`. Facilitator 145 tests after the rebase, and the testnet `scripts/settle-smoke.ts` passes all 5 checks again.
+- **Rebased onto develop after 0018 merged** (2026-10-14). `main.ts` now has `buildChecks(config, rpc, fees)`, from which `createVerifier` (`/verify`) and `createChecker` (`/settle`) are built, and the pool takes the same `fees.pool`. `createChecker` keeps 0018's envelope check, upstream deadline and string `payer`, and throws when upstream names no payer for a valid payment, as 0018 does for `unexpected_verify_error`. Facilitator 145 tests after the rebase, and the testnet `scripts/settle-smoke.ts` passes all 5 checks again. Adam's four handoff points then took it to 148: the settle floor through `buildChecks`, the real-checker `payer` test, and the refusal warning; `accepted` now differs in `settle.test.ts` and `settle-route.test.ts`. Each fix's mutant (the `/verify` minimum at `/settle`, `accepted` passed as the requirements to the settler or used for the amount, no refusal metric) fails 1–24 tests.
 - **Nothing else sends**: `grep sendTransaction|.settle(` in `apps/facilitator/src` finds nothing; the pool is the only sender.
 - **Tests**: facilitator 74 → 122.
   - `settle.test.ts` (37): memory store, a fake submitter, and real XDR payloads.
@@ -141,7 +141,7 @@ never charged twice.
   - two concurrent calls for a new payment submitted one transaction;
   - `/verify` of the settled payment fails.
 
-**Modified tests:** `main.test.ts` no longer expects 501 from `/settle`. It and `verify-route.test.ts` pass `settle` and `extensionResponses` stubs to `start()`. `config.test.ts` expects `settleBudgetMs`.
+**Modified tests:** `main.test.ts` no longer expects 501 from `/settle`. It and `verify-route.test.ts` pass `settle` and `extensionResponses` stubs to `start()`. `config.test.ts` expects `settleBudgetMs`. `settle.test.ts` and `settle-route.test.ts` give the payload an `accepted` whose amount differs from the requirements (Adam's point 3).
 
 ## Issues Encountered
 
@@ -159,6 +159,9 @@ never charged twice.
 5. **The settle module takes the pool as a `Submitter` interface,** so the facilitator tests use a fake submitter and need no `FakeRpc` (answers 0020's question for 0009). The real pool is exercised by `scripts/settle-smoke.ts`.
 6. **New fixed codes, named like upstream's:** `settle_exact_stellar_*` for settle-stage failures, plus `invalid_exact_stellar_payload_payer_auth_entries` and `…_nonce_already_used`.
 7. **`SETTLE_BUDGET_MS`** (default 90 s) is a config value, so the ADR 0011 budget can follow the load balancer's settings.
+8. **`/settle` rechecks the auth expiry at the pool's floor of 2 ledgers** (Adam, 0018's PR #33 review; spine AD-22). `settleCheck(checks)` in `main.ts` is `createChecker` with `SETTLE_MIN_VALIDITY_LEDGERS` = 2 in place of `MIN_VALIDITY_LEDGERS`. `/verify`'s larger minimum leaves room for the time between the two calls; rechecking with it refused, at `/settle`, payments the pool would still sign, after the resource was served.
+9. **`/settle`'s `payer` is a string or absent,** with no settle-side code: every `payer` in a settle answer comes from `createChecker`, which drops a non-string one (0018 decision 20), or from the record, which stores the checked payer. A test runs a settle through the real `createChecker` with an upstream `payer` of 5.
+10. **A fee or ledger refusal after `/verify` accepted keeps its answer and is flagged** (Adam, 0018's PR #33 review, asked to define it; to confirm in the 0009 PR). The answer stays `success: false` with `settle_exact_stellar_fee_exceeds_maximum` or `…_signature_expiration_too_soon`, the record ends `rejected`, nothing was sent, and the client needs a new payment (decision 2). It also means `/verify` and the pool disagreed: a new fee-stats reading or escalation raised the fee, or the call waited too long for a channel. So it logs `settlement_refused_after_verify` (warn) and counts `settle_refused_after_verify_total` by reason, for 0027's alerts.
 
 ## Future Work
 
