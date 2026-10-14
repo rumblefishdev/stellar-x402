@@ -88,9 +88,11 @@ graph TD
 - **Rule:**
   - **Upstream owns verification.** Auth signature and scope checks, `Address`/`AddressV2` credentials, simulation and the event checks all belong to `@x402/stellar` `ExactStellarScheme.verify()`. We never re-implement them.
   - **Construction.** `ExactStellarScheme` is constructed with the fee values from AD-10.
+    - Upstream takes one RPC URL, so there is one scheme per `RPC_URLS` entry, and upstream itself is not changed. They fail over the way `FallbackRpc` does: the call goes to the active URL, and on to the next when it throws, answers `unexpected_verify_error` or gives no answer within 10 s. The first URL with any other answer becomes active. `/verify`'s overall deadline is 10 s per URL.
+    - Upstream's Horizon read of the ledger close time has no URL of ours to fail over to. It falls back to upstream's default on an error, but a Horizon that hangs takes each URL past its 10 s.
   - **`/verify`** = upstream `verify()`, then the AD-5 channel check, then the AD-22 validity check. The first rejection returns `isValid: false` with its reason.
     - A network check runs first: a process serves one network, and upstream would verify another network's payload against that network's default RPC. A V0 envelope is rejected as malformed there too: upstream parses it, but can't assemble its simulation onto it.
-    - Upstream answers its own exceptions, such as a failed RPC call, with `unexpected_verify_error`. That is an error of ours, not a verdict on the payment, so `/verify` answers 500. So does an upstream call with no answer within 10 s: upstream's RPC and Horizon clients have no timeout.
+    - Upstream answers its own exceptions, such as a failed RPC call, with `unexpected_verify_error`. That is an error of ours, not a verdict on the payment, so `/verify` answers 500. So does an upstream call with no answer within 10 s on every URL: upstream's RPC and Horizon clients have no timeout.
     - A request whose `amount` isn't a whole number is a 400: upstream's `BigInt(amount)` would throw, which would be a 500.
     - Upstream's `payer` passes on only as a string. Upstream reads it from the client's `from` before any signature check.
   - **`/settle`** runs the same checks again, with the AD-22 floor of the pool (see AD-22). It then claims the record (AD-6), builds `{func, auth}` from the client's payload and submits it as in AD-2. The pool's `checkSimulation` hook enforces the spec's balance-change check.
