@@ -10,7 +10,10 @@ import { DatabaseSync } from "node:sqlite";
  * Counting runs in a write transaction, so processes paying at once never pass the day together.
  */
 
-/** Rows older than this are deleted when a payment is counted; only today's are ever read. */
+/**
+ * Rows older than this are deleted when a payment is counted, so the file stays small. Only today's
+ * are ever read; the last week is kept so the owner can see what was spent on recent days.
+ */
 const KEEP_DAYS = 7;
 
 /** Where an amount is counted: the day, the buyer's address and the asset contract. */
@@ -32,7 +35,8 @@ function database(dir: string): DatabaseSync {
   if (db) return db;
   mkdirSync(dir, { recursive: true });
   db = new DatabaseSync(join(dir, "spent.sqlite"));
-  // Wait for another process's transaction instead of failing; a counted payment survives a power cut.
+  // Wait for another process's transaction instead of failing; readers do not wait for a writer
+  // (WAL); a counted payment survives a power cut.
   db.exec("PRAGMA busy_timeout = 5000");
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA synchronous = FULL");

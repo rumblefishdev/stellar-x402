@@ -150,8 +150,8 @@ export async function callPaidHttp(
     const amount = BigInt(offer.amount);
     // The policy already kept offers within today's budget; the check that counts is this one, which
     // reads the day's spending again and records the amount in one transaction, so processes paying
-    // at the same moment never pass the day together. Once signed the amount is never given back, so a seller cannot return it
-    // to the budget by claiming the payment failed.
+    // at the same moment never pass the day together. Once signed the amount is never given back,
+    // so a seller cannot return it to the budget by claiming the payment failed.
     const countedIn = { day: utcDay(now()), payer: config.payer, asset: offer.asset };
     let counted = false;
     try {
