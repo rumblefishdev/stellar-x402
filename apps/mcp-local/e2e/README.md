@@ -7,7 +7,8 @@ stdio, real signing, two real payments on testnet, and the buyer's secret absent
 the servers write.
 
 The scenarios (E-01…E-23) were written from the README, the tool list and the acceptance criteria
-only, by a reviewer who had not read the code.
+only, by a reviewer who had not read the code; E-09h, E-14b, E-14c and E-24 came from a second,
+independent review of what the first set left out.
 
 ## Run
 
@@ -24,8 +25,21 @@ It needs `.env.e2e-testnet` at the repo root (git-ignored), or the file named by
 | `E2E_SELLER_PUBLIC` | testnet account with a USDC trustline that receives the payments |
 
 The run checks balances on Horizon, so these accounts must not be used by another run at the same
-time. Testnet USDC comes from Circle's faucet; friendbot gives only XLM. The run also creates one fresh
-account with friendbot, without a USDC trustline, for the `insufficient_funds` case.
+time. Testnet USDC comes from Circle's faucet; friendbot gives only XLM. The run also creates two
+fresh accounts with friendbot for `insufficient_funds`: one without a USDC trustline, one with a
+trustline and no USDC.
+
+## Scenarios
+
+| Group                   | Scenarios          | What they prove                                                                                                                 |
+| ----------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| start-up                | E-01 – E-03        | wrong settings stop the server (exit 1, the variable named); 2 tools without a key, 3 with                                      |
+| catalog                 | E-04 – E-06        | filters and paging passed on, one request per call; catalog failures; input failing a schema                                    |
+| `get_resource`          | E-07 – E-09        | the real seller's terms; every seller failure's code; the address guard, and a public https name passing it                     |
+| refusals before signing | E-10 – E-13a       | each refusal in the documented order, with nothing signed                                                                       |
+| after signing           | E-13b – E-20, E-24 | what was signed (from the transaction), empty wallets, every after-payment code, one deadline per call, the shared daily budget |
+| real payments           | E-21, E-22         | two payments settled on testnet, checked on Horizon; then over the budget and over the price limit                              |
+| secrets                 | E-23               | no secret in anything the servers wrote                                                                                         |
 
 ## What it spends
 
