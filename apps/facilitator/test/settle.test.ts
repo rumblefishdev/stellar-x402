@@ -496,6 +496,32 @@ describe("createSettler", () => {
     expect(hooks.onFinal).not.toHaveBeenCalled();
   });
 
+  it("answers a beforeSubmit refusal even when the store can't record it", async () => {
+    const { settle, store, hooks, lines } = setup();
+    hooks.beforeSubmit.mockResolvedValueOnce({ allow: false, errorReason: "over_budget" });
+    vi.spyOn(store, "transition").mockRejectedValueOnce(new Error("store down"));
+    expect((await settle(payload(), requirements)).response).toMatchObject({
+      success: false,
+      errorReason: "over_budget",
+    });
+    expect(lines.join("")).toContain("settlement_record_failed");
+  });
+
+  it("answers with the pool's result when the store fails to record it", async () => {
+    const { settle, store } = setup();
+    vi.spyOn(store, "transition").mockRejectedValue(new Error("store down"));
+    // The repeat lookup and `advance`'s read work; reading the record back after the failed
+    // write doesn't.
+    const get = store.get.bind(store);
+    vi.spyOn(store, "get")
+      .mockImplementationOnce(get)
+      .mockImplementationOnce(get)
+      .mockRejectedValue(new Error("store down"));
+    const settled = await settle(payload(), requirements);
+    expect(settled.response).toEqual({ success: true, transaction: HASH, network, payer });
+    expect(settled.afterResponse).toBeUndefined();
+  });
+
   it("treats a beforeSubmit that throws as a refusal", async () => {
     const { settle, submit, hooks, metrics } = setup();
     hooks.beforeSubmit.mockRejectedValueOnce(new Error("store down"));
@@ -545,12 +571,69 @@ describe("createSettler", () => {
     });
 
     it("answers a retryable timeout when the budget runs out before anything was signed", async () => {
-      const { settle } = setup(() => new Promise(() => {}), { budgetMs: 30 });
+      const { settle, store, hooks } = setup(() => new Promise(() => {}), { budgetMs: 30 });
       expect((await settle(payload(), requirements)).response).toMatchObject({
         success: false,
         errorReason: SETTLE_REASONS.timeout,
         transaction: "",
       });
+      expect(await store.get(key)).toMatchObject({
+        state: "rejected",
+        errorReason: SETTLE_REASONS.timeout,
+      });
+      expect(hooks.onFinal).toHaveBeenCalledTimes(1);
+    });
+
+    it("never sends what it answered as timed out: a late sign is refused", async () => {
+      let sign!: () => void;
+      const signing = new Promise<void>((resolve) => (sign = resolve));
+      const { settle, store } = setup(
+        async (opts) => {
+          await signing;
+          return landing()(opts);
+        },
+        { budgetMs: 30 },
+      );
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.timeout,
+      });
+      expect(await store.addHash(key, HASH, Date.now())).toBe(false);
+      sign();
+      // `onSigned` throws on the final record, so the pool sends nothing (a `SignedHookError`).
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(await store.get(key)).toMatchObject({ state: "rejected", hashes: [] });
+    });
+
+    it("submits nothing when the checks and beforeSubmit used up the budget", async () => {
+      const { settle, submit, store, hooks } = setup(landing(), { budgetMs: 30 });
+      hooks.beforeSubmit.mockImplementationOnce(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        return { allow: true };
+      });
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.timeout,
+      });
+      expect(submit).not.toHaveBeenCalled();
+      expect((await store.get(key))?.state).toBe("rejected");
+    });
+
+    it("keeps a repeat waiting past the settle timeout while nothing is signed yet, up to its budget", async () => {
+      let sign!: () => void;
+      const signing = new Promise<void>((resolve) => (sign = resolve));
+      const { settle, submit } = setup(
+        async (opts) => {
+          await signing;
+          return landing()(opts);
+        },
+        { settleTimeoutMs: 20, budgetMs: 2_000 },
+      );
+      const first = settle(payload(), requirements);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      const repeat = settle(payload(), requirements);
+      setTimeout(sign, 60);
+      expect((await repeat).response).toMatchObject({ success: true, transaction: HASH });
+      expect((await first).response).toMatchObject({ success: true });
+      expect(submit).toHaveBeenCalledTimes(1);
     });
 
     it("stops the wait for a channel at the auth expiry when it comes before the budget", async () => {
