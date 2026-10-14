@@ -3,7 +3,7 @@ import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import { createEd25519Signer, USDC_TESTNET_ADDRESS } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/client";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { z } from "zod";
 
 /** What `createServer` needs, read from the environment; only the log is added by the caller. */
@@ -49,7 +49,11 @@ const ENV = z.object({
   STELLAR_X402_SECRET_KEY: optional(z.string()),
   STELLAR_X402_MAX_PER_CALL: optional(ATOMIC),
   STELLAR_X402_DAILY_BUDGET: optional(ATOMIC),
-  STELLAR_X402_STATE_DIR: optional(z.string()),
+  // An MCP client passes env values as written: `~` is not expanded, and a relative path would
+  // follow each server's working directory, giving every project its own daily budget.
+  STELLAR_X402_STATE_DIR: optional(
+    z.string().refine(isAbsolute, "must be an absolute path (`~` is not expanded)"),
+  ),
 });
 
 /** Outside any project, so every Claude session of the user counts against the same day. */

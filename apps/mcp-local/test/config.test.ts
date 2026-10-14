@@ -129,6 +129,16 @@ describe("loadConfig", () => {
       "STELLAR_X402_STATE_DIR needs STELLAR_X402_SECRET_KEY",
     ],
     [
+      "a state directory starting with ~",
+      { ...PAYING, STELLAR_X402_STATE_DIR: "~/.stellar-x402-mcp" },
+      "STELLAR_X402_STATE_DIR must be an absolute path (`~` is not expanded)",
+    ],
+    [
+      "a relative state directory",
+      { ...PAYING, STELLAR_X402_STATE_DIR: "state" },
+      "STELLAR_X402_STATE_DIR must be an absolute path",
+    ],
+    [
       "the state file, replaced by a state directory",
       { ...PAYING, STELLAR_X402_STATE_FILE: "/var/tmp/spent.json" },
       "STELLAR_X402_STATE_FILE is not a setting of this server; it was replaced by STELLAR_X402_STATE_DIR",
