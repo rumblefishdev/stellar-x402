@@ -15,10 +15,11 @@ import { createApp, type AppDeps } from "./http/app.js";
 import { captureConsoleError, jsonLogger, type Logger } from "./logger.js";
 import { memoryMetrics } from "./metrics.js";
 import { feeSettings, upstreamAtCurrentBid, type FeeSettings } from "./settlement/fees.js";
-import { createSettler } from "./settlement/settle.js";
+import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler } from "./settlement/settle.js";
 import {
   createChecker,
   createVerifier,
+  type Check,
   type UpstreamVerifier,
   type VerifierDeps,
   type Verify,
@@ -99,6 +100,14 @@ export function buildVerifier(
 }
 
 /**
+ * `/settle`'s checks: the same as `/verify`'s, with the pool's validity floor instead of
+ * `MIN_VALIDITY_LEDGERS` (AD-22).
+ */
+export function settleCheck(checks: VerifierDeps): Check {
+  return createChecker({ ...checks, minValidityLedgers: SETTLE_MIN_VALIDITY_LEDGERS });
+}
+
+/**
  * The composition root (AD-1): the only module that reads `process.env`. It validates the config
  * once and builds every part from it.
  */
@@ -155,7 +164,7 @@ export async function main(env: Record<string, string | undefined> = process.env
     });
     const settle = createSettler({
       network: config.network,
-      check: createChecker(checks),
+      check: settleCheck(checks),
       store: stores.settlements,
       submitter,
       // Spend budgets plug in here with 0024.

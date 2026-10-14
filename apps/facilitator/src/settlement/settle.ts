@@ -74,6 +74,24 @@ export const SETTLE_REASONS = {
   unexpected: "unexpected_settle_error",
 } as const;
 
+/**
+ * The validity minimum `/settle` rechecks with (AD-22): the pool's own floor. `signer-pool` keeps
+ * one spare ledger and refuses a call that has fewer than 2 ledgers left, so `/settle` refuses
+ * only what the pool would. `/verify`'s larger `MIN_VALIDITY_LEDGERS` leaves room for the time
+ * between `/verify` and `/settle`; rechecking with it would refuse payments the pool still signs.
+ */
+export const SETTLE_MIN_VALIDITY_LEDGERS = 2;
+
+/**
+ * Refusals that mean the pool disagreed with a `/verify` that accepted: the fee rose above the
+ * ceiling (a new fee-stats reading, or escalation), or the auth expiry came too close while the
+ * call waited for a channel.
+ */
+const REFUSED_AFTER_VERIFY = new Set<string>([
+  "settle_exact_stellar_fee_exceeds_maximum",
+  "settle_exact_stellar_signature_expiration_too_soon",
+]);
+
 /** The pool as `/settle` uses it. */
 export interface Submitter {
   submit(call: ContractCall, opts?: SubmitOptions): Promise<SubmitResult>;
@@ -245,6 +263,16 @@ export function createSettler(deps: SettlerDeps): Settle {
         const errorReason = reasonFor(error);
         if (errorReason === SETTLE_REASONS.unexpected) {
           logger.error("settlement_submit_failed", { network, settlementKey: key, error });
+        }
+        // The answer is the same fixed reason, and the client needs a new payment. It is also a
+        // sign that `/verify` and the pool drifted apart (AD-10, AD-22), so it is counted.
+        if (REFUSED_AFTER_VERIFY.has(errorReason)) {
+          logger.warn("settlement_refused_after_verify", {
+            network,
+            settlementKey: key,
+            errorReason,
+          });
+          metrics.increment("settle_refused_after_verify_total", { reason: errorReason });
         }
         return await finish(key, { state: "rejected", errorReason });
       }

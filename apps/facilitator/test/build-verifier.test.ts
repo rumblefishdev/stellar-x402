@@ -14,7 +14,7 @@ import type { SorobanRpc } from "@stellar-x402/signer-pool";
 import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/core/types";
 import { describe, expect, it, vi } from "vitest";
 import { parseConfig } from "../src/config.js";
-import { buildVerifier, type SchemeOptions } from "../src/main.js";
+import { buildChecks, buildVerifier, settleCheck, type SchemeOptions } from "../src/main.js";
 import { feeSettings } from "../src/settlement/fees.js";
 import {
   CHANNEL_ACCOUNT_REASON,
@@ -110,7 +110,12 @@ function setup(answer: VerifyResponse = { isValid: true, payer }) {
     schemes.push({ signer: signer.address, options });
     return { verify: async () => answer } satisfies UpstreamVerifier;
   });
-  return { verify: buildVerifier(config, rpc, feeSettings(config.fees, rpc), makeScheme), schemes };
+  const fees = feeSettings(config.fees, rpc);
+  return {
+    verify: buildVerifier(config, rpc, fees, makeScheme),
+    check: settleCheck(buildChecks(config, rpc, fees, makeScheme)),
+    schemes,
+  };
 }
 
 describe("buildVerifier (the /verify wiring in main)", () => {
@@ -164,5 +169,21 @@ describe("buildVerifier (the /verify wiring in main)", () => {
   it("throws when upstream reports unexpected_verify_error", async () => {
     const { verify } = setup({ isValid: false, invalidReason: "unexpected_verify_error", payer });
     await expect(verify(payload(), requirements)).rejects.toThrow("unexpected_verify_error");
+  });
+
+  it("rechecks /settle's auth expiry at the pool's floor of 2, not MIN_VALIDITY_LEDGERS", async () => {
+    const { verify, check } = setup();
+    // 3 ledgers left: below `/verify`'s default of 4, above the pool's 2.
+    await expect(verify(payload(undefined, CURRENT + 3), requirements)).resolves.toMatchObject({
+      isValid: false,
+    });
+    const at = async (expiration: number) =>
+      (await check(payload(undefined, expiration), requirements)).response;
+    await expect(at(CURRENT + 3)).resolves.toEqual({ isValid: true, payer });
+    await expect(at(CURRENT + 2)).resolves.toEqual({ isValid: true, payer });
+    await expect(at(CURRENT + 1)).resolves.toMatchObject({
+      isValid: false,
+      invalidReason: "invalid_exact_stellar_signature_expiration_too_soon",
+    });
   });
 });
