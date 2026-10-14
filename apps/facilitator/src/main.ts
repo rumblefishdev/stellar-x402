@@ -1,11 +1,17 @@
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
+import { FallbackRpc } from "@stellar-x402/signer-pool";
+import { createEd25519Signer } from "@x402/stellar";
+import { ExactStellarScheme } from "@x402/stellar/exact/facilitator";
 import { memoryStores } from "./adapters/memory.js";
 import { createCataloger } from "./catalog/cataloger.js";
 import { parseConfig } from "./config.js";
+import type { Config } from "./config.js";
 import { createApp, type AppDeps } from "./http/app.js";
-import { jsonLogger } from "./logger.js";
+import { captureConsoleError, jsonLogger } from "./logger.js";
 import { memoryMetrics } from "./metrics.js";
+import { feeSettings, upstreamAtCurrentBid, type FeeSettings } from "./settlement/fees.js";
+import { createVerifier, type UpstreamVerifier, type Verify } from "./settlement/verify.js";
 
 export interface Started {
   port: number;
@@ -29,6 +35,45 @@ export async function start(deps: AppDeps): Promise<Started> {
   };
 }
 
+/** What `buildVerifier` passes to `ExactStellarScheme`, besides the facilitator's signer. */
+export type SchemeOptions = NonNullable<ConstructorParameters<typeof ExactStellarScheme>[1]>;
+
+/**
+ * `/verify`'s verifier from the config (AD-3, AD-5, AD-10, AD-22): upstream `ExactStellarScheme`
+ * with the fee ceiling and the fee a settlement pays at the shared bid, then our checks. `fees` is
+ * the caller's, so the pool can be built from the same `fees.pool` and share its bid. Tests pass
+ * their own `makeScheme`.
+ */
+export function buildVerifier(
+  config: Config,
+  rpc: Pick<FallbackRpc, "getLatestLedger">,
+  fees: FeeSettings,
+  makeScheme: (
+    signer: ReturnType<typeof createEd25519Signer>,
+    options: SchemeOptions,
+  ) => UpstreamVerifier = (signer, options) => new ExactStellarScheme([signer], options),
+): Verify {
+  // Upstream knows only the facilitator key, and only in plain form; the channels and the muxed
+  // facilitator are `createVerifier`'s check (AD-5).
+  // It reads the first RPC URL only.
+  const signer = createEd25519Signer(config.facilitatorSecret, config.network);
+  const upstream = upstreamAtCurrentBid(fees.inclusionFee, (inclusionFeeStroops) =>
+    makeScheme(signer, {
+      rpcConfig: { url: config.rpcUrls[0] },
+      maxTransactionFeeStroops: fees.maxFeeStroops,
+      inclusionFeeStroops,
+    }),
+  );
+  return createVerifier({
+    network: config.network,
+    upstream,
+    facilitator: signer.address,
+    channels: config.channels,
+    minValidityLedgers: config.settlement.minValidityLedgers,
+    latestLedger: async () => (await rpc.getLatestLedger()).sequence,
+  });
+}
+
 /**
  * The composition root (AD-1): the only module that reads `process.env`. It validates the config
  * once and builds every part from it.
@@ -45,7 +90,17 @@ export async function main(env: Record<string, string | undefined> = process.env
     metrics: memoryMetrics(),
     allowHttp: config.catalog.allowHttp,
   });
-  const started = await start({ config, logger, stores });
+  const rpc = FallbackRpc.fromUrls(config.rpcUrls);
+  // 0009 builds the pool from `fees.pool`, so `/verify` and the pool share one bid (AD-10).
+  const fees = feeSettings(config.fees, rpc);
+  const verify = buildVerifier(config, rpc, fees);
+  // For the life of the process: an upstream call cut off by the deadline keeps running after
+  // `close()`, and its error would reach stderr with the RPC URL in it.
+  const restoreConsole = captureConsoleError(logger);
+  const started = await start({ config, logger, stores, verify }).catch((error: unknown) => {
+    restoreConsole();
+    throw error;
+  });
   return {
     ...started,
     // Catalog writes already under way finish before the process exits.

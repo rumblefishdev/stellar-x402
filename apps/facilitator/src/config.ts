@@ -1,4 +1,5 @@
 import { StrKey } from "@stellar/stellar-sdk";
+import { FEE_STATS_MIN_STROOPS } from "@stellar-x402/signer-pool";
 import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import { z } from "zod";
 
@@ -44,11 +45,23 @@ const stroops = (min: bigint) =>
     .regex(/^\d+$/, "must be a whole number of stroops")
     .transform((value) => BigInt(value))
     .refine((value) => value >= min, `must be at least ${min}`);
+/** The floor of `signer-pool`'s `feeStatsInclusionFee` bid, used when no bid is set. */
+const FEE_STATS_MIN_BID_STROOPS = BigInt(FEE_STATS_MIN_STROOPS);
 
+/** Fee settings reach upstream and the pool as a `number`. */
+const feeStroops = stroops(100n).refine(
+  (value) => value <= BigInt(Number.MAX_SAFE_INTEGER),
+  `must be at most ${Number.MAX_SAFE_INTEGER}`,
+);
+
+/**
+ * An http(s) URL without credentials. Upstream's RPC client refuses `user:pass@`, and it writes
+ * the whole URL to stderr on a failed call.
+ */
 function isHttpUrl(value: string): boolean {
   try {
-    const { protocol } = new URL(value);
-    return protocol === "https:" || protocol === "http:";
+    const { protocol, username, password } = new URL(value);
+    return (protocol === "https:" || protocol === "http:") && !username && !password;
   } catch {
     return false;
   }
@@ -61,11 +74,14 @@ const envSchema = z
     ),
     PORT: int(1, 65_535).default("4021"),
     LOG_LEVEL: oneOf(["debug", "info", "warn", "error"]).default("info"),
-    /** Comma-separated; the first is primary, the rest are fallbacks. */
+    /**
+     * Comma-separated; the first is primary, the rest are fallbacks for the pool and the ledger
+     * reads. Upstream verify uses only the first, so `/verify` fails while it is down.
+     */
     RPC_URLS: list
       .pipe(
         z
-          .array(z.string().refine(isHttpUrl, "must be http(s) URLs"))
+          .array(z.string().refine(isHttpUrl, "must be http(s) URLs without credentials"))
           .min(1, "must list at least one URL"),
       )
       .optional(),
@@ -99,9 +115,12 @@ const envSchema = z
     STORE: oneOf(["memory"]).default("memory"),
 
     /** Fee ceiling for upstream verify and the pool alike (AD-10). */
-    MAX_FEE_STROOPS: stroops(100n).default("250000"),
-    /** Inclusion bid; unset means the pool's fee-stats provider (at least 100). */
-    INCLUSION_FEE_STROOPS: stroops(100n).optional(),
+    MAX_FEE_STROOPS: feeStroops.default("250000"),
+    /**
+     * Inclusion bid; unset means the pool's fee-stats provider (at least 100). A settlement pays
+     * it twice, so twice the bid must stay below `MAX_FEE_STROOPS`.
+     */
+    INCLUSION_FEE_STROOPS: feeStroops.optional(),
     FEE_ESCALATION_FACTOR: z
       .string()
       .regex(/^\d+(\.\d+)?$/, "must be a decimal number")
@@ -111,8 +130,12 @@ const envSchema = z
       .optional(),
     FEE_ESCALATION_MAX_STROOPS: int(100).optional(),
 
-    /** Least ledgers left before the payer's auth expires (AD-22). */
-    MIN_VALIDITY_LEDGERS: int(1).default("12"),
+    /**
+     * Least ledgers left before the payer's auth expires (AD-22): 2 for the pool plus about 2 of
+     * channel wait. A client signs for only `maxTimeoutSeconds` (12 ledgers at 60 s). Below 2 the
+     * pool refuses at `/settle` what `/verify` accepted (its one spare ledger).
+     */
+    MIN_VALIDITY_LEDGERS: int(2).default("4"),
     /** How long a repeat `/settle` waits on a pending record (AD-6). */
     SETTLE_TIMEOUT_MS: ms(1).default("30000"),
     /** Channel lease TTL; renewed well before it runs out (AD-17). */
@@ -145,6 +168,31 @@ const envSchema = z
     message: "is required outside testnet",
     path: ["RPC_URLS"],
   })
+  // Upstream's RPC client refuses http outside testnet, which would make every `/verify` a 500.
+  .refine(
+    (env) =>
+      env.NETWORK === STELLAR_NETWORKS.testnet ||
+      (env.RPC_URLS ?? []).every((url) => url.startsWith("https:")),
+    { message: "must be https outside testnet", path: ["RPC_URLS"] },
+  )
+  // Under the fee bump the bid is paid twice (AD-10), and the ceiling also pays the resource fee,
+  // which is never 0: twice the bid at the ceiling fails every payment.
+  .refine(
+    (env) =>
+      env.INCLUSION_FEE_STROOPS === undefined ||
+      2n * env.INCLUSION_FEE_STROOPS < env.MAX_FEE_STROOPS,
+    { message: "must be below half of MAX_FEE_STROOPS", path: ["INCLUSION_FEE_STROOPS"] },
+  )
+  // The same for the fee-stats bid, which is never below its floor.
+  .refine(
+    (env) =>
+      env.INCLUSION_FEE_STROOPS !== undefined ||
+      2n * FEE_STATS_MIN_BID_STROOPS < env.MAX_FEE_STROOPS,
+    {
+      message: `must be above ${2n * FEE_STATS_MIN_BID_STROOPS}, twice the fee-stats bid's floor`,
+      path: ["MAX_FEE_STROOPS"],
+    },
+  )
   .refine((env) => !env.CATALOG_ALLOW_HTTP || env.NETWORK === STELLAR_NETWORKS.testnet, {
     message: "is only allowed on testnet",
     path: ["CATALOG_ALLOW_HTTP"],
