@@ -56,6 +56,9 @@ not by payer/payTo/amount alone (three identical transfers in one 7-ledger range
   - not used → `payment_expired`: nothing was paid, the amount goes back to the budget(s);
   - RPC unreachable → `payment_unknown` (kept only for this case).
 - Worst case ~45–50 s, under the MCP client's 60 s.
+- A settlement header that arrived before the body failed (too large, stalled) is used, not
+  discarded: the hash is known, so the result is `payment_settled_no_response` without a chain
+  lookup (found while documenting the codes, PR #35).
 - First step, cheap: the `payment_unknown` result names what was signed (payTo, asset, amount,
   the authorization's expiry) and tells the agent not to retry (W314).
 
