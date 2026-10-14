@@ -2,7 +2,7 @@
 id: "0040"
 title: "Improve the project skills: add /risk-split-pr and improve /pr"
 type: FEATURE
-status: active
+status: completed
 related_adr: []
 related_tasks: []
 tags: [layer-tooling, skills, priority-medium, effort-small, platform]
@@ -13,6 +13,14 @@ history:
     status: active
     who: okarcz
     note: "Created and started: add a risk-split-pr skill and improve the pr skill from PR #13."
+  - date: "2026-10-14"
+    status: completed
+    who: okarcz
+    note: >
+      PR #29 rebase-merged into develop (1c26329..d650c75), approved by Stan, Karol and Adam.
+      Added /risk-split-pr and improved /pr (reviewer count by kind of PR, "Reviewers, please
+      confirm" per affected task owner, a /risk-split-pr hint for mixed or large diffs).
+      Skills only, no code or tests changed.
 ---
 
 # Improve the project skills: add /risk-split-pr and improve /pr
