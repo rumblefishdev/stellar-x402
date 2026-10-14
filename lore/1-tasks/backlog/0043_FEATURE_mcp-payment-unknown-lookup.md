@@ -59,6 +59,11 @@ not by payer/payTo/amount alone (three identical transfers in one 7-ledger range
 - A settlement header that arrived before the body failed (too large, stalled) is used, not
   discarded: the hash is known, so the result is `payment_settled_no_response` without a chain
   lookup (found while documenting the codes, PR #35).
+- **Check the seller's hash on chain (W435 A, 2026-10-14):** `payment.transaction` is today the
+  hash the seller reports, checked for format only (the e2e run returns a made-up one). After a
+  settlement, look it up with the same RPC as the nonce lookup: the transaction succeeded and
+  transfers the paid amount from the payer to `payTo`; otherwise `transaction: null` and a log
+  line. Found by the second devil's advocate on the 0037 e2e suite (PR #39).
 - First step, cheap: the `payment_unknown` result names what was signed (payTo, asset, amount,
   the authorization's expiry) and tells the agent not to retry (W314).
 
