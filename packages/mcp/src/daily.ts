@@ -1,10 +1,12 @@
 import {
   closeSync,
+  fstatSync,
   fsyncSync,
   mkdirSync,
   openSync,
   readdirSync,
   readFileSync,
+  readSync,
   unlinkSync,
   writeSync,
 } from "node:fs";
@@ -53,8 +55,13 @@ function missing(error: unknown): boolean {
 }
 
 /**
- * Spent by `payer` per asset in a day file's text. Every line must parse, except a line cut short by
- * a crash: the last one with no newline, or one a later writer closed off with an empty line.
+ * Spent by `payer` per asset in a day file's text. A line cut short (a crash, or a write that came
+ * back short) has no newline of its own. The writer that comes next sees that at write time and puts
+ * an empty line before its record, so the cut line stays marked even once it is no longer last. Hence
+ * the rule: empty lines are skipped, and a line that does not parse is ignored (and logged) only when
+ * it is the last one with no newline (cut, or still being written) or is followed by an empty line
+ * (cut, then closed off). Any other malformed line, such as a hand edit, stops the read, so the day
+ * is never summed from a file that may hide what was spent.
  */
 function sum(text: string, file: string, payer: string, log: (message: string) => void) {
   const lines = text.split("\n");
@@ -94,7 +101,7 @@ export function countDaily(
   const text = readOrEmpty(dayFile(dir, entry.day));
   const spent = sum(text, dayFile(dir, entry.day), entry.payer, log).get(entry.asset) ?? 0n;
   if (spent + amount > daily) return false;
-  append(dir, entry, amount, text, log);
+  append(dir, entry, amount, log);
   return true;
 }
 
@@ -108,7 +115,7 @@ export function refundDaily(
   amount: bigint,
   log: (message: string) => void,
 ): void {
-  append(dir, entry, -amount, readOrEmpty(dayFile(dir, entry.day)), log);
+  append(dir, entry, -amount, log);
 }
 
 /** An absent file is a day with nothing spent. */
@@ -125,14 +132,18 @@ function append(
   dir: string,
   { day, payer, asset }: DailyEntry,
   amount: bigint,
-  before: string,
   log: (message: string) => void,
 ): void {
   mkdirSync(dir, { recursive: true });
-  // After a line cut short, an empty line closes it off, so it is still known as cut once not last.
-  const gap = before === "" || before.endsWith("\n") ? "" : "\n\n";
-  const fd = openSync(dayFile(dir, day), "a");
+  // Read as well as append, so the file's last byte can be checked on this descriptor.
+  const fd = openSync(dayFile(dir, day), "a+");
   try {
+    // Decided now, not from an earlier read: a file ending without a newline ends in a cut line, and
+    // an empty line after it closes it off, so it is still known as cut once not last (see `sum`).
+    const { size } = fstatSync(fd);
+    const lastByte = Buffer.alloc(1);
+    if (size > 0) readSync(fd, lastByte, 0, 1, size - 1);
+    const gap = size > 0 && lastByte.toString() !== "\n" ? "\n\n" : "";
     // One write of a line far below 4 KiB: appended whole, never mixed with another process's line.
     const line = `${gap}${JSON.stringify({ payer, asset, amount: amount.toString() })}\n`;
     const written = writeSync(fd, line);

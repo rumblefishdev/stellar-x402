@@ -2,7 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { SchemeNetworkClient } from "@x402/core/types";
 import { fork } from "node:child_process";
-import { writeSync } from "node:fs";
+import { readFileSync, writeSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,10 +19,11 @@ import {
   type FakeSeller,
 } from "./fake-seller.js";
 
-// The real writeSync, wrapped so a test can make one write come back short, as on a full disk.
+// The real calls, wrapped so a test can make one write come back short, as on a full disk, or one
+// read see the file as it was before another process wrote to it.
 vi.mock("node:fs", async (importOriginal) => {
   const fs = await importOriginal<typeof import("node:fs")>();
-  return { ...fs, writeSync: vi.fn(fs.writeSync) };
+  return { ...fs, readFileSync: vi.fn(fs.readFileSync), writeSync: vi.fn(fs.writeSync) };
 });
 
 /** Two buyers' public addresses; the daily log keys their spending apart. */
@@ -294,6 +295,18 @@ describe("daily log", () => {
     // The cut line is ignored; the next payment is counted as the only one.
     expect(countDaily(state, entry, 4n, 10n, log)).toBe(true);
     expect(spentOn(state, day, BUYER, log)).toEqual(new Map([[USDC, 4n]]));
+  });
+
+  it("closes off a line cut after its own read, so the day can still be read", async () => {
+    await mkdir(state);
+    const file = join(state, `spent-${day}.jsonl`);
+    const record = `${JSON.stringify({ payer: BUYER, asset: USDC, amount: "3" })}\n`;
+    // Another process's write is cut by a crash between this process's read and its append.
+    await writeFile(file, `${record}{"payer":"GB`);
+    vi.mocked(readFileSync).mockReturnValueOnce(record);
+    expect(countDaily(state, entry, 4n, 10n, log)).toBe(true);
+    expect(spentOn(state, day, BUYER, log)).toEqual(new Map([[USDC, 7n]]));
+    expect(logs.join()).toContain("a write cut short by a crash");
   });
 
   it("deletes day files older than seven days when it appends", async () => {
