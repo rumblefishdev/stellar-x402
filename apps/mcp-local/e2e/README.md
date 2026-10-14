@@ -23,7 +23,8 @@ It needs `.env.e2e-testnet` at the repo root (git-ignored), or the file named by
 | `E2E_BUYER_SECRET`  | its secret key; only ever passed to the server in its env        |
 | `E2E_SELLER_PUBLIC` | testnet account with a USDC trustline that receives the payments |
 
-Testnet USDC comes from Circle's faucet; friendbot gives only XLM. The run also creates one fresh
+The run checks balances on Horizon, so these accounts must not be used by another run at the same
+time. Testnet USDC comes from Circle's faucet; friendbot gives only XLM. The run also creates one fresh
 account with friendbot, without a USDC trustline, for the `insufficient_funds` case.
 
 ## What it spends
@@ -31,10 +32,13 @@ account with friendbot, without a USDC trustline, for the `insufficient_funds` c
 Two payments of 0.001 testnet USDC (E-21, E-22) to the example seller (`examples/http-api`,
 started locally), settled by the public x402.org facilitator. Every other paid path uses a local
 fake seller (`src/fakes.ts`) whose 402 copies the example seller's, so a real key signs it; the
-fake never forwards the signed payment, so no money moves.
+fake never forwards the signed payment, so no money moves. It is not the fake of the unit tests
+(`packages/mcp/test/fake-seller.ts`), which settles in process with fake signing; the catalog fake
+is shared.
 
 ## Results
 
-`results/testnet-results.json`: one row per check, with what was expected, what came back, and
-the transaction hash of a real payment. A failed row fails the run, but the scenarios after it
-still run, so the table is complete. The file is rewritten on each run.
+`results/testnet-results.json`: the commit it ran on, then one row per check, with what was
+expected, what came back, and the transaction hash of a real payment. A failed row fails the run,
+but the scenarios after it still run, so the table is complete. A run whose setup fails (no key
+file, too little USDC, friendbot or the seller down) writes the error instead of rows.

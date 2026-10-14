@@ -1,6 +1,10 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { encodePaymentRequiredHeader, encodePaymentResponseHeader } from "@x402/core/http";
+import {
+  decodePaymentSignatureHeader,
+  encodePaymentRequiredHeader,
+  encodePaymentResponseHeader,
+} from "@x402/core/http";
 import type { PaymentRequired } from "@x402/core/types";
 
 /**
@@ -17,17 +21,27 @@ export interface Route {
 
 export interface FakeSeller {
   url: string;
-  /** Requests received, in order: the path and whether it carried a signed payment. */
-  requests: { path: string; paid: boolean }[];
+  /**
+   * Requests received, in order: the path, and the offer the buyer signed when the request carried a
+   * payment, decoded from its header (the seller's own record, not the buyer's report).
+   */
+  requests: {
+    path: string;
+    paid: boolean;
+    signed?: { amount: string; asset: string; payTo: string };
+  }[];
   close(): Promise<void>;
 }
 
-/** The terms with the first offer changed: one place where a scenario names what differs. */
-export function withOffer(
+/**
+ * The terms with one offer per change, each the copied offer with the named fields changed: the one
+ * place where a scenario says what differs from the example seller.
+ */
+export function withOffers(
   terms: PaymentRequired,
-  change: Partial<PaymentRequired["accepts"][number]>,
+  ...changes: Partial<PaymentRequired["accepts"][number]>[]
 ): PaymentRequired {
-  return { ...terms, accepts: [{ ...terms.accepts[0]!, ...change }] };
+  return { ...terms, accepts: changes.map((change) => ({ ...terms.accepts[0]!, ...change })) };
 }
 
 export function answer402(terms: PaymentRequired) {
@@ -56,8 +70,14 @@ export async function startFakeSeller(
   const requests: FakeSeller["requests"] = [];
   const server: Server = createServer((req: IncomingMessage, res: ServerResponse) => {
     const path = new URL(req.url ?? "/", "http://localhost").pathname;
-    const paid = typeof req.headers["payment-signature"] === "string";
-    requests.push({ path, paid });
+    const header = req.headers["payment-signature"];
+    const paid = typeof header === "string";
+    const signed = paid ? decodePaymentSignatureHeader(header).accepted : undefined;
+    requests.push({
+      path,
+      paid,
+      signed: signed && { amount: signed.amount, asset: signed.asset, payTo: signed.payTo },
+    });
     const route = routes[path];
     if (!route) {
       res.writeHead(404).end();

@@ -21,6 +21,35 @@ export async function usdcBalance(account: string): Promise<bigint> {
   return BigInt(whole!) * 10_000_000n + BigInt(fraction.padEnd(7, "0"));
 }
 
+/** The account's XLM in stroops; the facilitator pays the fees, so a payment leaves it unchanged. */
+export async function xlmBalance(account: string): Promise<bigint> {
+  const { balances } = (await get(`/accounts/${account}`)) as {
+    balances: { asset_type: string; balance: string }[];
+  };
+  const [whole, fraction = ""] = balances
+    .find((b) => b.asset_type === "native")!
+    .balance.split(".");
+  return BigInt(whole!) * 10_000_000n + BigInt(fraction.padEnd(7, "0"));
+}
+
+/**
+ * The USDC moved by the transaction, from its effects: which account was debited and which
+ * credited, and how much. It ties the hash to this payment, not to any change on a shared account.
+ */
+export async function usdcTransfer(
+  hash: string,
+): Promise<{ from?: string; to?: string; amount?: string }> {
+  const { _embedded } = (await get(`/transactions/${hash}/effects`)) as {
+    _embedded: {
+      records: { type: string; account: string; amount?: string; asset_code?: string }[];
+    };
+  };
+  const usdc = _embedded.records.filter((e) => e.asset_code === "USDC");
+  const debit = usdc.find((e) => e.type === "account_debited");
+  const credit = usdc.find((e) => e.type === "account_credited");
+  return { from: debit?.account, to: credit?.account, amount: debit?.amount };
+}
+
 /** Whether the transaction is on the ledger and succeeded. */
 export async function succeeded(hash: string): Promise<boolean> {
   const { successful } = (await get(`/transactions/${hash}`)) as { successful: boolean };
