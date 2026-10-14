@@ -248,7 +248,41 @@ describe("daily budget", () => {
     expect(seller.payments).toHaveLength(0);
   });
 
-  it("never lets calls of one process paying at once exceed the budget", async () => {
+  it("refuses to pay when counting fails after the offer was chosen, and pays on the next call", async () => {
+    const call = await startProcess();
+    expect(await call()).toBe("paid");
+    // Reading today's spending still works, so the offer passes; only the insert of the count fails.
+    const db = new DatabaseSync(join(state, "spent.sqlite"));
+    db.exec(
+      "CREATE TRIGGER no_insert BEFORE INSERT ON spent BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+    );
+    expect(await call()).toBe("payment_failed");
+    expect(logs.join()).toContain("disk full");
+    expect(seller.payments).toHaveLength(1);
+    // The failed transaction was rolled back, so the same connection counts the next payment.
+    db.exec("DROP TRIGGER no_insert");
+    db.close();
+    expect(await call()).toBe("paid");
+    expect(spent()).toBe(20_000n);
+  });
+
+  it("refuses to pay when another server holds the database for over 5 seconds", async () => {
+    const call = await startProcess({ timeoutMs: 20_000 });
+    expect(await call()).toBe("paid");
+    const holder = new DatabaseSync(join(state, "spent.sqlite"));
+    holder.exec("BEGIN IMMEDIATE");
+    try {
+      expect(await call()).toBe("payment_failed");
+    } finally {
+      holder.exec("ROLLBACK");
+      holder.close();
+    }
+    expect(logs.join()).toContain("database is locked");
+    expect(seller.payments).toHaveLength(1);
+    expect(await call()).toBe("paid");
+  }, 20_000);
+
+  it("never lets six servers in one process paying at once exceed the budget", async () => {
     const calls = await Promise.all([1, 2, 3, 4, 5, 6].map(() => startProcess()));
     const results = await Promise.all(calls.map((call) => call()));
     expect(results.filter((result) => result === "paid")).toHaveLength(2);
@@ -289,7 +323,10 @@ describe("daily database", () => {
     // Each process tries five times: 100 attempts against a limit of 50.
     const results = await Promise.all(
       Array.from({ length: 20 }, () => {
-        const child = fork(script, [state], { execArgv: ["--import", "tsx"], silent: true });
+        const child = fork(script, [state, day, BUYER, USDC], {
+          execArgv: ["--import", "tsx"],
+          silent: true,
+        });
         let counted = "";
         child.stdout!.on("data", (chunk: Buffer) => (counted += chunk.toString()));
         return new Promise<{ code: number | null; counted: number }>((resolve) =>
@@ -299,6 +336,6 @@ describe("daily database", () => {
     );
     expect(results.map((result) => result.code)).toEqual(Array(20).fill(0));
     expect(results.reduce((total, result) => total + result.counted, 0)).toBe(50);
-    expect(spent(day, "GBUYER", "CASSET")).toBe(50n);
+    expect(spent(day)).toBe(50n);
   }, 30_000);
 });
