@@ -29,7 +29,7 @@ export function row(
   transaction?: string,
 ) {
   const pass = isDeepStrictEqual(got, expected);
-  rows.push({ id, check, expected, got, pass, transaction });
+  rows.push({ id, check, expected, got, pass, ...(transaction && { transaction }) });
   expect.soft(pass, `${id} ${check}: expected ${show(expected)}, got ${show(got)}`).toBe(true);
 }
 
