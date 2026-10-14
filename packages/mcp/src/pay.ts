@@ -13,11 +13,11 @@ export interface PaymentConfig {
   payer: string;
   /**
    * Per asset contract, in atomic units: the largest price one call may pay and the budget for one
-   * UTC day, shared by every process using `dailyFile`.
+   * UTC day, shared by every process using `dailyDir`.
    */
   assets: Record<string, { maxPerCall: bigint; daily: bigint }>;
-  /** The file that records what was spent per day. */
-  dailyFile: string;
+  /** The directory holding the log of what was spent, one file per day. */
+  dailyDir: string;
   /** The clock that decides the day; tests set it, the server uses the system's. */
   now?: () => Date;
 }
@@ -97,10 +97,10 @@ export async function callPaidHttp(
   // True once the request carrying the signed payment has been handed to the network.
   let paymentSent = false;
   // Nothing was sent, so the amount goes back to the day it was counted on.
-  const giveBack = async () => {
+  const giveBack = () => {
     if (!paid) return;
     try {
-      await refundDaily(config.dailyFile, paid.countedIn, paid.amount, log);
+      refundDaily(config.dailyDir, paid.countedIn, paid.amount, log);
     } catch (refundError) {
       // The amount stays counted for today: too strict, never too loose.
       log(
@@ -122,7 +122,7 @@ export async function callPaidHttp(
     let today = new Map<string, bigint>();
     if (affordable.length > 0) {
       try {
-        today = spentOn(config.dailyFile, utcDay(now()), config.payer);
+        today = spentOn(config.dailyDir, utcDay(now()), config.payer, log);
       } catch (error) {
         refusal = dailyUnreadable(error);
         return [];
@@ -148,15 +148,15 @@ export async function callPaidHttp(
   });
   client.onBeforePaymentCreation(async ({ selectedRequirements: offer }) => {
     const amount = BigInt(offer.amount);
-    // The policy already kept offers within today's budget from a read without the lock; the check
-    // that counts is this one, under the file's lock, so calls and processes paying at once cannot
-    // both fit in the last part of it. Once signed the amount is never given back, so a seller
-    // cannot return it to the budget by claiming the payment failed.
+    // The policy already kept offers within today's budget; the check that counts is this one, which
+    // reads the day's log again and appends the amount (see daily.ts for the bound when processes pay
+    // at the same moment). Once signed the amount is never given back, so a seller cannot return it
+    // to the budget by claiming the payment failed.
     const countedIn = { day: utcDay(now()), payer: config.payer, asset: offer.asset };
     let counted = false;
     try {
-      counted = await countDaily(
-        config.dailyFile,
+      counted = countDaily(
+        config.dailyDir,
         countedIn,
         amount,
         config.assets[offer.asset]!.daily,
@@ -175,7 +175,7 @@ export async function callPaidHttp(
   // deadline, so the amount goes back to the budget.
   client.onPaymentCreationFailure(async ({ error }) => {
     signingError = error;
-    await giveBack();
+    giveBack();
   });
 
   const sellerFetch = guardedFetch(limits, deadline);
@@ -185,7 +185,7 @@ export async function callPaidHttp(
       // Past the deadline the request would be refused before it connects: nothing is sent, so this
       // is a refusal with the amount given back, not a payment of unknown outcome.
       if (deadline.aborted) {
-        await giveBack();
+        giveBack();
         throw new ToolError(
           "upstream_error",
           "The time limit passed before the payment was sent; nothing was sent.",

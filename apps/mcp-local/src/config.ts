@@ -49,11 +49,11 @@ const ENV = z.object({
   STELLAR_X402_SECRET_KEY: optional(z.string()),
   STELLAR_X402_MAX_PER_CALL: optional(ATOMIC),
   STELLAR_X402_DAILY_BUDGET: optional(ATOMIC),
-  STELLAR_X402_STATE_FILE: optional(z.string()),
+  STELLAR_X402_STATE_DIR: optional(z.string()),
 });
 
 /** Outside any project, so every Claude session of the user counts against the same day. */
-const DEFAULT_STATE_FILE = join(homedir(), ".stellar-x402-mcp", "spent.json");
+const DEFAULT_STATE_DIR = join(homedir(), ".stellar-x402-mcp");
 
 /**
  * Reads the server's settings from environment variables, as an MCP client such as Claude Desktop
@@ -70,6 +70,11 @@ export function loadConfig(env: NodeJS.ProcessEnv): CliConfig {
       "STELLAR_X402_BUDGET is not a setting of this server; it was replaced by STELLAR_X402_DAILY_BUDGET.",
     );
   }
+  if (unknown === "STELLAR_X402_STATE_FILE") {
+    throw new Error(
+      "STELLAR_X402_STATE_FILE is not a setting of this server; it was replaced by STELLAR_X402_STATE_DIR, a directory.",
+    );
+  }
   if (unknown) throw new Error(`${unknown} is not a setting of this server.`);
   const parsed = ENV.safeParse(env);
   if (!parsed.success) {
@@ -77,9 +82,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): CliConfig {
     throw new Error(`${issue!.path.join(".")} ${issue!.message}.`);
   }
   const vars = parsed.data;
-  // The file only records the daily budget; set alone it would do nothing.
-  if (vars.STELLAR_X402_STATE_FILE !== undefined && vars.STELLAR_X402_DAILY_BUDGET === undefined) {
-    throw new Error("STELLAR_X402_STATE_FILE needs STELLAR_X402_DAILY_BUDGET.");
+  // The directory only records the daily budget; set alone it would do nothing.
+  if (vars.STELLAR_X402_STATE_DIR !== undefined && vars.STELLAR_X402_DAILY_BUDGET === undefined) {
+    throw new Error("STELLAR_X402_STATE_DIR needs STELLAR_X402_DAILY_BUDGET.");
   }
   const config: CliConfig = {
     discoveryUrl: vars.STELLAR_X402_DISCOVERY_URL,
@@ -113,7 +118,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): CliConfig {
           daily: vars.STELLAR_X402_DAILY_BUDGET,
         },
       },
-      dailyFile: vars.STELLAR_X402_STATE_FILE ?? DEFAULT_STATE_FILE,
+      dailyDir: vars.STELLAR_X402_STATE_DIR ?? DEFAULT_STATE_DIR,
     },
   };
 }

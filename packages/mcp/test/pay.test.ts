@@ -49,7 +49,7 @@ async function connect(
     schemes: [{ network: "stellar:testnet", client: scheme }],
     payer: "GBUYERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     assets: { [USDC]: { maxPerCall: 20_000n, daily: 15_000n } },
-    dailyFile: join(stateDir, "spent.json"),
+    dailyDir: stateDir,
     // A fixed day, so a test running across midnight UTC does not start a new budget.
     now: () => new Date("2026-10-13T12:00:00Z"),
     ...overrides,

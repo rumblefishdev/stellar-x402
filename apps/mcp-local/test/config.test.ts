@@ -43,12 +43,10 @@ describe("loadConfig", () => {
     });
   });
 
-  it("records the daily budget in the home directory unless a file is named", () => {
-    expect(loadConfig(PAYING).payment?.dailyFile).toBe(
-      join(homedir(), ".stellar-x402-mcp", "spent.json"),
-    );
-    const named = loadConfig({ ...PAYING, STELLAR_X402_STATE_FILE: "/var/tmp/spent.json" });
-    expect(named.payment?.dailyFile).toBe("/var/tmp/spent.json");
+  it("records the daily budget in the home directory unless a directory is named", () => {
+    expect(loadConfig(PAYING).payment?.dailyDir).toBe(join(homedir(), ".stellar-x402-mcp"));
+    const named = loadConfig({ ...PAYING, STELLAR_X402_STATE_DIR: "/var/tmp/x402" });
+    expect(named.payment?.dailyDir).toBe("/var/tmp/x402");
   });
 
   it("reads the optional settings", () => {
@@ -106,9 +104,14 @@ describe("loadConfig", () => {
       "STELLAR_X402_DAILY_BUDGET must be an amount in atomic units",
     ],
     [
-      "a record file without a daily budget",
-      { ...BASE, STELLAR_X402_STATE_FILE: "/var/tmp/spent.json" },
-      "STELLAR_X402_STATE_FILE needs STELLAR_X402_DAILY_BUDGET",
+      "a state directory without a daily budget",
+      { ...BASE, STELLAR_X402_STATE_DIR: "/var/tmp/x402" },
+      "STELLAR_X402_STATE_DIR needs STELLAR_X402_DAILY_BUDGET",
+    ],
+    [
+      "the state file, replaced by a state directory",
+      { ...PAYING, STELLAR_X402_STATE_FILE: "/var/tmp/spent.json" },
+      "STELLAR_X402_STATE_FILE is not a setting of this server; it was replaced by STELLAR_X402_STATE_DIR",
     ],
     [
       "a timeout that is not a number",

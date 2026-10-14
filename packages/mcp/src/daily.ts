@@ -1,17 +1,36 @@
-import { readFileSync } from "node:fs";
-import { link, mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
-import { dirname } from "node:path";
+import {
+  closeSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  unlinkSync,
+  writeSync,
+} from "node:fs";
+import { join } from "node:path";
 import { z } from "zod";
 
 /**
- * What was spent per UTC day, buyer and asset, in atomic units:
- * `{"2026-10-13": {"G…": {"C…": "20000"}}}`. One file is shared by every server process of a buyer,
- * so a restart or a second Claude session does not start the day again from zero; keyed by the
- * buyer's address, so two wallets using one file each keep their own limit. Only today's entry
- * counts; older days are dropped on the next count.
+ * The daily budget is an append-only log, one file per UTC day: `<dir>/spent-YYYY-MM-DD.jsonl`.
+ * Every server process of the buyer shares it, so a restart or a second Claude session does not start
+ * the day again from zero. A counted payment appends `{"payer":"G…","asset":"C…","amount":"10000"}`,
+ * a refund the same with a negative amount; spent today is the sum of today's lines for the payer
+ * and asset, so two wallets sharing the directory each keep their own limit.
+ *
+ * There is no lock: two processes paying at the very same moment can both read the same sum and both
+ * fit. The day can then be passed by at most one payment per process paying at that moment, and
+ * each of those stays within its asset's `maxPerCall`. Within one process the read and the append run
+ * synchronously, with no await between them, so parallel calls of one process never both fit.
  */
-const SPENT = z.record(z.record(z.record(z.string().regex(/^\d+$/))));
-type SpentDays = z.infer<typeof SPENT>;
+const LINE = z.object({
+  payer: z.string(),
+  asset: z.string(),
+  amount: z.string().regex(/^-?\d+$/),
+});
+
+/** Day files older than this are deleted when a line is appended; only today's is ever read. */
+const KEEP_DAYS = 7;
 
 /** Where an amount is counted: the day, the buyer's address and the asset contract. */
 export interface DailyEntry {
@@ -25,12 +44,8 @@ export function utcDay(now: Date): string {
   return now.toISOString().slice(0, 10);
 }
 
-/** An absent file is a day with nothing spent; a file that cannot be read or parsed is an error. */
-function parse(text: string | undefined, file: string): SpentDays {
-  if (text === undefined) return {};
-  const parsed = SPENT.safeParse(JSON.parse(text));
-  if (!parsed.success) throw new Error(`${file} is not a spent-per-day record`);
-  return parsed.data;
+function dayFile(dir: string, day: string): string {
+  return join(dir, `spent-${day}.jsonl`);
 }
 
 function missing(error: unknown): boolean {
@@ -38,165 +53,110 @@ function missing(error: unknown): boolean {
 }
 
 /**
- * Spent by `payer` on `day` per asset, read without the lock: a write replaces the file whole, so a
- * reader sees the old or the new record, never half of one. Synchronous, for the library's offer filter.
+ * Spent by `payer` per asset in a day file's text. Every line must parse, except a line cut short by
+ * a crash: the last one with no newline, or one a later writer closed off with an empty line.
  */
-export function spentOn(file: string, day: string, payer: string): Map<string, bigint> {
-  let text: string | undefined;
-  try {
-    text = readFileSync(file, "utf8");
-  } catch (error) {
-    if (!missing(error)) throw error;
+function sum(text: string, file: string, payer: string, log: (message: string) => void) {
+  const lines = text.split("\n");
+  const spent = new Map<string, bigint>();
+  for (const [i, line] of lines.entries()) {
+    if (line === "") continue;
+    let record: z.infer<typeof LINE>;
+    try {
+      record = LINE.parse(JSON.parse(line));
+    } catch {
+      const last = i === lines.length - 1;
+      const closedOff = lines[i + 1] === "" && i + 1 < lines.length - 1;
+      if (!last && !closedOff) throw new Error(`${file} line ${i + 1} is not a spent record`);
+      log(`daily budget: ignored line ${i + 1} of ${file}, a write cut short by a crash`);
+      continue;
+    }
+    const { asset, amount } = record;
+    if (record.payer === payer) spent.set(asset, (spent.get(asset) ?? 0n) + BigInt(amount));
   }
-  const amounts = parse(text, file)[day]?.[payer] ?? {};
-  return new Map(Object.entries(amounts).map(([asset, amount]) => [asset, BigInt(amount)]));
+  return spent;
 }
 
-/**
- * Counts `amount` against `entry` if it stays within `daily`; false when it would not. Runs under the
- * lock, so two processes paying at once cannot both fit in the last part of the budget.
- */
-export async function countDaily(
-  file: string,
-  { day, payer, asset }: DailyEntry,
+/** Spent by `payer` on `day` per asset. */
+export function spentOn(dir: string, day: string, payer: string, log: (message: string) => void) {
+  const file = dayFile(dir, day);
+  return sum(readOrEmpty(file), file, payer, log);
+}
+
+/** Counts `amount` against `entry` if it stays within `daily`; false when it would not. */
+export function countDaily(
+  dir: string,
+  entry: DailyEntry,
   amount: bigint,
   daily: bigint,
   log: (message: string) => void,
-): Promise<boolean> {
-  return locked(file, log, async () => {
-    const days = parse(await readOrNothing(file), file);
-    const already = BigInt(days[day]?.[payer]?.[asset] ?? "0");
-    if (already + amount > daily) return false;
-    const payers = {
-      ...days[day],
-      [payer]: { ...days[day]?.[payer], [asset]: (already + amount).toString() },
-    };
-    await replace(file, { [day]: payers });
-    return true;
-  });
+): boolean {
+  const text = readOrEmpty(dayFile(dir, entry.day));
+  const spent = sum(text, dayFile(dir, entry.day), entry.payer, log).get(entry.asset) ?? 0n;
+  if (spent + amount > daily) return false;
+  append(dir, entry, amount, text, log);
+  return true;
 }
 
 /**
- * Gives back an amount counted on `entry` whose payment was never signed. A day already dropped is over,
- * so nothing is given back to it; like a count, the write keeps only `day`.
+ * Gives back an amount counted on `entry` whose payment was never signed: a negative line in the
+ * day it was counted on, even if that day is over (harmless, it is no longer read).
  */
-export async function refundDaily(
-  file: string,
-  { day, payer, asset }: DailyEntry,
+export function refundDaily(
+  dir: string,
+  entry: DailyEntry,
   amount: bigint,
   log: (message: string) => void,
-): Promise<void> {
-  await locked(file, log, async () => {
-    const days = parse(await readOrNothing(file), file);
-    if (days[day] === undefined) return;
-    const already = BigInt(days[day][payer]?.[asset] ?? "0");
-    if (already < amount) {
-      // Something else changed the record since this amount was counted: leave it as it is.
-      log(`daily budget: cannot give back ${amount} of ${asset}, the record holds only ${already}`);
-      return;
-    }
-    const payers = {
-      ...days[day],
-      [payer]: { ...days[day][payer], [asset]: (already - amount).toString() },
-    };
-    await replace(file, { [day]: payers });
-  });
+): void {
+  append(dir, entry, -amount, readOrEmpty(dayFile(dir, entry.day)), log);
 }
 
-async function readOrNothing(file: string): Promise<string | undefined> {
+/** An absent file is a day with nothing spent. */
+function readOrEmpty(file: string): string {
   try {
-    return await readFile(file, "utf8");
+    return readFileSync(file, "utf8");
   } catch (error) {
-    if (missing(error)) return undefined;
+    if (missing(error)) return "";
     throw error;
   }
 }
 
-/** Writes beside the file, then renames over it: a reader never sees half a record. */
-async function replace(file: string, days: SpentDays): Promise<void> {
-  const temporary = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
-  const handle = await open(temporary, "w");
-  try {
-    await handle.writeFile(JSON.stringify(days));
-    // On disk before the rename: after a power loss the record is the old one or the new one, never
-    // an empty file that would block every payment until it is deleted by hand.
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  await rename(temporary, file);
-}
-
-/** A lock held longer than this belongs to a process that died; the work under it takes milliseconds. */
-const STALE_LOCK_MS = 5_000;
-/** Waiting longer than a stale lock lives means something else is wrong. */
-const LOCK_WAIT_MS = 10_000;
-const LOCK_RETRY_MS = 20;
-
-/**
- * Runs `work` while holding `<file>.lock`, a file only one process can create (`wx`). A lock left by
- * a process that died is taken over once it is older than STALE_LOCK_MS.
- */
-async function locked<T>(
-  file: string,
+function append(
+  dir: string,
+  { day, payer, asset }: DailyEntry,
+  amount: bigint,
+  before: string,
   log: (message: string) => void,
-  work: () => Promise<T>,
-): Promise<T> {
-  const lock = `${file}.lock`;
-  await mkdir(dirname(file), { recursive: true });
-  const giveUp = Date.now() + LOCK_WAIT_MS;
-  for (;;) {
-    try {
-      await (await open(lock, "wx")).close();
-      break;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    }
-    try {
-      await removeIfStale(lock);
-    } catch (error) {
-      // Its holder, or another waiter, removed it first: try again.
-      if (!missing(error)) throw error;
-    }
-    if (Date.now() > giveUp) throw new Error(`${lock} is held by another process`);
-    await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
-  }
+): void {
+  mkdirSync(dir, { recursive: true });
+  // After a line cut short, an empty line closes it off, so it is still known as cut once not last.
+  const gap = before === "" || before.endsWith("\n") ? "" : "\n\n";
+  const fd = openSync(dayFile(dir, day), "a");
   try {
-    return await work();
+    // One write of a line far below 4 KiB: appended whole, never mixed with another process's line.
+    writeSync(fd, `${gap}${JSON.stringify({ payer, asset, amount: amount.toString() })}\n`);
+    fsyncSync(fd);
   } finally {
-    await release(lock, log);
+    closeSync(fd);
   }
+  removeOldDays(dir, day, log);
 }
 
-async function release(lock: string, log: (message: string) => void): Promise<void> {
+/** Deletes day files older than KEEP_DAYS. Housekeeping only: a failure is logged, never fatal. */
+function removeOldDays(dir: string, today: string, log: (message: string) => void) {
+  const oldest = utcDay(new Date(Date.parse(today) - KEEP_DAYS * 86_400_000));
   try {
-    await unlink(lock);
+    for (const name of readdirSync(dir)) {
+      const day = /^spent-(\d{4}-\d{2}-\d{2})\.jsonl$/.exec(name)?.[1];
+      if (day === undefined || day >= oldest) continue;
+      try {
+        unlinkSync(join(dir, name));
+      } catch (error) {
+        // Another process deleted it first.
+        if (!missing(error)) throw error;
+      }
+    }
   } catch (error) {
-    if (!missing(error)) throw error;
-    // Another process took our lock over as stale; what `work` did is done and stays done.
-    log(`daily budget: ${lock} was already gone when its holder released it`);
-  }
-}
-
-/**
- * Removes `lock` if it is older than STALE_LOCK_MS. Two waiters can both find it stale, and between
- * their checks one of them may already hold a fresh lock under the same name. So the lock is first
- * renamed to a name only this process uses: one rename wins, and the file it took is checked to be
- * the same stale one before it is deleted; a fresh lock taken by mistake is put back.
- */
-async function removeIfStale(lock: string): Promise<void> {
-  const seen = await stat(lock);
-  if (Date.now() - seen.mtimeMs <= STALE_LOCK_MS) return;
-  const taken = `${lock}.${process.pid}.${Math.random().toString(36).slice(2)}.stale`;
-  await rename(lock, taken);
-  try {
-    const got = await stat(taken);
-    if (got.ino !== seen.ino || got.dev !== seen.dev) {
-      // Another waiter already removed the stale lock and holds a fresh one. `link` puts it back
-      // and fails, loudly, rather than replace a lock a third process created in that instant.
-      await link(taken, lock);
-    }
-  } finally {
-    await unlink(taken);
+    log(`daily budget: could not delete old day files in ${dir} (${String(error)})`);
   }
 }
