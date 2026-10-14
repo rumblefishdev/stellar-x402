@@ -48,13 +48,12 @@ const ENV = z.object({
   STELLAR_X402_ALLOW_INSECURE_LOCAL: optional(z.enum(["0", "1"], { message: "must be 0 or 1" })),
   STELLAR_X402_SECRET_KEY: optional(z.string()),
   STELLAR_X402_MAX_PER_CALL: optional(ATOMIC),
-  STELLAR_X402_BUDGET: optional(ATOMIC),
   STELLAR_X402_DAILY_BUDGET: optional(ATOMIC),
-  STELLAR_X402_STATE_FILE: optional(z.string()),
+  STELLAR_X402_STATE_DIR: optional(z.string()),
 });
 
 /** Outside any project, so every Claude session of the user counts against the same day. */
-const DEFAULT_STATE_FILE = join(homedir(), ".stellar-x402-mcp", "spent.json");
+const DEFAULT_STATE_DIR = join(homedir(), ".stellar-x402-mcp");
 
 /**
  * Reads the server's settings from environment variables, as an MCP client such as Claude Desktop
@@ -66,6 +65,16 @@ export function loadConfig(env: NodeJS.ProcessEnv): CliConfig {
   const unknown = Object.keys(env).find(
     (name) => name.startsWith("STELLAR_X402_") && !(name in ENV.shape),
   );
+  if (unknown === "STELLAR_X402_BUDGET") {
+    throw new Error(
+      "STELLAR_X402_BUDGET is not a setting of this server; it was replaced by STELLAR_X402_DAILY_BUDGET.",
+    );
+  }
+  if (unknown === "STELLAR_X402_STATE_FILE") {
+    throw new Error(
+      "STELLAR_X402_STATE_FILE is not a setting of this server; it was replaced by STELLAR_X402_STATE_DIR, a directory.",
+    );
+  }
   if (unknown) throw new Error(`${unknown} is not a setting of this server.`);
   const parsed = ENV.safeParse(env);
   if (!parsed.success) {
@@ -73,9 +82,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): CliConfig {
     throw new Error(`${issue!.path.join(".")} ${issue!.message}.`);
   }
   const vars = parsed.data;
-  // The file only records the daily budget; set alone it would do nothing.
-  if (vars.STELLAR_X402_STATE_FILE !== undefined && vars.STELLAR_X402_DAILY_BUDGET === undefined) {
-    throw new Error("STELLAR_X402_STATE_FILE needs STELLAR_X402_DAILY_BUDGET.");
+  // The directory only records the daily budget; set alone it would do nothing.
+  if (vars.STELLAR_X402_STATE_DIR !== undefined && vars.STELLAR_X402_DAILY_BUDGET === undefined) {
+    throw new Error("STELLAR_X402_STATE_DIR needs STELLAR_X402_DAILY_BUDGET.");
   }
   const config: CliConfig = {
     discoveryUrl: vars.STELLAR_X402_DISCOVERY_URL,
@@ -88,7 +97,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): CliConfig {
   if (vars.STELLAR_X402_MAX_PER_CALL === undefined) {
     throw new Error("STELLAR_X402_MAX_PER_CALL is required.");
   }
-  if (vars.STELLAR_X402_BUDGET === undefined) throw new Error("STELLAR_X402_BUDGET is required.");
+  if (vars.STELLAR_X402_DAILY_BUDGET === undefined) {
+    throw new Error("STELLAR_X402_DAILY_BUDGET is required.");
+  }
   let signer;
   try {
     signer = createEd25519Signer(vars.STELLAR_X402_SECRET_KEY, STELLAR_NETWORKS.testnet);
@@ -104,14 +115,10 @@ export function loadConfig(env: NodeJS.ProcessEnv): CliConfig {
       assets: {
         [USDC_TESTNET_ADDRESS]: {
           maxPerCall: vars.STELLAR_X402_MAX_PER_CALL,
-          budget: vars.STELLAR_X402_BUDGET,
           daily: vars.STELLAR_X402_DAILY_BUDGET,
         },
       },
-      dailyFile:
-        vars.STELLAR_X402_DAILY_BUDGET === undefined
-          ? undefined
-          : (vars.STELLAR_X402_STATE_FILE ?? DEFAULT_STATE_FILE),
+      dailyDir: vars.STELLAR_X402_STATE_DIR ?? DEFAULT_STATE_DIR,
     },
   };
 }
