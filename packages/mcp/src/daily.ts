@@ -98,8 +98,8 @@ export function countDaily(
   daily: bigint,
   log: (message: string) => void,
 ): boolean {
-  const text = readOrEmpty(dayFile(dir, entry.day));
-  const spent = sum(text, dayFile(dir, entry.day), entry.payer, log).get(entry.asset) ?? 0n;
+  const file = dayFile(dir, entry.day);
+  const spent = sum(readOrEmpty(file), file, entry.payer, log).get(entry.asset) ?? 0n;
   if (spent + amount > daily) return false;
   append(dir, entry, amount, log);
   return true;
@@ -144,7 +144,9 @@ function append(
     const lastByte = Buffer.alloc(1);
     if (size > 0) readSync(fd, lastByte, 0, 1, size - 1);
     const gap = size > 0 && lastByte.toString() !== "\n" ? "\n\n" : "";
-    // One write of a line far below 4 KiB: appended whole, never mixed with another process's line.
+    // One write of a line far below 4 KiB through O_APPEND: on a local filesystem it lands whole,
+    // never mixed with another process's line. That is how local filesystems behave in practice, not
+    // a POSIX promise, hence the local-disk-only note in the README.
     const line = `${gap}${JSON.stringify({ payer, asset, amount: amount.toString() })}\n`;
     const written = writeSync(fd, line);
     // A full disk or quota can write part of the line and still return; that amount is not counted.

@@ -261,7 +261,7 @@ describe("daily budget", () => {
     await mkdir(state);
     await writeFile(join(state, "spent-2026-10-13.jsonl"), content);
     expect(await call()).toBe("payment_failed");
-    expect(logs.join()).toContain("daily budget record cannot be read");
+    expect(logs.join()).toContain("daily budget record cannot be read or written");
     expect(seller.payments).toHaveLength(0);
   });
 

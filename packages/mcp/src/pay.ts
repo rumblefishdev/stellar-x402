@@ -43,7 +43,7 @@ const MAX_AUTHORIZATION_SECONDS = 300;
 function dailyUnreadable(error: unknown): ToolError {
   return new ToolError(
     "payment_failed",
-    "The daily budget record cannot be read, so nothing is paid.",
+    "The daily budget record cannot be read or written, so nothing is paid.",
     String(error),
   );
 }
