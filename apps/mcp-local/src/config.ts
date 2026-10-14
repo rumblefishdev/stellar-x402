@@ -3,7 +3,7 @@ import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import { createEd25519Signer, USDC_TESTNET_ADDRESS } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/client";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { z } from "zod";
 
 /** What `createServer` needs, read from the environment; only the log is added by the caller. */
@@ -49,7 +49,17 @@ const ENV = z.object({
   STELLAR_X402_SECRET_KEY: optional(z.string()),
   STELLAR_X402_MAX_PER_CALL: optional(ATOMIC),
   STELLAR_X402_DAILY_BUDGET: optional(ATOMIC),
-  STELLAR_X402_STATE_DIR: optional(z.string()),
+  // An MCP client passes env values as written, with no shell to expand `~`; it is expanded here,
+  // as the reference MCP servers do. A relative path would follow each server's working directory,
+  // giving every project its own daily budget.
+  STELLAR_X402_STATE_DIR: optional(
+    z
+      .string()
+      .transform((path) =>
+        path === "~" || path.startsWith("~/") ? homedir() + path.slice(1) : path,
+      )
+      .refine(isAbsolute, "must be an absolute path or start with ~/"),
+  ),
 });
 
 /** Outside any project, so every Claude session of the user counts against the same day. */
@@ -82,9 +92,15 @@ export function loadConfig(env: NodeJS.ProcessEnv): CliConfig {
     throw new Error(`${issue!.path.join(".")} ${issue!.message}.`);
   }
   const vars = parsed.data;
-  // The directory only records the daily budget; set alone it would do nothing.
-  if (vars.STELLAR_X402_STATE_DIR !== undefined && vars.STELLAR_X402_DAILY_BUDGET === undefined) {
-    throw new Error("STELLAR_X402_STATE_DIR needs STELLAR_X402_DAILY_BUDGET.");
+  // The limits and the state directory only matter when paying; without a key they would do nothing.
+  if (vars.STELLAR_X402_SECRET_KEY === undefined) {
+    const paymentOnly = [
+      "STELLAR_X402_MAX_PER_CALL",
+      "STELLAR_X402_DAILY_BUDGET",
+      "STELLAR_X402_STATE_DIR",
+    ] as const;
+    const set = paymentOnly.find((name) => vars[name] !== undefined);
+    if (set) throw new Error(`${set} needs STELLAR_X402_SECRET_KEY.`);
   }
   const config: CliConfig = {
     discoveryUrl: vars.STELLAR_X402_DISCOVERY_URL,

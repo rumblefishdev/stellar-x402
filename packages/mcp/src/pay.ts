@@ -16,7 +16,7 @@ export interface PaymentConfig {
    * UTC day, shared by every process using `dailyDir`.
    */
   assets: Record<string, { maxPerCall: bigint; daily: bigint }>;
-  /** The directory holding the log of what was spent, one file per day. */
+  /** The directory holding `spent.sqlite`, the database of what was spent per day. */
   dailyDir: string;
   /** The clock that decides the day; tests set it, the server uses the system's. */
   now?: () => Date;
@@ -39,11 +39,11 @@ export interface PaidResponse {
  */
 const MAX_AUTHORIZATION_SECONDS = 300;
 
-/** The daily record could not be read or written, so how much is left today is unknown: pay nothing. */
-function dailyUnreadable(error: unknown): ToolError {
+/** The daily database could not be read or written, so how much is left today is unknown: pay nothing. */
+function dailyRecordFailed(error: unknown): ToolError {
   return new ToolError(
     "payment_failed",
-    "The daily budget record cannot be read, so nothing is paid.",
+    "The daily budget database cannot be read or written, so nothing is paid.",
     String(error),
   );
 }
@@ -100,7 +100,7 @@ export async function callPaidHttp(
   const giveBack = () => {
     if (!paid) return;
     try {
-      refundDaily(config.dailyDir, paid.countedIn, paid.amount, log);
+      refundDaily(config.dailyDir, paid.countedIn, paid.amount);
     } catch (refundError) {
       // The amount stays counted for today: too strict, never too loose.
       log(
@@ -109,11 +109,15 @@ export async function callPaidHttp(
     }
   };
 
-  // Of the seller's offers, keep those in an allowed asset, with a short enough authorization, within
-  // the per-call limit and what is left of today's budget; the library pays the first one left.
+  // Of the seller's offers, keep those in an allowed asset, at a price above zero, with a short enough
+  // authorization, within the per-call limit and what is left of today's budget; the library pays the
+  // first one left.
   client.registerPolicy((_version, offers) => {
     const allowed = offers.filter((offer) => Object.hasOwn(config.assets, offer.asset));
-    const shortLived = allowed.filter(
+    // A zero or negative price would be counted before the library refuses to sign it, and a negative
+    // count raises the day's budget for every process until it is given back.
+    const priced = allowed.filter((offer) => /^[1-9][0-9]*$/.test(offer.amount));
+    const shortLived = priced.filter(
       (offer) => offer.maxTimeoutSeconds <= MAX_AUTHORIZATION_SECONDS,
     );
     const affordable = shortLived.filter(
@@ -122,9 +126,9 @@ export async function callPaidHttp(
     let today = new Map<string, bigint>();
     if (affordable.length > 0) {
       try {
-        today = spentOn(config.dailyDir, utcDay(now()), config.payer, log);
+        today = spentOn(config.dailyDir, utcDay(now()), config.payer);
       } catch (error) {
-        refusal = dailyUnreadable(error);
+        refusal = dailyRecordFailed(error);
         return [];
       }
     }
@@ -134,6 +138,11 @@ export async function callPaidHttp(
     );
     if (allowed.length === 0) {
       refusal = new ToolError("asset_not_allowed", "The seller asks for an asset not allowed.");
+    } else if (priced.length === 0) {
+      refusal = new ToolError(
+        "unsupported_payment",
+        "The seller's price is not a whole number of atomic units above zero.",
+      );
     } else if (shortLived.length === 0) {
       refusal = new ToolError(
         "unsupported_payment",
@@ -149,21 +158,15 @@ export async function callPaidHttp(
   client.onBeforePaymentCreation(async ({ selectedRequirements: offer }) => {
     const amount = BigInt(offer.amount);
     // The policy already kept offers within today's budget; the check that counts is this one, which
-    // reads the day's log again and appends the amount (see daily.ts for the bound when processes pay
-    // at the same moment). Once signed the amount is never given back, so a seller cannot return it
-    // to the budget by claiming the payment failed.
+    // reads the day's spending again and records the amount in one transaction, so processes paying
+    // at the same moment never pass the day together. Once signed the amount is never given back,
+    // so a seller cannot return it to the budget by claiming the payment failed.
     const countedIn = { day: utcDay(now()), payer: config.payer, asset: offer.asset };
     let counted = false;
     try {
-      counted = countDaily(
-        config.dailyDir,
-        countedIn,
-        amount,
-        config.assets[offer.asset]!.daily,
-        log,
-      );
+      counted = countDaily(config.dailyDir, countedIn, amount, config.assets[offer.asset]!.daily);
     } catch (error) {
-      refusal = dailyUnreadable(error);
+      refusal = dailyRecordFailed(error);
     }
     if (!counted) {
       refusal ??= new ToolError("over_budget", "The payment would exceed the daily budget.");
