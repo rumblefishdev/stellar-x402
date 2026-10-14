@@ -153,13 +153,13 @@ and existing servers. Each line: what was decided and why.
 - **The catalog is trusted as the operator's choice:** its request has a time limit but no address
   guard or size cap, unlike seller requests; revisit if a shared or third-party catalog is used
   (PR #28 review, 2026-10-13).
-- **Daily budget (PR #32, revised by PR #34: W350 A, W372 A, W373 A):** required with a key, per key
-  and asset, calendar UTC day; an append-only log, one file per day
-  (`~/.stellar-x402-mcp/spent-YYYY-MM-DD.jsonl`), one `O_APPEND` write + `fsync` per payment, a
-  refund as a negative line, no lock. Known bound: processes paying at the very same moment can each
-  pass the day by one payment, never more than the per-call limit. It guards against bugs and a
-  looping agent, not against an agent with access to the files (W383 C: documented, not prevented;
-  the real limit for mainnet is in 0044).
+- **Daily budget (PR #32 → #34 → #36; W350 A, W393 A1):** required with a key, per key and asset,
+  calendar UTC day, in Node's built-in SQLite (`<STATE_DIR>/spent.sqlite`): a count reads the sum and
+  inserts inside one `BEGIN IMMEDIATE` transaction, so it is exact across processes; a refund is a
+  negative row on the counted day. Two hand-made file formats (an own lock, then an append-only log)
+  were dropped after three review rounds kept finding edge cases. It guards against bugs and a
+  looping agent, not against an agent with access to the files (W383 C); the real limit for mainnet
+  is in 0044.
 - **Prices come only from the live 402,** and `call_paid_http` returns only the paid price: the
   agent saw the catalog price in `list_resources`.
 - **Which offer is paid:** of the seller's offers, those in an allowed asset and within the
