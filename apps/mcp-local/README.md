@@ -148,7 +148,7 @@ A failure is a tool result with `isError: true`, one text content holding
 
 Two failures do not carry this shape, as the MCP SDK answers them before this server's code runs:
 input that does not match the tool's input schema (a missing `url`, an unknown `method`, a negative
-`limit`) and a call to `call_paid_http` on a server without a key. Their text is plain, such as
+`limit`, an argument the tool does not have, such as a misspelt `offest`) and a call to `call_paid_http` on a server without a key. Their text is plain, such as
 `MCP error -32602: Input validation error: …`; nothing was sent for either.
 
 | Code                  | When                                                                                                                                                                                                                                                                                                                                                                                                       | Money may have moved | Daily budget keeps the amount | Retry                                                                      |

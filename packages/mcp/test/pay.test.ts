@@ -163,6 +163,16 @@ describe("call_paid_http", () => {
     },
   );
 
+  it("refuses an argument call_paid_http does not have, without calling the seller", async () => {
+    const result = await client.callTool({
+      name: "call_paid_http",
+      arguments: { url: `${seller.url}/forecast`, method: "GET", maxPrice: "1" },
+    });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain("maxPrice");
+    expect(seller.bodies).toHaveLength(0);
+  });
+
   it("refuses an asset name that is only a property of every object", async () => {
     seller.asset = "constructor";
     expect((await pay()).error.code).toBe("asset_not_allowed");
