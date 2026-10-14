@@ -82,9 +82,15 @@ export function loadConfig(env: NodeJS.ProcessEnv): CliConfig {
     throw new Error(`${issue!.path.join(".")} ${issue!.message}.`);
   }
   const vars = parsed.data;
-  // The directory only records the daily budget; set alone it would do nothing.
-  if (vars.STELLAR_X402_STATE_DIR !== undefined && vars.STELLAR_X402_DAILY_BUDGET === undefined) {
-    throw new Error("STELLAR_X402_STATE_DIR needs STELLAR_X402_DAILY_BUDGET.");
+  // The limits and the state directory only matter when paying; without a key they would do nothing.
+  if (vars.STELLAR_X402_SECRET_KEY === undefined) {
+    const paymentOnly = [
+      "STELLAR_X402_MAX_PER_CALL",
+      "STELLAR_X402_DAILY_BUDGET",
+      "STELLAR_X402_STATE_DIR",
+    ] as const;
+    const set = paymentOnly.find((name) => vars[name] !== undefined);
+    if (set) throw new Error(`${set} needs STELLAR_X402_SECRET_KEY.`);
   }
   const config: CliConfig = {
     discoveryUrl: vars.STELLAR_X402_DISCOVERY_URL,

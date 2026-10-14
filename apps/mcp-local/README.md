@@ -42,21 +42,23 @@ Add to `claude_desktop_config.json` (Settings → Developer → Edit Config):
 }
 ```
 
-Without `STELLAR_X402_SECRET_KEY` the server only lists and previews.
+Without `STELLAR_X402_SECRET_KEY` the server only lists and previews. The payment settings
+(`STELLAR_X402_MAX_PER_CALL`, `STELLAR_X402_DAILY_BUDGET`, `STELLAR_X402_STATE_DIR`) set without a
+key stop the start, so a key left out by mistake is not taken for a server that pays.
 
 ## Settings
 
-| Variable                            | Default                | Meaning                                                                                                 |
-| ----------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------- |
-| `STELLAR_X402_DISCOVERY_URL`        | required               | base URL of a server with `GET /discovery/resources`                                                    |
-| `STELLAR_X402_SECRET_KEY`           | none                   | the buyer's Stellar secret key; enables `call_paid_http`                                                |
-| `STELLAR_X402_MAX_PER_CALL`         | required with a key    | the largest price one call may pay, in atomic units (`10000` = 0.001 USDC)                              |
-| `STELLAR_X402_DAILY_BUDGET`         | required with a key    | the most one key may spend in one UTC day, all its processes together, in atomic units                  |
-| `STELLAR_X402_STATE_DIR`            | `~/.stellar-x402-mcp/` | where the daily budget logs what was spent, one file per UTC day; only with `STELLAR_X402_DAILY_BUDGET` |
-| `STELLAR_X402_NETWORK`              | `stellar:testnet`      | anything else stops the server: it pays on testnet only                                                 |
-| `STELLAR_X402_TIMEOUT_MS`           | `30000`                | a tool call gives up after this long, all its requests together                                         |
-| `STELLAR_X402_MAX_RESPONSE_BYTES`   | `100000`               | a seller response larger than this is refused (`response_too_large`)                                    |
-| `STELLAR_X402_ALLOW_INSECURE_LOCAL` | `0`                    | `1` also allows `http` to this machine only (below) — **only** for a seller you run on it in tests      |
+| Variable                            | Default                | Meaning                                                                                            |
+| ----------------------------------- | ---------------------- | -------------------------------------------------------------------------------------------------- |
+| `STELLAR_X402_DISCOVERY_URL`        | required               | base URL of a server with `GET /discovery/resources`                                               |
+| `STELLAR_X402_SECRET_KEY`           | none                   | the buyer's Stellar secret key; enables `call_paid_http`                                           |
+| `STELLAR_X402_MAX_PER_CALL`         | required with a key    | the largest price one call may pay, in atomic units (`10000` = 0.001 USDC)                         |
+| `STELLAR_X402_DAILY_BUDGET`         | required with a key    | the most one key may spend in one UTC day, all its processes together, in atomic units             |
+| `STELLAR_X402_STATE_DIR`            | `~/.stellar-x402-mcp/` | where the daily budget logs what was spent, one file per UTC day                                   |
+| `STELLAR_X402_NETWORK`              | `stellar:testnet`      | anything else stops the server: it pays on testnet only                                            |
+| `STELLAR_X402_TIMEOUT_MS`           | `30000`                | a tool call gives up after this long, all its requests together                                    |
+| `STELLAR_X402_MAX_RESPONSE_BYTES`   | `100000`               | a seller response larger than this is refused (`response_too_large`)                               |
+| `STELLAR_X402_ALLOW_INSECURE_LOCAL` | `0`                    | `1` also allows `http` to this machine only (below) — **only** for a seller you run on it in tests |
 
 ## What to know
 

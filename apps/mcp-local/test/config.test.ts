@@ -24,6 +24,16 @@ describe("loadConfig", () => {
     });
   });
 
+  it("browses only when the payment settings are left empty and no key is given", () => {
+    const config = loadConfig({
+      ...BASE,
+      STELLAR_X402_MAX_PER_CALL: "",
+      STELLAR_X402_DAILY_BUDGET: "",
+      STELLAR_X402_STATE_DIR: "",
+    });
+    expect(config).toEqual(loadConfig(BASE));
+  });
+
   it("uses the defaults for empty values", () => {
     const config = loadConfig({
       ...BASE,
@@ -104,9 +114,19 @@ describe("loadConfig", () => {
       "STELLAR_X402_DAILY_BUDGET must be an amount in atomic units",
     ],
     [
-      "a state directory without a daily budget",
+      "a per-call limit without a key",
+      { ...BASE, STELLAR_X402_MAX_PER_CALL: "10000" },
+      "STELLAR_X402_MAX_PER_CALL needs STELLAR_X402_SECRET_KEY",
+    ],
+    [
+      "a daily budget without a key",
+      { ...BASE, STELLAR_X402_DAILY_BUDGET: "200000" },
+      "STELLAR_X402_DAILY_BUDGET needs STELLAR_X402_SECRET_KEY",
+    ],
+    [
+      "a state directory without a key",
       { ...BASE, STELLAR_X402_STATE_DIR: "/var/tmp/x402" },
-      "STELLAR_X402_STATE_DIR needs STELLAR_X402_DAILY_BUDGET",
+      "STELLAR_X402_STATE_DIR needs STELLAR_X402_SECRET_KEY",
     ],
     [
       "the state file, replaced by a state directory",
