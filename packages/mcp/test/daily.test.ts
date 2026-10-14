@@ -2,9 +2,10 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { SchemeNetworkClient } from "@x402/core/types";
 import { fork } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { countDaily, refundDaily, spentOn } from "../src/daily.js";
@@ -18,20 +19,20 @@ import {
   type FakeSeller,
 } from "./fake-seller.js";
 
-/** Two buyers' public addresses; the daily log keys their spending apart. */
+/** Two buyers' public addresses; the daily database keys their spending apart. */
 const BUYER = "GBUYERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const OTHER_BUYER = "GOTHERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 let seller: FakeSeller;
 let dir: string;
-/** The state directory holding the day files. */
+/** The state directory holding `spent.sqlite`. */
 let state: string;
 let clients: Client[];
 let logs: string[];
 let clock: Date;
 
 /**
- * One server process of the buyer, with the shared daily log.
+ * One server process of the buyer, with the shared daily database.
  * The seller asks 10,000 a call: the daily budget of 25,000 fits two calls.
  */
 async function startProcess({
@@ -80,23 +81,22 @@ beforeEach(async () => {
   clock = new Date("2026-10-13T23:59:00Z");
 });
 
-/** The day file's lines, parsed; every one of them must be a whole record. */
-async function lines(
-  day = "2026-10-13",
-): Promise<{ payer: string; asset: string; amount: string }[]> {
-  const text = await readFile(join(state, `spent-${day}.jsonl`), "utf8");
-  expect(text.endsWith("\n")).toBe(true);
-  return text
-    .trimEnd()
-    .split("\n")
-    .map((line) => JSON.parse(line) as { payer: string; asset: string; amount: string });
+/** The database's rows, read through a connection of the test's own, in the order written. */
+function rows(sql = "SELECT day, payer, asset, amount FROM spent ORDER BY rowid"): unknown[] {
+  const db = new DatabaseSync(join(state, "spent.sqlite"));
+  try {
+    return db
+      .prepare(sql)
+      .all()
+      .map((row) => ({ ...row }));
+  } finally {
+    db.close();
+  }
 }
 
-/** What the day file sums to for one payer and asset. */
-async function spent(day = "2026-10-13", payer = BUYER, asset = USDC): Promise<bigint> {
-  return (await lines(day))
-    .filter((line) => line.payer === payer && line.asset === asset)
-    .reduce((total, line) => total + BigInt(line.amount), 0n);
+/** What a day sums to for one payer and asset. */
+function spent(day = "2026-10-13", payer = BUYER, asset = USDC): bigint {
+  return spentOn(state, day, payer).get(asset) ?? 0n;
 }
 
 afterEach(async () => {
@@ -112,13 +112,10 @@ describe("daily budget", () => {
     const second = await startProcess();
     expect(await second()).toBe("paid");
     expect(await second()).toBe("over_budget");
-    // A restarted process reads the same log.
+    // A restarted process reads the same database.
     expect(await (await startProcess())()).toBe("over_budget");
     expect(seller.payments).toHaveLength(2);
-    expect(await lines()).toEqual([
-      { payer: BUYER, asset: USDC, amount: "10000" },
-      { payer: BUYER, asset: USDC, amount: "10000" },
-    ]);
+    expect(spent()).toBe(20_000n);
   });
 
   it("keeps a separate daily limit for each wallet sharing the directory", async () => {
@@ -128,8 +125,8 @@ describe("daily budget", () => {
     expect(await first()).toBe("over_budget");
     const other = await startProcess({ payer: OTHER_BUYER });
     expect(await other()).toBe("paid");
-    expect(await spent()).toBe(20_000n);
-    expect(await spent("2026-10-13", OTHER_BUYER)).toBe(10_000n);
+    expect(spent()).toBe(20_000n);
+    expect(spent("2026-10-13", OTHER_BUYER)).toBe(10_000n);
   });
 
   it("says the daily budget is the one exceeded", async () => {
@@ -139,33 +136,49 @@ describe("daily budget", () => {
     expect(seller.payments).toHaveLength(0);
   });
 
-  it("starts again at a new UTC day, in a new file", async () => {
+  it("starts again at a new UTC day", async () => {
     const call = await startProcess();
     expect(await call()).toBe("paid");
     expect(await call()).toBe("paid");
     expect(await call()).toBe("over_budget");
     clock = new Date("2026-10-14T00:00:00Z");
     expect(await call()).toBe("paid");
-    expect(await spent("2026-10-14")).toBe(10_000n);
-    expect(await spent("2026-10-13")).toBe(20_000n);
+    expect(spent("2026-10-14")).toBe(10_000n);
+    expect(spent("2026-10-13")).toBe(20_000n);
   });
 
   it("gives the amount back when signing fails", async () => {
     const call = await startProcess({ scheme: fakeScheme(1) });
     expect(await call()).toBe("insufficient_funds");
-    expect(await lines()).toEqual([
-      { payer: BUYER, asset: USDC, amount: "10000" },
-      { payer: BUYER, asset: USDC, amount: "-10000" },
+    expect(rows("SELECT amount FROM spent ORDER BY rowid")).toEqual([
+      { amount: 10000 },
+      { amount: -10000 },
     ]);
     expect(await call()).toBe("paid");
     expect(await call()).toBe("paid");
+  });
+
+  it("gives the amount back to the day it was counted on, after midnight too", async () => {
+    const call = await startProcess({
+      scheme: {
+        scheme: "exact",
+        async createPaymentPayload() {
+          // Counted at 23:59 on the 13th; signing fails once the clock has passed midnight.
+          clock = new Date("2026-10-14T00:00:01Z");
+          throw new Error(NO_TRUSTLINE);
+        },
+      },
+    });
+    expect(await call()).toBe("insufficient_funds");
+    expect(spent("2026-10-13")).toBe(0n);
+    expect(rows("SELECT DISTINCT day FROM spent")).toEqual([{ day: "2026-10-13" }]);
   });
 
   it("gives the amount back when signing runs past the call's deadline", async () => {
     const call = await startProcess({ scheme: slowScheme(1_000), timeoutMs: 300 });
     expect(await call()).toBe("upstream_error");
     expect(seller.payments).toHaveLength(0);
-    expect(await spent()).toBe(0n);
+    expect(spent()).toBe(0n);
   });
 
   it("gives the amount back when the deadline passes before the payment is sent", async () => {
@@ -188,7 +201,7 @@ describe("daily budget", () => {
       vi.restoreAllMocks();
     }
     expect(seller.payments).toHaveLength(0);
-    expect(await spent()).toBe(0n);
+    expect(spent()).toBe(0n);
   });
 
   it.each([
@@ -202,12 +215,19 @@ describe("daily budget", () => {
   });
 
   it("logs a refund it cannot write, and the amount stays counted", async () => {
-    const file = join(state, "spent-2026-10-13.jsonl");
+    /** Fails every refund row from here on, through a connection of the test's own. */
+    const failRefunds = (sql: string) => {
+      const db = new DatabaseSync(join(state, "spent.sqlite"));
+      db.exec(sql);
+      db.close();
+    };
     const failing: SchemeNetworkClient = {
       scheme: "exact",
       async createPaymentPayload() {
-        // The amount is counted by now; a day file that cannot be written stops the refund.
-        await chmod(file, 0o400);
+        // The amount is counted by now; from here on the refund's insert fails.
+        failRefunds(
+          "CREATE TRIGGER no_refund BEFORE INSERT ON spent WHEN NEW.amount < 0 BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+        );
         throw new Error(NO_TRUSTLINE);
       },
     };
@@ -215,33 +235,69 @@ describe("daily budget", () => {
     try {
       expect(await call()).toBe("insufficient_funds");
     } finally {
-      await chmod(file, 0o600);
+      failRefunds("DROP TRIGGER IF EXISTS no_refund");
     }
     expect(logs.join()).toContain("could not give back 10000 to the daily budget");
-    expect(await spent()).toBe(10_000n);
+    expect(spent()).toBe(10_000n);
   });
 
-  it.each([
-    ["is not JSON", "{\n"],
-    [
-      "holds an amount that is not a number",
-      `${JSON.stringify({ payer: BUYER, asset: USDC, amount: "1.5" })}\n`,
-    ],
-    [
-      "has a malformed line in the middle",
-      `${JSON.stringify({ payer: BUYER, asset: USDC, amount: "1" })}\n{"payer":\n` +
-        `${JSON.stringify({ payer: BUYER, asset: USDC, amount: "1" })}\n`,
-    ],
-  ])("refuses to pay, and logs why, when the day file %s", async (_, content) => {
+  it("refuses to pay, and logs why, when the database file is corrupted", async () => {
     const call = await startProcess();
     await mkdir(state);
-    await writeFile(join(state, "spent-2026-10-13.jsonl"), content);
+    await writeFile(join(state, "spent.sqlite"), "not a database, just bytes ".repeat(200));
     expect(await call()).toBe("payment_failed");
-    expect(logs.join()).toContain("daily budget record cannot be read");
+    expect(logs.join()).toContain("daily budget database cannot be read or written");
     expect(seller.payments).toHaveLength(0);
   });
 
-  it("never lets calls of one process paying at once exceed the budget", async () => {
+  it("refuses to pay when counting fails after the offer was chosen, and pays on the next call", async () => {
+    const call = await startProcess();
+    expect(await call()).toBe("paid");
+    // Reading today's spending still works, so the offer passes; only the insert of the count fails.
+    const db = new DatabaseSync(join(state, "spent.sqlite"));
+    db.exec(
+      "CREATE TRIGGER no_insert BEFORE INSERT ON spent BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+    );
+    expect(await call()).toBe("payment_failed");
+    expect(logs.join()).toContain("disk full");
+    expect(seller.payments).toHaveLength(1);
+    // The failed transaction was rolled back, so the next payment is counted.
+    db.exec("DROP TRIGGER no_insert");
+    db.close();
+    expect(await call()).toBe("paid");
+    expect(spent()).toBe(20_000n);
+  });
+
+  it("refuses to pay when another server holds the database for over 5 seconds", async () => {
+    const call = await startProcess({ timeoutMs: 20_000 });
+    expect(await call()).toBe("paid");
+    const holder = new DatabaseSync(join(state, "spent.sqlite"));
+    holder.exec("BEGIN IMMEDIATE");
+    try {
+      expect(await call()).toBe("payment_failed");
+    } finally {
+      holder.exec("ROLLBACK");
+      holder.close();
+    }
+    expect(logs.join()).toContain("database is locked");
+    expect(seller.payments).toHaveLength(1);
+    expect(await call()).toBe("paid");
+  }, 20_000);
+
+  it("keeps one budget for running and new servers after the database is deleted", async () => {
+    const running = await startProcess();
+    expect(await running()).toBe("paid");
+    // A reset: the files are deleted while a server still runs.
+    await rm(state, { recursive: true });
+    const started = await startProcess();
+    expect(await running()).toBe("paid");
+    expect(await started()).toBe("paid");
+    expect(await running()).toBe("over_budget");
+    expect(await started()).toBe("over_budget");
+    expect(spent()).toBe(20_000n);
+  });
+
+  it("never lets six servers in one process paying at once exceed the budget", async () => {
     const calls = await Promise.all([1, 2, 3, 4, 5, 6].map(() => startProcess()));
     const results = await Promise.all(calls.map((call) => call()));
     expect(results.filter((result) => result === "paid")).toHaveLength(2);
@@ -250,57 +306,51 @@ describe("daily budget", () => {
   });
 });
 
-describe("daily log", () => {
+describe("daily database", () => {
   const day = "2026-10-13";
   const entry = { day, payer: BUYER, asset: USDC };
-  const log = (message: string) => logs.push(message);
 
   it("counts exactly up to the limit, and refuses one atomic unit more", () => {
-    expect(countDaily(state, entry, 10n, 10n, log)).toBe(true);
-    expect(countDaily(state, entry, 1n, 10n, log)).toBe(false);
-    expect(spentOn(state, day, BUYER, log)).toEqual(new Map([[USDC, 10n]]));
+    expect(countDaily(state, entry, 10n, 10n)).toBe(true);
+    expect(countDaily(state, entry, 1n, 10n)).toBe(false);
+    expect(spentOn(state, day, BUYER)).toEqual(new Map([[USDC, 10n]]));
   });
 
-  it("ignores, and logs, a last line cut short by a crash, and keeps it apart from the next", async () => {
-    await mkdir(state);
-    const file = join(state, `spent-${day}.jsonl`);
-    await writeFile(
-      file,
-      `${JSON.stringify({ payer: BUYER, asset: USDC, amount: "3" })}\n{"payer":"GB`,
-    );
-    expect(spentOn(state, day, BUYER, log)).toEqual(new Map([[USDC, 3n]]));
-    expect(logs.join()).toContain("a write cut short by a crash");
-    // The next line starts after an empty one, so the cut line is still known as cut.
-    expect(countDaily(state, entry, 4n, 10n, log)).toBe(true);
-    refundDaily(state, entry, 4n, log);
-    expect(spentOn(state, day, BUYER, log)).toEqual(new Map([[USDC, 3n]]));
+  it("gives an amount back with a negative row in the day it was counted on", () => {
+    expect(countDaily(state, entry, 4n, 10n)).toBe(true);
+    refundDaily(state, entry, 4n);
+    expect(spentOn(state, day, BUYER)).toEqual(new Map([[USDC, 0n]]));
+    expect(countDaily(state, entry, 10n, 10n)).toBe(true);
   });
 
-  it("deletes day files older than seven days when it appends", async () => {
-    await mkdir(state);
-    await writeFile(join(state, "spent-2026-10-05.jsonl"), "");
-    await writeFile(join(state, "spent-2026-10-06.jsonl"), "");
-    await writeFile(join(state, "notes.txt"), "");
-    countDaily(state, entry, 1n, 10n, log);
-    expect((await readdir(state)).sort()).toEqual([
-      "notes.txt",
-      "spent-2026-10-06.jsonl",
-      "spent-2026-10-13.jsonl",
+  it("deletes rows older than seven days when it counts", () => {
+    countDaily(state, { ...entry, day: "2026-10-05" }, 1n, 10n);
+    countDaily(state, { ...entry, day: "2026-10-06" }, 1n, 10n);
+    countDaily(state, entry, 1n, 10n);
+    expect(rows("SELECT day FROM spent ORDER BY day")).toEqual([
+      { day: "2026-10-06" },
+      { day: "2026-10-13" },
     ]);
   });
 
-  it("is counted once by each of 20 processes appending at once", async () => {
+  it("lets exactly the limit through when 20 processes count at once", async () => {
     const script = fileURLToPath(new URL("./count-daily-process.ts", import.meta.url));
-    const exits = await Promise.all(
+    // Each process tries five times: 100 attempts against a limit of 50.
+    const results = await Promise.all(
       Array.from({ length: 20 }, () => {
-        const child = fork(script, [state], { execArgv: ["--import", "tsx"] });
-        return new Promise<number | null>((resolve) => child.on("exit", resolve));
+        const child = fork(script, [state, day, BUYER, USDC], {
+          execArgv: ["--import", "tsx"],
+          silent: true,
+        });
+        let counted = "";
+        child.stdout!.on("data", (chunk: Buffer) => (counted += chunk.toString()));
+        return new Promise<{ code: number | null; counted: number }>((resolve) =>
+          child.on("exit", (code) => resolve({ code, counted: Number(counted) })),
+        );
       }),
     );
-    expect(exits).toEqual(Array(20).fill(0));
-    const appended = await lines();
-    expect(appended).toHaveLength(20);
-    expect(appended.every((line) => line.payer === "GBUYER" && line.amount === "1")).toBe(true);
-    expect(await spent(day, "GBUYER", "CASSET")).toBe(20n);
+    expect(results.map((result) => result.code)).toEqual(Array(20).fill(0));
+    expect(results.reduce((total, result) => total + result.counted, 0)).toBe(50);
+    expect(spent(day)).toBe(50n);
   }, 30_000);
 });
