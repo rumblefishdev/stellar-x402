@@ -60,7 +60,7 @@ key stop the start, so a key left out by mistake is not taken for a server that 
 | `STELLAR_X402_SECRET_KEY`           | none                   | the buyer's Stellar secret key; enables `call_paid_http`                                           |
 | `STELLAR_X402_MAX_PER_CALL`         | required with a key    | the largest price one call may pay, in atomic units (`10000` = 0.001 USDC)                         |
 | `STELLAR_X402_DAILY_BUDGET`         | required with a key    | the most one key may spend in one UTC day, all its processes together, in atomic units             |
-| `STELLAR_X402_STATE_DIR`            | `~/.stellar-x402-mcp/` | where the daily budget logs what was spent, one file per UTC day                                   |
+| `STELLAR_X402_STATE_DIR`            | `~/.stellar-x402-mcp/` | where the daily budget keeps what was spent, the SQLite database `spent.sqlite`                    |
 | `STELLAR_X402_NETWORK`              | `stellar:testnet`      | anything else stops the server: it pays on testnet only                                            |
 | `STELLAR_X402_TIMEOUT_MS`           | `30000`                | a tool call gives up after this long, all its requests together                                    |
 | `STELLAR_X402_MAX_RESPONSE_BYTES`   | `100000`               | a seller response larger than this is refused (`response_too_large`)                               |
@@ -86,29 +86,29 @@ used.
   was replaced by the daily budget; a server started with it stops and says so.
 - **The daily budget survives restarts and is shared.** Every process paying from the same key and
   using the same `STELLAR_X402_STATE_DIR` counts against one amount per day; the day is the UTC
-  date, so it starts again at midnight UTC. Each day is its own file, `spent-YYYY-MM-DD.jsonl`, with
-  one line per payment. Each time a payment is counted or given back, the files dated more than
-  seven days before that day are deleted (that day and the seven before it stay); on a day with no
-  payment nothing is deleted. If today's file cannot be read or written, the server refuses to pay
-  (`payment_failed`) rather than guess. `STELLAR_X402_STATE_FILE`, a single file, was replaced by
-  this directory; a server started with it stops and says so.
-- **Keep the state directory on a local disk only** — not a network drive or a synced folder
-  (iCloud, Dropbox). Processes writing at the same moment rely on a local filesystem appending each
-  line whole. That is checked with 20 processes at once on macOS and Linux only; Windows is untested.
+  date, so it starts again at midnight UTC. What was spent is kept in a SQLite database,
+  `spent.sqlite`, in that directory. Each payment is counted in a transaction, so the count is exact
+  across processes: processes paying at the very same moment never pass the daily budget together.
+  Each time a payment is counted, rows dated more than seven days before that day are deleted. If
+  the database cannot be read or written, the server refuses to pay (`payment_failed`) rather than
+  guess. `STELLAR_X402_STATE_FILE`, a single file, was replaced by this directory; a server started
+  with it stops and says so.
+- **Keep the state directory on a local disk** — not a network drive or a synced folder (iCloud,
+  Dropbox). SQLite's own guidance is not to use it over a network filesystem, whose locks it cannot
+  rely on.
+- **Node may print `ExperimentalWarning: SQLite is an experimental feature`** on stderr at start.
+  It comes from Node's built-in `node:sqlite`, which keeps the database; it is harmless.
 - **The daily limit is per key and per directory.** Two keys sharing one directory each get the full
   daily budget; one key with two different `STELLAR_X402_STATE_DIR` paths gets it twice.
 - **The day is a calendar day, not the last 24 hours.** A full daily budget spent just before
   midnight UTC and another just after it means up to twice the daily budget within minutes.
-- **Processes paying at the very same moment can pass the daily budget.** Two server processes
-  that check the budget at the same instant may both fit; each such process adds at most one
-  payment over the budget, never more than `STELLAR_X402_MAX_PER_CALL`. Calls within one process
-  never do.
-- **To reset the daily budget, delete today's file** in the state directory. It then forgets
-  everything spent today, for every key that uses that directory.
+- **To reset the daily budget, delete `spent.sqlite`** (with its `-wal` and `-shm` files, if
+  present) while no server is running. It then forgets everything spent today, for every key that
+  uses that directory.
 - **A refund that cannot be written stays counted.** When a payment fails before it is signed, its
-  amount goes back to the daily budget, in the file of the day the payment was counted on (a payment
-  counted at 23:59 UTC and refunded after midnight goes back to the day before). If that file cannot
-  be written at that moment, the amount stays counted for that day (the log says so). Too strict,
+  amount goes back to the daily budget, on the day the payment was counted on (a payment counted at
+  23:59 UTC and refunded after midnight goes back to the day before). If the database cannot be
+  written at that moment, the amount stays counted for that day (the log says so). Too strict,
   never too loose.
 - **Every payment sent counts against the budget**, even one the seller refuses afterwards; a
   payment that could not be signed (for example, too little USDC) does not.
@@ -162,7 +162,7 @@ input that does not match the tool's input schema (a missing `url`, an unknown `
 | `over_price_limit`    | every allowed offer costs more than `STELLAR_X402_MAX_PER_CALL`                                                                                                                                                                                                                                                                                                                                            | no                   | no                            | no                                |
 | `over_budget`         | every offer within the per-call limit would pass what is left of today's budget, also when another process spent it a moment earlier                                                                                                                                                                                                                                                                       | no                   | no                            | after midnight UTC                |
 | `insufficient_funds`  | signing fails because the payer has no USDC trustline or too little USDC                                                                                                                                                                                                                                                                                                                                   | no                   | no (given back)               | after funding the payer           |
-| `payment_failed`      | today's budget file cannot be read or written, or holds a broken line other than the last; or signing fails for another reason                                                                                                                                                                                                                                                                             | no                   | no (given back)               | after fixing the cause in the log |
+| `payment_failed`      | the daily budget database cannot be read or written; or signing fails for another reason                                                                                                                                                                                                                                                                                                                   | no                   | no (given back)               | after fixing the cause in the log |
 | `payment_rejected`    | after the payment was sent: the seller's settlement says it failed, or the seller answers 402 again without a settlement. An expired authorization ends here too: the facilitator reports it as a failed check                                                                                                                                                                                             | yes                  | yes                           | only after checking (below)       |
 | `payment_unknown`     | after the payment was sent, anything else goes wrong: the connection fails, the time limit passes, the body stops arriving or is too large, a redirect, or an answer other than 2xx without a settlement                                                                                                                                                                                                   | yes                  | yes                           | only after checking (below)       |
 

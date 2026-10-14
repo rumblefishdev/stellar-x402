@@ -1,37 +1,16 @@
-import {
-  closeSync,
-  fstatSync,
-  fsyncSync,
-  mkdirSync,
-  openSync,
-  readdirSync,
-  readFileSync,
-  readSync,
-  unlinkSync,
-  writeSync,
-} from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { z } from "zod";
+import { DatabaseSync } from "node:sqlite";
 
 /**
- * The daily budget is an append-only log, one file per UTC day: `<dir>/spent-YYYY-MM-DD.jsonl`.
- * Every server process of the buyer shares it, so a restart or a second Claude session does not start
- * the day again from zero. A counted payment appends `{"payer":"G…","asset":"C…","amount":"10000"}`,
- * a refund the same with a negative amount; spent today is the sum of today's lines for the payer
- * and asset, so two wallets sharing the directory each keep their own limit.
- *
- * There is no lock: two processes paying at the very same moment can both read the same sum and both
- * fit. The day can then be passed by at most one payment per process paying at that moment, and
- * each of those stays within its asset's `maxPerCall`. Within one process the read and the append run
- * synchronously, with no await between them, so parallel calls of one process never both fit.
+ * The daily budget is a SQLite database, `<dir>/spent.sqlite`, shared by every server process of the
+ * buyer, so a restart or a second Claude session does not start the day again from zero. A counted
+ * payment is a row (day, payer, asset, amount), a refund the same with a negative amount; spent on a
+ * day is the sum of its rows for the payer and asset, so wallets sharing the directory stay apart.
+ * Counting runs in a write transaction, so processes paying at once never pass the day together.
  */
-const LINE = z.object({
-  payer: z.string(),
-  asset: z.string(),
-  amount: z.string().regex(/^-?\d+$/),
-});
 
-/** Day files older than this are deleted when a line is appended; only today's is ever read. */
+/** Rows older than this are deleted when a payment is counted; only today's are ever read. */
 const KEEP_DAYS = 7;
 
 /** Where an amount is counted: the day, the buyer's address and the asset contract. */
@@ -46,137 +25,69 @@ export function utcDay(now: Date): string {
   return now.toISOString().slice(0, 10);
 }
 
-function dayFile(dir: string, day: string): string {
-  return join(dir, `spent-${day}.jsonl`);
-}
+const opened = new Map<string, DatabaseSync>();
 
-function missing(error: unknown): boolean {
-  return (error as NodeJS.ErrnoException).code === "ENOENT";
-}
-
-/**
- * Spent by `payer` per asset in a day file's text. A line cut short (a crash, or a write that came
- * back short) has no newline of its own. The writer that comes next sees that at write time and puts
- * an empty line before its record, so the cut line stays marked even once it is no longer last. Hence
- * the rule: empty lines are skipped, and a line that does not parse is ignored (and logged) only when
- * it is the last one with no newline (cut, or still being written) or is followed by an empty line
- * (cut, then closed off). Any other malformed line, such as a hand edit, stops the read, so the day
- * is never summed from a file that may hide what was spent.
- */
-function sum(text: string, file: string, payer: string, log: (message: string) => void) {
-  const lines = text.split("\n");
-  const spent = new Map<string, bigint>();
-  for (const [i, line] of lines.entries()) {
-    if (line === "") continue;
-    let record: z.infer<typeof LINE>;
-    try {
-      record = LINE.parse(JSON.parse(line));
-    } catch {
-      const last = i === lines.length - 1;
-      const closedOff = lines[i + 1] === "" && i + 1 < lines.length - 1;
-      if (!last && !closedOff) throw new Error(`${file} line ${i + 1} is not a spent record`);
-      log(`daily budget: ignored line ${i + 1} of ${file}, a write cut short by a crash`);
-      continue;
-    }
-    const { asset, amount } = record;
-    if (record.payer === payer) spent.set(asset, (spent.get(asset) ?? 0n) + BigInt(amount));
-  }
-  return spent;
+function database(dir: string): DatabaseSync {
+  let db = opened.get(dir);
+  if (db) return db;
+  mkdirSync(dir, { recursive: true });
+  db = new DatabaseSync(join(dir, "spent.sqlite"));
+  // Wait for another process's transaction instead of failing; a counted payment survives a power cut.
+  db.exec("PRAGMA busy_timeout = 5000");
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA synchronous = FULL");
+  db.exec(
+    "CREATE TABLE IF NOT EXISTS spent (day TEXT NOT NULL, payer TEXT NOT NULL, asset TEXT NOT NULL, amount INTEGER NOT NULL);" +
+      "CREATE INDEX IF NOT EXISTS spent_by_day ON spent (day, payer, asset)",
+  );
+  opened.set(dir, db);
+  return db;
 }
 
 /** Spent by `payer` on `day` per asset. */
-export function spentOn(dir: string, day: string, payer: string, log: (message: string) => void) {
-  const file = dayFile(dir, day);
-  return sum(readOrEmpty(file), file, payer, log);
-}
-
-/** Counts `amount` against `entry` if it stays within `daily`; false when it would not. */
-export function countDaily(
-  dir: string,
-  entry: DailyEntry,
-  amount: bigint,
-  daily: bigint,
-  log: (message: string) => void,
-): boolean {
-  const file = dayFile(dir, entry.day);
-  const spent = sum(readOrEmpty(file), file, entry.payer, log).get(entry.asset) ?? 0n;
-  if (spent + amount > daily) return false;
-  append(dir, entry, amount, log);
-  return true;
+export function spentOn(dir: string, day: string, payer: string): Map<string, bigint> {
+  const query = database(dir).prepare(
+    "SELECT asset, SUM(amount) AS total FROM spent WHERE day = ? AND payer = ? GROUP BY asset",
+  );
+  query.setReadBigInts(true);
+  const rows = query.all(day, payer) as { asset: string; total: bigint }[];
+  return new Map(rows.map((row) => [row.asset, row.total]));
 }
 
 /**
- * Gives back an amount counted on `entry` whose payment was never signed: a negative line in the
- * day it was counted on, even if that day is over (harmless, it is no longer read).
+ * Counts `amount` against `entry` if it stays within `daily`; false when it would not. BEGIN IMMEDIATE
+ * takes the write lock before the read, so another process cannot count between the read and the insert.
  */
-export function refundDaily(
-  dir: string,
-  entry: DailyEntry,
-  amount: bigint,
-  log: (message: string) => void,
-): void {
-  append(dir, entry, -amount, log);
-}
-
-/** An absent file is a day with nothing spent. */
-function readOrEmpty(file: string): string {
+export function countDaily(dir: string, entry: DailyEntry, amount: bigint, daily: bigint): boolean {
+  const db = database(dir);
+  db.exec("BEGIN IMMEDIATE");
   try {
-    return readFileSync(file, "utf8");
+    const spent = spentOn(dir, entry.day, entry.payer).get(entry.asset) ?? 0n;
+    if (spent + amount > daily) {
+      db.exec("ROLLBACK");
+      return false;
+    }
+    insert(db, entry, amount);
+    const oldest = utcDay(new Date(Date.parse(entry.day) - KEEP_DAYS * 86_400_000));
+    db.prepare("DELETE FROM spent WHERE day < ?").run(oldest);
+    db.exec("COMMIT");
+    return true;
   } catch (error) {
-    if (missing(error)) return "";
+    // Some errors (a full disk) end the transaction themselves; then ROLLBACK fails too, and both show.
+    try {
+      db.exec("ROLLBACK");
+    } catch (rollbackError) {
+      throw new Error(`${String(error)}, then ${String(rollbackError)}`, { cause: rollbackError });
+    }
     throw error;
   }
 }
 
-function append(
-  dir: string,
-  { day, payer, asset }: DailyEntry,
-  amount: bigint,
-  log: (message: string) => void,
-): void {
-  mkdirSync(dir, { recursive: true });
-  // Read as well as append, so the file's last byte can be checked on this descriptor.
-  const fd = openSync(dayFile(dir, day), "a+");
-  try {
-    // Decided now, not from an earlier read: a file ending without a newline ends in a cut line, and
-    // an empty line after it closes it off, so it is still known as cut once not last (see `sum`).
-    const { size } = fstatSync(fd);
-    const lastByte = Buffer.alloc(1);
-    if (size > 0) readSync(fd, lastByte, 0, 1, size - 1);
-    const gap = size > 0 && lastByte.toString() !== "\n" ? "\n\n" : "";
-    // One write of a line far below 4 KiB through O_APPEND: on a local filesystem it lands whole,
-    // never mixed with another process's line. That is how local filesystems behave in practice, not
-    // a POSIX promise, hence the local-disk-only note in the README.
-    const line = `${gap}${JSON.stringify({ payer, asset, amount: amount.toString() })}\n`;
-    const written = writeSync(fd, line);
-    // A full disk or quota can write part of the line and still return; that amount is not counted.
-    if (written !== Buffer.byteLength(line)) {
-      throw new Error(
-        `wrote ${written} of ${Buffer.byteLength(line)} bytes to ${dayFile(dir, day)}`,
-      );
-    }
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-  removeOldDays(dir, day, log);
+/** Gives back an amount whose payment was never signed, in the day it was counted on. */
+export function refundDaily(dir: string, entry: DailyEntry, amount: bigint): void {
+  insert(database(dir), entry, -amount);
 }
 
-/** Deletes day files older than KEEP_DAYS. Housekeeping only: a failure is logged, never fatal. */
-function removeOldDays(dir: string, today: string, log: (message: string) => void) {
-  const oldest = utcDay(new Date(Date.parse(today) - KEEP_DAYS * 86_400_000));
-  try {
-    for (const name of readdirSync(dir)) {
-      const day = /^spent-(\d{4}-\d{2}-\d{2})\.jsonl$/.exec(name)?.[1];
-      if (day === undefined || day >= oldest) continue;
-      try {
-        unlinkSync(join(dir, name));
-      } catch (error) {
-        // Another process deleted it first.
-        if (!missing(error)) throw error;
-      }
-    }
-  } catch (error) {
-    log(`daily budget: could not delete old day files in ${dir} (${String(error)})`);
-  }
+function insert(db: DatabaseSync, { day, payer, asset }: DailyEntry, amount: bigint): void {
+  db.prepare("INSERT INTO spent VALUES (?, ?, ?, ?)").run(day, payer, asset, amount);
 }
