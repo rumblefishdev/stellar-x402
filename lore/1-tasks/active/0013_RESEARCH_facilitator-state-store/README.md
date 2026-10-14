@@ -4,8 +4,8 @@ title: "Choose the facilitator's state store and record it in an ADR"
 type: RESEARCH
 status: active
 milestone: 1
-related_adr: ["0003", "0006", "0007", "0008", "0011"]
-related_tasks: ["0012", "0009", "0014"]
+related_adr: ["0003", "0006", "0007", "0008", "0011", "0012"]
+related_tasks: ["0012", "0009", "0014", "0022"]
 tags: [facilitator, persistence, bazaar, priority-high, effort-small, discovery]
 links:
   - ../../../../docs/adr/0003-settlement-channel-account-pool.md
@@ -28,6 +28,10 @@ history:
     status: active
     who: akot
     note: "Started by the Discovery lane; picks the one database the team agreed on, for the 0014 host."
+  - date: "2026-10-12"
+    status: active
+    who: akot
+    note: "Six options compared, server PostgreSQL and embedded SQLite spiked against the 0031 contract suites (23/23); RDS for PostgreSQL chosen, ADR 0012."
 ---
 
 # Choose the facilitator's state store and record it in an ADR
@@ -43,7 +47,7 @@ The 0012 architecture session settled the facilitator's shape:
 - `/verify` uses `@x402/stellar`'s rules.
 - `/settle` goes through `signer-pool` for every `exact` payment (ADR 0003).
 
-So T1 needs state in three places:
+So T1 needs state in four places:
 
 1. **Settlement record:**
    - Stores the hash from `onSigned` before the first send.
@@ -89,7 +93,7 @@ SQLite would move the facilitator to EC2 with EBS.
 
 ### Step 1: Requirements
 
-- Write down, for each of the three kinds of state:
+- Write down, for each of the four kinds of state:
   - consistency needs (dedupe must be atomic)
   - durability
   - expected volume (from the ADR 0003 throughput numbers)
@@ -124,9 +128,54 @@ SQLite would move the facilitator to EC2 with EBS.
 
 ## Acceptance Criteria
 
-- [ ] Requirements for the three kinds of state written down (T1 versus mainnet)
-- [ ] At least three options compared against the criteria above, with sources
-- [ ] Store chosen
-- [ ] ADR in `docs/adr/` documenting the decision and explaining why it was made over the
-      alternatives, linked from this task's `related_adr`
-- [ ] The 0012 architecture spine updated to reference the ADR
+- [x] Requirements for the four kinds of state written down (T1 versus mainnet)
+      ([R-state-store-options](notes/R-state-store-options.md))
+- [x] At least three options compared against the criteria above, with sources (six options)
+- [x] Store chosen: one RDS for PostgreSQL database ([S-state-store-decision](notes/S-state-store-decision.md))
+- [x] ADR in `docs/adr/` documenting the decision and explaining why it was made over the
+      alternatives, linked from this task's `related_adr` ([ADR 0012](../../../../docs/adr/0012-facilitator-state-store.md))
+- [x] The 0012 architecture spine updated to reference the ADR (AD-7, ADR table, Deferred)
+
+## Result
+
+- One RDS for PostgreSQL instance per network holds all four ports and the Tranche 2 search:
+  db.t4g.micro Single-AZ on testnet, Multi-AZ on mainnet.
+- The four ports in `apps/facilitator/src/ports/` stay the store interfaces the facilitator owns.
+- A local spike ran the contract suites as of task 0031 (23 cases), unchanged, on PostgreSQL 18.6
+  and SQLite. Both passed 23/23; on SQLite the concurrent cases pass by construction (one
+  connection). This branch depends on 0014 (PR #16, ADR 0011) merging first.
+  [G-postgres-port-mapping](notes/G-postgres-port-mapping.md) holds the schema and statements
+  for 0022.
+
+## Design Decisions
+
+### From Plan
+
+1. **One store for every kind of state.** The team agreed on a single database, so the split
+   options weren't pursued. That covers Redis or Valkey for rate limits, and DynamoDB for the hot
+   path with PostgreSQL for the catalog. Both are recorded as rejected alternatives in the ADR.
+
+### Emerged
+
+2. **Weights fixed before the research,** listed in
+   [S-state-store-decision](notes/S-state-store-decision.md#scoring).
+3. **Two architectures were spiked locally** (server PostgreSQL and embedded SQLite) before the
+   decision. Aurora shares the PostgreSQL adapter. Contract results outrank documentation where
+   they disagree.
+4. **Read Committed only.** At Repeatable Read the spend reserve's scope locks don't stop overspend
+   (PostgreSQL docs, reproduced on 18.6). In the spike, the contract failed when those locks were
+   removed.
+5. **Rate-limit window uses `GREATEST`** (found in review): a hit from an older window must not
+   reset the count once more than one ECS task writes it. The spike and memory adapter use `=`;
+   0022 adds the contract case.
+
+## Open Questions (for the team)
+
+- **T2 search: keyword, semantic or both?** PostgreSQL covers all three. The answer only matters if
+  the one-database rule is ever revisited.
+- **Should `ChannelLease` carry a fencing token, so a stale holder's writes are rejected?** This is a
+  contract change in 0025.
+- **What should `addHash` do with a hash another settlement already has?** Reject: keying hashes by
+  hash already enforces it. The memory adapter appends today (0022).
+- **Which class for mainnet?** Burstable t4g.small, a non-burstable class, or a Multi-AZ DB cluster,
+  priced before launch (ADR 0012).
