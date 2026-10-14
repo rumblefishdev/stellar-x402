@@ -92,7 +92,13 @@ function payload(
   return { x402Version: 2, accepted: requirements, payload: { transaction: transaction.toXDR() } };
 }
 
-function setup(answer: VerifyResponse = { isValid: true, payer }) {
+/** `answer` may depend on the scheme's RPC URL. */
+function setup(
+  answer: VerifyResponse | ((url: string) => VerifyResponse | Promise<VerifyResponse>) = {
+    isValid: true,
+    payer,
+  },
+) {
   const rpc = {
     getFeeStats: vi.fn(
       async () =>
@@ -108,7 +114,10 @@ function setup(answer: VerifyResponse = { isValid: true, payer }) {
   const schemes: { signer: string; options: SchemeOptions }[] = [];
   const makeScheme = vi.fn((signer: { address: string }, options: SchemeOptions) => {
     schemes.push({ signer: signer.address, options });
-    return { verify: async () => answer } satisfies UpstreamVerifier;
+    const url = options.rpcConfig!.url!;
+    return {
+      verify: async () => (typeof answer === "function" ? answer(url) : answer),
+    } satisfies UpstreamVerifier;
   });
   return { verify: buildVerifier(config, rpc, feeSettings(config.fees, rpc), makeScheme), schemes };
 }
@@ -161,7 +170,36 @@ describe("buildVerifier (the /verify wiring in main)", () => {
     });
   });
 
-  it("throws when upstream reports unexpected_verify_error", async () => {
+  it("answers from the second RPC URL while the first is down", async () => {
+    const { verify, schemes } = setup((url) =>
+      url === "https://rpc-a.example"
+        ? { isValid: false, invalidReason: "unexpected_verify_error" }
+        : { isValid: true, payer },
+    );
+    await expect(verify(payload(), requirements)).resolves.toEqual({ isValid: true, payer });
+    expect(schemes.map(({ options }) => options.rpcConfig?.url)).toEqual([
+      "https://rpc-a.example",
+      "https://rpc-b.example",
+    ]);
+  });
+
+  it("gives each RPC URL its own 10 s deadline, so a slow second URL still answers", async () => {
+    vi.useFakeTimers();
+    try {
+      const { verify } = setup((url) =>
+        url === "https://rpc-a.example"
+          ? new Promise<never>(() => {})
+          : new Promise((resolve) => setTimeout(() => resolve({ isValid: true, payer }), 5_000)),
+      );
+      const answer = verify(payload(), requirements);
+      await vi.advanceTimersByTimeAsync(16_000);
+      await expect(answer).resolves.toEqual({ isValid: true, payer });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("throws when upstream reports unexpected_verify_error on every RPC URL", async () => {
     const { verify } = setup({ isValid: false, invalidReason: "unexpected_verify_error", payer });
     await expect(verify(payload(), requirements)).rejects.toThrow("unexpected_verify_error");
   });

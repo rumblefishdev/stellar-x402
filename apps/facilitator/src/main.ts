@@ -11,6 +11,7 @@ import { createApp, type AppDeps } from "./http/app.js";
 import { captureConsoleError, jsonLogger } from "./logger.js";
 import { memoryMetrics } from "./metrics.js";
 import { feeSettings, upstreamAtCurrentBid, type FeeSettings } from "./settlement/fees.js";
+import { failoverUpstream } from "./settlement/upstream-failover.js";
 import { createVerifier, type UpstreamVerifier, type Verify } from "./settlement/verify.js";
 
 export interface Started {
@@ -35,6 +36,9 @@ export async function start(deps: AppDeps): Promise<Started> {
   };
 }
 
+/** How long upstream `verify()` may take on one RPC URL, as `FallbackRpc`'s timeout. */
+export const UPSTREAM_TIMEOUT_MS = 10_000;
+
 /** What `buildVerifier` passes to `ExactStellarScheme`, besides the facilitator's signer. */
 export type SchemeOptions = NonNullable<ConstructorParameters<typeof ExactStellarScheme>[1]>;
 
@@ -55,18 +59,26 @@ export function buildVerifier(
 ): Verify {
   // Upstream knows only the facilitator key, and only in plain form; the channels and the muxed
   // facilitator are `createVerifier`'s check (AD-5).
-  // It reads the first RPC URL only.
   const signer = createEd25519Signer(config.facilitatorSecret, config.network);
-  const upstream = upstreamAtCurrentBid(fees.inclusionFee, (inclusionFeeStroops) =>
-    makeScheme(signer, {
-      rpcConfig: { url: config.rpcUrls[0] },
-      maxTransactionFeeStroops: fees.maxFeeStroops,
-      inclusionFeeStroops,
-    }),
+  // Upstream reads one RPC URL, so there is one scheme per URL, tried in `RPC_URLS` order (AD-3).
+  const upstream = failoverUpstream(
+    config.rpcUrls.map((url, i) => ({
+      name: `RPC_URLS[${i}]`,
+      verifier: upstreamAtCurrentBid(fees.inclusionFee, (inclusionFeeStroops) =>
+        makeScheme(signer, {
+          rpcConfig: { url },
+          maxTransactionFeeStroops: fees.maxFeeStroops,
+          inclusionFeeStroops,
+        }),
+      ),
+    })),
+    { timeoutMs: UPSTREAM_TIMEOUT_MS },
   );
   return createVerifier({
     network: config.network,
     upstream,
+    // Each URL gets its own deadline, so the whole call can take one per URL.
+    upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS * config.rpcUrls.length,
     facilitator: signer.address,
     channels: config.channels,
     minValidityLedgers: config.settlement.minValidityLedgers,

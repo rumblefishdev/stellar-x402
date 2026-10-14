@@ -75,8 +75,8 @@ const envSchema = z
     PORT: int(1, 65_535).default("4021"),
     LOG_LEVEL: oneOf(["debug", "info", "warn", "error"]).default("info"),
     /**
-     * Comma-separated; the first is primary, the rest are fallbacks for the pool and the ledger
-     * reads. Upstream verify uses only the first, so `/verify` fails while it is down.
+     * Comma-separated; the first is primary, the rest are fallbacks for the pool, the ledger reads
+     * and upstream verify (one upstream scheme per URL).
      */
     RPC_URLS: list
       .pipe(
