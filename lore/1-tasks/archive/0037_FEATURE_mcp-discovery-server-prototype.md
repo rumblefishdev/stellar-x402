@@ -2,10 +2,10 @@
 id: "0037"
 title: "MCP discovery server prototype: list, inspect and pay for Bazaar resources"
 type: FEATURE
-status: active
+status: done
 milestone: 2
 related_adr: ["0008"]
-related_tasks: ["0032", "0031", "0016"]
+related_tasks: ["0032", "0031", "0016", "0042", "0043", "0044", "0046"]
 tags: [mcp, bazaar, agents, priority-medium, effort-medium, discovery]
 links:
   - ../../../docs/rfp/x402-facilitator-bazaar-technical-architecture.md
@@ -46,6 +46,14 @@ history:
     note: >
       get_resource is back, as a preview of the seller's 402 answer before paying rather than a
       catalog lookup; no catalog filter is needed.
+  - date: "2026-10-14"
+    status: done
+    who: karolkow
+    note: >
+      Done. Three tools over MCP stdio, a buyer-side address guard, one deadline per paid call, a
+      per-call limit and a daily budget in SQLite exact across processes, a fixed error-code list.
+      124 unit tests in packages/mcp, 26 in apps/mcp-local; a testnet e2e suite of 124 checks on
+      the built CLI (PR #39), two real payments per run. Follow-ups: 0042, 0043, 0044, 0046.
 ---
 
 # MCP discovery server prototype: list, inspect and pay for Bazaar resources
@@ -115,11 +123,17 @@ RFP's MCP discovery server, outside T1)
 - [x] Given a resource priced above the per-call limit, or a call that would exceed the budget,
       when it is called, then the tool returns `over_price_limit` or `over_budget` and nothing is
       signed or sent — unit tests, and on testnet with the built CLI
-- [ ] Given any failure (unfunded payer, expired authorization, unknown resource, facilitator
+- [x] Given any failure (unfunded payer, expired authorization, unknown resource, facilitator
       rejection), when it happens, then the tool returns a code from the fixed list, never only
-      free text
+      free text — 2026-10-14, testnet e2e run of the built CLI (PR #39, `pnpm e2e:testnet`):
+      124 of 124 checks on `3e90b3e`, every documented code reached through the binary; payments
+      `18be0325b6b50417ac9088011737d976f35211a0006206e3a367dcf09009f94e` and
+      `708705c28c361d1dfaf0ae7ff6ef67ddbd70e44b5391aa4ed399a56c78d20dc1`. An expired authorization
+      is not reproduced (it needs up to 300 s on a real facilitator); it ends as `payment_rejected`,
+      the code reached by the facilitator-refusal scenarios
 - [x] Given any tool output or log line, then the buyer's secret never appears in it — checked
-      on the stderr of three CLI runs on testnet; a malformed key is refused without repeating it
+      on the stderr of three CLI runs on testnet; a malformed key is refused without repeating it;
+      since PR #39 on every e2e run, over all output of its 53 server processes (E-23)
 - [ ] Given the locally built `stellar-x402-mcp` CLI and the README's config, when it is added to an MCP client such as
       Claude Desktop, then an agent can list a resource and pay for it end to end on testnet
       (deferred to 0042: needs a catalog a README reader can reach, which 0032 provides; the same
@@ -238,6 +252,35 @@ and existing servers. Each line: what was decided and why.
   `ipaddr.js` with "only `unicast` passes"; the CLI's env parsing uses `zod`. The streamed size cap
   stays own code: undici's `maxResponseSize` counts bytes on the wire, so a 9,751-byte gzip body
   that unpacks to 10 MB passed a 100,000-byte limit (measured in the PR #28 review).
+
+## Implementation Notes
+
+- PRs: #21 #23 (tools, guard), #25 (structure), #28 (libraries, size cap), #31 (one deadline per
+  call), #32 #34 #36 #37 (daily budget: file lock → append log → SQLite; #37 restored #36's
+  commits after a squash), #35 (error codes in the README), #38 (renames), #40 (unknown tool
+  arguments refused), #39 (testnet e2e).
+- `packages/mcp`: 124 unit tests; `apps/mcp-local`: 26; `apps/mcp-local/e2e`: 124 checks on
+  testnet, run by hand.
+
+## Issues Encountered
+
+- **undici's `maxResponseSize` counts compressed bytes:** a 9,751-byte gzip body unpacking to
+  10 MB passed; the streamed cap after decompression stays own code (#28).
+- **A hand-made cross-process counter kept growing edge cases** (short writes, fused lines, a
+  locked day) over three review rounds; Node's built-in SQLite replaced it (#36). Switching a new
+  database file to WAL is not covered by `busy_timeout` (1 of 500 processes failed); the default
+  journal is kept.
+- **Unknown tool arguments were dropped silently:** the SDK validates raw zod shapes with
+  zod's default, though the published schema says `additionalProperties: false`; found by the e2e
+  run (E-06), fixed with `.strict()` (#40).
+- **Signing takes ~1 s** (it simulates on testnet RPC), measured in the e2e run; it matters for
+  the short authorization window of 0043.
+
+## Future Work
+
+- Tidy the e2e suite and the tool schemas: 0046.
+- Seller-reported settlement hash checked on chain (W435 A): in 0043.
+- Mainnet readiness: 0044. Claude Desktop end to end: 0042.
 
 ## Out of scope
 
