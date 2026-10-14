@@ -178,13 +178,62 @@ describe("call_paid_http", () => {
     expect((await pay()).error.code).toBe("asset_not_allowed");
   });
 
-  it("refuses a payment the seller wants valid for longer than 300 s", async () => {
-    seller.maxTimeoutSeconds = 301;
-    expect((await pay()).error.code).toBe("unsupported_payment");
-    expect(seller.payments).toHaveLength(0);
-    seller.maxTimeoutSeconds = 300;
+  /** A fake scheme that records how long each payment it signs is valid for. */
+  function recordingScheme(signedFor: number[]): SchemeNetworkClient {
+    const inner = fakeScheme();
+    return {
+      scheme: "exact",
+      createPaymentPayload(version, requirements, context) {
+        signedFor.push(requirements.maxTimeoutSeconds);
+        return inner.createPaymentPayload(version, requirements, context);
+      },
+    };
+  }
+
+  it("signs a long offer only for the ledgers that fit in the call, and the seller sees its own terms", async () => {
+    const signedFor: number[] = [];
+    await reconnect({}, { scheme: recordingScheme(signedFor) });
+    seller.maxTimeoutSeconds = 600;
     expect((await pay()).payment).toBeDefined();
+    // A fast call: 6 ledgers of 9 s fit before 57 s; asked as 6 × 5 s, the library's count.
+    expect(signedFor).toEqual([30]);
+    expect(seller.payments).toEqual([
+      expect.objectContaining({ accepted: expect.objectContaining({ maxTimeoutSeconds: 600 }) }),
+    ]);
   });
+
+  it("never signs for longer than the seller asks", async () => {
+    const signedFor: number[] = [];
+    await reconnect({}, { scheme: recordingScheme(signedFor) });
+    seller.maxTimeoutSeconds = 10;
+    expect((await pay()).payment).toBeDefined();
+    expect(signedFor).toEqual([10]);
+  });
+
+  it.each([
+    ["30 s", 30_000, [15]],
+    ["50 s", 50_000, []],
+  ])(
+    "signs fewer ledgers when %s of the call are used, and nothing when none fit",
+    async (_, used, expected) => {
+      const signedFor: number[] = [];
+      await reconnect({}, { scheme: recordingScheme(signedFor) });
+      // The call's start reads the clock first; every later read is `used` ms on.
+      const now = vi.spyOn(performance, "now").mockReturnValueOnce(0).mockReturnValue(used);
+      try {
+        const result = await pay();
+        expect(signedFor).toEqual(expected);
+        if (expected.length === 0) {
+          expect(result.error.code).toBe("upstream_error");
+          expect(seller.payments).toHaveLength(0);
+        }
+      } finally {
+        now.mockRestore();
+      }
+      // Nothing signed means the amount was given back: the next call still fits today's budget.
+      if (expected.length === 0) expect((await pay()).payment).toBeDefined();
+    },
+  );
 
   it.each(["-10000", "0", "1.5"])("refuses a price of %s", async (price) => {
     seller.price = price;

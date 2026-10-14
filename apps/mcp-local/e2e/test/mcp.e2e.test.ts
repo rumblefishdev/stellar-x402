@@ -553,12 +553,10 @@ describe("call_paid_http refusals before signing", () => {
       "/paid": {},
       "/othasset": offering({ asset: other }),
       "/pubnet": offering({ network: "stellar:pubnet" }),
-      "/long": offering({ maxTimeoutSeconds: 600 }),
       "/negative": offering({ amount: "-5" }),
       "/zero": offering({ amount: "0" }),
       "/upto": offering({ scheme: "upto" }),
       "/long-pricey": offering({ maxTimeoutSeconds: 600, amount: "20000" }),
-      "/other-then-long": offering({ asset: other }, { maxTimeoutSeconds: 600 }),
       "/pricey": offering({ amount: "20000" }),
     });
   });
@@ -569,12 +567,12 @@ describe("call_paid_http refusals before signing", () => {
     const cases: [string, string, string][] = [
       ["E-11", "/othasset", "asset_not_allowed"],
       ["E-12a", "/pubnet", "unsupported_payment"],
-      ["E-12b", "/long", "unsupported_payment"],
+
       ["E-12c", "/negative", "unsupported_payment"],
       ["E-12d", "/zero", "unsupported_payment"],
       ["E-12e", "/upto", "unsupported_payment"],
-      ["E-12f", "/long-pricey", "unsupported_payment"],
-      ["E-12g", "/other-then-long", "unsupported_payment"],
+      ["E-12f", "/long-pricey", "over_price_limit"],
+
       ["E-13a", "/pricey", "over_price_limit"],
     ];
     for (const [id, path, expected] of cases)
@@ -624,14 +622,14 @@ describe("call_paid_http after signing (fake seller, no money moves)", () => {
       [{ asset: offer.asset, from: keys.buyerPublic, to: offer.payTo, amount: "5000" }],
       signed.map(({ asset, from, to, amount }) => ({ asset, from, to, amount })),
     );
-    // A ledger closes about every 5 s: the signature must stop being valid within the offer's own
-    // time limit, and never later than 300 s (the server's cap), counted in ledgers.
+    // The seller asks 300 s; the server signs only the ledgers that fit before the call ends (6 on a
+    // fast call), so the signature is still valid now, and for at most 6 more ledgers.
     const ledgersLeft = signed[0]!.expirationLedger - ledger;
     row(
       "E-13b",
-      `signature valid for ${ledgersLeft} more ledgers: within the offer's ${offer.maxTimeoutSeconds} s and 300 s`,
+      `signature valid for ${ledgersLeft} more ledgers: at most the 6 that fit before 57 s`,
       [true, true],
-      [ledgersLeft <= Math.ceil(offer.maxTimeoutSeconds / 5) + 1, ledgersLeft <= 61],
+      [ledgersLeft >= 1, ledgersLeft <= 6],
     );
     // A well-formed hash the fake made up is returned as is: the seller's word (W435).
     row(

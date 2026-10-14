@@ -34,10 +34,19 @@ export interface PaidResponse {
 }
 
 /**
- * The longest a seller may keep our signed payment valid: 300 s is the `@x402/express` default (seen in
- * the 402 of examples/http-api). A longer one could be settled long after the agent got its answer.
+ * The signed payment must expire before the call ends, so no settlement can land after the agent got
+ * its answer. It expires at a ledger, not at a time: the MCP client gives up after 60 s (SDK default,
+ * Claude Desktop), 3 s of that are left for reading the outcome, and a ledger took up to 9 s in the
+ * last year on mainnet (Horizon, 2026-10-14; 5 s today). So it is valid for as many 9 s ledgers as fit
+ * before 57 s from the call's start.
  */
-const MAX_AUTHORIZATION_SECONDS = 300;
+const CALL_ENDS_BY_SECONDS = 57;
+const SLOWEST_LEDGER_SECONDS = 9;
+/**
+ * `@x402/stellar` turns seconds into ledgers as `ceil(seconds / its estimate)`, the estimate being the
+ * mean of the last 20 ledgers rounded up, 5 s when unknown: asking 5 s per ledger never gets more.
+ */
+const UPSTREAM_LEDGER_SECONDS = 5;
 
 /** The daily database could not be read or written, so how much is left today is unknown: pay nothing. */
 function dailyDatabaseFailed(error: unknown): ToolError {
@@ -49,16 +58,38 @@ function dailyDatabaseFailed(error: unknown): ToolError {
 }
 
 /**
- * The scheme client with its signing bounded by the call's deadline. `@x402/stellar` asks Soroban RPC
- * for the latest ledger and a simulation while signing, with no time limit of its own; past the
- * deadline the signature is dropped and nothing is sent.
+ * The scheme client with its signing bounded by the call's deadline and its signature by the call's
+ * end. `@x402/stellar` asks Soroban RPC for the latest ledger and a simulation while signing, with no
+ * time limit of its own; past the deadline the signature is dropped and nothing is sent. It signs for
+ * as many ledgers as fit before the call ends, never more than the seller asks; the seller still sees
+ * its own terms, as the library sends the offer it was given, not the copy signed here.
  */
-function signWithin(scheme: SchemeNetworkClient, deadline: AbortSignal): SchemeNetworkClient {
+function signWithin(
+  scheme: SchemeNetworkClient,
+  deadline: AbortSignal,
+  startedAt: number,
+): SchemeNetworkClient {
   return {
     scheme: scheme.scheme,
     ...(scheme.schemeHooks && { schemeHooks: scheme.schemeHooks }),
     ...(scheme.findDefaultAsset && { findDefaultAsset: scheme.findDefaultAsset.bind(scheme) }),
     createPaymentPayload: (version, requirements, context) => {
+      const secondsUsed = (performance.now() - startedAt) / 1000;
+      const ledgers = Math.floor((CALL_ENDS_BY_SECONDS - secondsUsed) / SLOWEST_LEDGER_SECONDS);
+      if (ledgers < 1)
+        return Promise.reject(
+          new ToolError(
+            "upstream_error",
+            "Too little time is left in this call to pay safely; nothing was signed.",
+          ),
+        );
+      const signed = {
+        ...requirements,
+        maxTimeoutSeconds: Math.min(
+          requirements.maxTimeoutSeconds,
+          ledgers * UPSTREAM_LEDGER_SECONDS,
+        ),
+      };
       const late = new Promise<never>((_, reject) => {
         const refuse = () =>
           reject(
@@ -70,7 +101,7 @@ function signWithin(scheme: SchemeNetworkClient, deadline: AbortSignal): SchemeN
         if (deadline.aborted) refuse();
         deadline.addEventListener("abort", refuse, { once: true });
       });
-      return Promise.race([scheme.createPaymentPayload(version, requirements, context), late]);
+      return Promise.race([scheme.createPaymentPayload(version, signed, context), late]);
     },
   };
 }
@@ -86,8 +117,12 @@ export async function callPaidHttp(
 
   // One deadline for the whole call: the unpaid request, signing and the paid retry.
   const deadline = AbortSignal.timeout(limits.timeoutMs);
+  const startedAt = performance.now();
   // One client per call, so its hooks know which payment is this call's.
-  const schemes = config.schemes.map((s) => ({ ...s, client: signWithin(s.client, deadline) }));
+  const schemes = config.schemes.map((s) => ({
+    ...s,
+    client: signWithin(s.client, deadline, startedAt),
+  }));
   const client = x402Client.fromConfig({ schemes, spendControls: false });
   let refusal: ToolError | undefined;
   /** `countedIn` is where the amount was counted in the daily record, so a refund finds it. */
@@ -109,18 +144,14 @@ export async function callPaidHttp(
     }
   };
 
-  // Of the seller's offers, keep those in an allowed asset, at a price above zero, with a short enough
-  // authorization, within the per-call limit and what is left of today's budget; the library pays the
-  // first one left.
+  // Of the seller's offers, keep those in an allowed asset, at a price above zero, within the per-call
+  // limit and what is left of today's budget; the library pays the first one left.
   client.registerPolicy((_version, offers) => {
     const allowed = offers.filter((offer) => Object.hasOwn(config.assets, offer.asset));
     // A zero or negative price would be counted before the library refuses to sign it, and a negative
     // count raises the day's budget for every process until it is given back.
     const priced = allowed.filter((offer) => /^[1-9][0-9]*$/.test(offer.amount));
-    const shortLived = priced.filter(
-      (offer) => offer.maxTimeoutSeconds <= MAX_AUTHORIZATION_SECONDS,
-    );
-    const affordable = shortLived.filter(
+    const affordable = priced.filter(
       (offer) => BigInt(offer.amount) <= config.assets[offer.asset]!.maxPerCall,
     );
     let today = new Map<string, bigint>();
@@ -142,11 +173,6 @@ export async function callPaidHttp(
       refusal = new ToolError(
         "unsupported_payment",
         "The seller's price is not a whole number of atomic units above zero.",
-      );
-    } else if (shortLived.length === 0) {
-      refusal = new ToolError(
-        "unsupported_payment",
-        `The seller wants the payment valid for more than ${MAX_AUTHORIZATION_SECONDS} s.`,
       );
     } else if (affordable.length === 0) {
       refusal = new ToolError("over_price_limit", "The price is over the per-call limit.");
