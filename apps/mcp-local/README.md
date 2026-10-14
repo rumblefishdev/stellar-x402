@@ -9,8 +9,14 @@ resources on **Stellar testnet**, within limits you set.
 | `get_resource`   | asks the seller without paying and returns its terms (price, time limit, input and output)              | no          |
 | `call_paid_http` | calls the resource, pays the 402 price within the limits, returns the response and the transaction hash | yes         |
 
-Every failure comes back as a code from a fixed list (`over_price_limit`, `over_budget`,
-`insufficient_funds`, `unsafe_url`, `payment_unknown`, …); causes go to stderr only.
+Without `STELLAR_X402_SECRET_KEY`, `call_paid_http` is not offered: the client's tool list does not
+have it. Every failure comes back as a code from a fixed list ([Error codes](#error-codes)); causes
+go to stderr only.
+
+To try it locally, run the example seller in [`examples/http-api`](../../examples/http-api)
+(`http://localhost:4021/weather?city=Warsaw`, 0.001 testnet USDC) and start this server with
+`STELLAR_X402_ALLOW_INSECURE_LOCAL=1`. It is not in any catalog, so give its URL to `get_resource`
+or `call_paid_http` directly.
 
 ## Build
 
@@ -60,6 +66,13 @@ key stop the start, so a key left out by mistake is not taken for a server that 
 | `STELLAR_X402_MAX_RESPONSE_BYTES`   | `100000`               | a seller response larger than this is refused (`response_too_large`)                               |
 | `STELLAR_X402_ALLOW_INSECURE_LOCAL` | `0`                    | `1` also allows `http` to this machine only (below) — **only** for a seller you run on it in tests |
 
+Every value is read when the server starts. An empty value means the same as an unset one (the
+default applies, a required one is missing). Numbers are plain decimal digits: no `1e3`, hex, sign or
+spaces; the time limit and the response limit must be above 0, the two amounts may be 0. A missing or wrong value, or an unknown `STELLAR_X402_` variable (a misspelt name),
+stops the server with a message on stderr naming the variable. A malformed key is refused without
+repeating it. Without a key, `STELLAR_X402_MAX_PER_CALL` and `STELLAR_X402_DAILY_BUDGET` are not
+used.
+
 ## What to know
 
 - **Use a testnet-only key** that holds only what you are willing to spend. The asset paid is
@@ -74,9 +87,11 @@ key stop the start, so a key left out by mistake is not taken for a server that 
 - **The daily budget survives restarts and is shared.** Every process paying from the same key and
   using the same `STELLAR_X402_STATE_DIR` counts against one amount per day; the day is the UTC
   date, so it starts again at midnight UTC. Each day is its own file, `spent-YYYY-MM-DD.jsonl`, with
-  one line per payment; files older than seven days are deleted. If today's file cannot be read or
-  written, the server refuses to pay (`payment_failed`) rather than guess. `STELLAR_X402_STATE_FILE`,
-  a single file, was replaced by this directory; a server started with it stops and says so.
+  one line per payment. Each time a payment is counted or given back, the files dated more than
+  seven days before that day are deleted (that day and the seven before it stay); on a day with no
+  payment nothing is deleted. If today's file cannot be read or written, the server refuses to pay
+  (`payment_failed`) rather than guess. `STELLAR_X402_STATE_FILE`, a single file, was replaced by
+  this directory; a server started with it stops and says so.
 - **Keep the state directory on a local disk only** — not a network drive or a synced folder
   (iCloud, Dropbox). Processes writing at the same moment rely on a local filesystem appending each
   line whole. That is checked with 20 processes at once on macOS and Linux only; Windows is untested.
@@ -101,8 +116,74 @@ key stop the start, so a key left out by mistake is not taken for a server that 
   private network — even with a public certificate — is refused (`unsafe_url`), and so is a name
   with both a public and a private address. `STELLAR_X402_ALLOW_INSECURE_LOCAL=1` opens only this
   machine (`localhost`, `*.localhost`, `127.0.0.0/8`, `::1`), over http too; every other host still
-  needs https and a public address.
+  needs https and a public address. It is decided by the host written in the URL, not by the
+  address a name resolves to: `localhost` and `*.localhost` are opened by name, and any other name
+  pointing at `127.0.0.1` is still refused.
+- **Redirects are never followed.** A seller answering 3xx gets `unsafe_url` (or `payment_unknown`
+  once the payment was sent), so a signed payment never reaches another host.
+- **The address guard and the size limit cover sellers only, not the catalog.** The catalog is your
+  choice in `STELLAR_X402_DISCOVERY_URL` and is trusted as such: it may be http or a private
+  address, and its answer has no size limit. It has the time limit, and any failure of it is
+  `upstream_error`.
+- **One time limit per tool call.** `STELLAR_X402_TIMEOUT_MS` covers everything one call does:
+  for `call_paid_http` the unpaid request, the signing and the paid request, each until its body
+  has fully arrived. Keep it under the MCP client's own limit (60 s by default) so the agent always
+  gets an answer.
+- **The response limit counts bytes after decompression,** while the body arrives: a small gzip
+  body that unpacks to more than `STELLAR_X402_MAX_RESPONSE_BYTES` is refused.
 - **`get_resource` sends a real request** without paying. On a path the seller charges for, it gets
-  the 402 terms; on a path the seller does not charge for, the seller runs the request.
+  the 402 terms; on a path the seller does not charge for, the seller runs the request. It shows the
+  terms as the seller gives them, without checking them against your limits, asset or network; only
+  `call_paid_http` does that. It is stricter in two checks a payment does not make: the
+  `PAYMENT-REQUIRED` header must match the x402 v2 shape exactly, and the seller's input schema must
+  be within the catalog's depth and size limits. Terms it refuses (`unsupported_payment`) may still
+  be paid.
+
+## Error codes
+
+A failure is a tool result with `isError: true`, one text content holding
+`{"error":{"code":"…","message":"…"}}` and no structured content; branch on `code`, never on
+`message`. The cause (a library or seller error) goes only to stderr.
+
+Two failures do not carry this shape, as the MCP SDK answers them before this server's code runs:
+input that does not match the tool's input schema (a missing `url`, an unknown `method`, a negative
+`limit`) and a call to `call_paid_http` on a server without a key. Their text is plain, such as
+`MCP error -32602: Input validation error: …`; nothing was sent for either.
+
+| Code                  | When                                                                                                                                                                                                                                                                                                                                                                                                       | Money may have moved | Daily budget keeps the amount | Retry                             |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- | ----------------------------- | --------------------------------- |
+| `invalid_input`       | a `GET` with a `body`                                                                                                                                                                                                                                                                                                                                                                                      | no                   | no                            | with the input fixed              |
+| `unsafe_url`          | the `url` does not parse; it is not https; its host is an IP address, or a name resolving to an address, that is not public; the seller answers a redirect (3xx) before any payment was sent                                                                                                                                                                                                               | no                   | no                            | not the same URL                  |
+| `resource_not_found`  | the seller answers 404 to the unpaid request                                                                                                                                                                                                                                                                                                                                                               | no                   | no                            | no                                |
+| `response_too_large`  | a seller's body is over `STELLAR_X402_MAX_RESPONSE_BYTES` before any payment was sent                                                                                                                                                                                                                                                                                                                      | no                   | no                            | no                                |
+| `upstream_error`      | `list_resources`: the catalog cannot be reached, answers an error, returns a page in another shape, or not within the time limit. The seller tools, before any payment was sent: the seller cannot be reached or the time limit passes; `get_resource` gets a status other than 2xx, 402 or 404; `call_paid_http` gets an answer other than 2xx, 402 or 404; signing does not finish within the time limit | no                   | no (given back)               | yes                               |
+| `unsupported_payment` | `get_resource`: a 402 without a `PAYMENT-REQUIRED` header in the x402 v2 shape, or an input schema over the catalog's limits. `call_paid_http`: no offer this server can pay — a network other than `stellar:testnet`, another scheme or x402 version, terms it cannot read — or every allowed offer wants the payment valid for more than 300 s                                                           | no                   | no                            | no                                |
+| `asset_not_allowed`   | no testnet offer is in an allowed asset (the CLI allows testnet USDC only)                                                                                                                                                                                                                                                                                                                                 | no                   | no                            | no                                |
+| `over_price_limit`    | every allowed offer costs more than `STELLAR_X402_MAX_PER_CALL`                                                                                                                                                                                                                                                                                                                                            | no                   | no                            | no                                |
+| `over_budget`         | every offer within the per-call limit would pass what is left of today's budget, also when another process spent it a moment earlier                                                                                                                                                                                                                                                                       | no                   | no                            | after midnight UTC                |
+| `insufficient_funds`  | signing fails because the payer has no USDC trustline or too little USDC                                                                                                                                                                                                                                                                                                                                   | no                   | no (given back)               | after funding the payer           |
+| `payment_failed`      | today's budget file cannot be read or written, or holds a broken line other than the last; or signing fails for another reason                                                                                                                                                                                                                                                                             | no                   | no (given back)               | after fixing the cause in the log |
+| `payment_rejected`    | after the payment was sent: the seller's settlement says it failed, or the seller answers 402 again without a settlement. An expired authorization ends here too: the facilitator reports it as a failed check                                                                                                                                                                                             | yes                  | yes                           | only after checking (below)       |
+| `payment_unknown`     | after the payment was sent, anything else goes wrong: the connection fails, the time limit passes, the body stops arriving or is too large, a redirect, or an answer other than 2xx without a settlement                                                                                                                                                                                                   | yes                  | yes                           | only after checking (below)       |
+
+`call_paid_http` checks the seller's offers in this order, and the first check that leaves no offer
+gives the code: asset (`asset_not_allowed`), authorization time (`unsupported_payment`), per-call
+limit (`over_price_limit`), daily budget (`over_budget`). Nothing is signed for any of them.
+
+**`payment_rejected`** means the signed payment reached the seller and the seller, or its
+facilitator, said no. Usually nothing was settled, but the signed authorization stays valid until
+the seller's time limit (300 s at most) and could still be settled, so it counts as spent.
+**`payment_unknown`** means the signed payment left this server and then something failed before a
+settlement could be read: the seller may have settled it or not. In both cases no transaction hash
+is returned (the log has the cause, not a hash). Do not pay again for the same thing without
+checking: look at the payer's account on Horizon or stellar.expert for a USDC payment to the
+seller's `payTo` address, after the authorization time has passed.
+
+A successful call can still carry `payment.transaction: null`: the seller answered 2xx without a
+settlement this server can read, or with one whose hash is not a Stellar transaction hash. The
+response is what was paid for; the amount counts as spent and the log notes it. An answer other
+than 2xx that does carry a successful settlement is returned as a normal result with its `status`
+and transaction.
+
 - The server writes logs to stderr; stdout carries the MCP protocol. The secret key never appears
   in tool output or logs; the log names only the buyer's public address.
