@@ -8,7 +8,7 @@ import { createCataloger } from "./catalog/cataloger.js";
 import { parseConfig } from "./config.js";
 import type { Config } from "./config.js";
 import { createApp, type AppDeps } from "./http/app.js";
-import { captureConsoleError, jsonLogger } from "./logger.js";
+import { captureConsoleError, jsonLogger, type Logger } from "./logger.js";
 import { memoryMetrics } from "./metrics.js";
 import { feeSettings, upstreamAtCurrentBid, type FeeSettings } from "./settlement/fees.js";
 import { failoverUpstream } from "./settlement/upstream-failover.js";
@@ -36,8 +36,14 @@ export async function start(deps: AppDeps): Promise<Started> {
   };
 }
 
-/** How long upstream `verify()` may take on one RPC URL, as `FallbackRpc`'s timeout. */
+/**
+ * How long upstream `verify()` may take on one RPC URL, as `FallbackRpc`'s timeout. With fee-stats
+ * bids it includes the fee-stats read, which `upstreamAtCurrentBid` awaits before each call.
+ */
 export const UPSTREAM_TIMEOUT_MS = 10_000;
+
+/** Slack on `/verify`'s overall deadline, so the last URL's own deadline fires first. */
+const UPSTREAM_DEADLINE_SLACK_MS = 1_000;
 
 /** What `buildVerifier` passes to `ExactStellarScheme`, besides the facilitator's signer. */
 export type SchemeOptions = NonNullable<ConstructorParameters<typeof ExactStellarScheme>[1]>;
@@ -45,13 +51,14 @@ export type SchemeOptions = NonNullable<ConstructorParameters<typeof ExactStella
 /**
  * `/verify`'s verifier from the config (AD-3, AD-5, AD-10, AD-22): upstream `ExactStellarScheme`
  * with the fee ceiling and the fee a settlement pays at the shared bid, then our checks. `fees` is
- * the caller's, so the pool can be built from the same `fees.pool` and share its bid. Tests pass
- * their own `makeScheme`.
+ * the caller's, so the pool can be built from the same `fees.pool` and share its bid. A switch to
+ * another RPC URL is logged as `rpc_failover`. Tests pass their own `makeScheme`.
  */
 export function buildVerifier(
   config: Config,
   rpc: Pick<FallbackRpc, "getLatestLedger">,
   fees: FeeSettings,
+  logger: Pick<Logger, "warn">,
   makeScheme: (
     signer: ReturnType<typeof createEd25519Signer>,
     options: SchemeOptions,
@@ -72,13 +79,16 @@ export function buildVerifier(
         }),
       ),
     })),
-    { timeoutMs: UPSTREAM_TIMEOUT_MS },
+    {
+      timeoutMs: UPSTREAM_TIMEOUT_MS,
+      onSwitch: (from, to) => logger.warn("rpc_failover", { from, to }),
+    },
   );
   return createVerifier({
     network: config.network,
     upstream,
-    // Each URL gets its own deadline, so the whole call can take one per URL.
-    upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS * config.rpcUrls.length,
+    // Each URL gets its own deadline, so the whole call can take one per URL, plus slack.
+    upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS * config.rpcUrls.length + UPSTREAM_DEADLINE_SLACK_MS,
     facilitator: signer.address,
     channels: config.channels,
     minValidityLedgers: config.settlement.minValidityLedgers,
@@ -105,7 +115,7 @@ export async function main(env: Record<string, string | undefined> = process.env
   const rpc = FallbackRpc.fromUrls(config.rpcUrls);
   // 0009 builds the pool from `fees.pool`, so `/verify` and the pool share one bid (AD-10).
   const fees = feeSettings(config.fees, rpc);
-  const verify = buildVerifier(config, rpc, fees);
+  const verify = buildVerifier(config, rpc, fees, logger);
   // For the life of the process: an upstream call cut off by the deadline keeps running after
   // `close()`, and its error would reach stderr with the RPC URL in it.
   const restoreConsole = captureConsoleError(logger);
