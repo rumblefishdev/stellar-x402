@@ -23,6 +23,7 @@
     "contracts:lint": "cd contracts && cargo fmt --all --check && cargo clippy --all-targets -- -D warnings",
     "contracts:test:wasm": "pnpm contracts:build && cd contracts && cargo test -- --ignored --nocapture",
     "e2e:testnet": "turbo run build --filter=@stellar-x402/mcp-local --filter=@stellar-x402/example-http-api && pnpm --filter @stellar-x402/mcp-local-e2e test:testnet",
+    "conformance:e2e": "pnpm --filter @stellar-x402/conformance gate",
     "contracts:e2e": "turbo run build --filter=@stellar-x402/signer-pool && pnpm --filter @stellar-x402/upto-proxy-e2e test:testnet"
   },
   "devDependencies": {

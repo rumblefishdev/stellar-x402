@@ -113,11 +113,7 @@ importers:
         specifier: ~2.28.0
         version: 2.28.0(typescript@6.0.3)
 
-  conformance:
-    dependencies:
-      '@stellar-x402/config':
-        specifier: workspace:*
-        version: link:../packages/config
+  conformance: {}
 
   contracts/upto-proxy/e2e:
     dependencies:

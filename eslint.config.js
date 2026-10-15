@@ -9,11 +9,16 @@ export default defineConfig([
     "**/.turbo/",
     "**/coverage/",
     "contracts/target/",
+    "conformance/.cache/",
   ]),
   js.configs.recommended,
   tseslint.configs.recommended,
   {
     files: ["tools/scripts/**/*.mjs"],
     languageOptions: { globals: { console: "readonly", process: "readonly" } },
+  },
+  {
+    files: ["conformance/external-proxy/*.mjs"],
+    languageOptions: { globals: { console: "readonly", process: "readonly", fetch: "readonly" } },
   },
 ]);
