@@ -129,7 +129,7 @@ describe("the fee ceiling at /verify and in the pool (AD-10)", () => {
 
   /** Real upstream `ExactStellarScheme`, as `main()` wires it: did it refuse the fee? */
   async function verifyRefuses(): Promise<boolean> {
-    const verify = buildVerifier({ ...config, rpcUrls: [rpcUrl] }, poolRpc, fees);
+    const verify = buildVerifier({ ...config, rpcUrls: [rpcUrl] }, poolRpc, fees, { warn() {} });
     const answer = await verify(payload(), requirements);
     // A fee it accepts goes on to the event check, which an empty simulation fails.
     expect(answer.invalidReason).toMatch(/fee_exceeds_maximum|no_transfer_events/);

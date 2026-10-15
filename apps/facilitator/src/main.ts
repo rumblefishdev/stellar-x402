@@ -56,8 +56,14 @@ export async function start(deps: AppDeps): Promise<Started> {
   };
 }
 
-/** How long upstream `verify()` may take on one RPC URL, as `FallbackRpc`'s timeout. */
+/**
+ * How long upstream `verify()` may take on one RPC URL, as `FallbackRpc`'s timeout. With fee-stats
+ * bids it includes the fee-stats read, which `upstreamAtCurrentBid` awaits before each call.
+ */
 export const UPSTREAM_TIMEOUT_MS = 10_000;
+
+/** Slack on `/verify`'s overall deadline, so the last URL's own deadline fires first. */
+const UPSTREAM_DEADLINE_SLACK_MS = 1_000;
 
 /** What `buildChecks` passes to `ExactStellarScheme`, besides the facilitator's signer. */
 export type SchemeOptions = NonNullable<ConstructorParameters<typeof ExactStellarScheme>[1]>;
@@ -72,12 +78,13 @@ export type MakeScheme = (
  * `ExactStellarScheme` with the fee ceiling and the fee a settlement pays at the shared bid, the
  * channels and the validity minimum. `/verify` and `/settle` build their checks from the same
  * object. `fees` is the caller's, so the pool is built from the same `fees.pool` and shares its
- * bid. Tests pass their own `makeScheme`.
+ * bid. A switch to another RPC URL is logged as `rpc_failover`. Tests pass their own `makeScheme`.
  */
 export function buildChecks(
   config: Config,
   rpc: Pick<FallbackRpc, "getLatestLedger">,
   fees: FeeSettings,
+  logger: Pick<Logger, "warn">,
   makeScheme: MakeScheme = (signer, options) => new ExactStellarScheme([signer], options),
 ): VerifierDeps {
   // Upstream knows only the facilitator key, and only in plain form; the channels and the muxed
@@ -95,13 +102,16 @@ export function buildChecks(
         }),
       ),
     })),
-    { timeoutMs: UPSTREAM_TIMEOUT_MS },
+    {
+      timeoutMs: UPSTREAM_TIMEOUT_MS,
+      onSwitch: (from, to) => logger.warn("rpc_failover", { from, to }),
+    },
   );
   return {
     network: config.network,
     upstream,
-    // Each URL gets its own deadline, so the whole call can take one per URL.
-    upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS * config.rpcUrls.length,
+    // Each URL gets its own deadline, so the whole call can take one per URL, plus slack.
+    upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS * config.rpcUrls.length + UPSTREAM_DEADLINE_SLACK_MS,
     facilitator: signer.address,
     channels: config.channels,
     minValidityLedgers: config.settlement.minValidityLedgers,
@@ -117,9 +127,10 @@ export function buildVerifier(
   config: Config,
   rpc: Pick<FallbackRpc, "getLatestLedger">,
   fees: FeeSettings,
+  logger: Pick<Logger, "warn">,
   makeScheme?: MakeScheme,
 ): Verify {
-  return createVerifier(buildChecks(config, rpc, fees, makeScheme));
+  return createVerifier(buildChecks(config, rpc, fees, logger, makeScheme));
 }
 
 /**
@@ -222,7 +233,7 @@ export function compose(
   // One fee configuration: `/verify` and `/settle` check with it, and the pool pays with it, so
   // they share one ceiling and one bid (AD-10).
   const fees = feeSettings(config.fees, rpc);
-  const checks = buildChecks(config, rpc, fees, opts.makeScheme);
+  const checks = buildChecks(config, rpc, fees, logger, opts.makeScheme);
   const { settle } = buildSettlement(config, {
     rpc,
     fees,

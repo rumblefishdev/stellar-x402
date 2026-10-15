@@ -86,7 +86,7 @@ function setup(env: Partial<Env> = {}) {
   });
   const fake = new PaymentRpc({ [channel]: 1_000n });
   const fees = feeSettings(config.fees, fake);
-  const checks = buildChecks(config, fake, fees, () => ({
+  const checks = buildChecks(config, fake, fees, { warn() {} }, () => ({
     verify: async () => ({ isValid: true, payer }),
   }));
   const { settle } = buildSettlement(config, {

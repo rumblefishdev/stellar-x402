@@ -119,11 +119,13 @@ function setup(
       verify: async () => (typeof answer === "function" ? answer(url) : answer),
     } satisfies UpstreamVerifier;
   });
+  const logger = { warn: vi.fn() };
   const fees = feeSettings(config.fees, rpc);
   return {
-    verify: buildVerifier(config, rpc, fees, makeScheme),
-    check: settleCheck(buildChecks(config, rpc, fees, makeScheme)),
+    verify: buildVerifier(config, rpc, fees, logger, makeScheme),
+    check: settleCheck(buildChecks(config, rpc, fees, logger, makeScheme)),
     schemes,
+    logger,
   };
 }
 
@@ -175,8 +177,8 @@ describe("buildVerifier (the /verify wiring in main)", () => {
     });
   });
 
-  it("answers from the second RPC URL while the first is down", async () => {
-    const { verify, schemes } = setup((url) =>
+  it("answers from the second RPC URL while the first is down, and logs the switch", async () => {
+    const { verify, schemes, logger } = setup((url) =>
       url === "https://rpc-a.example"
         ? { isValid: false, invalidReason: "unexpected_verify_error" }
         : { isValid: true, payer },
@@ -186,6 +188,11 @@ describe("buildVerifier (the /verify wiring in main)", () => {
       "https://rpc-a.example",
       "https://rpc-b.example",
     ]);
+    // Names, not URLs: an RPC URL can carry an API key.
+    expect(logger.warn).toHaveBeenCalledExactlyOnceWith("rpc_failover", {
+      from: "RPC_URLS[0]",
+      to: "RPC_URLS[1]",
+    });
   });
 
   it("gives each RPC URL its own 10 s deadline, so a slow second URL still answers", async () => {
