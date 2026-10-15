@@ -90,11 +90,18 @@ export function createApp({
       res.status(400).json({ error: code(400) });
       return;
     }
-    const { response, record, afterResponse } = await settle(
+    // A client that left before the answer: a repeat stops waiting, and no success is used up.
+    const left = new AbortController();
+    res.once("close", () => {
+      if (!res.writableEnded) left.abort();
+    });
+    const { response, record, afterResponse, key, replay } = await settle(
       request.paymentPayload,
       request.paymentRequirements,
+      left.signal,
     );
-    // Every `success` answer, replays included, carries the header; it never changes the body.
+    // Every `success` answer carries the header (a success is answered once, AD-6); it never
+    // changes the body.
     if (response.success && record) {
       try {
         const header = extensionResponses(record);
@@ -105,6 +112,8 @@ export function createApp({
     }
     logger.info("settled", {
       network: response.network,
+      settlementKey: key,
+      replay: replay ?? false,
       success: response.success,
       errorReason: response.errorReason,
       payer: response.payer,

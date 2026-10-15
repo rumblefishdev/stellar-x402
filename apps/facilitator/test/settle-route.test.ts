@@ -73,18 +73,46 @@ describe("POST /settle", () => {
 
   it("answers 200 with a success body and the EXTENSION-RESPONSES header, then runs afterResponse", async () => {
     const afterResponse = vi.fn();
-    settle.mockResolvedValueOnce({ response: success, record, afterResponse });
+    settle.mockResolvedValueOnce({ response: success, record, afterResponse, key: record.key });
     extensionResponses.mockReturnValueOnce({ bazaar: { status: "processing" } });
 
     const response = await post(request);
     expect([response.status, await response.json()]).toEqual([200, success]);
-    expect(settle).toHaveBeenCalledWith(paymentPayload, requirements);
+    expect(settle).toHaveBeenCalledWith(paymentPayload, requirements, expect.any(AbortSignal));
+    expect(lines.map((line) => JSON.parse(line))).toContainEqual(
+      expect.objectContaining({ event: "settled", settlementKey: record.key, replay: false }),
+    );
     expect(extensionResponses).toHaveBeenCalledWith(record);
     const header = response.headers.get("extension-responses");
     expect(JSON.parse(Buffer.from(header!, "base64").toString())).toEqual({
       bazaar: { status: "processing" },
     });
     await vi.waitFor(() => expect(afterResponse).toHaveBeenCalledTimes(1));
+  });
+
+  it("tells the settler when the client leaves before the answer", async () => {
+    let aborted!: (value: boolean) => void;
+    const seen = new Promise<boolean>((resolve) => (aborted = resolve));
+    settle.mockImplementationOnce(
+      (_payload, _requirements, signal) =>
+        new Promise((resolve) => {
+          signal!.addEventListener("abort", () => {
+            aborted(true);
+            resolve({ response: success });
+          });
+        }),
+    );
+    const client = new AbortController();
+    const request_ = fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request),
+      signal: client.signal,
+    }).catch(() => undefined);
+    await vi.waitFor(() => expect(settle).toHaveBeenCalled());
+    client.abort();
+    await request_;
+    expect(await seen).toBe(true);
   });
 
   it("sends no header when there are no extension responses or the answer is a failure", async () => {

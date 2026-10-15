@@ -1,18 +1,26 @@
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { Keypair } from "@stellar/stellar-sdk";
-import { FallbackRpc, SettlementSubmitter, keypairSigner } from "@stellar-x402/signer-pool";
+import { STELLAR_NETWORKS } from "@stellar-x402/config";
+import {
+  FallbackRpc,
+  SettlementSubmitter,
+  keypairSigner,
+  type SorobanRpc,
+} from "@stellar-x402/signer-pool";
 import { createEd25519Signer, getNetworkPassphrase } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/facilitator";
 import { memoryStores } from "./adapters/memory.js";
 import { createCataloger } from "./catalog/cataloger.js";
-import { parseConfig } from "./config.js";
+import { ConfigError, parseConfig } from "./config.js";
 import type { Config } from "./config.js";
 import { createApp, type AppDeps } from "./http/app.js";
-import { captureConsoleError, jsonLogger } from "./logger.js";
-import { memoryMetrics } from "./metrics.js";
+import { captureConsoleError, jsonLogger, type Logger } from "./logger.js";
+import { memoryMetrics, type Metrics } from "./metrics.js";
+import type { SettlementStore } from "./ports/index.js";
 import { feeSettings, upstreamAtCurrentBid, type FeeSettings } from "./settlement/fees.js";
-import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler } from "./settlement/settle.js";
+import type { SettlementHooks } from "./settlement/hooks.js";
+import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler, type Settle } from "./settlement/settle.js";
 import {
   createChecker,
   createVerifier,
@@ -105,11 +113,73 @@ export function settleCheck(checks: VerifierDeps): Check {
 }
 
 /**
+ * `/settle` from the config (AD-2, AD-6, AD-10, ADR 0011): the pool, built from the same
+ * `fees.pool` as the checks' fees, and the settler with `/settle`'s checks and the settle budget.
+ * The pool's events go to the metrics; 0019 finishes the record of a settlement answered
+ * `pending`, until then its `resolved` event is logged.
+ */
+export function buildSettlement(
+  config: Config,
+  deps: {
+    rpc: SorobanRpc;
+    fees: FeeSettings;
+    checks: VerifierDeps;
+    store: SettlementStore;
+    hooks: Pick<SettlementHooks, "beforeSubmit" | "onFinal" | "onSuccess">;
+    logger: Logger;
+    metrics: Metrics;
+    /** Tests pass the pool's `sleep`. */
+    sleep?: (ms: number) => Promise<void>;
+  },
+): { settle: Settle; submitter: SettlementSubmitter } {
+  const { logger, metrics } = deps;
+  // The only sender of transactions in the service (AD-2). The channel check at startup comes
+  // with 0020, the lease with 0025.
+  const submitter = new SettlementSubmitter({
+    rpc: deps.rpc,
+    networkPassphrase: getNetworkPassphrase(config.network),
+    signer: keypairSigner(Keypair.fromSecret(config.facilitatorSecret)),
+    channels: config.channels,
+    ...deps.fees.pool,
+    ...(deps.sleep && { sleep: deps.sleep }),
+    onEvent: (event) => {
+      metrics.increment("pool_events_total", { type: event.type });
+      if (event.type === "resolved") {
+        logger.info("settlement_resolved", {
+          network: config.network,
+          transaction: event.result.hash,
+          status: event.result.status,
+        });
+      }
+    },
+  });
+  const settle = createSettler({
+    network: config.network,
+    check: settleCheck(deps.checks),
+    store: deps.store,
+    submitter,
+    hooks: deps.hooks,
+    logger,
+    metrics,
+    maxFeeStroops: config.fees.maxFeeStroops,
+    settleTimeoutMs: config.settlement.settleTimeoutMs,
+    budgetMs: config.settlement.settleBudgetMs,
+  });
+  return { settle, submitter };
+}
+
+/**
  * The composition root (AD-1): the only module that reads `process.env`. It validates the config
  * once and builds every part from it.
  */
 export async function main(env: Record<string, string | undefined> = process.env) {
   const config = parseConfig(env);
+  // `/settle` spends on pubnet: not with a store a restart loses, no spend budgets and no lease.
+  if (config.network === STELLAR_NETWORKS.pubnet && config.store === "memory") {
+    throw new ConfigError([
+      "NETWORK stellar:pubnet needs a durable STORE; STORE=memory is for testnet only (0022)",
+    ]);
+  }
   const logger = jsonLogger(config.logLevel);
   // STORE=memory is the only option until the durable adapters land (0022).
   const stores = memoryStores();
@@ -126,30 +196,11 @@ export async function main(env: Record<string, string | undefined> = process.env
   // they share one ceiling and one bid (AD-10).
   const fees = feeSettings(config.fees, rpc);
   const checks = buildChecks(config, rpc, fees);
-  // The only sender of transactions in the service (AD-2). The channel check at startup comes
-  // with 0020, the lease with 0025.
-  const submitter = new SettlementSubmitter({
+  const { settle } = buildSettlement(config, {
     rpc,
-    networkPassphrase: getNetworkPassphrase(config.network),
-    signer: keypairSigner(Keypair.fromSecret(config.facilitatorSecret)),
-    channels: config.channels,
-    ...fees.pool,
-    onEvent: (event) => {
-      // 0019 finishes the record of a settlement answered `pending`; until then it's logged.
-      if (event.type === "resolved") {
-        logger.info("settlement_resolved", {
-          network: config.network,
-          transaction: event.result.hash,
-          status: event.result.status,
-        });
-      }
-    },
-  });
-  const settle = createSettler({
-    network: config.network,
-    check: settleCheck(checks),
+    fees,
+    checks,
     store: stores.settlements,
-    submitter,
     // Spend budgets plug in here with 0024.
     hooks: {
       beforeSubmit: async () => ({ allow: true }),
@@ -158,9 +209,6 @@ export async function main(env: Record<string, string | undefined> = process.env
     },
     logger,
     metrics,
-    maxFeeStroops: config.fees.maxFeeStroops,
-    settleTimeoutMs: config.settlement.settleTimeoutMs,
-    budgetMs: config.settlement.settleBudgetMs,
   });
   // For the life of the process: an upstream call cut off by the deadline keeps running after
   // `close()`, and its error would reach stderr with the RPC URL in it.
