@@ -56,26 +56,33 @@ pool and our ledger reads) has a working fallback. Make `/verify` fail over too,
   - if every endpoint fails, the first failure is the result (thrown, or the
     `unexpected_verify_error` answer), so `createVerifier` still answers 500.
 - **`main.ts`**: `buildVerifier` builds one `upstreamAtCurrentBid` scheme per `RPC_URLS` entry
-  inside `failoverUpstream`, with `UPSTREAM_TIMEOUT_MS` (10 s) per URL, and gives `createVerifier`
-  an overall `upstreamTimeoutMs` of 10 s per URL.
+  inside `failoverUpstream`, with `UPSTREAM_TIMEOUT_MS` (10 s) per URL, logs each switch as
+  `rpc_failover` (`from`, `to`) through a new `logger` parameter, and gives `createVerifier` an
+  overall `upstreamTimeoutMs` of 10 s per URL plus 1 s.
 - **`verify.ts`**: exports `UNEXPECTED_VERIFY_ERROR` and `withTimeout` for the failover module.
 - **`config.ts`**: the `RPC_URLS` docstring now says upstream verify fails over too.
 - **Spine AD-3**: the construction rule records one scheme per URL, the failover rule, the
-  overall deadline and the Horizon limit; the 500 rule now says "on every URL".
+  `rpc_failover` log, the overall deadline, the lagging-RPC risk, the fee-stats read inside each
+  URL's 10 s and the Horizon limit; the 500 rule now lists the three ways every URL can fail.
 - **Tests**: facilitator 103 → 113.
   - `upstream-failover.test.ts` (8): failover on `unexpected_verify_error`, a throw and a timeout;
     staying on the endpoint that answered; a rejection passed on without failover; wrap-around
     from the active endpoint; the first failure when every endpoint fails; no endpoints.
-  - `build-verifier.test.ts` (+2): a down first URL answered from the second (AC 1), and a hung
-    first URL plus a second that answers in 5 s, under fake timers.
+  - `build-verifier.test.ts` (+2): a down first URL answered from the second (AC 1), with the
+    `rpc_failover` warning, and a hung first URL plus a second that answers in 5 s, under fake
+    timers.
   - Mutations caught: no failover on `unexpected_verify_error` (4 tests fail), always starting
     from the first endpoint (2), no per-endpoint timeout (3), an overall deadline of 10 s instead
     of 10 s per URL (1).
-- Not run on testnet: the tests use fake schemes, as the other `buildVerifier` tests do.
+- **Testnet**: `RPC_URLS=http://127.0.0.1:9,https://soroban-testnet.stellar.org npx tsx
+  scripts/verify-smoke.ts` (at 8b7c54b), with fresh friendbot accounts: `validPayment` and
+  `channelRejected` both true; the first URL failed on each call and the second answered.
 
 **Modified tests:** `build-verifier.test.ts`'s `setup` takes an answer that may depend on the
 scheme's RPC URL and may be a promise; the old "unexpected_verify_error" test now says "on every
-RPC URL", since both URLs answer it.
+RPC URL", since both URLs answer it. `buildVerifier` takes a `logger` before `makeScheme`, so
+`fee-agreement.test.ts` passes one. The "every endpoint fails" test in `upstream-failover.test.ts`
+now also checks that the next call starts from the first endpoint again.
 
 ## Issues Encountered
 
@@ -98,11 +105,12 @@ RPC URL", since both URLs answer it.
 3. **A rejection is never failed over.** Only a throw, a timeout and `unexpected_verify_error`
    say nothing about the payment. A lagging RPC can make a valid payment fail simulation; trying
    the next URL then would let a client shop for a verdict, so the verdict stands.
-4. **`/verify`'s overall deadline is 10 s per URL** (20 s with two). The single 10 s deadline from
-   0018 decision 18 would have cut off the second attempt.
+4. **`/verify`'s overall deadline is 10 s per URL plus 1 s** (21 s with two). The single 10 s
+   deadline from 0018 decision 18 would have cut off the second attempt; the 1 s lets the last
+   URL's own deadline fire first. With fee-stats bids, each URL's 10 s includes the fee-stats read.
 5. **Endpoints are named `RPC_URLS[i]`, not by URL**, because an RPC URL can carry an API key
-   (0018 decision 22). `onSwitch` exists, but `main.ts` doesn't log switches yet, as it doesn't
-   for `FallbackRpc`.
+   (0018 decision 22). `main.ts` logs each switch as `rpc_failover` with these names (okarcz,
+   2026-10-15, after the code review).
 6. **The Horizon read stays as it is.** Upstream reads the ledger close time from Horizon, with no
    URL of ours to fail over to. It falls back to its default on an error, but a Horizon that
    hangs takes every URL past its 10 s, and `/verify` then answers 500 after 10 s per URL.
