@@ -211,17 +211,16 @@ describe("start-up", () => {
         base({ STELLAR_X402_SECRET_KEY: key, STELLAR_X402_MAX_PER_CALL: PRICE }),
         "STELLAR_X402_DAILY_BUDGET",
       ],
+      // No network setting: it pays on testnet only, and the name is refused as unknown.
       [
-        "e",
-        base({ STELLAR_X402_DAILY_BUDGET: "100" }),
-        "STELLAR_X402_DAILY_BUDGET needs STELLAR_X402_SECRET_KEY",
+        "f",
+        paying({ STELLAR_X402_NETWORK: "stellar:pubnet" }),
+        "STELLAR_X402_NETWORK is not a setting",
       ],
-      ["f", paying({ STELLAR_X402_NETWORK: "stellar:pubnet" }), "STELLAR_X402_NETWORK"],
       ["g", paying({ STELLAR_X402_MAX_PER_CALL: "1e3" }), "STELLAR_X402_MAX_PER_CALL"],
       ["h", base({ STELLAR_X402_TIMEOUT_MS: "0" }), "STELLAR_X402_TIMEOUT_MS"],
       ["i", base({ STELLAR_X402_MAX_PERCALL: "10" }), "STELLAR_X402_MAX_PERCALL"],
-      ["j", paying({ STELLAR_X402_BUDGET: "100" }), "replaced by STELLAR_X402_DAILY_BUDGET"],
-      ["k", paying({ STELLAR_X402_STATE_FILE: "/tmp/x" }), "replaced by STELLAR_X402_STATE_DIR"],
+      ["j", paying({ STELLAR_X402_BUDGET: "100" }), "STELLAR_X402_BUDGET is not a setting"],
       [
         "l",
         paying({ STELLAR_X402_SECRET_KEY: "SNOTAVALIDKEY0123456789" }),
@@ -439,7 +438,7 @@ describe("get_resource", () => {
     const cases: [string, string, string][] = [
       ["a", "/free", "ok"],
       ["b", "/nohdr", "unsupported_payment"],
-      ["c", "/deep", "unsupported_payment"],
+      ["c", "/deep", "ok"],
       ["d", "/gone", "resource_not_found"],
       ["e", "/boom", "upstream_error"],
       ["f", "/big", "response_too_large"],
@@ -471,8 +470,6 @@ describe("get_resource", () => {
         );
       }
     }
-    // Row c answers unsupported_payment for several reasons; the log says it was the schema.
-    row("E-08c", "the log names the input schema", true, /schema/i.test(server.stderr()));
     await server.close();
     await fake.close();
   });

@@ -10,12 +10,6 @@ import { DatabaseSync } from "node:sqlite";
  * Counting runs in a write transaction, so processes paying at once never pass the day together.
  */
 
-/**
- * Rows older than this are deleted when a payment is counted, so the file stays small. Only today's
- * are ever read; the last week is kept so the owner can see what was spent on recent days.
- */
-const KEEP_DAYS = 7;
-
 /** Where an amount is counted: the day, the buyer's address and the asset contract. */
 export interface DailyEntry {
   day: string;
@@ -47,16 +41,6 @@ function open(dir: string): DatabaseSync {
   return db;
 }
 
-/** Spent by `payer` on `day` per asset. */
-export function spentOn(dir: string, day: string, payer: string): Map<string, bigint> {
-  const db = open(dir);
-  try {
-    return sum(db, day, payer);
-  } finally {
-    db.close();
-  }
-}
-
 /**
  * Counts `amount` against `entry` if it stays within `daily`; false when it would not. BEGIN IMMEDIATE
  * takes the write lock before the read, so another process cannot count between the read and the insert.
@@ -72,8 +56,6 @@ export function countDaily(dir: string, entry: DailyEntry, amount: bigint, daily
         return false;
       }
       insert(db, entry, amount);
-      const oldest = utcDay(new Date(Date.parse(entry.day) - KEEP_DAYS * 86_400_000));
-      db.prepare("DELETE FROM spent WHERE day < ?").run(oldest);
       db.exec("COMMIT");
       return true;
     } catch (error) {

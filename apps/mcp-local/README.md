@@ -50,9 +50,8 @@ Add to `claude_desktop_config.json` (Settings → Developer → Edit Config):
 }
 ```
 
-Without `STELLAR_X402_SECRET_KEY` the server only lists and previews. The payment settings
-(`STELLAR_X402_MAX_PER_CALL`, `STELLAR_X402_DAILY_BUDGET`, `STELLAR_X402_STATE_DIR`) set without a
-key stop the start, so a key left out by mistake is not taken for a server that pays.
+Without `STELLAR_X402_SECRET_KEY` the server only lists and previews, and its log says so at the
+start; the payment settings are then not used.
 
 ## Settings
 
@@ -63,7 +62,6 @@ key stop the start, so a key left out by mistake is not taken for a server that 
 | `STELLAR_X402_MAX_PER_CALL`         | required with a key    | the largest price one call may pay, in atomic units (`10000` = 0.001 USDC)                                                  |
 | `STELLAR_X402_DAILY_BUDGET`         | required with a key    | the most one key may spend in one UTC day, all its processes together, in atomic units                                      |
 | `STELLAR_X402_STATE_DIR`            | `~/.stellar-x402-mcp/` | where the daily budget keeps what was spent, the SQLite database `spent.sqlite`; an absolute path or one starting with `~/` |
-| `STELLAR_X402_NETWORK`              | `stellar:testnet`      | anything else stops the server: it pays on testnet only                                                                     |
 | `STELLAR_X402_TIMEOUT_MS`           | `30000`                | a tool call gives up after this long, all its requests together                                                             |
 | `STELLAR_X402_MAX_RESPONSE_BYTES`   | `100000`               | a seller response larger than this is refused (`response_too_large`)                                                        |
 | `STELLAR_X402_ALLOW_INSECURE_LOCAL` | `0`                    | `1` also allows `http` to this machine only (below) — **only** for a seller you run on it in tests                          |
@@ -85,8 +83,7 @@ malformed key is refused without repeating it.
   config included: it sits in plain text there. Keep only a small amount on it; a keychain or an
   external signer is planned before mainnet.
 - **Two limits, as on a payment card:** `STELLAR_X402_MAX_PER_CALL` for one payment and
-  `STELLAR_X402_DAILY_BUDGET` for one day. `STELLAR_X402_BUDGET`, a budget per server process,
-  was replaced by the daily budget; a server started with it stops and says so.
+  `STELLAR_X402_DAILY_BUDGET` for one day.
 - **The daily budget survives restarts and is shared.** Every process paying from the same key and
   using the same `STELLAR_X402_STATE_DIR` counts against one amount per day; the day is the UTC
   date, so it starts again at midnight UTC. What was spent is kept in a SQLite database,
@@ -94,12 +91,10 @@ malformed key is refused without repeating it.
   asset, amount in atomic units), a refund being a negative row. Each payment is counted in a
   transaction, so the count is exact across processes: processes paying at the very same moment
   never pass the daily budget together.
-  Each time a payment is counted, rows dated more than seven days before that day are deleted. If
-  the database cannot be read or written, the server refuses to pay (`payment_failed`) rather than
+  If the database cannot be read or written, the server refuses to pay (`payment_failed`) rather than
   guess. The same happens when another server holds the database for more than 5 seconds (a wait
   that is part of the call's time limit); a counted payment takes milliseconds, so a retry
-  normally passes. `STELLAR_X402_STATE_FILE`, a
-  single file, was replaced by this directory; a server started with it stops and says so.
+  normally passes.
 - **Keep the state directory on a local disk** — not a network drive or a synced folder (iCloud,
   Dropbox). SQLite's own guidance is not to use it over a network filesystem, whose locks it cannot
   rely on.
@@ -113,7 +108,7 @@ malformed key is refused without repeating it.
 - **The day is a calendar day, not the last 24 hours.** A full daily budget spent just before
   midnight UTC and another just after it means up to twice the daily budget within minutes.
 - **To reset the daily budget, delete `spent.sqlite`**, at a moment no payment is being made. It
-  then forgets everything spent today and on the days kept before it, for every key that uses that
+  then forgets everything spent, today and before, for every key that uses that
   directory. A running server opens the database for each payment, so after the reset it counts in
   the new file with every other server.
 - **A refund that cannot be written stays counted.** When a payment fails before it is signed, its
@@ -136,18 +131,18 @@ malformed key is refused without repeating it.
   choice in `STELLAR_X402_DISCOVERY_URL` and is trusted as such: it may be http or a private
   address, and its answer has no size limit. It has the time limit, and any failure of it is
   `upstream_error`.
-- **One time limit per tool call.** `STELLAR_X402_TIMEOUT_MS` covers everything one call does:
-  for `call_paid_http` the unpaid request, the signing and the paid request, each until its body
-  has fully arrived. Keep it under the MCP client's own limit (60 s by default) so the agent always
-  gets an answer.
+- **One time limit per tool call.** `STELLAR_X402_TIMEOUT_MS` covers the requests one call makes:
+  for `call_paid_http` the unpaid request and the paid request, each until its body has fully
+  arrived. Keep it under the MCP client's own limit (60 s by default). Signing, which asks the
+  Stellar RPC, is not cut off: a signature that comes after the limit is never sent, and the amount
+  goes back; a hung RPC makes the call wait until the MCP client gives up.
 - **The response limit counts bytes after decompression,** while the body arrives: a small gzip
   body that unpacks to more than `STELLAR_X402_MAX_RESPONSE_BYTES` is refused.
 - **`get_resource` sends a real request** without paying. On a path the seller charges for, it gets
   the 402 terms; on a path the seller does not charge for, the seller runs the request. It shows the
   terms as the seller gives them, without checking them against your limits, asset or network; only
-  `call_paid_http` does that. It is stricter in two checks a payment does not make: the
-  `PAYMENT-REQUIRED` header must match the x402 v2 shape exactly, and the seller's input schema must
-  be within the catalog's limits (depth 10, 1,000 nodes, 32 KiB for the whole Bazaar extension).
+  `call_paid_http` does that. It is stricter in one check a payment does not make: the
+  `PAYMENT-REQUIRED` header must match the x402 v2 shape exactly.
   `paymentRequired` is the decoded header as x402 v2 defines it: `x402Version`, `resource`,
   `accepts` (each offer's `scheme`, `network`, `amount`, `asset`, `payTo`, `maxTimeoutSeconds`,
   `extra`) and `extensions`. Terms it refuses (`unsupported_payment`) may still
@@ -161,28 +156,30 @@ A failure is a tool result with `isError: true`, one text content holding
 
 Two failures do not carry this shape, as the MCP SDK answers them before this server's code runs:
 input that does not match the tool's input schema (a missing `url`, an unknown `method`, a negative
-`limit`, an argument the tool does not have, such as a misspelt `offest`) and a call to `call_paid_http` on a server without a key. Their text is plain, such as
-`MCP error -32602: Input validation error: …`; nothing was sent for either.
+`limit`, an argument the tool does not have, such as a misspelt `offest`) and a call to
+`call_paid_http` on a server without a key. Their text is plain, such as `MCP error -32602: Input
+validation error: …`; nothing was sent for either.
 
-| Code                  | When                                                                                                                                                                                                                                                                                                                                                                                                       | Money may have moved | Daily budget keeps the amount | Retry                                                                      |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- | ----------------------------- | -------------------------------------------------------------------------- |
-| `invalid_input`       | a `GET` with a `body`, in either seller tool                                                                                                                                                                                                                                                                                                                                                               | no                   | no                            | with the input fixed                                                       |
-| `unsafe_url`          | the `url` does not parse; it is not https; its host is an IP address, or a name resolving to an address, that is not public; the seller answers a redirect (3xx) before any payment was sent                                                                                                                                                                                                               | no                   | no                            | not the same URL                                                           |
-| `resource_not_found`  | the seller answers 404 to the unpaid request                                                                                                                                                                                                                                                                                                                                                               | no                   | no                            | no                                                                         |
-| `response_too_large`  | a seller's body is over `STELLAR_X402_MAX_RESPONSE_BYTES` before any payment was sent                                                                                                                                                                                                                                                                                                                      | no                   | no                            | no                                                                         |
-| `upstream_error`      | `list_resources`: the catalog cannot be reached, answers an error, returns a page in another shape, or not within the time limit. The seller tools, before any payment was sent: the seller cannot be reached or the time limit passes; `get_resource` gets a status other than 2xx, 402 or 404; `call_paid_http` gets an answer other than 2xx, 402 or 404; signing does not finish within the time limit | no                   | no (given back)               | yes                                                                        |
-| `unsupported_payment` | `get_resource`: a 402 without a `PAYMENT-REQUIRED` header in the x402 v2 shape, or an input schema over the catalog's limits. `call_paid_http`: no offer this server can pay — a network other than `stellar:testnet`, another scheme or x402 version, terms it cannot read, a price that is not a whole number above zero — or every allowed offer wants the payment valid for more than 300 s            | no                   | no                            | no                                                                         |
-| `asset_not_allowed`   | no testnet offer is in an allowed asset (the CLI allows testnet USDC only)                                                                                                                                                                                                                                                                                                                                 | no                   | no                            | no                                                                         |
-| `over_price_limit`    | every allowed offer costs more than `STELLAR_X402_MAX_PER_CALL`                                                                                                                                                                                                                                                                                                                                            | no                   | no                            | no                                                                         |
-| `over_budget`         | every offer within the per-call limit would pass what is left of today's budget, also when another process spent it a moment earlier                                                                                                                                                                                                                                                                       | no                   | no                            | after midnight UTC                                                         |
-| `insufficient_funds`  | signing fails because the payer has no USDC trustline or too little USDC                                                                                                                                                                                                                                                                                                                                   | no                   | no (given back)               | after funding the payer                                                    |
-| `payment_failed`      | the daily budget database cannot be read or written, or another server held it for over 5 s; or signing fails for another reason                                                                                                                                                                                                                                                                           | no                   | no (given back)               | after fixing the cause in the log; at once if it says `database is locked` |
-| `payment_rejected`    | after the payment was sent: the seller's settlement says it failed, or the seller answers 402 again without a settlement. An expired authorization ends here too: the facilitator reports it as a failed check                                                                                                                                                                                             | yes                  | yes                           | only after checking (below)                                                |
-| `payment_unknown`     | after the payment was sent, anything else goes wrong: the connection fails, the time limit passes, the body stops arriving or is too large, a redirect, or an answer other than 2xx without a settlement                                                                                                                                                                                                   | yes                  | yes                           | only after checking (below)                                                |
+| Code                  | When                                                                                                                                                                                                                                                                                                                                                                                                                             | Money may have moved | Daily budget keeps the amount | Retry                                                                      |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- | ----------------------------- | -------------------------------------------------------------------------- |
+| `invalid_input`       | a `GET` with a `body`, in either seller tool                                                                                                                                                                                                                                                                                                                                                                                     | no                   | no                            | with the input fixed                                                       |
+| `unsafe_url`          | the `url` does not parse; it is not https; its host is an IP address, or a name resolving to an address, that is not public; the seller answers a redirect (3xx) before any payment was sent                                                                                                                                                                                                                                     | no                   | no                            | not the same URL                                                           |
+| `resource_not_found`  | the seller answers 404 to the unpaid request                                                                                                                                                                                                                                                                                                                                                                                     | no                   | no                            | no                                                                         |
+| `response_too_large`  | a seller's body is over `STELLAR_X402_MAX_RESPONSE_BYTES` before any payment was sent                                                                                                                                                                                                                                                                                                                                            | no                   | no                            | no                                                                         |
+| `upstream_error`      | `list_resources`: the catalog cannot be reached, answers an error, returns a page in another shape, or not within the time limit. The seller tools, before any payment was sent: the seller cannot be reached or the time limit passes; `get_resource` gets a status other than 2xx, 402 or 404; `call_paid_http` gets an answer other than 2xx, 402 or 404; signing finishes after the time limit, so the signature is not sent | no                   | no (given back)               | yes                                                                        |
+| `unsupported_payment` | `get_resource`: a 402 without a `PAYMENT-REQUIRED` header in the x402 v2 shape. `call_paid_http`: no offer this server can pay — a network other than `stellar:testnet`, another scheme or x402 version, terms it cannot read, a price that is not a whole number above zero — or every allowed offer wants the payment valid for more than 300 s                                                                                | no                   | no                            | no                                                                         |
+| `asset_not_allowed`   | no testnet offer is in an allowed asset (the CLI allows testnet USDC only)                                                                                                                                                                                                                                                                                                                                                       | no                   | no                            | no                                                                         |
+| `over_price_limit`    | every allowed offer costs more than `STELLAR_X402_MAX_PER_CALL`                                                                                                                                                                                                                                                                                                                                                                  | no                   | no                            | no                                                                         |
+| `over_budget`         | the offer chosen would pass what is left of today's budget, also when another process spent it a moment earlier                                                                                                                                                                                                                                                                                                                  | no                   | no                            | after midnight UTC                                                         |
+| `insufficient_funds`  | signing fails because the payer has no USDC trustline or too little USDC                                                                                                                                                                                                                                                                                                                                                         | no                   | no (given back)               | after funding the payer                                                    |
+| `payment_failed`      | the daily budget database cannot be read or written, or another server held it for over 5 s; or signing fails for another reason                                                                                                                                                                                                                                                                                                 | no                   | no (given back)               | after fixing the cause in the log; at once if it says `database is locked` |
+| `payment_rejected`    | after the payment was sent: the seller's settlement says it failed, or the seller answers 402 again without a settlement. An expired authorization ends here too: the facilitator reports it as a failed check                                                                                                                                                                                                                   | yes                  | yes                           | only after checking (below)                                                |
+| `payment_unknown`     | after the payment was sent, anything else goes wrong: the connection fails, the time limit passes, the body stops arriving or is too large, a redirect, or an answer other than 2xx without a settlement                                                                                                                                                                                                                         | yes                  | yes                           | only after checking (below)                                                |
 
 `call_paid_http` checks the seller's offers in this order, and the first check that leaves no offer
-gives the code: asset (`asset_not_allowed`), authorization time (`unsupported_payment`), per-call
-limit (`over_price_limit`), daily budget (`over_budget`). Nothing is signed for any of them.
+gives the code: asset (`asset_not_allowed`), a price above zero and an authorization of at most
+300 s (`unsupported_payment`), per-call limit (`over_price_limit`). The offer left is then counted
+against the daily budget (`over_budget`). Nothing is signed for any of them.
 
 **`payment_rejected`** means the signed payment reached the seller and the seller, or its
 facilitator, said no. Usually nothing was settled, but the signed authorization stays valid until
