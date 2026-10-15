@@ -3,9 +3,9 @@
  * client, settled through the channel pool by a facilitator built by `main()`.
  *
  * 1. A payment settles: `success: true`, and the transaction is `SUCCESS` on chain.
- * 2. The same request again gets the stored answer, with the same hash.
- * 3. The same payload with other requirements is refused (`…_nonce_already_used`).
- * 4. Two concurrent calls for one new payment submit one transaction.
+ * 2. The same request again gets `…_already_settled` with the same hash: success is answered once.
+ * 3. The same payload with other requirements is refused (`…_nonce_already_used`), with the hash.
+ * 4. Two concurrent calls for one new payment submit one transaction; one gets the success.
  * 5. `/verify` of the settled payment fails: its nonce is used on chain.
  *
  * Env (each optional; a missing key is a fresh friendbot-funded one, printed by address only):
@@ -114,11 +114,17 @@ try {
 
   const checks = {
     settled: settled.success && settled.payer === client.publicKey() && onChain === "SUCCESS",
-    repeatSameAnswer: repeat.success && repeat.transaction === settled.transaction,
+    repeatAlreadySettled:
+      !repeat.success &&
+      repeat.errorReason === "settle_exact_stellar_already_settled" &&
+      repeat.transaction === settled.transaction,
     nonceReuseRefused:
-      !reused.success && reused.errorReason === "settle_exact_stellar_nonce_already_used",
+      !reused.success &&
+      reused.errorReason === "settle_exact_stellar_nonce_already_used" &&
+      reused.transaction === settled.transaction,
     concurrentOneTransaction:
-      concurrent.every((answer) => answer.success) &&
+      concurrent.filter((answer) => answer.success).length === 1 &&
+      concurrent.some((answer) => answer.errorReason === "settle_exact_stellar_already_settled") &&
       concurrent[0]!.transaction === concurrent[1]!.transaction &&
       concurrent[0]!.transaction !== settled.transaction,
     settledPaymentNoLongerVerifies: !verifySettled.isValid,

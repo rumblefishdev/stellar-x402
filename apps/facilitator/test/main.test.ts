@@ -14,9 +14,9 @@ import {
 } from "@stellar/stellar-sdk";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { memoryStores } from "../src/adapters/memory.js";
-import { parseConfig } from "../src/config.js";
+import { ConfigError, parseConfig } from "../src/config.js";
 import { jsonLogger } from "../src/logger.js";
-import { start, type Started } from "../src/main.js";
+import { main, start, type Started } from "../src/main.js";
 
 const secret = Keypair.random().secret();
 const env = {
@@ -122,6 +122,22 @@ describe("startup with a bad config", () => {
     expect(output).toContain("DATABASE_URL must be a postgres:// URL");
     expect(output).not.toContain("secret");
   }, 20_000);
+
+  it("refuses stellar:pubnet even with a durable store, before serving anything", async () => {
+    // `/settle` spends there: not without spend budgets, rate limits and the channel lease.
+    const pubnet = {
+      ...env,
+      NETWORK: "stellar:pubnet",
+      RPC_URLS: "https://rpc.example",
+      STORE: "postgres",
+      DATABASE_URL: "postgres://db.internal/x402",
+    };
+    const error = await main(pubnet).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ConfigError);
+    expect((error as ConfigError).problems).toEqual([
+      "NETWORK stellar:pubnet is refused until spend budgets (0024), rate limits (0023) and the channel lease (0025) land",
+    ]);
+  });
 });
 
 describe("main()", () => {

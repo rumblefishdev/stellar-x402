@@ -8,12 +8,14 @@ const CHANNEL_A = keypair(2).publicKey();
 const CHANNEL_B = keypair(3).publicKey();
 
 const minimal = { FACILITATOR_SECRET: SECRET, CHANNELS: `${CHANNEL_A}, ${CHANNEL_B}` };
-/** Pubnet needs the PostgreSQL store. */
+/** Pubnet needs the PostgreSQL store, and is refused until 0023, 0024 and 0025 land. */
 const pubnet = {
   NETWORK: "stellar:pubnet",
   STORE: "postgres",
   DATABASE_URL: "postgres://db.internal/x402",
 };
+const PUBNET_REFUSED =
+  "NETWORK stellar:pubnet is refused until spend budgets (0024), rate limits (0023) and the channel lease (0025) land";
 
 function problems(env: Record<string, string | undefined>): string[] {
   try {
@@ -38,8 +40,8 @@ describe("parseConfig", () => {
       fees: { maxFeeStroops: 250_000n, inclusionFeeStroops: undefined, escalation: undefined },
       settlement: {
         minValidityLedgers: 4,
-        settleTimeoutMs: 30_000,
-        settleBudgetMs: 90_000,
+        settleTimeoutMs: 20_000,
+        settleBudgetMs: 30_000,
         leaseTtlMs: 30_000,
       },
       http: {
@@ -61,9 +63,10 @@ describe("parseConfig", () => {
   });
 
   it("maps every setting to its own field", () => {
-    // Distinct values, so two settings swapped in the mapping would fail.
+    // Distinct values, so two settings swapped in the mapping would fail. NETWORK can only be
+    // testnet, its default, while pubnet is refused.
     const config = parseConfig({
-      NETWORK: "stellar:pubnet",
+      NETWORK: "stellar:testnet",
       PORT: "8080",
       LOG_LEVEL: "debug",
       RPC_URLS: "https://a.example, https://b.example",
@@ -94,7 +97,7 @@ describe("parseConfig", () => {
       BREAKER_COOLDOWN_MS: "5000",
     });
     expect(config).toEqual<Config>({
-      network: "stellar:pubnet",
+      network: "stellar:testnet",
       port: 8080,
       logLevel: "debug",
       rpcUrls: ["https://a.example", "https://b.example"],
@@ -170,14 +173,26 @@ describe("parseConfig", () => {
     ]);
   });
 
+  it("keeps the settle budget below the seller's 90 s and the repeat wait within the budget", () => {
+    expect(problems({ ...minimal, SETTLE_BUDGET_MS: "80001" })).toEqual([
+      "SETTLE_BUDGET_MS must be between 1000 and 80000",
+    ]);
+    expect(problems({ ...minimal, SETTLE_BUDGET_MS: "10000", SETTLE_TIMEOUT_MS: "10001" })).toEqual(
+      ["SETTLE_TIMEOUT_MS must be at most SETTLE_BUDGET_MS"],
+    );
+    expect(
+      parseConfig({ ...minimal, SETTLE_BUDGET_MS: "80000", SETTLE_TIMEOUT_MS: "80000" }),
+    ).toMatchObject({ settlement: { settleBudgetMs: 80_000, settleTimeoutMs: 80_000 } });
+  });
+
   it("accepts only plain decimal numbers in range", () => {
     expect(problems({ ...minimal, PORT: "0x10" })).toEqual(["PORT must be a whole number"]);
     expect(problems({ ...minimal, PORT: "70000" })).toEqual(["PORT must be between 1 and 65535"]);
     expect(problems({ ...minimal, SETTLE_TIMEOUT_MS: "1e20" })).toEqual([
       "SETTLE_TIMEOUT_MS must be a whole number",
     ]);
-    expect(problems({ ...minimal, SETTLE_TIMEOUT_MS: "99999999999" })).toEqual([
-      "SETTLE_TIMEOUT_MS must be between 1 and 2147483647",
+    expect(problems({ ...minimal, LEASE_TTL_MS: "99999999999" })).toEqual([
+      "LEASE_TTL_MS must be between 1000 and 2147483647",
     ]);
     expect(problems({ ...minimal, FEE_ESCALATION_FACTOR: "Infinity" })).toEqual([
       "FEE_ESCALATION_FACTOR must be a decimal number",
@@ -227,7 +242,7 @@ describe("parseConfig", () => {
         RPC_URLS: "https://rpc.example",
         CATALOG_ALLOW_HTTP: "true",
       }),
-    ).toEqual(["CATALOG_ALLOW_HTTP is only allowed on testnet"]);
+    ).toEqual(["CATALOG_ALLOW_HTTP is only allowed on testnet", PUBNET_REFUSED]);
   });
 
   it("selects the PostgreSQL store with its URL", () => {
@@ -257,13 +272,22 @@ describe("parseConfig", () => {
     const rpc = { RPC_URLS: "https://rpc.example" };
     expect(problems({ ...minimal, ...rpc, NETWORK: "stellar:pubnet" })).toEqual([
       "STORE must be postgres outside testnet",
+      PUBNET_REFUSED,
     ]);
     expect(problems({ ...minimal, ...rpc, ...pubnet, STORE: "memory" })).toEqual([
       "STORE must be postgres outside testnet",
+      PUBNET_REFUSED,
       "DATABASE_URL is only used with STORE=postgres",
     ]);
     expect(problems({ ...minimal, DATABASE_URL: "postgres://db.internal/x402" })).toEqual([
       "DATABASE_URL is only used with STORE=postgres",
+    ]);
+  });
+
+  it("refuses stellar:pubnet with nothing else wrong, until 0023, 0024 and 0025 land", () => {
+    // `/settle` would spend there with allow-all spend hooks, no rate limit and no lease.
+    expect(problems({ ...minimal, ...pubnet, RPC_URLS: "https://rpc.example" })).toEqual([
+      PUBNET_REFUSED,
     ]);
   });
 
@@ -279,11 +303,15 @@ describe("parseConfig", () => {
     ]);
     expect(
       problems({ ...minimal, ...pubnet, RPC_URLS: "https://a.example,http://rpc:8000" }),
-    ).toEqual(["RPC_URLS must be https outside testnet"]);
+    ).toEqual(["RPC_URLS must be https outside testnet", PUBNET_REFUSED]);
     expect(problems({ ...minimal, ...pubnet, RPC_URLS: "," })).toEqual([
       "RPC_URLS must list at least one URL",
+      PUBNET_REFUSED,
     ]);
-    expect(problems({ ...minimal, ...pubnet })).toEqual(["RPC_URLS is required outside testnet"]);
+    expect(problems({ ...minimal, ...pubnet })).toEqual([
+      "RPC_URLS is required outside testnet",
+      PUBNET_REFUSED,
+    ]);
   });
 });
 

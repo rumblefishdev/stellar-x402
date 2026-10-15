@@ -98,6 +98,12 @@ CREATE TABLE spend_scopes (
 );
 `,
   },
+  {
+    // 0009: when `/settle` first answered a record's `success` (AD-6). Nullable, so the release
+    // before it keeps working.
+    name: "0002_success_answered",
+    sql: "ALTER TABLE settlements ADD COLUMN success_answered_at bigint;",
+  },
 ];
 
 /** Serializes concurrent `migrate` runs, e.g. two tasks of one deploy; held until commit. */
