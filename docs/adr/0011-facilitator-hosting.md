@@ -2,6 +2,8 @@
 
 - Status: accepted
 - Date: 2026-10-09
+- Amended: 2026-10-15 (task 0009, PR #41 review): the `/settle` budget is 30 s, below the
+  seller's own 90 s timeout
 
 ## Context
 
@@ -63,16 +65,23 @@ Prices API runs in Frankfurt. The full requirements and the research are in task
 
 One request or one stop must never outlast the layer in front of it:
 
-| Setting                         | Value               | Why                                                       |
-| ------------------------------- | ------------------- | --------------------------------------------------------- |
-| `/settle` response budget       | 90 s                | past it, answer `settlement_pending` with the hash (AD-6) |
-| ALB target deregistration delay | 100 s               | in-flight `/settle` finishes before SIGTERM               |
-| ALB idle timeout                | 120 s               | above the response budget                                 |
-| Node `keepAliveTimeout`         | 125 s               | above the ALB idle timeout, or the ALB sees 502s          |
-| `stopTimeout`                   | 120 s               | background drain after SIGTERM                            |
-| Target health check             | 10 s × 2, 3 to fail | a new target gets traffic within ~20 s                    |
-| `LEASE_TTL_MS`                  | 30 s                | after a crash, a new process waits at most this long      |
+| Setting                           | Value               | Why                                                                |
+| --------------------------------- | ------------------- | ------------------------------------------------------------------ |
+| Seller's facilitator client       | 90 s                | `@x402/core`'s `HTTPFacilitatorClient`; started before the request |
+| `/settle` response budget         | 30 s, at most 80 s  | well below the seller's 90 s, so our answer reaches it             |
+| Repeat wait (`SETTLE_TIMEOUT_MS`) | 20 s, ≤ the budget  | a repeat waits at most what the call could take                    |
+| ALB target deregistration delay   | 100 s               | in-flight `/settle` finishes before SIGTERM                        |
+| ALB idle timeout                  | 120 s               | above the response budget                                          |
+| Node `keepAliveTimeout`           | 125 s               | above the ALB idle timeout, or the ALB sees 502s                   |
+| `stopTimeout`                     | 120 s               | background drain after SIGTERM                                     |
+| Target health check               | 10 s × 2, 3 to fail | a new target gets traffic within ~20 s                             |
+| `LEASE_TTL_MS`                    | 30 s                | after a crash, a new process waits at most this long               |
 
+- **Past the budget,** `/settle` answers `settlement_pending` with the hash if one was signed,
+  and nothing new is signed after it. If nothing was signed, the record ends and the answer is
+  `settle_exact_stellar_timeout`: the client signs a new payment. 30 s fits 97 % of the
+  settlements measured in task 0043. Every store and hook call is bounded by what is left of it,
+  plus 1 s for the last store write.
 - **The budget covers the wait for a channel.** The pool's own bounds (60 s + 30 s) start only
   once a channel is acquired, so the `/settle` handler passes the pool a deadline (0009).
 - **ECS waits out the whole deregistration delay on every stop,** even with nothing in flight: the
@@ -267,7 +276,7 @@ One request or one stop must never outlast the layer in front of it:
   - the CloudFront-to-ALB hop would be plain HTTP;
   - any CloudFront distribution, not only ours, could reach the ALB, so `X-Forwarded-For` could
     be forged;
-  - a 90 s `/settle` needs a raised origin-timeout quota;
+  - a `/settle` of up to 80 s needs a raised origin-timeout quota;
   - the default cache and method settings break a JSON API.
 
   A subdomain avoids all of it.

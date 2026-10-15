@@ -2,6 +2,8 @@
 
 - Status: accepted
 - Date: 2026-10-07
+- Amended: 2026-10-15 (task 0009, PR #41 review): a success is answered once; a repeat of an
+  unsigned record ends it at the first call's budget
 
 ## Context
 
@@ -39,11 +41,18 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
 - **Claim before submit.** After verification, `/settle` claims the key with an atomic
   insert-if-absent. Only the caller that wins the claim submits.
 - **Replay rules.**
-  - A repeat with the same fingerprint returns the record's outcome. If the record is still
-    pending, it first waits, bounded by the settle timeout, for the final outcome.
-  - A repeat with a different fingerprint is rejected, and nothing is submitted.
+  - A repeat with the same fingerprint returns the record's outcome. If the record is signed but
+    not final, it first waits, bounded by `SETTLE_TIMEOUT_MS`, for the final outcome. If nothing
+    was signed, it waits until the first call's settle budget ends, counted from the claim, then
+    ends the record itself with `…_timeout` (compare-and-set against `addHash`).
+  - `success: true` is answered once per record, by compare-and-set on `successAnsweredAt`. Later
+    calls get `settle_exact_stellar_already_settled` with the hash. `settlement_pending` doesn't
+    count, and a call whose client left marks nothing.
+  - A repeat with a different fingerprint is rejected with the stored hash, if any, and nothing is
+    submitted.
 - **Wire mapping.**
-  - `success` → `{success: true, transaction, network, payer}`
+  - `success` → `{success: true, transaction, network, payer}`, once; after that
+    `{success: false, errorReason: "settle_exact_stellar_already_settled", transaction, network}`
   - `pending` → `{success: false, errorReason: "settlement_pending", transaction, network}`
   - other outcomes and each thrown submitter error → a fixed `errorReason`
 - **One owner of the lifecycle.** A single settlement module in `apps/facilitator` writes every
@@ -68,6 +77,10 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
 - **The claim is the only race-free dedupe.** Lookup-then-write lets parallel calls both submit.
 - **The fingerprint stops cross-merchant replay**, while still letting the same resource server
   retry safely.
+- **Success once stops one payment unlocking many responses.** A resource server delivers on every
+  `success`: with one per call, one payment header sent N times was served N times (seen on
+  testnet with a stock `@x402/express` seller). Upstream's own `settle()` gives one success per
+  nonce too. The cost is that a seller whose network lost our `success` can't get it again.
 - **The bounded wait keeps the e2e gate passing.** The canonical server's single immediate retry
   would otherwise get `pending` again and fail the payment.
 - **Forward-only compare-and-set lets one event order win.** Late events can't undo final

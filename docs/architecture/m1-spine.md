@@ -88,7 +88,7 @@ graph TD
 - **Rule:**
   - **Upstream owns verification.** Auth signature and scope checks, `Address`/`AddressV2` credentials, simulation and the event checks all belong to `@x402/stellar` `ExactStellarScheme.verify()`. We never re-implement them.
   - **Construction.** `ExactStellarScheme` is constructed with the fee values from AD-10.
-  - **`/verify`** = upstream `verify()`, then the AD-5 channel check, then the AD-22 validity check. The first rejection returns `isValid: false` with its reason.
+  - **`/verify`** = upstream `verify()`, then the AD-5 channel check, the AD-6 one-payer-entry check, then the AD-22 validity check. The first rejection returns `isValid: false` with its reason.
     - A network check runs first: a process serves one network, and upstream would verify another network's payload against that network's default RPC. A V0 envelope is rejected as malformed there too: upstream parses it, but can't assemble its simulation onto it.
     - Upstream answers its own exceptions, such as a failed RPC call, with `unexpected_verify_error`. That is an error of ours, not a verdict on the payment, so `/verify` answers 500. So does an upstream call with no answer within 10 s: upstream's RPC and Horizon clients have no timeout.
     - A request whose `amount` isn't a whole number is a 400: upstream's `BigInt(amount)` would throw, which would be a 500.
@@ -120,14 +120,18 @@ graph TD
   - double submission
   - paying N−1 fees for N parallel calls
   - one payment being replayed to unlock another merchant's resource
+  - one payment unlocking the same resource more than once
 - **Rule:**
-  - **Key.** The settlement key is `network:payer:nonce`. The nonce is the int64 nonce of the payer's auth entry, held as a decimal string. A payload must carry exactly one payer auth entry, otherwise it is rejected.
+  - **Key.** The settlement key is `network:payer:nonce`. The nonce is the int64 nonce of the payer's auth entry, held as a decimal string. A payload must carry exactly one payer auth entry, otherwise the `/verify` checks reject it, at `/verify` and `/settle` alike (upstream de-duplicates signers and doesn't count entries).
   - **Fingerprint.** Each record stores a fingerprint: a hash of the canonical payload plus `paymentRequirements`.
   - **Claim.** After verification and before `submit()`, `/settle` claims the key with an atomic insert-if-absent. Only the caller that wins the claim submits.
-  - **Repeat with the same fingerprint.** A repeat `/settle` returns the record's outcome. If the record is still pending, it waits, bounded by the settle timeout, for the final outcome before answering.
-  - **Repeat with a different fingerprint.** Rejected with `success: false`. Nothing is submitted, and the stored outcome is never returned.
+  - **Repeat with the same fingerprint.** A repeat `/settle` returns the record's outcome.
+    - A signed record that isn't final yet: it waits up to `SETTLE_TIMEOUT_MS` for the final outcome.
+    - A record with no hash: it waits until the first call's budget ends, counted from the claim. Then it ends the record itself (`claimed → rejected`, `…_timeout`), so the answer is never `…_timeout` for something that is then sent.
+  - **Success once.** `success: true` is answered once per record, by compare-and-set on `successAnsweredAt`. Every later call gets `success: false`, `settle_exact_stellar_already_settled` and the hash. `settlement_pending` doesn't count: the canonical resource server's one retry after it still gets the success. A call whose client left marks nothing. The cost: a seller that lost our `success` answer can't get it again.
+  - **Repeat with a different fingerprint.** Rejected with `success: false`, `settle_exact_stellar_nonce_already_used` and the stored hash, if any, so a payment that landed can be reconciled. Nothing is submitted, and the stored outcome is never returned.
   - **Wire shape.** `SubmitStatus` maps as follows:
-    - `success` → `{success: true, transaction, network, payer}`
+    - `success` → `{success: true, transaction, network, payer}`, once; later `{success: false, errorReason: "settle_exact_stellar_already_settled", transaction, network}`
     - `pending` → `{success: false, errorReason: "settlement_pending", transaction, network}`
     - `failed` / `rejected` / `expired` → `{success: false, errorReason}`
     - Each thrown submitter error class maps to a fixed `errorReason`, listed with the code.
