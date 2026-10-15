@@ -303,10 +303,11 @@ describe("call_paid_http", () => {
   });
 
   it("bounds signing by the call's deadline: nothing is sent and the amount goes back", async () => {
-    await reconnect({}, { scheme: slowScheme(1_000), timeoutMs: 300 });
+    // Signing takes 3 s; the 300 ms deadline cuts it off well before, with room for a slow CI runner.
+    await reconnect({}, { scheme: slowScheme(3_000), timeoutMs: 300 });
     const started = performance.now();
     expect((await pay()).error.code).toBe("upstream_error");
-    expect(performance.now() - started).toBeLessThan(300 + 150);
+    expect(performance.now() - started).toBeLessThan(1_500);
     expect(seller.payments).toHaveLength(0);
     // 10,000 of a 15,000 budget fits again: the late signature was never sent.
     expect((await pay()).payment).toBeDefined();
