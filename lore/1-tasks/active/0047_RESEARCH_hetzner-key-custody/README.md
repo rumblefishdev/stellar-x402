@@ -5,7 +5,7 @@ type: RESEARCH
 status: active
 milestone: 1
 related_adr: ["0011"]
-related_tasks: ["0036", "0026", "0014", "0044"]
+related_tasks: ["0036", "0026", "0014", "0044", "0048"]
 tags: [facilitator, keys, security, hetzner, priority-high, effort-small, payments]
 links:
   - ../../../../docs/adr/0011-facilitator-hosting.md
@@ -77,7 +77,7 @@ compares. Record the choice in an ADR that supersedes ADR 0011's custody part.
 - **Gap in our code, found by the research:** `packages/signer-pool/src/setup.ts` gives the
   facilitator key weight 1 and leaves every channel threshold at 0, so the hot key alone can
   change signers on every channel. Thresholds and a cold recovery signer are mainnet blockers
-  under any custody option.
+  under any custody option; task 0048 covers them.
 
 ## Design Decisions
 
@@ -91,3 +91,4 @@ compares. Record the choice in an ADR that supersedes ADR 0011's custody part.
 
 - The ADR, then a Transit `TransactionSigner` in `apps/facilitator/src/adapters/`, after the
   choice.
+- **0048**: thresholds that keep the hot key below high, and a cold recovery signer (backlog).
