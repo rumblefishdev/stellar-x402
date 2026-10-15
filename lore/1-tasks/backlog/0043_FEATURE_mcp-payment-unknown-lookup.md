@@ -87,14 +87,5 @@ this task (W450).
 
 ## Acceptance Criteria
 
-- [ ] Given a paid call whose seller answers in time, nothing changes for the agent: the response
-      and a hash that matches our nonce on chain
-- [ ] Given a signed payment, its authorization expires within the ledgers that fit before 57 s
-      (6 on a fast call); the seller still sees its own terms in `accepted`; tested on testnet
-- [ ] Given a paid call cut off, or refused by the seller, after the payment settled, the agent gets
-      the transaction hash found by our nonce; tested with a fake seller and on testnet
-- [ ] Given a paid call whose authorization expires unused, the agent gets `payment_expired` and the
-      budget is given back; tested with a fake seller and on testnet
-- [ ] Given a seller-reported hash that is not our payment, it is not shown as verified
-- [ ] Given the chain cannot be reached, the agent gets `payment_unknown` with the expiry ledger and
-      the seller's hash marked unverified
+To be written when the task comes back, for the shape chosen then. Whatever the shape: the agent
+learns whether a sent payment settled, from the chain, with the hash when it did.
