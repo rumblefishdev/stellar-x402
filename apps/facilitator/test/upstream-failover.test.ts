@@ -81,9 +81,15 @@ describe("failoverUpstream", () => {
     });
     await expect(thrown.verify(payload, requirements)).rejects.toBeInstanceOf(UpstreamTimeoutError);
 
-    const answered = failoverUpstream([endpoint("a", unexpected), endpoint("b", new Error("x"))]);
+    const a = endpoint("a", unexpected, valid);
+    const b = endpoint("b", new Error("x"));
+    const answered = failoverUpstream([a, b], { onSwitch });
     await expect(answered.verify(payload, requirements)).resolves.toEqual(unexpected);
     expect(onSwitch).not.toHaveBeenCalled();
+    // The next call starts from the first endpoint again.
+    await expect(answered.verify(payload, requirements)).resolves.toEqual(valid);
+    expect(a.verify).toHaveBeenCalledTimes(2);
+    expect(b.verify).toHaveBeenCalledTimes(1);
   });
 
   it("needs an endpoint", () => {
