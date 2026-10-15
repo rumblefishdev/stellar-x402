@@ -1,4 +1,5 @@
 import { LIMITS } from "@stellar-x402/bazaar";
+import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import { z } from "zod";
 
 const ACCEPT = z.object({
@@ -35,6 +36,33 @@ const ENTRY = z.object({
 /** Read the catalog's answer, never trust its shape: a malformed page becomes an upstream_error. */
 const PAGE = z.object({ items: z.array(ENTRY), pagination: PAGINATION });
 
+/** The list_resources tool's input and output, as server.ts registers it. */
+const LIST_RESOURCES_INPUT = z
+  .object({
+    type: z.enum(["http", "mcp"]).optional().describe("HTTP endpoints or MCP tools"),
+    payTo: z.string().optional().describe("Address that receives the payment"),
+    network: z
+      .enum([STELLAR_NETWORKS.testnet, STELLAR_NETWORKS.pubnet])
+      .optional()
+      .describe("Network the payment is made on"),
+    extensions: z.string().optional().describe("Extension key the resource must carry"),
+    limit: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Page size; the catalog sets the default and the maximum"),
+    offset: z
+      .number()
+      .int()
+      .nonnegative()
+      .optional()
+      .describe("Entries to skip; pagination.total says how many match"),
+  })
+  .strict();
+
+const LIST_RESOURCES_OUTPUT = { items: z.array(SUMMARY), pagination: PAGINATION };
+
 type Entry = z.infer<typeof ENTRY>;
 
 /** The upstream `listResources` takes no abort signal, so a catalog that never answers is cut off here. */
@@ -64,4 +92,4 @@ function summary(item: Entry) {
   };
 }
 
-export { PAGE, PAGINATION, SUMMARY, deadline, summary };
+export { LIST_RESOURCES_INPUT, LIST_RESOURCES_OUTPUT, PAGE, deadline, summary };
