@@ -1,9 +1,38 @@
 import { LIMITS } from "@stellar-x402/bazaar";
 import { x402Client, x402HTTPClient, type SchemeRegistration } from "@x402/core/client";
 import { wrapFetchWithPayment } from "@x402/fetch";
+import { z } from "zod";
 import { ToolError } from "./results.js";
 import { checkBody, checkUrl, guardedFetch, type SellerLimits } from "./guard.js";
 import { countDaily, refundDaily, utcDay, type DailyEntry } from "./daily.js";
+
+/** The call_paid_http tool's input and output, as server.ts registers it. */
+export const CALL_PAID_HTTP_INPUT = z
+  .object({
+    url: z
+      .string()
+      .describe("Resource URL with its query, e.g. https://api.example.com/x?city=Warsaw"),
+    method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
+    body: z.string().optional().describe("JSON request body"),
+  })
+  .strict();
+
+export const CALL_PAID_HTTP_OUTPUT = {
+  status: z.number(),
+  contentType: z.string().nullable(),
+  body: z.string(),
+  payment: z
+    .object({
+      transaction: z
+        .string()
+        .nullable()
+        .describe("Null when the seller sent no settlement it could show"),
+      network: z.string(),
+      asset: z.string(),
+      amount: z.string().describe("Paid, in the asset's smallest unit"),
+    })
+    .optional(),
+};
 
 export interface PaymentConfig {
   /** Scheme clients holding the buyer's key; the CLI registers `ExactStellarScheme` for testnet only. */
