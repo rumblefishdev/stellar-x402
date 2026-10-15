@@ -211,7 +211,12 @@ describe("start-up", () => {
         base({ STELLAR_X402_SECRET_KEY: key, STELLAR_X402_MAX_PER_CALL: PRICE }),
         "STELLAR_X402_DAILY_BUDGET",
       ],
-      ["f", paying({ STELLAR_X402_NETWORK: "stellar:pubnet" }), "STELLAR_X402_NETWORK"],
+      // No network setting: it pays on testnet only, and the name is refused as unknown.
+      [
+        "f",
+        paying({ STELLAR_X402_NETWORK: "stellar:pubnet" }),
+        "STELLAR_X402_NETWORK is not a setting",
+      ],
       ["g", paying({ STELLAR_X402_MAX_PER_CALL: "1e3" }), "STELLAR_X402_MAX_PER_CALL"],
       ["h", base({ STELLAR_X402_TIMEOUT_MS: "0" }), "STELLAR_X402_TIMEOUT_MS"],
       ["i", base({ STELLAR_X402_MAX_PERCALL: "10" }), "STELLAR_X402_MAX_PERCALL"],

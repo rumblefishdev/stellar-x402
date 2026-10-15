@@ -56,7 +56,8 @@ export async function callPaidHttp(
   const url = checkUrl(request.url, limits.allowInsecureLocal);
   checkBody(request.method, request.body);
 
-  // One deadline for the whole call: the unpaid request, signing and the paid retry.
+  // One deadline for the call's requests, the unpaid one and the paid retry. Signing is not cut off:
+  // a signature that comes after the deadline is never sent, and the amount goes back.
   const deadline = AbortSignal.timeout(limits.timeoutMs);
   // One client per call, so its hooks know which payment is this call's.
   const client = x402Client.fromConfig({ schemes: config.schemes, spendControls: false });

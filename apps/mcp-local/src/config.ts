@@ -33,8 +33,8 @@ const ENV = z.object({
     .string({ required_error: "is required" })
     .min(1, "is required")
     .url("must be a URL, such as https://catalog.example.com"),
-  // The MCP client gives up on a request after 60 s (SDK default); a whole tool call, its unpaid
-  // request and paid retry together, ends within this, so the agent gets its answer before that.
+  // The MCP client gives up on a request after 60 s (SDK default); a tool call's requests, the unpaid
+  // one and the paid retry together, end within this. Signing is not cut off by it.
   STELLAR_X402_TIMEOUT_MS: orDefault(POSITIVE, "30000"),
   // A response body goes into the model's context: 100 kB is about 25k tokens.
   STELLAR_X402_MAX_RESPONSE_BYTES: orDefault(POSITIVE, "100000"),
