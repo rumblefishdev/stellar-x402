@@ -12,6 +12,8 @@
  *   ASSET          token contract (default: the testnet XLM SAC)
  *   AMOUNT         base units (default 1000 = 0.0001 XLM)
  *   MIN_VALIDITY_LEDGERS  passed to the facilitators (default: the config default, 4)
+ *   RPC_URLS       passed to the facilitators (default: the testnet RPC); a down first URL shows
+ *                  the failover (0045)
  *
  *   cd apps/facilitator
  *   CLIENT_SECRET=$(stellar keys show x402-verify-client) \
@@ -69,6 +71,7 @@ async function verifyWith(channels: string): Promise<VerifyResponse> {
     PORT: String(port),
     LOG_LEVEL: "warn",
     MIN_VALIDITY_LEDGERS: process.env.MIN_VALIDITY_LEDGERS,
+    RPC_URLS: process.env.RPC_URLS,
   });
   try {
     const response = await fetch(`http://127.0.0.1:${port}/verify`, {
