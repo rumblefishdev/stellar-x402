@@ -323,16 +323,6 @@ describe("daily database", () => {
     expect(countDaily(state, entry, 10n, 10n)).toBe(true);
   });
 
-  it("deletes rows older than seven days when it counts", () => {
-    countDaily(state, { ...entry, day: "2026-10-05" }, 1n, 10n);
-    countDaily(state, { ...entry, day: "2026-10-06" }, 1n, 10n);
-    countDaily(state, entry, 1n, 10n);
-    expect(rows("SELECT day FROM spent ORDER BY day")).toEqual([
-      { day: "2026-10-06" },
-      { day: "2026-10-13" },
-    ]);
-  });
-
   it("lets exactly the limit through when 20 processes count at once", async () => {
     const script = fileURLToPath(new URL("./count-daily-process.ts", import.meta.url));
     // Each process tries five times: 100 attempts against a limit of 50.

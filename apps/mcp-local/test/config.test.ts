@@ -89,7 +89,11 @@ describe("loadConfig", () => {
       { STELLAR_X402_DISCOVERY_URL: "catalog.example.com" },
       "STELLAR_X402_DISCOVERY_URL must be a URL",
     ],
-    ["pubnet", { ...BASE, STELLAR_X402_NETWORK: "stellar:pubnet" }, "stellar:testnet only"],
+    [
+      "a network setting, which does not exist: it pays on testnet only",
+      { ...BASE, STELLAR_X402_NETWORK: "stellar:pubnet" },
+      "STELLAR_X402_NETWORK is not a setting of this server",
+    ],
     [
       "a key without a per-call limit",
       { ...PAYING, STELLAR_X402_MAX_PER_CALL: "" },
@@ -101,9 +105,9 @@ describe("loadConfig", () => {
       "STELLAR_X402_DAILY_BUDGET is required",
     ],
     [
-      "the per-process budget, replaced by the daily one",
+      "a misspelt setting",
       { ...PAYING, STELLAR_X402_BUDGET: "50000" },
-      "STELLAR_X402_BUDGET is not a setting of this server; it was replaced by STELLAR_X402_DAILY_BUDGET",
+      "STELLAR_X402_BUDGET is not a setting of this server",
     ],
     [
       "a limit in USDC instead of atomic units",
@@ -116,21 +120,6 @@ describe("loadConfig", () => {
       "STELLAR_X402_DAILY_BUDGET must be an amount in atomic units",
     ],
     [
-      "a per-call limit without a key",
-      { ...BASE, STELLAR_X402_MAX_PER_CALL: "10000" },
-      "STELLAR_X402_MAX_PER_CALL needs STELLAR_X402_SECRET_KEY",
-    ],
-    [
-      "a daily budget without a key",
-      { ...BASE, STELLAR_X402_DAILY_BUDGET: "200000" },
-      "STELLAR_X402_DAILY_BUDGET needs STELLAR_X402_SECRET_KEY",
-    ],
-    [
-      "a state directory without a key",
-      { ...BASE, STELLAR_X402_STATE_DIR: "/var/tmp/x402" },
-      "STELLAR_X402_STATE_DIR needs STELLAR_X402_SECRET_KEY",
-    ],
-    [
       "another user's home directory",
       { ...PAYING, STELLAR_X402_STATE_DIR: "~alice/.x402" },
       "STELLAR_X402_STATE_DIR must be an absolute path or start with ~/",
@@ -139,11 +128,6 @@ describe("loadConfig", () => {
       "a relative state directory",
       { ...PAYING, STELLAR_X402_STATE_DIR: "state" },
       "STELLAR_X402_STATE_DIR must be an absolute path",
-    ],
-    [
-      "the state file, replaced by a state directory",
-      { ...PAYING, STELLAR_X402_STATE_FILE: "/var/tmp/spent.json" },
-      "STELLAR_X402_STATE_FILE is not a setting of this server; it was replaced by STELLAR_X402_STATE_DIR",
     ],
     [
       "a timeout that is not a number",
@@ -157,6 +141,16 @@ describe("loadConfig", () => {
     ],
   ])("refuses to start with %s", (_, env, message) => {
     expect(() => loadConfig(env)).toThrow(message);
+  });
+
+  it("starts browsing only when payment settings come without a key", () => {
+    const config = loadConfig({
+      ...BASE,
+      STELLAR_X402_MAX_PER_CALL: "10000",
+      STELLAR_X402_DAILY_BUDGET: "200000",
+      STELLAR_X402_STATE_DIR: "/var/tmp/x402",
+    });
+    expect(config.payment).toBeUndefined();
   });
 
   it("refuses a malformed key without repeating it", () => {

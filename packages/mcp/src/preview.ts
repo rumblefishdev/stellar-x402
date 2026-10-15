@@ -1,4 +1,4 @@
-import { isSchemaWithinLimits, LIMITS } from "@stellar-x402/bazaar";
+import { LIMITS } from "@stellar-x402/bazaar";
 import { decodePaymentRequiredHeader } from "@x402/core/http";
 import { PaymentRequiredV2Schema } from "@x402/core/schemas";
 import type { PaymentRequired } from "@x402/core/types";
@@ -52,15 +52,8 @@ export async function previewPayment(
       parsed.error.message,
     );
   }
-  // The terms come in a header, which Node's HTTP client caps at 16 KiB; inside that, the input
-  // schema gets the depth and size bounds our catalog puts on a listing.
-  const bazaar = paymentRequired.extensions?.bazaar as { schema?: unknown } | undefined;
-  if (!isSchemaWithinLimits(bazaar?.schema)) {
-    throw new ToolError(
-      "unsupported_payment",
-      "The seller's input schema is over the catalog's limits.",
-    );
-  }
+  // The terms come in a header, which Node's HTTP client caps at 16 KiB: that bounds what reaches
+  // the agent, the seller's input schema included.
   // The seller writes these; keep its free text short before it reaches the model.
   const { resource } = paymentRequired;
   return {

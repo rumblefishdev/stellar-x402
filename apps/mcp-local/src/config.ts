@@ -33,13 +33,6 @@ const ENV = z.object({
     .string({ required_error: "is required" })
     .min(1, "is required")
     .url("must be a URL, such as https://catalog.example.com"),
-  STELLAR_X402_NETWORK: optional(
-    z.literal(STELLAR_NETWORKS.testnet, {
-      errorMap: () => ({
-        message: "must be stellar:testnet; this server pays on stellar:testnet only",
-      }),
-    }),
-  ),
   // The MCP client gives up on a request after 60 s (SDK default); a whole tool call, its unpaid
   // request and paid retry together, ends within this, so the agent gets its answer before that.
   STELLAR_X402_TIMEOUT_MS: orDefault(POSITIVE, "30000"),
@@ -75,16 +68,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): CliConfig {
   const unknown = Object.keys(env).find(
     (name) => name.startsWith("STELLAR_X402_") && !(name in ENV.shape),
   );
-  if (unknown === "STELLAR_X402_BUDGET") {
-    throw new Error(
-      "STELLAR_X402_BUDGET is not a setting of this server; it was replaced by STELLAR_X402_DAILY_BUDGET.",
-    );
-  }
-  if (unknown === "STELLAR_X402_STATE_FILE") {
-    throw new Error(
-      "STELLAR_X402_STATE_FILE is not a setting of this server; it was replaced by STELLAR_X402_STATE_DIR, a directory.",
-    );
-  }
   if (unknown) throw new Error(`${unknown} is not a setting of this server.`);
   const parsed = ENV.safeParse(env);
   if (!parsed.success) {
@@ -92,16 +75,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): CliConfig {
     throw new Error(`${issue!.path.join(".")} ${issue!.message}.`);
   }
   const vars = parsed.data;
-  // The limits and the state directory only matter when paying; without a key they would do nothing.
-  if (vars.STELLAR_X402_SECRET_KEY === undefined) {
-    const paymentOnly = [
-      "STELLAR_X402_MAX_PER_CALL",
-      "STELLAR_X402_DAILY_BUDGET",
-      "STELLAR_X402_STATE_DIR",
-    ] as const;
-    const orphan = paymentOnly.find((name) => vars[name] !== undefined);
-    if (orphan) throw new Error(`${orphan} needs STELLAR_X402_SECRET_KEY.`);
-  }
   const config: CliConfig = {
     discoveryUrl: vars.STELLAR_X402_DISCOVERY_URL,
     timeoutMs: vars.STELLAR_X402_TIMEOUT_MS,
