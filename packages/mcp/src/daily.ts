@@ -41,16 +41,6 @@ function open(dir: string): DatabaseSync {
   return db;
 }
 
-/** Spent by `payer` on `day` per asset. */
-export function spentOn(dir: string, day: string, payer: string): Map<string, bigint> {
-  const db = open(dir);
-  try {
-    return sum(db, day, payer);
-  } finally {
-    db.close();
-  }
-}
-
 /**
  * Counts `amount` against `entry` if it stays within `daily`; false when it would not. BEGIN IMMEDIATE
  * takes the write lock before the read, so another process cannot count between the read and the insert.

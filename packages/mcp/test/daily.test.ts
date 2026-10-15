@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { countDaily, refundDaily, spentOn } from "../src/daily.js";
+import { countDaily, refundDaily } from "../src/daily.js";
 import { createServer } from "../src/index.js";
 import {
   fakeScheme,
@@ -94,9 +94,24 @@ function rows(sql = "SELECT day, payer, asset, amount FROM spent ORDER BY rowid"
   }
 }
 
+/** Spent by `payer` on `day` per asset, read through a connection of the test's own. */
+function spentOn(day: string, payer: string): Map<string, bigint> {
+  const db = new DatabaseSync(join(state, "spent.sqlite"));
+  try {
+    const query = db.prepare(
+      "SELECT asset, SUM(amount) AS total FROM spent WHERE day = ? AND payer = ? GROUP BY asset",
+    );
+    query.setReadBigInts(true);
+    const rows = query.all(day, payer) as { asset: string; total: bigint }[];
+    return new Map(rows.map((row) => [row.asset, row.total]));
+  } finally {
+    db.close();
+  }
+}
+
 /** What a day sums to for one payer and asset. */
 function spent(day = "2026-10-13", payer = BUYER, asset = USDC): bigint {
-  return spentOn(state, day, payer).get(asset) ?? 0n;
+  return spentOn(day, payer).get(asset) ?? 0n;
 }
 
 afterEach(async () => {
@@ -250,10 +265,10 @@ describe("daily budget", () => {
     expect(seller.payments).toHaveLength(0);
   });
 
-  it("refuses to pay when counting fails after the offer was chosen, and pays on the next call", async () => {
+  it("refuses to pay when the count cannot be written, and pays on the next call", async () => {
     const call = await startProcess();
     expect(await call()).toBe("paid");
-    // Reading today's spending still works, so the offer passes; only the insert of the count fails.
+    // Reading today's spending still works; only the insert of the count fails.
     const db = new DatabaseSync(join(state, "spent.sqlite"));
     db.exec(
       "CREATE TRIGGER no_insert BEFORE INSERT ON spent BEGIN SELECT RAISE(ABORT, 'disk full'); END",
@@ -305,13 +320,13 @@ describe("daily database", () => {
   it("counts exactly up to the limit, and refuses one atomic unit more", () => {
     expect(countDaily(state, entry, 10n, 10n)).toBe(true);
     expect(countDaily(state, entry, 1n, 10n)).toBe(false);
-    expect(spentOn(state, day, BUYER)).toEqual(new Map([[USDC, 10n]]));
+    expect(spentOn(day, BUYER)).toEqual(new Map([[USDC, 10n]]));
   });
 
   it("gives an amount back with a negative row in the day it was counted on", () => {
     expect(countDaily(state, entry, 4n, 10n)).toBe(true);
     refundDaily(state, entry, 4n);
-    expect(spentOn(state, day, BUYER)).toEqual(new Map([[USDC, 0n]]));
+    expect(spentOn(day, BUYER)).toEqual(new Map([[USDC, 0n]]));
     expect(countDaily(state, entry, 10n, 10n)).toBe(true);
   });
 
