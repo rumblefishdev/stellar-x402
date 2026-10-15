@@ -162,6 +162,43 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       expect(await store.addHash(k2, "h1", 4_000)).toBe(false);
     });
 
+    it("lets exactly one of addHash and a final transition from claimed win, in either order", async () => {
+      for (const [nonce, hashFirst] of [
+        ["1", true],
+        ["2", false],
+      ] as const) {
+        const { key } = settlement(nonce);
+        await store.claim(settlement(nonce));
+        const add = () => store.addHash(key, "h1", 2_000);
+        const end = () =>
+          store.transition(key, "claimed", {
+            state: "rejected",
+            errorReason: "x",
+            updatedAt: 2_000,
+          });
+        const [added, ended] = hashFirst
+          ? await Promise.all([add(), end()])
+          : await Promise.all([end(), add()]).then(([e, a]) => [a, e] as const);
+        expect(added !== (ended !== undefined)).toBe(true);
+        const record = await store.get(key);
+        expect(record?.hashes).toEqual(added ? ["h1"] : []);
+        expect(record?.state).toBe(added ? "signed" : "rejected");
+      }
+    });
+
+    it("lets exactly one caller mark a success as answered, and only a success", async () => {
+      const { key } = settlement("1");
+      await store.claim(settlement("1"));
+      expect(await store.markSuccessAnswered(key, 2_000)).toBe(false);
+      await store.transition(key, "claimed", { state: "success", updatedAt: 3_000 });
+      const marks = await Promise.all(
+        Array.from({ length: 5 }, () => store.markSuccessAnswered(key, 4_000)),
+      );
+      expect(marks.filter(Boolean)).toHaveLength(1);
+      expect(await store.get(key)).toMatchObject({ state: "success", successAnsweredAt: 4_000 });
+      expect(await store.markSuccessAnswered(settlement("9").key, 4_000)).toBe(false);
+    });
+
     it("applies a transition only from the expected state, and only forward", async () => {
       const { key } = settlement("1");
       await store.claim(settlement("1"));

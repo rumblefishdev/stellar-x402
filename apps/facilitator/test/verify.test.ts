@@ -16,7 +16,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CHANNEL_ACCOUNT_REASON,
   MUXED_FACILITATOR_REASON,
+  PAYER_AUTH_REASON,
   UpstreamTimeoutError,
+  createChecker,
   createVerifier,
   signedLedgers,
   type UpstreamVerifier,
@@ -317,6 +319,43 @@ describe("createVerifier", () => {
       await expect(verify(payload({ auth }), requirements)).resolves.toEqual(
         facilitatorRejected("invalid_exact_stellar_payload_facilitator_in_auth"),
       );
+    });
+  });
+
+  describe("the payer's auth entry (AD-6)", () => {
+    // Upstream de-duplicates signers, so it accepts these; `/settle` can't key them.
+    it.each([
+      [
+        "two auth entries for the payer",
+        () => [authEntry(payer, CURRENT + MIN_VALIDITY), authEntry(payer, CURRENT + MIN_VALIDITY)],
+      ],
+      [
+        "no auth entry for the payer",
+        () => [authEntry(Keypair.random().publicKey(), CURRENT + MIN_VALIDITY)],
+      ],
+    ])("rejects %s, which /settle couldn't settle", async (_, auth) => {
+      const { verify } = setup();
+      await expect(verify(payload({ auth: auth() }), requirements)).resolves.toEqual(
+        rejected(PAYER_AUTH_REASON),
+      );
+    });
+
+    it("hands /settle the payer's nonce, its auth expiry and the ledger it read", async () => {
+      const check = createChecker({
+        network,
+        upstream: { verify: async () => ({ isValid: true, payer }) },
+        facilitator,
+        channels: [channel],
+        minValidityLedgers: MIN_VALIDITY,
+        latestLedger: async () => CURRENT,
+      });
+      const { verified } = await check(payload(), requirements);
+      expect(verified).toMatchObject({
+        payer,
+        nonce: "1",
+        expirationLedger: CURRENT + MIN_VALIDITY,
+        currentLedger: CURRENT,
+      });
     });
   });
 

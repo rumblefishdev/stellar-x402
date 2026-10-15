@@ -152,13 +152,14 @@ const envSchema = z
      * pool refuses at `/settle` what `/verify` accepted (its one spare ledger).
      */
     MIN_VALIDITY_LEDGERS: int(2).default("4"),
-    /** How long a repeat `/settle` waits on a pending record (AD-6). */
-    SETTLE_TIMEOUT_MS: ms(1).default("30000"),
+    /** How long a repeat `/settle` waits for a signed record to turn final (AD-6); ≤ the budget. */
+    SETTLE_TIMEOUT_MS: ms(1).default("20000"),
     /**
-     * Longest `/settle` call, the wait for a channel included; below the load balancer's 120 s
-     * idle timeout (ADR 0011).
+     * Longest `/settle` call, the wait for a channel included (ADR 0011). Well below the seller's
+     * own 90 s timeout (`@x402/core`'s `HTTPFacilitatorClient`), so the `settlement_pending`
+     * answer reaches it; at most 80 s, below the load balancer's 120 s.
      */
-    SETTLE_BUDGET_MS: ms(1_000).default("90000"),
+    SETTLE_BUDGET_MS: int(1_000, 80_000).default("30000"),
     /** Channel lease TTL; renewed well before it runs out (AD-17). */
     LEASE_TTL_MS: ms(1_000).default("30000"),
 
@@ -214,6 +215,11 @@ const envSchema = z
       path: ["MAX_FEE_STROOPS"],
     },
   )
+  // A repeat waits at most what the call it repeats could take.
+  .refine((env) => env.SETTLE_TIMEOUT_MS <= env.SETTLE_BUDGET_MS, {
+    message: "must be at most SETTLE_BUDGET_MS",
+    path: ["SETTLE_TIMEOUT_MS"],
+  })
   .refine((env) => !env.CATALOG_ALLOW_HTTP || env.NETWORK === STELLAR_NETWORKS.testnet, {
     message: "is only allowed on testnet",
     path: ["CATALOG_ALLOW_HTTP"],
@@ -221,6 +227,13 @@ const envSchema = z
   .refine((env) => env.STORE !== "memory" || env.NETWORK === STELLAR_NETWORKS.testnet, {
     message: "must be postgres outside testnet",
     path: ["STORE"],
+  })
+  // `/settle` spends on pubnet, so not before spend budgets, rate limits and the channel lease.
+  // The task that lands the last of them lifts this.
+  .refine((env) => env.NETWORK !== STELLAR_NETWORKS.pubnet, {
+    message:
+      "stellar:pubnet is refused until spend budgets (0024), rate limits (0023) and the channel lease (0025) land",
+    path: ["NETWORK"],
   })
   .refine((env) => env.DATABASE_URL !== undefined || env.STORE !== "postgres", {
     message: "is required when STORE=postgres",

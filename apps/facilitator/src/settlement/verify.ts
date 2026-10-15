@@ -41,6 +41,11 @@ export const CHANNEL_ACCOUNT_REASON = "invalid_exact_stellar_payload_channel_acc
  * misses; upstream rejects the plain address itself.
  */
 export const MUXED_FACILITATOR_REASON = "invalid_exact_stellar_payload_facilitator_muxed";
+/**
+ * The payload doesn't carry exactly one auth entry for the payer, so it has no settlement key
+ * (AD-6). Upstream de-duplicates signers and doesn't count entries.
+ */
+export const PAYER_AUTH_REASON = "invalid_exact_stellar_payload_payer_auth_entries";
 
 /** Upstream's code for an exception inside its `verify()`. */
 const UNEXPECTED_VERIFY_ERROR = "unexpected_verify_error";
@@ -66,7 +71,8 @@ export type Verify = (
 /**
  * The `exact` verification `/verify` answers with and `/settle` (0009) runs again (AD-3): the
  * network and envelope checks, upstream `verify()`, then the channel check (AD-5, with the
- * facilitator's muxed address), then the validity check (AD-22). The first rejection is the
+ * facilitator's muxed address), the payer's one auth entry (AD-6), then the validity check
+ * (AD-22). The first rejection is the
  * answer. Errors are thrown, not answered: ours (the ledger read), upstream's, which it reports as
  * `unexpected_verify_error`, and an upstream call past `upstreamTimeoutMs`.
  */
@@ -79,6 +85,8 @@ export function createVerifier(deps: VerifierDeps): Verify {
 export interface Verified {
   transaction: Transaction;
   payer: string;
+  /** The int64 nonce of the payer's one auth entry, as a decimal string (AD-6). */
+  nonce: string;
   /** The earliest `signatureExpirationLedger` of the auth entries. */
   expirationLedger: number;
   /** The ledger the validity check read. */
@@ -143,6 +151,17 @@ export function createChecker(deps: VerifierDeps): Check {
       };
       return { response };
     }
+    // `/settle` keys the settlement on this nonce; `/verify` must not accept what it can't settle.
+    const nonce = payerNonce({ transaction, payer: upstream.payer });
+    if (nonce === undefined) {
+      return {
+        response: invalid(
+          PAYER_AUTH_REASON,
+          upstream.payer,
+          "the payload must carry exactly one auth entry for the payer",
+        ),
+      };
+    }
 
     const expiration = authExpiration(transaction);
     const current = await deps.latestLedger();
@@ -169,6 +188,7 @@ export function createChecker(deps: VerifierDeps): Check {
       verified: {
         transaction,
         payer: upstream.payer,
+        nonce,
         expirationLedger: expiration,
         currentLedger: current,
       },
@@ -226,6 +246,27 @@ export function channelProblem(
     }
   }
   return undefined;
+}
+
+/** The int64 nonce of the payer's one auth entry, as a decimal string (AD-6). */
+export function payerNonce({
+  transaction,
+  payer,
+}: {
+  transaction: Transaction;
+  payer: string;
+}): string | undefined {
+  const nonces: string[] = [];
+  for (const operation of transaction.operations) {
+    if (operation.type !== "invokeHostFunction") continue;
+    for (const entry of operation.auth ?? []) {
+      const credentials = getAddressCredentials(entry.credentials());
+      if (credentials && addressOf(credentials.address()) === payer) {
+        nonces.push(credentials.nonce().toString());
+      }
+    }
+  }
+  return nonces.length === 1 ? nonces[0] : undefined;
 }
 
 /** The earliest `signatureExpirationLedger` of the payload's address-credential auth entries. */
