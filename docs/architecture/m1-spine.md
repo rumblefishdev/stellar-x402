@@ -230,9 +230,9 @@ graph TD
   - pushing to `x402-foundation/x402` during M1
 - **Rule:**
   - **The proxy** lives in `conformance/external-proxy/`. It contains:
-    - a `test.config.json` with `name`, `type: facilitator`, `language: typescript`, `protocolFamilies: [stellar]`, `schemes: [exact]`, `x402Versions: [2]`, and `environment.required` naming our facilitator-URL env var
+    - a `test.config.json` with `name`, `type: facilitator`, `language: typescript`, `protocolFamilies: [stellar]`, `schemes: [exact]`, `x402Versions: [2]`, `extensions: [bazaar]`, and `environment.required` naming our facilitator-URL env var
     - a `run.sh` that listens on `PORT`, prints `Facilitator listening`, answers `GET /health` and `POST /close` itself, and forwards `/verify`, `/settle` and `/supported` to our URL
-  - **The run.** A `conformance/` script clones `x402-foundation/x402` read-only at a pinned commit, copies in only that folder, and runs the Stellar `exact` scenarios with `--output-json`.
+  - **The run.** A `conformance/` script clones `x402-foundation/x402` read-only at a pinned commit, copies in only that folder, and runs every Stellar `exact` scenario with `--output-json`. A run fails unless every scenario passed with a transaction hash.
   - **The evidence.** Results, including the upstream commit and transaction hashes, are committed to `conformance/results/`.
 
 ### AD-16: One owner of the settlement record lifecycle
@@ -405,7 +405,8 @@ apps/facilitator/src/
   ports/        # SettlementStore, CatalogStore, RateLimitStore, SpendStore
   adapters/     # store, signer, metrics implementations
 conformance/
-  external-proxy/   # test.config.json, run.sh
+  external-proxy/   # test.config.json, run.sh, proxy.mjs
+  src/              # the gate runner: pinned upstream checkout, result checks
   results/          # committed run outputs with tx hashes
 ```
 
@@ -453,7 +454,7 @@ The rationale and rejected alternatives for these ADs are in ADRs:
 
 ## Open Questions
 
-- **`upfront` payment flow:** what does `/exact/stellar/upfront` in the e2e catalog require from a Stellar facilitator? Not a blocker for building; confirm before the first gate run (owned by the gate task).
+- **`upfront` payment flow (answered 2026-10-15, task 0028):** the resource server calls `/settle` without a `/verify` first, before serving the resource, with `extra.paymentFlow: "upfront"` in the requirements. `/settle` must check the payment itself, as the 0009 settle does.
 - **Backlog alignment (done 2026-10-07):**
   - 0009 is now T1 `exact` wiring
   - 0015 holds `upto` `/settle`, after T1

@@ -71,6 +71,51 @@ Read in a clone of upstream; paths are upstream's.
 - 2026-10-15 — **Names**: directory and `config.name` `stellar-x402`, URL variable `GATE_FACILITATOR_URL`, root command `pnpm conformance:e2e`.
 - 2026-10-15 — **Dry-run evidence** (x402.org) goes into this task and the PR, not `conformance/results/`, which holds our facilitator's runs (0029).
 
+### Emerged
+
+- 2026-10-15 — **Upstream's `setup.sh` is not run**: it also builds the Go and Python components
+  and fails without a Go toolchain. The runner runs the TypeScript components' own `install.sh`
+  and `build.sh`, after `pnpm install` + `pnpm build` in `typescript/` and `pnpm install` in `e2e/`,
+  as upstream's CI does.
+- 2026-10-15 — **The checkout is cached** in `conformance/.cache/x402-<commit>/` (git-ignored,
+  6.1 GB measured), built once; every run checks that HEAD is the pin and no tracked file changed.
+- 2026-10-15 — **`--schemes=exact`** is passed although Stellar has only `exact` routes today, so a
+  pin bump that adds a Stellar `upto` route does not widen the gate silently.
+- 2026-10-15 — **The proxy passes the facilitator's status and content type through** and answers
+  502 when it cannot reach it; anything but the three forwarded routes and `/health`, `/close` is a
+  404.
+- 2026-10-15 — **The conformance package has no build**: the placeholder `src/index.ts`, its build
+  config and the unused `@stellar-x402/config` dependency went; it runs with `tsx` like the e2e
+  packages.
+
+## Dry run (2026-10-15)
+
+`GATE_FACILITATOR_URL=https://x402.org/facilitator pnpm conformance:e2e`: 18 of 18 scenarios
+passed in 4.6 minutes (`passed: true`, `problems: []`), 9 `authorization` and 9 `upfront`. All 18
+hashes are successful on Horizon, each submitted by `GC6CSXBV…` with fees paid by `GC5OLUZ4…`, the
+two signers x402.org lists in `/supported`, so every payment went through the proxy.
+
+| #   | transport | client | server  | flow          | transaction |
+| --- | --------- | ------ | ------- | ------------- | ----------- |
+| 1 | http | axios | express | authorization | `134fae156e84fd1c87e3dd3d666fa5c1779eb8b58a0c553632cf3cf7507f2ae9` |
+| 2 | http | axios | express | upfront | `94eb7d3da589267c98122df209cc3335284adaf82bb78ce5efd7e18826cf0ec8` |
+| 3 | http | fetch | express | authorization | `71bb13810b1c21eb25c913e4234de49a716c0b32e5dde29f9b6040adf1d4f4fc` |
+| 4 | http | fetch | express | upfront | `51b706b491a3f8e37b86b2d3393de494348ffd6a65f12757d67d33c2a17c5ed2` |
+| 5 | http | axios | fastify | authorization | `dbacf70213a08ca0f7eb8b084375919dc1e5c1154263852f8d5dfb2bef5947da` |
+| 6 | http | axios | fastify | upfront | `9a9be84609f2e6854ad66b37dfb3e4419d77c4853d251621e32c6a798413bd72` |
+| 7 | http | fetch | fastify | authorization | `79792d5384e62df25b310f3a407761ca0c15b8fb4c15d966c442ab51628600ad` |
+| 8 | http | fetch | fastify | upfront | `8ec51a9e3234319421d7872acd2d90e2565f3106f013a7d950450057f857d450` |
+| 9 | http | axios | hono | authorization | `02e9882a8e861e6801f1149fb3c7291f6c8c104959f143e1a7da0c39472b1f33` |
+| 10 | http | axios | hono | upfront | `8d3775fd8d74ae899d6c04b5908963e36947f69d8dd5e3a5f4df44b16259e834` |
+| 11 | http | fetch | hono | authorization | `703461290a65dd09115fb74a7bb6a4d30cec36720126da533cb9a589c54df27d` |
+| 12 | http | fetch | hono | upfront | `340ce04d89377f167334cf7394fac64f2d1ef73bcdb569f3067ef40c255860cb` |
+| 13 | http | axios | next | authorization | `4428584b83dc941471be870c51bddb788ce3b4e54e0dd07f613dc2ba43b9d52d` |
+| 14 | http | axios | next | upfront | `082fbfbe6b920567470ef7f54b54ca65513454be1586ec373c941324ff8fd332` |
+| 15 | http | fetch | next | authorization | `3a69938dbd585a5597c71aea6c7c7c6d65bc1e81f779916e0e6ef8a2e25870ba` |
+| 16 | http | fetch | next | upfront | `7a81f23e387b636231f86a4d0feb37ca513912e2110a962905c8d9e6ce4f0237` |
+| 17 | mcp | mcp | mcp | authorization | `8273a3a285db935777fef125dbe680fd0201f66bd692a1ed041819283ed446e4` |
+| 18 | mcp | mcp | mcp | upfront | `261eb69c02b8707f1ce4a98db8c496caf09bb61d1637d4112ac5f5777f7024d4` |
+
 ## Not yet decided
 
 - None.
@@ -82,8 +127,8 @@ Read in a clone of upstream; paths are upstream's.
 
 ## Acceptance Criteria
 
-- [ ] Given `conformance/external-proxy/`, when it is built, then it has a `test.config.json` (`name`, `type: facilitator`, `language: typescript`, `protocolFamilies: [stellar]`, `schemes: [exact]`, `x402Versions: [2]`, `extensions: [bazaar]`, and `environment.required` naming our facilitator-URL variable) and a `run.sh` that listens on `PORT`, prints `Facilitator listening`, answers `GET /health` and `POST /close`, and forwards `/verify`, `/settle` and `/supported`
-- [ ] Given a conformance script, when it runs, then it clones `x402-foundation/x402` read-only at a pinned commit, copies in only our proxy folder and runs the full Stellar `exact` matrix with `--output-json`; nothing else in the clone is changed and nothing is pushed upstream
-- [ ] Given a run with no JSON, zero scenarios, a failed scenario or a passed one without a transaction hash, when the script finishes, then it exits non-zero and says which
-- [ ] Given the proxy pointed at the public Stellar facilitator, when the harness runs, then it completes end to end, which proves the harness before our facilitator is ready
+- [x] Given `conformance/external-proxy/`, when it is built, then it has a `test.config.json` (`name`, `type: facilitator`, `language: typescript`, `protocolFamilies: [stellar]`, `schemes: [exact]`, `x402Versions: [2]`, `extensions: [bazaar]`, and `environment.required` naming our facilitator-URL variable) and a `run.sh` that listens on `PORT`, prints `Facilitator listening`, answers `GET /health` and `POST /close`, and forwards `/verify`, `/settle` and `/supported`
+- [x] Given a conformance script, when it runs, then it clones `x402-foundation/x402` read-only at a pinned commit, copies in only our proxy folder and runs the full Stellar `exact` matrix with `--output-json`; nothing else in the clone is changed and nothing is pushed upstream
+- [x] Given a run with no JSON, zero scenarios, a failed scenario or a passed one without a transaction hash, when the script finishes, then it exits non-zero and says which
+- [x] Given the proxy pointed at the public Stellar facilitator, when the harness runs, then it completes end to end, which proves the harness before our facilitator is ready
 - [x] Given the `/exact/stellar/upfront` scenario, when this story is done, then what it requires from a Stellar facilitator is answered and written down (see `upfront` above; the spine's open question is closed in the PR)
