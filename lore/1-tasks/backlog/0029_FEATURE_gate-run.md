@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 milestone: 1
 related_adr: ["0009"]
-related_tasks: ["0012", "0028", "0026", "0009"]
+related_tasks: ["0012", "0028", "0026", "0009", "0020"]
 tags: [conformance, e2e, priority-high, effort-small, platform]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -28,7 +28,8 @@ As a reviewer of the grant, I want e2e results with real settled transaction has
 ## Context
 
 - First run around day 12, final rerun at the end of T1.
-- Related tasks: 0028, 0026, 0009.
+- Related tasks: 0028, 0026, 0009, 0020.
+- `/supported` (0020) must list `exact` on `stellar:testnet` with `extra.areFeesSponsored: true`: the canonical client throws without it (found in the 0028 recon).
 
 ## Implementation
 

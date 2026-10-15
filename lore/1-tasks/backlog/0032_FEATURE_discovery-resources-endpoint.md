@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 milestone: 1
 related_adr: ["0008"]
-related_tasks: ["0012", "0031", "0017"]
+related_tasks: ["0012", "0031", "0017", "0028"]
 tags: [bazaar, facilitator, priority-high, effort-small, discovery]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -29,6 +29,7 @@ As a agent, I want to list catalog resources with the standard discovery filters
 
 - Reads `CatalogStore`; builds on the in-memory fake until 0022 lands.
 - Search and ranking come in a later tranche.
+- The x402 e2e suite checks a facilitator's Bazaar only together with `/discovery/search`, so the gate (0028) runs without `--extensions=bazaar` until search exists; turn it on then.
 - Related tasks: 0031, 0017.
 
 ## Implementation
