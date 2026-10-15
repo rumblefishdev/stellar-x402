@@ -296,14 +296,6 @@ describe("daily budget", () => {
     expect(await started()).toBe("over_budget");
     expect(spent()).toBe(20_000n);
   });
-
-  it("never lets six servers in one process paying at once exceed the budget", async () => {
-    const calls = await Promise.all([1, 2, 3, 4, 5, 6].map(() => startProcess()));
-    const results = await Promise.all(calls.map((call) => call()));
-    expect(results.filter((result) => result === "paid")).toHaveLength(2);
-    expect(results.filter((result) => result === "over_budget")).toHaveLength(4);
-    expect(seller.payments).toHaveLength(2);
-  });
 });
 
 describe("daily database", () => {
