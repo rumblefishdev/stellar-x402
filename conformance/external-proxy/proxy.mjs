@@ -54,6 +54,7 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(port, () => {
+// Only this machine: the suite and its servers call http://localhost:<PORT>.
+server.listen(port, "localhost", () => {
   console.log(`Facilitator listening on port ${port}, forwarding to ${target}`);
 });

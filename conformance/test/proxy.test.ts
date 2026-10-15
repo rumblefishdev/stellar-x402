@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { networkInterfaces } from "node:os";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
@@ -72,7 +73,7 @@ async function startProxy(target = facilitatorUrl) {
     });
     child.on("exit", (code) => reject(new Error(`proxy exited with ${code}`)));
   });
-  return { child, url: `http://127.0.0.1:${port}`, stdout: () => stdout };
+  return { child, url: `http://localhost:${port}`, stdout: () => stdout };
 }
 
 function exited(child: ChildProcess) {
@@ -85,6 +86,18 @@ describe("external proxy", () => {
   it("prints the readiness line with its port and target", async () => {
     const proxy = await startProxy();
     expect(proxy.stdout()).toContain(`forwarding to ${facilitatorUrl}`);
+  });
+
+  // An address of this machine other than loopback, as another host on the network would use.
+  const lanAddress = Object.values(networkInterfaces())
+    .flat()
+    .find((address) => address && !address.internal && address.family === "IPv4")?.address;
+
+  it.skipIf(!lanAddress)("is not reachable from the network, only from this machine", async () => {
+    const proxy = await startProxy();
+    const port = new URL(proxy.url).port;
+    await expect(fetch(`http://${lanAddress}:${port}/health`)).rejects.toThrow();
+    expect((await fetch(`${proxy.url}/health`)).status).toBe(200);
   });
 
   it("answers /health itself with a JSON body", async () => {

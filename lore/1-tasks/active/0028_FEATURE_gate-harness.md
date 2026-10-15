@@ -88,6 +88,10 @@ Read in a clone of upstream; paths are upstream's.
   config and the unused `@stellar-x402/config` dependency went; it runs with `tsx` like the e2e
   packages.
 
+- 2026-10-15 — **After a security review**: the proxy listens on `localhost` only, and the gate
+  fails on any suite exit but 0, even when the file says every scenario passed. A second dry run
+  passed 18 of 18 with both (all hashes successful on Horizon).
+
 ## Dry run (2026-10-15)
 
 `GATE_FACILITATOR_URL=https://x402.org/facilitator pnpm conformance:e2e`: 18 of 18 scenarios

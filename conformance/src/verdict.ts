@@ -21,14 +21,17 @@ export interface SuiteResult {
 /**
  * What stops the gate passing, one line each; empty means it passed. The suite exits 0 when no
  * scenario matched its filters, writing no file, and its fetch client reports success without a
- * transaction when the payment response header is missing. Neither is evidence, so both fail here.
+ * transaction when the payment response header is missing. Neither is evidence, so both fail here,
+ * as does any exit but 0, even after a file with every scenario passed.
  */
-export function judge(run: SuiteRun | undefined): string[] {
-  if (!run)
-    return ["the suite wrote no results: no scenario matched, or it stopped before running"];
-  if (run.results.length === 0) return ["the suite ran no scenarios"];
-
+export function judge(run: SuiteRun | undefined, exitCode: number | null): string[] {
   const problems: string[] = [];
+  if (exitCode !== 0) problems.push(`the suite exited with ${exitCode}`);
+  if (!run) {
+    problems.push("the suite wrote no results: no scenario matched, or it stopped before running");
+    return problems;
+  }
+  if (run.results.length === 0) problems.push("the suite ran no scenarios");
   for (const result of run.results) {
     const name = `#${result.testNumber} ${result.client} -> ${result.server} ${result.endpoint}`;
     if (!result.passed) problems.push(`${name} failed: ${result.error ?? "no error given"}`);

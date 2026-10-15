@@ -66,7 +66,7 @@ if (suite.error) throw suite.error;
 const run = existsSync(suiteJson)
   ? (JSON.parse(readFileSync(suiteJson, "utf8")) as SuiteRun)
   : undefined;
-const problems = judge(run);
+const problems = judge(run, suite.status);
 
 if (run) {
   const date = new Date().toISOString();
