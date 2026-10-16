@@ -40,7 +40,8 @@ export interface UpstreamFailoverOptions {
  * Upstream `verify()` over one `ExactStellarScheme` per `RPC_URLS` entry. Calls go to the active
  * endpoint, and the same call is tried on the next ones when it throws, takes longer than
  * `timeoutMs`, or answers `unexpected_verify_error` (upstream's answer to its own exceptions, such
- * as a failed RPC call). The first endpoint with any other answer, valid or not, becomes active.
+ * as a failed RPC call). The first endpoint with any other answer, valid or not, becomes active,
+ * unless it is the first one (see below).
  * If every endpoint fails, the first failure is the result: the error is thrown, or the
  * `unexpected_verify_error` answer returned, for `createVerifier`'s 500.
  *
@@ -52,7 +53,9 @@ export interface UpstreamFailoverOptions {
  * waiting for it: `latestLedger` of the first endpoint and of the active one, each within
  * `timeoutMs`. Calls go back to the first endpoint only if it answers and trails the active one
  * by at most `maxLagLedgers`. A client's payload never decides it: upstream refuses many payloads
- * before any RPC call, so a payload answer says nothing about the RPC.
+ * before any RPC call, so a payload answer says nothing about the RPC. A call whose active endpoint
+ * fails and that wraps around to the first one returns its answer without switching, and makes a
+ * probe due at once.
  *
  * `endpoints` is read once per call, before any endpoint's timer starts: with fee-stats bids it
  * reads the bid (AD-10) and returns one scheme per URL built for it. It must return the same
@@ -143,7 +146,12 @@ export function failoverUpstream(
           tried.push({ name, failure: { answer } });
           continue;
         }
-        if (idx !== active && generation === atStart) {
+        if (idx === 0 && active !== 0) {
+          // A call that wrapped around to the first endpoint doesn't make it active: upstream
+          // answers many payloads before any RPC call, so only the probe decides. It's due now.
+          nextProbeAt = now();
+          maybeProbe(list);
+        } else if (idx !== active && generation === atStart) {
           current = idx;
           generation++;
           // Probes run only while calls are off the first endpoint.
