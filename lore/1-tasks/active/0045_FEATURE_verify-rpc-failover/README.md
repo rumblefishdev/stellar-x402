@@ -24,6 +24,10 @@ history:
     status: active
     who: okarcz
     note: "Converted to a directory; PR #45 second review: payload-free probe, switch counter, undici timeouts, RPC_URLS cap."
+  - date: "2026-10-16"
+    status: active
+    who: okarcz
+    note: "PR #45 third review: a call that wraps around to RPC_URLS[0] doesn't switch to it."
 ---
 
 # Fail over upstream verify across `RPC_URLS` before pubnet
@@ -79,8 +83,8 @@ once a probe finds it healthy.
 - **`http/app.ts`**: the `verified` log carries `rpc`, the `RPC_URLS[i]` that answered.
 - **Spine AD-3** and **`docs/threat-model.md`**: the probe, the logs, the deadline, the undici
   timeouts, false accepts and steering, and the Horizon limit.
-- **Tests**: facilitator 103 → 113 → 125 (first review) → 142 (second review):
-  `upstream-failover.test.ts` 14 → 25, `build-verifier.test.ts` 12 → 16, `fee-agreement.test.ts`
+- **Tests**: facilitator 103 → 113 → 125 (first review) → 142 (second review) → 145 (third review):
+  `upstream-failover.test.ts` 14 → 25 → 28, `build-verifier.test.ts` 12 → 16, `fee-agreement.test.ts`
   4 → 5, `config.test.ts` 11 → 12 (the cap), and `main.test.ts`'s secret check now uses two keyed
   URLs.
 
@@ -144,6 +148,10 @@ once a probe finds it healthy.
     main.ts:100): `rpc_failover` (warn), `rpc_failback` (info), `rpc_probe_failed` (warn) and
     `rpc_exhausted` (warn, every URL tried). The reason is `timeout`, `unexpected_verify_error`
     or `error:<name>`, never a message, which can carry a URL.
+16. **A call never switches to `RPC_URLS[0]`** (third review, A1): a call whose active fallback
+    fails and that wraps around to `RPC_URLS[0]` returns its answer without switching, and makes a
+    probe due at once. Otherwise a payload upstream answers before any RPC call (a wrong amount)
+    would bring back a dead primary, which decision 11 rules out. Only the probe returns to it.
 
 ## Future Work
 
