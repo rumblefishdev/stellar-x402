@@ -56,6 +56,11 @@ As a facilitator operator, I want fee spending capped and failing assets or reci
     seller for 10 minutes, at will. Needs: at most one non-final settlement per (payer, asset), or
     in-flight amounts reserved against the balance; and balance-race failures counted against the
     payer, not the asset.
+  - **Key a reservation by the settlement key, and refuse a reserve after its release** (Adam,
+    fourth review). In one process a repeat leaves an unsigned record to the first call until the
+    first call's budget ends (0009 decision 46). Across instances (0022) a repeat judges that by
+    its own clock, so it may end the record, and run `onFinal`, before the first call's
+    `beforeSubmit` reserves. Then the late reserve must be refused, not counted forever.
   - Refusal reasons are an `errorReason` sellers see; the README lists "a spend reason" as a
     refusal that ends the payment (sign a new one later).
 

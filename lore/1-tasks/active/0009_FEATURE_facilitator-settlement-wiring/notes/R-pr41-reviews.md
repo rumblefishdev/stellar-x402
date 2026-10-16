@@ -121,6 +121,31 @@ a loaded runner. `resilience.test.ts`: "throws the first error…" now expects `
 with that error as its `cause`, and the timeout test expects it with an `RpcTimeoutError` cause.
 `settle-route.test.ts`'s abort test also runs `afterResponse` after the client left.
 
+## Fourth review (Adam, 2026-10-16, at `0e77d9f`)
+
+Adam checked the third round in the code: 39 of 43 points resolved, 32 of 36 mutants on the money
+and security paths killed. One blocker, introduced by the decision 33 fix, and nits:
+
+- **Blocker:** the `unsignedUntil` clamp let a repeat that lost the claim end the winner's
+  unsigned record while the winner's budget still ran (decision 46). His probe (budget 60 ms, the
+  losing call's check 40 ms, the winner 20 ms later, a late reservation) gave
+  `["onFinal", "reserved"]`. Fixed as he suggested; the probe is a test, scaled to 150/100/50 ms
+  for a loaded runner, plus one for a winner that gets a channel after the loser's budget. The
+  cross-instance case is in 0024.
+- **README:** `unexpected_settle_error` and `…_unexpected_balance_changes` can carry an earlier
+  hash after a rebuild; the note under the table no longer says the stored hash was sent
+  (decision 35's hash never was). `settlement_pending` with no hash also means "not signed yet".
+- **Nits:** the decision index lives only in `S-design-decisions.md` (README 187 → 151 lines);
+  the facilitator baseline is 103 (0018's end), not 74; the PR body lists the depth cap
+  (decision 39) as a `/verify` change too.
+- **Non-blocking, to 0049:** `FallbackRpc.call` wraps every all-endpoints failure, JSON-RPC error
+  answers included.
+
+Facilitator tests 205 → 207. Mutants caught, each by both new tests: no "first call's budget not
+over" return (the old code), and no `Math.min(…, ownEnd)` clamp.
+
+**Modified tests:** none.
+
 ## Testnet
 
 `scripts/settle-smoke.ts`, friendbot keys, fresh channels.
