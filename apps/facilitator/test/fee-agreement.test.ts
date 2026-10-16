@@ -21,10 +21,11 @@ import {
   type SorobanRpc,
 } from "@stellar-x402/signer-pool";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { parseConfig } from "../src/config.js";
 import { buildVerifier } from "../src/main.js";
 import { feeSettings } from "../src/settlement/fees.js";
+import type { VerifyTrace } from "../src/settlement/verify.js";
 
 const MAX_FEE = 250_000;
 const BID = 1_000;
@@ -129,7 +130,10 @@ describe("the fee ceiling at /verify and in the pool (AD-10)", () => {
 
   /** Real upstream `ExactStellarScheme`, as `main()` wires it: did it refuse the fee? */
   async function verifyRefuses(): Promise<boolean> {
-    const verify = buildVerifier({ ...config, rpcUrls: [rpcUrl] }, poolRpc, fees);
+    const verify = buildVerifier({ ...config, rpcUrls: [rpcUrl] }, poolRpc, fees, {
+      warn() {},
+      info() {},
+    });
     const answer = await verify(payload(), requirements);
     // A fee it accepts goes on to the event check, which an empty simulation fails.
     expect(answer.invalidReason).toMatch(/fee_exceeds_maximum|no_transfer_events/);
@@ -173,5 +177,35 @@ describe("the fee ceiling at /verify and in the pool (AD-10)", () => {
     resourceFee = fee;
     expect(await verifyRefuses()).toBe(refused);
     expect(await poolRefuses()).toBe(refused);
+  });
+});
+
+describe("real upstream with a down first RPC URL (AD-3)", () => {
+  it("answers from the second URL and logs the switch", async () => {
+    const config = parseConfig({
+      FACILITATOR_SECRET: facilitator.secret(),
+      CHANNELS: channel,
+      // Nothing listens on port 1: upstream's simulation gets a refused connection.
+      RPC_URLS: `http://127.0.0.1:1,${rpcUrl}`,
+      MAX_FEE_STROOPS: String(MAX_FEE),
+      INCLUSION_FEE_STROOPS: String(BID),
+    });
+    resourceFee = 100_000;
+    const logger = { warn: vi.fn(), info: vi.fn() };
+    const verify = buildVerifier(config, poolRpc, feeSettings(config.fees, poolRpc), logger);
+    const trace: VerifyTrace = {};
+    // The second URL's verdict: the fee passes, and the empty simulation has no transfer events.
+    await expect(verify(payload(), requirements, trace)).resolves.toMatchObject({
+      isValid: false,
+      invalidReason: "invalid_exact_stellar_payload_no_transfer_events",
+    });
+    expect(trace).toEqual({ rpc: "RPC_URLS[1]" });
+    expect(logger.warn).toHaveBeenCalledExactlyOnceWith("rpc_failover", {
+      component: "verify",
+      network: "stellar:testnet",
+      from: "RPC_URLS[0]",
+      to: "RPC_URLS[1]",
+      reason: "unexpected_verify_error",
+    });
   });
 });

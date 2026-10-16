@@ -13,13 +13,24 @@ import {
 import type { SorobanRpc } from "@stellar-x402/signer-pool";
 import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/core/types";
 import { describe, expect, it, vi } from "vitest";
-import { parseConfig } from "../src/config.js";
-import { buildVerifier, type SchemeOptions } from "../src/main.js";
-import { feeSettings } from "../src/settlement/fees.js";
+import { parseConfig, type Config } from "../src/config.js";
+import { createEd25519Signer } from "@x402/stellar";
+import {
+  FAILBACK_MAX_LAG_LEDGERS,
+  PRIMARY_PROBE_INTERVAL_MS,
+  UPSTREAM_TIMEOUT_MS,
+  buildUpstream,
+  buildVerifier,
+  upstreamDeadlineMs,
+  type SchemeOptions,
+} from "../src/main.js";
+import { feeSettings, type FeeSettings } from "../src/settlement/fees.js";
 import {
   CHANNEL_ACCOUNT_REASON,
   MUXED_FACILITATOR_REASON,
+  UpstreamTimeoutError,
   type UpstreamVerifier,
+  type VerifyTrace,
 } from "../src/settlement/verify.js";
 
 const secret = Keypair.random().secret();
@@ -92,13 +103,39 @@ function payload(
   return { x402Version: 2, accepted: requirements, payload: { transaction: transaction.toXDR() } };
 }
 
-function setup(answer: VerifyResponse = { isValid: true, payer }) {
+type FeeStats = Awaited<ReturnType<SorobanRpc["getFeeStats"]>>;
+
+interface SetupOptions {
+  /** Delays the fee-stats read. */
+  feeStatsMs?: number;
+  /** Overrides the fee settings, e.g. a bid that changes between calls. */
+  fees?: (fees: FeeSettings) => FeeSettings;
+  config?: Config;
+  /** The probe's latest ledger per RPC URL. */
+  latestLedger?: (url: string) => Promise<number>;
+}
+
+/** `answer` may depend on the scheme's RPC URL and get the call's arguments. */
+function setup(
+  answer:
+    | VerifyResponse
+    | ((
+        url: string,
+        payload: PaymentPayload,
+        requirements: PaymentRequirements,
+      ) => VerifyResponse | Promise<VerifyResponse>) = {
+    isValid: true,
+    payer,
+  },
+  opts: SetupOptions = {},
+) {
+  const { feeStatsMs = 0, config: cfg = config } = opts;
+  const stats = { sorobanInclusionFee: { p90: "250" } } as unknown as FeeStats;
   const rpc = {
-    getFeeStats: vi.fn(
-      async () =>
-        ({ sorobanInclusionFee: { p90: "250" } }) as unknown as Awaited<
-          ReturnType<SorobanRpc["getFeeStats"]>
-        >,
+    getFeeStats: vi.fn(() =>
+      feeStatsMs === 0
+        ? Promise.resolve(stats)
+        : new Promise<FeeStats>((resolve) => setTimeout(() => resolve(stats), feeStatsMs)),
     ),
     getLatestLedger: vi.fn(
       async () =>
@@ -108,26 +145,51 @@ function setup(answer: VerifyResponse = { isValid: true, payer }) {
   const schemes: { signer: string; options: SchemeOptions }[] = [];
   const makeScheme = vi.fn((signer: { address: string }, options: SchemeOptions) => {
     schemes.push({ signer: signer.address, options });
-    return { verify: async () => answer } satisfies UpstreamVerifier;
+    const url = options.rpcConfig!.url!;
+    return {
+      verify: async (p, r) => {
+        if (typeof answer !== "function") return answer;
+        return answer(url, p, r);
+      },
+    } satisfies UpstreamVerifier;
   });
-  return { verify: buildVerifier(config, rpc, feeSettings(config.fees, rpc), makeScheme), schemes };
+  const logger = { warn: vi.fn(), info: vi.fn() };
+  const base = feeSettings(cfg.fees, rpc);
+  const fees = opts.fees ? opts.fees(base) : base;
+  const latestLedger = vi.fn(opts.latestLedger ?? (async () => CURRENT));
+  return {
+    verify: buildVerifier(cfg, rpc, fees, logger, { makeScheme, latestLedger }),
+    schemes,
+    logger,
+    latestLedger,
+  };
 }
 
+/** The same config with a fixed bid. */
+const fixedBid: Config = { ...config, fees: { ...config.fees, inclusionFeeStroops: 100n } };
+
+const down = { isValid: false, invalidReason: "unexpected_verify_error" } as const;
+
 describe("buildVerifier (the /verify wiring in main)", () => {
-  it("gives upstream the facilitator key, the first RPC URL, the ceiling and twice the shared bid", async () => {
+  it("gives each RPC URL's scheme the facilitator key, the ceiling and twice the shared bid", async () => {
     const { verify, schemes } = setup();
-    await expect(verify(payload(), requirements)).resolves.toEqual({ isValid: true, payer });
-    expect(schemes).toEqual([
-      {
+    const trace: VerifyTrace = {};
+    await expect(verify(payload(), requirements, trace)).resolves.toEqual({ isValid: true, payer });
+    expect(trace).toEqual({ rpc: "RPC_URLS[0]" });
+    expect(schemes).toEqual(
+      ["https://rpc-a.example", "https://rpc-b.example"].map((url) => ({
         signer: Keypair.fromSecret(secret).publicKey(),
         options: {
-          rpcConfig: { url: "https://rpc-a.example" },
+          rpcConfig: { url },
           maxTransactionFeeStroops: 300_000,
           // The fee-stats bid (250), paid by the inner operation and the fee bump.
           inclusionFeeStroops: 500,
         },
-      },
-    ]);
+      })),
+    );
+    // Built once for the bid, not on every call.
+    await verify(payload(), requirements);
+    expect(schemes).toHaveLength(2);
   });
 
   it("rejects a configured channel through the built verifier", async () => {
@@ -161,8 +223,223 @@ describe("buildVerifier (the /verify wiring in main)", () => {
     });
   });
 
-  it("throws when upstream reports unexpected_verify_error", async () => {
+  it("answers from the second RPC URL while the first is down, and logs the switch", async () => {
+    const { verify, logger } = setup((url) =>
+      url === "https://rpc-a.example" ? down : { isValid: true, payer },
+    );
+    const trace: VerifyTrace = {};
+    await expect(verify(payload(), requirements, trace)).resolves.toEqual({ isValid: true, payer });
+    expect(trace).toEqual({ rpc: "RPC_URLS[1]" });
+    // Names, not URLs: an RPC URL can carry an API key.
+    expect(logger.warn).toHaveBeenCalledExactlyOnceWith("rpc_failover", {
+      component: "verify",
+      network: config.network,
+      from: "RPC_URLS[0]",
+      to: "RPC_URLS[1]",
+      reason: "unexpected_verify_error",
+    });
+  });
+
+  it("answers from the second RPC URL when the first throws", async () => {
+    const { verify, logger } = setup((url) => {
+      if (url === "https://rpc-a.example") throw new Error("connect ECONNREFUSED");
+      return { isValid: true, payer };
+    });
+    await expect(verify(payload(), requirements)).resolves.toEqual({ isValid: true, payer });
+    expect(logger.warn).toHaveBeenCalledWith(
+      "rpc_failover",
+      expect.objectContaining({ reason: "error:Error" }),
+    );
+  });
+
+  it("passes the payload and the requirements on to the scheme", async () => {
+    const seen: [PaymentPayload, PaymentRequirements][] = [];
+    const { verify } = setup((_url, p, r) => {
+      seen.push([p, r]);
+      return { isValid: true, payer };
+    });
+    const sent = payload();
+    await verify(sent, requirements);
+    expect(seen).toEqual([[sent, requirements]]);
+    expect(seen[0]![0]).toBe(sent);
+  });
+
+  it("stays on the second RPC URL when the bid changes (decision 2)", async () => {
+    let bid = 250;
+    const called: string[] = [];
+    const { verify, schemes, logger } = setup(
+      (url) => {
+        called.push(url);
+        return url === "https://rpc-a.example" ? down : { isValid: true, payer };
+      },
+      { fees: (fees) => ({ ...fees, inclusionFee: async () => bid }) },
+    );
+    await verify(payload(), requirements);
+    bid = 300;
+    const trace: VerifyTrace = {};
+    await verify(payload(), requirements, trace);
+    expect(trace).toEqual({ rpc: "RPC_URLS[1]" });
+    // The new bid's call starts on the active URL, not on RPC_URLS[0] again.
+    expect(called).toEqual([
+      "https://rpc-a.example",
+      "https://rpc-b.example",
+      "https://rpc-b.example",
+    ]);
+    expect(logger.warn).toHaveBeenCalledOnce();
+    // Built again for the new bid: two URLs per bid.
+    expect(schemes.map((s) => s.options.inclusionFeeStroops)).toEqual([500, 500, 600, 600]);
+  });
+
+  it("returns to the first RPC URL after a probe every PRIMARY_PROBE_INTERVAL_MS", async () => {
+    vi.useFakeTimers();
+    try {
+      let firstDown = true;
+      const { verify, logger, latestLedger } = setup((url) =>
+        url === "https://rpc-a.example" && firstDown ? down : { isValid: true, payer },
+      );
+      await verify(payload(), requirements);
+      firstDown = false;
+      vi.advanceTimersByTime(PRIMARY_PROBE_INTERVAL_MS - 1);
+      await verify(payload(), requirements);
+      expect(latestLedger).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      await verify(payload(), requirements);
+      await vi.waitFor(() =>
+        expect(logger.info).toHaveBeenCalledExactlyOnceWith("rpc_failback", {
+          component: "verify",
+          network: config.network,
+          from: "RPC_URLS[1]",
+          to: "RPC_URLS[0]",
+          lagLedgers: 0,
+        }),
+      );
+      expect(latestLedger.mock.calls).toEqual([
+        ["https://rpc-a.example"],
+        ["https://rpc-b.example"],
+      ]);
+      const trace: VerifyTrace = {};
+      await verify(payload(), requirements, trace);
+      expect(trace).toEqual({ rpc: "RPC_URLS[0]" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it(`stays off a first RPC URL more than ${FAILBACK_MAX_LAG_LEDGERS} ledgers behind`, async () => {
+    vi.useFakeTimers();
+    try {
+      const { verify, logger } = setup(
+        (url) => (url === "https://rpc-a.example" ? down : { isValid: true, payer }),
+        {
+          latestLedger: async (url) =>
+            url === "https://rpc-a.example" ? CURRENT - FAILBACK_MAX_LAG_LEDGERS - 1 : CURRENT,
+        },
+      );
+      await verify(payload(), requirements);
+      vi.advanceTimersByTime(PRIMARY_PROBE_INTERVAL_MS);
+      await verify(payload(), requirements);
+      await vi.waitFor(() =>
+        expect(logger.warn).toHaveBeenCalledWith("rpc_probe_failed", {
+          component: "verify",
+          network: config.network,
+          rpc: "RPC_URLS[0]",
+          reason: "lagging",
+          lagLedgers: FAILBACK_MAX_LAG_LEDGERS + 1,
+        }),
+      );
+      expect(logger.info).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives each RPC URL its own deadline, so a slow second URL still answers", async () => {
+    vi.useFakeTimers();
+    try {
+      const slow = UPSTREAM_TIMEOUT_MS / 2;
+      const { verify } = setup((url) =>
+        url === "https://rpc-a.example"
+          ? new Promise<never>(() => {})
+          : new Promise((resolve) => setTimeout(() => resolve({ isValid: true, payer }), slow)),
+      );
+      const answer = verify(payload(), requirements);
+      await vi.advanceTimersByTimeAsync(UPSTREAM_TIMEOUT_MS + slow + 1);
+      await expect(answer).resolves.toEqual({ isValid: true, payer });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // With a fixed bid the deadline is 2 × 10 s + slack: without the slack, the overall deadline
+  // (set first) and the second URL's own (ending at the same time) would tie, and the overall one
+  // would win.
+  it("throws the first URL's timeout when every RPC URL hangs, and logs both", async () => {
+    vi.useFakeTimers();
+    try {
+      const { verify, logger } = setup(() => new Promise<never>(() => {}), { config: fixedBid });
+      const answer = verify(payload(), requirements);
+      const settled = expect(answer).rejects.toThrow(
+        new UpstreamTimeoutError(
+          `RPC_URLS[0]: upstream verify gave no answer within ${UPSTREAM_TIMEOUT_MS} ms`,
+        ),
+      );
+      await vi.advanceTimersByTimeAsync(2 * UPSTREAM_TIMEOUT_MS);
+      await settled;
+      expect(logger.warn).toHaveBeenCalledExactlyOnceWith("rpc_exhausted", {
+        component: "verify",
+        network: config.network,
+        tried: [
+          { rpc: "RPC_URLS[0]", reason: "timeout" },
+          { rpc: "RPC_URLS[1]", reason: "timeout" },
+        ],
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reads the fee-stats bid before the URL deadlines start, so a slow read costs no URL", async () => {
+    vi.useFakeTimers();
+    try {
+      // `FallbackRpc` moving on from a hung URL of its own takes its 10 s timeout.
+      const { verify, logger } = setup(
+        { isValid: true, payer },
+        { feeStatsMs: UPSTREAM_TIMEOUT_MS },
+      );
+      const trace: VerifyTrace = {};
+      const answer = verify(payload(), requirements, trace);
+      await vi.advanceTimersByTimeAsync(UPSTREAM_TIMEOUT_MS + 1);
+      await expect(answer).resolves.toEqual({ isValid: true, payer });
+      // The first URL answered: there was no failover.
+      expect(trace).toEqual({ rpc: "RPC_URLS[0]" });
+      expect(logger.warn).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("throws when upstream reports unexpected_verify_error on every RPC URL", async () => {
     const { verify } = setup({ isValid: false, invalidReason: "unexpected_verify_error", payer });
     await expect(verify(payload(), requirements)).rejects.toThrow("unexpected_verify_error");
+  });
+});
+
+describe("upstreamDeadlineMs", () => {
+  it("is 10 s per RPC URL, twice that with the fee-stats read before them, plus 1 s", () => {
+    expect(upstreamDeadlineMs(2, false)).toBe(21_000);
+    expect(upstreamDeadlineMs(2, true)).toBe(41_000);
+    expect(upstreamDeadlineMs(1, false)).toBe(11_000);
+  });
+
+  it("comes with the upstream from buildUpstream, in the fee settings' mode", () => {
+    const signer = createEd25519Signer(secret, config.network);
+    const logger = { warn: vi.fn(), info: vi.fn() };
+    const rpc = { getFeeStats: vi.fn() };
+    const feeStats = feeSettings(config.fees, rpc);
+    const fixed = feeSettings(fixedBid.fees, rpc);
+    expect(buildUpstream(config, feeStats, logger, signer).upstreamTimeoutMs).toBe(41_000);
+    expect(buildUpstream(config, fixed, logger, signer).upstreamTimeoutMs).toBe(21_000);
+    // The mode is the fees', not the config's.
+    expect(buildUpstream(fixedBid, feeStats, logger, signer).upstreamTimeoutMs).toBe(41_000);
   });
 });

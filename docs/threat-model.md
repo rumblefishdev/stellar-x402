@@ -1,6 +1,7 @@
 # Threat model
 
-Not written yet, except for the `upto` contract section below. Planned sections: assets (signer
+Not written yet, except for the `upto` contract section and the `/verify` RPC failover section
+below. Planned sections: assets (signer
 keys, fee budget, catalog integrity), fee griefing via failed transactions, auth-entry
 validation, SSRF in Bazaar metadata, API key abuse.
 
@@ -230,3 +231,39 @@ What each party must trust:
   reverse.
 - **Mitigation:** The client's tree has exactly two contexts; the spec tells wallets to allow both.
 - **Residual risk:** Wallets that don't follow it can't pay with `upto`.
+
+## `/verify` RPC failover
+
+Scope: upstream verify's failover across `RPC_URLS` (spine AD-3, task 0045).
+
+### Threats
+
+#### RPC steering
+
+- **Attack:** A client moves every user's `/verify` to a fallback RPC: it exhausts
+  `RPC_URLS[0]`'s per-key quota until it answers 429, which upstream reports as
+  `unexpected_verify_error`, and every call fails over. Keeping traffic there needs only to keep
+  `RPC_URLS[0]` failing.
+- **Mitigation:** Calls return to `RPC_URLS[0]` only when a probe (`getLatestLedger`, no client
+  payload) finds it healthy and at most 2 ledgers behind, so no payload can bring it back early or
+  keep traffic away once it answers. A call that wraps around to `RPC_URLS[0]` after the active
+  fallback fails gets its answer, but doesn't move the other calls there; it only makes the probe
+  due at once. A client's own verdict can't be chosen this way: a rejection
+  is never failed over.
+- **Residual risk:** Until the rate limit (0023), anyone can spend `RPC_URLS[0]`'s quota, and
+  traffic stays on the fallback while they do. Each probe interval then costs one probe, not a
+  user request.
+
+#### Lagging RPC answers
+
+- **Attack:** A fallback RPC that trails the network by a few ledgers answers `/verify`. Besides
+  rejecting valid payments, it can accept a payment the first URL would refuse: a replay whose
+  nonce is used on chain but not yet on that RPC, a balance spent since its ledger, a revoked SAC
+  authorization.
+- **Mitigation:** For `exact`, `/verify` is advisory: `/settle` simulates again through
+  `FallbackRpc` before it submits, and AD-6 refuses a nonce already used. The probe only returns to
+  `RPC_URLS[0]` when it isn't lagging, and `verified` names the URL that answered, so false answers
+  can be traced to it.
+- **Residual risk:** A seller that serves on `/verify`'s answer alone, without `/settle`, can serve
+  a payment that never settles. For `upto` (0015) `/verify` carries more weight, so its rules must
+  not rely on a single RPC's view.
