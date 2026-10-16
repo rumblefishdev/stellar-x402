@@ -14,9 +14,9 @@ import {
 } from "@stellar/stellar-sdk";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { memoryStores } from "../src/adapters/memory.js";
-import { parseConfig } from "../src/config.js";
+import { ConfigError, parseConfig } from "../src/config.js";
 import { jsonLogger } from "../src/logger.js";
-import { start, type Started } from "../src/main.js";
+import { main, start, type Started } from "../src/main.js";
 
 const secret = Keypair.random().secret();
 const env = {
@@ -35,22 +35,30 @@ describe("facilitator boot", () => {
     const config = { ...parseConfig(env), port: 0 };
     const logger = jsonLogger("debug", (line) => lines.push(line));
     const verify = async () => ({ isValid: true });
-    app = await start({ config, logger, stores: memoryStores(), verify });
+    const settle = async () => ({
+      response: { success: false, transaction: "", network: config.network },
+    });
+    app = await start({
+      config,
+      logger,
+      stores: memoryStores(),
+      verify,
+      settle,
+      extensionResponses: () => undefined,
+    });
     url = `http://127.0.0.1:${app.port}`;
   });
   afterAll(() => app.close());
 
   it("answers the stub routes, with no CORS headers", async () => {
     const routes = [
-      ["POST", "/settle"],
       ["GET", "/supported"],
       ["GET", "/discovery/resources"],
     ] as const;
     for (const [method, path] of routes) {
       const response = await fetch(`${url}${path}`, {
         method,
-        headers: { "content-type": "application/json", origin: "https://other.example" },
-        body: method === "POST" ? "{}" : undefined,
+        headers: { origin: "https://other.example" },
       });
       expect(response.status, path).toBe(501);
       expect(response.headers.get("access-control-allow-origin"), path).toBeNull();
@@ -102,6 +110,16 @@ describe("startup with a bad config", () => {
     expect(output).toContain("CHANNELS is required");
     expect(output).not.toContain(bad);
   }, 20_000);
+
+  it("refuses stellar:pubnet with STORE=memory, before serving anything", async () => {
+    // `/settle` spends there; a restart would lose its records, and there is no lease yet.
+    const pubnet = { ...env, NETWORK: "stellar:pubnet", RPC_URLS: "https://rpc.example" };
+    const error = await main(pubnet).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ConfigError);
+    expect((error as ConfigError).problems).toEqual([
+      "NETWORK stellar:pubnet needs a durable STORE; STORE=memory is for testnet only (0022)",
+    ]);
+  });
 });
 
 describe("main()", () => {

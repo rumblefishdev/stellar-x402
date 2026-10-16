@@ -1,7 +1,9 @@
 # ADR 0011: Host the facilitator on ECS Fargate in the company AWS account
 
 - Status: accepted
-- Date: 2026-10-09
+- Date: 2026-10-09, amended 2026-10-15 (task 0009: the `/settle` budget is 30 s, below the
+  seller's own 90 s timeout) and 2026-10-16 (task 0009: the checks are inside the budget; RPC
+  endpoints are logged as `RPC_URLS[i]`)
 
 ## Context
 
@@ -63,16 +65,45 @@ Prices API runs in Frankfurt. The full requirements and the research are in task
 
 One request or one stop must never outlast the layer in front of it:
 
-| Setting                         | Value               | Why                                                       |
-| ------------------------------- | ------------------- | --------------------------------------------------------- |
-| `/settle` response budget       | 90 s                | past it, answer `settlement_pending` with the hash (AD-6) |
-| ALB target deregistration delay | 100 s               | in-flight `/settle` finishes before SIGTERM               |
-| ALB idle timeout                | 120 s               | above the response budget                                 |
-| Node `keepAliveTimeout`         | 125 s               | above the ALB idle timeout, or the ALB sees 502s          |
-| `stopTimeout`                   | 120 s               | background drain after SIGTERM                            |
-| Target health check             | 10 s × 2, 3 to fail | a new target gets traffic within ~20 s                    |
-| `LEASE_TTL_MS`                  | 30 s                | after a crash, a new process waits at most this long      |
+| Setting                           | Value               | Why                                                                |
+| --------------------------------- | ------------------- | ------------------------------------------------------------------ |
+| Seller's facilitator client       | 90 s                | `@x402/core`'s `HTTPFacilitatorClient`; started before the request |
+| `/settle` response budget         | 30 s, at most 80 s  | well below the seller's 90 s, so our answer reaches it             |
+| `/settle` checks                  | see below           | inside the budget: past it, `…_timeout` and nothing is claimed     |
+| Repeat wait (`SETTLE_TIMEOUT_MS`) | 20 s, ≤ the budget  | and never past the repeat's own budget                             |
+| ALB target deregistration delay   | 100 s               | in-flight `/settle` finishes before SIGTERM                        |
+| ALB idle timeout                  | 120 s               | above the response budget                                          |
+| Node `keepAliveTimeout`           | 125 s               | above the ALB idle timeout, or the ALB sees 502s                   |
+| `stopTimeout`                     | 120 s               | background drain after SIGTERM                                     |
+| Target health check               | 10 s × 2, 3 to fail | a new target gets traffic within ~20 s                             |
+| `LEASE_TTL_MS`                    | 30 s                | after a crash, a new process waits at most this long               |
 
+- **Past the budget,** `/settle` answers `settlement_pending` with the hash if one was signed,
+  and nothing new is signed after it. If nothing was signed, the record ends and the answer is
+  `settle_exact_stellar_timeout`: the client signs a new payment. 30 s fits 97 % of the
+  settlements measured in task 0043. Every store and hook call is bounded by what is left of it,
+  plus up to 2 s for the last store writes: a repeat may end the record and then mark its
+  success, 1 s each.
+- **The checks run inside the budget.** They are upstream verify plus the AD-22 ledger read,
+  which `FallbackRpc` bounds at 10 s per RPC URL. Their worst case:
+
+  | `RPC_URLS`, bid                   | Upstream verify  | Ledger read  | Worst check            |
+  | --------------------------------- | ---------------- | ------------ | ---------------------- |
+  | before 0045, any                  | 10 s (first URL) | 10 s per URL | 20 s (1 URL), 30 s (2) |
+  | 0045, 2 URLs, fixed bid           | 21 s             | 20 s         | 41 s                   |
+  | 0045, 2 URLs, fee-stats bid       | 41 s             | 20 s         | 61 s                   |
+  | 0045, 3 URLs (its cap), fee-stats | 61 s             | 30 s         | 91 s                   |
+
+  Upstream verify after 0045 is 10 s per URL, twice that with a fee-stats bid (the read before
+  the URLs), plus 1 s. Past the budget the answer is `…_timeout` before the claim, so the same
+  payment may be sent again; a valid payment can still get it when the first URLs hang and the
+  last one answers late. These worst cases need hung RPC URLs, not slow ones.
+
+- **Known cost of "nothing sent → `rejected`".** The resource is usually served before `/settle`.
+  After a failure before anything was signed (no channel, the budget, the simulation, the RPCs
+  down), the record ends and the same payload can't be settled again: only the buyer can pay, by
+  signing a new payment, and nothing makes them. Claiming such a record again by the same
+  fingerprint would close it; it is not planned.
 - **The budget covers the wait for a channel.** The pool's own bounds (60 s + 30 s) start only
   once a channel is acquired, so the `/settle` handler passes the pool a deadline (0009).
 - **ECS waits out the whole deregistration delay on every stop,** even with nothing in flight: the
@@ -188,8 +219,11 @@ One request or one stop must never outlast the layer in front of it:
   - Its JSON lines go from stdout through the `awslogs` driver into CloudWatch Logs, Standard
     class (Infrequent Access drops metric extraction), with 30-day retention on testnet.
   - No pino: stdout is the only transport, and the logger already writes identifiers only.
-- **RPC URLs are logged by host only.** An RPC URL can carry an API key, and signer-pool's
-  `FallbackRpc.fromUrls` names endpoints by the full URL today (0027).
+- **RPC endpoints are logged as `RPC_URLS[i]`, never by URL or host.** An RPC URL can carry an
+  API key, and a host can name a paid provider. Upstream verify's failover logs its switches with
+  these names (0045). A URL that appears inside an error message is reduced to its host by the
+  logger. signer-pool's `FallbackRpc.fromUrls` still names endpoints by the full URL and logs no
+  switches (0049, 0027).
 - **Metrics:** a metrics adapter (0027) writes CloudWatch Embedded Metric Format lines to stdout,
   and `awslogs` turns them into metrics. No SDK and no agent.
   - Namespace `x402-facilitator`.
@@ -267,7 +301,7 @@ One request or one stop must never outlast the layer in front of it:
   - the CloudFront-to-ALB hop would be plain HTTP;
   - any CloudFront distribution, not only ours, could reach the ALB, so `X-Forwarded-For` could
     be forged;
-  - a 90 s `/settle` needs a raised origin-timeout quota;
+  - a `/settle` of up to 80 s needs a raised origin-timeout quota;
   - the default cache and method settings break a JSON API.
 
   A subdomain avoids all of it.

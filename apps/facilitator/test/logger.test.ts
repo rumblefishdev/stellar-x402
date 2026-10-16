@@ -107,3 +107,17 @@ it("logs every console.error as one error event, with URLs reduced to their host
   ]);
   expect(lines.join("")).not.toContain("apikey");
 });
+
+it("logs an error field's URLs by host only, its cause's too", () => {
+  const { lines, logger } = capture();
+  const cause = new Error("connect ECONNREFUSED https://rpc.example/v1/SECRETKEY");
+  logger.error("settlement_submit_failed", {
+    error: new Error("POST https://rpc.example/v1/SECRETKEY failed", { cause }),
+  });
+
+  expect(lines[0]).not.toContain("SECRETKEY");
+  expect(JSON.parse(lines[0] ?? "").error).toMatchObject({
+    message: "POST rpc.example failed",
+    cause: { message: "connect ECONNREFUSED rpc.example" },
+  });
+});

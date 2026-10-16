@@ -37,7 +37,16 @@ describe("POST /verify", () => {
     };
     const config = { ...parseConfig(env), port: 0 };
     const logger = jsonLogger("debug", (line) => lines.push(line));
-    app = await start({ config, logger, stores: memoryStores(), verify });
+    app = await start({
+      config,
+      logger,
+      stores: memoryStores(),
+      verify,
+      settle: async () => {
+        throw new Error("not used");
+      },
+      extensionResponses: () => undefined,
+    });
     url = `http://127.0.0.1:${app.port}/verify`;
   });
   afterAll(() => app.close());

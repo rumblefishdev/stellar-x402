@@ -42,6 +42,27 @@ As a facilitator operator, I want fee spending capped and failing assets or reci
   Resolving `false` lets the caller log it; inserting the spend needs the scopes.
 - A lost `onFinal` call after a crash leaves the reservation counted until it ages out of the
   rolling window; acceptable for T1 (0017, Stan's PR #7 review).
+- From 0009 (PR #41 reviews):
+  - **`beforeSubmit` must answer within the settle budget.** Past it, the record ends with
+    `…_timeout`, and `onFinal` runs once the hook's promise settles, whatever it answered (0009
+    decision 34), so a reservation made late is released. `onFinal` may also come for a
+    reservation that was never made: a refusal the store couldn't record ends later with
+    `onFinal` (`hooks.ts`).
+  - **Fee griefing by spending one balance in parallel** (Adam, third review). One payer funded
+    with exactly one `amount` signs N payments with N nonces and sends N `/settle` calls at once.
+    Each passes both simulations, N channels submit in one ledger, and N−1 fail on chain, at our
+    fee. A local probe had two payments from one payer reach `submitter.submit` concurrently.
+    The per-asset breaker makes it worse: 6 parallel calls would open the USDC breaker for every
+    seller for 10 minutes, at will. Needs: at most one non-final settlement per (payer, asset), or
+    in-flight amounts reserved against the balance; and balance-race failures counted against the
+    payer, not the asset.
+  - **Key a reservation by the settlement key, and refuse a reserve after its release** (Adam,
+    fourth review). In one process a repeat leaves an unsigned record to the first call until the
+    first call's budget ends (0009 decision 46). Across instances (0022) a repeat judges that by
+    its own clock, so it may end the record, and run `onFinal`, before the first call's
+    `beforeSubmit` reserves. Then the late reserve must be refused, not counted forever.
+  - Refusal reasons are an `errorReason` sellers see; the README lists "a spend reason" as a
+    refusal that ends the payment (sign a new one later).
 
 ## Acceptance Criteria
 

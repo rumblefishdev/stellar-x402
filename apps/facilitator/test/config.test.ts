@@ -30,7 +30,12 @@ describe("parseConfig", () => {
       channels: [CHANNEL_A, CHANNEL_B],
       store: "memory",
       fees: { maxFeeStroops: 250_000n, inclusionFeeStroops: undefined, escalation: undefined },
-      settlement: { minValidityLedgers: 4, settleTimeoutMs: 30_000, leaseTtlMs: 30_000 },
+      settlement: {
+        minValidityLedgers: 4,
+        settleTimeoutMs: 20_000,
+        settleBudgetMs: 30_000,
+        leaseTtlMs: 30_000,
+      },
       http: {
         bodyLimitBytes: 65_536,
         trustedProxyHops: 0,
@@ -65,6 +70,7 @@ describe("parseConfig", () => {
       FEE_ESCALATION_MAX_STROOPS: "1002",
       MIN_VALIDITY_LEDGERS: "13",
       SETTLE_TIMEOUT_MS: "31000",
+      SETTLE_BUDGET_MS: "60000",
       LEASE_TTL_MS: "32000",
       BODY_LIMIT_BYTES: "70000",
       TRUSTED_PROXY_HOPS: "2",
@@ -93,7 +99,12 @@ describe("parseConfig", () => {
         inclusionFeeStroops: 201n,
         escalation: { factor: 1.5, max: 1002 },
       },
-      settlement: { minValidityLedgers: 13, settleTimeoutMs: 31_000, leaseTtlMs: 32_000 },
+      settlement: {
+        minValidityLedgers: 13,
+        settleTimeoutMs: 31_000,
+        settleBudgetMs: 60_000,
+        leaseTtlMs: 32_000,
+      },
       http: {
         bodyLimitBytes: 70_000,
         trustedProxyHops: 2,
@@ -151,14 +162,41 @@ describe("parseConfig", () => {
     ]);
   });
 
+  it("keeps the settle budget below the seller's 90 s and the repeat wait within the budget", () => {
+    expect(problems({ ...minimal, SETTLE_BUDGET_MS: "80001" })).toEqual([
+      "SETTLE_BUDGET_MS must be between 1000 and 80000",
+    ]);
+    expect(problems({ ...minimal, SETTLE_BUDGET_MS: "10000", SETTLE_TIMEOUT_MS: "10001" })).toEqual(
+      ["SETTLE_TIMEOUT_MS must be at most SETTLE_BUDGET_MS"],
+    );
+    expect(
+      parseConfig({ ...minimal, SETTLE_BUDGET_MS: "80000", SETTLE_TIMEOUT_MS: "80000" }),
+    ).toMatchObject({ settlement: { settleBudgetMs: 80_000, settleTimeoutMs: 80_000 } });
+  });
+
+  it("defaults the repeat wait to 20 s, or to a shorter budget, and needs at least 1 s", () => {
+    expect(parseConfig(minimal).settlement).toMatchObject({
+      settleBudgetMs: 30_000,
+      settleTimeoutMs: 20_000,
+    });
+    // Only the budget set: the default wait follows it instead of failing startup.
+    expect(parseConfig({ ...minimal, SETTLE_BUDGET_MS: "15000" }).settlement).toMatchObject({
+      settleBudgetMs: 15_000,
+      settleTimeoutMs: 15_000,
+    });
+    expect(problems({ ...minimal, SETTLE_TIMEOUT_MS: "999" })).toEqual([
+      "SETTLE_TIMEOUT_MS must be between 1000 and 2147483647",
+    ]);
+  });
+
   it("accepts only plain decimal numbers in range", () => {
     expect(problems({ ...minimal, PORT: "0x10" })).toEqual(["PORT must be a whole number"]);
     expect(problems({ ...minimal, PORT: "70000" })).toEqual(["PORT must be between 1 and 65535"]);
     expect(problems({ ...minimal, SETTLE_TIMEOUT_MS: "1e20" })).toEqual([
       "SETTLE_TIMEOUT_MS must be a whole number",
     ]);
-    expect(problems({ ...minimal, SETTLE_TIMEOUT_MS: "99999999999" })).toEqual([
-      "SETTLE_TIMEOUT_MS must be between 1 and 2147483647",
+    expect(problems({ ...minimal, LEASE_TTL_MS: "99999999999" })).toEqual([
+      "LEASE_TTL_MS must be between 1000 and 2147483647",
     ]);
     expect(problems({ ...minimal, FEE_ESCALATION_FACTOR: "Infinity" })).toEqual([
       "FEE_ESCALATION_FACTOR must be a decimal number",

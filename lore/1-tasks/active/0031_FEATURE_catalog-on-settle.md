@@ -69,11 +69,12 @@ The criteria are met on the hook side; the real `/settle` route (0009) and the `
    `normalize()` and upsert, bounded by a 10 s timeout. It never rejects, and neither does its
    logging; `drain()` waits for in-flight writes and `main`'s `close()` calls it.
 2. **Caller rules for 0009 and 0019.** Set the header (`encodeExtensionResponses`) on every
-   `success: true` settle answer, replays included, never on `success: false`. Call
+   `success: true` settle answer, never on `success: false`. Since 0009 decision 16 a success is
+   answered once, so a replay gets `…_already_settled` and no header. Call
    `onSuccess(record, "settle")` once, by the transition that won, after the response:
    `if (res.closed) dispatch(); else res.once("close", dispatch)`; a plain `once("close")` misses a
-   client that left before the write. A `resolved` event or the startup re-check calls
-   `onSuccess(record, "resolved")`. `/verify` and replays never call it. A `success` record
+   client that left before the write. A `resolved` event, the startup re-check or a submission
+   that lands past the settle budget (0009) calls `onSuccess(record, "resolved")`. `/verify` and replays never call it. A `success` record
    carries `ledger`; without it nothing is cataloged (`no_ledger` internal error).
 3. **`lastUpdated` = when the record turned `success`**, so a repeated call writes the same state.
 4. **Stale guard in the port, ordered by `ledger` (emerged).** `upsert` resolves

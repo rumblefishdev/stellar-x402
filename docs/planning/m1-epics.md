@@ -67,8 +67,10 @@ guide, the two example integrations, the security review report, uptime targets,
 - **FR8:** The facilitator rejects a payload whose auth expires in fewer than
   `minValidityLedgers` ledgers, and a submitted transaction never stays valid past the auth expiry.
 - **FR9:** A settlement is claimed once per `network:payer:nonce`. A repeat with the same payload
-  returns the stored outcome (waiting, within the settle timeout, if it is pending). A repeat with
-  a different payload is rejected and nothing is submitted.
+  is answered from its record (waiting, within the settle timeout, if it is pending), and its
+  `success` is answered once: later repeats get `settle_exact_stellar_already_settled` with the
+  hash. A repeat with a different payload is rejected with the stored hash and nothing is
+  submitted.
 - **FR10:** Settlement records survive restarts: the hash is stored before the first send, states
   only move forward, a record can be found by any of its hashes, and records that aren't final
   are re-checked on chain at startup.
@@ -343,7 +345,7 @@ So that I get a transaction hash for every paid request and a buyer is never cha
 
 **Given** a valid payload  
 **When** `/settle` is called  
-**Then** it reruns the 1.3 checks, claims `network:payer:nonce`, submits `{func, auth}` through `SettlementSubmitter` with the deadline from the signature expiry and `maxLedger`, and returns `{success: true, transaction, network, payer}`  
+**Then** it reruns the 1.3 checks, claims `network:payer:nonce`, submits `{func, auth}` through `SettlementSubmitter` with a deadline of the settle budget or the signature expiry, whichever comes first, and `maxLedger`, and returns `{success: true, transaction, network, payer}`  
 **And** upstream `settle()` is never called and nothing else in the service calls `sendTransaction`
 
 **Given** several concurrent `/settle` calls for one settlement key  
@@ -352,7 +354,7 @@ So that I get a transaction hash for every paid request and a buyer is never cha
 
 **Given** a repeat call with the same fingerprint  
 **When** `/settle` is called again  
-**Then** it returns the stored outcome, waiting within the settle timeout if the record is pending
+**Then** it answers from the record, waiting within the settle timeout if the record is pending, and a success only once: after that `settle_exact_stellar_already_settled` with the hash
 
 **Given** a repeat call with a different fingerprint  
 **When** `/settle` is called  
