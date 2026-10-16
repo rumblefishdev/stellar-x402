@@ -22,6 +22,12 @@ history:
     note: >
       Extended from Adam's second PR #45 review: no return to the first URL (lag in the AD-22
       read), endpoint names that are full URLs, no switch logs, and the A → B → A case.
+  - date: "2026-10-16"
+    status: backlog
+    who: claude
+    note: >
+      Extended from Adam's fourth PR #41 review (wrap only transport failures) and the third
+      PR #45 review (a call never switches to the first URL).
 ---
 
 # Fix `FallbackRpc`'s switching: late answers, return to the first URL, URL-free logs
@@ -57,6 +63,12 @@ logs no switches. Fix those together, in the shape 0045 gave upstream verify's f
   as 0045 does for upstream verify.
 - **No switch logs**: `main()` passes no `onSwitch`, so a pool or ledger-read failover is
   silent, unlike upstream verify's `rpc_failover`.
+- **Every all-endpoints failure becomes `RpcUnavailableError`** (Adam, PR #41 fourth review,
+  fallback-rpc.ts:107). stellar-sdk throws a JSON-RPC error answer as a plain object
+  (`throw response.data.error`), so a request-level error on every endpoint, such as invalid
+  params on `simulateTransaction`, becomes `RpcUnavailableError("…: [object Object]")` →
+  `rpc_unavailable`, with no `settlement_submit_failed` log. It used to be `unexpected` plus an
+  error log.
 
 ## Implementation
 
@@ -64,10 +76,14 @@ logs no switches. Fix those together, in the shape 0045 gave upstream verify's f
   it hasn't moved (0045 decision 12).
 - Return to the first endpoint as 0045 decision 11 does: a `getLatestLedger` probe of endpoint 0
   every 60 s while off it, started beside a call, never inside one, and a return only within 2
-  ledgers of the active endpoint.
+  ledgers of the active endpoint. A call that wraps around to endpoint 0 never switches to it
+  (0045 decision 16).
+- Wrap only transport failures (timeouts, no response, 5xx/429) in `RpcUnavailableError`; let a
+  JSON-RPC error answer through, so `/settle` logs it as before.
 - `fromUrls` names endpoints `RPC_URLS[i]`, and `main()` logs switches as `rpc_failover` with
   `component: "rpc"`, the network and a URL-free reason.
-- Tests: the late answer, A → B → A, the probe's return and its lag guard, and a log with no URL.
+- Tests: the late answer, A → B → A, the probe's return and its lag guard, a log with no URL, and
+  a JSON-RPC error on every endpoint that isn't `rpc_unavailable`.
 
 ## Acceptance Criteria
 
