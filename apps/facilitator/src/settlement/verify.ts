@@ -9,7 +9,17 @@ import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/
 
 /** Upstream `ExactStellarScheme` as `/verify` uses it: only `verify()`, never `settle()` (AD-3). */
 export interface UpstreamVerifier {
-  verify(payload: PaymentPayload, requirements: PaymentRequirements): Promise<VerifyResponse>;
+  verify(
+    payload: PaymentPayload,
+    requirements: PaymentRequirements,
+    trace?: VerifyTrace,
+  ): Promise<VerifyResponse>;
+}
+
+/** What a verification learned besides its answer, for the `verified` log. Never sent. */
+export interface VerifyTrace {
+  /** The `RPC_URLS[i]` name of the URL whose upstream answer this is (AD-3). */
+  rpc?: string;
 }
 
 export interface VerifierDeps {
@@ -25,8 +35,9 @@ export interface VerifierDeps {
   /** Sequence of the latest closed ledger. */
   latestLedger: () => Promise<number>;
   /**
-   * How long upstream `verify()` may take, in milliseconds; 10,000 by default, as `FallbackRpc`.
-   * Upstream's RPC and Horizon clients have no timeout of their own.
+   * How long the whole upstream call may take, in milliseconds, across every RPC URL it tries and
+   * the bid read before them; 10,000 by default. Upstream's RPC and Horizon clients have no timeout
+   * of their own. The AD-22 ledger read comes after it, with `FallbackRpc`'s own timeout.
    */
   upstreamTimeoutMs?: number;
 }
@@ -77,9 +88,11 @@ export function signedLedgers(maxTimeoutSeconds: number): number {
   return Math.ceil(maxTimeoutSeconds / DEFAULT_ESTIMATED_LEDGER_SECONDS);
 }
 
+/** `trace`, when given, is filled in for the `verified` log. */
 export type Verify = (
   payload: PaymentPayload,
   requirements: PaymentRequirements,
+  trace?: VerifyTrace,
 ) => Promise<VerifyResponse>;
 
 /**
@@ -91,7 +104,8 @@ export type Verify = (
  */
 export function createVerifier(deps: VerifierDeps): Verify {
   const check = createChecker(deps);
-  return async (payload, requirements) => (await check(payload, requirements)).response;
+  return async (payload, requirements, trace) =>
+    (await check(payload, requirements, trace)).response;
 }
 
 /** A payment that passed every check, as `/settle` needs it. */
@@ -109,13 +123,14 @@ export interface Verified {
 export type Check = (
   payload: PaymentPayload,
   requirements: PaymentRequirements,
+  trace?: VerifyTrace,
 ) => Promise<{ response: VerifyResponse; verified?: Verified }>;
 
 /** {@link createVerifier}'s checks, also returning what they parsed and read when they pass. */
 export function createChecker(deps: VerifierDeps): Check {
   const accounts = new Set([...deps.channels, deps.facilitator]);
   const timeoutMs = deps.upstreamTimeoutMs ?? 10_000;
-  return async (payload, requirements) => {
+  return async (payload, requirements, trace) => {
     // Upstream would verify against any Stellar network's default RPC; this process serves one.
     if (requirements.network !== deps.network) {
       return {
@@ -133,7 +148,7 @@ export function createChecker(deps: VerifierDeps): Check {
       };
     }
     const upstream = withStringPayer(
-      await withTimeout(deps.upstream.verify(payload, requirements), timeoutMs),
+      await withTimeout(deps.upstream.verify(payload, requirements, trace), timeoutMs),
     );
     // Upstream catches every exception, a failed RPC call included, and answers with this code.
     // It says nothing about the payment, so it is our error: a 500, logged as one.
