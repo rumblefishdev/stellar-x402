@@ -94,6 +94,7 @@ export class MemorySettlementStore implements SettlementStore {
   async markSuccessAnswered(key: SettlementKey, at: number): Promise<boolean> {
     const record = this.records.get(key);
     if (record?.state !== "success" || record.successAnsweredAt !== undefined) return false;
+    // Not `updatedAt`: the mark records an answer, not a step in the lifecycle.
     record.successAnsweredAt = at;
     return true;
   }

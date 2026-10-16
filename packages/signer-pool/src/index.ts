@@ -7,6 +7,7 @@ export { ChannelPool, NoChannelsError, QueueTimeoutError, type Channel } from ".
 export {
   FallbackRpc,
   RpcTimeoutError,
+  RpcUnavailableError,
   type FallbackRpcOptions,
   type RpcEndpoint,
 } from "./fallback-rpc.js";
@@ -34,6 +35,7 @@ export {
   SignedHookError,
   SimulationCheckError,
   SimulationError,
+  SourceAccountAuthError,
   attemptsOf,
   type ContractCall,
   type FeeEscalation,

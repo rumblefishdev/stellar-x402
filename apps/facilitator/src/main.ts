@@ -11,7 +11,7 @@ import {
 import { createEd25519Signer, getNetworkPassphrase } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/facilitator";
 import { memoryStores } from "./adapters/memory.js";
-import { createCataloger } from "./catalog/cataloger.js";
+import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
 import { ConfigError, parseConfig } from "./config.js";
 import type { Config } from "./config.js";
 import { createApp, type AppDeps } from "./http/app.js";
@@ -74,8 +74,7 @@ export function buildChecks(
   makeScheme: MakeScheme = (signer, options) => new ExactStellarScheme([signer], options),
 ): VerifierDeps {
   // Upstream knows only the facilitator key, and only in plain form; the channels and the muxed
-  // facilitator are `createVerifier`'s check (AD-5).
-  // It reads the first RPC URL only.
+  // facilitator are `createChecker`'s check (AD-5). It reads the first RPC URL only.
   const signer = createEd25519Signer(config.facilitatorSecret, config.network);
   const upstream = upstreamAtCurrentBid(fees.inclusionFee, (inclusionFeeStroops) =>
     makeScheme(signer, {
@@ -94,7 +93,10 @@ export function buildChecks(
   };
 }
 
-/** `/verify`'s verifier: {@link buildChecks} through `createVerifier`. */
+/**
+ * A test seam: `/verify`'s verifier on checks of its own, {@link buildChecks} through
+ * `createVerifier`. `main()` builds the verifier from the checks it shares with `/settle`.
+ */
 export function buildVerifier(
   config: Config,
   rpc: Pick<FallbackRpc, "getLatestLedger">,
@@ -143,7 +145,13 @@ export function buildSettlement(
     ...deps.fees.pool,
     ...(deps.sleep && { sleep: deps.sleep }),
     onEvent: (event) => {
-      metrics.increment("pool_events_total", { type: event.type });
+      // `resolved` with its status: a pending settlement that ended, for the alarms in 0027.
+      metrics.increment(
+        "pool_events_total",
+        event.type === "resolved"
+          ? { type: event.type, status: event.result.status }
+          : { type: event.type },
+      );
       if (event.type === "resolved") {
         logger.info("settlement_resolved", {
           network: config.network,
@@ -169,18 +177,20 @@ export function buildSettlement(
 }
 
 /**
- * The composition root (AD-1): the only module that reads `process.env`. It validates the config
- * once and builds every part from it.
+ * Every part `main()` serves, built from the config: the stores, the cataloger, one RPC and one
+ * fee configuration shared by `/verify`, `/settle` and the pool. Tests pass their own `rpc`,
+ * `makeScheme` and pool `sleep`; `main()` passes none.
  */
-export async function main(env: Record<string, string | undefined> = process.env) {
-  const config = parseConfig(env);
-  // `/settle` spends on pubnet: not with a store a restart loses, no spend budgets and no lease.
-  if (config.network === STELLAR_NETWORKS.pubnet && config.store === "memory") {
-    throw new ConfigError([
-      "NETWORK stellar:pubnet needs a durable STORE; STORE=memory is for testnet only (0022)",
-    ]);
-  }
-  const logger = jsonLogger(config.logLevel);
+export function compose(
+  config: Config,
+  opts: {
+    logger: Logger;
+    rpc?: SorobanRpc;
+    makeScheme?: MakeScheme;
+    sleep?: (ms: number) => Promise<void>;
+  },
+): { deps: AppDeps; cataloger: Cataloger; metrics: Metrics } {
+  const { logger } = opts;
   // STORE=memory is the only option until the durable adapters land (0022).
   const stores = memoryStores();
   // Cataloging plugs into `/settle` through `extensionResponses` and `onSuccess` (AD-8).
@@ -191,11 +201,11 @@ export async function main(env: Record<string, string | undefined> = process.env
     metrics,
     allowHttp: config.catalog.allowHttp,
   });
-  const rpc = FallbackRpc.fromUrls(config.rpcUrls);
+  const rpc = opts.rpc ?? FallbackRpc.fromUrls(config.rpcUrls);
   // One fee configuration: `/verify` and `/settle` check with it, and the pool pays with it, so
   // they share one ceiling and one bid (AD-10).
   const fees = feeSettings(config.fees, rpc);
-  const checks = buildChecks(config, rpc, fees);
+  const checks = buildChecks(config, rpc, fees, opts.makeScheme);
   const { settle } = buildSettlement(config, {
     rpc,
     fees,
@@ -209,18 +219,40 @@ export async function main(env: Record<string, string | undefined> = process.env
     },
     logger,
     metrics,
+    ...(opts.sleep && { sleep: opts.sleep }),
   });
+  return {
+    deps: {
+      config,
+      logger,
+      stores,
+      verify: createVerifier(checks),
+      settle,
+      extensionResponses: cataloger.extensionResponses,
+    },
+    cataloger,
+    metrics,
+  };
+}
+
+/**
+ * The composition root (AD-1): the only module that reads `process.env`. It validates the config
+ * once and builds every part from it ({@link compose}).
+ */
+export async function main(env: Record<string, string | undefined> = process.env) {
+  const config = parseConfig(env);
+  // `/settle` spends on pubnet: not with a store a restart loses, no spend budgets and no lease.
+  if (config.network === STELLAR_NETWORKS.pubnet && config.store === "memory") {
+    throw new ConfigError([
+      "NETWORK stellar:pubnet needs a durable STORE; STORE=memory is for testnet only (0022)",
+    ]);
+  }
+  const logger = jsonLogger(config.logLevel);
+  const { deps, cataloger } = compose(config, { logger });
   // For the life of the process: an upstream call cut off by the deadline keeps running after
   // `close()`, and its error would reach stderr with the RPC URL in it.
   const restoreConsole = captureConsoleError(logger);
-  const started = await start({
-    config,
-    logger,
-    stores,
-    verify: createVerifier(checks),
-    settle,
-    extensionResponses: cataloger.extensionResponses,
-  }).catch((error: unknown) => {
+  const started = await start(deps).catch((error: unknown) => {
     restoreConsole();
     throw error;
   });

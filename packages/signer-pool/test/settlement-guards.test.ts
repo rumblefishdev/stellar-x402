@@ -4,6 +4,7 @@ import {
   LedgerBoundError,
   SettlementSubmitter,
   SignedHookError,
+  SourceAccountAuthError,
   attemptsOf,
   keypairSigner,
   type SubmitterOptions,
@@ -57,6 +58,33 @@ function setup(opts: Partial<SubmitterOptions> = {}, n = 1) {
 }
 
 const inner = (fake: FakeRpc, i = -1) => (fake.sent.at(i) as FeeBumpTransaction).innerTransaction;
+
+describe("source-account auth", () => {
+  it("refuses a call whose auth would authorize as the facilitator, before taking a channel", async () => {
+    const { fake, submitter, signer } = setup();
+    const entry = new xdr.SorobanAuthorizationEntry({
+      credentials: xdr.SorobanCredentials.sorobanCredentialsSourceAccount(),
+      rootInvocation: new xdr.SorobanAuthorizedInvocation({
+        function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
+          new xdr.InvokeContractArgs({
+            contractAddress: Address.fromString(
+              StrKey.encodeContract(Buffer.alloc(32, 9)),
+            ).toScAddress(),
+            functionName: "drain",
+            args: [],
+          }),
+        ),
+        subInvocations: [],
+      }),
+    });
+    await expect(submitter.submit({ ...call(), auth: [entry] })).rejects.toBeInstanceOf(
+      SourceAccountAuthError,
+    );
+    expect(signer.signs).toBe(0);
+    expect(fake.sent).toHaveLength(0);
+    expect(submitter.stats()).toMatchObject({ busy: 0, refused: { check: 1 } });
+  });
+});
 
 describe("onSigned", () => {
   it("is awaited before the first send", async () => {

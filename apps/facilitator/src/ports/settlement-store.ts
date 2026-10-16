@@ -98,7 +98,8 @@ export interface SettlementStore {
   /**
    * Compare-and-set on `successAnsweredAt`: sets it while the record is `success` and has none.
    * Resolves `true` for exactly one of several concurrent callers, the one whose answer may be
-   * `success` (AD-6).
+   * `success` (AD-6). It leaves `updatedAt` as it is: the mark records an answer, not a step of
+   * the lifecycle.
    */
   markSuccessAnswered(key: SettlementKey, at: number): Promise<boolean>;
   /**

@@ -12,14 +12,18 @@ import {
 } from "@stellar/stellar-sdk";
 import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import {
+  FallbackRpc,
   FeeLimitError,
   LedgerBoundError,
   NoChannelsError,
   QueueTimeoutError,
   RpcTimeoutError,
+  RpcUnavailableError,
   SignedHookError,
   SimulationCheckError,
   SimulationError,
+  SourceAccountAuthError,
+  type SorobanRpc,
   type SubmitOptions,
   type SubmitResult,
 } from "@stellar-x402/signer-pool";
@@ -304,7 +308,7 @@ describe("createSettler", () => {
     }
     expect(answers.filter((answer) => answer.afterResponse)).toHaveLength(1);
     expect(hooks.onFinal).toHaveBeenCalledTimes(1);
-    expect(metrics.value("settle_already_settled_total")).toBe(4);
+    expect(metrics.value("settlement_already_settled_total")).toBe(4);
   });
 
   it("answers a repeat after the success with already_settled and the hash, without submitting", async () => {
@@ -455,7 +459,7 @@ describe("createSettler", () => {
     });
     expect(answer.record).toBeUndefined();
     expect(submit).toHaveBeenCalledTimes(1);
-    expect(metrics.value("settle_nonce_reuse_total")).toBe(1);
+    expect(metrics.value("settlement_nonce_reuse_total")).toBe(1);
   });
 
   it.each([
@@ -529,6 +533,8 @@ describe("createSettler", () => {
     [new QueueTimeoutError("x"), "settle_exact_stellar_no_channel_in_time"],
     [new NoChannelsError("x"), "settle_exact_stellar_no_channels"],
     [new RpcTimeoutError("x"), "settle_exact_stellar_rpc_unavailable"],
+    [new RpcUnavailableError("x"), "settle_exact_stellar_rpc_unavailable"],
+    [new SourceAccountAuthError("x"), "invalid_exact_stellar_payload_unsupported_credential_type"],
     [new Error("rpc down"), "unexpected_settle_error"],
   ])("maps a thrown %s to a fixed reason and ends the record", async (error, reason) => {
     const { settle, store, hooks, metrics } = setup(async () => {
@@ -558,9 +564,15 @@ describe("createSettler", () => {
       errorReason: reason,
     });
     expect(lines.map((line) => JSON.parse(line))).toContainEqual(
-      expect.objectContaining({ event: "settlement_refused_after_verify", errorReason: reason }),
+      expect.objectContaining({
+        event: "settlement_refused_after_verify",
+        errorReason: reason,
+        stage: "check",
+      }),
     );
-    expect(metrics.value("settle_refused_after_verify_total", { reason })).toBe(1);
+    expect(metrics.value("settlement_refused_after_verify_total", { reason, stage: "check" })).toBe(
+      1,
+    );
   });
 
   it("warns and counts a fee or ledger refusal, which means the pool disagreed with /verify", async () => {
@@ -579,7 +591,9 @@ describe("createSettler", () => {
           errorReason: reason,
         }),
       );
-      expect(metrics.value("settle_refused_after_verify_total", { reason })).toBe(1);
+      expect(
+        metrics.value("settlement_refused_after_verify_total", { reason, stage: "pool" }),
+      ).toBe(1);
     }
     // Other refusals are not a drift between the two.
     const { settle, lines } = setup(async () => {
@@ -726,6 +740,180 @@ describe("createSettler", () => {
     expect(lines.join("")).toContain("settlement_hook_failed");
   });
 
+  it("answers rpc_unavailable when every RPC endpoint refuses the connection", async () => {
+    const refusing = {
+      getAccount: async () => {
+        throw Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:1"), {
+          code: "ECONNREFUSED",
+        });
+      },
+    } as unknown as SorobanRpc;
+    const rpc = new FallbackRpc([
+      { name: "a", rpc: refusing },
+      { name: "b", rpc: refusing },
+    ]);
+    // What the pool's sequence read passes on from `FallbackRpc`.
+    const error = await rpc.getAccount("G").catch((e: unknown) => e);
+    const { settle } = setup(async () => {
+      throw error;
+    });
+    expect((await settle(payload(), requirements)).response).toMatchObject({
+      errorReason: SETTLE_REASONS.rpcUnavailable,
+    });
+  });
+
+  it("counts every answer by its outcome", async () => {
+    const { settle, metrics } = setup();
+    await settle(payload(), requirements);
+    await settle(payload(), requirements);
+    expect(metrics.value("settlement_outcomes_total", { reason: "success", replay: "false" })).toBe(
+      1,
+    );
+    expect(
+      metrics.value("settlement_outcomes_total", {
+        reason: SETTLE_REASONS.alreadySettled,
+        replay: "true",
+      }),
+    ).toBe(1);
+  });
+
+  describe("when the store can't mark a success answered (ADR 0006)", () => {
+    it("answers the success: the payment landed", async () => {
+      const { settle, store, lines } = setup();
+      vi.spyOn(store, "markSuccessAnswered").mockRejectedValue(new Error("store down"));
+      const settled = await settle(payload(), requirements);
+      expect(settled.response).toEqual({ success: true, transaction: HASH, network, payer });
+      expect(settled.record).toMatchObject({ key, state: "success" });
+      expect(lines.join("")).toContain("settlement_record_failed");
+    });
+
+    it("answers it once in this process, to concurrent and later repeats alike", async () => {
+      const { settle, store } = setup();
+      // The mark hangs: each caller waits at most the store's grace.
+      vi.spyOn(store, "markSuccessAnswered").mockImplementation(() => new Promise(() => {}));
+      const first = await settle(payload(), requirements);
+      expect(first.response.success).toBe(true);
+      const repeats = await Promise.all([1, 2, 3].map(() => settle(payload(), requirements)));
+      expect(repeats.map(({ response }) => response)).toEqual([
+        alreadySettled,
+        alreadySettled,
+        alreadySettled,
+      ]);
+    });
+
+    it("answers concurrent callers once while the mark is in flight", async () => {
+      const { settle, store } = setup(async (opts) => {
+        await delay(10);
+        return landing()(opts);
+      });
+      vi.spyOn(store, "markSuccessAnswered").mockImplementation(() => new Promise(() => {}));
+      const answers = await Promise.all([1, 2, 3].map(() => settle(payload(), requirements)));
+      expect(answers.map(({ response }) => response.success).sort()).toEqual([false, false, true]);
+    });
+
+    it("answers a success from the pool's result once too, when the store failed to record it", async () => {
+      const { settle, store } = setup();
+      vi.spyOn(store, "transition").mockRejectedValue(new Error("store down"));
+      expect((await settle(payload(), requirements)).response.success).toBe(true);
+      // The record stays `signed` until 0019; say it turned `success` anyway.
+      const get = store.get.bind(store);
+      vi.spyOn(store, "get").mockImplementation(async (k) => {
+        const record = await get(k);
+        return record && { ...record, state: "success" };
+      });
+      vi.spyOn(store, "markSuccessAnswered").mockResolvedValue(true);
+      expect((await settle(payload(), requirements)).response).toEqual(alreadySettled);
+    });
+  });
+
+  it("answers pending with the hash of an uncertain send when the store fails, its reads too", async () => {
+    const { settle, store } = setup(async (opts) => {
+      await opts.onSigned?.(HASH);
+      throw Object.assign(new Error("connection reset"), {
+        attempts: [{ hash: HASH, sent: "unknown" }],
+      });
+    });
+    // The known-key lookup works; every read after the send doesn't.
+    const get = store.get.bind(store);
+    vi.spyOn(store, "get").mockImplementationOnce(get).mockRejectedValue(new Error("store down"));
+    expect((await settle(payload(), requirements)).response).toEqual({
+      success: false,
+      errorReason: SETTLE_REASONS.pending,
+      payer,
+      transaction: HASH,
+      network,
+    });
+  });
+
+  it.each([
+    ["failed", SETTLE_REASONS.failed],
+    ["pending", SETTLE_REASONS.pending],
+  ] as const)(
+    "answers a %s result with its hash when the store fails to record it",
+    async (status, errorReason) => {
+      const { settle, store } = setup(landing(status));
+      vi.spyOn(store, "transition").mockRejectedValue(new Error("store down"));
+      const settled = await settle(payload(), requirements);
+      expect(settled.response).toEqual({
+        success: false,
+        errorReason,
+        payer,
+        transaction: HASH,
+        network,
+      });
+      expect(settled.record).toBeUndefined();
+    },
+  );
+
+  describe("a repeat while the store fails", () => {
+    /** A first call that ends `pending` with the hash, then the store as `fail` sets it. */
+    async function pendingThen(fail: (store: MemorySettlementStore) => void) {
+      const s = setup(landing("pending"), { settleTimeoutMs: 30, storeGraceMs: 20 });
+      await s.settle(payload(), requirements);
+      const get = s.store.get.bind(s.store);
+      const spy = vi.spyOn(s.store, "get").mockImplementationOnce(get);
+      fail(s.store);
+      return { ...s, spy };
+    }
+
+    it("keeps the last record when a poll's read fails, and logs it", async () => {
+      const { settle, lines } = await pendingThen((store) =>
+        vi.mocked(store.get).mockRejectedValue(new Error("store down")),
+      );
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.pending,
+        transaction: HASH,
+      });
+      expect(lines.join("")).toContain("settlement_record_failed");
+    });
+
+    it("answers within the settle timeout and the grace when a poll's read hangs", async () => {
+      const { settle } = await pendingThen((store) =>
+        vi.mocked(store.get).mockImplementation(() => new Promise(() => {})),
+      );
+      const answer = await Promise.race([
+        settle(payload(), requirements).then(({ response }) => response),
+        delay(1_000).then(() => "hung"),
+      ]);
+      expect(answer).toMatchObject({ errorReason: SETTLE_REASONS.pending, transaction: HASH });
+    });
+
+    it("never says sign a new payment for an unsigned record it couldn't end", async () => {
+      // The refusal couldn't be stored, so the record stays `claimed` with no hash.
+      const s = setup(landing(), { budgetMs: 50 });
+      s.hooks.beforeSubmit.mockResolvedValueOnce({ allow: false, errorReason: "over_budget" });
+      vi.spyOn(s.store, "transition").mockRejectedValue(new Error("store down"));
+      await s.settle(payload(), requirements);
+      await delay(60);
+      // The repeat can't end it either: the record may still be signed elsewhere.
+      expect((await s.settle(payload(), requirements)).response).toMatchObject({
+        success: false,
+        errorReason: SETTLE_REASONS.pending,
+        transaction: "",
+      });
+    });
+  });
+
   describe("settle budget (ADR 0011)", () => {
     it("answers settlement_pending with the hash once the budget runs out after signing, and catalogs a late success", async () => {
       let land!: () => void;
@@ -790,7 +978,7 @@ describe("createSettler", () => {
         errorReason: SETTLE_REASONS.timeout,
       });
       expect(hooks.onFinal).toHaveBeenCalledTimes(1);
-      expect(metrics.value("settle_budget_exhausted_total", { signed: "false" })).toBe(1);
+      expect(metrics.value("settlement_budget_exhausted_total", { signed: "false" })).toBe(1);
     });
 
     it("never sends what it answered as timed out: the late onSigned rejects", async () => {
@@ -911,10 +1099,128 @@ describe("createSettler", () => {
         const started = Date.now();
         const { response } = await s.settle(payload(), requirements);
         expect(response, name).toMatchObject({ errorReason: SETTLE_REASONS.timeout });
-        // The budget, then at most the store's grace (20 ms here).
-        expect(Date.now() - started, name).toBeLessThan(150);
+        // The budget (30 ms), then at most the store's grace (20 ms): not a hang. The bound is
+        // loose for a loaded runner.
+        expect(Date.now() - started, name).toBeLessThan(1_000);
         expect(s.submit, name).not.toHaveBeenCalled();
       }
+    });
+
+    it("answers a timeout without claiming when the checks outlast the budget", async () => {
+      // E.g. upstream verify failing over across every RPC URL, then the ledger read.
+      const slow: Check = () => new Promise(() => {});
+      const { settle, store, submit } = setup(landing(), { budgetMs: 30, check: slow });
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        success: false,
+        errorReason: SETTLE_REASONS.timeout,
+      });
+      expect(submit).not.toHaveBeenCalled();
+      // Nothing is recorded, so the same payment can be sent again as it is.
+      expect(await store.get(key)).toBeUndefined();
+    });
+
+    it("answers a timeout without claiming when the checks end just as the budget does", async () => {
+      let time = 0;
+      const check: Check = async (p, r) => {
+        time = 5_000;
+        return passing(p, r);
+      };
+      const { settle, store } = setup(landing(), { check, now: () => time });
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.timeout,
+      });
+      expect(await store.get(key)).toBeUndefined();
+    });
+
+    it("gives the claim at least the store's grace when the checks left almost no budget", async () => {
+      let time = 0;
+      const check: Check = async (p, r) => {
+        time = 4_999;
+        return passing(p, r);
+      };
+      const { settle, store } = setup(landing(), { check, now: () => time });
+      // A real store's claim takes a few ms; a 1 ms bound would make it a 500 that still lands.
+      const claim = store.claim.bind(store);
+      vi.spyOn(store, "claim").mockImplementation(async (settlement) => {
+        await delay(5);
+        return claim(settlement);
+      });
+      await expect(settle(payload(), requirements)).resolves.toBeDefined();
+      expect(await store.get(key)).toBeDefined();
+    });
+
+    it("runs onFinal only after a beforeSubmit past the budget settles, so a late reservation is released", async () => {
+      const order: string[] = [];
+      let answer!: () => void;
+      const { settle, hooks } = setup(landing(), { budgetMs: 30 });
+      hooks.beforeSubmit.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            answer = () => {
+              order.push("reserved");
+              resolve({ allow: true });
+            };
+          }),
+      );
+      hooks.onFinal.mockImplementation(async () => {
+        order.push("onFinal");
+      });
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.timeout,
+      });
+      await delay(10);
+      expect(hooks.onFinal).not.toHaveBeenCalled();
+      answer();
+      await vi.waitFor(() => expect(order).toEqual(["reserved", "onFinal"]));
+    });
+
+    it("sends no hash whose write ended after the budget answer named another", async () => {
+      let signed: unknown = "not called";
+      const { settle, store } = setup(
+        async (opts) => {
+          signed = await Promise.resolve(opts.onSigned!(HASH)).then(
+            () => "stored",
+            (error: unknown) => error,
+          );
+          return new Promise(() => {});
+        },
+        { budgetMs: 30 },
+      );
+      // The hash is stored at once, but the store answers only after the budget.
+      const addHash = store.addHash.bind(store);
+      vi.spyOn(store, "addHash").mockImplementation(async (...args) => {
+        const added = await addHash(...args);
+        await delay(60);
+        return added;
+      });
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.pending,
+        transaction: HASH,
+      });
+      await vi.waitFor(() => expect(signed).toBeInstanceOf(Error));
+    });
+
+    it("ends a repeat's wait by its own budget, after a slow lookup", async () => {
+      let time = 0;
+      const { settle, store } = setup(landing("pending"), {
+        budgetMs: 100,
+        settleTimeoutMs: 100,
+        now: () => time,
+        sleep: async (ms) => {
+          time += ms;
+        },
+      });
+      await settle(payload(), requirements);
+      // The repeat's known-key lookup takes 40 of its 100 ms.
+      const get = store.get.bind(store);
+      vi.spyOn(store, "get").mockImplementationOnce(async (k) => {
+        time += 40;
+        return get(k);
+      });
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.pending,
+      });
+      expect(time).toBeLessThanOrEqual(105);
     });
 
     it("submits nothing when the checks and beforeSubmit used up the budget", async () => {

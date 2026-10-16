@@ -46,6 +46,13 @@ export const MUXED_FACILITATOR_REASON = "invalid_exact_stellar_payload_facilitat
  * (AD-6). Upstream de-duplicates signers and doesn't count entries.
  */
 export const PAYER_AUTH_REASON = "invalid_exact_stellar_payload_payer_auth_entries";
+/**
+ * Upstream's code for an auth entry without address credentials. A source-account entry
+ * authorizes as the transaction's operation source, which the pool makes the facilitator, so we
+ * refuse it too instead of trusting only upstream's check.
+ */
+export const UNSUPPORTED_CREDENTIAL_REASON =
+  "invalid_exact_stellar_payload_unsupported_credential_type";
 
 /** Upstream's code for an exception inside its `verify()`. */
 const UNEXPECTED_VERIFY_ERROR = "unexpected_verify_error";
@@ -70,10 +77,9 @@ export type Verify = (
 
 /**
  * The `exact` verification `/verify` answers with and `/settle` (0009) runs again (AD-3): the
- * network and envelope checks, upstream `verify()`, then the channel check (AD-5, with the
- * facilitator's muxed address), the payer's one auth entry (AD-6), then the validity check
- * (AD-22). The first rejection is the
- * answer. Errors are thrown, not answered: ours (the ledger read), upstream's, which it reports as
+ * network and envelope checks, upstream `verify()`, then address credentials only, the channel
+ * check (AD-5, with the facilitator's muxed address), the payer's one auth entry (AD-6), then the
+ * validity check (AD-22). The first rejection is the answer. Errors are thrown, not answered: ours (the ledger read), upstream's, which it reports as
  * `unexpected_verify_error`, and an upstream call past `upstreamTimeoutMs`.
  */
 export function createVerifier(deps: VerifierDeps): Verify {
@@ -136,6 +142,15 @@ export function createChecker(deps: VerifierDeps): Check {
       (payload.payload as { transaction: string }).transaction,
       getNetworkPassphrase(deps.network),
     );
+    if (hasSourceAccountAuth(transaction)) {
+      return {
+        response: invalid(
+          UNSUPPORTED_CREDENTIAL_REASON,
+          upstream.payer,
+          "every auth entry must have address credentials",
+        ),
+      };
+    }
     const problem = channelProblem(transaction, accounts);
     if (problem) {
       const isFacilitator = problem.account === deps.facilitator;
@@ -246,6 +261,17 @@ export function channelProblem(
     }
   }
   return undefined;
+}
+
+/** Whether any auth entry lacks address credentials, e.g. a source-account entry. */
+export function hasSourceAccountAuth(transaction: Transaction): boolean {
+  return transaction.operations.some(
+    (operation) =>
+      operation.type === "invokeHostFunction" &&
+      (operation.auth ?? []).some(
+        (entry) => getAddressCredentials(entry.credentials()) === undefined,
+      ),
+  );
 }
 
 /** The int64 nonce of the payer's one auth entry, as a decimal string (AD-6). */

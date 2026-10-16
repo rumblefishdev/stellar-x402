@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
 import { MemorySettlementStore } from "../src/adapters/memory.js";
 import { parseConfig, type Env } from "../src/config.js";
 import { jsonLogger } from "../src/logger.js";
-import { buildChecks, buildSettlement } from "../src/main.js";
+import { buildChecks, buildSettlement, compose } from "../src/main.js";
 import { memoryMetrics } from "../src/metrics.js";
 import { feeSettings } from "../src/settlement/fees.js";
 import { SETTLE_REASONS } from "../src/settlement/settle.js";
@@ -82,7 +82,7 @@ class PaymentRpc extends FakeRpc {
 }
 
 /** A `transfer` from the payer, with its one auth entry valid to `expiration`. */
-function payload(expiration: number): PaymentPayload {
+function payload(expiration: number, extensions?: Record<string, unknown>): PaymentPayload {
   const auth = new xdr.SorobanAuthorizationEntry({
     credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(
       new xdr.SorobanAddressCredentials({
@@ -121,7 +121,12 @@ function payload(expiration: number): PaymentPayload {
     )
     .setTimeout(60)
     .build();
-  return { x402Version: 2, accepted: requirements, payload: { transaction: transaction.toXDR() } };
+  return {
+    x402Version: 2,
+    accepted: requirements,
+    payload: { transaction: transaction.toXDR() },
+    ...(extensions && { resource: { url: "https://seller.example/users/42" }, extensions }),
+  } as PaymentPayload;
 }
 
 function setup(env: Partial<Env> = {}) {
@@ -183,5 +188,47 @@ describe("main()'s /settle wiring, with the real pool", () => {
     fake.accountDelayMs = 1_500;
     const { response } = await settle(payload(fake.ledger + 30), requirements);
     expect(response).toMatchObject({ success: true });
+  });
+});
+
+describe("main()'s composition (compose)", () => {
+  function composed() {
+    const config = parseConfig({
+      FACILITATOR_SECRET: facilitator.secret(),
+      CHANNELS: channel,
+      MAX_FEE_STROOPS: String(MAX_FEE),
+    });
+    const fake = new PaymentRpc({ [channel]: 1_000n });
+    fake.feeStats = {
+      sorobanInclusionFee: { p90: String(BID) },
+    } as unknown as NonNullable<FakeRpc["feeStats"]>;
+    const { deps, cataloger, metrics } = compose(config, {
+      logger: jsonLogger("error", () => {}),
+      rpc: fake,
+      makeScheme: () => ({ verify: async () => ({ isValid: true, payer }) }),
+      sleep: async () => {},
+    });
+    return { deps, cataloger, metrics, fake };
+  }
+  const bazaar = { info: { input: { type: "http", method: "GET" } }, routeTemplate: "/users/:id" };
+
+  it("gives a success the cataloger's header, and catalogs it after the response", async () => {
+    const { deps, cataloger, fake } = composed();
+    const settled = await deps.settle(payload(fake.ledger + 30, { bazaar }), requirements);
+    expect(settled.response).toMatchObject({ success: true });
+    expect(deps.extensionResponses(settled.record!)).toEqual({ bazaar: { status: "processing" } });
+    settled.afterResponse!();
+    await cataloger.drain();
+    const { items } = await deps.stores.catalog.list({ limit: 10, offset: 0 });
+    expect(items).toHaveLength(1);
+  });
+
+  it("reads the fee-stats bid once for /verify, /settle and the pool (AD-10)", async () => {
+    const { deps, fake } = composed();
+    const p = payload(fake.ledger + 30);
+    expect(await deps.verify(p, requirements)).toMatchObject({ isValid: true });
+    expect((await deps.settle(p, requirements)).response).toMatchObject({ success: true });
+    // One provider, read again only after 30 s: a second fee configuration would read it again.
+    expect(fake.calls.getFeeStats).toBe(1);
   });
 });

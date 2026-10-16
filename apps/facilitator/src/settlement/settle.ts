@@ -14,9 +14,11 @@ import {
   NoChannelsError,
   QueueTimeoutError,
   RpcTimeoutError,
+  RpcUnavailableError,
   SignedHookError,
   SimulationCheckError,
   SimulationError,
+  SourceAccountAuthError,
   attemptsOf,
   type ContractCall,
   type SubmitOptions,
@@ -34,11 +36,19 @@ import {
   type SettlementUpdate,
 } from "../ports/index.js";
 import type { BeforeSubmitResult, SettlementHooks, SettlementOrigin } from "./hooks.js";
-import { PAYER_AUTH_REASON, payerNonce, type Check, type Verified } from "./verify.js";
+import {
+  PAYER_AUTH_REASON,
+  UNSUPPORTED_CREDENTIAL_REASON,
+  payerNonce,
+  type Check,
+  type Verified,
+} from "./verify.js";
 
 /**
- * Every `errorReason` `/settle` sends besides upstream's verify reasons (AD-6). Two are upstream's
- * own settle codes for the same outcome.
+ * Every `errorReason` `/settle` sends besides the reasons of the `/verify` checks (AD-6). Three are
+ * upstream's own settle codes for the same outcome (`failed`, `rejected`, `unexpected`), and
+ * `pending` is `@x402/core`'s. `payerAuth` and `unsupportedCredential` are `/verify` reasons too:
+ * `/settle` sends them from its own re-check, and the pool's guard gives the second.
  */
 export const SETTLE_REASONS = {
   /** Sent, not final by the time bound (the RPC stopped answering) or the settle budget. */
@@ -77,13 +87,18 @@ export const SETTLE_REASONS = {
    * its hash. The resource was paid for once, so it is served once.
    */
   alreadySettled: "settle_exact_stellar_already_settled",
-  /** The settle budget ran out before anything was signed. The record ends; sign a new payment. */
+  /**
+   * The settle budget ran out before anything was signed: nothing was or will be sent for this
+   * payment. Sign a new payment.
+   */
   timeout: "settle_exact_stellar_timeout",
   /**
-   * No RPC endpoint answered before anything was signed. Not a bug: sign a new payment and try
-   * again later.
+   * No RPC endpoint answered before anything was signed (every one refused, failed or timed
+   * out). Not a bug: sign a new payment and try again later.
    */
   rpcUnavailable: "settle_exact_stellar_rpc_unavailable",
+  /** An auth entry with source-account credentials would authorize as the facilitator (AD-5). */
+  unsupportedCredential: UNSUPPORTED_CREDENTIAL_REASON,
   /** Anything else (upstream's code). */
   unexpected: "unexpected_settle_error",
 } as const;
@@ -228,12 +243,23 @@ export function createSettler(deps: SettlerDeps): Settle {
 
   /**
    * A refusal that means the pool, or `/settle`'s own re-check, disagreed with a `/verify` that
-   * accepted (decision 10). The answer stays; it is logged and counted.
+   * accepted (0009 decision 10). The answer stays; it is logged and counted. `stage` tells them
+   * apart: a `check` refusal may come from a payload `/verify` never saw, so anyone can raise it,
+   * while a `pool` one comes after the checks passed. Alarms watch `pool`.
    */
-  const flagDrift = (key: SettlementKey | undefined, errorReason: string | undefined) => {
+  const flagDrift = (
+    key: SettlementKey | undefined,
+    errorReason: string | undefined,
+    stage: "check" | "pool",
+  ) => {
     if (errorReason === undefined || !REFUSED_AFTER_VERIFY.has(errorReason)) return;
-    logger.warn("settlement_refused_after_verify", { network, settlementKey: key, errorReason });
-    metrics.increment("settle_refused_after_verify_total", { reason: errorReason });
+    logger.warn("settlement_refused_after_verify", {
+      network,
+      settlementKey: key,
+      errorReason,
+      stage,
+    });
+    metrics.increment("settlement_refused_after_verify_total", { reason: errorReason, stage });
   };
 
   /** Runs a hook without letting it reach the caller (hooks.ts). */
@@ -279,12 +305,13 @@ export function createSettler(deps: SettlerDeps): Settle {
 
   /**
    * Ends a record nothing was signed for: `claimed → rejected` with `…_timeout`, by
-   * compare-and-set (ADR 0011, decision 11). `addHash` then refuses it, so nothing is signed and
-   * sent after the answer; `onFinal` runs for the writer that ended it. A record with a hash stays
-   * open. Never throws: the record as stored, or `undefined` if the store didn't answer within
-   * `storeGraceMs`.
+   * compare-and-set (ADR 0011, 0009 decision 11). `addHash` then refuses it, so nothing is signed
+   * and sent after the answer; `onFinal` runs for the writer that ended it, once `after` (a
+   * `beforeSubmit` still running) has settled, so a late reservation is released too. A record
+   * with a hash stays open. Never throws: the record as stored, or `undefined` if the store didn't
+   * answer within `storeGraceMs`, when nothing is known about it.
    */
-  const endUnsigned = async (key: SettlementKey) => {
+  const endUnsigned = async (key: SettlementKey, after?: Promise<unknown>) => {
     try {
       return await bounded(
         (async () => {
@@ -293,7 +320,10 @@ export function createSettler(deps: SettlerDeps): Settle {
             errorReason: SETTLE_REASONS.timeout,
             updatedAt: now(),
           });
-          if (ended) onFinal(ended, "settle");
+          if (ended && after) {
+            const run = () => onFinal(ended, "settle");
+            after.then(run, run);
+          } else if (ended) onFinal(ended, "settle");
           return ended ?? (await store.get(key));
         })(),
         storeGraceMs,
@@ -305,10 +335,20 @@ export function createSettler(deps: SettlerDeps): Settle {
   };
 
   /**
+   * Keys whose success this process is answering, or answered without the store's mark: a mark
+   * in flight, a mark that failed, or a success answered from the pool's result when the store
+   * failed. Checked before the store, so one process answers a success once even while the store
+   * is down (0009 decision 29). Keys leave once the store holds the mark (or refused it).
+   */
+  const answeredHere = new Set<SettlementKey>();
+
+  /**
    * The answer for `record`. A `success` is answered once (AD-6): the caller that marks it gets
    * `success: true` and the record, for the `EXTENSION-RESPONSES` header; every later one gets
    * `…_already_settled` with the hash, so one payment unlocks one response. A caller whose client
-   * already left marks nothing, so the client's retry still gets the success.
+   * already left marks nothing, so the client's retry still gets the success. When the store
+   * can't mark, the payment still landed, so the caller gets the success (ADR 0006): after the
+   * store recovers, or on another instance, a repeat may get a second one until 0019.
    */
   const respond = async (
     record: SettlementRecord,
@@ -319,16 +359,21 @@ export function createSettler(deps: SettlerDeps): Settle {
     if (record.state !== "success") return { ...settled, response: answer(record) };
     if (signal?.aborted) return { ...settled, response: answer(record) };
     const answeredAt = now();
-    let first: boolean;
-    try {
-      first = await bounded(store.markSuccessAnswered(record.key, answeredAt), storeGraceMs);
-    } catch (error) {
-      // The payment landed; a store that can't say whether it was answered gets the success.
-      recordFailed(record.key, error);
-      first = true;
+    let first = !answeredHere.has(record.key);
+    if (first) {
+      answeredHere.add(record.key);
+      try {
+        first = await bounded(store.markSuccessAnswered(record.key, answeredAt), storeGraceMs);
+        answeredHere.delete(record.key);
+      } catch (error) {
+        // The payment landed; a store that can't say whether it was answered gets the success.
+        // The key stays here, so this process doesn't answer it again.
+        recordFailed(record.key, error);
+        first = true;
+      }
     }
     if (!first) {
-      metrics.increment("settle_already_settled_total");
+      metrics.increment("settlement_already_settled_total");
       return {
         ...settled,
         response: failure(
@@ -398,6 +443,9 @@ export function createSettler(deps: SettlerDeps): Settle {
             // Durable before the first send (AD-16); a final or missing record stops the send.
             if (!(await store.addHash(key, hash, now())))
               throw new Error("the settlement record is final or missing");
+            // The budget answer may have gone out while the store wrote: it named the hash it
+            // could read, so this one isn't sent.
+            if (call.budgetOver) throw new Error("the settle budget ran out");
           },
           deadline,
           maxLedger: verified.expirationLedger,
@@ -426,7 +474,7 @@ export function createSettler(deps: SettlerDeps): Settle {
           metrics.increment("settlement_submit_failures_total");
         }
         // The answer is the same fixed reason, and the client needs a new payment.
-        flagDrift(key, errorReason);
+        flagDrift(key, errorReason, "pool");
         return await finish(key, { state: "rejected", errorReason }, call.origin);
       }
       const fields = {
@@ -458,7 +506,8 @@ export function createSettler(deps: SettlerDeps): Settle {
       let fallback: Omit<Settled, "key"> | undefined;
       if (result) {
         // A success still carries the header (0031): the record as it would have been stored.
-        // Without a stored record there is no `markSuccessAnswered` and no `onSuccess`.
+        // Without a stored record there is no `markSuccessAnswered` and no `onSuccess`, so the
+        // key goes in `answeredHere` instead.
         const record: SettlementRecord | undefined =
           result.status === "success"
             ? {
@@ -471,6 +520,7 @@ export function createSettler(deps: SettlerDeps): Settle {
                 updatedAt: now(),
               }
             : undefined;
+        if (record) answeredHere.add(key);
         fallback = { response: answerResult(result, verified.payer), record };
       } else if (uncertain) {
         fallback = {
@@ -478,7 +528,10 @@ export function createSettler(deps: SettlerDeps): Settle {
         };
       }
       return {
-        record: await store.get(key).catch(() => undefined),
+        record: await store.get(key).catch((readError: unknown) => {
+          recordFailed(key, readError);
+          return undefined;
+        }),
         won: false,
         origin: call.origin,
         fallback,
@@ -496,7 +549,10 @@ export function createSettler(deps: SettlerDeps): Settle {
     if (!read) {
       read = sleep(pollMs)
         .then(() => bounded(store.get(key), storeGraceMs))
-        .catch(() => undefined)
+        .catch((error: unknown) => {
+          recordFailed(key, error);
+          return undefined;
+        })
         .finally(() => reads.delete(key));
       reads.set(key, read);
     }
@@ -507,17 +563,21 @@ export function createSettler(deps: SettlerDeps): Settle {
    * A repeat call: the stored outcome, waiting a while for a record that isn't final. A record
    * with a hash waits up to `settleTimeoutMs`. One without can be signed only until the first
    * call's budget, which began at the claim: past it the repeat ends the record itself
-   * ({@link endUnsigned}), so it answers `…_timeout` only for what will never be sent. A repeat
+   * ({@link endUnsigned}), so it answers `…_timeout` only for what will never be sent. If the
+   * store can't end it, nothing is known, so the answer is `settlement_pending` with no hash:
+   * repeat the same payment. Both waits end by this call's own budget (`startedAt`), and a repeat
    * whose client left stops waiting.
    */
   const replay = async (
     existing: SettlementRecord,
     fingerprint: string,
     signal: AbortSignal | undefined,
+    startedAt: number,
   ): Promise<Settled> => {
     const { key } = existing;
     if (existing.fingerprint !== fingerprint) {
-      metrics.increment("settle_nonce_reuse_total");
+      // Counted before any check: a forged body can raise it.
+      metrics.increment("settlement_nonce_reuse_total");
       // Never the outcome, but the hash, so a payment that landed can be reconciled on chain.
       return {
         key,
@@ -531,19 +591,33 @@ export function createSettler(deps: SettlerDeps): Settle {
       };
     }
     let record = existing;
-    const pendingUntil = now() + deps.settleTimeoutMs;
-    const unsignedUntil = existing.createdAt + deps.budgetMs;
+    const ownEnd = startedAt + deps.budgetMs;
+    const pendingUntil = Math.min(now() + deps.settleTimeoutMs, ownEnd);
+    const unsignedUntil = Math.min(existing.createdAt + deps.budgetMs, ownEnd);
     const until = () => (record.hashes.length > 0 ? pendingUntil : unsignedUntil);
     while (!isFinal(record) && now() < until() && !signal?.aborted) {
       record = (await nextRead(key)) ?? record;
     }
     if (!isFinal(record) && record.hashes.length === 0 && !signal?.aborted) {
-      record = (await endUnsigned(key)) ?? record;
+      const ended = await endUnsigned(key);
+      // The store didn't answer: the record may still be signed, so never "sign a new payment".
+      if (!ended) {
+        return {
+          key,
+          replay: true,
+          response: failure(
+            SETTLE_REASONS.pending,
+            record.payer,
+            "the settlement record could not be read: repeat the same payment",
+          ),
+        };
+      }
+      record = ended;
     }
     return respond(record, signal, { replay: true });
   };
 
-  return async (payload, requirements, signal) => {
+  const settle: Settle = async (payload, requirements, signal) => {
     const startedAt = now();
     const left = () => deps.budgetMs - (now() - startedAt);
     const fingerprint = fingerprintOf(payload, requirements);
@@ -553,11 +627,21 @@ export function createSettler(deps: SettlerDeps): Settle {
     // Before the claim, a store that fails or doesn't answer within the budget is a 500.
     const known = requirements.network === network ? keyOf(payload, network) : undefined;
     const existing = known && (await bounded(store.get(known), left()));
-    if (existing) return replay(existing, fingerprint, signal);
+    if (existing) return replay(existing, fingerprint, signal, startedAt);
 
-    const { response: verdict, verified } = await deps.check(payload, requirements);
+    // Nothing is claimed yet, so a budget that runs out here records nothing: the same payment
+    // may be sent again as it is.
+    const unclaimed = () => ({ response: failure(SETTLE_REASONS.timeout, undefined) });
+    let checked: Awaited<ReturnType<Check>>;
+    try {
+      checked = await bounded(deps.check(payload, requirements), left());
+    } catch (error) {
+      if (error instanceof OutOfTimeError) return unclaimed();
+      throw error;
+    }
+    const { response: verdict, verified } = checked;
     if (!verified) {
-      flagDrift(undefined, verdict.invalidReason);
+      flagDrift(undefined, verdict.invalidReason, "check");
       return {
         response: failure(
           verdict.invalidReason ?? SETTLE_REASONS.unexpected,
@@ -568,6 +652,9 @@ export function createSettler(deps: SettlerDeps): Settle {
     }
     const { payer, nonce } = verified;
     const key: SettlementKey = `${network}:${payer}:${nonce}`;
+    if (left() <= 0) return unclaimed();
+    // At least the store's grace: a claim cut off by a 0 ms bound may still land. A claim past
+    // it is a 500, and the client's repeat finds the record.
     const claim = await bounded(
       store.claim({
         key,
@@ -579,9 +666,9 @@ export function createSettler(deps: SettlerDeps): Settle {
         paymentRequirements: requirements,
         createdAt: startedAt,
       }),
-      left(),
+      Math.max(left(), storeGraceMs),
     );
-    if (!claim.claimed) return replay(claim.existing, fingerprint, signal);
+    if (!claim.claimed) return replay(claim.existing, fingerprint, signal, startedAt);
 
     const call: Call = { budgetOver: false, origin: "settle" };
     /**
@@ -589,12 +676,12 @@ export function createSettler(deps: SettlerDeps): Settle {
      * `rejected`, a signed one is `settlement_pending` with its hash, and a submission that is
      * already signed goes on. If the store doesn't answer, the answer is what this call knows.
      */
-    const outOfBudget = async (): Promise<Settled> => {
+    const outOfBudget = async (hook?: Promise<unknown>): Promise<Settled> => {
       call.budgetOver = true;
       call.origin = "resolved";
-      const record = await endUnsigned(key);
+      const record = await endUnsigned(key, hook);
       const signed = record ? record.hashes.length > 0 : call.signing !== undefined;
-      metrics.increment("settle_budget_exhausted_total", { signed: String(signed) });
+      metrics.increment("settlement_budget_exhausted_total", { signed: String(signed) });
       if (record) return respond(record, signal);
       return {
         key,
@@ -605,26 +692,26 @@ export function createSettler(deps: SettlerDeps): Settle {
     };
 
     // AD-18: spend budgets may refuse. A refusal ends the record without `onFinal` (hooks.ts). A
-    // hook that doesn't answer within the budget ends it as the budget does, with `onFinal`.
+    // hook that doesn't answer within the budget ends it as the budget does, with `onFinal` once
+    // the hook has settled, so a reservation it makes late is released.
     let verdictOfHook: BeforeSubmitResult;
+    let hook: Promise<BeforeSubmitResult> | undefined;
     try {
-      verdictOfHook = await bounded(
-        deps.hooks.beforeSubmit({
-          key,
-          network,
-          payer,
-          payTo: requirements.payTo,
-          asset: requirements.asset,
-          amount: BigInt(requirements.amount),
-          maxFeeStroops: deps.maxFeeStroops,
-          paymentPayload: payload,
-          paymentRequirements: requirements,
-          now: now(),
-        }),
-        left(),
-      );
+      hook = deps.hooks.beforeSubmit({
+        key,
+        network,
+        payer,
+        payTo: requirements.payTo,
+        asset: requirements.asset,
+        amount: BigInt(requirements.amount),
+        maxFeeStroops: deps.maxFeeStroops,
+        paymentPayload: payload,
+        paymentRequirements: requirements,
+        now: now(),
+      });
+      verdictOfHook = await bounded(hook, left());
     } catch (error) {
-      if (error instanceof OutOfTimeError) return outOfBudget();
+      if (error instanceof OutOfTimeError) return outOfBudget(hook);
       hookFailed("beforeSubmit", key, error);
       verdictOfHook = { allow: false, errorReason: SETTLE_REASONS.refused };
     }
@@ -660,6 +747,18 @@ export function createSettler(deps: SettlerDeps): Settle {
       if (record?.state === "success" && won) onSuccess(record, origin);
     });
     return outOfBudget();
+  };
+
+  // Every answer by outcome (0027): `success`, or the `errorReason`. A thrown error is the
+  // route's 500.
+  return async (payload, requirements, signal) => {
+    const settled = await settle(payload, requirements, signal);
+    const { response } = settled;
+    metrics.increment("settlement_outcomes_total", {
+      reason: response.success ? "success" : (response.errorReason ?? SETTLE_REASONS.unexpected),
+      replay: String(settled.replay ?? false),
+    });
+    return settled;
   };
 }
 
@@ -711,7 +810,9 @@ export function reasonFor(error: unknown): string {
   if (error instanceof SignedHookError) return SETTLE_REASONS.recordWrite;
   if (error instanceof QueueTimeoutError) return SETTLE_REASONS.noChannelInTime;
   if (error instanceof NoChannelsError) return SETTLE_REASONS.noChannels;
-  if (error instanceof RpcTimeoutError) return SETTLE_REASONS.rpcUnavailable;
+  if (error instanceof RpcTimeoutError || error instanceof RpcUnavailableError)
+    return SETTLE_REASONS.rpcUnavailable;
+  if (error instanceof SourceAccountAuthError) return SETTLE_REASONS.unsupportedCredential;
   return SETTLE_REASONS.unexpected;
 }
 
