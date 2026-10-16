@@ -130,6 +130,11 @@ C1–C4 and C6 held; the new 60 s retry was where the problems were.
   `reason: "unexpected_verify_error"`) and a hung first URL (`reason: "timeout"`). All three
   passed `validPayment` and `channelRejected`; the two failover runs also `failedOver`, answered by
   `RPC_URLS[1]`.
+- 2026-10-16, on the pushed head `8666c53` (third review, A14), fresh friendbot accounts: plain
+  `RPC_URLS` (answered by `RPC_URLS[0]`, no switch), a refused first URL (`http://127.0.0.1:9`;
+  `rpc_failover`, `reason: "unexpected_verify_error"`) and a hung first URL (a local server that
+  accepts and never answers; `reason: "timeout"`). All three passed `validPayment` and
+  `channelRejected`; the two failover runs also `failedOver`, answered by `RPC_URLS[1]`.
 
 ## Modified tests
 
