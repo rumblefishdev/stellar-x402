@@ -89,6 +89,28 @@ C1–C4 and C6 held; the new 60 s retry was where the problems were.
   defaults of `maxLagLedgers` and of `FallbackRpc`'s timeout equal the values passed). A probe
   answer applied after another switch survived until its test was added.
 
+## Third review (Adam, 2026-10-16, at cf6ee6a; changes requested)
+
+11 of 15 points resolved; A7, A9 and A12 deferred as agreed.
+
+- **A1 (blocker):** a call that failed on the active fallback still wrapped to `RPC_URLS[0]` and
+  made it active on any answer, a pre-RPC `…_wrong_amount` included, so a client's payload could
+  bring back a dead primary with no probe and no lag guard. **Fixed** (decision 16): from a call,
+  index 0 is never switched to; the call returns its answer and the probe is due at once. Tests:
+  "wraps around from the active endpoint, without making the first one active" (was "wraps
+  around…", which asserted the bug) and the dead-primary-wrong-amount case. The A → B → A
+  switch-counter test now returns to A through the probe.
+- **A13:** the decision-2 test didn't pin decision 2 (`rpc-a` is always down, so a reset to
+  `[0]` on a new bid ended on `[1]` too). **Fixed:** it checks the URLs called across the bid
+  change and that exactly one `rpc_failover` is logged; the "reset `current` on a bid change"
+  mutant now fails it.
+- **A14 (nit):** the smoke run was before the commit, with no SHA. To be run on the pushed head;
+  see Testnet.
+- **Mutants:** of the five survivors, three are killed by new tests: the probe's `withTimeout`
+  (a hung `latestLedger(0)` counts as down and the next probe still runs), the "active can't read
+  its ledger → return" branch, and the bid-change reset (A13). `setGlobalDispatcher` was checked
+  by hand by Adam; the real `rpcLatestLedger` still runs in no test.
+
 ## Testnet
 
 - 2026-10-16, with the first review's fixes, before their commit, fresh friendbot accounts:
@@ -130,3 +152,6 @@ C1–C4 and C6 held; the new 60 s retry was where the problems were.
   "every URL hangs" test runs on a fixed bid and expects the per-URL message; `buildUpstream` takes
   the signer. `fee-agreement.test.ts`'s logger has `info`. `main.test.ts`'s console test makes two
   requests over two keyed URLs. `verify-smoke.ts` reads the events from `main()`'s log sink.
+- **Third review:** "wraps around from the active endpoint" now expects no switch to the first
+  endpoint; the A → B → A test returns to A through a probe (`latestLedger`, `now`).
+  `build-verifier.test.ts`'s decision-2 test records the URLs called and counts `rpc_failover`.
