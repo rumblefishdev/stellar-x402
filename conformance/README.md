@@ -33,7 +33,9 @@ The suite kills whatever listens on ports 4022–4060 before it starts.
    the pinned commit.
 4. Runs every Stellar `exact` scenario: each canonical TypeScript client and server, HTTP and MCP,
    both routes (`/exact/stellar`, and `/exact/stellar/upfront`, which settles before serving).
-5. Fails unless every scenario passed with a transaction hash, and saves the run.
+5. Reads every reported transaction from Stellar RPC and fails unless each succeeded as one
+   `transfer` of 0.001 testnet USDC from the buyer to the seller; also fails unless every scenario
+   passed with a hash and the suite exited 0. Saves the run either way.
 
 The proxy (`external-proxy/proxy.mjs`) answers the suite's `/health` and `/close` itself and
 forwards `/verify`, `/settle` and `/supported` to `GATE_FACILITATOR_URL` unchanged. It uses Node

@@ -70,6 +70,7 @@ Read in a clone of upstream; paths are upstream's.
 - 2026-10-15 — **Keys** from an env file outside the repo, the same accounts as the MCP e2e suite; `FACILITATOR_STELLAR_PRIVATE_KEY` gets a placeholder the proxy ignores.
 - 2026-10-15 — **Names**: directory and `config.name` `stellar-x402`, URL variable `GATE_FACILITATOR_URL`, root command `pnpm conformance:e2e`.
 - 2026-10-16 — **Every run builds the suite from a fresh clone** (+2.5 min): the clean check sees only tracked files, so a build kept from an earlier run would not be covered by it.
+- 2026-10-16 — **The gate reads every hash on chain** through Stellar RPC `getTransaction` (Horizon is deprecated in favour of RPC): it fails unless each is a successful single `transfer` of 10000 units of testnet USDC from the buyer to the seller.
 - 2026-10-15 — **Dry-run evidence** (x402.org) goes into this task and the PR, not `conformance/results/`, which holds our facilitator's runs (0029).
 
 ### Emerged
@@ -130,6 +131,7 @@ two signers x402.org lists in `/supported`, so every payment went through the pr
 
 - The bazaar discovery check (`--extensions=bazaar`): once `/discovery/search` exists.
 - Running the gate in CI.
+- Finding the payment behind a failed scenario: all payments carry the same amount, so a match by time is a guess, and a failed scenario already fails the gate. A public facilitator's `/settle` answered 504 four times on 2026-10-16 while each payment landed; that is found by hand.
 
 ## Acceptance Criteria
 

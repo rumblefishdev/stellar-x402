@@ -42,8 +42,10 @@ facilitator roles, so we don't contribute new fixtures.
   3. installs and builds it the way upstream's CI does, without the Go and Python components;
   4. runs every Stellar `exact` scenario:
      `pnpm test --testnet --families=stellar --schemes=exact --facilitators=stellar-x402 --output-json=<file>`;
-  5. fails unless every scenario passed with a transaction hash. The suite itself exits 0 when no
-     scenario matched, and its fetch client can pass without a hash.
+  5. fails unless every scenario passed with a transaction hash, and Stellar RPC shows each hash
+     as a successful `transfer` of the route's price from the buyer to the seller. The suite itself
+     exits 0 when no scenario matched, its fetch client can pass without a hash, and it never
+     reads the chain.
 - **The evidence is committed.** Results, including the pinned upstream commit and the settled
   transaction hashes, go into `conformance/results/`.
 - **Nothing is pushed** to `x402-foundation/x402` or to our fork of it during M1.
