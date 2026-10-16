@@ -270,8 +270,12 @@ describe("buildVerifier (the /verify wiring in main)", () => {
 
   it("stays on the second RPC URL when the bid changes (decision 2)", async () => {
     let bid = 250;
-    const { verify, schemes } = setup(
-      (url) => (url === "https://rpc-a.example" ? down : { isValid: true, payer }),
+    const called: string[] = [];
+    const { verify, schemes, logger } = setup(
+      (url) => {
+        called.push(url);
+        return url === "https://rpc-a.example" ? down : { isValid: true, payer };
+      },
       { fees: (fees) => ({ ...fees, inclusionFee: async () => bid }) },
     );
     await verify(payload(), requirements);
@@ -279,6 +283,13 @@ describe("buildVerifier (the /verify wiring in main)", () => {
     const trace: VerifyTrace = {};
     await verify(payload(), requirements, trace);
     expect(trace).toEqual({ rpc: "RPC_URLS[1]" });
+    // The new bid's call starts on the active URL, not on RPC_URLS[0] again.
+    expect(called).toEqual([
+      "https://rpc-a.example",
+      "https://rpc-b.example",
+      "https://rpc-b.example",
+    ]);
+    expect(logger.warn).toHaveBeenCalledOnce();
     // Built again for the new bid: two URLs per bid.
     expect(schemes.map((s) => s.options.inclusionFeeStroops)).toEqual([500, 500, 600, 600]);
   });
