@@ -30,14 +30,34 @@ const notImplemented: RequestHandler = (_req, res) => {
 };
 
 /**
+ * How deeply a request body may nest. The x402 objects need about 6 levels; `extensions` is free
+ * JSON, and the settlement fingerprint's canonical JSON recurses once per level.
+ */
+export const MAX_BODY_DEPTH = 32;
+
+/** Whether `value` nests deeper than `max` arrays and objects, counted without recursion. */
+function nestsDeeper(value: unknown, max: number): boolean {
+  const stack: [unknown, number][] = [[value, 0]];
+  while (stack.length > 0) {
+    const [item, depth] = stack.pop()!;
+    if (item === null || typeof item !== "object") continue;
+    if (depth >= max) return true;
+    for (const child of Object.values(item)) stack.push([child, depth + 1]);
+  }
+  return false;
+}
+
+/**
  * An x402 v2 verify or settle request (AD-13), checked with `@x402/core`'s schemas. The objects
  * pass on as the client sent them; `undefined` means a 400.
  *
  * The schema takes any non-empty `amount`, and upstream's `BigInt(amount)` throws on anything but
  * an integer, which it reports as `unexpected_verify_error`: our 500. So `amount` must be digits.
+ * A body nested deeper than {@link MAX_BODY_DEPTH} is a 400 too, before anything recurses on it.
  */
 export function parsePaymentRequest(body: unknown): VerifyRequest | undefined {
   if (typeof body !== "object" || body === null) return undefined;
+  if (nestsDeeper(body, MAX_BODY_DEPTH)) return undefined;
   const { x402Version, paymentPayload, paymentRequirements } = body as Record<string, unknown>;
   const requirements = PaymentRequirementsV2Schema.safeParse(paymentRequirements);
   const valid =

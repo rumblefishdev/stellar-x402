@@ -5,6 +5,7 @@ import {
   NoChannelsError,
   QueueTimeoutError,
   RpcTimeoutError,
+  RpcUnavailableError,
   SettlementSubmitter,
   SimulationCheckError,
   checkFacilitatorBalance,
@@ -391,13 +392,30 @@ describe("FallbackRpc", () => {
     expect(rpc.active).toBe("fast");
   });
 
-  it("throws the first error and keeps the active endpoint when all fail", async () => {
+  it("throws RpcUnavailableError with the first error and keeps the active endpoint when all fail", async () => {
     const rpc = new FallbackRpc([
       { name: "a", rpc: endpoint("fail") },
       { name: "b", rpc: endpoint("fail") },
     ]);
-    await expect(rpc.getAccount("G")).rejects.toThrow("getAccount failed");
+    const error = await rpc.getAccount("G").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RpcUnavailableError);
+    expect((error as Error).cause).toEqual(new Error("getAccount failed"));
     expect(rpc.active).toBe("a");
+  });
+
+  it("throws a not-found answer as it is: the endpoint answered", async () => {
+    const missing = {
+      getAccount: async () => {
+        throw new Error("Account not found: G");
+      },
+    } as unknown as SorobanRpc;
+    const rpc = new FallbackRpc([
+      { name: "a", rpc: missing },
+      { name: "b", rpc: missing },
+    ]);
+    const error = await rpc.getAccount("G").catch((e: unknown) => e);
+    expect(error).not.toBeInstanceOf(RpcUnavailableError);
+    expect((error as Error).message).toBe("Account not found: G");
   });
 
   it("never retries sendTransaction itself, but moves on for the next call", async () => {
@@ -434,9 +452,11 @@ describe("FallbackRpc", () => {
     expect(rpc.active).toBe("a");
   });
 
-  it("reports timeouts as RpcTimeoutError", async () => {
+  it("reports timeouts as RpcTimeoutError, the cause once every endpoint timed out", async () => {
     const rpc = new FallbackRpc([{ name: "slow", rpc: endpoint("hang") }], { timeoutMs: 5 });
-    await expect(rpc.getLatestLedger()).rejects.toBeInstanceOf(RpcTimeoutError);
+    const error = await rpc.getLatestLedger().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RpcUnavailableError);
+    expect((error as Error).cause).toBeInstanceOf(RpcTimeoutError);
   });
 });
 

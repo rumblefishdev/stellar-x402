@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { memoryStores } from "../src/adapters/memory.js";
 import { parseConfig } from "../src/config.js";
 import { jsonLogger } from "../src/logger.js";
+import { MAX_BODY_DEPTH } from "../src/http/app.js";
 import { start, type Started } from "../src/main.js";
 import type { SettlementRecord } from "../src/ports/index.js";
 import type { SettlementHooks } from "../src/settlement/hooks.js";
@@ -90,15 +91,18 @@ describe("POST /settle", () => {
     await vi.waitFor(() => expect(afterResponse).toHaveBeenCalledTimes(1));
   });
 
-  it("tells the settler when the client leaves before the answer", async () => {
+  it("tells the settler when the client leaves before the answer, and still runs afterResponse", async () => {
     let aborted!: (value: boolean) => void;
     const seen = new Promise<boolean>((resolve) => (aborted = resolve));
+    // A settlement that landed while its client left: cataloging must not stop (0031).
+    const afterResponse = vi.fn();
     settle.mockImplementationOnce(
       (_payload, _requirements, signal) =>
         new Promise((resolve) => {
           signal!.addEventListener("abort", () => {
             aborted(true);
-            resolve({ response: success });
+            // After the close event, so the route finds the response closed.
+            setTimeout(() => resolve({ response: success, afterResponse }), 10);
           });
         }),
     );
@@ -113,6 +117,29 @@ describe("POST /settle", () => {
     client.abort();
     await request_;
     expect(await seen).toBe(true);
+    await vi.waitFor(() => expect(afterResponse).toHaveBeenCalledTimes(1));
+  });
+
+  it("sends no CORS headers", async () => {
+    settle.mockResolvedValueOnce({ response: success });
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://other.example" },
+      body: JSON.stringify(request),
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("answers 400 for a body nested deeper than MAX_BODY_DEPTH, without settling", async () => {
+    let deep: unknown = 0;
+    for (let i = 0; i < MAX_BODY_DEPTH; i++) deep = [deep];
+    const response = await post({
+      ...request,
+      paymentPayload: { ...paymentPayload, extensions: { deep } },
+    });
+    expect([response.status, await response.json()]).toEqual([400, { error: "bad_request" }]);
+    expect(settle).not.toHaveBeenCalled();
   });
 
   it("sends no header when there are no extension responses or the answer is a failure", async () => {
