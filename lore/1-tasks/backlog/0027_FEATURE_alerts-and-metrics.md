@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 milestone: 1
 related_adr: ["0007", "0011"]
-related_tasks: ["0012", "0014", "0024", "0026", "0020"]
+related_tasks: ["0012", "0014", "0024", "0026", "0020", "0009", "0045", "0049"]
 tags: [facilitator, operations, monitoring, priority-medium, effort-small, platform]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -62,9 +62,24 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
   - Check `/supported` once 0020 lands, `/health` before.
   - The 99% figure counts a minute as up only when the check passes and the facilitator is ready
     to settle.
-- From 0014: RPC URLs are logged by host only. signer-pool's `FallbackRpc.fromUrls` names
-  endpoints by their full URL, which reaches `onSwitch`; name them by host before wiring it to logs
-  or metrics.
+- From 0014, amended by 0009 (decision 44; ADR 0011): RPC endpoints are logged and labelled as
+  `RPC_URLS[i]`, never by URL or host, as 0045's verify failover does. signer-pool's
+  `FallbackRpc.fromUrls` names endpoints by their full URL, which reaches `onSwitch`; name them
+  `RPC_URLS[i]` before wiring it to logs or metrics (0049).
+- From 0009 (PR #41 reviews): the settlement counters, one `settlement_` prefix, labels from
+  closed sets (0009 decision 38):
+  - `settlement_outcomes_total{reason, replay}`: every `/settle` answer (this task's AC 1);
+  - `settlement_already_settled_total`, `settlement_nonce_reuse_total` (counted before any check:
+    forged bodies raise it, so don't page on it);
+  - `settlement_refused_after_verify_total{reason, stage}`: alarm on `stage="pool"` only;
+  - `settlement_budget_exhausted_total{signed}`, `settlement_uncertain_total`,
+    `settlement_submit_failures_total`, `settlement_hook_failures_total{hook}`;
+  - `settlement_record_failures_total`: the store-outage alarm (0009 decision 30);
+  - `pool_events_total{type}`, with `status` on `resolved`, for a "pending settlements" alarm.
+- From 0045 (via 0009): `/verify`'s upstream failover logs `rpc_failover` with `RPC_URLS[i]`
+  names. Add a `rpc_failovers_total{from,to}` counter, or an alarm on the log, since a lagging
+  fallback answers valid payments with rejections (0045 decision 9). A return to the first URL
+  should read as recovery, not a new outage (`rpc_failback`, info).
 
 ## Acceptance Criteria
 

@@ -1,9 +1,9 @@
 # ADR 0006: The settlement record: claim, replay, lifecycle and channel lease
 
 - Status: accepted
-- Date: 2026-10-07
-- Amended: 2026-10-15 (task 0009, PR #41 review): a success is answered once; a repeat of an
-  unsigned record ends it at the first call's budget
+- Date: 2026-10-07, amended 2026-10-15 (task 0009: a success is answered once; a repeat of an
+  unsigned record ends it at the first call's budget) and 2026-10-16 (task 0009: the store-outage
+  rule; a success answered while the store can't mark it)
 
 ## Context
 
@@ -44,17 +44,36 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
   - A repeat with the same fingerprint returns the record's outcome. If the record is signed but
     not final, it first waits, bounded by `SETTLE_TIMEOUT_MS`, for the final outcome. If nothing
     was signed, it waits until the first call's settle budget ends, counted from the claim, then
-    ends the record itself with `…_timeout` (compare-and-set against `addHash`).
+    ends the record itself with `…_timeout` (compare-and-set against `addHash`). If the store
+    can't end it, the answer is `settlement_pending` with no hash, never `…_timeout`: the record
+    may still be signed. Both waits also end with the repeat's own budget.
   - `success: true` is answered once per record, by compare-and-set on `successAnsweredAt`. Later
     calls get `settle_exact_stellar_already_settled` with the hash. `settlement_pending` doesn't
-    count, and a call whose client left marks nothing.
+    count, and a call whose client left before the mark marks nothing.
+  - When the store can't mark (it fails or misses its 1 s grace), the payment still landed, so the
+    caller gets the success. The process keeps the key in memory and answers every later call
+    `…_already_settled`. Known exception until 0019: after the store recovers, or on another
+    instance, a repeat can win the mark and get a second success.
   - A repeat with a different fingerprint is rejected with the stored hash, if any, and nothing is
     submitted.
-- **Wire mapping.**
-  - `success` → `{success: true, transaction, network, payer}`, once; after that
-    `{success: false, errorReason: "settle_exact_stellar_already_settled", transaction, network}`
-  - `pending` → `{success: false, errorReason: "settlement_pending", transaction, network}`
-  - other outcomes and each thrown submitter error → a fixed `errorReason`
+- **Wire mapping.** Every answer carries `network` and `payer`.
+  - `success` → `{success: true, transaction}`, once; after that
+    `{success: false, errorReason: "settle_exact_stellar_already_settled", transaction}`
+  - `pending` → `{success: false, errorReason: "settlement_pending", transaction}`
+  - other outcomes and each thrown submitter error → a fixed `errorReason`, with the record's last
+    hash as `transaction` when it has one
+- **Store outage: refuse before money moves, tell the truth after.** A store that fails or
+  doesn't answer:
+  - before the claim, or at the claim: a 500, and nothing is sent; the client repeats the same
+    request;
+  - at the hash write before a send: the pool doesn't send (AD-16);
+  - after the pool answered: the answer is the pool's result, with its hash, and the record is left
+    as it was, unfinished;
+  - at the success mark: the success, as above.
+
+  0019 finishes unfinished records once the store is back; how available the store must be is
+  0013's requirement, and its alarms 0027's.
+
 - **One owner of the lifecycle.** A single settlement module in `apps/facilitator` writes every
   record change.
   - States only move forward: `claimed → signed → pending → success | failed | rejected | expired`.
@@ -80,7 +99,13 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
 - **Success once stops one payment unlocking many responses.** A resource server delivers on every
   `success`: with one per call, one payment header sent N times was served N times (seen on
   testnet with a stock `@x402/express` seller). Upstream's own `settle()` gives one success per
-  nonce too. The cost is that a seller whose network lost our `success` can't get it again.
+  nonce too. The costs:
+  - a seller whose network lost our `success` can't get it again;
+  - the success goes to whichever call marked first: one whose client dropped the connection
+    after the mark, or anyone else holding the payment header (the buyer, a proxy, a log sink).
+- **The outage rule keeps money and answers consistent.** Before anything is sent, refusing costs
+  only a retry. Once something may have been sent, an answer that hides it (a 500 or
+  `…_timeout`) would make the buyer sign and pay again.
 - **The bounded wait keeps the e2e gate passing.** The canonical server's single immediate retry
   would otherwise get `pending` again and fail the payment.
 - **Forward-only compare-and-set lets one event order win.** Late events can't undo final
@@ -102,6 +127,7 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
 ## Consequences
 
 - Each settlement pays one durable store write before its first send.
+- While the store is down, `/settle` takes no new payments: every one is a 500 before its claim.
 - The store (task 0013) must support:
   - the atomic claim;
   - compare-and-set state changes;

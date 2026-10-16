@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 milestone: 1
 related_adr: ["0007", "0011"]
-related_tasks: ["0012", "0017", "0014"]
+related_tasks: ["0012", "0017", "0014", "0009", "0022"]
 tags: [facilitator, security, priority-high, effort-small, platform]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -48,6 +48,12 @@ As a facilitator operator, I want per-route rate limits and basic HTTP hardening
   database `hit`, and decide what the limiter does when the store is unreachable (let requests
   through or refuse them). `hit` runs on its own pool of 3 (0022 decision 16) without a
   `lock_timeout`, so past that pool a flood waits up to 5 s for a connection and then rejects.
+- From 0009 (PR #41 review): without a rate limit, `/settle` self-payments that end before
+  signing (`no_channel_in_time`, `…_timeout`) cost nothing on chain, and each keeps a record with
+  its full payload in `MemorySettlementStore` (about 16k per GB). The `/settle` budget per IP
+  bounds that growth until 0022's durable store. Also: the `/verify` failover (0045) costs up to
+  10 s per RPC URL per request when the URLs hang, so the `/verify` budget should count requests,
+  not just successes.
 
 ## Acceptance Criteria
 
