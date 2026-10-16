@@ -1277,6 +1277,61 @@ describe("createSettler", () => {
       expect(await store.addHash(key, HASH, Date.now())).toBe(false);
     });
 
+    describe("a repeat that lost the claim to a call that started after it", () => {
+      // The losing call's checks take 100 ms; the winner starts 50 ms after it and claims at
+      // once. Budget 150 ms: the loser's own ends at 150, the winner's at 200.
+      const race = (behaviour: Behaviour) => {
+        let calls = 0;
+        const slowFirst: Check = async (...args) => {
+          if (calls++ === 0) await delay(100);
+          return passing(...args);
+        };
+        const ctx = setup(behaviour, { budgetMs: 150, check: slowFirst });
+        const loser = ctx.settle(payload(), requirements);
+        const winner = delay(50).then(() => ctx.settle(payload(), requirements));
+        return { ...ctx, loser, winner };
+      };
+
+      it("leaves the record to the winner while its budget runs: a late reservation is released after it", async () => {
+        const order: string[] = [];
+        let reserve!: () => void;
+        const { hooks, loser, winner } = race(landing());
+        hooks.beforeSubmit.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              reserve = () => {
+                order.push("reserved");
+                resolve({ allow: true });
+              };
+            }),
+        );
+        hooks.onFinal.mockImplementation(async () => {
+          order.push("onFinal");
+        });
+        // By its own budget, before the winner's ends, and with no hash.
+        expect((await loser).response).toMatchObject({
+          errorReason: SETTLE_REASONS.pending,
+          errorMessage: "not signed yet: repeat the same payment",
+          transaction: "",
+        });
+        expect(hooks.onFinal).not.toHaveBeenCalled();
+        expect((await winner).response).toMatchObject({ errorReason: SETTLE_REASONS.timeout });
+        reserve();
+        await vi.waitFor(() => expect(order).toEqual(["reserved", "onFinal"]));
+      });
+
+      it("lets the winner sign after the loser's budget, while its own still runs", async () => {
+        // The winner gets a channel at 170 ms: past the loser's budget, within its own.
+        const { loser, winner, store } = race(async (opts) => {
+          await delay(120);
+          return landing()(opts);
+        });
+        expect((await loser).response).toMatchObject({ errorReason: SETTLE_REASONS.pending });
+        expect((await winner).response).toMatchObject({ success: true, transaction: HASH });
+        expect((await store.get(key))?.state).toBe("success");
+      });
+    });
+
     it("stops the wait for a channel at the auth expiry when it comes before the budget", async () => {
       const { settle, submit } = setup(landing(), { budgetMs: 600_000, ledgerMs: 1_000 });
       const before = Date.now();
