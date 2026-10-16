@@ -12,12 +12,16 @@ history:
     status: developing
     who: claude
     note: "Moved out of the task README when 0009 became a directory; decisions 29–45 added."
+  - date: 2026-10-16
+    status: developing
+    who: claude
+    note: "Fourth PR #41 review: decision 46; the index now lives only here."
 ---
 
 # Design decisions of task 0009
 
 All emerged during implementation and the PR #41 reviews ([R-pr41-reviews.md](R-pr41-reviews.md));
-none came from the plan. The README lists them by title.
+none came from the plan.
 
 1. **A repeat is answered from the record before the checks run.** ADR 0006's replay rule needs it (see Issues). The fingerprint still has to match exactly, so nothing new gets through. The checks run for every first call.
 2. **A failure before anything was signed ends the record as `rejected`.** The same payload then gets the same failure, so the client retries by signing a new payment (new nonce). Examples: no channel in time, the simulation, the fee ceiling, a hook refusal. Reopening a record would need a store operation the port doesn't have.
@@ -76,3 +80,4 @@ none came from the plan. The README lists them by title.
     - give `Check` the `VerifyTrace` argument, or `verified.rpc` stays empty for `/settle` (the trial merge auto-merged `trace` into `createChecker`'s arrow without it);
     - fix `settle-pool.test.ts`, which calls `buildChecks` positionally and breaks on the new `logger` argument;
     - add a `/settle` test with a hung first RPC URL, which decision 32's bound now answers `…_timeout` before the claim when it outlasts the budget.
+46. **A repeat ends an unsigned record only once the first call's budget has ended** (Adam's fourth review). Decision 33 capped the unsigned wait at the repeat's own budget, and the repeat then ended the record. On the lost-claim path the repeat began before the winner, so its budget ends first, and it ended the winner's record while the winner could still reserve or sign: `onFinal` ran before a late `beforeSubmit` settled (against decision 34), and a winner still waiting for a channel had `addHash` refused and answered `…_timeout` with budget left. Now the wait is still capped by the repeat's own budget, but if the first call's budget (`createdAt + SETTLE_BUDGET_MS`) hasn't ended, the repeat answers `settlement_pending` with no hash ("not signed yet: repeat the same payment") and leaves the record. Across instances a repeat judges this by its own clock, so 0024 keys a reservation by the settlement key and refuses a reserve after its release.

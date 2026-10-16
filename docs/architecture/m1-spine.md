@@ -130,7 +130,7 @@ graph TD
   - **Repeat with the same fingerprint.** A repeat `/settle` answers from the record.
     - A signed record that isn't final yet: it waits up to `SETTLE_TIMEOUT_MS` for the final outcome.
     - A record with no hash: it waits until the first call's budget ends, counted from the claim. Then it ends the record itself (`claimed → rejected`, `…_timeout`), so the answer is never `…_timeout` for something that is then sent. If the store can't end it, the answer is `settlement_pending` with no hash.
-    - Neither wait goes past the repeat's own budget.
+    - Neither wait goes past the repeat's own budget. A repeat whose budget ends before the first call's (it lost the claim, so it began first) answers `settlement_pending` with no hash and leaves the record to the first call, which may still reserve or sign.
   - **Success once.** `success: true` is answered once per record, by compare-and-set on `successAnsweredAt`. Every later call gets `success: false`, `settle_exact_stellar_already_settled` and the hash. `settlement_pending` doesn't count: the canonical resource server's one retry after it still gets the success. A call whose client left before the mark marks nothing. The costs: a seller that lost our `success` answer can't get it again, and the success goes to whichever call marked first, whoever holds the payment header. A store that can't mark still gets the success, once per process ([ADR 0006](../adr/0006-settlement-record.md)).
   - **Repeat with a different fingerprint.** Rejected with `success: false`, `settle_exact_stellar_nonce_already_used` and the stored hash, if any, so a payment that landed can be reconciled. Nothing is submitted, and the stored outcome is never returned.
   - **Wire shape.** `SubmitStatus` maps as follows:
