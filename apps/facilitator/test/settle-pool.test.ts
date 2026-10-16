@@ -86,9 +86,13 @@ function setup(env: Partial<Env> = {}) {
   });
   const fake = new PaymentRpc({ [channel]: 1_000n });
   const fees = feeSettings(config.fees, fake);
-  const checks = buildChecks(config, fake, fees, { warn() {} }, () => ({
-    verify: async () => ({ isValid: true, payer }),
-  }));
+  const checks = buildChecks(
+    config,
+    fake,
+    fees,
+    { warn() {}, info() {} },
+    { makeScheme: () => ({ verify: async () => ({ isValid: true, payer }) }) },
+  );
   const { settle } = buildSettlement(config, {
     rpc: fake,
     fees,
@@ -162,7 +166,7 @@ describe("main()'s composition (compose)", () => {
     const { deps, cataloger, metrics } = compose(config, {
       logger: jsonLogger("error", () => {}),
       rpc: fake,
-      makeScheme: () => ({ verify: async () => ({ isValid: true, payer }) }),
+      seams: { makeScheme: () => ({ verify: async () => ({ isValid: true, payer }) }) },
       sleep: async () => {},
     });
     return { deps, cataloger, metrics, fake };
