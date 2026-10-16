@@ -13,6 +13,11 @@ export interface FeeSettings {
    * provider (p90, 100–10,000 stroops, read again after 30 s) shared with the pool.
    */
   inclusionFee: () => Promise<number>;
+  /**
+   * Whether `inclusionFee` reads fee stats over the RPC (no `INCLUSION_FEE_STROOPS`), which adds
+   * the read's own deadline to upstream verify's (AD-3).
+   */
+  feeStats: boolean;
   /** Options of the pool's `SettlementSubmitter`, which pays the fee. */
   pool: Pick<SubmitterOptions, "maxFeeStroops" | "inclusionFee" | "feeEscalation">;
 }
@@ -33,6 +38,7 @@ export function feeSettings(
   return {
     maxFeeStroops,
     inclusionFee,
+    feeStats: fixed === undefined,
     pool: { maxFeeStroops, inclusionFee, feeEscalation: fees.escalation },
   };
 }

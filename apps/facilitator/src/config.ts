@@ -14,6 +14,11 @@ import { z } from "zod";
 const DEFAULT_TESTNET_RPC = "https://soroban-testnet.stellar.org";
 /** Largest delay `setTimeout` accepts; longer ones fire at once. */
 const MAX_TIMER_MS = 2_147_483_647;
+/**
+ * Upstream verify tries each RPC URL for 10 s, so more URLs mean a longer worst case for
+ * `/verify` and for `/settle`'s check, which its budget must hold (AD-3, ADR 0011).
+ */
+export const MAX_RPC_URLS = 3;
 
 const list = z.string().transform((value) =>
   value
@@ -87,15 +92,18 @@ const envSchema = z
     PORT: int(1, 65_535).default("4021"),
     LOG_LEVEL: oneOf(["debug", "info", "warn", "error"]).default("info"),
     /**
-     * Comma-separated, tried in order: the pool and the ledger and fee-stats reads move to the
-     * next on a failure and stay there. Upstream verify (one scheme per URL) fails over on its own
-     * and returns to the first after 60 s (AD-3).
+     * Comma-separated, tried in order, at most 3: the pool and the ledger and fee-stats reads
+     * move to the next on a failure and stay there. Upstream verify (one scheme per URL) fails over
+     * on its own and returns to the first once a probe finds it healthy (AD-3). Each URL adds 10 s
+     * to upstream verify's worst case, twice that with fee-stats bids, which `/settle`'s budget
+     * must hold (ADR 0011).
      */
     RPC_URLS: list
       .pipe(
         z
           .array(z.string().refine(isHttpUrl, "must be http(s) URLs without credentials"))
-          .min(1, "must list at least one URL"),
+          .min(1, "must list at least one URL")
+          .max(MAX_RPC_URLS, `must list at most ${MAX_RPC_URLS} URLs`),
       )
       .optional(),
 
