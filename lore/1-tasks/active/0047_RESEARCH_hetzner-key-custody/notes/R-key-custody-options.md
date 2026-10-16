@@ -12,6 +12,10 @@ history:
     status: developing
     who: okarcz
     note: "Options compared, Vault and OpenBao Transit tested on testnet; recommendation awaits review."
+  - date: "2026-10-16"
+    status: developing
+    who: okarcz
+    note: "Mainnet unseal checked: no HSM on Hetzner, a cloud KMS seal through OpenBao's KMS plugin instead."
 ---
 
 # Facilitator key custody on Hetzner
@@ -96,7 +100,10 @@ documented as pure Ed25519 over the data).
   - static seal (OpenBao): a 32-byte key in a file or env var on the OpenBao server. Auto-unseal,
     and that one secret is what protects the vault;
   - PKCS#11 seal: an HSM unwraps the root key once at start. Open source in OpenBao (an external
-    plugin from 2.7.0); Vault offers HSM seals only in Enterprise.
+    KMS plugin; KMS plugins work since 2.6.0); Vault offers HSM seals only in Enterprise. Hetzner
+    can't host the HSM today (see [Mainnet unseal, checked](#mainnet-unseal-checked));
+  - cloud KMS seal: AWS, GCP, OVHcloud and other KMSs unwrap the root key once at start, also
+    through a KMS plugin (see the same section).
 - Backups of its storage keep the key (encrypted), so a lost server isn't a lost key, unlike a
   KMS key. The backups need the unseal keys.
 
@@ -105,7 +112,8 @@ documented as pure Ed25519 over the data).
 - Signs Ed25519 in hardware; the key never leaves.
 - About 168 ms per Ed25519 signature of 256 bytes (Yubico's data sheet): too slow for the hot path
   at the pool's rates, one device is one point of failure, and Hetzner would need a dedicated
-  server with a USB device (not checked).
+  server with a USB device, which Hetzner doesn't offer (see
+  [Mainnet unseal, checked](#mainnet-unseal-checked)).
 - Fits better as **OpenBao's PKCS#11 seal**, which signs nothing per settlement.
 
 ### E. Stellar-level limits (with any option)
@@ -144,6 +152,42 @@ They are API-compatible for Transit: the same spike passed on both, unchanged.
 
 OpenBao fits better: open license, and the HSM seal without Enterprise.
 
+## Mainnet unseal, checked
+
+After every restart OpenBao is sealed and signs nothing until it gets its root key. Where that key
+lives is the custody's root of trust: whoever has it and a copy of OpenBao's storage has the
+facilitator key. The recommendation left mainnet open between Shamir and an HSM seal, so both were
+checked on 2026-10-16.
+
+**An HSM on Hetzner: not available today.**
+
+- Hetzner documents no way to attach a customer's USB device, such as a YubiHSM, to a dedicated
+  server. Extra hardware is ordered by a Robot support ticket, and the listed add-ons are
+  Hetzner's own, e.g. 16 and 64 GB USB sticks. Only a ticket could confirm it either way.
+- Colocation, which would allow our own hardware, is closed to new customers "until further
+  notice" (Hetzner's colocation FAQ, changed 2026-03-06).
+- A YubiHSM can be shared over the network through its HTTPS connector, but it would then sit
+  outside Hetzner, a new weak point and a single point of failure.
+
+**A cloud KMS seal: possible.**
+
+- OpenBao 2.7 has seals for AWS KMS (`awskms`), GCP Cloud KMS, Azure Key Vault, OCI, AliCloud,
+  OVHcloud KMS (`ovhcloud`), KMIP and another OpenBao's Transit, besides static and Shamir.
+- Since 2.7.0 the vendor seals (`alicloudkms`, `awskms`, `azurekeyvault`, `gcpckms`, `ocikms`)
+  are no longer built in. They are external KMS plugins from the `openbao-plugins` collection,
+  "drop-in support" per the deprecation notice, declared with a `plugin "kms"` stanza that the
+  `seal` block names.
+- The KMS unwraps the root key once at start, never per signature. So it gives hardware-backed
+  protection of the root key without option B's costs on every settlement: no cross-cloud call
+  per signature, and a KMS outage matters only while OpenBao restarts.
+- Its costs: one more plugin to install and upgrade, credentials for the other cloud on the
+  OpenBao server, and a restart during a KMS outage leaves OpenBao sealed.
+- OVHcloud KMS is a European provider. Whether it suits us better than AWS or GCP isn't
+  checked.
+
+**So mainnet's real choice is Shamir with an on-call person, or a cloud KMS seal.** The HSM seal
+is out until Hetzner offers one.
+
 ## Recommendation
 
 1. **A self-hosted OpenBao Transit signer, not a cloud KMS.** On Hetzner a KMS means another
@@ -155,7 +199,8 @@ OpenBao fits better: open license, and the HSM seal without Enterprise.
 3. **OpenBao on its own server** in the private network, TLS, a token or certificate whose
    policy allows only `transit/sign/<key>`, the audit log shipped off the box.
 4. **Unseal:** a static seal on testnet; for mainnet, choose between Shamir with an on-call person
-   and a PKCS#11 seal on an HSM.
+   and a cloud KMS seal (AWS, GCP or OVHcloud). An HSM seal isn't possible on Hetzner today
+   ([Mainnet unseal, checked](#mainnet-unseal-checked)).
 5. **Recovery on chain:** a second, offline signer on every channel and the fee account, and a
    small hot balance.
 6. **Keep B open.** If mainnet needs hardware custody, a cloud KMS behind the same interface is
@@ -164,7 +209,8 @@ OpenBao fits better: open license, and the HSM seal without Enterprise.
 ## Open questions
 
 - Is Hetzner the decision for both networks? ADR 0011 still says AWS; it needs a superseding ADR.
-- Mainnet unseal: Shamir and on-call, or an HSM, and can Hetzner host one?
+- Mainnet unseal: Shamir and on-call, or a cloud KMS seal, and which KMS (AWS, GCP or OVHcloud)?
+  Hetzner can't host an HSM today.
 - One OpenBao node or three (Raft) for mainnet: a lone node down stops `/settle`.
 - The latency from the facilitator to OpenBao over Hetzner's private network (to measure).
 - Do the channels keep the facilitator key as their only signer, or get an offline second one?
@@ -180,6 +226,14 @@ OpenBao fits better: open license, and the HSM seal without Enterprise.
 - [HashiCorp's BSL 1.1 announcement](https://discuss.hashicorp.com/t/hashicorp-projects-changing-license-to-business-source-license-v1-1/57106)
 - [Google Cloud KMS algorithms](https://docs.cloud.google.com/kms/docs/algorithms) (`EC_SIGN_ED25519`)
 - [IAM Roles Anywhere](https://docs.aws.amazon.com/rolesanywhere/latest/userguide/introduction.html)
+- [OpenBao seal configuration](https://openbao.org/docs/configuration/seal/),
+  [AWS KMS seal](https://openbao.org/docs/configuration/seal/awskms/),
+  [deprecation notices](https://openbao.org/community/deprecation/) (checked 2026-10-16)
+- [Hetzner colocation FAQ](https://docs.hetzner.com/de/robot/colocation/faq),
+  [dedicated server hardware](https://docs.hetzner.com/robot/dedicated-server/dedicated-server-hardware/dedicated-server-hardware-overview/),
+  [server add-on prices](https://docs.hetzner.com/robot/dedicated-server/dedicated-server-hardware/price-server-addons/)
+  (checked 2026-10-16)
+- [YubiHSM 2 overview](https://docs.yubico.com/hardware/yubihsm-2/hsm-2-user-guide/hsm2-intro-overview.html)
 - [YubiHSM 2 data sheet](https://docs.yubico.com/hardware/yubihsm-2/datasheet/_static/YubiHSM_2_Technical_Data_Sheet.pdf)
 - ADR 0011, task 0036, `docs/threat-model.md`, spine AD-12
 - The spike: `../spike/` (scripts and results)
