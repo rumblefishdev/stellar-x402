@@ -563,10 +563,11 @@ export function createSettler(deps: SettlerDeps): Settle {
    * A repeat call: the stored outcome, waiting a while for a record that isn't final. A record
    * with a hash waits up to `settleTimeoutMs`. One without can be signed only until the first
    * call's budget, which began at the claim: past it the repeat ends the record itself
-   * ({@link endUnsigned}), so it answers `…_timeout` only for what will never be sent. If the
-   * store can't end it, nothing is known, so the answer is `settlement_pending` with no hash:
-   * repeat the same payment. Both waits end by this call's own budget (`startedAt`), and a repeat
-   * whose client left stops waiting.
+   * ({@link endUnsigned}), so it answers `…_timeout` only for what will never be sent. A repeat
+   * whose own budget ends before the first call's answers `settlement_pending` with no hash and
+   * leaves the record open. If the store can't end it, nothing is known, so the answer is
+   * `settlement_pending` with no hash: repeat the same payment. Both waits end by this call's own
+   * budget (`startedAt`), and a repeat whose client left stops waiting.
    */
   const replay = async (
     existing: SettlementRecord,
@@ -593,12 +594,27 @@ export function createSettler(deps: SettlerDeps): Settle {
     let record = existing;
     const ownEnd = startedAt + deps.budgetMs;
     const pendingUntil = Math.min(now() + deps.settleTimeoutMs, ownEnd);
-    const unsignedUntil = Math.min(existing.createdAt + deps.budgetMs, ownEnd);
+    // The first call may sign until its own budget ends. A repeat that lost the claim began
+    // before it, so its own budget can end first: it stops waiting then, but leaves the record to
+    // the first call, which may still reserve or sign.
+    const firstEnd = existing.createdAt + deps.budgetMs;
+    const unsignedUntil = Math.min(firstEnd, ownEnd);
     const until = () => (record.hashes.length > 0 ? pendingUntil : unsignedUntil);
     while (!isFinal(record) && now() < until() && !signal?.aborted) {
       record = (await nextRead(key)) ?? record;
     }
     if (!isFinal(record) && record.hashes.length === 0 && !signal?.aborted) {
+      if (now() < firstEnd) {
+        return {
+          key,
+          replay: true,
+          response: failure(
+            SETTLE_REASONS.pending,
+            record.payer,
+            "not signed yet: repeat the same payment",
+          ),
+        };
+      }
       const ended = await endUnsigned(key);
       // The store didn't answer: the record may still be signed, so never "sign a new payment".
       if (!ended) {

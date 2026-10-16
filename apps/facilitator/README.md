@@ -26,7 +26,7 @@ unlocks one response.
 
 | `errorReason`                                        | `transaction`           | Meaning                                                                        | What to do                                               |
 | ---------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------- |
-| `settlement_pending`                                 | the hash, or empty      | sent, not final yet; empty: the store couldn't say what happened               | repeat the same request (see below), or look the hash up |
+| `settlement_pending`                                 | the hash, or empty      | sent, not final yet; empty: not signed yet, or the store couldn't say          | repeat the same request (see below), or look the hash up |
 | `settle_exact_stellar_already_settled`               | the hash                | settled; an earlier call already got this payment's success                    | don't serve again for this payment                       |
 | `settle_exact_stellar_nonce_already_used`            | the stored hash, if any | this payer's nonce is already used by another payment, in whatever state       | refuse: the payment isn't for this request               |
 | `settle_exact_stellar_timeout`                       | —                       | the settle budget ran out before anything was signed; nothing was or will be   | sign a new payment                                       |
@@ -36,7 +36,7 @@ unlocks one response.
 | `settle_exact_stellar_fee_exceeds_maximum`           | an earlier hash, if any | the network fee rose above the facilitator's ceiling                           | sign a new payment and try again later                   |
 | `settle_exact_stellar_signature_expiration_too_soon` | an earlier hash, if any | the auth expires before the pool could land it                                 | sign a new payment with a longer `maxTimeoutSeconds`     |
 | `settle_exact_stellar_simulation_failed`             | an earlier hash, if any | the settlement's simulation failed, e.g. the payer's balance                   | check the payer, then sign a new payment                 |
-| `settle_exact_stellar_unexpected_balance_changes`    | —                       | the transaction moves something other than the one payment                     | refuse: the payment is malformed                         |
+| `settle_exact_stellar_unexpected_balance_changes`    | an earlier hash, if any | the transaction moves something other than the one payment                     | refuse: the payment is malformed                         |
 | `settle_exact_stellar_record_write_failed`           | an earlier hash, if any | a new envelope wasn't sent: its hash couldn't be stored, or the budget ran out | sign a new payment                                       |
 | a spend reason from the facilitator's limits         | —                       | the facilitator's spend limits refused it                                      | sign a new payment later; this one is ended              |
 | `settle_exact_stellar_refused`                       | —                       | the spend-limit check failed with an error of ours                             | sign a new payment, and tell us                          |
@@ -44,10 +44,10 @@ unlocks one response.
 | `settle_exact_stellar_transaction_submission_failed` | the hash                | refused by the network before inclusion                                        | sign a new payment                                       |
 | `settle_exact_stellar_transaction_expired`           | the hash                | not included before its time or ledger bound                                   | sign a new payment                                       |
 | `invalid_exact_stellar_*`, `invalid_network`         | —                       | the `/verify` checks, rerun by `/settle`, refused the payment                  | fix the payment                                          |
-| `unexpected_settle_error`                            | —                       | an error of ours after the claim                                               | sign a new payment, and tell us                          |
+| `unexpected_settle_error`                            | an earlier hash, if any | an error of ours after the claim                                               | sign a new payment, and tell us                          |
 
-"An earlier hash, if any": a refusal after a `txBadSeq` rebuild carries the last stored hash, of an
-envelope sent before it that the network refused.
+"An earlier hash, if any": a refusal after a `txBadSeq` rebuild carries the last stored hash.
+`transaction` is the last stored hash; it may never have reached the network.
 
 A failure with no `transaction`, other than `settlement_pending`, sent nothing. The same payment
 gets the same answer again, so a retry needs a new payment (a new nonce); only
