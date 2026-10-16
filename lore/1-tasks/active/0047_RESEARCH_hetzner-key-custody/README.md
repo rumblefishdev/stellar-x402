@@ -5,7 +5,7 @@ type: RESEARCH
 status: active
 milestone: 1
 related_adr: ["0011"]
-related_tasks: ["0036", "0026", "0014", "0044"]
+related_tasks: ["0036", "0026", "0014", "0044", "0048"]
 tags: [facilitator, keys, security, hetzner, priority-high, effort-small, payments]
 links:
   - ../../../../docs/adr/0011-facilitator-hosting.md
@@ -35,7 +35,15 @@ compares. Record the choice in an ADR that supersedes ADR 0011's custody part.
 
 ## Status: Active
 
-> Started 2026-10-15 on branch `lore-0047-hetzner-key-custody`.
+> Research and a spike are done; the recommendation awaits okarcz's review. The full report is
+> [`reports/Hetzner signer key custody.md`](<reports/Hetzner signer key custody.md>), built from
+> the four notes in `research_notes/Hetzner signer key custody/`; the first, shorter comparison is
+> [`notes/R-key-custody-options.md`](notes/R-key-custody-options.md); where OpenBao runs, its cost
+> and its link to the facilitator's server are in
+> [`notes/R-openbao-on-hetzner.md`](notes/R-openbao-on-hetzner.md). On 2026-10-16 the choice
+> between OpenBao and AWS KMS was reopened: OpenBao needs its own machine, and mainnet may unseal
+> from a KMS anyway
+> ([revisited](notes/R-key-custody-options.md#openbao-or-aws-kms-revisited)).
 
 ## Context
 
@@ -56,7 +64,36 @@ compares. Record the choice in an ADR that supersedes ADR 0011's custody part.
 
 ## Acceptance Criteria
 
-- [ ] Options compared for Hetzner, with sources
-- [ ] Vault Transit's Ed25519 checked for valid Stellar signatures, on testnet
+- [x] Options compared for Hetzner, with sources (`notes/R-key-custody-options.md`)
+- [x] Vault Transit's Ed25519 shown to make valid Stellar signatures, on testnet (`spike/`)
 - [ ] okarcz picks the custody option, unseal and recovery
 - [ ] An ADR records it and supersedes ADR 0011's custody part; 0036 and 0026 are updated
+
+## Implementation Notes
+
+- **Spike** (`spike/`, Docker dev servers): Vault 2.1.2 and OpenBao 2.7.1 both sign the 32-byte
+  transaction hash with pure Ed25519, accepted by `stellar-sdk`; an imported `S…` key keeps its
+  G-address; non-exportable keys refuse export; ~6 ms a signature locally. A `createAccount`
+  signed only by OpenBao landed on testnet (`26a93987…`, ledger 5210493).
+- **No Stellar plugin exists**: Transit works because Stellar keys are plain Ed25519.
+- **Deep research** (2026-10-15): AWS KMS from Hetzner (pure Ed25519 since 2025-11-07, seed
+  import documented, untested on Stellar, cross-cloud on every settlement), the other managed
+  KMS/HSM services and custody APIs, self-hosted options and Stellar-level controls.
+- **Gap in our code, found by the research:** `packages/signer-pool/src/setup.ts` gives the
+  facilitator key weight 1 and leaves every channel threshold at 0, so the hot key alone can
+  change signers on every channel. Thresholds and a cold recovery signer are mainnet blockers
+  under any custody option; task 0048 covers them.
+
+## Design Decisions
+
+### Emerged
+
+1. **OpenBao over Vault, if Transit is chosen** (proposal): API-compatible (the spike passed on
+   both), MPL-2.0 rather than BSL, and its HSM seal is open source.
+2. **The same signer on testnet and mainnet** (proposal), unlike ADR 0011's split.
+
+## Future Work
+
+- The ADR, then a Transit `TransactionSigner` in `apps/facilitator/src/adapters/`, after the
+  choice.
+- **0048**: thresholds that keep the hot key below high, and a cold recovery signer (backlog).
