@@ -167,6 +167,12 @@ over" return (the old code), and no `Math.min(…, ownEnd)` clamp.
   hash; the same payload with other requirements got `…_nonce_already_used` with that hash; two
   concurrent calls submitted one transaction (`3fd2b0a4…`), one `success` and one
   `…_already_settled`; `/verify` of the settled payment fails (`…_simulation_failed`).
+- **After the fourth review** (2026-10-16, on the pushed head `accb133`, fresh friendbot keys):
+  all 5 passed on the first run: the payment settled (`ecfabb9c…`, `SUCCESS` on chain); the same
+  request again got `…_already_settled` with that hash; the same payload with other requirements
+  got `…_nonce_already_used` with that hash; two concurrent calls submitted one transaction
+  (`7c3409f2…`), one `success` and one `…_already_settled`; `/verify` of the settled payment
+  fails (`…_simulation_failed`).
 
 ## Issues encountered
 
