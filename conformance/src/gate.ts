@@ -110,7 +110,10 @@ if (run) {
     problems,
     ...run,
   };
-  writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`);
+  // Errors carry stack traces through the local checkout; results are committed (task 0029), so
+  // the machine's own path stays out.
+  const text = JSON.stringify(record, null, 2).replaceAll(checkout, "<x402 checkout>");
+  writeFileSync(file, `${text}\n`);
   console.log(`Saved ${file}`);
 }
 
