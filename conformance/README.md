@@ -22,14 +22,15 @@ The suite kills whatever listens on ports 4022–4060 before it starts.
 
 ## What it does
 
-1. Clones the suite into `.cache/x402-<commit>/` at the commit pinned in `src/upstream.ts`, and
-   stops if any tracked file there differs from that commit.
-2. The first time only (~2.5 minutes, ~6 GB on disk; delete `.cache/` to free it): installs and
-   builds upstream's TypeScript SDK, the suite and its TypeScript components, the way upstream's CI
-   does. Upstream's `setup.sh` is not run: it also builds the Go and Python components, which the
-   Stellar scenarios never start.
+1. Deletes `.cache/x402-<commit>/` and clones the suite there afresh at the commit pinned in
+   `src/upstream.ts`, so no build from an earlier run is reused.
+2. Installs and builds upstream's TypeScript SDK, the suite and its TypeScript components, the way
+   upstream's CI does (~2.5 minutes, ~6 GB on disk; delete `.cache/` to free it). Upstream's
+   `setup.sh` is not run: it also builds the Go and Python components, which the Stellar scenarios
+   never start.
 3. Copies `external-proxy/` into the suite as `e2e/facilitators/external-proxies/stellar-x402/`,
-   the folder upstream keeps for external facilitators.
+   the folder upstream keeps for external facilitators, and stops if any tracked file differs from
+   the pinned commit.
 4. Runs every Stellar `exact` scenario: each canonical TypeScript client and server, HTTP and MCP,
    both routes (`/exact/stellar`, and `/exact/stellar/upfront`, which settles before serving).
 5. Fails unless every scenario passed with a transaction hash, and saves the run.

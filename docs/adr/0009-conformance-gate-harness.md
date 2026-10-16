@@ -36,7 +36,8 @@ facilitator roles, so we don't contribute new fixtures.
     itself.
   - It forwards `/verify`, `/settle` and `/supported` to our hosted facilitator.
 - **A `conformance/` script runs the gate.** It:
-  1. clones `x402-foundation/x402` read-only at a pinned commit;
+  1. clones `x402-foundation/x402` read-only at a pinned commit, afresh on every run, so no build
+     from an earlier run is reused;
   2. copies in only the proxy folder;
   3. installs and builds it the way upstream's CI does, without the Go and Python components;
   4. runs every Stellar `exact` scenario:

@@ -69,6 +69,7 @@ Read in a clone of upstream; paths are upstream's.
 - 2026-10-15 — **Runner in TypeScript** in `conformance/`, run with `tsx`. It fails on: no JSON, zero scenarios, any failed scenario, any passed scenario without a transaction hash. It adds the upstream commit, date and target URL to the saved JSON.
 - 2026-10-15 — **Keys** from an env file outside the repo, the same accounts as the MCP e2e suite; `FACILITATOR_STELLAR_PRIVATE_KEY` gets a placeholder the proxy ignores.
 - 2026-10-15 — **Names**: directory and `config.name` `stellar-x402`, URL variable `GATE_FACILITATOR_URL`, root command `pnpm conformance:e2e`.
+- 2026-10-16 — **Every run builds the suite from a fresh clone** (+2.5 min): the clean check sees only tracked files, so a build kept from an earlier run would not be covered by it.
 - 2026-10-15 — **Dry-run evidence** (x402.org) goes into this task and the PR, not `conformance/results/`, which holds our facilitator's runs (0029).
 
 ### Emerged
@@ -77,8 +78,9 @@ Read in a clone of upstream; paths are upstream's.
   and fails without a Go toolchain. The runner runs the TypeScript components' own `install.sh`
   and `build.sh`, after `pnpm install` + `pnpm build` in `typescript/` and `pnpm install` in `e2e/`,
   as upstream's CI does.
-- 2026-10-15 — **The checkout is cached** in `conformance/.cache/x402-<commit>/` (git-ignored,
-  6.1 GB measured), built once; every run checks that HEAD is the pin and no tracked file changed.
+- 2026-10-15 — **The checkout lives** in `conformance/.cache/x402-<commit>/` (git-ignored,
+  6.1 GB measured) and is rebuilt on every run (decided 2026-10-16); after the build and the proxy
+  copy, the run checks that HEAD is the pin and no tracked file changed.
 - 2026-10-15 — **`--schemes=exact`** is passed although Stellar has only `exact` routes today, so a
   pin bump that adds a Stellar `upto` route does not widen the gate silently.
 - 2026-10-15 — **The proxy passes the facilitator's status and content type through** and answers
