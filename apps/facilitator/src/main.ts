@@ -21,7 +21,7 @@ import { supportedResponse } from "./http/supported.js";
 import { captureConsoleError, jsonLogger, type Logger } from "./logger.js";
 import { memoryMetrics, type Metrics } from "./metrics.js";
 import type { SettlementStore } from "./ports/index.js";
-import { feeSettings, upstreamAtCurrentBid, type FeeSettings } from "./settlement/fees.js";
+import { atCurrentBid, feeSettings, type FeeSettings } from "./settlement/fees.js";
 import type { SettlementHooks } from "./settlement/hooks.js";
 import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler, type Settle } from "./settlement/settle.js";
 import { failoverUpstream } from "./settlement/upstream-failover.js";
@@ -57,15 +57,24 @@ export async function start(deps: AppDeps): Promise<Started> {
 }
 
 /**
- * How long upstream `verify()` may take on one RPC URL, as `FallbackRpc`'s timeout. With fee-stats
- * bids it includes the fee-stats read, which `upstreamAtCurrentBid` awaits before each call.
+ * How long upstream `verify()` may take on one RPC URL, the same as `FallbackRpc`'s timeout. The
+ * fee-stats bid is read before it starts (AD-10), so it covers the upstream call alone.
  */
 export const UPSTREAM_TIMEOUT_MS = 10_000;
 
-/** Slack on `/verify`'s overall deadline, so the last URL's own deadline fires first. */
-const UPSTREAM_DEADLINE_SLACK_MS = 1_000;
+/** Slack on the whole upstream call's deadline, so the last URL's own deadline fires first. */
+export const UPSTREAM_DEADLINE_SLACK_MS = 1_000;
 
-/** What `buildChecks` passes to `ExactStellarScheme`, besides the facilitator's signer. */
+/**
+ * The deadline of the whole upstream call (AD-3): 10 s for each of `urls` RPC URLs, plus, with
+ * fee-stats bids, the bid read before them, which `FallbackRpc` bounds at 10 s per URL, plus 1 s of
+ * slack. The AD-22 ledger read after it is not included.
+ */
+export function upstreamDeadlineMs(urls: number, feeStats: boolean): number {
+  return UPSTREAM_TIMEOUT_MS * urls * (feeStats ? 2 : 1) + UPSTREAM_DEADLINE_SLACK_MS;
+}
+
+/** What `buildUpstream` passes to `ExactStellarScheme`, besides the facilitator's signer. */
 export type SchemeOptions = NonNullable<ConstructorParameters<typeof ExactStellarScheme>[1]>;
 
 export type MakeScheme = (
@@ -74,45 +83,61 @@ export type MakeScheme = (
 ) => UpstreamVerifier;
 
 /**
- * The verify checks' dependencies from the config (AD-3, AD-5, AD-10, AD-22): upstream
- * `ExactStellarScheme` with the fee ceiling and the fee a settlement pays at the shared bid, the
- * channels and the validity minimum. `/verify` and `/settle` build their checks from the same
+ * Upstream verify from the config, with its deadline (AD-3, AD-10): one `ExactStellarScheme` per
+ * `RPC_URLS` entry, with the fee ceiling and the fee a settlement pays at the shared bid, read once
+ * per call, behind `failoverUpstream`. A switch to another RPC URL is logged as `rpc_failover`.
+ * The two belong together: spread both into `VerifierDeps`, or the deadline falls back to 10 s and
+ * cuts off the second URL. Tests pass their own `makeScheme`.
+ */
+export function buildUpstream(
+  config: Config,
+  fees: FeeSettings,
+  logger: Pick<Logger, "warn">,
+  makeScheme: MakeScheme = (signer, options) => new ExactStellarScheme([signer], options),
+): Pick<VerifierDeps, "upstream" | "upstreamTimeoutMs"> {
+  // Upstream knows only the facilitator key, and only in plain form; the channels and the muxed
+  // facilitator are `createChecker`'s check (AD-5).
+  const signer = createEd25519Signer(config.facilitatorSecret, config.network);
+  // Upstream reads one RPC URL, so there is one scheme per URL, tried in `RPC_URLS` order.
+  const endpoints = atCurrentBid(fees.inclusionFee, (inclusionFeeStroops) =>
+    config.rpcUrls.map((url, i) => ({
+      name: `RPC_URLS[${i}]`,
+      verifier: makeScheme(signer, {
+        rpcConfig: { url },
+        maxTransactionFeeStroops: fees.maxFeeStroops,
+        inclusionFeeStroops,
+      }),
+    })),
+  );
+  return {
+    upstream: failoverUpstream(endpoints, {
+      timeoutMs: UPSTREAM_TIMEOUT_MS,
+      onSwitch: (from, to) => logger.warn("rpc_failover", { from, to }),
+    }),
+    upstreamTimeoutMs: upstreamDeadlineMs(
+      config.rpcUrls.length,
+      config.fees.inclusionFeeStroops === undefined,
+    ),
+  };
+}
+
+/**
+ * The verify checks' dependencies from the config (AD-3, AD-5, AD-10, AD-22): {@link buildUpstream},
+ * the channels and the validity minimum. `/verify` and `/settle` build their checks from the same
  * object. `fees` is the caller's, so the pool is built from the same `fees.pool` and shares its
- * bid. A switch to another RPC URL is logged as `rpc_failover`. Tests pass their own `makeScheme`.
+ * bid.
  */
 export function buildChecks(
   config: Config,
   rpc: Pick<FallbackRpc, "getLatestLedger">,
   fees: FeeSettings,
   logger: Pick<Logger, "warn">,
-  makeScheme: MakeScheme = (signer, options) => new ExactStellarScheme([signer], options),
+  makeScheme?: MakeScheme,
 ): VerifierDeps {
-  // Upstream knows only the facilitator key, and only in plain form; the channels and the muxed
-  // facilitator are `createChecker`'s check (AD-5).
-  const signer = createEd25519Signer(config.facilitatorSecret, config.network);
-  // Upstream reads one RPC URL, so there is one scheme per URL, tried in `RPC_URLS` order (AD-3).
-  const upstream = failoverUpstream(
-    config.rpcUrls.map((url, i) => ({
-      name: `RPC_URLS[${i}]`,
-      verifier: upstreamAtCurrentBid(fees.inclusionFee, (inclusionFeeStroops) =>
-        makeScheme(signer, {
-          rpcConfig: { url },
-          maxTransactionFeeStroops: fees.maxFeeStroops,
-          inclusionFeeStroops,
-        }),
-      ),
-    })),
-    {
-      timeoutMs: UPSTREAM_TIMEOUT_MS,
-      onSwitch: (from, to) => logger.warn("rpc_failover", { from, to }),
-    },
-  );
   return {
     network: config.network,
-    upstream,
-    // Each URL gets its own deadline, so the whole call can take one per URL, plus slack.
-    upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS * config.rpcUrls.length + UPSTREAM_DEADLINE_SLACK_MS,
-    facilitator: signer.address,
+    ...buildUpstream(config, fees, logger, makeScheme),
+    facilitator: createEd25519Signer(config.facilitatorSecret, config.network).address,
     channels: config.channels,
     minValidityLedgers: config.settlement.minValidityLedgers,
     latestLedger: async () => (await rpc.getLatestLedger()).sequence,

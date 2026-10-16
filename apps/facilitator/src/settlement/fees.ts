@@ -4,7 +4,6 @@ import {
   type SubmitterOptions,
 } from "@stellar-x402/signer-pool";
 import type { Config } from "../config.js";
-import type { UpstreamVerifier } from "./verify.js";
 
 export interface FeeSettings {
   /** Ceiling of the total fee, for upstream's `maxTransactionFeeStroops` and the pool. */
@@ -49,23 +48,22 @@ export function settlementInclusionFee(bid: number): number {
 
 /**
  * Upstream `ExactStellarScheme` takes its inclusion fee as a constructor value, and `verify()`
- * checks the simulated resource fee plus that value against the ceiling. This verifier reads the
- * current bid on each call and builds a scheme for the fee a settlement pays at that bid when the
- * bid has changed, so `/verify` refuses exactly what the pool would refuse at the same bid. A
- * fee-stats bid stays the same only within one 30 s reading, so a `/settle` after the next reading
- * can pay a different one. Fee escalation under load can also raise the pool's bid later; the pool
- * checks its own total again before signing.
+ * checks the simulated resource fee plus that value against the ceiling. This reads the current
+ * bid and returns what `build` made for the fee a settlement pays at that bid, built again only
+ * when the bid has changed, so `/verify` refuses exactly what the pool would refuse at the same
+ * bid. `/verify` builds one scheme per RPC URL with it and reads the bid once per call, before any
+ * URL's deadline starts (AD-3). A fee-stats bid stays the same only within one 30 s reading, so a
+ * `/settle` after the next reading can pay a different one. Fee escalation under load can also
+ * raise the pool's bid later; the pool checks its own total again before signing.
  */
-export function upstreamAtCurrentBid(
+export function atCurrentBid<T>(
   inclusionFee: () => Promise<number>,
-  build: (inclusionFeeStroops: number) => UpstreamVerifier,
-): UpstreamVerifier {
-  let current: { bid: number; scheme: UpstreamVerifier } | undefined;
-  return {
-    async verify(payload, requirements) {
-      const bid = await inclusionFee();
-      if (current?.bid !== bid) current = { bid, scheme: build(settlementInclusionFee(bid)) };
-      return current.scheme.verify(payload, requirements);
-    },
+  build: (inclusionFeeStroops: number) => T,
+): () => Promise<T> {
+  let current: { bid: number; built: T } | undefined;
+  return async () => {
+    const bid = await inclusionFee();
+    if (current?.bid !== bid) current = { bid, built: build(settlementInclusionFee(bid)) };
+    return current.built;
   };
 }
