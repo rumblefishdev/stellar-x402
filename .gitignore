@@ -7,6 +7,9 @@ dist/
 .turbo/
 coverage/
 
+# The pinned upstream x402 checkout the conformance gate builds and runs
+conformance/.cache/
+
 # Rust / Soroban
 contracts/target/
 contracts/**/test_snapshots/
