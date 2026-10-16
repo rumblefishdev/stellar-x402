@@ -100,7 +100,11 @@ export function createVerifier(deps: VerifierDeps): Verify {
       );
     }
     const upstream = withStringPayer(
-      await withTimeout(deps.upstream.verify(payload, requirements, trace), timeoutMs),
+      await withTimeout(
+        deps.upstream.verify(payload, requirements, trace),
+        timeoutMs,
+        "upstream verify (every RPC URL)",
+      ),
     );
     // Upstream catches every exception, a failed RPC call included, and answers with this code.
     // It says nothing about the payment, so it is our error: a 500, logged as one.
@@ -243,11 +247,16 @@ function withStringPayer(response: VerifyResponse): VerifyResponse {
     : { ...response, payer: undefined };
 }
 
-export async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+/** `promise`, or an `UpstreamTimeoutError` naming `what` after `ms`. */
+export async function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  what = "upstream verify",
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(
-      () => reject(new UpstreamTimeoutError(`upstream verify gave no answer within ${ms} ms`)),
+      () => reject(new UpstreamTimeoutError(`${what} gave no answer within ${ms} ms`)),
       ms,
     );
   });

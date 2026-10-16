@@ -21,7 +21,8 @@
  *   CLIENT_SECRET=$(stellar keys show x402-verify-client) \
  *     PAY_TO=$(stellar keys address x402-verify-seller) npx tsx scripts/verify-smoke.ts
  *
- * Nothing is submitted: `/verify` only simulates.
+ * Nothing is submitted: `/verify` only simulates. The facilitators' log lines go to stderr, so
+ * stdout carries only the result.
  */
 import { once } from "node:events";
 import { createServer, type AddressInfo } from "node:net";
@@ -29,6 +30,7 @@ import { Keypair } from "@stellar/stellar-sdk";
 import type { PaymentRequirements, VerifyResponse } from "@x402/core/types";
 import { createEd25519Signer } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/client";
+import { Agent, fetch } from "undici";
 import { main } from "../src/main.js";
 
 const XLM_SAC_TESTNET = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
@@ -64,22 +66,15 @@ async function freePort(): Promise<number> {
   return port;
 }
 
-/** The facilitators' log events, read from stdout, where `jsonLogger` writes them. */
+/** The facilitators' log events, from `main()`'s log sink; the lines go on to stderr. */
 const events: { event: string; rpc?: string }[] = [];
-const write = process.stdout.write.bind(process.stdout);
-process.stdout.write = ((chunk: string | Uint8Array, ...rest: never[]) => {
-  for (const line of String(chunk).split("\n")) {
-    try {
-      const parsed: unknown = JSON.parse(line);
-      if (parsed && typeof parsed === "object" && "event" in parsed) {
-        events.push(parsed as { event: string; rpc?: string });
-      }
-    } catch {
-      // Not a log line.
-    }
-  }
-  return write(chunk, ...rest);
-}) as typeof process.stdout.write;
+const write = (line: string) => {
+  events.push(JSON.parse(line) as { event: string; rpc?: string });
+  process.stderr.write(line);
+};
+
+/** The script's own HTTP client, apart from the global one `main()` sets for the facilitator. */
+const http = new Agent({ headersTimeout: 120_000 });
 
 async function verifyWith(
   channels: string,
@@ -87,16 +82,22 @@ async function verifyWith(
   const port = await freePort();
   const from = events.length;
   // A fresh facilitator key: verify never spends from it.
-  const server = await main({
-    FACILITATOR_SECRET: Keypair.random().secret(),
-    CHANNELS: channels,
-    PORT: String(port),
-    LOG_LEVEL: "info",
-    MIN_VALIDITY_LEDGERS: process.env.MIN_VALIDITY_LEDGERS,
-    RPC_URLS: process.env.RPC_URLS,
-  });
+  const server = await main(
+    {
+      FACILITATOR_SECRET: Keypair.random().secret(),
+      CHANNELS: channels,
+      PORT: String(port),
+      LOG_LEVEL: "info",
+      MIN_VALIDITY_LEDGERS: process.env.MIN_VALIDITY_LEDGERS,
+      RPC_URLS: process.env.RPC_URLS,
+    },
+    { write },
+  );
   try {
     const response = await fetch(`http://127.0.0.1:${port}/verify`, {
+      // `main()` bounds this process's `fetch` at 10 s without headers; a hung first RPC URL makes
+      // `/verify` itself take longer.
+      dispatcher: http,
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ x402Version: 2, paymentPayload, paymentRequirements: requirements }),

@@ -153,16 +153,26 @@ describe("main()", () => {
 });
 
 describe("upstream's console.error in main()", () => {
-  it("never writes the RPC URL's key to stderr when upstream's RPC call fails", async () => {
-    // Every RPC call answers 503, so upstream's simulation fails and it prints the AxiosError.
-    const rpc = createServer((_req, res) => res.writeHead(503).end()).listen(0, "127.0.0.1");
+  it("never writes an RPC URL's key to a log line or stderr when upstream's RPC calls fail", async () => {
+    // Both URLs answer 503, so upstream's simulation fails and it prints the AxiosError. On the
+    // second request the second URL answers a failed simulation: a verdict, so a failover.
+    let request = 0;
+    const rpc = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", () => {
+        if (request < 2 || !req.url?.includes("0TH3R")) return void res.writeHead(503).end();
+        const { id } = JSON.parse(body) as { id: number };
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ jsonrpc: "2.0", id, result: { latestLedger: 1, error: "boom" } }));
+      });
+    }).listen(0, "127.0.0.1");
     await once(rpc, "listening");
-    const rpcUrl = `http://127.0.0.1:${(rpc.address() as AddressInfo).port}/apikey-S3CR3T`;
+    const base = `http://127.0.0.1:${(rpc.address() as AddressInfo).port}`;
     const child = spawn(process.execPath, ["--import", "tsx", "src/server.ts"], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),
-      env: { ...env, PORT: "47130", RPC_URLS: rpcUrl },
+      env: { ...env, PORT: "47130", RPC_URLS: `${base}/apikey-S3CR3T,${base}/apikey-0TH3R` },
     });
-
     // A transfer that passes upstream's checks up to the simulation.
     const asset = StrKey.encodeContract(Buffer.alloc(32, 7));
     const payer = Keypair.random().publicKey();
@@ -206,29 +216,33 @@ describe("upstream's console.error in main()", () => {
     let stdout = "";
     let stderr = "";
     child.stderr.on("data", (chunk) => (stderr += chunk));
-    let status: Promise<number> | undefined;
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-      if (status || !stdout.includes('"listening"')) return;
-      status = fetch("http://127.0.0.1:47130/verify", {
+    const post = () =>
+      fetch("http://127.0.0.1:47130/verify", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
-      })
-        .then((response) => response.status)
-        .finally(() => child.kill("SIGTERM"));
+      }).then((response) => response.status);
+    let statuses: Promise<number[]> | undefined;
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      if (statuses || !stdout.includes('"listening"')) return;
+      statuses = (async () => {
+        const first = await post();
+        request = 2;
+        return [first, await post()];
+      })().finally(() => child.kill("SIGTERM"));
     });
     await once(child, "exit");
     rpc.close();
 
-    expect(await status).toBe(500);
+    expect(await statuses).toEqual([500, 200]);
     const events = stdout
       .split("\n")
       .filter(Boolean)
       .map((line) => JSON.parse(line));
-    expect(events).toContainEqual(
-      expect.objectContaining({ level: "error", event: "console_error" }),
-    );
-    expect(stdout + stderr).not.toContain("S3CR3T");
+    for (const event of ["console_error", "rpc_exhausted", "http_error", "rpc_failover"]) {
+      expect(events.map((e) => e.event)).toContain(event);
+    }
+    for (const key of ["S3CR3T", "0TH3R"]) expect(stdout + stderr).not.toContain(key);
   }, 20_000);
 });
