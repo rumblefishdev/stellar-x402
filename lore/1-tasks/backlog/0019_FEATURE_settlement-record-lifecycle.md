@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 milestone: 1
 related_adr: ["0006", "0011"]
-related_tasks: ["0012", "0009", "0016", "0014"]
+related_tasks: ["0012", "0009", "0016", "0014", "0013"]
 tags: [facilitator, settlement, priority-high, effort-medium, payments]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -65,6 +65,13 @@ As a facilitator operator, I want settlement records that are written before sen
     `addHash`, which refuses final records, so it sends nothing.
 - Tests with the in-memory store and `fake-rpc`, including a simulated crash between sign and send and one between the claim and the first
   `onSigned`.
+- From 0009 (PR #41 reviews; ADR 0006's store-outage rule): records an outage leaves
+  unfinished are this task's to finish once the store is back:
+  - a success answered from the pool's result while the store failed stays `signed` or
+    `pending`; finishing it to `success` lets a later repeat win the mark and get a second success
+    (0009 decision 29). Mark such a finish answered, e.g. `successAnsweredAt` set at the finish;
+  - every `pending` answer waits for this task: until then a repeat gets `settlement_pending`
+    until the process restarts (the README says so).
 - From 0014 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md)): reconciliation runs after the process takes the
   lease and before `/settle` is served.
   - The HTTP server listens at once, because ECS needs `/health` to answer.
