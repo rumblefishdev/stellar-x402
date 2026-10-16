@@ -99,17 +99,20 @@ describe("failoverUpstream", () => {
     expect(b.verify).toHaveBeenCalledTimes(2);
   });
 
-  it("wraps around from the active endpoint", async () => {
+  it("wraps around from the active endpoint, without making the first one active", async () => {
     const a = endpoint("a", unexpected, valid);
-    const b = endpoint("b", valid, unexpected);
+    const b = endpoint("b", valid, unexpected, valid);
     const onSwitch = vi.fn();
     const upstream = failover([a, b], { onSwitch });
-    await upstream.verify(payload, requirements); // a fails, b answers
-    await expect(upstream.verify(payload, requirements)).resolves.toEqual(valid); // b fails, a
-    expect(onSwitch.mock.calls.map(([from, to]) => [from, to])).toEqual([
-      ["a", "b"],
-      ["b", "a"],
-    ]);
+    await upstream.verify(payload, requirements); // a fails, b answers: a → b
+    const trace: VerifyTrace = {};
+    await expect(upstream.verify(payload, requirements, trace)).resolves.toEqual(valid); // b fails, a
+    expect(trace).toEqual({ rpc: "a" });
+    expect(onSwitch.mock.calls.map(([from, to]) => [from, to])).toEqual([["a", "b"]]);
+    // b stays active.
+    await upstream.verify(payload, requirements, trace);
+    expect(trace).toEqual({ rpc: "b" });
+    expect(a.verify).toHaveBeenCalledTimes(2);
   });
 
   it("doesn't switch back for a call that began before another one switched", async () => {
@@ -135,20 +138,29 @@ describe("failoverUpstream", () => {
     let answerLate!: (answer: VerifyResponse) => void;
     const late = () => new Promise<VerifyResponse>((resolve) => (answerLate = resolve));
     const a = endpoint("a", unexpected, unexpected, valid);
-    const b = endpoint("b", late, valid, unexpected);
+    const b = endpoint("b", late, valid);
     const onSwitch = vi.fn();
-    const upstream = failover([a, b], { onSwitch });
+    const onFailback = vi.fn();
+    let time = 0;
+    const upstream = failover([a, b], {
+      onSwitch,
+      onFailback,
+      latestLedger: async () => 100,
+      now: () => time,
+    });
     const x = upstream.verify(payload, requirements); // a fails, then waits on b
     await vi.waitFor(() => expect(b.verify).toHaveBeenCalledTimes(1));
     await upstream.verify(payload, requirements); // a fails, b answers: a → b
-    await upstream.verify(payload, requirements); // b fails, a answers: b → a
+    time = 60_000;
+    await upstream.verify(payload, requirements); // the probe finds a healthy: b → a
+    await vi.waitFor(() => expect(onFailback).toHaveBeenCalledOnce());
     answerLate(valid);
     await expect(x).resolves.toEqual(valid);
-    // An index guard (`current === active`, both 0 again) would have switched to b a third time.
-    expect(onSwitch.mock.calls.map(([from, to]) => [from, to])).toEqual([
-      ["a", "b"],
-      ["b", "a"],
-    ]);
+    // An index guard (`current === active`, both 0 again) would have switched to b a second time.
+    expect(onSwitch.mock.calls.map(([from, to]) => [from, to])).toEqual([["a", "b"]]);
+    const trace: VerifyTrace = {};
+    await upstream.verify(payload, requirements, trace);
+    expect(trace).toEqual({ rpc: "a" });
   });
 
   it("switches once for concurrent calls in one outage", async () => {
@@ -265,6 +277,72 @@ describe("failoverUpstream", () => {
       expect(p.latestLedger).toHaveBeenCalledTimes(2);
       expect(a.verify).toHaveBeenCalledTimes(1);
       expect(p.onFailback).not.toHaveBeenCalled();
+    });
+
+    it("stays off a dead first endpoint that a call wraps around to, and probes it at once", async () => {
+      // Upstream rejects a wrong amount before any RPC call, so a dead RPC would answer it.
+      const wrongAmount: VerifyResponse = {
+        isValid: false,
+        invalidReason: "invalid_exact_stellar_payload_wrong_amount",
+      };
+      const a = endpoint("a", unexpected, wrongAmount);
+      const b = endpoint("b", valid, unexpected, valid);
+      const down = new Error("ECONNREFUSED");
+      const p = probed([a, b], [down, 100]);
+      await p.upstream.verify(payload, requirements); // a fails, b answers: a → b
+      p.at(1_000);
+      const trace: VerifyTrace = {};
+      // b fails, a answers from the payload alone.
+      await expect(p.upstream.verify(payload, requirements, trace)).resolves.toEqual(wrongAmount);
+      expect(trace).toEqual({ rpc: "a" });
+      // The probe runs now, not 60 s after calls left a.
+      await vi.waitFor(() =>
+        expect(p.onProbeFailed).toHaveBeenCalledExactlyOnceWith("a", { error: down }),
+      );
+      expect(p.onSwitch.mock.calls.map(([from, to]) => [from, to])).toEqual([["a", "b"]]);
+      expect(p.onFailback).not.toHaveBeenCalled();
+      await p.upstream.verify(payload, requirements, trace);
+      expect(trace).toEqual({ rpc: "b" });
+      expect(a.verify).toHaveBeenCalledTimes(2);
+    });
+
+    it("counts a first endpoint whose probe hangs past timeoutMs as down, and probes again later", async () => {
+      const a = endpoint("a", unexpected);
+      const b = endpoint("b", valid);
+      let time = 0;
+      const latestLedger = vi.fn((i: number) =>
+        i === 0 ? new Promise<number>(() => {}) : Promise.resolve(100),
+      );
+      const onProbeFailed = vi.fn();
+      const upstream = failover([a, b], {
+        latestLedger,
+        onProbeFailed,
+        timeoutMs: 20,
+        now: () => time,
+      });
+      await upstream.verify(payload, requirements);
+      time = 60_000;
+      await upstream.verify(payload, requirements);
+      await vi.waitFor(() =>
+        expect(onProbeFailed).toHaveBeenCalledExactlyOnceWith("a", {
+          error: expect.any(UpstreamTimeoutError),
+        }),
+      );
+      // The hung probe ended, so the next one can start.
+      time = 120_000;
+      await upstream.verify(payload, requirements);
+      expect(latestLedger.mock.calls).toEqual([[0], [1], [0], [1]]);
+    });
+
+    it("returns to a healthy first endpoint when the active one can't read its ledger", async () => {
+      const a = endpoint("a", unexpected, valid);
+      const b = endpoint("b", valid);
+      const p = probed([a, b], [100, new Error("down")]);
+      await p.upstream.verify(payload, requirements);
+      p.at(60_000);
+      await p.upstream.verify(payload, requirements);
+      await vi.waitFor(() => expect(p.onFailback).toHaveBeenCalledExactlyOnceWith("b", "a", 0));
+      expect(p.onProbeFailed).not.toHaveBeenCalled();
     });
 
     it("stays off a first endpoint that trails the active one by more than maxLagLedgers", async () => {
