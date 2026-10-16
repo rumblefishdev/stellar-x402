@@ -10,5 +10,8 @@
     "test": "vitest run",
     "gate": "tsx src/gate.ts",
     "clean": "rm -rf .turbo"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^16.3.0"
   }
 }

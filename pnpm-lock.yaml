@@ -113,7 +113,11 @@ importers:
         specifier: ~2.28.0
         version: 2.28.0(typescript@6.0.3)
 
-  conformance: {}
+  conformance:
+    dependencies:
+      '@stellar/stellar-sdk':
+        specifier: ^16.3.0
+        version: 16.3.0
 
   contracts/upto-proxy/e2e:
     dependencies:

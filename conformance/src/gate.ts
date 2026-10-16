@@ -6,6 +6,8 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } fr
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
+import { Keypair, rpc } from "@stellar/stellar-sdk";
+import { checkSettlement } from "./onchain.js";
 import { UPSTREAM_COMMIT, UPSTREAM_REPO, assertClean, prepare } from "./upstream.js";
 import { judge, type SuiteRun } from "./verdict.js";
 
@@ -68,6 +70,27 @@ const run = existsSync(suiteJson)
   : undefined;
 const problems = judge(run, suite.status);
 
+// The suite reports a hash; the chain says what it paid. Every Stellar route costs $0.001, 10000
+// units of testnet USDC (7 decimals), at the pinned commit (e2e/config/mechanisms_stellar.json,
+// typescript/packages/mechanisms/stellar/src/constants.ts).
+const expected = {
+  asset: "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+  from: Keypair.fromSecret(accounts.E2E_BUYER_SECRET!).publicKey(),
+  to: accounts.E2E_SELLER_PUBLIC!,
+  amount: 10000n,
+};
+const chain = new rpc.Server("https://soroban-testnet.stellar.org");
+let readOnChain = 0;
+for (const result of run?.results ?? []) {
+  if (!result.passed || !result.transaction) continue;
+  readOnChain += 1;
+  const answer = await chain.getTransaction(result.transaction);
+  const envelope = answer.status === "SUCCESS" ? answer.envelopeXdr.toXDR("base64") : undefined;
+  const problem = checkSettlement(answer.status, envelope, expected);
+  if (problem) problems.push(`#${result.testNumber} transaction ${result.transaction} ${problem}`);
+}
+console.log(`Read ${readOnChain} transactions on chain`);
+
 if (run) {
   const date = new Date().toISOString();
   const file = join(
@@ -82,6 +105,7 @@ if (run) {
     facilitatorUrl,
     command: `pnpm ${args.slice(0, -1).join(" ")}`,
     suiteExitCode: suite.status,
+    readOnChain,
     passed: problems.length === 0,
     problems,
     ...run,
@@ -94,4 +118,6 @@ if (problems.length > 0) {
   console.error(`Gate failed:\n${problems.map((problem) => `- ${problem}`).join("\n")}`);
   process.exit(1);
 }
-console.log(`Gate passed: ${run?.results.length} scenarios, each with a transaction hash`);
+console.log(
+  `Gate passed: ${run?.results.length} scenarios, each settled on chain buyer to seller for the price`,
+);
