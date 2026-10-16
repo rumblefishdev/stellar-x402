@@ -44,6 +44,12 @@ history:
     note: >
       Third PR #41 review (Adam) and @karolko9's points applied: decisions 29–45, facilitator
       177 → 205 tests, signer-pool 99 → 101. Converted to a directory with notes/.
+  - date: "2026-10-16"
+    status: active
+    who: claude
+    note: >
+      Fourth PR #41 review (Adam): decision 46 (a repeat that lost the claim leaves an unsigned
+      record to the first call), facilitator 205 → 207.
 ---
 
 # Settle exact payments once through the channel pool
@@ -107,7 +113,7 @@ never charged twice.
 ## Implementation Notes
 
 - **`settlement/settle.ts`**: `createSettler()` returns `/settle`'s function.
-  1. A payload whose key (`keyOf`, from the transaction alone) has a record is a repeat (`replay`): the fingerprint must match; it waits for a signed record up to `SETTLE_TIMEOUT_MS`, for an unsigned one up to the first call's budget and then ends it, both capped by its own budget; a success only once.
+  1. A payload whose key (`keyOf`, from the transaction alone) has a record is a repeat (`replay`): the fingerprint must match; it waits for a signed record up to `SETTLE_TIMEOUT_MS`, for an unsigned one up to the first call's budget and then ends it, both capped by its own budget (one that lost the claim may stop first, and then leaves the record, decision 46); a success only once.
   2. Otherwise the `/verify` checks (`createChecker`), bounded by the budget.
   3. The claim (`network:payer:nonce`, SHA-256 fingerprint of canonical JSON).
   4. `beforeSubmit`; a refusal, or a hook that throws, ends the record `rejected` without `onFinal`.
@@ -118,59 +124,17 @@ never charged twice.
 - **`main.ts`**: `compose(config, …)` builds the stores, cataloger, RPC, one `fees`, `buildChecks` and `buildSettlement` (the pool from `fees.pool`, `keypairSigner`, the channels; the settler with `settleCheck(checks)` and the budget); `main()` refuses `stellar:pubnet` with `STORE=memory` and starts it.
 - **`signer-pool`**: `./testing` exports `FakeRpc`; `FallbackRpc` throws `RpcUnavailableError`; `submit()` refuses source-account auth (`SourceAccountAuthError`).
 - **Nothing else sends**: `grep sendTransaction|.settle(` in `apps/facilitator/src` finds nothing.
-- **Tests**: facilitator 74 → 205 (`settle.test.ts` 76, `settle-route.test.ts` 8, `settle-pool.test.ts` 6), signer-pool 99 → 101. The review rounds, their mutants, modified tests and the testnet runs are in [notes/R-pr41-reviews.md](notes/R-pr41-reviews.md).
+- **Tests**: facilitator 103 → 207 (`settle.test.ts` 78, `settle-route.test.ts` 8, `settle-pool.test.ts` 6), signer-pool 99 → 101. The review rounds, their mutants, modified tests and the testnet runs are in [notes/R-pr41-reviews.md](notes/R-pr41-reviews.md).
 
 ## Design Decisions
 
 ### Emerged
 
-All 45, with their reasons, are in [notes/S-design-decisions.md](notes/S-design-decisions.md):
-
-1. A repeat is answered from the record before the checks run
-2. A failure before anything was signed ends the record as `rejected`
-3. A thrown send that may have reached the network keeps the record open
-4. The balance-change check is ours
-5. The settle module takes the pool as a `Submitter` interface
-6. New fixed codes, named like upstream's
-7. `SETTLE_BUDGET_MS` is a setting
-8. `/settle` rechecks the auth expiry at the pool's floor of 2 ledgers
-9. `/settle`'s `payer` is a string or absent
-10. A fee or ledger refusal after `/verify` accepted keeps its answer and is flagged
-11. A timeout answer ends what it says was never signed
-12. Nothing is submitted once the checks and `beforeSubmit` used up the budget
-13. A repeat waits for a record with no hash until the first call's budget ends, counted from the claim
-14. A refusal stands when the store can't record it
-15. When the store fails after the pool answered, the answer is the pool's result
-16. A success is answered once per record
-17. `SETTLE_BUDGET_MS` 30 s and `SETTLE_TIMEOUT_MS` 20 s
-18. `main()` refuses `stellar:pubnet` while `STORE=memory`
-19. The one-payer-entry rule is a `/verify` check
-20. Every store and hook call is bounded, and the budget answer never throws
-21. A `beforeSubmit` that doesn't answer within the budget ends the record as the budget does
-22. Repeats share one store read per poll per key, and stop when their client leaves
-23. `RpcTimeoutError` before anything was signed answers `settle_exact_stellar_rpc_unavailable`
-24. `…_nonce_already_used` carries the stored hash, if any
-25. `/settle`'s own fee refusal is a drift too
-26. One origin per transition
-27. `FakeRpc` is exported as `@stellar-x402/signer-pool/testing`
-28. Metrics and logs for the rest
-29. A success the store can't mark is answered once per process (okarcz)
-30. The store-outage rule: refuse before money moves, tell the truth after (okarcz)
-31. A repeat that can't end an unsigned record answers `settlement_pending` with no hash
-32. The checks run inside the budget, and past it nothing is claimed
-33. A repeat's waits end by its own budget
-34. `onFinal` after a `beforeSubmit` past the budget runs once the hook settles
-35. `onSigned` checks the budget flag again after `addHash`
-36. `FallbackRpc` throws `RpcUnavailableError` when every endpoint failed
-37. Auth entries without address credentials are refused by `createChecker` and the pool
-38. One metric prefix, every metric listed
-39. A request body nested deeper than 32 levels is a 400
-40. `SETTLE_TIMEOUT_MS` defaults to the shorter of 20 s and the budget, and needs at least 1 s
-41. Logged errors keep only the host of each URL
-42. `main()`'s parts come from `compose(config, …)`, tested on the real pool
-43. `<package>/testing` subpaths are test-only, by a lint rule
-44. RPC endpoints are logged as `RPC_URLS[i]`, never by URL or host
-45. #41 merges first; #45 rebases onto it (okarcz)
+All 46, with their reasons, are in [notes/S-design-decisions.md](notes/S-design-decisions.md).
+The ones a reviewer should check first: 1 (a repeat answered from the record), 11 and 13 (a
+timeout answer ends what was never signed), 16 (a success once), 29 and 30 (okarcz: the store
+outage), 45 (the #45 rebase) and 46 (a repeat that lost the claim leaves the record to the first
+call).
 
 ## Future Work
 
@@ -182,6 +146,6 @@ Each item is also a "From 0009" bullet in its task:
 - **0020**: the startup `checkChannel` and `/supported`.
 - **0022**: `markSuccessAnswered`, `successAnsweredAt` and an `addHash` atomic with `transition` in the durable adapters (port doc, contract tests), with their own timeouts; clock skew on `unsignedUntil`; lift `main()`'s pubnet refusal (decision 18).
 - **0023**: memory store growth with no rate limit.
-- **0024**: real `beforeSubmit` and `onFinal`; parallel-spend fee griefing; `onFinal` after a late hook (decision 34).
+- **0024**: real `beforeSubmit` and `onFinal`; parallel-spend fee griefing; `onFinal` after a late hook (decision 34); a reservation keyed by the settlement key, refused after its release (decision 46).
 - **0025**: the channel lease before `/settle` is served.
 - **0027**: the metrics of decision 38, the outcome counter, alarms on store failures.

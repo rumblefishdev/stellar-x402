@@ -46,7 +46,9 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
     was signed, it waits until the first call's settle budget ends, counted from the claim, then
     ends the record itself with `…_timeout` (compare-and-set against `addHash`). If the store
     can't end it, the answer is `settlement_pending` with no hash, never `…_timeout`: the record
-    may still be signed. Both waits also end with the repeat's own budget.
+    may still be signed. Both waits also end with the repeat's own budget. A repeat that lost the
+    claim began before the first call, so its budget can end first: then it answers
+    `settlement_pending` with no hash and leaves the record to the first call.
   - `success: true` is answered once per record, by compare-and-set on `successAnsweredAt`. Later
     calls get `settle_exact_stellar_already_settled` with the hash. `settlement_pending` doesn't
     count, and a call whose client left before the mark marks nothing.
