@@ -88,12 +88,13 @@ graph TD
 - **Rule:**
   - **Upstream owns verification.** Auth signature and scope checks, `Address`/`AddressV2` credentials, simulation and the event checks all belong to `@x402/stellar` `ExactStellarScheme.verify()`. We never re-implement them.
   - **Construction.** `ExactStellarScheme` is constructed with the fee values from AD-10.
-  - **`/verify`** = upstream `verify()`, then the AD-5 channel check, the AD-6 one-payer-entry check, then the AD-22 validity check. The first rejection returns `isValid: false` with its reason.
+  - **`/verify`** = upstream `verify()`, then address credentials only, the AD-5 channel check, the AD-6 one-payer-entry check, then the AD-22 validity check. The first rejection returns `isValid: false` with its reason.
+    - Address credentials only: an auth entry with source-account credentials would authorize as the operation source, which the pool makes the facilitator. Upstream refuses it too (`…_unsupported_credential_type`); we check it again because the pin `~2.28.0` lets upstream patches float, and the pool refuses such a call as well.
     - A network check runs first: a process serves one network, and upstream would verify another network's payload against that network's default RPC. A V0 envelope is rejected as malformed there too: upstream parses it, but can't assemble its simulation onto it.
     - Upstream answers its own exceptions, such as a failed RPC call, with `unexpected_verify_error`. That is an error of ours, not a verdict on the payment, so `/verify` answers 500. So does an upstream call with no answer within 10 s: upstream's RPC and Horizon clients have no timeout.
     - A request whose `amount` isn't a whole number is a 400: upstream's `BigInt(amount)` would throw, which would be a 500.
     - Upstream's `payer` passes on only as a string. Upstream reads it from the client's `from` before any signature check.
-  - **`/settle`** runs the same checks again, with the AD-22 floor of the pool (see AD-22). It then claims the record (AD-6), builds `{func, auth}` from the client's payload and submits it as in AD-2. The pool's `checkSimulation` hook enforces the spec's balance-change check.
+  - **`/settle`** first looks the payload's key up (AD-6): a known settlement is answered from its record, without any check, since a landed payment's nonce is used on chain and upstream's simulation of it fails. A new one gets the same checks again, with the AD-22 floor of the pool (see AD-22), within the settle budget (ADR 0011). It then claims the record (AD-6), builds `{func, auth}` from the client's payload and submits it as in AD-2. The pool's `checkSimulation` hook enforces the spec's balance-change check.
   - Upstream's `ExactStellarScheme.settle()` is never called.
 
 ### AD-4: Channel accounts count as the facilitator
@@ -124,18 +125,21 @@ graph TD
 - **Rule:**
   - **Key.** The settlement key is `network:payer:nonce`. The nonce is the int64 nonce of the payer's auth entry, held as a decimal string. A payload must carry exactly one payer auth entry, otherwise the `/verify` checks reject it, at `/verify` and `/settle` alike (upstream de-duplicates signers and doesn't count entries).
   - **Fingerprint.** Each record stores a fingerprint: a hash of the canonical payload plus `paymentRequirements`.
+  - **Known key first.** `/settle` reads the key from the payload and looks it up before any check. A known key is a repeat; only a new key is checked and claimed.
   - **Claim.** After verification and before `submit()`, `/settle` claims the key with an atomic insert-if-absent. Only the caller that wins the claim submits.
-  - **Repeat with the same fingerprint.** A repeat `/settle` returns the record's outcome.
+  - **Repeat with the same fingerprint.** A repeat `/settle` answers from the record.
     - A signed record that isn't final yet: it waits up to `SETTLE_TIMEOUT_MS` for the final outcome.
-    - A record with no hash: it waits until the first call's budget ends, counted from the claim. Then it ends the record itself (`claimed → rejected`, `…_timeout`), so the answer is never `…_timeout` for something that is then sent.
-  - **Success once.** `success: true` is answered once per record, by compare-and-set on `successAnsweredAt`. Every later call gets `success: false`, `settle_exact_stellar_already_settled` and the hash. `settlement_pending` doesn't count: the canonical resource server's one retry after it still gets the success. A call whose client left marks nothing. The cost: a seller that lost our `success` answer can't get it again.
+    - A record with no hash: it waits until the first call's budget ends, counted from the claim. Then it ends the record itself (`claimed → rejected`, `…_timeout`), so the answer is never `…_timeout` for something that is then sent. If the store can't end it, the answer is `settlement_pending` with no hash.
+    - Neither wait goes past the repeat's own budget.
+  - **Success once.** `success: true` is answered once per record, by compare-and-set on `successAnsweredAt`. Every later call gets `success: false`, `settle_exact_stellar_already_settled` and the hash. `settlement_pending` doesn't count: the canonical resource server's one retry after it still gets the success. A call whose client left before the mark marks nothing. The costs: a seller that lost our `success` answer can't get it again, and the success goes to whichever call marked first, whoever holds the payment header. A store that can't mark still gets the success, once per process ([ADR 0006](../adr/0006-settlement-record.md)).
   - **Repeat with a different fingerprint.** Rejected with `success: false`, `settle_exact_stellar_nonce_already_used` and the stored hash, if any, so a payment that landed can be reconciled. Nothing is submitted, and the stored outcome is never returned.
   - **Wire shape.** `SubmitStatus` maps as follows:
-    - `success` → `{success: true, transaction, network, payer}`, once; later `{success: false, errorReason: "settle_exact_stellar_already_settled", transaction, network}`
-    - `pending` → `{success: false, errorReason: "settlement_pending", transaction, network}`
-    - `failed` / `rejected` / `expired` → `{success: false, errorReason}`
+    - Every answer carries `network` and `payer`.
+    - `success` → `{success: true, transaction}`, once; later `{success: false, errorReason: "settle_exact_stellar_already_settled", transaction}`
+    - `pending` → `{success: false, errorReason: "settlement_pending", transaction}`
+    - `failed` / `rejected` / `expired` → `{success: false, errorReason, transaction}`, with the record's last hash
     - Each thrown submitter error class maps to a fixed `errorReason`, listed with the code.
-  - **Deadline.** The submit `deadline` comes from the client's signature expiry.
+  - **Deadline.** The submit `deadline` is the call's start plus the shorter of the settle budget and the ledgers left before the auth expiry, at the estimated ledger time.
 
 ### AD-7: State goes through ports the facilitator owns
 
@@ -340,6 +344,7 @@ graph TD
 | Logging and metrics   | structured, one event per line, carrying `network`, settlement key and the transaction hash where known; secrets and full XDR are never logged; pool `onEvent` forwarded to metrics                  |
 | HTTP hardening        | request body size limit; no CORS on `/verify` and `/settle`; trusted proxy hops set from config                                                                                                      |
 | Testing               | unit tests with fakes in each package; facilitator integration tests against in-memory stores and `fake-rpc`; testnet runs (AD-9 token matrix, AD-15 gate) record their transaction hashes           |
+| Test helpers          | a package shares its fakes through a `<package>/testing` subpath (e.g. `@stellar-x402/signer-pool/testing`); a lint rule keeps `src` from importing any of them                                      |
 
 ## Stack
 
@@ -384,19 +389,21 @@ sequenceDiagram
   participant R as SettlementStore
   participant P as signer-pool
   S->>F: paymentPayload, paymentRequirements
-  F->>F: upstream verify() + AD-5 + AD-22
-  F->>R: claim network:payer:nonce (insert-if-absent)
+  F->>R: get network:payer:nonce (read from the payload)
   alt key exists, same fingerprint
-    R-->>F: record (wait if pending)
-    F-->>S: stored outcome
+    R-->>F: record (wait while not final)
+    F->>R: success: mark successAnsweredAt (compare-and-set)
+    F-->>S: success once, then already_settled + hash; else the outcome
   else key exists, other fingerprint
-    F-->>S: success false, nothing submitted
-  else claimed
+    F-->>S: nonce_already_used + stored hash, nothing submitted
+  else new key
+    F->>F: upstream verify() + credentials + AD-5 + one payer entry + AD-22
+    F->>R: claim network:payer:nonce (insert-if-absent)
     F->>F: reserve spend budget (AD-18)
     F->>P: submit({func, auth}, deadline, maxLedger)
     P->>R: await onSigned(hash)
     P-->>F: success / pending / failed
-    F->>R: compare-and-set outcome
+    F->>R: compare-and-set outcome, then mark the success answered
     F-->>S: SettleResponse
     F-)F: on success: catalog (fire-and-forget)
   end

@@ -1,0 +1,187 @@
+---
+id: "0009"
+title: "Settle exact payments once through the channel pool"
+type: FEATURE
+status: active
+milestone: 1
+related_adr: ["0003", "0004", "0005", "0006", "0007", "0011"]
+related_tasks: ["0007", "0006", "0012", "0013", "0014", "0015", "0016", "0017", "0018", "0019", "0020", "0022", "0023", "0024", "0025", "0027", "0031", "0043", "0045", "0049"]
+tags: [facilitator, signer-pool, exact, settlement, priority-high, effort-medium, payments]
+links:
+  - ../../archive/0007_FEATURE_facilitator-settlement-submitter.md
+  - ../../../../docs/x402-settlement-scaling-en.md
+  - ../../../../docs/architecture/m1-spine.md
+  - ../../../../docs/planning/m1-epics.md
+  - notes/S-design-decisions.md
+  - notes/R-pr41-reviews.md
+history:
+  - date: "2026-10-06"
+    status: backlog
+    who: claude
+    note: "Spawned from 0007 future work and the PR #4 review (Adam)."
+  - date: "2026-10-07"
+    status: backlog
+    who: claude
+    note: >
+      Re-scoped by the 0012 M1 architecture spine: T1 wiring for `exact`. The `upto` part moved
+      to 0015; the signer-pool changes it needs are in 0016.
+  - date: "2026-10-07"
+    status: backlog
+    who: claude
+    note: >
+      Narrowed to M1 Story 1.4 (Payments lane) when 0012 split T1 into stories. Moved out:
+      /verify and the fee config to 0018, the record lifecycle and startup check to 0019,
+      /supported and the channel hardening check to 0020, spend budgets to 0024, the channel
+      lease to 0025, alerts to 0027.
+  - date: "2026-10-13"
+    status: active
+    who: okarcz
+    note: >
+      Work started, stacked on 0018 (PR #33) for the reusable verify checks and fee settings.
+  - date: "2026-10-16"
+    status: active
+    who: claude
+    note: >
+      Third PR #41 review (Adam) and @karolko9's points applied: decisions 29–45, facilitator
+      177 → 205 tests, signer-pool 99 → 101. Converted to a directory with notes/.
+---
+
+# Settle exact payments once through the channel pool
+
+## Summary
+
+As a resource server, I want `POST /settle` to settle a verified `exact` payment exactly once,
+through the channel pool, so that I get a transaction hash for every paid request and a buyer is
+never charged twice.
+
+**Story:** [M1 Story 1.4](../../../../docs/planning/m1-epics.md#story-14-settle-exact-payments-once-through-the-channel-pool) · **Lane:** Payments · **Covers:** FR2, FR6, FR9 (AD-2, AD-3, AD-6)
+
+## Context
+
+- 0007 built the pool and measured it on testnet: about 1 settlement per channel per ledger, up
+  to the network ceiling. ADR 0003: one payment = one transaction through this pool, in the
+  delegated-bump shape, with `settlement_pending` on timeout.
+- The 0012 spine: upstream `@x402/stellar` verifies, we settle through the pool, and channel
+  accounts count as "facilitator as source" (AD-4, ADR 0005).
+- Builds on the skeleton and hooks (0017), the reusable verify checks (0018) and the signer-pool
+  prerequisites (0016). Runs on the in-memory `SettlementStore` until 0022 lands. Calls the
+  cataloging hooks by 0031's caller rules.
+
+## Implementation
+
+- **Settle (AD-2, AD-3):** a known key is answered from its record; a new payment reruns the
+  0018 checks within the settle budget, then the pool submits the client's `{func, auth}` with a
+  deadline of the budget or the auth expiry, whichever comes first, and `maxLedger` = the auth
+  expiry. The pool's `checkSimulation` hook enforces the spec's balance-change check. Upstream
+  `settle()` is never called.
+- **Claim and dedupe (AD-6):** key `network:payer:nonce` (exactly one payer auth entry);
+  fingerprint = hash of the canonical payload plus `paymentRequirements`; atomic
+  insert-if-absent before `submit()`. Same fingerprint: answered from the record, waiting within
+  `SETTLE_TIMEOUT_MS` while it is pending (the e2e resource server retries once, immediately),
+  and a success only once. Different fingerprint: `…_nonce_already_used` with the stored hash,
+  nothing submitted.
+- **Wire mapping (AD-6):** `settlement_pending` with the hash, and a fixed `errorReason` for each
+  submitter error class (`SETTLE_REASONS`), listed for integrators in `apps/facilitator/README.md`.
+- **Hooks:** `beforeSubmit` (spend budgets, 0024) before `submit()`; `onFinal` once per final
+  record; `onSuccess` (cataloging, 0031) after the response.
+- **Budget (ADR 0011):** `SETTLE_BUDGET_MS` 30 s bounds the whole call, the checks and the wait for
+  a channel included. Past it: `settlement_pending` with the hash if one was signed, otherwise the
+  record ends and the answer is `…_timeout` (before the claim, nothing is recorded).
+
+## Acceptance Criteria
+
+- [x] Given a valid payload, when `/settle` is called, then it reruns the 1.3 checks, claims `network:payer:nonce`, submits `{func, auth}` through `SettlementSubmitter` with a deadline of the settle budget or the signature expiry, whichever comes first, and `maxLedger`, and returns `{success: true, transaction, network, payer}`; upstream `settle()` is never called and nothing else in the service calls `sendTransaction`
+- [x] Given several concurrent `/settle` calls for one settlement key, when they run, then exactly one transaction is submitted
+- [x] Given a repeat call with the same fingerprint, when `/settle` is called again, then it answers from the record, waiting within the settle timeout if the record is pending; a success is answered once, later calls get `…_already_settled` with the hash (decision 16)
+- [x] Given a repeat call with a different fingerprint, when `/settle` is called, then it returns `success: false`, submits nothing and never returns the stored outcome; a payload with zero or several payer auth entries is rejected
+- [x] Given a submission that is still pending when the settle budget runs out, when `/settle` answers, then it returns `{success: false, errorReason: "settlement_pending", transaction, network}`; every `SubmitStatus` and submitter error class maps to a fixed `errorReason`, listed with the code
+- [x] Given the hooks from 1.1, when a settlement runs, then the before-submit hook runs before `submit()` and the on-success hook runs when the record turns `success`
+- [x] Given the fee configuration, when `main()` builds the pool, then it uses the same `fees.pool` that the checks get, so `/verify` and the pool share one ceiling and one bid (AD-10; deferred from 0018's AC 5); `compose()` builds one `fees`, then `buildChecks` (for `/verify` and `/settle`) and the pool from it, tested in `settle-pool.test.ts`
+
+**From 0018's PR #33 review (Adam), done after the rebase:**
+- [x] the `/settle` expiry recheck uses the pool's floor of 2 ledgers, not `minValidityLedgers` (spine AD-22; decision 8);
+- [x] `SettleResponse.payer` passes on only as a string, as in `/verify` (0018 decision 20; decision 9);
+- [x] the `/settle` tests use an `accepted` that differs from the requirements;
+- [x] define the answer for `FeeLimitError` and `LedgerBoundError` after `/verify` accepted (decision 10).
+
+## Implementation Notes
+
+- **`settlement/settle.ts`**: `createSettler()` returns `/settle`'s function.
+  1. A payload whose key (`keyOf`, from the transaction alone) has a record is a repeat (`replay`): the fingerprint must match; it waits for a signed record up to `SETTLE_TIMEOUT_MS`, for an unsigned one up to the first call's budget and then ends it, both capped by its own budget; a success only once.
+  2. Otherwise the `/verify` checks (`createChecker`), bounded by the budget.
+  3. The claim (`network:payer:nonce`, SHA-256 fingerprint of canonical JSON).
+  4. `beforeSubmit`; a refusal, or a hook that throws, ends the record `rejected` without `onFinal`.
+  5. The pool's `submit()` with `onSigned` (`addHash`, durable before the send), `maxLedger`, `deadline` and `checkSimulation` = `expectTransfer`.
+  6. Forward-only compare-and-set writes (`advance`); the writer that makes a record final runs `onFinal`; `respond` marks a success answered (`markSuccessAnswered`, with a process-local set for store failures).
+- **`settlement/verify.ts`**: `createChecker` also refuses auth entries without address credentials.
+- **`http/app.ts`**: `POST /settle` takes the `/verify` body check (and a depth cap of 32), an `AbortSignal` for a client that left, the `EXTENSION-RESPONSES` header on a success, `afterResponse` after the response (`res.closed`-aware), and one `settled` log with the key and a `replay` flag.
+- **`main.ts`**: `compose(config, …)` builds the stores, cataloger, RPC, one `fees`, `buildChecks` and `buildSettlement` (the pool from `fees.pool`, `keypairSigner`, the channels; the settler with `settleCheck(checks)` and the budget); `main()` refuses `stellar:pubnet` with `STORE=memory` and starts it.
+- **`signer-pool`**: `./testing` exports `FakeRpc`; `FallbackRpc` throws `RpcUnavailableError`; `submit()` refuses source-account auth (`SourceAccountAuthError`).
+- **Nothing else sends**: `grep sendTransaction|.settle(` in `apps/facilitator/src` finds nothing.
+- **Tests**: facilitator 74 → 205 (`settle.test.ts` 76, `settle-route.test.ts` 8, `settle-pool.test.ts` 6), signer-pool 99 → 101. The review rounds, their mutants, modified tests and the testnet runs are in [notes/R-pr41-reviews.md](notes/R-pr41-reviews.md).
+
+## Design Decisions
+
+### Emerged
+
+All 45, with their reasons, are in [notes/S-design-decisions.md](notes/S-design-decisions.md):
+
+1. A repeat is answered from the record before the checks run
+2. A failure before anything was signed ends the record as `rejected`
+3. A thrown send that may have reached the network keeps the record open
+4. The balance-change check is ours
+5. The settle module takes the pool as a `Submitter` interface
+6. New fixed codes, named like upstream's
+7. `SETTLE_BUDGET_MS` is a setting
+8. `/settle` rechecks the auth expiry at the pool's floor of 2 ledgers
+9. `/settle`'s `payer` is a string or absent
+10. A fee or ledger refusal after `/verify` accepted keeps its answer and is flagged
+11. A timeout answer ends what it says was never signed
+12. Nothing is submitted once the checks and `beforeSubmit` used up the budget
+13. A repeat waits for a record with no hash until the first call's budget ends, counted from the claim
+14. A refusal stands when the store can't record it
+15. When the store fails after the pool answered, the answer is the pool's result
+16. A success is answered once per record
+17. `SETTLE_BUDGET_MS` 30 s and `SETTLE_TIMEOUT_MS` 20 s
+18. `main()` refuses `stellar:pubnet` while `STORE=memory`
+19. The one-payer-entry rule is a `/verify` check
+20. Every store and hook call is bounded, and the budget answer never throws
+21. A `beforeSubmit` that doesn't answer within the budget ends the record as the budget does
+22. Repeats share one store read per poll per key, and stop when their client leaves
+23. `RpcTimeoutError` before anything was signed answers `settle_exact_stellar_rpc_unavailable`
+24. `…_nonce_already_used` carries the stored hash, if any
+25. `/settle`'s own fee refusal is a drift too
+26. One origin per transition
+27. `FakeRpc` is exported as `@stellar-x402/signer-pool/testing`
+28. Metrics and logs for the rest
+29. A success the store can't mark is answered once per process (okarcz)
+30. The store-outage rule: refuse before money moves, tell the truth after (okarcz)
+31. A repeat that can't end an unsigned record answers `settlement_pending` with no hash
+32. The checks run inside the budget, and past it nothing is claimed
+33. A repeat's waits end by its own budget
+34. `onFinal` after a `beforeSubmit` past the budget runs once the hook settles
+35. `onSigned` checks the budget flag again after `addHash`
+36. `FallbackRpc` throws `RpcUnavailableError` when every endpoint failed
+37. Auth entries without address credentials are refused by `createChecker` and the pool
+38. One metric prefix, every metric listed
+39. A request body nested deeper than 32 levels is a 400
+40. `SETTLE_TIMEOUT_MS` defaults to the shorter of 20 s and the budget, and needs at least 1 s
+41. Logged errors keep only the host of each URL
+42. `main()`'s parts come from `compose(config, …)`, tested on the real pool
+43. `<package>/testing` subpaths are test-only, by a lint rule
+44. RPC endpoints are logged as `RPC_URLS[i]`, never by URL or host
+45. #41 merges first; #45 rebases onto it (okarcz)
+
+## Future Work
+
+Each item is also a "From 0009" bullet in its task:
+
+- **#45 rebase** (0045, after this merges): `buildUpstream()` into `buildChecks`, `trace` on `Check`, `settle-pool.test.ts`'s positional `buildChecks`, a `/settle` test with a hung first RPC URL (decision 45).
+- **0013**: the store's availability target and the outage rule (decision 30).
+- **0019**: finish records from the pool's `resolved` events, now only logged; resolve the records decisions 3, 15 and 30 leave open; close the second-success exception (decision 29).
+- **0020**: the startup `checkChannel` and `/supported`.
+- **0022**: `markSuccessAnswered`, `successAnsweredAt` and an `addHash` atomic with `transition` in the durable adapters (port doc, contract tests), with their own timeouts; clock skew on `unsignedUntil`; lift `main()`'s pubnet refusal (decision 18).
+- **0023**: memory store growth with no rate limit.
+- **0024**: real `beforeSubmit` and `onFinal`; parallel-spend fee griefing; `onFinal` after a late hook (decision 34).
+- **0025**: the channel lease before `/settle` is served.
+- **0027**: the metrics of decision 38, the outcome counter, alarms on store failures.
