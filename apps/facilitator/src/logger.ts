@@ -12,12 +12,11 @@ export interface Logger {
 
 const LEVELS: readonly LogLevel[] = ["debug", "info", "warn", "error"];
 
-const plain = ({ name, message, stack }: Error) => ({ name, message, stack });
-
 /**
  * Bigints as decimal strings, errors with their name, message, stack and `Error` cause
- * (`JSON.stringify` drops all of them). A stack adds code locations, not data: its first line is
- * the message.
+ * (`JSON.stringify` drops all of them), each URL in them reduced to its host as in
+ * {@link captureConsoleError}: an RPC error's message can hold the URL, and the URL an API key. A
+ * stack adds code locations, not data: its first line is the message.
  *
  * An error is recognized by the holder's original value: `JSON.stringify` calls `toJSON` before
  * the replacer, and the snapshot an AxiosError (stellar-sdk's RPC client) returns holds the
@@ -28,11 +27,7 @@ const plain = ({ name, message, stack }: Error) => ({ name, message, stack });
  */
 function replacer(this: Record<string, unknown>, key: string, value: unknown): unknown {
   const original = this[key];
-  if (original instanceof Error)
-    return {
-      ...plain(original),
-      cause: original.cause instanceof Error ? plain(original.cause) : undefined,
-    };
+  if (original instanceof Error) return redactedError(original);
   if (typeof value === "bigint") return value.toString();
   return value;
 }

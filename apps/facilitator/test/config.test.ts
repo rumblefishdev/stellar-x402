@@ -185,6 +185,21 @@ describe("parseConfig", () => {
     ).toMatchObject({ settlement: { settleBudgetMs: 80_000, settleTimeoutMs: 80_000 } });
   });
 
+  it("defaults the repeat wait to 20 s, or to a shorter budget, and needs at least 1 s", () => {
+    expect(parseConfig(minimal).settlement).toMatchObject({
+      settleBudgetMs: 30_000,
+      settleTimeoutMs: 20_000,
+    });
+    // Only the budget set: the default wait follows it instead of failing startup.
+    expect(parseConfig({ ...minimal, SETTLE_BUDGET_MS: "15000" }).settlement).toMatchObject({
+      settleBudgetMs: 15_000,
+      settleTimeoutMs: 15_000,
+    });
+    expect(problems({ ...minimal, SETTLE_TIMEOUT_MS: "999" })).toEqual([
+      "SETTLE_TIMEOUT_MS must be between 1000 and 2147483647",
+    ]);
+  });
+
   it("accepts only plain decimal numbers in range", () => {
     expect(problems({ ...minimal, PORT: "0x10" })).toEqual(["PORT must be a whole number"]);
     expect(problems({ ...minimal, PORT: "70000" })).toEqual(["PORT must be between 1 and 65535"]);

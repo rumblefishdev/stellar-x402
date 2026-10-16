@@ -25,7 +25,9 @@ export type BeforeSubmitResult =
   /**
    * Nothing is submitted: the record moves `claimed → rejected` with this x402 `errorReason`,
    * `/settle` answers `success: false`, and `onFinal` is not called. A hook that throws is
-   * treated the same way.
+   * treated the same way, with `settle_exact_stellar_refused`. If the refusal can't be stored, the
+   * record stays `claimed`: a repeat past the budget ends it with `…_timeout`, and then `onFinal`
+   * runs (`settle`), so a release must tolerate a reservation that was never made.
    */
   | { allow: false; errorReason: string };
 
@@ -43,7 +45,8 @@ export interface SettlementHooks {
   /**
    * Runs after the claim and before `submit()` (AD-18); may refuse the settlement. It must answer
    * within what is left of the settle budget: past it, the record ends as the budget does
-   * (`…_timeout`, with `onFinal`), whatever the hook answers later.
+   * (`…_timeout`), whatever the hook answers later, and `onFinal` runs once the hook has settled,
+   * so a reservation it makes late is released.
    */
   beforeSubmit(context: BeforeSubmitContext): Promise<BeforeSubmitResult>;
   /**

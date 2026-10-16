@@ -165,6 +165,27 @@ describe("createVerifier", () => {
     }
   });
 
+  it("throws when upstream calls a payment valid without naming its payer", async () => {
+    // `/settle` couldn't key such a payment, so `/verify` must not accept it.
+    const { verify, latestLedger } = setup({ isValid: true });
+    await expect(verify(payload(), requirements)).rejects.toThrow("upstream verify named no payer");
+    expect(latestLedger).not.toHaveBeenCalled();
+  });
+
+  it("rejects a source-account auth entry, which would authorize as the facilitator, even if upstream accepts it", async () => {
+    const sourceAccount = new xdr.SorobanAuthorizationEntry({
+      credentials: xdr.SorobanCredentials.sorobanCredentialsSourceAccount(),
+      rootInvocation: authEntry(payer, CURRENT + MIN_VALIDITY).rootInvocation(),
+    });
+    const { verify } = setup();
+    await expect(
+      verify(
+        payload({ auth: [authEntry(payer, CURRENT + MIN_VALIDITY), sourceAccount] }),
+        requirements,
+      ),
+    ).resolves.toEqual(rejected("invalid_exact_stellar_payload_unsupported_credential_type"));
+  });
+
   it("throws when upstream gives no answer within upstreamTimeoutMs", async () => {
     const verify = createVerifier({
       network,

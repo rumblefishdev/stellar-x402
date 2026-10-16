@@ -152,8 +152,12 @@ const envSchema = z
      * pool refuses at `/settle` what `/verify` accepted (its one spare ledger).
      */
     MIN_VALIDITY_LEDGERS: int(2).default("4"),
-    /** How long a repeat `/settle` waits for a signed record to turn final (AD-6); ≤ the budget. */
-    SETTLE_TIMEOUT_MS: ms(1).default("20000"),
+    /**
+     * How long a repeat `/settle` waits for a signed record to turn final (AD-6); at most the
+     * budget. Unset means 20 s, or the budget when that is shorter. At least 1 s, so a seller's
+     * retry can use it.
+     */
+    SETTLE_TIMEOUT_MS: ms(1_000).optional(),
     /**
      * Longest `/settle` call, the wait for a channel included (ADR 0011). Well below the seller's
      * own 90 s timeout (`@x402/core`'s `HTTPFacilitatorClient`), so the `settlement_pending`
@@ -216,7 +220,7 @@ const envSchema = z
     },
   )
   // A repeat waits at most what the call it repeats could take.
-  .refine((env) => env.SETTLE_TIMEOUT_MS <= env.SETTLE_BUDGET_MS, {
+  .refine((env) => (env.SETTLE_TIMEOUT_MS ?? 0) <= env.SETTLE_BUDGET_MS, {
     message: "must be at most SETTLE_BUDGET_MS",
     path: ["SETTLE_TIMEOUT_MS"],
   })
@@ -249,6 +253,9 @@ const envSchema = z
 const migrateEnvSchema = z.object({ DATABASE_URL: databaseUrl });
 
 export type Env = z.input<typeof envSchema>;
+
+/** `SETTLE_TIMEOUT_MS` when unset, unless `SETTLE_BUDGET_MS` is shorter. */
+const DEFAULT_SETTLE_TIMEOUT_MS = 20_000;
 
 /** Parsed environment, grouped for the parts that consume it. */
 export interface Config {
@@ -346,7 +353,8 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
     },
     settlement: {
       minValidityLedgers: e.MIN_VALIDITY_LEDGERS,
-      settleTimeoutMs: e.SETTLE_TIMEOUT_MS,
+      settleTimeoutMs:
+        e.SETTLE_TIMEOUT_MS ?? Math.min(DEFAULT_SETTLE_TIMEOUT_MS, e.SETTLE_BUDGET_MS),
       settleBudgetMs: e.SETTLE_BUDGET_MS,
       leaseTtlMs: e.LEASE_TTL_MS,
     },

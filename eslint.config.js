@@ -13,6 +13,25 @@ export default defineConfig([
   js.configs.recommended,
   tseslint.configs.recommended,
   {
+    // `<package>/testing` subpaths hold test helpers (e.g. `FakeRpc`); they ship in `dist` but
+    // must never reach production code.
+    files: ["apps/*/src/**/*.ts", "packages/*/src/**/*.ts"],
+    ignores: ["packages/*/src/testing.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@stellar-x402/*/testing"],
+              message: "Test helpers are for tests only.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ["tools/scripts/**/*.mjs"],
     languageOptions: { globals: { console: "readonly", process: "readonly" } },
   },

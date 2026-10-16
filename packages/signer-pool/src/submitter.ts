@@ -6,7 +6,7 @@ import {
   Transaction,
   TransactionBuilder,
   rpc,
-  type xdr,
+  xdr,
 } from "@stellar/stellar-sdk";
 import { ChannelPool, NoChannelsError, QueueTimeoutError, type Channel } from "./channel-pool.js";
 import { isNotFound } from "./errors.js";
@@ -24,8 +24,9 @@ export interface SubmitterOptions {
   rpc: SorobanRpc;
   networkPassphrase: string;
   /**
-   * The facilitator. It is the operation source of every call (so contract `require_auth` on its
-   * address uses source-account credentials), a signer on every channel, and the fee-bump payer.
+   * The facilitator. It is the operation source of every call, a signer on every channel, and the
+   * fee-bump payer. It never authorizes a call: one with a source-account auth entry, which would
+   * authorize as the operation source, is refused ({@link SourceAccountAuthError}).
    */
   signer: TransactionSigner;
   /** Channel account addresses. Each must list `signer.address` as a signer. */
@@ -145,6 +146,14 @@ export interface SubmitOptions {
 /** Simulation failed or needs a restore; nothing was signed or sent. */
 export class SimulationError extends Error {
   override readonly name = "SimulationError";
+}
+
+/**
+ * The call carries an auth entry with source-account credentials. It would authorize as the
+ * operation source, which is the facilitator, so the call is refused before a channel is taken.
+ */
+export class SourceAccountAuthError extends Error {
+  override readonly name = "SourceAccountAuthError";
 }
 
 /** The caller's `checkSimulation` refused the simulation; nothing was signed or sent. */
@@ -301,6 +310,19 @@ export class SettlementSubmitter {
       !(Number.isInteger(maxLedger) && maxLedger > 0 && maxLedger < 2 ** 32 - 1)
     )
       throw new RangeError(`maxLedger must be a ledger sequence, got ${maxLedger}`);
+    if (
+      call.auth.some(
+        (entry) =>
+          entry.credentials().switch() ===
+          xdr.SorobanCredentialsType.sorobanCredentialsSourceAccount(),
+      )
+    ) {
+      const error = new SourceAccountAuthError(
+        "an auth entry has source-account credentials, which would authorize as the facilitator",
+      );
+      this.refused(undefined, error);
+      throw error;
+    }
     const start = this.now();
     let channel: Channel;
     try {
@@ -792,7 +814,8 @@ function callSafely(hook: ((hash: string) => void) | undefined, hash: string): v
 function refusalReason(error: unknown): RefusalReason {
   if (error instanceof SimulationError) return "simulation";
   if (error instanceof FeeLimitError) return "fee-limit";
-  if (error instanceof SimulationCheckError) return "check";
+  if (error instanceof SimulationCheckError || error instanceof SourceAccountAuthError)
+    return "check";
   if (error instanceof QueueTimeoutError) return "queue-timeout";
   if (error instanceof LedgerBoundError) return "ledger-bound";
   if (error instanceof SignedHookError) return "on-signed";
