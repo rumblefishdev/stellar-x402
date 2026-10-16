@@ -75,8 +75,9 @@ const envSchema = z
     PORT: int(1, 65_535).default("4021"),
     LOG_LEVEL: oneOf(["debug", "info", "warn", "error"]).default("info"),
     /**
-     * Comma-separated; the first is primary, the rest are fallbacks for the pool, the ledger reads
-     * and upstream verify (one upstream scheme per URL).
+     * Comma-separated, tried in order: the pool and the ledger and fee-stats reads move to the
+     * next on a failure and stay there. Upstream verify (one scheme per URL) fails over on its own
+     * and returns to the first after 60 s (AD-3).
      */
     RPC_URLS: list
       .pipe(
