@@ -38,7 +38,12 @@ compares. Record the choice in an ADR that supersedes ADR 0011's custody part.
 > Research and a spike are done; the recommendation awaits okarcz's review. The full report is
 > [`reports/Hetzner signer key custody.md`](<reports/Hetzner signer key custody.md>), built from
 > the four notes in `research_notes/Hetzner signer key custody/`; the first, shorter comparison is
-> [`notes/R-key-custody-options.md`](notes/R-key-custody-options.md).
+> [`notes/R-key-custody-options.md`](notes/R-key-custody-options.md); where OpenBao runs, its cost
+> and its link to the facilitator's server are in
+> [`notes/R-openbao-on-hetzner.md`](notes/R-openbao-on-hetzner.md). On 2026-10-16 the choice
+> between OpenBao and AWS KMS was reopened: OpenBao needs its own machine, and mainnet may unseal
+> from a KMS anyway
+> ([revisited](notes/R-key-custody-options.md#openbao-or-aws-kms-revisited)).
 
 ## Context
 
