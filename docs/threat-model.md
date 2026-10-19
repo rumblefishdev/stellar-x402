@@ -1,9 +1,8 @@
 # Threat model
 
-Not written yet, except for the `upto` contract section and the `/verify` RPC failover section
-below. Planned sections: assets (signer
-keys, fee budget, catalog integrity), fee griefing via failed transactions, auth-entry
-validation, SSRF in Bazaar metadata, API key abuse.
+Not written yet, except for the `upto` contract, `/verify` RPC failover and facilitator key
+sections below. Planned sections: assets (fee budget, catalog integrity), fee griefing via failed
+transactions, auth-entry validation, SSRF in Bazaar metadata, API key abuse.
 
 ## `upto` contract
 
@@ -269,3 +268,45 @@ Scope: upstream verify's failover across `RPC_URLS` (spine AD-3, task 0045).
 - **Residual risk:** A seller that serves on `/verify`'s answer alone, without `/settle`, can serve
   a payment that never settles. For `upto` (0015) `/verify` carries more weight, so its rules must
   not rely on a single RPC's view.
+
+## Facilitator key
+
+Scope: the facilitator key in OpenBao Transit on the facilitator's Hetzner server
+([ADR 0013](adr/0013-facilitator-key-custody.md)). The key signs for every channel and pays fee
+bumps (AD-12). It can't move buyers' or sellers' tokens: a theft reaches the fee account's float and
+the channels' reserves, about 180 XLM at launch.
+
+#### A bug in the facilitator leaks its memory or environment
+
+- **Attack:** A bug, a crash dump or a debugging session exposes what the facilitator holds.
+- **Mitigation:** The facilitator holds only an AppRole token allowed `transit/sign/<key>`, never the
+  key. The token expires within 1 hour.
+- **Residual risk:** A leaked secret ID mints new tokens until it is destroyed (runbook, 0026). The
+  fee-bump alarm shows signatures we didn't send.
+
+#### Root on the server
+
+- **Attack:** Root, through another service on the shared server or a container escape, copies the
+  key from OpenBao's memory, or its disk plus the unseal credential.
+- **Mitigation:** None that stops it. The fee-bump alarm (a fee bump on the fee account that our
+  submitter didn't send, read from Horizon) and the 50 XLM low-balance alarm catch it; the float caps
+  the loss.
+- **Residual risk:** Accepted at today's stakes. The hot key is each account's only signer (0048's
+  cold key was declined for now), so a thief can also lock us out of the channels. Upgrades: TPM-bound
+  credentials, OpenBao on its own machine, a KMS, and 0048 re-checked before mainnet.
+
+#### A copied disk or snapshot
+
+- **Attack:** Someone copies a Raft snapshot from the Storage Box, or the server's disk.
+- **Mitigation:** Snapshots are encrypted by OpenBao and open only with the unseal key, which is kept
+  offline. The Borg repository is encrypted too.
+- **Residual risk:** A copy of the whole disk includes the unseal credential in `host` mode; TPM mode
+  would bind it to the board.
+
+#### OpenBao lost or down
+
+- **Attack:** OpenBao's disk dies, or it is sealed, down, or can't write its audit log.
+- **Mitigation:** `/settle` fails closed and an alarm fires; `/verify` keeps working. Daily snapshots
+  leave the server, and a restore with the unseal key backup is tested before mainnet.
+- **Residual risk:** The key can't be exported and has no cold backup. Losing both the snapshots and
+  the unseal key loses the fee account and every channel.

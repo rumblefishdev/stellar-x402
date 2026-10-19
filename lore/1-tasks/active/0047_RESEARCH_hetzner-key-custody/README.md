@@ -4,7 +4,7 @@ title: "Choose how the facilitator keeps its signing key on Hetzner"
 type: RESEARCH
 status: active
 milestone: 1
-related_adr: ["0011"]
+related_adr: ["0011", "0013"]
 related_tasks: ["0036", "0026", "0014", "0044", "0048"]
 tags: [facilitator, keys, security, hetzner, priority-high, effort-small, payments]
 links:
@@ -20,6 +20,10 @@ history:
     status: active
     who: okarcz
     note: "Started right away; compare a KMS signer with HashiCorp Vault / OpenBao Transit."
+  - date: "2026-10-19"
+    status: active
+    who: okarcz
+    note: "Decided: OpenBao Transit on the facilitator's server, no cold key (ADR 0013). Unseal key backup holder open."
 ---
 
 # Choose how the facilitator keeps its signing key on Hetzner
@@ -35,7 +39,13 @@ compares. Record the choice in an ADR that supersedes ADR 0011's custody part.
 
 ## Status: Active
 
-> Research and a spike are done; the recommendation awaits okarcz's review. The full report is
+> **Decided on 2026-10-19** ([ADR 0013](../../../../docs/adr/0013-facilitator-key-custody.md),
+> [S-key-custody-decisions](notes/S-key-custody-decisions.md)): OpenBao Transit in a container on
+> the facilitator's server, the key generated inside and not exportable, auto-unseal from a systemd
+> credential, snapshots on the existing Storage Box, and **no cold key**. Open: who holds the
+> unseal key backup (an acceptance criterion below) and where top-ups come from.
+>
+> Research and a spike are done. The full report is
 > [`reports/Hetzner signer key custody.md`](<reports/Hetzner signer key custody.md>), built from
 > the four notes in `research_notes/Hetzner signer key custody/`; the first, shorter comparison is
 > [`notes/R-key-custody-options.md`](notes/R-key-custody-options.md); where OpenBao runs, its cost
@@ -70,8 +80,9 @@ compares. Record the choice in an ADR that supersedes ADR 0011's custody part.
 
 - [x] Options compared for Hetzner, with sources (`notes/R-key-custody-options.md`)
 - [x] Vault Transit's Ed25519 shown to make valid Stellar signatures, on testnet (`spike/`)
-- [ ] okarcz picks the custody option, unseal and recovery
-- [ ] An ADR records it and supersedes ADR 0011's custody part; 0036 and 0026 are updated
+- [x] okarcz picks the custody option, unseal and recovery (`notes/S-key-custody-decisions.md`)
+- [x] An ADR records it and supersedes ADR 0011's custody part; 0036 and 0026 are updated (ADR 0013)
+- [ ] okarcz decides who holds the unseal key backup, and where; ADR 0013 records it
 
 ## Implementation Notes
 
@@ -98,14 +109,27 @@ compares. Record the choice in an ADR that supersedes ADR 0011's custody part.
 
 ## Design Decisions
 
+### From Plan
+
+3. **OpenBao Transit in a container on the facilitator's server** (okarcz, 2026-10-19): the stakes
+   (~180 XLM) don't pay for a separate machine or a KMS. Question by question in
+   [S-key-custody-decisions](notes/S-key-custody-decisions.md).
+4. **No cold key** (okarcz, 2026-10-19): only the hot key is kept. 0048 stays a mainnet blocker
+   with a note to re-check its cold-key design. Losing OpenBao's data and the unseal key then loses
+   the accounts.
+5. **Build order** (okarcz, 2026-10-19): 0036 → 0026 on testnet → 0048 re-check → mainnet.
+
 ### Emerged
 
-1. **OpenBao over Vault, if Transit is chosen** (proposal): API-compatible (the spike passed on
-   both), MPL-2.0 rather than BSL, and its HSM seal is open source.
-2. **The same signer on testnet and mainnet** (proposal), unlike ADR 0011's split.
+1. **OpenBao over Vault** (accepted in ADR 0013): API-compatible (the spike passed on both),
+   MPL-2.0 rather than BSL, and its HSM seal is open source.
+2. **The same signer on testnet and mainnet** (accepted in ADR 0013), unlike ADR 0011's split.
 
 ## Future Work
 
-- The ADR, then a Transit `TransactionSigner` in `apps/facilitator/src/adapters/`, after the
-  choice.
-- **0048**: thresholds that keep the hot key below high, and a cold recovery signer (backlog).
+- **0036**: the Transit `TransactionSigner` (retargeted from AWS KMS, now Payments).
+- **0026**: OpenBao's deployment, snapshots, the testnet key move and the runbook.
+- **0048**: re-check the thresholds and recovery design before mainnet.
+- **0027**: the fee-bump, low-balance, OpenBao-down and audit-disk alarms.
+- **A hosting ADR** for the move to Hetzner: ADR 0011 still describes AWS apart from custody.
+- **Top-ups**: where the fee account's XLM comes from when the 50 XLM alarm fires.

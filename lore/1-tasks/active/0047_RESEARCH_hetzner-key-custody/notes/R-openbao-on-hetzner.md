@@ -12,9 +12,18 @@ history:
     status: developing
     who: okarcz
     note: "Deployment sketch: own machine, cost, vSwitch link to the dedicated server, what crosses it."
+  - date: "2026-10-19"
+    status: developing
+    who: okarcz
+    note: "Not chosen for now: OpenBao runs in a container on the facilitator's server (ADR 0013). Kept as the upgrade path."
 ---
 
 # Running OpenBao on Hetzner
+
+> **Not chosen for now** (2026-10-19): [ADR 0013](../../../../../docs/adr/0013-facilitator-key-custody.md)
+> runs OpenBao in a container on the facilitator's server, reached over a unix socket, with
+> snapshots on the existing Storage Box. This note stays as the upgrade path: a separate machine
+> once the float or `upto` raises the stakes.
 
 ## Question
 

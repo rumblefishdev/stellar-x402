@@ -327,8 +327,11 @@ dependency at all, or if KMS's test fails. Before choosing:
 
 ## Recommendation
 
-> Reopened on 2026-10-16: see [OpenBao or AWS KMS, revisited](#openbao-or-aws-kms-revisited).
-> The list below is the original recommendation.
+> Decided on 2026-10-19 in [ADR 0013](../../../../../docs/adr/0013-facilitator-key-custody.md):
+> OpenBao in a container on the facilitator's server, no cold key
+> ([S-key-custody-decisions](S-key-custody-decisions.md)). Reopened on 2026-10-16: see
+> [OpenBao or AWS KMS, revisited](#openbao-or-aws-kms-revisited). The list below is the original
+> recommendation.
 
 1. **A self-hosted OpenBao Transit signer, not a cloud KMS.** On Hetzner a KMS means another
    cloud, cross-cloud credentials and a network round trip per settlement, for the one property

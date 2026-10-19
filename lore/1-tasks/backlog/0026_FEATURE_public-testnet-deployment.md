@@ -15,6 +15,10 @@ history:
     status: backlog
     who: claude
     note: "Created by 0012 from M1 Story 2.5 (Platform lane)."
+  - date: "2026-10-19"
+    status: backlog
+    who: okarcz
+    note: "0047 (ADR 0013): the facilitator key moves to OpenBao Transit on the Hetzner server; adds its deployment and runbook."
   - date: "2026-10-20"
     status: backlog
     who: okarcz
@@ -113,9 +117,41 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     URL needs that URL: a store with versions, or each change recorded in the deploy history. A
     plain env file that is edited in place loses it.
 
+### The facilitator key in OpenBao (0047)
+
+> [ADR 0013](../../../docs/adr/0013-facilitator-key-custody.md) replaces the SSM parameter for
+> `FACILITATOR_SECRET` above. The facilitator moved to the company's Hetzner server; the rest of
+> this task still follows ADR 0011 until a hosting ADR replaces it.
+
+- **Containers:** OpenBao (the official image, pinned by digest) and the facilitator under Docker
+  Compose, started by a systemd unit that passes in the credentials. Neither gets the Docker
+  socket. Swap and core dumps off for OpenBao.
+- **Link:** a unix socket in a volume shared only by the two containers; no TCP listener.
+- **Keys:** one Transit key per network, generated inside OpenBao, `type=ed25519`,
+  `exportable=false`, `allow_plaintext_backup=false`. One policy per network allowing only
+  `transit/sign/<key>`, and one AppRole per network: `token_ttl` 1 h, `token_max_ttl` 24 h, a secret
+  ID that doesn't expire, delivered as a Compose secret.
+- **Unseal:** a static seal key as an encrypted systemd credential (`systemd-creds`, `host` mode).
+  Note in the runbook whether the board has a TPM (ADR 0013's first upgrade).
+- **Admin:** the root token revoked after setup; admin through SSH with the `bao` CLI; no UI.
+- **Audit log:** a file on its own volume, rotated; alarm at 80% disk (0027).
+- **Snapshots:** daily Raft snapshots to our own sub-account and Borg repository on the company's
+  existing Hetzner Storage Box (BX21), keeping 14, set up like that box's other sub-account. Tell
+  the team that owns the box that we depend on it.
+- **Move testnet to the OpenBao key:** stop the service; with the current key, a `set_options` on
+  the fee account and each channel adds the OpenBao key and removes the current one; start the
+  service in `openbao` signer mode (0036).
+- **Runbook** in `docs/runbook.md`:
+  - restore OpenBao from a snapshot with the unseal key backup, tested once before mainnet;
+  - a leaked token or secret ID: destroy the secret ID, revoke its tokens, issue a new one;
+  - a suspected key theft: new Transit key, move every account to it with the old key, drain the
+    rest, check the fee-bump alarm's history;
+  - OpenBao upgrades and what `/settle` does meanwhile (it answers an error).
+
 ## Acceptance Criteria
 
 - [ ] Given the platform chosen in the 0014 ADR, when a deploy runs, then a container image built from the repo is deployed to it as the ADR describes, and the service answers `/supported` at a public HTTPS URL
 - [ ] Given a running instance, when a new version is deployed, then the old process stops before the new one starts; the process is long-lived and never scaled to zero
 - [ ] Given the facilitator key, when the service is deployed, then it comes from the platform's secret store, never from the image or the logs, and is a testnet-only key
 - [ ] Given the durable stores from 0022, when the service runs, then it uses them, and `docs/runbook.md` has the deploy and rollback steps
+- [ ] Given the deployed facilitator, when it settles, then it signs through OpenBao Transit over the unix socket, no secret seed is on the server outside OpenBao, and a snapshot restore with the unseal key backup has been tested

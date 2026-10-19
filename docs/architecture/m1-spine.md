@@ -212,7 +212,7 @@ graph TD
 - **Binds:** configuration, `TransactionSigner`, startup
 - **Prevents:** key sprawl, keys shared between networks, and channels another key can move.
 - **Rule:**
-  - **Key.** Each network has one facilitator key. It signs for the channels and pays fee bumps, and it reaches the pool only as a `TransactionSigner`, so a KMS can replace it.
+  - **Key.** Each network has one facilitator key. It signs for the channels and pays fee bumps, and it reaches the pool only as a `TransactionSigner`, so a remote signer can replace it. It lives in OpenBao Transit ([ADR 0013](../adr/0013-facilitator-key-custody.md)).
   - **Config.** `FACILITATOR_SECRET` plus `CHANNELS` (addresses, never secrets).
   - **Startup check.** The service refuses to start unless every channel has its master key weight at 0 and the facilitator key as its only signer (`checkChannel`).
   - **Separation.** Testnet and mainnet never share a key or a channel.
@@ -458,11 +458,12 @@ The rationale and rejected alternatives for these ADs are in ADRs:
 | [0009](../adr/0009-conformance-gate-harness.md)               | AD-13, AD-15                       |
 | [0011](../adr/0011-facilitator-hosting.md)                    | AD-11, AD-12, AD-15, AD-17         |
 | [0012](../adr/0012-facilitator-state-store.md)                | AD-7 (store)                       |
+| [0013](../adr/0013-facilitator-key-custody.md)                | AD-12 (key custody)                |
 
 ## Deferred
 
 - **State store:** decided in [ADR 0012](../adr/0012-facilitator-state-store.md) (task 0013): one RDS for PostgreSQL database for all four ports and Tranche 2 search.
-- **Hosting, container setup, key custody, logger, metrics and alert backend:** decided in [ADR 0011](../adr/0011-facilitator-hosting.md) (task 0014): ECS on Fargate in AWS, the key in SSM under its own KMS key (in KMS on mainnet), CloudWatch logs, EMF metrics and alarms to Slack. Constraints it meets:
+- **Hosting, container setup, key custody, logger, metrics and alert backend:** decided in [ADR 0011](../adr/0011-facilitator-hosting.md) (task 0014): ECS on Fargate in AWS, the key in SSM under its own KMS key (in KMS on mainnet; replaced by OpenBao Transit on the Hetzner server in [ADR 0013](../adr/0013-facilitator-key-custody.md)), CloudWatch logs, EMF metrics and alarms to Slack. Constraints it meets:
   - the process is long-lived, and scale-to-zero is not allowed
   - the lease and stop-before-start deploys from AD-17 apply
 - **Mainnet fee values** (`feeEscalation`, `maxFeeStroops`): task 0010. T1 uses interim testnet values.

@@ -1,9 +1,10 @@
 ---
 title: "What a leaked facilitator key costs, and custody sized to it"
 type: research
-status: developing
+status: mature
 spawned_from: R-key-custody-options.md
-spawns: []
+spawns:
+  - S-key-custody-decisions.md
 tags: [keys, custody, hetzner, threat-model, fees, openbao, kms]
 links:
   - R-openbao-on-hetzner.md
@@ -21,13 +22,18 @@ history:
     status: developing
     who: okarcz
     note: "Preferred: OpenBao on the facilitator's server with auto-unseal; not yet an ADR."
+  - date: "2026-10-19"
+    status: mature
+    who: okarcz
+    note: "Decided (ADR 0013), without the cold keys: only the hot key is kept; top-ups left open."
 ---
 
 # What a leaked facilitator key costs, and custody sized to it
 
-> Preferred option, not yet an ADR: OpenBao on the facilitator's server with auto-unseal
-> ([below](#preferred-option)). okarcz, 2026-10-19: the move to Hetzner was about cost, not about
-> leaving AWS.
+> Decided in [ADR 0013](../../../../../docs/adr/0013-facilitator-key-custody.md) (2026-10-19):
+> OpenBao on the facilitator's server with auto-unseal, **without the cold keys** proposed below.
+> Every decision is in [S-key-custody-decisions](S-key-custody-decisions.md). okarcz: the move to
+> Hetzner was about cost, not about leaving AWS.
 
 ## Question
 
@@ -69,8 +75,9 @@ A proposal for launch:
 - **Float:** about 150 XLM on the fee account, a few weeks of fees at early traffic.
 - **Alarm:** low balance at 50 XLM spendable. `checkFacilitatorBalance` defaults to 100 XLM
   (`minSpendableStroops`), which would sit just under a 150 float; it is an option, not code.
-- **Top-ups:** from a cold treasury account, signed offline. Never an automatic top-up with a hot
-  key, which would put the treasury behind it.
+- **Top-ups:** open (2026-10-19). The cold treasury account proposed here was declined with the
+  other cold keys. Still: never an automatic top-up with a hot key, which would put the treasury
+  behind it.
 - **Channels:** about 1.5 XLM each, not spendable on fees; 20 channels add ~30 XLM to what a leak
   reaches.
 - **Review** after the first weeks: keep 2–4 weeks of real fees.
@@ -108,7 +115,8 @@ about 180 XLM at stake, downtime costs more than the leak.
 
 ## Preferred option
 
-> okarcz, 2026-10-19: preferred, not yet an ADR.
+> okarcz, 2026-10-19: decided in ADR 0013 with items 2–4 changed: no cold key, so 0048 is re-checked
+> before mainnet, top-ups are open, and rotation is signed by the current key.
 
 1. **OpenBao Transit on the facilitator's server**, with **auto-unseal**: the unseal key is a
    root-only file, kept apart from OpenBao's Raft data and left out of its backups. The
@@ -127,5 +135,7 @@ about 180 XLM at stake, downtime costs more than the leak.
 
 - Mainnet traffic, which sets the float.
 - The number of mainnet channels (0038).
-- Who holds the cold recovery key and the cold treasury key, and where (0048).
+- ~~Who holds the cold recovery key and the cold treasury key (0048).~~ No cold key (2026-10-19).
+- Who holds the unseal key backup, and where (0047's acceptance criteria).
+- Where the fee account's top-ups come from.
 - Whether the dedicated server has a TPM, which would let systemd encrypt the credential to it.
