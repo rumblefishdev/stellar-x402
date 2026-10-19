@@ -254,6 +254,26 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       expect(open.map((r) => r.nonce)).toEqual(["1"]);
     });
 
+    it("adds a hash to a pending record, and lists in-flight records with their hashes", async () => {
+      const k1 = settlement("1").key;
+      const k2 = settlement("2").key;
+      await store.claim(settlement("1"));
+      await store.claim(settlement("2"));
+      await store.addHash(k1, "h1", 2_000);
+      await store.transition(k1, "signed", { state: "pending", updatedAt: 3_000 });
+      // A rebuilt transaction (a fee bump) adds a hash while the record is pending.
+      expect(await store.addHash(k1, "h2", 4_000)).toBe(true);
+      expect(await store.get(k1)).toMatchObject({ state: "pending", hashes: ["h1", "h2"] });
+      await store.addHash(k2, "h3", 2_000);
+      const open = (await store.listNonFinal("stellar:testnet")).sort((a, b) =>
+        a.nonce.localeCompare(b.nonce),
+      );
+      expect(open.map((r) => [r.nonce, r.state, r.hashes])).toEqual([
+        ["1", "pending", ["h1", "h2"]],
+        ["2", "signed", ["h3"]],
+      ]);
+    });
+
     describe("channel lease", () => {
       const NAME = "stellar:testnet:channels";
 
