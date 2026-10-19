@@ -71,6 +71,9 @@ Read in a clone of upstream; paths are upstream's.
 - 2026-10-15 — **Names**: directory and `config.name` `stellar-x402`, URL variable `GATE_FACILITATOR_URL`, root command `pnpm conformance:e2e`.
 - 2026-10-16 — **Every run builds the suite from a fresh clone** (+2.5 min): the clean check sees only tracked files, so a build kept from an earlier run would not be covered by it.
 - 2026-10-16 — **The gate reads every hash on chain** through Stellar RPC `getTransaction` (Horizon is deprecated in favour of RPC): it fails unless each is a successful single `transfer` of 10000 units of testnet USDC from the buyer to the seller.
+- 2026-10-19 — **A hash proves this run through this facilitator**: the gate fails when two scenarios report one hash, when a transaction was made before the run started, or when its fee was paid by an account the facilitator does not list as a Stellar signer in `/supported` (read before any payment). Each transaction's ledger, time, fee payer and call are saved with the run.
+- 2026-10-19 — **A hash RPC cannot answer for is a problem of the run**, not a crash: the run is saved either way.
+- 2026-10-19 — **The placeholder package files go in this PR** (`src/index.ts`, its build config, the unused `@stellar-x402/config`): the package existed for this task to fill; named in the PR body.
 - 2026-10-15 — **Dry-run evidence** (x402.org) goes into this task and the PR, not `conformance/results/`, which holds our facilitator's runs (0029).
 
 ### Emerged
@@ -79,7 +82,7 @@ Read in a clone of upstream; paths are upstream's.
   and fails without a Go toolchain. The runner runs the TypeScript components' own `install.sh`
   and `build.sh`, after `pnpm install` + `pnpm build` in `typescript/` and `pnpm install` in `e2e/`,
   as upstream's CI does.
-- 2026-10-15 — **The checkout lives** in `conformance/.cache/x402-<commit>/` (git-ignored,
+- 2026-10-15 — **The checkout lives** in `conformance/.cache/x402/` (git-ignored,
   6.1 GB measured) and is rebuilt on every run (decided 2026-10-16); after the build and the proxy
   copy, the run checks that HEAD is the pin and no tracked file changed.
 - 2026-10-15 — **`--schemes=exact`** is passed although Stellar has only `exact` routes today, so a

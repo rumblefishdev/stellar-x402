@@ -22,20 +22,23 @@ The suite kills whatever listens on ports 4022–4060 before it starts.
 
 ## What it does
 
-1. Deletes `.cache/x402-<commit>/` and clones the suite there afresh at the commit pinned in
+1. Reads the Stellar signers from `GATE_FACILITATOR_URL/supported`, before any payment.
+2. Deletes `.cache/x402/` and clones the suite there afresh at the commit pinned in
    `src/upstream.ts`, so no build from an earlier run is reused.
-2. Installs and builds upstream's TypeScript SDK, the suite and its TypeScript components, the way
+3. Installs and builds upstream's TypeScript SDK, the suite and its TypeScript components, the way
    upstream's CI does (~2.5 minutes, ~6 GB on disk; delete `.cache/` to free it). Upstream's
    `setup.sh` is not run: it also builds the Go and Python components, which the Stellar scenarios
    never start.
-3. Copies `external-proxy/` into the suite as `e2e/facilitators/external-proxies/stellar-x402/`,
+4. Copies `external-proxy/` into the suite as `e2e/facilitators/external-proxies/stellar-x402/`,
    the folder upstream keeps for external facilitators, and stops if any tracked file differs from
    the pinned commit.
-4. Runs every Stellar `exact` scenario: each canonical TypeScript client and server, HTTP and MCP,
+5. Runs every Stellar `exact` scenario: each canonical TypeScript client and server, HTTP and MCP,
    both routes (`/exact/stellar`, and `/exact/stellar/upfront`, which settles before serving).
-5. Reads every reported transaction from Stellar RPC and fails unless each succeeded as one
-   `transfer` of 0.001 testnet USDC from the buyer to the seller; also fails unless every scenario
-   passed with a hash and the suite exited 0. Saves the run either way.
+6. Fails unless the suite exited 0, every scenario passed with a hash and no two report the same
+   hash. Reads every hash from Stellar RPC and fails unless each succeeded as one `transfer` of
+   0.001 testnet USDC from the buyer to the seller, its fee paid by one of the facilitator's
+   signers, after the run started. A hash RPC cannot answer for is a failure too. Saves the run
+   either way.
 
 The proxy (`external-proxy/proxy.mjs`) answers the suite's `/health` and `/close` itself and
 forwards `/verify`, `/settle` and `/supported` to `GATE_FACILITATOR_URL` unchanged. It uses Node
@@ -49,8 +52,10 @@ the fees.
 ## Results
 
 `results/<date>-<facilitator host>.json`: the upstream repo and commit, the date, the facilitator
-URL, the command, whether the gate passed and why not, then the suite's own summary and one row per
-scenario with its transaction hash. Runs against our facilitator are committed (task 0029).
+URL and its signers, the command, when the run started, whether the gate passed and why not, each
+transaction as the chain shows it (ledger, time, fee payer, call), then the suite's own summary and
+one row per scenario. Only runs against our facilitator are committed (task 0029); dry runs against
+a public facilitator stay out of git.
 
 The suite's Bazaar check (`--extensions=bazaar`) is not run: it also calls `/discovery/search`,
 which comes after Tranche 1.
