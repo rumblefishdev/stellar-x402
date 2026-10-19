@@ -36,9 +36,10 @@ beforeAll(async () => {
 
 afterAll(() => facilitator.close());
 
-async function freePort() {
+/** A port free on `host`; the proxy listens on `localhost`, which may be IPv6 only. */
+async function freePort(host = "localhost") {
   const server = createServer();
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => server.listen(0, host, resolve));
   const { port } = server.address() as AddressInfo;
   await new Promise((resolve) => server.close(resolve));
   return port;
@@ -61,12 +62,14 @@ async function startProxy(target = facilitatorUrl) {
   });
   started.push(child);
   let stdout = "";
+  let stderr = "";
+  child.stderr!.on("data", (chunk) => (stderr += chunk));
   await new Promise<void>((resolve, reject) => {
     child.stdout!.on("data", (chunk) => {
       stdout += chunk;
       if (stdout.includes("Facilitator listening")) resolve();
     });
-    child.on("exit", (code) => reject(new Error(`proxy exited with ${code}`)));
+    child.on("exit", (code) => reject(new Error(`proxy exited with ${code}: ${stderr}`)));
   });
   return { child, url: `http://localhost:${port}` };
 }
@@ -162,7 +165,7 @@ describe("external proxy", () => {
   });
 
   it("answers 502 when the facilitator cannot be reached", async () => {
-    const proxy = await startProxy(`http://127.0.0.1:${await freePort()}`);
+    const proxy = await startProxy(`http://127.0.0.1:${await freePort("127.0.0.1")}`);
     const res = await fetch(`${proxy.url}/supported`);
     expect(res.status).toBe(502);
     expect(await res.json()).toEqual({ error: "facilitator_unreachable" });
