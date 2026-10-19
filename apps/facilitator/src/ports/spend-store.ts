@@ -45,7 +45,10 @@ export interface SpendStore {
   recordFailure(scope: SpendScope, now: number): Promise<number>;
   /** Resets the consecutive failures for `scope`. */
   recordSuccess(scope: SpendScope): Promise<void>;
-  /** Opens the breaker for `scope` until `until` (milliseconds since the epoch). */
+  /**
+   * Opens the breaker for `scope` until `until` (milliseconds since the epoch). The later end
+   * wins: an earlier `until`, from another task, never shortens a breaker that is open.
+   */
   openBreaker(scope: SpendScope, until: number): Promise<void>;
   /** When the breaker for `scope` closes again, or `undefined` if it isn't open. */
   breakerOpenUntil(scope: SpendScope, now: number): Promise<number | undefined>;

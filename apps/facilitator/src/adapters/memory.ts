@@ -222,7 +222,7 @@ export class MemorySpendStore implements SpendStore {
   }
 
   async openBreaker(scope: SpendScope, until: number): Promise<void> {
-    this.breakers.set(scope, until);
+    this.breakers.set(scope, Math.max(this.breakers.get(scope) ?? -Infinity, until));
   }
 
   async breakerOpenUntil(scope: SpendScope, now: number): Promise<number | undefined> {

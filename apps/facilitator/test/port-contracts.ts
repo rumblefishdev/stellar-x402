@@ -424,6 +424,16 @@ export function spendStoreContract(make: Make<SpendStore>) {
       expect(await store.breakerOpenUntil(scope, 999)).toBe(1_000);
       expect(await store.breakerOpenUntil(scope, 1_000)).toBeUndefined();
     });
+
+    it("keeps the later end when a breaker is opened again", async () => {
+      const scope = "asset:CASSET" as const;
+      await store.openBreaker(scope, 2_000);
+      // Another task opening it with an earlier end can't close it early.
+      await store.openBreaker(scope, 1_000);
+      expect(await store.breakerOpenUntil(scope, 1_500)).toBe(2_000);
+      await store.openBreaker(scope, 3_000);
+      expect(await store.breakerOpenUntil(scope, 2_500)).toBe(3_000);
+    });
   });
 }
 

@@ -537,7 +537,8 @@ export class PostgresSpendStore implements SpendStore {
   async openBreaker(scope: SpendScope, until: number): Promise<void> {
     await this.pool.query(
       `INSERT INTO spend_scopes (scope, breaker_until) VALUES ($1, $2)
-       ON CONFLICT (scope) DO UPDATE SET breaker_until = EXCLUDED.breaker_until`,
+       ON CONFLICT (scope) DO UPDATE
+         SET breaker_until = GREATEST(spend_scopes.breaker_until, EXCLUDED.breaker_until)`,
       [scope, until],
     );
   }

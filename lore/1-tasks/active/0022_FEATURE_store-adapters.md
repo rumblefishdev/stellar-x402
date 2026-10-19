@@ -174,6 +174,10 @@ As a facilitator operator, I want durable implementations of the four store port
     a paid fee never queues behind reservations. `SET LOCAL lock_timeout = '2s'` gives a queued
     reservation up with `55P03`, and nothing is reserved. The timeout alone only shortened the
     stall (a test without the own pool waited about 2 s); a bigger pool would only move it.
+13. **`openBreaker` keeps the later end** (`GREATEST` in PostgreSQL, `Math.max` in memory), as the
+    0013 G-note asked. Both adapters overwrote it, so a second task opening the same breaker with an
+    earlier end closed it early, and the contract, which opened a breaker once, passed on both. A
+    contract case now opens it at 2 000, then 1 000, and expects 2 000. Found in karczuRF's review.
 
 ## Issues Encountered
 
