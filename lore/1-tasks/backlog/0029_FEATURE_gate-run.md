@@ -30,6 +30,9 @@ As a reviewer of the grant, I want e2e results with real settled transaction has
 - First run around day 12, final rerun at the end of T1.
 - Related tasks: 0028, 0026, 0009, 0020.
 - `/supported` (0020) must list `exact` on `stellar:testnet` with `extra.areFeesSponsored: true`: the canonical client throws without it (found in the 0028 recon).
+- From the 0028 review: the gate also needs `/supported` to list the facilitator key under a `stellar:` signer, because it fails any settlement whose fee another account paid.
+- From the 0028 review: the saved run holds the upstream commit, date, facilitator URL, its signers and each transaction, but no facilitator version; the facilitator has to expose one for this task's results.
+- From the 0028 review: the first criterion says "verify → settle" for each scenario, but the 9 `upfront` scenarios settle without a `/verify` (answered in 0028); reword it before starting.
 
 ## Implementation
 
