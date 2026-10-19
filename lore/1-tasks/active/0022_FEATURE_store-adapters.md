@@ -48,6 +48,14 @@ history:
       `reserve` rejects, and new cases pin a cleared field, an extension given as an array or a
       string, a ROLLBACK that fails, and `main()` with STORE=postgres. 174 facilitator tests (51 on
       PostgreSQL). Closes after PR merge.
+  - date: "2026-10-19"
+    status: active
+    who: akot
+    note: >
+      BMAD code review (4 layers): an index for release's cascade (decision 14), `close()` drains
+      even when closing the server fails (decision 15), memory's extension filter matches only an
+      object, and a case pins `addHash` on a pending record and `listNonFinal` with hashes. 176
+      facilitator tests (52 on PostgreSQL). Closes after PR merge.
 ---
 
 # Durable adapters for the four store ports
@@ -128,10 +136,11 @@ As a facilitator operator, I want durable implementations of the four store port
   turbo's `test.env`.
 - Tests: the contract suites gained cases for hash conflicts, older rate-limit windows, scope order,
   contested leases, past-the-end listing, int64 amounts, out-of-order `now` and a retried rejected
-  reservation; after karczuRF's review, also a breaker opened twice, a cleared field and an
-  extension given as an array or a string. Memory runs 37 cases and PostgreSQL 51, which add the
-  migration, lock-wait, dropped-connection, isolation, failed-`SET`, failed-`ROLLBACK`,
-  pool-starvation, lock-timeout and `main()` cases. The facilitator has 174 tests in all, after
+  reservation; after the reviews, also a breaker opened twice, a cleared field, an extension given
+  as an array or a string, and a hash added to a pending record. Memory runs 38 cases and
+  PostgreSQL 52, which add the migration, lock-wait, dropped-connection, isolation, failed-`SET`,
+  failed-`ROLLBACK`, pool-starvation, lock-timeout and `main()` cases. The facilitator has 176
+  tests in all, after
   merging develop. Before the PR, a final review by two independent reviewers was
   reconciled into one list.
 
@@ -188,6 +197,15 @@ As a facilitator operator, I want durable implementations of the four store port
     0013 G-note asked. Both adapters overwrote it, so a second task opening the same breaker with an
     earlier end closed it early, and the contract, which opened a breaker once, passed on both. A
     contract case now opens it at 2 000, then 1 000, and expects 2 000. Found in karczuRF's review.
+14. **An index on `spend_reservation_scopes (id)`, in `0001_init`.** `release` cascades to a
+    reservation's scope rows by `id`, which the `(scope, id)` primary key can't look up, so every
+    release scanned the whole table, which nothing prunes before 0042. With 50 000 reservations the
+    cascade took 7.9 ms without the index and 0.16 ms with it. It goes into `0001_init` rather than
+    a new migration because `0001` hasn't reached any deployment yet. Found in the BMAD review.
+15. **`close()` drains the cataloger even when closing the server fails.** A second signal
+    (SIGINT after SIGTERM) calls `close()` again, closing the server rejects, and the pools ended
+    under catalog writes still under way. No test pins it: the cataloger isn't reachable from
+    `main()`'s result. Found in the BMAD review.
 
 ## Issues Encountered
 
@@ -210,8 +228,7 @@ As a facilitator operator, I want durable implementations of the four store port
 ## Future Work
 
 - 0042: prune old rate-limit windows and spend reservations, and index the spend-window sum.
-- For 0025/0026: check at startup that the database is reachable and its schema is current, and
-  test `main()` with `STORE=postgres`.
+- For 0025/0026: check at startup that the database is reachable and its schema is current.
 - For 0025: a client stalled mid-headers blocks `server.close()`, and with it the drain and the
   lease release; and a fencing token with a skew margin for the lease. See 0025's "From 0022"
   notes.
