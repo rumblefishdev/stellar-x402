@@ -146,9 +146,12 @@ export class MemoryCatalogStore implements CatalogStore {
         (type === undefined || resource.type === type) &&
         (payTo === undefined || key.payTo === payTo) &&
         (network === undefined || key.network === network) &&
-        // An own key with a value: not a prototype key, and not one JSON storage would drop.
+        // An own key with a value of a plain object: not a prototype key, not one JSON storage
+        // would drop, and not an array's index (PostgreSQL's `jsonb_typeof` guard).
         (extensions === undefined ||
-          (resource.extensions?.[extensions] !== undefined &&
+          (typeof resource.extensions === "object" &&
+            !Array.isArray(resource.extensions) &&
+            resource.extensions[extensions] !== undefined &&
             Object.hasOwn(resource.extensions, extensions))),
     );
     return {

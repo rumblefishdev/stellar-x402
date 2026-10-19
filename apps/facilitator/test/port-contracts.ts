@@ -658,6 +658,11 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
       const page = await store.list({ extensions: "bazaar", limit: 10, offset: 0 });
       expect(page.items.map((item) => item.resource)).toEqual(["https://object.example"]);
       expect(page.total).toBe(1);
+      // An array's index is not an extension key either.
+      expect(await store.list({ extensions: "0", limit: 10, offset: 0 })).toEqual({
+        items: [],
+        total: 0,
+      });
     });
   });
 }
