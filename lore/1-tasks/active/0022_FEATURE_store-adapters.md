@@ -127,10 +127,12 @@ As a facilitator operator, I want durable implementations of the four store port
 
 ### Emerged
 
-6. **Every connection sets Read Committed as its session default,** in a pool `connect` hook. Until
+6. **Every connection sets Read Committed as its session default,** in the pool's `onConnect`. Until
    then only the transactions set it, so single statements took the server's default; under
    Repeatable Read the concurrent claims threw serialization errors. A config `options` setting
-   would be overridden by an `options` parameter in the URL.
+   would be overridden by an `options` parameter in the URL. The pool waits for `onConnect`, so a
+   connection whose `SET` fails is closed and its caller's query fails; a `connect` listener could
+   only log the failure and hand the connection out at the server's default.
 7. **Every pool client keeps an `error` listener.** pg-pool removes its own listener while a client
    is checked out, so a connection lost mid-transaction (a failover, a reboot, the idle-in-transaction
    timeout) crashed the process. Now the transaction fails.

@@ -32,7 +32,8 @@ import { NON_FINAL_STATES, assertLedger, isFinal, isForward, mergeCatalogEntry }
  *
  * - Every time comes from the caller; the SQL never reads the database's clock.
  * - Every statement runs at Read Committed, so a role or server default can't change it: each
- *   connection sets it as its session default, and each transaction sets it again explicitly.
+ *   connection sets it as its session default before the pool hands it out, and is closed if it
+ *   can't; each transaction sets it again explicitly.
  *   Each statement sees what committed before it started, which is why a value read after a lock
  *   wait is read in a new statement.
  * - int8 columns come back as strings: `BigInt()` for stroops, `Number()` for times, ledgers and
@@ -50,9 +51,9 @@ export function postgresStores(pool: pg.Pool): Stores {
 /**
  * A pool with the facilitator's limits: a statement runs at most 10 s on the server and a query
  * waits at most 15 s in the client. `onError` receives errors of idle connections, which would
- * otherwise crash the process. Every connection runs at Read Committed and keeps an error
- * listener while checked out, where pg-pool removes its own: a connection lost mid-transaction
- * then fails its queries instead of crashing the process.
+ * otherwise crash the process. Every connection runs at Read Committed, or is closed and its
+ * caller's query fails, and keeps an error listener while checked out, where pg-pool removes its
+ * own: a connection lost mid-transaction then fails its queries instead of crashing the process.
  */
 export function createPool(
   connectionString: string,
@@ -69,14 +70,20 @@ export function createPool(
     query_timeout: 15_000,
     idle_in_transaction_session_timeout: 10_000,
     application_name: "x402-facilitator",
+    // The pool waits for this before handing the client out; if it throws, it closes the client.
+    onConnect: async (client) => {
+      try {
+        await client.query(
+          "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL READ COMMITTED",
+        );
+      } catch (error) {
+        throw new Error("could not set Read Committed on a new connection", { cause: error });
+      }
+    },
   });
   pool.on("error", onError);
   pool.on("connect", (client) => {
     client.on("error", () => {});
-    // Queued before the first query the pool hands this client.
-    client
-      .query("SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL READ COMMITTED")
-      .catch(onError);
   });
   return pool;
 }

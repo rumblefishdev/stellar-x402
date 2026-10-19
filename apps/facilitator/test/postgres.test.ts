@@ -1,6 +1,6 @@
 import { CATALOG_KEY_VERSION } from "@stellar-x402/bazaar";
-import type pg from "pg";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import pg from "pg";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createPool, postgresStores } from "../src/adapters/postgres.js";
 import { MIGRATIONS, migrate } from "../src/adapters/postgres-schema.js";
 import { NON_FINAL_STATES } from "../src/adapters/rules.js";
@@ -152,6 +152,36 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
       const results = await Promise.all(Array.from({ length: 10 }, () => settlements.claim(s)));
       expect(results.filter((result) => result.claimed)).toHaveLength(1);
     } finally {
+      await strict.end();
+    }
+  });
+
+  it("closes a connection that can't set Read Committed, before anyone uses it", async () => {
+    const strict = poolFor(schema, 1, "-c default_transaction_isolation=serializable");
+    const query = pg.Client.prototype.query;
+    const cause = new Error("SET failed");
+    const spy = vi.spyOn(pg.Client.prototype, "query").mockImplementation(function (
+      this: pg.Client,
+      ...args: unknown[]
+    ) {
+      if (typeof args[0] === "string" && args[0].startsWith("SET SESSION")) {
+        return Promise.reject(cause);
+      }
+      return (query as (...a: unknown[]) => unknown).apply(this, args);
+    } as typeof query);
+    try {
+      await expect(strict.query("SELECT 1")).rejects.toThrow(
+        expect.objectContaining({
+          message: "could not set Read Committed on a new connection",
+          cause,
+        }),
+      );
+      expect(strict.totalCount).toBe(0);
+      spy.mockRestore();
+      const { rows } = await strict.query("SHOW transaction_isolation");
+      expect(rows).toEqual([{ transaction_isolation: "read committed" }]);
+    } finally {
+      spy.mockRestore();
       await strict.end();
     }
   });
