@@ -43,7 +43,11 @@ compares. Record the choice in an ADR that supersedes ADR 0011's custody part.
 > [`notes/R-openbao-on-hetzner.md`](notes/R-openbao-on-hetzner.md). On 2026-10-16 the choice
 > between OpenBao and AWS KMS was reopened: OpenBao needs its own machine, and mainnet may unseal
 > from a KMS anyway
-> ([revisited](notes/R-key-custody-options.md#openbao-or-aws-kms-revisited)).
+> ([revisited](notes/R-key-custody-options.md#openbao-or-aws-kms-revisited)). On 2026-10-19
+> okarcz said the move to Hetzner was about cost. A leaked key reaches only our own float (about
+> 180 XLM at launch), so a separate machine or KMS costs more than it protects. **Preferred
+> (okarcz, 2026-10-19), not yet an ADR:** OpenBao on the facilitator's server with auto-unseal,
+> plus 0048 and a small float ([R-key-leak-impact](notes/R-key-leak-impact.md)).
 
 ## Context
 
@@ -83,6 +87,14 @@ compares. Record the choice in an ADR that supersedes ADR 0011's custody part.
   facilitator key weight 1 and leaves every channel threshold at 0, so the hot key alone can
   change signers on every channel. Thresholds and a cold recovery signer are mainnet blockers
   under any custody option; task 0048 covers them.
+- **Leak impact** (2026-10-19, [R-key-leak-impact](notes/R-key-leak-impact.md)): the key can't
+  move buyers' or sellers' tokens, only the fee account's float and the channels' ~1.5 XLM each.
+  A launch float of about 150 XLM (alarm at 50, cold top-ups) caps a leak at about 180 XLM plus
+  downtime, which 0048 shortens. A separate OpenBao machine (~€78–144 a year) costs more than
+  that. Preferred: OpenBao on the facilitator's server with auto-unseal (the unseal key a root-only
+  file outside OpenBao's data and backups); Shamir was rejected for its downtime on every restart.
+  A separate machine or a KMS seal is the upgrade once the float or `upto` (0015) raises the
+  stakes.
 
 ## Design Decisions
 

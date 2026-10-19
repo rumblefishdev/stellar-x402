@@ -25,6 +25,9 @@ it reach the dedicated server privately, and is that link safe for signing?
 
 ## OpenBao can't share the facilitator's server
 
+> 2026-10-19: true for isolation, but not worth a machine at our stakes. okarcz prefers OpenBao on
+> the facilitator's server with auto-unseal ([R-key-leak-impact](R-key-leak-impact.md)).
+
 - OpenBao holds the key in software. Root on OpenBao's host can get it.
 - On the facilitator's host, root on that host would have the key, as with `FACILITATOR_SECRET`
   in the environment today. Keeping the raw key away from the facilitator's host is the point of

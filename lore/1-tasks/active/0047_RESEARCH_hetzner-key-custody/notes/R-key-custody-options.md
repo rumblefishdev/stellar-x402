@@ -4,6 +4,7 @@ type: research
 status: developing
 spawns:
   - R-openbao-on-hetzner.md
+  - R-key-leak-impact.md
 tags: [keys, custody, hetzner, vault, openbao, kms, hsm]
 links:
   - ../spike/results.md
