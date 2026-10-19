@@ -4,8 +4,8 @@ title: "Public testnet deployment"
 type: FEATURE
 status: backlog
 milestone: 1
-related_adr: ["0011"]
-related_tasks: ["0012", "0014", "0022", "0017", "0020"]
+related_adr: ["0011", "0012"]
+related_tasks: ["0012", "0014", "0022", "0017", "0020", "0013"]
 tags: [facilitator, deploy, priority-high, effort-medium, platform]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -74,6 +74,13 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   - it is encrypted with the testnet KMS key, whose policy gives `kms:Decrypt` only to the task
     execution role;
   - a keyed RPC URL and the database credentials go the same way.
+- From 0013 ([ADR 0012](../../../docs/adr/0012-facilitator-state-store.md)), the database:
+  - isolated private subnets for RDS, with no NAT;
+  - a db.t4g.micro Single-AZ RDS for PostgreSQL 18 instance, its security group and its parameter
+    group;
+  - the database credentials as a SecureString under `/x402/testnet/db`;
+  - migrations written expand/contract, because the old task keeps serving while they run;
+  - a failover drill and the upgrade policy in the runbook.
 - From 0014: `GET /health` answers 200 and reports `ready` in its body.
 - From 0014, the runbook: deploy, rollback (redeploy an earlier SHA) and key rotation as an
   on-chain signer change.

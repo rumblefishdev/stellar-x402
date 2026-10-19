@@ -2,15 +2,16 @@
 id: "0013"
 title: "Choose the facilitator's state store and record it in an ADR"
 type: RESEARCH
-status: active
+status: completed
 milestone: 1
 related_adr: ["0003", "0006", "0007", "0008", "0011", "0012"]
-related_tasks: ["0012", "0009", "0014", "0022"]
+related_tasks: ["0012", "0009", "0014", "0022", "0025", "0026", "0031"]
 tags: [facilitator, persistence, bazaar, priority-high, effort-small, discovery]
 links:
   - ../../../../docs/adr/0003-settlement-channel-account-pool.md
   - ../../../../docs/x402-settlement-scaling-en.md
   - ../../../../docs/planning/m1-epics.md
+  - ../../../../docs/adr/0012-facilitator-state-store.md
 history:
   - date: "2026-10-07"
     status: backlog
@@ -32,9 +33,26 @@ history:
     status: active
     who: akot
     note: "Six options compared, server PostgreSQL and embedded SQLite spiked against the 0031 contract suites (23/23); RDS for PostgreSQL chosen, ADR 0012."
+  - date: "2026-10-19"
+    status: completed
+    who: akot
+    note: >
+      PR #20 merged without a review. ADR 0012 keeps all facilitator state in one RDS for
+      PostgreSQL database per network.
+      - Research: R-, S- and G- notes; six options scored, PostgreSQL 90/100, Aurora Serverless
+        v2 81.
+      - Hand-offs to 0022 (adapters, six contract cases, CI on PostgreSQL), 0025 (fencing token)
+        and 0026 (subnets, RDS, SSM credentials, migration task).
+      - The six confirmations asked of the lanes in PR #20 were still unanswered at merge.
 ---
 
 # Choose the facilitator's state store and record it in an ADR
+
+## Status: Completed
+
+> Started 2026-10-12 by Adam (akot) for the Discovery lane and finished in PR #20, merged on
+> 2026-10-19 without a review. Every acceptance criterion is met. The questions put to the lanes
+> in PR #20 are still open; see [Open Questions](#open-questions-for-the-team).
 
 ## Summary
 
@@ -143,7 +161,7 @@ SQLite would move the facilitator to EC2 with EBS.
 - The four ports in `apps/facilitator/src/ports/` stay the store interfaces the facilitator owns.
 - A local spike ran the contract suites as of task 0031 (23 cases), unchanged, on PostgreSQL 18.6
   and SQLite. Both passed 23/23; on SQLite the concurrent cases pass by construction (one
-  connection). This branch depends on 0014 (PR #16, ADR 0011) merging first.
+  connection). It builds on 0014 (PR #16, ADR 0011).
   [G-postgres-port-mapping](notes/G-postgres-port-mapping.md) holds the schema and statements
   for 0022.
 
@@ -179,3 +197,10 @@ SQLite would move the facilitator to EC2 with EBS.
   hash already enforces it. The memory adapter appends today (0022).
 - **Which class for mainnet?** Burstable t4g.small, a non-burstable class, or a Multi-AZ DB cluster,
   priced before launch (ADR 0012).
+
+## Future Work
+
+- PostgreSQL adapters, the new contract cases and CI against PostgreSQL → 0022.
+- Fencing token on `ChannelLease` → 0025.
+- Subnets, the RDS instance, SSM credentials and the migration task → 0026.
+- Mainnet instance class: priced before launch (ADR 0012); no task yet.
