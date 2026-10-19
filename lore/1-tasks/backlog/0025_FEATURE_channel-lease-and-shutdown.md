@@ -15,6 +15,10 @@ history:
     status: backlog
     who: claude
     note: "Created by 0012 from M1 Story 2.4 (Payments lane)."
+  - date: "2026-10-19"
+    status: backlog
+    who: akot
+    note: "0022's review added a finding: a stalled client blocks `server.close()`."
 ---
 
 # Channel lease and graceful shutdown
@@ -48,6 +52,12 @@ As a facilitator operator, I want only one process at a time to settle through a
   lease keeps trying to take it and never exits; one whose renewal fails stops new submissions
   until it holds the lease again. ECS may start the new task while the old one is still
   deregistering, so the lease, not ECS, keeps them apart.
+- From 0022: once `server.close()` runs, Node 22 stops enforcing `headersTimeout` and
+  `requestTimeout`, so a client that stalls mid-headers keeps the server open indefinitely. With
+  `STORE=postgres` the process was still running 137 s after SIGTERM, past the 120 s SIGKILL; a
+  bare `http` server reproduces it. The ALB normally doesn't forward such clients, but the drain
+  and the lease release run after `close()`, so they need a deadline, e.g. `closeAllConnections()`
+  once in-flight requests had their time.
 
 ## Acceptance Criteria
 
