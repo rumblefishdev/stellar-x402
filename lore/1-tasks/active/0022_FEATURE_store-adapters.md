@@ -26,6 +26,13 @@ history:
       Built and reviewed: four PostgreSQL adapters, pnpm migrate, STORE=postgres, a CI service.
       All 4 acceptance criteria met; 108 facilitator tests (43 on PostgreSQL). Final review fixes
       are in. Spawned 0042 (pruning). Closes after PR merge.
+  - date: "2026-10-19"
+    status: active
+    who: akot
+    note: >
+      Merged develop (through the updated 0013 base). Review fix: a connection whose Read Committed
+      SET fails is now closed (decision 6). 164 facilitator tests (44 on PostgreSQL). Closes after
+      PR merge.
 ---
 
 # Durable adapters for the four store ports
@@ -105,9 +112,10 @@ As a facilitator operator, I want durable implementations of the four store port
   turbo's `test.env`.
 - Tests: the contract suites gained cases for hash conflicts, older rate-limit windows, scope order,
   contested leases, past-the-end listing, int64 amounts, out-of-order `now` and a retried rejected
-  reservation. Memory runs 34 cases and PostgreSQL 43, which add the migration, lock-wait,
-  dropped-connection and isolation cases. The facilitator has 108 tests in all. Before the PR, a
-  final review by two independent reviewers was reconciled into one list.
+  reservation. Memory runs 34 cases and PostgreSQL 44, which add the migration, lock-wait,
+  dropped-connection, isolation and failed-`SET` cases. The facilitator has 164 tests in all,
+  after merging develop. Before the PR, a final review by two independent reviewers was
+  reconciled into one list.
 
 ## Design Decisions
 
@@ -166,7 +174,8 @@ As a facilitator operator, I want durable implementations of the four store port
 - **Modified tests:** `config.test.ts` now uses `STORE=postgres` with a URL wherever it uses
   pubnet (the mapping case, the CATALOG_ALLOW_HTTP case, the RPC_URLS case). This follows from
   decision 9 and is not a regression. The spend case "counts only the rolling window ending at
-  now" is renamed, because the window no longer ends at `now`.
+  now" is renamed, because the window no longer ends at `now`. The pubnet https case that develop
+  added to "checks RPC URLs" uses the same pubnet helper after the merge.
 
 ## Future Work
 
