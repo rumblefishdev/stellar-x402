@@ -149,6 +149,37 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     }
   });
 
+  it("drops a live connection whose ROLLBACK failed, so its open transaction isn't reused", async () => {
+    await stores();
+    const single = poolFor(schema, 1);
+    const query = pg.Client.prototype.query;
+    const spy = vi.spyOn(pg.Client.prototype, "query").mockImplementation(function (
+      this: pg.Client,
+      ...args: unknown[]
+    ) {
+      if (args[0] === "ROLLBACK") return Promise.reject(new Error("ROLLBACK failed"));
+      return (query as (...a: unknown[]) => unknown).apply(this, args);
+    } as typeof query);
+    try {
+      const { settlements, spend } = postgresStores(single);
+      // Over the limit, so the transaction rolls back, and the stubbed ROLLBACK fails.
+      const limits = [{ scope: "global" as const, maxStroops: 0n, windowMs: 1_000 }];
+      expect(await spend.reserve({ id: "a", amount: 1n, limits, now: 0 })).toEqual({
+        reserved: false,
+        scope: "global",
+      });
+      spy.mockRestore();
+      expect(single.totalCount).toBe(0);
+      // A reused connection would run this inside the still-open transaction, never committed.
+      expect((await settlements.claim(settlement("1"))).claimed).toBe(true);
+      const { rows } = await pool.query("SELECT key FROM settlements");
+      expect(rows).toHaveLength(1);
+    } finally {
+      spy.mockRestore();
+      await single.end();
+    }
+  });
+
   it("keeps reservations queued on the scope lock from starving the other stores", async () => {
     await stores();
     await pool.query("INSERT INTO spend_scopes (scope) VALUES ('global')");
