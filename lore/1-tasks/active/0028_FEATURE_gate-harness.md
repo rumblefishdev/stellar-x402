@@ -126,6 +126,37 @@ two signers x402.org lists in `/supported`, so every payment went through the pr
 | 17 | mcp | mcp | mcp | authorization | `8273a3a285db935777fef125dbe680fd0201f66bd692a1ed041819283ed446e4` |
 | 18 | mcp | mcp | mcp | upfront | `261eb69c02b8707f1ce4a98db8c496caf09bb61d1637d4112ac5f5777f7024d4` |
 
+## Gate run on the final code (2026-10-19)
+
+`GATE_FACILITATOR_URL=https://vellar-facilitator-testnet-production.up.railway.app pnpm conformance:e2e`
+on commit `474d5b2` (the last runtime change): `Gate passed`, 18 of 18 in 6.4 minutes, `Read 18
+transactions on chain`, 18 distinct hashes, every fee paid by `GDKU24JT…`, one of the six Stellar
+signers Vellar lists in `/supported`, every transaction made after the run started. The same code
+against x402.org passed 15 of 18 that morning: its `/settle` failed three payments, and all 15
+reported hashes passed the new checks. Vellar is a community testnet facilitator; the run proves the
+harness, not Vellar.
+
+| #   | transport | client | server  | flow          | transaction |
+| --- | --------- | ------ | ------- | ------------- | ----------- |
+| 1 | http | axios | express | authorization | `215cc6ee245429a885f426009622e4446e438941ea5c38ec91cd91c49783cd05` |
+| 2 | http | axios | express | upfront | `bce4d93273c89f6566211a4b4472b46ec427595bed2e14c23914892fc81a0db2` |
+| 3 | http | fetch | express | authorization | `a234c7791e54c0cf0ef31f60ad56d8f52f9e0a101b1581f91d12f97df950de37` |
+| 4 | http | fetch | express | upfront | `7d0ca073db513d6eb125922ef3261c51639d160edf88e0bd84eda9db93d28a84` |
+| 5 | http | axios | fastify | authorization | `e67baf3ff69614da8a8934f307db52a306818af897f6f3c82045ba752cb26d3a` |
+| 6 | http | axios | fastify | upfront | `135fc24e78811a2e57453c654b287e3cc3386684d97ae5f0ebcca917d4df2db9` |
+| 7 | http | fetch | fastify | authorization | `1dd98e8a544481f0d75385349f0e9f31bbe53ee4b8c45924be0bdaf8b15df5ad` |
+| 8 | http | fetch | fastify | upfront | `7dd5fc02fddb699fca8d2b4eb9ba9e68b399a8f816e4981ea291455c081f3dd5` |
+| 9 | http | axios | hono | authorization | `2f8716ead19c22c33554fdf04ce45298f79c583a9b55c7cd6d631f707735833c` |
+| 10 | http | axios | hono | upfront | `380f8a26dbe2c11951789a47c3546413fefd7b292a15df332913e9e2b9a32f71` |
+| 11 | http | fetch | hono | authorization | `8e3bf64446bce803711e0c1adc7690a3bbd404bfc6e79ab795a5128c0df36f71` |
+| 12 | http | fetch | hono | upfront | `920753d771e163cb427398e285d435ff4dec3fa549ff9732cd9fd209b7776366` |
+| 13 | http | axios | next | authorization | `a859d511f0eafd2fee541fbf6cddbbf0e5ecd11974ec79178d79f6371636e56c` |
+| 14 | http | axios | next | upfront | `15fcb056a3d41ebe705b6a0b17f8d72e967590d9a45492819f018331c835b806` |
+| 15 | http | fetch | next | authorization | `4f94f08a99a4237519f97545c09198100056f61578adee73c6d8a2f5b00a949c` |
+| 16 | http | fetch | next | upfront | `63c779a2b09f6d4e4ec9ae54b263975c5ed1600da18e70ae6dec215ba6e3ef23` |
+| 17 | mcp | mcp | mcp | authorization | `53809c8792cfc9c5088fbd05445fb4e8a724ce8784a8de0ae8777612f0086fb1` |
+| 18 | mcp | mcp | mcp | upfront | `370b2556a13f5b00c63f6aa48f73c3ba04d1a0a7dc376e177a493bfa22697c3d` |
+
 ## Not yet decided
 
 - None.
