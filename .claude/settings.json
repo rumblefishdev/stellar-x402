@@ -18,7 +18,8 @@
       "Skill(lore-framework-git)",
       "Skill(promote-task)",
       "Skill(branch)",
-      "Skill(pr)"
+      "Skill(pr)",
+      "Skill(risk-split-pr)"
     ]
   }
 }

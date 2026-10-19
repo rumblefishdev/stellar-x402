@@ -2,10 +2,12 @@ import type { ServerConfig } from "@stellar-x402/mcp";
 import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import { createEd25519Signer, USDC_TESTNET_ADDRESS } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/client";
+import { homedir } from "node:os";
+import { isAbsolute, join } from "node:path";
 import { z } from "zod";
 
 /** What `createServer` needs, read from the environment; only the log is added by the caller. */
-export type CliConfig = Omit<ServerConfig, "log"> & { buyer?: string };
+export type CliConfig = Omit<ServerConfig, "log">;
 
 /** An unset variable and an empty one mean the same: not given. */
 const blank = (value: unknown) => (value === "" ? undefined : value);
@@ -31,22 +33,30 @@ const ENV = z.object({
     .string({ required_error: "is required" })
     .min(1, "is required")
     .url("must be a URL, such as https://catalog.example.com"),
-  STELLAR_X402_NETWORK: optional(
-    z.literal(STELLAR_NETWORKS.testnet, {
-      errorMap: () => ({
-        message: "must be stellar:testnet; this server pays on stellar:testnet only",
-      }),
-    }),
-  ),
-  // The MCP client gives up on a request after 60 s (SDK default), so a call must end before that.
+  // The MCP client gives up on a request after 60 s (SDK default); a tool call's requests, the unpaid
+  // one and the paid retry together, end within this. Signing is not cut off by it.
   STELLAR_X402_TIMEOUT_MS: orDefault(POSITIVE, "30000"),
   // A response body goes into the model's context: 100 kB is about 25k tokens.
   STELLAR_X402_MAX_RESPONSE_BYTES: orDefault(POSITIVE, "100000"),
   STELLAR_X402_ALLOW_INSECURE_LOCAL: optional(z.enum(["0", "1"], { message: "must be 0 or 1" })),
   STELLAR_X402_SECRET_KEY: optional(z.string()),
   STELLAR_X402_MAX_PER_CALL: optional(ATOMIC),
-  STELLAR_X402_BUDGET: optional(ATOMIC),
+  STELLAR_X402_DAILY_BUDGET: optional(ATOMIC),
+  // An MCP client passes env values as written, with no shell to expand `~`; it is expanded here,
+  // as the reference MCP servers do. A relative path would follow each server's working directory,
+  // giving every project its own daily budget.
+  STELLAR_X402_STATE_DIR: optional(
+    z
+      .string()
+      .transform((path) =>
+        path === "~" || path.startsWith("~/") ? homedir() + path.slice(1) : path,
+      )
+      .refine(isAbsolute, "must be an absolute path or start with ~/"),
+  ),
 });
+
+/** Outside any project, so every Claude session of the user counts against the same day. */
+const DEFAULT_STATE_DIR = join(homedir(), ".stellar-x402-mcp");
 
 /**
  * Reads the server's settings from environment variables, as an MCP client such as Claude Desktop
@@ -76,7 +86,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): CliConfig {
   if (vars.STELLAR_X402_MAX_PER_CALL === undefined) {
     throw new Error("STELLAR_X402_MAX_PER_CALL is required.");
   }
-  if (vars.STELLAR_X402_BUDGET === undefined) throw new Error("STELLAR_X402_BUDGET is required.");
+  if (vars.STELLAR_X402_DAILY_BUDGET === undefined) {
+    throw new Error("STELLAR_X402_DAILY_BUDGET is required.");
+  }
   let signer;
   try {
     signer = createEd25519Signer(vars.STELLAR_X402_SECRET_KEY, STELLAR_NETWORKS.testnet);
@@ -86,15 +98,16 @@ export function loadConfig(env: NodeJS.ProcessEnv): CliConfig {
   }
   return {
     ...config,
-    buyer: signer.address,
     payment: {
       schemes: [{ network: STELLAR_NETWORKS.testnet, client: new ExactStellarScheme(signer) }],
+      payer: signer.address,
       assets: {
         [USDC_TESTNET_ADDRESS]: {
           maxPerCall: vars.STELLAR_X402_MAX_PER_CALL,
-          budget: vars.STELLAR_X402_BUDGET,
+          daily: vars.STELLAR_X402_DAILY_BUDGET,
         },
       },
+      dailyDir: vars.STELLAR_X402_STATE_DIR ?? DEFAULT_STATE_DIR,
     },
   };
 }

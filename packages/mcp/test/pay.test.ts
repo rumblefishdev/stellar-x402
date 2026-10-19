@@ -1,9 +1,19 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { SchemeNetworkClient } from "@x402/core/types";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer, type PaymentConfig } from "../src/index.js";
-import { fakeScheme, NO_TRUSTLINE, startFakeSeller, USDC, type FakeSeller } from "./fake-seller.js";
+import {
+  fakeScheme,
+  NO_TRUSTLINE,
+  slowScheme,
+  startFakeSeller,
+  USDC,
+  type FakeSeller,
+} from "./fake-seller.js";
 
 /** What a tool answered: its JSON text, which holds the result or `{error}` alike. */
 function payload<T = Paid>(result: Awaited<ReturnType<Client["callTool"]>>): T {
@@ -22,6 +32,8 @@ interface Paid {
 let seller: FakeSeller;
 let client: Client;
 let logs: string[];
+/** Each test's own daily record, so no test sees another's spending. */
+let stateDir: string;
 
 async function connect(
   overrides: Partial<PaymentConfig> = {},
@@ -35,7 +47,11 @@ async function connect(
   const payment: PaymentConfig = {
     // Testnet only, as the CLI registers it.
     schemes: [{ network: "stellar:testnet", client: scheme }],
-    assets: { [USDC]: { maxPerCall: 20_000n, budget: 15_000n } },
+    payer: "GBUYERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    assets: { [USDC]: { maxPerCall: 20_000n, daily: 15_000n } },
+    dailyDir: stateDir,
+    // A fixed day, so a test running across midnight UTC does not start a new budget.
+    now: () => new Date("2026-10-13T12:00:00Z"),
     ...overrides,
   };
   const log = (message: string) => logs.push(message);
@@ -60,12 +76,14 @@ async function reconnect(...args: Parameters<typeof connect>) {
 
 beforeEach(async () => {
   seller = await startFakeSeller();
+  stateDir = await mkdtemp(join(tmpdir(), "pay-test-"));
   await connect();
 });
 
 afterEach(async () => {
   await client.close();
   await seller.close();
+  await rm(stateDir, { recursive: true, force: true });
 });
 
 async function pay(path = "/forecast?city=Warsaw", method = "GET") {
@@ -145,6 +163,16 @@ describe("call_paid_http", () => {
     },
   );
 
+  it("refuses an argument call_paid_http does not have, without calling the seller", async () => {
+    const result = await client.callTool({
+      name: "call_paid_http",
+      arguments: { url: `${seller.url}/forecast`, method: "GET", maxPrice: "1" },
+    });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain("maxPrice");
+    expect(seller.bodies).toHaveLength(0);
+  });
+
   it("refuses an asset name that is only a property of every object", async () => {
     seller.asset = "constructor";
     expect((await pay()).error.code).toBe("asset_not_allowed");
@@ -158,18 +186,28 @@ describe("call_paid_http", () => {
     expect((await pay()).payment).toBeDefined();
   });
 
-  it("pays in another allowed asset when the first one's budget is spent", async () => {
+  it.each(["-10000", "0", "1.5"])("refuses a price of %s", async (price) => {
+    seller.price = price;
+    const result = await pay();
+    expect(result.error.code).toBe("unsupported_payment");
+    expect(result.error.message).toContain("above zero");
+    expect(seller.payments).toHaveLength(0);
+  });
+
+  it("counts the daily budget on the offer the library chose, without trying another", async () => {
     await reconnect({
       assets: {
-        [USDC]: { maxPerCall: 20_000n, budget: 15_000n },
-        COTHER: { maxPerCall: 10n, budget: 100n },
+        [USDC]: { maxPerCall: 20_000n, daily: 15_000n },
+        COTHER: { maxPerCall: 10n, daily: 100n },
       },
     });
     seller.otherOffers = [{ asset: USDC, amount: "10000" }];
     seller.asset = "COTHER";
     seller.price = "1";
     expect((await pay()).payment).toMatchObject({ asset: USDC });
-    expect((await pay()).payment).toMatchObject({ asset: "COTHER", amount: "1" });
+    // USDC's day is spent (10,000 of 15,000 left 5,000); the cheaper COTHER offer is not tried.
+    expect((await pay()).error.code).toBe("over_budget");
+    expect(seller.payments).toHaveLength(1);
   });
 
   it("logs why a settlement header cannot be read, and returns what was paid for", async () => {
@@ -255,6 +293,55 @@ describe("call_paid_http", () => {
     expect(seller.payments).toHaveLength(0);
   });
 
+  it("gives the whole call one deadline, so a paid retry that would end past it is cut short", async () => {
+    await reconnect({}, { timeoutMs: 1_000 });
+    // Each answer alone fits in the deadline; the unpaid one and the paid retry together do not. The
+    // 400 ms left after the first answer leave room on a slow CI runner to sign, count and send.
+    seller.delayMs = 600;
+    const started = performance.now();
+    expect((await pay()).error.code).toBe("payment_unknown");
+    expect(performance.now() - started).toBeLessThan(1_000 + 150);
+    expect(seller.payments).toHaveLength(1);
+  });
+
+  it("does not send a payment whose signing outlasted the deadline, and gives the amount back", async () => {
+    await reconnect({}, { scheme: slowScheme(1_000), timeoutMs: 300 });
+    expect((await pay()).error.code).toBe("upstream_error");
+    expect(seller.payments).toHaveLength(0);
+    // 10,000 of a 15,000 budget fits again: the late signature was never sent.
+    expect((await pay()).payment).toBeDefined();
+  });
+
+  it("does not send a payment signed after the deadline passed, and gives the amount back", async () => {
+    const deadline = new AbortController();
+    vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    await reconnect(
+      {},
+      {
+        scheme: {
+          scheme: "exact",
+          // The signature is ready just as the deadline passes: signing wins the race, and the paid
+          // request is the first to see the deadline gone.
+          createPaymentPayload(x402Version, requirements) {
+            const signed = Promise.resolve({
+              x402Version,
+              payload: { amount: requirements.amount },
+            });
+            deadline.abort();
+            return signed;
+          },
+        },
+      },
+    );
+    try {
+      expect((await pay()).error.code).toBe("upstream_error");
+    } finally {
+      vi.restoreAllMocks();
+    }
+    expect(seller.payments).toHaveLength(0);
+    expect((await pay()).payment).toBeDefined();
+  });
+
   it("returns upstream_error when the seller stops sending its response before paying", async () => {
     await reconnect({}, { timeoutMs: 300 });
     expect((await pay("/stall")).error.code).toBe("upstream_error");
@@ -279,7 +366,7 @@ describe("call_paid_http", () => {
   );
 
   it("pays a price equal to the per-call limit, and up to the whole budget", async () => {
-    await reconnect({ assets: { [USDC]: { maxPerCall: 10_000n, budget: 20_000n } } });
+    await reconnect({ assets: { [USDC]: { maxPerCall: 10_000n, daily: 20_000n } } });
     expect((await pay()).payment).toBeDefined();
     expect((await pay()).payment).toBeDefined();
     expect((await pay()).error.code).toBe("over_budget");
@@ -386,11 +473,11 @@ describe("get_resource", () => {
     expect((await preview(path)).error.code).toBe(code);
   });
 
-  it("refuses an input schema deeper than the catalog allows", async () => {
+  it("passes a deep input schema on as the seller's data", async () => {
     let schema: Record<string, unknown> = { type: "string" };
     for (let i = 0; i < 12; i++) schema = { type: "object", properties: { a: schema } };
     seller.inputSchema = schema;
-    expect((await preview()).error.code).toBe("unsupported_payment");
+    expect((await preview()).status).toBe(402);
   });
 
   it("returns upstream_error for terms larger than an HTTP header can carry", async () => {

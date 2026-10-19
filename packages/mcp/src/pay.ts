@@ -1,14 +1,53 @@
 import { LIMITS } from "@stellar-x402/bazaar";
 import { x402Client, x402HTTPClient, type SchemeRegistration } from "@x402/core/client";
 import { wrapFetchWithPayment } from "@x402/fetch";
+import { z } from "zod";
 import { ToolError } from "./results.js";
 import { checkBody, checkUrl, guardedFetch, type SellerLimits } from "./guard.js";
+import { countDaily, refundDaily, utcDay, type DailyEntry } from "./daily.js";
+
+/** The call_paid_http tool's input and output, as server.ts registers it. */
+export const CALL_PAID_HTTP_INPUT = z
+  .object({
+    url: z
+      .string()
+      .describe("Resource URL with its query, e.g. https://api.example.com/x?city=Warsaw"),
+    method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
+    body: z.string().optional().describe("JSON request body"),
+  })
+  .strict();
+
+export const CALL_PAID_HTTP_OUTPUT = {
+  status: z.number(),
+  contentType: z.string().nullable(),
+  body: z.string(),
+  payment: z
+    .object({
+      transaction: z
+        .string()
+        .nullable()
+        .describe("Null when the seller sent no settlement it could show"),
+      network: z.string(),
+      asset: z.string(),
+      amount: z.string().describe("Paid, in the asset's smallest unit"),
+    })
+    .optional(),
+};
 
 export interface PaymentConfig {
   /** Scheme clients holding the buyer's key; the CLI registers `ExactStellarScheme` for testnet only. */
   schemes: SchemeRegistration[];
-  /** Per asset contract: the largest price one call may pay and the budget for this process, in atomic units. */
-  assets: Record<string, { maxPerCall: bigint; budget: bigint }>;
+  /** The buyer's public address, the address those schemes sign for; it keys the daily record. */
+  payer: string;
+  /**
+   * Per asset contract, in atomic units: the largest price one call may pay and the budget for one
+   * UTC day, shared by every process using `dailyDir`.
+   */
+  assets: Record<string, { maxPerCall: bigint; daily: bigint }>;
+  /** The directory holding `spent.sqlite`, the database of what was spent per day. */
+  dailyDir: string;
+  /** The clock that decides the day; tests set it, the server uses the system's. */
+  now?: () => Date;
 }
 
 export interface PaidResponse {
@@ -28,41 +67,70 @@ export interface PaidResponse {
  */
 const MAX_AUTHORIZATION_SECONDS = 300;
 
-/** What every call has paid so far, per asset; shared by all calls of one process. */
-export type Spent = Map<string, bigint>;
+/** The daily database could not be read or written, so how much is left today is unknown: pay nothing. */
+function dailyDatabaseFailed(error: unknown): ToolError {
+  return new ToolError(
+    "payment_failed",
+    "The daily budget database cannot be read or written, so nothing is paid.",
+    String(error),
+  );
+}
 
 export async function callPaidHttp(
   request: { url: string; method: string; headers?: Record<string, string>; body?: string },
   config: PaymentConfig,
-  spent: Spent,
   limits: SellerLimits,
   log: (message: string) => void,
 ): Promise<PaidResponse> {
   const url = checkUrl(request.url, limits.allowInsecureLocal);
   checkBody(request.method, request.body);
 
+  // One deadline for the call's requests, the unpaid one and the paid retry. Signing is not cut off:
+  // a signature that comes after the deadline is never sent, and the amount goes back.
+  const deadline = AbortSignal.timeout(limits.timeoutMs);
   // One client per call, so its hooks know which payment is this call's.
   const client = x402Client.fromConfig({ schemes: config.schemes, spendControls: false });
   let refusal: ToolError | undefined;
-  let paid: { network: string; asset: string; amount: bigint } | undefined;
+  /** `countedIn` is where the amount was counted in the daily record, so a refund finds it. */
+  let paid: { network: string; asset: string; amount: bigint; countedIn: DailyEntry } | undefined;
   let signingError: Error | undefined;
+  const now = config.now ?? (() => new Date());
+  // True once the request carrying the signed payment has been handed to the network.
+  let paymentSent = false;
+  // Nothing was sent, so the amount goes back to the day it was counted on.
+  const giveBack = () => {
+    if (!paid) return;
+    try {
+      refundDaily(config.dailyDir, paid.countedIn, paid.amount);
+    } catch (refundError) {
+      // The amount stays counted for today: too strict, never too loose.
+      log(
+        `call_paid_http: could not give back ${paid.amount} to the daily budget (${String(refundError)})`,
+      );
+    }
+  };
 
-  // Of the seller's offers, keep those in an allowed asset, with a short enough authorization, within
-  // the per-call limit and the remaining budget; the library pays the first one left.
+  // Of the seller's offers, keep those in an allowed asset, at a price above zero, with a short enough
+  // authorization and within the per-call limit; the library pays the first one left, and the daily
+  // budget is counted when it is chosen.
   client.registerPolicy((_version, offers) => {
     const allowed = offers.filter((offer) => Object.hasOwn(config.assets, offer.asset));
-    const shortLived = allowed.filter(
+    // A zero or negative price would be counted before the library refuses to sign it, and a negative
+    // count raises the day's budget for every process until it is given back.
+    const priced = allowed.filter((offer) => /^[1-9][0-9]*$/.test(offer.amount));
+    const shortLived = priced.filter(
       (offer) => offer.maxTimeoutSeconds <= MAX_AUTHORIZATION_SECONDS,
     );
     const affordable = shortLived.filter(
       (offer) => BigInt(offer.amount) <= config.assets[offer.asset]!.maxPerCall,
     );
-    const inBudget = affordable.filter(
-      (offer) =>
-        (spent.get(offer.asset) ?? 0n) + BigInt(offer.amount) <= config.assets[offer.asset]!.budget,
-    );
     if (allowed.length === 0) {
       refusal = new ToolError("asset_not_allowed", "The seller asks for an asset not allowed.");
+    } else if (priced.length === 0) {
+      refusal = new ToolError(
+        "unsupported_payment",
+        "The seller's price is not a whole number of atomic units above zero.",
+      );
     } else if (shortLived.length === 0) {
       refusal = new ToolError(
         "unsupported_payment",
@@ -70,33 +138,51 @@ export async function callPaidHttp(
       );
     } else if (affordable.length === 0) {
       refusal = new ToolError("over_price_limit", "The price is over the per-call limit.");
-    } else if (inBudget.length === 0) {
-      refusal = new ToolError("over_budget", "The payment would exceed the budget.");
     }
-    return inBudget;
+    return affordable;
   });
   client.onBeforePaymentCreation(async ({ selectedRequirements: offer }) => {
     const amount = BigInt(offer.amount);
-    const already = spent.get(offer.asset) ?? 0n;
-    if (already + amount > config.assets[offer.asset]!.budget) {
-      refusal = new ToolError("over_budget", "The payment would exceed the budget.");
+    // The day's spending is read and the amount recorded in one transaction, so processes paying at
+    // the same moment never pass the day together. Once signed the amount is never given back,
+    // so a seller cannot return it to the budget by claiming the payment failed.
+    const countedIn = { day: utcDay(now()), payer: config.payer, asset: offer.asset };
+    let counted = false;
+    try {
+      counted = countDaily(config.dailyDir, countedIn, amount, config.assets[offer.asset]!.daily);
+    } catch (error) {
+      refusal = dailyDatabaseFailed(error);
+    }
+    if (!counted) {
+      refusal ??= new ToolError("over_budget", "The payment would exceed the daily budget.");
       return { abort: true, reason: refusal.code };
     }
-    // The policy already kept offers within the budget, and today it runs in the same synchronous
-    // step as this hook; the check stays here, where the amount is counted, so two calls at once
-    // cannot both pass even if the library puts an await in between. Once signed it is never given back, so a seller cannot return it to the budget by
-    // claiming the payment failed.
-    spent.set(offer.asset, already + amount);
-    paid = { network: offer.network, asset: offer.asset, amount };
+    paid = { network: offer.network, asset: offer.asset, amount, countedIn };
   });
   // Nothing was sent: signing failed (an unfunded payer fails here, in simulation), so the amount
   // goes back to the budget.
   client.onPaymentCreationFailure(async ({ error }) => {
     signingError = error;
-    if (paid) spent.set(paid.asset, (spent.get(paid.asset) ?? 0n) - paid.amount);
+    giveBack();
   });
 
-  const pay = wrapFetchWithPayment(guardedFetch(limits), client);
+  const sellerFetch = guardedFetch(limits, deadline);
+  const pay = wrapFetchWithPayment(async (input, init) => {
+    const outgoing = new Request(input, init);
+    if (outgoing.headers.has("PAYMENT-SIGNATURE")) {
+      // Past the deadline the request would be refused before it connects: nothing is sent, so this
+      // is a refusal with the amount given back, not a payment of unknown outcome.
+      if (deadline.aborted) {
+        giveBack();
+        throw new ToolError(
+          "upstream_error",
+          "The time limit passed before the payment was sent; nothing was sent.",
+        );
+      }
+      paymentSent = true;
+    }
+    return sellerFetch(outgoing);
+  }, client);
   let response: Response;
   try {
     response = await pay(url, {
@@ -105,7 +191,7 @@ export async function callPaidHttp(
       body: request.body,
     });
   } catch (error) {
-    if (paid && !signingError) {
+    if (paymentSent) {
       // The signed payment left this process; whether the seller settled it is unknown.
       const detail =
         error instanceof ToolError

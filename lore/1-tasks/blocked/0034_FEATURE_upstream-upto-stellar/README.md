@@ -2,7 +2,7 @@
 id: "0034"
 title: "Merge the Stellar upto scheme upstream: scheme_upto_stellar.md and the @x402/stellar classes"
 type: FEATURE
-status: active
+status: blocked
 related_adr: ["0001"]
 related_tasks: ["0002", "0003", "0004", "0005", "0015"]
 tags: [upstream, upto, spec, priority-high, effort-large, payments]
@@ -40,6 +40,12 @@ history:
       Spec PR x402-foundation/x402#3781 opened on 2026-10-12 from okarcz's fork, in place of the
       issue: upstream proposes new schemes through the spec PR itself. Competing PRs #3098, #3134
       and #3428 recorded; the first criterion now tracks maintainer acknowledgement on #3781.
+  - date: "2026-10-15"
+    status: blocked
+    who: okarcz
+    note: >
+      Waiting for the x402 Foundation maintainers to review the upstream upto spec PR. Nothing
+      more to do on our side until they answer.
 ---
 
 # Merge the Stellar upto scheme upstream: scheme_upto_stellar.md and the @x402/stellar classes
@@ -52,12 +58,11 @@ once it is **merged**, not when it is proposed.
 
 **Lane:** Payments
 
-## Status: Active
+## Status: Blocked
 
-> Started 2026-10-08 on branch `lore-0034-upstream-upto-stellar`. The spec is upstream for review
-> as [x402-foundation/x402#3781](https://github.com/x402-foundation/x402/pull/3781) (opened
-> 2026-10-12, no maintainer review yet). The code PR waits on 0015. Drafts are in
-> [`drafts/`](drafts/).
+> Blocked since 2026-10-15: waiting for the x402 Foundation maintainers to review the upstream
+> spec PR. Nothing more to do on our side until they answer. The code PR also waits on 0015.
+> Drafts are in [`drafts/`](drafts/).
 
 ## Context
 

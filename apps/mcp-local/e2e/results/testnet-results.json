@@ -1,0 +1,1577 @@
+{
+  "ranAt": "2026-10-15T11:31:03.910Z",
+  "commit": "514113aa858849e3b33acfc891b9eca85c405efa",
+  "rows": 121,
+  "failed": 0,
+  "results": [
+    {
+      "id": "E-13b",
+      "check": "one payment, the signed transfer: 5000 USDC from the buyer to the seller's payTo",
+      "expected": [
+        {
+          "asset": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+          "from": "GDUFPEXV27XLNI2UNEIOY4HQAMAGSNIHV2QHPZRPFPK5QGK6S3AD5AFK",
+          "to": "GAS7JQRKLXPO5L7OFYDEILAM6AZGPHFJKQ2UJV7TAT5BNXPCXX54L5IF",
+          "amount": "5000"
+        }
+      ],
+      "got": [
+        {
+          "asset": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+          "from": "GDUFPEXV27XLNI2UNEIOY4HQAMAGSNIHV2QHPZRPFPK5QGK6S3AD5AFK",
+          "to": "GAS7JQRKLXPO5L7OFYDEILAM6AZGPHFJKQ2UJV7TAT5BNXPCXX54L5IF",
+          "amount": "5000"
+        }
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-13b",
+      "check": "signature valid for 60 more ledgers: within the offer's 300 s and 300 s",
+      "expected": [
+        true,
+        true
+      ],
+      "got": [
+        true,
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-13b",
+      "check": "result: ok, 5000, the settlement's hash",
+      "expected": [
+        "ok",
+        "5000",
+        "abababababababababababababababababababababababababababababababab"
+      ],
+      "got": [
+        "ok",
+        "5000",
+        "abababababababababababababababababababababababababababababababab"
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-14",
+      "check": "both calls (the second is not over_budget: the amount came back)",
+      "expected": [
+        "insufficient_funds",
+        "insufficient_funds"
+      ],
+      "got": [
+        "insufficient_funds",
+        "insufficient_funds"
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-14",
+      "check": "cause in the log, not in the tool text",
+      "expected": [
+        true,
+        false
+      ],
+      "got": [
+        true,
+        false
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-14",
+      "check": "XLM unchanged",
+      "expected": "100000000000",
+      "got": "100000000000",
+      "pass": true
+    },
+    {
+      "id": "E-14b",
+      "check": "insufficient_funds, the contract's #10 in the log only",
+      "expected": [
+        "insufficient_funds",
+        true,
+        false
+      ],
+      "got": [
+        "insufficient_funds",
+        true,
+        false
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-14c",
+      "check": "refused, nothing sent, the amount given back",
+      "expected": [
+        "payment_failed",
+        0,
+        "0"
+      ],
+      "got": [
+        "payment_failed",
+        0,
+        "0"
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-24",
+      "check": "ok; the unpaid and the paid request both carry the body",
+      "expected": [
+        "ok",
+        [
+          "{\"city\":\"Warsaw\",\"days\":3}",
+          "{\"city\":\"Warsaw\",\"days\":3}"
+        ]
+      ],
+      "got": [
+        "ok",
+        [
+          "{\"city\":\"Warsaw\",\"days\":3}",
+          "{\"city\":\"Warsaw\",\"days\":3}"
+        ]
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-15",
+      "check": "rejected, rejected, then over the budget",
+      "expected": [
+        "payment_rejected",
+        "payment_rejected",
+        "over_budget"
+      ],
+      "got": [
+        "payment_rejected",
+        "payment_rejected",
+        "over_budget"
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-15",
+      "check": "no transaction in the rejections",
+      "expected": [
+        false,
+        false
+      ],
+      "got": [
+        false,
+        false
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-15",
+      "check": "signed payments received: one per rejection, none for the refused third",
+      "expected": [
+        1,
+        1,
+        0
+      ],
+      "got": [
+        1,
+        1,
+        0
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-16a",
+      "check": "call_paid_http /stall: sent, then unknown within 4 s",
+      "expected": [
+        "payment_unknown",
+        1,
+        true
+      ],
+      "got": [
+        "payment_unknown",
+        1,
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-16b",
+      "check": "call_paid_http /redir: sent, then unknown within 4 s",
+      "expected": [
+        "payment_unknown",
+        1,
+        true
+      ],
+      "got": [
+        "payment_unknown",
+        1,
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-16c",
+      "check": "call_paid_http /boom: sent, then unknown within 4 s",
+      "expected": [
+        "payment_unknown",
+        1,
+        true
+      ],
+      "got": [
+        "payment_unknown",
+        1,
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-16d",
+      "check": "call_paid_http /big: sent, then unknown within 4 s",
+      "expected": [
+        "payment_unknown",
+        1,
+        true
+      ],
+      "got": [
+        "payment_unknown",
+        1,
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-16e",
+      "check": "call_paid_http /drop: sent, then unknown within 4 s",
+      "expected": [
+        "payment_unknown",
+        1,
+        true
+      ],
+      "got": [
+        "payment_unknown",
+        1,
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-16b",
+      "check": "redirect not followed",
+      "expected": 0,
+      "got": 0,
+      "pass": true
+    },
+    {
+      "id": "E-16",
+      "check": "every amount stays counted",
+      "expected": "50000",
+      "got": "50000",
+      "pass": true
+    },
+    {
+      "id": "E-16f",
+      "check": "sent, then unknown at the 5 s deadline (took 5.0 s)",
+      "expected": [
+        "payment_unknown",
+        1,
+        true
+      ],
+      "got": [
+        "payment_unknown",
+        1,
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-17a",
+      "check": "no settlement header",
+      "expected": [
+        "ok",
+        200,
+        null,
+        "10000",
+        "{\"ok\":true}"
+      ],
+      "got": [
+        "ok",
+        200,
+        null,
+        "10000",
+        "{\"ok\":true}"
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-17b",
+      "check": "a hash that is not one",
+      "expected": [
+        "ok",
+        null
+      ],
+      "got": [
+        "ok",
+        null
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-17c",
+      "check": "500 with a settlement",
+      "expected": [
+        "ok",
+        500,
+        "abababababababababababababababababababababababababababababababab"
+      ],
+      "got": [
+        "ok",
+        500,
+        "abababababababababababababababababababababababababababababababab"
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-17d",
+      "check": "content type passed on",
+      "expected": [
+        "ok",
+        "text/plain"
+      ],
+      "got": [
+        "ok",
+        "text/plain"
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-18",
+      "check": "first payment creates the database",
+      "expected": "ok",
+      "got": "ok",
+      "pass": true
+    },
+    {
+      "id": "E-18",
+      "check": "locked: payment_failed after the 5 s wait (took 5.2 s), log names the lock",
+      "expected": [
+        "payment_failed",
+        true,
+        true
+      ],
+      "got": [
+        "payment_failed",
+        true,
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-18",
+      "check": "after the lock is gone",
+      "expected": "ok",
+      "got": "ok",
+      "pass": true
+    },
+    {
+      "id": "E-18",
+      "check": "signed payments received: not the locked one",
+      "expected": 2,
+      "got": 2,
+      "pass": true
+    },
+    {
+      "id": "E-19",
+      "check": "A, A, B, restart C, D with a larger budget, reset E, E",
+      "expected": [
+        "ok",
+        "ok",
+        "over_budget",
+        "over_budget",
+        "ok",
+        "ok",
+        "ok"
+      ],
+      "got": [
+        "ok",
+        "ok",
+        "over_budget",
+        "over_budget",
+        "ok",
+        "ok",
+        "ok"
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-19",
+      "check": "database after A's first payment; B sent nothing",
+      "expected": [
+        true,
+        0
+      ],
+      "got": [
+        true,
+        0
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-20.1",
+      "check": "one paid, one over the budget; one payment sent",
+      "expected": [
+        [
+          "ok",
+          "over_budget"
+        ],
+        1
+      ],
+      "got": [
+        [
+          "ok",
+          "over_budget"
+        ],
+        1
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-20.2",
+      "check": "one paid, one over the budget; one payment sent",
+      "expected": [
+        [
+          "ok",
+          "over_budget"
+        ],
+        1
+      ],
+      "got": [
+        [
+          "ok",
+          "over_budget"
+        ],
+        1
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-20.3",
+      "check": "one paid, one over the budget; one payment sent",
+      "expected": [
+        [
+          "ok",
+          "over_budget"
+        ],
+        1
+      ],
+      "got": [
+        [
+          "ok",
+          "over_budget"
+        ],
+        1
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-20.4",
+      "check": "one paid, one over the budget; one payment sent",
+      "expected": [
+        [
+          "ok",
+          "over_budget"
+        ],
+        1
+      ],
+      "got": [
+        [
+          "ok",
+          "over_budget"
+        ],
+        1
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-20.5",
+      "check": "one paid, one over the budget; one payment sent",
+      "expected": [
+        [
+          "ok",
+          "over_budget"
+        ],
+        1
+      ],
+      "got": [
+        [
+          "ok",
+          "over_budget"
+        ],
+        1
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-01a",
+      "check": "exit 1, stderr says \"STELLAR_X402_DISCOVERY_URL\"",
+      "expected": [
+        1,
+        true
+      ],
+      "got": [
+        1,
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-01b",
+      "check": "exit 1, stderr says \"STELLAR_X402_DISCOVERY_URL\"",
+      "expected": [
+        1,
+        true
+      ],
+      "got": [
+        1,
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-01c",
+      "check": "exit 1, stderr says \"STELLAR_X402_MAX_PER_CALL\"",
+      "expected": [
+        1,
+        true
+      ],
+      "got": [
+        1,
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-01d",
+      "check": "exit 1, stderr says \"STELLAR_X402_DAILY_BUDGET\"",
+      "expected": [
+        1,
+        true
+      ],
+      "got": [
+        1,
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-01f",
+      "check": "exit 1, stderr says \"STELLAR_X402_NETWORK is not a setting\"",
+      "expected": [
+        1,
+        true
+      ],
+      "got": [
+        1,
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-01g",
+      "check": "exit 1, stderr says \"STELLAR_X402_MAX_PER_CALL\"",
+      "expected": [
+        1,
+        true
+      ],
+      "got": [
+        1,
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-01h",
+      "check": "exit 1, stderr says \"STELLAR_X402_TIMEOUT_MS\"",
+      "expected": [
+        1,
+        true
+      ],
+      "got": [
+        1,
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-01i",
+      "check": "exit 1, stderr says \"STELLAR_X402_MAX_PERCALL\"",
+      "expected": [
+        1,
+        true
+      ],
+      "got": [
+        1,
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-01j",
+      "check": "exit 1, stderr says \"STELLAR_X402_BUDGET is not a setting\"",
+      "expected": [
+        1,
+        true
+      ],
+      "got": [
+        1,
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-01l",
+      "check": "exit 1, stderr says \"STELLAR_X402_SECRET_KEY\"",
+      "expected": [
+        1,
+        true
+      ],
+      "got": [
+        1,
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-01m",
+      "check": "exit 1, stderr says \"STELLAR_X402_STATE_DIR\"",
+      "expected": [
+        1,
+        true
+      ],
+      "got": [
+        1,
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-02",
+      "check": "tools, each with an output schema",
+      "expected": [
+        [
+          "get_resource",
+          "list_resources"
+        ],
+        true
+      ],
+      "got": [
+        [
+          "get_resource",
+          "list_resources"
+        ],
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-02",
+      "check": "call_paid_http: -32602, not our shape, nothing sent",
+      "expected": [
+        true,
+        true,
+        "<undefined>",
+        0
+      ],
+      "got": [
+        true,
+        true,
+        "<undefined>",
+        0
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-03",
+      "check": "tools, each with an output schema",
+      "expected": [
+        [
+          "call_paid_http",
+          "get_resource",
+          "list_resources"
+        ],
+        true
+      ],
+      "got": [
+        [
+          "call_paid_http",
+          "get_resource",
+          "list_resources"
+        ],
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-03",
+      "check": "call_paid_http is destructive",
+      "expected": true,
+      "got": true,
+      "pass": true
+    },
+    {
+      "id": "E-03",
+      "check": "stderr names the buyer's public address",
+      "expected": true,
+      "got": true,
+      "pass": true
+    },
+    {
+      "id": "E-04",
+      "check": "{}: entries, total, filters passed, one request",
+      "expected": [
+        [
+          "https://h1.example.com/",
+          "https://h2.example.com/",
+          "https://h3.example.com/",
+          "https://m1.example.com/mcp",
+          "https://m2.example.com/mcp"
+        ],
+        5,
+        true,
+        1
+      ],
+      "got": [
+        [
+          "https://h1.example.com/",
+          "https://h2.example.com/",
+          "https://h3.example.com/",
+          "https://m1.example.com/mcp",
+          "https://m2.example.com/mcp"
+        ],
+        5,
+        true,
+        1
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-04",
+      "check": "{\"type\":\"http\"}: entries, total, filters passed, one request",
+      "expected": [
+        [
+          "https://h1.example.com/",
+          "https://h2.example.com/",
+          "https://h3.example.com/"
+        ],
+        3,
+        true,
+        1
+      ],
+      "got": [
+        [
+          "https://h1.example.com/",
+          "https://h2.example.com/",
+          "https://h3.example.com/"
+        ],
+        3,
+        true,
+        1
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-04",
+      "check": "{\"type\":\"mcp\",\"payTo\":\"GPAYEE1\"}: entries, total, filters passed, one request",
+      "expected": [
+        [
+          "https://m1.example.com/mcp"
+        ],
+        1,
+        true,
+        1
+      ],
+      "got": [
+        [
+          "https://m1.example.com/mcp"
+        ],
+        1,
+        true,
+        1
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-04",
+      "check": "{\"network\":\"stellar:pubnet\"}: entries, total, filters passed, one request",
+      "expected": [
+        [
+          "https://h3.example.com/"
+        ],
+        1,
+        true,
+        1
+      ],
+      "got": [
+        [
+          "https://h3.example.com/"
+        ],
+        1,
+        true,
+        1
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-04",
+      "check": "{\"extensions\":\"bazaar\"}: entries, total, filters passed, one request",
+      "expected": [
+        [
+          "https://h1.example.com/",
+          "https://m1.example.com/mcp"
+        ],
+        2,
+        true,
+        1
+      ],
+      "got": [
+        [
+          "https://h1.example.com/",
+          "https://m1.example.com/mcp"
+        ],
+        2,
+        true,
+        1
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-04",
+      "check": "{\"limit\":2,\"offset\":0}: entries, total, filters passed, one request",
+      "expected": [
+        [
+          "https://h1.example.com/",
+          "https://h2.example.com/"
+        ],
+        5,
+        true,
+        1
+      ],
+      "got": [
+        [
+          "https://h1.example.com/",
+          "https://h2.example.com/"
+        ],
+        5,
+        true,
+        1
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-04",
+      "check": "{\"limit\":2,\"offset\":4}: entries, total, filters passed, one request",
+      "expected": [
+        [
+          "https://m2.example.com/mcp"
+        ],
+        5,
+        true,
+        1
+      ],
+      "got": [
+        [
+          "https://m2.example.com/mcp"
+        ],
+        5,
+        true,
+        1
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-04",
+      "check": "{\"type\":\"http\",\"network\":\"stellar:testnet\",\"payTo\":\"GPAYEE2\"}: entries, total, filters passed, one request",
+      "expected": [
+        [
+          "https://h2.example.com/"
+        ],
+        1,
+        true,
+        1
+      ],
+      "got": [
+        [
+          "https://h2.example.com/"
+        ],
+        1,
+        true,
+        1
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-04",
+      "check": "a 10,000-character description is cut to 500 (README)",
+      "expected": 500,
+      "got": 500,
+      "pass": true
+    },
+    {
+      "id": "E-05a",
+      "check": "upstream_error twice, the first within 2 s",
+      "expected": [
+        "upstream_error",
+        "upstream_error",
+        true
+      ],
+      "got": [
+        "upstream_error",
+        "upstream_error",
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-05b",
+      "check": "upstream_error twice, the first within 2 s",
+      "expected": [
+        "upstream_error",
+        "upstream_error",
+        true
+      ],
+      "got": [
+        "upstream_error",
+        "upstream_error",
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-05c",
+      "check": "upstream_error twice, the first within 2 s",
+      "expected": [
+        "upstream_error",
+        "upstream_error",
+        true
+      ],
+      "got": [
+        "upstream_error",
+        "upstream_error",
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-05d",
+      "check": "upstream_error twice, the first within 2 s",
+      "expected": [
+        "upstream_error",
+        "upstream_error",
+        true
+      ],
+      "got": [
+        "upstream_error",
+        "upstream_error",
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-06",
+      "check": "list_resources {\"limit\":-1}: -32602",
+      "expected": [
+        true,
+        true
+      ],
+      "got": [
+        true,
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-06",
+      "check": "get_resource {\"method\":\"GET\"}: -32602",
+      "expected": [
+        true,
+        true
+      ],
+      "got": [
+        true,
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-06",
+      "check": "call_paid_http {\"url\":\"http://127.0.0.1:57773/ok\",\"method\":\"HEAD\"}: -32602",
+      "expected": [
+        true,
+        true
+      ],
+      "got": [
+        true,
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-06",
+      "check": "list_resources {\"foo\":1}: -32602",
+      "expected": [
+        true,
+        true
+      ],
+      "got": [
+        true,
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-06",
+      "check": "requests reaching the seller",
+      "expected": 0,
+      "got": 0,
+      "pass": true
+    },
+    {
+      "id": "E-07",
+      "check": "402 at 10000 on testnet, valid ≤ 300 s",
+      "expected": [
+        402,
+        "10000",
+        "stellar:testnet",
+        true
+      ],
+      "got": [
+        402,
+        "10000",
+        "stellar:testnet",
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-07",
+      "check": "buyer balance unchanged",
+      "expected": "199589972",
+      "got": "199589972",
+      "pass": true
+    },
+    {
+      "id": "E-08a",
+      "check": "get_resource /free, within 4 s",
+      "expected": [
+        "ok",
+        true
+      ],
+      "got": [
+        "ok",
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-08b",
+      "check": "get_resource /nohdr, within 4 s",
+      "expected": [
+        "unsupported_payment",
+        true
+      ],
+      "got": [
+        "unsupported_payment",
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-08c",
+      "check": "get_resource /deep, within 4 s",
+      "expected": [
+        "ok",
+        true
+      ],
+      "got": [
+        "ok",
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-08d",
+      "check": "get_resource /gone, within 4 s",
+      "expected": [
+        "resource_not_found",
+        true
+      ],
+      "got": [
+        "resource_not_found",
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-08e",
+      "check": "get_resource /boom, within 4 s",
+      "expected": [
+        "upstream_error",
+        true
+      ],
+      "got": [
+        "upstream_error",
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-08f",
+      "check": "get_resource /big, within 4 s",
+      "expected": [
+        "response_too_large",
+        true
+      ],
+      "got": [
+        "response_too_large",
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-08g",
+      "check": "get_resource /gzip, within 4 s",
+      "expected": [
+        "response_too_large",
+        true
+      ],
+      "got": [
+        "response_too_large",
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-08h",
+      "check": "get_resource /stall, within 4 s",
+      "expected": [
+        "upstream_error",
+        true
+      ],
+      "got": [
+        "upstream_error",
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-08i",
+      "check": "get_resource /redir, within 4 s",
+      "expected": [
+        "unsafe_url",
+        true
+      ],
+      "got": [
+        "unsafe_url",
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-08i",
+      "check": "redirect not followed",
+      "expected": 1,
+      "got": 1,
+      "pass": true
+    },
+    {
+      "id": "E-08j",
+      "check": "get_resource /pubnet402, within 4 s",
+      "expected": [
+        "ok",
+        true
+      ],
+      "got": [
+        "ok",
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-08j",
+      "check": "terms returned as given",
+      "expected": [
+        402,
+        "stellar:pubnet"
+      ],
+      "got": [
+        402,
+        "stellar:pubnet"
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-09a",
+      "check": "get_resource not a url",
+      "expected": "unsafe_url",
+      "got": "unsafe_url",
+      "pass": true
+    },
+    {
+      "id": "E-09b",
+      "check": "get_resource http://example.com/",
+      "expected": "unsafe_url",
+      "got": "unsafe_url",
+      "pass": true
+    },
+    {
+      "id": "E-09c",
+      "check": "get_resource https://10.0.0.1/x",
+      "expected": "unsafe_url",
+      "got": "unsafe_url",
+      "pass": true
+    },
+    {
+      "id": "E-09d",
+      "check": "get_resource http://192.168.1.1/x",
+      "expected": "unsafe_url",
+      "got": "unsafe_url",
+      "pass": true
+    },
+    {
+      "id": "E-09e",
+      "check": "call_paid_http https://169.254.169.254/latest",
+      "expected": "unsafe_url",
+      "got": "unsafe_url",
+      "pass": true
+    },
+    {
+      "id": "E-09g",
+      "check": "get_resource http://127.0.0.1.nip.io:57788/free",
+      "expected": "unsafe_url",
+      "got": "unsafe_url",
+      "pass": true
+    },
+    {
+      "id": "E-09",
+      "check": "control: localhost and 127.0.0.1 pass with the switch",
+      "expected": [
+        "ok",
+        "ok"
+      ],
+      "got": [
+        "ok",
+        "ok"
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-09f",
+      "check": "127.0.0.1 without the switch",
+      "expected": "unsafe_url",
+      "got": "unsafe_url",
+      "pass": true
+    },
+    {
+      "id": "E-09h",
+      "check": "https://example.com/ without the switch passes the guard",
+      "expected": [
+        "ok",
+        200
+      ],
+      "got": [
+        "ok",
+        200
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-09",
+      "check": "nothing counted",
+      "expected": false,
+      "got": false,
+      "pass": true
+    },
+    {
+      "id": "E-09",
+      "check": "requests reaching the seller: the two controls only",
+      "expected": 2,
+      "got": 2,
+      "pass": true
+    },
+    {
+      "id": "E-11",
+      "check": "call_paid_http /othasset",
+      "expected": "asset_not_allowed",
+      "got": "asset_not_allowed",
+      "pass": true
+    },
+    {
+      "id": "E-12a",
+      "check": "call_paid_http /pubnet",
+      "expected": "unsupported_payment",
+      "got": "unsupported_payment",
+      "pass": true
+    },
+    {
+      "id": "E-12b",
+      "check": "call_paid_http /long",
+      "expected": "unsupported_payment",
+      "got": "unsupported_payment",
+      "pass": true
+    },
+    {
+      "id": "E-12c",
+      "check": "call_paid_http /negative",
+      "expected": "unsupported_payment",
+      "got": "unsupported_payment",
+      "pass": true
+    },
+    {
+      "id": "E-12d",
+      "check": "call_paid_http /zero",
+      "expected": "unsupported_payment",
+      "got": "unsupported_payment",
+      "pass": true
+    },
+    {
+      "id": "E-12e",
+      "check": "call_paid_http /upto",
+      "expected": "unsupported_payment",
+      "got": "unsupported_payment",
+      "pass": true
+    },
+    {
+      "id": "E-12f",
+      "check": "call_paid_http /long-pricey",
+      "expected": "unsupported_payment",
+      "got": "unsupported_payment",
+      "pass": true
+    },
+    {
+      "id": "E-12g",
+      "check": "call_paid_http /other-then-long",
+      "expected": "unsupported_payment",
+      "got": "unsupported_payment",
+      "pass": true
+    },
+    {
+      "id": "E-13a",
+      "check": "call_paid_http /pricey",
+      "expected": "over_price_limit",
+      "got": "over_price_limit",
+      "pass": true
+    },
+    {
+      "id": "E-11…13a",
+      "check": "signed payments the seller received",
+      "expected": 0,
+      "got": 0,
+      "pass": true
+    },
+    {
+      "id": "E-10",
+      "check": "call_paid_http GET with a body",
+      "expected": "invalid_input",
+      "got": "invalid_input",
+      "pass": true
+    },
+    {
+      "id": "E-10",
+      "check": "get_resource GET with a body (README: either seller tool)",
+      "expected": "invalid_input",
+      "got": "invalid_input",
+      "pass": true
+    },
+    {
+      "id": "E-10",
+      "check": "requests reaching /paid",
+      "expected": 0,
+      "got": 0,
+      "pass": true
+    },
+    {
+      "id": "E-21",
+      "check": "paid result: the weather, on testnet, 10000 in USDC, a hash",
+      "expected": [
+        "ok",
+        200,
+        true,
+        "stellar:testnet",
+        "10000",
+        "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+        true
+      ],
+      "got": [
+        "ok",
+        200,
+        true,
+        "stellar:testnet",
+        "10000",
+        "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+        true
+      ],
+      "pass": true,
+      "transaction": "1bc53d50a888d4ffc71ff37c9c39c1c52d876e9069126e6ba1235ae90f8418de"
+    },
+    {
+      "id": "E-21",
+      "check": "the transaction succeeded and moved 0.001 USDC from the buyer to the seller",
+      "expected": [
+        true,
+        {
+          "from": "GDUFPEXV27XLNI2UNEIOY4HQAMAGSNIHV2QHPZRPFPK5QGK6S3AD5AFK",
+          "to": "GAS7JQRKLXPO5L7OFYDEILAM6AZGPHFJKQ2UJV7TAT5BNXPCXX54L5IF",
+          "amount": "0.0010000"
+        }
+      ],
+      "got": [
+        true,
+        {
+          "from": "GDUFPEXV27XLNI2UNEIOY4HQAMAGSNIHV2QHPZRPFPK5QGK6S3AD5AFK",
+          "to": "GAS7JQRKLXPO5L7OFYDEILAM6AZGPHFJKQ2UJV7TAT5BNXPCXX54L5IF",
+          "amount": "0.0010000"
+        }
+      ],
+      "pass": true,
+      "transaction": "1bc53d50a888d4ffc71ff37c9c39c1c52d876e9069126e6ba1235ae90f8418de"
+    },
+    {
+      "id": "E-21",
+      "check": "buyer −10000, seller +10000, buyer XLM unchanged (the facilitator pays fees)",
+      "expected": [
+        "-10000",
+        "10000",
+        "0"
+      ],
+      "got": [
+        "-10000",
+        "10000",
+        "0"
+      ],
+      "pass": true,
+      "transaction": "1bc53d50a888d4ffc71ff37c9c39c1c52d876e9069126e6ba1235ae90f8418de"
+    },
+    {
+      "id": "E-22a",
+      "check": "paid result: the weather, on testnet, 10000 in USDC, a hash",
+      "expected": [
+        "ok",
+        200,
+        true,
+        "stellar:testnet",
+        "10000",
+        "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+        true
+      ],
+      "got": [
+        "ok",
+        200,
+        true,
+        "stellar:testnet",
+        "10000",
+        "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+        true
+      ],
+      "pass": true,
+      "transaction": "e5e3301b61df509a314f11041abb8d4e0028198c45d692628768a9382a5ff662"
+    },
+    {
+      "id": "E-22a",
+      "check": "the transaction succeeded and moved 0.001 USDC from the buyer to the seller",
+      "expected": [
+        true,
+        {
+          "from": "GDUFPEXV27XLNI2UNEIOY4HQAMAGSNIHV2QHPZRPFPK5QGK6S3AD5AFK",
+          "to": "GAS7JQRKLXPO5L7OFYDEILAM6AZGPHFJKQ2UJV7TAT5BNXPCXX54L5IF",
+          "amount": "0.0010000"
+        }
+      ],
+      "got": [
+        true,
+        {
+          "from": "GDUFPEXV27XLNI2UNEIOY4HQAMAGSNIHV2QHPZRPFPK5QGK6S3AD5AFK",
+          "to": "GAS7JQRKLXPO5L7OFYDEILAM6AZGPHFJKQ2UJV7TAT5BNXPCXX54L5IF",
+          "amount": "0.0010000"
+        }
+      ],
+      "pass": true,
+      "transaction": "e5e3301b61df509a314f11041abb8d4e0028198c45d692628768a9382a5ff662"
+    },
+    {
+      "id": "E-22a",
+      "check": "buyer −10000, seller +10000, buyer XLM unchanged (the facilitator pays fees)",
+      "expected": [
+        "-10000",
+        "10000",
+        "0"
+      ],
+      "got": [
+        "-10000",
+        "10000",
+        "0"
+      ],
+      "pass": true,
+      "transaction": "e5e3301b61df509a314f11041abb8d4e0028198c45d692628768a9382a5ff662"
+    },
+    {
+      "id": "E-22b",
+      "check": "another process, same directory",
+      "expected": "over_budget",
+      "got": "over_budget",
+      "pass": true
+    },
+    {
+      "id": "E-22c",
+      "check": "per-call limit under the price",
+      "expected": "over_price_limit",
+      "got": "over_price_limit",
+      "pass": true
+    },
+    {
+      "id": "E-22",
+      "check": "buyer balance unchanged after b and after c",
+      "expected": [
+        "199569972",
+        "199569972"
+      ],
+      "got": [
+        "199569972",
+        "199569972"
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-23",
+      "check": "no buyer secret in 267 captures from 54 processes",
+      "expected": false,
+      "got": false,
+      "pass": true
+    },
+    {
+      "id": "E-23",
+      "check": "no buyer without its S secret in 267 captures from 54 processes",
+      "expected": false,
+      "got": false,
+      "pass": true
+    },
+    {
+      "id": "E-23",
+      "check": "no unfunded secret in 267 captures from 54 processes",
+      "expected": false,
+      "got": false,
+      "pass": true
+    },
+    {
+      "id": "E-23",
+      "check": "no drained (E-14b) secret in 267 captures from 54 processes",
+      "expected": false,
+      "got": false,
+      "pass": true
+    },
+    {
+      "id": "E-23",
+      "check": "no malformed key of E-01l secret in 267 captures from 54 processes",
+      "expected": false,
+      "got": false,
+      "pass": true
+    }
+  ]
+}

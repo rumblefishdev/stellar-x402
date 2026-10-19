@@ -1,7 +1,7 @@
 # ADR 0007: Any SEP-41 token, with fees contained by one fee config, rate limits and spend budgets
 
 - Status: accepted
-- Date: 2026-10-07
+- Date: 2026-10-07, amended 2026-10-14 (task 0018: the bid counts twice)
 
 ## Context
 
@@ -36,6 +36,9 @@ It also found that two fee ceilings disagreed:
 - **One fee configuration.**
   - The fee is the simulation resource fee plus our inclusion bid, at least 100 stroops. The
     client's fee is never used.
+  - The pool settles under a fee bump, where the inner transaction and the bump each pay the bid
+    (CAP-15), so the total is the resource fee plus twice the bid. Upstream's
+    `inclusionFeeStroops` is twice the bid, so `/verify` refuses what the pool would (spine AD-10).
   - `maxFeeStroops` and `inclusionFeeStroops` each feed both upstream `ExactStellarScheme` and the
     pool.
   - `feeEscalation` is set by the app: interim testnet values in Tranche 1, mainnet values from
