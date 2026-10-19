@@ -141,6 +141,46 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     });
   });
 
+  it("keeps reservations queued on the scope lock from starving the other stores", async () => {
+    await stores();
+    await pool.query("INSERT INTO spend_scopes (scope) VALUES ('global')");
+    const main = poolFor(schema, 2);
+    const reserving = poolFor(schema, 1);
+    try {
+      const { settlements, spend } = postgresStores(main, reserving);
+      const limits = [{ scope: "global" as const, maxStroops: 10n, windowMs: 1_000 }];
+      let queued: Promise<unknown>[] = [];
+      await holding(async (client) => {
+        await client.query("SELECT scope FROM spend_scopes WHERE scope = 'global' FOR UPDATE");
+        // More reservations than the main pool has connections, all waiting on the lock.
+        queued = ["a", "b", "c"].map((id) => spend.reserve({ id, amount: 1n, limits, now: 0 }));
+        await lockWaiter();
+        const started = Date.now();
+        expect((await settlements.claim(settlement("1"))).claimed).toBe(true);
+        expect(Date.now() - started).toBeLessThan(1_000);
+      });
+      await Promise.allSettled(queued);
+    } finally {
+      await main.end();
+      await reserving.end();
+    }
+  });
+
+  it("gives up a reservation that waits on the scope lock too long", async () => {
+    const { spend } = await stores();
+    await pool.query("INSERT INTO spend_scopes (scope) VALUES ('global')");
+    const limits = [{ scope: "global" as const, maxStroops: 10n, windowMs: 1_000 }];
+    await holding(async (client) => {
+      await client.query("SELECT scope FROM spend_scopes WHERE scope = 'global' FOR UPDATE");
+      await expect(spend.reserve({ id: "a", amount: 1n, limits, now: 0 })).rejects.toMatchObject({
+        code: "55P03",
+      });
+    });
+    expect(await spend.reserve({ id: "a", amount: 1n, limits, now: 0 })).toEqual({
+      reserved: true,
+    });
+  });
+
   it("runs every statement at Read Committed under a stricter server default", async () => {
     await stores();
     const strict = poolFor(schema, 20, "-c default_transaction_isolation=serializable");

@@ -33,6 +33,13 @@ history:
       Merged develop (through the updated 0013 base). Review fix: a connection whose Read Committed
       SET fails is now closed (decision 6). 164 facilitator tests (44 on PostgreSQL). Closes after
       PR merge.
+  - date: "2026-10-19"
+    status: active
+    who: akot
+    note: >
+      Review fix: `reserve` runs on its own pool with a 2 s lock timeout, so reservations queued on
+      the global scope lock can't starve the other stores (decision 12). 166 facilitator tests
+      (46 on PostgreSQL). Closes after PR merge.
 ---
 
 # Durable adapters for the four store ports
@@ -112,8 +119,9 @@ As a facilitator operator, I want durable implementations of the four store port
   turbo's `test.env`.
 - Tests: the contract suites gained cases for hash conflicts, older rate-limit windows, scope order,
   contested leases, past-the-end listing, int64 amounts, out-of-order `now` and a retried rejected
-  reservation. Memory runs 34 cases and PostgreSQL 44, which add the migration, lock-wait,
-  dropped-connection, isolation and failed-`SET` cases. The facilitator has 164 tests in all,
+  reservation. Memory runs 34 cases and PostgreSQL 46, which add the migration, lock-wait,
+  dropped-connection, isolation, failed-`SET`, pool-starvation and lock-timeout cases. The
+  facilitator has 166 tests in all,
   after merging develop. Before the PR, a final review by two independent reviewers was
   reconciled into one list.
 
@@ -158,6 +166,14 @@ As a facilitator operator, I want durable implementations of the four store port
 11. **Lock-wait reads have deterministic tests.** These hold a transaction open on a second
     connection: `addHash` re-reading the hash owner, and `transition` reading hashes after its row
     lock. The racy contract case reached the first only about half the time.
+12. **`reserve` runs on its own small pool, with a 2 s lock timeout.** A reservation holds its
+    connection while it queues on the global scope's lock. On the one shared pool (10 connections),
+    a burst of reservations took every connection, so `claim`, `addHash` and the rate limiter's
+    `hit` waited 5 s for one and failed. `reserve` now runs on a pool of 3 that `main.ts` creates
+    beside the main one; `commit`, `release` and the breakers stay on the main pool, so recording
+    a paid fee never queues behind reservations. `SET LOCAL lock_timeout = '2s'` gives a queued
+    reservation up with `55P03`, and nothing is reserved. The timeout alone only shortened the
+    stall (a test without the own pool waited about 2 s); a bigger pool would only move it.
 
 ## Issues Encountered
 

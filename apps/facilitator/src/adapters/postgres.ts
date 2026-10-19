@@ -38,13 +38,16 @@ import { NON_FINAL_STATES, assertLedger, isFinal, isForward, mergeCatalogEntry }
  *   wait is read in a new statement.
  * - int8 columns come back as strings: `BigInt()` for stroops, `Number()` for times, ledgers and
  *   counts. No global type parser is installed.
+ * - `reserve` runs on `reservePool`. Reservations queue on the global scope's lock while holding a
+ *   connection, so on the shared pool a burst of them would leave none for `claim`, `addHash` or
+ *   `hit`. Its own small pool keeps that queue off the others.
  */
-export function postgresStores(pool: pg.Pool): Stores {
+export function postgresStores(pool: pg.Pool, reservePool: pg.Pool = pool): Stores {
   return {
     settlements: new PostgresSettlementStore(pool),
     catalog: new PostgresCatalogStore(pool),
     rateLimits: new PostgresRateLimitStore(pool),
-    spend: new PostgresSpendStore(pool),
+    spend: new PostgresSpendStore(pool, reservePool),
   };
 }
 
@@ -423,6 +426,12 @@ export class PostgresRateLimitStore implements RateLimitStore {
   }
 }
 
+/**
+ * How long `reserve` waits on a lock. A reservation holds the global scope's lock for a few round
+ * trips, so a longer wait means a queue; giving up returns the connection to `reservePool`.
+ */
+const RESERVE_LOCK_TIMEOUT = "2s";
+
 /** Thrown inside `reserve`'s transaction so a breach rolls the reservation back. */
 class LimitExceeded extends Error {
   constructor(readonly scope: SpendScope) {
@@ -431,17 +440,22 @@ class LimitExceeded extends Error {
 }
 
 export class PostgresSpendStore implements SpendStore {
-  constructor(private readonly pool: pg.Pool) {}
+  constructor(
+    private readonly pool: pg.Pool,
+    private readonly reservePool: pg.Pool = pool,
+  ) {}
 
   /**
    * One transaction: insert the reservation (a repeated id is a no-op), create and lock the scope
    * rows in sorted order so two reservations can't deadlock, then sum each window in a new
-   * statement, which sees every reservation committed before the locks were granted.
+   * statement, which sees every reservation committed before the locks were granted. A wait on any
+   * lock longer than `RESERVE_LOCK_TIMEOUT` rejects with `55P03` and reserves nothing.
    */
   async reserve({ id, amount, limits, now }: SpendReservation): Promise<ReserveResult> {
     const scopes = [...new Set(limits.map((limit) => limit.scope))].sort();
     try {
-      return await inTransaction<ReserveResult>(this.pool, async (client) => {
+      return await inTransaction<ReserveResult>(this.reservePool, async (client) => {
+        await client.query(`SET LOCAL lock_timeout = '${RESERVE_LOCK_TIMEOUT}'`);
         const fresh = await client.query(
           "INSERT INTO spend_reservations (id, amount, at) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING",
           [id, amount.toString(), now],

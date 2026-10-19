@@ -86,12 +86,16 @@ export async function main(env: Record<string, string | undefined> = process.env
   const logger = jsonLogger(config.logLevel);
   // STORE=postgres needs a migrated schema (`pnpm migrate`); the service never migrates it.
   let pool: pg.Pool | undefined;
+  let reservePool: pg.Pool | undefined;
   if (config.store === "postgres") {
     if (config.databaseUrl === undefined) throw new Error("STORE=postgres needs a DATABASE_URL");
     pool = createPool(config.databaseUrl, poolErrorLogger(logger));
+    // Reservations queue on the global scope's lock; their own pool keeps them off the others.
+    reservePool = createPool(config.databaseUrl, poolErrorLogger(logger), 3);
   }
+  const endPools = () => Promise.all([pool?.end(), reservePool?.end()]);
   try {
-    const stores = pool ? postgresStores(pool) : memoryStores();
+    const stores = pool ? postgresStores(pool, reservePool) : memoryStores();
     // 0009 hands its `extensionResponses` and `onSuccess` to `/settle` as `SettlementHooks`.
     const cataloger = createCataloger({
       store: stores.catalog,
@@ -112,19 +116,19 @@ export async function main(env: Record<string, string | undefined> = process.env
     });
     return {
       ...started,
-      // Catalog writes already under way finish before the process exits, and before the pool
-      // ends; the pool ends even if closing or draining fails.
+      // Catalog writes already under way finish before the process exits, and before the pools
+      // end; the pools end even if closing or draining fails.
       close: async () => {
         try {
           await started.close();
           await cataloger.drain();
         } finally {
-          await pool?.end();
+          await endPools();
         }
       },
     };
   } catch (error) {
-    await pool?.end();
+    await endPools();
     throw error;
   }
 }
