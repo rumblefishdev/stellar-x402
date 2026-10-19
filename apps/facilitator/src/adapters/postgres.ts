@@ -28,7 +28,8 @@ import { NON_FINAL_STATES, assertLedger, isFinal, isForward, mergeCatalogEntry }
 
 /**
  * PostgreSQL adapters of the four ports (AD-7, ADR 0012), on the schema in `postgres-schema.ts`.
- * They share one pool, so concurrent calls run on separate connections.
+ * They share one pool, except `reserve`, which runs on its own; concurrent calls run on
+ * separate connections.
  *
  * - Every time comes from the caller; the SQL never reads the database's clock.
  * - Every statement runs at Read Committed, so a role or server default can't change it: each

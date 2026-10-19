@@ -40,6 +40,14 @@ history:
       Review fix: `reserve` runs on its own pool with a 2 s lock timeout, so reservations queued on
       the global scope lock can't starve the other stores (decision 12). 166 facilitator tests
       (46 on PostgreSQL). Closes after PR merge.
+  - date: "2026-10-19"
+    status: active
+    who: akot
+    note: >
+      karczuRF's review: `openBreaker` keeps the later end (decision 13), the port says when
+      `reserve` rejects, and new cases pin a cleared field, an extension given as an array or a
+      string, a ROLLBACK that fails, and `main()` with STORE=postgres. 174 facilitator tests (51 on
+      PostgreSQL). Closes after PR merge.
 ---
 
 # Durable adapters for the four store ports
@@ -108,7 +116,8 @@ As a facilitator operator, I want durable implementations of the four store port
 
 ## Result
 
-- `adapters/postgres.ts` holds the four adapters on one `pg` pool. `adapters/postgres-schema.ts`
+- `adapters/postgres.ts` holds the four adapters on a shared `pg` pool; `reserve` runs on its own
+  (decision 12). `adapters/postgres-schema.ts`
   holds the schema as ordered SQL migrations. `adapters/rules.ts` holds the lifecycle and catalog
   merge rules that both adapters share.
 - `pnpm migrate` (`src/migrate.ts`) applies the migrations under a transaction-level advisory lock.
@@ -119,10 +128,11 @@ As a facilitator operator, I want durable implementations of the four store port
   turbo's `test.env`.
 - Tests: the contract suites gained cases for hash conflicts, older rate-limit windows, scope order,
   contested leases, past-the-end listing, int64 amounts, out-of-order `now` and a retried rejected
-  reservation. Memory runs 34 cases and PostgreSQL 46, which add the migration, lock-wait,
-  dropped-connection, isolation, failed-`SET`, pool-starvation and lock-timeout cases. The
-  facilitator has 166 tests in all,
-  after merging develop. Before the PR, a final review by two independent reviewers was
+  reservation; after karczuRF's review, also a breaker opened twice, a cleared field and an
+  extension given as an array or a string. Memory runs 37 cases and PostgreSQL 51, which add the
+  migration, lock-wait, dropped-connection, isolation, failed-`SET`, failed-`ROLLBACK`,
+  pool-starvation, lock-timeout and `main()` cases. The facilitator has 174 tests in all, after
+  merging develop. Before the PR, a final review by two independent reviewers was
   reconciled into one list.
 
 ## Design Decisions
@@ -207,6 +217,9 @@ As a facilitator operator, I want durable implementations of the four store port
   notes.
 - For 0026: the RDS CA bundle and TLS, and `STORE`, `DATABASE_URL` and `pnpm migrate` in the deploy
   env examples.
+- For 0026: measure `addHash` and the full settle path on the testnet database, which 0026
+  creates; 0022 had no instance to measure on. ADR 0012's RDS, and with it the RDS CA item, may
+  change with the hosting move to Hetzner (PR #48).
 - For 0009 and the routes: map `HashConflictError`; validate `\u0000` in payloads and resources, and
   negative `limit`/`offset`.
 - For 0009 and 0024: `reserve` can reject when the store is busy or unreachable (`55P03` after the
