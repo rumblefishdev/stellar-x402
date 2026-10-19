@@ -178,6 +178,20 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       expect(await store.get(key)).toMatchObject({ state: "success", feeCharged: 41_000n });
     });
 
+    it("clears a field a transition gives as undefined", async () => {
+      const { key } = settlement("1");
+      await store.claim(settlement("1"));
+      await store.transition(key, "claimed", { state: "signed", channel: "GA", updatedAt: 2_000 });
+      const pending = await store.transition(key, "signed", {
+        state: "pending",
+        channel: undefined,
+        updatedAt: 3_000,
+      });
+      expect(pending?.state).toBe("pending");
+      expect(pending?.channel).toBeUndefined();
+      expect((await store.get(key))?.channel).toBeUndefined();
+    });
+
     it("lets exactly one of several concurrent transitions from a state win", async () => {
       const { key } = settlement("1");
       await store.claim(settlement("1"));
@@ -606,6 +620,24 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
       const page = await store.list({ limit: 1, offset: 1 });
       expect(page).toMatchObject({ total: 3, items: [{ resource: "https://b.example" }] });
       expect(await store.list({ limit: 10, offset: 5 })).toEqual({ items: [], total: 3 });
+    });
+
+    it("matches an extension only as an object's key, not an array element or a string", async () => {
+      const entries = [
+        ["https://object.example", { bazaar: {} }],
+        ["https://array.example", ["bazaar"]],
+        ["https://string.example", "bazaar"],
+      ] as const;
+      for (const [url, extensions] of entries)
+        await upsert({
+          key: key(url),
+          resource: resource(url, {
+            extensions: extensions as unknown as DiscoveryResource["extensions"],
+          }),
+        });
+      const page = await store.list({ extensions: "bazaar", limit: 10, offset: 0 });
+      expect(page.items.map((item) => item.resource)).toEqual(["https://object.example"]);
+      expect(page.total).toBe(1);
     });
   });
 }

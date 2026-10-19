@@ -1,10 +1,11 @@
 import { CATALOG_KEY_VERSION } from "@stellar-x402/bazaar";
+import { Keypair } from "@stellar/stellar-sdk";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createPool, postgresStores } from "../src/adapters/postgres.js";
 import { MIGRATIONS, migrate } from "../src/adapters/postgres-schema.js";
 import { NON_FINAL_STATES } from "../src/adapters/rules.js";
-import { migrateMain } from "../src/main.js";
+import { main, migrateMain } from "../src/main.js";
 import { HashConflictError, type Stores } from "../src/ports/index.js";
 import {
   catalogStoreContract,
@@ -126,19 +127,26 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     });
   });
 
-  it("fails a transaction whose connection drops, and the process keeps running", async () => {
-    const { spend } = await stores();
-    await holding(async (client) => {
-      await client.query("INSERT INTO spend_scopes (scope) VALUES ('global')");
-      const reserving = spend.reserve({
-        id: "a",
-        amount: 1n,
-        limits: [{ scope: "global", maxStroops: 10n, windowMs: 1_000 }],
-        now: 0,
+  it("fails a transaction whose connection drops, keeps running, and drops the connection", async () => {
+    await stores();
+    // One connection, so the calls after the drop must reuse it or replace it.
+    const single = poolFor(schema, 1);
+    try {
+      const { settlements, spend } = postgresStores(single);
+      const limits = [{ scope: "global" as const, maxStroops: 10n, windowMs: 1_000 }];
+      await holding(async (client) => {
+        await client.query("INSERT INTO spend_scopes (scope) VALUES ('global')");
+        const reserving = spend.reserve({ id: "a", amount: 1n, limits, now: 0 });
+        await pool.query("SELECT pg_terminate_backend($1)", [await lockWaiter()]);
+        await expect(reserving).rejects.toThrow();
       });
-      await pool.query("SELECT pg_terminate_backend($1)", [await lockWaiter()]);
-      await expect(reserving).rejects.toThrow();
-    });
+      expect(await spend.reserve({ id: "b", amount: 1n, limits, now: 0 })).toEqual({
+        reserved: true,
+      });
+      expect((await settlements.claim(settlement("1"))).claimed).toBe(true);
+    } finally {
+      await single.end();
+    }
   });
 
   it("keeps reservations queued on the scope lock from starving the other stores", async () => {
@@ -228,6 +236,30 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
 
   it("ran the concurrent cases on separate connections", () => {
     expect(connections).toBeGreaterThanOrEqual(10);
+  });
+
+  it("boots main() with STORE=postgres, reserves on its own pool, and ends both pools", async () => {
+    await stores();
+    const app = await main({
+      STORE: "postgres",
+      DATABASE_URL: urlFor(schema),
+      FACILITATOR_SECRET: Keypair.random().secret(),
+      CHANNELS: Keypair.random().publicKey(),
+      PORT: "47131",
+      LOG_LEVEL: "error",
+    });
+    const pools = app.pools;
+    expect(pools).toBeDefined();
+    try {
+      const limits = [{ scope: "global" as const, maxStroops: 10n, windowMs: 1_000 }];
+      await app.stores.spend.reserve({ id: "a", amount: 1n, limits, now: 0 });
+      expect([pools?.main.totalCount, pools?.reserve.totalCount]).toEqual([0, 1]);
+      expect((await app.stores.settlements.claim(settlement("1"))).claimed).toBe(true);
+      expect([pools?.main.totalCount, pools?.reserve.totalCount]).toEqual([1, 1]);
+    } finally {
+      await app.close();
+    }
+    expect([pools?.main.ended, pools?.reserve.ended]).toEqual([true, true]);
   });
 
   it("applies every migration once, in order", async () => {

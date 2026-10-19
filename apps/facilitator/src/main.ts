@@ -116,6 +116,9 @@ export async function main(env: Record<string, string | undefined> = process.env
     });
     return {
       ...started,
+      /** The graph's stores, and with `STORE=postgres` its two pools: for tests. */
+      stores,
+      pools: pool && reservePool ? { main: pool, reserve: reservePool } : undefined,
       // Catalog writes already under way finish before the process exits, and before the pools
       // end; the pools end even if closing or draining fails.
       close: async () => {
