@@ -11,7 +11,7 @@ links:
 history:
   - date: "2026-10-13"
     status: backlog
-    who: claude
+    who: karolkow
     note: >
       Spawned from 0037: its paid test endpoint became examples/http-api, a test seller and only
       the seed of Example 1, so the RFP deliverable gets its own task.

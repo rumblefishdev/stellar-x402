@@ -1,9 +1,29 @@
-import { isSchemaWithinLimits, LIMITS } from "@stellar-x402/bazaar";
+import { LIMITS } from "@stellar-x402/bazaar";
 import { decodePaymentRequiredHeader } from "@x402/core/http";
 import { PaymentRequiredV2Schema } from "@x402/core/schemas";
 import type { PaymentRequired } from "@x402/core/types";
+import { z } from "zod";
 import { checkBody, checkUrl, guardedFetch, type SellerLimits } from "./guard.js";
 import { ToolError } from "./results.js";
+
+/** The get_resource tool's input and output, as server.ts registers it. */
+export const GET_RESOURCE_INPUT = z
+  .object({
+    url: z
+      .string()
+      .describe("Resource URL with its query, e.g. https://api.example.com/x?city=Warsaw"),
+    method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
+    body: z.string().optional().describe("JSON request body, for a price that depends on it"),
+  })
+  .strict();
+
+export const GET_RESOURCE_OUTPUT = {
+  status: z.number(),
+  paymentRequired: z
+    .record(z.unknown())
+    .nullable()
+    .describe("The seller's payment terms; null when the resource needs no payment"),
+};
 
 /**
  * What a seller asks for a resource, read from its 402 answer to an unpaid request: the payment terms
@@ -18,7 +38,7 @@ export async function previewPayment(
   checkBody(request.method, request.body);
   // A price can depend on the body (e.g. how many results are asked for), so the body is sent too.
   const headers = request.body === undefined ? undefined : { "content-type": "application/json" };
-  const response = await guardedFetch(limits)(url, {
+  const response = await guardedFetch(limits, AbortSignal.timeout(limits.timeoutMs))(url, {
     method: request.method,
     headers,
     body: request.body,
@@ -52,15 +72,8 @@ export async function previewPayment(
       parsed.error.message,
     );
   }
-  // The terms come in a header, which Node's HTTP client caps at 16 KiB; inside that, the input
-  // schema gets the depth and size bounds our catalog puts on a listing.
-  const bazaar = paymentRequired.extensions?.bazaar as { schema?: unknown } | undefined;
-  if (!isSchemaWithinLimits(bazaar?.schema)) {
-    throw new ToolError(
-      "unsupported_payment",
-      "The seller's input schema is over the catalog's limits.",
-    );
-  }
+  // The terms come in a header, which Node's HTTP client caps at 16 KiB: that bounds what reaches
+  // the agent, the seller's input schema included.
   // The seller writes these; keep its free text short before it reaches the model.
   const { resource } = paymentRequired;
   return {

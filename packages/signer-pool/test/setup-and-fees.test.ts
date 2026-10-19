@@ -152,6 +152,31 @@ describe("feeStatsInclusionFee", () => {
     expect(await cold()).toBe(100);
   });
 
+  it("treats a percentile that isn't a whole number as a failed read", async () => {
+    let p90: unknown = "300";
+    let t = 0;
+    const fee = feeStatsInclusionFee(
+      {
+        getFeeStats: async () =>
+          ({ sorobanInclusionFee: { p90 } }) as unknown as rpc.Api.GetFeeStatsResponse,
+      },
+      { cacheMs: 0, failureCacheMs: 0, now: () => t++ },
+    );
+    expect(await fee()).toBe(300);
+    // `Number` reads the blank ones and null as 0, which would cache the floor as a good reading.
+    for (const bad of ["n/a", "", " ", null, 300, "1e3", "-5", "12.5"]) {
+      p90 = bad;
+      expect(await fee(), JSON.stringify(bad)).toBe(300);
+    }
+    p90 = "400";
+    expect(await fee()).toBe(400);
+    const missing = feeStatsInclusionFee({
+      getFeeStats: async () =>
+        ({ sorobanInclusionFee: {} }) as unknown as rpc.Api.GetFeeStatsResponse,
+    });
+    expect(await missing()).toBe(100);
+  });
+
   it("raises a low reading to the floor and reads the chosen percentile", async () => {
     const low = feeStatsInclusionFee({ getFeeStats: async () => stats("50") });
     expect(await low()).toBe(100);

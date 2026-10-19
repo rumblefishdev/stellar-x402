@@ -123,6 +123,17 @@ describe("list_resources", () => {
     expect(catalog.queries).toHaveLength(0);
   });
 
+  it.each([
+    ["list_resources", { offest: 40 }],
+    ["get_resource", { url: "https://example.com/", method: "GET", headers: {} }],
+  ])("refuses an argument %s does not have, naming it", async (name, args) => {
+    // A misspelt optional argument would otherwise be dropped and the call run without it.
+    const result = await client.callTool({ name, arguments: args });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain(Object.keys(args).at(-1));
+    expect(catalog.queries).toHaveLength(0);
+  });
+
   it("returns upstream_error, without the catalog's response body, when the catalog fails", async () => {
     catalog.failWith = 503;
     const { isError, structuredContent } = await call("list_resources", {});

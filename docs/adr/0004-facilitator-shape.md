@@ -1,7 +1,7 @@
 # ADR 0004: One facilitator service; upstream verifies, we settle
 
 - Status: accepted
-- Date: 2026-10-07
+- Date: 2026-10-07, amended 2026-10-14 (task 0018: the checks around upstream verify)
 
 ## Context
 
@@ -28,7 +28,9 @@ reimplement verify and settle.
 - **Upstream verifies.** `/verify` uses `ExactStellarScheme.verify()`. Signature, auth scope,
   `Address`/`AddressV2` credentials, simulation and event checks stay upstream's job. We add only
   the channel-address check ([ADR 0005](0005-channel-accounts-as-facilitator-source.md)) and a
-  minimum remaining validity ([ADR 0006](0006-settlement-record.md)).
+  minimum remaining validity ([ADR 0006](0006-settlement-record.md)). Before upstream, we also
+  reject a payment for another network and a V0 envelope, and bound upstream's call with a
+  deadline; an error inside upstream is a 500, not a verdict (spine AD-3).
 - **We settle.** `/settle` calls upstream `verify()` again (the spec requires settle to verify
   independently), then submits through `SettlementSubmitter` in `packages/signer-pool`. The
   spec's balance-change check runs in the pool's `checkSimulation` hook. Upstream `settle()` is

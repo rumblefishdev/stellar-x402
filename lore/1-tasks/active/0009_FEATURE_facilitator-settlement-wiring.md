@@ -2,7 +2,7 @@
 id: "0009"
 title: "Settle exact payments once through the channel pool"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0003", "0004", "0005", "0006", "0007", "0011"]
 related_tasks: ["0007", "0006", "0012", "0015", "0016", "0017", "0018", "0019", "0020", "0024", "0025", "0027", "0014"]
@@ -31,6 +31,11 @@ history:
       /verify and the fee config to 0018, the record lifecycle and startup check to 0019,
       /supported and the channel hardening check to 0020, spend budgets to 0024, the channel
       lease to 0025, alerts to 0027.
+  - date: "2026-10-13"
+    status: active
+    who: okarcz
+    note: >
+      Work started, stacked on 0018 (PR #33) for the reusable verify checks and fee settings.
 ---
 
 # Settle exact payments once through the channel pool
@@ -97,3 +102,10 @@ never charged twice.
 - [ ] Given a repeat call with a different fingerprint, when `/settle` is called, then it returns `success: false`, submits nothing and never returns the stored outcome; a payload with zero or several payer auth entries is rejected
 - [ ] Given a submission that is still pending at the settle timeout, when `/settle` answers, then it returns `{success: false, errorReason: "settlement_pending", transaction, network}`; every `SubmitStatus` and submitter error class maps to a fixed `errorReason`, listed with the code
 - [ ] Given the hooks from 1.1, when a settlement runs, then the before-submit hook runs before `submit()` and the on-success hook runs when the record turns `success`
+- [ ] Given the fee configuration, when `main()` builds the pool, then it uses the same `fees.pool` that `buildVerifier` gets, so `/verify` and the pool share one ceiling and one bid (AD-10; deferred from 0018's AC 5)
+
+**From 0018's PR #33 review (Adam), for after the rebase:**
+- the `/settle` expiry recheck uses the pool's floor of 2 ledgers, not `minValidityLedgers` (spine AD-22);
+- `SettleResponse.payer` passes on only as a string, as in `/verify` (0018 decision 20);
+- the `/settle` tests use an `accepted` that differs from the requirements;
+- define the answer for `FeeLimitError` and `LedgerBoundError` after `/verify` accepted.

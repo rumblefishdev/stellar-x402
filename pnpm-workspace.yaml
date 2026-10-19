@@ -4,6 +4,7 @@ packages:
   - examples/*
   - conformance
   - contracts/upto-proxy/e2e
+  - apps/mcp-local/e2e
 
 allowBuilds:
   esbuild: true

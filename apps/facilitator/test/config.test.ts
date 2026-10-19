@@ -36,7 +36,7 @@ describe("parseConfig", () => {
       channels: [CHANNEL_A, CHANNEL_B],
       store: "memory",
       fees: { maxFeeStroops: 250_000n, inclusionFeeStroops: undefined, escalation: undefined },
-      settlement: { minValidityLedgers: 12, settleTimeoutMs: 30_000, leaseTtlMs: 30_000 },
+      settlement: { minValidityLedgers: 4, settleTimeoutMs: 30_000, leaseTtlMs: 30_000 },
       http: {
         bodyLimitBytes: 65_536,
         trustedProxyHops: 0,
@@ -61,7 +61,7 @@ describe("parseConfig", () => {
       NETWORK: "stellar:pubnet",
       PORT: "8080",
       LOG_LEVEL: "debug",
-      RPC_URLS: "https://a.example, http://b.example",
+      RPC_URLS: "https://a.example, https://b.example",
       FACILITATOR_SECRET: SECRET,
       CHANNELS: CHANNEL_B,
       STORE: "postgres",
@@ -91,7 +91,7 @@ describe("parseConfig", () => {
       network: "stellar:pubnet",
       port: 8080,
       logLevel: "debug",
-      rpcUrls: ["https://a.example", "http://b.example"],
+      rpcUrls: ["https://a.example", "https://b.example"],
       facilitatorSecret: SECRET,
       channels: [CHANNEL_B],
       store: "postgres",
@@ -177,6 +177,34 @@ describe("parseConfig", () => {
     expect(problems({ ...minimal, INCLUSION_FEE_STROOPS: "99" })).toEqual([
       "INCLUSION_FEE_STROOPS must be at least 100",
     ]);
+    // The pool keeps one spare ledger, so 1 lets `/verify` accept what `/settle` refuses.
+    expect(problems({ ...minimal, MIN_VALIDITY_LEDGERS: "1" })).toEqual([
+      "MIN_VALIDITY_LEDGERS must be at least 2",
+    ]);
+  });
+
+  it("keeps twice the inclusion bid below the fee ceiling, as the fee bump pays it twice", () => {
+    for (const bid of ["500", "999", "5000"]) {
+      expect(problems({ ...minimal, MAX_FEE_STROOPS: "1000", INCLUSION_FEE_STROOPS: bid })).toEqual(
+        ["INCLUSION_FEE_STROOPS must be below half of MAX_FEE_STROOPS"],
+      );
+    }
+    expect(
+      parseConfig({ ...minimal, MAX_FEE_STROOPS: "1000", INCLUSION_FEE_STROOPS: "499" }).fees,
+    ).toMatchObject({ maxFeeStroops: 1000n, inclusionFeeStroops: 499n });
+  });
+
+  it("keeps twice the fee-stats floor below the fee ceiling without a fixed bid", () => {
+    for (const max of ["100", "200"]) {
+      expect(problems({ ...minimal, MAX_FEE_STROOPS: max })).toEqual([
+        "MAX_FEE_STROOPS must be above 200, twice the fee-stats bid's floor",
+      ]);
+    }
+    expect(parseConfig({ ...minimal, MAX_FEE_STROOPS: "201" }).fees.maxFeeStroops).toBe(201n);
+    // A fixed bid replaces the floor: 2 × 100 < 201.
+    expect(
+      parseConfig({ ...minimal, MAX_FEE_STROOPS: "201", INCLUSION_FEE_STROOPS: "100" }).fees,
+    ).toMatchObject({ maxFeeStroops: 201n, inclusionFeeStroops: 100n });
   });
 
   it("allows http catalog URLs on testnet only", () => {
@@ -229,12 +257,18 @@ describe("parseConfig", () => {
   });
 
   it("checks RPC URLs", () => {
-    expect(problems({ ...minimal, RPC_URLS: "ftp://rpc.example" })).toEqual([
-      "RPC_URLS must be http(s) URLs",
+    for (const url of ["ftp://rpc.example", "not a url", "https://user:pass@rpc.example"]) {
+      expect(problems({ ...minimal, RPC_URLS: url })).toEqual([
+        "RPC_URLS must be http(s) URLs without credentials",
+      ]);
+    }
+    // Upstream's client allows http on testnet only.
+    expect(parseConfig({ ...minimal, RPC_URLS: "http://rpc:8000" }).rpcUrls).toEqual([
+      "http://rpc:8000",
     ]);
-    expect(problems({ ...minimal, RPC_URLS: "not a url, also not" })).toEqual([
-      "RPC_URLS must be http(s) URLs",
-    ]);
+    expect(
+      problems({ ...minimal, ...pubnet, RPC_URLS: "https://a.example,http://rpc:8000" }),
+    ).toEqual(["RPC_URLS must be https outside testnet"]);
     expect(problems({ ...minimal, ...pubnet, RPC_URLS: "," })).toEqual([
       "RPC_URLS must list at least one URL",
     ]);
