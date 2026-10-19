@@ -301,6 +301,12 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
       [schema],
     );
     for (const state of NON_FINAL_STATES) expect(rows[0]?.indexdef).toContain(`'${state}'`);
+    // `release` cascades by `id`, which the `(scope, id)` primary key can't look up.
+    const byId = await pool.query<{ indexdef: string }>(
+      "SELECT indexdef FROM pg_indexes WHERE schemaname = $1 AND tablename = 'spend_reservation_scopes'",
+      [schema],
+    );
+    expect(byId.rows.map((row) => row.indexdef)).toContainEqual(expect.stringMatching(/\(id\)$/));
   });
 
   it("applies the migrations once when two runs race", async () => {

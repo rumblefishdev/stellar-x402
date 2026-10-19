@@ -80,6 +80,8 @@ CREATE TABLE spend_reservation_scopes (
   id text NOT NULL REFERENCES spend_reservations (id) ON DELETE CASCADE,
   PRIMARY KEY (scope, id)
 );
+-- release's cascade finds a reservation's scopes by id, which the primary key can't look up.
+CREATE INDEX spend_reservation_scopes_id ON spend_reservation_scopes (id);
 -- One row per scope: its failure count and breaker, and the row a reservation locks.
 CREATE TABLE spend_scopes (
   scope text PRIMARY KEY,
