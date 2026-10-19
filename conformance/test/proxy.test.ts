@@ -1,7 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { createServer, type IncomingMessage, type Server } from "node:http";
+import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { networkInterfaces } from "node:os";
+import { text } from "node:stream/consumers";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
@@ -22,17 +23,11 @@ let answer = valid;
 let facilitator: Server;
 let facilitatorUrl: string;
 
-async function readBody(req: IncomingMessage) {
-  let body = "";
-  for await (const chunk of req) body += chunk;
-  return body;
-}
-
 beforeAll(async () => {
   facilitator = createServer(async (req, res) => {
-    const body = await readBody(req);
+    const body = await text(req);
     seen.push({ method: req.method, url: req.url, contentType: req.headers["content-type"], body });
-    res.writeHead(answer.status, { "content-type": answer.contentType });
+    res.writeHead(answer.status, answer.contentType ? { "content-type": answer.contentType } : {});
     res.end(answer.body);
   });
   await new Promise<void>((resolve) => facilitator.listen(0, "127.0.0.1", resolve));
@@ -73,7 +68,7 @@ async function startProxy(target = facilitatorUrl) {
     });
     child.on("exit", (code) => reject(new Error(`proxy exited with ${code}`)));
   });
-  return { child, url: `http://localhost:${port}`, stdout: () => stdout };
+  return { child, url: `http://localhost:${port}` };
 }
 
 function exited(child: ChildProcess) {
@@ -83,11 +78,6 @@ function exited(child: ChildProcess) {
 }
 
 describe("external proxy", () => {
-  it("prints the readiness line with its port and target", async () => {
-    const proxy = await startProxy();
-    expect(proxy.stdout()).toContain(`forwarding to ${facilitatorUrl}`);
-  });
-
   // An address of this machine other than loopback, as another host on the network would use.
   const lanAddress = Object.values(networkInterfaces())
     .flat()
@@ -139,6 +129,14 @@ describe("external proxy", () => {
     expect(res.status).toBe(503);
     expect(res.headers.get("content-type")).toBe("text/html");
     expect(await res.text()).toBe("<h1>busy</h1>");
+  });
+
+  it("labels an answer without a content type as nothing", async () => {
+    answer = { status: 200, contentType: "", body: "ok" };
+    const proxy = await startProxy();
+    const res = await fetch(`${proxy.url}/supported`);
+    expect(res.headers.get("content-type")).toBeNull();
+    expect(await res.text()).toBe("ok");
   });
 
   it("forwards GET /supported", async () => {

@@ -3,6 +3,7 @@
 // GATE_FACILITATOR_URL unchanged. The suite copies only this folder into its checkout, so it uses
 // Node built-ins only.
 import { createServer } from "node:http";
+import { text } from "node:stream/consumers";
 
 const target = process.env.GATE_FACILITATOR_URL;
 const port = Number(process.env.PORT);
@@ -18,12 +19,6 @@ function send(res, status, body) {
   return res.end(JSON.stringify(body));
 }
 
-async function readBody(req) {
-  let body = "";
-  for await (const chunk of req) body += chunk;
-  return body;
-}
-
 const server = createServer(async (req, res) => {
   const route = `${req.method} ${req.url}`;
   if (route === "GET /health") return send(res, 200, { status: "ok" });
@@ -35,18 +30,17 @@ const server = createServer(async (req, res) => {
 
   const started = Date.now();
   try {
-    const body = req.method === "POST" ? await readBody(req) : undefined;
+    const body = req.method === "POST" ? await text(req) : undefined;
     const answer = await fetch(`${target}${req.url}`, {
       method: req.method,
       headers: body ? { "content-type": "application/json" } : undefined,
       body,
     });
-    const text = await answer.text();
+    const answerBody = await answer.text();
     console.log(`${route} -> ${answer.status} in ${Date.now() - started} ms`);
-    res.writeHead(answer.status, {
-      "content-type": answer.headers.get("content-type") ?? "application/json",
-    });
-    res.end(text);
+    const type = answer.headers.get("content-type");
+    res.writeHead(answer.status, type ? { "content-type": type } : {});
+    res.end(answerBody);
   } catch (error) {
     // The suite sees a 502; the cause goes to stderr.
     console.error(`${route} failed after ${Date.now() - started} ms:`, error);

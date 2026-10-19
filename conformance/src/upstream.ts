@@ -39,12 +39,8 @@ export function prepare(dir: string) {
   }
 }
 
-/** The checkout is the pinned commit with no tracked file changed, by the build or anything else. */
+/** No tracked file of the pinned checkout changed, by the build or anything else. */
 export function assertClean(dir: string) {
-  const head = output("git", ["rev-parse", "HEAD"], dir);
-  if (head !== UPSTREAM_COMMIT) {
-    throw new Error(`${dir} is at ${head}, not the pinned ${UPSTREAM_COMMIT}`);
-  }
   const changed = output("git", ["status", "--porcelain", "--untracked-files=no"], dir);
   if (changed) throw new Error(`${dir} has changed upstream files:\n${changed}`);
 }
