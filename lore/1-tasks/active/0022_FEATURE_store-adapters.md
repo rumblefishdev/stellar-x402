@@ -209,4 +209,7 @@ As a facilitator operator, I want durable implementations of the four store port
   env examples.
 - For 0009 and the routes: map `HashConflictError`; validate `\u0000` in payloads and resources, and
   negative `limit`/`offset`.
+- For 0009 and 0024: `reserve` can reject when the store is busy or unreachable (`55P03` after the
+  2 s lock timeout, no `reservePool` connection within 5 s, a lost `COMMIT` answer). Answer it on
+  purpose, e.g. 503 with a retry, not 500; a retry with the same `id` is safe, as the port says.
 - With migration `0002`: a test that a failing migration rolls back.

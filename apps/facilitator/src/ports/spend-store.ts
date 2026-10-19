@@ -32,7 +32,12 @@ export type ReserveResult =
 
 /** Spend budgets and circuit breakers (AD-7, AD-18). Policy lives in the settlement module. */
 export interface SpendStore {
-  /** Reserves against all limits at once, or against none. Repeating an `id` is a no-op. */
+  /**
+   * Reserves against all limits at once, or against none. Repeating an `id` is a no-op.
+   * Rejects when the store is busy or unreachable (a lock wait or a connection that times out, a
+   * lost answer to the commit): then nothing new is reserved, or the outcome is unknown. Retrying
+   * with the same `id` is safe either way, so a caller answers it as "try again", not as a failure.
+   */
   reserve(reservation: SpendReservation): Promise<ReserveResult>;
   /** Replaces a reservation with the fee actually paid. */
   commit(id: string, feeCharged: bigint, now: number): Promise<void>;
