@@ -2,12 +2,12 @@
 // scenario against the facilitator at GATE_FACILITATOR_URL through the proxy in
 // `conformance/external-proxy/`, and the run is saved with the pin and the transaction hashes.
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import { Keypair, rpc } from "@stellar/stellar-sdk";
-import { checkSettlement } from "./onchain.js";
+import { checkSettlement, readSettlement, type Settlement } from "./onchain.js";
 import { UPSTREAM_COMMIT, UPSTREAM_REPO, assertClean, prepare } from "./upstream.js";
 import { judge, type SuiteRun } from "./verdict.js";
 
@@ -30,27 +30,43 @@ for (const name of ["E2E_BUYER_SECRET", "E2E_SELLER_PUBLIC"]) {
   if (!accounts[name]) throw new Error(`${name} is missing from ${envFile}`);
 }
 
-const checkout = join(conformance, ".cache", `x402-${UPSTREAM_COMMIT.slice(0, 7)}`);
+// The accounts that may pay a settlement's fee: the facilitator's own signers. Asked before any
+// payment, so an unreachable facilitator stops the run with nothing spent.
+const supported = await fetch(`${facilitatorUrl}/supported`);
+if (!supported.ok) throw new Error(`GET ${facilitatorUrl}/supported answered ${supported.status}`);
+const { signers = {} } = (await supported.json()) as { signers?: Record<string, string[]> };
+const stellarSigners = Object.entries(signers)
+  .filter(([family]) => family.startsWith("stellar:"))
+  .flatMap(([, addresses]) => addresses);
+if (stellarSigners.length === 0) {
+  throw new Error(
+    `${facilitatorUrl}/supported lists no Stellar signers: ${JSON.stringify(signers)}`,
+  );
+}
+
+const checkout = join(conformance, ".cache", "x402");
 prepare(checkout);
 
 // The proxy goes in under its config's name, which is what --facilitators matches.
 const e2e = join(checkout, "e2e");
-const proxy = join(e2e, "facilitators", "external-proxies", "stellar-x402");
-rmSync(proxy, { recursive: true, force: true });
-cpSync(join(conformance, "external-proxy"), proxy, { recursive: true });
+cpSync(
+  join(conformance, "external-proxy"),
+  join(e2e, "facilitators", "external-proxies", "stellar-x402"),
+  { recursive: true },
+);
 assertClean(checkout);
 
 const suiteJson = join(checkout, "gate-results.json");
-rmSync(suiteJson, { force: true });
-const args = [
+const filters = [
   "test",
   "--testnet",
   "--families=stellar",
   "--schemes=exact",
   "--facilitators=stellar-x402",
-  `--output-json=${suiteJson}`,
 ];
+const args = [...filters, `--output-json=${suiteJson}`];
 console.log(`$ pnpm ${args.join(" ")}   (in ${e2e})`);
+const startedAt = Math.floor(Date.now() / 1000);
 const suite = spawnSync("pnpm", args, {
   cwd: e2e,
   stdio: "inherit",
@@ -78,18 +94,35 @@ const expected = {
   from: Keypair.fromSecret(accounts.E2E_BUYER_SECRET!).publicKey(),
   to: accounts.E2E_SELLER_PUBLIC!,
   amount: 10000n,
+  signers: stellarSigners,
+  notBefore: startedAt,
 };
 const chain = new rpc.Server("https://soroban-testnet.stellar.org");
-let readOnChain = 0;
+const settlements: Settlement[] = [];
 for (const result of run?.results ?? []) {
   if (!result.passed || !result.transaction) continue;
-  readOnChain += 1;
-  const answer = await chain.getTransaction(result.transaction);
-  const envelope = answer.status === "SUCCESS" ? answer.envelopeXdr.toXDR("base64") : undefined;
-  const problem = checkSettlement(answer.status, envelope, expected);
-  if (problem) problems.push(`#${result.testNumber} transaction ${result.transaction} ${problem}`);
+  const hash = result.transaction;
+  // A failed read is a problem of this run, not a crash: the run is saved either way.
+  try {
+    const answer = await chain.getTransaction(hash);
+    const settlement =
+      answer.status === "NOT_FOUND"
+        ? { transaction: hash, status: answer.status }
+        : readSettlement(
+            hash,
+            answer.status,
+            answer.ledger,
+            answer.createdAt,
+            answer.envelopeXdr.toXDR("base64"),
+          );
+    settlements.push(settlement);
+    const problem = checkSettlement(settlement, expected);
+    if (problem) problems.push(`#${result.testNumber} transaction ${hash} ${problem}`);
+  } catch (error) {
+    problems.push(`#${result.testNumber} transaction ${hash} could not be read on chain: ${error}`);
+  }
 }
-console.log(`Read ${readOnChain} transactions on chain`);
+console.log(`Read ${settlements.length} transactions on chain`);
 
 if (run) {
   const date = new Date().toISOString();
@@ -103,11 +136,13 @@ if (run) {
     upstream: { repo: UPSTREAM_REPO, commit: UPSTREAM_COMMIT },
     date,
     facilitatorUrl,
-    command: `pnpm ${args.slice(0, -1).join(" ")}`,
+    command: `pnpm ${filters.join(" ")}`,
+    signers: stellarSigners,
+    startedAt: new Date(startedAt * 1000).toISOString(),
     suiteExitCode: suite.status,
-    readOnChain,
     passed: problems.length === 0,
     problems,
+    settlements,
     ...run,
   };
   // Errors carry stack traces through the local checkout; results are committed (task 0029), so
@@ -122,5 +157,5 @@ if (problems.length > 0) {
   process.exit(1);
 }
 console.log(
-  `Gate passed: ${run?.results.length} scenarios, each settled on chain buyer to seller for the price`,
+  `Gate passed: ${settlements.length} scenarios, each settled on chain in this run, buyer to seller for the price, by a facilitator signer`,
 );

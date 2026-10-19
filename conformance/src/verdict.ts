@@ -1,9 +1,8 @@
 /**
  * The suite's `--output-json` file, trimmed to what the gate reads (upstream `e2e/test.ts`, the
- * `results` and `summary` it writes).
+ * `results` it writes).
  */
 export interface SuiteRun {
-  summary: { total: number; passed: number; failed: number };
   results: SuiteResult[];
 }
 
@@ -12,7 +11,6 @@ export interface SuiteResult {
   client: string;
   server: string;
   endpoint: string;
-  transport?: string;
   passed: boolean;
   error?: string;
   transaction?: string;
@@ -22,7 +20,8 @@ export interface SuiteResult {
  * What stops the gate passing, one line each; empty means it passed. The suite exits 0 when no
  * scenario matched its filters, writing no file, and its fetch client reports success without a
  * transaction when the payment response header is missing. Neither is evidence, so both fail here,
- * as does any exit but 0, even after a file with every scenario passed.
+ * as does any exit but 0, even after a file with every scenario passed, and one hash reported by
+ * two scenarios: a facilitator replaying an earlier answer.
  */
 export function judge(run: SuiteRun | undefined, exitCode: number | null): string[] {
   const problems: string[] = [];
@@ -32,10 +31,15 @@ export function judge(run: SuiteRun | undefined, exitCode: number | null): strin
     return problems;
   }
   if (run.results.length === 0) problems.push("the suite ran no scenarios");
+  const reportedBy = new Map<string, number>();
   for (const result of run.results) {
     const name = `#${result.testNumber} ${result.client} -> ${result.server} ${result.endpoint}`;
+    const first = result.transaction ? reportedBy.get(result.transaction) : undefined;
     if (!result.passed) problems.push(`${name} failed: ${result.error ?? "no error given"}`);
     else if (!result.transaction) problems.push(`${name} passed without a transaction hash`);
+    else if (first)
+      problems.push(`${name} reports transaction ${result.transaction}, as #${first} does`);
+    else reportedBy.set(result.transaction, result.testNumber);
   }
   return problems;
 }

@@ -11,13 +11,13 @@ const settled: SuiteResult = {
 };
 
 function suiteRun(results: SuiteResult[]) {
-  const passed = results.filter((result) => result.passed).length;
-  return { summary: { total: results.length, passed, failed: results.length - passed }, results };
+  return { results };
 }
 
 describe("judge", () => {
   it("passes a run where every scenario settled with a hash", () => {
-    expect(judge(suiteRun([settled, { ...settled, testNumber: 2 }]), 0)).toEqual([]);
+    const second = { ...settled, testNumber: 2, transaction: "9a2e51c0" };
+    expect(judge(suiteRun([settled, second]), 0)).toEqual([]);
   });
 
   it("fails a run the suite exited non-zero, even when every scenario passed", () => {
@@ -64,6 +64,13 @@ describe("judge", () => {
       "#1 typescript/http/fetch -> typescript/http/express /exact/stellar passed without a transaction hash",
     ]);
     expect(judge(suiteRun([{ ...settled, transaction: undefined }]), 0)).toHaveLength(1);
+  });
+
+  it("fails a hash that more than one scenario reports", () => {
+    const again = { ...settled, testNumber: 2, endpoint: "/exact/stellar/upfront" };
+    expect(judge(suiteRun([settled, again]), 0)).toEqual([
+      "#2 typescript/http/fetch -> typescript/http/express /exact/stellar/upfront reports transaction 4f1c0b7e, as #1 does",
+    ]);
   });
 
   it("lists every problem in scenario order, not only the first", () => {
