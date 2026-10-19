@@ -41,6 +41,9 @@ Thumbs.db
 !.claude/settings.json
 !.claude/skills/
 
+# VibeWise: per-developer learning notes
+.vibe-wise/
+
 # Lore framework - session-local files
 lore/0-session/current-user.md
 lore/0-session/current-task.md
