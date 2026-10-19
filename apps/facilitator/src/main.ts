@@ -120,13 +120,17 @@ export async function main(env: Record<string, string | undefined> = process.env
       stores,
       pools: pool && reservePool ? { main: pool, reserve: reservePool } : undefined,
       // Catalog writes already under way finish before the process exits, and before the pools
-      // end; the pools end even if closing or draining fails.
+      // end, even if closing the server fails (a second signal); the pools end even if draining
+      // fails.
       close: async () => {
         try {
           await started.close();
-          await cataloger.drain();
         } finally {
-          await endPools();
+          try {
+            await cataloger.drain();
+          } finally {
+            await endPools();
+          }
         }
       },
     };
