@@ -52,7 +52,7 @@ As a facilitator operator, I want durable implementations of the four store port
 - From 0013 ([ADR 0012](../../../docs/adr/0012-facilitator-state-store.md)): one PostgreSQL
   database, `pg` driver, Read Committed, app `now` only. A local spike passed the 0031 contract
   suites (23 cases) unchanged. The schema, statements and known gaps are in
-  [G-postgres-port-mapping](../active/0013_RESEARCH_facilitator-state-store/notes/G-postgres-port-mapping.md).
+  [G-postgres-port-mapping](../archive/0013_RESEARCH_facilitator-state-store/notes/G-postgres-port-mapping.md).
   Watch for:
   - `addHash` is one statement, plus a re-read when the hash already exists. Hashes live in their
     own table, keyed by hash.

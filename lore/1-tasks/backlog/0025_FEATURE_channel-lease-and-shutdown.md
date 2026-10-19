@@ -4,8 +4,8 @@ title: "Channel lease and graceful shutdown"
 type: FEATURE
 status: backlog
 milestone: 1
-related_adr: ["0006", "0011"]
-related_tasks: ["0012", "0009", "0019", "0022", "0014"]
+related_adr: ["0006", "0011", "0012"]
+related_tasks: ["0012", "0009", "0019", "0022", "0014", "0013"]
 tags: [facilitator, signer-pool, operations, priority-high, effort-small, payments]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -48,6 +48,10 @@ As a facilitator operator, I want only one process at a time to settle through a
   lease keeps trying to take it and never exits; one whose renewal fails stops new submissions
   until it holds the lease again. ECS may start the new task while the old one is still
   deregistering, so the lease, not ECS, keeps them apart.
+- From 0013 ([ADR 0012](../../../docs/adr/0012-facilitator-state-store.md)): decide whether
+  `ChannelLease` carries a fencing token, so writes from a holder whose lease has expired are
+  rejected. Without one, a paused holder can still write after a new one takes over. This is a
+  contract change in the store port.
 
 ## Acceptance Criteria
 

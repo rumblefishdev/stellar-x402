@@ -60,7 +60,7 @@ Fargate in eu-central-1:
   - The channel lease is a row, never a session advisory lock.
   - Stroops are `bigint`, converted to `BigInt` column by column.
   - The schema and the statement for each operation are in
-    [G-postgres-port-mapping](../../lore/1-tasks/active/0013_RESEARCH_facilitator-state-store/notes/G-postgres-port-mapping.md).
+    [G-postgres-port-mapping](../../lore/1-tasks/archive/0013_RESEARCH_facilitator-state-store/notes/G-postgres-port-mapping.md).
 - **Search (T2).** It can use the same database: core full-text search, `pg_trgm` and `pgvector`.
 
 ## Rationale
@@ -150,10 +150,10 @@ Fargate in eu-central-1:
 
 ## References
 
-- [Task 0013](../../lore/1-tasks/active/0013_RESEARCH_facilitator-state-store/README.md):
-  [options and sources](../../lore/1-tasks/active/0013_RESEARCH_facilitator-state-store/notes/R-state-store-options.md),
-  [decision](../../lore/1-tasks/active/0013_RESEARCH_facilitator-state-store/notes/S-state-store-decision.md),
-  [PostgreSQL mapping](../../lore/1-tasks/active/0013_RESEARCH_facilitator-state-store/notes/G-postgres-port-mapping.md)
+- [Task 0013](../../lore/1-tasks/archive/0013_RESEARCH_facilitator-state-store/README.md):
+  [options and sources](../../lore/1-tasks/archive/0013_RESEARCH_facilitator-state-store/notes/R-state-store-options.md),
+  [decision](../../lore/1-tasks/archive/0013_RESEARCH_facilitator-state-store/notes/S-state-store-decision.md),
+  [PostgreSQL mapping](../../lore/1-tasks/archive/0013_RESEARCH_facilitator-state-store/notes/G-postgres-port-mapping.md)
 - [M1 architecture spine](../architecture/m1-spine.md): AD-6, AD-7, AD-11, AD-16 to AD-20
 - [ADR 0006](0006-settlement-record.md), [ADR 0007](0007-fee-abuse-containment.md),
   [ADR 0008](0008-bazaar-catalog-integrity.md), [ADR 0011](0011-facilitator-hosting.md)
