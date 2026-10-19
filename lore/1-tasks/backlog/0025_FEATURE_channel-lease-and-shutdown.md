@@ -18,7 +18,9 @@ history:
   - date: "2026-10-19"
     status: backlog
     who: akot
-    note: "0022's review added a finding: a stalled client blocks `server.close()`."
+    note: >
+      0022's review added a finding (a stalled client blocks `server.close()`) and a recommendation
+      for the lease under clock skew.
 ---
 
 # Channel lease and graceful shutdown
@@ -58,6 +60,17 @@ As a facilitator operator, I want only one process at a time to settle through a
   bare `http` server reproduces it. The ALB normally doesn't forward such clients, but the drain
   and the lease release run after `close()`, so they need a deadline, e.g. `closeAllConnections()`
   once in-flight requests had their time.
+- From 0022: `acquireLease` compares `expires_at`, stamped by the holder's clock, with the
+  acquirer's `now`, so an acquirer whose clock runs ahead by more than the TTL takes a live lease,
+  and both processes sign on the same channels until the holder's next renewal fails. The review
+  recommends a fencing token together with a skew margin:
+  - the margin (take over only once `expires_at + margin < now`) makes an early takeover rarer;
+  - the token, raised on every acquire and checked in the same statement as `addHash`, stops a
+    stale holder from sending anything new, since every send follows `addHash`;
+  - `transition` stays unfenced, so a stale holder can still record what it already sent; what it
+    doesn't record, the new holder's startup re-check resolves through the stored hashes. Its late
+    transactions can still use a sequence number the new holder read, so expect `tx_bad_seq` and a
+    sequence refresh.
 
 ## Acceptance Criteria
 

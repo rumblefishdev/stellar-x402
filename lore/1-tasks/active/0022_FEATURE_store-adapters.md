@@ -199,7 +199,8 @@ As a facilitator operator, I want durable implementations of the four store port
 - For 0025/0026: check at startup that the database is reachable and its schema is current, and
   test `main()` with `STORE=postgres`.
 - For 0025: a client stalled mid-headers blocks `server.close()`, and with it the drain and the
-  lease release; see 0025's "From 0022" note.
+  lease release; and a fencing token with a skew margin for the lease. See 0025's "From 0022"
+  notes.
 - For 0026: the RDS CA bundle and TLS, and `STORE`, `DATABASE_URL` and `pnpm migrate` in the deploy
   env examples.
 - For 0009 and the routes: map `HashConflictError`; validate `\u0000` in payloads and resources, and
