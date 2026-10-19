@@ -82,7 +82,8 @@ Read in a clone of upstream; paths are upstream's.
   and fails without a Go toolchain. The runner runs the TypeScript components' own `install.sh`
   and `build.sh`, after `pnpm install` + `pnpm build` in `typescript/` and `pnpm install` in `e2e/`,
   as upstream's CI does.
-- 2026-10-15 — **The checkout lives** in `conformance/.cache/x402/` (git-ignored,
+- 2026-10-19 — **The checkout lives in a temporary folder** made for each run and deleted when the gate exits (it held 6.1 GB and nothing read it after a run).
+- 2026-10-15 — **The checkout lived** in `conformance/.cache/x402/` (git-ignored,
   6.1 GB measured) and is rebuilt on every run (decided 2026-10-16); after the build and the proxy
   copy, the run checks that HEAD is the pin and no tracked file changed.
 - 2026-10-15 — **`--schemes=exact`** is passed although Stellar has only `exact` routes today, so a

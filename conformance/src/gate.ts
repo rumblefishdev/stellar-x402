@@ -2,7 +2,17 @@
 // scenario against the facilitator at GATE_FACILITATOR_URL through the proxy in
 // `conformance/external-proxy/`, and the run is saved with the pin and the transaction hashes.
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
@@ -44,7 +54,11 @@ if (stellarSigners.length === 0) {
   );
 }
 
-const checkout = join(conformance, ".cache", "x402");
+// A new folder per run, gone when the gate exits, failed or not (~6 GB). Its real path, as stack
+// traces print it (macOS links /var to /private/var).
+const checkout = realpathSync(mkdtempSync(join(tmpdir(), "x402-gate-")));
+process.on("exit", () => rmSync(checkout, { recursive: true, force: true }));
+process.once("SIGINT", () => process.exit(130));
 prepare(checkout);
 
 // The proxy goes in under its config's name, which is what --facilitators matches.

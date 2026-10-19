@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 export const UPSTREAM_REPO = "https://github.com/x402-foundation/x402.git";
@@ -17,16 +17,15 @@ function output(command: string, args: string[], cwd: string) {
 }
 
 /**
- * A fresh checkout of the suite at the pin, installed and built the way upstream's CI does it
- * (`.github/workflows/e2e_tests.yml`). Every run starts over: a build kept from an earlier run is
- * not covered by `assertClean`, which sees only tracked files.
+ * A checkout of the suite at the pin in the empty folder `dir`, installed and built the way
+ * upstream's CI does it (`.github/workflows/e2e_tests.yml`). Every run starts over: a build kept
+ * from an earlier run is not covered by `assertClean`, which sees only tracked files.
  *
  * Upstream's `e2e/setup.sh` would also build the Go and Python components, which the Stellar
  * scenarios never start, and fails without a Go toolchain. So only the TypeScript components'
  * own `install.sh` and `build.sh` run here, in the order `setup.sh` runs them.
  */
 export function prepare(dir: string) {
-  rmSync(dir, { recursive: true, force: true });
   run("git", ["clone", "--filter=blob:none", UPSTREAM_REPO, dir], ".");
   run("git", ["-c", "advice.detachedHead=false", "checkout", UPSTREAM_COMMIT], dir);
   run("pnpm", ["install", "--frozen-lockfile"], join(dir, "typescript"));
