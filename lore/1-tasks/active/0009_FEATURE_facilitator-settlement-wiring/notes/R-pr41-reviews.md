@@ -146,6 +146,26 @@ over" return (the old code), and no `Math.min(…, ownEnd)` clamp.
 
 **Modified tests:** none.
 
+## Fifth review (Stan, 2026-10-20, at `53495bb`)
+
+Stan reviewed the Platform points of "Please confirm" (7, 10, 17, 18, 25, 27, 28, 38, 40, 41, 43,
+44) and found them fine: the budget and timeout settings, the pubnet + `STORE=memory` refusal,
+`settlement_outcomes_total{reason, replay}` and alerting on `stage="pool"` only, which he takes
+into 0027. He didn't review the core of `/settle`. Two non-blocking questions:
+
+- **The test-helper lint rule missed relative imports** (`eslint.config.js`): a package's own
+  `export * from "./testing.js"` passed. The rule now also refuses `**/testing` and
+  `**/testing.js`; two probe files (`./testing.js`, `../testing`) failed lint, `testing.ts` itself
+  passes.
+- **Hosts still reached the logs** (`logger.ts`), against ADR 0011's "never by host". okarcz chose
+  to name them (decision 47): an `RPC_URLS` entry in an error message is logged as
+  `RPC_URLS[i]#<fingerprint>`, other URLs keep their host. Where `RPC_URLS` lives on Hetzner, and
+  its old values with it, went to 0026.
+
+Facilitator tests 207 → 209.
+
+**Modified tests:** none.
+
 ## Testnet
 
 `scripts/settle-smoke.ts`, friendbot keys, fresh channels.

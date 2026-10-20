@@ -124,13 +124,13 @@ never charged twice.
 - **`main.ts`**: `compose(config, …)` builds the stores, cataloger, RPC, one `fees`, `buildChecks` and `buildSettlement` (the pool from `fees.pool`, `keypairSigner`, the channels; the settler with `settleCheck(checks)` and the budget); `main()` refuses `stellar:pubnet` with `STORE=memory` and starts it.
 - **`signer-pool`**: `./testing` exports `FakeRpc`; `FallbackRpc` throws `RpcUnavailableError`; `submit()` refuses source-account auth (`SourceAccountAuthError`).
 - **Nothing else sends**: `grep sendTransaction|.settle(` in `apps/facilitator/src` finds nothing.
-- **Tests**: facilitator 103 → 207 (`settle.test.ts` 78, `settle-route.test.ts` 8, `settle-pool.test.ts` 6), signer-pool 99 → 101. The review rounds, their mutants, modified tests and the testnet runs are in [notes/R-pr41-reviews.md](notes/R-pr41-reviews.md).
+- **Tests**: facilitator 103 → 209 (`settle.test.ts` 78, `settle-route.test.ts` 8, `settle-pool.test.ts` 6), signer-pool 99 → 101. The review rounds, their mutants, modified tests and the testnet runs are in [notes/R-pr41-reviews.md](notes/R-pr41-reviews.md).
 
 ## Design Decisions
 
 ### Emerged
 
-All 46, with their reasons, are in [notes/S-design-decisions.md](notes/S-design-decisions.md).
+All 47, with their reasons, are in [notes/S-design-decisions.md](notes/S-design-decisions.md).
 The ones a reviewer should check first: 1 (a repeat answered from the record), 11 and 13 (a
 timeout answer ends what was never signed), 16 (a success once), 29 and 30 (okarcz: the store
 outage), 45 (the #45 rebase) and 46 (a repeat that lost the claim leaves the record to the first
@@ -140,7 +140,8 @@ call).
 
 Each item is also a "From 0009" bullet in its task:
 
-- **#45 rebase** (0045, after this merges): `buildUpstream()` into `buildChecks`, `trace` on `Check`, `settle-pool.test.ts`'s positional `buildChecks`, a `/settle` test with a hung first RPC URL (decision 45).
+- **#45 rebase** (0045, after this merges): `buildUpstream()` into `buildChecks`, `trace` on `Check`, `settle-pool.test.ts`'s positional `buildChecks`, a `/settle` test with a hung first RPC URL (decision 45); switch logs named by `rpcEndpointName` (decision 47).
+- **0026**: where `RPC_URLS` lives on Hetzner, with its old values (decision 47).
 - **0013**: the store's availability target and the outage rule (decision 30).
 - **0019**: finish records from the pool's `resolved` events, now only logged; resolve the records decisions 3, 15 and 30 leave open; close the second-success exception (decision 29).
 - **0020**: the startup `checkChannel` and `/supported`.
