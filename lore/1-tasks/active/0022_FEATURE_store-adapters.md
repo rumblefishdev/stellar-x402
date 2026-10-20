@@ -249,3 +249,9 @@ As a facilitator operator, I want durable implementations of the four store port
 - For 0009 and 0024: `reserve` can reject when the store is busy or unreachable (`55P03` after the
   2 s lock timeout, no `reservePool` connection within 5 s, a lost `COMMIT` answer). Answer it on
   purpose, e.g. 503 with a retry, not 500; a retry with the same `id` is safe, as the port says.
+- For 0009, options from the third review to verify, not decisions (0009 becomes a directory in
+  PR #41, so they live here): a typed `StoreUnavailableError` at the ports if `/settle` needs to
+  tell "busy" from a bug; reject lone UTF-16 surrogates (`isWellFormed()`) along with `\u0000`,
+  since jsonb rejects them and text turns them into U+FFFD; `claim` only after `/verify` fully
+  passes, or throwaway payers leave unpruned 64 KB payloads. The other options from that review
+  are notes in 0019, 0023, 0024, 0026 and 0042.

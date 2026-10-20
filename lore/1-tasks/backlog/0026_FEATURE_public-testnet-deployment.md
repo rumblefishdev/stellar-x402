@@ -90,6 +90,14 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   - the region (eu-central-1 assumed).
 
   There is no CloudFront fallback.
+- Option from 0022's third review, to verify rather than a decision (a better approach may exist):
+  - Separate database roles: a migrator that owns the schema, and an app role with DML only.
+    `pnpm migrate` would then read its own URL variable.
+  - Measure commit latency under a flood of rate-limit `hit` calls running alongside `claim`.
+  - Migrations are tracked by name only. A checksum of each migration's SQL would catch an edited
+    one. 0022's first review judged this too small; it matters once a database is durable.
+  - The startup schema check (0025/0026) should accept a database ahead of the code, i.e. every
+    known migration applied. Otherwise a rollback to an earlier SHA refuses to start.
 
 ## Acceptance Criteria
 

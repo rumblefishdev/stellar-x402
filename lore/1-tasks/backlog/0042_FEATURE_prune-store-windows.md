@@ -39,6 +39,16 @@ the spend-window sum gets slower on every settlement.
 - Make the window sum use an index: copy `at` into `spend_reservation_scopes` and index
   `(scope, at)`, as a new expand-only migration.
 - A contract or adapter case: pruning never removes a reservation still inside a window.
+- Option from 0022's third review, to verify rather than a decision (a better approach may exist):
+  - `commit` re-stamps `spend_reservations.at`. While the expand-only migration that copies `at`
+    runs, the previous release keeps serving and doesn't update the copy. Committed spend then
+    leaves the window early and `reserve` under-counts. Options: write the copy in `commit` from
+    the first release that has it, keep the original `at` on commit, or decide before the first
+    durable deploy and put the column in `0001_init`.
+  - The migration runner applies everything in one transaction with the pool's 10 s
+    `statement_timeout`. A backfill or an index on a large table needs a
+    `{ transaction: false }` flag (for `CREATE INDEX CONCURRENTLY`), a migrate pool without
+    `statement_timeout`, and a short `lock_timeout` with retry.
 
 ## Acceptance Criteria
 

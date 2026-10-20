@@ -40,6 +40,13 @@ As a facilitator operator, I want per-route rate limits and basic HTTP hardening
   - Implement it as Express's numeric `trust proxy` (`app.set("trust proxy", hops)`): 1 takes the
     rightmost `X-Forwarded-For` entry, and 0 the socket address.
   - Test both.
+- Option from 0022's third review, to verify rather than a decision (a better approach may exist): key the limiter on an API key only after validating it. A raw caller-supplied key
+  creates a new counter per request, which bypasses the limit and grows `rate_limits` without
+  bound. A key over about 2.7 KB also makes the primary-key insert fail (btree row size), so the
+  middleware either lets the request through or answers 500. Options: hash the key in the adapter,
+  or document a maximum length in the port. Also consider an in-process pre-filter before the
+  database `hit`, and decide what the limiter does when the store is unreachable (let requests
+  through or refuse them).
 
 ## Acceptance Criteria
 
