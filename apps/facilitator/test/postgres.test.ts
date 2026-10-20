@@ -330,7 +330,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     expect(connections).toBeGreaterThanOrEqual(10);
   });
 
-  it("boots main() with STORE=postgres, reserves and limits on their own pools, and ends them", async () => {
+  it("boots main() with STORE=postgres, reserves, limits and listings on their own pools, and ends them", async () => {
     await stores();
     const app = await main({
       STORE: "postgres",
@@ -348,21 +348,25 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
         pools?.main.totalCount,
         pools?.reserve.totalCount,
         pools?.rateLimits.totalCount,
+        pools?.discovery.totalCount,
       ];
       await app.stores.spend.reserve({ id: "a", amount: 1n, limits, now: 0 });
-      expect(counts()).toEqual([0, 1, 0]);
+      expect(counts()).toEqual([0, 1, 0, 0]);
       await app.stores.rateLimits.hit("k", 60_000, 0);
-      expect(counts()).toEqual([0, 1, 1]);
+      expect(counts()).toEqual([0, 1, 1, 0]);
+      await app.stores.catalog.list({ limit: 1, offset: 0 });
+      expect(counts()).toEqual([0, 1, 1, 1]);
       expect((await app.stores.settlements.claim(settlement("1"))).claimed).toBe(true);
-      expect(counts()).toEqual([1, 1, 1]);
+      expect(counts()).toEqual([1, 1, 1, 1]);
     } finally {
       await app.close();
     }
-    expect([pools?.main.ended, pools?.reserve.ended, pools?.rateLimits.ended]).toEqual([
-      true,
-      true,
-      true,
-    ]);
+    expect([
+      pools?.main.ended,
+      pools?.reserve.ended,
+      pools?.rateLimits.ended,
+      pools?.discovery.ended,
+    ]).toEqual([true, true, true, true]);
   });
 
   it("answers main()'s /settle from the PostgreSQL record", async () => {
@@ -454,6 +458,14 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
       [schema],
     );
     expect(byId.rows.map((row) => row.indexdef)).toContainEqual(expect.stringMatching(/\(id\)$/));
+    // A listing's `type` filter, matched or not, would otherwise scan the whole catalog twice.
+    const catalog = await pool.query<{ indexdef: string }>(
+      "SELECT indexdef FROM pg_indexes WHERE schemaname = $1 AND tablename = 'catalog'",
+      [schema],
+    );
+    expect(catalog.rows.map((row) => row.indexdef)).toContainEqual(
+      expect.stringMatching(/\(type, seq\)$/),
+    );
   });
 
   it("applies the migrations once when two runs race", async () => {

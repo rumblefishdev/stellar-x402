@@ -52,7 +52,8 @@ CREATE TABLE leases (
 );
 
 -- seq is the insertion order the listing pages by; an update keeps it. type and extension_keys
--- copy the resource's filter fields, so a listing filters without reading resource.
+-- copy the resource's filter fields, so a listing filters without reading resource, and
+-- catalog_type_seq answers a type filter, matched or not, without scanning the table.
 CREATE TABLE catalog (
   seq bigint GENERATED ALWAYS AS IDENTITY UNIQUE,
   network text NOT NULL,
@@ -66,6 +67,7 @@ CREATE TABLE catalog (
   extension_keys text[] NOT NULL,
   PRIMARY KEY (network, pay_to, method, resource_url)
 );
+CREATE INDEX catalog_type_seq ON catalog (type, seq);
 CREATE INDEX catalog_extension_keys ON catalog USING gin (extension_keys);
 
 CREATE TABLE rate_limits (
