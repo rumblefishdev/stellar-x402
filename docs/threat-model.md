@@ -274,7 +274,7 @@ Scope: upstream verify's failover across `RPC_URLS` (spine AD-3, task 0045).
 Scope: the facilitator key in OpenBao Transit on the facilitator's Hetzner server
 ([ADR 0013](adr/0013-facilitator-key-custody.md)). The key signs for every channel and pays fee
 bumps (AD-12). It can't move buyers' or sellers' tokens: a theft reaches the fee account's float and
-the channels' reserves, about 180 XLM at launch.
+the channels' reserves, about 130 XLM at launch (a 100 XLM float plus ~30 XLM of reserves).
 
 #### A bug in the facilitator leaks its memory or environment
 
@@ -289,8 +289,9 @@ the channels' reserves, about 180 XLM at launch.
 - **Attack:** Root, through another service on the shared server or a container escape, copies the
   key from OpenBao's memory, or its disk plus the unseal credential.
 - **Mitigation:** None that stops it. The fee-bump alarm (a fee bump on the fee account that our
-  submitter didn't send, read from Horizon) and the 50 XLM low-balance alarm catch it; the float caps
-  the loss.
+  submitter didn't send, read from Horizon) and the 25 XLM low-balance alarm catch it; the float caps
+  the loss. The float has no upper limit, so the weekly review re-checks that this custody still fits
+  it.
 - **Residual risk:** Accepted at today's stakes. The hot key is each account's only signer (0048's
   cold key was declined for now), so a thief can also lock us out of the channels. Upgrades: TPM-bound
   credentials, OpenBao on its own machine, a KMS, and 0048 re-checked before mainnet.
@@ -299,14 +300,26 @@ the channels' reserves, about 180 XLM at launch.
 
 - **Attack:** Someone copies a Raft snapshot from the Storage Box, or the server's disk.
 - **Mitigation:** Snapshots are encrypted by OpenBao and open only with the unseal key, which is kept
-  offline. The Borg repository is encrypted too.
+  apart from them in AWS Secrets Manager. The Borg repository is encrypted too.
 - **Residual risk:** A copy of the whole disk includes the unseal credential in `host` mode; TPM mode
   would bind it to the board.
+
+#### Someone reads the backup set in AWS
+
+- **Attack:** An admin of the AWS account soroban-explorer and prices-api share, or someone who takes
+  over such an admin, reads `x402/production/openbao-backup` and copies one snapshot from the Storage
+  Box. Together they open OpenBao's data and give the key.
+- **Mitigation:** The facilitator's server has no AWS credentials, so a break-in there doesn't reach
+  the secret. People sign in to AWS through SSO only. Each restore drill checks the 90-day CloudTrail
+  event history for reads that weren't drills; the fee-bump and balance alarms catch a theft.
+- **Residual risk:** Accepted at today's stakes, as for root on the server. The account has no
+  CloudTrail trail, so nothing alarms on a read; an alarm is a 0027 follow-up.
 
 #### OpenBao lost or down
 
 - **Attack:** OpenBao's disk dies, or it is sealed, down, or can't write its audit log.
 - **Mitigation:** `/settle` fails closed and an alarm fires; `/verify` keeps working. Daily snapshots
-  leave the server, and a restore with the unseal key backup is tested before mainnet.
+  leave the server. The backup set (seal key and key ID, recovery key, Borg passphrase, seal config)
+  is in AWS Secrets Manager, and a restore drill proves it before mainnet and every quarter.
 - **Residual risk:** The key can't be exported and has no cold backup. Losing both the snapshots and
-  the unseal key loses the fee account and every channel.
+  the backup set, or access to the shared AWS account, loses the fee account and every channel.

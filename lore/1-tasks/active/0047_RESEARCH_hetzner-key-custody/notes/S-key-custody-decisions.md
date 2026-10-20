@@ -10,6 +10,7 @@ links:
   - R-key-leak-impact.md
   - R-openbao-on-hetzner.md
   - R-key-custody-options.md
+  - R-unseal-key-backup.md
 history:
   - date: "2026-10-19"
     status: mature
@@ -17,6 +18,13 @@ history:
     note: >
       Decided in a grilling session (Q1–Q19), with the open points answered the same day. No cold
       key; two questions left open.
+  - date: "2026-10-20"
+    status: mature
+    who: okarcz
+    note: >
+      Second grilling session (B1–B20): the unseal backup set goes into AWS Secrets Manager, with a
+      restore drill; the fee float is 100 XLM with a 25 XLM alarm and manual top-ups. Only the
+      mainnet top-up owner is left, before mainnet.
 ---
 
 # Decision: OpenBao Transit in a container on the facilitator's server, hot key only
@@ -57,7 +65,7 @@ asks OpenBao for signatures. There is no cold key: the hot key in OpenBao stays 
 | 13  | One OpenBao per server. Each network gets its own key, policy and AppRole. |
 | 14  | Token renewal and re-login live in our Transit `TransactionSigner`, not in an OpenBao Agent container. |
 | 15  | The key is generated inside OpenBao, `exportable=false`, on both networks. |
-| 16  | Daily encrypted Raft snapshots leave the server. The unseal key is kept offline and apart from them. Fallback if both are lost: new key, new accounts and channels. |
+| 16  | Daily encrypted Raft snapshots leave the server. The unseal key is kept apart from them (in AWS Secrets Manager since B1). Fallback if both are lost: new key, new accounts and channels. |
 | 16b | Snapshots go to our own sub-account and Borg repo on the company's existing Hetzner Storage Box (BX21), daily, keep 14. |
 | 17  | **No cold key** (okarcz: "I dont want to store any cold key. Keep only hot key"). 0048 gets a note to re-check this. |
 | 18  | All of it lands in PR #48: ADR 0013, the R- note updates, the threat model, the PR body, and the task changes to 0036, 0026 and 0048. |
@@ -66,17 +74,68 @@ asks OpenBao for signatures. There is no cold key: the hot key in OpenBao stays 
 ## What declining the cold key costs
 
 - **The hot key keeps full power.** Whoever steals it, or a token for it, can drain the fee account
-  and the channels' reserves, add a signer and lock us out. The loss is still about 180 XLM plus
-  downtime.
+  and the channels' reserves, add a signer and lock us out. The loss is still about 130 XLM (B16)
+  plus downtime.
 - **Losing OpenBao's data loses the accounts.** The key can't be exported (Q15) and nothing else
   signs for the fee account or the channels. The snapshots (Q16) and the unseal key backup are the
   only way back. Without both, the fee account and every channel are lost for good.
 
+## Backup and top-ups (2026-10-20)
+
+Decided by okarcz in a second grilling session, from
+[R-unseal-key-backup](R-unseal-key-backup.md) and the fee measurements in ADR 0003 and ADR 0007.
+The research recommended a password manager shared by two people; okarcz chose the AWS account the
+other projects already run.
+
+### The unseal backup set
+
+| #   | Decision |
+| --- | -------- |
+| B1  | **AWS Secrets Manager**, not KMS (KMS never gives a key back). 30-day recovery window. |
+| B2  | The AWS account soroban-explorer and prices-api share (`750702271865`, `eu-central-1`). |
+| B3  | **No AWS credentials on the facilitator's server.** Only people read or write the secret. |
+| B4  | **Any admin of that account can read it,** as for the other projects. Default `aws/secretsmanager` key. |
+| B5  | **AWS is the only copy.** No paper copy. The AWS account is a recorded dependency, like the Storage Box. |
+| B6  | One server runs both networks, so one OpenBao and **one secret**. A second server gets its own. |
+| B7  | `bao operator init -recovery-shares=1 -recovery-threshold=1`; the share goes into the secret. |
+| B8  | ADR 0013 accepts that AWS admins can read the backup, with the same reasoning as root on the server. |
+| B9  | **Restore drill** before mainnet (first on testnet), then quarterly and after any rotation, passphrase change or OpenBao upgrade. Owned by 0026 (Platform). |
+| B10 | Name `x402/production/openbao-backup`; tags `Project=stellar-x402`, `Environment=production`. |
+| B11 | **CLI only, never CDK** (`/dev/shm`, `create-secret`, `shred`; then `put-secret-value`, old version kept as `AWSPREVIOUS`). Written by the 0026 operator. |
+| B12 | One JSON: `seal_key_hex`, `seal_key_id`, `seal_key_sha256`, `previous_seal_key_hex`, `previous_seal_key_id`, `recovery_key`, `borg_passphrase`, `borg_key_export`, `seal_config`, `openbao_version`, `updated`. The runbook lists field names only. |
+| B13 | **No alarm on reads now.** The account has no CloudTrail trail; each drill checks the 90-day event history. An alarm is a 0027 follow-up. |
+
+Correction found by the research: with a static seal the root token is regenerated with the
+**recovery key**, not the unseal key. ADR 0013 is fixed.
+
+### Fee float and top-ups
+
+| #   | Decision |
+| --- | -------- |
+| B14 | Testnet: Friendbot by hand, with a one-line script in the 0026 runbook. |
+| B15 | Mainnet: a manual withdrawal from the company's exchange account to the fee account. Nothing automatic for now. |
+| B16 | **Refill to 100 XLM, alarm at 25 XLM, no upper limit.** Re-check the amount after the first week of mainnet and every week after. Testnet uses the same numbers for now. |
+| B17 | The low-balance alarm is a **Slack message**; 0027 decides where the check runs and what the message says. |
+| B18 | Who makes the mainnet transfer, and a backup person: **TBD before mainnet** (0026). |
+| B19 | The leak limit is **the float plus the channels' reserves** (~130 XLM at 100 XLM). The weekly review checks that this custody still fits the float and raises the upgrade path if not. |
+| B20 | The weekly review is owned by okarcz (Payments), recorded in the 0026 runbook. |
+
+What 100 XLM pays for, at a typical `exact` fee of ~41,200 stroops (ADR 0003, measured on testnet):
+
+| Settlements a day | Days until the 25 XLM alarm | Days until empty | Time to act after the alarm |
+| ----------------: | --------------------------: | ---------------: | --------------------------: |
+| 100               | 182                         | 243              | 61 days                     |
+| 500               | 36                          | 49               | 12 days                     |
+| 1,000             | 18                          | 24               | 6 days                      |
+| 5,000             | 3.6                         | 4.9              | 29 hours                    |
+| 10,000            | 1.8                         | 2.4              | 15 hours                    |
+
+At the pool ceiling (250,000 stroops) 100 XLM is 4,000 settlements. Mainnet resource prices may
+differ from testnet's, so the first mainnet settlements are checked against these numbers.
+
 ## Open
 
-- **Who holds the unseal key backup**, and where. An acceptance criterion of 0047.
-- **Where the fee account's top-ups come from** when the 50 XLM alarm fires (Q17b). Options seen: a
-  treasury account with an offline key, or top-ups straight from wherever the company buys XLM.
+- **Who makes mainnet top-ups,** and a backup person (B18, before mainnet).
 
 ## Alternatives considered
 

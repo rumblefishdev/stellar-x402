@@ -23,6 +23,10 @@ history:
     status: backlog
     who: okarcz
     note: "Added where RPC_URLS lives and keeps its old values, from Stan's PR #41 review."
+  - date: "2026-10-20"
+    status: backlog
+    who: okarcz
+    note: "0047 (ADR 0013 amended): the unseal backup secret in AWS, the restore drill, the fee float and manual top-ups."
 ---
 
 # Public testnet deployment
@@ -133,16 +137,46 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   ID that doesn't expire, delivered as a Compose secret.
 - **Unseal:** a static seal key as an encrypted systemd credential (`systemd-creds`, `host` mode).
   Note in the runbook whether the board has a TPM (ADR 0013's first upgrade).
-- **Admin:** the root token revoked after setup; admin through SSH with the `bao` CLI; no UI.
+- **Init:** `bao operator init -recovery-shares=1 -recovery-threshold=1`. Check that the static
+  seal accepts these flags (the init docs name only HSM, KMS and Transit seals).
+- **Backup secret** (ADR 0013): `x402/production/openbao-backup` in AWS Secrets Manager,
+  `eu-central-1`, in the AWS account soroban-explorer and prices-api share; tags
+  `Project=stellar-x402`, `Environment=production`; 30-day recovery window; default
+  `aws/secretsmanager` key.
+  - One JSON: `seal_key_hex`, `seal_key_id`, `seal_key_sha256`, `previous_seal_key_hex`,
+    `previous_seal_key_id`, `recovery_key`, `borg_passphrase`, `borg_key_export`, `seal_config`,
+    `openbao_version`, `updated`.
+  - Made by hand from an admin's machine, never by CDK: stage the JSON in `/dev/shm`,
+    `aws secretsmanager create-secret`, `shred`. Every change (a seal key rotation, a new Borg
+    passphrase, an OpenBao upgrade) is a `put-secret-value` of the whole JSON; the old version stays
+    as `AWSPREVIOUS`.
+  - The server gets no AWS credentials. The runbook names the secret and its fields, never values.
+- **Admin:** the root token revoked after setup, regenerated with the recovery key when needed;
+  admin through SSH with the `bao` CLI; no UI.
 - **Audit log:** a file on its own volume, rotated; alarm at 80% disk (0027).
 - **Snapshots:** daily Raft snapshots to our own sub-account and Borg repository on the company's
   existing Hetzner Storage Box (BX21), keeping 14, set up like that box's other sub-account. Tell
-  the team that owns the box that we depend on it.
+  the team that owns the box that we depend on it. Decide the Borg mode (repokey or keyfile); in
+  keyfile mode `borg key export` goes into the backup secret.
+- **Fee float** (ADR 0013): refill to 100 XLM, alarm at 25 XLM, no upper limit, the same numbers on
+  testnet for now. Set `checkFacilitatorBalance`'s `minSpendableStroops` to 25 XLM (its default is
+  100 XLM).
 - **Move testnet to the OpenBao key:** stop the service; with the current key, a `set_options` on
   the fee account and each channel adds the OpenBao key and removes the current one; start the
   service in `openbao` signer mode (0036).
 - **Runbook** in `docs/runbook.md`:
-  - restore OpenBao from a snapshot with the unseal key backup, tested once before mainnet;
+  - **restore drill:** on a throwaway machine with no route to production, using only the backup
+    secret and the Storage Box: pull the newest snapshot, start OpenBao with the seal key and key
+    ID, init, restore (first without `-force`, then with it), regenerate a root token with the
+    recovery key, issue an AppRole login, check that the Transit public key equals the on-chain
+    signer, check the CloudTrail event history for reads that weren't drills, destroy the machine,
+    log the result. First on testnet, before mainnet; then quarterly and after any seal key
+    rotation, passphrase change or OpenBao upgrade;
+  - **top-ups:** testnet with a one-line Friendbot script; mainnet by a withdrawal from the
+    company's exchange account to the fee account (no memo). **Who makes it, and a backup person:
+    TBD before mainnet;**
+  - **weekly review** after the mainnet deploy (okarcz): the real fee spend, the next refill
+    amount, and whether ADR 0013's custody still fits the float;
   - a leaked token or secret ID: destroy the secret ID, revoke its tokens, issue a new one;
   - a suspected key theft: new Transit key, move every account to it with the old key, drain the
     rest, check the fee-bump alarm's history;
@@ -154,4 +188,4 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 - [ ] Given a running instance, when a new version is deployed, then the old process stops before the new one starts; the process is long-lived and never scaled to zero
 - [ ] Given the facilitator key, when the service is deployed, then it comes from the platform's secret store, never from the image or the logs, and is a testnet-only key
 - [ ] Given the durable stores from 0022, when the service runs, then it uses them, and `docs/runbook.md` has the deploy and rollback steps
-- [ ] Given the deployed facilitator, when it settles, then it signs through OpenBao Transit over the unix socket, no secret seed is on the server outside OpenBao, and a snapshot restore with the unseal key backup has been tested
+- [ ] Given the deployed facilitator, when it settles, then it signs through OpenBao Transit over the unix socket, no secret seed is on the server outside OpenBao, the backup secret exists in AWS, and a restore drill from it has passed

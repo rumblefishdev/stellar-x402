@@ -24,6 +24,13 @@ history:
     status: active
     who: okarcz
     note: "Decided: OpenBao Transit on the facilitator's server, no cold key (ADR 0013). Unseal key backup holder open."
+  - date: "2026-10-20"
+    status: active
+    who: okarcz
+    note: >
+      Decided the last open points (B1–B20): the unseal backup set in AWS Secrets Manager with a
+      restore drill, a 100 XLM float with a 25 XLM alarm and manual top-ups. ADR 0013 amended. All
+      acceptance criteria met; closes when PR #48 merges.
 ---
 
 # Choose how the facilitator keeps its signing key on Hetzner
@@ -39,6 +46,13 @@ compares. Record the choice in an ADR that supersedes ADR 0011's custody part.
 
 ## Status: Active
 
+> **Decided on 2026-10-20** ([S-key-custody-decisions, B1–B20](notes/S-key-custody-decisions.md#backup-and-top-ups-2026-10-20)):
+> the unseal backup set (seal key and key ID, recovery key, Borg passphrase, seal config) goes into
+> **AWS Secrets Manager** in the account soroban-explorer and prices-api share, proven by a
+> quarterly restore drill ([R-unseal-key-backup](notes/R-unseal-key-backup.md)). The fee float is
+> **100 XLM with a 25 XLM alarm**, topped up by hand. Left for before mainnet: who makes mainnet
+> top-ups.
+>
 > **Decided on 2026-10-19** ([ADR 0013](../../../../docs/adr/0013-facilitator-key-custody.md),
 > [S-key-custody-decisions](notes/S-key-custody-decisions.md)): OpenBao Transit in a container on
 > the facilitator's server, the key generated inside and not exportable, auto-unseal from a systemd
@@ -82,7 +96,8 @@ compares. Record the choice in an ADR that supersedes ADR 0011's custody part.
 - [x] Vault Transit's Ed25519 shown to make valid Stellar signatures, on testnet (`spike/`)
 - [x] okarcz picks the custody option, unseal and recovery (`notes/S-key-custody-decisions.md`)
 - [x] An ADR records it and supersedes ADR 0011's custody part; 0036 and 0026 are updated (ADR 0013)
-- [ ] okarcz decides who holds the unseal key backup, and where; ADR 0013 records it
+- [x] okarcz decides who holds the unseal key backup, and where; ADR 0013 records it (AWS Secrets
+      Manager, any admin of the shared AWS account; B1–B13)
 
 ## Implementation Notes
 
@@ -107,6 +122,23 @@ compares. Record the choice in an ADR that supersedes ADR 0011's custody part.
   A separate machine or a KMS seal is the upgrade once the float or `upto` (0015) raises the
   stakes.
 
+- **Unseal key backup** (2026-10-20, [R-unseal-key-backup](notes/R-unseal-key-backup.md)): a
+  restore on a new server needs four items, not one: the seal key with its exact key ID (OpenBao's
+  static wrapper refuses another ID), the recovery key (it regenerates a root token, needed for a
+  new AppRole login), the Borg passphrase, and the seal config with the OpenBao version. A
+  `host`-mode systemd credential opens only on the server that made it, so it is no backup. The
+  research recommended a two-person password manager vault; okarcz chose AWS Secrets Manager.
+- **Fee float** (2026-10-20): at ~41,200 stroops a typical `exact` settlement (ADR 0003), 100 XLM
+  pays for about 24,000 settlements; at 1,000 a day the 25 XLM alarm leaves about 6 days. Table in
+  [S-key-custody-decisions](notes/S-key-custody-decisions.md#fee-float-and-top-ups).
+
+## Issues Encountered
+
+- **ADR 0013 said the root token is regenerated with the unseal key.** With a static (auto-unseal)
+  seal it is the recovery key; fixed on 2026-10-20.
+- **AWS KMS can't hold a backup:** it never returns key material, so "the AWS key manager" became
+  Secrets Manager.
+
 ## Design Decisions
 
 ### From Plan
@@ -118,6 +150,14 @@ compares. Record the choice in an ADR that supersedes ADR 0011's custody part.
    with a note to re-check its cold-key design. Losing OpenBao's data and the unseal key then loses
    the accounts.
 5. **Build order** (okarcz, 2026-10-19): 0036 → 0026 on testnet → 0048 re-check → mainnet.
+
+6. **The unseal backup set in AWS Secrets Manager** (okarcz, 2026-10-20): one secret,
+   `x402/production/openbao-backup`, in the AWS account soroban-explorer and prices-api share,
+   readable by its admins; no paper copy; made by hand with the CLI; one recovery share; a restore
+   drill before mainnet and every quarter (B1–B13).
+7. **Fee float 100 XLM, alarm at 25 XLM, no upper limit** (okarcz, 2026-10-20): manual top-ups
+   (Friendbot on testnet, the company's exchange account on mainnet), a Slack alarm, a weekly review
+   by okarcz that also re-checks the custody against the float (B14–B20).
 
 ### Emerged
 
@@ -132,4 +172,7 @@ compares. Record the choice in an ADR that supersedes ADR 0011's custody part.
 - **0048**: re-check the thresholds and recovery design before mainnet.
 - **0027**: the fee-bump, low-balance, OpenBao-down and audit-disk alarms.
 - **A hosting ADR** for the move to Hetzner: ADR 0011 still describes AWS apart from custody.
-- **Top-ups**: where the fee account's XLM comes from when the 50 XLM alarm fires.
+- **0026**: the backup secret, the init flags, the CLI steps, the restore drill, the Friendbot
+  script, the weekly review, and the mainnet top-up owner (TBD before mainnet).
+- **0027**: the Slack low-balance alarm at 25 XLM, and a CloudTrail alarm on reads of the backup
+  secret.

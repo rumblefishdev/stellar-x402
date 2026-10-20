@@ -34,6 +34,11 @@ history:
 > OpenBao on the facilitator's server with auto-unseal, **without the cold keys** proposed below.
 > Every decision is in [S-key-custody-decisions](S-key-custody-decisions.md). okarcz: the move to
 > Hetzner was about cost, not about leaving AWS.
+>
+> **Amended 2026-10-20** ([S-key-custody-decisions, B14–B20](S-key-custody-decisions.md#fee-float-and-top-ups)):
+> the float is **100 XLM with the alarm at 25 XLM**, no upper limit, reviewed weekly after the
+> mainnet deploy; top-ups are by hand (Friendbot on testnet, the company's exchange account on
+> mainnet). A leak now reaches about 130 XLM. The numbers below are the 2026-10-19 sizing.
 
 ## Question
 
@@ -136,6 +141,7 @@ about 180 XLM at stake, downtime costs more than the leak.
 - Mainnet traffic, which sets the float.
 - The number of mainnet channels (0038).
 - ~~Who holds the cold recovery key and the cold treasury key (0048).~~ No cold key (2026-10-19).
-- Who holds the unseal key backup, and where (0047's acceptance criteria).
-- Where the fee account's top-ups come from.
+- ~~Who holds the unseal key backup, and where.~~ AWS Secrets Manager (2026-10-20, B1–B13).
+- ~~Where the fee account's top-ups come from.~~ By hand (2026-10-20, B14–B15); who makes the
+  mainnet transfer is named before mainnet.
 - Whether the dedicated server has a TPM, which would let systemd encrypt the credential to it.
