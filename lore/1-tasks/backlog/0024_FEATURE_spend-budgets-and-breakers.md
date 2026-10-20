@@ -50,8 +50,9 @@ As a facilitator operator, I want fee spending capped and failing assets or reci
   whether a row matched. This goes with the open decision on `commit` for an unknown id above,
   and with 0009's "refuse a reserve after its release": a reservation status
   (`reserved | committed | released`) kept as a row instead of deleting it would cover both.
-  0022 took the `committed` flag (its decision 17); refusing a reserve after its release is
-  still open here, and the flag could grow into that status.
+  0022 took the status (its decision 17): `state` is `reserved` or `committed`, `release` deletes
+  only `reserved` rows, and `commit` resolves `false` for an unknown id. Refusing a reserve after
+  its release is still open here; it can add `released` as a kept row.
 
 ## Acceptance Criteria
 

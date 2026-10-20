@@ -69,7 +69,7 @@ history:
     note: >
       Third review fixes (decisions 16 to 21): a pool for the rate limiter, a committed fee survives
       `release`, an idempotent `close()`, catalog filter columns, `assertStroops`, and new contract
-      and lock-wait cases. 194 facilitator tests (63 on PostgreSQL). Closes after PR merge.
+      and lock-wait cases. 196 facilitator tests (64 on PostgreSQL). Closes after PR merge.
 ---
 
 # Durable adapters for the four store ports
@@ -153,10 +153,10 @@ As a facilitator operator, I want durable implementations of the four store port
   reservation; after the reviews, also a breaker opened twice, a cleared field, an extension given
   as an array or a string, and a hash added to a pending record; after the third review, whole
   claimed records, omitted fields, scope isolation, commit stamps, a committed fee through a
-  release, stroop ranges and filters after an update. Memory runs 45 cases and
-  PostgreSQL 63, which add the migration, failed-migration, lock-wait, dropped-connection,
+  release, stroop ranges and filters after an update. Memory runs 46 cases and
+  PostgreSQL 64, which add the migration, failed-migration, lock-wait, dropped-connection,
   isolation, failed-`SET`, failed-`ROLLBACK`, pool-starvation (reservations and hits), lock-timeout,
-  `main()` and double-`close()` cases. The facilitator has 194 tests in all, after
+  `main()` and double-`close()` cases. The facilitator has 196 tests in all, after
   merging develop. Before the PR, a final review by two independent reviewers was
   reconciled into one list.
 
@@ -221,8 +221,8 @@ As a facilitator operator, I want durable implementations of the four store port
 15. **`close()` drains the cataloger even when closing the server fails.** A second signal
     (SIGINT after SIGTERM) calls `close()` again, closing the server rejects, and the pools ended
     under catalog writes still under way. No test pins it: the cataloger isn't reachable from
-    `main()`'s result. Found in the BMAD review. Decision 18 makes the second call wait for the
-    first instead.
+    `main()`'s result. Found in the BMAD review. Decision 18 corrects the mechanism and makes the
+    second call share the first.
 16. **The rate limiter's `hit` runs on its own pool of 3,** like `reserve` (decision 12). One
     client's flood queues its hits on its key's row lock, each holding a connection, so on the main
     pool it took the connections `claim` and `addHash` need, and a burst of settlements could leave
@@ -233,14 +233,18 @@ As a facilitator operator, I want durable implementations of the four store port
 17. **`release` keeps a committed reservation, and `commit` resolves whether one matched.** A
     `release` after `commit` (a timed-out path finishing late) deleted the row, so a fee paid
     on-chain stopped counting against its budgets; a `commit` on an unknown id did nothing, with no
-    sign. A `committed` column (in `0001_init`, decision 14's precedent) marks it, and `release`
-    deletes only uncommitted rows. Repeating `commit` replaces the fee. Refusing a `reserve` after
-    its `release` stays with 0024 and 0009; a tombstone for it fits beside the column. PR #41's
+    sign. A `state` column, `reserved` or `committed` (in `0001_init`, decision 14's precedent),
+    marks it, and `release` deletes only `reserved` rows. Repeating `commit` replaces the fee. A
+    status rather than a boolean, so refusing a `reserve` after its `release` (0024 and 0009) can
+    add `released` as a kept row without another column. PR #41's
     calls (`await commit(...)`, `release(...)`) are unchanged. Found in the third review.
-18. **`main()`'s `close()` is idempotent.** SIGTERM then SIGINT called it twice: the second closed
-    a stopped server, which rejected, then ended the pools while the first still waited for open
-    requests (`Called end on pool more than once`). Every call now shares the first call's promise.
-    Found in the third review.
+18. **`main()`'s `close()` is idempotent.** SIGTERM then SIGINT called it twice. The review
+    expected the second call to end the pools under open requests, but Node's second
+    `server.close()` calls back only on the server's `close` event, once those requests ended, and
+    then with `ERR_SERVER_NOT_RUNNING` (checked with a stalled client). So the second call drained
+    again and ended the pools a second time, which rejects (`Called end on pool more than once`),
+    and shutdown ended in an error. Every call now shares the first call's promise. Found in the
+    third review; the mechanism was corrected while fixing it.
 19. **The catalog filters on columns, not on `resource`.** `list` read `resource->>'type'` and
     `resource->'extensions'` for every row, and its CTE carried `resource` for every match, so an
     unauthenticated query detoasted every padded listing. `type` and `extension_keys` (GIN) are

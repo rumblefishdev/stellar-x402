@@ -46,7 +46,8 @@ As a facilitator operator, I want per-route rate limits and basic HTTP hardening
   middleware either lets the request through or answers 500. Options: hash the key in the adapter,
   or document a maximum length in the port. Also consider an in-process pre-filter before the
   database `hit`, and decide what the limiter does when the store is unreachable (let requests
-  through or refuse them).
+  through or refuse them). `hit` runs on its own pool of 3 (0022 decision 16) without a
+  `lock_timeout`, so past that pool a flood waits up to 5 s for a connection and then rejects.
 
 ## Acceptance Criteria
 
