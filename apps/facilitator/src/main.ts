@@ -85,17 +85,21 @@ export async function main(env: Record<string, string | undefined> = process.env
   const config = parseConfig(env);
   const logger = jsonLogger(config.logLevel);
   // STORE=postgres needs a migrated schema (`pnpm migrate`); the service never migrates it.
-  let pool: pg.Pool | undefined;
-  let reservePool: pg.Pool | undefined;
+  let pools: { main: pg.Pool; reserve: pg.Pool; rateLimits: pg.Pool } | undefined;
   if (config.store === "postgres") {
-    if (config.databaseUrl === undefined) throw new Error("STORE=postgres needs a DATABASE_URL");
-    pool = createPool(config.databaseUrl, poolErrorLogger(logger));
-    // Reservations queue on the global scope's lock; their own pool keeps them off the others.
-    reservePool = createPool(config.databaseUrl, poolErrorLogger(logger), 3);
+    const url = config.databaseUrl;
+    if (url === undefined) throw new Error("STORE=postgres needs a DATABASE_URL");
+    // Reservations queue on the global scope's lock, and a flood's hits on its key's row lock;
+    // their own pools keep those queues off the others.
+    pools = {
+      main: createPool(url, poolErrorLogger(logger)),
+      reserve: createPool(url, poolErrorLogger(logger), 3),
+      rateLimits: createPool(url, poolErrorLogger(logger), 3),
+    };
   }
-  const endPools = () => Promise.all([pool?.end(), reservePool?.end()]);
+  const endPools = () => Promise.all(Object.values(pools ?? {}).map((p) => p.end()));
   try {
-    const stores = pool ? postgresStores(pool, reservePool) : memoryStores();
+    const stores = pools ? postgresStores(pools.main, pools) : memoryStores();
     // 0009 hands its `extensionResponses` and `onSuccess` to `/settle` as `SettlementHooks`.
     const cataloger = createCataloger({
       store: stores.catalog,
@@ -130,9 +134,9 @@ export async function main(env: Record<string, string | undefined> = process.env
     let closing: Promise<void> | undefined;
     return {
       ...started,
-      /** The graph's stores, and with `STORE=postgres` its two pools: for tests. */
+      /** The graph's stores, and with `STORE=postgres` its pools: for tests. */
       stores,
-      pools: pool && reservePool ? { main: pool, reserve: reservePool } : undefined,
+      pools,
       // A second signal (SIGINT after SIGTERM) gets the first call's promise: running it again
       // would end the pools under requests the first is still waiting for.
       close: () => (closing ??= closeOnce()),

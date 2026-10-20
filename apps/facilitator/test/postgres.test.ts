@@ -186,7 +186,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     const main = poolFor(schema, 2);
     const reserving = poolFor(schema, 1);
     try {
-      const { settlements, spend } = postgresStores(main, reserving);
+      const { settlements, spend } = postgresStores(main, { reserve: reserving });
       const limits = [{ scope: "global" as const, maxStroops: 10n, windowMs: 1_000 }];
       let queued: Promise<unknown>[] = [];
       await holding(async (client) => {
@@ -202,6 +202,30 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     } finally {
       await main.end();
       await reserving.end();
+    }
+  });
+
+  it("keeps hits queued on one key's lock from starving the other stores", async () => {
+    await stores();
+    await pool.query("INSERT INTO rate_limits (key, count, reset_at) VALUES ('k', 1, 60000)");
+    const main = poolFor(schema, 2);
+    const limiting = poolFor(schema, 1);
+    try {
+      const { settlements, rateLimits } = postgresStores(main, { rateLimits: limiting });
+      let queued: Promise<unknown>[] = [];
+      await holding(async (client) => {
+        await client.query("SELECT key FROM rate_limits WHERE key = 'k' FOR UPDATE");
+        // One client's flood: more hits on its key than the main pool has connections.
+        queued = [0, 1, 2].map(() => rateLimits.hit("k", 60_000, 0));
+        await lockWaiter();
+        const started = Date.now();
+        expect((await settlements.claim(settlement("1"))).claimed).toBe(true);
+        expect(Date.now() - started).toBeLessThan(1_000);
+      });
+      await Promise.allSettled(queued);
+    } finally {
+      await main.end();
+      await limiting.end();
     }
   });
 
@@ -269,7 +293,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     expect(connections).toBeGreaterThanOrEqual(10);
   });
 
-  it("boots main() with STORE=postgres, reserves on its own pool, and ends both pools", async () => {
+  it("boots main() with STORE=postgres, reserves and limits on their own pools, and ends them", async () => {
     await stores();
     const app = await main({
       STORE: "postgres",
@@ -283,14 +307,25 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     expect(pools).toBeDefined();
     try {
       const limits = [{ scope: "global" as const, maxStroops: 10n, windowMs: 1_000 }];
+      const counts = () => [
+        pools?.main.totalCount,
+        pools?.reserve.totalCount,
+        pools?.rateLimits.totalCount,
+      ];
       await app.stores.spend.reserve({ id: "a", amount: 1n, limits, now: 0 });
-      expect([pools?.main.totalCount, pools?.reserve.totalCount]).toEqual([0, 1]);
+      expect(counts()).toEqual([0, 1, 0]);
+      await app.stores.rateLimits.hit("k", 60_000, 0);
+      expect(counts()).toEqual([0, 1, 1]);
       expect((await app.stores.settlements.claim(settlement("1"))).claimed).toBe(true);
-      expect([pools?.main.totalCount, pools?.reserve.totalCount]).toEqual([1, 1]);
+      expect(counts()).toEqual([1, 1, 1]);
     } finally {
       await app.close();
     }
-    expect([pools?.main.ended, pools?.reserve.ended]).toEqual([true, true]);
+    expect([pools?.main.ended, pools?.reserve.ended, pools?.rateLimits.ended]).toEqual([
+      true,
+      true,
+      true,
+    ]);
   });
 
   it("closes once when two signals call close()", async () => {

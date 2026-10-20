@@ -1,7 +1,7 @@
 # ADR 0012: Keep all facilitator state in one RDS for PostgreSQL database
 
 - Status: accepted
-- Date: 2026-10-12, amended 2026-10-20 (task 0022: a pool for `reserve`; 0026 measures)
+- Date: 2026-10-12, amended 2026-10-20 (task 0022: pools for `reserve` and the rate limiter; 0026 measures)
 
 ## Context
 
@@ -42,7 +42,8 @@ Fargate in eu-central-1:
     window.
 - **Access.**
   - The `pg` driver, small fixed pools per ECS task, and no RDS Proxy: 10 connections, plus 3 for
-    `reserve`, so reservations queued on the global scope's lock can't starve the other stores.
+    `reserve` and 3 for the rate limiter, so reservations queued on the global scope's lock, or a
+    flood's hits on its key's row lock, can't starve the other stores.
   - TLS with the RDS CA bundle.
   - The database credentials are an SSM Parameter Store SecureString under `/x402/<network>/db`,
     injected like `FACILITATOR_SECRET`.

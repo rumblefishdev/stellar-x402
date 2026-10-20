@@ -35,8 +35,8 @@ import {
 
 /**
  * PostgreSQL adapters of the four ports (AD-7, ADR 0012), on the schema in `postgres-schema.ts`.
- * They share one pool, except `reserve`, which runs on its own; concurrent calls run on
- * separate connections.
+ * They share one pool, except `reserve` and the rate limiter's `hit`, which can each run on their
+ * own; concurrent calls run on separate connections.
  *
  * - Every time comes from the caller; the SQL never reads the database's clock.
  * - Every statement runs at Read Committed, so a role or server default can't change it: each
@@ -49,13 +49,18 @@ import {
  * - `reserve` runs on `reservePool`. Reservations queue on the global scope's lock while holding a
  *   connection, so on the shared pool a burst of them would leave none for `claim`, `addHash` or
  *   `hit`. Its own small pool keeps that queue off the others.
+ * - `hit` runs on `pools.rateLimits`, for the same reason: one client's flood queues its hits on
+ *   one key's row lock, and the rate limiter must still answer when settlements hold the main pool.
  */
-export function postgresStores(pool: pg.Pool, reservePool: pg.Pool = pool): Stores {
+export function postgresStores(
+  pool: pg.Pool,
+  pools: { reserve?: pg.Pool; rateLimits?: pg.Pool } = {},
+): Stores {
   return {
     settlements: new PostgresSettlementStore(pool),
     catalog: new PostgresCatalogStore(pool),
-    rateLimits: new PostgresRateLimitStore(pool),
-    spend: new PostgresSpendStore(pool, reservePool),
+    rateLimits: new PostgresRateLimitStore(pools.rateLimits ?? pool),
+    spend: new PostgresSpendStore(pool, pools.reserve ?? pool),
   };
 }
 
