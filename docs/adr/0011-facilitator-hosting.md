@@ -219,10 +219,13 @@ One request or one stop must never outlast the layer in front of it:
   - Its JSON lines go from stdout through the `awslogs` driver into CloudWatch Logs, Standard
     class (Infrequent Access drops metric extraction), with 30-day retention on testnet.
   - No pino: stdout is the only transport, and the logger already writes identifiers only.
-- **RPC endpoints are logged as `RPC_URLS[i]`, never by URL or host.** An RPC URL can carry an
-  API key, and a host can name a paid provider. Upstream verify's failover logs its switches with
-  these names (0045). A URL that appears inside an error message is reduced to its host by the
-  logger. signer-pool's `FallbackRpc.fromUrls` still names endpoints by the full URL and logs no
+- **RPC endpoints are logged as `RPC_URLS[i]#<fingerprint>`, never by URL or host.** An RPC URL
+  can carry an API key, and a host can be an account's own endpoint name (some providers put one
+  in the subdomain) or an internal one. The fingerprint is the first 8 hex digits of the entry's
+  SHA-256, so a line written before `RPC_URLS` changed can't be read as today's `RPC_URLS[i]`;
+  `printf %s "$url" | sha256sum | cut -c1-8` matches it to a URL. Upstream verify's failover logs
+  its switches with these names (0045). In an error message, the logger names a URL on an
+  `RPC_URLS` entry the same way and reduces any other URL to its host. signer-pool's `FallbackRpc.fromUrls` still names endpoints by the full URL and logs no
   switches (0049, 0027).
 - **Metrics:** a metrics adapter (0027) writes CloudWatch Embedded Metric Format lines to stdout,
   and `awslogs` turns them into metrics. No SDK and no agent.
