@@ -107,6 +107,29 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     });
   });
 
+  it("adds a hash, and keeps the state, when a transition commits while addHash waits", async () => {
+    const { settlements } = await stores();
+    const { key } = settlement("1");
+    await settlements.claim(settlement("1"));
+    await holding(async (client) => {
+      // A transition claimed → pending, as its UPDATE runs, holding the record's lock.
+      await client.query(
+        "UPDATE settlements SET state = 'pending', updated_at = 2500 WHERE key = $1",
+        [key],
+      );
+      const adding = settlements.addHash(key, "h1", 3_000);
+      await lockWaiter();
+      await client.query("COMMIT");
+      expect(await adding).toBe(true);
+    });
+    // `claimed → signed` applies to the state after the wait, so `pending` doesn't move back.
+    expect(await settlements.get(key)).toMatchObject({
+      state: "pending",
+      hashes: ["h1"],
+      updatedAt: 3_000,
+    });
+  });
+
   it("returns the hashes committed while transition waited on the record", async () => {
     const { settlements } = await stores();
     const { key } = settlement("1");
