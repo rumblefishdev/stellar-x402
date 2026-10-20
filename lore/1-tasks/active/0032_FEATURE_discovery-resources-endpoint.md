@@ -27,6 +27,14 @@ history:
       two ways (patterns from Google AIP, Microsoft, Zalando, Stripe, Plaid, Berlin Group and other
       x402 facilitators; a prototype with edge-case tests). All 3 acceptance criteria met; 236
       facilitator tests (39 new).
+  - date: "2026-10-20"
+    status: active
+    who: akot
+    note: >
+      Self-check of PR #50 (security, code review and a PostgreSQL run at 100 000 entries):
+      empty values count as absent and `limit=0` gives the total, as upstream's client sends
+      them; `list` drops its CTE and gains a `(type, seq)` index (3–10 ms instead of 14–25 ms);
+      listings get their own pool. 236 facilitator tests.
 ---
 
 # List resources in `/discovery/resources`
@@ -72,12 +80,17 @@ As a agent, I want to list catalog resources with the standard discovery filters
   `{ x402Version: 2, items, pagination: { limit, offset, total } }`, with the limit actually used.
 - `src/http/app.ts` wires it in place of the 501 stub; `AppDeps` gains `metrics`, which `main()`
   now shares with the cataloger.
+- `src/adapters/postgres.ts`: `list` writes its filter out twice instead of sharing a CTE, and runs
+  on its own pool (`pools.discovery`, 3 connections, built by `main()`); `0001_init` gains
+  `catalog_type_seq` on `(type, seq)`.
 - `test/discovery.test.ts`: 39 cases. The parser's accepted and refused inputs; the route through
   a running server with a seeded memory catalog (each filter, combined filters, `scheme`, another
   network, stable paging, the total past the end, the clamp, 400s before the store, unknown params
   logged and counted, a store failure, no CORS); and upstream's own `withBazaar` client. Three
   mutants (no `scheme` guard, no clamp, no control-character check) each fail a case.
-- `test/main.test.ts` no longer lists `/discovery/resources` among the 501 stubs.
+- `test/main.test.ts` no longer lists `/discovery/resources` among the 501 stubs, and
+  `test/verify-route.test.ts` passes `metrics`. `test/postgres.test.ts` checks the listing pool and
+  the `(type, seq)` index; the store contract checks `limit: 0`.
 
 ## Design Decisions
 
@@ -90,12 +103,18 @@ As a agent, I want to list catalog resources with the standard discovery filters
    upstream's `/discovery/search`, so the keyset paging noted from 0022 doesn't fit this endpoint,
    and an estimated or cached `total` would break "total count of resources matching". The cost
    is bounded instead: `offset` at most 10 000 (400 beyond, like Elasticsearch's result window),
-   `limit` 1 to 100 with a default of 20 (100 is every known x402 facilitator's maximum).
-3. **Strict values, clamped size.** `limit`/`offset` must be plain digits (`Number()` reads `""`
-   as 0, `0x10` as 16, `1e3` as 1000); a repeated param, a control character such as NUL, an
-   empty value, a value over 256 characters or a `network` that isn't CAIP-2 is a 400
+   `limit` 0 to 100 with a default of 20 (100 is every known x402 facilitator's maximum). The
+   count, not the offset, is most of a call's cost (decision 9); the cap bounds how far a page
+   skips. It also means only the first 10 100 entries of a result can be paged to: the rest are
+   reached through a filter, `payTo` above all, and fair ordering is Tranche 2's curation.
+3. **Strict values, clamped size.** `limit`/`offset` must be plain digits (`Number()` reads `" "`
+   as 0, `0x10` as 16, `1e3` as 1000); a repeated param, a control character such as NUL, a value
+   over 256 characters or a `network` that isn't CAIP-2 is a 400
    `{ error: "bad_request", param }`, like `/verify`'s body plus the param. A `limit` above 100 is
-   clamped and reported, as Google AIP-158 and GitHub do.
+   clamped and reported, as Google AIP-158 and GitHub do. An empty value counts as absent and
+   `limit=0` gives the total alone: upstream's client sends `?type=` for `type: ""`, its type
+   allows `limit: 0`, and a 400 would make it throw (changed in the self-check, which first had
+   both as a 400).
 4. **Unknown parameters are ignored, logged and counted** (`discovery_unknown_params`, names only,
    capped). Fintech APIs refuse them, but this endpoint implements upstream's contract for
    upstream's client, which would fail every call once upstream adds a filter; the log shows a new
@@ -113,12 +132,23 @@ As a agent, I want to list catalog resources with the standard discovery filters
 
 8. **`AppDeps` carries `metrics`.** Only the cataloger had counters; the route's counter for
    unknown params needed the same instance, so `main()` builds one and hands it to both.
+9. **`list` without a CTE, and a `(type, seq)` index in `0001_init`.** 0022's `list` shared its
+   filter through a CTE read twice, which PostgreSQL materializes in full: 14–25 ms per call at
+   100 000 entries whatever the offset (18.3, p50). Written out twice, the count and the page each
+   use an index: 3–10 ms, except a `type` filter, which then scanned the table twice (30 ms for a
+   type nothing has). The index answers it in 0.3–3 ms. It goes into `0001_init`, which may still
+   change before the first durable deploy (0026), as 0019 and 0050 note.
+10. **Listings run on their own pool.** `/discovery/resources` is public and unauthenticated until
+    0023, and ten concurrent callers held all ten main connections (117 calls/s measured), which
+    `/settle` needs. Like `reserve` and `hit`, `list` gets three of its own; catalog writes stay
+    on the main pool.
 
 ## Future Work
 
-- If the catalog nears 100 000 entries (0022 measured 40–57 ms per list there, temp from about
-  105 000): an index on `(type, seq)` for the type filter, and a cached or bounded count only if
-  upstream's contract allows it. Until then the 10 000 offset cap and 0023's rate limit bound it.
+- If the catalog grows well past 100 000 entries: the count stays O(matches) (about 25 ms
+  unfiltered at 1 000 000 after decision 9), so a cached or bounded count only if upstream's
+  contract allows it. Until then the 10 000 offset cap, the listing pool and 0023's rate limit
+  bound it.
 - For 0015: a real `scheme` filter once `upto` is cataloged (note added there).
 - With 0009's option: a typed store-unavailable error mapped to 503 and `Retry-After` in the
   shared handler, for every route.

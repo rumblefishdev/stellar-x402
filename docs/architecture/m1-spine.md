@@ -311,7 +311,8 @@ graph TD
     `upto` is cataloged (0015). A well-formed network we don't serve matches nothing.
   - `limit` is bounded, with a fixed default (20, at most 100); `offset` at most 10 000, and
     `total` is exact.
-  - Malformed values are a 400; unknown parameters are ignored, logged and counted (task 0032).
+  - Malformed values are a 400; an empty value counts as absent, `limit=0` gives the total alone,
+    and unknown parameters are ignored, logged and counted (task 0032).
   - No ranking in T1.
 
 ### AD-21: Non-custodial [ADOPTED]
