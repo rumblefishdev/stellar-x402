@@ -76,10 +76,15 @@ As a facilitator operator, I want only one process at a time to settle through a
   together with the facilitator README.
   - **0025 on that list is an assumption, not yet shown** (okarcz, 2026-10-20). The double-charge
     guard held without a lease: two `main()` instances on one database settled one payment once
-    (Adam, fifth review). Find out what two processes on one channel set cost on pubnet: fees, a
+    (Adam, sixth review). Find out what two processes on one channel set cost on pubnet: fees, a
     buyer charged and not served, or only `tx_bad_seq` rebuilds and slower answers. Then confirm
     the lease belongs in the refusal, or take it out.
-- From 0009 (PR #41, Adam's fifth review): a startup schema check, before `/settle` is served:
+- From 0009 (Adam's sixth PR #41 review): a submission that runs on after its budget answer
+  writes to pools `close()` has ended. Reproduced: the transaction is sent, the row stays `signed`,
+  and two `settlement_record_failed` lines are logged. Not a regression (0019 resolves the
+  `signed` row through its hash), but the drain must wait for such submissions before the pools
+  end. `compose()` doesn't return the `submitter` today; the drain needs it.
+- From 0009 (PR #41, Adam's sixth review): a startup schema check, before `/settle` is served:
   every name in `MIGRATIONS` is in `schema_migrations`, and later ones are accepted (0026's note,
   so a rollback still starts). PR #41's release is the first to add a migration
   (`0002_success_answered`). Started on a database without it, it ran: every success was answered

@@ -2,8 +2,9 @@
 
 - Status: accepted
 - Date: 2026-10-07, amended 2026-10-15 (task 0009: a success is answered once; a repeat of an
-  unsigned record ends it at the first call's budget) and 2026-10-16 (task 0009: the store-outage
-  rule; a success answered while the store can't mark it)
+  unsigned record ends it at the first call's budget), 2026-10-16 (task 0009: the store-outage
+  rule; a success answered while the store can't mark it) and 2026-10-20 (task 0009: a repeat's
+  settle timeout counts from the hash it sees; a refusal the store can't record)
 
 ## Context
 
@@ -42,8 +43,9 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
   insert-if-absent. Only the caller that wins the claim submits.
 - **Replay rules.**
   - A repeat with the same fingerprint returns the record's outcome. If the record is signed but
-    not final, it first waits, bounded by `SETTLE_TIMEOUT_MS`, for the final outcome. If nothing
-    was signed, it waits until the first call's settle budget ends, counted from the claim, then
+    not final, it first waits, up to `SETTLE_TIMEOUT_MS` from when the repeat first sees a hash,
+    for the final outcome. If nothing was signed, it waits until the first call's settle budget
+    ends, counted from the first call's start (`createdAt`, taken before its checks), then
     ends the record itself with `…_timeout` (compare-and-set against `addHash`). If the store
     can't end it, the answer is `settlement_pending` with no hash, never `…_timeout`: the record
     may still be signed. Both waits also end with the repeat's own budget. A repeat that lost the
@@ -70,11 +72,14 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
     request;
   - at the hash write before a send: the pool doesn't send (AD-16);
   - after the pool answered: the answer is the pool's result, with its hash, and the record is left
-    as it was, unfinished;
+    as it was, unfinished. One exception: when the pool threw a refusal (e.g.
+    `…_simulation_failed`) and the refusal can't be recorded, the answer is
+    `unexpected_settle_error` (`…_timeout` past the budget), not the refusal's reason. It takes two
+    failures in a row, and the record is still open, so a repeat could answer otherwise;
   - at the success mark: the success, as above.
 
   0019 finishes unfinished records once the store is back; how available the store must be is
-  0013's requirement, and its alarms 0027's.
+  set by ADR 0012 (task 0013), and its alarms are 0027's.
 
 - **One owner of the lifecycle.** A single settlement module in `apps/facilitator` writes every
   record change.

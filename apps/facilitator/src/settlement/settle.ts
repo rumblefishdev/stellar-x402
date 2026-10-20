@@ -564,14 +564,15 @@ export function createSettler(deps: SettlerDeps): Settle {
 
   /**
    * A repeat call: the stored outcome, waiting a while for a record that isn't final. A record
-   * with a hash waits up to `settleTimeoutMs`, counted from when this call first sees a hash, so a
-   * repeat that waited for the signing still waits for the landing. One without can be signed only until the first
-   * call's budget, which began at the claim: past it the repeat ends the record itself
-   * ({@link endUnsigned}), so it answers `…_timeout` only for what will never be sent. A repeat
-   * whose own budget ends before the first call's answers `settlement_pending` with no hash and
-   * leaves the record open. If the store can't end it, nothing is known, so the answer is
-   * `settlement_pending` with no hash: repeat the same payment. Both waits end by this call's own
-   * budget (`startedAt`), and a repeat whose client left stops waiting.
+   * with a hash waits up to `settleTimeoutMs`, counted from when this call first sees a hash, so
+   * a repeat that waited for the signing still waits for the landing. One without can be signed
+   * only until the first call's budget, counted from that call's start (before its checks): past
+   * it the repeat ends the record itself ({@link endUnsigned}), so it answers `…_timeout` only for
+   * what will never be sent. A repeat whose own budget ends before the first call's answers
+   * `settlement_pending` with no hash and leaves the record open. If the store can't end it,
+   * nothing is known, so the answer is `settlement_pending` with no hash: repeat the same payment.
+   * Both waits end by this call's own budget (`startedAt`), and a repeat whose client left stops
+   * waiting.
    */
   const replay = async (
     existing: SettlementRecord,

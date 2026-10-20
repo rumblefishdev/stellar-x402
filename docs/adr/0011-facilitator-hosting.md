@@ -2,8 +2,9 @@
 
 - Status: accepted
 - Date: 2026-10-09, amended 2026-10-15 (task 0009: the `/settle` budget is 30 s, below the
-  seller's own 90 s timeout) and 2026-10-16 (task 0009: the checks are inside the budget; RPC
-  endpoints are logged as `RPC_URLS[i]`)
+  seller's own 90 s timeout), 2026-10-16 (task 0009: the checks are inside the budget; RPC
+  endpoints are logged as `RPC_URLS[i]`) and 2026-10-20 (task 0009: `RPC_URLS[i]#<fingerprint>`
+  and the fingerprint's limit; how far a repeat runs past the budget)
 
 ## Context
 
@@ -82,8 +83,9 @@ One request or one stop must never outlast the layer in front of it:
   and nothing new is signed after it. If nothing was signed, the record ends and the answer is
   `settle_exact_stellar_timeout`: the client signs a new payment. 30 s fits 97 % of the
   settlements measured in task 0043. Every store and hook call is bounded by what is left of it,
-  plus up to 2 s for the last store writes: a repeat may end the record and then mark its
-  success, 1 s each.
+  plus the store's 1 s grace for each of the last store calls: a repeat's last poll read, its end
+  of the record and its success mark, so up to the poll interval plus 3 s past the budget (3.46 s
+  measured past a 1 s budget). Far below the load balancer's 120 s.
 - **The checks run inside the budget.** They are upstream verify plus the AD-22 ledger read,
   which `FallbackRpc` bounds at 10 s per RPC URL. Their worst case:
 
@@ -223,7 +225,11 @@ One request or one stop must never outlast the layer in front of it:
   can carry an API key, and a host can be an account's own endpoint name (some providers put one
   in the subdomain) or an internal one. The fingerprint is the first 8 hex digits of the entry's
   SHA-256, so a line written before `RPC_URLS` changed can't be read as today's `RPC_URLS[i]`;
-  `printf %s "$url" | sha256sum | cut -c1-8` matches it to a URL. Upstream verify's failover logs
+  `printf %s "$url" | sha256sum | cut -c1-8` matches it to a URL. The hash is unsalted: it keeps
+  a long API key out of the logs, but anyone holding a log can confirm a guessed URL with few
+  unknowns, such as a provider host named after the company, in seconds. We accept that: the logs
+  are ours, and an HMAC would need one more secret per deployment while key custody (0047) is
+  open. Upstream verify's failover logs
   its switches with these names (0045). In an error message, the logger names a URL on an
   `RPC_URLS` entry the same way and reduces any other URL to its host. signer-pool's `FallbackRpc.fromUrls` still names endpoints by the full URL and logs no
   switches (0049, 0027).

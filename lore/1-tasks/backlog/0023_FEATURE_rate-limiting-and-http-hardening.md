@@ -51,7 +51,7 @@ As a facilitator operator, I want per-route rate limits and basic HTTP hardening
 - From 0009 (PR #41 review): without a rate limit, `/settle` self-payments that end before
   signing (`no_channel_in_time`, `…_timeout`) cost nothing on chain, and each keeps a record with
   its full payload in `MemorySettlementStore` (about 16k per GB). The `/settle` budget per IP
-  bounds that growth until 0022's durable store. Also: the `/verify` failover (0045) costs up to
+  bounds that growth; with `STORE=postgres` (0022) the records survive restarts, so it grows for good until pruned. Also: the `/verify` failover (0045) costs up to
   10 s per RPC URL per request when the URLs hang, so the `/verify` budget should count requests,
   not just successes.
 - From 0009 (PR #41 reviews), moved here when 0022 closed before PR #41 merged: reject a NUL
