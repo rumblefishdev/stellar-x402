@@ -63,6 +63,13 @@ history:
       BMAD's deferred items: a test that a failing migration run rolls back (`migrate` takes its
       migrations from the caller), ADR 0012 amended for the reserve pool and the 0026 measurement,
       and `STORE`/`DATABASE_URL` in both env examples. Closes after PR merge.
+  - date: "2026-10-20"
+    status: active
+    who: akot
+    note: >
+      Third review fixes (decisions 16 to 21): a pool for the rate limiter, a committed fee survives
+      `release`, an idempotent `close()`, catalog filter columns, `assertStroops`, and new contract
+      and lock-wait cases. 194 facilitator tests (63 on PostgreSQL). Closes after PR merge.
 ---
 
 # Durable adapters for the four store ports
@@ -131,8 +138,8 @@ As a facilitator operator, I want durable implementations of the four store port
 
 ## Result
 
-- `adapters/postgres.ts` holds the four adapters on a shared `pg` pool; `reserve` runs on its own
-  (decision 12). `adapters/postgres-schema.ts`
+- `adapters/postgres.ts` holds the four adapters on a shared `pg` pool; `reserve` and the rate
+  limiter's `hit` each run on their own (decisions 12 and 16). `adapters/postgres-schema.ts`
   holds the schema as ordered SQL migrations. `adapters/rules.ts` holds the lifecycle and catalog
   merge rules that both adapters share.
 - `pnpm migrate` (`src/migrate.ts`) applies the migrations under a transaction-level advisory lock.
@@ -144,10 +151,12 @@ As a facilitator operator, I want durable implementations of the four store port
 - Tests: the contract suites gained cases for hash conflicts, older rate-limit windows, scope order,
   contested leases, past-the-end listing, int64 amounts, out-of-order `now` and a retried rejected
   reservation; after the reviews, also a breaker opened twice, a cleared field, an extension given
-  as an array or a string, and a hash added to a pending record. Memory runs 38 cases and
-  PostgreSQL 53, which add the migration, failed-migration, lock-wait, dropped-connection,
-  isolation, failed-`SET`, failed-`ROLLBACK`, pool-starvation, lock-timeout and `main()` cases. The
-  facilitator has 177 tests in all, after
+  as an array or a string, and a hash added to a pending record; after the third review, whole
+  claimed records, omitted fields, scope isolation, commit stamps, a committed fee through a
+  release, stroop ranges and filters after an update. Memory runs 45 cases and
+  PostgreSQL 63, which add the migration, failed-migration, lock-wait, dropped-connection,
+  isolation, failed-`SET`, failed-`ROLLBACK`, pool-starvation (reservations and hits), lock-timeout,
+  `main()` and double-`close()` cases. The facilitator has 194 tests in all, after
   merging develop. Before the PR, a final review by two independent reviewers was
   reconciled into one list.
 
@@ -212,7 +221,40 @@ As a facilitator operator, I want durable implementations of the four store port
 15. **`close()` drains the cataloger even when closing the server fails.** A second signal
     (SIGINT after SIGTERM) calls `close()` again, closing the server rejects, and the pools ended
     under catalog writes still under way. No test pins it: the cataloger isn't reachable from
-    `main()`'s result. Found in the BMAD review.
+    `main()`'s result. Found in the BMAD review. Decision 18 makes the second call wait for the
+    first instead.
+16. **The rate limiter's `hit` runs on its own pool of 3,** like `reserve` (decision 12). One
+    client's flood queues its hits on its key's row lock, each holding a connection, so on the main
+    pool it took the connections `claim` and `addHash` need, and a burst of settlements could leave
+    the rate limiter none. A test like the reservation one queues three hits on a held key against
+    a main pool of 2: before, `claim` timed out after 5 s. `postgresStores` takes the extra pools as
+    options (`{ reserve, rateLimits }`), since two optional pools of one type are easy to swap by
+    position. ADR 0012 is amended. Found in the third review.
+17. **`release` keeps a committed reservation, and `commit` resolves whether one matched.** A
+    `release` after `commit` (a timed-out path finishing late) deleted the row, so a fee paid
+    on-chain stopped counting against its budgets; a `commit` on an unknown id did nothing, with no
+    sign. A `committed` column (in `0001_init`, decision 14's precedent) marks it, and `release`
+    deletes only uncommitted rows. Repeating `commit` replaces the fee. Refusing a `reserve` after
+    its `release` stays with 0024 and 0009; a tombstone for it fits beside the column. PR #41's
+    calls (`await commit(...)`, `release(...)`) are unchanged. Found in the third review.
+18. **`main()`'s `close()` is idempotent.** SIGTERM then SIGINT called it twice: the second closed
+    a stopped server, which rejected, then ended the pools while the first still waited for open
+    requests (`Called end on pool more than once`). Every call now shares the first call's promise.
+    Found in the third review.
+19. **The catalog filters on columns, not on `resource`.** `list` read `resource->>'type'` and
+    `resource->'extensions'` for every row, and its CTE carried `resource` for every match, so an
+    unauthenticated query detoasted every padded listing. `type` and `extension_keys` (GIN) are
+    columns in `0001_init`, set by every upsert from the merged resource; the filters and the count
+    read only them, and `resource` is read for the page's rows alone. A shared `extensionKeys` rule
+    gives the memory adapter the same matching. On 3 000 listings padded to about 60 KB, a filtered
+    list read 94 648 buffers in 147 ms before and 178 buffers in 3.2 ms after. Found in the third
+    review.
+20. **A shared `assertStroops` rejects amounts outside `0 … 2^63 − 1`** in `reserve` (`amount`,
+    each `maxStroops`), `commit` and `transition` (`feeCharged`), with a `RangeError`, like
+    `assertLedger`. A negative amount lowered a budget's sum, and one past int64 was kept in memory
+    but failed in PostgreSQL. Found in the third review.
+21. **`migrate` runs in the shared `inTransaction`, and both rate limiters use `windowEnd`.** Both
+    were copies. Found in the third review.
 
 ## Issues Encountered
 
@@ -249,6 +291,8 @@ As a facilitator operator, I want durable implementations of the four store port
 - For 0009 and 0024: `reserve` can reject when the store is busy or unreachable (`55P03` after the
   2 s lock timeout, no `reservePool` connection within 5 s, a lost `COMMIT` answer). Answer it on
   purpose, e.g. 503 with a retry, not 500; a retry with the same `id` is safe, as the port says.
+- For 0024: `commit` resolves `false` when no reservation has the id, so the fee counts against no
+  budget; log or alert it rather than drop it (decision 17).
 - For 0009, options from the third review to verify, not decisions (0009 becomes a directory in
   PR #41, so they live here): a typed `StoreUnavailableError` at the ports if `/settle` needs to
   tell "busy" from a bug; reject lone UTF-16 surrogates (`isWellFormed()`) along with `\u0000`,
