@@ -39,9 +39,12 @@ export interface SpendStore {
    * with the same `id` is safe either way, so a caller answers it as "try again", not as a failure.
    */
   reserve(reservation: SpendReservation): Promise<ReserveResult>;
-  /** Replaces a reservation with the fee actually paid. */
-  commit(id: string, feeCharged: bigint, now: number): Promise<void>;
-  /** Drops a reservation that was never spent. */
+  /**
+   * Replaces a reservation with the fee actually paid, stamped at `now`. Resolves `false` when no
+   * reservation has `id`, so the fee counts against no budget; committing again replaces the fee.
+   */
+  commit(id: string, feeCharged: bigint, now: number): Promise<boolean>;
+  /** Drops a reservation that was never spent; a committed one stays, since its fee was paid. */
   release(id: string): Promise<void>;
   /** Stroops reserved or spent after `now - windowMs`, for alerts. */
   used(scope: SpendScope, windowMs: number, now: number): Promise<bigint>;

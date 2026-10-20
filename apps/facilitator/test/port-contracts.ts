@@ -438,6 +438,16 @@ export function spendStoreContract(make: Make<SpendStore>) {
       expect(await store.used("global", DAY, 10)).toBe(20n);
     });
 
+    it("keeps a committed fee through a release, and reports a commit of an unknown id", async () => {
+      await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 0 });
+      expect(await store.commit("a", 20n, 10)).toBe(true);
+      // The fee was paid on-chain; a late release (a timed-out path) can't hand it back.
+      await store.release("a");
+      expect(await store.used("global", DAY, 10)).toBe(20n);
+      expect(await store.commit("missing", 20n, 10)).toBe(false);
+      expect(await store.used("global", DAY, 10)).toBe(20n);
+    });
+
     it("counts only the rolling window", async () => {
       await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 0 });
       expect(await store.used("global", DAY, DAY - 1)).toBe(60n);

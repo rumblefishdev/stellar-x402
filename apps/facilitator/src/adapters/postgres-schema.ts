@@ -70,10 +70,12 @@ CREATE TABLE rate_limits (
   reset_at bigint NOT NULL
 );
 
+-- committed: the amount is a fee paid on-chain, which release keeps.
 CREATE TABLE spend_reservations (
   id text PRIMARY KEY,
   amount bigint NOT NULL,
-  at bigint NOT NULL
+  at bigint NOT NULL,
+  committed boolean NOT NULL DEFAULT false
 );
 CREATE INDEX spend_reservations_at ON spend_reservations (at);
 CREATE TABLE spend_reservation_scopes (

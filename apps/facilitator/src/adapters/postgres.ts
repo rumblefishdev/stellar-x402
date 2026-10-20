@@ -510,17 +510,17 @@ export class PostgresSpendStore implements SpendStore {
     }
   }
 
-  async commit(id: string, feeCharged: bigint, now: number): Promise<void> {
-    await this.pool.query("UPDATE spend_reservations SET amount = $2, at = $3 WHERE id = $1", [
-      id,
-      feeCharged.toString(),
-      now,
-    ]);
+  async commit(id: string, feeCharged: bigint, now: number): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      "UPDATE spend_reservations SET amount = $2, at = $3, committed = true WHERE id = $1",
+      [id, feeCharged.toString(), now],
+    );
+    return rowCount === 1;
   }
 
   /** The delete cascades to the reservation's scopes. */
   async release(id: string): Promise<void> {
-    await this.pool.query("DELETE FROM spend_reservations WHERE id = $1", [id]);
+    await this.pool.query("DELETE FROM spend_reservations WHERE id = $1 AND NOT committed", [id]);
   }
 
   async used(scope: SpendScope, windowMs: number, now: number): Promise<bigint> {

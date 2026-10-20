@@ -182,6 +182,7 @@ interface Reservation {
   amount: bigint;
   at: number;
   scopes: SpendScope[];
+  committed: boolean;
 }
 
 export class MemorySpendStore implements SpendStore {
@@ -197,17 +198,24 @@ export class MemorySpendStore implements SpendStore {
     for (const limit of limits)
       if (this.sum(limit.scope, limit.windowMs, now) + amount > limit.maxStroops)
         return { reserved: false, scope: limit.scope };
-    this.reservations.set(id, { amount, at: now, scopes: limits.map((limit) => limit.scope) });
+    this.reservations.set(id, {
+      amount,
+      at: now,
+      scopes: limits.map((limit) => limit.scope),
+      committed: false,
+    });
     return { reserved: true };
   }
 
-  async commit(id: string, feeCharged: bigint, now: number): Promise<void> {
+  async commit(id: string, feeCharged: bigint, now: number): Promise<boolean> {
     const reservation = this.reservations.get(id);
-    if (reservation) Object.assign(reservation, { amount: feeCharged, at: now });
+    if (!reservation) return false;
+    Object.assign(reservation, { amount: feeCharged, at: now, committed: true });
+    return true;
   }
 
   async release(id: string): Promise<void> {
-    this.reservations.delete(id);
+    if (!this.reservations.get(id)?.committed) this.reservations.delete(id);
   }
 
   async used(scope: SpendScope, windowMs: number, now: number): Promise<bigint> {
