@@ -1,7 +1,6 @@
 import type { StellarNetwork } from "@stellar-x402/config";
-import type { PaymentRequirements } from "@x402/core/types";
 import {
-  FINAL_SETTLEMENT_STATES,
+  HashConflictError,
   type CatalogEntry,
   type CatalogPage,
   type CatalogQuery,
@@ -23,11 +22,20 @@ import {
   type SpendStore,
   type Stores,
 } from "../ports/index.js";
+import {
+  assertLedger,
+  assertStroops,
+  extensionKeys,
+  isFinal,
+  isForward,
+  mergeCatalogEntry,
+  windowEnd,
+} from "./rules.js";
 
 /**
  * In-memory adapters of the four ports (AD-7), for `STORE=memory` and for tests. State lives in
- * the process and a restart loses it; the durable adapters come in 0022. Reads and writes copy,
- * so a caller can't change stored state by mutating an object, just as with a real store.
+ * the process and a restart loses it. Reads and writes copy, so a caller can't change stored state
+ * by mutating an object, just as with a real store.
  *
  * Each method finishes its check and its write without an `await` in between, which makes it
  * atomic on Node's single thread.
@@ -41,20 +49,10 @@ export function memoryStores(): Stores {
   };
 }
 
-const ORDER: Record<SettlementState, number> = {
-  claimed: 0,
-  signed: 1,
-  pending: 2,
-  success: 3,
-  failed: 3,
-  rejected: 3,
-  expired: 3,
-};
-
-const isFinal = (state: SettlementState) => FINAL_SETTLEMENT_STATES.includes(state);
-
 export class MemorySettlementStore implements SettlementStore {
   private readonly records = new Map<SettlementKey, SettlementRecord>();
+  /** The record each hash belongs to. */
+  private readonly hashes = new Map<string, SettlementKey>();
   private readonly leases = new Map<string, ChannelLease>();
 
   async claim(settlement: NewSettlement): Promise<ClaimResult> {
@@ -75,16 +73,17 @@ export class MemorySettlementStore implements SettlementStore {
   }
 
   async findByHash(hash: string): Promise<SettlementRecord | undefined> {
-    // ponytail: linear scan, fine for tests and one testnet process; durable adapters index hashes.
-    for (const record of this.records.values())
-      if (record.hashes.includes(hash)) return structuredClone(record);
-    return undefined;
+    const key = this.hashes.get(hash);
+    return key === undefined ? undefined : structuredClone(this.records.get(key));
   }
 
   async addHash(key: SettlementKey, hash: string, updatedAt: number): Promise<boolean> {
     const record = this.records.get(key);
     if (!record || isFinal(record.state)) return false;
-    if (record.hashes.includes(hash)) return true;
+    const owner = this.hashes.get(hash);
+    if (owner === key) return true;
+    if (owner !== undefined) throw new HashConflictError(hash);
+    this.hashes.set(hash, key);
     record.hashes.push(hash);
     if (record.state === "claimed") record.state = "signed";
     record.updatedAt = updatedAt;
@@ -96,11 +95,10 @@ export class MemorySettlementStore implements SettlementStore {
     expected: SettlementState,
     update: SettlementUpdate,
   ): Promise<SettlementRecord | undefined> {
+    if (update.feeCharged !== undefined) assertStroops(update.feeCharged, "feeCharged");
     const record = this.records.get(key);
-    // A final state is the end of the lifecycle: nothing moves on from it.
-    if (!record || record.state !== expected || isFinal(expected)) return undefined;
-    // Only forward: a same-state update would let two concurrent callers both win.
-    if (ORDER[update.state] <= ORDER[expected]) return undefined;
+    if (!record || record.state !== expected || !isForward(expected, update.state))
+      return undefined;
     Object.assign(record, structuredClone(update));
     return structuredClone(record);
   }
@@ -136,33 +134,17 @@ export class MemorySettlementStore implements SettlementStore {
   }
 }
 
-const requirementKey = (r: PaymentRequirements) => `${r.scheme}|${r.network}|${r.asset}`;
-
 export class MemoryCatalogStore implements CatalogStore {
   /** Insertion order is the stable listing order. */
   private readonly entries = new Map<string, CatalogEntry>();
 
   async upsert(entry: CatalogEntry): Promise<UpsertOutcome> {
-    if (!Number.isSafeInteger(entry.ledger) || entry.ledger < 0)
-      throw new RangeError("catalog entry ledger must be a non-negative integer");
+    assertLedger(entry.ledger);
     const { network, payTo, method, resourceUrl } = entry.key;
     const id = JSON.stringify([network, payTo, method, resourceUrl]);
     const stored = this.entries.get(id);
-    const stale = stored !== undefined && entry.ledger < stored.ledger;
-    const accepts = new Map<string, PaymentRequirements>();
-    for (const requirement of stored?.resource.accepts ?? [])
-      accepts.set(requirementKey(requirement), requirement);
-    for (const requirement of entry.resource.accepts)
-      if (!stale || !accepts.has(requirementKey(requirement)))
-        accepts.set(requirementKey(requirement), requirement);
-    const latest = stale ? stored : entry;
-    this.entries.set(
-      id,
-      structuredClone({
-        ...latest,
-        resource: { ...latest.resource, accepts: [...accepts.values()] },
-      }),
-    );
+    const { merged, stale } = mergeCatalogEntry(stored, entry);
+    this.entries.set(id, structuredClone(merged));
     return stale ? "stale" : stored ? "updated" : "inserted";
   }
 
@@ -173,10 +155,7 @@ export class MemoryCatalogStore implements CatalogStore {
         (type === undefined || resource.type === type) &&
         (payTo === undefined || key.payTo === payTo) &&
         (network === undefined || key.network === network) &&
-        // An own key with a value: not a prototype key, and not one JSON storage would drop.
-        (extensions === undefined ||
-          (resource.extensions?.[extensions] !== undefined &&
-            Object.hasOwn(resource.extensions, extensions))),
+        (extensions === undefined || extensionKeys(resource).includes(extensions)),
     );
     return {
       items: matches.slice(offset, offset + limit).map(({ resource }) => structuredClone(resource)),
@@ -190,11 +169,15 @@ export class MemoryRateLimitStore implements RateLimitStore {
   private readonly windows = new Map<string, RateLimitHit>();
 
   async hit(key: string, windowMs: number, now: number): Promise<RateLimitHit> {
-    const resetAt = (Math.floor(now / windowMs) + 1) * windowMs;
-    const current = this.windows.get(key);
-    const count = current?.resetAt === resetAt ? current.count + 1 : 1;
-    this.windows.set(key, { count, resetAt });
-    return { count, resetAt };
+    const resetAt = windowEnd(now, windowMs);
+    const stored = this.windows.get(key);
+    // A hit from an older window (a lagging clock) counts in the stored, newer one.
+    const counted =
+      stored && stored.resetAt >= resetAt
+        ? { count: stored.count + 1, resetAt: stored.resetAt }
+        : { count: 1, resetAt };
+    this.windows.set(key, counted);
+    return { ...counted };
   }
 }
 
@@ -202,32 +185,43 @@ interface Reservation {
   amount: bigint;
   at: number;
   scopes: SpendScope[];
+  state: "reserved" | "committed";
 }
 
 export class MemorySpendStore implements SpendStore {
   // ponytail: reservations are never pruned, so memory and each `sum` scan grow with the process's
-  // settlements. Fine for tests and dev runs (deployments use the 0022 stores); prune past the
+  // settlements. Fine for tests and dev runs (deployments use the PostgreSQL stores); prune past the
   // longest window if a memory store ever runs for long.
   private readonly reservations = new Map<string, Reservation>();
   private readonly failures = new Map<SpendScope, number>();
   private readonly breakers = new Map<SpendScope, number>();
 
   async reserve({ id, amount, limits, now }: SpendReservation): Promise<ReserveResult> {
+    assertStroops(amount, "amount");
+    for (const limit of limits) assertStroops(limit.maxStroops, "maxStroops");
     if (this.reservations.has(id)) return { reserved: true };
     for (const limit of limits)
       if (this.sum(limit.scope, limit.windowMs, now) + amount > limit.maxStroops)
         return { reserved: false, scope: limit.scope };
-    this.reservations.set(id, { amount, at: now, scopes: limits.map((limit) => limit.scope) });
+    this.reservations.set(id, {
+      amount,
+      at: now,
+      scopes: limits.map((limit) => limit.scope),
+      state: "reserved",
+    });
     return { reserved: true };
   }
 
-  async commit(id: string, feeCharged: bigint, now: number): Promise<void> {
+  async commit(id: string, feeCharged: bigint, now: number): Promise<boolean> {
+    assertStroops(feeCharged, "feeCharged");
     const reservation = this.reservations.get(id);
-    if (reservation) Object.assign(reservation, { amount: feeCharged, at: now });
+    if (!reservation) return false;
+    Object.assign(reservation, { amount: feeCharged, at: now, state: "committed" });
+    return true;
   }
 
   async release(id: string): Promise<void> {
-    this.reservations.delete(id);
+    if (this.reservations.get(id)?.state === "reserved") this.reservations.delete(id);
   }
 
   async used(scope: SpendScope, windowMs: number, now: number): Promise<bigint> {
@@ -245,7 +239,7 @@ export class MemorySpendStore implements SpendStore {
   }
 
   async openBreaker(scope: SpendScope, until: number): Promise<void> {
-    this.breakers.set(scope, until);
+    this.breakers.set(scope, Math.max(this.breakers.get(scope) ?? -Infinity, until));
   }
 
   async breakerOpenUntil(scope: SpendScope, now: number): Promise<number | undefined> {
@@ -256,7 +250,7 @@ export class MemorySpendStore implements SpendStore {
   private sum(scope: SpendScope, windowMs: number, now: number): bigint {
     let total = 0n;
     for (const { amount, at, scopes } of this.reservations.values())
-      if (scopes.includes(scope) && at > now - windowMs && at <= now) total += amount;
+      if (scopes.includes(scope) && at > now - windowMs) total += amount;
     return total;
   }
 }

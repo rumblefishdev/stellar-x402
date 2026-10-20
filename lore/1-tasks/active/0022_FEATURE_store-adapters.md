@@ -5,7 +5,7 @@ type: FEATURE
 status: active
 milestone: 1
 related_adr: ["0004", "0006", "0012"]
-related_tasks: ["0012", "0013", "0017"]
+related_tasks: ["0012", "0013", "0017", "0050"]
 tags: [facilitator, persistence, priority-high, effort-medium, discovery]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -19,6 +19,57 @@ history:
     status: active
     who: akot
     note: "Started by the Discovery lane on the 0013 decision (ADR 0012, PR #20): PostgreSQL adapters from the spike."
+  - date: "2026-10-13"
+    status: active
+    who: akot
+    note: >
+      Built and reviewed: four PostgreSQL adapters, pnpm migrate, STORE=postgres, a CI service.
+      All 4 acceptance criteria met; 108 facilitator tests (43 on PostgreSQL). Final review fixes
+      are in. Spawned 0050 (pruning). Closes after PR merge.
+  - date: "2026-10-19"
+    status: active
+    who: akot
+    note: >
+      Merged develop (through the updated 0013 base). Review fix: a connection whose Read Committed
+      SET fails is now closed (decision 6). 164 facilitator tests (44 on PostgreSQL). Closes after
+      PR merge.
+  - date: "2026-10-19"
+    status: active
+    who: akot
+    note: >
+      Review fix: `reserve` runs on its own pool with a 2 s lock timeout, so reservations queued on
+      the global scope lock can't starve the other stores (decision 12). 166 facilitator tests
+      (46 on PostgreSQL). Closes after PR merge.
+  - date: "2026-10-19"
+    status: active
+    who: akot
+    note: >
+      karczuRF's review: `openBreaker` keeps the later end (decision 13), the port says when
+      `reserve` rejects, and new cases pin a cleared field, an extension given as an array or a
+      string, a ROLLBACK that fails, and `main()` with STORE=postgres. 174 facilitator tests (51 on
+      PostgreSQL). Closes after PR merge.
+  - date: "2026-10-19"
+    status: active
+    who: akot
+    note: >
+      BMAD code review (4 layers): an index for release's cascade (decision 14), `close()` drains
+      even when closing the server fails (decision 15), memory's extension filter matches only an
+      object, and a case pins `addHash` on a pending record and `listNonFinal` with hashes. 176
+      facilitator tests (52 on PostgreSQL). Closes after PR merge.
+  - date: "2026-10-20"
+    status: active
+    who: akot
+    note: >
+      BMAD's deferred items: a test that a failing migration run rolls back (`migrate` takes its
+      migrations from the caller), ADR 0012 amended for the reserve pool and the 0026 measurement,
+      and `STORE`/`DATABASE_URL` in both env examples. Closes after PR merge.
+  - date: "2026-10-20"
+    status: active
+    who: akot
+    note: >
+      Third review fixes (decisions 16 to 21): a pool for the rate limiter, a committed fee survives
+      `release`, an idempotent `close()`, catalog filter columns, `assertStroops`, and new contract
+      and lock-wait cases. 197 facilitator tests (65 on PostgreSQL). Closes after PR merge.
 ---
 
 # Durable adapters for the four store ports
@@ -80,7 +131,196 @@ As a facilitator operator, I want durable implementations of the four store port
 
 ## Acceptance Criteria
 
-- [ ] Given the store chosen in the 0013 ADR, when the adapters are built, then `SettlementStore`, `CatalogStore`, `RateLimitStore` and `SpendStore` each have an adapter in `apps/facilitator/src/adapters/` that passes the same contract tests as its in-memory fake
-- [ ] Given concurrent claims for one settlement key, when they hit the store, then exactly one wins; lookup by any hash, forward-only compare-and-set, the exclusive renewable channel lease, catalog upserts by key and the `resources` filters are all supported
-- [ ] Given a fresh environment, when migrations run, then the schema is created with one command; the composition root picks the memory or the real stores from config
-- [ ] Given CI, when it runs, then the four contract suites run against the PostgreSQL adapters on a service container, fail if the database is unreachable (no skip), and use a test pool larger than the 10-way concurrency cases
+- [x] Given the store chosen in the 0013 ADR, when the adapters are built, then `SettlementStore`, `CatalogStore`, `RateLimitStore` and `SpendStore` each have an adapter in `apps/facilitator/src/adapters/` that passes the same contract tests as its in-memory fake
+- [x] Given concurrent claims for one settlement key, when they hit the store, then exactly one wins; lookup by any hash, forward-only compare-and-set, the exclusive renewable channel lease, catalog upserts by key and the `resources` filters are all supported
+- [x] Given a fresh environment, when migrations run, then the schema is created with one command; the composition root picks the memory or the real stores from config
+- [x] Given CI, when it runs, then the four contract suites run against the PostgreSQL adapters on a service container, fail if the database is unreachable (no skip), and use a test pool larger than the 10-way concurrency cases
+
+## Result
+
+- `adapters/postgres.ts` holds the four adapters on a shared `pg` pool; `reserve` and the rate
+  limiter's `hit` each run on their own (decisions 12 and 16). `adapters/postgres-schema.ts`
+  holds the schema as ordered SQL migrations. `adapters/rules.ts` holds the lifecycle and catalog
+  merge rules that both adapters share.
+- `pnpm migrate` (`src/migrate.ts`) applies the migrations under a transaction-level advisory lock.
+  The service never migrates itself.
+- `STORE=postgres` with `DATABASE_URL` selects the PostgreSQL stores. `STORE=memory` is testnet
+  only.
+- CI runs the suites on a `postgres:18` service on Node 22 and 24. `TEST_DATABASE_URL` is in
+  turbo's `test.env`.
+- Tests: the contract suites gained cases for hash conflicts, older rate-limit windows, scope order,
+  contested leases, past-the-end listing, int64 amounts, out-of-order `now` and a retried rejected
+  reservation; after the reviews, also a breaker opened twice, a cleared field, an extension given
+  as an array or a string, and a hash added to a pending record; after the third review, whole
+  claimed records, omitted fields, scope isolation, commit stamps, a committed fee through a
+  release, stroop ranges and filters after an update. Memory runs 46 cases and
+  PostgreSQL 65, which add the migration, failed-migration, lock-wait, dropped-connection,
+  isolation, failed-`SET`, failed-`ROLLBACK`, pool-starvation (reservations and hits), lock-timeout,
+  `main()`, double-`close()` and `recordSuccess`-behind-a-lock cases. The facilitator has 197 tests
+  in all, after merging develop. Before the PR, a final review by two independent reviewers was
+  reconciled into one list.
+
+## Design Decisions
+
+### From Plan
+
+1. **`addHash` rejects a hash another settlement already has** with a typed `HashConflictError`,
+   and neither record changes. Both adapters do this; the team chose it during 0022.
+2. **A rate-limit hit from an older window counts in the newer one.** `GREATEST` keeps the newer
+   `reset_at`, with qualified columns.
+3. **Our own migration runner, not a library:** a `schema_migrations` table, one Read Committed
+   transaction, `pg_advisory_xact_lock` and a 10 s `lock_timeout`. There is one migration today,
+   and ADR 0012 asks for a transaction-level lock. The migrations are TS strings, so `tsc` ships
+   them.
+4. **The suites skip locally only when neither `TEST_DATABASE_URL` nor `CI` is set,** so CI never
+   skips them. Each run gets its own schema.
+5. **Pruning is out of 0022** (the team decided). It is spawned as 0050.
+
+### Emerged
+
+6. **Every connection sets Read Committed as its session default,** in the pool's `onConnect`. Until
+   then only the transactions set it, so single statements took the server's default; under
+   Repeatable Read the concurrent claims threw serialization errors. A config `options` setting
+   would be overridden by an `options` parameter in the URL. The pool waits for `onConnect`, so a
+   connection whose `SET` fails is closed and its caller's query fails; a `connect` listener could
+   only log the failure and hand the connection out at the server's default.
+7. **Every pool client keeps an `error` listener.** pg-pool removes its own listener while a client
+   is checked out, so a connection lost mid-transaction (a failover, a reboot, the idle-in-transaction
+   timeout) crashed the process. Now the transaction fails.
+8. **The spend window has no upper bound (`at > now - windowMs`).** The SPEC kept this G-note gap
+   out. The final review showed it overspends on a single instance too, because the caller takes
+   `now` before `reserve` waits on the scope lock. The team pulled it in. The port docs now say
+   that a later stamp counts.
+9. **`STORE=memory` is testnet only, and `DATABASE_URL` with it is an error** (team decision in
+   the final review). A pubnet deploy that forgets `STORE` would otherwise lose settlements on
+   restart.
+10. **`migrate` keeps the pool's statement limit.** An earlier review added
+    `SET LOCAL statement_timeout = 0`. That did nothing useful: the client's 15 s `query_timeout`
+    still gave up while the server kept running. A pool just for migrations waits for a migration
+    that needs one.
+11. **Lock-wait reads have deterministic tests.** These hold a transaction open on a second
+    connection: `addHash` re-reading the hash owner, and `transition` reading hashes after its row
+    lock. The racy contract case reached the first only about half the time.
+12. **`reserve` runs on its own small pool, with a 2 s lock timeout.** A reservation holds its
+    connection while it queues on the global scope's lock. On the one shared pool (10 connections),
+    a burst of reservations took every connection, so `claim`, `addHash` and the rate limiter's
+    `hit` waited 5 s for one and failed. `reserve` now runs on a pool of 3 that `main.ts` creates
+    beside the main one; `commit`, `release` and the breakers stay on the main pool, so recording
+    a paid fee never queues behind reservations. `SET LOCAL lock_timeout = '2s'` gives a queued
+    reservation up with `55P03`, and nothing is reserved. The timeout alone only shortened the
+    stall (a test without the own pool waited about 2 s); a bigger pool would only move it.
+13. **`openBreaker` keeps the later end** (`GREATEST` in PostgreSQL, `Math.max` in memory), as the
+    0013 G-note asked. Both adapters overwrote it, so a second task opening the same breaker with an
+    earlier end closed it early, and the contract, which opened a breaker once, passed on both. A
+    contract case now opens it at 2 000, then 1 000, and expects 2 000. Found in karczuRF's review.
+14. **An index on `spend_reservation_scopes (id)`, in `0001_init`.** `release` cascades to a
+    reservation's scope rows by `id`, which the `(scope, id)` primary key can't look up, so every
+    release scanned the whole table, which nothing prunes before 0050. With 50 000 reservations the
+    cascade took 7.9 ms without the index and 0.16 ms with it. It goes into `0001_init` rather than
+    a new migration because `0001` hasn't reached any deployment yet. Found in the BMAD review.
+15. **`close()` drains the cataloger even when closing the server fails.** A second signal
+    (SIGINT after SIGTERM) calls `close()` again, closing the server rejects, and the pools ended
+    under catalog writes still under way. No test pins it: the cataloger isn't reachable from
+    `main()`'s result. Found in the BMAD review. Decision 18 corrects the mechanism and makes the
+    second call share the first.
+16. **The rate limiter's `hit` runs on its own pool of 3,** like `reserve` (decision 12). One
+    client's flood queues its hits on its key's row lock, each holding a connection, so on the main
+    pool it took the connections `claim` and `addHash` need, and a burst of settlements could leave
+    the rate limiter none. A test like the reservation one queues three hits on a held key against
+    a main pool of 2: before, `claim` timed out after 5 s. `postgresStores` takes the extra pools as
+    options (`{ reserve, rateLimits }`), since two optional pools of one type are easy to swap by
+    position. ADR 0012 is amended. Found in the third review.
+17. **`release` keeps a committed reservation, and `commit` resolves whether one matched.** A
+    `release` after `commit` (a timed-out path finishing late) deleted the row, so a fee paid
+    on-chain stopped counting against its budgets; a `commit` on an unknown id did nothing, with no
+    sign. A `state` column, `reserved` or `committed` (in `0001_init`, decision 14's precedent),
+    marks it, and `release` deletes only `reserved` rows. Repeating `commit` replaces the fee. A
+    status rather than a boolean, so refusing a `reserve` after its `release` (0024 and 0009) can
+    add `released` as a kept row without another column. PR #41's
+    calls (`await commit(...)`, `release(...)`) are unchanged. Found in the third review.
+18. **`main()`'s `close()` is idempotent.** SIGTERM then SIGINT called it twice. The review
+    expected the second call to end the pools under open requests, but Node's second
+    `server.close()` calls back only on the server's `close` event, once those requests ended, and
+    then with `ERR_SERVER_NOT_RUNNING` (checked with a stalled client). So the second call drained
+    again and ended the pools a second time, which rejects (`Called end on pool more than once`),
+    and shutdown ended in an error. Every call now shares the first call's promise. Found in the
+    third review; the mechanism was corrected while fixing it.
+19. **The catalog filters on columns, not on `resource`.** `list` read `resource->>'type'` and
+    `resource->'extensions'` for every row, and its CTE carried `resource` for every match, so an
+    unauthenticated query detoasted every padded listing. `type` and `extension_keys` (GIN) are
+    columns in `0001_init`, set by every upsert from the merged resource; the filters and the count
+    read only them, and `resource` is read for the page's rows alone. A shared `extensionKeys` rule
+    gives the memory adapter the same matching. On 3 000 listings padded to about 60 KB, a filtered
+    list read 94 648 buffers in 147 ms before and 178 buffers in 3.2 ms after. Found in the third
+    review.
+20. **A shared `assertStroops` rejects amounts outside `0 … 2^63 − 1`** in `reserve` (`amount`,
+    each `maxStroops`), `commit` and `transition` (`feeCharged`), with a `RangeError`, like
+    `assertLedger`. A negative amount lowered a budget's sum, and one past int64 was kept in memory
+    but failed in PostgreSQL. Found in the third review.
+21. **`migrate` runs in the shared `inTransaction`, and both rate limiters use `windowEnd`.** Both
+    were copies. Found in the third review.
+22. **`reserve` sums each limit's window in a statement of its own,** the one `used` runs. The
+    single statement joined the limits through `unnest` with `LATERAL`, and the planner, guessing
+    a few hundred rows per scope, probed `spend_reservations` once per scope row: 277 ms at
+    100 000 reservations and about 3.3 s at 1 000 000, all under the global scope's lock. With
+    the scope as a plain parameter it sees the real count and hashes the join: 48 ms and 160 to
+    320 ms, the same sums. One round trip per limit is the cost. It is still linear in the rows
+    the scope holds, so 0050 (pruning, and an indexed or bucketed sum) is needed before mainnet.
+    Found in Karol's review, which estimated 25 ms and 0.5 s; measured on PostgreSQL 18.3.
+23. **`recordSuccess` writes only when there are failures to reset** (`AND failures <> 0`). It runs
+    on the main pool, and an unconditional reset queued on a scope row `reserve` holds `FOR UPDATE`,
+    so once 0024 calls it after every success a burst of them could starve `claim` and `addHash`.
+    A row with no failures now fails the condition on its visible version and is skipped without
+    waiting. Found in Staszek's review; `recordFailure` and `openBreaker` still take the lock, less
+    often, which 0024 can revisit.
+
+## Issues Encountered
+
+- **The concurrent-claim case failed once and was never reproduced.** It failed in one of 13
+  turbo runs. Since then it passed:
+  - 40 direct runs, 15 `turbo --force` runs and 48 runs six at a time under CPU load;
+  - 1,300 isolated claim races.
+
+  The claim path is correct at Read Committed. The case is the only one that grows the pool from 1
+  to 10 connections, and the local cluster restarted many times that day. That points to the
+  environment, and turbo's cache made the 1-in-13 figure soft as well.
+- **Turbo's strict env mode dropped `TEST_DATABASE_URL`.** `passThroughEnv` also left it out of the
+  cache hash, so a cached run replayed 36 skipped cases. Moved to `env`.
+- **Modified tests:** `config.test.ts` now uses `STORE=postgres` with a URL wherever it uses
+  pubnet (the mapping case, the CATALOG_ALLOW_HTTP case, the RPC_URLS case). This follows from
+  decision 9 and is not a regression. The spend case "counts only the rolling window ending at
+  now" is renamed, because the window no longer ends at `now`. The pubnet https case that develop
+  added to "checks RPC URLs" uses the same pubnet helper after the merge.
+
+## Future Work
+
+- 0050: prune old rate-limit windows and spend reservations, and index the spend-window sum.
+- For 0025/0026: check at startup that the database is reachable and its schema is current.
+- For 0025: a client stalled mid-headers blocks `server.close()`, and with it the drain and the
+  lease release; and a fencing token with a skew margin for the lease. See 0025's "From 0022"
+  notes.
+- For 0026: the RDS CA bundle and TLS. The env examples carry `STORE` and `DATABASE_URL`; renaming
+  their signer variables is 0020's.
+- For 0026: measure `addHash` and the full settle path on the testnet database, which 0026
+  creates; 0022 had no instance to measure on. ADR 0012's RDS, and with it the RDS CA item, may
+  change with the hosting move to Hetzner (PR #24).
+- For 0009 and the routes: map `HashConflictError`; validate `\u0000` in payloads and resources, and
+  negative `limit`/`offset`.
+- For 0009 and 0024: `reserve` can reject when the store is busy or unreachable (`55P03` after the
+  2 s lock timeout, no `reservePool` connection within 5 s, a lost `COMMIT` answer). Answer it on
+  purpose, e.g. 503 with a retry, not 500; a retry with the same `id` is safe, as the port says.
+- For 0019, from Karol's review: the startup sweep closes every `claimed` record without a hash,
+  whatever its age. With one lease holder per network that is right; with ADR 0011's option of two
+  tasks on separate channel sets, one task's sweep would reject the other's live claims (money is
+  safe: `addHash` refuses a final record). Option: close only claims older than
+  `createdAt + SETTLE_BUDGET_MS + margin`, the rule 0009's replay already uses, with a later pass
+  for younger ones. A `claimed_by` column to recognise one's own claim was rejected: a client
+  repeat landing in the same process would look like its own and sign twice.
+- For 0024: `commit` resolves `false` when no reservation has the id, so the fee counts against no
+  budget; log or alert it rather than drop it (decision 17).
+- For 0009, options from the third review to verify, not decisions (0009 becomes a directory in
+  PR #41, so they live here): a typed `StoreUnavailableError` at the ports if `/settle` needs to
+  tell "busy" from a bug; reject lone UTF-16 surrogates (`isWellFormed()`) along with `\u0000`,
+  since jsonb rejects them and text turns them into U+FFFD; `claim` only after `/verify` fully
+  passes, or throwaway payers leave unpruned 64 KB payloads. The other options from that review
+  are notes in 0019, 0023, 0024, 0026 and 0050.

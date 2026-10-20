@@ -36,6 +36,13 @@ As a agent, I want to list catalog resources with the standard discovery filters
 
 - Route in `http/` with filter parsing and the upstream response types.
 - Query through `CatalogStore`; tests per filter.
+- From 0022 (Karol's review, measured on PostgreSQL 18.3), to verify rather than a decision:
+  `CatalogStore.list` filters on narrow columns, but every call still counts and sorts every
+  matching `seq` for `total` and the offset: 40–57 ms at 100 000 entries (about 125–145 calls/s
+  on a pool of 10), spilling to temp from about 105 000, and about 0.5 s at 1 000 000. Keyset
+  paging (`seq > $cursor ORDER BY seq LIMIT n`) is about 0.02 ms at any size; with it, an index on
+  `(type, seq)`, and a `total` that is dropped, estimated or cached, since an exact count stays
+  O(n). The upstream response's pagination shape decides which.
 
 ## Acceptance Criteria
 

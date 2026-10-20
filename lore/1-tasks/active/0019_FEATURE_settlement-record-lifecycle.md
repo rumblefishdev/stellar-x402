@@ -75,6 +75,10 @@ As a facilitator operator, I want settlement records that are written before sen
   - Store each transaction's time bound next to its hash. After a crash the lease expires in 30 s,
     but the dead process's transactions stay valid for up to 60 s. A hash that isn't found stays
     non-final until its bound has passed.
+- Option from 0022's third review, to verify rather than a decision (a better approach may exist): `settlement_hashes` holds only `(hash, key, seq)`, and `addHash` takes no time bound
+  or per-hash status. Adding a nullable column later is cheap, and rows written before it can fall
+  back to the auth expiry in `payment_payload`. If this task lands before the first durable deploy
+  (0026), it can still edit `0001_init` instead.
 
 ## Acceptance Criteria
 

@@ -1,6 +1,6 @@
 import { Keypair } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
-import { type Config, ConfigError, parseConfig } from "../src/config.js";
+import { type Config, ConfigError, parseConfig, parseMigrateConfig } from "../src/config.js";
 
 const keypair = (byte: number) => Keypair.fromRawEd25519Seed(Buffer.alloc(32, byte));
 const SECRET = keypair(1).secret();
@@ -8,6 +8,12 @@ const CHANNEL_A = keypair(2).publicKey();
 const CHANNEL_B = keypair(3).publicKey();
 
 const minimal = { FACILITATOR_SECRET: SECRET, CHANNELS: `${CHANNEL_A}, ${CHANNEL_B}` };
+/** Pubnet needs the PostgreSQL store. */
+const pubnet = {
+  NETWORK: "stellar:pubnet",
+  STORE: "postgres",
+  DATABASE_URL: "postgres://db.internal/x402",
+};
 
 function problems(env: Record<string, string | undefined>): string[] {
   try {
@@ -58,7 +64,8 @@ describe("parseConfig", () => {
       RPC_URLS: "https://a.example, https://b.example",
       FACILITATOR_SECRET: SECRET,
       CHANNELS: CHANNEL_B,
-      STORE: "memory",
+      STORE: "postgres",
+      DATABASE_URL: "postgres://db.internal/x402",
       MAX_FEE_STROOPS: "300001",
       INCLUSION_FEE_STROOPS: "201",
       FEE_ESCALATION_FACTOR: "1.5",
@@ -87,7 +94,8 @@ describe("parseConfig", () => {
       rpcUrls: ["https://a.example", "https://b.example"],
       facilitatorSecret: SECRET,
       channels: [CHANNEL_B],
-      store: "memory",
+      store: "postgres",
+      databaseUrl: "postgres://db.internal/x402",
       fees: {
         maxFeeStroops: 300_001n,
         inclusionFeeStroops: 201n,
@@ -204,11 +212,48 @@ describe("parseConfig", () => {
     expect(
       problems({
         ...minimal,
-        NETWORK: "stellar:pubnet",
+        ...pubnet,
         RPC_URLS: "https://rpc.example",
         CATALOG_ALLOW_HTTP: "true",
       }),
     ).toEqual(["CATALOG_ALLOW_HTTP is only allowed on testnet"]);
+  });
+
+  it("selects the PostgreSQL store with its URL", () => {
+    const url = "postgres://u:pw@db.internal:5432/x402";
+    const config = parseConfig({ ...minimal, STORE: "postgres", DATABASE_URL: url });
+    expect(config.store).toBe("postgres");
+    expect(config.databaseUrl).toBe(url);
+  });
+
+  it("requires a postgres:// DATABASE_URL for STORE=postgres, without echoing it", () => {
+    expect(problems({ ...minimal, STORE: "postgres" })).toEqual([
+      "DATABASE_URL is required when STORE=postgres",
+    ]);
+    const found = problems({
+      ...minimal,
+      STORE: "postgres",
+      DATABASE_URL: "mysql://u:secret@db/x",
+    });
+    expect(found).toEqual(["DATABASE_URL must be a postgres:// URL"]);
+    expect(() =>
+      parseConfig({ ...minimal, STORE: "postgres", DATABASE_URL: "mysql://u:secret@db/x" }),
+    ).toThrow(expect.objectContaining({ message: expect.not.stringContaining("secret") }));
+  });
+
+  it("allows the memory store on testnet only, and never with a DATABASE_URL", () => {
+    expect(parseConfig(minimal).store).toBe("memory");
+    const rpc = { RPC_URLS: "https://rpc.example" };
+    expect(problems({ ...minimal, ...rpc, NETWORK: "stellar:pubnet" })).toEqual([
+      "STORE must be postgres outside testnet",
+    ]);
+    expect(problems({ ...minimal, ...rpc, ...pubnet, STORE: "memory" })).toEqual([
+      "STORE must be postgres outside testnet",
+      "DATABASE_URL is only used with STORE=postgres",
+    ]);
+    expect(problems({ ...minimal, DATABASE_URL: "postgres://db.internal/x402" })).toEqual([
+      "DATABASE_URL is only used with STORE=postgres",
+    ]);
   });
 
   it("checks RPC URLs", () => {
@@ -222,17 +267,33 @@ describe("parseConfig", () => {
       "http://rpc:8000",
     ]);
     expect(
-      problems({
-        ...minimal,
-        NETWORK: "stellar:pubnet",
-        RPC_URLS: "https://a.example,http://rpc:8000",
-      }),
+      problems({ ...minimal, ...pubnet, RPC_URLS: "https://a.example,http://rpc:8000" }),
     ).toEqual(["RPC_URLS must be https outside testnet"]);
-    expect(problems({ ...minimal, NETWORK: "stellar:pubnet", RPC_URLS: "," })).toEqual([
+    expect(problems({ ...minimal, ...pubnet, RPC_URLS: "," })).toEqual([
       "RPC_URLS must list at least one URL",
     ]);
-    expect(problems({ ...minimal, NETWORK: "stellar:pubnet" })).toEqual([
-      "RPC_URLS is required outside testnet",
-    ]);
+    expect(problems({ ...minimal, ...pubnet })).toEqual(["RPC_URLS is required outside testnet"]);
+  });
+});
+
+describe("parseMigrateConfig", () => {
+  it("requires DATABASE_URL", () => {
+    for (const env of [{}, { DATABASE_URL: " " }]) {
+      const error = (() => {
+        try {
+          parseMigrateConfig(env);
+        } catch (thrown) {
+          return thrown;
+        }
+      })();
+      expect(error).toBeInstanceOf(ConfigError);
+      expect((error as ConfigError).problems).toEqual(["DATABASE_URL is required"]);
+    }
+  });
+
+  it("trims a postgres:// URL", () => {
+    expect(parseMigrateConfig({ DATABASE_URL: " postgresql://db/x402\n" })).toEqual({
+      databaseUrl: "postgresql://db/x402",
+    });
   });
 });

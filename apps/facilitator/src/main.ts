@@ -3,12 +3,15 @@ import type { AddressInfo } from "node:net";
 import { FallbackRpc } from "@stellar-x402/signer-pool";
 import { createEd25519Signer } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/facilitator";
+import type pg from "pg";
 import { memoryStores } from "./adapters/memory.js";
+import { migrate } from "./adapters/postgres-schema.js";
+import { createPool, postgresStores } from "./adapters/postgres.js";
 import { createCataloger } from "./catalog/cataloger.js";
-import { parseConfig } from "./config.js";
+import { parseConfig, parseMigrateConfig } from "./config.js";
 import type { Config } from "./config.js";
 import { createApp, type AppDeps } from "./http/app.js";
-import { captureConsoleError, jsonLogger } from "./logger.js";
+import { captureConsoleError, jsonLogger, type Logger } from "./logger.js";
 import { memoryMetrics } from "./metrics.js";
 import { feeSettings, upstreamAtCurrentBid, type FeeSettings } from "./settlement/fees.js";
 import { createVerifier, type UpstreamVerifier, type Verify } from "./settlement/verify.js";
@@ -81,32 +84,86 @@ export function buildVerifier(
 export async function main(env: Record<string, string | undefined> = process.env) {
   const config = parseConfig(env);
   const logger = jsonLogger(config.logLevel);
-  // STORE=memory is the only option until the durable adapters land (0022).
-  const stores = memoryStores();
-  // 0009 hands its `extensionResponses` and `onSuccess` to `/settle` as `SettlementHooks`.
-  const cataloger = createCataloger({
-    store: stores.catalog,
-    logger,
-    metrics: memoryMetrics(),
-    allowHttp: config.catalog.allowHttp,
-  });
-  const rpc = FallbackRpc.fromUrls(config.rpcUrls);
-  // 0009 builds the pool from `fees.pool`, so `/verify` and the pool share one bid (AD-10).
-  const fees = feeSettings(config.fees, rpc);
-  const verify = buildVerifier(config, rpc, fees);
-  // For the life of the process: an upstream call cut off by the deadline keeps running after
-  // `close()`, and its error would reach stderr with the RPC URL in it.
-  const restoreConsole = captureConsoleError(logger);
-  const started = await start({ config, logger, stores, verify }).catch((error: unknown) => {
-    restoreConsole();
+  // STORE=postgres needs a migrated schema (`pnpm migrate`); the service never migrates it.
+  let pools: { main: pg.Pool; reserve: pg.Pool; rateLimits: pg.Pool } | undefined;
+  if (config.store === "postgres") {
+    const url = config.databaseUrl;
+    if (url === undefined) throw new Error("STORE=postgres needs a DATABASE_URL");
+    // Reservations queue on the global scope's lock, and a flood's hits on its key's row lock;
+    // their own pools keep those queues off the others.
+    pools = {
+      main: createPool(url, poolErrorLogger(logger)),
+      reserve: createPool(url, poolErrorLogger(logger), 3),
+      rateLimits: createPool(url, poolErrorLogger(logger), 3),
+    };
+  }
+  const endPools = () => Promise.all(Object.values(pools ?? {}).map((p) => p.end()));
+  try {
+    const stores = pools ? postgresStores(pools.main, pools) : memoryStores();
+    // 0009 hands its `extensionResponses` and `onSuccess` to `/settle` as `SettlementHooks`.
+    const cataloger = createCataloger({
+      store: stores.catalog,
+      logger,
+      metrics: memoryMetrics(),
+      allowHttp: config.catalog.allowHttp,
+    });
+    const rpc = FallbackRpc.fromUrls(config.rpcUrls);
+    // 0009 builds the pool from `fees.pool`, so `/verify` and the pool share one bid (AD-10).
+    const fees = feeSettings(config.fees, rpc);
+    const verify = buildVerifier(config, rpc, fees);
+    // For the life of the process: an upstream call cut off by the deadline keeps running after
+    // `close()`, and its error would reach stderr with the RPC URL in it.
+    const restoreConsole = captureConsoleError(logger);
+    const started = await start({ config, logger, stores, verify }).catch((error: unknown) => {
+      restoreConsole();
+      throw error;
+    });
+    // Catalog writes already under way finish before the process exits, and before the pools
+    // end, even if closing the server fails; the pools end even if draining fails.
+    const closeOnce = async () => {
+      try {
+        await started.close();
+      } finally {
+        try {
+          await cataloger.drain();
+        } finally {
+          await endPools();
+        }
+      }
+    };
+    let closing: Promise<void> | undefined;
+    return {
+      ...started,
+      /** The graph's stores, and with `STORE=postgres` its pools: for tests. */
+      stores,
+      pools,
+      // A second signal (SIGINT after SIGTERM) gets the first call's promise: running it again
+      // would end the pools under requests the first is still waiting for.
+      close: () => (closing ??= closeOnce()),
+    };
+  } catch (error) {
+    await endPools();
     throw error;
-  });
-  return {
-    ...started,
-    // Catalog writes already under way finish before the process exits.
-    close: async () => {
-      await started.close();
-      await cataloger.drain();
-    },
-  };
+  }
+}
+
+/** Logs an idle connection's error with its message only; the URL never reaches the log. */
+function poolErrorLogger(logger: Logger) {
+  return (error: Error) => logger.warn("store_connection_error", { message: error.message });
+}
+
+/**
+ * `pnpm migrate`: applies the pending PostgreSQL migrations and logs their names. It needs only
+ * `DATABASE_URL`, and is the only path that changes the schema.
+ */
+export async function migrateMain(env: Record<string, string | undefined> = process.env) {
+  const { databaseUrl } = parseMigrateConfig(env);
+  const logger = jsonLogger("info");
+  const pool = createPool(databaseUrl, poolErrorLogger(logger));
+  try {
+    const applied = await migrate(pool);
+    logger.info("migrated", { applied });
+  } finally {
+    await pool.end();
+  }
 }

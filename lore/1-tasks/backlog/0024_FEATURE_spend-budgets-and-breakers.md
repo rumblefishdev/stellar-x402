@@ -39,9 +39,20 @@ As a facilitator operator, I want fee spending capped and failing assets or reci
 - Decide what `SpendStore.commit` does for an id with no reservation (0017, Oskar's PR #11
   review): the in-memory store ignores it and the port says nothing. `onFinal` is its only
   caller and runs once at a final state, so it only happens after a bug or a lost store.
-  Resolving `false` lets the caller log it; inserting the spend needs the scopes.
+  Resolving `false` lets the caller log it; inserting the spend needs the scopes. 0022 now
+  resolves `false` (its decision 17); what the caller does with it is still this task's.
 - A lost `onFinal` call after a crash leaves the reservation counted until it ages out of the
   rolling window; acceptable for T1 (0017, Stan's PR #7 review).
+- Option from 0022's third review, to verify rather than a decision (a better approach may exist): `release` is an unconditional DELETE. Releasing a reservation that was already committed
+  (a duplicate final call, or a re-check that reclassifies a landed transaction) removes a fee
+  that was actually paid from every budget window. One option: a `committed` flag on
+  `spend_reservations`, with `release` deleting only `WHERE NOT committed` and `commit` returning
+  whether a row matched. This goes with the open decision on `commit` for an unknown id above,
+  and with 0009's "refuse a reserve after its release": a reservation status
+  (`reserved | committed | released`) kept as a row instead of deleting it would cover both.
+  0022 took the status (its decision 17): `state` is `reserved` or `committed`, `release` deletes
+  only `reserved` rows, and `commit` resolves `false` for an unknown id. Refusing a reserve after
+  its release is still open here; it can add `released` as a kept row.
 
 ## Acceptance Criteria
 
