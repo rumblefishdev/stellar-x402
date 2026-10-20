@@ -215,6 +215,14 @@ postgres outside testnet`.
   got `…_nonce_already_used` with that hash; two concurrent calls submitted one transaction
   (`7c3409f2…`), one `success` and one `…_already_settled`; `/verify` of the settled payment
   fails (`…_simulation_failed`).
+- **After the rebase onto 0022** (2026-10-20, on `e26c911`, fresh friendbot keys, `STORE=memory`):
+  the first run stopped at its first `/verify`, a 500. Its logs weren't kept, so the cause is not
+  known; the one earlier 500 (after the third review) was the testnet RPC missing upstream's 10 s
+  deadline. The second run passed all 5: the payment settled (`a00d6df2…`, `SUCCESS` on chain);
+  the same request again got `…_already_settled` with that hash; the same payload with other
+  requirements got `…_nonce_already_used` with that hash; two concurrent calls submitted one
+  transaction (`80db7432…`), one `success` and one `…_already_settled`; `/verify` of the settled
+  payment fails (`…_simulation_failed`).
 
 ## Issues encountered
 
