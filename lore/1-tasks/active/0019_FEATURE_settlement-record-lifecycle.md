@@ -2,7 +2,7 @@
 id: "0019"
 title: "Settlement records survive restarts"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0006", "0011"]
 related_tasks: ["0012", "0009", "0016", "0014"]
@@ -27,6 +27,10 @@ history:
     note: >
       Added Adam's (adamkoot) attempt/settlement state model from the PR #22 review as an open
       question.
+  - date: "2026-10-20"
+    status: active
+    who: okarcz
+    note: "Started after 0009 (PR #41), as the next Payments task."
 ---
 
 # Settlement records survive restarts
