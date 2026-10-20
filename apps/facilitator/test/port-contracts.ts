@@ -75,6 +75,17 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       expect(await store.get(s.key)).toEqual(record);
     });
 
+    it("returns the whole record from transition, findByHash and listNonFinal", async () => {
+      const s = settlement("1");
+      await store.claim(s);
+      await store.addHash(s.key, "h1", 2_000);
+      const update = { state: "pending", channel: "GCHANNEL", updatedAt: 3_000 } as const;
+      const pending = { ...s, ...update, hashes: ["h1"] };
+      expect(await store.transition(s.key, "signed", update)).toEqual(pending);
+      expect(await store.findByHash("h1")).toEqual(pending);
+      expect(await store.listNonFinal("stellar:testnet")).toEqual([pending]);
+    });
+
     it("keeps every hash, finds the record by any of them, and moves claimed to signed", async () => {
       const { key } = settlement("1");
       await store.claim(settlement("1"));

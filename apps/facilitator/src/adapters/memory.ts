@@ -185,7 +185,7 @@ interface Reservation {
   amount: bigint;
   at: number;
   scopes: SpendScope[];
-  committed: boolean;
+  state: "reserved" | "committed";
 }
 
 export class MemorySpendStore implements SpendStore {
@@ -207,7 +207,7 @@ export class MemorySpendStore implements SpendStore {
       amount,
       at: now,
       scopes: limits.map((limit) => limit.scope),
-      committed: false,
+      state: "reserved",
     });
     return { reserved: true };
   }
@@ -216,12 +216,12 @@ export class MemorySpendStore implements SpendStore {
     assertStroops(feeCharged, "feeCharged");
     const reservation = this.reservations.get(id);
     if (!reservation) return false;
-    Object.assign(reservation, { amount: feeCharged, at: now, committed: true });
+    Object.assign(reservation, { amount: feeCharged, at: now, state: "committed" });
     return true;
   }
 
   async release(id: string): Promise<void> {
-    if (!this.reservations.get(id)?.committed) this.reservations.delete(id);
+    if (this.reservations.get(id)?.state === "reserved") this.reservations.delete(id);
   }
 
   async used(scope: SpendScope, windowMs: number, now: number): Promise<bigint> {

@@ -74,12 +74,13 @@ CREATE TABLE rate_limits (
   reset_at bigint NOT NULL
 );
 
--- committed: the amount is a fee paid on-chain, which release keeps.
+-- A committed reservation's amount is a fee paid on-chain, which release keeps. A status rather
+-- than a flag, so refusing a reserve after its release (0024) can add 'released'.
 CREATE TABLE spend_reservations (
   id text PRIMARY KEY,
   amount bigint NOT NULL,
   at bigint NOT NULL,
-  committed boolean NOT NULL DEFAULT false
+  state text NOT NULL DEFAULT 'reserved' CHECK (state IN ('reserved', 'committed'))
 );
 CREATE INDEX spend_reservations_at ON spend_reservations (at);
 CREATE TABLE spend_reservation_scopes (
