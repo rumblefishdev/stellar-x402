@@ -1,7 +1,7 @@
 # ADR 0012: Keep all facilitator state in one RDS for PostgreSQL database
 
 - Status: accepted
-- Date: 2026-10-12
+- Date: 2026-10-12, amended 2026-10-20 (task 0022: a pool for `reserve`; 0026 measures)
 
 ## Context
 
@@ -41,7 +41,8 @@ Fargate in eu-central-1:
   - Auto minor version upgrade is off on mainnet. Upgrades go through Blue/Green in a planned
     window.
 - **Access.**
-  - The `pg` driver, a small fixed pool per ECS task, and no RDS Proxy.
+  - The `pg` driver, small fixed pools per ECS task, and no RDS Proxy: 10 connections, plus 3 for
+    `reserve`, so reservations queued on the global scope's lock can't starve the other stores.
   - TLS with the RDS CA bundle.
   - The database credentials are an SSM Parameter Store SecureString under `/x402/<network>/db`,
     injected like `FACILITATOR_SECRET`.
@@ -128,8 +129,9 @@ Fargate in eu-central-1:
 - **Throughput.**
   - `reserve` takes about seven round trips and holds the global scope's row lock, so reservations
     are serialized across ECS tasks.
-  - Old rate-limit windows and spend reservations are pruned.
-  - Task 0022 measures the full settle path and `addHash` on the testnet instance.
+  - Old rate-limit windows and spend reservations are pruned (task 0042).
+  - Task 0026 measures the full settle path and `addHash` on the testnet instance it creates;
+    0022 had no instance to measure on.
 - **Task 0022 builds the adapters.** CI runs the contract suites against a PostgreSQL service
   container.
 - **Two contract questions remain for the team:**
