@@ -89,10 +89,12 @@ function hostOf(url: string): string | undefined {
 /**
  * Each URL in `text` redacted, so an API key stays out of the logs: a URL that starts with an entry
  * of `rpcUrls` becomes that entry's {@link rpcEndpointName}, one on an entry's host the names of
- * every entry on that host, and any other URL its host.
+ * every entry on that host, and any other URL its host. A `file:` URL is kept: it is a stack
+ * trace's code location, and carries no key.
  */
 export function redactUrls(text: string, rpcUrls: readonly string[] = []): string {
   return text.replace(/\b[a-z][a-z\d+.-]*:\/\/[^\s"'<>]+/gi, (url) => {
+    if (/^file:/i.test(url)) return url;
     const host = hostOf(url);
     if (host === undefined) return "[url]";
     let prefix = -1;

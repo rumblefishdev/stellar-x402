@@ -131,6 +131,20 @@ describe("POST /settle", () => {
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
   });
 
+  /** `request` with `extensions.deep`: `levels` arrays, the innermost at body depth `levels + 2`. */
+  const nested = (levels: number) => {
+    let deep: unknown = 0;
+    for (let i = 0; i < levels; i++) deep = [deep];
+    return { ...request, paymentPayload: { ...paymentPayload, extensions: { deep } } };
+  };
+
+  it("settles a body nested to MAX_BODY_DEPTH, and refuses one level deeper", async () => {
+    settle.mockResolvedValue({ response: success, record });
+    expect((await post(nested(MAX_BODY_DEPTH - 3))).status).toBe(200);
+    expect((await post(nested(MAX_BODY_DEPTH - 2))).status).toBe(400);
+    expect(settle).toHaveBeenCalledTimes(1);
+  });
+
   it("answers 400 for a body nested deeper than MAX_BODY_DEPTH, without settling", async () => {
     let deep: unknown = 0;
     for (let i = 0; i < MAX_BODY_DEPTH; i++) deep = [deep];

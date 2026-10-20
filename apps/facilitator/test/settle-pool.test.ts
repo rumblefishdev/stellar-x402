@@ -136,6 +136,16 @@ describe("main()'s /settle wiring, with the real pool", () => {
     const { response } = await settle(payload(fake.ledger + 30), requirements);
     expect(response).toMatchObject({ success: true });
   });
+
+  it("ends a call at SETTLE_BUDGET_MS when it is shorter than the default", async () => {
+    // 1.2 s: neither the 30 s default nor SETTLE_TIMEOUT_MS, so neither can stand in for it.
+    const { settle, fake } = setup({ SETTLE_TIMEOUT_MS: "1000", SETTLE_BUDGET_MS: "1200" });
+    fake.accountDelayMs = 3_000;
+    const started = Date.now();
+    const { response } = await settle(payload(fake.ledger + 30), requirements);
+    expect(response).toMatchObject({ success: false, errorReason: SETTLE_REASONS.timeout });
+    expect(Date.now() - started).toBeLessThan(2_500);
+  });
 });
 
 describe("main()'s composition (compose)", () => {

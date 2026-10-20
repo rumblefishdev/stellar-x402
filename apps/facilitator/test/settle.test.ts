@@ -289,7 +289,8 @@ describe("createSettler", () => {
     );
   });
 
-  it("submits once for concurrent calls with one settlement key, and answers success once", async () => {
+  it("submits once for concurrent calls with one settlement key, and answers success once, to whichever marks it", async () => {
+    // On memory the submitting call marks first; on PostgreSQL a repeat may (see `respond`).
     const { settle, submit, hooks, metrics } = setup(async (opts) => {
       await delay(20);
       return landing()(opts);
@@ -1250,6 +1251,27 @@ describe("createSettler", () => {
       await delay(5);
       const repeat = settle(payload(), requirements);
       setTimeout(sign, 60);
+      const answers = [(await repeat).response, (await first).response];
+      expect(answers.filter((response) => response.success)).toHaveLength(1);
+      expect(answers).toContainEqual(alreadySettled);
+      expect(submit).toHaveBeenCalledTimes(1);
+    });
+
+    it("counts a repeat's settle timeout from the hash it first sees, not from its start", async () => {
+      // Signed at 60 ms, landed at 75 ms: past `settleTimeoutMs` from the repeat's start (5 + 20),
+      // within it from the hash (60 + 20).
+      const { settle, submit } = setup(
+        async (opts) => {
+          await delay(60);
+          await opts.onSigned?.(HASH);
+          await delay(15);
+          return result();
+        },
+        { settleTimeoutMs: 20, budgetMs: 2_000 },
+      );
+      const first = settle(payload(), requirements);
+      await delay(5);
+      const repeat = settle(payload(), requirements);
       const answers = [(await repeat).response, (await first).response];
       expect(answers.filter((response) => response.success)).toHaveLength(1);
       expect(answers).toContainEqual(alreadySettled);

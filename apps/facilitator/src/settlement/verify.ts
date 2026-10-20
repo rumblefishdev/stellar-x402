@@ -54,6 +54,13 @@ export const PAYER_AUTH_REASON = "invalid_exact_stellar_payload_payer_auth_entri
 export const UNSUPPORTED_CREDENTIAL_REASON =
   "invalid_exact_stellar_payload_unsupported_credential_type";
 
+/**
+ * The auth expires at or past the last ledger the pool can bound an envelope by: `/settle` passes
+ * it as `maxLedger`, and the envelope's bound (`maxLedger + 1`) is a uint32.
+ */
+export const EXPIRATION_TOO_FAR_REASON = "invalid_exact_stellar_signature_expiration_too_far";
+const MAX_EXPIRATION_LEDGER = 2 ** 32 - 2;
+
 /** Upstream's code for an exception inside its `verify()`. */
 const UNEXPECTED_VERIFY_ERROR = "unexpected_verify_error";
 
@@ -195,6 +202,15 @@ export function createChecker(deps: VerifierDeps): Check {
           upstream.payer,
           `auth expires at ledger ${expiration}, ${expiration - current} ledgers after ledger ` +
             `${current}; at least ${deps.minValidityLedgers} are required${hint}`,
+        ),
+      };
+    }
+    if (expiration > MAX_EXPIRATION_LEDGER) {
+      return {
+        response: invalid(
+          EXPIRATION_TOO_FAR_REASON,
+          upstream.payer,
+          `auth expires at ledger ${expiration}; it must be at most ${MAX_EXPIRATION_LEDGER}`,
         ),
       };
     }

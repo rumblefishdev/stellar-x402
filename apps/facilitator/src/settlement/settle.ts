@@ -349,6 +349,9 @@ export function createSettler(deps: SettlerDeps): Settle {
    * already left marks nothing, so the client's retry still gets the success. When the store
    * can't mark, the payment still landed, so the caller gets the success (ADR 0006): after the
    * store recovers, or on another instance, a repeat may get a second one until 0019.
+   * Whoever marks first gets the success, not necessarily the call that submitted: on PostgreSQL a
+   * repeat's poll can read `success` between the submitter's `transition` and its mark. Still one
+   * success and one `onSuccess`.
    */
   const respond = async (
     record: SettlementRecord,
@@ -561,7 +564,8 @@ export function createSettler(deps: SettlerDeps): Settle {
 
   /**
    * A repeat call: the stored outcome, waiting a while for a record that isn't final. A record
-   * with a hash waits up to `settleTimeoutMs`. One without can be signed only until the first
+   * with a hash waits up to `settleTimeoutMs`, counted from when this call first sees a hash, so a
+   * repeat that waited for the signing still waits for the landing. One without can be signed only until the first
    * call's budget, which began at the claim: past it the repeat ends the record itself
    * ({@link endUnsigned}), so it answers `…_timeout` only for what will never be sent. A repeat
    * whose own budget ends before the first call's answers `settlement_pending` with no hash and
@@ -593,13 +597,17 @@ export function createSettler(deps: SettlerDeps): Settle {
     }
     let record = existing;
     const ownEnd = startedAt + deps.budgetMs;
-    const pendingUntil = Math.min(now() + deps.settleTimeoutMs, ownEnd);
     // The first call may sign until its own budget ends. A repeat that lost the claim began
     // before it, so its own budget can end first: it stops waiting then, but leaves the record to
     // the first call, which may still reserve or sign.
     const firstEnd = existing.createdAt + deps.budgetMs;
     const unsignedUntil = Math.min(firstEnd, ownEnd);
-    const until = () => (record.hashes.length > 0 ? pendingUntil : unsignedUntil);
+    let hashSeenAt: number | undefined;
+    const until = () => {
+      if (record.hashes.length === 0) return unsignedUntil;
+      hashSeenAt ??= now();
+      return Math.min(hashSeenAt + deps.settleTimeoutMs, ownEnd);
+    };
     while (!isFinal(record) && now() < until() && !signal?.aborted) {
       record = (await nextRead(key)) ?? record;
     }
