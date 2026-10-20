@@ -15,6 +15,10 @@ history:
     status: backlog
     who: claude
     note: "Created by 0012 from M1 Story 1.6 (Platform lane)."
+  - date: "2026-10-20"
+    status: backlog
+    who: akot
+    note: "0022 added `STORE` and `DATABASE_URL` to the env examples; the rename stays here."
 ---
 
 # `/supported` and startup channel checks
@@ -39,6 +43,9 @@ As a resource server, and as the operator, I want `GET /supported` to describe e
 - From 0017: decide with 0009 how facilitator tests get `FakeRpc` (it sits in
   `packages/signer-pool/test/` and isn't exported; a `./testing` subpath export is the
   suggestion). The 0017 boot test runs without one, since nothing in its graph calls RPC.
+- From 0022: both env examples now carry `STORE` and `DATABASE_URL` (pubnet needs
+  `STORE=postgres`). They still use `FACILITATOR_SIGNER_SECRETS` and `FEE_BUMP_SIGNER_SECRET`,
+  which the config doesn't read; renaming them to `FACILITATOR_SECRET` and `CHANNELS` stays here.
 
 ## Acceptance Criteria
 
