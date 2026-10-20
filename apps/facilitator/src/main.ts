@@ -229,6 +229,7 @@ export function compose(
     deps: {
       config,
       logger,
+      metrics,
       stores,
       verify: createVerifier(checks),
       settle,
