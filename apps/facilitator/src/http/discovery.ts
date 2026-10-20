@@ -9,8 +9,9 @@ import type { CatalogQuery, CatalogStore } from "../ports/index.js";
 /** AD-20: `limit` is bounded, with a fixed default. 100 is every known x402 facilitator's max. */
 export const DISCOVERY_LIMIT = { default: 20, max: 100 } as const;
 /**
- * Deeper pages are refused: the count and the sort behind `offset` grow with the catalog, and the
- * upstream contract asks for an exact `total`, so the offset is what gets bounded.
+ * Deeper pages are refused, so a page never skips more than this many matches. The exact `total`
+ * upstream's contract asks for is counted on an index whatever the offset; entries past the cap
+ * are reached through a filter, `payTo` above all.
  */
 export const MAX_OFFSET = 10_000;
 /** A `G…` address is 56 characters and a CAIP-2 id a few dozen; anything longer is noise. */
@@ -26,10 +27,9 @@ const KNOWN_PARAMS = ["type", "payTo", "scheme", "network", "extensions", "limit
  */
 const text = z
   .string()
-  .min(1)
   .max(MAX_VALUE_LENGTH)
   .regex(/^\P{Cc}*$/u);
-/** Plain decimal digits only: `Number()` would read `""` as 0, `0x10` as 16 and `1e3` as 1000. */
+/** Plain decimal digits only: `Number()` would read `" "` as 0, `0x10` as 16 and `1e3` as 1000. */
 const count = z
   .string()
   .regex(/^\d{1,9}$/)
@@ -42,7 +42,8 @@ const QUERY = z.object({
   // CAIP-2: a malformed id is a 400; a well-formed one we don't serve matches nothing.
   network: text.regex(/^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}$/).optional(),
   extensions: text.optional(),
-  limit: count.pipe(z.number().min(1)).optional(),
+  // 0 asks for the total alone.
+  limit: count.optional(),
   offset: count.pipe(z.number().max(MAX_OFFSET)).optional(),
 });
 
@@ -59,10 +60,12 @@ export type DiscoveryQuery =
  * Parses `/discovery/resources`' query string (AD-20) at the HTTP adapter, so the store only sees
  * a typed `CatalogQuery`. A `limit` above the max is clamped, and the page reports the limit it
  * used. Unknown parameters are ignored rather than refused: upstream's client sends whatever its
- * version knows, and a 400 would fail every call it makes once upstream adds a filter.
+ * version knows, and a 400 would fail every call it makes once upstream adds a filter. An empty
+ * value counts as absent, since that client sends `?type=` for `type: ""`.
  */
 export function parseDiscoveryQuery(raw: Record<string, unknown>): DiscoveryQuery {
-  const parsed = QUERY.safeParse(raw);
+  const given = Object.fromEntries(Object.entries(raw).filter(([, value]) => value !== ""));
+  const parsed = QUERY.safeParse(given);
   if (!parsed.success) return { kind: "invalid", param: String(parsed.error.issues[0]!.path[0]) };
   const { scheme, network, limit: asked, offset = 0, ...filters } = parsed.data;
   const limit = Math.min(asked ?? DISCOVERY_LIMIT.default, DISCOVERY_LIMIT.max);

@@ -17,6 +17,12 @@ import type { Verify } from "../src/settlement/verify.js";
 describe("parseDiscoveryQuery", () => {
   it.each([
     ["no params", {}, { kind: "query", limit: 20, offset: 0 }],
+    ["limit=0, for the total alone", { limit: "0" }, { kind: "query", limit: 0 }],
+    [
+      "empty values, as absent",
+      { type: "", payTo: "", network: "", limit: "", offset: "" },
+      { kind: "query", query: { limit: 20, offset: 0 }, ignored: [] },
+    ],
     ["limit and offset", { limit: "5", offset: "10" }, { kind: "query", limit: 5, offset: 10 }],
     ["a limit above the max, clamped", { limit: "101" }, { kind: "query", limit: 100 }],
     ["the deepest offset", { offset: String(MAX_OFFSET) }, { kind: "query", offset: MAX_OFFSET }],
@@ -29,19 +35,16 @@ describe("parseDiscoveryQuery", () => {
   });
 
   it.each([
-    ["limit=0", { limit: "0" }, "limit"],
     ["a negative limit", { limit: "-1" }, "limit"],
     ["a non-numeric limit", { limit: "abc" }, "limit"],
     ["a fractional limit", { limit: "1.5" }, "limit"],
     ["an exponent", { limit: "1e3" }, "limit"],
     ["hex", { limit: "0x10" }, "limit"],
-    ["an empty limit", { limit: "" }, "limit"],
     ["a negative offset", { offset: "-1" }, "offset"],
     ["an offset past the cap", { offset: String(MAX_OFFSET + 1) }, "offset"],
     ["a repeated param", { type: ["mcp", "http"] }, "type"],
     ["a NUL", { payTo: "G\u0000B" }, "payTo"],
     ["a control character", { type: "http\n" }, "type"],
-    ["an empty filter", { type: "" }, "type"],
     ["a value over 256 characters", { extensions: "x".repeat(257) }, "extensions"],
     ["a network that isn't CAIP-2", { network: "pubnet" }, "network"],
   ])("refuses %s, naming the param", (_name, raw, param) => {
@@ -195,6 +198,12 @@ describe("GET /discovery/resources", () => {
     });
   });
 
+  it("reads an empty value as absent, and limit=0 as the total alone", async () => {
+    const { response, body } = await list("type=&payTo=&limit=0");
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ items: [], pagination: { limit: 0, offset: 0, total: N } });
+  });
+
   it("clamps a limit above the max and reports the limit it used", async () => {
     expect((await list("limit=101")).body.pagination.limit).toBe(DISCOVERY_LIMIT.max);
   });
@@ -240,6 +249,9 @@ describe("GET /discovery/resources", () => {
       scheme: "exact",
     });
     expect(page.pagination).toEqual({ limit: 3, offset: 0, total: matching((i) => i % 4 === 0) });
+    // It sends `?type=` for an empty string, and `limit: 0` is in its type.
+    const count = await client.extensions.bazaar.listResources({ type: "", limit: 0 });
+    expect(count).toMatchObject({ items: [], pagination: { limit: 0, total: N } });
     await expect(client.extensions.bazaar.listResources({ limit: -1 })).rejects.toThrow(/400/);
   });
 });
