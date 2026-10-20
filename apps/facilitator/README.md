@@ -11,8 +11,8 @@ discovery routes. Design: [the M1 spine](../../docs/architecture/m1-spine.md) (A
   and the wait for a channel included. It stays below the seller's own 90 s timeout.
 - `SETTLE_TIMEOUT_MS` (20 s, or the budget when that is shorter; at least 1 s, at most the
   budget): how long a repeat of a sent payment waits for it to turn final.
-- `NETWORK=stellar:pubnet` refuses to start with `STORE=memory`: a restart would lose the
-  settlement records, and there are no spend budgets or channel lease yet (0022).
+- `NETWORK=stellar:pubnet` refuses to start, whatever the store: `/settle` would spend there
+  with no spend budgets (0024), no rate limits (0023) and no channel lease (0025) yet.
 
 ## `/settle` answers
 
