@@ -560,8 +560,15 @@ export class PostgresSpendStore implements SpendStore {
     return rows[0]!.failures;
   }
 
+  /**
+   * Writes only when there are failures to reset, so the usual call, with none, doesn't queue on
+   * a row `reserve` holds `FOR UPDATE` while keeping a main-pool connection.
+   */
   async recordSuccess(scope: SpendScope): Promise<void> {
-    await this.pool.query("UPDATE spend_scopes SET failures = 0 WHERE scope = $1", [scope]);
+    await this.pool.query(
+      "UPDATE spend_scopes SET failures = 0 WHERE scope = $1 AND failures <> 0",
+      [scope],
+    );
   }
 
   async openBreaker(scope: SpendScope, until: number): Promise<void> {

@@ -69,7 +69,7 @@ history:
     note: >
       Third review fixes (decisions 16 to 21): a pool for the rate limiter, a committed fee survives
       `release`, an idempotent `close()`, catalog filter columns, `assertStroops`, and new contract
-      and lock-wait cases. 196 facilitator tests (64 on PostgreSQL). Closes after PR merge.
+      and lock-wait cases. 197 facilitator tests (65 on PostgreSQL). Closes after PR merge.
 ---
 
 # Durable adapters for the four store ports
@@ -154,10 +154,10 @@ As a facilitator operator, I want durable implementations of the four store port
   as an array or a string, and a hash added to a pending record; after the third review, whole
   claimed records, omitted fields, scope isolation, commit stamps, a committed fee through a
   release, stroop ranges and filters after an update. Memory runs 46 cases and
-  PostgreSQL 64, which add the migration, failed-migration, lock-wait, dropped-connection,
+  PostgreSQL 65, which add the migration, failed-migration, lock-wait, dropped-connection,
   isolation, failed-`SET`, failed-`ROLLBACK`, pool-starvation (reservations and hits), lock-timeout,
-  `main()` and double-`close()` cases. The facilitator has 196 tests in all, after
-  merging develop. Before the PR, a final review by two independent reviewers was
+  `main()`, double-`close()` and `recordSuccess`-behind-a-lock cases. The facilitator has 197 tests
+  in all, after merging develop. Before the PR, a final review by two independent reviewers was
   reconciled into one list.
 
 ## Design Decisions
@@ -267,6 +267,12 @@ As a facilitator operator, I want durable implementations of the four store port
     320 ms, the same sums. One round trip per limit is the cost. It is still linear in the rows
     the scope holds, so 0050 (pruning, and an indexed or bucketed sum) is needed before mainnet.
     Found in Karol's review, which estimated 25 ms and 0.5 s; measured on PostgreSQL 18.3.
+23. **`recordSuccess` writes only when there are failures to reset** (`AND failures <> 0`). It runs
+    on the main pool, and an unconditional reset queued on a scope row `reserve` holds `FOR UPDATE`,
+    so once 0024 calls it after every success a burst of them could starve `claim` and `addHash`.
+    A row with no failures now fails the condition on its visible version and is skipped without
+    waiting. Found in Staszek's review; `recordFailure` and `openBreaker` still take the lock, less
+    often, which 0024 can revisit.
 
 ## Issues Encountered
 
@@ -297,7 +303,7 @@ As a facilitator operator, I want durable implementations of the four store port
   their signer variables is 0020's.
 - For 0026: measure `addHash` and the full settle path on the testnet database, which 0026
   creates; 0022 had no instance to measure on. ADR 0012's RDS, and with it the RDS CA item, may
-  change with the hosting move to Hetzner (PR #48).
+  change with the hosting move to Hetzner (PR #24).
 - For 0009 and the routes: map `HashConflictError`; validate `\u0000` in payloads and resources, and
   negative `limit`/`offset`.
 - For 0009 and 0024: `reserve` can reject when the store is busy or unreachable (`55P03` after the

@@ -267,6 +267,17 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     });
   });
 
+  it("resets no failures without waiting on a reservation's scope lock", async () => {
+    const { spend } = await stores();
+    await pool.query("INSERT INTO spend_scopes (scope) VALUES ('asset:CX')");
+    await holding(async (client) => {
+      await client.query("SELECT scope FROM spend_scopes WHERE scope = 'asset:CX' FOR UPDATE");
+      const reset = spend.recordSuccess("asset:CX").then(() => "reset");
+      const waited = new Promise((resolve) => setTimeout(() => resolve("waited"), 1_000));
+      expect(await Promise.race([reset, waited])).toBe("reset");
+    });
+  });
+
   it("runs every statement at Read Committed under a stricter server default", async () => {
     await stores();
     const strict = poolFor(schema, 20, "-c default_transaction_isolation=serializable");
