@@ -340,6 +340,28 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     }
   });
 
+  it("rolls back a whole run when one migration fails, then applies it again", async () => {
+    const fresh = `${schema}_fail`;
+    await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
+    await pool.query(`CREATE SCHEMA ${fresh}`);
+    const migrating = poolFor(fresh, 1);
+    const first = { name: "0001_first", sql: "CREATE TABLE first (id int)" };
+    const broken = { name: "0002_broken", sql: "SELECT 1 / 0" };
+    try {
+      await expect(migrate(migrating, 0, [first, broken])).rejects.toThrow(/division by zero/);
+      const { rows } = await pool.query<{ tablename: string }>(
+        "SELECT tablename FROM pg_tables WHERE schemaname = $1",
+        [fresh],
+      );
+      // Neither the first migration's table nor `schema_migrations` survived.
+      expect(rows).toEqual([]);
+      expect(await migrate(migrating, 0, [first])).toEqual(["0001_first"]);
+    } finally {
+      await migrating.end();
+      await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
+    }
+  });
+
   it("stores the catalog key version", async () => {
     const { catalog } = await stores();
     await catalog.upsert({

@@ -99,9 +99,13 @@ const MIGRATE_LOCK = 0x78343032; // "x402"
  * Applies the pending `MIGRATIONS` in order, in one Read Committed transaction, and resolves the
  * names it applied (`[]` when the schema is current). Any failure rolls back the whole run.
  * `now` stamps `applied_at`. `pool` comes from `createPool`, so a lost connection fails the run
- * instead of crashing the process.
+ * instead of crashing the process. Tests pass their own `migrations`.
  */
-export async function migrate(pool: pg.Pool, now = Date.now()): Promise<string[]> {
+export async function migrate(
+  pool: pg.Pool,
+  now = Date.now(),
+  migrations: readonly { name: string; sql: string }[] = MIGRATIONS,
+): Promise<string[]> {
   const client = await pool.connect();
   let broken: Error | undefined;
   try {
@@ -113,7 +117,7 @@ export async function migrate(pool: pg.Pool, now = Date.now()): Promise<string[]
     );
     const { rows } = await client.query<{ name: string }>("SELECT name FROM schema_migrations");
     const applied = new Set(rows.map((row) => row.name));
-    const pending = MIGRATIONS.filter((migration) => !applied.has(migration.name));
+    const pending = migrations.filter((migration) => !applied.has(migration.name));
     for (const migration of pending) {
       await client.query(migration.sql);
       await client.query("INSERT INTO schema_migrations (name, applied_at) VALUES ($1, $2)", [
