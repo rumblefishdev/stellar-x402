@@ -2,7 +2,7 @@
 id: "0032"
 title: "List resources in /discovery/resources"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0008"]
 related_tasks: ["0012", "0031", "0017", "0028"]
@@ -15,6 +15,10 @@ history:
     status: backlog
     who: claude
     note: "Created by 0012 from M1 Story 4.3 (Discovery lane)."
+  - date: "2026-10-20"
+    status: active
+    who: akot
+    note: "Started by the Discovery lane after PR #30 (0022) merged the durable CatalogStore."
 ---
 
 # List resources in `/discovery/resources`
