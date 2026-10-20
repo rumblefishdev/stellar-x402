@@ -14,7 +14,7 @@ export default defineConfig([
   tseslint.configs.recommended,
   {
     // `<package>/testing` subpaths hold test helpers (e.g. `FakeRpc`); they ship in `dist` but
-    // must never reach production code.
+    // must never reach production code, by package subpath or by relative path.
     files: ["apps/*/src/**/*.ts", "packages/*/src/**/*.ts"],
     ignores: ["packages/*/src/testing.ts"],
     rules: {
@@ -23,7 +23,7 @@ export default defineConfig([
         {
           patterns: [
             {
-              group: ["@stellar-x402/*/testing"],
+              group: ["@stellar-x402/*/testing", "**/testing", "**/testing.js"],
               message: "Test helpers are for tests only.",
             },
           ],
