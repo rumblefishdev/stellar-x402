@@ -15,6 +15,10 @@ history:
     status: backlog
     who: claude
     note: "Created by 0012 from M1 Story 2.5 (Platform lane)."
+  - date: "2026-10-20"
+    status: backlog
+    who: okarcz
+    note: "Added where RPC_URLS lives and keeps its old values, from Stan's PR #41 review."
 ---
 
 # Public testnet deployment
@@ -100,6 +104,14 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     known migration applied. Otherwise a rollback to an earlier SHA refuses to start.
 - From 0022: measure `addHash` and the full settle path on the testnet database this task creates;
   0022 had no instance to measure on (ADR 0012's Consequences).
+- From 0009 (PR #41, decision 47): decide where `RPC_URLS` lives on the server and keep its old
+  values.
+  - A keyed RPC URL is a secret (ADR 0011), but the Hetzner move left its store open: ADR 0013
+    covers only the signing key.
+  - Logs name an endpoint `RPC_URLS[i]#<fingerprint>` (the first 8 hex digits of the entry's
+    SHA-256), and `RPC_URLS[i]` can mean another URL after a redeploy. Matching an old line to a
+    URL needs that URL: a store with versions, or each change recorded in the deploy history. A
+    plain env file that is edited in place loses it.
 
 ## Acceptance Criteria
 
