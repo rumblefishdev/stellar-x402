@@ -115,9 +115,9 @@ importers:
 
   conformance:
     dependencies:
-      '@stellar-x402/config':
-        specifier: workspace:*
-        version: link:../packages/config
+      '@stellar/stellar-sdk':
+        specifier: ^16.3.0
+        version: 16.3.0
 
   contracts/upto-proxy/e2e:
     dependencies:
