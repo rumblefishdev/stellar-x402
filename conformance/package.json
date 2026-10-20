@@ -2,17 +2,16 @@
   "name": "@stellar-x402/conformance",
   "version": "0.0.0",
   "private": true,
-  "description": "Wire-level conformance runs against canonical x402 clients and the report generator",
+  "description": "The Tranche 1 gate: the unmodified x402 e2e suite against a facilitator, through an external proxy (ADR 0009)",
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests",
-    "clean": "rm -rf dist .turbo"
+    "test": "vitest run",
+    "gate": "tsx src/gate.ts",
+    "clean": "rm -rf .turbo"
   },
   "dependencies": {
-    "@stellar-x402/config": "workspace:*"
-  },
-  "devDependencies": {}
+    "@stellar/stellar-sdk": "^16.3.0"
+  }
 }

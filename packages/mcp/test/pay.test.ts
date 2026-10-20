@@ -276,7 +276,9 @@ describe("call_paid_http", () => {
     ["no answer in time", "slow"],
     ["an error status without a settlement", "error"],
   ] as const)("returns payment_unknown when the paid retry gets %s", async (_, settle) => {
-    await reconnect({}, { timeoutMs: 300 });
+    // 1.5 s, not 300 ms: the unpaid request, signing and the paid retry must reach the seller before
+    // the deadline, or the retry is cut off on its way and the seller records no payment (slow CI).
+    await reconnect({}, { timeoutMs: 1_500 });
     seller.settle = settle;
     expect((await pay()).error.code).toBe("payment_unknown");
     expect(seller.payments).toHaveLength(1);

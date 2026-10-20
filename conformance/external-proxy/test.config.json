@@ -1,0 +1,12 @@
+{
+  "name": "stellar-x402",
+  "type": "facilitator",
+  "language": "typescript",
+  "protocolFamilies": ["stellar"],
+  "schemes": ["exact"],
+  "x402Versions": [2],
+  "extensions": ["bazaar"],
+  "environment": {
+    "required": ["GATE_FACILITATOR_URL"]
+  }
+}
