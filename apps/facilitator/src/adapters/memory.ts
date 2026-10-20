@@ -25,6 +25,7 @@ import {
 import {
   assertLedger,
   assertStroops,
+  extensionKeys,
   isFinal,
   isForward,
   mergeCatalogEntry,
@@ -154,13 +155,7 @@ export class MemoryCatalogStore implements CatalogStore {
         (type === undefined || resource.type === type) &&
         (payTo === undefined || key.payTo === payTo) &&
         (network === undefined || key.network === network) &&
-        // An own key with a value of a plain object: not a prototype key, not one JSON storage
-        // would drop, and not an array's index (PostgreSQL's `jsonb_typeof` guard).
-        (extensions === undefined ||
-          (typeof resource.extensions === "object" &&
-            !Array.isArray(resource.extensions) &&
-            resource.extensions[extensions] !== undefined &&
-            Object.hasOwn(resource.extensions, extensions))),
+        (extensions === undefined || extensionKeys(resource).includes(extensions)),
     );
     return {
       items: matches.slice(offset, offset + limit).map(({ resource }) => structuredClone(resource)),

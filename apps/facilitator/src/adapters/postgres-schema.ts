@@ -51,7 +51,8 @@ CREATE TABLE leases (
   expires_at bigint NOT NULL
 );
 
--- seq is the insertion order the listing pages by; an update keeps it.
+-- seq is the insertion order the listing pages by; an update keeps it. type and extension_keys
+-- copy the resource's filter fields, so a listing filters without reading resource.
 CREATE TABLE catalog (
   seq bigint GENERATED ALWAYS AS IDENTITY UNIQUE,
   network text NOT NULL,
@@ -61,8 +62,11 @@ CREATE TABLE catalog (
   key_version integer NOT NULL,
   ledger bigint NOT NULL CHECK (ledger >= 0),
   resource jsonb NOT NULL,
+  type text,
+  extension_keys text[] NOT NULL,
   PRIMARY KEY (network, pay_to, method, resource_url)
 );
+CREATE INDEX catalog_extension_keys ON catalog USING gin (extension_keys);
 
 CREATE TABLE rate_limits (
   key text PRIMARY KEY,

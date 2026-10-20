@@ -678,6 +678,21 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
       expect(await store.list({ limit: 10, offset: 5 })).toEqual({ items: [], total: 3 });
     });
 
+    it("filters on the stored fields after an update, and after a stale write", async () => {
+      const url = "https://seller.example/data";
+      const at = (ledger: number, overrides: Partial<DiscoveryResource>) =>
+        upsert({ key: key(url), resource: resource(url, overrides) }, ledger);
+      await at(10, { type: "http", extensions: { bazaar: {} } });
+      await at(10, { type: "mcp" });
+      // A write from an earlier ledger keeps the stored fields, and with them the filters.
+      expect(await at(9, { type: "http", extensions: { bazaar: {} } })).toBe("stale");
+      const total = async (query: Omit<Parameters<CatalogStore["list"]>[0], "limit" | "offset">) =>
+        (await store.list({ ...query, limit: 10, offset: 0 })).total;
+      expect(await total({ type: "mcp" })).toBe(1);
+      expect(await total({ type: "http" })).toBe(0);
+      expect(await total({ extensions: "bazaar" })).toBe(0);
+    });
+
     it("matches an extension only as an object's key, not an array element or a string", async () => {
       const entries = [
         ["https://object.example", { bazaar: {} }],

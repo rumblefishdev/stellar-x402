@@ -1,4 +1,5 @@
 import type { PaymentRequirements } from "@x402/core/types";
+import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import {
   FINAL_SETTLEMENT_STATES,
   type CatalogEntry,
@@ -54,6 +55,16 @@ export function assertStroops(amount: bigint, name: string): void {
 /** The end of the fixed rate-limit window of `windowMs` that contains `now`. */
 export const windowEnd = (now: number, windowMs: number): number =>
   (Math.floor(now / windowMs) + 1) * windowMs;
+
+/**
+ * The keys an `extensions` filter matches: the own keys of `resource.extensions` that have a
+ * value, when it is a plain object. JSON storage drops a key without a value, and an array's index
+ * is not an extension key.
+ */
+export function extensionKeys({ extensions }: DiscoveryResource): string[] {
+  if (typeof extensions !== "object" || extensions === null || Array.isArray(extensions)) return [];
+  return Object.keys(extensions).filter((key) => extensions[key] !== undefined);
+}
 
 const requirementKey = (r: PaymentRequirements) => `${r.scheme}|${r.network}|${r.asset}`;
 
