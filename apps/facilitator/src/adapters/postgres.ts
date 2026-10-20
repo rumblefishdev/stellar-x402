@@ -459,6 +459,11 @@ export class PostgresRateLimitStore implements RateLimitStore {
  */
 const RESERVE_LOCK_TIMEOUT = "2s";
 
+/** Stroops reserved or spent in one scope after `$2`, as text; `reserve` and `used` share it. */
+const WINDOW_SUM = `SELECT coalesce(sum(r.amount), 0)::text AS used
+  FROM spend_reservation_scopes rs JOIN spend_reservations r ON r.id = rs.id
+  WHERE rs.scope = $1 AND r.at > $2`;
+
 /** Thrown inside `reserve`'s transaction so a breach rolls the reservation back. */
 class LimitExceeded extends Error {
   constructor(readonly scope: SpendScope) {
@@ -474,8 +479,9 @@ export class PostgresSpendStore implements SpendStore {
 
   /**
    * One transaction: insert the reservation (a repeated id is a no-op), create and lock the scope
-   * rows in sorted order so two reservations can't deadlock, then sum each window in a new
-   * statement, which sees every reservation committed before the locks were granted. A wait on any
+   * rows in sorted order so two reservations can't deadlock, then sum each limit's window in a
+   * statement of its own, which sees every reservation committed before the locks were granted.
+   * A wait on any
    * lock longer than `RESERVE_LOCK_TIMEOUT` rejects with `55P03` and reserves nothing.
    */
   async reserve({ id, amount, limits, now }: SpendReservation): Promise<ReserveResult> {
@@ -500,20 +506,17 @@ export class PostgresSpendStore implements SpendStore {
           "SELECT scope FROM spend_scopes WHERE scope = ANY ($1::text[]) ORDER BY scope FOR UPDATE",
           [scopes],
         );
-        const { rows } = await client.query<{ used: string }>(
-          `SELECT w.used
-           FROM unnest($1::text[], $2::bigint[]) WITH ORDINALITY AS l (scope, since, ord)
-           CROSS JOIN LATERAL (
-             SELECT coalesce(sum(r.amount), 0)::text AS used
-             FROM spend_reservation_scopes rs JOIN spend_reservations r ON r.id = rs.id
-             WHERE rs.scope = l.scope AND r.at > l.since
-           ) w
-           ORDER BY l.ord`,
-          [limits.map((limit) => limit.scope), limits.map((limit) => now - limit.windowMs)],
-        );
-        for (const [i, limit] of limits.entries())
-          if (BigInt(rows[i]!.used) + amount > limit.maxStroops)
+        // One statement per limit: with the scope as a plain parameter the planner sees how many
+        // rows it has and joins them in one pass, where a join over `unnest` probed the
+        // reservations one row at a time, about 6 times slower at 100 000 rows (0022 decision 22).
+        for (const limit of limits) {
+          const { rows } = await client.query<{ used: string }>(WINDOW_SUM, [
+            limit.scope,
+            now - limit.windowMs,
+          ]);
+          if (BigInt(rows[0]!.used) + amount > limit.maxStroops)
             throw new LimitExceeded(limit.scope);
+        }
         await client.query(
           "INSERT INTO spend_reservation_scopes (id, scope) SELECT $1, unnest($2::text[])",
           [id, scopes],
@@ -543,12 +546,7 @@ export class PostgresSpendStore implements SpendStore {
   }
 
   async used(scope: SpendScope, windowMs: number, now: number): Promise<bigint> {
-    const { rows } = await this.pool.query<{ used: string }>(
-      `SELECT coalesce(sum(r.amount), 0)::text AS used
-       FROM spend_reservation_scopes rs JOIN spend_reservations r ON r.id = rs.id
-       WHERE rs.scope = $1 AND r.at > $2`,
-      [scope, now - windowMs],
-    );
+    const { rows } = await this.pool.query<{ used: string }>(WINDOW_SUM, [scope, now - windowMs]);
     return BigInt(rows[0]!.used);
   }
 
