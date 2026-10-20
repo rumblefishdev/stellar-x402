@@ -68,13 +68,11 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       const s = settlement("1");
       const results = await Promise.all(Array.from({ length: 10 }, () => store.claim(s)));
       expect(results.filter((r) => r.claimed)).toHaveLength(1);
-      const lost = results.find((r) => !r.claimed);
-      expect(lost).toMatchObject({ claimed: false, existing: { key: s.key, fingerprint: "fp-1" } });
-      expect(await store.get(s.key)).toMatchObject({
-        state: "claimed",
-        hashes: [],
-        updatedAt: 1_000,
-      });
+      // The whole record, so a payload or requirement that doesn't round-trip fails.
+      const record = { ...s, state: "claimed", hashes: [], updatedAt: 1_000 };
+      expect(results.find((r) => r.claimed)).toEqual({ claimed: true, record });
+      expect(results.find((r) => !r.claimed)).toEqual({ claimed: false, existing: record });
+      expect(await store.get(s.key)).toEqual(record);
     });
 
     it("keeps every hash, finds the record by any of them, and moves claimed to signed", async () => {
@@ -83,7 +81,12 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       expect(await store.addHash(key, "h1", 2_000)).toBe(true);
       expect(await store.addHash(key, "h2", 3_000)).toBe(true);
       expect(await store.addHash(key, "h2", 4_000)).toBe(true);
-      expect(await store.get(key)).toMatchObject({ state: "signed", hashes: ["h1", "h2"] });
+      // The repeat changed nothing, its time included.
+      expect(await store.get(key)).toMatchObject({
+        state: "signed",
+        hashes: ["h1", "h2"],
+        updatedAt: 3_000,
+      });
       expect((await store.findByHash("h1"))?.key).toBe(key);
       expect((await store.findByHash("h2"))?.key).toBe(key);
       expect(await store.findByHash("h3")).toBeUndefined();
@@ -190,6 +193,15 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       expect(pending?.state).toBe("pending");
       expect(pending?.channel).toBeUndefined();
       expect((await store.get(key))?.channel).toBeUndefined();
+    });
+
+    it("keeps a field a transition omits", async () => {
+      const { key } = settlement("1");
+      await store.claim(settlement("1"));
+      await store.transition(key, "claimed", { state: "signed", channel: "GA", updatedAt: 2_000 });
+      const pending = await store.transition(key, "signed", { state: "pending", updatedAt: 3_000 });
+      expect(pending?.channel).toBe("GA");
+      expect((await store.get(key))?.channel).toBe("GA");
     });
 
     it("lets exactly one of several concurrent transitions from a state win", async () => {
@@ -462,6 +474,8 @@ export function spendStoreContract(make: Make<SpendStore>) {
       await store.commit("a", 20n, 10);
       await store.release("b");
       expect(await store.used("global", DAY, 10)).toBe(20n);
+      // The commit stamped the fee at 10, so it outlives the reservation's window.
+      expect(await store.used("global", DAY, DAY + 5)).toBe(20n);
     });
 
     it("keeps a committed fee through a release, and reports a commit of an unknown id", async () => {
@@ -481,6 +495,31 @@ export function spendStoreContract(make: Make<SpendStore>) {
       expect(await store.reserve({ id: "b", amount: 60n, limits: limits(100n), now: DAY })).toEqual(
         { reserved: true },
       );
+    });
+
+    it("counts each scope on its own, and only the scopes a reservation lists", async () => {
+      const payer = (name: string): SpendLimit[] => [
+        { scope: `payer:${name}`, maxStroops: 100n, windowMs: DAY },
+      ];
+      await store.reserve({ id: "a", amount: 80n, limits: payer("A"), now: 0 });
+      expect(await store.reserve({ id: "b", amount: 80n, limits: payer("B"), now: 0 })).toEqual({
+        reserved: true,
+      });
+      expect(await store.used("payer:A", DAY, 0)).toBe(80n);
+      expect(await store.used("payer:B", DAY, 0)).toBe(80n);
+      expect(await store.used("global", DAY, 0)).toBe(0n);
+    });
+
+    it("keeps each scope's failures and breaker apart", async () => {
+      const [x, y] = ["asset:CX", "asset:CY"] as const;
+      await store.recordFailure(x, 0);
+      await store.recordFailure(x, 1);
+      expect(await store.recordFailure(y, 2)).toBe(1);
+      await store.recordSuccess(y);
+      expect(await store.recordFailure(x, 3)).toBe(3);
+      await store.openBreaker(x, 1_000);
+      expect(await store.breakerOpenUntil(y, 0)).toBeUndefined();
+      expect(await store.breakerOpenUntil(x, 0)).toBe(1_000);
     });
 
     it("counts consecutive failures and opens a breaker until a time", async () => {
