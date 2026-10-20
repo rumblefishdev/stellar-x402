@@ -1,5 +1,5 @@
 ---
-id: "0042"
+id: "0050"
 title: "Prune old rate-limit windows and spend reservations"
 type: FEATURE
 status: backlog
@@ -14,6 +14,10 @@ history:
     status: backlog
     who: akot
     note: "Spawned from 0022 future work: pruning was kept out of 0022."
+  - date: "2026-10-20"
+    status: backlog
+    who: akot
+    note: "Renumbered from 0042, which develop already uses for the MCP Claude Desktop task (Karol's review)."
 ---
 
 # Prune old rate-limit windows and spend reservations

@@ -130,7 +130,7 @@ Fargate in eu-central-1:
 - **Throughput.**
   - `reserve` takes about six round trips plus one per budget, and holds the global scope's row
     lock, so reservations are serialized across ECS tasks.
-  - Old rate-limit windows and spend reservations are pruned (task 0042).
+  - Old rate-limit windows and spend reservations are pruned (task 0050).
   - Task 0026 measures the full settle path and `addHash` on the testnet instance it creates;
     0022 had no instance to measure on.
 - **Task 0022 builds the adapters.** CI runs the contract suites against a PostgreSQL service

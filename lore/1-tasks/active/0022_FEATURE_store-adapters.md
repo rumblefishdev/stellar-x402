@@ -5,7 +5,7 @@ type: FEATURE
 status: active
 milestone: 1
 related_adr: ["0004", "0006", "0012"]
-related_tasks: ["0012", "0013", "0017", "0042"]
+related_tasks: ["0012", "0013", "0017", "0050"]
 tags: [facilitator, persistence, priority-high, effort-medium, discovery]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -25,7 +25,7 @@ history:
     note: >
       Built and reviewed: four PostgreSQL adapters, pnpm migrate, STORE=postgres, a CI service.
       All 4 acceptance criteria met; 108 facilitator tests (43 on PostgreSQL). Final review fixes
-      are in. Spawned 0042 (pruning). Closes after PR merge.
+      are in. Spawned 0050 (pruning). Closes after PR merge.
   - date: "2026-10-19"
     status: active
     who: akot
@@ -174,7 +174,7 @@ As a facilitator operator, I want durable implementations of the four store port
    them.
 4. **The suites skip locally only when neither `TEST_DATABASE_URL` nor `CI` is set,** so CI never
    skips them. Each run gets its own schema.
-5. **Pruning is out of 0022** (the team decided). It is spawned as 0042.
+5. **Pruning is out of 0022** (the team decided). It is spawned as 0050.
 
 ### Emerged
 
@@ -215,7 +215,7 @@ As a facilitator operator, I want durable implementations of the four store port
     contract case now opens it at 2 000, then 1 000, and expects 2 000. Found in karczuRF's review.
 14. **An index on `spend_reservation_scopes (id)`, in `0001_init`.** `release` cascades to a
     reservation's scope rows by `id`, which the `(scope, id)` primary key can't look up, so every
-    release scanned the whole table, which nothing prunes before 0042. With 50 000 reservations the
+    release scanned the whole table, which nothing prunes before 0050. With 50 000 reservations the
     cascade took 7.9 ms without the index and 0.16 ms with it. It goes into `0001_init` rather than
     a new migration because `0001` hasn't reached any deployment yet. Found in the BMAD review.
 15. **`close()` drains the cataloger even when closing the server fails.** A second signal
@@ -265,7 +265,7 @@ As a facilitator operator, I want durable implementations of the four store port
     100 000 reservations and about 3.3 s at 1 000 000, all under the global scope's lock. With
     the scope as a plain parameter it sees the real count and hashes the join: 48 ms and 160 to
     320 ms, the same sums. One round trip per limit is the cost. It is still linear in the rows
-    the scope holds, so 0042 (pruning, and an indexed or bucketed sum) is needed before mainnet.
+    the scope holds, so 0050 (pruning, and an indexed or bucketed sum) is needed before mainnet.
     Found in Karol's review, which estimated 25 ms and 0.5 s; measured on PostgreSQL 18.3.
 
 ## Issues Encountered
@@ -288,7 +288,7 @@ As a facilitator operator, I want durable implementations of the four store port
 
 ## Future Work
 
-- 0042: prune old rate-limit windows and spend reservations, and index the spend-window sum.
+- 0050: prune old rate-limit windows and spend reservations, and index the spend-window sum.
 - For 0025/0026: check at startup that the database is reachable and its schema is current.
 - For 0025: a client stalled mid-headers blocks `server.close()`, and with it the drain and the
   lease release; and a fencing token with a skew margin for the lease. See 0025's "From 0022"
@@ -317,4 +317,4 @@ As a facilitator operator, I want durable implementations of the four store port
   tell "busy" from a bug; reject lone UTF-16 surrogates (`isWellFormed()`) along with `\u0000`,
   since jsonb rejects them and text turns them into U+FFFD; `claim` only after `/verify` fully
   passes, or throwaway payers leave unpruned 64 KB payloads. The other options from that review
-  are notes in 0019, 0023, 0024, 0026 and 0042.
+  are notes in 0019, 0023, 0024, 0026 and 0050.
