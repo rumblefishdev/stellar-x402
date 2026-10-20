@@ -2,6 +2,7 @@ import { Keypair } from "@stellar/stellar-sdk";
 import type { PaymentRequirements, VerifyResponse } from "@x402/core/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { memoryStores } from "../src/adapters/memory.js";
+import { MAX_BODY_DEPTH } from "../src/http/app.js";
 import { parseConfig } from "../src/config.js";
 import { jsonLogger } from "../src/logger.js";
 import { start, type Started } from "../src/main.js";
@@ -124,6 +125,19 @@ describe("POST /verify", () => {
       expect(verify).not.toHaveBeenCalled();
     },
   );
+
+  it("verifies a body nested to MAX_BODY_DEPTH, and refuses one level deeper", async () => {
+    // `paymentPayload.extensions.deep` holds `levels` arrays; the innermost is at depth levels + 2.
+    const nested = (levels: number) => {
+      let deep: unknown = 0;
+      for (let i = 0; i < levels; i++) deep = [deep];
+      return { ...request, paymentPayload: { ...paymentPayload, extensions: { deep } } };
+    };
+    verify.mockResolvedValue({ isValid: true, payer: "GPAYER" });
+    expect((await post(nested(MAX_BODY_DEPTH - 3))).status).toBe(200);
+    expect((await post(nested(MAX_BODY_DEPTH - 2))).status).toBe(400);
+    expect(verify).toHaveBeenCalledTimes(1);
+  });
 
   it("answers 500 and logs the error when verification throws", async () => {
     verify.mockRejectedValueOnce(new Error("rpc down"));

@@ -1,4 +1,4 @@
-import { Address, FeeBumpTransaction, StrKey, rpc, xdr } from "@stellar/stellar-sdk";
+import { Address, FeeBumpTransaction, Keypair, StrKey, rpc, xdr } from "@stellar/stellar-sdk";
 import { describe, expect, it, vi } from "vitest";
 import {
   LedgerBoundError,
@@ -59,30 +59,69 @@ function setup(opts: Partial<SubmitterOptions> = {}, n = 1) {
 
 const inner = (fake: FakeRpc, i = -1) => (fake.sent.at(i) as FeeBumpTransaction).innerTransaction;
 
+/** An auth entry for a `drain` call with `credentials`. */
+const authEntry = (credentials: xdr.SorobanCredentials) =>
+  new xdr.SorobanAuthorizationEntry({
+    credentials,
+    rootInvocation: new xdr.SorobanAuthorizedInvocation({
+      function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
+        new xdr.InvokeContractArgs({
+          contractAddress: Address.fromString(
+            StrKey.encodeContract(Buffer.alloc(32, 9)),
+          ).toScAddress(),
+          functionName: "drain",
+          args: [],
+        }),
+      ),
+      subInvocations: [],
+    }),
+  });
+
+/** Address credentials for a random account; `v2` for CAP-71's `AddressV2`. */
+const addressCredentials = (v2 = false) => {
+  const credentials = new xdr.SorobanAddressCredentials({
+    address: Address.fromString(Keypair.random().publicKey()).toScAddress(),
+    nonce: xdr.Int64.fromString("1"),
+    signatureExpirationLedger: 1_000,
+    signature: xdr.ScVal.scvVoid(),
+  });
+  return v2
+    ? xdr.SorobanCredentials.sorobanCredentialsAddressV2(credentials)
+    : xdr.SorobanCredentials.sorobanCredentialsAddress(credentials);
+};
+
 describe("source-account auth", () => {
   it("refuses a call whose auth would authorize as the facilitator, before taking a channel", async () => {
     const { fake, submitter, signer } = setup();
-    const entry = new xdr.SorobanAuthorizationEntry({
-      credentials: xdr.SorobanCredentials.sorobanCredentialsSourceAccount(),
-      rootInvocation: new xdr.SorobanAuthorizedInvocation({
-        function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
-          new xdr.InvokeContractArgs({
-            contractAddress: Address.fromString(
-              StrKey.encodeContract(Buffer.alloc(32, 9)),
-            ).toScAddress(),
-            functionName: "drain",
-            args: [],
-          }),
-        ),
-        subInvocations: [],
-      }),
-    });
+    const entry = authEntry(xdr.SorobanCredentials.sorobanCredentialsSourceAccount());
     await expect(submitter.submit({ ...call(), auth: [entry] })).rejects.toBeInstanceOf(
       SourceAccountAuthError,
     );
     expect(signer.signs).toBe(0);
     expect(fake.sent).toHaveLength(0);
     expect(submitter.stats()).toMatchObject({ busy: 0, refused: { check: 1 } });
+  });
+
+  it("refuses a source-account entry behind address entries", async () => {
+    const { fake, submitter } = setup();
+    const auth = [
+      authEntry(addressCredentials()),
+      authEntry(addressCredentials(true)),
+      authEntry(xdr.SorobanCredentials.sorobanCredentialsSourceAccount()),
+    ];
+    await expect(submitter.submit({ ...call(), auth })).rejects.toBeInstanceOf(
+      SourceAccountAuthError,
+    );
+    expect(fake.sent).toHaveLength(0);
+  });
+
+  it("submits Address and AddressV2 entries", async () => {
+    const { fake, submitter } = setup();
+    const auth = [authEntry(addressCredentials()), authEntry(addressCredentials(true))];
+    await expect(submitter.submit({ ...call(), auth })).resolves.toMatchObject({
+      status: "success",
+    });
+    expect(fake.sent).toHaveLength(1);
   });
 });
 

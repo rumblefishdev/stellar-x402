@@ -60,6 +60,24 @@ it("reduces URLs to their host, so an RPC key in the path or query stays out of 
   ).toBe("GET rpc.example failed; also node:8000");
 });
 
+it("redacts an upper-case scheme and an unparseable URL, and keeps stack locations", () => {
+  expect(redactUrls("GET HTTPS://acct.example/KEY failed")).toBe("GET acct.example failed");
+  expect(redactUrls("GET http://[::1/KEY failed")).toBe("GET [url] failed");
+  const location = "at settle (file:///app/dist/settlement/settle.js:10:5)";
+  expect(redactUrls(location, ["https://acct.example/K/"])).toBe(location);
+});
+
+it("names a URL by the longest RPC_URLS entry it starts with", () => {
+  const rpcUrls = ["https://acct.example/", "https://acct.example/K/"];
+  expect(redactUrls("POST https://acct.example/K/rpc failed", rpcUrls)).toBe(
+    `POST ${rpcEndpointName("https://acct.example/K/", 1)} failed`,
+  );
+  // In the other order too, so neither the first nor the last match wins by position.
+  expect(redactUrls("POST https://acct.example/K/rpc failed", [...rpcUrls].reverse())).toBe(
+    `POST ${rpcEndpointName("https://acct.example/K/", 0)} failed`,
+  );
+});
+
 it("names an RPC_URLS entry by index and fingerprint, never by host", () => {
   const primary = "https://acct-1.paid.example/K/";
   const fallback = "https://rpc.other.example/v1?apikey=K2";

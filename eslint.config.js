@@ -29,6 +29,15 @@ export default defineConfig([
           ],
         },
       ],
+      // `no-restricted-imports` doesn't see a dynamic `import()`.
+      "no-restricted-syntax": [
+        "error",
+        {
+          // esquery's regex can't hold a `/`, hence `\x2F`.
+          selector: "ImportExpression[source.value=/(^|\\x2F)testing(\\.js)?$/]",
+          message: "Test helpers are for tests only.",
+        },
+      ],
     },
   },
   {

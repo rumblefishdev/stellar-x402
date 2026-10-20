@@ -187,17 +187,69 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       }
     });
 
-    it("lets exactly one caller mark a success as answered, and only a success", async () => {
+    it("lets exactly one caller mark a success as answered, and leaves updatedAt", async () => {
       const { key } = settlement("1");
       await store.claim(settlement("1"));
-      expect(await store.markSuccessAnswered(key, 2_000)).toBe(false);
       await store.transition(key, "claimed", { state: "success", updatedAt: 3_000 });
       const marks = await Promise.all(
         Array.from({ length: 5 }, () => store.markSuccessAnswered(key, 4_000)),
       );
       expect(marks.filter(Boolean)).toHaveLength(1);
-      expect(await store.get(key)).toMatchObject({ state: "success", successAnsweredAt: 4_000 });
+      expect(await store.get(key)).toMatchObject({
+        state: "success",
+        successAnsweredAt: 4_000,
+        updatedAt: 3_000,
+      });
       expect(await store.markSuccessAnswered(settlement("9").key, 4_000)).toBe(false);
+    });
+
+    it("marks only a success as answered, in no other state", async () => {
+      // Each state reached the way `/settle` reaches it.
+      const reach: Record<string, (key: SettlementKey) => Promise<unknown>> = {
+        claimed: async () => {},
+        signed: (key) => store.addHash(key, `h-${key}`, 2_000),
+        pending: async (key) => {
+          await store.addHash(key, `h-${key}`, 2_000);
+          await store.transition(key, "signed", { state: "pending", updatedAt: 2_000 });
+        },
+        failed: async (key) => {
+          await reach.pending!(key);
+          await store.transition(key, "pending", { state: "failed", updatedAt: 3_000 });
+        },
+        expired: async (key) => {
+          await reach.pending!(key);
+          await store.transition(key, "pending", { state: "expired", updatedAt: 3_000 });
+        },
+        rejected: (key) =>
+          store.transition(key, "claimed", {
+            state: "rejected",
+            errorReason: "x",
+            updatedAt: 2_000,
+          }),
+      };
+      for (const [index, [state, to]] of Object.entries(reach).entries()) {
+        const s = settlement(String(index + 1));
+        await store.claim(s);
+        await to(s.key);
+        expect((await store.get(s.key))?.state).toBe(state);
+        expect(await store.markSuccessAnswered(s.key, 4_000)).toBe(false);
+        expect(await store.get(s.key)).not.toHaveProperty("successAnsweredAt");
+      }
+    });
+
+    it("keeps epoch-scale times exact, past 32 bits", async () => {
+      // Millisecond times are past 2^31 since 1970-01-26; a 32-bit column would refuse them.
+      const at = Date.UTC(2026, 9, 20);
+      const s = { ...settlement("1"), createdAt: at };
+      await store.claim(s);
+      await store.addHash(s.key, "h1", at + 1);
+      await store.transition(s.key, "signed", { state: "success", updatedAt: at + 2 });
+      expect(await store.markSuccessAnswered(s.key, at + 3)).toBe(true);
+      expect(await store.get(s.key)).toMatchObject({
+        createdAt: at,
+        updatedAt: at + 2,
+        successAnsweredAt: at + 3,
+      });
     });
 
     it("applies a transition only from the expected state, and only forward", async () => {

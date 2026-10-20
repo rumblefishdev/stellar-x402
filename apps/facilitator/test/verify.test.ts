@@ -15,6 +15,7 @@ import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/
 import { describe, expect, it, vi } from "vitest";
 import {
   CHANNEL_ACCOUNT_REASON,
+  EXPIRATION_TOO_FAR_REASON,
   MUXED_FACILITATOR_REASON,
   PAYER_AUTH_REASON,
   UpstreamTimeoutError,
@@ -393,6 +394,15 @@ describe("createVerifier", () => {
         );
       },
     );
+
+    it("rejects auth that expires past the last ledger the pool can bound an envelope by", async () => {
+      // A huge maxTimeoutSeconds signs to 0xFFFFFFFF, which `submit()`'s `maxLedger` refuses.
+      const { verify } = setup();
+      const at = (expiration: number) =>
+        verify(payload({ auth: [authEntry(payer, expiration)] }), requirements);
+      await expect(at(2 ** 32 - 2)).resolves.toEqual({ isValid: true, payer });
+      await expect(at(2 ** 32 - 1)).resolves.toEqual(rejected(EXPIRATION_TOO_FAR_REASON));
+    });
 
     it("counts the earliest expiring auth entry", async () => {
       const { verify } = setup();
