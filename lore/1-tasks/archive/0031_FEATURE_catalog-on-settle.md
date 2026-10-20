@@ -2,7 +2,7 @@
 id: "0031"
 title: "Catalog resources after successful settlements"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0008", "0004"]
 related_tasks: ["0012", "0030", "0017", "0009"]
@@ -31,6 +31,13 @@ history:
     note: >
       PR #17 review: writes ordered by ledger, a stale write still adds new requirements, upsert
       timeout, main drains on close, CATALOG_ALLOW_HTTP wired. Rebased onto develop.
+  - date: "2026-10-20"
+    status: completed
+    who: akot
+    note: >
+      PR #17 merged; all four acceptance criteria met. Checked on develop after PR #30: 197
+      facilitator tests pass, including the cataloger suite and the CatalogStore contract on memory
+      and PostgreSQL. The real /settle and resolved-event wiring stays with 0009 and 0019.
 ---
 
 # Catalog resources after successful settlements
