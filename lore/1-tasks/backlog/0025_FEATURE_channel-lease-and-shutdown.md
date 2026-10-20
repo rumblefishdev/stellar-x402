@@ -15,12 +15,6 @@ history:
     status: backlog
     who: claude
     note: "Created by 0012 from M1 Story 2.4 (Payments lane)."
-  - date: "2026-10-19"
-    status: backlog
-    who: akot
-    note: >
-      0022's review added a finding (a stalled client blocks `server.close()`) and a recommendation
-      for the lease under clock skew.
 ---
 
 # Channel lease and graceful shutdown

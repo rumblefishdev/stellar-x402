@@ -15,10 +15,6 @@ history:
     status: backlog
     who: claude
     note: "Created by 0012 from M1 Story 1.6 (Platform lane)."
-  - date: "2026-10-20"
-    status: backlog
-    who: akot
-    note: "0022 added `STORE` and `DATABASE_URL` to the env examples; the rename stays here."
 ---
 
 # `/supported` and startup channel checks
