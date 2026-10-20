@@ -5,7 +5,7 @@ type: RESEARCH
 status: completed
 milestone: 1
 related_adr: ["0003", "0006", "0007", "0008", "0011", "0012"]
-related_tasks: ["0012", "0009", "0014", "0019", "0022", "0025", "0026", "0027", "0031"]
+related_tasks: ["0012", "0009", "0014", "0022", "0025", "0026", "0031"]
 tags: [facilitator, persistence, bazaar, priority-high, effort-small, discovery]
 links:
   - ../../../../docs/adr/0003-settlement-channel-account-pool.md
@@ -118,18 +118,6 @@ SQLite would move the facilitator to EC2 with EBS.
   - read patterns
   - retention
 - Separate what T1 (testnet, one instance) needs from what mainnet will need.
-- **Store outage** (from 0009, decision 30; ADR 0006):
-  - Set an availability target for the settlement store, for testnet and for mainnet. While the
-    store is down, `/settle` takes no new payments: each one is a 500 before its claim.
-  - `/settle`'s rule while it is down is fixed: refuse before money moves (a failed claim or hash
-    write is a 500, or the pool doesn't send), tell the truth after it moves (the pool's result is
-    the answer, and the record is left unfinished). The chosen store must make the claim,
-    `addHash` and the compare-and-set writes fail cleanly, never half-applied.
-  - 0019 finishes the records an outage leaves unfinished, once the store is back; 0027 alarms on
-    `settlement_record_failures_total`.
-  - A success the store couldn't mark is answered once per process (0009 decision 29); across
-    instances or after recovery it can be answered twice until 0019. Say whether the chosen store's
-    failover (e.g. Multi-AZ) shortens that window.
 
 ### Step 2: Compare options
 
