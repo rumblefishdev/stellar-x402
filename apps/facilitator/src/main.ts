@@ -179,9 +179,10 @@ export function buildSettlement(
 }
 
 /**
- * Every part `main()` serves, built from the config: the stores, the cataloger, one RPC and one
- * fee configuration shared by `/verify`, `/settle` and the pool. Tests pass their own `rpc`,
- * `makeScheme` and pool `sleep`; `main()` passes none.
+ * Every part `main()` serves, built from the config on the given stores: the cataloger, one RPC
+ * and one fee configuration shared by `/verify`, `/settle` and the pool. `main()` passes the
+ * PostgreSQL stores when `STORE=postgres`; tests pass their own `rpc`, `makeScheme` and pool
+ * `sleep`.
  */
 export function compose(
   config: Config,

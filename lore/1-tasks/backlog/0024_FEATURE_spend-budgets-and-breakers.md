@@ -77,6 +77,11 @@ As a facilitator operator, I want fee spending capped and failing assets or reci
     `beforeSubmit` reserves. Then the late reserve must be refused, not counted forever.
   - Refusal reasons are an `errorReason` sellers see; the README lists "a spend reason" as a
     refusal that ends the payment (sign a new one later).
+- From 0009 (PR #41, decision 49): the config refuses `NETWORK=stellar:pubnet` until spend
+  budgets (0024), rate limits (0023) and the channel lease (0025) land: the rule after the
+  `STORE` one in `config.ts`, with tests in `config.test.ts` and `main.test.ts`. Whichever of the
+  three lands last removes it; an earlier one narrows its message to what is still missing,
+  together with the facilitator README.
 
 ## Acceptance Criteria
 
