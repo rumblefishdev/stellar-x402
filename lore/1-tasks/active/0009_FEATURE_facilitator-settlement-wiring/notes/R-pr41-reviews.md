@@ -166,6 +166,28 @@ Facilitator tests 207 → 209.
 
 **Modified tests:** none.
 
+## Rebase onto develop after 0022 merged (2026-10-20)
+
+Develop was 85 commits ahead, with 0022's PostgreSQL adapters (PR #30), 0013's archive and 0028.
+Conflicts and how each went:
+
+- **`main.ts`**: develop's `main()` builds PostgreSQL pools or the memory stores and closes once.
+  `compose()` now takes the `stores` (memory when absent), and `main()` keeps develop's pools,
+  `migrateMain` and idempotent `close()` around this PR's `compose()`. Every commit was rebuilt
+  this way, so each one typechecks.
+- **The `SettlementStore` port**: develop's precedence list for `addHash` (with
+  `HashConflictError`) and this PR's atomicity sentence, both kept. The PostgreSQL adapter gained
+  `markSuccessAnswered` in the rebased copy of the commit that added it to the port (decision 48).
+- **`main()`'s pubnet refusal** never ran: 0022's config refuses first (decision 18).
+- **Task files**: 0009's file became this directory, and develop's "From 0022" bullet moved into
+  Future Work; 0022 and 0013 had closed, so this PR's bullets for them were dropped and their
+  open points moved to 0019 and 0023 (README Future Work); 0020, 0023 and 0024 keep both sides.
+
+Facilitator tests 209 → 305 against PostgreSQL 18 (`TEST_DATABASE_URL`; 67 in its suite).
+
+**Modified tests:** `main.test.ts`'s pubnet test expects the config's message, `STORE must be
+postgres outside testnet`.
+
 ## Testnet
 
 `scripts/settle-smoke.ts`, friendbot keys, fresh channels.
