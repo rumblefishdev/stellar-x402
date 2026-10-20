@@ -45,8 +45,10 @@ facilitator roles, so we don't contribute new fixtures.
   5. fails unless every scenario passed with its own transaction hash, and Stellar RPC shows each
      hash as a successful `transfer` of the route's price from the buyer to the seller, its fee
      paid by a signer the facilitator lists in `/supported`, made after the run started. The suite
-     itself exits 0 when no scenario matched, its fetch client can pass without a hash, and it
-     never reads the chain, so a replayed hash or another facilitator's settlement would pass it.
+     itself exits 0 when no scenario matched, its axios client can pass without a hash, and it
+     never reads the chain, so a replayed hash would pass it. The signer check trusts the
+     facilitator's own `/supported`: a facilitator that relays to another and lists that one's
+     fee payer as its signer still passes.
 - **The evidence is committed.** Results, including the pinned upstream commit and the settled
   transaction hashes, go into `conformance/results/`.
 - **Nothing is pushed** to `x402-foundation/x402` or to our fork of it during M1.

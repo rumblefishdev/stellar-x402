@@ -116,7 +116,7 @@ const settlements: Settlement[] = [];
 for (const result of run?.results ?? []) {
   if (!result.passed || !result.transaction) continue;
   const hash = result.transaction;
-  // A failed read is a problem of this run, not a crash: the run is saved either way.
+  // A failed read is a problem of this run, not a crash: the run is saved unless interrupted.
   try {
     const answer = await chain.getTransaction(hash);
     const settlement =

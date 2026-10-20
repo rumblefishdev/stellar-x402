@@ -38,7 +38,7 @@ The suite kills whatever listens on ports 4022–4060 before it starts.
    hash. Reads every hash from Stellar RPC and fails unless each succeeded as one `transfer` of
    0.001 testnet USDC from the buyer to the seller, its fee paid by one of the facilitator's
    signers, after the run started. A hash RPC cannot answer for is a failure too. Saves the run
-   either way.
+   either way, unless interrupted (Ctrl+C).
 
 The proxy (`external-proxy/proxy.mjs`) answers the suite's `/health` and `/close` itself and
 forwards `/verify`, `/settle` and `/supported` to `GATE_FACILITATOR_URL` unchanged. It uses Node

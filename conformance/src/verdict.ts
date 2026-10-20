@@ -18,7 +18,7 @@ export interface SuiteResult {
 
 /**
  * What stops the gate passing, one line each; empty means it passed. The suite exits 0 when no
- * scenario matched its filters, writing no file, and its fetch client reports success without a
+ * scenario matched its filters, writing no file, and its axios client reports success without a
  * transaction when the payment response header is missing. Neither is evidence, so both fail here,
  * as does any exit but 0, even after a file with every scenario passed, and one hash reported by
  * two scenarios: a facilitator replaying an earlier answer.

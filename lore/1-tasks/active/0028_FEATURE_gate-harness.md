@@ -45,7 +45,7 @@ Read in a clone of upstream; paths are upstream's.
 - **Lifecycle.** The harness runs `bash run.sh` in the proxy directory, waits for `Facilitator listening` on stdout (30 s), polls `GET /health` for a 200 JSON body, stops with `POST /close`, then SIGTERM to the bash PID (`e2e/src/proxy-base.ts`, `e2e/src/facilitators/generic-facilitator.ts`). The harness itself never calls `/verify`, `/settle` or `/supported`; the canonical server does, at `http://localhost:<PORT>`.
 - **Env.** The harness refuses to start without `SERVER_STELLAR_ADDRESS`, `CLIENT_STELLAR_PRIVATE_KEY` and `FACILITATOR_STELLAR_PRIVATE_KEY`, the last even for an external facilitator (`e2e/test.ts:946-958`). The client needs testnet USDC, the server a USDC trustline; nothing in the suite funds them.
 - **`/supported`.** It must list `exact` on `stellar:testnet` with `extra.areFeesSponsored: true`; the canonical client throws otherwise (`stellar/src/exact/client/scheme.ts:58`).
-- **Silent passes.** A typo in `--facilitators` or zero scenarios exits 0 with no JSON (`e2e/test.ts:840,918`); the fetch client reports success with an empty `transaction` when the payment response header is missing (`e2e/clients/typescript/http/fetch/index.ts:25`). The JSON carries no upstream commit.
+- **Silent passes.** A typo in `--facilitators` or zero scenarios exits 0 with no JSON (`e2e/test.ts:840,918`); the axios client reports success with an empty `transaction` when the payment response header is missing (`e2e/clients/typescript/http/axios/index.ts:24`; the fetch client throws instead, `core/src/http/x402HTTPClient.ts:159`). The JSON carries no upstream commit.
 - **Prerequisites.** `pnpm install` and build in `typescript/`, then `e2e/setup.sh` (`.github/workflows/e2e_tests.yml:155-168`).
 - **Public facilitator for the dry run.** `https://x402.org/facilitator/supported` lists `exact` on `stellar:testnet` with fees sponsored, no `bazaar` (measured 2026-10-15). Fallback: Vellar (community, 60 req/min).
 
@@ -72,7 +72,7 @@ Read in a clone of upstream; paths are upstream's.
 - 2026-10-16 — **Every run builds the suite from a fresh clone** (+2.5 min): the clean check sees only tracked files, so a build kept from an earlier run would not be covered by it.
 - 2026-10-16 — **The gate reads every hash on chain** through Stellar RPC `getTransaction` (Horizon is deprecated in favour of RPC): it fails unless each is a successful single `transfer` of 10000 units of testnet USDC from the buyer to the seller.
 - 2026-10-19 — **A hash proves this run through this facilitator**: the gate fails when two scenarios report one hash, when a transaction was made before the run started, or when its fee was paid by an account the facilitator does not list as a Stellar signer in `/supported` (read before any payment). Each transaction's ledger, time, fee payer and call are saved with the run.
-- 2026-10-19 — **A hash RPC cannot answer for is a problem of the run**, not a crash: the run is saved either way.
+- 2026-10-19 — **A hash RPC cannot answer for is a problem of the run**, not a crash: the run is saved, unless the gate is interrupted.
 - 2026-10-19 — **The placeholder package files go in this PR** (`src/index.ts`, its build config, the unused `@stellar-x402/config`): the package existed for this task to fill; named in the PR body.
 - 2026-10-15 — **Dry-run evidence** (x402.org) goes into this task and the PR, not `conformance/results/`, which holds our facilitator's runs (0029).
 
