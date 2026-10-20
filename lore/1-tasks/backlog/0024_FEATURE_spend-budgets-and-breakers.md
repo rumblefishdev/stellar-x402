@@ -77,6 +77,14 @@ As a facilitator operator, I want fee spending capped and failing assets or reci
     `beforeSubmit` reserves. Then the late reserve must be refused, not counted forever.
   - Refusal reasons are an `errorReason` sellers see; the README lists "a spend reason" as a
     refusal that ends the payment (sign a new one later).
+- From 0009 (Adam's sixth PR #41 review), **to verify on a Soroban host first**, not a decision:
+  upstream checks only that the payer's auth entry has a non-void signature, and Soroban checks it
+  (and uses up the nonce) only when `require_auth` uses the entry. So a wasm token whose `transfer`
+  never calls `from.require_auth()` would pass both simulations with any `from` and any nonce. Not
+  reproduced: there was no local Soroban host. If it holds, per-payer budgets bound nothing for such
+  tokens (ADR 0007's rationale), the global budget becomes a way to refuse every seller, and records
+  and the catalog carry a payer the attacker picked. Adam's idea: limits tiered by asset kind, SAC
+  (`ContractExecutable::StellarAsset`) against wasm, with low defaults for wasm.
 - From 0009 (PR #41, decision 49): the config refuses `NETWORK=stellar:pubnet` until spend
   budgets (0024), rate limits (0023) and the channel lease (0025) land: the rule after the
   `STORE` one in `config.ts`, with tests in `config.test.ts` and `main.test.ts`. Whichever of the

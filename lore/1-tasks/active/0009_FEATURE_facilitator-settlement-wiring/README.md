@@ -5,7 +5,7 @@ type: FEATURE
 status: active
 milestone: 1
 related_adr: ["0003", "0004", "0005", "0006", "0007", "0011"]
-related_tasks: ["0007", "0006", "0012", "0013", "0014", "0015", "0016", "0017", "0018", "0019", "0020", "0022", "0023", "0024", "0025", "0027", "0031", "0043", "0045", "0049"]
+related_tasks: ["0007", "0006", "0012", "0013", "0014", "0015", "0016", "0017", "0018", "0019", "0020", "0022", "0023", "0024", "0025", "0026", "0027", "0031", "0043", "0045", "0047", "0049"]
 tags: [facilitator, signer-pool, exact, settlement, priority-high, effort-medium, payments]
 links:
   - ../../archive/0007_FEATURE_facilitator-settlement-submitter.md
@@ -50,6 +50,21 @@ history:
     note: >
       Fourth PR #41 review (Adam): decision 46 (a repeat that lost the claim leaves an unsigned
       record to the first call), facilitator 205 → 207.
+  - date: "2026-10-20"
+    status: active
+    who: claude
+    note: >
+      Stan's review (decision 47: RPC_URLS[i]#<fingerprint>, relative test-helper imports) and the
+      rebase onto develop after 0022 (decision 48: PostgreSQL markSuccessAnswered, migration
+      0002_success_answered). Facilitator 207 → 305 with 0022's PostgreSQL suite.
+  - date: "2026-10-20"
+    status: active
+    who: claude
+    note: >
+      Sixth PR #41 review (Adam): decision 49 (the config refuses pubnet until 0023, 0024 and
+      0025, folded into the commit that added main()'s check), the hand-offs lost with 0022 into
+      0019 and 0023, the should-fix points and the nits (decisions 50–55). Facilitator 305 → 320,
+      signer-pool 101 → 111.
 ---
 
 # Settle exact payments once through the channel pool
@@ -119,22 +134,23 @@ never charged twice.
   4. `beforeSubmit`; a refusal, or a hook that throws, ends the record `rejected` without `onFinal`.
   5. The pool's `submit()` with `onSigned` (`addHash`, durable before the send), `maxLedger`, `deadline` and `checkSimulation` = `expectTransfer`.
   6. Forward-only compare-and-set writes (`advance`); the writer that makes a record final runs `onFinal`; `respond` marks a success answered (`markSuccessAnswered`, with a process-local set for store failures).
-- **`settlement/verify.ts`**: `createChecker` also refuses auth entries without address credentials.
+- **`settlement/verify.ts`**: `createChecker` also refuses auth entries without address credentials, and an auth expiry past ledger 2^32 − 2 (decision 53).
 - **`http/app.ts`**: `POST /settle` takes the `/verify` body check (and a depth cap of 32), an `AbortSignal` for a client that left, the `EXTENSION-RESPONSES` header on a success, `afterResponse` after the response (`res.closed`-aware), and one `settled` log with the key and a `replay` flag.
 - **`main.ts`**: `compose(config, …)` builds, on the stores it is given (memory ones when absent), the cataloger, RPC, one `fees`, `buildChecks` and `buildSettlement` (the pool from `fees.pool`, `keypairSigner`, the channels; the settler with `settleCheck(checks)` and the budget); `main()` builds the PostgreSQL stores when `STORE=postgres` and starts it. The config refuses `stellar:pubnet` until 0023, 0024 and 0025 land (decision 49).
 - **`signer-pool`**: `./testing` exports `FakeRpc`; `FallbackRpc` throws `RpcUnavailableError`; `submit()` refuses source-account auth (`SourceAccountAuthError`).
 - **Nothing else sends**: `grep sendTransaction|.settle(` in `apps/facilitator/src` finds nothing.
-- **Tests**: facilitator 103 → 305 (209 before the rebase onto 0022, whose PostgreSQL suite adds the rest) (`settle.test.ts` 78, `settle-route.test.ts` 8, `settle-pool.test.ts` 6), signer-pool 99 → 101. The review rounds, their mutants, modified tests and the testnet runs are in [notes/R-pr41-reviews.md](notes/R-pr41-reviews.md).
+- **Tests**: facilitator 103 → 320 (209 before the rebase onto 0022, whose PostgreSQL suite adds most of the rest) (`settle.test.ts` 79, `settle-route.test.ts` 9, `settle-pool.test.ts` 7), signer-pool 99 → 111. The review rounds, their mutants, modified tests and the testnet runs are in [notes/R-pr41-reviews.md](notes/R-pr41-reviews.md).
 
 ## Design Decisions
 
 ### Emerged
 
-All 48, with their reasons, are in [notes/S-design-decisions.md](notes/S-design-decisions.md).
+All 55, with their reasons, are in [notes/S-design-decisions.md](notes/S-design-decisions.md).
 The ones a reviewer should check first: 1 (a repeat answered from the record), 11 and 13 (a
 timeout answer ends what was never signed), 16 (a success once), 29 and 30 (okarcz: the store
-outage), 45 (the #45 rebase) and 46 (a repeat that lost the claim leaves the record to the first
-call).
+outage), 45 (the #45 rebase), 46 (a repeat that lost the claim leaves the record to the first
+call), 47 (RPC URLs in logs), 48 (PostgreSQL `markSuccessAnswered`), 49 (the pubnet refusal) and
+53 (`/verify` refuses an expiry past 2^32 − 2).
 
 ## Future Work
 

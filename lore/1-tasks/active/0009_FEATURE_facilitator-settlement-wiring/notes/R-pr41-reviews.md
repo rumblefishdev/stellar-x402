@@ -188,6 +188,37 @@ Facilitator tests 209 → 305 against PostgreSQL 18 (`TEST_DATABASE_URL`; 67 in 
 **Modified tests:** `main.test.ts`'s pubnet test expects the config's message, `STORE must be
 postgres outside testnet`.
 
+## Sixth review (Adam, 2026-10-20, at `b45a662`)
+
+Adam ran every check with PostgreSQL 18.3, the testnet smoke with `STORE=postgres` (5/5), two
+`main()` instances on one database (one transaction for one payment), a restart (repeats answered
+from the record) and 101 mutants on code earlier rounds hadn't mutated. Blocking:
+
+- **The pubnet refusal lost three of its four reasons in the rebase** (`config.ts`): pubnet with
+  `STORE=postgres` started a `/settle` that spends, with allow-all spend hooks, no limiter and no
+  lease. The config refuses pubnet until 0023, 0024 and 0025 land (decision 49), folded into the
+  commit that added `main()`'s check, which also drops the later fix.
+- **9 commits failed `pnpm test`** (`main.test.ts` expected `main()`'s message): fixed by that
+  fold. Build, typecheck and `pnpm test` pass on each rewritten commit.
+- **The hand-offs from 0022 didn't land**: they are in 0019 and 0023 now.
+
+Should fix, all done: `!= null` for a database without `0002_success_answered`, with a test and a
+"run `pnpm migrate` first" note (startup schema check: 0025); `main()` tests with `STORE=postgres`
+and for `RPC_URLS` names in its logs, each killing Adam's mutants (`main()` returns its `logger`
+for tests); a hash per nonce in the flaky contract test; the README (the store settings, check
+refusals as a third exception, `pending` across restarts); `rpcEndpointName` in 0027 and 0049.
+Nits: decisions 50–55, tests for each surviving mutant he listed (each fails with its mutant), and
+the records.
+
+Facilitator tests 305 → 320, signer-pool 101 → 111, against PostgreSQL 18 (`TEST_DATABASE_URL`).
+
+**Modified tests:** the pubnet tests in `config.test.ts` and `main.test.ts` expect the refusal
+("maps every setting" parses testnet, the only `NETWORK` that parses); the contract test "exactly
+one of addHash and a final transition" uses a hash per nonce; "lets exactly one caller mark a
+success" no longer covers `claimed` (the new "in no other state" test does); the concurrent-calls
+test in `settle.test.ts` is renamed; `settle-pool.test.ts`'s payload builder moved to
+`test/payment.ts`.
+
 ## Testnet
 
 `scripts/settle-smoke.ts`, friendbot keys, fresh channels.
@@ -217,9 +248,10 @@ postgres outside testnet`.
   fails (`…_simulation_failed`).
 - **After the rebase onto 0022** (2026-10-20, on `e26c911`, fresh friendbot keys, `STORE=memory`):
   the first run stopped at its first `/verify`, a 500. Its logs weren't kept; Adam got the same
-  500 in his fifth review and traced it: a slow testnet RPC (`getLatestLedger`, or upstream's own
-  calls past their 10 s deadline) makes the checks throw before the claim, so it is a 500 by
-  design and nothing is recorded, as the 500 after the third review was. The second run passed all 5: the payment settled (`a00d6df2…`, `SUCCESS` on chain);
+  500 in the sixth review and traced it: a slow testnet RPC (`getLatestLedger`, or upstream's
+  own calls past their 10 s deadline) makes the checks throw before the claim, so it is a 500 by
+  design and nothing is recorded, as the 500 after the third review was. The second run passed
+  all 5: the payment settled (`a00d6df2…`, `SUCCESS` on chain);
   the same request again got `…_already_settled` with that hash; the same payload with other
   requirements got `…_nonce_already_used` with that hash; two concurrent calls submitted one
   transaction (`80db7432…`), one `success` and one `…_already_settled`; `/verify` of the settled
