@@ -56,6 +56,13 @@ history:
       even when closing the server fails (decision 15), memory's extension filter matches only an
       object, and a case pins `addHash` on a pending record and `listNonFinal` with hashes. 176
       facilitator tests (52 on PostgreSQL). Closes after PR merge.
+  - date: "2026-10-20"
+    status: active
+    who: akot
+    note: >
+      BMAD's deferred items: a test that a failing migration run rolls back (`migrate` takes its
+      migrations from the caller), ADR 0012 amended for the reserve pool and the 0026 measurement,
+      and `STORE`/`DATABASE_URL` in both env examples. Closes after PR merge.
 ---
 
 # Durable adapters for the four store ports
@@ -138,9 +145,9 @@ As a facilitator operator, I want durable implementations of the four store port
   contested leases, past-the-end listing, int64 amounts, out-of-order `now` and a retried rejected
   reservation; after the reviews, also a breaker opened twice, a cleared field, an extension given
   as an array or a string, and a hash added to a pending record. Memory runs 38 cases and
-  PostgreSQL 52, which add the migration, lock-wait, dropped-connection, isolation, failed-`SET`,
-  failed-`ROLLBACK`, pool-starvation, lock-timeout and `main()` cases. The facilitator has 176
-  tests in all, after
+  PostgreSQL 53, which add the migration, failed-migration, lock-wait, dropped-connection,
+  isolation, failed-`SET`, failed-`ROLLBACK`, pool-starvation, lock-timeout and `main()` cases. The
+  facilitator has 177 tests in all, after
   merging develop. Before the PR, a final review by two independent reviewers was
   reconciled into one list.
 
@@ -232,8 +239,8 @@ As a facilitator operator, I want durable implementations of the four store port
 - For 0025: a client stalled mid-headers blocks `server.close()`, and with it the drain and the
   lease release; and a fencing token with a skew margin for the lease. See 0025's "From 0022"
   notes.
-- For 0026: the RDS CA bundle and TLS, and `STORE`, `DATABASE_URL` and `pnpm migrate` in the deploy
-  env examples.
+- For 0026: the RDS CA bundle and TLS. The env examples carry `STORE` and `DATABASE_URL`; renaming
+  their signer variables is 0020's.
 - For 0026: measure `addHash` and the full settle path on the testnet database, which 0026
   creates; 0022 had no instance to measure on. ADR 0012's RDS, and with it the RDS CA item, may
   change with the hosting move to Hetzner (PR #48).
