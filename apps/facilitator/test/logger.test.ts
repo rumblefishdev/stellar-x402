@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { expect, it } from "vitest";
-import { captureConsoleError, jsonLogger, redactUrls } from "../src/logger.js";
+import { captureConsoleError, jsonLogger, redactUrls, rpcEndpointName } from "../src/logger.js";
 
 const capture = () => {
   const lines: string[] = [];
@@ -57,6 +58,41 @@ it("reduces URLs to their host, so an RPC key in the path or query stays out of 
   expect(
     redactUrls("GET https://rpc.example/v1/K?apikey=K failed; also http://u:p@node:8000/x."),
   ).toBe("GET rpc.example failed; also node:8000");
+});
+
+it("names an RPC_URLS entry by index and fingerprint, never by host", () => {
+  const primary = "https://acct-1.paid.example/K/";
+  const fallback = "https://rpc.other.example/v1?apikey=K2";
+  const rpcUrls = [primary, fallback, "https://acct-1.paid.example/K3/"];
+  const fingerprint = createHash("sha256").update(primary).digest("hex").slice(0, 8);
+  expect(rpcEndpointName(primary, 0)).toBe(`RPC_URLS[0]#${fingerprint}`);
+
+  const text = redactUrls(
+    `POST ${primary}rpc failed, then ${fallback} on https://acct-1.paid.example/ at https://horizon.example/x`,
+    rpcUrls,
+  );
+  expect(text).toBe(
+    `POST ${rpcEndpointName(primary, 0)} failed, then ${rpcEndpointName(fallback, 1)} ` +
+      `on ${rpcEndpointName(primary, 0)}|${rpcEndpointName(rpcUrls[2] ?? "", 2)} at horizon.example`,
+  );
+  expect(text).not.toMatch(/K|paid|other/);
+});
+
+it("names RPC_URLS entries in logged errors and console.error", () => {
+  const rpcUrls = ["https://acct-1.paid.example/K/"];
+  const lines: string[] = [];
+  const logger = jsonLogger("debug", (line) => lines.push(line), rpcUrls);
+  logger.error("x", { error: new Error("fetch https://acct-1.paid.example/K/ failed") });
+  const restore = captureConsoleError(logger, rpcUrls);
+  try {
+    console.error("verify failed at https://acct-1.paid.example/K/");
+  } finally {
+    restore();
+  }
+
+  const name = rpcEndpointName(rpcUrls[0] ?? "", 0);
+  expect(JSON.parse(lines[0] ?? "").error.message).toBe(`fetch ${name} failed`);
+  expect(JSON.parse(lines[1] ?? "").message).toBe(`verify failed at ${name}`);
 });
 
 it("logs every console.error as one error event, with URLs reduced to their host", () => {

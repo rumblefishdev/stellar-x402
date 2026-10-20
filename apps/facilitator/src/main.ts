@@ -244,7 +244,7 @@ export function compose(
  */
 export async function main(env: Record<string, string | undefined> = process.env) {
   const config = parseConfig(env);
-  const logger = jsonLogger(config.logLevel);
+  const logger = jsonLogger(config.logLevel, undefined, config.rpcUrls);
   // STORE=postgres needs a migrated schema (`pnpm migrate`); the service never migrates it.
   let pools: { main: pg.Pool; reserve: pg.Pool; rateLimits: pg.Pool } | undefined;
   if (config.store === "postgres") {
@@ -264,7 +264,7 @@ export async function main(env: Record<string, string | undefined> = process.env
     const { deps, cataloger } = compose(config, { logger, stores });
     // For the life of the process: an upstream call cut off by the deadline keeps running after
     // `close()`, and its error would reach stderr with the RPC URL in it.
-    const restoreConsole = captureConsoleError(logger);
+    const restoreConsole = captureConsoleError(logger, config.rpcUrls);
     const started = await start(deps).catch((error: unknown) => {
       restoreConsole();
       throw error;
