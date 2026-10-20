@@ -2,7 +2,7 @@
 id: "0022"
 title: "Durable adapters for the four store ports"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0004", "0006", "0012"]
 related_tasks: ["0012", "0013", "0017", "0050"]
@@ -70,6 +70,14 @@ history:
       Third review fixes (decisions 16 to 21): a pool for the rate limiter, a committed fee survives
       `release`, an idempotent `close()`, catalog filter columns, `assertStroops`, and new contract
       and lock-wait cases. 197 facilitator tests (65 on PostgreSQL). Closes after PR merge.
+  - date: "2026-10-20"
+    status: completed
+    who: akot
+    note: >
+      PR #30 merged after five review rounds (Staszek approved; karczuRF, BMAD, a third review and
+      Karol's). Four PostgreSQL adapters, `pnpm migrate`, `STORE=postgres`, three pools; 23
+      decisions; 197 facilitator tests (65 on PostgreSQL). Future Work handed to 0009, 0019, 0024,
+      0025, 0026, 0032 and 0050 as notes in those tasks.
 ---
 
 # Durable adapters for the four store ports

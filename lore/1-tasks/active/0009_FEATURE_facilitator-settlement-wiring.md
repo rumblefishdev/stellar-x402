@@ -93,6 +93,14 @@ never charged twice.
   - When the budget runs out after the transaction was sent, answer `settlement_pending` with its
     hash (AD-6).
   - When nothing was sent, answer with a failure the resource server can retry.
+- From 0022 (PR #30, merged): `SettlementStore.addHash` rejects a hash another settlement owns with
+  `HashConflictError`; map it to an aborted send. Validate `\u0000` in payloads and resources
+  (PostgreSQL rejects a NUL in text and jsonb). `SpendStore.reserve` can reject when the store is
+  busy or unreachable (`55P03`, no pool connection in 5 s, a lost `COMMIT` answer): answer 503 with
+  a retry, not 500; a retry with the same `id` is safe. Options to verify, not decisions: a typed
+  `StoreUnavailableError` if `/settle` needs to tell "busy" from a bug; reject lone UTF-16
+  surrogates (`isWellFormed()`), which jsonb rejects; `claim` only after `/verify` fully passes, or
+  throwaway payers leave unpruned payloads.
 
 ## Acceptance Criteria
 

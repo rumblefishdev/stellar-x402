@@ -53,6 +53,9 @@ As a facilitator operator, I want fee spending capped and failing assets or reci
   0022 took the status (its decision 17): `state` is `reserved` or `committed`, `release` deletes
   only `reserved` rows, and `commit` resolves `false` for an unknown id. Refusing a reserve after
   its release is still open here; it can add `released` as a kept row.
+- From 0022: `reserve` can reject when the store is busy or unreachable (`55P03` after the 2 s lock
+  timeout, no `reservePool` connection within 5 s, a lost `COMMIT` answer). Answer it on purpose,
+  e.g. 503 with a retry, not 500; a retry with the same `id` is safe, as the port says.
 
 ## Acceptance Criteria
 

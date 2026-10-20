@@ -43,6 +43,8 @@ As a agent, I want to list catalog resources with the standard discovery filters
   paging (`seq > $cursor ORDER BY seq LIMIT n`) is about 0.02 ms at any size; with it, an index on
   `(type, seq)`, and a `total` that is dropped, estimated or cached, since an exact count stays
   O(n). The upstream response's pagination shape decides which.
+- From 0022: reject a negative `limit` or `offset` and `\u0000` in the filters before they reach
+  `CatalogStore.list`; PostgreSQL rejects a NUL in text, while memory accepts it.
 
 ## Acceptance Criteria
 

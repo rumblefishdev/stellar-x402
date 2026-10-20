@@ -79,6 +79,13 @@ As a facilitator operator, I want settlement records that are written before sen
   or per-hash status. Adding a nullable column later is cheap, and rows written before it can fall
   back to the auth expiry in `payment_payload`. If this task lands before the first durable deploy
   (0026), it can still edit `0001_init` instead.
+- From 0022 (Karol's review of PR #30), to verify rather than a decision: the startup sweep closes
+  every `claimed` record without a hash, whatever its age. With one lease holder per network that
+  is right; with ADR 0011's option of two tasks on separate channel sets, one task's sweep would
+  reject the other's live claims (money stays safe: `addHash` refuses a final record). Option:
+  close only claims older than `createdAt + SETTLE_BUDGET_MS + margin`, the rule 0009's replay
+  already uses, with a later pass for younger ones. A `claimed_by` column was rejected: a client
+  repeat landing in the same process would look like its own claim and sign twice.
 
 ## Acceptance Criteria
 

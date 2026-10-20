@@ -98,6 +98,8 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     one. 0022's first review judged this too small; it matters once a database is durable.
   - The startup schema check (0025/0026) should accept a database ahead of the code, i.e. every
     known migration applied. Otherwise a rollback to an earlier SHA refuses to start.
+- From 0022: measure `addHash` and the full settle path on the testnet database this task creates;
+  0022 had no instance to measure on (ADR 0012's Consequences).
 
 ## Acceptance Criteria
 
