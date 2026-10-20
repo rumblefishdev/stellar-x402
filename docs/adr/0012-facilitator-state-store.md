@@ -1,7 +1,7 @@
 # ADR 0012: Keep all facilitator state in one RDS for PostgreSQL database
 
 - Status: accepted
-- Date: 2026-10-12, amended 2026-10-20 (task 0022: pools for `reserve` and the rate limiter; 0026 measures)
+- Date: 2026-10-12, amended 2026-10-20 (task 0022: pools for `reserve` and the rate limiter; 0026 measures; hosting note)
 
 ## Context
 
@@ -128,8 +128,8 @@ Fargate in eu-central-1:
 - **One clock per comparison, but several across ECS tasks.** The lease TTL carries a skew margin
   (task 0025), and window reads tolerate a bounded skew.
 - **Throughput.**
-  - `reserve` takes about seven round trips and holds the global scope's row lock, so reservations
-    are serialized across ECS tasks.
+  - `reserve` takes about six round trips plus one per budget, and holds the global scope's row
+    lock, so reservations are serialized across ECS tasks.
   - Old rate-limit windows and spend reservations are pruned (task 0042).
   - Task 0026 measures the full settle path and `addHash` on the testnet instance it creates;
     0022 had no instance to measure on.
@@ -147,6 +147,11 @@ Fargate in eu-central-1:
   - the credentials parameter;
   - the migration task in the deploy workflow;
   - the failover drill.
+- **Hosting is being revised** (ADR 0011 in PR #24, task 0039): one facilitator and one PostgreSQL
+  container per network on the company Hetzner server, stop-before-start deploys, and backups (a
+  daily base backup and a WAL archive off the server) run by the team. The RDS items above change
+  with it. What was built for several ECS tasks (the lease, separate pools, skew margins) stays
+  correct for one process, so running several instances is an option kept open, not a decision.
 - **Exit.** The ports are the seam. Moving to Aurora PostgreSQL is a snapshot restore. Moving to
   another store means new adapters that pass the same suites, once task 0022 has closed the gaps
   listed in G.

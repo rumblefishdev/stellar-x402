@@ -6,7 +6,7 @@ status: backlog
 milestone: 1
 related_adr: ["0012"]
 related_tasks: ["0022", "0023", "0024"]
-tags: [facilitator, persistence, priority-medium, effort-small, discovery]
+tags: [facilitator, persistence, priority-high, effort-small, discovery]
 links:
   - ../../../docs/adr/0012-facilitator-state-store.md
 history:
@@ -22,7 +22,8 @@ history:
 
 The PostgreSQL stores from 0022 never delete anything. Rate-limit rows are keyed per client IP and
 spend reservations are kept forever, so both tables grow without bound on a public endpoint, and
-the spend-window sum gets slower on every settlement.
+the spend-window sum gets slower on every settlement. Needed before mainnet: at 10 000 payments a
+day (ADR 0011's mainnet sizing) a 1-day window alone holds about 10 000 reservations.
 
 ## Context
 
@@ -45,6 +46,13 @@ the spend-window sum gets slower on every settlement.
     leaves the window early and `reserve` under-counts. Options: write the copy in `commit` from
     the first release that has it, keep the original `at` on commit, or decide before the first
     durable deploy and put the column in `0001_init`.
+  - Measured for 0022's decision 22 (PostgreSQL 18.3, `global` plus one payer scope): the
+    per-scope sum takes about 48 ms at 100 000 reservations and 160–320 ms at 1 000 000, under the
+    global lock. Copying only `at` with an index `(scope, at)` doesn't help while the window is
+    full (it still joins every row in it). What does: `at` and `amount` copied with
+    `(scope, at) INCLUDE (amount)`, 13 ms at 100 000 and 144 ms at 1 000 000 for a full window;
+    or hourly buckets `spend_buckets (scope, hour, amount)`, 0.04–0.19 ms at any size, exact to
+    the hour at the window's edge, kept by `reserve`, `commit` and `release`. Both need pruning.
   - The migration runner applies everything in one transaction with the pool's 10 s
     `statement_timeout`. A backfill or an index on a large table needs a
     `{ transaction: false }` flag (for `CREATE INDEX CONCURRENTLY`), a migrate pool without

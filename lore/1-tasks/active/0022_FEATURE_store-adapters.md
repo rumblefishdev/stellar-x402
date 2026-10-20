@@ -259,6 +259,14 @@ As a facilitator operator, I want durable implementations of the four store port
     but failed in PostgreSQL. Found in the third review.
 21. **`migrate` runs in the shared `inTransaction`, and both rate limiters use `windowEnd`.** Both
     were copies. Found in the third review.
+22. **`reserve` sums each limit's window in a statement of its own,** the one `used` runs. The
+    single statement joined the limits through `unnest` with `LATERAL`, and the planner, guessing
+    a few hundred rows per scope, probed `spend_reservations` once per scope row: 277 ms at
+    100 000 reservations and about 3.3 s at 1 000 000, all under the global scope's lock. With
+    the scope as a plain parameter it sees the real count and hashes the join: 48 ms and 160 to
+    320 ms, the same sums. One round trip per limit is the cost. It is still linear in the rows
+    the scope holds, so 0042 (pruning, and an indexed or bucketed sum) is needed before mainnet.
+    Found in Karol's review, which estimated 25 ms and 0.5 s; measured on PostgreSQL 18.3.
 
 ## Issues Encountered
 
@@ -295,6 +303,13 @@ As a facilitator operator, I want durable implementations of the four store port
 - For 0009 and 0024: `reserve` can reject when the store is busy or unreachable (`55P03` after the
   2 s lock timeout, no `reservePool` connection within 5 s, a lost `COMMIT` answer). Answer it on
   purpose, e.g. 503 with a retry, not 500; a retry with the same `id` is safe, as the port says.
+- For 0019, from Karol's review: the startup sweep closes every `claimed` record without a hash,
+  whatever its age. With one lease holder per network that is right; with ADR 0011's option of two
+  tasks on separate channel sets, one task's sweep would reject the other's live claims (money is
+  safe: `addHash` refuses a final record). Option: close only claims older than
+  `createdAt + SETTLE_BUDGET_MS + margin`, the rule 0009's replay already uses, with a later pass
+  for younger ones. A `claimed_by` column to recognise one's own claim was rejected: a client
+  repeat landing in the same process would look like its own and sign twice.
 - For 0024: `commit` resolves `false` when no reservation has the id, so the fee counts against no
   budget; log or alert it rather than drop it (decision 17).
 - For 0009, options from the third review to verify, not decisions (0009 becomes a directory in
