@@ -1,15 +1,4 @@
-import {
-  Account,
-  Address,
-  Keypair,
-  Networks,
-  Operation,
-  StrKey,
-  TransactionBuilder,
-  nativeToScVal,
-  xdr,
-  type rpc,
-} from "@stellar/stellar-sdk";
+import { Account, Keypair, StrKey, nativeToScVal, xdr, type rpc } from "@stellar/stellar-sdk";
 import { FakeRpc } from "@stellar-x402/signer-pool/testing";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import { describe, expect, it } from "vitest";
@@ -20,6 +9,7 @@ import { buildChecks, buildSettlement, compose } from "../src/main.js";
 import { memoryMetrics } from "../src/metrics.js";
 import { feeSettings } from "../src/settlement/fees.js";
 import { SETTLE_REASONS } from "../src/settlement/settle.js";
+import { transferPayload } from "./payment.js";
 
 /**
  * `main()`'s `/settle` wiring with the real pool on `FakeRpc`: `/settle`'s checks, the pool's fee
@@ -83,50 +73,7 @@ class PaymentRpc extends FakeRpc {
 
 /** A `transfer` from the payer, with its one auth entry valid to `expiration`. */
 function payload(expiration: number, extensions?: Record<string, unknown>): PaymentPayload {
-  const auth = new xdr.SorobanAuthorizationEntry({
-    credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(
-      new xdr.SorobanAddressCredentials({
-        address: new Address(payer).toScAddress(),
-        nonce: xdr.Int64.fromString("7"),
-        signatureExpirationLedger: expiration,
-        signature: xdr.ScVal.scvVoid(),
-      }),
-    ),
-    rootInvocation: new xdr.SorobanAuthorizedInvocation({
-      function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
-        new xdr.InvokeContractArgs({
-          contractAddress: new Address(asset).toScAddress(),
-          functionName: "transfer",
-          args: [],
-        }),
-      ),
-      subInvocations: [],
-    }),
-  });
-  const transaction = new TransactionBuilder(new Account(payer, "1"), {
-    fee: "100",
-    networkPassphrase: Networks.TESTNET,
-  })
-    .addOperation(
-      Operation.invokeContractFunction({
-        contract: asset,
-        function: "transfer",
-        args: [
-          nativeToScVal(payer, { type: "address" }),
-          nativeToScVal(payTo, { type: "address" }),
-          nativeToScVal(1000n, { type: "i128" }),
-        ],
-        auth: [auth],
-      }),
-    )
-    .setTimeout(60)
-    .build();
-  return {
-    x402Version: 2,
-    accepted: requirements,
-    payload: { transaction: transaction.toXDR() },
-    ...(extensions && { resource: { url: "https://seller.example/users/42" }, extensions }),
-  } as PaymentPayload;
+  return transferPayload({ payer, payTo, requirements }, expiration, extensions);
 }
 
 function setup(env: Partial<Env> = {}) {

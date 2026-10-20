@@ -169,7 +169,8 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       ] as const) {
         const { key } = settlement(nonce);
         await store.claim(settlement(nonce));
-        const add = () => store.addHash(key, "h1", 2_000);
+        // A hash per nonce: another key's `h1` would conflict, not race.
+        const add = () => store.addHash(key, `h${nonce}`, 2_000);
         const end = () =>
           store.transition(key, "claimed", {
             state: "rejected",
@@ -181,7 +182,7 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
           : await Promise.all([end(), add()]).then(([e, a]) => [a, e] as const);
         expect(added !== (ended !== undefined)).toBe(true);
         const record = await store.get(key);
-        expect(record?.hashes).toEqual(added ? ["h1"] : []);
+        expect(record?.hashes).toEqual(added ? [`h${nonce}`] : []);
         expect(record?.state).toBe(added ? "signed" : "rejected");
       }
     });

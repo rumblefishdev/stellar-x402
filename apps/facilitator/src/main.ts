@@ -289,6 +289,8 @@ export async function main(env: Record<string, string | undefined> = process.env
       /** The graph's stores, and with `STORE=postgres` its pools: for tests. */
       stores,
       pools,
+      /** The logger every part writes to: for tests. */
+      logger,
       // A second signal (SIGINT after SIGTERM) gets the first call's promise: running it again
       // would end the pools under requests the first is still waiting for.
       close: () => (closing ??= closeOnce()),

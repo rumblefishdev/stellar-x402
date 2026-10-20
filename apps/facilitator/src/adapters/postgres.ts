@@ -148,7 +148,8 @@ interface SettlementRow {
   ledger: string | null;
   fee_charged: string | null;
   error_reason: string | null;
-  success_answered_at: string | null;
+  /** Absent on a database `0002_success_answered` hasn't reached (`SELECT s.*`). */
+  success_answered_at?: string | null;
   created_at: string;
   updated_at: string;
   hashes?: string[];
@@ -172,7 +173,7 @@ function toRecord(row: SettlementRow, hashes = row.hashes ?? []): SettlementReco
   if (row.ledger !== null) record.ledger = Number(row.ledger);
   if (row.fee_charged !== null) record.feeCharged = BigInt(row.fee_charged);
   if (row.error_reason !== null) record.errorReason = row.error_reason;
-  if (row.success_answered_at !== null) record.successAnsweredAt = Number(row.success_answered_at);
+  if (row.success_answered_at != null) record.successAnsweredAt = Number(row.success_answered_at);
   return record;
 }
 
