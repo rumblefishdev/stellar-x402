@@ -37,6 +37,7 @@ export interface SpendStore {
    * Rejects when the store is busy or unreachable (a lock wait or a connection that times out, a
    * lost answer to the commit): then nothing new is reserved, or the outcome is unknown. Retrying
    * with the same `id` is safe either way, so a caller answers it as "try again", not as a failure.
+   * Rejects an `amount` or `maxStroops` that isn't a non-negative int64, like `commit`'s fee.
    */
   reserve(reservation: SpendReservation): Promise<ReserveResult>;
   /**

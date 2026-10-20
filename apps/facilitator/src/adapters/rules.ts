@@ -39,6 +39,18 @@ export function assertLedger(ledger: number): void {
     throw new RangeError("catalog entry ledger must be a non-negative integer");
 }
 
+/** The largest PostgreSQL `bigint`, the column every stroop amount is stored in. */
+const INT64_MAX = 2n ** 63n - 1n;
+
+/**
+ * Rejects a stroop amount below zero or above the int64 maximum: the memory adapter would keep
+ * it, and PostgreSQL would store a negative one or fail with an out-of-range error.
+ */
+export function assertStroops(amount: bigint, name: string): void {
+  if (typeof amount !== "bigint" || amount < 0n || amount > INT64_MAX)
+    throw new RangeError(`${name} must be a non-negative int64 amount of stroops`);
+}
+
 /** The end of the fixed rate-limit window of `windowMs` that contains `now`. */
 export const windowEnd = (now: number, windowMs: number): number =>
   (Math.floor(now / windowMs) + 1) * windowMs;

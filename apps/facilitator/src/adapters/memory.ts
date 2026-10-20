@@ -22,7 +22,14 @@ import {
   type SpendStore,
   type Stores,
 } from "../ports/index.js";
-import { assertLedger, isFinal, isForward, mergeCatalogEntry, windowEnd } from "./rules.js";
+import {
+  assertLedger,
+  assertStroops,
+  isFinal,
+  isForward,
+  mergeCatalogEntry,
+  windowEnd,
+} from "./rules.js";
 
 /**
  * In-memory adapters of the four ports (AD-7), for `STORE=memory` and for tests. State lives in
@@ -87,6 +94,7 @@ export class MemorySettlementStore implements SettlementStore {
     expected: SettlementState,
     update: SettlementUpdate,
   ): Promise<SettlementRecord | undefined> {
+    if (update.feeCharged !== undefined) assertStroops(update.feeCharged, "feeCharged");
     const record = this.records.get(key);
     if (!record || record.state !== expected || !isForward(expected, update.state))
       return undefined;
@@ -194,6 +202,8 @@ export class MemorySpendStore implements SpendStore {
   private readonly breakers = new Map<SpendScope, number>();
 
   async reserve({ id, amount, limits, now }: SpendReservation): Promise<ReserveResult> {
+    assertStroops(amount, "amount");
+    for (const limit of limits) assertStroops(limit.maxStroops, "maxStroops");
     if (this.reservations.has(id)) return { reserved: true };
     for (const limit of limits)
       if (this.sum(limit.scope, limit.windowMs, now) + amount > limit.maxStroops)
@@ -208,6 +218,7 @@ export class MemorySpendStore implements SpendStore {
   }
 
   async commit(id: string, feeCharged: bigint, now: number): Promise<boolean> {
+    assertStroops(feeCharged, "feeCharged");
     const reservation = this.reservations.get(id);
     if (!reservation) return false;
     Object.assign(reservation, { amount: feeCharged, at: now, committed: true });

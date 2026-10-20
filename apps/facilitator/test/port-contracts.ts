@@ -233,6 +233,16 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       expect((await store.get(key))?.feeCharged).toBe(INT64_MAX);
     });
 
+    it("rejects a fee that isn't a non-negative int64, and leaves the record", async () => {
+      const { key } = settlement("1");
+      await store.claim(settlement("1"));
+      for (const feeCharged of [-1n, INT64_MAX + 1n])
+        await expect(
+          store.transition(key, "claimed", { state: "success", feeCharged, updatedAt: 2_000 }),
+        ).rejects.toBeInstanceOf(RangeError);
+      expect(await store.get(key)).toMatchObject({ state: "claimed", updatedAt: 1_000 });
+    });
+
     it("returns copies, not live state", async () => {
       const { key } = settlement("1");
       const claimed = await store.claim(settlement("1"));
@@ -398,6 +408,22 @@ export function spendStoreContract(make: Make<SpendStore>) {
       expect(
         await store.reserve({ id: "b", amount: 1n, limits: limits(INT64_MAX, INT64_MAX), now: 0 }),
       ).toEqual({ reserved: false, scope: "global" });
+    });
+
+    it("rejects a stroop amount that isn't a non-negative int64, and changes nothing", async () => {
+      for (const bad of [-1n, INT64_MAX + 1n]) {
+        await expect(
+          store.reserve({ id: "a", amount: bad, limits: limits(100n), now: 0 }),
+        ).rejects.toBeInstanceOf(RangeError);
+        const limit = { scope: "global" as const, maxStroops: bad, windowMs: DAY };
+        await expect(
+          store.reserve({ id: "a", amount: 1n, limits: [limit], now: 0 }),
+        ).rejects.toBeInstanceOf(RangeError);
+      }
+      expect(await store.used("global", DAY, 0)).toBe(0n);
+      await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 0 });
+      await expect(store.commit("a", -1n, 10)).rejects.toBeInstanceOf(RangeError);
+      expect(await store.used("global", DAY, 10)).toBe(60n);
     });
 
     it("treats a repeated id as a no-op", async () => {

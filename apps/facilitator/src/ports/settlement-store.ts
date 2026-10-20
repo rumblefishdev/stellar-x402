@@ -100,7 +100,7 @@ export interface SettlementStore {
    * the updated record, or `undefined` if the state had already moved on. An `update.state`
    * that isn't ahead of `expected` in the lifecycle order, the same state included, is dropped
    * the same way, so exactly one of several concurrent callers wins. A record in a final state
-   * never moves on (AD-16).
+   * never moves on (AD-16). Rejects a `feeCharged` that isn't a non-negative int64.
    */
   transition(
     key: SettlementKey,

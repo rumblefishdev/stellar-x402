@@ -27,6 +27,7 @@ import {
 import {
   NON_FINAL_STATES,
   assertLedger,
+  assertStroops,
   isFinal,
   isForward,
   mergeCatalogEntry,
@@ -280,6 +281,7 @@ export class PostgresSettlementStore implements SettlementStore {
     expected: SettlementState,
     update: SettlementUpdate,
   ): Promise<SettlementRecord | undefined> {
+    if (update.feeCharged !== undefined) assertStroops(update.feeCharged, "feeCharged");
     if (!isForward(expected, update.state)) return undefined;
     const values: unknown[] = [key, expected, update.state, update.updatedAt];
     const sets = ["state = $3", "updated_at = $4"];
@@ -465,6 +467,8 @@ export class PostgresSpendStore implements SpendStore {
    * lock longer than `RESERVE_LOCK_TIMEOUT` rejects with `55P03` and reserves nothing.
    */
   async reserve({ id, amount, limits, now }: SpendReservation): Promise<ReserveResult> {
+    assertStroops(amount, "amount");
+    for (const limit of limits) assertStroops(limit.maxStroops, "maxStroops");
     const scopes = [...new Set(limits.map((limit) => limit.scope))].sort();
     try {
       return await inTransaction<ReserveResult>(this.reservePool, async (client) => {
@@ -511,6 +515,7 @@ export class PostgresSpendStore implements SpendStore {
   }
 
   async commit(id: string, feeCharged: bigint, now: number): Promise<boolean> {
+    assertStroops(feeCharged, "feeCharged");
     const { rowCount } = await this.pool.query(
       "UPDATE spend_reservations SET amount = $2, at = $3, committed = true WHERE id = $1",
       [id, feeCharged.toString(), now],
