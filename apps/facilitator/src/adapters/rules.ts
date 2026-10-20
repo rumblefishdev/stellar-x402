@@ -39,6 +39,10 @@ export function assertLedger(ledger: number): void {
     throw new RangeError("catalog entry ledger must be a non-negative integer");
 }
 
+/** The end of the fixed rate-limit window of `windowMs` that contains `now`. */
+export const windowEnd = (now: number, windowMs: number): number =>
+  (Math.floor(now / windowMs) + 1) * windowMs;
+
 const requirementKey = (r: PaymentRequirements) => `${r.scheme}|${r.network}|${r.asset}`;
 
 /**

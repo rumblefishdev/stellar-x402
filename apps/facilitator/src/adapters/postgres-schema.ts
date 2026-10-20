@@ -1,4 +1,5 @@
 import type pg from "pg";
+import { inTransaction } from "./postgres.js";
 
 /**
  * The PostgreSQL schema of the four ports (ADR 0012), as ordered migrations that `migrate` applies
@@ -106,10 +107,7 @@ export async function migrate(
   now = Date.now(),
   migrations: readonly { name: string; sql: string }[] = MIGRATIONS,
 ): Promise<string[]> {
-  const client = await pool.connect();
-  let broken: Error | undefined;
-  try {
-    await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+  return inTransaction(pool, async (client) => {
     await client.query("SET LOCAL lock_timeout = '10s'");
     await client.query("SELECT pg_advisory_xact_lock($1)", [MIGRATE_LOCK]);
     await client.query(
@@ -125,13 +123,6 @@ export async function migrate(
         now,
       ]);
     }
-    await client.query("COMMIT");
     return pending.map((migration) => migration.name);
-  } catch (error) {
-    // A connection that can't roll back is dropped, not returned to the pool.
-    await client.query("ROLLBACK").catch((rollbackError: Error) => (broken = rollbackError));
-    throw error;
-  } finally {
-    client.release(broken);
-  }
+  });
 }

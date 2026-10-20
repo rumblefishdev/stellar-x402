@@ -24,7 +24,14 @@ import {
   type Stores,
   type UpsertOutcome,
 } from "../ports/index.js";
-import { NON_FINAL_STATES, assertLedger, isFinal, isForward, mergeCatalogEntry } from "./rules.js";
+import {
+  NON_FINAL_STATES,
+  assertLedger,
+  isFinal,
+  isForward,
+  mergeCatalogEntry,
+  windowEnd,
+} from "./rules.js";
 
 /**
  * PostgreSQL adapters of the four ports (AD-7, ADR 0012), on the schema in `postgres-schema.ts`.
@@ -93,7 +100,7 @@ export function createPool(
 }
 
 /** Runs `fn` in one Read Committed transaction on one connection; any throw rolls it back. */
-async function inTransaction<T>(
+export async function inTransaction<T>(
   pool: pg.Pool,
   fn: (client: pg.PoolClient) => Promise<T>,
 ): Promise<T> {
@@ -412,7 +419,7 @@ export class PostgresRateLimitStore implements RateLimitStore {
 
   /** A hit from an older window counts in the stored one, which `GREATEST` keeps. */
   async hit(key: string, windowMs: number, now: number): Promise<RateLimitHit> {
-    const resetAt = (Math.floor(now / windowMs) + 1) * windowMs;
+    const resetAt = windowEnd(now, windowMs);
     const { rows } = await this.pool.query<{ count: number; reset_at: string }>(
       `INSERT INTO rate_limits (key, count, reset_at) VALUES ($1, 1, $2)
        ON CONFLICT (key) DO UPDATE SET

@@ -22,7 +22,7 @@ import {
   type SpendStore,
   type Stores,
 } from "../ports/index.js";
-import { assertLedger, isFinal, isForward, mergeCatalogEntry } from "./rules.js";
+import { assertLedger, isFinal, isForward, mergeCatalogEntry, windowEnd } from "./rules.js";
 
 /**
  * In-memory adapters of the four ports (AD-7), for `STORE=memory` and for tests. State lives in
@@ -166,7 +166,7 @@ export class MemoryRateLimitStore implements RateLimitStore {
   private readonly windows = new Map<string, RateLimitHit>();
 
   async hit(key: string, windowMs: number, now: number): Promise<RateLimitHit> {
-    const resetAt = (Math.floor(now / windowMs) + 1) * windowMs;
+    const resetAt = windowEnd(now, windowMs);
     const stored = this.windows.get(key);
     // A hit from an older window (a lagging clock) counts in the stored, newer one.
     const counted =
