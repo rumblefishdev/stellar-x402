@@ -62,10 +62,11 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
   - Check `/supported` once 0020 lands, `/health` before.
   - The 99% figure counts a minute as up only when the check passes and the facilitator is ready
     to settle.
-- From 0014, amended by 0009 (decision 44; ADR 0011): RPC endpoints are logged and labelled as
-  `RPC_URLS[i]`, never by URL or host, as 0045's verify failover does. signer-pool's
+- From 0014, amended by 0009 (decisions 44, 47; ADR 0011): RPC endpoints are logged and labelled
+  as `RPC_URLS[i]#<fingerprint>` (`rpcEndpointName` in `logger.ts`), never by URL or host. The
+  fingerprint tells an entry from the URL it replaced after a redeploy. signer-pool's
   `FallbackRpc.fromUrls` names endpoints by their full URL, which reaches `onSwitch`; name them
-  `RPC_URLS[i]` before wiring it to logs or metrics (0049).
+  with `rpcEndpointName` before wiring it to logs or metrics (0049).
 - From 0009 (PR #41 reviews): the settlement counters, one `settlement_` prefix, labels from
   closed sets (0009 decision 38):
   - `settlement_outcomes_total{reason, replay}`: every `/settle` answer (this task's AC 1);
@@ -76,8 +77,8 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     `settlement_submit_failures_total`, `settlement_hook_failures_total{hook}`;
   - `settlement_record_failures_total`: the store-outage alarm (0009 decision 30);
   - `pool_events_total{type}`, with `status` on `resolved`, for a "pending settlements" alarm.
-- From 0045 (via 0009): `/verify`'s upstream failover logs `rpc_failover` with `RPC_URLS[i]`
-  names. Add a `rpc_failovers_total{from,to}` counter, or an alarm on the log, since a lagging
+- From 0045 (via 0009): `/verify`'s upstream failover logs `rpc_failover` with `rpcEndpointName`
+  names (`RPC_URLS[i]#<fingerprint>`). Add a `rpc_failovers_total{from,to}` counter, or an alarm on the log, since a lagging
   fallback answers valid payments with rejections (0045 decision 9). A return to the first URL
   should read as recovery, not a new outage (`rpc_failback`, info).
 

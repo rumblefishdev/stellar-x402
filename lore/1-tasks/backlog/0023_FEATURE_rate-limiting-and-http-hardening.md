@@ -54,6 +54,11 @@ As a facilitator operator, I want per-route rate limits and basic HTTP hardening
   bounds that growth until 0022's durable store. Also: the `/verify` failover (0045) costs up to
   10 s per RPC URL per request when the URLs hang, so the `/verify` budget should count requests,
   not just successes.
+- From 0009 (PR #41 reviews), moved here when 0022 closed before PR #41 merged: reject a NUL
+  (`\u0000`) and lone UTF-16 surrogates (`isWellFormed()`) in `/verify` and `/settle` bodies and
+  in resources. PostgreSQL refuses a NUL in `text` and `jsonb`, `jsonb` refuses a lone surrogate
+  and `text` turns it into U+FFFD. Today a NUL fails the claim as a store error, a 500 before money
+  moves.
 - From 0009 (PR #41, decision 49): the config refuses `NETWORK=stellar:pubnet` until spend
   budgets (0024), rate limits (0023) and the channel lease (0025) land: the rule after the
   `STORE` one in `config.ts`, with tests in `config.test.ts` and `main.test.ts`. Whichever of the

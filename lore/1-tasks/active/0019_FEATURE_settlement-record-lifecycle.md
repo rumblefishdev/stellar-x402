@@ -75,7 +75,25 @@ As a facilitator operator, I want settlement records that are written before sen
     `pending`; finishing it to `success` lets a later repeat win the mark and get a second success
     (0009 decision 29). Mark such a finish answered, e.g. `successAnsweredAt` set at the finish;
   - every `pending` answer waits for this task: until then a repeat gets `settlement_pending`
-    until the process restarts (the README says so).
+    for as long as the record stays `pending`. With `STORE=memory` a restart drops it; with
+    `STORE=postgres` it survives restarts (the README says so).
+- From 0009 (PR #41 reviews), moved here when 0022 and 0013 closed before PR #41 merged: what a
+  durable, shared store adds, which the memory store can't show:
+  - **clock skew** between instances on `unsignedUntil = existing.createdAt + SETTLE_BUDGET_MS`,
+    which compares one instance's `createdAt` with another's clock (0009 decision 46);
+  - **two settlers on one store** for the repeat paths (0009 decisions 29, 31): a repeat that
+    can't end a record answers `settlement_pending`, and a success the store can't mark is
+    answered once per process only;
+  - **the `addHash` / budget race** (0009 decision 35): `onSigned` checks the budget flag again
+    after `addHash`; keep that order, and test a slow `addHash`;
+  - **a timeout per store call:** `/settle` bounds each one by its budget and a 1 s grace, but a
+    hung driver call still holds a connection;
+  - **Multi-AZ against decision 29's window:** a success the store couldn't mark can be answered
+    twice across instances or after recovery until this task; say whether the store's failover
+    (ADR 0012: Multi-AZ on mainnet) shortens that window;
+  - **a typed `StoreUnavailableError` at the ports**, an option to verify: only if `/settle` needs
+    to tell "busy" from a bug (today both are a 500 before the claim, or the store-outage rule
+    after it).
 - From 0014 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md)): reconciliation runs after the process takes the
   lease and before `/settle` is served.
   - The HTTP server listens at once, because ECS needs `/health` to answer.

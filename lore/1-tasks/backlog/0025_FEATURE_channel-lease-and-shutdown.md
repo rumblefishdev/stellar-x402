@@ -79,6 +79,11 @@ As a facilitator operator, I want only one process at a time to settle through a
     (Adam, fifth review). Find out what two processes on one channel set cost on pubnet: fees, a
     buyer charged and not served, or only `tx_bad_seq` rebuilds and slower answers. Then confirm
     the lease belongs in the refusal, or take it out.
+- From 0009 (PR #41, Adam's fifth review): a startup schema check, before `/settle` is served:
+  every name in `MIGRATIONS` is in `schema_migrations`, and later ones are accepted (0026's note,
+  so a rollback still starts). PR #41's release is the first to add a migration
+  (`0002_success_answered`). Started on a database without it, it ran: every success was answered
+  once per process instead of once per payment, because `markSuccessAnswered` failed with `42703`.
 
 ## Acceptance Criteria
 

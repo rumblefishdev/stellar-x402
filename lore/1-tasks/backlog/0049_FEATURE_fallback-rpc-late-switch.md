@@ -78,8 +78,8 @@ returns to its first endpoint, names endpoints by their full URL, and logs no sw
   lagging fallback reports a lower ledger, and `/verify` accepts payloads with fewer real ledgers
   left than `MIN_VALIDITY_LEDGERS`, which `/settle` then refuses.
 - **Names are full URLs** (`fromUrls` uses `name: url`). An RPC URL can carry an API key, so a
-  name must never reach a log. ADR 0011 (as amended by 0009) logs RPC endpoints as `RPC_URLS[i]`,
-  as 0045 does for upstream verify.
+  name must never reach a log. ADR 0011 (as amended by 0009) logs RPC endpoints as
+  `RPC_URLS[i]#<fingerprint>` (`rpcEndpointName`), as 0045 does for upstream verify.
 - **No switch logs**: `main()` passes no `onSwitch`, so a pool or ledger-read failover is
   silent, unlike upstream verify's `rpc_failover`.
 - **Every all-endpoints failure becomes `RpcUnavailableError`** (Adam, PR #41 fourth review,
@@ -105,7 +105,7 @@ returns to its first endpoint, names endpoints by their full URL, and logs no sw
   (0045 decision 16).
 - Wrap only transport failures (timeouts, no response, 5xx/429) in `RpcUnavailableError`; let a
   JSON-RPC error answer through, so `/settle` logs it as before.
-- `fromUrls` names endpoints `RPC_URLS[i]`, and `main()` logs switches as `rpc_failover` with
+- `fromUrls` names endpoints with `rpcEndpointName` (`RPC_URLS[i]#<fingerprint>`), and `main()` logs switches as `rpc_failover` with
   `component: "rpc"`, the network and a URL-free reason.
 - Tests: a frozen endpoint left for a live one, with a pending confirmation that then finishes;
   every endpoint frozen; the late answer, A → B → A, the probe's return and its lag guard, a log

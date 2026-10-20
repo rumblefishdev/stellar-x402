@@ -12,10 +12,10 @@ import {
   TransactionBuilder,
   nativeToScVal,
 } from "@stellar/stellar-sdk";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { memoryStores } from "../src/adapters/memory.js";
 import { ConfigError, parseConfig } from "../src/config.js";
-import { jsonLogger } from "../src/logger.js";
+import { jsonLogger, rpcEndpointName } from "../src/logger.js";
 import { main, start, type Started } from "../src/main.js";
 
 const secret = Keypair.random().secret();
@@ -141,6 +141,31 @@ describe("startup with a bad config", () => {
 });
 
 describe("main()", () => {
+  it("names an RPC_URLS entry in its logs and console.error lines, never its host", async () => {
+    // A URL can carry its API key in the path, and its host can name a paid provider (ADR 0011).
+    const original = console.error;
+    const lines: string[] = [];
+    const write = vi.spyOn(process.stdout, "write").mockImplementation((line) => {
+      lines.push(String(line));
+      return true;
+    });
+    const url = "https://acct.example/K/";
+    const app = await main({ ...env, RPC_URLS: url, PORT: "47134", LOG_LEVEL: "error" });
+    try {
+      app.logger.error("http_error", { error: new Error(`request to ${url}rpc failed`) });
+      console.error(`request to ${url}rpc failed`);
+      expect(lines).toHaveLength(2);
+      for (const line of lines) {
+        expect(line).toContain(rpcEndpointName(url, 0));
+        expect(line).not.toContain("acct.example");
+      }
+    } finally {
+      write.mockRestore();
+      console.error = original;
+      await app.close();
+    }
+  });
+
   it("answers /verify with the real verifier, then exits 0 on SIGTERM", async () => {
     const child = spawn(process.execPath, ["--import", "tsx", "src/server.ts"], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),

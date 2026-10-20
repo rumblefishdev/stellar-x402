@@ -70,7 +70,7 @@ never charged twice.
 - The 0012 spine: upstream `@x402/stellar` verifies, we settle through the pool, and channel
   accounts count as "facilitator as source" (AD-4, ADR 0005).
 - Builds on the skeleton and hooks (0017), the reusable verify checks (0018) and the signer-pool
-  prerequisites (0016). Runs on the in-memory `SettlementStore` until 0022 lands. Calls the
+  prerequisites (0016). Runs on the in-memory `SettlementStore` or, since the rebase onto 0022, the PostgreSQL one (`STORE=postgres`). Calls the
   cataloging hooks by 0031's caller rules.
 
 ## Implementation
