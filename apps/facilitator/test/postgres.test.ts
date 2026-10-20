@@ -293,6 +293,22 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     expect([pools?.main.ended, pools?.reserve.ended]).toEqual([true, true]);
   });
 
+  it("closes once when two signals call close()", async () => {
+    const app = await main({
+      STORE: "postgres",
+      DATABASE_URL: urlFor(schema),
+      FACILITATOR_SECRET: Keypair.random().secret(),
+      CHANNELS: Keypair.random().publicKey(),
+      PORT: "47132",
+      LOG_LEVEL: "error",
+    });
+    // SIGTERM then SIGINT: the second call waits for the first instead of ending the pools early.
+    const [first, second] = [app.close(), app.close()];
+    expect(second).toBe(first);
+    await first;
+    expect(app.pools?.main.ended).toBe(true);
+  });
+
   it("applies every migration once, in order", async () => {
     expect(applied).toEqual(MIGRATIONS.map((migration) => migration.name));
     expect(await migrate(pool)).toEqual([]);

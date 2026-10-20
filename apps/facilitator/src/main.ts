@@ -114,25 +114,28 @@ export async function main(env: Record<string, string | undefined> = process.env
       restoreConsole();
       throw error;
     });
+    // Catalog writes already under way finish before the process exits, and before the pools
+    // end, even if closing the server fails; the pools end even if draining fails.
+    const closeOnce = async () => {
+      try {
+        await started.close();
+      } finally {
+        try {
+          await cataloger.drain();
+        } finally {
+          await endPools();
+        }
+      }
+    };
+    let closing: Promise<void> | undefined;
     return {
       ...started,
       /** The graph's stores, and with `STORE=postgres` its two pools: for tests. */
       stores,
       pools: pool && reservePool ? { main: pool, reserve: reservePool } : undefined,
-      // Catalog writes already under way finish before the process exits, and before the pools
-      // end, even if closing the server fails (a second signal); the pools end even if draining
-      // fails.
-      close: async () => {
-        try {
-          await started.close();
-        } finally {
-          try {
-            await cataloger.drain();
-          } finally {
-            await endPools();
-          }
-        }
-      },
+      // A second signal (SIGINT after SIGTERM) gets the first call's promise: running it again
+      // would end the pools under requests the first is still waiting for.
+      close: () => (closing ??= closeOnce()),
     };
   } catch (error) {
     await endPools();
