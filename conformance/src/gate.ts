@@ -2,7 +2,9 @@
 // scenario against the facilitator at GATE_FACILITATOR_URL through the proxy in
 // `conformance/external-proxy/`, and the run is saved with the pin and the transaction hashes.
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
+  copyFileSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -138,15 +140,20 @@ for (const result of run?.results ?? []) {
 }
 console.log(`Read ${settlements.length} transactions on chain`);
 
+// One folder per run: the suite's own file, copied byte for byte, and the gate's verdict on it,
+// which names that file and its hash so the two are read as one run.
 if (run) {
   const date = new Date().toISOString();
-  const file = join(
+  const folder = join(
     conformance,
     "results",
-    `${date.replace(/[:.]/g, "-")}-${new URL(facilitatorUrl).host}.json`,
+    `${date.replace(/[:.]/g, "-")}-${new URL(facilitatorUrl).host}`,
   );
-  mkdirSync(join(conformance, "results"), { recursive: true });
+  mkdirSync(folder, { recursive: true });
+  copyFileSync(suiteJson, join(folder, "suite.json"));
   const record = {
+    suiteFile: "suite.json",
+    suiteSha256: createHash("sha256").update(readFileSync(suiteJson)).digest("hex"),
     upstream: { repo: UPSTREAM_REPO, commit: UPSTREAM_COMMIT },
     date,
     facilitatorUrl,
@@ -157,13 +164,11 @@ if (run) {
     passed: problems.length === 0,
     problems,
     settlements,
-    ...run,
   };
-  // Errors carry stack traces through the local checkout; results are committed (task 0029), so
-  // the machine's own path stays out.
+  // Problems quote the suite's errors, whose stack traces run through the temporary checkout.
   const text = JSON.stringify(record, null, 2).replaceAll(checkout, "<x402 checkout>");
-  writeFileSync(file, `${text}\n`);
-  console.log(`Saved ${file}`);
+  writeFileSync(join(folder, "gate.json"), `${text}\n`);
+  console.log(`Saved ${folder}/suite.json and gate.json`);
 }
 
 if (problems.length > 0) {

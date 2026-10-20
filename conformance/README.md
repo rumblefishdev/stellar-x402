@@ -51,11 +51,15 @@ the fees.
 
 ## Results
 
-`results/<date>-<facilitator host>.json`: the upstream repo and commit, the date, the facilitator
-URL and its signers, the command, when the run started, whether the gate passed and why not, each
-transaction as the chain shows it (ledger, time, fee payer, call), then the suite's own summary and
-one row per scenario. Only runs against our facilitator are committed (task 0029); dry runs against
-a public facilitator stay out of git.
+One folder per run, `results/<date>-<facilitator host>/`, with two files:
+
+- `suite.json`: the suite's own `--output-json` file, copied byte for byte. It is what the
+  unmodified x402 tests say: one row per scenario with its transaction hash.
+- `gate.json`: what the gate says about it: `suite.json`'s name and SHA-256, the upstream repo and
+  commit, the date, the facilitator URL and its signers, the command, when the run started, the
+  suite's exit code, whether the gate passed and why not, and each transaction as the chain shows
+  it (ledger, time, fee payer, call). Only runs against our facilitator are committed (task 0029); dry runs against
+  a public facilitator stay out of git.
 
 The suite's Bazaar check (`--extensions=bazaar`) is not run: it also calls `/discovery/search`,
 which comes after Tranche 1.
