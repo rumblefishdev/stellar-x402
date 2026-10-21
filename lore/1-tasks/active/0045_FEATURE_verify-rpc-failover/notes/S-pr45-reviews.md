@@ -136,6 +136,25 @@ C1–C4 and C6 held; the new 60 s retry was where the problems were.
   accepts and never answers; `reason: "timeout"`). All three passed `validPayment` and
   `channelRejected`; the two failover runs also `failedOver`, answered by `RPC_URLS[1]`.
 
+- 2026-10-21, before the shared URL, on `8dd7f6f`: plain and refused `/verify` passed; hung runs
+  failed 3 of 7 with `RPC_URLS[1]` = SDF, and so did the pre-rebase code (1 of 4); 40 plain
+  `getLatestLedger` calls to SDF had one 10 s stall. Plain `/settle` passed; every hung `/settle`
+  failed its first call (`…_timeout`), the reason for decision 21.
+- 2026-10-21, on the shared active URL (`07a6f8c`), with Gateway
+  (`https://soroban-rpc.testnet.stellar.gateway.fm`) as `RPC_URLS[1]` and a local server that
+  accepts and never answers as the hung `RPC_URLS[0]`:
+  - `verify-smoke.ts`: plain (SDF only), a refused first URL and three hung runs all passed
+    `validPayment` and `channelRejected`; the failover runs also `failedOver`, answered by
+    `RPC_URLS[1]#44fa24ad`, the switch logged `by: "getFeeStats"`. A hung run took 24 s for both
+    facilitators, one 10 s wait each.
+  - `settle-smoke.ts` with the hung first URL, twice with `INCLUSION_FEE_STROOPS=100` and twice
+    with fee-stats: every check passed, `failedOver` included; the first `/settle` settled on
+    chain (`0dc492c3…`, `affa5014…`, `f343bd5b…`, `3ac05f91…`), one switch each, `by: "verify"`
+    with the fixed bid and `by: "getFeeStats"` with fee-stats.
+  - `settle-smoke.ts` plain: the first run answered 500 (`RPC_URLS[0]` gave upstream no answer
+    within 10 s, SDF only: decision 25's stall, with no second URL); rerun, it passed on SDF and
+    on Gateway.
+
 ## Karol's review (2026-10-20, at 83e8c29; comments)
 
 Two questions, both answered by okarcz on 2026-10-20:
@@ -157,7 +176,22 @@ On 2026-10-21 it was rebased onto #41 (`05bb5a0`), as decision 7 planned. Six of
 conflicted, mostly in `main.ts`; decision 18 records how they were merged. Two commits followed:
 the `/settle` tests with a hung first URL (decision 19) and the smoke script's dispatcher. Lint
 and typecheck pass, each of the 17 commits typechecks, and facilitator tests pass, 366 against
-PostgreSQL 18. Not pushed yet: the testnet smoke runs come first.
+PostgreSQL 18.
+
+On 2026-10-21, after #41 merged by rebase (`ef10461`), the 18 `lore-0045` commits were replayed
+onto develop with no conflicts; build, lint, typecheck and every package's tests pass. Then:
+
+- **Decision 47 of 0009** (`8dd7f6f`): failover logs name `RPC_URLS[i]#<fingerprint>`.
+- **The testnet smoke runs** found the first `/settle` with a hung `RPC_URLS[0]` timing out:
+  upstream and `FallbackRpc` each waited 10 s on it (a trace with a temporary timing wrapper:
+  27.8 s with a fixed bid, `settlement_pending` at 30 s with fee-stats). okarcz chose one active
+  URL owned by `FallbackRpc` (decisions 21–23) and Gateway as the smoke runs' `RPC_URLS[1]`
+  (decision 25).
+- **Mutants**: each new rule fails a test when broken, in signer-pool (a late answer switching
+  back, a stale token accepted, a probe ignoring a switch, a fallback switch restarting the probe
+  clock, two probes at once) and the facilitator (upstream starting on `[0]` regardless, never
+  reporting a timeout, reporting `unexpected_verify_error`). In `settle-pool.test.ts` the fixed-bid
+  test catches the second and the fee-stats test the first: the two halves of the testnet failure.
 
 ## Modified tests
 
@@ -187,3 +221,12 @@ PostgreSQL 18. Not pushed yet: the testnet smoke runs come first.
   `check`, `/settle`'s checks from `buildChecks` with the same `seams`. `settle-pool.test.ts` (#41)
   passes `seams` to `buildChecks` and `compose()` in place of a positional `makeScheme`, with a
   logger that has `info`; its `setup` takes optional `seams` and returns the upstream logger.
+- **The shared active URL** (2026-10-21): `upstream-failover.test.ts` runs on a real `FallbackRpc`
+  as the shared state, its probe tests moved to signer-pool's `resilience.test.ts`, and an
+  `unexpected_verify_error` no longer switches. `build-verifier.test.ts` builds the shared client
+  with `buildRpc`; switches are expected from it (`component: "rpc"`, `by`); the decision-2,
+  probe and lag tests switch with a throw; "every RPC URL hangs" expects two `rpc_failover` lines;
+  the fee-stats read waits just under the shared client's 10 s. `fee-agreement.test.ts`'s refused
+  first URL expects no switch, and `main.test.ts`'s secret check looks for `verified` instead of
+  `rpc_failover`. `settle-pool.test.ts`'s `setup` builds the shared client. Name assertions use
+  `rpcEndpointName` (`8dd7f6f`).
