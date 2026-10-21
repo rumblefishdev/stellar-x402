@@ -2,7 +2,7 @@
 id: "0020"
 title: "/supported and startup channel checks"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0005"]
 related_tasks: ["0012", "0017"]
@@ -15,6 +15,10 @@ history:
     status: backlog
     who: claude
     note: "Created by 0012 from M1 Story 1.6 (Platform lane)."
+  - date: "2026-10-21"
+    status: active
+    who: karolkow
+    note: "Work starts."
 ---
 
 # `/supported` and startup channel checks
