@@ -86,13 +86,28 @@ function hostOf(url: string): string | undefined {
   }
 }
 
+/** `url`'s host name without the port, lower-case (IPv6 without its brackets). */
+function hostnameOf(url: string): string | undefined {
+  try {
+    return new URL(url).hostname.replace(/^\[(.*)\]$/, "$1") || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Each URL in `text` redacted, so an API key stays out of the logs: a URL that starts with an entry
  * of `rpcUrls` becomes that entry's {@link rpcEndpointName}, one on an entry's host the names of
  * every entry on that host, and any other URL its host. A `file:` URL is kept: it is a stack
- * trace's code location, and carries no key.
+ * trace's code location, and carries no key. An entry's bare host name, as Node's network errors
+ * give it (`getaddrinfo ENOTFOUND <host>`, `connect ETIMEDOUT <host>:443`, a TLS altname
+ * mismatch), becomes the names of every entry on that host too.
  */
 export function redactUrls(text: string, rpcUrls: readonly string[] = []): string {
+  return redactRpcHosts(redactUrlsOnly(text, rpcUrls), rpcUrls);
+}
+
+function redactUrlsOnly(text: string, rpcUrls: readonly string[]): string {
   return text.replace(/\b[a-z][a-z\d+.-]*:\/\/[^\s"'<>]+/gi, (url) => {
     if (/^file:/i.test(url)) return url;
     const host = hostOf(url);
@@ -107,6 +122,21 @@ export function redactUrls(text: string, rpcUrls: readonly string[] = []): strin
     );
     return sameHost.length > 0 ? sameHost.join("|") : host;
   });
+}
+
+/** Each bare host name of an `rpcUrls` entry in `text`, as the names of every entry on it. */
+function redactRpcHosts(text: string, rpcUrls: readonly string[]): string {
+  const names = new Map<string, string[]>();
+  rpcUrls.forEach((entry, index) => {
+    const hostname = hostnameOf(entry);
+    if (hostname)
+      names.set(hostname, [...(names.get(hostname) ?? []), rpcEndpointName(entry, index)]);
+  });
+  if (names.size === 0) return text;
+  // Not inside a longer name: no name character before, none after but a sentence's full stop.
+  const hosts = [...names.keys()].map((host) => host.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const pattern = new RegExp(`(?<![\\w.-])(?:${hosts.join("|")})(?![\\w-]|\\.[\\w-])`, "gi");
+  return text.replace(pattern, (host) => names.get(host.toLowerCase())?.join("|") ?? host);
 }
 
 /** An error as its name, message and stack, URLs redacted, with one level of cause. */

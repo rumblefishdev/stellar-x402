@@ -649,6 +649,36 @@ describe("createSettler", () => {
     expect(metrics.value("settlement_uncertain_total")).toBe(1);
   });
 
+  it("keeps the record open after an unexpected error that follows a send the network answered", async () => {
+    // `sent: "yes"` may be an accepted send: nothing says this one won't land.
+    const { settle, store, hooks } = setup(async (opts) => {
+      await opts.onSigned?.(HASH);
+      throw Object.assign(new Error("bug after the send"), {
+        attempts: [{ hash: HASH, sent: "yes" }],
+      });
+    });
+    expect((await settle(payload(), requirements)).response).toMatchObject({
+      errorReason: SETTLE_REASONS.pending,
+      transaction: HASH,
+    });
+    expect((await store.get(key))?.state).toBe("pending");
+    expect(hooks.onFinal).not.toHaveBeenCalled();
+  });
+
+  it("ends the record on a classified error after a refused send: the pool knows it won't land", async () => {
+    // A txBadSeq refusal, then the rebuild's simulation fails.
+    const { settle, store } = setup(async (opts) => {
+      await opts.onSigned?.(HASH);
+      throw Object.assign(new SimulationError("rebuild failed"), {
+        attempts: [{ hash: HASH, sent: "yes" }],
+      });
+    });
+    expect((await settle(payload(), requirements)).response).toMatchObject({
+      errorReason: SETTLE_REASONS.simulation,
+    });
+    expect((await store.get(key))?.state).toBe("rejected");
+  });
+
   it("answers pending with the hash of a send that may have reached the network, even when the store fails", async () => {
     const { settle, store } = setup(async (opts) => {
       await opts.onSigned?.(HASH);
@@ -824,6 +854,46 @@ describe("createSettler", () => {
       });
       vi.spyOn(store, "markSuccessAnswered").mockResolvedValue(true);
       expect((await settle(payload(), requirements)).response).toEqual(alreadySettled);
+    });
+
+    it("leaves a success from the pool's result to a repeat when the budget answer replaced it", async () => {
+      let land!: () => void;
+      const { settle, store } = setup(
+        async (opts) => {
+          await opts.onSigned?.(HASH);
+          await new Promise<void>((resolve) => (land = resolve));
+          return result();
+        },
+        { budgetMs: 30 },
+      );
+      const transition = vi.spyOn(store, "transition");
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.pending,
+        transaction: HASH,
+      });
+      // The success lands after the budget answer, and the store fails to record it.
+      transition.mockRejectedValue(new Error("store down"));
+      land();
+      await vi.waitFor(() =>
+        expect(transition).toHaveBeenCalledWith(
+          key,
+          "signed",
+          expect.objectContaining({ state: "success" }),
+        ),
+      );
+      // The record turns `success` later (0019, or a write whose client timed out).
+      const get = store.get.bind(store);
+      vi.spyOn(store, "get").mockImplementation(async (k) => {
+        const record = await get(k);
+        return record && { ...record, state: "success" };
+      });
+      vi.spyOn(store, "markSuccessAnswered").mockResolvedValue(true);
+      expect((await settle(payload(), requirements)).response).toEqual({
+        success: true,
+        transaction: HASH,
+        network,
+        payer,
+      });
     });
   });
 

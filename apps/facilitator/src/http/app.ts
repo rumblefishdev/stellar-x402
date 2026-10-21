@@ -30,10 +30,12 @@ const notImplemented: RequestHandler = (_req, res) => {
 };
 
 /**
- * How deeply a request body may nest. The x402 objects need about 6 levels; `extensions` is free
- * JSON, and the settlement fingerprint's canonical JSON recurses once per level.
+ * How deeply a request body may nest. The x402 objects need about 6 levels, but `extensions` is
+ * free JSON: upstream's client copies a seller's whole Bazaar declaration into it, JSON Schema
+ * included, and each nullable object in an output schema adds 4. The settlement fingerprint's
+ * canonical JSON recurses once per level and overflows only at about 20 000.
  */
-export const MAX_BODY_DEPTH = 32;
+export const MAX_BODY_DEPTH = 256;
 
 /** Whether `value` nests deeper than `max` arrays and objects, counted without recursion. */
 function nestsDeeper(value: unknown, max: number): boolean {
