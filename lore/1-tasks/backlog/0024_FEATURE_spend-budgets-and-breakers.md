@@ -56,6 +56,45 @@ As a facilitator operator, I want fee spending capped and failing assets or reci
 - From 0022: `reserve` can reject when the store is busy or unreachable (`55P03` after the 2 s lock
   timeout, no `reservePool` connection within 5 s, a lost `COMMIT` answer). Answer it on purpose,
   e.g. 503 with a retry, not 500; a retry with the same `id` is safe, as the port says.
+- From 0009 (PR #41 reviews):
+  - **`beforeSubmit` must answer within the settle budget.** Past it, the record ends with
+    `…_timeout`, and `onFinal` runs once the hook's promise settles, whatever it answered (0009
+    decision 34), so a reservation made late is released. `onFinal` may also come for a
+    reservation that was never made: a refusal the store couldn't record ends later with
+    `onFinal` (`hooks.ts`).
+  - **Fee griefing by spending one balance in parallel** (Adam, third review). One payer funded
+    with exactly one `amount` signs N payments with N nonces and sends N `/settle` calls at once.
+    Each passes both simulations, N channels submit in one ledger, and N−1 fail on chain, at our
+    fee. A local probe had two payments from one payer reach `submitter.submit` concurrently.
+    The per-asset breaker makes it worse: 6 parallel calls would open the USDC breaker for every
+    seller for 10 minutes, at will. Needs: at most one non-final settlement per (payer, asset), or
+    in-flight amounts reserved against the balance; and balance-race failures counted against the
+    payer, not the asset.
+  - **Key a reservation by the settlement key, and refuse a reserve after its release** (Adam,
+    fourth review). In one process a repeat leaves an unsigned record to the first call until the
+    first call's budget ends (0009 decision 46). Across instances (0022) a repeat judges that by
+    its own clock, so it may end the record, and run `onFinal`, before the first call's
+    `beforeSubmit` reserves. Then the late reserve must be refused, not counted forever.
+  - Refusal reasons are an `errorReason` sellers see; the README lists "a spend reason" as a
+    refusal that ends the payment (sign a new one later).
+- From 0009 (Adam's sixth PR #41 review), **to verify on a Soroban host first**, not a decision:
+  upstream checks only that the payer's auth entry has a non-void signature, and Soroban checks it
+  (and uses up the nonce) only when `require_auth` uses the entry. So a wasm token whose `transfer`
+  never calls `from.require_auth()` would pass both simulations with any `from` and any nonce. Not
+  reproduced: there was no local Soroban host. If it holds, per-payer budgets bound nothing for such
+  tokens (ADR 0007's rationale), the global budget becomes a way to refuse every seller, and records
+  and the catalog carry a payer the attacker picked. Adam's idea: limits tiered by asset kind, SAC
+  (`ContractExecutable::StellarAsset`) against wasm, with low defaults for wasm.
+- From 0009 (Adam's seventh PR #41 review): **fees burnt by payments that pass every check.** A
+  C-address payer whose `__check_auth` depends on the PRNG or the ledger number passes both
+  simulations and `expectTransfer`, then fails on chain at our fee, with no balance spent and no
+  parallel spend. Zero-amount transfers (`amount: "0"`) are the same class. Per-payer single-flight
+  and balance reservation don't stop it; it needs per-`payTo` and global fee budgets.
+- From 0009 (PR #41, decision 49): the config refuses `NETWORK=stellar:pubnet` until spend
+  budgets (0024), rate limits (0023) and the channel lease (0025) land: the rule after the
+  `STORE` one in `config.ts`, with tests in `config.test.ts` and `main.test.ts`. Whichever of the
+  three lands last removes it; an earlier one narrows its message to what is still missing,
+  together with the facilitator README.
 
 ## Acceptance Criteria
 

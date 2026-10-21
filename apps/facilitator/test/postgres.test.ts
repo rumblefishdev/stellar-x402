@@ -1,5 +1,6 @@
 import { CATALOG_KEY_VERSION } from "@stellar-x402/bazaar";
-import { Keypair } from "@stellar/stellar-sdk";
+import { Keypair, StrKey } from "@stellar/stellar-sdk";
+import type { PaymentRequirements } from "@x402/core/types";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createPool, postgresStores } from "../src/adapters/postgres.js";
@@ -7,6 +8,8 @@ import { MIGRATIONS, migrate } from "../src/adapters/postgres-schema.js";
 import { NON_FINAL_STATES } from "../src/adapters/rules.js";
 import { main, migrateMain } from "../src/main.js";
 import { HashConflictError, type Stores } from "../src/ports/index.js";
+import { fingerprintOf, keyOf } from "../src/settlement/settle.js";
+import { transferPayload } from "./payment.js";
 import {
   catalogStoreContract,
   rateLimitStoreContract,
@@ -362,6 +365,65 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     ]);
   });
 
+  it("answers main()'s /settle from the PostgreSQL record", async () => {
+    // A repeat is answered from its record before any check or RPC call, so only a `/settle` wired
+    // to these stores gives this answer; on memory stores it would start a new settlement.
+    const { settlements } = await stores();
+    const requirements = {
+      scheme: "exact",
+      network: "stellar:testnet",
+      asset: StrKey.encodeContract(Buffer.alloc(32, 7)),
+      amount: "1000",
+      payTo: Keypair.random().publicKey(),
+      maxTimeoutSeconds: 60,
+      extra: {},
+    } satisfies PaymentRequirements;
+    const payer = Keypair.random().publicKey();
+    const paymentPayload = transferPayload(
+      { payer, payTo: requirements.payTo, requirements },
+      1_000,
+    );
+    const key = keyOf(paymentPayload, "stellar:testnet");
+    if (!key) throw new Error("the payload has no settlement key");
+    const now = Date.now();
+    await settlements.claim({
+      key,
+      network: "stellar:testnet",
+      payer,
+      nonce: "7",
+      fingerprint: fingerprintOf(paymentPayload, requirements),
+      paymentPayload,
+      paymentRequirements: requirements,
+      createdAt: now,
+    });
+    await settlements.addHash(key, "h1", now);
+    await settlements.transition(key, "signed", { state: "success", updatedAt: now });
+    const app = await main({
+      STORE: "postgres",
+      DATABASE_URL: urlFor(schema),
+      FACILITATOR_SECRET: Keypair.random().secret(),
+      CHANNELS: Keypair.random().publicKey(),
+      PORT: "0",
+      LOG_LEVEL: "error",
+    });
+    try {
+      const response = await fetch(`http://127.0.0.1:${app.port}/settle`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ x402Version: 2, paymentPayload, paymentRequirements: requirements }),
+      });
+      expect(await response.json()).toEqual({
+        success: true,
+        transaction: "h1",
+        network: "stellar:testnet",
+        payer,
+      });
+      expect((await settlements.get(key))?.successAnsweredAt).toEqual(expect.any(Number));
+    } finally {
+      await app.close();
+    }
+  });
+
   it("closes once when two signals call close()", async () => {
     const app = await main({
       STORE: "postgres",
@@ -421,6 +483,24 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
       );
       expect(rows.map((row) => row.name)).toEqual(MIGRATIONS.map((migration) => migration.name));
     } finally {
+      await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
+    }
+  });
+
+  it("reads records on a database `0002_success_answered` hasn't reached", async () => {
+    // A release started before `pnpm migrate`: `SELECT s.*` has no `success_answered_at`.
+    const fresh = `${schema}_0001`;
+    await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
+    await pool.query(`CREATE SCHEMA ${fresh}`);
+    const old = poolFor(fresh, 2);
+    try {
+      expect(await migrate(old, 0, MIGRATIONS.slice(0, 1))).toEqual(["0001_init"]);
+      const { settlements } = postgresStores(old);
+      const s = settlement("1");
+      await settlements.claim(s);
+      expect(await settlements.get(s.key)).not.toHaveProperty("successAnsweredAt");
+    } finally {
+      await old.end();
       await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
     }
   });

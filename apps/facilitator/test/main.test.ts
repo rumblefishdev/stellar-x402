@@ -12,11 +12,11 @@ import {
   TransactionBuilder,
   nativeToScVal,
 } from "@stellar/stellar-sdk";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { memoryStores } from "../src/adapters/memory.js";
-import { parseConfig } from "../src/config.js";
-import { jsonLogger } from "../src/logger.js";
-import { start, type Started } from "../src/main.js";
+import { ConfigError, parseConfig } from "../src/config.js";
+import { jsonLogger, rpcEndpointName } from "../src/logger.js";
+import { main, start, type Started } from "../src/main.js";
 
 const secret = Keypair.random().secret();
 const env = {
@@ -34,22 +34,30 @@ describe("facilitator boot", () => {
     const config = parseConfig({ ...env, PORT: "0" });
     const logger = jsonLogger("debug", (line) => lines.push(line));
     const verify = async () => ({ isValid: true });
-    app = await start({ config, logger, stores: memoryStores(), verify });
+    const settle = async () => ({
+      response: { success: false, transaction: "", network: config.network },
+    });
+    app = await start({
+      config,
+      logger,
+      stores: memoryStores(),
+      verify,
+      settle,
+      extensionResponses: () => undefined,
+    });
     url = `http://127.0.0.1:${app.port}`;
   });
   afterAll(() => app.close());
 
   it("answers the stub routes, with no CORS headers", async () => {
     const routes = [
-      ["POST", "/settle"],
       ["GET", "/supported"],
       ["GET", "/discovery/resources"],
     ] as const;
     for (const [method, path] of routes) {
       const response = await fetch(`${url}${path}`, {
         method,
-        headers: { "content-type": "application/json", origin: "https://other.example" },
-        body: method === "POST" ? "{}" : undefined,
+        headers: { origin: "https://other.example" },
       });
       expect(response.status, path).toBe(501);
       expect(response.headers.get("access-control-allow-origin"), path).toBeNull();
@@ -113,9 +121,50 @@ describe("startup with a bad config", () => {
     expect(output).toContain("DATABASE_URL must be a postgres:// URL");
     expect(output).not.toContain("secret");
   }, 20_000);
+
+  it("refuses stellar:pubnet even with a durable store, before serving anything", async () => {
+    // `/settle` spends there: not without spend budgets, rate limits and the channel lease.
+    const pubnet = {
+      ...env,
+      NETWORK: "stellar:pubnet",
+      RPC_URLS: "https://rpc.example",
+      STORE: "postgres",
+      DATABASE_URL: "postgres://db.internal/x402",
+    };
+    const error = await main(pubnet).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ConfigError);
+    expect((error as ConfigError).problems).toEqual([
+      "NETWORK stellar:pubnet is refused until spend budgets (0024), rate limits (0023) and the channel lease (0025) land",
+    ]);
+  });
 });
 
 describe("main()", () => {
+  it("names an RPC_URLS entry in its logs and console.error lines, never its host", async () => {
+    // A URL can carry its API key in the path, and its host can name a paid provider (ADR 0011).
+    const original = console.error;
+    const lines: string[] = [];
+    const write = vi.spyOn(process.stdout, "write").mockImplementation((line) => {
+      lines.push(String(line));
+      return true;
+    });
+    const url = "https://acct.example/K/";
+    const app = await main({ ...env, RPC_URLS: url, PORT: "0", LOG_LEVEL: "error" });
+    try {
+      app.logger.error("http_error", { error: new Error(`request to ${url}rpc failed`) });
+      console.error(`request to ${url}rpc failed`);
+      expect(lines).toHaveLength(2);
+      for (const line of lines) {
+        expect(line).toContain(rpcEndpointName(url, 0));
+        expect(line).not.toContain("acct.example");
+      }
+    } finally {
+      write.mockRestore();
+      console.error = original;
+      await app.close();
+    }
+  });
+
   it("answers /verify with the real verifier, then exits 0 on SIGTERM", async () => {
     const child = spawn(process.execPath, ["--import", "tsx", "src/server.ts"], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),
