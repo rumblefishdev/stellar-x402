@@ -127,7 +127,11 @@ try {
   const first = await pay();
   const settled = await post<SettleResponse>("settle", first);
   const failedOver = events.some(
-    (e) => e.event === "rpc_failover" && e.from === "RPC_URLS[0]" && e.to === "RPC_URLS[1]",
+    // Logs name an entry `RPC_URLS[i]#<fingerprint>` (0009 decision 47).
+    (e) =>
+      e.event === "rpc_failover" &&
+      e.from?.startsWith("RPC_URLS[0]#") &&
+      e.to?.startsWith("RPC_URLS[1]#"),
   );
   const onChain = settled.success
     ? (await server.pollTransaction(settled.transaction, { attempts: 30 })).status

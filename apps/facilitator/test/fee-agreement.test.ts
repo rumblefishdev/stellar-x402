@@ -23,6 +23,7 @@ import {
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { parseConfig } from "../src/config.js";
+import { rpcEndpointName } from "../src/logger.js";
 import { buildVerifier } from "../src/main.js";
 import { feeSettings } from "../src/settlement/fees.js";
 import type { VerifyTrace } from "../src/settlement/verify.js";
@@ -191,6 +192,7 @@ describe("real upstream with a down first RPC URL (AD-3)", () => {
       INCLUSION_FEE_STROOPS: String(BID),
     });
     resourceFee = 100_000;
+    const rpc = (i: number) => rpcEndpointName(config.rpcUrls[i]!, i);
     const logger = { warn: vi.fn(), info: vi.fn() };
     const verify = buildVerifier(config, poolRpc, feeSettings(config.fees, poolRpc), logger);
     const trace: VerifyTrace = {};
@@ -199,12 +201,12 @@ describe("real upstream with a down first RPC URL (AD-3)", () => {
       isValid: false,
       invalidReason: "invalid_exact_stellar_payload_no_transfer_events",
     });
-    expect(trace).toEqual({ rpc: "RPC_URLS[1]" });
+    expect(trace).toEqual({ rpc: rpc(1) });
     expect(logger.warn).toHaveBeenCalledExactlyOnceWith("rpc_failover", {
       component: "verify",
       network: "stellar:testnet",
-      from: "RPC_URLS[0]",
-      to: "RPC_URLS[1]",
+      from: rpc(0),
+      to: rpc(1),
       reason: "unexpected_verify_error",
     });
   });

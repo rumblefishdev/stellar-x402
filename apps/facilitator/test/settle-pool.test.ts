@@ -4,7 +4,7 @@ import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import { describe, expect, it, vi } from "vitest";
 import { MemorySettlementStore } from "../src/adapters/memory.js";
 import { parseConfig, type Env } from "../src/config.js";
-import { jsonLogger } from "../src/logger.js";
+import { jsonLogger, rpcEndpointName } from "../src/logger.js";
 import { buildChecks, buildSettlement, compose, type UpstreamSeams } from "../src/main.js";
 import { memoryMetrics } from "../src/metrics.js";
 import { feeSettings } from "../src/settlement/fees.js";
@@ -113,6 +113,7 @@ function setup(env: Partial<Env> = {}, seams?: UpstreamSeams) {
 
 describe("main()'s /settle wiring, with a hung RPC_URLS[0]", () => {
   const RPC_URLS = "https://rpc-a.example,https://rpc-b.example";
+  const rpc = (i: number) => rpcEndpointName(RPC_URLS.split(",")[i]!, i);
   /** `RPC_URLS[0]` accepts the call and never answers; `RPC_URLS[1]` answers. */
   const hungFirst = (timeoutMs: number): UpstreamSeams => ({
     makeScheme: (_signer, options) => ({
@@ -132,7 +133,7 @@ describe("main()'s /settle wiring, with a hung RPC_URLS[0]", () => {
     expect(fake.sent).toHaveLength(1);
     expect(upstreamLogger.warn).toHaveBeenCalledWith(
       "rpc_failover",
-      expect.objectContaining({ from: "RPC_URLS[0]", to: "RPC_URLS[1]", reason: "timeout" }),
+      expect.objectContaining({ from: rpc(0), to: rpc(1), reason: "timeout" }),
     );
   });
 

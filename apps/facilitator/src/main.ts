@@ -19,7 +19,7 @@ import { parseConfig, parseMigrateConfig } from "./config.js";
 import type { Config } from "./config.js";
 import { createApp, type AppDeps } from "./http/app.js";
 import { supportedResponse } from "./http/supported.js";
-import { captureConsoleError, jsonLogger, type Logger } from "./logger.js";
+import { captureConsoleError, jsonLogger, rpcEndpointName, type Logger } from "./logger.js";
 import { memoryMetrics, type Metrics } from "./metrics.js";
 import type { SettlementStore } from "./ports/index.js";
 import { atCurrentBid, feeSettings, type FeeSettings } from "./settlement/fees.js";
@@ -118,7 +118,7 @@ export function failureReason(failure: EndpointFailure | { error: unknown }): st
  * Upstream verify from the config, with its deadline (AD-3, AD-10): one `ExactStellarScheme` per
  * `RPC_URLS` entry, with the fee ceiling and the fee a settlement pays at the shared bid, read once
  * per call, behind `failoverUpstream`, which probes `RPC_URLS[0]` with its own `rpc.Server` while
- * calls are off it. Logs, each with `component: "verify"`, the network and `RPC_URLS[i]` names:
+ * calls are off it. Logs, each with `component: "verify"`, the network and `RPC_URLS[i]#…` names:
  * `rpc_failover` (warn) on a switch, `rpc_failback` (info) on the return to the first URL,
  * `rpc_probe_failed` (warn), and `rpc_exhausted` (warn) when every URL failed.
  * The two belong together: spread both into `VerifierDeps`, or the deadline falls back to 10 s and
@@ -136,7 +136,8 @@ export function buildUpstream(
     latestLedger = rpcLatestLedger(config.rpcUrls),
     timeoutMs = UPSTREAM_TIMEOUT_MS,
   } = seams;
-  const name = (i: number) => `RPC_URLS[${i}]`;
+  // `RPC_URLS[i]#<fingerprint>`, as everywhere else in the logs (ADR 0011, 0009 decision 47).
+  const name = (i: number) => rpcEndpointName(config.rpcUrls[i]!, i);
   // Upstream reads one RPC URL, so there is one scheme per URL, tried in `RPC_URLS` order.
   const endpoints = atCurrentBid(fees.inclusionFee, (inclusionFeeStroops) =>
     config.rpcUrls.map((url, i) => ({

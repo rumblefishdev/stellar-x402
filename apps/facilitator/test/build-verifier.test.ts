@@ -26,6 +26,7 @@ import {
   upstreamDeadlineMs,
   type SchemeOptions,
 } from "../src/main.js";
+import { rpcEndpointName } from "../src/logger.js";
 import { feeSettings, type FeeSettings } from "../src/settlement/fees.js";
 import {
   CHANNEL_ACCOUNT_REASON,
@@ -48,6 +49,8 @@ const config = parseConfig({
   RPC_URLS: "https://rpc-a.example,https://rpc-b.example",
   MAX_FEE_STROOPS: "300000",
 });
+/** How the logs name `RPC_URLS[i]`. */
+const rpc = (i: number) => rpcEndpointName(config.rpcUrls[i]!, i);
 
 const requirements: PaymentRequirements = {
   scheme: "exact",
@@ -179,7 +182,7 @@ describe("buildVerifier (the /verify wiring in main)", () => {
     const { verify, schemes } = setup();
     const trace: VerifyTrace = {};
     await expect(verify(payload(), requirements, trace)).resolves.toEqual({ isValid: true, payer });
-    expect(trace).toEqual({ rpc: "RPC_URLS[0]" });
+    expect(trace).toEqual({ rpc: rpc(0) });
     expect(schemes).toEqual(
       ["https://rpc-a.example", "https://rpc-b.example"].map((url) => ({
         signer: Keypair.fromSecret(secret).publicKey(),
@@ -233,13 +236,13 @@ describe("buildVerifier (the /verify wiring in main)", () => {
     );
     const trace: VerifyTrace = {};
     await expect(verify(payload(), requirements, trace)).resolves.toEqual({ isValid: true, payer });
-    expect(trace).toEqual({ rpc: "RPC_URLS[1]" });
+    expect(trace).toEqual({ rpc: rpc(1) });
     // Names, not URLs: an RPC URL can carry an API key.
     expect(logger.warn).toHaveBeenCalledExactlyOnceWith("rpc_failover", {
       component: "verify",
       network: config.network,
-      from: "RPC_URLS[0]",
-      to: "RPC_URLS[1]",
+      from: rpc(0),
+      to: rpc(1),
       reason: "unexpected_verify_error",
     });
   });
@@ -282,7 +285,7 @@ describe("buildVerifier (the /verify wiring in main)", () => {
     bid = 300;
     const trace: VerifyTrace = {};
     await verify(payload(), requirements, trace);
-    expect(trace).toEqual({ rpc: "RPC_URLS[1]" });
+    expect(trace).toEqual({ rpc: rpc(1) });
     // The new bid's call starts on the active URL, not on RPC_URLS[0] again.
     expect(called).toEqual([
       "https://rpc-a.example",
@@ -312,8 +315,8 @@ describe("buildVerifier (the /verify wiring in main)", () => {
         expect(logger.info).toHaveBeenCalledExactlyOnceWith("rpc_failback", {
           component: "verify",
           network: config.network,
-          from: "RPC_URLS[1]",
-          to: "RPC_URLS[0]",
+          from: rpc(1),
+          to: rpc(0),
           lagLedgers: 0,
         }),
       );
@@ -323,7 +326,7 @@ describe("buildVerifier (the /verify wiring in main)", () => {
       ]);
       const trace: VerifyTrace = {};
       await verify(payload(), requirements, trace);
-      expect(trace).toEqual({ rpc: "RPC_URLS[0]" });
+      expect(trace).toEqual({ rpc: rpc(0) });
     } finally {
       vi.useRealTimers();
     }
@@ -346,7 +349,7 @@ describe("buildVerifier (the /verify wiring in main)", () => {
         expect(logger.warn).toHaveBeenCalledWith("rpc_probe_failed", {
           component: "verify",
           network: config.network,
-          rpc: "RPC_URLS[0]",
+          rpc: rpc(0),
           reason: "lagging",
           lagLedgers: FAILBACK_MAX_LAG_LEDGERS + 1,
         }),
@@ -384,7 +387,7 @@ describe("buildVerifier (the /verify wiring in main)", () => {
       const answer = verify(payload(), requirements);
       const settled = expect(answer).rejects.toThrow(
         new UpstreamTimeoutError(
-          `RPC_URLS[0]: upstream verify gave no answer within ${UPSTREAM_TIMEOUT_MS} ms`,
+          `${rpc(0)}: upstream verify gave no answer within ${UPSTREAM_TIMEOUT_MS} ms`,
         ),
       );
       await vi.advanceTimersByTimeAsync(2 * UPSTREAM_TIMEOUT_MS);
@@ -393,8 +396,8 @@ describe("buildVerifier (the /verify wiring in main)", () => {
         component: "verify",
         network: config.network,
         tried: [
-          { rpc: "RPC_URLS[0]", reason: "timeout" },
-          { rpc: "RPC_URLS[1]", reason: "timeout" },
+          { rpc: rpc(0), reason: "timeout" },
+          { rpc: rpc(1), reason: "timeout" },
         ],
       });
     } finally {
@@ -415,7 +418,7 @@ describe("buildVerifier (the /verify wiring in main)", () => {
       await vi.advanceTimersByTimeAsync(UPSTREAM_TIMEOUT_MS + 1);
       await expect(answer).resolves.toEqual({ isValid: true, payer });
       // The first URL answered: there was no failover.
-      expect(trace).toEqual({ rpc: "RPC_URLS[0]" });
+      expect(trace).toEqual({ rpc: rpc(0) });
       expect(logger.warn).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
