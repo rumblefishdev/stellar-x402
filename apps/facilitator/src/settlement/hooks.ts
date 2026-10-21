@@ -25,7 +25,9 @@ export type BeforeSubmitResult =
   /**
    * Nothing is submitted: the record moves `claimed → rejected` with this x402 `errorReason`,
    * `/settle` answers `success: false`, and `onFinal` is not called. A hook that throws is
-   * treated the same way.
+   * treated the same way, with `settle_exact_stellar_refused`. If the refusal can't be stored, the
+   * record stays `claimed`: a repeat past the budget ends it with `…_timeout`, and then `onFinal`
+   * runs (`settle`), so a release must tolerate a reservation that was never made.
    */
   | { allow: false; errorReason: string };
 
@@ -40,11 +42,17 @@ export type { ExtensionResponses } from "@stellar-x402/bazaar";
  * the other lanes implement them (spend budgets in 0024, cataloging in 0031).
  */
 export interface SettlementHooks {
-  /** Runs after the claim and before `submit()` (AD-18); may refuse the settlement. */
+  /**
+   * Runs after the claim and before `submit()` (AD-18); may refuse the settlement. It must answer
+   * within what is left of the settle budget: past it, the record ends as the budget does
+   * (`…_timeout`), whatever the hook answers later, and `onFinal` runs once the hook has settled,
+   * so a reservation it makes late is released.
+   */
   beforeSubmit(context: BeforeSubmitContext): Promise<BeforeSubmitResult>;
   /**
-   * Runs once when a record turns final, in any final state, after `beforeSubmit` allowed it:
-   * settles or releases the spend reservation and feeds the breakers (AD-18). Its errors never
+   * Runs once when a record turns final, in any final state, after `beforeSubmit` allowed it or
+   * didn't answer within the budget: settles or releases the spend reservation, which may then
+   * not exist, and feeds the breakers (AD-18). Its errors never
    * reach the caller and never change the settle outcome; `/settle` doesn't wait for it. The
    * settlement module logs and counts them.
    */
@@ -58,7 +66,8 @@ export interface SettlementHooks {
   extensionResponses(record: SettlementRecord): ExtensionResponses | undefined;
   /**
    * Runs once when a record turns `success` (AD-8): after the settle response is sent, or when a
-   * `resolved` event or the startup re-check finalizes it. Its result and errors never reach the
+   * `resolved` event, the startup re-check or a submission past the settle budget finalizes it
+   * (`resolved`, the same origin `onFinal` gets). Its result and errors never reach the
    * caller; the settlement module logs and counts them.
    */
   onSuccess(record: SettlementRecord, origin: SettlementOrigin): Promise<void>;

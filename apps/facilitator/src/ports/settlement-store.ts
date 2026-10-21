@@ -38,6 +38,8 @@ export interface SettlementRecord {
   feeCharged?: bigint;
   /** x402 `errorReason` for a final state other than `success`. */
   errorReason?: string;
+  /** When a `/settle` call first answered this record's `success` (AD-6: once per record). */
+  successAnsweredAt?: number;
   /** Milliseconds since the epoch. */
   createdAt: number;
   updatedAt: number;
@@ -45,7 +47,14 @@ export interface SettlementRecord {
 
 export type NewSettlement = Omit<
   SettlementRecord,
-  "state" | "hashes" | "channel" | "ledger" | "feeCharged" | "errorReason" | "updatedAt"
+  | "state"
+  | "hashes"
+  | "channel"
+  | "ledger"
+  | "feeCharged"
+  | "errorReason"
+  | "successAnsweredAt"
+  | "updatedAt"
 >;
 
 export type ClaimResult =
@@ -93,8 +102,18 @@ export interface SettlementStore {
    * 2. a hash already on this record resolves `true`, a no-op;
    * 3. a hash on another record rejects with `HashConflictError`, and neither record changes;
    * 4. otherwise the hash is appended and it resolves `true`.
+   * Atomic with {@link transition}: against a concurrent `transition(key, "claimed", …)` to a
+   * final state, exactly one wins. A check-then-write would let `/settle` answer `…_timeout` for a
+   * hash that is then sent.
    */
   addHash(key: SettlementKey, hash: string, updatedAt: number): Promise<boolean>;
+  /**
+   * Compare-and-set on `successAnsweredAt`: sets it while the record is `success` and has none.
+   * Resolves `true` for exactly one of several concurrent callers, the one whose answer may be
+   * `success` (AD-6). It leaves `updatedAt` as it is: the mark records an answer, not a step of
+   * the lifecycle.
+   */
+  markSuccessAnswered(key: SettlementKey, at: number): Promise<boolean>;
   /**
    * Compare-and-set: applies `update` only while the record is in state `expected`. Resolves
    * the updated record, or `undefined` if the state had already moved on. An `update.state`

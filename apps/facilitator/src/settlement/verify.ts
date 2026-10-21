@@ -41,6 +41,25 @@ export const CHANNEL_ACCOUNT_REASON = "invalid_exact_stellar_payload_channel_acc
  * misses; upstream rejects the plain address itself.
  */
 export const MUXED_FACILITATOR_REASON = "invalid_exact_stellar_payload_facilitator_muxed";
+/**
+ * The payload doesn't carry exactly one auth entry for the payer, so it has no settlement key
+ * (AD-6). Upstream de-duplicates signers and doesn't count entries.
+ */
+export const PAYER_AUTH_REASON = "invalid_exact_stellar_payload_payer_auth_entries";
+/**
+ * Upstream's code for an auth entry without address credentials. A source-account entry
+ * authorizes as the transaction's operation source, which the pool makes the facilitator, so we
+ * refuse it too instead of trusting only upstream's check.
+ */
+export const UNSUPPORTED_CREDENTIAL_REASON =
+  "invalid_exact_stellar_payload_unsupported_credential_type";
+
+/**
+ * The auth expires at or past the last ledger the pool can bound an envelope by: `/settle` passes
+ * it as `maxLedger`, and the envelope's bound (`maxLedger + 1`) is a uint32.
+ */
+export const EXPIRATION_TOO_FAR_REASON = "invalid_exact_stellar_signature_expiration_too_far";
+const MAX_EXPIRATION_LEDGER = 2 ** 32 - 2;
 
 /** Upstream's code for an exception inside its `verify()`. */
 const UNEXPECTED_VERIFY_ERROR = "unexpected_verify_error";
@@ -65,26 +84,53 @@ export type Verify = (
 
 /**
  * The `exact` verification `/verify` answers with and `/settle` (0009) runs again (AD-3): the
- * network and envelope checks, upstream `verify()`, then the channel check (AD-5, with the
- * facilitator's muxed address), then the validity check (AD-22). The first rejection is the
- * answer. Errors are thrown, not answered: ours (the ledger read), upstream's, which it reports as
+ * network and envelope checks, upstream `verify()`, then address credentials only, the channel
+ * check (AD-5, with the facilitator's muxed address), the payer's one auth entry (AD-6), then the
+ * validity check (AD-22). The first rejection is the answer. Errors are thrown, not answered: ours (the ledger read), upstream's, which it reports as
  * `unexpected_verify_error`, and an upstream call past `upstreamTimeoutMs`.
  */
 export function createVerifier(deps: VerifierDeps): Verify {
+  const check = createChecker(deps);
+  return async (payload, requirements) => (await check(payload, requirements)).response;
+}
+
+/** A payment that passed every check, as `/settle` needs it. */
+export interface Verified {
+  transaction: Transaction;
+  payer: string;
+  /** The int64 nonce of the payer's one auth entry, as a decimal string (AD-6). */
+  nonce: string;
+  /** The earliest `signatureExpirationLedger` of the auth entries. */
+  expirationLedger: number;
+  /** The ledger the validity check read. */
+  currentLedger: number;
+}
+
+export type Check = (
+  payload: PaymentPayload,
+  requirements: PaymentRequirements,
+) => Promise<{ response: VerifyResponse; verified?: Verified }>;
+
+/** {@link createVerifier}'s checks, also returning what they parsed and read when they pass. */
+export function createChecker(deps: VerifierDeps): Check {
   const accounts = new Set([...deps.channels, deps.facilitator]);
   const timeoutMs = deps.upstreamTimeoutMs ?? 10_000;
   return async (payload, requirements) => {
     // Upstream would verify against any Stellar network's default RPC; this process serves one.
     if (requirements.network !== deps.network) {
-      return invalid("invalid_network", undefined, `this facilitator serves ${deps.network}`);
+      return {
+        response: invalid("invalid_network", undefined, `this facilitator serves ${deps.network}`),
+      };
     }
     // Upstream parses a V0 envelope, and its simulation result then can't be assembled onto it.
     if (isV0Envelope(payload)) {
-      return invalid(
-        "invalid_exact_stellar_payload_malformed",
-        undefined,
-        "the transaction must be a v1 envelope",
-      );
+      return {
+        response: invalid(
+          "invalid_exact_stellar_payload_malformed",
+          undefined,
+          "the transaction must be a v1 envelope",
+        ),
+      };
     }
     const upstream = withStringPayer(
       await withTimeout(deps.upstream.verify(payload, requirements), timeoutMs),
@@ -94,17 +140,28 @@ export function createVerifier(deps: VerifierDeps): Verify {
     if (upstream.invalidReason === UNEXPECTED_VERIFY_ERROR) {
       throw new Error(`upstream verify failed with ${UNEXPECTED_VERIFY_ERROR}`);
     }
-    if (!upstream.isValid) return upstream;
+    if (!upstream.isValid) return { response: upstream };
+    // Upstream always names the payer of a valid payment; without one, nothing below can run.
+    if (upstream.payer === undefined) throw new Error("upstream verify named no payer");
 
     // Upstream accepted it, so the payload is a parsed, one-operation `transfer` call.
     const transaction = new Transaction(
       (payload.payload as { transaction: string }).transaction,
       getNetworkPassphrase(deps.network),
     );
+    if (hasSourceAccountAuth(transaction)) {
+      return {
+        response: invalid(
+          UNSUPPORTED_CREDENTIAL_REASON,
+          upstream.payer,
+          "every auth entry must have address credentials",
+        ),
+      };
+    }
     const problem = channelProblem(transaction, accounts);
     if (problem) {
       const isFacilitator = problem.account === deps.facilitator;
-      return {
+      const response = {
         ...invalid(
           problem.invalidReason,
           upstream.payer,
@@ -113,6 +170,18 @@ export function createVerifier(deps: VerifierDeps): Verify {
             : "the payload uses a facilitator channel account",
         ),
         extra: { reason: isFacilitator ? MUXED_FACILITATOR_REASON : CHANNEL_ACCOUNT_REASON },
+      };
+      return { response };
+    }
+    // `/settle` keys the settlement on this nonce; `/verify` must not accept what it can't settle.
+    const nonce = payerNonce({ transaction, payer: upstream.payer });
+    if (nonce === undefined) {
+      return {
+        response: invalid(
+          PAYER_AUTH_REASON,
+          upstream.payer,
+          "the payload must carry exactly one auth entry for the payer",
+        ),
       };
     }
 
@@ -127,14 +196,34 @@ export function createVerifier(deps: VerifierDeps): Verify {
           ? `; maxTimeoutSeconds ${requirements.maxTimeoutSeconds} is about ${signed} ledgers, ` +
             `so it should be well above ${floor}`
           : "";
-      return invalid(
-        "invalid_exact_stellar_signature_expiration_too_soon",
-        upstream.payer,
-        `auth expires at ledger ${expiration}, ${expiration - current} ledgers after ledger ` +
-          `${current}; at least ${deps.minValidityLedgers} are required${hint}`,
-      );
+      return {
+        response: invalid(
+          "invalid_exact_stellar_signature_expiration_too_soon",
+          upstream.payer,
+          `auth expires at ledger ${expiration}, ${expiration - current} ledgers after ledger ` +
+            `${current}; at least ${deps.minValidityLedgers} are required${hint}`,
+        ),
+      };
     }
-    return upstream;
+    if (expiration > MAX_EXPIRATION_LEDGER) {
+      return {
+        response: invalid(
+          EXPIRATION_TOO_FAR_REASON,
+          upstream.payer,
+          `auth expires at ledger ${expiration}; it must be at most ${MAX_EXPIRATION_LEDGER}`,
+        ),
+      };
+    }
+    return {
+      response: upstream,
+      verified: {
+        transaction,
+        payer: upstream.payer,
+        nonce,
+        expirationLedger: expiration,
+        currentLedger: current,
+      },
+    };
   };
 }
 
@@ -188,6 +277,38 @@ export function channelProblem(
     }
   }
   return undefined;
+}
+
+/** Whether any auth entry lacks address credentials, e.g. a source-account entry. */
+export function hasSourceAccountAuth(transaction: Transaction): boolean {
+  return transaction.operations.some(
+    (operation) =>
+      operation.type === "invokeHostFunction" &&
+      (operation.auth ?? []).some(
+        (entry) => getAddressCredentials(entry.credentials()) === undefined,
+      ),
+  );
+}
+
+/** The int64 nonce of the payer's one auth entry, as a decimal string (AD-6). */
+export function payerNonce({
+  transaction,
+  payer,
+}: {
+  transaction: Transaction;
+  payer: string;
+}): string | undefined {
+  const nonces: string[] = [];
+  for (const operation of transaction.operations) {
+    if (operation.type !== "invokeHostFunction") continue;
+    for (const entry of operation.auth ?? []) {
+      const credentials = getAddressCredentials(entry.credentials());
+      if (credentials && addressOf(credentials.address()) === payer) {
+        nonces.push(credentials.nonce().toString());
+      }
+    }
+  }
+  return nonces.length === 1 ? nonces[0] : undefined;
 }
 
 /** The earliest `signatureExpirationLedger` of the payload's address-credential auth entries. */

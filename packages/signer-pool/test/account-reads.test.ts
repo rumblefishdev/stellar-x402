@@ -7,6 +7,7 @@ import {
   AccountNotFoundError,
   FallbackRpc,
   RpcTimeoutError,
+  RpcUnavailableError,
   SettlementSubmitter,
   checkChannel,
   keypairSigner,
@@ -74,7 +75,7 @@ async function stub(answer: Answer): Promise<string> {
 function wireResult(answer: "no-entry" | "entry", key: string) {
   if (answer === "no-entry") return { entries: [], latestLedger: 100 };
   const accountId = xdr.LedgerKey.fromXDR(key, "base64").account().accountId();
-  const xdrEntry = accountEntry(accountId, 4000n).val.toXDR("base64");
+  const xdrEntry = accountEntry(accountId, 4000n, [facilitator]).val.toXDR("base64");
   return { entries: [{ key, xdr: xdrEntry, lastModifiedLedgerSeq: 90 }], latestLedger: 100 };
 }
 
@@ -169,7 +170,9 @@ describe("sequence reads during an RPC outage", () => {
 
   it("keeps the channel in the pool when reads time out past the time bound", async () => {
     const { submitter, events } = setup(await stub("hang"), 20);
-    await expect(submitter.submit(call())).rejects.toBeInstanceOf(RpcTimeoutError);
+    const error = await submitter.submit(call()).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RpcUnavailableError);
+    expect((error as Error).cause).toBeInstanceOf(RpcTimeoutError);
     expect(events.map((e) => e.type)).not.toContain("channel-quarantined");
     expect(submitter.stats()).toMatchObject({ quarantined: 0, channels: 1, busy: 0 });
   });

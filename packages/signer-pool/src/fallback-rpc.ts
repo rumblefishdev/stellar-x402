@@ -19,9 +19,19 @@ export class RpcTimeoutError extends Error {
 }
 
 /**
+ * Every endpoint failed one call: refused the connection, answered an error status, or timed out.
+ * `cause` is the first endpoint's error.
+ */
+export class RpcUnavailableError extends Error {
+  override readonly name = "RpcUnavailableError";
+}
+
+/**
  * A {@link SorobanRpc} over several endpoints. Calls go to the active endpoint; when it throws
  * or times out, the same call is tried on the next ones, and the first that answers becomes
- * active. If every endpoint fails, the active one stays and the first error is thrown.
+ * active. If every endpoint fails, the active one stays and an {@link RpcUnavailableError} is
+ * thrown with the first error as its `cause`. An account that doesn't exist is an answer, not a
+ * failure: `getLedgerEntries` returns no entry (see `readAccountEntry`).
  *
  * `sendTransaction` is the exception: it is never retried here, because a failed send may still
  * have reached the network. It moves the active endpoint and rethrows, and the submitter decides
@@ -90,7 +100,9 @@ export class FallbackRpc implements SorobanRpc {
         if (i === 0) firstError = error;
       }
     }
-    throw firstError;
+    // `rpc.Server` throws a JSON-RPC error answer as the plain `{ code, message }` object.
+    const message = firstError instanceof Error ? firstError.message : JSON.stringify(firstError);
+    throw new RpcUnavailableError(`every RPC endpoint failed: ${message}`, { cause: firstError });
   }
 
   private switchTo(idx: number, error: unknown): void {

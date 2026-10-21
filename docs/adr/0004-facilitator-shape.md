@@ -1,7 +1,9 @@
 # ADR 0004: One facilitator service; upstream verifies, we settle
 
 - Status: accepted
-- Date: 2026-10-07, amended 2026-10-14 (task 0018: the checks around upstream verify)
+- Date: 2026-10-07, amended 2026-10-14 (task 0018: the checks around upstream verify) and
+  2026-10-16 (task 0009: the one-payer-entry and credential checks; repeats answered from the
+  record)
 
 ## Context
 
@@ -27,12 +29,18 @@ reimplement verify and settle.
   - `packages/config` is the leaf of the dependency graph.
 - **Upstream verifies.** `/verify` uses `ExactStellarScheme.verify()`. Signature, auth scope,
   `Address`/`AddressV2` credentials, simulation and event checks stay upstream's job. We add only
-  the channel-address check ([ADR 0005](0005-channel-accounts-as-facilitator-source.md)) and a
-  minimum remaining validity ([ADR 0006](0006-settlement-record.md)). Before upstream, we also
+  the channel-address check ([ADR 0005](0005-channel-accounts-as-facilitator-source.md)), exactly
+  one auth entry for the payer, a minimum remaining validity
+  ([ADR 0006](0006-settlement-record.md)), and a refusal of source-account auth entries, which
+  upstream refuses too, because the pool makes the facilitator the operation source. Before
+  upstream, we also
   reject a payment for another network and a V0 envelope, and bound upstream's call with a
   deadline; an error inside upstream is a 500, not a verdict (spine AD-3).
-- **We settle.** `/settle` calls upstream `verify()` again (the spec requires settle to verify
-  independently), then submits through `SettlementSubmitter` in `packages/signer-pool`. The
+- **We settle.** For a new payment, `/settle` calls upstream `verify()` again (the spec requires
+  settle to verify independently), then submits through `SettlementSubmitter` in
+  `packages/signer-pool`. A repeat of a known payment is answered from its record without the
+  checks: once it landed, its nonce is used on chain and upstream's simulation fails
+  ([ADR 0006](0006-settlement-record.md)). The
   spec's balance-change check runs in the pool's `checkSimulation` hook. Upstream `settle()` is
   never called, and nothing else in the service calls `sendTransaction`.
 - **State only through ports the facilitator owns.** These are `SettlementStore`,

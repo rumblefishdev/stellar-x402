@@ -2,10 +2,12 @@ import { Keypair } from "@stellar/stellar-sdk";
 import type { PaymentRequirements, VerifyResponse } from "@x402/core/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { memoryStores } from "../src/adapters/memory.js";
+import { MAX_BODY_DEPTH } from "../src/http/app.js";
 import { parseConfig } from "../src/config.js";
 import { jsonLogger } from "../src/logger.js";
 import { start, type Started } from "../src/main.js";
 import type { Verify } from "../src/settlement/verify.js";
+import { bazaarExtensions, depthOf } from "./payment.js";
 
 const requirements: PaymentRequirements = {
   scheme: "exact",
@@ -37,7 +39,16 @@ describe("POST /verify", () => {
     };
     const config = { ...parseConfig(env), port: 0 };
     const logger = jsonLogger("debug", (line) => lines.push(line));
-    app = await start({ config, logger, stores: memoryStores(), verify });
+    app = await start({
+      config,
+      logger,
+      stores: memoryStores(),
+      verify,
+      settle: async () => {
+        throw new Error("not used");
+      },
+      extensionResponses: () => undefined,
+    });
     url = `http://127.0.0.1:${app.port}/verify`;
   });
   afterAll(() => app.close());
@@ -115,6 +126,31 @@ describe("POST /verify", () => {
       expect(verify).not.toHaveBeenCalled();
     },
   );
+
+  it("verifies the payload upstream's client builds for a Bazaar resource with a deep output schema", async () => {
+    verify.mockResolvedValue({ isValid: true, payer: "GPAYER" });
+    const body = {
+      ...request,
+      paymentPayload: { ...paymentPayload, extensions: bazaarExtensions(6) },
+    };
+    // Deeper than the old cap of 32 (0009 decision 39).
+    expect(depthOf(body)).toBeGreaterThan(32);
+    expect((await post(body)).status).toBe(200);
+    expect(verify).toHaveBeenCalledTimes(1);
+  });
+
+  it("verifies a body nested to MAX_BODY_DEPTH, and refuses one level deeper", async () => {
+    // `paymentPayload.extensions.deep` holds `levels` arrays; the innermost is at depth levels + 2.
+    const nested = (levels: number) => {
+      let deep: unknown = 0;
+      for (let i = 0; i < levels; i++) deep = [deep];
+      return { ...request, paymentPayload: { ...paymentPayload, extensions: { deep } } };
+    };
+    verify.mockResolvedValue({ isValid: true, payer: "GPAYER" });
+    expect((await post(nested(MAX_BODY_DEPTH - 3))).status).toBe(200);
+    expect((await post(nested(MAX_BODY_DEPTH - 2))).status).toBe(400);
+    expect(verify).toHaveBeenCalledTimes(1);
+  });
 
   it("answers 500 and logs the error when verification throws", async () => {
     verify.mockRejectedValueOnce(new Error("rpc down"));
