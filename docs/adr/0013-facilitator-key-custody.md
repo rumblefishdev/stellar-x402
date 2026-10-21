@@ -36,7 +36,7 @@
 - **One OpenBao per server.** Testnet and mainnet each get their own Transit key, policy, AppRole
   and socket, so a break-in on one network's facilitator gets only that network's token and can't
   reach the other network's socket. It still shares the process, so a flood from one network
-  slows the other's signing. Whether mainnet gets an OpenBao of its own is decided in 0038.
+  slows the other's signing; that is accepted at these stakes (Rationale).
 - **The same setup on testnet and mainnet,** so testnet runs exactly what mainnet will.
 - **OpenBao does Transit signing only.** Other secrets, the database password and `RPC_URLS` (one
   credential file per version, ADR 0011), stay systemd credentials, so OpenBao is needed for
