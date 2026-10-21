@@ -1,8 +1,8 @@
 import {
-  Account,
   FeeBumpTransaction,
   Keypair,
   SorobanDataBuilder,
+  StrKey,
   Transaction,
   rpc,
   xdr,
@@ -63,15 +63,13 @@ export class FakeRpc implements SorobanRpc {
     this.calls[name] = (this.calls[name] ?? 0) + 1;
   }
 
-  async getAccount(address: string): Promise<Account> {
-    this.count("getAccount");
-    const seq = this.sequences.get(address);
-    if (seq === undefined) throw new Error(`account ${address} not found`);
-    return new Account(address, seq.toString());
-  }
-
-  async getAccountEntry(): Promise<xdr.AccountEntry> {
-    throw new Error("not used");
+  /** Answers account keys only, with no entry for an unknown account, as the RPC does. */
+  async getLedgerEntries(...keys: xdr.LedgerKey[]): Promise<rpc.Api.GetLedgerEntriesResponse> {
+    this.count("getLedgerEntries");
+    const accountId = keys[0]!.account().accountId();
+    const seq = this.sequences.get(StrKey.encodeEd25519PublicKey(accountId.ed25519()));
+    const entries = seq === undefined ? [] : [accountEntry(accountId, seq)];
+    return { entries, latestLedger: this.ledger };
   }
 
   async getFeeStats(): Promise<rpc.Api.GetFeeStatsResponse> {
@@ -233,6 +231,38 @@ function result(code: string, inner = false): xdr.TransactionResult {
     result: xdr.TransactionResultResult.txFeeBumpInnerFailed(pair),
     ext: new xdr.TransactionResultExt(0),
   });
+}
+
+/** A `getLedgerEntries` answer holding `entry`, or no entry. */
+export function ledgerEntries(entry?: xdr.AccountEntry): rpc.Api.GetLedgerEntriesResponse {
+  const entries = entry ? [{ val: xdr.LedgerEntryData.account(entry) }] : [];
+  return { entries, latestLedger: 1 } as unknown as rpc.Api.GetLedgerEntriesResponse;
+}
+
+/** A channel's ledger entry: the facilitator is its only signer. */
+export function accountEntry(accountId: xdr.AccountId, seq: bigint): rpc.Api.LedgerEntryResult {
+  const entry = new xdr.AccountEntry({
+    accountId,
+    balance: xdr.Int64.fromString("15000000"),
+    seqNum: xdr.Int64.fromString(seq.toString()),
+    numSubEntries: 1,
+    inflationDest: null,
+    flags: 0,
+    homeDomain: "",
+    thresholds: Buffer.from([0, 0, 0, 0]),
+    signers: [
+      new xdr.Signer({
+        key: xdr.SignerKey.signerKeyTypeEd25519(facilitator.rawPublicKey()),
+        weight: 1,
+      }),
+    ],
+    ext: new xdr.AccountEntryExt(0),
+  });
+  return {
+    key: xdr.LedgerKey.account(new xdr.LedgerKeyAccount({ accountId })),
+    val: xdr.LedgerEntryData.account(entry),
+    lastModifiedLedgerSeq: 1,
+  };
 }
 
 export const facilitator = Keypair.random();

@@ -6,6 +6,7 @@ import {
   checkChannel,
   feeStatsInclusionFee,
 } from "../src/index.js";
+import { ledgerEntries } from "./fake-rpc.js";
 
 const PASSPHRASE = "Test SDF Network ; September 2015";
 
@@ -59,52 +60,50 @@ function accountEntry(signers: { key: string; weight: number }[], thresholds = [
 
 describe("checkChannel", () => {
   const fac = Keypair.random().publicKey();
+  const ch = Keypair.random().publicKey();
   const rpcWith = (entry?: xdr.AccountEntry) => ({
-    getAccountEntry: async () => {
-      if (!entry) throw new Error("Account not found: G");
-      return entry;
-    },
+    getLedgerEntries: async () => ledgerEntries(entry),
   });
 
   it("accepts a channel the facilitator can sign for", async () => {
-    expect(await checkChannel(rpcWith(accountEntry([{ key: fac, weight: 1 }])), "G", fac)).toBe(
+    expect(await checkChannel(rpcWith(accountEntry([{ key: fac, weight: 1 }])), ch, fac)).toBe(
       undefined,
     );
   });
 
   it("reports missing accounts, missing signers and thresholds above the signer weight", async () => {
-    expect(await checkChannel(rpcWith(), "G", fac)).toBe("missing");
+    expect(await checkChannel(rpcWith(), ch, fac)).toBe("missing");
     const other = Keypair.random().publicKey();
-    expect(await checkChannel(rpcWith(accountEntry([{ key: other, weight: 1 }])), "G", fac)).toBe(
+    expect(await checkChannel(rpcWith(accountEntry([{ key: other, weight: 1 }])), ch, fac)).toBe(
       "facilitator-not-signer",
     );
     expect(
-      await checkChannel(rpcWith(accountEntry([{ key: fac, weight: 1 }], [1, 1, 2, 2])), "G", fac),
+      await checkChannel(rpcWith(accountEntry([{ key: fac, weight: 1 }], [1, 1, 2, 2])), ch, fac),
     ).toBe("thresholds-too-high");
   });
 
   it("requires the facilitator to be the only signer", async () => {
     const other = Keypair.random().publicKey();
     const withMaster = accountEntry([{ key: fac, weight: 1 }], [1, 0, 0, 0]);
-    expect(await checkChannel(rpcWith(withMaster), "G", fac)).toBe("master-key-active");
-    expect(await checkChannel(rpcWith(withMaster), "G", fac, { allowMasterKey: true })).toBe(
+    expect(await checkChannel(rpcWith(withMaster), ch, fac)).toBe("master-key-active");
+    expect(await checkChannel(rpcWith(withMaster), ch, fac, { allowMasterKey: true })).toBe(
       undefined,
     );
     const shared = accountEntry([
       { key: fac, weight: 1 },
       { key: other, weight: 1 },
     ]);
-    expect(await checkChannel(rpcWith(shared), "G", fac)).toBe("extra-signer");
+    expect(await checkChannel(rpcWith(shared), ch, fac)).toBe("extra-signer");
     const zeroWeight = accountEntry([
       { key: fac, weight: 1 },
       { key: other, weight: 0 },
     ]);
-    expect(await checkChannel(rpcWith(zeroWeight), "G", fac)).toBe(undefined);
+    expect(await checkChannel(rpcWith(zeroWeight), ch, fac)).toBe(undefined);
   });
 
   it("throws RPC errors other than not-found instead of reporting missing", async () => {
-    const flaky = { getAccountEntry: async () => Promise.reject(new Error("fetch failed")) };
-    await expect(checkChannel(flaky, "G", fac)).rejects.toThrow("fetch failed");
+    const flaky = { getLedgerEntries: async () => Promise.reject(new Error("fetch failed")) };
+    await expect(checkChannel(flaky, ch, fac)).rejects.toThrow("fetch failed");
   });
 });
 

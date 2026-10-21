@@ -12,6 +12,7 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import {
+  Account,
   Address,
   FeeBumpTransaction,
   Keypair,
@@ -30,6 +31,7 @@ import {
   checkChannel,
   feeStatsInclusionFee,
   keypairSigner,
+  readAccountEntry,
 } from "../src/index.js";
 
 const need = (k: string) =>
@@ -141,7 +143,10 @@ const fresh = Array.from({ length: Math.max(0, nChannels - known.length) }, () =
 for (let i = 0; i < fresh.length; i += MAX_CHANNELS_PER_TX) {
   const batch = fresh.slice(i, i + MAX_CHANNELS_PER_TX);
   const setupTx = buildCreateChannelsTx({
-    facilitator: await server.getAccount(facilitator.publicKey()),
+    facilitator: new Account(
+      facilitator.publicKey(),
+      (await readAccountEntry(server, facilitator.publicKey())).seqNum().toString(),
+    ),
     channels: batch,
     networkPassphrase: passphrase,
     fee: 1000,

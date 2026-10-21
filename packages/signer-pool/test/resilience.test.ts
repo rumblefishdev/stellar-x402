@@ -1,4 +1,4 @@
-import { Account, Address, FeeBumpTransaction, Keypair, StrKey, xdr } from "@stellar/stellar-sdk";
+import { Address, FeeBumpTransaction, Keypair, StrKey, xdr } from "@stellar/stellar-sdk";
 import { describe, expect, it, vi } from "vitest";
 import {
   FallbackRpc,
@@ -13,7 +13,7 @@ import {
   type SubmitterEvent,
   type SubmitterOptions,
 } from "../src/index.js";
-import { FakeRpc, channels, facilitator } from "./fake-rpc.js";
+import { FakeRpc, accountEntry, channels, facilitator, ledgerEntries } from "./fake-rpc.js";
 
 const PASSPHRASE = "Test SDF Network ; September 2015";
 
@@ -79,11 +79,11 @@ describe("uncertain sends", () => {
     fake.sendScript.push(...Array<"THROW">(10).fill("THROW"));
     const res = await submitter.submit(call());
     expect(res.status).toBe("expired");
-    const reads = fake.calls.getAccount!;
+    const reads = fake.calls.getLedgerEntries!;
     fake.sendScript = [];
     const next = await submitter.submit(call());
     expect(next.status).toBe("success");
-    expect(fake.calls.getAccount).toBe(reads + 1);
+    expect(fake.calls.getLedgerEntries).toBe(reads + 1);
   });
 
   it("rebuilds once after a plain txBadSeq, and rejects if it repeats", async () => {
@@ -97,7 +97,12 @@ describe("uncertain sends", () => {
 
     // A reader that keeps returning a stale sequence: the rebuild is rejected too.
     fake.sequences.set(channels[0]!, 12_000n);
-    Object.assign(fake, { getAccount: async (a: string) => new Account(a, "1") });
+    Object.assign(fake, {
+      getLedgerEntries: async (key: xdr.LedgerKey) => ({
+        entries: [accountEntry(key.account().accountId(), 1n)],
+        latestLedger: fake.ledger,
+      }),
+    });
     const again = await submitter.submit(call());
     expect(again).toMatchObject({ status: "rejected", errorCode: "txBadSeq" });
     expect(submitter.stats().sequenceResyncs).toBe(2);
@@ -105,13 +110,13 @@ describe("uncertain sends", () => {
 });
 
 describe("sequence reads", () => {
-  /** Makes the first `n` getAccount calls throw, as the public RPC did under load. */
+  /** Makes the first `n` account reads answer no entry, as the public RPC seemed to under load. */
   const failReads = (fake: FakeRpc, n: number) => {
-    const getAccount = fake.getAccount.bind(fake);
+    const getLedgerEntries = fake.getLedgerEntries.bind(fake);
     Object.assign(fake, {
-      getAccount: async (address: string) => {
-        if (n-- > 0) throw new Error(`Account not found: ${address}`);
-        return getAccount(address);
+      getLedgerEntries: async (key: xdr.LedgerKey) => {
+        if (n-- > 0) return { entries: [], latestLedger: fake.ledger };
+        return getLedgerEntries(key);
       },
     });
   };
@@ -146,7 +151,7 @@ describe("sequence reads", () => {
   it("keeps the channel when reads fail for another reason", async () => {
     const { fake, submitter } = setup({ timeoutSeconds: 20 });
     Object.assign(fake, {
-      getAccount: async () => Promise.reject(new Error("fetch failed")),
+      getLedgerEntries: async () => Promise.reject(new Error("fetch failed")),
     });
     await expect(submitter.submit(call())).rejects.toThrow("fetch failed");
     expect(submitter.stats()).toMatchObject({ quarantined: 0, channels: 1, busy: 0 });
@@ -349,8 +354,7 @@ function endpoint(behaviour: "ok" | "fail" | "hang", calls: string[] = []): Soro
     return Promise.resolve(value);
   };
   return {
-    getAccount: answer("getAccount", "acct"),
-    getAccountEntry: answer("getAccountEntry", "entry"),
+    getLedgerEntries: answer("getLedgerEntries", "entries"),
     simulateTransaction: answer("simulateTransaction", "sim"),
     sendTransaction: answer("sendTransaction", "sent"),
     getTransaction: answer("getTransaction", "tx"),
@@ -396,7 +400,7 @@ describe("FallbackRpc", () => {
       { name: "a", rpc: endpoint("fail") },
       { name: "b", rpc: endpoint("fail") },
     ]);
-    await expect(rpc.getAccount("G")).rejects.toThrow("getAccount failed");
+    await expect(rpc.getFeeStats()).rejects.toThrow("getFeeStats failed");
     expect(rpc.active).toBe("a");
   });
 
@@ -476,7 +480,7 @@ describe("checkFacilitatorBalance", () => {
 
   it("subtracts the reserve and estimates settlements left", async () => {
     const r = await checkFacilitatorBalance(
-      { getAccountEntry: async () => entry(2_000_000_000n, 0) },
+      { getLedgerEntries: async () => ledgerEntries(entry(2_000_000_000n, 0)) },
       addr,
     );
     expect(r.reserveStroops).toBe(10_000_000n);
@@ -488,8 +492,10 @@ describe("checkFacilitatorBalance", () => {
   it("counts sub-entries, sponsorships and selling liabilities, and flags a low balance", async () => {
     const r = await checkFacilitatorBalance(
       {
-        getAccountEntry: async () =>
-          entry(600_000_000n, 2, { selling: 100_000_000n, sponsoring: 3, sponsored: 1 }),
+        getLedgerEntries: async () =>
+          ledgerEntries(
+            entry(600_000_000n, 2, { selling: 100_000_000n, sponsoring: 3, sponsored: 1 }),
+          ),
       },
       addr,
       { minSpendableStroops: 500_000_000n },

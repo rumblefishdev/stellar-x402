@@ -58,9 +58,8 @@ export class FallbackRpc implements SorobanRpc {
     return this.endpoints[this.current]!.name;
   }
 
-  getAccount: SorobanRpc["getAccount"] = (...a) => this.call((r) => r.getAccount(...a));
-  getAccountEntry: SorobanRpc["getAccountEntry"] = (...a) =>
-    this.call((r) => r.getAccountEntry(...a));
+  getLedgerEntries: SorobanRpc["getLedgerEntries"] = (...a) =>
+    this.call((r) => r.getLedgerEntries(...a));
   simulateTransaction: SorobanRpc["simulateTransaction"] = (...a) =>
     this.call((r) => r.simulateTransaction(...a));
   getTransaction: SorobanRpc["getTransaction"] = (...a) => this.call((r) => r.getTransaction(...a));

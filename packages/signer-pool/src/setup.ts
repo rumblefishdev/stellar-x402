@@ -7,7 +7,7 @@ import {
   type Transaction,
   type xdr,
 } from "@stellar/stellar-sdk";
-import { isNotFound } from "./errors.js";
+import { AccountNotFoundError, readAccountEntry } from "./account.js";
 import type { SorobanRpc } from "./types.js";
 
 /** Base reserve (0.5 XLM) x (2 + one extra signer): a channel never pays fees itself. */
@@ -77,20 +77,20 @@ export type ChannelProblem =
  * Checks that a channel exists and that the facilitator is its only signer: the facilitator's
  * weight meets the medium threshold (which transactions and payments need), the master key
  * weight is 0, and no other key can sign. `allowMasterKey` accepts channels created with
- * `disableMasterKey: false`. Only a not-found answer is reported as `missing`; other RPC errors
- * are thrown, since they say nothing about the channel.
+ * `disableMasterKey: false`. Only an answer with no entry is reported as `missing`; other RPC
+ * errors are thrown, since they say nothing about the channel.
  */
 export async function checkChannel(
-  rpc: Pick<SorobanRpc, "getAccountEntry">,
+  rpc: Pick<SorobanRpc, "getLedgerEntries">,
   channel: string,
   facilitator: string,
   opts: { allowMasterKey?: boolean } = {},
 ): Promise<ChannelProblem | undefined> {
   let entry;
   try {
-    entry = await rpc.getAccountEntry(channel);
+    entry = await readAccountEntry(rpc, channel);
   } catch (error) {
-    if (isNotFound(error)) return "missing";
+    if (error instanceof AccountNotFoundError) return "missing";
     throw error;
   }
   const isFacilitator = (s: xdr.Signer) =>

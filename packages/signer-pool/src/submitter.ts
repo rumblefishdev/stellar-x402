@@ -8,8 +8,8 @@ import {
   rpc,
   type xdr,
 } from "@stellar/stellar-sdk";
+import { AccountNotFoundError, readAccountEntry } from "./account.js";
 import { ChannelPool, NoChannelsError, QueueTimeoutError, type Channel } from "./channel-pool.js";
-import { isNotFound } from "./errors.js";
 import { feeStatsInclusionFee } from "./fees.js";
 import { LedgerClock } from "./ledger-clock.js";
 import {
@@ -456,12 +456,12 @@ export class SettlementSubmitter {
     const giveUpAt = this.now() + this.timeoutSeconds * 1000;
     for (;;) {
       try {
-        const account = await this.rpc.getAccount(channel.address);
-        return BigInt(account.sequenceNumber());
+        const account = await readAccountEntry(this.rpc, channel.address);
+        return account.seqNum().toBigInt();
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (this.now() >= giveUpAt) {
-          if (isNotFound(error)) {
+          if (error instanceof AccountNotFoundError) {
             this.pool.retire(channel);
             hold.retired = true;
             this.emit({ type: "channel-quarantined", channel: channel.address, reason: message });

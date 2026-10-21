@@ -4,13 +4,15 @@ import type { AddressInfo } from "node:net";
 import { Address, StrKey, xdr } from "@stellar/stellar-sdk";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  AccountNotFoundError,
   FallbackRpc,
   SettlementSubmitter,
   checkChannel,
   keypairSigner,
+  readAccountEntry,
   type SubmitterEvent,
 } from "../src/index.js";
-import { FakeRpc, channels, facilitator } from "./fake-rpc.js";
+import { FakeRpc, accountEntry, channels, facilitator } from "./fake-rpc.js";
 
 // Account reads over HTTP, against a JSON-RPC stub: what an RPC outage looks like to the pool.
 
@@ -49,33 +51,8 @@ async function stub(answer: Answer): Promise<string> {
 function ledgerEntries(answer: Answer, key: string) {
   if (answer === "no-entry") return { entries: [], latestLedger: 100 };
   const accountId = xdr.LedgerKey.fromXDR(key, "base64").account().accountId();
-  const entry = new xdr.AccountEntry({
-    accountId,
-    balance: xdr.Int64.fromString("15000000"),
-    seqNum: xdr.Int64.fromString("4000"),
-    numSubEntries: 1,
-    inflationDest: null,
-    flags: 0,
-    homeDomain: "",
-    thresholds: Buffer.from([0, 0, 0, 0]),
-    signers: [
-      new xdr.Signer({
-        key: xdr.SignerKey.signerKeyTypeEd25519(facilitator.rawPublicKey()),
-        weight: 1,
-      }),
-    ],
-    ext: new xdr.AccountEntryExt(0),
-  });
-  return {
-    entries: [
-      {
-        key,
-        xdr: xdr.LedgerEntryData.account(entry).toXDR("base64"),
-        lastModifiedLedgerSeq: 90,
-      },
-    ],
-    latestLedger: 100,
-  };
+  const xdrEntry = accountEntry(accountId, 4000n).val.toXDR("base64");
+  return { entries: [{ key, xdr: xdrEntry, lastModifiedLedgerSeq: 90 }], latestLedger: 100 };
 }
 
 /** A port nothing listens on: the connection is refused. */
@@ -102,26 +79,27 @@ describe("checkChannel over HTTP", () => {
 
   it("throws when the connection is refused, instead of reporting the channel missing", async () => {
     const rpc = FallbackRpc.fromUrls([REFUSED]);
-    await expect(checkChannel(rpc, channel, fac)).rejects.toThrow(/ECONNREFUSED/);
+    await expect(checkChannel(rpc, channel, fac)).rejects.toThrow("fetch failed");
   });
 });
 
-describe("FallbackRpc account reads", () => {
+describe("account reads through FallbackRpc", () => {
   it("moves past a failing endpoint to one that says the account does not exist", async () => {
     const rpc = FallbackRpc.fromUrls([await stub("503"), await stub("no-entry")]);
-    await expect(rpc.getAccountEntry(channel)).rejects.toThrow(/not found/i);
+    await expect(readAccountEntry(rpc, channel)).rejects.toBeInstanceOf(AccountNotFoundError);
   });
 
   it("does not report not-found when every endpoint failed", async () => {
     const rpc = FallbackRpc.fromUrls([await stub("503"), REFUSED]);
-    const error = await rpc.getAccountEntry(channel).catch((e: unknown) => e);
+    const error = await readAccountEntry(rpc, channel).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(AccountNotFoundError);
     expect((error as Error).message).not.toMatch(/not found/i);
   });
 
   it("reads the sequence number from the entry", async () => {
     const rpc = FallbackRpc.fromUrls([await stub("entry")]);
-    expect((await rpc.getAccount(channel)).sequenceNumber()).toBe("4000");
+    expect((await readAccountEntry(rpc, channel)).seqNum().toString()).toBe("4000");
   });
 });
 
@@ -130,7 +108,7 @@ describe("sequence reads during an RPC outage", () => {
   function setup(url: string) {
     const fake = new FakeRpc({ [fac]: 500n, [channel]: 1000n });
     const http = FallbackRpc.fromUrls([url]);
-    Object.assign(fake, { getAccount: (a: string) => http.getAccount(a) });
+    Object.assign(fake, { getLedgerEntries: (key: xdr.LedgerKey) => http.getLedgerEntries(key) });
     const events: SubmitterEvent[] = [];
     const submitter = new SettlementSubmitter({
       rpc: fake,
