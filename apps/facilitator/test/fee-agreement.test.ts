@@ -24,7 +24,7 @@ import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { parseConfig } from "../src/config.js";
 import { rpcEndpointName } from "../src/logger.js";
-import { buildVerifier } from "../src/main.js";
+import { buildRpc, buildVerifier } from "../src/main.js";
 import { feeSettings } from "../src/settlement/fees.js";
 import type { VerifyTrace } from "../src/settlement/verify.js";
 
@@ -131,10 +131,14 @@ describe("the fee ceiling at /verify and in the pool (AD-10)", () => {
 
   /** Real upstream `ExactStellarScheme`, as `main()` wires it: did it refuse the fee? */
   async function verifyRefuses(): Promise<boolean> {
-    const verify = buildVerifier({ ...config, rpcUrls: [rpcUrl] }, poolRpc, fees, {
-      warn() {},
-      info() {},
-    });
+    const cfg = { ...config, rpcUrls: [rpcUrl] };
+    const logger = { warn() {}, info() {} };
+    const verify = buildVerifier(
+      cfg,
+      buildRpc(cfg, logger, () => poolRpc),
+      fees,
+      logger,
+    );
     const answer = await verify(payload(), requirements);
     // A fee it accepts goes on to the event check, which an empty simulation fails.
     expect(answer.invalidReason).toMatch(/fee_exceeds_maximum|no_transfer_events/);
@@ -182,7 +186,7 @@ describe("the fee ceiling at /verify and in the pool (AD-10)", () => {
 });
 
 describe("real upstream with a down first RPC URL (AD-3)", () => {
-  it("answers from the second URL and logs the switch", async () => {
+  it("answers from the second URL, and leaves the shared client on the first (decision 22)", async () => {
     const config = parseConfig({
       FACILITATOR_SECRET: facilitator.secret(),
       CHANNELS: channel,
@@ -194,7 +198,9 @@ describe("real upstream with a down first RPC URL (AD-3)", () => {
     resourceFee = 100_000;
     const rpc = (i: number) => rpcEndpointName(config.rpcUrls[i]!, i);
     const logger = { warn: vi.fn(), info: vi.fn() };
-    const verify = buildVerifier(config, poolRpc, feeSettings(config.fees, poolRpc), logger);
+    // The pool's reads still work on both URLs: only upstream's simulation is refused.
+    const shared = buildRpc(config, logger, () => poolRpc);
+    const verify = buildVerifier(config, shared, feeSettings(config.fees, shared), logger);
     const trace: VerifyTrace = {};
     // The second URL's verdict: the fee passes, and the empty simulation has no transfer events.
     await expect(verify(payload(), requirements, trace)).resolves.toMatchObject({
@@ -202,12 +208,8 @@ describe("real upstream with a down first RPC URL (AD-3)", () => {
       invalidReason: "invalid_exact_stellar_payload_no_transfer_events",
     });
     expect(trace).toEqual({ rpc: rpc(1) });
-    expect(logger.warn).toHaveBeenCalledExactlyOnceWith("rpc_failover", {
-      component: "verify",
-      network: "stellar:testnet",
-      from: rpc(0),
-      to: rpc(1),
-      reason: "unexpected_verify_error",
-    });
+    // Upstream answers a refused connection with unexpected_verify_error, which moves nothing.
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect(shared.active).toBe(rpc(0));
   });
 });
