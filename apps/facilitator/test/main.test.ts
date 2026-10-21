@@ -120,7 +120,7 @@ describe("main()", () => {
   it("answers /verify with the real verifier, then exits 0 on SIGTERM", async () => {
     const child = spawn(process.execPath, ["--import", "tsx", "src/server.ts"], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),
-      env: { ...env, PORT: "47129" },
+      env: { ...env, PORT: "0" },
     });
     // A pubnet payment: the real verifier rejects it before any RPC call; a stub wouldn't.
     const requirements = {
@@ -141,8 +141,9 @@ describe("main()", () => {
     let answer: Promise<unknown> | undefined;
     child.stdout.on("data", (chunk) => {
       output += chunk;
-      if (answer || !output.includes('"listening"')) return;
-      answer = fetch("http://127.0.0.1:47129/verify", {
+      const port = listeningPort(output);
+      if (answer || port === undefined) return;
+      answer = fetch(`http://127.0.0.1:${port}/verify`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
@@ -172,7 +173,7 @@ describe("upstream's console.error in main()", () => {
     const rpcUrl = `http://127.0.0.1:${(rpc.address() as AddressInfo).port}/apikey-S3CR3T`;
     const child = spawn(process.execPath, ["--import", "tsx", "src/server.ts"], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),
-      env: { ...env, PORT: "47130", RPC_URLS: rpcUrl },
+      env: { ...env, PORT: "0", RPC_URLS: rpcUrl },
     });
 
     // A transfer that passes upstream's checks up to the simulation.
@@ -221,8 +222,9 @@ describe("upstream's console.error in main()", () => {
     let status: Promise<number> | undefined;
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
-      if (status || !stdout.includes('"listening"')) return;
-      status = fetch("http://127.0.0.1:47130/verify", {
+      const port = listeningPort(stdout);
+      if (status || port === undefined) return;
+      status = fetch(`http://127.0.0.1:${port}/verify`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
@@ -244,3 +246,9 @@ describe("upstream's console.error in main()", () => {
     expect(stdout + stderr).not.toContain("S3CR3T");
   }, 20_000);
 });
+
+/** The port in the server's `listening` log line, once that line has arrived whole. */
+function listeningPort(stdout: string): number | undefined {
+  const lines = stdout.split("\n").slice(0, -1);
+  return lines.map((line) => JSON.parse(line)).find((entry) => entry.event === "listening")?.port;
+}

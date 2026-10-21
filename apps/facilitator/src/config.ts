@@ -84,7 +84,8 @@ const envSchema = z
     NETWORK: oneOf([STELLAR_NETWORKS.testnet, STELLAR_NETWORKS.pubnet]).default(
       STELLAR_NETWORKS.testnet,
     ),
-    PORT: int(1, 65_535).default("4021"),
+    /** 0 lets the system pick a free port; the `listening` log line names it. */
+    PORT: int(0, 65_535).default("4021"),
     LOG_LEVEL: oneOf(["debug", "info", "warn", "error"]).default("info"),
     /**
      * Comma-separated; the first is primary, the rest are fallbacks for the pool and the ledger

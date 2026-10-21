@@ -159,9 +159,13 @@ describe("parseConfig", () => {
     ]);
   });
 
+  it("accepts PORT 0, which lets the system pick a free port", () => {
+    expect(parseConfig({ ...minimal, PORT: "0" }).port).toBe(0);
+  });
+
   it("accepts only plain decimal numbers in range", () => {
     expect(problems({ ...minimal, PORT: "0x10" })).toEqual(["PORT must be a whole number"]);
-    expect(problems({ ...minimal, PORT: "70000" })).toEqual(["PORT must be between 1 and 65535"]);
+    expect(problems({ ...minimal, PORT: "70000" })).toEqual(["PORT must be between 0 and 65535"]);
     expect(problems({ ...minimal, SETTLE_TIMEOUT_MS: "1e20" })).toEqual([
       "SETTLE_TIMEOUT_MS must be a whole number",
     ]);
