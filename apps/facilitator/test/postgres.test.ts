@@ -18,6 +18,25 @@ import {
   spendStoreContract,
 } from "./port-contracts.js";
 
+/** One catalog entry, as the cataloger writes it after a settlement. */
+const catalogEntry = () => ({
+  key: {
+    network: "stellar:testnet" as const,
+    payTo: "GPAYTO",
+    method: "GET",
+    resourceUrl: "https://seller.example/data",
+  },
+  keyVersion: CATALOG_KEY_VERSION,
+  ledger: 1,
+  resource: {
+    resource: "https://seller.example/data",
+    type: "http",
+    x402Version: 2 as const,
+    accepts: [],
+    lastUpdated: "2026-10-08T00:00:00.000Z",
+  },
+});
+
 /**
  * The contract suites against a real PostgreSQL, set by `TEST_DATABASE_URL`. Skipped only when
  * neither it nor `CI` is set. Each run gets its own schema, so runs never share tables.
@@ -330,7 +349,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     expect(connections).toBeGreaterThanOrEqual(10);
   });
 
-  it("boots main() with STORE=postgres, reserves, limits and listings on their own pools, and ends them", async () => {
+  it("boots main() with STORE=postgres, reserves, limits and listings on their own pools, catalog writes on the main one, and ends them", async () => {
     await stores();
     const app = await main({
       STORE: "postgres",
@@ -344,20 +363,26 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     expect(pools).toBeDefined();
     try {
       const limits = [{ scope: "global" as const, maxStroops: 10n, windowMs: 1_000 }];
-      const counts = () => [
-        pools?.main.totalCount,
-        pools?.reserve.totalCount,
-        pools?.rateLimits.totalCount,
-        pools?.discovery.totalCount,
-      ];
-      await app.stores.spend.reserve({ id: "a", amount: 1n, limits, now: 0 });
-      expect(counts()).toEqual([0, 1, 0, 0]);
-      await app.stores.rateLimits.hit("k", 60_000, 0);
-      expect(counts()).toEqual([0, 1, 1, 0]);
-      await app.stores.catalog.list({ limit: 1, offset: 0 });
-      expect(counts()).toEqual([0, 1, 1, 1]);
-      expect((await app.stores.settlements.claim(settlement("1"))).claimed).toBe(true);
-      expect(counts()).toEqual([1, 1, 1, 1]);
+      // Checkouts, not connections: a pool reuses an idle connection, so only a checkout shows
+      // which pool a call ran on once the main pool has one.
+      const checkouts = { main: 0, reserve: 0, rateLimits: 0, discovery: 0 };
+      const names = Object.keys(checkouts) as (keyof typeof checkouts)[];
+      for (const name of names) pools?.[name].on("acquire", () => checkouts[name]++);
+      const ranOn = async (call: () => Promise<unknown>) => {
+        const before = { ...checkouts };
+        await call();
+        return names.filter((name) => checkouts[name] > before[name]);
+      };
+      expect(
+        await ranOn(() => app.stores.spend.reserve({ id: "a", amount: 1n, limits, now: 0 })),
+      ).toEqual(["reserve"]);
+      expect(await ranOn(() => app.stores.rateLimits.hit("k", 60_000, 0))).toEqual(["rateLimits"]);
+      expect(await ranOn(() => app.stores.catalog.list({ limit: 1, offset: 0 }))).toEqual([
+        "discovery",
+      ]);
+      // Catalog writes come from `/settle`, so they stay off the public listings' pool.
+      expect(await ranOn(() => app.stores.catalog.upsert(catalogEntry()))).toEqual(["main"]);
+      expect(await ranOn(() => app.stores.settlements.claim(settlement("1")))).toEqual(["main"]);
     } finally {
       await app.close();
     }
@@ -541,23 +566,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
 
   it("stores the catalog key version", async () => {
     const { catalog } = await stores();
-    await catalog.upsert({
-      key: {
-        network: "stellar:testnet",
-        payTo: "GPAYTO",
-        method: "GET",
-        resourceUrl: "https://seller.example/data",
-      },
-      keyVersion: CATALOG_KEY_VERSION,
-      ledger: 1,
-      resource: {
-        resource: "https://seller.example/data",
-        type: "http",
-        x402Version: 2,
-        accepts: [],
-        lastUpdated: "2026-10-08T00:00:00.000Z",
-      },
-    });
+    await catalog.upsert(catalogEntry());
     const { rows } = await pool.query("SELECT key_version FROM catalog");
     expect(rows).toEqual([{ key_version: CATALOG_KEY_VERSION }]);
   });
