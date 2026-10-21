@@ -31,6 +31,8 @@ describe("parseDiscoveryQuery", () => {
     ["a scheme we never settle", { scheme: "upto" }, { kind: "empty" }],
     ["an unknown param", { foo: "1" }, { kind: "query", ignored: ["foo"] }],
     ["an unknown param in brackets", { "foo[]": "1" }, { kind: "query", ignored: ["foo[]"] }],
+    ["a name a separator away", { pay_to: "GB" }, { kind: "query", ignored: ["pay_to"] }],
+    ["a name a letter away", { types: "http" }, { kind: "query", ignored: ["types"] }],
   ])("accepts %s", (_name, raw, expected) => {
     expect(parseDiscoveryQuery(raw)).toMatchObject(expected);
   });
@@ -47,6 +49,12 @@ describe("parseDiscoveryQuery", () => {
     ["a known param in brackets", { "type[]": "http" }, "type[]"],
     ["an indexed known param", { "payTo[0]": "GB" }, "payTo[0]"],
     ["a known param in brackets, empty", { "type[]": "" }, "type[]"],
+    ["a known param in another case", { payto: "GB" }, "payto"],
+    ["a known param in capitals", { PAYTO: "GB" }, "PAYTO"],
+    ["a known param capitalized", { Type: "http" }, "Type"],
+    ["a known param with a trailing space", { "type ": "http" }, "type "],
+    ["a known param with a leading space", { " type": "http" }, " type"],
+    ["a known param capitalized, in brackets", { "Type[]": "http" }, "Type[]"],
     [
       "a long name in brackets, capped",
       { [`type[${"x".repeat(100)}]`]: "1" },
@@ -223,6 +231,7 @@ describe("GET /discovery/resources", () => {
       ["limit=-1", "limit"],
       ["type=mcp&type=http", "type"],
       ["type[]=http", "type[]"],
+      ["payto=GB", "payto"],
       ["payTo=G%00B", "payTo"],
     ]) {
       const { response, body } = await list(query);
