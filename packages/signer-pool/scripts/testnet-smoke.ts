@@ -142,11 +142,9 @@ const known: string[] =
 const fresh = Array.from({ length: Math.max(0, nChannels - known.length) }, () => Keypair.random());
 for (let i = 0; i < fresh.length; i += MAX_CHANNELS_PER_TX) {
   const batch = fresh.slice(i, i + MAX_CHANNELS_PER_TX);
+  const facilitatorEntry = await readAccountEntry(server, facilitator.publicKey());
   const setupTx = buildCreateChannelsTx({
-    facilitator: new Account(
-      facilitator.publicKey(),
-      (await readAccountEntry(server, facilitator.publicKey())).seqNum().toString(),
-    ),
+    facilitator: new Account(facilitator.publicKey(), facilitatorEntry.seqNum().toString()),
     channels: batch,
     networkPassphrase: passphrase,
     fee: 1000,

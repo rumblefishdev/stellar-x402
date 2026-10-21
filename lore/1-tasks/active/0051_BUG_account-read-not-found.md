@@ -65,6 +65,7 @@ Measured on testnet (2026-10-21): `getLedgerEntries` for an account that does no
 | The pool reads an account | One function, `readAccountEntry`, calls `getLedgerEntries`; `SorobanRpc` and `FallbackRpc` no longer carry `getAccount` or `getAccountEntry` | 2026-10-21 |
 | The RPC answers no entry | `AccountNotFoundError`: `checkChannel` returns `missing`, `readSequence` retires the channel after `timeoutSeconds` | 2026-10-21 |
 | The read fails (error status, refused connection, timeout, JSON-RPC error) | The error is thrown as it is; `checkChannel` throws, `readSequence` refuses the call and keeps the channel | 2026-10-21 |
+| The read gets a JSON-RPC error answer | `rpc.Server` throws it as a plain `{ code, message }` object; `readAccountEntry` throws it as an `Error` naming the code and message, so logs and events carry it | 2026-10-21 |
 
 ## Measurement: 0007's "Account not found under load"
 
@@ -89,14 +90,22 @@ accounts, drawn from Horizon's recent transactions and checked with `getLedgerEn
 - It cannot show: the 2026-10-06 errors themselves, or whether the simulates trigger the 502s
   (3 of 5 equal bursts were clean).
 
+**To repeat run 2:** a fresh Node process builds one `rpc.Server` for
+`https://soroban-testnet.stellar.org` and fires, in one `Promise.all`, N calls of
+`server.getLedgerEntries(accountKey)` (one existing account each) and N calls of
+`server.simulateTransaction(tx)`, where `tx` calls the native XLM SAC's `balance` for an existing
+account (source `new Account(id, "0")`, fee 100, nothing submitted). Record each rejection's
+constructor, message, `code`, `response.status` and the JSON-RPC error object; count results with
+0 entries. Bursts of N = 200 five times, then N = 400 twice, about 10 s apart.
+
 ## Acceptance Criteria
 
-- [ ] Given every RPC endpoint answers 503 or refuses the connection, when `checkChannel` reads a
+- [x] Given every RPC endpoint answers 503 or refuses the connection, when `checkChannel` reads a
       channel, then it throws instead of returning `missing`
-- [ ] Given every endpoint fails an account read, then `FallbackRpc` throws an error that is not
+- [x] Given every endpoint fails an account read, then `FallbackRpc` throws an error that is not
       read as not-found
-- [ ] Given account reads fail with 503 past `timeoutSeconds`, then the submitter refuses the call
-      and keeps the channel in the pool
-- [ ] Given the RPC answers no entry for a channel, then `checkChannel` returns `missing` and the
+- [x] Given account reads fail with 503, a JSON-RPC error or a timeout past `timeoutSeconds`, then
+      the submitter refuses the call and keeps the channel in the pool
+- [x] Given the RPC answers no entry for a channel, then `checkChannel` returns `missing` and the
       submitter still retires the channel after `timeoutSeconds`
 - [x] 0007's "Account not found under load" is confirmed or refuted with a testnet measurement

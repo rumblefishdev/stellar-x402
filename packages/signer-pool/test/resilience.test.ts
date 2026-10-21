@@ -400,7 +400,7 @@ describe("FallbackRpc", () => {
       { name: "a", rpc: endpoint("fail") },
       { name: "b", rpc: endpoint("fail") },
     ]);
-    await expect(rpc.getFeeStats()).rejects.toThrow("getFeeStats failed");
+    await expect(rpc.getLedgerEntries()).rejects.toThrow("getLedgerEntries failed");
     expect(rpc.active).toBe("a");
   });
 

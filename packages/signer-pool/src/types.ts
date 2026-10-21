@@ -2,8 +2,7 @@ import type { rpc } from "@stellar/stellar-sdk";
 
 /**
  * The RPC calls the pool needs. `rpc.Server` satisfies it; tests pass a fake. Accounts are read
- * with `getLedgerEntries` through `readAccountEntry`, never `getAccount`, which reports every
- * failure as "Account not found".
+ * with `getLedgerEntries` through `readAccountEntry`.
  */
 export type SorobanRpc = Pick<
   rpc.Server,

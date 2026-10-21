@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   AccountNotFoundError,
   FallbackRpc,
+  RpcTimeoutError,
   SettlementSubmitter,
   checkChannel,
   keypairSigner,
@@ -17,11 +18,31 @@ import { FakeRpc, accountEntry, channels, facilitator } from "./fake-rpc.js";
 // Account reads over HTTP, against a JSON-RPC stub: what an RPC outage looks like to the pool.
 
 /** How the stub answers `getLedgerEntries`. */
-type Answer = "503" | "no-entry" | "entry";
+type Answer = "503" | "rpc-error" | "hang" | "no-entry" | "entry";
+
+/** The JSON-RPC error the public testnet RPC answered for 3 of 2,800 reads under load (0051). */
+const CAPTIVE_CORE_ERROR = {
+  code: -32603,
+  message: "could not query captive core: http request failed with non-200 status code (404)",
+};
 
 const servers: Server[] = [];
 afterEach(() => {
-  for (const s of servers.splice(0)) s.close();
+  for (const s of servers.splice(0)) {
+    s.closeAllConnections();
+    s.close();
+  }
+});
+
+const call = () => ({
+  func: xdr.HostFunction.hostFunctionTypeInvokeContract(
+    new xdr.InvokeContractArgs({
+      contractAddress: Address.fromString(StrKey.encodeContract(Buffer.alloc(32, 7))).toScAddress(),
+      functionName: "settle_upto",
+      args: [],
+    }),
+  ),
+  auth: [],
 });
 
 /** A Soroban RPC stub at a local URL. Every method but `getLedgerEntries` is unknown to it. */
@@ -30,15 +51,17 @@ async function stub(answer: Answer): Promise<string> {
     let body = "";
     req.on("data", (chunk) => (body += chunk));
     req.on("end", () => {
+      if (answer === "hang") return;
       if (answer === "503") {
         res.writeHead(503).end("Service Unavailable");
         return;
       }
       const { id, method, params } = JSON.parse(body);
-      const reply =
-        method !== "getLedgerEntries"
-          ? { jsonrpc: "2.0", id, error: { code: -32601, message: "method not found" } }
-          : { jsonrpc: "2.0", id, result: ledgerEntries(answer, params.keys[0]) };
+      let reply;
+      if (method !== "getLedgerEntries")
+        reply = { jsonrpc: "2.0", id, error: { code: -32601, message: "method not found" } };
+      else if (answer === "rpc-error") reply = { jsonrpc: "2.0", id, error: CAPTIVE_CORE_ERROR };
+      else reply = { jsonrpc: "2.0", id, result: wireResult(answer, params.keys[0]) };
       res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(reply));
     });
   });
@@ -48,7 +71,7 @@ async function stub(answer: Answer): Promise<string> {
 }
 
 /** The RPC's `getLedgerEntries` result: no entries for an unknown account (measured on testnet). */
-function ledgerEntries(answer: Answer, key: string) {
+function wireResult(answer: "no-entry" | "entry", key: string) {
   if (answer === "no-entry") return { entries: [], latestLedger: 100 };
   const accountId = xdr.LedgerKey.fromXDR(key, "base64").account().accountId();
   const xdrEntry = accountEntry(accountId, 4000n).val.toXDR("base64");
@@ -81,6 +104,11 @@ describe("checkChannel over HTTP", () => {
     const rpc = FallbackRpc.fromUrls([REFUSED]);
     await expect(checkChannel(rpc, channel, fac)).rejects.toThrow("fetch failed");
   });
+
+  it("throws a JSON-RPC error answer as an Error that names it", async () => {
+    const rpc = FallbackRpc.fromUrls([await stub("rpc-error")]);
+    await expect(checkChannel(rpc, channel, fac)).rejects.toThrow(/-32603.*captive core/);
+  });
 });
 
 describe("account reads through FallbackRpc", () => {
@@ -105,9 +133,9 @@ describe("account reads through FallbackRpc", () => {
 
 describe("sequence reads during an RPC outage", () => {
   /** A submitter whose account reads go over HTTP to `url`; everything else is the fake. */
-  function setup(url: string) {
+  function setup(url: string, timeoutMs?: number) {
     const fake = new FakeRpc({ [fac]: 500n, [channel]: 1000n });
-    const http = FallbackRpc.fromUrls([url]);
+    const http = FallbackRpc.fromUrls([url], { timeoutMs });
     Object.assign(fake, { getLedgerEntries: (key: xdr.LedgerKey) => http.getLedgerEntries(key) });
     const events: SubmitterEvent[] = [];
     const submitter = new SettlementSubmitter({
@@ -130,6 +158,22 @@ describe("sequence reads during an RPC outage", () => {
     expect(submitter.stats()).toMatchObject({ quarantined: 0, channels: 1, busy: 0 });
   });
 
+  it("keeps the channel and logs the RPC's message when reads get a JSON-RPC error", async () => {
+    const { submitter, events } = setup(await stub("rpc-error"));
+    await expect(submitter.submit(call())).rejects.toThrow(/-32603.*captive core/);
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "read-retry", message: expect.stringContaining("-32603") }),
+    );
+    expect(submitter.stats()).toMatchObject({ quarantined: 0, channels: 1, busy: 0 });
+  });
+
+  it("keeps the channel in the pool when reads time out past the time bound", async () => {
+    const { submitter, events } = setup(await stub("hang"), 20);
+    await expect(submitter.submit(call())).rejects.toBeInstanceOf(RpcTimeoutError);
+    expect(events.map((e) => e.type)).not.toContain("channel-quarantined");
+    expect(submitter.stats()).toMatchObject({ quarantined: 0, channels: 1, busy: 0 });
+  });
+
   it("still takes a channel the RPC has no entry for out of the pool", async () => {
     const { submitter, events } = setup(await stub("no-entry"));
     await expect(submitter.submit(call())).rejects.toThrow(/not found/i);
@@ -137,18 +181,3 @@ describe("sequence reads during an RPC outage", () => {
     expect(submitter.stats()).toMatchObject({ quarantined: 1, channels: 0 });
   });
 });
-
-function call() {
-  return {
-    func: xdr.HostFunction.hostFunctionTypeInvokeContract(
-      new xdr.InvokeContractArgs({
-        contractAddress: Address.fromString(
-          StrKey.encodeContract(Buffer.alloc(32, 7)),
-        ).toScAddress(),
-        functionName: "settle_upto",
-        args: [],
-      }),
-    ),
-    auth: [],
-  };
-}

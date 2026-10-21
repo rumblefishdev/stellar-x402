@@ -8,9 +8,9 @@ export class AccountNotFoundError extends Error {
 
 /**
  * Reads an account entry. Only an answer with no entry is {@link AccountNotFoundError}; a failed
- * call (an error status, a refused connection, a timeout) throws its own error. `rpc.Server`'s
- * `getAccountEntry` and `getAccount` turn every failure into "Account not found", so the pool
- * never calls them.
+ * call (an error status, a refused connection, a timeout, a JSON-RPC error) throws an error that
+ * says so. `rpc.Server`'s `getAccountEntry` and `getAccount` turn every failure into "Account not
+ * found", which would read an RPC outage as a missing channel.
  */
 export async function readAccountEntry(
   rpc: Pick<SorobanRpc, "getLedgerEntries">,
@@ -19,7 +19,14 @@ export async function readAccountEntry(
   const key = xdr.LedgerKey.account(
     new xdr.LedgerKeyAccount({ accountId: Keypair.fromPublicKey(address).xdrPublicKey() }),
   );
-  const { entries } = await rpc.getLedgerEntries(key);
+  let entries;
+  try {
+    ({ entries } = await rpc.getLedgerEntries(key));
+  } catch (error) {
+    if (error instanceof Error) throw error;
+    // `rpc.Server` throws a JSON-RPC error answer as the plain `{ code, message }` object.
+    throw new Error(`RPC error: ${JSON.stringify(error)}`, { cause: error });
+  }
   const entry = entries[0];
   if (!entry) throw new AccountNotFoundError(`Account not found: ${address}`);
   return entry.val.account();
