@@ -59,10 +59,12 @@ As a resource server, and as the operator, I want `GET /supported` to describe e
 | --- | --- | --- |
 | Base branch | 0020 branches from `lore-0009-settle-exact` (PR #41), whose `compose()` builds the RPC the startup check needs; its PR targets that branch and moves to `develop` once #41 merges | 2026-10-21 |
 | No RPC answers at startup | The service refuses to start and logs the RPC error, as for a bad channel (AD-12: it starts only once every channel is checked) | 2026-10-21 |
-| Several channels fail the check | All are checked at once; the startup error names each failing channel with its `ChannelProblem` | 2026-10-21 |
+| Several channels fail the check | All are checked at once (`Promise.allSettled`); the startup error names each failing channel with its `ChannelProblem` or its RPC error | 2026-10-21 |
 | `/supported` response | A plain object from the config, typed `SupportedResponse`: `kinds` = `exact`, `x402Version: 2`, `config.network`, `extra.areFeesSponsored: true`; `extensions` = `["bazaar"]`; `signers` = `{"stellar:*": [facilitator address]}`. A test compares it with upstream `x402Facilitator.getSupported()` for `ExactStellarScheme` plus `BAZAAR` | 2026-10-21 |
 | `maxTimeoutSeconds` in `/supported` (0018's note) | Not advertised: spec v2 §7.3 has no such field, and the upstream Stellar server scheme copies only `areFeesSponsored` from `extra` | 2026-10-21 |
-| Facilitator tests and the startup check | `FakeRpc.getAccountEntry` (`@stellar-x402/signer-pool/testing`) returns a hardened channel entry instead of throwing | 2026-10-21 |
+| Facilitator tests and the startup check | The check runs in `main()`, not `compose()`. `main()` tests get a JSON-RPC stub over HTTP in `RPC_URLS`, as `fee-agreement.test.ts` does; `compose()`'s tests and `FakeRpc` stay as they are | 2026-10-21 |
+| A startup failure after the logger exists | `main()` logs it with the logger that names RPC endpoints (`RPC_URLS[i]#…`, never a host, ADR 0011) and rethrows; `server.ts` logs only a `ConfigError`, which comes before any logger | 2026-10-21 |
+| `scripts/verify-smoke.ts` (0018) | Both runs build the verifier with `buildVerifier` instead of `main()`: a client's address can't pass the startup check by design. The full service on real channels is `scripts/settle-smoke.ts`'s (0009) | 2026-10-21 |
 
 ## Recon (2026-10-21)
 
