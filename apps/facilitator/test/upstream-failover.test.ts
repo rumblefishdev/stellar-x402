@@ -306,6 +306,28 @@ describe("failoverUpstream", () => {
       expect(a.verify).toHaveBeenCalledTimes(2);
     });
 
+    it("probes at most once per minProbeGapMs while every call wraps around", async () => {
+      // A double outage: b fails every call, and a answers payloads but not its ledger.
+      const wrongAmount: VerifyResponse = {
+        isValid: false,
+        invalidReason: "invalid_exact_stellar_payload_wrong_amount",
+      };
+      const a = endpoint("a", unexpected, wrongAmount);
+      const b = endpoint("b", valid, unexpected);
+      const p = probed([a, b], [new Error("ECONNREFUSED"), 100]);
+      await p.upstream.verify(payload, requirements); // a → b
+      for (const t of [1_000, 2_000, 5_999]) {
+        p.at(t);
+        await expect(p.upstream.verify(payload, requirements)).resolves.toEqual(wrongAmount);
+      }
+      // One probe (a's and b's ledgers) for the three calls.
+      expect(p.latestLedger).toHaveBeenCalledTimes(2);
+      p.at(6_000);
+      await p.upstream.verify(payload, requirements);
+      expect(p.latestLedger).toHaveBeenCalledTimes(4);
+      await vi.waitFor(() => expect(p.onProbeFailed).toHaveBeenCalledTimes(2));
+    });
+
     it("counts a first endpoint whose probe hangs past timeoutMs as down, and probes again later", async () => {
       const a = endpoint("a", unexpected);
       const b = endpoint("b", valid);

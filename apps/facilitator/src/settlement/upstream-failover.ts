@@ -23,6 +23,12 @@ export interface UpstreamFailoverOptions {
    * default. The first probe is due this long after calls left it.
    */
   probeIntervalMs?: number;
+  /**
+   * The shortest time between two probes that calls wrapping around to the first endpoint make
+   * due, in milliseconds; 5,000 by default. In a double outage every call wraps around, and each
+   * probe that fails is logged.
+   */
+  minProbeGapMs?: number;
   /** How many ledgers the first endpoint may trail the active one by and still be returned to. */
   maxLagLedgers?: number;
   /** Calls moved to another endpoint, after `failure` of the endpoint they were on. */
@@ -55,7 +61,9 @@ export interface UpstreamFailoverOptions {
  * by at most `maxLagLedgers`. A client's payload never decides it: upstream refuses many payloads
  * before any RPC call, so a payload answer says nothing about the RPC. A call whose active endpoint
  * fails and that wraps around to the first one returns its answer without switching, and makes a
- * probe due at once.
+ * probe due at once, or `minProbeGapMs` after the last one began. An active endpoint that can't
+ * read its own ledger counts as 0 ledgers ahead: it's no reason to stay on it, so a healthy first
+ * endpoint is returned to without a lag check.
  *
  * `endpoints` is read once per call, before any endpoint's timer starts: with fee-stats bids it
  * reads the bid (AD-10) and returns one scheme per URL built for it. It must return the same
@@ -70,12 +78,20 @@ export function failoverUpstream(
   endpoints: () => Promise<readonly UpstreamEndpoint[]>,
   opts: UpstreamFailoverOptions = {},
 ): UpstreamVerifier {
-  const { timeoutMs = 10_000, probeIntervalMs = 60_000, maxLagLedgers = 2, now = Date.now } = opts;
+  const {
+    timeoutMs = 10_000,
+    probeIntervalMs = 60_000,
+    minProbeGapMs = 5_000,
+    maxLagLedgers = 2,
+    now = Date.now,
+  } = opts;
   let current = 0;
   /** Counts switches, so a call can tell whether another one switched while it ran. */
   let generation = 0;
   /** When the next probe of the first endpoint is due, while calls are off it. */
   let nextProbeAt = Infinity;
+  /** When the last probe began. */
+  let lastProbeAt = -Infinity;
   let probing = false;
 
   /** Hooks only log; one that throws must not turn an answer into a failure. */
@@ -116,7 +132,8 @@ export function failoverUpstream(
   const maybeProbe = (list: readonly UpstreamEndpoint[]) => {
     if (!opts.latestLedger || current === 0 || probing || now() < nextProbeAt) return;
     probing = true;
-    nextProbeAt = now() + probeIntervalMs;
+    lastProbeAt = now();
+    nextProbeAt = lastProbeAt + probeIntervalMs;
     void probe(list).finally(() => (probing = false));
   };
 
@@ -148,8 +165,9 @@ export function failoverUpstream(
         }
         if (idx === 0 && active !== 0) {
           // A call that wrapped around to the first endpoint doesn't make it active: upstream
-          // answers many payloads before any RPC call, so only the probe decides. It's due now.
-          nextProbeAt = now();
+          // answers many payloads before any RPC call, so only the probe decides. It's due now, or
+          // `minProbeGapMs` after the last one.
+          nextProbeAt = Math.min(nextProbeAt, lastProbeAt + minProbeGapMs);
           maybeProbe(list);
         } else if (idx !== active && generation === atStart) {
           current = idx;
