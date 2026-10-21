@@ -15,8 +15,8 @@ import {
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { memoryStores } from "../src/adapters/memory.js";
 import { ConfigError, parseConfig } from "../src/config.js";
-import { jsonLogger, rpcEndpointName } from "../src/logger.js";
 import { supportedResponse } from "../src/http/supported.js";
+import { jsonLogger, rpcEndpointName } from "../src/logger.js";
 import { main, start, type Started } from "../src/main.js";
 import { hardened, rpcStub } from "./rpc-stub.js";
 
@@ -230,6 +230,17 @@ describe("main()", () => {
     } finally {
       write.mockRestore();
       console.error = original;
+      await app.close();
+    }
+  });
+
+  it("serves /supported for the key it checked the channels against", async () => {
+    const app = await main({ ...env, RPC_URLS: rpc.url, PORT: "47136", LOG_LEVEL: "error" });
+    try {
+      const body = await (await fetch("http://127.0.0.1:47136/supported")).text();
+      expect(JSON.parse(body)).toEqual(supportedResponse("stellar:testnet", facilitator));
+      expect(body).not.toContain(env.CHANNELS);
+    } finally {
       await app.close();
     }
   });

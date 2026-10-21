@@ -3,13 +3,13 @@ import type { PaymentRequirements } from "@x402/core/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { memoryStores } from "../src/adapters/memory.js";
 import { parseConfig } from "../src/config.js";
+import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
 import { MAX_BODY_DEPTH } from "../src/http/app.js";
 import { start, type Started } from "../src/main.js";
 import type { SettlementRecord } from "../src/ports/index.js";
 import type { SettlementHooks } from "../src/settlement/hooks.js";
 import type { Settle } from "../src/settlement/settle.js";
-import { supportedResponse } from "../src/http/supported.js";
 
 const requirements: PaymentRequirements = {
   scheme: "exact",

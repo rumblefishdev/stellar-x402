@@ -4,10 +4,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { memoryStores } from "../src/adapters/memory.js";
 import { MAX_BODY_DEPTH } from "../src/http/app.js";
 import { parseConfig } from "../src/config.js";
+import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
 import { start, type Started } from "../src/main.js";
 import type { Verify } from "../src/settlement/verify.js";
-import { supportedResponse } from "../src/http/supported.js";
 
 const requirements: PaymentRequirements = {
   scheme: "exact",
