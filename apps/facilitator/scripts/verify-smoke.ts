@@ -129,7 +129,7 @@ const checks = {
     channel.isValid === false &&
     channel.extra?.reason === "invalid_exact_stellar_payload_channel_account",
   ...(expectFailover && {
-    failedOver: [plain, channelled].every((r) => r.failedOver && r.rpc === "RPC_URLS[1]"),
+    failedOver: [plain, channelled].every((r) => r.failedOver && r.rpc?.startsWith("RPC_URLS[1]#")),
   }),
 };
 const answeredBy = { valid: plain.rpc, channel: channelled.rpc };
