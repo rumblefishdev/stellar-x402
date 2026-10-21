@@ -7,6 +7,7 @@ import { parseConfig } from "../src/config.js";
 import { jsonLogger } from "../src/logger.js";
 import { start, type Started } from "../src/main.js";
 import type { Verify } from "../src/settlement/verify.js";
+import { supportedResponse } from "../src/http/supported.js";
 
 const requirements: PaymentRequirements = {
   scheme: "exact",
@@ -47,6 +48,7 @@ describe("POST /verify", () => {
         throw new Error("not used");
       },
       extensionResponses: () => undefined,
+      supported: supportedResponse(config.network, Keypair.random().publicKey()),
     });
     url = `http://127.0.0.1:${app.port}/verify`;
   });

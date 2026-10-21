@@ -1,6 +1,6 @@
 import { STATUS_CODES } from "node:http";
 import { PaymentPayloadV2Schema, PaymentRequirementsV2Schema } from "@x402/core/schemas";
-import type { VerifyRequest } from "@x402/core/types";
+import type { SupportedResponse, VerifyRequest } from "@x402/core/types";
 import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
@@ -19,6 +19,8 @@ export interface AppDeps {
   settle: Settle;
   /** The `EXTENSION-RESPONSES` header of a `success` settle answer (AD-8). */
   extensionResponses: SettlementHooks["extensionResponses"];
+  /** The `GET /supported` answer, fixed for the life of the process. */
+  supported: SupportedResponse;
 }
 
 /** The status as a body code, like `not_found`: 413 → `payload_too_large`. */
@@ -69,8 +71,8 @@ export function parsePaymentRequest(body: unknown): VerifyRequest | undefined {
 }
 
 /**
- * The inbound HTTP adapter (AD-13). The routes answer 501 until their tasks land: `/supported`
- * (0020) and `/discovery/resources` (0032). There is a body size limit and
+ * The inbound HTTP adapter (AD-13). `/discovery/resources` answers 501 until its task lands
+ * (0032). There is a body size limit and
  * no CORS anywhere (spine "HTTP hardening"); rate limits come in 0023.
  */
 export function createApp({
@@ -79,6 +81,7 @@ export function createApp({
   verify,
   settle,
   extensionResponses,
+  supported,
 }: AppDeps): Express {
   const app = express();
   app.disable("x-powered-by");
@@ -146,7 +149,9 @@ export function createApp({
       else res.once("close", afterResponse);
     }
   });
-  app.get("/supported", notImplemented);
+  app.get("/supported", (_req, res) => {
+    res.json(supported);
+  });
   app.get("/discovery/resources", notImplemented);
 
   app.use((_req, res) => {

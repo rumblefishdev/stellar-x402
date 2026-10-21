@@ -16,14 +16,29 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { memoryStores } from "../src/adapters/memory.js";
 import { ConfigError, parseConfig } from "../src/config.js";
 import { jsonLogger, rpcEndpointName } from "../src/logger.js";
+import { supportedResponse } from "../src/http/supported.js";
 import { main, start, type Started } from "../src/main.js";
+import { hardened, rpcStub } from "./rpc-stub.js";
 
 const secret = Keypair.random().secret();
+const facilitator = Keypair.fromSecret(secret).publicKey();
 const env = {
   FACILITATOR_SECRET: secret,
   CHANNELS: Keypair.random().publicKey(),
   BODY_LIMIT_BYTES: "1024",
 };
+/** A channel whose master key still signs: the startup check refuses it. */
+const masterActive = Keypair.random().publicKey();
+
+// `main()` checks every channel at startup, on the RPC it builds from `RPC_URLS`.
+let rpc: Awaited<ReturnType<typeof rpcStub>>;
+beforeAll(async () => {
+  rpc = await rpcStub({
+    [env.CHANNELS]: hardened(facilitator),
+    [masterActive]: { signers: [{ key: facilitator, weight: 1 }], masterWeight: 1 },
+  });
+});
+afterAll(() => rpc.close());
 
 describe("facilitator boot", () => {
   const lines: string[] = [];
@@ -45,25 +60,30 @@ describe("facilitator boot", () => {
       verify,
       settle,
       extensionResponses: () => undefined,
+      supported: supportedResponse(config.network, facilitator),
     });
     url = `http://127.0.0.1:${app.port}`;
   });
   afterAll(() => app.close());
 
-  it("answers the stub routes, with no CORS headers", async () => {
-    const routes = [
-      ["GET", "/supported"],
-      ["GET", "/discovery/resources"],
-    ] as const;
-    for (const [method, path] of routes) {
-      const response = await fetch(`${url}${path}`, {
-        method,
-        headers: { origin: "https://other.example" },
-      });
-      expect(response.status, path).toBe(501);
-      expect(response.headers.get("access-control-allow-origin"), path).toBeNull();
-    }
+  it("answers the stub route, with no CORS headers", async () => {
+    const response = await fetch(`${url}/discovery/resources`, {
+      headers: { origin: "https://other.example" },
+    });
+    expect(response.status).toBe(501);
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
     expect((await fetch(`${url}/unknown`)).status).toBe(404);
+  });
+
+  it("answers /supported with the facilitator key as its only signer, never a channel", async () => {
+    const response = await fetch(`${url}/supported`, {
+      headers: { origin: "https://other.example" },
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    const body = await response.text();
+    expect(JSON.parse(body)).toEqual(supportedResponse("stellar:testnet", facilitator));
+    expect(body).not.toContain(env.CHANNELS);
   });
 
   it("answers a client's bad body with a 4xx and doesn't log it as an error", async () => {
@@ -140,6 +160,54 @@ describe("startup with a bad config", () => {
   });
 });
 
+describe("the startup channel check", () => {
+  /** Runs `src/server.ts` until it exits; its stdout as JSON events, and all its output. */
+  async function serve(extra: Record<string, string>) {
+    const child = spawn(process.execPath, ["--import", "tsx", "src/server.ts"], {
+      cwd: fileURLToPath(new URL("..", import.meta.url)),
+      env: { ...env, PORT: "47135", ...extra },
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => (stdout += chunk));
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    const [code] = await once(child, "exit");
+    const events = stdout
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    return { code, events, output: stdout + stderr };
+  }
+
+  it("refuses to start on a channel another key can sign for, and names it", async () => {
+    const { code, events, output } = await serve({
+      CHANNELS: `${env.CHANNELS},${masterActive}`,
+      RPC_URLS: rpc.url,
+    });
+    expect(code, output).toBe(1);
+    expect(events.map((event) => event.event)).toEqual(["startup_failed"]);
+    expect(output).toContain(`${masterActive}: master-key-active`);
+    expect(output).not.toContain(`${env.CHANNELS}:`);
+  }, 20_000);
+
+  it("refuses to start when no RPC answers, naming the endpoint, never its host", async () => {
+    // A URL can carry its API key in the path, and its host can name a paid provider (ADR 0011).
+    const down = createServer((_req, res) => res.writeHead(503).end()).listen(0, "127.0.0.1");
+    await once(down, "listening");
+    const url = `http://127.0.0.1:${(down.address() as AddressInfo).port}/apikey-S3CR3T`;
+    try {
+      const { code, events, output } = await serve({ RPC_URLS: url });
+      expect(code, output).toBe(1);
+      expect(events.map((event) => event.event)).toEqual(["startup_failed"]);
+      expect(output).toContain(env.CHANNELS);
+      expect(output).not.toContain("S3CR3T");
+      expect(output).not.toContain("127.0.0.1");
+    } finally {
+      down.close();
+    }
+  }, 20_000);
+});
+
 describe("main()", () => {
   it("names an RPC_URLS entry in its logs and console.error lines, never its host", async () => {
     // A URL can carry its API key in the path, and its host can name a paid provider (ADR 0011).
@@ -149,7 +217,7 @@ describe("main()", () => {
       lines.push(String(line));
       return true;
     });
-    const url = "https://acct.example/K/";
+    const url = `${rpc.url}/K/`;
     const app = await main({ ...env, RPC_URLS: url, PORT: "47134", LOG_LEVEL: "error" });
     try {
       app.logger.error("http_error", { error: new Error(`request to ${url}rpc failed`) });
@@ -157,7 +225,7 @@ describe("main()", () => {
       expect(lines).toHaveLength(2);
       for (const line of lines) {
         expect(line).toContain(rpcEndpointName(url, 0));
-        expect(line).not.toContain("acct.example");
+        expect(line).not.toContain("127.0.0.1");
       }
     } finally {
       write.mockRestore();
@@ -169,7 +237,7 @@ describe("main()", () => {
   it("answers /verify with the real verifier, then exits 0 on SIGTERM", async () => {
     const child = spawn(process.execPath, ["--import", "tsx", "src/server.ts"], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),
-      env: { ...env, PORT: "47129" },
+      env: { ...env, PORT: "47129", RPC_URLS: rpc.url },
     });
     // A pubnet payment: the real verifier rejects it before any RPC call; a stub wouldn't.
     const requirements = {
@@ -215,10 +283,9 @@ describe("main()", () => {
 
 describe("upstream's console.error in main()", () => {
   it("never writes the RPC URL's key to stderr when upstream's RPC call fails", async () => {
-    // Every RPC call answers 503, so upstream's simulation fails and it prints the AxiosError.
-    const rpc = createServer((_req, res) => res.writeHead(503).end()).listen(0, "127.0.0.1");
-    await once(rpc, "listening");
-    const rpcUrl = `http://127.0.0.1:${(rpc.address() as AddressInfo).port}/apikey-S3CR3T`;
+    // The stub answers only the startup check's reads; upstream's simulation gets a 503 and
+    // upstream prints the AxiosError.
+    const rpcUrl = `${rpc.url}/apikey-S3CR3T`;
     const child = spawn(process.execPath, ["--import", "tsx", "src/server.ts"], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),
       env: { ...env, PORT: "47130", RPC_URLS: rpcUrl },
@@ -280,7 +347,6 @@ describe("upstream's console.error in main()", () => {
         .finally(() => child.kill("SIGTERM"));
     });
     await once(child, "exit");
-    rpc.close();
 
     expect(await status).toBe(500);
     const events = stdout

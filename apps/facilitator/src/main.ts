@@ -17,9 +17,11 @@ import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
 import { parseConfig, parseMigrateConfig } from "./config.js";
 import type { Config } from "./config.js";
 import { createApp, type AppDeps } from "./http/app.js";
+import { supportedResponse } from "./http/supported.js";
 import { captureConsoleError, jsonLogger, type Logger } from "./logger.js";
 import { memoryMetrics, type Metrics } from "./metrics.js";
 import type { SettlementStore } from "./ports/index.js";
+import { checkChannels } from "./settlement/channel-check.js";
 import { feeSettings, upstreamAtCurrentBid, type FeeSettings } from "./settlement/fees.js";
 import type { SettlementHooks } from "./settlement/hooks.js";
 import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler, type Settle } from "./settlement/settle.js";
@@ -137,8 +139,8 @@ export function buildSettlement(
   },
 ): { settle: Settle; submitter: SettlementSubmitter } {
   const { logger, metrics } = deps;
-  // The only sender of transactions in the service (AD-2). The channel check at startup comes
-  // with 0020, the lease with 0025.
+  // The only sender of transactions in the service (AD-2). `main()` checks its channels before
+  // it starts; the lease comes with 0025.
   const submitter = new SettlementSubmitter({
     rpc: deps.rpc,
     networkPassphrase: getNetworkPassphrase(config.network),
@@ -233,6 +235,7 @@ export function compose(
       verify: createVerifier(checks),
       settle,
       extensionResponses: cataloger.extensionResponses,
+      supported: supportedResponse(config.network, checks.facilitator),
     },
     cataloger,
     metrics,
@@ -246,23 +249,28 @@ export function compose(
 export async function main(env: Record<string, string | undefined> = process.env) {
   const config = parseConfig(env);
   const logger = jsonLogger(config.logLevel, undefined, config.rpcUrls);
-  // STORE=postgres needs a migrated schema (`pnpm migrate`); the service never migrates it.
   let pools: { main: pg.Pool; reserve: pg.Pool; rateLimits: pg.Pool } | undefined;
-  if (config.store === "postgres") {
-    const url = config.databaseUrl;
-    if (url === undefined) throw new Error("STORE=postgres needs a DATABASE_URL");
-    // Reservations queue on the global scope's lock, and a flood's hits on its key's row lock;
-    // their own pools keep those queues off the others.
-    pools = {
-      main: createPool(url, poolErrorLogger(logger)),
-      reserve: createPool(url, poolErrorLogger(logger), 3),
-      rateLimits: createPool(url, poolErrorLogger(logger), 3),
-    };
-  }
   const endPools = () => Promise.all(Object.values(pools ?? {}).map((p) => p.end()));
   try {
+    // STORE=postgres needs a migrated schema (`pnpm migrate`); the service never migrates it.
+    if (config.store === "postgres") {
+      const url = config.databaseUrl;
+      if (url === undefined) throw new Error("STORE=postgres needs a DATABASE_URL");
+      // Reservations queue on the global scope's lock, and a flood's hits on its key's row lock;
+      // their own pools keep those queues off the others.
+      pools = {
+        main: createPool(url, poolErrorLogger(logger)),
+        reserve: createPool(url, poolErrorLogger(logger), 3),
+        rateLimits: createPool(url, poolErrorLogger(logger), 3),
+      };
+    }
+    const rpc = FallbackRpc.fromUrls(config.rpcUrls);
+    // AD-12: the service starts only when no other key can move a channel. An RPC that doesn't
+    // answer fails the check too.
+    const facilitator = Keypair.fromSecret(config.facilitatorSecret).publicKey();
+    await checkChannels(rpc, config.channels, facilitator);
     const stores = pools ? postgresStores(pools.main, pools) : memoryStores();
-    const { deps, cataloger } = compose(config, { logger, stores });
+    const { deps, cataloger } = compose(config, { logger, stores, rpc });
     // For the life of the process: an upstream call cut off by the deadline keeps running after
     // `close()`, and its error would reach stderr with the RPC URL in it.
     const restoreConsole = captureConsoleError(logger, config.rpcUrls);
@@ -296,6 +304,9 @@ export async function main(env: Record<string, string | undefined> = process.env
       close: () => (closing ??= closeOnce()),
     };
   } catch (error) {
+    // Logged here, where an RPC URL is named as its `RPC_URLS` entry, never by its host
+    // (ADR 0011); `server.ts` logs only a `ConfigError`, which comes before the logger.
+    logger.error("startup_failed", { error });
     await endPools();
     throw error;
   }

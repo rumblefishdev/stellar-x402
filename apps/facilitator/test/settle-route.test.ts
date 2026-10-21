@@ -9,6 +9,7 @@ import { start, type Started } from "../src/main.js";
 import type { SettlementRecord } from "../src/ports/index.js";
 import type { SettlementHooks } from "../src/settlement/hooks.js";
 import type { Settle } from "../src/settlement/settle.js";
+import { supportedResponse } from "../src/http/supported.js";
 
 const requirements: PaymentRequirements = {
   scheme: "exact",
@@ -55,6 +56,7 @@ describe("POST /settle", () => {
       verify: async () => ({ isValid: true }),
       settle,
       extensionResponses,
+      supported: supportedResponse(config.network, Keypair.random().publicKey()),
     });
     url = `http://127.0.0.1:${app.port}/settle`;
   });

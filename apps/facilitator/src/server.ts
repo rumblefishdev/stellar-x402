@@ -14,8 +14,10 @@ process.once("SIGTERM", stop);
 process.once("SIGINT", stop);
 
 started.catch((error: unknown) => {
-  // A ConfigError names each bad setting and never echoes a value.
-  const fields = error instanceof ConfigError ? { problems: error.problems } : { error };
-  jsonLogger("error").error("startup_failed", fields);
+  // A ConfigError names each bad setting and never echoes a value. `main()` logged any other
+  // error itself, with the RPC endpoints named by its config.
+  if (error instanceof ConfigError) {
+    jsonLogger("error").error("startup_failed", { problems: error.problems });
+  }
   process.exitCode = 1;
 });
