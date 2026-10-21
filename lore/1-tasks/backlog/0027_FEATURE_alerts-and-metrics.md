@@ -49,11 +49,14 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
 - Update `docs/monitoring.md`.
 - From 0039 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md), revised): the backend is CloudWatch, fed from the
   Hetzner server.
-  - Logs go through Docker's `awslogs` driver, with a logs-only role's credentials from IAM Roles
-    Anywhere.
+  - Docker keeps our containers' logs on the host (`json-file`, rotated), and the CloudWatch
+    agent sends them on with the logs-and-metrics role's credentials from IAM Roles Anywhere. Only
+    the agent holds them, so `dockerd` stays untouched and an AWS outage never stops a container.
+    Decide how the agent picks only our containers' files.
   - The adapter writes Embedded Metric Format lines to stdout (namespace `x402-facilitator`).
     Dimensions stay low-cardinality (`network`, route, outcome, event name), never payer or
-    `payTo`, and the adapter emits only listed fields. Check once that extraction works.
+    `payTo`, and the adapter emits only listed fields. Check once that extraction works on the
+    agent's path.
   - The CloudWatch agent on the server reports memory, CPU and free disk, since ClickHouse shares
     the machine.
 - From 0039: alarms go through SNS and Amazon Q Developer in chat applications to the team's
@@ -61,7 +64,10 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
   - "ready to settle" (lease held, reconciliation done);
   - from ADR 0013: OpenBao sealed, down or failing to sign; a fee bump on the fee account that
     our submitter didn't send, read from Horizon; and OpenBao's audit log disk at 80%;
+  - WAL archiving failing: `pg_stat_archiver.failed_count` rising, or the last archived segment
+    older than 10 minutes, since a stuck archive fills a disk ClickHouse shares;
   - the last backup shipped off the server (WAL or OpenBao snapshot) older than 30 minutes;
+  - the Roles Anywhere certificate expiring within 30 days;
   - low free disk and memory on the server.
 - From 0014: uptime is a Route 53 HTTPS health check.
   - Its metrics exist only in us-east-1, so the alarm and its SNS topic go in a small us-east-1

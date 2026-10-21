@@ -3,7 +3,7 @@
 - Status: accepted
 - Date: 2026-10-12, amended 2026-10-20 (task 0022: pools for `reserve` and the rate limiter; 0026
   measures; hosting note; task 0039: PostgreSQL in a container on the Hetzner server) and
-  2026-10-21 (task 0039: how backups leave the server)
+  2026-10-21 (task 0039: how backups leave the server, the migration service and its bounds)
 
 ## Context
 
@@ -33,29 +33,37 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
 ## Decision
 
 - **Store.**
-  - One PostgreSQL 18 container per network on the same server (ADR 0011), with a 1 GiB memory
-    limit and its data on a volume.
-  - Only that network's facilitator and the one-off migration container reach it, over the
-    `internal` network `x402-<network>-db`.
+  - One PostgreSQL 18 container per network on the same server (ADR 0011), pinned by digest,
+    with a 1 GiB memory limit and its data on a volume. It has a systemd unit of its own, so a
+    facilitator deploy never restarts it.
+  - Only that network's facilitator and the migration service reach it, over the `internal`
+    network `x402-<network>-db`.
   - Backups: Postgres archives WAL to a local volume, and a timer on the host takes a daily base
-    backup and sends both off the server with Borg every 5 minutes, to our own sub-account on
-    soroban-block-explorer's Hetzner Storage Box (BX21), kept 14 days (ADR 0011). They allow
-    point-in-time restore and lose at most about 6 minutes. An S3 bucket in the company AWS
+    backup and sends both off the server with Borg every 5 minutes, encrypted, to our own
+    sub-account on the company's existing Hetzner Storage Box, kept 14 days (ADR 0011). They
+    allow point-in-time restore and lose at most about 6 minutes. An alarm fires when archiving
+    fails, since `pg_wal` then grows on a disk ClickHouse shares. An S3 bucket in the company AWS
     account is the fallback. A restore drill runs on testnet before mainnet.
-  - Minor upgrades are an image bump in a planned window; a major upgrade is planned on its own.
+  - Minor upgrades are a digest bump in a planned window; a major upgrade is planned on its own.
 - **Access.**
   - The `pg` driver and small fixed pools per process: 10 connections, plus 3 for
     `reserve` and 3 for the rate limiter, so reservations queued on the global scope's lock, or a
     flood's hits on its key's row lock, can't starve the other stores.
   - No TLS: the connection stays on one host's internal Docker network (ADR 0011). Passwords use
     `scram-sha-256`. TLS comes back if the database leaves the host.
-  - The database password is an encrypted systemd credential, passed in as a Compose secret.
+  - The database password is an encrypted systemd credential, mounted as a Compose `file:`
+    secret; the app reads its URL from a file (`DATABASE_URL_FILE`, 0020), never from
+    `environment:`.
   - `STORE=memory|postgres` picks the adapters in the composition root.
 - **Schema.**
   - Plain SQL migrations, applied by one command, under a transaction-level advisory lock with a
     `lock_timeout`.
-  - Deploys run the migrations as a one-off container of the new image, after the old facilitator
+  - Deploys run the migrations as a one-off service of the new image, after the old facilitator
     stops and before the new one starts (ADR 0011).
+  - `migrate()` applies all pending migrations in one transaction, so a failed run leaves the
+    schema as it was. That is what makes a deploy's automatic rollback safe.
+  - The migration service has its own bounds, longer than the app pool's 10 s statement timeout
+    (0026). An index build on a big table runs outside the deploy (ADR 0011).
   - Every change is expand/contract: new columns are nullable or have a default, and nothing is
     dropped or renamed in the same release, so a rollback to an earlier image runs against the
     newer schema.
@@ -68,6 +76,7 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
   - The schema and the statement for each operation are in
     [G-postgres-port-mapping](../../lore/1-tasks/archive/0013_RESEARCH_facilitator-state-store/notes/G-postgres-port-mapping.md).
 - **Search (T2).** It can use the same database: core full-text search, `pg_trgm` and `pgvector`.
+  The official `postgres` image has no `pgvector`, so T2 needs an image that does.
 
 ## Rationale
 

@@ -2,8 +2,9 @@
 
 Testnet and mainnet run as separate deployments. They never share keys.
 
-- `testnet.env.example` and `mainnet.env.example`: environment variables for each deployment.
-  Copy to a `.env` file (git-ignored) and fill in.
+- `testnet.env.example` and `mainnet.env.example`: environment variables for each network.
+  Copy to a `.env` file (git-ignored) and fill in, for local runs only. The deployed networks get
+  their secrets from encrypted systemd credentials and sign through OpenBao (ADR 0011, ADR 0013).
 - `scripts/`: operational scripts (signer funding, testnet reset recovery, contract deploy).
   - `deploy-contract.sh <upto-proxy|test-token>`: builds and deploys a contract to testnet. The
     salt is the WASM hash, so a rerun deploys nothing, changed code gets a new ID, and after a

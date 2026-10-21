@@ -27,9 +27,11 @@ history:
     status: active
     who: stkrolikiewicz
     note: >
-      Second review round on PR #24: a directory and a systemd unit per network own deploys, a
-      failed deploy rolls back, reboots wait for the drain, backups leave from the host, the
-      alarms follow ADR 0013, and testnet deploys from a protected deploy/testnet branch.
+      Second review round on PR #24 (Oskar and Adam): a directory and systemd units per network
+      own deploys, Postgres and rollback, secrets sit in tmpfs and reach the app as files, reboots
+      wait for the drain, backups leave from the host encrypted, logs go through the CloudWatch
+      agent, the alarms follow ADR 0013, and testnet deploys from a protected deploy/testnet
+      branch.
 ---
 
 # Move facilitator hosting to the company Hetzner server in ADR 0011

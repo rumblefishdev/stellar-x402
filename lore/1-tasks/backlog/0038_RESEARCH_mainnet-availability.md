@@ -45,6 +45,8 @@ launch, this task decides how much of that to remove.
   - a ruleset that protects `v*` tags, since the workflow at the tag runs with the mainnet key;
   - a mainnet `deploy.sh` that accepts only a digest testnet has run;
   - named reviewers for mainnet deploys, and who may edit the environments;
+  - whether admins may bypass the `mainnet` environment's reviewers (ADR 0011). GitHub lets them
+    by default, so until then they can;
   - a deploy user per network;
   - whether mainnet needs an OpenBao of its own;
   - a Caddy of our own on a second IPv4 address, if the shared Caddy's coupling bites.

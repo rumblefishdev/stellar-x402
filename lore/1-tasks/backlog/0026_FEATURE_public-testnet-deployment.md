@@ -30,7 +30,7 @@ history:
   - date: "2026-10-21"
     status: backlog
     who: stkrolikiewicz
-    note: "Deploys through a unit per network, rollback, backups from the host, deploy/testnet, from Oskar's PR #24 review."
+    note: "Units per network for deploys, Postgres and rollback, secrets in tmpfs, backups from the host, deploy/testnet, from Oskar's and Adam's PR #24 reviews."
 ---
 
 # Public testnet deployment
@@ -54,69 +54,88 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 - From 0039 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md), revised): Docker Compose on the company Hetzner server
   (x86_64), project `x402`, owned by its own Linux user, apart from ClickHouse's
   `app` project, in `/srv/x402` (the ClickHouse project's deploy overwrites its own directory).
-  - `/srv/x402/testnet/` holds the compose file, `deploy.sh`, `digest` and the secret files; an
-    operator copies the first two there by hand from a reviewed commit (runbook).
-  - `facilitator-testnet`: memory limit 512 MiB, one CPU, `restart: unless-stopped`,
+  - `/srv/x402/testnet/` holds the compose file, `deploy.sh`, `digest` and the encrypted
+    credentials; an operator copies the first two there by hand from a reviewed commit (runbook).
+  - `facilitator-testnet`: memory limit 512 MiB, one CPU, `restart: on-failure`,
     `stop_grace_period` 180 s, healthcheck on `/health` every 10 s set in the compose service,
     not the image (a Node one-liner, 5 s timeout, 30 s `start_period`, 3 failures), no published
     port.
-  - A systemd timer on the host restarts an `unhealthy` facilitator every 30 s, with a 10 s stop
-    timeout, and only while `x402@testnet.service` is `active`.
-  - `postgres-testnet`: PostgreSQL 18, memory limit 1 GiB, data on a volume, reachable only from
-    the facilitator and the one-off migration container.
+  - `migrate-testnet`: a one-off service of the facilitator image with its healthcheck disabled,
+    run only by `docker compose run --rm`, with its own statement and query timeouts instead of
+    the app pool's 10 s and 15 s (`migrateMain` uses `createPool` today).
+  - A systemd timer on the host restarts the `facilitator-testnet` container when it is
+    `unhealthy`, every 30 s, with a 10 s stop timeout: found by its Compose service label,
+    skipping one-off containers, and only while `x402@testnet.service` is `active`.
+  - `postgres-testnet`: PostgreSQL 18 pinned by digest, memory limit 1 GiB, `stop_grace_period`
+    120 s, a set `shm_size`, data on a volume mounted at `/var/lib/postgresql` (the 18 image
+    moved `PGDATA` to `/var/lib/postgresql/18/docker` and refuses the old `…/data` mount),
+    reachable only from the facilitator and the migration service.
   - Networks `x402-testnet-edge` (Caddy and the facilitator) and `x402-testnet-db`
-    (`internal: true`, the facilitator, Postgres and the migration container). Caddy joins the
-    edge network in the same pull request as the site block.
-  - OpenBao (ADR 0013): one container for both networks in `/srv/x402/openbao/`, memory limit
-    256 MiB and half a CPU, a listener socket per network in its own volume, its own unit
-    `x402-openbao.service` for the unseal credential. Its snapshots and restore drill follow
-    ADR 0013 (task 0047).
+    (`internal: true`, the facilitator, Postgres and the migration service). The edge network is
+    created once outside both projects, before the ClickHouse project's deploy, and is
+    `external: true` in both; `x402@testnet` creates it again if it's missing.
+  - OpenBao (ADR 0013): one container for both networks in `/srv/x402/openbao/`, pinned by
+    digest, memory limit 256 MiB and half a CPU, a listener socket per network in its own volume,
+    its own unit `x402-openbao.service` for the unseal credential. Its snapshots and restore
+    drill follow ADR 0013 (task 0047).
   - Node `keepAliveTimeout` 125 s, with `headersTimeout` above it; `TRUSTED_PROXY_HOPS=1`.
 - From 0039, the image: `pnpm deploy --prod` with `injectWorkspacePackages: true`;
   `"files": ["dist"]` in `apps/facilitator/package.json` and a `.dockerignore` that excludes
   `.env*`; `node:22-slim` pinned by digest, `linux/amd64`, user `node`, read-only root filesystem.
   Images go to GHCR, tagged with the git SHA; the workflow skips the build when the SHA exists.
 - From 0039, the deploy:
-  - GitHub Actions connects over SSH as a deploy user with one key per network; each key's
-    `authorized_keys` entry fixes its network (`command="/srv/x402/testnet/deploy.sh",restrict`),
-    and the script accepts only an image digest (`sha256:` and 64 hex digits);
-  - the deploy user isn't in the `docker` group: it may write only `digest` and run
-    `sudo systemctl restart x402@testnet`, its one `sudo` rule;
+  - GitHub Actions connects over SSH to the server's existing SSH port, with the server's host
+    key pinned in the workflow's `known_hosts`, as a deploy user with one key per network; each
+    key's `authorized_keys` entry fixes its network
+    (`command="/srv/x402/testnet/deploy.sh",restrict`), and the script accepts only an image
+    digest (`sha256:` and 64 hex digits);
+  - the deploy user isn't in the `docker` group: it may write only `digest.next` and run
+    `sudo systemctl start x402-deploy@testnet`, its one `sudo` rule;
   - the `testnet` and `mainnet` environments carry the protection rules from ADR 0011
     (`deploy/testnet` only; `v*` tags, required reviewers, "Prevent self-review");
   - `deploy/testnet` is a protected branch: a pull request from `develop` with an approving
     review, and no bypass, admins included;
-  - `deploy.sh` takes the network's lock, saves the current digest, writes the new one, restarts
-    the unit and waits up to 120 s for `ready: true` from `/health`; if the restart fails or
-    `ready` doesn't come, it restores the previous digest, restarts the unit and fails the run;
-  - the unit `x402@testnet.service` decrypts the credentials, pulls the image, runs the
-    migrations (ADR 0012) as a one-off container of the new image and starts the facilitator;
-    `ExecStop` runs `docker compose down`. It runs after `docker.service`, with
-    `TimeoutStopSec` 200 s, and is enabled at boot;
+  - `x402-deploy@testnet.service` (a oneshot, as root) takes the network's lock, saves the
+    current digest, moves `digest.next` into `digest`, restarts `x402@testnet` and waits up to
+    120 s for `ready: true` from `/health`; if the restart fails or `ready` doesn't come, it
+    restores the previous digest, restarts again and fails. `systemctl start` waits for it, so
+    the job gets the result, and a dropped SSH session doesn't cut it;
+  - `x402@testnet.service` decrypts the credentials to `/run/x402/testnet/` (tmpfs, 0700),
+    creates the edge network if it's missing, pulls the image, runs `migrate-testnet` and starts
+    only the facilitator (`--no-deps`); `ExecStop` stops it. It requires and runs after
+    `x402-db@testnet.service`, which runs Postgres. Both run after `docker.service`, the
+    facilitator's with `TimeoutStopSec` 200 s, and both are enabled at boot;
   - it runs on a push to `deploy/testnet` unless only `lore/**`, `docs/**` or Markdown changed,
-    and by hand, in a `concurrency` group;
+    and by hand, in a `concurrency` group with `cancel-in-progress: false`;
   - actions are pinned by commit SHA, with minimal token permissions, and the SSH key is an
     environment secret.
 - From 0039, keys and secrets:
   - the facilitator signs through OpenBao Transit on the server (ADR 0013, 0036 a prerequisite);
   - the server gets short-lived AWS credentials through IAM Roles Anywhere, for a role that only
-    writes logs and metrics;
+    writes logs and metrics, held only by the CloudWatch agent. The trust anchor is the
+    ClickHouse project's existing client-certificate CA; the server certificate is issued with
+    that project's script, valid for a year, its CN accepted by the role's trust policy and kept
+    off the ClickHouse site's allowlist. Ask that project to tell us when it rotates its CA;
   - the database password and any keyed RPC URL are encrypted systemd credentials
-    (`systemd-creds`), passed to Compose as secrets by `x402@testnet.service` (as in ADR 0013);
+    (`systemd-creds`), decrypted by `x402@testnet.service` to `/run/x402/testnet/` and mounted as
+    Compose `file:` secrets, never `environment:`; the app reads them as files (0020);
   - no TLS to `postgres-testnet` on the internal network; `scram-sha-256` passwords.
 - From 0039: backups of `postgres-testnet` leave from the host. Postgres archives WAL to a local
   volume (`archive_timeout` 60 s); a timer takes a daily `pg_basebackup` and sends the archive
-  with Borg every 5 minutes to our own sub-account on soroban-block-explorer's Storage Box
-  (BX21), kept 14 days; a restore drill follows.
-- From 0039: the Caddy site block for the subdomain is a pull request to soroban-block-explorer's
-  `infra-hetzner/Caddyfile`, agreed with its team, with plain public TLS (no client certificate)
-  and a comment that the block belongs to x402. An A record in Route 53 points at the server.
-  Record that team's answers here, as the Prices API did in its task 0045.
+  with Borg every 5 minutes to our own sub-account on the company's existing Storage Box, kept
+  14 days, in a Borg repository encrypted with a passphrase kept beside ADR 0013's backup
+  secret; a restore drill follows.
+- From 0039: the Caddy site block for the subdomain is a pull request to the ClickHouse project's
+  repo, agreed with its team, with plain public TLS (no client certificate) and a comment that
+  the block belongs to x402. Its compose declares the edge network `external: true`. An A record
+  in Route 53 points at the server. Record that team's answers here, as the Prices API did in its
+  task 0045.
 - From 0039: `GET /health` answers 200 and reports `ready` in its body.
 - From 0039, the runbook: deploy, copying the compose file and `deploy.sh` from a reviewed
   commit, rollback (automatic on a failed deploy; by hand, redeploy an earlier digest), long
-  migrations outside the deploy, reboots, key rotation as an on-chain signer change, and
-  restoring the service on another machine.
+  migrations outside the deploy, reboots, creating the edge networks, renewing the Roles
+  Anywhere certificate, key rotation as an on-chain signer change, and restoring the service on
+  another machine.
 - From 0013 ([ADR 0012](../../../docs/adr/0012-facilitator-state-store.md)), the database, on the
   server (ADR 0011):
   - the `postgres-testnet` container above, its credentials a Compose secret file;

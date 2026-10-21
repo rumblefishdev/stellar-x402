@@ -35,7 +35,8 @@ The company already runs a Hetzner dedicated server for its production ClickHous
 - Docker Compose, and Caddy already terminates HTTPS in the same compose project as ClickHouse.
 
 Our containers are limited to 1.5 GiB of RAM per network, 1.75 GiB on testnet with OpenBao and
-3.25 GiB with both networks; on testnet they need under 1 GB of disk. The `rumblefish.dev` zone is on Route 53 in the company AWS account, which also holds sorobanscan and
+3.25 GiB with both networks; on testnet they need about 2 GB of disk, WAL included. The
+`rumblefish.dev` zone is on Route 53 in the company AWS account, which also holds sorobanscan and
 the Stellar Prices API.
 
 ## Decision
@@ -47,14 +48,18 @@ the Stellar Prices API.
   - It lives in `/srv/x402`, outside the ClickHouse project's directory, which that project's
     deploy overwrites.
   - Each network has its own directory, `/srv/x402/<network>/`, with its compose file, deploy
-    script, `digest` file and secret files. OpenBao, shared by both networks, has
+    script, `digest` file and encrypted credentials. OpenBao, shared by both networks, has
     `/srv/x402/openbao/`.
   - Nothing else is there apart from the data volumes.
-- **Per network, two containers:**
+- **Per network, two long-running containers and a one-off one:**
   - `facilitator-<network>`, memory limit 512 MiB and one CPU;
-  - `postgres-<network>`, PostgreSQL 18, memory limit 1 GiB, data on a volume on the server's
-    RAID.
-- **One OpenBao container for both networks** (ADR 0013), memory limit 256 MiB and half a CPU.
+  - `postgres-<network>`, PostgreSQL 18 pinned by digest, memory limit 1 GiB, data on a volume
+    on the server's RAID. It has a unit of its own (below), so a facilitator deploy never
+    restarts it;
+  - `migrate-<network>`, a one-off service of the facilitator image that runs the migrations,
+    with its healthcheck disabled. `docker compose up` never starts it.
+- **One OpenBao container for both networks** (ADR 0013), pinned by digest, memory limit 256 MiB
+  and half a CPU.
   - Each network gets its own listener socket in its own volume, mounted only into that
     network's facilitator, so neither facilitator can reach the other network's socket.
   - Whether mainnet needs an OpenBao of its own is decided with 0038.
@@ -64,31 +69,35 @@ the Stellar Prices API.
   OpenBao is the one shared container.
 - **Neither container publishes a port on the host,** and each network gets two Docker networks
   of its own:
-  - `x402-<network>-edge`: Caddy and that network's facilitator only. Caddy joins it as an
-    external network, a change to the ClickHouse project's compose that goes with the site block.
-    The facilitator reaches the internet (RPC) through it;
-  - `x402-<network>-db`: `internal: true`, the facilitator, its Postgres and the one-off
-    migration container only, with no route out.
+  - `x402-<network>-edge`: Caddy and that network's facilitator only. The facilitator reaches
+    the internet (RPC) through it. It is created once outside both projects
+    (`docker network create`, a runbook step done before the ClickHouse project's deploy) and is
+    `external: true` in both, so neither project's `down` removes it, and the facilitator's unit
+    creates it again if it's missing;
+  - `x402-<network>-db`: `internal: true`, the facilitator, its Postgres and the migration
+    service only, with no route out.
   - No facilitator joins the ClickHouse project's `app` network, so neither reaches ClickHouse or
     the other network's facilitator. OpenBao is reached over a unix socket per network
     (ADR 0013), not a network.
-- **`restart: unless-stopped`:** Docker restarts a facilitator that crashes. Compose doesn't act
-  on `unhealthy`, so a hung one needs a watcher:
-  - a systemd timer on the host runs every 30 s and restarts a facilitator container that is
-    `unhealthy`, with a 10 s stop timeout, since a hung process can't drain anyway;
+- **`restart: on-failure`:** Docker restarts a facilitator that crashes, but doesn't start
+  containers by itself at boot; the units do (below). Compose doesn't act on `unhealthy`, so a
+  hung one needs a watcher:
+  - a systemd timer on the host runs every 30 s and restarts the `facilitator-<network>`
+    container when it is `unhealthy`, with a 10 s stop timeout, since a hung process can't drain
+    anyway. It finds the container by its Compose service label and skips one-off containers;
   - it acts only while the network's unit (`x402@<network>.service`, below) is `active`. While a
     deploy, a reboot or an operator stops or starts the unit, it skips the pass, so it never
-    restarts a facilitator that is draining or the migration container;
+    restarts a facilitator that is draining;
   - it runs on the host, so no container gets the Docker socket.
-- **The healthcheck is set on the facilitator service in the compose file,** not in the image, so
-  the one-off migration container doesn't inherit it. It is a Node one-liner (`node:22-slim` has
-  no curl): it calls `/health` with a 5 s timeout, after a 30 s `start_period`, and three
-  failures in a row make the container `unhealthy`.
+- **The healthcheck is set on the facilitator service in the compose file,** not in the image. It
+  is a Node one-liner (`node:22-slim` has no curl): it calls `/health` with a 5 s timeout, after
+  a 30 s `start_period`, and three failures in a row make the container `unhealthy`. The
+  migration service disables it, since `docker compose run` would inherit it.
 
 ### Deploys, liveness and readiness
 
-- **Stop-before-start:** a deploy restarts the network's systemd unit, which stops the old
-  container and only then starts the new one.
+- **Stop-before-start:** a deploy restarts the network's facilitator unit, which stops the old
+  container and only then starts the new one. Postgres keeps running.
   - Docker sends SIGTERM and waits `stop_grace_period` before SIGKILL.
   - The lease, not the ordering, guarantees one owner (AD-17). A process that finds the lease
     taken waits for it and never exits for lack of it.
@@ -120,6 +129,7 @@ One request or one stop must never outlast the layer in front of it:
 | `LEASE_TTL_MS`                    | 30 s               | after a crash, a new process waits at most this long               |
 | Wait for `ready: true`            | 120 s              | past it, the deploy rolls back to the previous digest              |
 | Unit `TimeoutStopSec`             | 200 s              | above `stop_grace_period`, so a reboot waits for the drain         |
+| Postgres `stop_grace_period`      | 120 s              | a clean shutdown; the Compose default is 10 s                      |
 
 - **Past the budget,** `/settle` answers `settlement_pending` with the hash if one was signed,
   and nothing new is signed after it. If nothing was signed, the record ends and the answer is
@@ -171,24 +181,38 @@ One request or one stop must never outlast the layer in front of it:
   build when the SHA is already there, and mainnet deploys the digest that ran on testnet. The
   image is public, so the server needs no registry credential.
 - **GitHub Actions deploys over SSH:**
+  - GitHub-hosted runners reach the server's SSH port, which the server's setup already opens to
+    the internet, with key-only logins and fail2ban. There is no allowlist, since GitHub's address
+    ranges change, and the workflow pins the server's host key in `known_hosts`. A self-hosted
+    runner on the server would run workflow code next to ClickHouse and is rejected; a tunnel is
+    a mainnet option (0038).
   - It logs in as a deploy user with one key per network, and each key's `authorized_keys` entry
     fixes its network: `command="/srv/x402/testnet/deploy.sh",restrict` for the testnet key,
     `/srv/x402/mainnet/deploy.sh` for the mainnet key. The script reads only an image digest from
     `SSH_ORIGINAL_COMMAND` and refuses anything but `sha256:` and 64 hex digits.
-  - The deploy user isn't in the `docker` group. It may write only its network's `digest` file
-    and run one command through `sudo`, `systemctl restart x402@<network>`. Both networks share
-    the user, so the forced command picks the network; a user per network is a mainnet option
-    (0038).
-  - The script takes the network's lock (`flock`), so two deploys of one network can't overlap.
-    It saves the current digest, writes the new one to `digest`, restarts the unit and waits up
-    to 120 s for `ready: true`. If the restart fails or `ready` doesn't come, it writes the
-    previous digest back, restarts the unit again and fails the run. Migrations are
-    expand/contract, so the previous image runs against the newer schema.
-  - **The unit `x402@<network>.service` owns Compose.** It decrypts the network's credentials
-    (`LoadCredentialEncrypted`), pulls the image, runs the migrations (ADR 0012) as a one-off
-    container of the new image, and starts the facilitator. `ExecStop` runs `docker compose
-down`, which gives the facilitator its `stop_grace_period`. The unit is enabled at boot and
-    reads the same `digest`, so a reboot starts the image that was last deployed.
+  - The deploy user isn't in the `docker` group. It may write only its network's `digest.next`
+    and run one command through `sudo`, `systemctl start x402-deploy@<network>`. Both networks
+    share the user, so the forced command picks the network; a user per network is a mainnet
+    option (0038).
+  - **The deploy itself is a unit, `x402-deploy@<network>.service`** (a oneshot, as root), so a
+    cancelled job or a dropped runner can't cut it between stopping the old facilitator and
+    starting the new one. `deploy.sh` only checks the digest, writes `digest.next` and starts the
+    unit; `systemctl start` waits for it, so the job still gets the result.
+  - The deploy unit takes the network's lock (`flock`), so two deploys of one network can't
+    overlap. It saves the current digest, moves the new one into `digest`, restarts
+    `x402@<network>` and waits up to 120 s for `ready: true`. If the restart fails or `ready`
+    doesn't come, it puts the previous digest back, restarts again and fails.
+  - That rollback is safe because `migrate()` applies all pending migrations in one transaction,
+    so a failed run leaves the schema as it was, and expand/contract keeps the previous image
+    working on a schema that did move forward.
+  - **`x402@<network>.service` owns the facilitator.** Its `ExecStartPre` decrypts the network's
+    credentials (below), creates the edge network if it's missing, pulls the image and runs the
+    migration service (ADR 0012). `ExecStart` starts only the facilitator (`--no-deps`), and
+    `ExecStop` stops it, which gives it its `stop_grace_period`.
+  - **`x402-db@<network>.service` owns Postgres.** The facilitator's unit requires it and runs
+    after it, so at a reboot the facilitator drains while the database is still up. Both are
+    enabled at boot, and `x402@` reads the same `digest`, so a reboot starts the image that was
+    last deployed.
   - Testnet deploys on a push to `deploy/testnet` unless only `lore/**`, `docs/**` or Markdown
     files changed, or by hand. A deploy is a pull request from `develop` to `deploy/testnet`.
     `develop` stays open for direct pushes such as lore status changes.
@@ -205,7 +229,8 @@ down`, which gives the facilitator its `stop_grace_period`. The unit is enabled 
     - All four of us are repo admins, and an admin can switch the protection off. It stops
       unreviewed and accidental changes, not a deliberate admin, whose change stays in the
       repo's audit log.
-  - One deploy runs at a time per network (a `concurrency` group).
+  - One deploy runs at a time per network: a `concurrency` group with `cancel-in-progress: false`,
+    so a newer push waits instead of cancelling a deploy in progress.
   - Every action is pinned to a commit SHA, and the workflow sets `permissions: {}` and grants
     only what each job needs.
   - Before mainnet (0038): a ruleset that protects `v*` tags, since the workflow at the tag runs
@@ -222,11 +247,10 @@ down`, which gives the facilitator its `stop_grace_period`. The unit is enabled 
 - **A `rumblefish.dev` subdomain is a prerequisite:** an A record in the company's Route 53 zone
   pointing at the server. The proposal is `testnet.x402.rumblefish.dev`.
 - **Caddy terminates HTTPS** with an automatic Let's Encrypt certificate and proxies the subdomain
-  to the facilitator. Its config lives in the ClickHouse project's repo
-  (soroban-block-explorer, `infra-hetzner/Caddyfile`) and is applied by that project's deploy.
-  - Adding the facilitator's site block is a pull request to that repo, agreed with its owner.
-  - The site block uses plain public TLS, without the client-certificate check that the
-    ClickHouse site uses.
+  to the facilitator. Its config lives in the ClickHouse project's repo and is applied by that
+  project's deploy.
+  - Adding the facilitator's site block is a pull request to that repo, agreed with its team.
+  - The site block uses plain public TLS, with no client certificate.
 - **`TRUSTED_PROXY_HOPS=1`** (AD-11): Caddy is the one proxy that appends `X-Forwarded-For`. It
   is Express's numeric `trust proxy`, so the client IP is the rightmost entry (0023).
 - **No edge rate limiting;** the in-app limits (AD-11, AD-18) apply. Mainnet revisits this
@@ -241,23 +265,35 @@ down`, which gives the facilitator its `stop_grace_period`. The unit is enabled 
 - **The server reaches AWS only for logs and metrics, through IAM Roles Anywhere.**
   - A certificate on the server gets short-lived credentials, and no long-lived AWS keys are
     stored there.
+  - The trust anchor is the ClickHouse project's existing client-certificate CA, so there is no
+    CA of our own to run or pay for. The role's trust policy accepts only our server
+    certificate's CN, which isn't on the ClickHouse site's allowlist, so the certificate opens
+    nothing else. It is valid for a year and Platform renews it by hand; 0027 alarms 30 days
+    before it expires. That project tells us when it rotates its CA, since our trust anchor
+    changes with it. Anyone with that CA's key can issue our CN, which is accepted at a logging
+    role's stakes.
   - The role may only write the facilitator's log groups and metrics, only from the server's IP.
     It can't sign or read secrets, the OpenBao backup secret included.
-  - There is one logging role for both networks. Docker's `awslogs` driver runs inside `dockerd`
-    and the CloudWatch agent on the host, so both use the daemon's credentials, not a
-    per-network identity. Either network's logs can be written with it; nothing can be signed or
-    read. Per-network separation is for signing, and OpenBao provides it (ADR 0013).
+  - There is one logging role for both networks, and only the CloudWatch agent on the host holds
+    its credentials: no container and not `dockerd`. Either network's logs can be written with
+    it; nothing can be signed or read. Per-network separation is for signing, and OpenBao
+    provides it (ADR 0013).
   - It is the only AWS credential on the server; ADR 0013 names it as the exception to "no AWS
     credentials".
 - **`FACILITATOR_SECRET` stays for local development and tests.** Deployed networks use the OpenBao
   signer instead.
 - **Other secrets are encrypted systemd credentials,** as in ADR 0013: the database password, and
   an RPC URL that carries an API key.
-  - `systemd-creds` keeps them encrypted on disk with the host key. Each network's unit
-    (`x402@<network>.service`) decrypts its own and passes them in as Compose secrets, so they are
-    plain only in memory. OpenBao's unit (`x402-openbao.service`) does the same with its unseal
-    credential.
-  - They never go into the image, the repo or the logs.
+  - `systemd-creds` keeps them encrypted on disk with the host key. The `ExecStartPre` of each
+    network's unit decrypts its own to `/run/x402/<network>/` (tmpfs, mode 0700), and Compose
+    mounts them as `file:` secrets, so they are plain only in memory. OpenBao's unit
+    (`x402-openbao.service`) does the same with its unseal credential.
+  - They stay there until a reboot, so Docker's crash restart and the watchdog still find them.
+    At boot the unit writes them again before it starts anything.
+  - The app reads them from files (`DATABASE_URL_FILE`, `RPC_URLS_FILE` and the AppRole files),
+    a config change in 0020.
+  - They never go into the image, the repo or the logs, and never into `environment:`, which
+    `docker inspect` shows in plain text.
 - **Rotating the key is an on-chain change.** AD-12 makes the facilitator key the only signer of
   every channel. Rotation means:
   1. stop the service;
@@ -280,8 +316,10 @@ down`, which gives the facilitator its `stop_grace_period`. The unit is enabled 
   - Postgres archives WAL to a local volume (`archive_command`, `archive_timeout` 60 s);
   - a systemd timer on the host takes a daily `pg_basebackup` and sends the archive off the
     server with Borg every 5 minutes, so a hardware fault loses at most about 6 minutes;
-  - the target is our own sub-account on soroban-block-explorer's Hetzner Storage Box (BX21),
-    the box ADR 0013 uses for OpenBao's snapshots, with the same 14-day retention;
+  - the target is our own sub-account on the company's existing Hetzner Storage Box, the box
+    ADR 0013 uses for OpenBao's snapshots, with the same 14-day retention;
+  - the Borg repository is encrypted, with its passphrase in AWS Secrets Manager beside
+    ADR 0013's backup secret, since the box belongs to another project;
   - an S3 bucket in the company AWS account is the fallback. Using it needs its own named,
     write-only role, never the logging role;
   - a restore drill runs on testnet before mainnet, and 0038 sets mainnet's targets for downtime
@@ -291,7 +329,8 @@ down`, which gives the facilitator its `stop_grace_period`. The unit is enabled 
   they add to the deploy's downtime. Every migration is still expand/contract, so a rollback to an
   earlier image runs against the newer schema. A long one, such as an index build on a big table,
   runs outside the deploy as a planned step (`CREATE INDEX CONCURRENTLY`), so a deploy's
-  migrations stay short.
+  migrations stay short. The migration service gets its own bounds, longer than the app pool's
+  10 s statement timeout (0026).
 - **No TLS to the database.** The connection stays on the network's `internal` Docker network on
   one host, and anyone who could read it there could read the database files. PostgreSQL uses
   `scram-sha-256` passwords, never `trust`. TLS comes back if the database ever leaves the host.
@@ -302,9 +341,12 @@ down`, which gives the facilitator its `stop_grace_period`. The unit is enabled 
 ### Logs, metrics and alerts
 
 - **Logs:** the 0017 `jsonLogger` stays.
-  - Its JSON lines go from stdout to CloudWatch Logs through Docker's `awslogs` driver, with
-    the logging role's credentials from IAM Roles Anywhere. The log group uses the Standard
-    class, with 30-day retention on testnet.
+  - Its JSON lines go to stdout, and Docker keeps them on the host (`json-file`, rotated). The
+    CloudWatch agent sends our containers' logs to CloudWatch Logs with the logging role's
+    credentials, so `dockerd` stays untouched and an AWS outage never stops a container from
+    starting. The log group uses the Standard class, with 30-day retention on testnet.
+  - How the agent picks only our containers, and that EMF lines turn into metrics, is checked
+    in 0027.
   - No pino: stdout is the only transport, and the logger already writes identifiers only.
 - **RPC endpoints are logged as `RPC_URLS[i]#<fingerprint>`, never by URL or host.** An RPC URL
   can carry an API key, and a host can be an account's own endpoint name (some providers put one
@@ -333,7 +375,10 @@ down`, which gives the facilitator its `stop_grace_period`. The unit is enabled 
   - not ready to settle (the counterpart of the lease-blind `/health`);
   - from ADR 0013: OpenBao sealed, down or failing to sign; a fee bump on the fee account that our
     submitter didn't send, read from Horizon; and OpenBao's audit log disk at 80%;
+  - WAL archiving failing (`pg_stat_archiver.failed_count` rising, or the last archived segment
+    older than 10 minutes), since a stuck archive fills a disk ClickHouse shares;
   - the last backup shipped off the server (WAL or OpenBao snapshot) older than 30 minutes;
+  - the Roles Anywhere certificate expiring within 30 days;
   - low free disk and memory on the server.
 - **Uptime:** a Route 53 HTTPS health check on the public URL.
   - Route 53 publishes its metrics only in us-east-1, so the alarm and its SNS topic live there.
@@ -346,8 +391,8 @@ down`, which gives the facilitator its `stop_grace_period`. The unit is enabled 
 
 - **The capacity is already paid for.** The server has a lot of free RAM and disk, and our
   containers are limited to 1.75 GiB on testnet and 3.25 GiB with both networks. Running there
-  costs about
-  €0 more, against about $60–70 a month on testnet and $150 on mainnet for ECS Fargate.
+  costs about €0 more, against about $60–70 a month on testnet and $150 on mainnet for ECS
+  Fargate.
 - **It meets both hard rules.** Compose stops the old container first, and the grace period has no
   platform cap, so 180 s covers the drain with room to spare.
 - **The alerting design carries over:** the same logger, the same EMF metrics, CloudWatch alarms
@@ -391,16 +436,17 @@ down`, which gives the facilitator its `stop_grace_period`. The unit is enabled 
 - **The facilitator shares a production server with ClickHouse.**
   - Memory and CPU limits on our containers, and ClickHouse's own memory limit, keep them apart.
   - Maintenance couples them: a reboot for a kernel update restarts both. Our units run after
-    `docker.service`, so systemd stops them before dockerd, and their `TimeoutStopSec` of 200 s
-    lets the facilitator drain; the shared `daemon.json` stays as it is. A reboot takes up to
-    about 3 minutes longer.
+    `docker.service`, so systemd stops them first, the facilitator before Postgres, and the
+    facilitator unit's `TimeoutStopSec` of 200 s covers the drain, where `docker.service` itself
+    gets 90 s. The shared `daemon.json` stays as it is. A reboot takes up to about 3 minutes
+    longer.
   - Patching needs an owner and a schedule, which the team decides.
-  - Caddy couples them too. Our site block, and Caddy joining `x402-<network>-edge`, live in
-    soroban-block-explorer's repo and deploy, so a deploy there that recreates Caddy without
-    them takes the facilitator offline. The uptime alarm catches it. The site block carries a
-    comment that it belongs to x402, the soroban-block-explorer team is asked to tag us on Caddy
-    changes, and it is who we call. A Caddy of our own on a second IPv4 address is the way out if
-    this bites (0038).
+  - Caddy couples them too. Our site block lives in the ClickHouse project's repo and deploy, so
+    a deploy there that recreates Caddy without it takes the facilitator offline. The uptime
+    alarm catches it. The site block carries a comment that it belongs to x402, that project's
+    team is asked to tag us on Caddy changes, and it is who we call. The edge networks live
+    outside both projects, so neither project's `down` removes them. A Caddy of our own on a
+    second IPv4 address is the way out if this bites (0038).
 - **It is one physical machine.** A hardware fault takes the facilitator down until the server is
   repaired or the service is restored elsewhere from the off-server backups, which can take hours.
   Restoring elsewhere is a runbook step (0026) and a mainnet risk (0038).
@@ -410,24 +456,28 @@ down`, which gives the facilitator its `stop_grace_period`. The unit is enabled 
   migrations, a container start, and reconciliation. At worst it is about 5 minutes and more: a
   180 s drain, the migrations, and up to 120 s for `ready: true`. The uptime alarm waits 7
   failing minutes for that reason.
-- **After a crash,** Docker restarts the container. The new process waits up to 30 s for the lease
-  and reconciles. Records keep each transaction's time bound, so a hash that can't be found yet
-  stays non-final until that bound passes (0019).
+- **After a crash,** Docker restarts the container (`on-failure`). The new process waits up to
+  30 s for the lease and reconciles. Records keep each transaction's time bound, so a hash that
+  can't be found yet stays non-final until that bound passes (0019).
 - **The OpenBao signer (0036, ADR 0013) blocks the testnet deploy (0026).**
 - **ADR 0012's store moves from RDS to a container on the server.** Its schema, adapter rules and
   migrations are unchanged; managed backups and failover become ours (task 0013).
 - **0026 builds:**
   - the Dockerfile, the compose files and the deploy script;
-  - the systemd units: `x402@<network>`, `x402-openbao`, the restart timer and the backup timer;
-  - the deploy user, its one `sudo` rule, the SSH forced command, the workflow, and the
-    `deploy/testnet` branch with its protection;
-  - the OpenBao container (ADR 0013), the IAM Roles Anywhere logging role and the secret files;
-  - the backups (WAL archive, base backups, Borg), the Caddy site block (a pull request to the
-    ClickHouse project's repo) and the DNS record;
-  - `GET /health` with `ready`, and the Node keep-alive setting;
-  - the runbook: deploy, rollback, key rotation, restore on another machine.
-- **0027 builds:** log shipping and the CloudWatch agent, the EMF adapter, the alarms above, the
-  us-east-1 uptime stack and the Slack integration.
+  - the systemd units: `x402@<network>`, `x402-db@<network>`, `x402-deploy@<network>`,
+    `x402-openbao`, the restart timer and the backup timer;
+  - the edge networks, outside both projects;
+  - the deploy user, its one `sudo` rule, the SSH forced command, the workflow with the pinned
+    host key, and the `deploy/testnet` branch with its protection;
+  - the OpenBao container (ADR 0013), the IAM Roles Anywhere logging role and its certificate,
+    and the secret files;
+  - the backups (WAL archive, base backups, encrypted Borg), the Caddy site block (a pull request
+    to the ClickHouse project's repo) and the DNS record;
+  - `GET /health` with `ready`, the Node keep-alive setting, and the migration bounds;
+  - the runbook: deploy, rollback, key rotation, certificate renewal, restore on another machine.
+- **0020 reads secrets from files** (`*_FILE`), since nothing reads `/run/secrets/*` today.
+- **0027 builds:** log shipping through the CloudWatch agent, the EMF adapter, the alarms above,
+  the us-east-1 uptime stack and the Slack integration.
 - **0009 gives `/settle` its response budget;** 0023 implements `TRUSTED_PROXY_HOPS` as above.
 - **Cost:**
   - The server adds nothing.
@@ -453,5 +503,5 @@ down`, which gives the facilitator its `stop_grace_period`. The unit is enabled 
 - Task 0039: the move to the Hetzner server
 - ADR 0013 (task 0047, in review): the facilitator key in OpenBao Transit
 - [IAM Roles Anywhere](https://docs.aws.amazon.com/rolesanywhere/latest/userguide/introduction.html),
-  [Docker `awslogs` driver](https://docs.docker.com/engine/logging/drivers/awslogs/),
+  [CloudWatch agent](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Install-CloudWatch-Agent.html),
   [Compose `stop_grace_period`](https://docs.docker.com/reference/compose-file/services/#stop_grace_period)
