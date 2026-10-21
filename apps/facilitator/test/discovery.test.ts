@@ -255,6 +255,27 @@ describe("GET /discovery/resources", () => {
     expect(metrics.value("discovery_unknown_params_total")).toBe(1);
   });
 
+  it("logs at most 10 unknown names, each cut to 64 characters", async () => {
+    const names = ["x".repeat(100), ...Array.from({ length: 10 }, (_, i) => `u${i}`)];
+    await list(names.map((name) => `${name}=1`).join("&"));
+    const logged = lines
+      .map((line) => JSON.parse(line))
+      .find((entry) => entry.event === "discovery_unknown_params");
+    expect(logged.params).toEqual(["x".repeat(64), ...names.slice(1, 10)]);
+  });
+
+  it("answers a query nothing can match without the store", async () => {
+    const spy = vi.spyOn(stores.catalog, "list");
+    for (const query of ["scheme=upto", "network=eip155:8453"]) {
+      const { response, body } = await list(query);
+      expect(response.status, query).toBe(200);
+      expect(body.items, query).toEqual([]);
+      expect(body.pagination, query).toEqual({ limit: 20, offset: 0, total: 0 });
+    }
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
   it("answers a store failure with the shared 500", async () => {
     const spy = vi.spyOn(stores.catalog, "list").mockRejectedValueOnce(new Error("store down"));
     const { response, body } = await list();
