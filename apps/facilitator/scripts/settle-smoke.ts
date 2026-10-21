@@ -17,7 +17,10 @@
  *   RPC_URLS            passed to the facilitator (default: the testnet RPC); a hung first URL
  *                       shows `/settle`'s checks failing over (0045)
  *   EXPECT_FAILOVER     1: also check that the first `/settle` logged `rpc_failover` from
- *                       `RPC_URLS[0]` to `RPC_URLS[1]` (0045)
+ *                       `RPC_URLS[0]` to `RPC_URLS[1]`; with the shared active URL it waits for a
+ *                       hung first URL once, so it settles within the budget (0045)
+ *   INCLUSION_FEE_STROOPS  passed to the facilitator (default: the fee-stats bid), to run the
+ *                       hung-URL check in both bid modes
  *
  *   cd apps/facilitator && npx tsx scripts/settle-smoke.ts
  *
@@ -90,6 +93,7 @@ const facilitatorServer = await main(
     PORT: String(port),
     LOG_LEVEL: "warn",
     RPC_URLS: process.env.RPC_URLS,
+    INCLUSION_FEE_STROOPS: process.env.INCLUSION_FEE_STROOPS,
   },
   { write },
 );
