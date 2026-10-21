@@ -73,7 +73,10 @@ As a facilitator operator, I want settlement records that are written before sen
   unfinished are this task's to finish once the store is back:
   - a success answered from the pool's result while the store failed stays `signed` or
     `pending`; finishing it to `success` lets a later repeat win the mark and get a second success
-    (0009 decision 29). Mark such a finish answered, e.g. `successAnsweredAt` set at the finish;
+    (0009 decision 29). Mark such a finish answered, e.g. `successAnsweredAt` set at the finish,
+    but only if the success was sent: one the budget answer replaced (`settlement_pending`) never
+    was, and a repeat must still get it (0009 decision 56). The process's `answeredHere` knows
+    which; the store doesn't yet;
   - every `pending` answer waits for this task: until then a repeat gets `settlement_pending`
     for as long as the record stays `pending`. With `STORE=memory` a restart drops it; with
     `STORE=postgres` it survives restarts (the README says so).

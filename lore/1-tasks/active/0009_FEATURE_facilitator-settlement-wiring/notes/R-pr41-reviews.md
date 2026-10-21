@@ -219,6 +219,23 @@ success" no longer covers `claimed` (the new "in no other state" test does); the
 test in `settle.test.ts` is renamed; `settle-pool.test.ts`'s payload builder moved to
 `test/payment.ts`.
 
+## Seventh review (Adam, 2026-10-21, at `7deaa5b`, approved)
+
+Adam's final pass found no double settle, double send, or "sign a new payment" answer while an
+envelope can still land, on both adapters. Four should-fix points, all done in this PR:
+
+- **`answeredHere` kept a key whose fallback success was never sent** (`settle.ts`): decision 56.
+- **The depth cap refused upstream's own Bazaar payloads**: the cap is 256 (decision 57), with a
+  real `declareDiscoveryExtension` declaration in the `/verify` and `/settle` route tests.
+- **An unexpected error after an accepted send ended the record**: decision 58.
+- **Bare RPC hosts in Node's network errors**: decision 59.
+
+For 0024 (a bullet there): a C-address payer whose `__check_auth` depends on the PRNG or the ledger
+number, and a zero-amount transfer, pass both simulations and `expectTransfer`, then fail on chain
+at our fee.
+
+Facilitator tests 320 → 327. Each new test fails with the old code. No test was modified.
+
 ## Testnet
 
 `scripts/settle-smoke.ts`, friendbot keys, fresh channels.
