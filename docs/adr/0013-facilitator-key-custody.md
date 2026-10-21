@@ -4,7 +4,8 @@
 - Date: 2026-10-19
 - Amended: 2026-10-20 (where the unseal backup lives, the restore drill, the fee float and
   top-ups; [S-key-custody-decisions](../../lore/1-tasks/active/0047_RESEARCH_hetzner-key-custody/notes/S-key-custody-decisions.md#backup-and-top-ups-2026-10-20));
-  2026-10-21 (the AWS logging role and the other secrets, to match ADR 0011's Hetzner revision)
+  2026-10-21 (the AWS logging role and the other secrets, to match ADR 0011's Hetzner revision;
+  a socket per network, OpenBao's own unit and limits, from the PR #24 review)
 - Supersedes: the key custody part of [ADR 0011](0011-facilitator-hosting.md) ("Keys, secrets and
   access": the SSM parameter for `FACILITATOR_SECRET` and the mainnet KMS key)
 
@@ -28,11 +29,14 @@
 
 - **OpenBao's Transit engine holds the key.** It is generated inside OpenBao, `type=ed25519`,
   `exportable=false`, `allow_plaintext_backup=false`. The raw key never exists outside OpenBao.
-- **OpenBao runs in its own container** on the facilitator's server, beside the facilitator's
-  container, under Docker Compose. A systemd unit starts Compose and passes in the credentials.
-  Neither container gets the Docker socket.
-- **One OpenBao per server.** Testnet and mainnet each get their own Transit key, policy and
-  AppRole, so a break-in on one network's facilitator gets only that network's token.
+- **OpenBao runs in its own container** on the facilitator's server, beside the facilitators'
+  containers, under Docker Compose, pinned by digest, with a 256 MiB memory limit and half a CPU.
+  Its own systemd unit (`x402-openbao.service`, ADR 0011) starts it and passes in the unseal
+  credential. No container gets the Docker socket.
+- **One OpenBao per server.** Testnet and mainnet each get their own Transit key, policy, AppRole
+  and socket, so a break-in on one network's facilitator gets only that network's token and can't
+  reach the other network's socket. It still shares the process, so a flood from one network
+  slows the other's signing. Whether mainnet gets an OpenBao of its own is decided in 0038.
 - **The same setup on testnet and mainnet,** so testnet runs exactly what mainnet will.
 - **OpenBao does Transit signing only.** Other secrets, the database password and `RPC_URLS` (one
   credential file per version, ADR 0011), stay systemd credentials, so OpenBao is needed for
@@ -42,11 +46,13 @@
 
 - **A Transit `TransactionSigner`** (0036) sends the 32-byte transaction hash to
   `transit/sign/<network key>` and adds the 64-byte signature.
-- **A unix socket only.** OpenBao listens on a socket in a volume shared only with the
-  facilitator's container. It opens no TCP port, so nothing on the network can reach it.
-- **AppRole login.** The role ID and secret ID come in as Compose secrets. The token is valid for
-  1 hour (`token_ttl`), at most 24 hours (`token_max_ttl`), and the signer renews it and logs in
-  again by itself. The secret ID doesn't expire. The policy allows only `transit/sign/<network key>`.
+- **A unix socket per network only.** OpenBao has one listener per network, each on a socket in
+  its own volume, mounted only into that network's facilitator. It opens no TCP port, so nothing
+  on the network can reach it.
+- **AppRole login.** The role ID and secret ID come in as Compose `file:` secrets, decrypted by
+  the network's unit to a tmpfs (ADR 0011), never as environment variables. The token is valid
+  for 1 hour (`token_ttl`), at most 24 hours (`token_max_ttl`), and the signer renews it and logs
+  in again by itself. The secret ID doesn't expire. The policy allows only `transit/sign/<network key>`.
   A leaked token stops working within the hour; a leaked secret ID is revoked by hand (runbook).
 - **Fail closed.** If OpenBao is down, sealed, or can't write its audit log, `/settle` answers an
   error, `/verify` keeps working and an alarm fires. There is no fallback copy of the key.
@@ -58,7 +64,7 @@
   - TPM mode (`tpm2` or `host+tpm2`) would bind the credential to the board, so a copied disk
     couldn't open it. It is the first upgrade to consider; it isn't used now.
 - **Daily Raft snapshots leave the server.** They go to our own sub-account and Borg repository on
-  the company's existing Hetzner Storage Box (BX21), daily, keeping 14. The snapshots are encrypted
+  the company's existing Hetzner Storage Box, daily, keeping 14. The snapshots are encrypted
   by OpenBao, and the Borg repository is encrypted too.
 - **The backup set is kept in AWS Secrets Manager, apart from the snapshots.** A restore on a new
   server needs four items, all of which are lost with the server
@@ -78,8 +84,8 @@
   - **AWS is a store here, not a signer.** People read it during a restore; no settlement calls it.
     The facilitator's server has no AWS credentials except the roles ADR 0011 names and
     justifies, and none of them may sign or read this secret. Today that is one logs-and-metrics
-    role (IAM Roles Anywhere), for `dockerd`'s `awslogs` driver and the CloudWatch agent. An S3
-    fallback for the snapshots would get its own named, write-only role there, not this one.
+    role (IAM Roles Anywhere), held only by the CloudWatch agent on the host. An S3 fallback for
+    the snapshots would get its own named, write-only role there, not this one.
   - **Made by hand with the CLI, never by CDK,** so no stack teardown deletes it: stage the JSON in
     `/dev/shm`, `create-secret`, `shred`. Later changes use `put-secret-value`; the old version
     stays as `AWSPREVIOUS`. The 0026 operator writes it; the runbook names the fields, never the

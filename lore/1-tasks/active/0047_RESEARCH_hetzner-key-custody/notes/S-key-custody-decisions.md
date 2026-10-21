@@ -66,7 +66,7 @@ asks OpenBao for signatures. There is no cold key: the hot key in OpenBao stays 
 | 14  | Token renewal and re-login live in our Transit `TransactionSigner`, not in an OpenBao Agent container. |
 | 15  | The key is generated inside OpenBao, `exportable=false`, on both networks. |
 | 16  | Daily encrypted Raft snapshots leave the server. The unseal key is kept apart from them (in AWS Secrets Manager since B1). Fallback if both are lost: new key, new accounts and channels. |
-| 16b | Snapshots go to our own sub-account and Borg repo on the company's existing Hetzner Storage Box (BX21), daily, keep 14. |
+| 16b | Snapshots go to our own sub-account and Borg repo on the company's existing Hetzner Storage Box, daily, keep 14. |
 | 17  | **No cold key** (okarcz: "I dont want to store any cold key. Keep only hot key"). 0048 gets a note to re-check this. |
 | 18  | All of it lands in PR #48: ADR 0013, the R- note updates, the threat model, the PR body, and the task changes to 0036, 0026 and 0048. |
 | 19  | Build order: Transit signer (0036) against a local OpenBao → OpenBao on testnet (0026), where the current key moves the accounts to the OpenBao key → re-decide 0048 → mainnet. |

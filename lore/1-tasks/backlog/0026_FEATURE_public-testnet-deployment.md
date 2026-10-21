@@ -155,7 +155,7 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   admin through SSH with the `bao` CLI; no UI.
 - **Audit log:** a file on its own volume, rotated; alarm at 80% disk (0027).
 - **Snapshots:** daily Raft snapshots to our own sub-account and Borg repository on the company's
-  existing Hetzner Storage Box (BX21), keeping 14, set up like that box's other sub-account. Tell
+  existing Hetzner Storage Box, keeping 14, set up like that box's other sub-account. Tell
   the team that owns the box that we depend on it. Decide the Borg mode (repokey or keyfile); in
   keyfile mode `borg key export` goes into the backup secret.
 - **Fee float** (ADR 0013): refill to 100 XLM, alarm at 25 XLM, no upper limit, the same numbers on

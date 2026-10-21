@@ -31,6 +31,13 @@ history:
       Decided the last open points (B1–B20): the unseal backup set in AWS Secrets Manager with a
       restore drill, a 100 XLM float with a 25 XLM alarm and manual top-ups. ADR 0013 amended. All
       acceptance criteria met; closes when PR #48 merges.
+  - date: "2026-10-21"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      Taken over from okarcz for the remaining changes and the merge. ADR 0013 follows the PR #24
+      review: a socket per network, OpenBao's own unit and limits, AppRole files in tmpfs, and the
+      Storage Box named generically.
 ---
 
 # Choose how the facilitator keeps its signing key on Hetzner
