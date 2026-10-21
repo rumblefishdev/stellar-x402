@@ -1,10 +1,10 @@
 ---
 id: "0038"
-title: "Decide the mainnet availability setup: two tasks with separate channel sets, and a WAF"
+title: "Decide the mainnet availability setup on the Hetzner server"
 type: RESEARCH
 status: backlog
 related_adr: ["0011"]
-related_tasks: ["0014", "0025", "0026", "0027"]
+related_tasks: ["0014", "0025", "0026", "0027", "0039"]
 tags: [facilitator, mainnet, availability, deploy, priority-low, effort-medium, platform]
 links:
   - ../../../docs/adr/0011-facilitator-hosting.md
@@ -13,50 +13,61 @@ history:
     status: backlog
     who: claude
     note: "Spawned from 0014 future work: ADR 0011 leaves the two-task option and the WAF rule to the mainnet launch."
+  - date: "2026-10-13"
+    status: backlog
+    who: stkrolikiewicz
+    note: "Reframed for the Hetzner server (0039): two containers on one server, a second machine or standby, edge rate limiting."
 ---
 
-# Decide the mainnet availability setup: two tasks with separate channel sets, and a WAF
+# Decide the mainnet availability setup on the Hetzner server
 
 ## Summary
 
-ADR 0011 runs one facilitator task per network. Every restart is therefore a few minutes of
-downtime, whatever causes it: a deploy, AWS task retirement, a host or zone failure, a crash,
-an out-of-memory kill, or a flood that starves the task. The ADR records two tasks with separate
-channel sets in two Availability Zones as an option for mainnet, not a requirement. This task
-decides, before the mainnet launch, whether to take that option and whether to add a WAF
-rate-based rule.
+ADR 0011 (revised in 0039) runs one facilitator container per network on one physical server,
+shared with ClickHouse. A deploy or a crash is a short outage, and a hardware fault takes the
+service down until the server is repaired or the service is restored elsewhere. Before the mainnet
+launch, this task decides how much of that to remove.
 
 ## Context
 
-- **The model** is in task 0014's `R-cloud-container-options` §A2:
-  - one ECS service with `desiredCount` 2 and `minimumHealthyPercent` 50;
-  - each task takes a free channel set's lease at start;
-  - a deploy replaces the tasks one at a time, so there is no downtime, only half the channels
-    for a few minutes.
-- **It changes AD-17**, which today gives one process the network's one channel set. The lease
-  from 0025 would become one lease per channel set.
-- **It costs** a second task (about $33/mo at 1 vCPU / 2 GB) and a second channel set (1.5 XLM
-  reserve per channel).
-- **The WAF rule** (about $5 per web ACL plus $1 per rule and per-request fees) limits floods at
-  the edge. The in-app limits (AD-11, AD-18) only act once a request has reached the task.
-- Related tasks: 0014, 0025, 0026, 0027.
+- **Two facilitator containers with separate channel sets on the same server:**
+  - each container takes a free channel set's lease, and a deploy replaces them one at a time;
+  - that removes deploy downtime and covers a crash of one container, but not a hardware fault;
+  - it changes AD-17's one channel set per network and extends the 0025 lease to channel sets;
+  - it costs a second channel set (1.5 XLM reserve per channel) and no extra hardware.
+- **A second machine or a standby** for hardware faults. Options:
+  - a warm standby restored from the off-server backups;
+  - a second server running the second channel set.
+- **Edge rate limiting:** the in-app limits (AD-11, AD-18) only act once a request has reached
+  the server. Caddy rate limits or an external front can stop a flood earlier.
+- **The ECS Fargate variant** in the first version of ADR 0011 remains the managed alternative.
+- **From 0039 (PR #24 review), to settle before mainnet:**
+  - a ruleset that protects `v*` tags, since the workflow at the tag runs with the mainnet key;
+  - a mainnet `deploy.sh` that accepts only a digest testnet has run;
+  - named reviewers for mainnet deploys, and who may edit the environments;
+  - a deploy user per network;
+  - whether mainnet needs an OpenBao of its own;
+  - a Caddy of our own on a second IPv4 address, if the shared Caddy's coupling bites.
+- Related tasks: 0014, 0025, 0026, 0027, 0039.
 
 ## Implementation
 
+- Set concrete targets for this decision: the longest downtime and the most data lost after a
+  hardware fault that mainnet accepts. One machine is fine for testnet, and its backups lose
+  about 6 minutes (ADR 0011).
 - Weigh the mainnet uptime target (99%, `docs/monitoring.md`) against the measured downtime of a
-  testnet deploy and of a task replacement.
-- If two tasks are chosen:
+  testnet deploy, a crash and a restore drill.
+- If two containers are chosen:
   - change AD-17 in the spine;
   - extend the 0025 lease to channel sets;
-  - add the second set to the config and the CDK service;
-  - run a deploy on testnet with two tasks while payments flow.
-- Decide the WAF rule and its limits.
+  - run a deploy on testnet with two containers while payments flow.
+- Decide the hardware-fault plan and edge rate limiting.
 
 ## Acceptance Criteria
 
 - [ ] Given the mainnet uptime target and the testnet measurements, when the decision is made,
-      then ADR 0011 (or a new ADR) records whether mainnet runs two tasks and a WAF rule, and
-      why
-- [ ] Given two tasks are chosen, when a new version is deployed on testnet with payments
-      flowing, then no `/settle` fails for lack of a serving task, and each task settles only
-      through its own channel set
+      then ADR 0011 (or a new ADR) records the mainnet setup for deploys, hardware faults and
+      edge rate limiting, and why
+- [ ] Given two containers are chosen, when a new version is deployed on testnet with payments
+      flowing, then no `/settle` fails for lack of a serving process, and each process settles
+      only through its own channel set

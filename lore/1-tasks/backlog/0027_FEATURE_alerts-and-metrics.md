@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 milestone: 1
 related_adr: ["0007", "0011"]
-related_tasks: ["0012", "0014", "0024", "0026", "0020", "0009", "0045", "0049"]
+related_tasks: ["0012", "0014", "0024", "0026", "0020", "0009", "0045", "0049", "0039"]
 tags: [facilitator, operations, monitoring, priority-medium, effort-small, platform]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -47,22 +47,28 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
   extends itself on settlements, so a low TTL means little traffic; an operator then extends it
   with `stellar contract extend` before it is archived.
 - Update `docs/monitoring.md`.
-- From 0014 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md)): the backend is CloudWatch.
-  - The adapter writes Embedded Metric Format lines to stdout (namespace `x402-facilitator`), and
-    `awslogs` turns them into metrics; no SDK or agent.
-  - Dimensions stay low-cardinality (`network`, route, outcome, event name), never payer or
-    `payTo`, and the adapter emits only listed fields.
-  - Check once that extraction works, since some setups report it failing.
-- From 0014: alarms go through SNS and Amazon Q Developer in chat applications to the team's
+- From 0039 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md), revised): the backend is CloudWatch, fed from the
+  Hetzner server.
+  - Logs go through Docker's `awslogs` driver, with a logs-only role's credentials from IAM Roles
+    Anywhere.
+  - The adapter writes Embedded Metric Format lines to stdout (namespace `x402-facilitator`).
+    Dimensions stay low-cardinality (`network`, route, outcome, event name), never payer or
+    `payTo`, and the adapter emits only listed fields. Check once that extraction works.
+  - The CloudWatch agent on the server reports memory, CPU and free disk, since ClickHouse shares
+    the machine.
+- From 0039: alarms go through SNS and Amazon Q Developer in chat applications to the team's
   Slack channel. Besides the five AD-18 conditions:
   - "ready to settle" (lease held, reconciliation done);
-  - CloudTrail events on the testnet KMS key: use by another principal, a policy change, a
-    scheduled deletion;
-  - AWS Health task-retirement notices.
+  - from ADR 0013: OpenBao sealed, down or failing to sign; a fee bump on the fee account that
+    our submitter didn't send, read from Horizon; and OpenBao's audit log disk at 80%;
+  - the last backup shipped off the server (WAL or OpenBao snapshot) older than 30 minutes;
+  - low free disk and memory on the server.
 - From 0014: uptime is a Route 53 HTTPS health check.
   - Its metrics exist only in us-east-1, so the alarm and its SNS topic go in a small us-east-1
     stack subscribed to the same Slack channel.
-  - The alarm needs more failing minutes than a deploy's downtime (about 6).
+  - The alarm needs more failing minutes than a deploy's worst downtime, which includes the
+    migrations and the wait for `ready` (ADR 0011's Consequences). It fires after 7 failing
+    minutes in a row; ADR 0011 gives the reasoning.
   - Check `/supported` once 0020 lands, `/health` before.
   - The 99% figure counts a minute as up only when the check passes and the facilitator is ready
     to settle.

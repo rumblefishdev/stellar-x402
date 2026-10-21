@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 milestone: 1
 related_adr: ["0011", "0012"]
-related_tasks: ["0012", "0014", "0022", "0017", "0020", "0013"]
+related_tasks: ["0012", "0014", "0022", "0017", "0020", "0013", "0039", "0036", "0047"]
 tags: [facilitator, deploy, priority-high, effort-medium, platform]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -27,6 +27,10 @@ history:
     status: backlog
     who: okarcz
     note: "0047 (ADR 0013 amended): the unseal backup secret in AWS, the restore drill, the fee float and manual top-ups."
+  - date: "2026-10-21"
+    status: backlog
+    who: stkrolikiewicz
+    note: "Deploys through a unit per network, rollback, backups from the host, deploy/testnet, from Oskar's PR #24 review."
 ---
 
 # Public testnet deployment
@@ -39,69 +43,91 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 
 ## Context
 
-- Needs the 0014 hosting ADR and the 0022 adapters.
-- Related tasks: 0014, 0022, 0017.
+- Needs [ADR 0011](../../../docs/adr/0011-facilitator-hosting.md) as revised in 0039, the 0022
+  adapters and the OpenBao signer (0036).
+- Related tasks: 0014, 0022, 0017, 0039, 0036, 0047.
 
 ## Implementation
 
-- Dockerfile, image build and the deploy trigger from 0014.
+- Dockerfile, image build and the deploy trigger from ADR 0011.
 - Secrets and stores configured on the platform; runbook updated.
-- From 0014 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md)), the service: ECS on Fargate in the account
-  that runs sorobanscan and the Prices API.
-  - One service, `desiredCount` 1, `minimumHealthyPercent` 0, `maximumPercent` 100,
-    `stopTimeout` 120.
-  - The circuit breaker rolls back, with a threshold of one failed task (`thresholdConfiguration`;
-    use the ECS API if CDK doesn't expose it yet).
-  - The ALB is HTTPS only, with `SslPolicy.RECOMMENDED_TLS` or newer, idle timeout 120 s and
-    deregistration delay 100 s.
-  - The target health check is `/health` every 10 s, 2 checks to pass and 3 to fail.
-  - `TRUSTED_PROXY_HOPS=1`.
-  - Node `keepAliveTimeout` is 125 s, with `headersTimeout` above it.
-- From 0014, the image:
-  - `pnpm deploy --prod` with `injectWorkspacePackages: true` in `pnpm-workspace.yaml`;
-  - `"files": ["dist"]` in `apps/facilitator/package.json` and a `.dockerignore` that excludes
-    `.env*`;
-  - `node:22-slim` pinned by digest, user `node`, read-only root filesystem, ECS Exec off;
-  - one ECR repository for both networks: immutable SHA tags, scan on push, a lifecycle rule
-    that keeps rollback images. The workflow skips the build when the SHA exists.
-- From 0014, the infrastructure: CDK with its own bootstrap qualifier.
-  - An infra stack (VPC, ALB, certificate, DNS, KMS key, roles), applied by a person.
-  - A service stack (task definition and service, image digest as a parameter), applied by the
-    workflow. Its execution policy covers only ECS, its log group and passing the two roles.
-  - No `amazon-ecs-deploy-task-definition`: the service stack is the only owner of the task
-    definition.
-- From 0014, the workflow:
-  - an OIDC role that trusts only `refs/heads/develop` and may push to ECR, deploy the testnet
-    service stack and pass only the testnet roles;
-  - it runs on a push to `develop` unless only `lore/**`, `docs/**` or Markdown changed, and by
-    hand, in a `concurrency` group;
-  - actions are pinned by commit SHA. `permissions: {}` is set at the top, and the deploy job
-    gets only `id-token: write` and `contents: read`;
-  - before the service update, it runs the one-off migration task from ADR 0012 (task 0013),
-    and the deploy role may run it;
-  - the last step waits for `ready: true` from `/health`.
-- From 0014, secrets:
-  - `FACILITATOR_SECRET` is a SecureString under `/x402/testnet/`, created by hand with
-    `aws ssm put-parameter`;
-  - it is encrypted with the testnet KMS key, whose policy gives `kms:Decrypt` only to the task
-    execution role;
-  - a keyed RPC URL and the database credentials go the same way.
-- From 0013 ([ADR 0012](../../../docs/adr/0012-facilitator-state-store.md)), the database:
-  - isolated private subnets for RDS, with no NAT;
-  - a db.t4g.micro Single-AZ RDS for PostgreSQL 18 instance, its security group and its parameter
-    group;
-  - the database credentials as a SecureString under `/x402/testnet/db`;
-  - migrations written expand/contract, because the old task keeps serving while they run;
-  - a failover drill and the upgrade policy in the runbook.
-- From 0014: `GET /health` answers 200 and reports `ready` in its body.
-- From 0014, the runbook: deploy, rollback (redeploy an earlier SHA) and key rotation as an
-  on-chain signer change.
-- From 0014, prerequisites:
-  - a `rumblefish.dev` subdomain (proposed `testnet.x402.rumblefish.dev`), as a record in the
-    company zone or a delegated subzone, with Route 53 access;
-  - the region (eu-central-1 assumed).
-
-  There is no CloudFront fallback.
+- From 0039 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md), revised): Docker Compose on the company Hetzner server
+  (x86_64), project `x402`, owned by its own Linux user, apart from ClickHouse's
+  `app` project, in `/srv/x402` (the ClickHouse project's deploy overwrites its own directory).
+  - `/srv/x402/testnet/` holds the compose file, `deploy.sh`, `digest` and the secret files; an
+    operator copies the first two there by hand from a reviewed commit (runbook).
+  - `facilitator-testnet`: memory limit 512 MiB, one CPU, `restart: unless-stopped`,
+    `stop_grace_period` 180 s, healthcheck on `/health` every 10 s set in the compose service,
+    not the image (a Node one-liner, 5 s timeout, 30 s `start_period`, 3 failures), no published
+    port.
+  - A systemd timer on the host restarts an `unhealthy` facilitator every 30 s, with a 10 s stop
+    timeout, and only while `x402@testnet.service` is `active`.
+  - `postgres-testnet`: PostgreSQL 18, memory limit 1 GiB, data on a volume, reachable only from
+    the facilitator and the one-off migration container.
+  - Networks `x402-testnet-edge` (Caddy and the facilitator) and `x402-testnet-db`
+    (`internal: true`, the facilitator, Postgres and the migration container). Caddy joins the
+    edge network in the same pull request as the site block.
+  - OpenBao (ADR 0013): one container for both networks in `/srv/x402/openbao/`, memory limit
+    256 MiB and half a CPU, a listener socket per network in its own volume, its own unit
+    `x402-openbao.service` for the unseal credential. Its snapshots and restore drill follow
+    ADR 0013 (task 0047).
+  - Node `keepAliveTimeout` 125 s, with `headersTimeout` above it; `TRUSTED_PROXY_HOPS=1`.
+- From 0039, the image: `pnpm deploy --prod` with `injectWorkspacePackages: true`;
+  `"files": ["dist"]` in `apps/facilitator/package.json` and a `.dockerignore` that excludes
+  `.env*`; `node:22-slim` pinned by digest, `linux/amd64`, user `node`, read-only root filesystem.
+  Images go to GHCR, tagged with the git SHA; the workflow skips the build when the SHA exists.
+- From 0039, the deploy:
+  - GitHub Actions connects over SSH as a deploy user with one key per network; each key's
+    `authorized_keys` entry fixes its network (`command="/srv/x402/testnet/deploy.sh",restrict`),
+    and the script accepts only an image digest (`sha256:` and 64 hex digits);
+  - the deploy user isn't in the `docker` group: it may write only `digest` and run
+    `sudo systemctl restart x402@testnet`, its one `sudo` rule;
+  - the `testnet` and `mainnet` environments carry the protection rules from ADR 0011
+    (`deploy/testnet` only; `v*` tags, required reviewers, "Prevent self-review");
+  - `deploy/testnet` is a protected branch: a pull request from `develop` with an approving
+    review, and no bypass, admins included;
+  - `deploy.sh` takes the network's lock, saves the current digest, writes the new one, restarts
+    the unit and waits up to 120 s for `ready: true` from `/health`; if the restart fails or
+    `ready` doesn't come, it restores the previous digest, restarts the unit and fails the run;
+  - the unit `x402@testnet.service` decrypts the credentials, pulls the image, runs the
+    migrations (ADR 0012) as a one-off container of the new image and starts the facilitator;
+    `ExecStop` runs `docker compose down`. It runs after `docker.service`, with
+    `TimeoutStopSec` 200 s, and is enabled at boot;
+  - it runs on a push to `deploy/testnet` unless only `lore/**`, `docs/**` or Markdown changed,
+    and by hand, in a `concurrency` group;
+  - actions are pinned by commit SHA, with minimal token permissions, and the SSH key is an
+    environment secret.
+- From 0039, keys and secrets:
+  - the facilitator signs through OpenBao Transit on the server (ADR 0013, 0036 a prerequisite);
+  - the server gets short-lived AWS credentials through IAM Roles Anywhere, for a role that only
+    writes logs and metrics;
+  - the database password and any keyed RPC URL are encrypted systemd credentials
+    (`systemd-creds`), passed to Compose as secrets by `x402@testnet.service` (as in ADR 0013);
+  - no TLS to `postgres-testnet` on the internal network; `scram-sha-256` passwords.
+- From 0039: backups of `postgres-testnet` leave from the host. Postgres archives WAL to a local
+  volume (`archive_timeout` 60 s); a timer takes a daily `pg_basebackup` and sends the archive
+  with Borg every 5 minutes to our own sub-account on soroban-block-explorer's Storage Box
+  (BX21), kept 14 days; a restore drill follows.
+- From 0039: the Caddy site block for the subdomain is a pull request to soroban-block-explorer's
+  `infra-hetzner/Caddyfile`, agreed with its team, with plain public TLS (no client certificate)
+  and a comment that the block belongs to x402. An A record in Route 53 points at the server.
+  Record that team's answers here, as the Prices API did in its task 0045.
+- From 0039: `GET /health` answers 200 and reports `ready` in its body.
+- From 0039, the runbook: deploy, copying the compose file and `deploy.sh` from a reviewed
+  commit, rollback (automatic on a failed deploy; by hand, redeploy an earlier digest), long
+  migrations outside the deploy, reboots, key rotation as an on-chain signer change, and
+  restoring the service on another machine.
+- From 0013 ([ADR 0012](../../../docs/adr/0012-facilitator-state-store.md)), the database, on the
+  server (ADR 0011):
+  - the `postgres-testnet` container above, its credentials a Compose secret file;
+  - the upgrade policy and a restore drill in the runbook; there is no failover on one server.
+- From 0039, migrations: the unit runs `node dist/migrate.js` in a one-off container of the new
+  image, since the runtime image has no pnpm. Locally it is
+  `pnpm --filter @stellar-x402/facilitator migrate` after `pnpm build`; the root has no `migrate`
+  script.
+- From 0022: at startup the facilitator checks that the database is reachable and every migration
+  it knows is applied (a database ahead of the code passes, see below). Until then it isn't ready
+  and `/settle` answers 503.
 - Option from 0022's third review, to verify rather than a decision (a better approach may exist):
   - Separate database roles: a migrator that owns the schema, and an app role with DML only.
     `pnpm migrate` would then read its own URL variable.
@@ -120,6 +146,9 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     SHA-256), and `RPC_URLS[i]` can mean another URL after a redeploy. Matching an old line to a
     URL needs that URL: a store with versions, or each change recorded in the deploy history. A
     plain env file that is edited in place loses it.
+  - From 0039: `RPC_URLS` is an encrypted systemd credential like the other secrets, one file per
+    version (`rpc-urls.<date>.cred`), never edited in place. The unit names the active one; the
+    older files are the history, so an old fingerprint maps back to its URL.
 
 ### The facilitator key in OpenBao (0047)
 
@@ -194,8 +223,8 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 
 ## Acceptance Criteria
 
-- [ ] Given the platform chosen in the 0014 ADR, when a deploy runs, then a container image built from the repo is deployed to it as the ADR describes, and the service answers `/supported` at a public HTTPS URL
+- [ ] Given the Hetzner server and Docker Compose of ADR 0011 (revised in 0039), when a deploy runs, then a container image built from the repo is deployed to it as the ADR describes, and the service answers `/supported` at a public HTTPS URL
 - [ ] Given a running instance, when a new version is deployed, then the old process stops before the new one starts; the process is long-lived and never scaled to zero
-- [ ] Given the facilitator key, when the service is deployed, then it comes from the platform's secret store, never from the image or the logs, and is a testnet-only key
+- [ ] Given the facilitator key, when the service is deployed, then it signs through the testnet OpenBao Transit key, and the raw key never reaches the facilitator's process, the image or the logs (ADR 0013)
 - [ ] Given the durable stores from 0022, when the service runs, then it uses them, and `docs/runbook.md` has the deploy and rollback steps
 - [ ] Given the deployed facilitator, when it settles, then it signs through OpenBao Transit over the unix socket, no secret seed is on the server outside OpenBao, the backup secret exists in AWS, and a restore drill from it has passed

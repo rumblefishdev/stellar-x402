@@ -157,7 +157,7 @@ graph TD
 - **Rule:**
   - All state goes through four interfaces defined in `apps/facilitator`: `SettlementStore`, `CatalogStore`, `RateLimitStore` and `SpendStore`.
   - Concrete adapters live in `apps/facilitator/src/adapters/`, and there is an in-memory fake of each for tests.
-  - The backing store is one RDS for PostgreSQL database ([ADR 0012](../adr/0012-facilitator-state-store.md), task 0013). It must support:
+  - The backing store is one PostgreSQL database per network, in a container on the facilitator's server ([ADR 0012](../adr/0012-facilitator-state-store.md), task 0013). It must support:
     - the atomic claim (AD-6)
     - lookup by any of a settlement's hashes (AD-16)
     - the channel lease (AD-17)
@@ -462,8 +462,8 @@ The rationale and rejected alternatives for these ADs are in ADRs:
 
 ## Deferred
 
-- **State store:** decided in [ADR 0012](../adr/0012-facilitator-state-store.md) (task 0013): one RDS for PostgreSQL database for all four ports and Tranche 2 search.
-- **Hosting, container setup, key custody, logger, metrics and alert backend:** decided in [ADR 0011](../adr/0011-facilitator-hosting.md) (task 0014): ECS on Fargate in AWS, the key in SSM under its own KMS key (in KMS on mainnet; replaced by OpenBao Transit on the Hetzner server in [ADR 0013](../adr/0013-facilitator-key-custody.md)), CloudWatch logs, EMF metrics and alarms to Slack. Constraints it meets:
+- **State store:** decided in [ADR 0012](../adr/0012-facilitator-state-store.md) (task 0013): one PostgreSQL database for all four ports and Tranche 2 search, run in a container on the Hetzner server (ADR 0011).
+- **Hosting, container setup, key custody, logger, metrics and alert backend:** decided in [ADR 0011](../adr/0011-facilitator-hosting.md) (tasks 0014 and 0039): the company Hetzner server with Docker Compose, the key in OpenBao Transit on the server (ADR 0013), CloudWatch logs, EMF metrics and alarms to Slack. Constraints it meets:
   - the process is long-lived, and scale-to-zero is not allowed
   - the lease and stop-before-start deploys from AD-17 apply
 - **Mainnet fee values** (`feeEscalation`, `maxFeeStroops`): task 0010. T1 uses interim testnet values.
