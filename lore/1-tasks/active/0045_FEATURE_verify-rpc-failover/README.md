@@ -152,6 +152,13 @@ once a probe finds it healthy.
     fails and that wraps around to `RPC_URLS[0]` returns its answer without switching, and makes a
     probe due at once. Otherwise a payload upstream answers before any RPC call (a wrong amount)
     would bring back a dead primary, which decision 11 rules out. Only the probe returns to it.
+17. **The return to `RPC_URLS[0]` stays; a wrap-around probe waits 5 s after the last one**
+    (okarcz, 2026-10-20, Karol's review). Karol asked whether failover that stays on the new URL
+    would do. It would drop about 40% of the code, but leave calls on a fallback until a restart,
+    where a lagging one fails valid payments. Of his two edge cases, a double outage made every
+    wrapping call start a probe and log `rpc_probe_failed`; `minProbeGapMs` (5 s) now spaces them.
+    The other, a return with no lag check when the active URL can't read its own ledger, is
+    intended (decision 11's "no reason to stay on it") and now documented.
 
 ## Future Work
 
@@ -160,5 +167,7 @@ once a probe finds it healthy.
   (Adam, both reviews).
 - **0027**: an alarm or a `rpc_failovers_total{from,to}` counter, so the lag risk can be alarmed
   on (recorded in 0027 by #41).
-- **The rebase onto #41** (decision 7), with a `/settle` test with a hung first URL.
+- **The rebase onto #41** (decision 7), with a `/settle` test with a hung first URL. Also from
+  Karol: #41's `settle-smoke.ts` gets its own undici `Agent` (as `verify-smoke.ts` has), or the
+  global 10 s header timeout `main()` sets fails a `/settle` slower than 10 s.
 - **A testnet smoke run on the pushed head**, also with a hung first URL.

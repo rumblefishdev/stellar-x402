@@ -136,6 +136,22 @@ C1–C4 and C6 held; the new 60 s retry was where the problems were.
   accepts and never answers; `reason: "timeout"`). All three passed `validPayment` and
   `channelRejected`; the two failover runs also `failedOver`, answered by `RPC_URLS[1]`.
 
+## Karol's review (2026-10-20, at 83e8c29; comments)
+
+Two questions, both answered by okarcz on 2026-10-20:
+
+- **Would sticky failover be enough?** No (decision 17): the return stays, since a fallback kept
+  until restart can lag and fail valid payments. Of his two edge cases, the probe per request in a
+  double outage is capped by `minProbeGapMs` (5 s), with a test that fails without the cap; the
+  failback without a known lag (`upstream-failover.ts:103-104`) is intended and now documented.
+- **`settle-smoke.ts` (#41) under the global undici timeout:** a `/settle` slower than 10 s would
+  fail the smoke run falsely. Fixed on the rebase onto #41: the script gets its own `Agent`.
+
+The branch was rebased onto develop after 0022 (PR #30) merged: `main()` keeps develop's
+PostgreSQL pools and idempotent `close()`, with this PR's global undici timeouts, `MainOptions` and
+`FallbackRpc`'s timeout; `package.json` has `pg` and `undici`. Facilitator tests 239 against
+PostgreSQL 18, each commit typechecks. Not pushed: it is pushed once, after the rebase onto #41.
+
 ## Modified tests
 
 - **Before review:** `build-verifier.test.ts`'s `setup` takes an answer that may depend on the
