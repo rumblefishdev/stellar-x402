@@ -448,9 +448,10 @@ export class SettlementSubmitter {
 
   /**
    * Reads a channel's sequence number, retrying once per new ledger for up to `timeoutSeconds`.
-   * Nothing has been sent yet, so retrying is safe. Under load the public RPC has answered
-   * "Account not found" for existing channels (0007 step 7). A channel still not found after
-   * that is taken out of the pool, so later calls don't draw it.
+   * Nothing has been sent yet, so retrying is safe. Under load the public RPC fails some reads
+   * of existing channels with 502 or a JSON-RPC error (0007 step 7, measured in 0051). Only a
+   * channel the RPC still has no entry for after that is taken out of the pool, so later calls
+   * don't draw it; a failed read keeps the channel.
    */
   private async readSequence(channel: Channel, hold: Hold): Promise<bigint> {
     const giveUpAt = this.now() + this.timeoutSeconds * 1000;

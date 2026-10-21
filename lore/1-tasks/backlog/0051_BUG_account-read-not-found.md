@@ -59,9 +59,33 @@ Measured on testnet (2026-10-21): `getLedgerEntries` for an account that does no
 
 ## Not yet decided
 
-- Where the account read lives (FallbackRpc's endpoints, or one function on `getLedgerEntries`).
-- Whether 0007's "Account not found under load" (30 of 2,400 first reads at 200 channels) was
-  rate limiting masked by the same catch. A read-only burst on the public testnet RPC answers it.
+- Where the account read lives. Built on the branch: one function, `readAccountEntry`, on
+  `getLedgerEntries`; `SorobanRpc` and `FallbackRpc` drop `getAccount` and `getAccountEntry`.
+  The alternative keeps both and makes only `FallbackRpc.fromUrls`'s endpoints read through
+  `getLedgerEntries`; a plain `rpc.Server` passed as `SorobanRpc` would still swallow errors.
+
+## Measurement: 0007's "Account not found under load"
+
+**Hypothesis:** 0007's 30 of 2,400 "Account not found" first reads at 200 channels were RPC
+failures masked by the SDK's catch, not an RPC answer of no entry.
+
+**Result: supported, not proven for the 2026-10-06 run** (its raw errors were not kept). Read-only,
+public testnet RPC, one client, 2026-10-21 11:30–11:35 UTC. Accounts: 480 existing testnet
+accounts, drawn from Horizon's recent transactions and checked with `getLedgerEntries`.
+
+| Run | Client | Load per burst | Reads | Failed reads | Empty answer for an existing account |
+|---|---|---|---|---|---|
+| 1 | plain `fetch` | 200 or 400 reads | 1,400 | 0 | 0 |
+| 2 | SDK `rpc.Server` (axios), `getLedgerEntries` | 200 reads + 200 simulates, or 400 + 400 | 2,800 | 24 | 0 |
+
+- Run 2's failures came in 2 of 7 bursts: 21 × HTTP 502 (an HTML error page), all in one burst
+  that also failed 45 of 200 simulates; 3 × JSON-RPC `-32603` "could not query captive core:
+  http request failed with non-200 status code (404)". `getAccountEntry` turns each into
+  "Account not found".
+- The RPC never answered no entry for an account that exists. No 429 and no rate-limit headers:
+  this looks like the RPC's front end failing under load, not rate limiting.
+- It cannot show: the 2026-10-06 errors themselves, or whether the simulates trigger the 502s
+  (3 of 5 equal bursts were clean).
 
 ## Acceptance Criteria
 
@@ -73,4 +97,4 @@ Measured on testnet (2026-10-21): `getLedgerEntries` for an account that does no
       and keeps the channel in the pool
 - [ ] Given the RPC answers no entry for a channel, then `checkChannel` returns `missing` and the
       submitter still retires the channel after `timeoutSeconds`
-- [ ] 0007's "Account not found under load" is confirmed or refuted with a testnet measurement
+- [x] 0007's "Account not found under load" is confirmed or refuted with a testnet measurement
