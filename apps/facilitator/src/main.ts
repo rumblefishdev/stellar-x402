@@ -76,12 +76,16 @@ export const PRIMARY_PROBE_INTERVAL_MS = 60_000;
 export const FAILBACK_MAX_LAG_LEDGERS = 2;
 
 /**
- * The deadline of the whole upstream call (AD-3): 10 s for each of `urls` RPC URLs, plus, with
- * fee-stats bids, the bid read before them, which `FallbackRpc` bounds at 10 s per URL, plus 1 s of
- * slack. The AD-22 ledger read after it is not included.
+ * The deadline of the whole upstream call (AD-3): `timeoutMs` (10 s) for each of `urls` RPC URLs,
+ * plus, with fee-stats bids, the bid read before them, which `FallbackRpc` bounds at 10 s per URL,
+ * plus 1 s of slack. The AD-22 ledger read after it is not included.
  */
-export function upstreamDeadlineMs(urls: number, feeStats: boolean): number {
-  return UPSTREAM_TIMEOUT_MS * urls * (feeStats ? 2 : 1) + UPSTREAM_DEADLINE_SLACK_MS;
+export function upstreamDeadlineMs(
+  urls: number,
+  feeStats: boolean,
+  timeoutMs = UPSTREAM_TIMEOUT_MS,
+): number {
+  return (timeoutMs + (feeStats ? UPSTREAM_TIMEOUT_MS : 0)) * urls + UPSTREAM_DEADLINE_SLACK_MS;
 }
 
 /** What `buildUpstream` passes to `ExactStellarScheme`, besides the facilitator's signer. */
@@ -92,10 +96,14 @@ export type MakeScheme = (
   options: SchemeOptions,
 ) => UpstreamVerifier;
 
-/** Test seams of {@link buildUpstream}: the scheme per URL and the probe's ledger read per URL. */
+/**
+ * Test seams of {@link buildUpstream}: the scheme per URL, the probe's ledger read per URL, and how
+ * long one URL may take (`UPSTREAM_TIMEOUT_MS` by default), so a hung URL needn't cost a test 10 s.
+ */
 export interface UpstreamSeams {
   makeScheme?: MakeScheme;
   latestLedger?: (url: string) => Promise<number>;
+  timeoutMs?: number;
 }
 
 /** A short, URL-free reason for the logs: an error's message can carry an RPC URL. */
@@ -126,6 +134,7 @@ export function buildUpstream(
   const {
     makeScheme = (signer, options) => new ExactStellarScheme([signer], options),
     latestLedger = rpcLatestLedger(config.rpcUrls),
+    timeoutMs = UPSTREAM_TIMEOUT_MS,
   } = seams;
   const name = (i: number) => `RPC_URLS[${i}]`;
   // Upstream reads one RPC URL, so there is one scheme per URL, tried in `RPC_URLS` order.
@@ -142,7 +151,7 @@ export function buildUpstream(
   const fields = { component: "verify", network: config.network };
   return {
     upstream: failoverUpstream(endpoints, {
-      timeoutMs: UPSTREAM_TIMEOUT_MS,
+      timeoutMs,
       probeIntervalMs: PRIMARY_PROBE_INTERVAL_MS,
       maxLagLedgers: FAILBACK_MAX_LAG_LEDGERS,
       latestLedger: (i) => latestLedger(config.rpcUrls[i]!),
@@ -164,7 +173,7 @@ export function buildUpstream(
           tried: tried.map((t) => ({ rpc: t.name, reason: failureReason(t.failure) })),
         }),
     }),
-    upstreamTimeoutMs: upstreamDeadlineMs(config.rpcUrls.length, fees.feeStats),
+    upstreamTimeoutMs: upstreamDeadlineMs(config.rpcUrls.length, fees.feeStats, timeoutMs),
   };
 }
 

@@ -1,11 +1,11 @@
 import { Account, Keypair, StrKey, nativeToScVal, xdr, type rpc } from "@stellar/stellar-sdk";
 import { FakeRpc } from "@stellar-x402/signer-pool/testing";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MemorySettlementStore } from "../src/adapters/memory.js";
 import { parseConfig, type Env } from "../src/config.js";
 import { jsonLogger } from "../src/logger.js";
-import { buildChecks, buildSettlement, compose } from "../src/main.js";
+import { buildChecks, buildSettlement, compose, type UpstreamSeams } from "../src/main.js";
 import { memoryMetrics } from "../src/metrics.js";
 import { feeSettings } from "../src/settlement/fees.js";
 import { SETTLE_REASONS } from "../src/settlement/settle.js";
@@ -76,7 +76,7 @@ function payload(expiration: number, extensions?: Record<string, unknown>): Paym
   return transferPayload({ payer, payTo, requirements }, expiration, extensions);
 }
 
-function setup(env: Partial<Env> = {}) {
+function setup(env: Partial<Env> = {}, seams?: UpstreamSeams) {
   const config = parseConfig({
     FACILITATOR_SECRET: facilitator.secret(),
     CHANNELS: channel,
@@ -86,12 +86,13 @@ function setup(env: Partial<Env> = {}) {
   });
   const fake = new PaymentRpc({ [channel]: 1_000n });
   const fees = feeSettings(config.fees, fake);
+  const upstreamLogger = { warn: vi.fn(), info: vi.fn() };
   const checks = buildChecks(
     config,
     fake,
     fees,
-    { warn() {}, info() {} },
-    { makeScheme: () => ({ verify: async () => ({ isValid: true, payer }) }) },
+    upstreamLogger,
+    seams ?? { makeScheme: () => ({ verify: async () => ({ isValid: true, payer }) }) },
   );
   const { settle } = buildSettlement(config, {
     rpc: fake,
@@ -107,8 +108,44 @@ function setup(env: Partial<Env> = {}) {
     metrics: memoryMetrics(),
     sleep: async () => {},
   });
-  return { settle, fake };
+  return { settle, fake, upstreamLogger };
 }
+
+describe("main()'s /settle wiring, with a hung RPC_URLS[0]", () => {
+  const RPC_URLS = "https://rpc-a.example,https://rpc-b.example";
+  /** `RPC_URLS[0]` accepts the call and never answers; `RPC_URLS[1]` answers. */
+  const hungFirst = (timeoutMs: number): UpstreamSeams => ({
+    makeScheme: (_signer, options) => ({
+      verify: () =>
+        options.rpcConfig?.url === "https://rpc-a.example"
+          ? new Promise(() => {})
+          : Promise.resolve({ isValid: true, payer }),
+    }),
+    latestLedger: async () => 1,
+    timeoutMs,
+  });
+
+  it("settles through RPC_URLS[1] once RPC_URLS[0]'s own timeout ends, and logs the switch", async () => {
+    const { settle, fake, upstreamLogger } = setup({ RPC_URLS }, hungFirst(50));
+    const { response } = await settle(payload(fake.ledger + 30), requirements);
+    expect(response).toMatchObject({ success: true, payer });
+    expect(fake.sent).toHaveLength(1);
+    expect(upstreamLogger.warn).toHaveBeenCalledWith(
+      "rpc_failover",
+      expect.objectContaining({ from: "RPC_URLS[0]", to: "RPC_URLS[1]", reason: "timeout" }),
+    );
+  });
+
+  it("answers the retryable timeout and sends nothing when the budget ends before the failover", async () => {
+    // RPC_URLS[0]'s 2 s outlasts the 1 s budget, as 41 s of fee-stats failover outlasts 30 s.
+    const { settle, fake } = setup({ RPC_URLS, SETTLE_BUDGET_MS: "1000" }, hungFirst(2_000));
+    const started = Date.now();
+    const { response } = await settle(payload(fake.ledger + 30), requirements);
+    expect(response).toMatchObject({ success: false, errorReason: SETTLE_REASONS.timeout });
+    expect(fake.sent).toHaveLength(0);
+    expect(Date.now() - started).toBeLessThan(1_800);
+  });
+});
 
 describe("main()'s /settle wiring, with the real pool", () => {
   it("settles through the pool with the hash it sent", async () => {
