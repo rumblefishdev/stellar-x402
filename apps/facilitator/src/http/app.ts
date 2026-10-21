@@ -153,7 +153,10 @@ export function createApp({
     }
   });
   app.get("/supported", notImplemented);
-  app.get("/discovery/resources", discoveryResources(stores.catalog, logger, metrics));
+  app.get(
+    "/discovery/resources",
+    discoveryResources(stores.catalog, logger, metrics, config.network),
+  );
 
   app.use((_req, res) => {
     res.status(404).json({ error: "not_found" });

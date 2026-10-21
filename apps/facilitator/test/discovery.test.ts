@@ -14,6 +14,9 @@ import type { Stores } from "../src/ports/index.js";
 import type { Settle } from "../src/settlement/settle.js";
 import type { Verify } from "../src/settlement/verify.js";
 
+/** The network `parseConfig` defaults to, and so the one the route below serves. */
+const SERVED = STELLAR_NETWORKS.testnet;
+
 describe("parseDiscoveryQuery", () => {
   it.each([
     ["no params", {}, { kind: "query", limit: 20, offset: 0 }],
@@ -29,6 +32,12 @@ describe("parseDiscoveryQuery", () => {
     ["a limit of 256 digits, clamped", { limit: "9".repeat(256) }, { kind: "query", limit: 100 }],
     ["the deepest offset", { offset: String(MAX_OFFSET) }, { kind: "query", offset: MAX_OFFSET }],
     ["another CAIP-2 network", { network: "eip155:8453" }, { kind: "empty", limit: 20 }],
+    ["another Stellar network", { network: STELLAR_NETWORKS.pubnet }, { kind: "empty" }],
+    [
+      "the network we serve, as no filter",
+      { network: SERVED },
+      { kind: "query", query: { limit: 20, offset: 0 } },
+    ],
     ["the scheme we settle", { scheme: "exact" }, { kind: "query" }],
     ["a scheme we never settle", { scheme: "upto" }, { kind: "empty" }],
     ["an unknown param", { foo: "1" }, { kind: "query", ignored: ["foo"] }],
@@ -36,7 +45,7 @@ describe("parseDiscoveryQuery", () => {
     ["a name a separator away", { pay_to: "GB" }, { kind: "query", ignored: ["pay_to"] }],
     ["a name a letter away", { types: "http" }, { kind: "query", ignored: ["types"] }],
   ])("accepts %s", (_name, raw, expected) => {
-    expect(parseDiscoveryQuery(raw)).toMatchObject(expected);
+    expect(parseDiscoveryQuery(raw, SERVED)).toMatchObject(expected);
   });
 
   it.each([
@@ -68,24 +77,26 @@ describe("parseDiscoveryQuery", () => {
     ["a value over 256 characters", { extensions: "x".repeat(257) }, "extensions"],
     ["a network that isn't CAIP-2", { network: "pubnet" }, "network"],
   ])("refuses %s, naming the param", (_name, raw, param) => {
-    expect(parseDiscoveryQuery(raw)).toEqual({ kind: "invalid", param });
+    expect(parseDiscoveryQuery(raw, SERVED)).toEqual({ kind: "invalid", param });
   });
 
-  it("hands the store only the filters it knows, typed", () => {
-    const parsed = parseDiscoveryQuery({
-      type: "http",
-      payTo: "GB",
-      network: STELLAR_NETWORKS.pubnet,
-      extensions: "bazaar",
-      scheme: "exact",
-      foo: "1",
-    });
+  it("hands the store only the filters that narrow the catalog, typed", () => {
+    const parsed = parseDiscoveryQuery(
+      {
+        type: "http",
+        payTo: "GB",
+        network: SERVED,
+        extensions: "bazaar",
+        scheme: "exact",
+        foo: "1",
+      },
+      SERVED,
+    );
     expect(parsed).toEqual({
       kind: "query",
       query: {
         type: "http",
         payTo: "GB",
-        network: STELLAR_NETWORKS.pubnet,
         extensions: "bazaar",
         limit: DISCOVERY_LIMIT.default,
         offset: 0,
@@ -99,10 +110,10 @@ describe("parseDiscoveryQuery", () => {
 
 const N = 30;
 
-/** Entry i: mcp when i % 4 is 0, payTo GB when odd, pubnet when i % 3 is 0, bazaar when i % 5 is 0. */
+/** Entry i, all on the served network: mcp when i % 4 is 0, payTo GB when odd, bazaar when i % 5 is 0. */
 async function seed(stores: Stores) {
   for (let i = 0; i < N; i++) {
-    const network = i % 3 === 0 ? STELLAR_NETWORKS.pubnet : STELLAR_NETWORKS.testnet;
+    const network = SERVED;
     const payTo = i % 2 ? "GB" : "GA";
     const resourceUrl = `https://seller.example/${i}`;
     await stores.catalog.upsert({
@@ -191,14 +202,15 @@ describe("GET /discovery/resources", () => {
   it.each([
     ["type=mcp", matching((i) => i % 4 === 0)],
     ["payTo=GB", matching((i) => i % 2 === 1)],
-    [`network=${STELLAR_NETWORKS.pubnet}`, matching((i) => i % 3 === 0)],
+    [`network=${SERVED}`, N],
     ["extensions=bazaar", matching((i) => i % 5 === 0)],
     [
-      `type=mcp&payTo=GA&network=${STELLAR_NETWORKS.pubnet}&extensions=bazaar`,
-      matching((i) => i % 4 === 0 && i % 2 === 0 && i % 3 === 0 && i % 5 === 0),
+      `type=mcp&payTo=GA&network=${SERVED}&extensions=bazaar`,
+      matching((i) => i % 4 === 0 && i % 2 === 0 && i % 5 === 0),
     ],
     ["scheme=exact", N],
     ["scheme=upto", 0],
+    [`network=${STELLAR_NETWORKS.pubnet}`, 0],
     ["network=eip155:8453", 0],
   ])("filters on %s", async (query, total) => {
     const { response, body } = await list(`${query}&limit=100`);
@@ -266,7 +278,11 @@ describe("GET /discovery/resources", () => {
 
   it("answers a query nothing can match without the store", async () => {
     const spy = vi.spyOn(stores.catalog, "list");
-    for (const query of ["scheme=upto", "network=eip155:8453"]) {
+    for (const query of [
+      "scheme=upto",
+      "network=eip155:8453",
+      `network=${STELLAR_NETWORKS.pubnet}`,
+    ]) {
       const { response, body } = await list(query);
       expect(response.status, query).toBe(200);
       expect(body.items, query).toEqual([]);
