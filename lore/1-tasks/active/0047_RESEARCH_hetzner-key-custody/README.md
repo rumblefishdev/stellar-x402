@@ -164,6 +164,10 @@ compares. Record the choice in an ADR that supersedes ADR 0011's custody part.
 1. **OpenBao over Vault** (accepted in ADR 0013): API-compatible (the spike passed on both),
    MPL-2.0 rather than BSL, and its HSM seal is open source.
 2. **The same signer on testnet and mainnet** (accepted in ADR 0013), unlike ADR 0011's split.
+3. **One AWS role on the server, for logs and metrics** (okarcz, 2026-10-21, Stan's comment on
+   #48): ADR 0013's "no AWS credentials" now allows the roles ADR 0011 names and justifies, none of
+   which may sign or read the backup secret. Accepted in the #24 review; more roles can be added if
+   needed and documented, an S3 snapshot fallback with its own write-only role.
 
 ## Future Work
 

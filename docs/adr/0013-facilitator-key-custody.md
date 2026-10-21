@@ -3,7 +3,8 @@
 - Status: accepted
 - Date: 2026-10-19
 - Amended: 2026-10-20 (where the unseal backup lives, the restore drill, the fee float and
-  top-ups; [S-key-custody-decisions](../../lore/1-tasks/active/0047_RESEARCH_hetzner-key-custody/notes/S-key-custody-decisions.md#backup-and-top-ups-2026-10-20))
+  top-ups; [S-key-custody-decisions](../../lore/1-tasks/active/0047_RESEARCH_hetzner-key-custody/notes/S-key-custody-decisions.md#backup-and-top-ups-2026-10-20));
+  2026-10-21 (the AWS logging role and the other secrets, to match ADR 0011's Hetzner revision)
 - Supersedes: the key custody part of [ADR 0011](0011-facilitator-hosting.md) ("Keys, secrets and
   access": the SSM parameter for `FACILITATOR_SECRET` and the mainnet KMS key)
 
@@ -33,8 +34,9 @@
 - **One OpenBao per server.** Testnet and mainnet each get their own Transit key, policy and
   AppRole, so a break-in on one network's facilitator gets only that network's token.
 - **The same setup on testnet and mainnet,** so testnet runs exactly what mainnet will.
-- **OpenBao does Transit signing only.** Other secrets, such as a keyed RPC URL, stay systemd
-  credentials, so OpenBao is needed for `/settle` and not for the facilitator to start.
+- **OpenBao does Transit signing only.** Other secrets, the database password and `RPC_URLS` (one
+  credential file per version, ADR 0011), stay systemd credentials, so OpenBao is needed for
+  `/settle` and not for the facilitator to start.
 
 ### How the facilitator signs
 
@@ -74,7 +76,10 @@
   `aws/secretsmanager` key, with a 30-day recovery window. Tags `Project=stellar-x402`,
   `Environment=production`.
   - **AWS is a store here, not a signer.** People read it during a restore; no settlement calls it.
-    The facilitator's server has no AWS credentials.
+    The facilitator's server has no AWS credentials except the roles ADR 0011 names and
+    justifies, and none of them may sign or read this secret. Today that is one logs-and-metrics
+    role (IAM Roles Anywhere), for `dockerd`'s `awslogs` driver and the CloudWatch agent. An S3
+    fallback for the snapshots would get its own named, write-only role there, not this one.
   - **Made by hand with the CLI, never by CDK,** so no stack teardown deletes it: stage the JSON in
     `/dev/shm`, `create-secret`, `shred`. Later changes use `put-secret-value`; the old version
     stays as `AWSPREVIOUS`. The 0026 operator writes it; the runbook names the fields, never the
@@ -182,7 +187,8 @@
   and its runbook.
 - **The upgrade path** when the float or `upto` (0015) raises the stakes: TPM-bound credentials,
   then OpenBao on its own machine, then a KMS. The `TransactionSigner` stays the same.
-- **The rest of ADR 0011 still describes AWS.** The move to Hetzner needs its own hosting ADR.
+- **ADR 0011 describes the hosting on Hetzner** (task 0039): the containers, the deploys and the one
+  AWS role above. A new AWS role on the server needs its own entry and reason there.
 
 ## Open questions
 
