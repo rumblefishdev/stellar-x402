@@ -31,8 +31,7 @@ describe("facilitator boot", () => {
   let url: string;
 
   beforeAll(async () => {
-    // Port 0 picks a free port; the schema itself requires 1–65535.
-    const config = { ...parseConfig(env), port: 0 };
+    const config = parseConfig({ ...env, PORT: "0" });
     const logger = jsonLogger("debug", (line) => lines.push(line));
     const verify = async () => ({ isValid: true });
     app = await start({ config, logger, stores: memoryStores(), verify });
@@ -249,6 +248,9 @@ describe("upstream's console.error in main()", () => {
 
 /** The port in the server's `listening` log line, once that line has arrived whole. */
 function listeningPort(stdout: string): number | undefined {
-  const lines = stdout.split("\n").slice(0, -1);
-  return lines.map((line) => JSON.parse(line)).find((entry) => entry.event === "listening")?.port;
+  const line = stdout
+    .split("\n")
+    .slice(0, -1)
+    .find((text) => text.includes('"event":"listening"'));
+  return line === undefined ? undefined : JSON.parse(line).port;
 }

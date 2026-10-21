@@ -34,7 +34,7 @@ take the port first. CI on PR #52 failed that way: `listen EADDRINUSE: address a
 | Situation | What happens | Date |
 |---|---|---|
 | `PORT=0` | Accepted: the system picks a free port, and the `listening` log line names it. Before, config refused it | 2026-10-21 |
-| A test starts the facilitator | It sets `PORT=0`; an in-process test reads `port` from `main()`'s result, a child process's test reads it from the `listening` log line | 2026-10-21 |
+| A test or script starts the facilitator | It sets `PORT=0`. A child process's test reads the port from the `listening` log line, `verify-smoke.ts` from `main()`'s result; the postgres tests never call the server | 2026-10-21 |
 
 ## Acceptance Criteria
 
