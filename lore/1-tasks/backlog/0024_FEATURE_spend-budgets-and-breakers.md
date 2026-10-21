@@ -85,6 +85,11 @@ As a facilitator operator, I want fee spending capped and failing assets or reci
   tokens (ADR 0007's rationale), the global budget becomes a way to refuse every seller, and records
   and the catalog carry a payer the attacker picked. Adam's idea: limits tiered by asset kind, SAC
   (`ContractExecutable::StellarAsset`) against wasm, with low defaults for wasm.
+- From 0009 (Adam's seventh PR #41 review): **fees burnt by payments that pass every check.** A
+  C-address payer whose `__check_auth` depends on the PRNG or the ledger number passes both
+  simulations and `expectTransfer`, then fails on chain at our fee, with no balance spent and no
+  parallel spend. Zero-amount transfers (`amount: "0"`) are the same class. Per-payer single-flight
+  and balance reservation don't stop it; it needs per-`payTo` and global fee budgets.
 - From 0009 (PR #41, decision 49): the config refuses `NETWORK=stellar:pubnet` until spend
   budgets (0024), rate limits (0023) and the channel lease (0025) land: the rule after the
   `STORE` one in `config.ts`, with tests in `config.test.ts` and `main.test.ts`. Whichever of the

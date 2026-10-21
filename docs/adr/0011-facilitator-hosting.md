@@ -4,7 +4,8 @@
 - Date: 2026-10-09, amended 2026-10-15 (task 0009: the `/settle` budget is 30 s, below the
   seller's own 90 s timeout), 2026-10-16 (task 0009: the checks are inside the budget; RPC
   endpoints are logged as `RPC_URLS[i]`) and 2026-10-20 (task 0009: `RPC_URLS[i]#<fingerprint>`
-  and the fingerprint's limit; how far a repeat runs past the budget)
+  and the fingerprint's limit; how far a repeat runs past the budget) and 2026-10-21 (task 0009:
+  bare RPC hosts in error messages)
 
 ## Context
 
@@ -231,7 +232,8 @@ One request or one stop must never outlast the layer in front of it:
   are ours, and an HMAC would need one more secret per deployment while key custody (0047) is
   open. Upstream verify's failover logs
   its switches with these names (0045). In an error message, the logger names a URL on an
-  `RPC_URLS` entry the same way and reduces any other URL to its host. signer-pool's `FallbackRpc.fromUrls` still names endpoints by the full URL and logs no
+  `RPC_URLS` entry the same way and reduces any other URL to its host; an entry's bare host, as
+  Node's network errors give it (`getaddrinfo ENOTFOUND <host>`), is named too. signer-pool's `FallbackRpc.fromUrls` still names endpoints by the full URL and logs no
   switches (0049, 0027).
 - **Metrics:** a metrics adapter (0027) writes CloudWatch Embedded Metric Format lines to stdout,
   and `awslogs` turns them into metrics. No SDK and no agent.
