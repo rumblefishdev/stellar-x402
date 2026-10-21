@@ -542,6 +542,34 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     }
   });
 
+  it("adds the catalog's type index to a database past 0002, or one that has it", async () => {
+    // A database `migrate` brought to 0002 before 0032 gets the index from 0003; one built from
+    // 0032's branch, whose `0001_init` carried it, takes 0003 without an error.
+    const typeIndex = async (on: pg.Pool) =>
+      (
+        await on.query(
+          "SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'catalog_type_seq'",
+        )
+      ).rowCount;
+    for (const built of ["develop", "branch"]) {
+      const fresh = `${schema}_0002_${built}`;
+      await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
+      await pool.query(`CREATE SCHEMA ${fresh}`);
+      const old = poolFor(fresh, 1);
+      try {
+        await migrate(old, 0, MIGRATIONS.slice(0, 2));
+        if (built === "branch")
+          await old.query("CREATE INDEX catalog_type_seq ON catalog (type, seq)");
+        expect(await typeIndex(old), built).toBe(built === "branch" ? 1 : 0);
+        expect(await migrate(old), built).toEqual(["0003_catalog_type_seq"]);
+        expect(await typeIndex(old), built).toBe(1);
+      } finally {
+        await old.end();
+        await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
+      }
+    }
+  });
+
   it("rolls back a whole run when one migration fails, then applies it again", async () => {
     const fresh = `${schema}_fail`;
     await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
