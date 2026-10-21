@@ -451,6 +451,12 @@ describe("upstreamDeadlineMs", () => {
     expect(upstreamDeadlineMs(1, false)).toBe(11_000);
   });
 
+  it("scales only the per-URL part with a test's timeoutMs, not the fee-stats read", () => {
+    // `FallbackRpc` still bounds the bid read at 10 s per URL.
+    expect(upstreamDeadlineMs(2, false, 50)).toBe(1_100);
+    expect(upstreamDeadlineMs(2, true, 50)).toBe(21_100);
+  });
+
   it("comes with the upstream from buildUpstream, in the fee settings' mode", () => {
     const signer = createEd25519Signer(secret, config.network);
     const logger = { warn: vi.fn(), info: vi.fn() };
