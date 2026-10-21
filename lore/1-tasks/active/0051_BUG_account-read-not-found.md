@@ -2,7 +2,7 @@
 id: "0051"
 title: "Report an RPC failure on an account read as an error, never as account not found"
 type: BUG
-status: backlog
+status: active
 milestone: 1
 related_adr: []
 related_tasks: ["0007", "0009", "0020", "0049"]
@@ -16,6 +16,12 @@ history:
     note: >
       Found while building 0020's startup channel check: stellar-sdk turns every RPC error on an
       account read into "Account not found", so an outage looks like a missing channel.
+  - date: "2026-10-21"
+    status: active
+    who: karolkow
+    note: >
+      Red tests for the three effects, the fix (readAccountEntry on getLedgerEntries) and a testnet
+      burst that reproduces masked 502 and -32603 reads. The owner chose one read function.
 ---
 
 # Report an RPC failure on an account read as an error, never as account not found
@@ -56,13 +62,9 @@ Measured on testnet (2026-10-21): `getLedgerEntries` for an account that does no
 
 | Situation | What happens | Date |
 |---|---|---|
-
-## Not yet decided
-
-- Where the account read lives. Built on the branch: one function, `readAccountEntry`, on
-  `getLedgerEntries`; `SorobanRpc` and `FallbackRpc` drop `getAccount` and `getAccountEntry`.
-  The alternative keeps both and makes only `FallbackRpc.fromUrls`'s endpoints read through
-  `getLedgerEntries`; a plain `rpc.Server` passed as `SorobanRpc` would still swallow errors.
+| The pool reads an account | One function, `readAccountEntry`, calls `getLedgerEntries`; `SorobanRpc` and `FallbackRpc` no longer carry `getAccount` or `getAccountEntry` | 2026-10-21 |
+| The RPC answers no entry | `AccountNotFoundError`: `checkChannel` returns `missing`, `readSequence` retires the channel after `timeoutSeconds` | 2026-10-21 |
+| The read fails (error status, refused connection, timeout, JSON-RPC error) | The error is thrown as it is; `checkChannel` throws, `readSequence` refuses the call and keeps the channel | 2026-10-21 |
 
 ## Measurement: 0007's "Account not found under load"
 
