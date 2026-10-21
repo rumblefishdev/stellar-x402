@@ -145,12 +145,19 @@ Two questions, both answered by okarcz on 2026-10-20:
   double outage is capped by `minProbeGapMs` (5 s), with a test that fails without the cap; the
   failback without a known lag (`upstream-failover.ts:103-104`) is intended and now documented.
 - **`settle-smoke.ts` (#41) under the global undici timeout:** a `/settle` slower than 10 s would
-  fail the smoke run falsely. Fixed on the rebase onto #41: the script gets its own `Agent`.
+  fail the smoke run falsely. Fixed on the rebase onto #41: the script sends every request through
+  its own `Agent` (decision 20).
 
 The branch was rebased onto develop after 0022 (PR #30) merged: `main()` keeps develop's
 PostgreSQL pools and idempotent `close()`, with this PR's global undici timeouts, `MainOptions` and
-`FallbackRpc`'s timeout; `package.json` has `pg` and `undici`. Facilitator tests 239 against
-PostgreSQL 18, each commit typechecks. Not pushed: it is pushed once, after the rebase onto #41.
+`FallbackRpc`'s timeout; `package.json` has `pg` and `undici`. Facilitator tests 240 against
+PostgreSQL 18.
+
+On 2026-10-21 it was rebased onto #41 (`05bb5a0`), as decision 7 planned. Six of the 15 commits
+conflicted, mostly in `main.ts`; decision 18 records how they were merged. Two commits followed:
+the `/settle` tests with a hung first URL (decision 19) and the smoke script's dispatcher. Lint
+and typecheck pass, each of the 17 commits typechecks, and facilitator tests pass, 366 against
+PostgreSQL 18. Not pushed yet: the testnet smoke runs come first.
 
 ## Modified tests
 
@@ -176,3 +183,7 @@ PostgreSQL 18, each commit typechecks. Not pushed: it is pushed once, after the 
 - **Third review:** "wraps around from the active endpoint" now expects no switch to the first
   endpoint; the A → B → A test returns to A through a probe (`latestLedger`, `now`).
   `build-verifier.test.ts`'s decision-2 test records the URLs called and counts `rpc_failover`.
+- **Karol's review and the rebase onto #41:** `build-verifier.test.ts`'s `setup` also returns
+  `check`, `/settle`'s checks from `buildChecks` with the same `seams`. `settle-pool.test.ts` (#41)
+  passes `seams` to `buildChecks` and `compose()` in place of a positional `makeScheme`, with a
+  logger that has `info`; its `setup` takes optional `seams` and returns the upstream logger.

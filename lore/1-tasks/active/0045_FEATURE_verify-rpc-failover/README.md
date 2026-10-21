@@ -28,6 +28,10 @@ history:
     status: active
     who: okarcz
     note: "PR #45 third review: a call that wraps around to RPC_URLS[0] doesn't switch to it."
+  - date: "2026-10-21"
+    status: active
+    who: okarcz
+    note: "Karol's review; rebased onto #41: /settle's checks fail over too, with hung-URL /settle tests."
 ---
 
 # Fail over upstream verify across `RPC_URLS` before pubnet
@@ -87,6 +91,15 @@ once a probe finds it healthy.
   `upstream-failover.test.ts` 14 → 25 → 28, `build-verifier.test.ts` 12 → 16, `fee-agreement.test.ts`
   4 → 5, `config.test.ts` 11 → 12 (the cap), and `main.test.ts`'s secret check now uses two keyed
   URLs.
+
+- **After the rebase onto #41**: `buildChecks(config, rpc, fees, logger, seams?)` spreads
+  `buildUpstream`, so `/settle`'s checks fail over too; `buildVerifier` is `createVerifier` over
+  it, and `compose()` passes its `seams`. `Check` takes the trace. `UpstreamSeams.timeoutMs`
+  (decision 19) and `upstreamDeadlineMs`'s per-URL `timeoutMs`. `settle-smoke.ts` has its own
+  dispatcher and an `EXPECT_FAILOVER` check (decision 20).
+- **Tests after Karol's review and the rebases**: 240 on develop (0022's tests included), 366 on
+  #41 (#41's tests included). This round adds `upstream-failover.test.ts` +1 (the probe gap),
+  `settle-pool.test.ts` +2 (a hung first URL) and `build-verifier.test.ts` +1 (the test timeout).
 
 **Modified tests:** listed per round in [the note](notes/S-pr45-reviews.md#modified-tests).
 
@@ -159,6 +172,20 @@ once a probe finds it healthy.
     wrapping call start a probe and log `rpc_probe_failed`; `minProbeGapMs` (5 s) now spaces them.
     The other, a return with no lag check when the active URL can't read its own ledger, is
     intended (decision 11's "no reason to stay on it") and now documented.
+18. **The rebase onto #41 merges both shapes** (2026-10-21). `buildChecks` keeps #41's name and
+    `VerifierDeps` return, and spreads `buildUpstream` (decision 7); it and `buildVerifier` take a
+    `logger` and `seams`, not a positional `makeScheme`. Adam's two silent breaks are fixed:
+    `Check` takes the trace, and `settle-pool.test.ts` passes `seams`. `main()` keeps #41's
+    `compose()` and PostgreSQL stores, with this PR's undici timeouts, `opts.write` and
+    `FallbackRpc`'s 10 s; its logger takes both `opts.write` and #41's `RPC_URLS` redaction.
+19. **`/settle` is tested with a hung `RPC_URLS[0]` both ways** (okarcz, 2026-10-21): it settles
+    through `RPC_URLS[1]` and logs `rpc_failover`, and a budget shorter than the failover answers
+    `…_timeout` with nothing sent, as 41 s of fee-stats failover would against the 30 s default
+    (ADR 0011's table). `UpstreamSeams.timeoutMs` makes the hang take milliseconds, not 10 s.
+20. **`settle-smoke.ts` sends every request through its own `Agent`** (okarcz, 2026-10-21,
+    Karol's review): `/settle`, `/verify` and friendbot, with a 120 s header timeout, above
+    `/settle`'s 90 s answer. It passes `RPC_URLS` on; `EXPECT_FAILOVER=1` checks that the first
+    `/settle` failed over from `RPC_URLS[0]` to `RPC_URLS[1]`.
 
 ## Future Work
 
@@ -167,7 +194,5 @@ once a probe finds it healthy.
   (Adam, both reviews).
 - **0027**: an alarm or a `rpc_failovers_total{from,to}` counter, so the lag risk can be alarmed
   on (recorded in 0027 by #41).
-- **The rebase onto #41** (decision 7), with a `/settle` test with a hung first URL. Also from
-  Karol: #41's `settle-smoke.ts` gets its own undici `Agent` (as `verify-smoke.ts` has), or the
-  global 10 s header timeout `main()` sets fails a `/settle` slower than 10 s.
-- **A testnet smoke run on the pushed head**, also with a hung first URL.
+- **Testnet smoke runs before the push**: `settle-smoke.ts` plain and with a hung `RPC_URLS[0]`
+  (`EXPECT_FAILOVER=1`), and `verify-smoke.ts` again on #41's head.
