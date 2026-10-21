@@ -8,6 +8,7 @@ import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
 import { start, type Started } from "../src/main.js";
 import type { Verify } from "../src/settlement/verify.js";
+import { bazaarExtensions, depthOf } from "./payment.js";
 
 const requirements: PaymentRequirements = {
   scheme: "exact",
@@ -127,6 +128,18 @@ describe("POST /verify", () => {
       expect(verify).not.toHaveBeenCalled();
     },
   );
+
+  it("verifies the payload upstream's client builds for a Bazaar resource with a deep output schema", async () => {
+    verify.mockResolvedValue({ isValid: true, payer: "GPAYER" });
+    const body = {
+      ...request,
+      paymentPayload: { ...paymentPayload, extensions: bazaarExtensions(6) },
+    };
+    // Deeper than the old cap of 32 (0009 decision 39).
+    expect(depthOf(body)).toBeGreaterThan(32);
+    expect((await post(body)).status).toBe(200);
+    expect(verify).toHaveBeenCalledTimes(1);
+  });
 
   it("verifies a body nested to MAX_BODY_DEPTH, and refuses one level deeper", async () => {
     // `paymentPayload.extensions.deep` holds `levels` arrays; the innermost is at depth levels + 2.

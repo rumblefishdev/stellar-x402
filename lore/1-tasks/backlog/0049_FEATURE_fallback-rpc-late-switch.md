@@ -110,6 +110,10 @@ returns to its first endpoint, names endpoints by their full URL, and logs no sw
 - Tests: a frozen endpoint left for a live one, with a pending confirmation that then finishes;
   every endpoint frozen; the late answer, A → B → A, the probe's return and its lag guard, a log
   with no URL, and a JSON-RPC error on every endpoint that isn't `rpc_unavailable`.
+- From 0009 (Adam's seventh PR #41 review, decision 58): split `Attempt.sent: "yes"` into
+  accepted and refused. `/settle` now keeps a record `pending` after an unexpected error that
+  follows any answered send, since `"yes"` can't tell an accepted send from a refused one; with
+  the split, only an accepted one needs to.
 
 ## Acceptance Criteria
 

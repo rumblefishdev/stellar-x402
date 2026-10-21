@@ -96,6 +96,47 @@ it("names an RPC_URLS entry by index and fingerprint, never by host", () => {
   expect(text).not.toMatch(/K|paid|other/);
 });
 
+it("names an RPC_URLS entry's bare host, as Node's network errors give it", () => {
+  const rpcUrls = [
+    "https://acct-1234.quiknode.example/K/",
+    "https://acct-1234.quiknode.example/K2/",
+  ];
+  const names = rpcUrls.map((url, index) => rpcEndpointName(url, index)).join("|");
+  expect(redactUrls("getaddrinfo ENOTFOUND acct-1234.quiknode.example", rpcUrls)).toBe(
+    `getaddrinfo ENOTFOUND ${names}`,
+  );
+  expect(redactUrls("connect ETIMEDOUT ACCT-1234.quiknode.example:443.", rpcUrls)).toBe(
+    `connect ETIMEDOUT ${names}:443.`,
+  );
+  expect(
+    redactUrls(
+      "Hostname/IP does not match certificate's altnames: Host: acct-1234.quiknode.example. is not in",
+      rpcUrls,
+    ),
+  ).toBe(`Hostname/IP does not match certificate's altnames: Host: ${names}. is not in`);
+  // Only the whole name: a longer one that contains it is another host.
+  const other = "x.acct-1234.quiknode.example and acct-1234.quiknode.example.org";
+  expect(redactUrls(other, rpcUrls)).toBe(other);
+});
+
+it("names an RPC_URLS host in a logged error's message, stack and cause", () => {
+  const rpcUrls = ["https://acct-1.paid.example/K/"];
+  const lines: string[] = [];
+  const logger = jsonLogger("debug", (line) => lines.push(line), rpcUrls);
+  logger.error("x", {
+    error: new Error("fetch failed", {
+      cause: new Error("getaddrinfo ENOTFOUND acct-1.paid.example"),
+    }),
+  });
+  const restore = captureConsoleError(logger, rpcUrls);
+  try {
+    console.error(new Error("connect ETIMEDOUT acct-1.paid.example:443"));
+  } finally {
+    restore();
+  }
+  expect(lines.join("")).not.toContain("paid");
+});
+
 it("names RPC_URLS entries in logged errors and console.error", () => {
   const rpcUrls = ["https://acct-1.paid.example/K/"];
   const lines: string[] = [];

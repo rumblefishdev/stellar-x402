@@ -2,7 +2,7 @@
 id: "0009"
 title: "Settle exact payments once through the channel pool"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0003", "0004", "0005", "0006", "0007", "0011"]
 related_tasks: ["0007", "0006", "0012", "0013", "0014", "0015", "0016", "0017", "0018", "0019", "0020", "0022", "0023", "0024", "0025", "0026", "0027", "0031", "0043", "0045", "0047", "0049"]
@@ -65,6 +65,21 @@ history:
       0025, folded into the commit that added main()'s check), the hand-offs lost with 0022 into
       0019 and 0023, the should-fix points and the nits (decisions 50–55). Facilitator 305 → 320,
       signer-pool 101 → 111.
+  - date: "2026-10-21"
+    status: active
+    who: claude
+    note: >
+      Seventh PR #41 review (Adam, approved): decisions 56–59 (a fallback success counts as
+      answered once sent, a depth cap of 256, an unexpected error after a send stays pending, bare
+      RPC hosts named in logs); 0019's bullet, 0024's and 0049's. Facilitator 320 → 327.
+  - date: "2026-10-21"
+    status: completed
+    who: okarcz
+    note: >
+      PR #41 merged into develop by rebase (ef10461), approved by Adam and Stan after seven review
+      rounds; all acceptance criteria met. 59 design decisions; facilitator tests 103 → 327,
+      signer-pool 99 → 111. Its open points are "From 0009" bullets in 0019, 0020, 0023–0027,
+      0045 and 0049.
 ---
 
 # Settle exact payments once through the channel pool
@@ -135,22 +150,23 @@ never charged twice.
   5. The pool's `submit()` with `onSigned` (`addHash`, durable before the send), `maxLedger`, `deadline` and `checkSimulation` = `expectTransfer`.
   6. Forward-only compare-and-set writes (`advance`); the writer that makes a record final runs `onFinal`; `respond` marks a success answered (`markSuccessAnswered`, with a process-local set for store failures).
 - **`settlement/verify.ts`**: `createChecker` also refuses auth entries without address credentials, and an auth expiry past ledger 2^32 − 2 (decision 53).
-- **`http/app.ts`**: `POST /settle` takes the `/verify` body check (and a depth cap of 32), an `AbortSignal` for a client that left, the `EXTENSION-RESPONSES` header on a success, `afterResponse` after the response (`res.closed`-aware), and one `settled` log with the key and a `replay` flag.
+- **`http/app.ts`**: `POST /settle` takes the `/verify` body check (and a depth cap of 256, decision 57), an `AbortSignal` for a client that left, the `EXTENSION-RESPONSES` header on a success, `afterResponse` after the response (`res.closed`-aware), and one `settled` log with the key and a `replay` flag.
 - **`main.ts`**: `compose(config, …)` builds, on the stores it is given (memory ones when absent), the cataloger, RPC, one `fees`, `buildChecks` and `buildSettlement` (the pool from `fees.pool`, `keypairSigner`, the channels; the settler with `settleCheck(checks)` and the budget); `main()` builds the PostgreSQL stores when `STORE=postgres` and starts it. The config refuses `stellar:pubnet` until 0023, 0024 and 0025 land (decision 49).
 - **`signer-pool`**: `./testing` exports `FakeRpc`; `FallbackRpc` throws `RpcUnavailableError`; `submit()` refuses source-account auth (`SourceAccountAuthError`).
 - **Nothing else sends**: `grep sendTransaction|.settle(` in `apps/facilitator/src` finds nothing.
-- **Tests**: facilitator 103 → 320 (209 before the rebase onto 0022, whose PostgreSQL suite adds most of the rest) (`settle.test.ts` 79, `settle-route.test.ts` 9, `settle-pool.test.ts` 7), signer-pool 99 → 111. The review rounds, their mutants, modified tests and the testnet runs are in [notes/R-pr41-reviews.md](notes/R-pr41-reviews.md).
+- **Tests**: facilitator 103 → 327 (209 before the rebase onto 0022, whose PostgreSQL suite adds most of the rest) (`settle.test.ts` 82, `settle-route.test.ts` 10, `settle-pool.test.ts` 7), signer-pool 99 → 111. The review rounds, their mutants, modified tests and the testnet runs are in [notes/R-pr41-reviews.md](notes/R-pr41-reviews.md).
 
 ## Design Decisions
 
 ### Emerged
 
-All 55, with their reasons, are in [notes/S-design-decisions.md](notes/S-design-decisions.md).
+All 59, with their reasons, are in [notes/S-design-decisions.md](notes/S-design-decisions.md).
 The ones a reviewer should check first: 1 (a repeat answered from the record), 11 and 13 (a
 timeout answer ends what was never signed), 16 (a success once), 29 and 30 (okarcz: the store
 outage), 45 (the #45 rebase), 46 (a repeat that lost the claim leaves the record to the first
-call), 47 (RPC URLs in logs), 48 (PostgreSQL `markSuccessAnswered`), 49 (the pubnet refusal) and
-53 (`/verify` refuses an expiry past 2^32 − 2).
+call), 47 and 59 (RPC URLs and hosts in logs), 48 (PostgreSQL `markSuccessAnswered`), 49 (the
+pubnet refusal), 53 (`/verify` refuses an expiry past 2^32 − 2), 56 (a fallback success counts as
+answered once sent), 57 (the depth cap) and 58 (an unexpected error after a send stays pending).
 
 ## Future Work
 
@@ -163,6 +179,7 @@ Each item is also a "From 0009" bullet in its task:
 - **0020**: the startup `checkChannel` and `/supported`.
 - **0022** (closed before this merged): done in this PR's rebase (decision 48): PostgreSQL `markSuccessAnswered`, migration `0002_success_answered`, `addHash` atomic with `transition` (its row lock). Its config refuses `STORE=memory` outside testnet, so `main()`'s own refusal is gone (decision 18); the config refuses pubnet as a whole instead (decision 49). Its hand-over to 0009: a hash another settlement owns (`HashConflictError`) stops the send (`SignedHookError`), and the record ends `rejected` with `settle_exact_stellar_record_write_failed`; a NUL (`\u0000`) in a payload fails the claim as a store error, a 500 before money moves (→ 0023, validate it); `reserve` rejecting when the store is busy is 0024's.
 - **0023**: lift the pubnet refusal with 0024 and 0025 (decision 49); memory store growth with no rate limit; reject a NUL (`\u0000`) or a lone UTF-16 surrogate in `/verify` and `/settle` bodies, which PostgreSQL refuses in `text` and `jsonb`.
-- **0024**: real `beforeSubmit` and `onFinal`; lift the pubnet refusal with 0023 and 0025 (decision 49); parallel-spend fee griefing; `onFinal` after a late hook (decision 34); a reservation keyed by the settlement key, refused after its release (decision 46).
+- **0024**: real `beforeSubmit` and `onFinal`; lift the pubnet refusal with 0023 and 0025 (decision 49); parallel-spend fee griefing; a `__check_auth` that fails only on chain, and zero-amount transfers; `onFinal` after a late hook (decision 34); a reservation keyed by the settlement key, refused after its release (decision 46).
 - **0025**: the channel lease before `/settle` is served; lift the pubnet refusal with 0023 and 0024, after confirming the lease belongs there (decision 49).
 - **0027**: the metrics of decision 38, the outcome counter, alarms on store failures.
+- **0049**: split `Attempt.sent: "yes"` into accepted and refused (decision 58).

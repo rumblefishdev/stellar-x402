@@ -49,6 +49,47 @@ As a resource server, and as the operator, I want `GET /supported` to describe e
 
 ## Acceptance Criteria
 
-- [ ] Given the running facilitator, when `GET /supported` is called, then it lists `exact` on `stellar:testnet` with `extra.areFeesSponsored: true`, the `bazaar` extension, and the facilitator key's address as the only signer; channel addresses never appear, and `upto` is not listed
+- [ ] Given the running facilitator, when `GET /supported` is called, then it lists `exact` on the configured network (`stellar:testnet` in M1) with `extra.areFeesSponsored: true`, the `bazaar` extension, and the facilitator key's address as the only signer; channel addresses never appear, and `upto` is not listed
 - [ ] Given `FACILITATOR_SECRET` and `CHANNELS` (addresses only) in config, when the service starts, then it checks every channel with `checkChannel`: master key weight 0 and the facilitator key as the only signer; if any channel fails, the service refuses to start and names the channel
 - [ ] Given the deploy env examples, when they are updated, then `deploy/testnet.env.example` and `deploy/mainnet.env.example` use `FACILITATOR_SECRET` and `CHANNELS` instead of `FACILITATOR_SIGNER_SECRETS` and `FEE_BUMP_SIGNER_SECRET`; the facilitator key reaches the pool only as a `TransactionSigner`
+
+## Decisions so far
+
+| Situation | What happens | Date |
+| --- | --- | --- |
+| Base branch | 0020 branches from `lore-0009-settle-exact` (PR #41), whose `compose()` builds the RPC the startup check needs; its PR targets that branch and moves to `develop` once #41 merges | 2026-10-21 |
+| No RPC answers at startup | The service refuses to start and logs the RPC error, as for a bad channel (AD-12: it starts only once every channel is checked) | 2026-10-21 |
+| Several channels fail the check | All are checked at once (`Promise.allSettled`); the startup error names each failing channel with its `ChannelProblem` or its RPC error | 2026-10-21 |
+| `/supported` response | A plain object from the config, typed `SupportedResponse`: `kinds` = `exact`, `x402Version: 2`, `config.network`, `extra.areFeesSponsored: true`; `extensions` = `["bazaar"]`; `signers` = `{"stellar:*": [facilitator address]}`. A test compares it with upstream `x402Facilitator.getSupported()` for `ExactStellarScheme` plus `BAZAAR` | 2026-10-21 |
+| `maxTimeoutSeconds` in `/supported` (0018's note) | Not advertised: spec v2 §7.3 has no such field, and the upstream Stellar server scheme copies only `areFeesSponsored` from `extra` | 2026-10-21 |
+| Facilitator tests and the startup check | The check runs in `main()`, not `compose()`. `main()` tests get a JSON-RPC stub over HTTP in `RPC_URLS`, as `fee-agreement.test.ts` does; `compose()`'s tests and `FakeRpc` stay as they are | 2026-10-21 |
+| A startup failure after the logger exists | `main()` logs it with the logger that names RPC endpoints (`RPC_URLS[i]#…`, never a host, ADR 0011) and rethrows; `server.ts` logs only a `ConfigError`, which comes before any logger | 2026-10-21 |
+| `scripts/verify-smoke.ts` (0018) | Both runs build the verifier with `buildVerifier` instead of `main()`: a client's address can't pass the startup check by design. The full service on real channels is `scripts/settle-smoke.ts`'s (0009) | 2026-10-21 |
+
+## Recon (2026-10-21)
+
+- Done by 0009 (PR #41): `keypairSigner(FACILITATOR_SECRET)` feeds the pool, and `FakeRpc` is
+  exported from `@stellar-x402/signer-pool/testing`. `FACILITATOR_SECRET`, `CHANNELS` and
+  `checkChannel` are already on `develop`. `deploy/README.md` names no key variable, so it needs
+  no change.
+- Who reads `/supported` (spec v2 §7.3, upstream 2.28.0): `x402Version` per kind is required or
+  `HTTPFacilitatorClient` rejects the whole response; the upstream Stellar client throws without
+  `extra.areFeesSponsored: true`; only our gate (`conformance/src/gate.ts`) reads `signers`; no
+  upstream TS code reads `extensions`.
+- The upstream e2e servers fall back to a mock facilitator for any kind we don't list, so a wrong
+  `/supported` surfaces later as a client error. The tests assert the whole response.
+- x402.org's live `/supported` lists the same Stellar shape, with two signers (its second pays fee
+  bumps); ours lists one, since one key does both.
+- 0048 changes `checkChannel` itself (hot key below high, a cold recovery signer); the call site
+  here stays one line.
+- Outside this task: `buildChecks` still hands the raw secret to upstream `createEd25519Signer`
+  for `/verify`, which a KMS or Vault signer (0036, 0047) can't provide.
+
+## Not yet decided
+
+- Nothing.
+
+## Out of scope
+
+- The `/verify` path's raw secret (0036, 0047).
+- The new signer layout that `checkChannel` will check (0048).

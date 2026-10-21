@@ -10,6 +10,7 @@ import { start, type Started } from "../src/main.js";
 import type { SettlementRecord } from "../src/ports/index.js";
 import type { SettlementHooks } from "../src/settlement/hooks.js";
 import type { Settle } from "../src/settlement/settle.js";
+import { bazaarExtensions, depthOf } from "./payment.js";
 
 const requirements: PaymentRequirements = {
   scheme: "exact",
@@ -139,6 +140,18 @@ describe("POST /settle", () => {
     for (let i = 0; i < levels; i++) deep = [deep];
     return { ...request, paymentPayload: { ...paymentPayload, extensions: { deep } } };
   };
+
+  it("settles the payload upstream's client builds for a Bazaar resource with a deep output schema", async () => {
+    settle.mockResolvedValue({ response: success, record });
+    const body = {
+      ...request,
+      paymentPayload: { ...paymentPayload, extensions: bazaarExtensions(6) },
+    };
+    // Deeper than the old cap of 32 (0009 decision 39).
+    expect(depthOf(body)).toBeGreaterThan(32);
+    expect((await post(body)).status).toBe(200);
+    expect(settle).toHaveBeenCalledTimes(1);
+  });
 
   it("settles a body nested to MAX_BODY_DEPTH, and refuses one level deeper", async () => {
     settle.mockResolvedValue({ response: success, record });
