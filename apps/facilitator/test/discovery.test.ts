@@ -30,6 +30,7 @@ describe("parseDiscoveryQuery", () => {
     ["the scheme we settle", { scheme: "exact" }, { kind: "query" }],
     ["a scheme we never settle", { scheme: "upto" }, { kind: "empty" }],
     ["an unknown param", { foo: "1" }, { kind: "query", ignored: ["foo"] }],
+    ["an unknown param in brackets", { "foo[]": "1" }, { kind: "query", ignored: ["foo[]"] }],
   ])("accepts %s", (_name, raw, expected) => {
     expect(parseDiscoveryQuery(raw)).toMatchObject(expected);
   });
@@ -43,6 +44,14 @@ describe("parseDiscoveryQuery", () => {
     ["a negative offset", { offset: "-1" }, "offset"],
     ["an offset past the cap", { offset: String(MAX_OFFSET + 1) }, "offset"],
     ["a repeated param", { type: ["mcp", "http"] }, "type"],
+    ["a known param in brackets", { "type[]": "http" }, "type[]"],
+    ["an indexed known param", { "payTo[0]": "GB" }, "payTo[0]"],
+    ["a known param in brackets, empty", { "type[]": "" }, "type[]"],
+    [
+      "a long name in brackets, capped",
+      { [`type[${"x".repeat(100)}]`]: "1" },
+      `type[${"x".repeat(59)}`,
+    ],
     ["a NUL", { payTo: "G\u0000B" }, "payTo"],
     ["a control character", { type: "http\n" }, "type"],
     ["a value over 256 characters", { extensions: "x".repeat(257) }, "extensions"],
@@ -213,6 +222,7 @@ describe("GET /discovery/resources", () => {
     for (const [query, param] of [
       ["limit=-1", "limit"],
       ["type=mcp&type=http", "type"],
+      ["type[]=http", "type[]"],
       ["payTo=G%00B", "payTo"],
     ]) {
       const { response, body } = await list(query);

@@ -20,6 +20,11 @@ const MAX_VALUE_LENGTH = 256;
 const CATALOGED_SCHEMES: readonly string[] = ["exact"];
 /** The parameters upstream's `listResources` sends. */
 const KNOWN_PARAMS = ["type", "payTo", "scheme", "network", "extensions", "limit", "offset"];
+/**
+ * Express 5's query parser keeps brackets in the name, so `?type[]=http` arrives as `type[]`. As
+ * an unknown param it would be ignored and the whole catalog returned unfiltered.
+ */
+const BRACKETED_KNOWN = new RegExp(`^(?:${KNOWN_PARAMS.join("|")})\\[`);
 
 /**
  * One value per parameter: a repeated one (`?type=a&type=b`) arrives as an array and fails here,
@@ -61,9 +66,12 @@ export type DiscoveryQuery =
  * a typed `CatalogQuery`. A `limit` above the max is clamped, and the page reports the limit it
  * used. Unknown parameters are ignored rather than refused: upstream's client sends whatever its
  * version knows, and a 400 would fail every call it makes once upstream adds a filter. An empty
- * value counts as absent, since that client sends `?type=` for `type: ""`.
+ * value counts as absent, since that client sends `?type=` for `type: ""`. A known param with
+ * brackets (`type[]`, `payTo[0]`) is refused whatever its value, naming it as sent.
  */
 export function parseDiscoveryQuery(raw: Record<string, unknown>): DiscoveryQuery {
+  const bracketed = Object.keys(raw).find((param) => BRACKETED_KNOWN.test(param));
+  if (bracketed !== undefined) return { kind: "invalid", param: bracketed.slice(0, 64) };
   const given = Object.fromEntries(Object.entries(raw).filter(([, value]) => value !== ""));
   const parsed = QUERY.safeParse(given);
   if (!parsed.success) return { kind: "invalid", param: String(parsed.error.issues[0]!.path[0]) };

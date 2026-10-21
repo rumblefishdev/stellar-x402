@@ -83,11 +83,12 @@ As a agent, I want to list catalog resources with the standard discovery filters
 - `src/adapters/postgres.ts`: `list` writes its filter out twice instead of sharing a CTE, and runs
   on its own pool (`pools.discovery`, 3 connections, built by `main()`); `0001_init` gains
   `catalog_type_seq` on `(type, seq)`.
-- `test/discovery.test.ts`: 39 cases. The parser's accepted and refused inputs; the route through
-  a running server with a seeded memory catalog (each filter, combined filters, `scheme`, another
-  network, stable paging, the total past the end, the clamp, 400s before the store, unknown params
-  logged and counted, a store failure, no CORS); and upstream's own `withBazaar` client. Three
-  mutants (no `scheme` guard, no clamp, no control-character check) each fail a case.
+- `test/discovery.test.ts`: 44 cases. The parser's accepted and refused inputs, bracketed names
+  among them; the route through a running server with a seeded memory catalog (each filter,
+  combined filters, `scheme`, another network, stable paging, the total past the end, the clamp,
+  400s before the store, unknown params logged and counted, a store failure, no CORS); and
+  upstream's own `withBazaar` client. Mutants (no `scheme` guard, no clamp, no control-character
+  check; no bracket check, any bracketed name refused, no cap on the echoed name) each fail a case.
 - `test/main.test.ts` no longer lists `/discovery/resources` among the 501 stubs, and
   `test/verify-route.test.ts` passes `metrics`. `test/postgres.test.ts` checks the listing pool and
   the `(type, seq)` index; the store contract checks `limit: 0`.
@@ -108,9 +109,12 @@ As a agent, I want to list catalog resources with the standard discovery filters
    skips. It also means only the first 10 100 entries of a result can be paged to: the rest are
    reached through a filter, `payTo` above all, and fair ordering is Tranche 2's curation.
 3. **Strict values, clamped size.** `limit`/`offset` must be plain digits (`Number()` reads `" "`
-   as 0, `0x10` as 16, `1e3` as 1000); a repeated param, a control character such as NUL, a value
-   over 256 characters or a `network` that isn't CAIP-2 is a 400
-   `{ error: "bad_request", param }`, like `/verify`'s body plus the param. A `limit` above 100 is
+   as 0, `0x10` as 16, `1e3` as 1000); a repeated param, a known param with brackets (`type[]`,
+   `payTo[0]`, named as sent), a control character such as NUL, a value over 256 characters or a
+   `network` that isn't CAIP-2 is a 400 `{ error: "bad_request", param }`, like `/verify`'s body
+   plus the param. Express 5's parser keeps the brackets in the name, so `type[]=http` would
+   otherwise be an unknown param and return the catalog unfiltered (found in the self-check, fixed
+   during review; `foo[]` stays ignored, as decision 4 has it). A `limit` above 100 is
    clamped and reported, as Google AIP-158 and GitHub do. An empty value counts as absent and
    `limit=0` gives the total alone: upstream's client sends `?type=` for `type: ""`, its type
    allows `limit: 0`, and a 400 would make it throw (changed in the self-check, which first had
