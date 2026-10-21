@@ -87,10 +87,10 @@ ranking. `total` counts every entry the filters match.
   `scheme` but `exact` give an empty page.
 - `limit`: 20 by default, at most 100. A larger one is clamped, and `pagination.limit` echoes the
   limit used. `limit=0` gives `total` alone.
-- `offset`: at most 10 000. Reach entries past it with a filter, `payTo` above all.
+- `offset`: at most 1 000 000, so every entry can be paged to.
 - An empty value counts as absent: `?type=` doesn't filter.
 - `400 { error: "bad_request", param }` names the parameter: `limit` or `offset` not plain digits
-  or `offset` above 10 000, a repeated parameter, a value over 256 characters or with a control
+  or `offset` above 1 000 000, a repeated parameter, a value over 256 characters or with a control
   character, a `network` that isn't CAIP-2, or a known name written otherwise (`type[]`, `payto`,
   `Type`).
 - Other parameters are ignored, so a client that sends a newer filter still gets a page.

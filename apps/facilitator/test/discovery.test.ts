@@ -30,6 +30,7 @@ describe("parseDiscoveryQuery", () => {
     ["a limit above the max, clamped", { limit: "101" }, { kind: "query", limit: 100 }],
     ["a limit of ten digits, clamped", { limit: "10000000000" }, { kind: "query", limit: 100 }],
     ["a limit of 256 digits, clamped", { limit: "9".repeat(256) }, { kind: "query", limit: 100 }],
+    ["an offset past 100 000 entries", { offset: "100000" }, { kind: "query", offset: 100_000 }],
     ["the deepest offset", { offset: String(MAX_OFFSET) }, { kind: "query", offset: MAX_OFFSET }],
     ["another CAIP-2 network", { network: "eip155:8453" }, { kind: "empty", limit: 20 }],
     ["another Stellar network", { network: STELLAR_NETWORKS.pubnet }, { kind: "empty" }],

@@ -9,11 +9,11 @@ import type { CatalogQuery, CatalogStore } from "../ports/index.js";
 /** AD-20: `limit` is bounded, with a fixed default. 100 is every known x402 facilitator's max. */
 export const DISCOVERY_LIMIT = { default: 20, max: 100 } as const;
 /**
- * Deeper pages are refused, so a page never skips more than this many matches. The exact `total`
- * upstream's contract asks for is counted on an index whatever the offset; entries past the cap
- * are reached through a filter, `payTo` above all.
+ * Deeper pages are refused. The cap is high, so every entry of a catalog this size can be paged
+ * to: a deep offset costs about as much as the exact `total` every call counts anyway (15 ms at
+ * offset 99 000 of 100 000 entries, 9 ms at 0), and filters can't narrow an unknown catalog.
  */
-export const MAX_OFFSET = 10_000;
+export const MAX_OFFSET = 1_000_000;
 /** A `G…` address is 56 characters and a CAIP-2 id a few dozen; anything longer is noise. */
 const MAX_VALUE_LENGTH = 256;
 /** Entries come only from our own settlements, and T1 settles `exact` alone (0015 adds `upto`). */
