@@ -227,7 +227,8 @@ describe("main()", () => {
 describe("upstream's console.error in main()", () => {
   it("never writes an RPC URL's key to a log line or stderr when upstream's RPC calls fail", async () => {
     // Both URLs answer 503, so upstream's simulation fails and it prints the AxiosError. On the
-    // second request the second URL answers a failed simulation: a verdict, so a failover.
+    // second request the second URL answers a failed simulation: a verdict, from `RPC_URLS[1]`.
+    // Upstream's 503 is `unexpected_verify_error`, which moves no client (0045 decision 22).
     let request = 0;
     const rpc = createServer((req, res) => {
       let body = "";
@@ -312,7 +313,7 @@ describe("upstream's console.error in main()", () => {
       .split("\n")
       .filter(Boolean)
       .map((line) => JSON.parse(line));
-    for (const event of ["console_error", "rpc_exhausted", "http_error", "rpc_failover"]) {
+    for (const event of ["console_error", "rpc_exhausted", "http_error", "verified"]) {
       expect(events.map((e) => e.event)).toContain(event);
     }
     for (const key of ["S3CR3T", "0TH3R"]) expect(stdout + stderr).not.toContain(key);

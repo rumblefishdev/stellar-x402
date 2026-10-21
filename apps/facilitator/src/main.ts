@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 import { Keypair, rpc as stellarRpc } from "@stellar/stellar-sdk";
 import {
   FallbackRpc,
+  RpcTimeoutError,
   SettlementSubmitter,
   keypairSigner,
   type SorobanRpc,
@@ -69,7 +70,7 @@ export const UPSTREAM_TIMEOUT_MS = 10_000;
 /** Slack on the whole upstream call's deadline, so the last URL's own deadline fires first. */
 export const UPSTREAM_DEADLINE_SLACK_MS = 1_000;
 
-/** How often upstream verify probes `RPC_URLS[0]` while calls are off it (AD-3). */
+/** How often the shared `FallbackRpc` probes `RPC_URLS[0]` while calls are off it (AD-3). */
 export const PRIMARY_PROBE_INTERVAL_MS = 60_000;
 
 /** How many ledgers `RPC_URLS[0]` may trail the active URL by when calls return to it (AD-3). */
@@ -97,12 +98,11 @@ export type MakeScheme = (
 ) => UpstreamVerifier;
 
 /**
- * Test seams of {@link buildUpstream}: the scheme per URL, the probe's ledger read per URL, and how
- * long one URL may take (`UPSTREAM_TIMEOUT_MS` by default), so a hung URL needn't cost a test 10 s.
+ * Test seams of {@link buildUpstream}: the scheme per URL, and how long one URL may take
+ * (`UPSTREAM_TIMEOUT_MS` by default), so a hung URL needn't cost a test 10 s.
  */
 export interface UpstreamSeams {
   makeScheme?: MakeScheme;
-  latestLedger?: (url: string) => Promise<number>;
   timeoutMs?: number;
 }
 
@@ -110,54 +110,36 @@ export interface UpstreamSeams {
 export function failureReason(failure: EndpointFailure | { error: unknown }): string {
   if ("answer" in failure) return UNEXPECTED_VERIFY_ERROR;
   const { error } = failure;
-  if (error instanceof UpstreamTimeoutError) return "timeout";
+  if (error instanceof UpstreamTimeoutError || error instanceof RpcTimeoutError) return "timeout";
   return error instanceof Error ? `error:${error.name}` : "error";
 }
 
 /**
- * Upstream verify from the config, with its deadline (AD-3, AD-10): one `ExactStellarScheme` per
- * `RPC_URLS` entry, with the fee ceiling and the fee a settlement pays at the shared bid, read once
- * per call, behind `failoverUpstream`, which probes `RPC_URLS[0]` with its own `rpc.Server` while
- * calls are off it. Logs, each with `component: "verify"`, the network and `RPC_URLS[i]#…` names:
- * `rpc_failover` (warn) on a switch, `rpc_failback` (info) on the return to the first URL,
- * `rpc_probe_failed` (warn), and `rpc_exhausted` (warn) when every URL failed.
- * The two belong together: spread both into `VerifierDeps`, or the deadline falls back to 10 s and
- * cuts off the second URL.
+ * The one RPC client over `RPC_URLS` (AD-3): the pool, the AD-22 ledger read and the fee-stats bid
+ * read go through it, and upstream verify shares its active URL ({@link buildUpstream}), so one
+ * outage moves them all once. Each URL is named `RPC_URLS[i]#<fingerprint>` (ADR 0011); a call
+ * gives up on a URL after `UPSTREAM_TIMEOUT_MS`, and calls return to `RPC_URLS[0]` after a probe
+ * every `PRIMARY_PROBE_INTERVAL_MS` finds it within `FAILBACK_MAX_LAG_LEDGERS`. Logs, each with
+ * `component: "rpc"` and the network: `rpc_failover` (warn) on a switch, with `by`, the method or
+ * caller that saw the failure; `rpc_failback` (info) on the return; `rpc_probe_failed` (warn).
+ * `makeRpc` and `timeoutMs` are test seams: the client of one URL, and how long a call may take on
+ * it.
  */
-export function buildUpstream(
+export function buildRpc(
   config: Config,
-  fees: FeeSettings,
   logger: Pick<Logger, "warn" | "info">,
-  facilitator: ReturnType<typeof createEd25519Signer>,
-  seams: UpstreamSeams = {},
-): Pick<VerifierDeps, "upstream" | "upstreamTimeoutMs"> {
-  const {
-    makeScheme = (signer, options) => new ExactStellarScheme([signer], options),
-    latestLedger = rpcLatestLedger(config.rpcUrls),
-    timeoutMs = UPSTREAM_TIMEOUT_MS,
-  } = seams;
-  // `RPC_URLS[i]#<fingerprint>`, as everywhere else in the logs (ADR 0011, 0009 decision 47).
-  const name = (i: number) => rpcEndpointName(config.rpcUrls[i]!, i);
-  // Upstream reads one RPC URL, so there is one scheme per URL, tried in `RPC_URLS` order.
-  const endpoints = atCurrentBid(fees.inclusionFee, (inclusionFeeStroops) =>
-    config.rpcUrls.map((url, i) => ({
-      name: name(i),
-      verifier: makeScheme(facilitator, {
-        rpcConfig: { url },
-        maxTransactionFeeStroops: fees.maxFeeStroops,
-        inclusionFeeStroops,
-      }),
-    })),
-  );
-  const fields = { component: "verify", network: config.network };
-  return {
-    upstream: failoverUpstream(endpoints, {
+  makeRpc: (url: string) => SorobanRpc = (url) =>
+    new stellarRpc.Server(url, { allowHttp: url.startsWith("http:") }),
+  timeoutMs = UPSTREAM_TIMEOUT_MS,
+): FallbackRpc {
+  const fields = { component: "rpc", network: config.network };
+  return new FallbackRpc(
+    config.rpcUrls.map((url, i) => ({ name: rpcEndpointName(url, i), rpc: makeRpc(url) })),
+    {
       timeoutMs,
-      probeIntervalMs: PRIMARY_PROBE_INTERVAL_MS,
-      maxLagLedgers: FAILBACK_MAX_LAG_LEDGERS,
-      latestLedger: (i) => latestLedger(config.rpcUrls[i]!),
-      onSwitch: (from, to, failure) =>
-        logger.warn("rpc_failover", { ...fields, from, to, reason: failureReason(failure) }),
+      failback: { intervalMs: PRIMARY_PROBE_INTERVAL_MS, maxLagLedgers: FAILBACK_MAX_LAG_LEDGERS },
+      onSwitch: (from, to, error, by) =>
+        logger.warn("rpc_failover", { ...fields, by, from, to, reason: failureReason({ error }) }),
       onFailback: (from, to, lagLedgers) =>
         logger.info("rpc_failback", { ...fields, from, to, lagLedgers }),
       onProbeFailed: (rpc, failure) =>
@@ -168,22 +150,59 @@ export function buildUpstream(
             ? { reason: "lagging", lagLedgers: failure.lagLedgers }
             : { reason: failureReason(failure) }),
         }),
+    },
+  );
+}
+
+/**
+ * Upstream verify from the config, with its deadline (AD-3, AD-10): one `ExactStellarScheme` per
+ * `RPC_URLS` entry, with the fee ceiling and the fee a settlement pays at the shared bid, read once
+ * per call, behind `failoverUpstream`, which starts each call on `active`'s URL (the shared
+ * {@link buildRpc}) and reports a throw or a timeout there. Logs `rpc_exhausted` (warn, with
+ * `component: "verify"`, the network and `RPC_URLS[i]#…` names) when every URL failed; switches
+ * are `active`'s to log.
+ * The two belong together: spread both into `VerifierDeps`, or the deadline falls back to 10 s and
+ * cuts off the second URL.
+ */
+export function buildUpstream(
+  config: Config,
+  fees: FeeSettings,
+  logger: Pick<Logger, "warn">,
+  facilitator: ReturnType<typeof createEd25519Signer>,
+  active: Pick<FallbackRpc, "begin" | "markFailed">,
+  seams: UpstreamSeams = {},
+): Pick<VerifierDeps, "upstream" | "upstreamTimeoutMs"> {
+  const {
+    makeScheme = (signer, options) => new ExactStellarScheme([signer], options),
+    timeoutMs = UPSTREAM_TIMEOUT_MS,
+  } = seams;
+  // `RPC_URLS[i]#<fingerprint>`, as everywhere else in the logs (ADR 0011, 0009 decision 47).
+  const name = (i: number) => rpcEndpointName(config.rpcUrls[i]!, i);
+  // Upstream reads one RPC URL, so there is one scheme per URL, in `RPC_URLS` order: the order of
+  // `active`'s endpoints.
+  const endpoints = atCurrentBid(fees.inclusionFee, (inclusionFeeStroops) =>
+    config.rpcUrls.map((url, i) => ({
+      name: name(i),
+      verifier: makeScheme(facilitator, {
+        rpcConfig: { url },
+        maxTransactionFeeStroops: fees.maxFeeStroops,
+        inclusionFeeStroops,
+      }),
+    })),
+  );
+  return {
+    upstream: failoverUpstream(endpoints, {
+      timeoutMs,
+      active,
       onExhausted: (tried) =>
         logger.warn("rpc_exhausted", {
-          ...fields,
+          component: "verify",
+          network: config.network,
           tried: tried.map((t) => ({ rpc: t.name, reason: failureReason(t.failure) })),
         }),
     }),
     upstreamTimeoutMs: upstreamDeadlineMs(config.rpcUrls.length, fees.feeStats, timeoutMs),
   };
-}
-
-/** The probe's ledger read: one `rpc.Server` per URL, apart from `FallbackRpc`'s. */
-function rpcLatestLedger(urls: readonly string[]): (url: string) => Promise<number> {
-  const servers = new Map(
-    urls.map((url) => [url, new stellarRpc.Server(url, { allowHttp: url.startsWith("http:") })]),
-  );
-  return async (url) => (await servers.get(url)!.getLatestLedger()).sequence;
 }
 
 /**
@@ -194,7 +213,7 @@ function rpcLatestLedger(urls: readonly string[]): (url: string) => Promise<numb
  */
 export function buildChecks(
   config: Config,
-  rpc: Pick<FallbackRpc, "getLatestLedger">,
+  rpc: Pick<FallbackRpc, "getLatestLedger" | "begin" | "markFailed">,
   fees: FeeSettings,
   logger: Pick<Logger, "warn" | "info">,
   seams?: UpstreamSeams,
@@ -204,7 +223,7 @@ export function buildChecks(
   const facilitator = createEd25519Signer(config.facilitatorSecret, config.network);
   return {
     network: config.network,
-    ...buildUpstream(config, fees, logger, facilitator, seams),
+    ...buildUpstream(config, fees, logger, facilitator, rpc, seams),
     facilitator: facilitator.address,
     channels: config.channels,
     minValidityLedgers: config.settlement.minValidityLedgers,
@@ -218,7 +237,7 @@ export function buildChecks(
  */
 export function buildVerifier(
   config: Config,
-  rpc: Pick<FallbackRpc, "getLatestLedger">,
+  rpc: Pick<FallbackRpc, "getLatestLedger" | "begin" | "markFailed">,
   fees: FeeSettings,
   logger: Pick<Logger, "warn" | "info">,
   seams?: UpstreamSeams,
@@ -322,7 +341,9 @@ export function compose(
     logger,
     metrics,
   });
-  const rpc = opts.rpc ?? FallbackRpc.fromUrls(config.rpcUrls, { timeoutMs: UPSTREAM_TIMEOUT_MS });
+  // One client for every RPC_URLS read and send, whose active URL upstream verify shares (AD-3).
+  // A test's `rpc` serves every URL.
+  const rpc = buildRpc(config, logger, opts.rpc && (() => opts.rpc!));
   // One fee configuration: `/verify` and `/settle` check with it, and the pool pays with it, so
   // they share one ceiling and one bid (AD-10).
   const fees = feeSettings(config.fees, rpc);
