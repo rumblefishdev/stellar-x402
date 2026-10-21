@@ -42,8 +42,8 @@ const text = z
   .max(MAX_VALUE_LENGTH)
   .regex(/^\P{Cc}*$/u);
 /**
- * Plain decimal digits only: `Number()` would read `" "` as 0, `0x10` as 16 and `1e3` as 1000. Any
- * number of them, so a huge `limit` is clamped like any other above the max (AD-20).
+ * Plain decimal digits only: `Number()` would read `" "` as 0, `0x10` as 16 and `1e3` as 1000. Up
+ * to 256 of them, as any value, so a huge `limit` is clamped like any other above the max (AD-20).
  */
 const count = z.string().max(MAX_VALUE_LENGTH).regex(/^\d+$/).transform(Number);
 

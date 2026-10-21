@@ -43,6 +43,14 @@ history:
       param (`type[]`, `payto`) is a 400 rather than an unfiltered page; a `limit` of any length
       is clamped; the index moves to its own migration, `0003_catalog_type_seq`; tests pin catalog
       writes to the main pool, the empty page off the store and the log cap; a README section.
+  - date: "2026-10-21"
+    status: active
+    who: akot
+    note: >
+      Self-review with GSD's code reviewer, measured on PostgreSQL 18.3 at 100 000 entries: the
+      network we serve no longer filters and another Stellar network skips the store (29 ms to
+      8 ms); the offset cap goes from 10 000 to 1 000 000, so every entry can be paged to; a
+      `payTo` filter needs no index of its own. 389 facilitator tests.
 ---
 
 # List resources in `/discovery/resources`
@@ -83,7 +91,7 @@ As a agent, I want to list catalog resources with the standard discovery filters
 ## Result
 
 - `src/http/discovery.ts`: `parseDiscoveryQuery(req.query)`, a zod schema at the HTTP adapter, and
-  the `discoveryResources(catalog, logger, metrics)` handler. The store only gets a typed
+  the `discoveryResources(catalog, logger, metrics, network)` handler, with the network it serves. The store only gets a typed
   `CatalogQuery`. The answer is upstream's `DiscoveryResourcesResponse`:
   `{ x402Version: 2, items, pagination: { limit, offset, total } }`, with the limit actually used.
 - `src/http/app.ts` wires it in place of the 501 stub; `AppDeps` gains `metrics`, the instance
@@ -91,14 +99,15 @@ As a agent, I want to list catalog resources with the standard discovery filters
 - `src/adapters/postgres.ts`: `list` writes its filter out twice instead of sharing a CTE, and runs
   on its own pool (`pools.discovery`, 3 connections, built by `main()`). `postgres-schema.ts`:
   `0003_catalog_type_seq` adds `catalog_type_seq` on `(type, seq)`.
-- `test/discovery.test.ts`: 57 cases. The parser's accepted and refused inputs, misspelled names
+- `test/discovery.test.ts`: 61 cases. The parser's accepted and refused inputs, misspelled names
   among them; the route through a running server with a seeded memory catalog (each filter,
   combined filters, `scheme`, another network, stable paging, the total past the end, the clamp,
   400s before the store, an empty page without the store, unknown params logged, capped and
   counted, a store failure, no CORS); and upstream's own `withBazaar` client. Mutants (no `scheme`
   guard, no clamp, no control-character check; for misspelled names no bracket cut, no trim, no
   lowercase, no exact-name guard, no cap on the echoed name; a nine-digit or unbounded `limit`; no
-  log cap on names or their length; the store called for an empty page) each fail a case.
+  log cap on names or their length; the store called for an empty page; the served network passed
+  on, another Stellar network sent to the store, the old offset cap) each fail a case.
 - `test/main.test.ts` no longer lists `/discovery/resources` among the 501 stubs, and
   `test/verify-route.test.ts` and `test/settle-route.test.ts` pass `metrics`.
   `test/postgres.test.ts` counts checkouts per pool, so each store call is pinned to its own (a
@@ -115,12 +124,15 @@ As a agent, I want to list catalog resources with the standard discovery filters
    throw without `expose` would reach the shared handler as a 500.
 2. **`offset` and an exact `total`, as upstream's list contract has them.** Cursors exist only in
    upstream's `/discovery/search`, so the keyset paging noted from 0022 doesn't fit this endpoint,
-   and an estimated or cached `total` would break "total count of resources matching". The cost
-   is bounded instead: `offset` at most 10 000 (400 beyond, like Elasticsearch's result window),
-   `limit` 0 to 100 with a default of 20 (100 is every known x402 facilitator's maximum). The
-   count, not the offset, is most of a call's cost (decision 9); the cap bounds how far a page
-   skips. It also means only the first 10 100 entries of a result can be paged to: the rest are
-   reached through a filter, `payTo` above all, and fair ordering is Tranche 2's curation.
+   and an estimated or cached `total` would break "total count of resources matching". `limit`
+   is 0 to 100 with a default of 20 (100 is every known x402 facilitator's maximum). `offset` is
+   at most 1 000 000 (400 beyond), so every entry can be paged to: the count, not the offset, is
+   most of a call's cost (decision 9), and a deep page costs little more (15 ms at offset 99 000
+   of 100 000 entries, 9 ms at 0). The cap was first 10 000, like Elasticsearch's result window,
+   which left every match past the first 10 100 out of reach, the newest first: no filter narrows
+   a catalog the caller doesn't know yet (`type` has two values, a database one network, and
+   `payTo` must be known beforehand). Raised in the GSD self-review. Fair ordering is Tranche 2's
+   curation.
 3. **Strict values, clamped size.** `limit`/`offset` must be plain digits (`Number()` reads `" "`
    as 0, `0x10` as 16, `1e3` as 1000); a repeated param, a misspelled known param (named as sent),
    a control character such as NUL, a value over 256 characters or a `network` that isn't CAIP-2
@@ -143,8 +155,12 @@ As a agent, I want to list catalog resources with the standard discovery filters
 5. **`scheme` is answered from what we settle:** `exact` matches every entry, any other scheme
    none, with no store change. Ignoring it returned `exact` resources for `scheme=upto` in the
    prototype. AD-20 and ADR 0008 are amended; 0015 replaces it once `upto` is cataloged.
-6. **A well-formed network we don't serve (e.g. `eip155:8453`) is an empty page,** not a 400, so a
-   client asking many facilitators at once gets a page, and `CatalogQuery.network` stays typed.
+6. **`network` is answered from the one we serve.** Another well-formed network (`eip155:8453`,
+   or the other Stellar network) is an empty page without the store, not a 400, so a client
+   asking many facilitators at once gets a page. Ours filters nothing and isn't passed on: the
+   catalog holds only its own network (ADR 0012; `/settle` refuses any other), and a filter every
+   entry matches made the count slower than none (29 ms against 8 ms at 100 000 entries).
+   `CatalogQuery.network` stays in the port, typed. Changed in the GSD self-review.
 7. **No try/catch in the route.** Express 5 hands a rejected handler to the shared `onError`,
    which answers 500 and logs it. A 503 with `Retry-After` needs a typed store-unavailable error
    for every route, which stays with 0019's `StoreUnavailableError` option (the upstream client
@@ -162,7 +178,10 @@ As a agent, I want to list catalog resources with the standard discovery filters
    decision 14 did before any deploy, but `migrate` skips an applied migration by name, and
    databases past `0001` exist since #41 added `0002_success_answered`: they would never get it.
    So it is its own migration, as the schema's header asks, with `IF NOT EXISTS` for a database
-   built from this branch (changed in Oskar's review).
+   built from this branch (changed in Oskar's review). A `payTo` filter needs no index of its
+   own: PostgreSQL 18 answers it from the primary key, where `pay_to` comes second (1.3 ms for a
+   seller of 40 entries, 3.5 ms for one of 20 000). `(pay_to, seq)` gained under a millisecond,
+   and nothing on a table not yet vacuumed.
 10. **Listings run on their own pool.** `/discovery/resources` is public and unauthenticated until
     0023, and ten concurrent callers held all ten main connections (117 calls/s measured), which
     `/settle` needs. Like `reserve` and `hit`, `list` gets three of its own; catalog writes stay
@@ -172,8 +191,14 @@ As a agent, I want to list catalog resources with the standard discovery filters
 
 - If the catalog grows well past 100 000 entries: the count stays O(matches) (about 25 ms
   unfiltered at 1 000 000 after decision 9), so a cached or bounded count only if upstream's
-  contract allows it. Until then the 10 000 offset cap, the listing pool and 0023's rate limit
-  bound it.
+  contract allows it. Until then the listing pool and 0023's rate limit bound it.
+- `extensions` can't be left out like `network`, since an entry's extensions are optional, and a
+  GIN index counts no row on its own: `extensions=bazaar`, which nearly every entry matches, scans
+  the table (82 ms at 100 000 entries, against 8 ms unfiltered). If listings ask for it often, a
+  partial index on `seq` for entries with `bazaar` may answer it (not measured).
+- A page of 100 entries at the 32 KiB extension cap is 3.2 MB and about 40 ms of Node CPU per
+  call, 22 ms of it in `list` (measured). Each such entry takes a paid settlement, but listing
+  them is free, so 0023's limit for this route should allow for it.
 - For 0015: a real `scheme` filter once `upto` is cataloged (note added there).
 - With 0019's `StoreUnavailableError` option: a typed store-unavailable error mapped to 503 and
   `Retry-After` in the shared handler, for every route.
