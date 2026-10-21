@@ -35,6 +35,14 @@ history:
       empty values count as absent and `limit=0` gives the total, as upstream's client sends
       them; `list` drops its CTE and gains a `(type, seq)` index (3–10 ms instead of 14–25 ms);
       listings get their own pool. 236 facilitator tests.
+  - date: "2026-10-21"
+    status: active
+    who: akot
+    note: >
+      Review of PR #50 (Oskar's), after a rebase onto develop with 0009: a misspelled known
+      param (`type[]`, `payto`) is a 400 rather than an unfiltered page; a `limit` of any length
+      is clamped; the index moves to its own migration, `0003_catalog_type_seq`; tests pin catalog
+      writes to the main pool, the empty page off the store and the log cap; a README section.
 ---
 
 # List resources in `/discovery/resources`
@@ -78,21 +86,25 @@ As a agent, I want to list catalog resources with the standard discovery filters
   the `discoveryResources(catalog, logger, metrics)` handler. The store only gets a typed
   `CatalogQuery`. The answer is upstream's `DiscoveryResourcesResponse`:
   `{ x402Version: 2, items, pagination: { limit, offset, total } }`, with the limit actually used.
-- `src/http/app.ts` wires it in place of the 501 stub; `AppDeps` gains `metrics`, which `main()`
-  now shares with the cataloger.
+- `src/http/app.ts` wires it in place of the 501 stub; `AppDeps` gains `metrics`, the instance
+  `compose()` already shares with the cataloger and the settlement.
 - `src/adapters/postgres.ts`: `list` writes its filter out twice instead of sharing a CTE, and runs
-  on its own pool (`pools.discovery`, 3 connections, built by `main()`); `0001_init` gains
-  `catalog_type_seq` on `(type, seq)`.
-- `test/discovery.test.ts`: 52 cases. The parser's accepted and refused inputs, misspelled names
+  on its own pool (`pools.discovery`, 3 connections, built by `main()`). `postgres-schema.ts`:
+  `0003_catalog_type_seq` adds `catalog_type_seq` on `(type, seq)`.
+- `test/discovery.test.ts`: 57 cases. The parser's accepted and refused inputs, misspelled names
   among them; the route through a running server with a seeded memory catalog (each filter,
   combined filters, `scheme`, another network, stable paging, the total past the end, the clamp,
-  400s before the store, unknown params logged and counted, a store failure, no CORS); and
-  upstream's own `withBazaar` client. Mutants (no `scheme` guard, no clamp, no control-character
-  check; for misspelled names no bracket cut, no trim, no lowercase, no exact-name guard, no cap on
-  the echoed name) each fail a case.
+  400s before the store, an empty page without the store, unknown params logged, capped and
+  counted, a store failure, no CORS); and upstream's own `withBazaar` client. Mutants (no `scheme`
+  guard, no clamp, no control-character check; for misspelled names no bracket cut, no trim, no
+  lowercase, no exact-name guard, no cap on the echoed name; a nine-digit or unbounded `limit`; no
+  log cap on names or their length; the store called for an empty page) each fail a case.
 - `test/main.test.ts` no longer lists `/discovery/resources` among the 501 stubs, and
-  `test/verify-route.test.ts` passes `metrics`. `test/postgres.test.ts` checks the listing pool and
-  the `(type, seq)` index; the store contract checks `limit: 0`.
+  `test/verify-route.test.ts` and `test/settle-route.test.ts` pass `metrics`.
+  `test/postgres.test.ts` counts checkouts per pool, so each store call is pinned to its own (a
+  catalog upsert to the main one), and checks that `0003` adds the index to a database past `0002`
+  or one that has it; the store contract checks `limit: 0`.
+- `apps/facilitator/README.md`: a `/discovery/resources` section for integrators.
 
 ## Design Decisions
 
@@ -135,18 +147,22 @@ As a agent, I want to list catalog resources with the standard discovery filters
    client asking many facilitators at once gets a page, and `CatalogQuery.network` stays typed.
 7. **No try/catch in the route.** Express 5 hands a rejected handler to the shared `onError`,
    which answers 500 and logs it. A 503 with `Retry-After` needs a typed store-unavailable error
-   for every route, which stays with 0009's option (the upstream client throws on either status).
+   for every route, which stays with 0019's `StoreUnavailableError` option (the upstream client
+   throws on either status).
 
 ### Emerged
 
-8. **`AppDeps` carries `metrics`.** Only the cataloger had counters; the route's counter for
-   unknown params needed the same instance, so `main()` builds one and hands it to both.
-9. **`list` without a CTE, and a `(type, seq)` index in `0001_init`.** 0022's `list` shared its
+8. **`AppDeps` carries `metrics`.** The route's counter for unknown params needs the instance
+   `compose()` builds for the cataloger and the settlement, so it goes into the `deps` it returns.
+9. **`list` without a CTE, and a `(type, seq)` index in `0003_catalog_type_seq`.** 0022's `list` shared its
    filter through a CTE read twice, which PostgreSQL materializes in full: 14–25 ms per call at
    100 000 entries whatever the offset (18.3, p50). Written out twice, the count and the page each
    use an index: 3–10 ms, except a `type` filter, which then scanned the table twice (30 ms for a
-   type nothing has). The index answers it in 0.3–3 ms. It goes into `0001_init`, which may still
-   change before the first durable deploy (0026), as 0019 and 0050 note.
+   type nothing has). The index answers it in 0.3–3 ms. It first went into `0001_init`, as 0022's
+   decision 14 did before any deploy, but `migrate` skips an applied migration by name, and
+   databases past `0001` exist since #41 added `0002_success_answered`: they would never get it.
+   So it is its own migration, as the schema's header asks, with `IF NOT EXISTS` for a database
+   built from this branch (changed in Oskar's review).
 10. **Listings run on their own pool.** `/discovery/resources` is public and unauthenticated until
     0023, and ten concurrent callers held all ten main connections (117 calls/s measured), which
     `/settle` needs. Like `reserve` and `hit`, `list` gets three of its own; catalog writes stay
@@ -159,5 +175,5 @@ As a agent, I want to list catalog resources with the standard discovery filters
   contract allows it. Until then the 10 000 offset cap, the listing pool and 0023's rate limit
   bound it.
 - For 0015: a real `scheme` filter once `upto` is cataloged (note added there).
-- With 0009's option: a typed store-unavailable error mapped to 503 and `Retry-After` in the
-  shared handler, for every route.
+- With 0019's `StoreUnavailableError` option: a typed store-unavailable error mapped to 503 and
+  `Retry-After` in the shared handler, for every route.

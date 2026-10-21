@@ -20,8 +20,9 @@ discovery routes. Design: [the M1 spine](../../docs/architecture/m1-spine.md) (A
   settlement record on a restart.
 - `DATABASE_URL`: a `postgres://` URL, required with `STORE=postgres` and refused without it.
 - `pnpm migrate` applies the pending migrations; the service never changes the schema. Run it
-  before a release that adds one. This one adds `0002_success_answered`: on a database without
-  it, a success is answered once per process instead of once per payment.
+  before a release that adds one. `0002_success_answered`: on a database without it, a success is
+  answered once per process instead of once per payment. `0003_catalog_type_seq`: without it, a
+  `/discovery/resources` `type` filter scans the whole catalog.
 
 ## `/settle` answers
 
@@ -74,3 +75,22 @@ gets the same answer again, so a retry needs a new payment (a new nonce); only
 Until 0019 nothing finishes a `pending` record: every repeat of it gets `settlement_pending`.
 With `STORE=postgres` the record stays `pending` across restarts; with `STORE=memory` a restart
 drops it. Look the hash up on chain instead of repeating for long.
+
+## `/discovery/resources`
+
+`GET /discovery/resources` lists the catalog in upstream's `DiscoveryResourcesResponse`:
+`{ x402Version: 2, items, pagination: { limit, offset, total } }`, in a stable order with no
+ranking. `total` counts every entry the filters match.
+
+- Filters: `type`, `payTo`, `network`, `extensions` and `scheme`, alone or combined. A
+  well-formed network we don't serve, such as `eip155:8453`, and any `scheme` but `exact` give an
+  empty page.
+- `limit`: 20 by default, at most 100. A larger one is clamped, and `pagination.limit` echoes the
+  limit used. `limit=0` gives `total` alone.
+- `offset`: at most 10 000. Reach entries past it with a filter, `payTo` above all.
+- An empty value counts as absent: `?type=` doesn't filter.
+- `400 { error: "bad_request", param }` names the parameter: `limit` or `offset` not plain digits
+  or `offset` above 10 000, a repeated parameter, a value over 256 characters or with a control
+  character, a `network` that isn't CAIP-2, or a known name written otherwise (`type[]`, `payto`,
+  `Type`).
+- Other parameters are ignored, so a client that sends a newer filter still gets a page.

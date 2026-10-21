@@ -428,7 +428,7 @@ export class PostgresCatalogStore implements CatalogStore {
    * `total` is a separate count, so it stays right for an offset past the end, where a window
    * count would return no row. The filter is written out twice rather than shared through a CTE,
    * which PostgreSQL would materialize in full for its two readers; this way the count and the
-   * page each scan an index (measured on 18.3 at 100 000 entries: 22–25 ms with the CTE, 3–10 ms
+   * page each scan an index (measured on 18.3 at 100 000 entries: 14–25 ms with the CTE, 3–10 ms
    * without). They read only the narrow columns; `resource` is read for the page's rows alone, so
    * padded listings can't make a query costly.
    */
