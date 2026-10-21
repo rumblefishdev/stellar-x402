@@ -455,7 +455,14 @@ export function createSettler(deps: SettlerDeps): Settle {
         });
       } catch (error) {
         // A send that threw may have reached the network: keep the record open (0019 resolves it).
-        const unknown = attemptsOf(error).filter((attempt) => attempt.sent === "unknown");
+        // `sent: "yes"` is an accepted send or a refused one, so after an unexpected error it may
+        // still land too; a classified error says the pool knows it won't.
+        const errorReason = reasonFor(error);
+        const unknown = attemptsOf(error).filter((attempt) =>
+          errorReason === SETTLE_REASONS.unexpected
+            ? attempt.sent !== "no"
+            : attempt.sent === "unknown",
+        );
         if (unknown.length > 0) {
           uncertain = unknown.at(-1)!.hash;
           logger.warn("settlement_uncertain", {
@@ -471,7 +478,6 @@ export function createSettler(deps: SettlerDeps): Settle {
             origin: call.origin,
           };
         }
-        const errorReason = reasonFor(error);
         if (errorReason === SETTLE_REASONS.unexpected) {
           logger.error("settlement_submit_failed", { network, settlementKey: key, error });
           metrics.increment("settlement_submit_failures_total");
@@ -509,8 +515,8 @@ export function createSettler(deps: SettlerDeps): Settle {
       let fallback: Omit<Settled, "key"> | undefined;
       if (result) {
         // A success still carries the header (0031): the record as it would have been stored.
-        // Without a stored record there is no `markSuccessAnswered` and no `onSuccess`, so the
-        // key goes in `answeredHere` instead.
+        // Without a stored record there is no `markSuccessAnswered` and no `onSuccess`; the
+        // caller puts the key in `answeredHere` if it sends this answer.
         const record: SettlementRecord | undefined =
           result.status === "success"
             ? {
@@ -523,7 +529,6 @@ export function createSettler(deps: SettlerDeps): Settle {
                 updatedAt: now(),
               }
             : undefined;
-        if (record) answeredHere.add(key);
         fallback = { response: answerResult(result, verified.payer), record };
       } else if (uncertain) {
         fallback = {
@@ -760,7 +765,12 @@ export function createSettler(deps: SettlerDeps): Settle {
     const inTime = await within(submission, left());
     if (inTime) {
       const { record, won, origin, fallback } = inTime;
-      if (fallback) return { key, ...fallback };
+      if (fallback) {
+        // Only a success this call sends is answered: one the budget answer replaced was never
+        // sent, so a repeat still gets it (and a client that left marks nothing, as in `respond`).
+        if (fallback.record && !signal?.aborted) answeredHere.add(key);
+        return { key, ...fallback };
+      }
       if (!record) return { key, response: failure(SETTLE_REASONS.unexpected, payer) };
       return respond(record, signal, {
         afterResponse:
