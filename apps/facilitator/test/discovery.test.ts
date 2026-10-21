@@ -259,13 +259,14 @@ describe("GET /discovery/resources", () => {
   });
 
   it("ignores an unknown param, and logs and counts it", async () => {
+    const before = metrics.value("discovery_unknown_params_total");
     const { response, body } = await list("foo=1");
     expect(response.status).toBe(200);
     expect(body.pagination.total).toBe(N);
     expect(lines.map((line) => JSON.parse(line))).toContainEqual(
       expect.objectContaining({ event: "discovery_unknown_params", params: ["foo"] }),
     );
-    expect(metrics.value("discovery_unknown_params_total")).toBe(1);
+    expect(metrics.value("discovery_unknown_params_total")).toBe(before + 1);
   });
 
   it("logs at most 10 unknown names, each cut to 64 characters", async () => {
