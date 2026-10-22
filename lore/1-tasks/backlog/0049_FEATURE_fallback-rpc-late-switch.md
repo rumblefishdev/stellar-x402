@@ -35,6 +35,14 @@ history:
       Extended with frozen endpoints: one that keeps answering with a ledger that no longer
       advances is never switched away from, and settlements hang in `pending`. Kept here, not in
       PR #45, so every switching rule lives in one place.
+  - date: "2026-10-21"
+    status: backlog
+    who: claude
+    note: >
+      Narrowed by 0045 decision 21: PR #45 made FallbackRpc own the active URL that upstream
+      verify shares, with the switch counter, the return to the first endpoint and the switch logs.
+      Left here: frozen endpoints, transport-only RpcUnavailableError, fromUrls names, and the
+      Attempt.sent split.
 ---
 
 # Fix `FallbackRpc`'s switching: late answers, frozen endpoints, return to the first URL, URL-free logs
@@ -50,6 +58,14 @@ when no other call has switched since this one began.
 
 `FallbackRpc` also never leaves an endpoint that answers but has stopped advancing, never
 returns to its first endpoint, names endpoints by their full URL, and logs no switches. Fix those together, in the shape 0045 gave upstream verify's failover.
+
+**Done in 0045 (decision 21, PR #45):** `FallbackRpc` now owns the active URL that upstream verify
+shares; a switch counter guards `call()`, `sendTransaction` and the shared `markFailed`, so a late
+answer can't switch back (A → B → A included); with `failback` it probes the first endpoint every
+60 s and returns within 2 ledgers; `main()` builds it with `RPC_URLS[i]#<fingerprint>` names and
+logs `rpc_failover`, `rpc_failback` and `rpc_probe_failed`. What's left: frozen endpoints,
+transport-only `RpcUnavailableError`, `fromUrls`' names (no longer used by `main()`), and the
+`Attempt.sent` split.
 
 **Lane:** Payments
 
@@ -114,18 +130,29 @@ returns to its first endpoint, names endpoints by their full URL, and logs no sw
   accepted and refused. `/settle` now keeps a record `pending` after an unexpected error that
   follows any answered send, since `"yes"` can't tell an accepted send from a refused one; with
   the split, only an accepted one needs to.
+- From 0045 (Adam's last PR #45 review), none of them blocking it:
+  - The `RPC_URLS` docstring in `apps/facilitator/src/config.ts` still says the pool's reads stay
+    on the URL they moved to and upstream verify fails over on its own. Since 0045 decision 21
+    they share one active URL, and the pool returns to the first one too. Rewrite it to match.
+  - Refuse duplicate `RPC_URLS` entries: with `a,a` failover lands on the same provider and costs
+    a second 10 s.
+  - `failoverUpstream` keeps going after `/settle`'s budget has answered, since `bounded()` can't
+    cancel it: it tries the next URLs, reports their timeouts with `markFailed` and logs
+    `rpc_exhausted` for a request already answered. Stop it once the caller gives up, for example
+    with an abort signal or a deadline passed in.
 
 ## Acceptance Criteria
 
-- [ ] Given a call that began on an endpoint before another call switched away from it, when it
-      answers late, then the active endpoint doesn't change and `onSwitch` isn't called
-- [ ] A signer-pool test covers it, and fails with the old condition
-- [ ] Given calls on a fallback, when a probe finds endpoint 0 answering within 2 ledgers, then
-      calls return to it; a probe that fails or lags keeps them on the fallback
+- [x] Given a call that began on an endpoint before another call switched away from it, when it
+      answers late, then the active endpoint doesn't change and `onSwitch` isn't called (0045)
+- [x] A signer-pool test covers it, and fails with the old condition (0045)
+- [x] Given calls on a fallback, when a probe finds endpoint 0 answering within 2 ledgers, then
+      calls return to it; a probe that fails or lags keeps them on the fallback (0045)
 - [ ] Given an active endpoint whose ledger hasn't advanced for `STALE_AFTER_MS` while another
       advances, when the pool confirms a pending transaction, then calls move to the live endpoint,
       the switch is logged with reason `stale`, and the transaction ends `success`, `failed` or
       `expired` from the live endpoint's answer
 - [ ] Given every endpoint frozen, then `GET /health` reports `ready` false and no settlement is
       closed because of it
-- [ ] No `FallbackRpc` name or log line contains an RPC URL, and each switch is logged
+- [ ] No `FallbackRpc` name or log line contains an RPC URL, and each switch is logged (done for
+      `main()`'s client in 0045; `fromUrls` still names by URL)

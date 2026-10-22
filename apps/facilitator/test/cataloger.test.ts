@@ -89,6 +89,43 @@ describe("cataloger", () => {
     );
   });
 
+  it("catalogs what upstream 2.28 servers send by default (0053)", async () => {
+    const { cataloger, list } = setup();
+    // `@x402/core` sends `mimeType` and `description` as `|| ""`; `@x402/mcp` names a tool
+    // `mcp://tool/<name>` with `application/json`.
+    const http = record(
+      { info: { input: { type: "http", method: "GET" } } },
+      {
+        paymentPayload: {
+          x402Version: 2,
+          resource: { url: "http://localhost:4022/exact/stellar", description: "", mimeType: "" },
+          extensions: { bazaar: { info: { input: { type: "http", method: "GET" } } } },
+        } as unknown as PaymentPayload,
+      },
+    );
+    const tool = { info: { input: { type: "mcp", toolName: "exact_stellar", inputSchema: {} } } };
+    const mcp = record(tool, {
+      key: "stellar:testnet:GPAYER:2",
+      paymentPayload: {
+        x402Version: 2,
+        resource: { url: "mcp://tool/exact_stellar", mimeType: "application/json" },
+        extensions: { bazaar: tool },
+      } as unknown as PaymentPayload,
+    });
+    expect(cataloger.extensionResponses(http)).toEqual({ bazaar: { status: "processing" } });
+    expect(cataloger.extensionResponses(mcp)).toEqual({ bazaar: { status: "processing" } });
+    await cataloger.onSuccess(http, "settle");
+    await cataloger.onSuccess(mcp, "settle");
+    const entries = await list();
+    expect(entries.map((entry) => entry.resource)).toEqual([
+      "http://localhost:4022/exact/stellar",
+      "mcp://tool/exact_stellar",
+    ]);
+    expect(entries[0]).not.toHaveProperty("mimeType");
+    expect(entries[0]).not.toHaveProperty("description");
+    expect(entries[1]?.mimeType).toBe("application/json");
+  });
+
   it("keeps a newer listing when a success from an earlier ledger resolves later", async () => {
     const { cataloger, metrics } = setup();
     await cataloger.onSuccess(record(valid), "settle");

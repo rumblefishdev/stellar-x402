@@ -1,11 +1,18 @@
 import { Account, Keypair, StrKey, nativeToScVal, xdr, type rpc } from "@stellar/stellar-sdk";
+import type { SorobanRpc } from "@stellar-x402/signer-pool";
 import { FakeRpc } from "@stellar-x402/signer-pool/testing";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MemorySettlementStore } from "../src/adapters/memory.js";
 import { parseConfig, type Env } from "../src/config.js";
-import { jsonLogger } from "../src/logger.js";
-import { buildChecks, buildSettlement, compose } from "../src/main.js";
+import { jsonLogger, rpcEndpointName } from "../src/logger.js";
+import {
+  buildChecks,
+  buildRpc,
+  buildSettlement,
+  compose,
+  type UpstreamSeams,
+} from "../src/main.js";
 import { memoryMetrics } from "../src/metrics.js";
 import { feeSettings } from "../src/settlement/fees.js";
 import { SETTLE_REASONS } from "../src/settlement/settle.js";
@@ -76,7 +83,15 @@ function payload(expiration: number, extensions?: Record<string, unknown>): Paym
   return transferPayload({ payer, payTo, requirements }, expiration, extensions);
 }
 
-function setup(env: Partial<Env> = {}) {
+/**
+ * `rpc` gives the shared client's endpoints: each RPC URL is `fake` unless it returns another
+ * client for that URL; `rpcTimeoutMs` is how long a call may take on one.
+ */
+function setup(
+  env: Partial<Env> = {},
+  seams?: UpstreamSeams,
+  rpc: { endpoint?: (url: string) => SorobanRpc | undefined; timeoutMs?: number } = {},
+) {
   const config = parseConfig({
     FACILITATOR_SECRET: facilitator.secret(),
     CHANNELS: channel,
@@ -85,12 +100,27 @@ function setup(env: Partial<Env> = {}) {
     ...env,
   });
   const fake = new PaymentRpc({ [channel]: 1_000n });
-  const fees = feeSettings(config.fees, fake);
-  const checks = buildChecks(config, fake, fees, () => ({
-    verify: async () => ({ isValid: true, payer }),
-  }));
+  fake.feeStats = {
+    sorobanInclusionFee: { p90: String(BID) },
+  } as unknown as NonNullable<FakeRpc["feeStats"]>;
+  const upstreamLogger = { warn: vi.fn(), info: vi.fn() };
+  // The shared client, as `main()` builds it (AD-3).
+  const shared = buildRpc(
+    config,
+    upstreamLogger,
+    (url) => rpc.endpoint?.(url) ?? fake,
+    rpc.timeoutMs,
+  );
+  const fees = feeSettings(config.fees, shared);
+  const checks = buildChecks(
+    config,
+    shared,
+    fees,
+    upstreamLogger,
+    seams ?? { makeScheme: () => ({ verify: async () => ({ isValid: true, payer }) }) },
+  );
   const { settle } = buildSettlement(config, {
-    rpc: fake,
+    rpc: shared,
     fees,
     checks,
     store: new MemorySettlementStore(),
@@ -103,8 +133,86 @@ function setup(env: Partial<Env> = {}) {
     metrics: memoryMetrics(),
     sleep: async () => {},
   });
-  return { settle, fake };
+  return { settle, fake, upstreamLogger };
 }
+
+describe("main()'s /settle wiring, with a hung RPC_URLS[0]", () => {
+  const RPC_URLS = "https://rpc-a.example,https://rpc-b.example";
+  const rpc = (i: number) => rpcEndpointName(RPC_URLS.split(",")[i]!, i);
+  /** `RPC_URLS[0]` accepts the call and never answers; `RPC_URLS[1]` answers. */
+  const hungFirst = (timeoutMs: number): UpstreamSeams => ({
+    makeScheme: (_signer, options) => ({
+      verify: () =>
+        options.rpcConfig?.url === "https://rpc-a.example"
+          ? new Promise(() => {})
+          : Promise.resolve({ isValid: true, payer }),
+    }),
+    timeoutMs,
+  });
+
+  it("settles through RPC_URLS[1] once RPC_URLS[0]'s own timeout ends, and logs the switch", async () => {
+    const { settle, fake, upstreamLogger } = setup({ RPC_URLS }, hungFirst(50));
+    const { response } = await settle(payload(fake.ledger + 30), requirements);
+    expect(response).toMatchObject({ success: true, payer });
+    expect(fake.sent).toHaveLength(1);
+    expect(upstreamLogger.warn).toHaveBeenCalledWith(
+      "rpc_failover",
+      expect.objectContaining({ from: rpc(0), to: rpc(1), reason: "timeout" }),
+    );
+  });
+
+  it("answers the retryable timeout and sends nothing when the budget ends before the failover", async () => {
+    // RPC_URLS[0]'s 2 s outlasts the 1 s budget, as 41 s of fee-stats failover outlasts 30 s.
+    const { settle, fake } = setup({ RPC_URLS, SETTLE_BUDGET_MS: "1000" }, hungFirst(2_000));
+    const started = Date.now();
+    const { response } = await settle(payload(fake.ledger + 30), requirements);
+    expect(response).toMatchObject({ success: false, errorReason: SETTLE_REASONS.timeout });
+    expect(fake.sent).toHaveLength(0);
+    expect(Date.now() - started).toBeLessThan(1_800);
+  });
+});
+
+describe("main()'s /settle wiring, with RPC_URLS[0] hung for every client (AD-3)", () => {
+  const RPC_URLS = "https://rpc-a.example,https://rpc-b.example";
+  const HANG_MS = 600;
+  /** The shortest budget the config takes: one wait fits, two don't. */
+  const BUDGET_MS = 1_000;
+  /** Every call to RPC_URLS[0], upstream's and the shared client's, never answers. */
+  const hung = new Proxy({} as SorobanRpc, { get: () => () => new Promise(() => {}) });
+  const run = (env: Partial<Env>) =>
+    setup(
+      { RPC_URLS, SETTLE_BUDGET_MS: String(BUDGET_MS), ...env },
+      {
+        makeScheme: (_signer, options) => ({
+          verify: () =>
+            options.rpcConfig?.url === "https://rpc-a.example"
+              ? new Promise(() => {})
+              : Promise.resolve({ isValid: true, payer }),
+        }),
+        timeoutMs: HANG_MS,
+      },
+      {
+        endpoint: (url) => (url === "https://rpc-a.example" ? hung : undefined),
+        timeoutMs: HANG_MS,
+      },
+    );
+
+  // Two waits for the hung URL (upstream's, then the AD-22 read's) would outlast the budget.
+  it.each([
+    ["a fixed bid", {}],
+    ["the fee-stats bid", { INCLUSION_FEE_STROOPS: undefined }],
+  ])("waits for it once, so the first /settle fits the budget, with %s", async (_, env) => {
+    const { settle, fake, upstreamLogger } = run(env);
+    const started = Date.now();
+    const { response } = await settle(payload(fake.ledger + 30), requirements);
+    expect(response).toMatchObject({ success: true, payer });
+    expect(fake.sent).toHaveLength(1);
+    expect(Date.now() - started).toBeLessThan(BUDGET_MS);
+    expect(
+      upstreamLogger.warn.mock.calls.filter(([event]) => event === "rpc_failover"),
+    ).toHaveLength(1);
+  });
+});
 
 describe("main()'s /settle wiring, with the real pool", () => {
   it("settles through the pool with the hash it sent", async () => {
@@ -162,7 +270,7 @@ describe("main()'s composition (compose)", () => {
     const { deps, cataloger, metrics } = compose(config, {
       logger: jsonLogger("error", () => {}),
       rpc: fake,
-      makeScheme: () => ({ verify: async () => ({ isValid: true, payer }) }),
+      seams: { makeScheme: () => ({ verify: async () => ({ isValid: true, payer }) }) },
       sleep: async () => {},
     });
     return { deps, cataloger, metrics, fake };

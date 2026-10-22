@@ -14,6 +14,11 @@ import { z } from "zod";
 const DEFAULT_TESTNET_RPC = "https://soroban-testnet.stellar.org";
 /** Largest delay `setTimeout` accepts; longer ones fire at once. */
 const MAX_TIMER_MS = 2_147_483_647;
+/**
+ * Upstream verify tries each RPC URL for 10 s, so more URLs mean a longer worst case for
+ * `/verify` and for `/settle`'s check, which its budget must hold (AD-3, ADR 0011).
+ */
+export const MAX_RPC_URLS = 3;
 
 const list = z.string().transform((value) =>
   value
@@ -88,14 +93,18 @@ const envSchema = z
     PORT: int(0, 65_535).default("4021"),
     LOG_LEVEL: oneOf(["debug", "info", "warn", "error"]).default("info"),
     /**
-     * Comma-separated; the first is primary, the rest are fallbacks for the pool and the ledger
-     * reads. Upstream verify uses only the first, so `/verify` fails while it is down.
+     * Comma-separated, tried in order, at most 3: the pool and the ledger and fee-stats reads
+     * move to the next on a failure and stay there. Upstream verify (one scheme per URL) fails over
+     * on its own and returns to the first once a probe finds it healthy (AD-3). Each URL adds 10 s
+     * to upstream verify's worst case, twice that with fee-stats bids, which `/settle`'s budget
+     * must hold (ADR 0011).
      */
     RPC_URLS: list
       .pipe(
         z
           .array(z.string().refine(isHttpUrl, "must be http(s) URLs without credentials"))
-          .min(1, "must list at least one URL"),
+          .min(1, "must list at least one URL")
+          .max(MAX_RPC_URLS, `must list at most ${MAX_RPC_URLS} URLs`),
       )
       .optional(),
 
@@ -185,11 +194,6 @@ const envSchema = z
     /** Consecutive on-chain failures that open an asset or `payTo` breaker. */
     BREAKER_FAILURES: int(1).default("5"),
     BREAKER_COOLDOWN_MS: int(1_000).default("600000"),
-
-    /** Development only: also catalog `http:` resource URLs (testnet). */
-    CATALOG_ALLOW_HTTP: oneOf(["true", "false"])
-      .default("false")
-      .transform((value) => value === "true"),
   })
   .refine((env) => env.RPC_URLS !== undefined || env.NETWORK === STELLAR_NETWORKS.testnet, {
     message: "is required outside testnet",
@@ -224,10 +228,6 @@ const envSchema = z
   .refine((env) => (env.SETTLE_TIMEOUT_MS ?? 0) <= env.SETTLE_BUDGET_MS, {
     message: "must be at most SETTLE_BUDGET_MS",
     path: ["SETTLE_TIMEOUT_MS"],
-  })
-  .refine((env) => !env.CATALOG_ALLOW_HTTP || env.NETWORK === STELLAR_NETWORKS.testnet, {
-    message: "is only allowed on testnet",
-    path: ["CATALOG_ALLOW_HTTP"],
   })
   .refine((env) => env.STORE !== "memory" || env.NETWORK === STELLAR_NETWORKS.testnet, {
     message: "must be postgres outside testnet",
@@ -294,7 +294,6 @@ export interface Config {
     breakerFailures: number;
     breakerCooldownMs: number;
   };
-  catalog: { allowHttp: boolean };
 }
 
 /** Names every invalid setting; never echoes a value, so a secret can't leak into logs. */
@@ -378,7 +377,6 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
       breakerFailures: e.BREAKER_FAILURES,
       breakerCooldownMs: e.BREAKER_COOLDOWN_MS,
     },
-    catalog: { allowHttp: e.CATALOG_ALLOW_HTTP },
   };
 }
 
