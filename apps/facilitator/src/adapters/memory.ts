@@ -1,6 +1,8 @@
 import type { StellarNetwork } from "@stellar-x402/config";
 import {
   HashConflictError,
+  type AttemptBounds,
+  type AttemptUpdate,
   type CatalogEntry,
   type CatalogPage,
   type CatalogQuery,
@@ -12,6 +14,7 @@ import {
   type RateLimitHit,
   type RateLimitStore,
   type ReserveResult,
+  type SettlementAttempt,
   type SettlementKey,
   type SettlementRecord,
   type SettlementState,
@@ -26,6 +29,7 @@ import {
   assertLedger,
   assertStroops,
   extensionKeys,
+  isAttemptForward,
   isFinal,
   isForward,
   mergeCatalogEntry,
@@ -53,6 +57,8 @@ export class MemorySettlementStore implements SettlementStore {
   private readonly records = new Map<SettlementKey, SettlementRecord>();
   /** The record each hash belongs to. */
   private readonly hashes = new Map<string, SettlementKey>();
+  /** Each record's attempts, oldest first. */
+  private readonly attemptsOf = new Map<SettlementKey, SettlementAttempt[]>();
   private readonly leases = new Map<string, ChannelLease>();
 
   async claim(settlement: NewSettlement): Promise<ClaimResult> {
@@ -77,7 +83,12 @@ export class MemorySettlementStore implements SettlementStore {
     return key === undefined ? undefined : structuredClone(this.records.get(key));
   }
 
-  async addHash(key: SettlementKey, hash: string, updatedAt: number): Promise<boolean> {
+  async addHash(
+    key: SettlementKey,
+    hash: string,
+    updatedAt: number,
+    bounds?: AttemptBounds,
+  ): Promise<boolean> {
     const record = this.records.get(key);
     if (!record || isFinal(record.state)) return false;
     const owner = this.hashes.get(hash);
@@ -85,9 +96,38 @@ export class MemorySettlementStore implements SettlementStore {
     if (owner !== undefined) throw new HashConflictError(hash);
     this.hashes.set(hash, key);
     record.hashes.push(hash);
+    const attempts = this.attemptsOf.get(key) ?? [];
+    attempts.push({ hash, state: "stored", ...structuredClone(bounds), updatedAt });
+    this.attemptsOf.set(key, attempts);
     if (record.state === "claimed") record.state = "signed";
     record.updatedAt = updatedAt;
     return true;
+  }
+
+  async attempts(key: SettlementKey): Promise<SettlementAttempt[]> {
+    return structuredClone(this.attemptsOf.get(key) ?? []);
+  }
+
+  async markAttempts(
+    key: SettlementKey,
+    updates: AttemptUpdate[],
+    updatedAt: number,
+  ): Promise<number> {
+    return this.applyAttempts(key, updates, updatedAt);
+  }
+
+  private applyAttempts(key: SettlementKey, updates: AttemptUpdate[], updatedAt: number): number {
+    let moved = 0;
+    for (const update of updates) {
+      const attempt = this.attemptsOf.get(key)?.find((a) => a.hash === update.hash);
+      if (!attempt || !isAttemptForward(attempt.state, update.state)) continue;
+      attempt.state = update.state;
+      if (update.channel !== undefined) attempt.channel = update.channel;
+      if (update.errorCode !== undefined) attempt.errorCode = update.errorCode;
+      attempt.updatedAt = updatedAt;
+      moved++;
+    }
+    return moved;
   }
 
   async markSuccessAnswered(key: SettlementKey, at: number): Promise<boolean> {
@@ -104,10 +144,12 @@ export class MemorySettlementStore implements SettlementStore {
     update: SettlementUpdate,
   ): Promise<SettlementRecord | undefined> {
     if (update.feeCharged !== undefined) assertStroops(update.feeCharged, "feeCharged");
+    const { attempts, ...fields } = update;
+    if (attempts) this.applyAttempts(key, attempts, update.updatedAt);
     const record = this.records.get(key);
     if (!record || record.state !== expected || !isForward(expected, update.state))
       return undefined;
-    Object.assign(record, structuredClone(update));
+    Object.assign(record, structuredClone(fields));
     return structuredClone(record);
   }
 

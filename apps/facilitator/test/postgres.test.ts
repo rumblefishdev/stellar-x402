@@ -590,7 +590,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
         if (built === "branch")
           await old.query("CREATE INDEX catalog_type_seq ON catalog (type, seq)");
         expect(await typeIndex(old), built).toBe(built === "branch" ? 1 : 0);
-        expect(await migrate(old), built).toEqual(["0003_catalog_type_seq", "0004_spend_window"]);
+        expect(await migrate(old), built).toEqual([
+          "0003_catalog_type_seq",
+          "0004_spend_window",
+          "0005_settlement_attempts",
+        ]);
         expect(await typeIndex(old), built).toBe(1);
       } finally {
         await old.end();
@@ -611,7 +615,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
         `INSERT INTO spend_reservations (id, amount, at, state) VALUES ('a', 60, 5, 'committed');
          INSERT INTO spend_reservation_scopes (id, scope) VALUES ('a', 'global'), ('a', 'payer:P')`,
       );
-      expect(await migrate(old)).toEqual(["0004_spend_window"]);
+      expect(await migrate(old)).toEqual(["0004_spend_window", "0005_settlement_attempts"]);
       const { rows } = await old.query(
         "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",
       );

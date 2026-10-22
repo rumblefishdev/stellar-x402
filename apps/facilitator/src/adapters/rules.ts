@@ -2,6 +2,7 @@ import type { PaymentRequirements } from "@x402/core/types";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import {
   FINAL_SETTLEMENT_STATES,
+  type AttemptState,
   type CatalogEntry,
   type SettlementState,
 } from "../ports/index.js";
@@ -34,6 +35,24 @@ export const isFinal = (state: SettlementState): boolean => FINAL_SETTLEMENT_STA
  */
 export const isForward = (expected: SettlementState, next: SettlementState): boolean =>
   !isFinal(expected) && ORDER[next] > ORDER[expected];
+
+const ATTEMPT_ORDER: Record<AttemptState, number> = {
+  stored: 0,
+  sent: 1,
+  unknown: 1,
+  landed: 2,
+  dead: 2,
+};
+
+/** Whether an attempt in `current` may move to `next`: only forward (0019 decision 7). */
+export const isAttemptForward = (current: AttemptState, next: AttemptState): boolean =>
+  ATTEMPT_ORDER[next] > ATTEMPT_ORDER[current];
+
+/** `ATTEMPT_ORDER` as a SQL expression over `column`; a null column is `stored`. */
+export const attemptRankSql = (column: string): string =>
+  `CASE coalesce(${column}, 'stored') ${Object.entries(ATTEMPT_ORDER)
+    .map(([state, rank]) => `WHEN '${state}' THEN ${rank}`)
+    .join(" ")} END`;
 
 export function assertLedger(ledger: number): void {
   if (!Number.isSafeInteger(ledger) || ledger < 0)
