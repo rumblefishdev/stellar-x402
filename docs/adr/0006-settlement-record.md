@@ -3,8 +3,9 @@
 - Status: accepted
 - Date: 2026-10-07, amended 2026-10-15 (task 0009: a success is answered once; a repeat of an
   unsigned record ends it at the first call's budget), 2026-10-16 (task 0009: the store-outage
-  rule; a success answered while the store can't mark it) and 2026-10-20 (task 0009: a repeat's
-  settle timeout counts from the hash it sees; a refusal the store can't record)
+  rule; a success answered while the store can't mark it), 2026-10-20 (task 0009: a repeat's
+  settle timeout counts from the hash it sees; a refusal the store can't record) and 2026-10-22
+  (task 0019: attempt states, reconciliation sweeps, the outage leftovers)
 
 ## Context
 
@@ -55,9 +56,11 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
     calls get `settle_exact_stellar_already_settled` with the hash. `settlement_pending` doesn't
     count, and a call whose client left before the mark marks nothing.
   - When the store can't mark (it fails or misses its 1 s grace), the payment still landed, so the
-    caller gets the success. The process keeps the key in memory and answers every later call
-    `…_already_settled`. Known exception until 0019: after the store recovers, or on another
-    instance, a repeat can win the mark and get a second success.
+    caller gets the success. The process keeps the key in memory, answers every later call
+    `…_already_settled`, and marks it once the store is back (0019 decision 9). Known exception:
+    after a restart, or on another instance, nothing knows it was answered, so a repeat can win
+    the mark and get a second success, at most once. Marking every such record instead would
+    leave a buyer whose answer was `settlement_pending` paid with nothing to show.
   - A repeat with a different fingerprint is rejected with the stored hash, if any, and nothing is
     submitted.
 - **Wire mapping.** Every answer carries `network` and `payer`.
@@ -78,18 +81,27 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
     failures in a row, and the record is still open, so a repeat could answer otherwise;
   - at the success mark: the success, as above.
 
-  0019 finishes unfinished records once the store is back; how available the store must be is
-  set by ADR 0012 (task 0013), and its alarms are 0027's.
+  Reconciliation (0019) finishes unfinished records once the store is back: a failed write arms
+  a sweep that runs when the store answers again. How available the store must be is set by
+  ADR 0012 (task 0013), and its alarms are 0027's.
 
 - **One owner of the lifecycle.** A single settlement module in `apps/facilitator` writes every
   record change.
   - States only move forward: `claimed → signed → pending → success | failed | rejected | expired`.
   - Each write is a compare-and-set.
   - A record keeps every hash it was signed with, and can be found by any of them.
+  - Each hash keeps its attempt state (`stored → sent | unknown → landed | dead`) and its time
+    and ledger bounds (0019 decision 7). `sent` is written without waiting, so it can lag;
+    reconciliation decides from the network, never from these states.
 - **Durable hash.** `signer-pool` awaits an async `onSigned` before every send and aborts the
   send if it rejects (task 0016).
 - **Startup.** Before serving traffic, the module re-checks every non-final record on chain by its
-  hashes.
+  hashes; until each has been tried, `/settle` answers 503, and one the RPC couldn't check is
+  retried in the background. A hash the network doesn't know stays non-final until
+  its bound has passed; a record expires only once every hash's has. A claim with no hash is
+  closed as `settle_exact_stellar_interrupted`. Sweeps run again when the store answers after a
+  failed write, and every 5 minutes; a live sweep closes a hashless claim only past its settle
+  budget plus a margin (0019 decisions 1–13).
 - **Channel lease.** A process takes an exclusive, renewable lease on its network's channel set,
   and doesn't serve `/settle` without it.
   - Deploys stop the old process before the new one starts.
