@@ -344,7 +344,17 @@ describe("PostgreSQL stores", () => {
     const pools = app.pools;
     expect(pools).toBeDefined();
     try {
+      // The startup sweep reads the settlements on the main pool, and only there.
+      await app.reconciled;
+      const main = pools?.main.totalCount;
+      expect(main).toBeGreaterThan(0);
       const limits = [{ scope: "global" as const, maxStroops: 10n, windowMs: 1_000 }];
+      // Nothing but the main pool served the sweep.
+      expect([
+        pools?.reserve.totalCount,
+        pools?.rateLimits.totalCount,
+        pools?.discovery.totalCount,
+      ]).toEqual([0, 0, 0]);
       // Checkouts, not connections: a pool reuses an idle connection, so only a checkout shows
       // which pool a call ran on once the pool has one.
       const checkouts = { main: 0, reserve: 0, rateLimits: 0, discovery: 0 };
@@ -432,6 +442,7 @@ describe("PostgreSQL stores", () => {
       LOG_LEVEL: "error",
     });
     try {
+      await app.reconciled;
       const response = await fetch(`http://127.0.0.1:${app.port}/settle`, {
         method: "POST",
         headers: { "content-type": "application/json" },
