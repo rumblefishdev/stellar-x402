@@ -43,7 +43,8 @@ launch, this task decides how much of that to remove.
 - **The ECS Fargate variant** in the first version of ADR 0011 remains the managed alternative.
 - **From 0039 (PR #24 review), to settle before mainnet:**
   - a ruleset that protects `v*` tags, since the workflow at the tag runs with the mainnet key;
-  - a mainnet `deploy.sh` that accepts only a digest testnet has run;
+  - a mainnet `deploy.sh` that itself refuses a digest without a successful `testnet`
+    deployment (the workflow checks it today, ADR 0011);
   - named reviewers for mainnet deploys, and who may edit the environments;
   - whether admins may bypass the `mainnet` environment's reviewers (ADR 0011). GitHub lets them
     by default, so until then they can;

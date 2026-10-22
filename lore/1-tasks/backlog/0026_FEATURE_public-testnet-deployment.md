@@ -87,6 +87,8 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   `"files": ["dist"]` in `apps/facilitator/package.json` and a `.dockerignore` that excludes
   `.env*`; `node:22-slim` pinned by digest, `linux/amd64`, user `node`, read-only root filesystem.
   Images go to GHCR, tagged with the git SHA; the workflow skips the build when the SHA exists.
+  A successful testnet deploy records its digest and SHA as a GitHub Deployment in the `testnet`
+  environment, which mainnet later promotes from (ADR 0011).
 - From 0039, the deploy:
   - GitHub Actions connects over SSH to the server's existing SSH port, with the server's host
     key pinned in the workflow's `known_hosts`, as a deploy user with one key per network; each

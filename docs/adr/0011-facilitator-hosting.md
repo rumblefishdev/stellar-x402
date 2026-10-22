@@ -178,8 +178,13 @@ One request or one stop must never outlast the layer in front of it:
     read-only root filesystem and `CMD ["node", "dist/server.js"]`. Node is PID 1 and handles
     SIGTERM itself (`src/server.ts`).
 - **Images go to GitHub Container Registry,** tagged with the git SHA. The workflow skips the
-  build when the SHA is already there, and mainnet deploys the digest that ran on testnet. The
-  image is public, so the server needs no registry credential.
+  build when the SHA is already there. The image is public, so the server needs no registry
+  credential.
+- **Mainnet is promoted by digest.** A successful testnet deploy records its digest and SHA as a
+  GitHub Deployment in the `testnet` environment. The mainnet workflow takes a digest, never a
+  SHA or a tag, and refuses one without a successful `testnet` deployment: a rebase merge into
+  `deploy/testnet` gives new SHAs, and a tag can point at a commit whose image never ran on
+  testnet.
 - **GitHub Actions deploys over SSH:**
   - GitHub-hosted runners reach the server's SSH port, which the server's setup already opens to
     the internet, with key-only logins and fail2ban. There is no allowlist, since GitHub's address
@@ -220,7 +225,8 @@ One request or one stop must never outlast the layer in front of it:
   - Testnet deploys on a push to `deploy/testnet` unless only `lore/**`, `docs/**` or Markdown
     files changed, or by hand. A deploy is a pull request from `develop` to `deploy/testnet`.
     `develop` stays open for direct pushes such as lore status changes.
-  - Mainnet deploys by hand from a tag, through the `mainnet` environment with required reviewers.
+  - Mainnet deploys by hand from a `v*` tag, through the `mainnet` environment with required
+    reviewers, with the digest testnet recorded (above).
   - The SSH key is an environment secret, one per network, and each environment carries the
     rules the OIDC trust policy used to:
     - `testnet`: deployment branches limited to `deploy/testnet`, which is protected: a pull
@@ -238,8 +244,9 @@ One request or one stop must never outlast the layer in front of it:
   - Every action is pinned to a commit SHA, and the workflow sets `permissions: {}` and grants
     only what each job needs.
   - Before mainnet (0038): a ruleset that protects `v*` tags, since the workflow at the tag runs
-    with the mainnet key; a mainnet `deploy.sh` that accepts only a digest testnet has run, since
-    today only the workflow enforces it; named reviewers; and who may edit the environments.
+    with the mainnet key; a mainnet `deploy.sh` that itself refuses a digest without a testnet
+    deployment, since today only the workflow checks it; named reviewers; and who may edit the
+    environments.
 - **Rollback** redeploys an earlier digest through the same workflow; a failed deploy rolls back
   by itself (above).
 - **The compose files and the deploy scripts live in `deploy/`.** The SSH key can only send a
