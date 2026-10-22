@@ -57,13 +57,13 @@ asks OpenBao for signatures. There is no cold key: the hot key in OpenBao stays 
 | 5   | Platform runs OpenBao (0026). Payments owns the signer code, the key policy and the ADR. |
 | 6   | OpenBao does Transit signing only. Other secrets stay systemd credentials. |
 | 7   | The same setup on testnet and mainnet, with a separate key and policy per network. |
-| 8   | Keep both alarms: a fee bump on the fee account that our submitter didn't send (from Horizon), and low balance at 50 XLM. |
+| 8   | Keep both alarms: theft (a transaction on the fee account or a channel that our submitter didn't send, or a signer or threshold change on them, from Horizon off the server) and low balance at 25 XLM (B17). Amended 2026-10-22, #48 review. |
 | 9   | The facilitator reaches OpenBao only through a unix socket on a volume shared by the two containers. No TCP listener. |
-| 10  | AppRole login. Token `token_ttl` 1 h, `token_max_ttl` 24 h, renewed and re-logged-in automatically. The secret ID never expires. Break-in runbook: destroy the secret ID, revoke its tokens, issue a new one. |
+| 10  | AppRole login. Token `token_ttl` and `token_max_ttl` 1 h, no renewal, re-logged-in automatically (amended 2026-10-22, #48 review). The secret ID never expires. Break-in runbook: destroy the secret ID, revoke its tokens, issue a new one. |
 | 11  | The audit log goes to a file on its own volume, with rotation and an alarm at 80% disk. |
-| 12  | No standing admin access: the root token is revoked after setup and regenerated with the unseal key when needed. Admin is SSH plus the `bao` CLI; no web UI, no remote admin. |
+| 12  | No standing admin access: the root token is revoked after setup and regenerated with the recovery key when needed, through the legacy `/sys/generate-root/*` API on a root-only admin socket. Admin is SSH over that socket; no web UI, no remote admin. |
 | 13  | One OpenBao per server. Each network gets its own key, policy and AppRole. |
-| 14  | Token renewal and re-login live in our Transit `TransactionSigner`, not in an OpenBao Agent container. |
+| 14  | Re-login lives in our Transit `TransactionSigner`, not in an OpenBao Agent container. |
 | 15  | The key is generated inside OpenBao, `exportable=false`, on both networks. |
 | 16  | Daily encrypted Raft snapshots leave the server. The unseal key is kept apart from them (in AWS Secrets Manager since B1). Fallback if both are lost: new key, new accounts and channels. |
 | 16b | Snapshots go to our own sub-account and Borg repo on the company's existing Hetzner Storage Box, daily, keep 14. |
@@ -92,8 +92,8 @@ other projects already run.
 | #   | Decision |
 | --- | -------- |
 | B1  | **AWS Secrets Manager**, not KMS (KMS never gives a key back). 30-day recovery window. |
-| B2  | The AWS account soroban-explorer and prices-api share (`750702271865`, `eu-central-1`). |
-| B3  | **No AWS credentials on the facilitator's server.** Only people read or write the secret. |
+| B2  | The AWS account soroban-explorer and prices-api share (`eu-central-1`). |
+| B3  | **No AWS credentials on the facilitator's server that can read the secret.** Only people read or write it; the server may hold only the roles ADR 0011 names (amended 2026-10-21). |
 | B4  | **Any admin of that account can read it,** as for the other projects. Default `aws/secretsmanager` key. |
 | B5  | **AWS is the only copy.** No paper copy. The AWS account is a recorded dependency, like the Storage Box. |
 | B6  | One server runs both networks, so one OpenBao and **one secret**. A second server gets its own. |
@@ -112,7 +112,7 @@ Correction found by the research: with a static seal the root token is regenerat
 
 | #   | Decision |
 | --- | -------- |
-| B14 | Testnet: Friendbot by hand, with a one-line script in the 0026 runbook. |
+| B14 | Testnet: Friendbot by hand, with a short script in the 0026 runbook: Friendbot only creates accounts, so it funds a fresh account and merges it into the fee account. |
 | B15 | Mainnet: a manual withdrawal from the company's exchange account to the fee account. Nothing automatic for now. |
 | B16 | **Refill to 100 XLM, alarm at 25 XLM, no upper limit.** Re-check the amount after the first week of mainnet and every week after. Testnet uses the same numbers for now. |
 | B17 | The low-balance alarm is a **Slack message**; 0027 decides where the check runs and what the message says. |

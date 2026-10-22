@@ -76,8 +76,8 @@ compares. Record the choice in an ADR that supersedes ADR 0011's custody part.
 > from a KMS anyway
 > ([revisited](notes/R-key-custody-options.md#openbao-or-aws-kms-revisited)). On 2026-10-19
 > okarcz said the move to Hetzner was about cost. A leaked key reaches only our own float (about
-> 180 XLM at launch), so a separate machine or KMS costs more than it protects. **Preferred
-> (okarcz, 2026-10-19), not yet an ADR:** OpenBao on the facilitator's server with auto-unseal,
+> 130 XLM at launch), so a separate machine or KMS costs more than it protects. **Chosen
+> (okarcz, 2026-10-19), recorded in ADR 0013:** OpenBao on the facilitator's server with auto-unseal,
 > plus 0048 and a small float ([R-key-leak-impact](notes/R-key-leak-impact.md)).
 
 ## Context
@@ -122,7 +122,7 @@ compares. Record the choice in an ADR that supersedes ADR 0011's custody part.
   under any custody option; task 0048 covers them.
 - **Leak impact** (2026-10-19, [R-key-leak-impact](notes/R-key-leak-impact.md)): the key can't
   move buyers' or sellers' tokens, only the fee account's float and the channels' ~1.5 XLM each.
-  A launch float of about 150 XLM (alarm at 50, cold top-ups) caps a leak at about 180 XLM plus
+  A launch float of 100 XLM (alarm at 25, manual top-ups) caps a leak at about 130 XLM plus
   downtime, which 0048 shortens. A separate OpenBao machine (~€78–144 a year) costs more than
   that. Preferred: OpenBao on the facilitator's server with auto-unseal (the unseal key a root-only
   file outside OpenBao's data and backups); Shamir was rejected for its downtime on every restart.
@@ -151,7 +151,7 @@ compares. Record the choice in an ADR that supersedes ADR 0011's custody part.
 ### From Plan
 
 3. **OpenBao Transit in a container on the facilitator's server** (okarcz, 2026-10-19): the stakes
-   (~180 XLM) don't pay for a separate machine or a KMS. Question by question in
+   (~130 XLM) don't pay for a separate machine or a KMS. Question by question in
    [S-key-custody-decisions](notes/S-key-custody-decisions.md).
 4. **No cold key** (okarcz, 2026-10-19): only the hot key is kept. 0048 stays a mainnet blocker
    with a note to re-check its cold-key design. Losing OpenBao's data and the unseal key then loses
@@ -181,7 +181,7 @@ compares. Record the choice in an ADR that supersedes ADR 0011's custody part.
 - **0036**: the Transit `TransactionSigner` (retargeted from AWS KMS, now Payments).
 - **0026**: OpenBao's deployment, snapshots, the testnet key move and the runbook.
 - **0048**: re-check the thresholds and recovery design before mainnet.
-- **0027**: the fee-bump, low-balance, OpenBao-down and audit-disk alarms.
+- **0027**: the theft, low-balance, OpenBao-down and audit-disk alarms.
 - **A hosting ADR** for the move to Hetzner: ADR 0011 still describes AWS apart from custody.
 - **0026**: the backup secret, the init flags, the CLI steps, the restore drill, the Friendbot
   script, the weekly review, and the mainnet top-up owner (TBD before mainnet).

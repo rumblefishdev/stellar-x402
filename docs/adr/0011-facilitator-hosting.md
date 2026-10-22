@@ -184,7 +184,9 @@ One request or one stop must never outlast the layer in front of it:
 - **Rotating the key is an on-chain change.** AD-12 makes the facilitator key the only signer of
   every channel, so the service won't start with a new key. Rotation means:
   1. stop the service;
-  2. with the old key, make the new key the signer of every channel and the fee account;
+  2. with the old key, create the new key's own account, make the new key the signer of every
+     channel, and merge the old fee account into the new one (the pool pays from the signer's
+     address, so the fee account is the key's own account);
   3. update the parameter;
   4. start the service.
 

@@ -127,13 +127,15 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 > `FACILITATOR_SECRET` above. The facilitator moved to the company's Hetzner server; the rest of
 > this task still follows ADR 0011 until a hosting ADR replaces it.
 
-- **Containers:** OpenBao (the official image, pinned by digest) and the facilitator under Docker
-  Compose, started by a systemd unit that passes in the credentials. Neither gets the Docker
-  socket. Swap and core dumps off for OpenBao.
-- **Link:** a unix socket in a volume shared only by the two containers; no TCP listener.
+- **Containers:** OpenBao (the official image, pinned by digest) under its own unit,
+  `x402-openbao.service`, and each network's facilitator under that network's unit (ADR 0013),
+  each unit passing in its own credentials. None gets the Docker socket. Swap and core dumps off
+  for OpenBao.
+- **Link:** a socket per network, each in its own volume mounted only into that network's
+  facilitator, plus the admin socket (root-only, in no container); no TCP listener.
 - **Keys:** one Transit key per network, generated inside OpenBao, `type=ed25519`,
   `exportable=false`, `allow_plaintext_backup=false`. One policy per network allowing only
-  `transit/sign/<key>`, and one AppRole per network: `token_ttl` 1 h, `token_max_ttl` 24 h, a secret
+  `transit/sign/<key>`, and one AppRole per network: `token_ttl` and `token_max_ttl` 1 h, a secret
   ID that doesn't expire, delivered as a Compose secret.
 - **Unseal:** a static seal key as an encrypted systemd credential (`systemd-creds`, `host` mode).
   Note in the runbook whether the board has a TPM (ADR 0013's first upgrade).
@@ -145,41 +147,49 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   `aws/secretsmanager` key.
   - One JSON: `seal_key_hex`, `seal_key_id`, `seal_key_sha256`, `previous_seal_key_hex`,
     `previous_seal_key_id`, `recovery_key`, `borg_passphrase`, `borg_key_export`, `seal_config`,
-    `openbao_version`, `updated`.
+    `openbao_version`, `storage_box_ro_user`, `storage_box_ro_ssh_key`, `updated`.
   - Made by hand from an admin's machine, never by CDK: stage the JSON in `/dev/shm`,
     `aws secretsmanager create-secret`, `shred`. Every change (a seal key rotation, a new Borg
     passphrase, an OpenBao upgrade) is a `put-secret-value` of the whole JSON; the old version stays
     as `AWSPREVIOUS`.
-  - The server gets no AWS credentials. The runbook names the secret and its fields, never values.
-- **Admin:** the root token revoked after setup, regenerated with the recovery key when needed;
-  admin through SSH with the `bao` CLI; no UI.
+  - The server gets no AWS credentials that can read it: only the roles ADR 0011 names (today the
+    logs-and-metrics role, ADR 0013). The runbook names the secret and its fields, never values.
+- **Admin:** the root token revoked after setup, regenerated with the recovery key when needed
+  through the legacy `/sys/generate-root/*` API with curl (the 2.6+ CLI needs a token); admin
+  through SSH over the admin socket (root-only, in no container, with
+  `disable_unauthed_generate_root_endpoints=false`); no UI.
 - **Audit log:** a file on its own volume, rotated; alarm at 80% disk (0027).
 - **Snapshots:** daily Raft snapshots to our own sub-account and Borg repository on the company's
   existing Hetzner Storage Box, keeping 14, set up like that box's other sub-account. Tell
-  the team that owns the box that we depend on it. Decide the Borg mode (repokey or keyfile); in
+  the team that owns the box that we depend on it. The job uses its own AppRole with a
+  snapshot-only policy (`sys/storage/raft/snapshot`), its credential a systemd credential, over
+  the admin socket. A second, read-only sub-account on the same directory, its SSH key in the
+  backup secret, is what a restore uses. Decide the Borg mode (repokey or keyfile); in
   keyfile mode `borg key export` goes into the backup secret.
 - **Fee float** (ADR 0013): refill to 100 XLM, alarm at 25 XLM, no upper limit, the same numbers on
   testnet for now. Set `checkFacilitatorBalance`'s `minSpendableStroops` to 25 XLM (its default is
   100 XLM).
-- **Move testnet to the OpenBao key:** stop the service; with the current key, a `set_options` on
-  the fee account and each channel adds the OpenBao key and removes the current one; start the
-  service in `openbao` signer mode (0036).
+- **Move testnet to the OpenBao key:** stop the service; in one transaction signed by the current
+  key, create the OpenBao key's own account, a `set_options` on each channel adds the OpenBao key
+  and removes the current one, and an `accountMerge` moves the old fee account into the new one;
+  start the service in `openbao` signer mode with the new account as its address (0036).
 - **Runbook** in `docs/runbook.md`:
   - **restore drill:** on a throwaway machine with no route to production, using only the backup
     secret and the Storage Box: pull the newest snapshot, start OpenBao with the seal key and key
     ID, init, restore (first without `-force`, then with it), regenerate a root token with the
-    recovery key, issue an AppRole login, check that the Transit public key equals the on-chain
+    recovery key (legacy API), issue an AppRole login, check that the Transit public key equals the on-chain
     signer, check the CloudTrail event history for reads that weren't drills, destroy the machine,
     log the result. First on testnet, before mainnet; then quarterly and after any seal key
     rotation, passphrase change or OpenBao upgrade;
-  - **top-ups:** testnet with a one-line Friendbot script; mainnet by a withdrawal from the
+  - **top-ups:** testnet with a short Friendbot script (Friendbot only creates accounts, so it
+    funds a fresh account and merges it into the fee account); mainnet by a withdrawal from the
     company's exchange account to the fee account (no memo). **Who makes it, and a backup person:
     TBD before mainnet;**
   - **weekly review** after the mainnet deploy (okarcz): the real fee spend, the next refill
     amount, and whether ADR 0013's custody still fits the float;
   - a leaked token or secret ID: destroy the secret ID, revoke its tokens, issue a new one;
-  - a suspected key theft: new Transit key, move every account to it with the old key, drain the
-    rest, check the fee-bump alarm's history;
+  - a suspected key theft: new Transit key, then the same transaction as the move above with the
+    old key, check the theft alarm's history;
   - OpenBao upgrades and what `/settle` does meanwhile (it answers an error).
 
 ## Acceptance Criteria

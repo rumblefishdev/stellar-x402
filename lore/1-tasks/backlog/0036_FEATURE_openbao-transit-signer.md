@@ -43,31 +43,38 @@ the facilitator. It is built and tested against a local OpenBao in Docker, befor
   signature locally. A transaction signed only by OpenBao landed on testnet.
 - The submitter signs twice per settlement (the inner transaction and the fee bump), so OpenBao's
   latency counts twice.
-- ADR 0013's choices this task builds: a unix socket, AppRole with a 1-hour token renewed by the
-  signer, a sign-only policy per network, fail closed.
+- ADR 0013's choices this task builds: a unix socket, AppRole with a 1-hour token the signer
+  replaces by logging in again, a sign-only policy per network, fail closed.
 
 ## Implementation
 
 - **A Transit `TransactionSigner`** in `apps/facilitator/src/adapters/`, chosen by config:
-  - it hashes the transaction for the network, calls `transit/sign/<key>` with the hash, decodes
-    `vault:v1:<b64>` and adds the signature with the key's hint;
-  - its `address` comes from the key's public key in `transit/keys/<key>` at startup;
+  - it hashes the transaction for the network, calls `transit/sign/<key>` with the hash and the
+    `key_version` from config, decodes `vault:v<n>:<b64>` and adds the signature with the key's hint;
+  - its `address` comes from config: the OpenBao key's own account, which is also the fee account
+    (the pool pays fee bumps from `signer.address`, `submitter.ts`). The first signature is
+    verified against it and the signer fails closed on a mismatch. Startup doesn't call OpenBao,
+    and the policy needs no `read` on `transit/keys/<key>`;
   - it talks to OpenBao over a unix socket path from config.
-- **AppRole login and renewal** in the signer, not an OpenBao Agent: it reads the role ID and
-  secret ID from files (Compose secrets), logs in, renews the token before it expires and logs in
-  again when renewal is refused (`token_max_ttl` 24 h).
+- **AppRole login** in the signer, not an OpenBao Agent: it reads the role ID and secret ID from
+  files (Compose secrets), logs in, and logs in again before the token expires. No renewal:
+  `token_ttl` and `token_max_ttl` are both 1 h, so a leaked token can't be renewed past the hour.
 - **Fail closed:** a signing error makes `/settle` answer an error; there is no fallback key, and
   the error is logged and counted for 0027's alarm. `/verify` doesn't sign, so it is unaffected.
 - **Config:** a signer mode (`secret` for local and tests, `openbao` for deployments), the socket
-  path, the key name and the AppRole file paths. In `openbao` mode, `FACILITATOR_SECRET` is not read.
-- **Tests** against OpenBao in Docker (as the spike did): signing, an expired token, a refused
-  renewal, OpenBao down.
+  path, the key name, the key version, the address and the AppRole file paths. In `openbao` mode,
+  `FACILITATOR_SECRET` is optional and not read (`config.ts` requires it today), and `/verify`
+  builds upstream's scheme from the Transit signer instead of the secret (`main.ts`).
+- **Tests** against OpenBao in Docker (as the spike did): signing, an expired token, OpenBao
+  down.
 - **Measure** the latency per settlement over the socket.
 
 ## Acceptance Criteria
 
 - [ ] Given an OpenBao Transit Ed25519 key, when it signs a testnet settlement through the pool, then the transaction is accepted on chain
 - [ ] Given the `openbao` signer mode, when the facilitator starts, then no secret seed is read from the environment or a file
-- [ ] Given a token past its TTL, when the next settlement signs, then the signer has renewed it or logged in again without a restart
+- [ ] Given OpenBao down, when the facilitator starts, then it starts and `/verify` answers
+- [ ] Given a configured address that isn't the Transit key's, when the first settlement signs, then it fails closed and nothing is submitted
+- [ ] Given a token past its TTL, when the next settlement signs, then the signer has logged in again without a restart
 - [ ] Given OpenBao down or sealed, when `/settle` is called, then it answers an error, no other key signs, and the failure is logged and counted
 - [ ] The added latency per settlement is measured and recorded

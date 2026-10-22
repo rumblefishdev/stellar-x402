@@ -213,7 +213,7 @@ graph TD
 - **Prevents:** key sprawl, keys shared between networks, and channels another key can move.
 - **Rule:**
   - **Key.** Each network has one facilitator key. It signs for the channels and pays fee bumps, and it reaches the pool only as a `TransactionSigner`, so a remote signer can replace it. It lives in OpenBao Transit ([ADR 0013](../adr/0013-facilitator-key-custody.md)).
-  - **Config.** `FACILITATOR_SECRET` plus `CHANNELS` (addresses, never secrets).
+  - **Config.** `FACILITATOR_SECRET`, or in `openbao` mode the Transit key, its version and the fee account's address (ADR 0013), plus `CHANNELS` (addresses, never secrets).
   - **Startup check.** The service refuses to start unless every channel has its master key weight at 0 and the facilitator key as its only signer (`checkChannel`).
   - **Separation.** Testnet and mainnet never share a key or a channel.
 

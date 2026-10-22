@@ -282,16 +282,27 @@ the channels' reserves, about 130 XLM at launch (a 100 XLM float plus ~30 XLM of
 - **Mitigation:** The facilitator holds only an AppRole token allowed `transit/sign/<key>`, never the
   key. The token expires within 1 hour.
 - **Residual risk:** A leaked secret ID mints new tokens until it is destroyed (runbook, 0026). The
-  fee-bump alarm shows signatures we didn't send.
+  theft alarm shows transactions we didn't send.
+
+#### Code runs in the facilitator's container
+
+- **Attack:** A bug lets someone run code in the facilitator's container. They read the role ID and
+  secret ID from its tmpfs files, mint tokens, and have OpenBao sign any 32-byte hash for that
+  network's key, a channel `set_options` included.
+- **Mitigation:** None that stops it: nothing checks what OpenBao signs, and the secret ID doesn't
+  expire. The theft alarm detects it, the runbook destroys the secret ID, and the float caps the
+  loss.
+- **Residual risk:** Accepted at today's stakes, as for root on the server: they can also lock us
+  out of the channels (0048).
 
 #### Root on the server
 
 - **Attack:** Root, through another service on the shared server or a container escape, copies the
   key from OpenBao's memory, or its disk plus the unseal credential.
-- **Mitigation:** None that stops it. The fee-bump alarm (a fee bump on the fee account that our
-  submitter didn't send, read from Horizon) and the 25 XLM low-balance alarm catch it; the float caps
-  the loss. The float has no upper limit, so the weekly review re-checks that this custody still fits
-  it.
+- **Mitigation:** None that stops it. The theft alarm (a transaction on the fee account or a channel
+  that our submitter didn't send, or a signer or threshold change on them, read from Horizon off
+  the server) and the 25 XLM low-balance alarm catch it; the float caps the loss. The float has no
+  upper limit, so the weekly review re-checks that this custody still fits it.
 - **Residual risk:** Accepted at today's stakes. The hot key is each account's only signer (0048's
   cold key was declined for now), so a thief can also lock us out of the channels. Upgrades: TPM-bound
   credentials, OpenBao on its own machine, a KMS, and 0048 re-checked before mainnet.
@@ -307,11 +318,11 @@ the channels' reserves, about 130 XLM at launch (a 100 XLM float plus ~30 XLM of
 #### Someone reads the backup set in AWS
 
 - **Attack:** An admin of the AWS account soroban-explorer and prices-api share, or someone who takes
-  over such an admin, reads `x402/production/openbao-backup` and copies one snapshot from the Storage
-  Box. Together they open OpenBao's data and give the key.
-- **Mitigation:** The facilitator's server has no AWS credentials, so a break-in there doesn't reach
-  the secret. People sign in to AWS through SSO only. Each restore drill checks the 90-day CloudTrail
-  event history for reads that weren't drills; the fee-bump and balance alarms catch a theft.
+  over such an admin, reads `x402/production/openbao-backup` and, with the read-only Storage Box key
+  it holds, copies one snapshot. Together they open OpenBao's data and give the key.
+- **Mitigation:** The facilitator's server has no AWS credentials that can read the secret (only
+  ADR 0011's logs-and-metrics role), so a break-in there doesn't reach it. People sign in to AWS through SSO only. Each restore drill checks the 90-day CloudTrail
+  event history for reads that weren't drills; the theft and balance alarms catch a theft.
 - **Residual risk:** Accepted at today's stakes, as for root on the server. The account has no
   CloudTrail trail, so nothing alarms on a read; an alarm is a 0027 follow-up.
 

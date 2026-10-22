@@ -90,6 +90,11 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     message. Decide here where the check runs (in the facilitator, or off the server, e.g. a
     scheduled job reading Horizon, which still fires when the server is down) and what the message
     says (network, balance, the fee account's address, the runbook's top-up step).
+  - **Theft:** a transaction with the fee account or a channel as its source or fee source whose
+    hash our submitter didn't record, and any signer or threshold change on those accounts, read
+    from Horizon (`/accounts/{id}/transactions`). It runs off the server, since root on the server
+    is the case it is for. Decide here how it gets our hashes: they sit in the server's database,
+    where root could forge them; the signer check doesn't need them.
   - **Reads of the backup secret:** `GetSecretValue` on `x402/production/openbao-backup` outside a
     drill. The shared AWS account has no CloudTrail trail today, so this needs one; until then the
     drill checks the 90-day event history.
