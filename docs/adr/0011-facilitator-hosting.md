@@ -10,7 +10,9 @@
   version is in git history and task 0014. 2026-10-21: the key moved to OpenBao (ADR 0013), and
   deploys, reboots, backups, alarms and downtime were worked out in the PR #24 review.
   2026-10-22: pgBackRest for Postgres, migrations before the old facilitator stops, mainnet
-  promoted by a recorded digest, and the Hetzner Cloud VM weighed on its coupling (third round).
+  promoted by a recorded digest, and the Hetzner Cloud VM weighed on its coupling (third round);
+  the facilitator is reached through Cloudflare Tunnel on `sorobanscan.com` instead of the
+  server's Caddy.
 
 ## Context
 
@@ -34,12 +36,13 @@ The company already runs a Hetzner dedicated server for its production ClickHous
 
 - x86_64, with plenty of free CPU, RAM and disk, and ClickHouse held to a memory limit in its
   container;
-- Docker Compose, and Caddy already terminates HTTPS in the same compose project as ClickHouse.
+- Docker Compose, and Caddy already terminates HTTPS for ClickHouse's mutual-TLS endpoint, in the
+  same compose project as ClickHouse.
 
-Our containers are limited to 1.5 GiB of RAM per network, 1.75 GiB on testnet with OpenBao and
-3.25 GiB with both networks; on testnet they need about 2 GB of disk, WAL included. The
-`rumblefish.dev` zone is on Route 53 in the company AWS account, which also holds sorobanscan and
-the Stellar Prices API.
+Our containers are limited to 1.625 GiB of RAM per network, 1.875 GiB on testnet with OpenBao
+and 3.5 GiB with both networks; on testnet they need about 2 GB of disk, WAL included. The company
+bought `sorobanscan.com` for sorobanscan and the Stellar Prices API and moves it, as a whole zone,
+to Cloudflare on the Free plan.
 
 ## Decision
 
@@ -53,8 +56,11 @@ the Stellar Prices API.
     script, `digest` file and encrypted credentials. OpenBao, shared by both networks, has
     `/srv/x402/openbao/`.
   - Nothing else is there apart from the data volumes.
-- **Per network, two long-running containers and a one-off one:**
+- **Per network, three long-running containers and a one-off one:**
   - `facilitator-<network>`, memory limit 512 MiB and one CPU;
+  - `cloudflared-<network>`, Cloudflare's tunnel connector pinned by digest, memory limit
+    128 MiB. It has a unit of its own (below), so a deploy never restarts it and it keeps
+    forwarding while the facilitator drains;
   - `postgres-<network>`, PostgreSQL 18 pinned by digest, memory limit 1 GiB, data on a volume
     on the server's RAID. It has a unit of its own (below), so a facilitator deploy never
     restarts it;
@@ -64,17 +70,14 @@ the Stellar Prices API.
   and half a CPU.
   - Each network gets its own listener socket in its own volume, mounted only into that
     network's facilitator, so neither facilitator can reach the other network's socket.
-- **The limits add up to 1.5 GiB per network:** 1.75 GiB on testnet with OpenBao, 3.25 GiB with
-  both networks. They are ceilings; testnet uses less.
+- **The limits add up to 1.625 GiB per network:** 1.875 GiB on testnet with OpenBao, 3.5 GiB
+  with both networks. They are ceilings; testnet uses less.
 - **Testnet and mainnet never share a facilitator,** a database, a key or a channel set (AD-12).
   OpenBao is the one shared container.
-- **Neither container publishes a port on the host,** and each network gets two Docker networks
-  of its own:
-  - `x402-<network>-edge`: Caddy and that network's facilitator only. The facilitator reaches
-    the internet (RPC) through it. It is created once outside both projects
-    (`docker network create`, a runbook step done before the ClickHouse project's deploy) and is
-    `external: true` in both, so neither project's `down` removes it, and the facilitator's unit
-    creates it again if it's missing;
+- **No container publishes a port on the host,** and each network gets two Docker networks of
+  its own, both part of our compose project:
+  - `x402-<network>-edge`: that network's `cloudflared` and facilitator only. Both reach the
+    internet through it: `cloudflared` to Cloudflare, the facilitator to its RPC URLs;
   - `x402-<network>-db`: `internal: true`, the facilitator, its Postgres and the migration
     service only, with no route out.
   - No facilitator joins the ClickHouse project's `app` network, so neither reaches ClickHouse or
@@ -126,7 +129,8 @@ One request or one stop must never outlast the layer in front of it:
 | `/settle` checks                  | see below          | inside the budget: past it, `…_timeout` and nothing is claimed     |
 | Repeat wait (`SETTLE_TIMEOUT_MS`) | 20 s, ≤ the budget | and never past the repeat's own budget                             |
 | `stop_grace_period`               | 180 s              | sent submissions (≤ 90 s) plus a 90 s margin                       |
-| Node `keepAliveTimeout`           | 125 s              | above Caddy's idle keep-alive (2 min), or Caddy sees 502s          |
+| Cloudflare's response limit       | 100 s              | above the 80 s cap; past it Cloudflare answers 524                 |
+| Node `keepAliveTimeout`           | 125 s              | above `cloudflared`'s idle keep-alive (90 s), or it sees 502s      |
 | Container healthcheck             | 10 s               | liveness only                                                      |
 | `LEASE_TTL_MS`                    | 30 s               | after a crash, a new process waits at most this long               |
 | Wait for `ready: true`            | 120 s              | past it, the deploy rolls back to the previous digest              |
@@ -163,7 +167,7 @@ One request or one stop must never outlast the layer in front of it:
 - **The budget covers the wait for a channel.** The pool's own bounds (60 s + 30 s) start only
   once a channel is acquired, so the `/settle` handler passes the pool a deadline (0009).
 - **On SIGTERM the facilitator stops taking `/settle` itself** (503), refuses at once every call
-  not yet signed and sent, lets only sent ones finish, and drains (0025). Caddy has no
+  not yet signed and sent, lets only sent ones finish, and drains (0025). `cloudflared` has no
   deregistration step, so it keeps forwarding until the container is gone and answers 502 while
   it is down.
 
@@ -217,9 +221,12 @@ One request or one stop must never outlast the layer in front of it:
     expand/contract keeps the older image working on a schema that did move forward. If
     `lock_timeout` hits, the deploy fails before anything was stopped.
   - **`x402@<network>.service` owns the facilitator.** Its `ExecStartPre` decrypts the network's
-    credentials (below) and creates the edge network if it's missing. It neither pulls nor
-    migrates: `ExecStart` starts only the facilitator (`--no-deps`) from the image in `digest`,
-    which the deploy pulled, and `ExecStop` stops it, which gives it its `stop_grace_period`.
+    credentials (below). It neither pulls nor migrates: `ExecStart` starts only the facilitator
+    (`--no-deps`) from the image in `digest`, which the deploy pulled, and `ExecStop` stops it,
+    which gives it its `stop_grace_period`.
+  - **`x402-tunnel@<network>.service` owns `cloudflared`.** It decrypts the tunnel token itself,
+    as OpenBao's unit does, and is enabled at boot. `x402@` runs after it, so at a reboot the
+    tunnel stops last and answers reach the clients while the facilitator drains.
   - **`x402-db@<network>.service` owns Postgres.** The facilitator's unit requires it and runs
     after it, so at a reboot the facilitator drains while the database is still up. Both are
     enabled at boot, and `x402@` reads the same `digest`, so a reboot starts the image that was
@@ -257,17 +264,25 @@ One request or one stop must never outlast the layer in front of it:
 
 ### Network and URL
 
-- **A `rumblefish.dev` subdomain is a prerequisite:** an A record in the company's Route 53 zone
-  pointing at the server. The proposal is `testnet.x402.rumblefish.dev`.
-- **Caddy terminates HTTPS** with an automatic Let's Encrypt certificate and proxies the subdomain
-  to the facilitator. Its config lives in the ClickHouse project's repo and is applied by that
-  project's deploy.
-  - Adding the facilitator's site block is a pull request to that repo, agreed with its team.
-  - The site block uses plain public TLS, with no client certificate.
-- **`TRUSTED_PROXY_HOPS=1`** (AD-11): Caddy is the one proxy that appends `X-Forwarded-For`. It
-  is Express's numeric `trust proxy`, so the client IP is the rightmost entry (0023).
-- **No edge rate limiting;** the in-app limits (AD-11, AD-18) apply. Mainnet revisits this
-  (0038).
+- **Cloudflare is the DNS and the edge, through Cloudflare Tunnel.** The hostnames are
+  `x402-facilitator-testnet.sorobanscan.com` and `x402-facilitator.sorobanscan.com`, one label
+  under the zone, since the Free plan's certificate covers only one level of subdomain.
+  - Each network has its own tunnel. Its `cloudflared` opens outbound connections to Cloudflare
+    (port 7844) and forwards its hostname to `http://facilitator-<network>:<port>`; anything
+    else gets 404. The server opens no port for it.
+  - HTTPS ends at Cloudflare, so Cloudflare sees the requests in plain text. They carry signed
+    payments, never keys.
+  - The tunnel, its routing and the DNS record are Terraform in the `soroban-infrastructure`
+    repo's `cloudflare/`, beside the `sorobanscan.com` zone, so routing changes are reviewed
+    there. It writes the tunnel token to AWS Secrets Manager, and an operator moves it into an
+    encrypted systemd credential (runbook), since the server's only AWS role can't read secrets.
+  - Caddy and the ClickHouse project's repo are not involved.
+- **The client IP is `CF-Connecting-IP`** (AD-11), which Cloudflare sets on every request. Only
+  `cloudflared` reaches the facilitator, so a client can't forge it, and `X-Forwarded-For` is
+  ignored (0023).
+- **Edge rate limiting:** the Free plan allows one rate-limit rule per zone, shared with
+  sorobanscan and the Prices API, so the in-app limits (AD-11, AD-18) carry the load. Mainnet
+  revisits this (0038).
 
 ### Keys, secrets and access
 
@@ -295,8 +310,8 @@ One request or one stop must never outlast the layer in front of it:
     credentials".
 - **`FACILITATOR_SECRET` stays for local development and tests.** Deployed networks use the OpenBao
   signer instead.
-- **Other secrets are encrypted systemd credentials,** as in ADR 0013: the database password, and
-  an RPC URL that carries an API key.
+- **Other secrets are encrypted systemd credentials,** as in ADR 0013: the database password, an
+  RPC URL that carries an API key, and the tunnel token.
   - `systemd-creds` keeps them encrypted on disk with the host key. The `ExecStartPre` of each
     network's unit decrypts its own to `/run/x402/<network>/` (tmpfs, mode 0700), and Compose
     mounts them as `file:` secrets, so they are plain only in memory. OpenBao's unit
@@ -412,14 +427,17 @@ One request or one stop must never outlast the layer in front of it:
 ## Rationale
 
 - **The capacity is already paid for.** The server has a lot of free RAM and disk, and our
-  containers are limited to 1.75 GiB on testnet and 3.25 GiB with both networks. Running there
+  containers are limited to 1.875 GiB on testnet and 3.5 GiB with both networks. Running there
   costs about €0 more, against about $60–70 a month on testnet and $150 on mainnet for ECS
   Fargate.
 - **It meets both hard rules.** Compose stops the old container first, and the grace period has no
   platform cap, so 180 s covers the drain with room to spare.
 - **The alerting design carries over:** the same logger, the same EMF metrics, CloudWatch alarms
   and Slack.
-- **Caddy and Docker are already on the server.**
+- **Docker is already on the server,** and the company already runs sorobanscan's API behind
+  Cloudflare.
+- **The tunnel needs nothing from the ClickHouse project:** no site block in its Caddy, no
+  network created before its deploy, and no inbound port on the server.
 
 ## Alternatives considered
 
@@ -436,7 +454,6 @@ One request or one stop must never outlast the layer in front of it:
 
   | On the shared server                                           | On a VM of our own                       |
   | -------------------------------------------------------------- | ---------------------------------------- |
-  | Caddy lives in the ClickHouse project's repo and deploy        | our own Caddy and deploy                 |
   | one `dockerd`: restarting Docker touches ClickHouse            | our own `dockerd`                        |
   | one disk: `pg_wal` growth and logs                             | our own disk                             |
   | reboots and patching are shared, and their owner is open       | we patch on our schedule                 |
@@ -465,6 +482,15 @@ One request or one stop must never outlast the layer in front of it:
   It still fits side jobs, such as topping up the fee balance and rebuilding channels after a
   testnet reset.
 
+- **The server's Caddy, in the ClickHouse project,** as the edge and reverse proxy, with an
+  A record in Route 53 (`testnet.x402.rumblefish.dev`). This was this section until 2026-10-22.
+  Rejected: our site block would live in that project's repo and deploy, a deploy there that
+  recreates Caddy without it takes the facilitator offline, and the edge networks would have to
+  exist before that project's deploy. The company is also moving sorobanscan to Cloudflare.
+- **Cloudflare's proxy in front of that Caddy:** Cloudflare as the edge, Caddy as the reverse
+  proxy behind it. It keeps the Caddy coupling, and needs an origin lock (Authenticated Origin
+  Pulls in our site block), since the server's address is already public under ClickHouse's own
+  name.
 - **ClickHouse as the store.** Rejected; see Store.
 - **Key custody** (AWS KMS, a key file, OpenBao and others): compared in ADR 0013 (task 0047).
 - **Grafana Cloud Free for metrics and alerts.** $0, but a second vendor whose alert rules sit
@@ -480,17 +506,17 @@ One request or one stop must never outlast the layer in front of it:
     gets 90 s. The shared `daemon.json` stays as it is. A reboot takes up to about 3 minutes
     longer.
   - Patching needs an owner and a schedule, which the team decides.
-  - Caddy couples them too. Our site block lives in the ClickHouse project's repo and deploy, so
-    a deploy there that recreates Caddy without it takes the facilitator offline. The uptime
-    alarm catches it. The site block carries a comment that it belongs to x402, that project's
-    team is asked to tag us on Caddy changes, and it is who we call. The edge networks live
-    outside both projects, so neither project's `down` removes them. A Caddy of our own on a
-    second IPv4 address is the way out if this bites (0038).
+- **Cloudflare and `soroban-infrastructure` are dependencies instead.**
+  - The tunnel, its routing and the DNS record live in another repo, applied by whoever holds its
+    Cloudflare token, so renaming the facilitator's service or port is a pull request there.
+  - Cloudflare's Free plan has no uptime SLA, and an outage there takes the facilitator off the
+    internet; the uptime alarm catches it. A paid plan is a mainnet question (0038).
+  - The server must allow outbound connections to Cloudflare on port 7844.
 - **It is one physical machine.** A hardware fault takes the facilitator down until the server is
   repaired or the service is restored elsewhere from the off-server backups, which can take hours.
   Restoring elsewhere is a runbook step (0026) and a mainnet risk (0038).
 - **Operations are ours:** Docker and OS updates, PostgreSQL upgrades, backups and restore drills,
-  and the Caddy site block.
+  and `cloudflared` upgrades.
 - **Deploy downtime is usually under a minute:** a quick drain when idle, a container start, and
   reconciliation; the pull and the migrations run before the stop. At worst it is about 5
   minutes: a 180 s drain and up to 120 s for `ready: true`. The uptime alarm waits 7 failing
@@ -504,20 +530,21 @@ One request or one stop must never outlast the layer in front of it:
 - **0026 builds:**
   - the Dockerfile, the compose files and the deploy script;
   - the systemd units: `x402@<network>`, `x402-db@<network>`, `x402-deploy@<network>`,
-    `x402-openbao`, the restart timer and the backup timer;
-  - the edge networks, outside both projects;
+    `x402-tunnel@<network>`, `x402-openbao`, the restart timer and the backup timer;
+  - the `cloudflared` container, with the tunnel token moved from AWS Secrets Manager into a
+    systemd credential. The tunnel, its routing and the DNS record come from
+    `soroban-infrastructure`, after the `sorobanscan.com` zone is on Cloudflare;
   - the deploy user, its one `sudo` rule, the SSH forced command, the workflow with the pinned
     host key, and the `deploy/testnet` branch with its protection;
   - the OpenBao container (ADR 0013), the IAM Roles Anywhere logging role and its certificate,
     and the secret files;
-  - the backups (pgBackRest to the Storage Box), the Caddy site block (a pull request
-    to the ClickHouse project's repo) and the DNS record;
+  - the backups (pgBackRest to the Storage Box);
   - `GET /health` with `ready`, the Node keep-alive setting, and the migration bounds;
   - the config reading secrets from files (`*_FILE`), since nothing reads them today;
   - the runbook: deploy, rollback, key rotation, certificate renewal, restore on another machine.
 - **0027 builds:** log shipping through the CloudWatch agent, the EMF adapter, the alarms above,
   the us-east-1 uptime stack and the Slack integration.
-- **0023 implements `TRUSTED_PROXY_HOPS`** as above.
+- **0023 keys the limiter on `CF-Connecting-IP`** as above.
 - **Cost:**
   - The server adds nothing.
   - CloudWatch logs, metrics and alarms, and the health check, come to a few dollars.
@@ -527,7 +554,7 @@ One request or one stop must never outlast the layer in front of it:
   - two facilitator containers with separate channel sets on this server, which give deploys
     without downtime but no protection from hardware faults;
   - a second machine or a standby;
-  - edge rate limiting.
+  - edge rate limiting, and whether mainnet needs a paid Cloudflare plan for its uptime SLA.
 - **Slack is not a pager.** On mainnet, the alerts that cost money (breaker open, low balance,
   pending settlements) also need a phone or SMS route.
 

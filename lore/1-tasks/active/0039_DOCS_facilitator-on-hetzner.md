@@ -39,6 +39,12 @@ history:
       Rebased onto #41 and #48. Third review round (Oskar): one OpenBao per server, pgBackRest
       for Postgres, migrations before the old facilitator stops, mainnet promoted by a recorded
       digest, and the Hetzner Cloud VM weighed on its coupling. Design Decisions added.
+  - date: "2026-10-22"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      The public URL moves to Cloudflare Tunnel on sorobanscan.com (Slack with Marek and Marcin):
+      cloudflared per network, the tunnel and DNS in soroban-infrastructure, no Caddy site block.
 ---
 
 # Move facilitator hosting to the company Hetzner server in ADR 0011
@@ -67,7 +73,7 @@ build on it.
 ## Acceptance Criteria
 
 - [x] ADR 0011 describes hosting on the Hetzner server: containers and limits, stop-before-start
-      deploys, Caddy, the key in OpenBao (ADR 0013), Postgres on the server with off-server
+      deploys, the public URL through Cloudflare Tunnel, the key in OpenBao (ADR 0013), Postgres on the server with off-server
       backups, CloudWatch from the server, and the consequences of a shared single server
 - [x] The tasks that build on ADR 0011 (0009, 0013, 0019, 0023, 0025, 0026, 0027, 0038), the
       spine and `deploy/README.md` match the revised ADR; 0036 is reshaped by 0047 (ADR 0013)
@@ -131,3 +137,21 @@ Taken while writing these, without a separate review:
 21. **During the rebase onto #41 and #48:** the Timing table carries #41's rows, logs name RPC
     endpoints `RPC_URLS[i]#<fingerprint>`, and reading secrets from files moved from 0020
     (nearly done) to 0026.
+
+From the Slack thread with Marek and Marcin (2026-10-22):
+
+22. **Cloudflare Tunnel on `sorobanscan.com` instead of the server's Caddy.** Cloudflare is the
+    DNS and the edge; a `cloudflared` per network forwards to its facilitator, with no inbound
+    port and nothing in the ClickHouse project's repo. The tunnel, its routing and the DNS record
+    are Terraform in `soroban-infrastructure`, beside the zone.
+23. **One label under the zone:** `x402-facilitator-testnet.sorobanscan.com` and
+    `x402-facilitator.sorobanscan.com`, since the Free plan's certificate covers one level.
+
+Taken while writing the tunnel in:
+
+24. **`cloudflared` gets its own unit (`x402-tunnel@`) and a 128 MiB limit,** so deploys never
+    restart it and it stops after the facilitator at a reboot, while answers are still going
+    out. The memory totals grow to 1.875 GiB on testnet and 3.5 GiB with both networks.
+25. **The tunnel token reaches the server by hand** from AWS Secrets Manager into a systemd
+    credential, like ADR 0013's backup secret in reverse, since the server can't read secrets.
+26. **The client IP is `CF-Connecting-IP`,** replacing `TRUSTED_PROXY_HOPS` (0023, spine).

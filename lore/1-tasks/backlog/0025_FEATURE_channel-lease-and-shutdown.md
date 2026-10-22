@@ -62,8 +62,8 @@ As a facilitator operator, I want only one process at a time to settle through a
 - From 0022: once `server.close()` runs, Node 22 stops enforcing `headersTimeout` and
   `requestTimeout`, so a client that stalls mid-headers keeps the server open indefinitely. With
   `STORE=postgres` the process was still running 137 s after SIGTERM, past the 120 s SIGKILL of
-  the time (180 s now); a bare `http` server reproduces it. Caddy normally doesn't forward such
-  clients, since it reads the whole request head first, but the drain and the lease release run
+  the time (180 s now); a bare `http` server reproduces it. Cloudflare normally doesn't forward
+  such clients, since it reads the whole request head first, but the drain and the lease release run
   after `close()`, so they need a deadline, e.g. `closeAllConnections()` once in-flight requests
   had their time.
 - From 0022: `acquireLease` compares `expires_at`, stamped by the holder's clock, with the

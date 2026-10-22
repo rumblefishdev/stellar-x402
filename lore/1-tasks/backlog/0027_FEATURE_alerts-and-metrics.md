@@ -23,6 +23,10 @@ history:
     status: backlog
     who: okarcz
     note: "0047 (ADR 0013 amended): the low-balance alarm at 25 XLM as a Slack message, and a CloudTrail alarm on reads of the backup secret."
+  - date: "2026-10-22"
+    status: backlog
+    who: stkrolikiewicz
+    note: "0039: the uptime check targets the Cloudflare Tunnel hostname on sorobanscan.com."
 ---
 
 # Alerts and metrics
@@ -76,7 +80,9 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
   - The alarm needs more failing minutes than a deploy's worst downtime, which includes the
     migrations and the wait for `ready` (ADR 0011's Consequences). It fires after 7 failing
     minutes in a row; ADR 0011 gives the reasoning.
-  - Check `/supported` once 0020 lands, `/health` before.
+  - Check `/supported` once 0020 lands, `/health` before, at
+    `x402-facilitator-testnet.sorobanscan.com` (Cloudflare Tunnel, ADR 0011), so a Cloudflare
+    or tunnel outage counts as downtime.
   - The 99% figure counts a minute as up only when the check passes and the facilitator is ready
     to settle.
   - From 0020: `/supported` answers an object fixed at startup, so its 200 shows only that the

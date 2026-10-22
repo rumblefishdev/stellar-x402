@@ -39,6 +39,10 @@ history:
     status: backlog
     who: stkrolikiewicz
     note: "PR #24 round three: pgBackRest backups, migrations before the old facilitator stops, testnet deploys record their digest for mainnet."
+  - date: "2026-10-22"
+    status: backlog
+    who: stkrolikiewicz
+    note: "Public URL through Cloudflare Tunnel on sorobanscan.com, from Marek's and Marcin's Slack proposal; no Caddy site block or Route 53 record."
 ---
 
 # Public testnet deployment
@@ -78,15 +82,21 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     120 s, a set `shm_size`, data on a volume mounted at `/var/lib/postgresql` (the 18 image
     moved `PGDATA` to `/var/lib/postgresql/18/docker` and refuses the old `…/data` mount),
     reachable only from the facilitator and the migration service.
-  - Networks `x402-testnet-edge` (Caddy and the facilitator) and `x402-testnet-db`
-    (`internal: true`, the facilitator, Postgres and the migration service). The edge network is
-    created once outside both projects, before the ClickHouse project's deploy, and is
-    `external: true` in both; `x402@testnet` creates it again if it's missing.
+  - Networks `x402-testnet-edge` (`cloudflared-testnet` and the facilitator) and
+    `x402-testnet-db` (`internal: true`, the facilitator, Postgres and the migration service),
+    both part of our compose project.
+  - `cloudflared-testnet`: Cloudflare's tunnel connector pinned by digest, memory limit 128 MiB,
+    under its own unit `x402-tunnel@testnet.service`, enabled at boot and untouched by deploys,
+    so it keeps forwarding while the facilitator drains; `x402@testnet` runs after it. The unit
+    decrypts the tunnel token, an encrypted systemd credential, and `cloudflared` reads it from a
+    file (`--token-file`; check that the pinned version has it), never from `environment:`. The
+    server must allow outbound connections on port 7844.
   - OpenBao (ADR 0013): one container for both networks in `/srv/x402/openbao/`, pinned by
     digest, memory limit 256 MiB and half a CPU, a listener socket per network in its own volume,
     its own unit `x402-openbao.service` for the unseal credential. Its snapshots and restore
     drill follow ADR 0013 (task 0047).
-  - Node `keepAliveTimeout` 125 s, with `headersTimeout` above it; `TRUSTED_PROXY_HOPS=1`.
+  - Node `keepAliveTimeout` 125 s, above `cloudflared`'s 90 s idle keep-alive, with
+    `headersTimeout` above it; the client IP from `CF-Connecting-IP` (0023).
 - From 0039, the image: `pnpm deploy --prod` with `injectWorkspacePackages: true`;
   `"files": ["dist"]` in `apps/facilitator/package.json` and a `.dockerignore` that excludes
   `.env*`; `node:22-slim` pinned by digest, `linux/amd64`, user `node`, read-only root filesystem.
@@ -112,9 +122,9 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     `ready: true` from `/health`; if the restart fails or `ready` doesn't come, it restores the
     previous digest, restarts again and fails. `systemctl start` waits for it, so the job gets
     the result, and a dropped SSH session doesn't cut it;
-  - `x402@testnet.service` decrypts the credentials to `/run/x402/testnet/` (tmpfs, 0700),
-    creates the edge network if it's missing and starts only the facilitator (`--no-deps`) from
-    the image in `digest`, without pulling or migrating; `ExecStop` stops it. It requires and runs after
+  - `x402@testnet.service` decrypts the credentials to `/run/x402/testnet/` (tmpfs, 0700) and
+    starts only the facilitator (`--no-deps`) from the image in `digest`, without pulling or
+    migrating; `ExecStop` stops it. It requires and runs after
     `x402-db@testnet.service`, which runs Postgres. Both run after `docker.service`, the
     facilitator's with `TimeoutStopSec` 200 s, and both are enabled at boot;
   - it runs on a push to `deploy/testnet` unless only `lore/**`, `docs/**` or Markdown changed,
@@ -142,15 +152,16 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   credentials, and the passphrase is also kept beside ADR 0013's backup secret in AWS Secrets
   Manager. Decide how the database reaches the box: a second network for Postgres, or pgBackRest
   on the host. The restore drill adds `pgbackrest check` and `pgbackrest verify`.
-- From 0039: the Caddy site block for the subdomain is a pull request to the ClickHouse project's
-  repo, agreed with its team, with plain public TLS (no client certificate) and a comment that
-  the block belongs to x402. Its compose declares the edge network `external: true`. An A record
-  in Route 53 points at the server. Record that team's answers here, as the Prices API did in its
-  task 0045.
+- From 0039: the public URL is `x402-facilitator-testnet.sorobanscan.com` through Cloudflare
+  Tunnel (ADR 0011). Prerequisites: the `sorobanscan.com` zone on Cloudflare, and the testnet
+  tunnel with its routing (the hostname to `http://facilitator-testnet:<port>`, anything else
+  404) and DNS record, both Terraform in `soroban-infrastructure`'s `cloudflare/`, which writes
+  the tunnel token to AWS Secrets Manager. Nothing goes into the ClickHouse project's repo.
 - From 0039: `GET /health` answers 200 and reports `ready` in its body.
 - From 0039, the runbook: deploy, copying the compose file and `deploy.sh` from a reviewed
   commit, rollback (automatic on a failed deploy; by hand, redeploy an earlier digest), long
-  migrations outside the deploy, reboots, creating the edge networks, renewing the Roles
+  migrations outside the deploy, reboots, moving the tunnel token from AWS Secrets Manager into
+  its systemd credential, renewing the Roles
   Anywhere certificate, key rotation as an on-chain signer change, and restoring the service on
   another machine.
 - From 0013 ([ADR 0012](../../../docs/adr/0012-facilitator-state-store.md)), the database, on the
