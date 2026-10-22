@@ -32,6 +32,11 @@ As a reviewer of the grant, I want e2e results with real settled transaction has
 - `/supported` (0020) must list `exact` on `stellar:testnet` with `extra.areFeesSponsored: true`: the canonical client throws without it (found in the 0028 recon).
 - From the 0028 review: the gate also needs `/supported` to list the facilitator key under a `stellar:` signer, because it fails any settlement whose fee another account paid.
 - From the 0028 review: the saved run holds the upstream commit, date, facilitator URL, its signers and each transaction, but no facilitator version; the facilitator has to expose one for this task's results.
+- From 0053: the catalog now takes the suite's `http://localhost:<port>/…` and
+  `mcp://tool/<name>` URLs, so a run against the public testnet facilitator leaves about 18 such
+  entries in its durable catalog (one key per server and route, refreshed by each run; nothing
+  deletes them), and 0042's demo lists them. The suite's Bazaar check still waits for
+  `/discovery/search` (0028).
 - From the 0028 review: the first criterion says "verify → settle" for each scenario, but the 9 `upfront` scenarios settle without a `/verify` (answered in 0028); reword it before starting.
 
 ## Implementation
