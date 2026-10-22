@@ -55,7 +55,7 @@ launch, this task decides how much of that to remove.
 
 - Set concrete targets for this decision: the longest downtime and the most data lost after a
   hardware fault that mainnet accepts. One machine is fine for testnet, and its backups lose
-  about 6 minutes (ADR 0011).
+  about a minute (ADR 0011).
 - Weigh the mainnet uptime target (99%, `docs/monitoring.md`) against the measured downtime of a
   testnet deploy, a crash and a restore drill.
 - If two containers are chosen:

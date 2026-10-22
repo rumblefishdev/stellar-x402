@@ -126,11 +126,14 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   - the config reads `DATABASE_URL_FILE`, `RPC_URLS_FILE` and the OpenBao AppRole files when
     they are set, and the plain variables otherwise, for local runs;
   - no TLS to `postgres-testnet` on the internal network; `scram-sha-256` passwords.
-- From 0039: backups of `postgres-testnet` leave from the host. Postgres archives WAL to a local
-  volume (`archive_timeout` 60 s); a timer takes a daily `pg_basebackup` and sends the archive
-  with Borg every 5 minutes to our own sub-account on the company's existing Storage Box, kept
-  14 days, in a Borg repository encrypted with a passphrase kept beside ADR 0013's backup
-  secret; a restore drill follows.
+- From 0039: backups of `postgres-testnet` go off the server with pgBackRest. Postgres hands each
+  WAL segment to it (`archive_command`, `archive-async`, `archive_timeout` 60 s), and a timer
+  runs a daily `pgbackrest backup`. The repository is of type `sftp`, in `pgbackrest/` on our own
+  sub-account on the company's existing Storage Box (beside Borg's `openbao/`), compressed and
+  encrypted, kept 14 days. Its passphrase and the Storage Box SSH key are encrypted systemd
+  credentials, and the passphrase is also kept beside ADR 0013's backup secret in AWS Secrets
+  Manager. Decide how the database reaches the box: a second network for Postgres, or pgBackRest
+  on the host. The restore drill adds `pgbackrest check` and `pgbackrest verify`.
 - From 0039: the Caddy site block for the subdomain is a pull request to the ClickHouse project's
   repo, agreed with its team, with plain public TLS (no client certificate) and a comment that
   the block belongs to x402. Its compose declares the edge network `external: true`. An A record

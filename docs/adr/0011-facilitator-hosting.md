@@ -309,20 +309,27 @@ One request or one stop must never outlast the layer in front of it:
 - **PostgreSQL in a container per network, on the same server.** It holds the schema and adapter
   rules of [ADR 0012](0012-facilitator-state-store.md).
 - **Sizing:** about 2–4 KB per payment. That is under 1 GB on testnet and about 1 GB a month on
-  mainnet at 10,000 payments a day, plus up to about 1 GB of WAL.
-- **Backups are ours, and they leave from the host,** so the database stays on its `internal`
-  network:
-  - Postgres archives WAL to a local volume (`archive_command`, `archive_timeout` 60 s);
-  - a systemd timer on the host takes a daily `pg_basebackup` and sends the archive off the
-    server with Borg every 5 minutes, so a hardware fault loses at most about 6 minutes;
-  - the target is our own sub-account on the company's existing Hetzner Storage Box, the box
-    ADR 0013 uses for OpenBao's snapshots, with the same 14-day retention;
-  - the Borg repository is encrypted, with its passphrase in AWS Secrets Manager beside
-    ADR 0013's backup secret, since the box belongs to another project;
+  mainnet at 10,000 payments a day. `pg_wal` stays small, since each segment leaves as it closes
+  (below) and Postgres recycles it.
+- **Backups leave the server with pgBackRest,** on testnet as on mainnet:
+  - Postgres hands each WAL segment to pgBackRest (`archive_command`, `archive-async`), which
+    compresses, encrypts and pushes it at once. `archive_timeout` stays 60 s, so a hardware fault
+    loses about a minute. The lease writes WAL every few seconds, so a mostly empty 16 MB segment
+    closes every minute; compressed, it costs little, and nothing piles up on the server's disk;
+  - a systemd timer takes a daily backup (`pgbackrest backup`);
+  - the repository is of type `sftp`, on our own sub-account on the company's existing Hetzner
+    Storage Box, the box ADR 0013 uses for OpenBao's snapshots: `pgbackrest/` beside Borg's
+    `openbao/`, kept 14 days;
+  - it is encrypted. Its passphrase and the Storage Box SSH key are encrypted systemd
+    credentials on the server, and the passphrase is also kept in AWS Secrets Manager beside
+    ADR 0013's backup secret, since the box belongs to another project and the server's only AWS
+    role can't read secrets;
+  - how the database reaches the box, a second network for Postgres or pgBackRest on the host, is
+    settled in 0026;
   - an S3 bucket in the company AWS account is the fallback. Using it needs its own named,
     write-only role, never the logging role;
-  - a restore drill runs on testnet before mainnet, and 0038 sets mainnet's targets for downtime
-    and data loss.
+  - a restore drill, with `pgbackrest check` and `pgbackrest verify`, runs on testnet before
+    mainnet, and 0038 sets mainnet's targets for downtime and data loss.
 - **The migrations** run from the new image in the stop-before-start gap: after the old
   facilitator stops and before the new one starts (ADR 0012). Nothing serves while they run, so
   they add to the deploy's downtime. Every migration is still expand/contract, so a rollback to an
@@ -472,7 +479,7 @@ One request or one stop must never outlast the layer in front of it:
     host key, and the `deploy/testnet` branch with its protection;
   - the OpenBao container (ADR 0013), the IAM Roles Anywhere logging role and its certificate,
     and the secret files;
-  - the backups (WAL archive, base backups, encrypted Borg), the Caddy site block (a pull request
+  - the backups (pgBackRest to the Storage Box), the Caddy site block (a pull request
     to the ClickHouse project's repo) and the DNS record;
   - `GET /health` with `ready`, the Node keep-alive setting, and the migration bounds;
   - the config reading secrets from files (`*_FILE`), since nothing reads them today;

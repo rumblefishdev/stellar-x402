@@ -38,12 +38,12 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
     facilitator deploy never restarts it.
   - Only that network's facilitator and the migration service reach it, over the `internal`
     network `x402-<network>-db`.
-  - Backups: Postgres archives WAL to a local volume, and a timer on the host takes a daily base
-    backup and sends both off the server with Borg every 5 minutes, encrypted, to our own
-    sub-account on the company's existing Hetzner Storage Box, kept 14 days (ADR 0011). They
-    allow point-in-time restore and lose at most about 6 minutes. An alarm fires when archiving
-    fails, since `pg_wal` then grows on a disk ClickHouse shares. An S3 bucket in the company AWS
-    account is the fallback. A restore drill runs on testnet before mainnet.
+  - Backups: pgBackRest pushes each WAL segment as it closes, compressed and encrypted, and takes
+    a daily backup, to our own sub-account on the company's existing Hetzner Storage Box over
+    SFTP, kept 14 days (ADR 0011). They allow point-in-time restore and lose about a minute. An
+    alarm fires when archiving fails, since `pg_wal` then grows on a disk ClickHouse shares. An S3
+    bucket in the company AWS account is the fallback. A restore drill, with `pgbackrest check`
+    and `verify`, runs on testnet before mainnet.
   - Minor upgrades are a digest bump in a planned window; a major upgrade is planned on its own.
 - **Access.**
   - The `pg` driver and small fixed pools per process: 10 connections, plus 3 for
