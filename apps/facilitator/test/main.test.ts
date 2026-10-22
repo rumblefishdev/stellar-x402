@@ -161,9 +161,9 @@ describe("main()", () => {
   });
 
   it("serves /supported for its own key, never a channel", async () => {
-    const app = await main({ ...env, PORT: "47136", LOG_LEVEL: "error" });
+    const app = await main({ ...env, PORT: "0", LOG_LEVEL: "error" });
     try {
-      const response = await fetch("http://127.0.0.1:47136/supported", {
+      const response = await fetch(`http://127.0.0.1:${app.port}/supported`, {
         headers: { origin: "https://other.example" },
       });
       expect(response.headers.get("access-control-allow-origin")).toBeNull();
