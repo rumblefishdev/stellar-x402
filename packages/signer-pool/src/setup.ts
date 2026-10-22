@@ -22,11 +22,6 @@ export interface CreateChannelsOptions {
   /** Inclusion fee per operation, in stroops. */
   fee?: number;
   startingBalance?: string;
-  /**
-   * Set each channel's master key weight to 0, so only the facilitator key can sign for it.
-   * Default true: the channel secrets can then be thrown away.
-   */
-  disableMasterKey?: boolean;
 }
 
 /**
@@ -59,7 +54,8 @@ export function buildCreateChannelsTx(opts: CreateChannelsOptions): Transaction 
       Operation.setOptions({
         source: ch.publicKey(),
         signer: { ed25519PublicKey: facilitator.accountId(), weight: 1 },
-        ...(opts.disableMasterKey === false ? {} : { masterWeight: 0 }),
+        // Only the facilitator key can sign for the channel, so its secret can be thrown away.
+        masterWeight: 0,
       }),
     );
   }
@@ -76,15 +72,13 @@ export type ChannelProblem =
 /**
  * Checks that a channel exists and that the facilitator is its only signer: the facilitator's
  * weight meets the medium threshold (which transactions and payments need), the master key
- * weight is 0, and no other key can sign. `allowMasterKey` accepts channels created with
- * `disableMasterKey: false`. Only an answer with no entry is reported as `missing`; other RPC
- * errors are thrown, since they say nothing about the channel.
+ * weight is 0, and no other key can sign. Only an answer with no entry is reported as `missing`;
+ * other RPC errors are thrown, since they say nothing about the channel.
  */
 export async function checkChannel(
   rpc: Pick<SorobanRpc, "getLedgerEntries">,
   channel: string,
   facilitator: string,
-  opts: { allowMasterKey?: boolean } = {},
 ): Promise<ChannelProblem | undefined> {
   let entry;
   try {
@@ -101,7 +95,7 @@ export async function checkChannel(
   // Thresholds are [master weight, low, medium, high]. Most operations need medium.
   const [masterWeight = 0, , medium = 0] = entry.thresholds();
   if (signer.weight() < Math.max(1, medium)) return "thresholds-too-high";
-  if (!opts.allowMasterKey && masterWeight > 0) return "master-key-active";
+  if (masterWeight > 0) return "master-key-active";
   if (entry.signers().some((s) => !isFacilitator(s) && s.weight() > 0)) return "extra-signer";
   return undefined;
 }

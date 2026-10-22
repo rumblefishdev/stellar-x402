@@ -86,9 +86,6 @@ describe("checkChannel", () => {
     const other = Keypair.random().publicKey();
     const withMaster = accountEntry([{ key: fac, weight: 1 }], [1, 0, 0, 0]);
     expect(await checkChannel(rpcWith(withMaster), ch, fac)).toBe("master-key-active");
-    expect(await checkChannel(rpcWith(withMaster), ch, fac, { allowMasterKey: true })).toBe(
-      undefined,
-    );
     const shared = accountEntry([
       { key: fac, weight: 1 },
       { key: other, weight: 1 },

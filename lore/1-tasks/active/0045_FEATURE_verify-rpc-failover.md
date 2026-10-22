@@ -33,6 +33,13 @@ pool and our ledger reads) has a working fallback. Make `/verify` fail over too,
 - 0018 builds upstream with `rpcUrls[0]` and answers its `unexpected_verify_error`, and any call
   past a 10 s deadline, with a 500. The `RPC_URLS` docstring says so.
 - Upstream also reads Horizon for the ledger close time, with no failover and no timeout.
+- A local gate run on 2026-10-22 (0028 harness, PR #51 build, default single RPC URL) passed 14 of
+  18: from 09:33 to 09:37 UTC `soroban-testnet.stellar.org` gave no answer within 10 s, so
+  `/verify` and the checks inside `/settle` answered 500 three times. With one URL, failover has
+  nowhere to go, so `deploy/testnet.env.example` lists more than one provider (decided
+  2026-10-22). Public testnet RPCs on the Stellar providers page
+  (developers.stellar.org/docs/data/apis/rpc/providers): SDF and Gateway answered
+  `getLatestLedger` that day; Nodies' listed URL answered 404 on `/`.
 
 ## Implementation
 
@@ -45,3 +52,5 @@ pool and our ledger reads) has a working fallback. Make `/verify` fail over too,
 - [ ] Given `RPC_URLS` with a down first URL and a working second, when `/verify` is called, then it
       answers from the second URL, not with a 500
 - [ ] The choice is recorded in spine AD-3
+- [ ] Given `deploy/testnet.env.example`, when it is read, then `RPC_URLS` names at least two
+      public testnet providers

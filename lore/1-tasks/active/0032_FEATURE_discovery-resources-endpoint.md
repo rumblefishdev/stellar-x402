@@ -34,6 +34,13 @@ As a agent, I want to list catalog resources with the standard discovery filters
 - Reads `CatalogStore`; builds on the in-memory fake until 0022 lands.
 - Search and ranking come in a later tranche.
 - The x402 e2e suite checks a facilitator's Bazaar only together with `/discovery/search`, so the gate (0028) runs without `--extensions=bazaar` until search exists; turn it on then.
+- That check can't pass against our catalog as it is (local gate run, 2026-10-22). It expects
+  `/discovery/resources` to list `http://localhost:<port>/…` for the HTTP servers and
+  `mcp://tool/<name>` for the MCP one (upstream `e2e/extensions/bazaar.ts:146-152` at `10b2d06`).
+  Our validator refuses http, loopback hosts (ADR 0008) and any non-web scheme, so every one of
+  the 18 settlements logged `catalog_rejected`. 16 of them failed even earlier, on
+  `resource.mimeType`: upstream's server sends `mimeType: ""` when a route sets none
+  (`@x402/core` 2.28.0, `routeConfig.mimeType || ""`). Both are fixed by 0053.
 - Related tasks: 0031, 0017.
 
 ## Implementation
