@@ -18,7 +18,7 @@ import { ConfigError, parseConfig } from "../src/config.js";
 import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger, rpcEndpointName } from "../src/logger.js";
 import { main, start, type Started } from "../src/main.js";
-import { hardened, rpcStub } from "./rpc-stub.js";
+import { hardened, ledgerEntries, rpcStub } from "./rpc-stub.js";
 
 const secret = Keypair.random().secret();
 const facilitator = Keypair.fromSecret(secret).publicKey();
@@ -286,15 +286,38 @@ describe("main()", () => {
 });
 
 describe("upstream's console.error in main()", () => {
-  it("never writes the RPC URL's key to stderr when upstream's RPC call fails", async () => {
-    // The stub answers only the startup check's reads; upstream's simulation gets a 503 and
-    // upstream prints the AxiosError.
-    const rpcUrl = `${rpc.url}/apikey-S3CR3T`;
+  it("never writes an RPC URL's key to a log line or stderr when upstream's RPC calls fail", async () => {
+    // Both URLs answer 503, so upstream's simulation fails and it prints the AxiosError. On the
+    // second request the second URL answers a failed simulation: a verdict, from `RPC_URLS[1]`.
+    // Upstream's 503 is `unexpected_verify_error`, which moves no client (0045 decision 22).
+    let request = 0;
+    const rpc = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", () => {
+        const { id, method, params } = JSON.parse(body) as {
+          id: number;
+          method: string;
+          params: { keys: string[] };
+        };
+        res.setHeader("content-type", "application/json");
+        // The startup check's reads find the channel set up as AD-12 requires.
+        if (method === "getLedgerEntries") {
+          const accounts = { [env.CHANNELS]: hardened(facilitator) };
+          return void res.end(
+            JSON.stringify({ jsonrpc: "2.0", id, result: ledgerEntries(params.keys, accounts) }),
+          );
+        }
+        if (request < 2 || !req.url?.includes("0TH3R")) return void res.writeHead(503).end();
+        res.end(JSON.stringify({ jsonrpc: "2.0", id, result: { latestLedger: 1, error: "boom" } }));
+      });
+    }).listen(0, "127.0.0.1");
+    await once(rpc, "listening");
+    const base = `http://127.0.0.1:${(rpc.address() as AddressInfo).port}`;
     const child = spawn(process.execPath, ["--import", "tsx", "src/server.ts"], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),
-      env: { ...env, PORT: "47130", RPC_URLS: rpcUrl },
+      env: { ...env, PORT: "47130", RPC_URLS: `${base}/apikey-S3CR3T,${base}/apikey-0TH3R` },
     });
-
     // A transfer that passes upstream's checks up to the simulation.
     const asset = StrKey.encodeContract(Buffer.alloc(32, 7));
     const payer = Keypair.random().publicKey();
@@ -338,28 +361,32 @@ describe("upstream's console.error in main()", () => {
     let stdout = "";
     let stderr = "";
     child.stderr.on("data", (chunk) => (stderr += chunk));
-    let status: Promise<number> | undefined;
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-      if (status || !stdout.includes('"listening"')) return;
-      status = fetch("http://127.0.0.1:47130/verify", {
+    const post = () =>
+      fetch("http://127.0.0.1:47130/verify", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
-      })
-        .then((response) => response.status)
-        .finally(() => child.kill("SIGTERM"));
+      }).then((response) => response.status);
+    let statuses: Promise<number[]> | undefined;
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      if (statuses || !stdout.includes('"listening"')) return;
+      statuses = (async () => {
+        const first = await post();
+        request = 2;
+        return [first, await post()];
+      })().finally(() => child.kill("SIGTERM"));
     });
     await once(child, "exit");
 
-    expect(await status).toBe(500);
+    expect(await statuses).toEqual([500, 200]);
     const events = stdout
       .split("\n")
       .filter(Boolean)
       .map((line) => JSON.parse(line));
-    expect(events).toContainEqual(
-      expect.objectContaining({ level: "error", event: "console_error" }),
-    );
-    expect(stdout + stderr).not.toContain("S3CR3T");
+    for (const event of ["console_error", "rpc_exhausted", "http_error", "verified"]) {
+      expect(events.map((e) => e.event)).toContain(event);
+    }
+    for (const key of ["S3CR3T", "0TH3R"]) expect(stdout + stderr).not.toContain(key);
   }, 20_000);
 });

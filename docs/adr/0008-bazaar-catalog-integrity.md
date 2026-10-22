@@ -1,7 +1,7 @@
 # ADR 0008: Bazaar foundation: catalog after settle, validated and SSRF-safe
 
 - Status: accepted
-- Date: 2026-10-07
+- Date: 2026-10-07, amended 2026-10-22 (task 0053: resource URLs and empty fields)
 
 ## Context
 
@@ -32,12 +32,23 @@ settlement.
   - Both `http` and `mcp` input types are accepted.
   - Malformed required fields reject the listing. Malformed optional fields (`serviceName`,
     `tags`, `iconUrl`) are dropped.
+  - An empty `description` or `mimeType` counts as absent: upstream's resource server sends both
+    as `|| ""` when a route sets none (task 0053).
 - **SSRF safety.**
   - `iconUrl` must be absolute https, with no IP literals and no loopback or private hosts.
   - The facilitator never fetches any seller-supplied URL in Tranche 1.
+  - Resource URLs carry a scheme allowlist by listing type (task 0053): an `http` listing takes
+    `https` and `http`, an `mcp` listing also `mcp` (`@x402/mcp`'s `mcp://tool/<name>`). `http(s)`
+    hosts carry no host rules: loopback, private and IP hosts are cataloged as sent. An `mcp:` host
+    must be a DNS-style name (letters, digits, hyphens; labels up to 63 characters, the host up to
+    253), so `mcp://127.0.0.1/x` passes and `mcp://[::1]/x`, `mcp://my_srv/x` and non-ASCII hosts
+    don't. A host ending in a dot is refused on every scheme.
 - **Catalog key.**
   - The key is `network + payTo + method + normalized resource URL` (with `routeTemplate`
-    applied).
+    applied). An `mcp:` URL is normalized by hand: lowercased host, `/` for an empty path, no
+    query or fragment (its WHATWG origin is `"null"`).
+  - `http` and `https` copies of one resource are two keys, and two MCP servers of one `payTo`
+    that both name a tool `mcp://tool/<name>` share one. Both are accepted for Tranche 1.
   - Upserts are idempotent and update `lastUpdated`.
 - **Settle response.**
   - Only the pure, synchronous validation runs before the settle response.
@@ -57,6 +68,12 @@ settlement.
 - **Upstream types keep us interoperable** with the x402 discovery ecosystem, and avoid a
   parallel schema.
 - **Never fetching seller URLs removes SSRF** as a class in Tranche 1, not just in `iconUrl`.
+- **SSRF is checked where a URL is fetched.** A rule on the URL text can't stop a public name that
+  resolves to `127.0.0.1` (OWASP: check the resolved address at connection time), which is what
+  `packages/mcp` does before every call. On resource URLs the host rules only refused what
+  upstream servers send by default (`http://localhost:<port>`, the e2e suite, local sellers). The
+  scheme allowlist stays, since a catalog rendered as links would run `javascript:`. `iconUrl`
+  keeps its host rules: a browser fetches an icon as soon as the catalog is shown.
 - **Validation before, storage after.** Reporting the validation result costs microseconds and
   can't fail a payment. Waiting for the store write could.
 
@@ -73,6 +90,11 @@ settlement.
 
 - Anyone who settles a real payment, even a tiny one, can create a listing. That is accepted for
   Tranche 1, and quality is handled by curation and ranking later.
+- Loopback and private resource URLs can be listed on any network, including the entries gate
+  runs leave. Whether
+  pubnet should refuse them as a listing-quality rule, as the MCP registry does, is decided before
+  mainnet (task 0053, Future Work).
+- A client that calls catalog URLs must check the address it connects to.
 - The store (task 0013) must enforce the catalog key and support the `resources` filters.
 - The e2e gate routes carry the `bazaar` extension, so a gate run also exercises cataloging.
 

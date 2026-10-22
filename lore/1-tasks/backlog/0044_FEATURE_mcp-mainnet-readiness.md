@@ -47,6 +47,14 @@ is decided with the owner (options and a recommendation) before it is built.
   OS keychain, an external signer, a hardware wallet.
 - **Catalog guard.** The catalog request has a time limit but no address guard or size cap (0037,
   "the catalog is trusted as the operator's choice"); a public catalog needs both.
+- **Entries the client can't call (from 0053).** Our catalog now lists `http://`, loopback, private
+  and `mcp://tool/<name>` resource URLs as sellers send them. `list_resources` shows them and
+  `checkUrl` then refuses them as `unsafe_url`. With `STELLAR_X402_ALLOW_INSECURE_LOCAL=1`, an
+  agent pointed at a public catalog would call a `localhost` entry on its own machine. Filter or
+  mark them in `list_resources`, and say in the README that the flag is for a local catalog only.
+- **Threat model entry (from the 0053 review).** `docs/threat-model.md` plans "SSRF in Bazaar
+  metadata" but has no catalog entry, and 0053 left the SSRF check on resource URLs to whoever
+  fetches them. Write it with the catalog guard: the catalog request, then each listed URL.
 
 ## From the comparison with other servers (lore/3-wiki/mcp/x402-mcp-server-comparison.md)
 

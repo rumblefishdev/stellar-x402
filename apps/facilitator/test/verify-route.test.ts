@@ -81,9 +81,19 @@ describe("POST /verify", () => {
       verify.mockResolvedValueOnce(answer);
       const response = await post(request);
       expect([response.status, await response.json()]).toEqual([200, answer]);
-      expect(verify).toHaveBeenCalledWith(paymentPayload, requirements);
+      expect(verify).toHaveBeenCalledWith(paymentPayload, requirements, expect.any(Object));
     },
   );
+
+  it("logs the RPC URL that answered", async () => {
+    verify.mockImplementationOnce(async (_payload, _requirements, trace) => {
+      trace!.rpc = "RPC_URLS[1]";
+      return { isValid: false, invalidReason: "invalid_exact_stellar_payload_simulation_failed" };
+    });
+    await post(request);
+    const verified = lines.map((line) => JSON.parse(line)).find((l) => l.event === "verified");
+    expect(verified).toMatchObject({ isValid: false, rpc: "RPC_URLS[1]" });
+  });
 
   it("logs our own reason next to upstream's", async () => {
     verify.mockResolvedValueOnce({
