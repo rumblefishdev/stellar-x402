@@ -36,7 +36,8 @@ As a reviewer of the grant, I want e2e results with real settled transaction has
   `mcp://tool/<name>` URLs, so a run against the public testnet facilitator leaves about 18 such
   entries in its durable catalog (one key per server and route, refreshed by each run; nothing
   deletes them), and 0042's demo lists them. The suite's Bazaar check still waits for
-  `/discovery/search` (0028).
+  `/discovery/search` (0028). Nothing owns removing them yet: decide before the first run whether
+  the gate uses a separate catalog, or the catalog gets a TTL or an admin delete (0053 review).
 - From the 0028 review: the first criterion says "verify → settle" for each scenario, but the 9 `upfront` scenarios settle without a `/verify` (answered in 0028); reword it before starting.
 
 ## Implementation

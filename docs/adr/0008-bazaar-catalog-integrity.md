@@ -37,9 +37,12 @@ settlement.
 - **SSRF safety.**
   - `iconUrl` must be absolute https, with no IP literals and no loopback or private hosts.
   - The facilitator never fetches any seller-supplied URL in Tranche 1.
-  - Resource URLs carry a scheme allowlist by listing type and no host rules (task 0053): an
-    `http` listing takes `https` and `http`, an `mcp` listing also `mcp` (`@x402/mcp`'s
-    `mcp://tool/<name>`). Loopback, private and IP hosts are cataloged as sent.
+  - Resource URLs carry a scheme allowlist by listing type (task 0053): an `http` listing takes
+    `https` and `http`, an `mcp` listing also `mcp` (`@x402/mcp`'s `mcp://tool/<name>`). `http(s)`
+    hosts carry no host rules: loopback, private and IP hosts are cataloged as sent. An `mcp:` host
+    must be a DNS-style name (letters, digits, hyphens; labels up to 63 characters, the host up to
+    253), so `mcp://127.0.0.1/x` passes and `mcp://[::1]/x`, `mcp://my_srv/x` and non-ASCII hosts
+    don't. A host ending in a dot is refused on every scheme.
 - **Catalog key.**
   - The key is `network + payTo + method + normalized resource URL` (with `routeTemplate`
     applied). An `mcp:` URL is normalized by hand: lowercased host, `/` for an empty path, no
@@ -87,7 +90,8 @@ settlement.
 
 - Anyone who settles a real payment, even a tiny one, can create a listing. That is accepted for
   Tranche 1, and quality is handled by curation and ranking later.
-- Loopback and private resource URLs can be listed on any network, gate runs' among them. Whether
+- Loopback and private resource URLs can be listed on any network, including the entries gate
+  runs leave. Whether
   pubnet should refuse them as a listing-quality rule, as the MCP registry does, is decided before
   mainnet (task 0053, Future Work).
 - A client that calls catalog URLs must check the address it connects to.

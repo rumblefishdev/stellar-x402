@@ -88,17 +88,19 @@ catalog, so that the catalog takes what upstream servers actually send.
   also `mcp`; no host rules on resource URLs, on any network. Still refused: userinfo, a host
   ending in a dot, `//` in the path. `mcp:` is built by hand: lowercased DNS-style host (labels
   up to 63, host up to 253 characters), port kept, `/` for an empty path, no query or fragment,
-  no backslash. Icons keep https and the host rules (`parseIconUrl`). `https` keys don't change,
+  no backslash in the path. `catalogKey`, which had no caller and repeated `normalize`'s key
+  logic, is gone. Icons keep https and the host rules (`parseIconUrl`). `https` keys don't change,
   so `CATALOG_KEY_VERSION` stays.
 - `apps/facilitator`: `CATALOG_ALLOW_HTTP`, `Config.catalog` and the cataloger's `allowHttp` are
   gone; a leftover variable is ignored. The env examples never had it.
-- Tests: `packages/bazaar` 67 (the rejection table with the dropped schemes, `mcp:` on an `http`
-  listing, backslash, trailing dot, long labels, `mimeType` `" "`, `"json"`, `null`, `0`; the
-  upstream defaults; no host rules; one canonical `mcp` URL per spelling; icon host rules;
-  pubnet; an unknown type), `cataloger.test.ts` the upstream default payloads through to the
-  store, `config.test.ts` a leftover `CATALOG_ALLOW_HTTP` on testnet and pubnet. 12 mutants (each
+- Tests: `packages/bazaar` 72 (the rejection table with the dropped schemes, `mcp:` on an `http`
+  listing, backslash, trailing dot, long labels and hosts, userinfo and `//` on `mcp:`, `mimeType` `" "`, `"json"`, `null`, `0`; the
+  upstream defaults; no host rules; one canonical `mcp` URL per spelling; a template ignored on
+  an `mcp` listing; icon host rules; pubnet; an unknown type), `cataloger.test.ts` the upstream default payloads through to the
+  store, `config.test.ts` a leftover `CATALOG_ALLOW_HTTP` on testnet and pubnet. 16 mutants (each
   scheme rule, trailing dot, backslash, empty path, host case, the type guard, the icon suffixes
-  and single-label rule, both empty-field rules, the label bound) each fail a case.
+  and single-label rule, both empty-field rules, the label and host bounds, userinfo and `//` on
+  `mcp:`, the http-only template) each fail a case.
 - Reproduced with real upstream 2.28.0 servers: `@x402/express` and `@x402/mcp` with the e2e
   suite's route config, their 402s assembled as `@x402/core`'s client does, through our
   cataloger and `/discovery/resources?limit=1000` (develop plus #50, locally), checked with the
@@ -161,8 +163,7 @@ catalog, so that the catalog takes what upstream servers actually send.
 
 - Before mainnet: decide whether pubnet refuses loopback, private and IP resource URLs as a
   listing-quality rule (the network is in `paymentRequirements`, so no config is needed). Not
-  taken now because pubnet is refused until 0023, 0024 and 0025.
+  taken now because pubnet is refused until 0023, 0024 and 0025. Spawned as a backlog task when
+  0053 closes and linked from a pubnet blocker (0053 review).
 - The suite's whole Bazaar check, once `/discovery/search` exists (Tranche 2); then the gate can
   run with `--extensions=bazaar` (0028).
-- `catalogKey` in `packages/bazaar` has no caller and repeats `normalize`'s key logic; drop it or
-  make `normalize` use it.
