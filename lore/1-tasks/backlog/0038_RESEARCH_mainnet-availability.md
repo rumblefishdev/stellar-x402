@@ -49,7 +49,10 @@ launch, this task decides how much of that to remove.
   - whether admins may bypass the `mainnet` environment's reviewers (ADR 0011). GitHub lets them
     by default, so until then they can;
   - a deploy user per network;
-  - a Caddy of our own on a second IPv4 address, if the shared Caddy's coupling bites.
+  - a Caddy of our own on a second IPv4 address, if the shared Caddy's coupling bites;
+  - a Hetzner Cloud VM of our own instead of the shared server: ADR 0011's Alternatives list
+    what it would remove and what it costs (about €12–20 a month on testnet). Testnet accepts the
+    shared server knowingly; mainnet decides here.
 - Related tasks: 0014, 0025, 0026, 0027, 0039.
 
 ## Implementation

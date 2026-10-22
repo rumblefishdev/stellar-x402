@@ -429,9 +429,26 @@ One request or one stop must never outlast the layer in front of it:
   - Rejected because the company server already has the room.
   - It stays the migration path: the image, the stop-first design and CloudWatch move over
     unchanged.
-- **A separate small Hetzner Cloud VM** (about €7–14 a month), which would isolate the
-  facilitator from the production ClickHouse server. Not chosen, because the shared server has the
-  room and limits contain the contention. It is the first step if isolation becomes a concern.
+- **A separate small Hetzner Cloud VM,** which would isolate the facilitator from the production
+  ClickHouse server. What the shared server couples, and what a VM of our own would change:
+
+  | On the shared server                                           | On a VM of our own                       |
+  | -------------------------------------------------------------- | ---------------------------------------- |
+  | Caddy lives in the ClickHouse project's repo and deploy        | our own Caddy and deploy                 |
+  | one `dockerd`: restarting Docker touches ClickHouse            | our own `dockerd`                        |
+  | one disk: `pg_wal` growth and logs                             | our own disk                             |
+  | reboots and patching are shared, and their owner is open       | we patch on our schedule                 |
+  | root on that server, for any project, can copy the OpenBao key | only the VM's root                       |
+  | testnet code runs on the production ClickHouse server          | it runs on the VM only                   |
+  | GitHub runners SSH into the production ClickHouse server       | they SSH into the VM only                |
+  | a hardware fault waits for that server's repair                | Hetzner Cloud moves the VM to a new host |
+  - What it costs: about €12–20 a month on testnet (CPX12 to CPX22 after Hetzner's 2026 price
+    rises, from task 0047's `notes/R-openbao-on-hetzner.md`), more with mainnet, and the VM's
+    system, Docker and proxy are ours to run.
+  - Not chosen for testnet: the shared server has the room, limits contain the contention, and
+    the coupling above is accepted knowingly. It is the first step if isolation becomes a
+    concern, and an explicit mainnet question (0038).
+
 - **Fly.io, Render, Railway, Google Cloud Run, AWS App Runner, ECS Express Mode, Lightsail, EKS,
   Lambda.** Compared in task 0014: they overlap deploys, cap the drain too low, cost more, or run
   no long-lived process.
