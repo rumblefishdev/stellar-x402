@@ -125,6 +125,21 @@ ALTER TABLE spend_reservation_scopes ALTER COLUMN at SET NOT NULL, ALTER COLUMN 
 CREATE INDEX spend_reservation_scopes_window ON spend_reservation_scopes (scope, at) INCLUDE (amount);
 `,
   },
+  {
+    // 0019: each hash's attempt state and the bounds reconciliation resolves it by (decisions 6,
+    // 7). Nullable, so the release before it keeps working; a null state reads as `stored`, and a
+    // hash without bounds falls back to the auth entry's expiry in `payment_payload`.
+    name: "0005_settlement_attempts",
+    sql: `
+ALTER TABLE settlement_hashes
+  ADD COLUMN state text CHECK (state IN ('stored', 'sent', 'unknown', 'landed', 'dead')),
+  ADD COLUMN max_time bigint,
+  ADD COLUMN max_ledger bigint,
+  ADD COLUMN channel text,
+  ADD COLUMN error_code text,
+  ADD COLUMN updated_at bigint;
+`,
+  },
 ];
 
 /** Serializes concurrent `migrate` runs, e.g. two tasks of one deploy; held until commit. */

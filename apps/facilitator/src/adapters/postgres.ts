@@ -3,6 +3,9 @@ import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import pg from "pg";
 import {
   HashConflictError,
+  type AttemptBounds,
+  type AttemptState,
+  type AttemptUpdate,
   type CatalogEntry,
   type CatalogPage,
   type CatalogQuery,
@@ -13,6 +16,7 @@ import {
   type RateLimitHit,
   type RateLimitStore,
   type ReserveResult,
+  type SettlementAttempt,
   type SettlementKey,
   type SettlementRecord,
   type SettlementState,
@@ -28,6 +32,7 @@ import {
   NON_FINAL_STATES,
   assertLedger,
   assertStroops,
+  attemptRankSql,
   extensionKeys,
   isFinal,
   isForward,
@@ -182,6 +187,53 @@ function toRecord(row: SettlementRow, hashes = row.hashes ?? []): SettlementReco
   return record;
 }
 
+interface AttemptRow {
+  hash: string;
+  state: string | null;
+  max_time: string | null;
+  max_ledger: string | null;
+  channel: string | null;
+  error_code: string | null;
+  updated_at: string | null;
+}
+
+function toAttempt(row: AttemptRow): SettlementAttempt {
+  const attempt: SettlementAttempt = {
+    hash: row.hash,
+    state: (row.state ?? "stored") as AttemptState,
+  };
+  if (row.max_time !== null) attempt.maxTime = Number(row.max_time);
+  if (row.max_ledger !== null) attempt.maxLedger = Number(row.max_ledger);
+  if (row.channel !== null) attempt.channel = row.channel;
+  if (row.error_code !== null) attempt.errorCode = row.error_code;
+  if (row.updated_at !== null) attempt.updatedAt = Number(row.updated_at);
+  return attempt;
+}
+
+/**
+ * Moves the named attempts of `$1` forward, each on its own, and stamps `$2`; `$3` is the updates
+ * as JSON. The rank comparison drops an update that isn't ahead, so concurrent writers can only
+ * move an attempt on.
+ */
+const MARK_ATTEMPTS = `UPDATE settlement_hashes h
+  SET state = u.state,
+      channel = coalesce(u.channel, h.channel),
+      error_code = coalesce(u.error_code, h.error_code),
+      updated_at = $2
+  FROM jsonb_to_recordset($3::jsonb) AS u(hash text, state text, channel text, error_code text)
+  WHERE h.hash = u.hash AND h.key = $1
+    AND ${attemptRankSql("u.state")} > ${attemptRankSql("h.state")}`;
+
+const attemptsJson = (updates: AttemptUpdate[]) =>
+  JSON.stringify(
+    updates.map(({ hash, state, channel, errorCode }) => ({
+      hash,
+      state,
+      channel: channel ?? null,
+      error_code: errorCode ?? null,
+    })),
+  );
+
 /** The optional fields a transition may set, and their columns. */
 const UPDATE_COLUMNS = {
   channel: "channel",
@@ -238,7 +290,12 @@ export class PostgresSettlementStore implements SettlementStore {
    * One statement locks the record, adds the hash while the record is non-final, and moves
    * `claimed` to `signed`; it also returns the hash's owner as its snapshot sees it.
    */
-  async addHash(key: SettlementKey, hash: string, updatedAt: number): Promise<boolean> {
+  async addHash(
+    key: SettlementKey,
+    hash: string,
+    updatedAt: number,
+    bounds?: AttemptBounds,
+  ): Promise<boolean> {
     const { rows } = await this.pool.query<{
       state: string | null;
       added: boolean;
@@ -247,8 +304,9 @@ export class PostgresSettlementStore implements SettlementStore {
       `WITH rec AS (
          SELECT key, state FROM settlements WHERE key = $1 FOR UPDATE
        ), ins AS (
-         INSERT INTO settlement_hashes (hash, key)
-         SELECT $2, key FROM rec WHERE state IN (${NON_FINAL_SQL})
+         INSERT INTO settlement_hashes (hash, key, state, max_time, max_ledger, updated_at)
+         SELECT $2, key, 'stored', $4::bigint, $5::bigint, $3 FROM rec
+         WHERE state IN (${NON_FINAL_SQL})
          ON CONFLICT (hash) DO NOTHING
          RETURNING key
        ), upd AS (
@@ -261,7 +319,7 @@ export class PostgresSettlementStore implements SettlementStore {
        SELECT (SELECT state FROM rec) AS state,
               EXISTS (SELECT 1 FROM upd) AS added,
               (SELECT key FROM settlement_hashes WHERE hash = $2) AS owner`,
-      [key, hash, updatedAt],
+      [key, hash, updatedAt, bounds?.maxTime ?? null, bounds?.maxLedger ?? null],
     );
     const { state, added, owner } = rows[0]!;
     // 1. A missing or final record.
@@ -285,6 +343,29 @@ export class PostgresSettlementStore implements SettlementStore {
     throw new Error("transaction hash conflicted but no record owns it");
   }
 
+  async attempts(key: SettlementKey): Promise<SettlementAttempt[]> {
+    const { rows } = await this.pool.query<AttemptRow>(
+      `SELECT hash, state, max_time, max_ledger, channel, error_code, updated_at
+       FROM settlement_hashes WHERE key = $1 ORDER BY seq`,
+      [key],
+    );
+    return rows.map(toAttempt);
+  }
+
+  async markAttempts(
+    key: SettlementKey,
+    updates: AttemptUpdate[],
+    updatedAt: number,
+  ): Promise<number> {
+    if (updates.length === 0) return 0;
+    const { rowCount } = await this.pool.query(MARK_ATTEMPTS, [
+      key,
+      updatedAt,
+      attemptsJson(updates),
+    ]);
+    return rowCount ?? 0;
+  }
+
   /** One conditional `UPDATE`: the row lock lets exactly one of several callers set it. */
   async markSuccessAnswered(key: SettlementKey, at: number): Promise<boolean> {
     const { rowCount } = await this.pool.query(
@@ -301,6 +382,21 @@ export class PostgresSettlementStore implements SettlementStore {
     update: SettlementUpdate,
   ): Promise<SettlementRecord | undefined> {
     if (update.feeCharged !== undefined) assertStroops(update.feeCharged, "feeCharged");
+    const { attempts } = update;
+    if (attempts?.length)
+      return inTransaction(this.pool, async (client) => {
+        await client.query(MARK_ATTEMPTS, [key, update.updatedAt, attemptsJson(attempts)]);
+        return this.moveState(client, key, expected, update);
+      });
+    return this.moveState(this.pool, key, expected, update);
+  }
+
+  private async moveState(
+    db: pg.Pool | pg.PoolClient,
+    key: SettlementKey,
+    expected: SettlementState,
+    update: SettlementUpdate,
+  ): Promise<SettlementRecord | undefined> {
     if (!isForward(expected, update.state)) return undefined;
     const values: unknown[] = [key, expected, update.state, update.updatedAt];
     const sets = ["state = $3", "updated_at = $4"];
@@ -311,14 +407,14 @@ export class PostgresSettlementStore implements SettlementStore {
         values.push(typeof value === "bigint" ? value.toString() : (value ?? null));
         sets.push(`${column} = $${values.length}`);
       }
-    const { rows } = await this.pool.query<SettlementRow>(
+    const { rows } = await db.query<SettlementRow>(
       `UPDATE settlements SET ${sets.join(", ")} WHERE key = $1 AND state = $2 RETURNING *`,
       values,
     );
     if (!rows[0]) return undefined;
     // A separate statement: a hash subquery in the UPDATE would use its snapshot from before the
     // row lock wait.
-    const hashes = await this.pool.query<{ hash: string }>(
+    const hashes = await db.query<{ hash: string }>(
       "SELECT hash FROM settlement_hashes WHERE key = $1 ORDER BY seq",
       [key],
     );
