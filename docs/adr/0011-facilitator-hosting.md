@@ -373,8 +373,9 @@ One request or one stop must never outlast the layer in front of it:
   - the five AD-18 conditions; the low-balance one fires below 25 XLM of spendable balance
     (ADR 0013);
   - not ready to settle (the counterpart of the lease-blind `/health`);
-  - from ADR 0013: OpenBao sealed, down or failing to sign; a fee bump on the fee account that our
-    submitter didn't send, read from Horizon; and OpenBao's audit log disk at 80%;
+  - from ADR 0013: OpenBao sealed, down or failing to sign; theft (a transaction on the fee
+    account or a channel that our submitter didn't send, or a signer or threshold change on them,
+    read from Horizon off the server); and OpenBao's audit log disk at 80%;
   - WAL archiving failing (`pg_stat_archiver.failed_count` rising, or the last archived segment
     older than 10 minutes), since a stuck archive fills a disk ClickHouse shares;
   - the last WAL segment shipped off the server older than 30 minutes, or the last OpenBao

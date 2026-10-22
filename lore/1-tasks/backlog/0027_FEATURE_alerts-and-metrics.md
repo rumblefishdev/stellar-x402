@@ -62,8 +62,8 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
 - From 0039: alarms go through SNS and Amazon Q Developer in chat applications to the team's
   Slack channel. Besides the five AD-18 conditions:
   - "ready to settle" (lease held, reconciliation done);
-  - from ADR 0013: OpenBao sealed, down or failing to sign; a fee bump on the fee account that
-    our submitter didn't send, read from Horizon; and OpenBao's audit log disk at 80%;
+  - from ADR 0013: OpenBao sealed, down or failing to sign; theft (below, from 0047); and
+    OpenBao's audit log disk at 80%;
   - WAL archiving failing: `pg_stat_archiver.failed_count` rising, or the last archived segment
     older than 10 minutes, since a stuck archive fills a disk ClickHouse shares;
   - the last WAL segment shipped off the server older than 30 minutes, or the last OpenBao
