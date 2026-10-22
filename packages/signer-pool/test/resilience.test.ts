@@ -422,6 +422,25 @@ describe("FallbackRpc", () => {
     expect(rpc.active).toBe("a");
   });
 
+  it("never asks the next endpoint after one answered that the account does not exist", async () => {
+    const asked: string[] = [];
+    const answering = (name: string, entry?: xdr.AccountEntry) =>
+      ({
+        getLedgerEntries: async () => {
+          asked.push(name);
+          return ledgerEntries(entry);
+        },
+      }) as unknown as SorobanRpc;
+    const found = accountEntry(Keypair.fromPublicKey(channels[0]!).xdrAccountId(), 1n).val;
+    const rpc = new FallbackRpc([
+      { name: "a", rpc: answering("a") },
+      { name: "b", rpc: answering("b", found.account()) },
+    ]);
+    const error = await readAccountEntry(rpc, channels[0]!).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AccountNotFoundError);
+    expect(asked).toEqual(["a"]);
+  });
+
   it("names a JSON-RPC error answer when every endpoint gave one", async () => {
     const failing = {
       getLedgerEntries: async () => {
