@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { memoryStores } from "../src/adapters/memory.js";
 import { MAX_BODY_DEPTH } from "../src/http/app.js";
 import { parseConfig } from "../src/config.js";
+import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
 import { start, type Started } from "../src/main.js";
 import type { Verify } from "../src/settlement/verify.js";
@@ -48,6 +49,7 @@ describe("POST /verify", () => {
         throw new Error("not used");
       },
       extensionResponses: () => undefined,
+      supported: supportedResponse(config.network, Keypair.random().publicKey()),
     });
     url = `http://127.0.0.1:${app.port}/verify`;
   });
