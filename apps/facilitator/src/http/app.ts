@@ -7,7 +7,7 @@ import type { Logger } from "../logger.js";
 import type { Stores } from "../ports/index.js";
 import type { SettlementHooks } from "../settlement/hooks.js";
 import type { Settle } from "../settlement/settle.js";
-import type { Verify } from "../settlement/verify.js";
+import type { Verify, VerifyTrace } from "../settlement/verify.js";
 import { EXTENSION_RESPONSES_HEADER, encodeExtensionResponses } from "./extension-responses.js";
 
 /** What the composition root hands to the HTTP adapter. Lanes add their services here. */
@@ -96,7 +96,8 @@ export function createApp({
       res.status(400).json({ error: code(400) });
       return;
     }
-    const response = await verify(request.paymentPayload, request.paymentRequirements);
+    const trace: VerifyTrace = {};
+    const response = await verify(request.paymentPayload, request.paymentRequirements, trace);
     logger.info("verified", {
       network: request.paymentRequirements.network,
       isValid: response.isValid,
@@ -104,6 +105,8 @@ export function createApp({
       // Our own code next to upstream's, e.g. for a channel account.
       reason: response.extra?.reason,
       payer: response.payer,
+      // Which RPC URL answered: a lagging fallback rejects valid payments (AD-3).
+      rpc: trace.rpc,
     });
     res.json(response);
   });

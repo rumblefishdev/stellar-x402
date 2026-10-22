@@ -9,6 +9,7 @@ export {
   FallbackRpc,
   RpcTimeoutError,
   RpcUnavailableError,
+  type ActiveEndpoint,
   type FallbackRpcOptions,
   type RpcEndpoint,
 } from "./fallback-rpc.js";

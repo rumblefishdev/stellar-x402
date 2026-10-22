@@ -1,10 +1,8 @@
 import { Keypair } from "@stellar/stellar-sdk";
 import type { SorobanRpc } from "@stellar-x402/signer-pool";
-import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import { describe, expect, it, vi } from "vitest";
 import { ConfigError, parseConfig } from "../src/config.js";
-import { feeSettings, upstreamAtCurrentBid } from "../src/settlement/fees.js";
-import type { UpstreamVerifier } from "../src/settlement/verify.js";
+import { atCurrentBid, feeSettings } from "../src/settlement/fees.js";
 
 const env = {
   FACILITATOR_SECRET: Keypair.random().secret(),
@@ -65,41 +63,28 @@ describe("feeSettings (AD-10)", () => {
   });
 });
 
-describe("upstreamAtCurrentBid", () => {
-  const payload = {} as PaymentPayload;
-  const requirements = {} as PaymentRequirements;
-
-  it("verifies with a scheme built for twice the current bid, rebuilt only when the bid changes", async () => {
+describe("atCurrentBid", () => {
+  it("builds for twice the current bid, again only when the bid changes", async () => {
     let bid = 250;
-    const built: number[] = [];
-    const build = vi.fn((inclusionFeeStroops: number): UpstreamVerifier => {
-      built.push(inclusionFeeStroops);
-      return { verify: async () => ({ isValid: true, payer: `at ${inclusionFeeStroops}` }) };
-    });
-    const upstream = upstreamAtCurrentBid(async () => bid, build);
+    const build = vi.fn((inclusionFeeStroops: number) => ({ inclusionFeeStroops }));
+    const atBid = atCurrentBid(async () => bid, build);
 
     // The fee bump pays the bid twice (settlementInclusionFee).
-    await expect(upstream.verify(payload, requirements)).resolves.toEqual({
-      isValid: true,
-      payer: "at 500",
-    });
-    await upstream.verify(payload, requirements);
-    expect(built).toEqual([500]);
+    await expect(atBid()).resolves.toEqual({ inclusionFeeStroops: 500 });
+    const first = await atBid();
+    expect(build).toHaveBeenCalledOnce();
 
     bid = 400;
-    await expect(upstream.verify(payload, requirements)).resolves.toMatchObject({
-      payer: "at 800",
-    });
-    expect(built).toEqual([500, 800]);
+    await expect(atBid()).resolves.toEqual({ inclusionFeeStroops: 800 });
+    expect(build.mock.calls).toEqual([[500], [800]]);
+    expect(await atBid()).not.toBe(first);
   });
 
-  it("passes the request to the scheme as is", async () => {
-    const verify = vi.fn<UpstreamVerifier["verify"]>(async () => ({ isValid: false }));
-    const upstream = upstreamAtCurrentBid(
-      async () => 100,
-      () => ({ verify }),
-    );
-    await upstream.verify(payload, requirements);
-    expect(verify).toHaveBeenCalledWith(payload, requirements);
+  it("reads the bid on every call", async () => {
+    const inclusionFee = vi.fn(async () => 100);
+    const atBid = atCurrentBid(inclusionFee, () => "built");
+    await atBid();
+    await atBid();
+    expect(inclusionFee).toHaveBeenCalledTimes(2);
   });
 });

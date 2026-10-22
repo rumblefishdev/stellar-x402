@@ -10,8 +10,34 @@ export interface RpcEndpoint {
 export interface FallbackRpcOptions {
   /** A call that takes longer counts as a failure of that endpoint. */
   timeoutMs?: number;
-  /** Called when calls move to another endpoint. */
-  onSwitch?: (from: string, to: string, error: unknown) => void;
+  /**
+   * Called when calls move to another endpoint, after `error` of the one they were on. `by` is the
+   * method whose call failed, or the caller that reported it through {@link FallbackRpc.markFailed}.
+   */
+  onSwitch?: (from: string, to: string, error: unknown, by: string) => void;
+  /**
+   * Return to the first endpoint while calls are off it. A call that finds a probe due starts one
+   * beside it, without waiting: the latest ledger of the first endpoint and of the active one, each
+   * within `timeoutMs`. Calls go back only if the first answers and trails the active one by at
+   * most `maxLagLedgers` (2 by default); an active endpoint that can't read its own ledger is no
+   * reason to stay on it. The first probe is due `intervalMs` (60 s by default) after calls left
+   * the first endpoint, and the next one `intervalMs` after it began. Only the probe returns calls
+   * to the first endpoint: a failure of the last one moves them to the next fallback, or, with none
+   * left, keeps them where they are and makes a probe due at once. Without `failback`, calls stay
+   * where they moved, and a failure of the last endpoint wraps around to the first.
+   */
+  failback?: { intervalMs?: number; maxLagLedgers?: number };
+  /** A probe found the first endpoint healthy, and calls went back to it. */
+  onFailback?: (from: string, to: string, lagLedgers: number) => void;
+  /** A probe found the first endpoint down, or trailing by more than `maxLagLedgers`. */
+  onProbeFailed?: (name: string, failure: { error: unknown } | { lagLedgers: number }) => void;
+  now?: () => number;
+}
+
+/** The endpoint calls go to, and the token that {@link FallbackRpc.markFailed} checks. */
+export interface ActiveEndpoint {
+  index: number;
+  token: number;
 }
 
 export class RpcTimeoutError extends Error {
@@ -39,10 +65,22 @@ export class RpcUnavailableError extends Error {
  *
  * A response from a lagging endpoint is still correct for the submitter: `NOT_FOUND` carries that
  * endpoint's own latest close time, so it cannot report a transaction as expired too early.
+ *
+ * The active endpoint can be shared: a caller that reaches the same URLs another way, in the same
+ * order, starts on {@link begin}'s endpoint and reports a failure there with {@link markFailed}, so
+ * one outage moves both once. A call only moves the active endpoint if no other call moved it since
+ * this call began (a switch counter, the token), so a late answer can't switch back, even after
+ * A → B → A.
  */
 export class FallbackRpc implements SorobanRpc {
   private current = 0;
+  /** Counts switches, so a call can tell whether another one switched while it ran. */
+  private generation = 0;
+  /** When the next probe of the first endpoint is due, while calls are off it. */
+  private nextProbeAt = Infinity;
+  private probing = false;
   private readonly timeoutMs: number;
+  private readonly now: () => number;
 
   constructor(
     private readonly endpoints: readonly RpcEndpoint[],
@@ -50,6 +88,7 @@ export class FallbackRpc implements SorobanRpc {
   ) {
     if (endpoints.length === 0) throw new Error("FallbackRpc needs at least one endpoint");
     this.timeoutMs = opts.timeoutMs ?? 10_000;
+    this.now = opts.now ?? Date.now;
   }
 
   /** One endpoint per URL, using `rpc.Server` (http URLs allowed for local nodes). */
@@ -68,33 +107,57 @@ export class FallbackRpc implements SorobanRpc {
     return this.endpoints[this.current]!.name;
   }
 
+  /** The endpoint a call starts on, with its token. Starts a due probe beside the call. */
+  begin(): ActiveEndpoint {
+    this.maybeProbe();
+    return { index: this.current, token: this.generation };
+  }
+
+  /**
+   * A call on endpoint `index` that began at `token` failed, made by a caller that reaches the
+   * endpoints another way (`by` names it): calls move to the next endpoint, unless they moved since
+   * `token`. Returns the token to report the next endpoint's failure with, or `undefined` if calls
+   * had moved or stayed (see {@link FallbackRpcOptions.failback}), and then the caller reports
+   * nothing more for this call.
+   */
+  markFailed(index: number, token: number, error: unknown, by: string): number | undefined {
+    if (this.endpoints.length < 2 || token !== this.generation || index !== this.current) {
+      return undefined;
+    }
+    return this.moveOn(error, by) ? this.generation : undefined;
+  }
+
   getLedgerEntries: SorobanRpc["getLedgerEntries"] = (...a) =>
-    this.call((r) => r.getLedgerEntries(...a));
+    this.call("getLedgerEntries", (r) => r.getLedgerEntries(...a));
   simulateTransaction: SorobanRpc["simulateTransaction"] = (...a) =>
-    this.call((r) => r.simulateTransaction(...a));
-  getTransaction: SorobanRpc["getTransaction"] = (...a) => this.call((r) => r.getTransaction(...a));
+    this.call("simulateTransaction", (r) => r.simulateTransaction(...a));
+  getTransaction: SorobanRpc["getTransaction"] = (...a) =>
+    this.call("getTransaction", (r) => r.getTransaction(...a));
   getLatestLedger: SorobanRpc["getLatestLedger"] = (...a) =>
-    this.call((r) => r.getLatestLedger(...a));
-  getFeeStats: SorobanRpc["getFeeStats"] = (...a) => this.call((r) => r.getFeeStats(...a));
+    this.call("getLatestLedger", (r) => r.getLatestLedger(...a));
+  getFeeStats: SorobanRpc["getFeeStats"] = (...a) =>
+    this.call("getFeeStats", (r) => r.getFeeStats(...a));
 
   sendTransaction: SorobanRpc["sendTransaction"] = async (...a) => {
-    const from = this.current;
+    const { index: from, token } = this.begin();
     try {
       return await this.withTimeout(this.endpoints[from]!.rpc.sendTransaction(...a));
     } catch (error) {
-      if (this.endpoints.length > 1 && this.current === from) this.switchTo(from + 1, error);
+      if (this.endpoints.length > 1 && this.generation === token) {
+        this.moveOn(error, "sendTransaction");
+      }
       throw error;
     }
   };
 
-  private async call<T>(fn: (r: SorobanRpc) => Promise<T>): Promise<T> {
-    const start = this.current;
+  private async call<T>(by: string, fn: (r: SorobanRpc) => Promise<T>): Promise<T> {
+    const { index: start, token } = this.begin();
     let firstError: unknown;
     for (let i = 0; i < this.endpoints.length; i++) {
       const idx = (start + i) % this.endpoints.length;
       try {
         const result = await this.withTimeout(fn(this.endpoints[idx]!.rpc));
-        if (idx !== this.current) this.switchTo(idx, firstError);
+        if (idx !== start && this.generation === token) this.switchTo(idx, firstError, by);
         return result;
       } catch (error) {
         if (i === 0) firstError = error;
@@ -105,10 +168,70 @@ export class FallbackRpc implements SorobanRpc {
     throw new RpcUnavailableError(`every RPC endpoint failed: ${message}`, { cause: firstError });
   }
 
-  private switchTo(idx: number, error: unknown): void {
-    const from = this.active;
+  /**
+   * Moves calls past the active endpoint after its failure, and says whether they moved. With
+   * `failback` they never move to the first endpoint, whose return is the probe's alone: a dead
+   * first endpoint would otherwise be back after one failure of the last one (AD-3).
+   */
+  private moveOn(error: unknown, by: string): boolean {
+    let next = (this.current + 1) % this.endpoints.length;
+    if (this.opts.failback && next === 0) next = 1;
+    if (next === this.current) {
+      this.nextProbeAt = this.now();
+      this.maybeProbe();
+      return false;
+    }
+    this.switchTo(next, error, by);
+    return true;
+  }
+
+  private switchTo(idx: number, error: unknown, by: string): void {
+    const from = this.current;
     this.current = idx % this.endpoints.length;
-    this.opts.onSwitch?.(from, this.active, error);
+    this.generation++;
+    // Probes run only while calls are off the first endpoint; a switch between the others keeps
+    // the time of the next one.
+    if (this.current === 0) this.nextProbeAt = Infinity;
+    else if (from === 0) this.nextProbeAt = this.now() + this.probeIntervalMs;
+    const [fromName, toName] = [this.endpoints[from]!.name, this.active];
+    notify(() => this.opts.onSwitch?.(fromName, toName, error, by));
+  }
+
+  private get probeIntervalMs(): number {
+    return this.opts.failback?.intervalMs ?? 60_000;
+  }
+
+  private maybeProbe(): void {
+    if (!this.opts.failback || this.current === 0 || this.probing) return;
+    if (this.now() < this.nextProbeAt) return;
+    this.probing = true;
+    this.nextProbeAt = this.now() + this.probeIntervalMs;
+    void this.probe().finally(() => (this.probing = false));
+  }
+
+  private async probe(): Promise<void> {
+    const from = this.current;
+    const atStart = this.generation;
+    const first = this.endpoints[0]!.name;
+    const ledger = async (i: number) =>
+      (await this.withTimeout(this.endpoints[i]!.rpc.getLatestLedger())).sequence;
+    const [primary, active] = await Promise.allSettled([ledger(0), ledger(from)]);
+    if (primary.status === "rejected") {
+      notify(() => this.opts.onProbeFailed?.(first, { error: primary.reason }));
+      return;
+    }
+    // An active endpoint that can't say its ledger is no reason to stay on it.
+    const lagLedgers =
+      active.status === "fulfilled" ? Math.max(0, active.value - primary.value) : 0;
+    if (lagLedgers > (this.opts.failback?.maxLagLedgers ?? 2)) {
+      notify(() => this.opts.onProbeFailed?.(first, { lagLedgers }));
+      return;
+    }
+    if (this.generation !== atStart) return;
+    this.current = 0;
+    this.generation++;
+    this.nextProbeAt = Infinity;
+    notify(() => this.opts.onFailback?.(this.endpoints[from]!.name, first, lagLedgers));
   }
 
   private withTimeout<T>(p: Promise<T>): Promise<T> {
@@ -120,5 +243,14 @@ export class FallbackRpc implements SorobanRpc {
       );
     });
     return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
+  }
+}
+
+/** Hooks only log; one that throws must not turn an answer into a failure. */
+function notify(hook: () => void): void {
+  try {
+    hook();
+  } catch {
+    // A failing logger has nowhere to report to.
   }
 }

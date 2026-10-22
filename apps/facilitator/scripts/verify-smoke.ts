@@ -12,12 +12,17 @@
  *   ASSET          token contract (default: the testnet XLM SAC)
  *   AMOUNT         base units (default 1000 = 0.0001 XLM)
  *   MIN_VALIDITY_LEDGERS  passed to the facilitators (default: the config default, 4)
+ *   RPC_URLS       passed to the facilitators (default: the testnet RPC); a down first URL shows
+ *                  the failover (0045)
+ *   EXPECT_FAILOVER  1: also check that each `/verify` failed over, logging `rpc_failover`, and
+ *                  was answered by `RPC_URLS[1]` (0045)
  *
  *   cd apps/facilitator
  *   CLIENT_SECRET=$(stellar keys show x402-verify-client) \
  *     PAY_TO=$(stellar keys address x402-verify-seller) npx tsx scripts/verify-smoke.ts
  *
- * Nothing is submitted: `/verify` only simulates.
+ * Nothing is submitted: `/verify` only simulates. The facilitators' log lines go to stderr, so
+ * stdout carries only the result.
  */
 import { once } from "node:events";
 import { createServer, type AddressInfo } from "node:net";
@@ -25,6 +30,7 @@ import { Keypair } from "@stellar/stellar-sdk";
 import type { PaymentRequirements, VerifyResponse } from "@x402/core/types";
 import { createEd25519Signer } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/client";
+import { Agent, fetch } from "undici";
 import { main } from "../src/main.js";
 
 const XLM_SAC_TESTNET = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
@@ -60,31 +66,60 @@ async function freePort(): Promise<number> {
   return port;
 }
 
-async function verifyWith(channels: string): Promise<VerifyResponse> {
+/** The facilitators' log events, from `main()`'s log sink; the lines go on to stderr. */
+const events: { event: string; rpc?: string }[] = [];
+const write = (line: string) => {
+  events.push(JSON.parse(line) as { event: string; rpc?: string });
+  process.stderr.write(line);
+};
+
+/** The script's own HTTP client, apart from the global one `main()` sets for the facilitator. */
+const http = new Agent({ headersTimeout: 120_000 });
+
+async function verifyWith(
+  channels: string,
+): Promise<{ answer: VerifyResponse; rpc?: string; failedOver: boolean }> {
   const port = await freePort();
+  const from = events.length;
   // A fresh facilitator key: verify never spends from it.
-  const server = await main({
-    FACILITATOR_SECRET: Keypair.random().secret(),
-    CHANNELS: channels,
-    PORT: String(port),
-    LOG_LEVEL: "warn",
-    MIN_VALIDITY_LEDGERS: process.env.MIN_VALIDITY_LEDGERS,
-  });
+  const server = await main(
+    {
+      FACILITATOR_SECRET: Keypair.random().secret(),
+      CHANNELS: channels,
+      PORT: String(port),
+      LOG_LEVEL: "info",
+      MIN_VALIDITY_LEDGERS: process.env.MIN_VALIDITY_LEDGERS,
+      RPC_URLS: process.env.RPC_URLS,
+    },
+    { write },
+  );
   try {
     const response = await fetch(`http://127.0.0.1:${port}/verify`, {
+      // `main()` bounds this process's `fetch` at 10 s without headers; a hung first RPC URL makes
+      // `/verify` itself take longer.
+      dispatcher: http,
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ x402Version: 2, paymentPayload, paymentRequirements: requirements }),
     });
     if (response.status !== 200) throw new Error(`/verify answered ${response.status}`);
-    return (await response.json()) as VerifyResponse;
+    const answer = (await response.json()) as VerifyResponse;
+    const own = events.slice(from);
+    return {
+      answer,
+      rpc: own.find((e) => e.event === "verified")?.rpc,
+      failedOver: own.some((e) => e.event === "rpc_failover"),
+    };
   } finally {
     await server.close();
   }
 }
 
-const valid = await verifyWith(Keypair.random().publicKey());
-const channel = await verifyWith(client.address);
+const plain = await verifyWith(Keypair.random().publicKey());
+const channelled = await verifyWith(client.address);
+const valid = plain.answer;
+const channel = channelled.answer;
+const expectFailover = process.env.EXPECT_FAILOVER === "1";
 
 const checks = {
   validPayment: valid.isValid === true && valid.payer === client.address,
@@ -93,6 +128,12 @@ const checks = {
   channelRejected:
     channel.isValid === false &&
     channel.extra?.reason === "invalid_exact_stellar_payload_channel_account",
+  ...(expectFailover && {
+    failedOver: [plain, channelled].every((r) => r.failedOver && r.rpc?.startsWith("RPC_URLS[1]#")),
+  }),
 };
-console.log(JSON.stringify({ payer: client.address, payTo, valid, channel, checks }, null, 2));
+const answeredBy = { valid: plain.rpc, channel: channelled.rpc };
+console.log(
+  JSON.stringify({ payer: client.address, payTo, valid, channel, answeredBy, checks }, null, 2),
+);
 if (!Object.values(checks).every(Boolean)) process.exitCode = 1;

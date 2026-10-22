@@ -12,6 +12,7 @@ import {
   checkFacilitatorBalance,
   keypairSigner,
   readAccountEntry,
+  type FallbackRpcOptions,
   type SorobanRpc,
   type SubmitterEvent,
   type SubmitterOptions,
@@ -495,6 +496,307 @@ describe("FallbackRpc", () => {
     const error = await rpc.getLatestLedger().catch((e: unknown) => e);
     expect(error).toBeInstanceOf(RpcUnavailableError);
     expect((error as Error).cause).toBeInstanceOf(RpcTimeoutError);
+  });
+});
+
+/** An endpoint whose behaviour and latest ledger a test changes while it runs. */
+function switchable(state: { mode: "ok" | "fail" | "hang"; ledger: number }): SorobanRpc {
+  const run = <T>(value: () => T) =>
+    state.mode === "fail"
+      ? Promise.reject(new Error("down"))
+      : state.mode === "hang"
+        ? new Promise<never>(() => {})
+        : Promise.resolve(value());
+  return {
+    ...endpoint("ok"),
+    getLatestLedger: () => run(() => ({ sequence: state.ledger })),
+    getFeeStats: () => run(() => "fees"),
+    sendTransaction: () => run(() => "sent"),
+  } as unknown as SorobanRpc;
+}
+
+describe("FallbackRpc's shared active endpoint", () => {
+  const pair = (opts: FallbackRpcOptions = {}) => {
+    const a = { mode: "ok" as "ok" | "fail" | "hang", ledger: 100 };
+    const b = { mode: "ok" as "ok" | "fail" | "hang", ledger: 100 };
+    const switches: string[] = [];
+    const rpc = new FallbackRpc(
+      [
+        { name: "a", rpc: switchable(a) },
+        { name: "b", rpc: switchable(b) },
+      ],
+      {
+        timeoutMs: 20,
+        onSwitch: (from, to, _error, by) => switches.push(`${from}->${to} by ${by}`),
+        ...opts,
+      },
+    );
+    return { rpc, a, b, switches };
+  };
+
+  it("moves every caller on a failure another caller reports, once", async () => {
+    const { rpc, switches } = pair();
+    const { index, token } = rpc.begin();
+    expect(index).toBe(0);
+    const next = rpc.markFailed(0, token, new Error("timeout"), "verify");
+    expect(next).toBeDefined();
+    expect(rpc.begin().index).toBe(1);
+    // A second report from a call that began before the move changes nothing.
+    expect(rpc.markFailed(0, token, new Error("timeout"), "verify")).toBeUndefined();
+    expect(switches).toEqual(["a->b by verify"]);
+    // The next read starts on the new endpoint, and the reporter's next failure moves on again.
+    expect(rpc.markFailed(1, next!, new Error("timeout"), "verify")).toBeDefined();
+    expect(rpc.active).toBe("a");
+    // Back on `a` (A → B → A): a report from the first call names `a` again, with its old token.
+    expect(rpc.markFailed(0, token, new Error("timeout"), "verify")).toBeUndefined();
+    expect(rpc.active).toBe("a");
+  });
+
+  it("ignores a report for an endpoint calls aren't on, and never moves a single endpoint", async () => {
+    const { rpc, switches } = pair();
+    const { token } = rpc.begin();
+    expect(rpc.markFailed(1, token, new Error("x"), "verify")).toBeUndefined();
+    expect(rpc.active).toBe("a");
+    const single = new FallbackRpc([{ name: "only", rpc: endpoint("ok") }]);
+    expect(single.markFailed(0, single.begin().token, new Error("x"), "verify")).toBeUndefined();
+    expect(switches).toEqual([]);
+  });
+
+  it("starts a read on the endpoint another caller moved to: the hung one costs one timeout", async () => {
+    const { rpc, a, switches } = pair();
+    a.mode = "hang";
+    rpc.markFailed(0, rpc.begin().token, new Error("timeout"), "verify");
+    const started = Date.now();
+    expect(await rpc.getLatestLedger()).toEqual({ sequence: 100 });
+    expect(Date.now() - started).toBeLessThan(20);
+    expect(switches).toEqual(["a->b by verify"]);
+  });
+
+  it("doesn't switch for a call whose answer comes after another one switched (A → B → A)", async () => {
+    let release!: () => void;
+    const slowB = new Promise<void>((resolve) => (release = resolve));
+    const switches: string[] = [];
+    const rpc = new FallbackRpc(
+      [
+        { name: "a", rpc: endpoint("fail") },
+        {
+          name: "b",
+          rpc: {
+            ...endpoint("ok"),
+            getLatestLedger: async () => {
+              await slowB;
+              return { sequence: 2 };
+            },
+          } as unknown as SorobanRpc,
+        },
+      ],
+      {
+        timeoutMs: 1_000,
+        onSwitch: (from, to, _e, by) => switches.push(`${from}->${to} by ${by}`),
+      },
+    );
+    // The read fails on `a` and waits on `b`; meanwhile a caller moves A → B, then B → A.
+    const pending = rpc.getLatestLedger();
+    const next = rpc.markFailed(0, rpc.begin().token, new Error("timeout"), "verify")!;
+    rpc.markFailed(1, next, new Error("timeout"), "verify");
+    release();
+    expect(await pending).toEqual({ sequence: 2 });
+    expect(rpc.active).toBe("a");
+    expect(switches).toEqual(["a->b by verify", "b->a by verify"]);
+  });
+
+  it("names the method whose call failed in onSwitch", async () => {
+    const { rpc, a, switches } = pair();
+    a.mode = "fail";
+    await rpc.getFeeStats();
+    expect(switches).toEqual(["a->b by getFeeStats"]);
+  });
+
+  it("keeps the answer when onSwitch throws", async () => {
+    const { rpc, a } = pair({
+      onSwitch: () => {
+        throw new Error("logger down");
+      },
+    });
+    a.mode = "fail";
+    expect(await rpc.getLatestLedger()).toEqual({ sequence: 100 });
+    expect(rpc.active).toBe("b");
+  });
+
+  describe("failback", () => {
+    const withClock = (extra: FallbackRpcOptions = {}) => {
+      const clock = { t: 0 };
+      const failbacks: string[] = [];
+      const probeFailures: unknown[] = [];
+      const setup = pair({
+        failback: { intervalMs: 1_000 },
+        now: () => clock.t,
+        onFailback: (from, to, lag) => failbacks.push(`${from}->${to} lag ${lag}`),
+        onProbeFailed: (name, failure) => probeFailures.push({ name, ...failure }),
+        ...extra,
+      });
+      // Calls leave `a` at t = 0.
+      setup.rpc.markFailed(0, setup.rpc.begin().token, new Error("timeout"), "verify");
+      return { ...setup, clock, failbacks, probeFailures };
+    };
+
+    it("never probes without the option: calls stay where they moved", async () => {
+      const { rpc } = pair();
+      rpc.markFailed(0, rpc.begin().token, new Error("timeout"), "verify");
+      rpc.begin();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(rpc.active).toBe("b");
+    });
+
+    it("returns to a healthy first endpoint once a probe is due, never before", async () => {
+      const { rpc, clock, failbacks } = withClock();
+      clock.t = 999;
+      rpc.begin();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(rpc.active).toBe("b");
+      clock.t = 1_000;
+      rpc.begin();
+      await vi.waitFor(() => expect(rpc.active).toBe("a"));
+      expect(failbacks).toEqual(["b->a lag 0"]);
+      // A late report from before the return changes nothing.
+      expect(rpc.markFailed(1, 1, new Error("x"), "verify")).toBeUndefined();
+    });
+
+    it("stays off a first endpoint that is down, or trails by more than maxLagLedgers", async () => {
+      const { rpc, a, b, clock, probeFailures } = withClock();
+      a.mode = "fail";
+      clock.t = 1_000;
+      rpc.begin();
+      await vi.waitFor(() => expect(probeFailures).toHaveLength(1));
+      expect(probeFailures[0]).toMatchObject({ name: "a", error: new Error("down") });
+      a.mode = "ok";
+      a.ledger = 100;
+      b.ledger = 103;
+      clock.t = 2_000;
+      rpc.begin();
+      await vi.waitFor(() => expect(probeFailures).toHaveLength(2));
+      expect(probeFailures[1]).toEqual({ name: "a", lagLedgers: 3 });
+      expect(rpc.active).toBe("b");
+    });
+
+    it("counts a first endpoint whose probe hangs past timeoutMs as down, and probes again later", async () => {
+      const { rpc, a, clock, probeFailures } = withClock();
+      a.mode = "hang";
+      clock.t = 1_000;
+      rpc.begin();
+      await vi.waitFor(() => expect(probeFailures).toHaveLength(1));
+      expect(probeFailures[0]).toMatchObject({ name: "a", error: expect.any(RpcTimeoutError) });
+      a.mode = "ok";
+      clock.t = 2_000;
+      rpc.begin();
+      await vi.waitFor(() => expect(rpc.active).toBe("a"));
+    });
+
+    it("never returns to the first endpoint on a failure of the last one: it probes at once", async () => {
+      // The A1 case: `a` is dead, calls moved to `b`, and then `b` fails too.
+      const { rpc, a, b, switches, probeFailures } = withClock();
+      a.mode = "fail";
+      b.mode = "fail";
+      expect(rpc.markFailed(1, rpc.begin().token, new Error("timeout"), "verify")).toBeUndefined();
+      expect(rpc.active).toBe("b");
+      await vi.waitFor(() => expect(probeFailures).toHaveLength(1));
+      await expect(rpc.sendTransaction({} as never)).rejects.toThrow("down");
+      expect(rpc.active).toBe("b");
+      expect(switches).toEqual(["a->b by verify"]);
+    });
+
+    it("moves a failure of the last endpoint to the next fallback, skipping the first", async () => {
+      const switches: string[] = [];
+      const rpc = new FallbackRpc(
+        ["a", "b", "c"].map((name) => ({ name, rpc: endpoint("ok") })),
+        {
+          failback: { intervalMs: 1_000 },
+          now: () => 0,
+          onSwitch: (from, to) => switches.push(`${from}->${to}`),
+        },
+      );
+      const t1 = rpc.markFailed(0, rpc.begin().token, new Error("x"), "verify")!;
+      const t2 = rpc.markFailed(1, t1, new Error("x"), "verify")!;
+      expect(rpc.markFailed(2, t2, new Error("x"), "verify")).toBeDefined();
+      expect(switches).toEqual(["a->b", "b->c", "c->b"]);
+    });
+
+    it("returns to a healthy first endpoint when the active one can't read its ledger", async () => {
+      const { rpc, b, clock, failbacks } = withClock();
+      b.mode = "fail";
+      clock.t = 1_000;
+      rpc.begin();
+      await vi.waitFor(() => expect(failbacks).toEqual(["b->a lag 0"]));
+    });
+
+    it("drops a probe's answer when calls switched while it ran", async () => {
+      let release!: () => void;
+      const slow = new Promise<void>((resolve) => (release = resolve));
+      const clock = { t: 0 };
+      const failbacks: string[] = [];
+      const rpc = new FallbackRpc(
+        [
+          {
+            name: "a",
+            rpc: {
+              ...endpoint("ok"),
+              getLatestLedger: async () => {
+                await slow;
+                return { sequence: 1 };
+              },
+            } as unknown as SorobanRpc,
+          },
+          { name: "b", rpc: endpoint("ok") },
+          { name: "c", rpc: endpoint("ok") },
+        ],
+        {
+          timeoutMs: 1_000,
+          failback: { intervalMs: 1_000 },
+          now: () => clock.t,
+          onFailback: (from, to) => failbacks.push(`${from}->${to}`),
+        },
+      );
+      rpc.markFailed(0, rpc.begin().token, new Error("x"), "verify");
+      clock.t = 1_000;
+      // The probe starts and waits for `a`; meanwhile a caller moves B → C.
+      const { token } = rpc.begin();
+      rpc.markFailed(1, token, new Error("x"), "verify");
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(failbacks).toEqual([]);
+      expect(rpc.active).toBe("c");
+    });
+
+    it("runs one probe at a time, and keeps its time across a switch between the others", async () => {
+      const calls: string[] = [];
+      const clock = { t: 0 };
+      const ledgerOf = (name: string, mode: "ok" | "hang") =>
+        ({
+          ...endpoint("ok"),
+          getLatestLedger: () => {
+            calls.push(name);
+            return mode === "hang" ? new Promise(() => {}) : Promise.resolve({ sequence: 1 });
+          },
+        }) as unknown as SorobanRpc;
+      const rpc = new FallbackRpc(
+        [
+          { name: "a", rpc: ledgerOf("a", "hang") },
+          { name: "b", rpc: ledgerOf("b", "ok") },
+          { name: "c", rpc: ledgerOf("c", "ok") },
+        ],
+        { timeoutMs: 1_000, failback: { intervalMs: 1_000 }, now: () => clock.t },
+      );
+      const t0 = rpc.markFailed(0, rpc.begin().token, new Error("x"), "verify")!;
+      clock.t = 500;
+      // b → c doesn't restart the probe's clock: it is still due at 1 000.
+      rpc.markFailed(1, t0, new Error("x"), "verify");
+      clock.t = 1_000;
+      rpc.begin();
+      // The first probe still waits for `a` when the next one would be due.
+      clock.t = 2_000;
+      rpc.begin();
+      expect(calls).toEqual(["a", "c"]);
+    });
   });
 });
 
