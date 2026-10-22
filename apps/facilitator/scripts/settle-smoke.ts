@@ -26,8 +26,6 @@
  *
  * The facilitator's log lines go to stderr, so stdout carries only the result.
  */
-import { once } from "node:events";
-import { createServer, type AddressInfo } from "node:net";
 import { Account, Keypair, Networks, rpc } from "@stellar/stellar-sdk";
 import { buildCreateChannelsTx, readAccountEntry } from "@stellar-x402/signer-pool";
 import type { PaymentRequirements, SettleResponse, VerifyResponse } from "@x402/core/types";
@@ -84,15 +82,11 @@ const created = await server.pollTransaction((await server.sendTransaction(setup
 });
 if (created.status !== "SUCCESS") throw new Error(`channel setup ${created.status}`);
 
-const probe = createServer().listen(0);
-await once(probe, "listening");
-const { port } = probe.address() as AddressInfo;
-await new Promise((resolve) => probe.close(resolve));
 const facilitatorServer = await main(
   {
     FACILITATOR_SECRET: facilitator.secret(),
     CHANNELS: channelKeys.map((keypair) => keypair.publicKey()).join(","),
-    PORT: String(port),
+    PORT: "0",
     LOG_LEVEL: "warn",
     RPC_URLS: process.env.RPC_URLS,
     INCLUSION_FEE_STROOPS: process.env.INCLUSION_FEE_STROOPS,
@@ -119,7 +113,7 @@ const post = async <T>(
   paymentPayload: unknown,
   paymentRequirements = requirements,
 ) => {
-  const response = await fetch(`http://127.0.0.1:${port}/${route}`, {
+  const response = await fetch(`http://127.0.0.1:${facilitatorServer.port}/${route}`, {
     dispatcher: http,
     method: "POST",
     headers: { "content-type": "application/json" },

@@ -46,8 +46,7 @@ describe("facilitator boot", () => {
   let url: string;
 
   beforeAll(async () => {
-    // Port 0 picks a free port; the schema itself requires 1–65535.
-    const config = { ...parseConfig(env), port: 0 };
+    const config = parseConfig({ ...env, PORT: "0" });
     const logger = jsonLogger("debug", (line) => lines.push(line));
     const verify = async () => ({ isValid: true });
     const settle = async () => ({
@@ -154,7 +153,7 @@ describe("the startup channel check", () => {
   async function serve(extra: Record<string, string>) {
     const child = spawn(process.execPath, ["--import", "tsx", "src/server.ts"], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),
-      env: { ...env, PORT: "47135", ...extra },
+      env: { ...env, PORT: "0", ...extra },
     });
     let stdout = "";
     let stderr = "";
@@ -207,7 +206,7 @@ describe("main()", () => {
       return true;
     });
     const url = `${rpc.url}/K/`;
-    const app = await main({ ...env, RPC_URLS: url, PORT: "47134", LOG_LEVEL: "error" });
+    const app = await main({ ...env, RPC_URLS: url, PORT: "0", LOG_LEVEL: "error" });
     try {
       app.logger.error("http_error", { error: new Error(`request to ${url}rpc failed`) });
       console.error(`request to ${url}rpc failed`);
@@ -224,9 +223,9 @@ describe("main()", () => {
   });
 
   it("serves /supported for the key it checked the channels against", async () => {
-    const app = await main({ ...env, RPC_URLS: rpc.url, PORT: "47136", LOG_LEVEL: "error" });
+    const app = await main({ ...env, RPC_URLS: rpc.url, PORT: "0", LOG_LEVEL: "error" });
     try {
-      const response = await fetch("http://127.0.0.1:47136/supported", {
+      const response = await fetch(`http://127.0.0.1:${app.port}/supported`, {
         headers: { origin: "https://other.example" },
       });
       expect(response.headers.get("access-control-allow-origin")).toBeNull();
@@ -241,7 +240,7 @@ describe("main()", () => {
   it("answers /verify with the real verifier, then exits 0 on SIGTERM", async () => {
     const child = spawn(process.execPath, ["--import", "tsx", "src/server.ts"], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),
-      env: { ...env, PORT: "47129", RPC_URLS: rpc.url },
+      env: { ...env, PORT: "0", RPC_URLS: rpc.url },
     });
     // A pubnet payment: the real verifier rejects it before any RPC call; a stub wouldn't.
     const requirements = {
@@ -262,8 +261,9 @@ describe("main()", () => {
     let answer: Promise<unknown> | undefined;
     child.stdout.on("data", (chunk) => {
       output += chunk;
-      if (answer || !output.includes('"listening"')) return;
-      answer = fetch("http://127.0.0.1:47129/verify", {
+      const port = listeningPort(output);
+      if (answer || port === undefined) return;
+      answer = fetch(`http://127.0.0.1:${port}/verify`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
@@ -316,7 +316,7 @@ describe("upstream's console.error in main()", () => {
     const base = `http://127.0.0.1:${(rpc.address() as AddressInfo).port}`;
     const child = spawn(process.execPath, ["--import", "tsx", "src/server.ts"], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),
-      env: { ...env, PORT: "47130", RPC_URLS: `${base}/apikey-S3CR3T,${base}/apikey-0TH3R` },
+      env: { ...env, PORT: "0", RPC_URLS: `${base}/apikey-S3CR3T,${base}/apikey-0TH3R` },
     });
     // A transfer that passes upstream's checks up to the simulation.
     const asset = StrKey.encodeContract(Buffer.alloc(32, 7));
@@ -361,8 +361,8 @@ describe("upstream's console.error in main()", () => {
     let stdout = "";
     let stderr = "";
     child.stderr.on("data", (chunk) => (stderr += chunk));
-    const post = () =>
-      fetch("http://127.0.0.1:47130/verify", {
+    const post = (port: number) =>
+      fetch(`http://127.0.0.1:${port}/verify`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
@@ -370,11 +370,12 @@ describe("upstream's console.error in main()", () => {
     let statuses: Promise<number[]> | undefined;
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
-      if (statuses || !stdout.includes('"listening"')) return;
+      const port = listeningPort(stdout);
+      if (statuses || port === undefined) return;
       statuses = (async () => {
-        const first = await post();
+        const first = await post(port);
         request = 2;
-        return [first, await post()];
+        return [first, await post(port)];
       })().finally(() => child.kill("SIGTERM"));
     });
     await once(child, "exit");
@@ -390,3 +391,12 @@ describe("upstream's console.error in main()", () => {
     for (const key of ["S3CR3T", "0TH3R"]) expect(stdout + stderr).not.toContain(key);
   }, 20_000);
 });
+
+/** The port in the server's `listening` log line, once that line has arrived whole. */
+function listeningPort(stdout: string): number | undefined {
+  const line = stdout
+    .split("\n")
+    .slice(0, -1)
+    .find((text) => text.includes('"event":"listening"'));
+  return line === undefined ? undefined : JSON.parse(line).port;
+}
