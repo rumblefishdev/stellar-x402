@@ -9,6 +9,8 @@
 - Revised: 2026-10-13. ECS Fargate became the company Hetzner server (task 0039); the first
   version is in git history and task 0014. 2026-10-21: the key moved to OpenBao (ADR 0013), and
   deploys, reboots, backups, alarms and downtime were worked out in the PR #24 review.
+  2026-10-22: pgBackRest for Postgres, migrations before the old facilitator stops, mainnet
+  promoted by a recorded digest, and the Hetzner Cloud VM weighed on its coupling (third round).
 
 ## Context
 

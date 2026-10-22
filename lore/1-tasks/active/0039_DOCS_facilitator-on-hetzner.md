@@ -32,6 +32,13 @@ history:
       wait for the drain, backups leave from the host encrypted, logs go through the CloudWatch
       agent, the alarms follow ADR 0013, and testnet deploys from a protected deploy/testnet
       branch.
+  - date: "2026-10-22"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      Rebased onto #41 and #48. Third review round (Oskar): one OpenBao per server, pgBackRest
+      for Postgres, migrations before the old facilitator stops, mainnet promoted by a recorded
+      digest, and the Hetzner Cloud VM weighed on its coupling. Design Decisions added.
 ---
 
 # Move facilitator hosting to the company Hetzner server in ADR 0011
@@ -64,3 +71,63 @@ build on it.
       backups, CloudWatch from the server, and the consequences of a shared single server
 - [x] The tasks that build on ADR 0011 (0009, 0013, 0019, 0023, 0025, 0026, 0027, 0038), the
       spine and `deploy/README.md` match the revised ADR; 0036 is reshaped by 0047 (ADR 0013)
+
+## Design Decisions
+
+### From Plan
+
+1. **Revise ADR 0011 in place** rather than supersede it; the ECS Fargate version stays in git
+   history and task 0014.
+2. **CloudWatch stays,** fed from the server, and deploys go through GitHub Actions over SSH with
+   Docker Compose (2026-10-12).
+
+### Emerged
+
+From the second review round (Oskar, 2026-10-20), agreed on 2026-10-21:
+
+3. **A directory and systemd units per network** (`/srv/x402/<network>/`, `x402@`,
+   `x402-db@`, `x402-deploy@`), so a deploy, a reboot and Postgres each have one owner.
+4. **The deploy is a oneshot unit with an automatic rollback by digest,** so a dropped runner
+   can't cut it between stop and start.
+5. **Reboots wait for the drain:** the units run after `docker.service`, with `TimeoutStopSec`
+   200 s.
+6. **Testnet deploys from a protected `deploy/testnet` branch,** and `develop` stays open for
+   lore status pushes.
+7. **The ADR 0013 alarms, memory limits for every container, and a 7-minute uptime alarm.**
+
+From Adam's review (2026-10-21, A1–A11):
+
+8. **Secrets decrypted to tmpfs and read from files** (`*_FILE`, built in 0026), never
+   `environment:`.
+9. **`migrate-<network>` as its own one-off service,** and Postgres under its own unit.
+10. **The CloudWatch agent ships logs,** not `dockerd`'s `awslogs`, so only the agent holds the
+    logging role.
+11. **Runners use the server's existing SSH port with a pinned host key;** the ClickHouse
+    project's CA is the Roles Anywhere trust anchor.
+12. **Merge order #41 → #48 → #24,** so this ADR builds on both.
+
+From the third review round (Oskar, 2026-10-21), decided the same day and written on 2026-10-22:
+
+13. **One OpenBao per server** (O1), as ADR 0013 decides; the open question left ADR 0011 and
+    0038.
+14. **pgBackRest instead of Borg for Postgres** (O2): the lease's WAL, about 23 GB a day at a 60 s
+    `archive_timeout`, leaves compressed as each segment closes. Borg stays for OpenBao's
+    snapshots. How the database reaches the Storage Box goes to 0026.
+15. **Migrations before the old facilitator stops** (O3), in the deploy unit, safe under
+    expand/contract; they leave the deploy's downtime.
+16. **Mainnet is promoted by a digest testnet recorded** (O4) as a GitHub Deployment, never by
+    SHA or tag.
+17. **The shared server is kept knowingly** (O5): ADR 0011 weighs the Hetzner Cloud VM on what
+    the shared server couples, at about €12–20 a month on testnet.
+
+Taken while writing these, without a separate review:
+
+18. **pgBackRest's passphrase and the Storage Box SSH key are systemd credentials,** with the
+    passphrase also in AWS Secrets Manager, since the server's only AWS role can't read secrets
+    (Oskar asked the same of Borg's passphrase).
+19. **`x402@` neither pulls nor migrates;** it starts the image the deploy already pulled. It
+    follows from 15.
+20. **The VM is an explicit 0038 item,** the condition Oskar set for keeping the shared server.
+21. **During the rebase onto #41 and #48:** the Timing table carries #41's rows, logs name RPC
+    endpoints `RPC_URLS[i]#<fingerprint>`, and reading secrets from files moved from 0020
+    (nearly done) to 0026.

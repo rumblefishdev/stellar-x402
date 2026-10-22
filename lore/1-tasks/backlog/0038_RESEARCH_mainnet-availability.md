@@ -17,6 +17,10 @@ history:
     status: backlog
     who: stkrolikiewicz
     note: "Reframed for the Hetzner server (0039): two containers on one server, a second machine or standby, edge rate limiting."
+  - date: "2026-10-22"
+    status: backlog
+    who: stkrolikiewicz
+    note: "PR #24 round three: one OpenBao per server is settled (ADR 0013); the Hetzner Cloud VM and the digest check in the mainnet deploy.sh are mainnet questions here."
 ---
 
 # Decide the mainnet availability setup on the Hetzner server

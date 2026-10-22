@@ -35,6 +35,10 @@ history:
     status: backlog
     who: stkrolikiewicz
     note: "Reading secrets from files (`*_FILE`) moved here from 0020, which was nearly done when #24 was rebased."
+  - date: "2026-10-22"
+    status: backlog
+    who: stkrolikiewicz
+    note: "PR #24 round three: pgBackRest backups, migrations before the old facilitator stops, testnet deploys record their digest for mainnet."
 ---
 
 # Public testnet deployment
