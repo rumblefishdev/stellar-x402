@@ -17,6 +17,16 @@ import {
   settlementStoreContract,
   spendStoreContract,
 } from "./port-contracts.js";
+import { hardened, rpcStub } from "./rpc-stub.js";
+
+// `main()` checks its channel at startup, on the RPC it builds from `RPC_URLS`.
+const bootSecret = Keypair.random().secret();
+const bootChannel = Keypair.random().publicKey();
+let rpc: Awaited<ReturnType<typeof rpcStub>>;
+beforeAll(async () => {
+  rpc = await rpcStub({ [bootChannel]: hardened(Keypair.fromSecret(bootSecret).publicKey()) });
+});
+afterAll(() => rpc.close());
 
 /**
  * The contract suites against a real PostgreSQL, set by `TEST_DATABASE_URL`. Skipped only when
@@ -335,8 +345,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     const app = await main({
       STORE: "postgres",
       DATABASE_URL: urlFor(schema),
-      FACILITATOR_SECRET: Keypair.random().secret(),
-      CHANNELS: Keypair.random().publicKey(),
+      FACILITATOR_SECRET: bootSecret,
+      CHANNELS: bootChannel,
+      RPC_URLS: rpc.url,
       PORT: "0",
       LOG_LEVEL: "error",
     });
@@ -401,8 +412,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     const app = await main({
       STORE: "postgres",
       DATABASE_URL: urlFor(schema),
-      FACILITATOR_SECRET: Keypair.random().secret(),
-      CHANNELS: Keypair.random().publicKey(),
+      FACILITATOR_SECRET: bootSecret,
+      CHANNELS: bootChannel,
+      RPC_URLS: rpc.url,
       PORT: "0",
       LOG_LEVEL: "error",
     });
@@ -428,8 +440,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     const app = await main({
       STORE: "postgres",
       DATABASE_URL: urlFor(schema),
-      FACILITATOR_SECRET: Keypair.random().secret(),
-      CHANNELS: Keypair.random().publicKey(),
+      FACILITATOR_SECRET: bootSecret,
+      CHANNELS: bootChannel,
+      RPC_URLS: rpc.url,
       PORT: "0",
       LOG_LEVEL: "error",
     });

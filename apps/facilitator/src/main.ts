@@ -23,6 +23,7 @@ import { supportedResponse } from "./http/supported.js";
 import { captureConsoleError, jsonLogger, rpcEndpointName, type Logger } from "./logger.js";
 import { memoryMetrics, type Metrics } from "./metrics.js";
 import type { SettlementStore } from "./ports/index.js";
+import { checkChannels } from "./settlement/channel-check.js";
 import { atCurrentBid, feeSettings, type FeeSettings } from "./settlement/fees.js";
 import type { SettlementHooks } from "./settlement/hooks.js";
 import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler, type Settle } from "./settlement/settle.js";
@@ -274,8 +275,8 @@ export function buildSettlement(
   },
 ): { settle: Settle; submitter: SettlementSubmitter } {
   const { logger, metrics } = deps;
-  // The only sender of transactions in the service (AD-2). The channel check at startup comes
-  // with 0020, the lease with 0025.
+  // The only sender of transactions in the service (AD-2). `main()` checks its channels before
+  // it starts; the lease comes with 0025.
   const submitter = new SettlementSubmitter({
     rpc: deps.rpc,
     networkPassphrase: getNetworkPassphrase(config.network),
@@ -331,7 +332,7 @@ export function compose(
     seams?: UpstreamSeams;
     sleep?: (ms: number) => Promise<void>;
   },
-): { deps: AppDeps; cataloger: Cataloger; metrics: Metrics } {
+): { deps: AppDeps; cataloger: Cataloger; metrics: Metrics; rpc: FallbackRpc } {
   const { logger } = opts;
   const stores = opts.stores ?? memoryStores();
   // Cataloging plugs into `/settle` through `extensionResponses` and `onSuccess` (AD-8).
@@ -375,6 +376,7 @@ export function compose(
     },
     cataloger,
     metrics,
+    rpc,
   };
 }
 
@@ -393,30 +395,35 @@ export async function main(
 ) {
   const config = parseConfig(env);
   const logger = jsonLogger(config.logLevel, opts.write, config.rpcUrls);
-  // stellar-sdk's RPC and Horizon clients use the global fetch with no timeout of their own, and an
-  // upstream call cut off by its deadline can't be cancelled. undici's defaults would hold its
-  // socket for 300 s; these end it after 10 s without headers or body data. Process-wide: any other
-  // `fetch` in this process gets the same bounds (the facilitator makes no other).
-  setGlobalDispatcher(
-    new Agent({ headersTimeout: UPSTREAM_TIMEOUT_MS, bodyTimeout: UPSTREAM_TIMEOUT_MS }),
-  );
-  // STORE=postgres needs a migrated schema (`pnpm migrate`); the service never migrates it.
   let pools: { main: pg.Pool; reserve: pg.Pool; rateLimits: pg.Pool } | undefined;
-  if (config.store === "postgres") {
-    const url = config.databaseUrl;
-    if (url === undefined) throw new Error("STORE=postgres needs a DATABASE_URL");
-    // Reservations queue on the global scope's lock, and a flood's hits on its key's row lock;
-    // their own pools keep those queues off the others.
-    pools = {
-      main: createPool(url, poolErrorLogger(logger)),
-      reserve: createPool(url, poolErrorLogger(logger), 3),
-      rateLimits: createPool(url, poolErrorLogger(logger), 3),
-    };
-  }
   const endPools = () => Promise.all(Object.values(pools ?? {}).map((p) => p.end()));
   try {
+    // stellar-sdk's RPC and Horizon clients use the global fetch with no timeout of their own, and
+    // an upstream call cut off by its deadline can't be cancelled. undici's defaults would hold its
+    // socket for 300 s; these end it after 10 s without headers or body data. Process-wide: any
+    // other `fetch` in this process gets the same bounds (the facilitator makes no other).
+    setGlobalDispatcher(
+      new Agent({ headersTimeout: UPSTREAM_TIMEOUT_MS, bodyTimeout: UPSTREAM_TIMEOUT_MS }),
+    );
+    // STORE=postgres needs a migrated schema (`pnpm migrate`); the service never migrates it.
+    if (config.store === "postgres") {
+      const url = config.databaseUrl;
+      if (url === undefined) throw new Error("STORE=postgres needs a DATABASE_URL");
+      // Reservations queue on the global scope's lock, and a flood's hits on its key's row lock;
+      // their own pools keep those queues off the others.
+      pools = {
+        main: createPool(url, poolErrorLogger(logger)),
+        reserve: createPool(url, poolErrorLogger(logger), 3),
+        rateLimits: createPool(url, poolErrorLogger(logger), 3),
+      };
+    }
     const stores = pools ? postgresStores(pools.main, pools) : memoryStores();
-    const { deps, cataloger } = compose(config, { logger, stores });
+    const { deps, cataloger, rpc } = compose(config, { logger, stores });
+    // AD-12: the service starts only when no other key can move a channel. An RPC that doesn't
+    // answer fails the check with its error. `compose()` only wires parts, so nothing has called
+    // the RPC yet.
+    const facilitator = Keypair.fromSecret(config.facilitatorSecret).publicKey();
+    await checkChannels(rpc, config.channels, facilitator);
     // For the life of the process: an upstream call cut off by the deadline keeps running after
     // `close()`, and its error would reach stderr with the RPC URL in it.
     const restoreConsole = captureConsoleError(logger, config.rpcUrls);
@@ -450,6 +457,9 @@ export async function main(
       close: () => (closing ??= closeOnce()),
     };
   } catch (error) {
+    // Logged here, where an RPC URL is named as its `RPC_URLS` entry, never by its host
+    // (ADR 0011); `server.ts` logs only a `ConfigError`, which comes before the logger.
+    logger.error("startup_failed", { error });
     await endPools();
     throw error;
   }

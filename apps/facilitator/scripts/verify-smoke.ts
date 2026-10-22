@@ -1,10 +1,14 @@
 /**
- * Testnet smoke run of `POST /verify` (0018): a real client signs an `exact` payment with
- * upstream's client, and two facilitators built by `main()` verify it.
+ * Testnet smoke run of `/verify` (0018): a real client signs an `exact` payment with upstream's
+ * client, and two verifiers built from the config, as `main()` builds them, check it.
  *
  * 1. Plain facilitator: the payment is valid (`isValid: true`, `payer` = the client).
  * 2. Facilitator that lists the client's address as a channel: rejected by the channel check,
  *    with our code in `extra.reason`.
+ *
+ * Only the verifier, not `main()`: `main()` refuses to start on channels its key can't sign for
+ * alone (0020), and the client's address is one. `settle-smoke.ts` runs `main()` on real
+ * channels.
  *
  * Env:
  *   CLIENT_SECRET  funded testnet key that pays (never printed)
@@ -28,8 +32,11 @@ import { Keypair } from "@stellar/stellar-sdk";
 import type { PaymentRequirements, VerifyResponse } from "@x402/core/types";
 import { createEd25519Signer } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/client";
-import { Agent, fetch } from "undici";
-import { main } from "../src/main.js";
+import { Agent, setGlobalDispatcher } from "undici";
+import { parseConfig } from "../src/config.js";
+import { jsonLogger } from "../src/logger.js";
+import { UPSTREAM_TIMEOUT_MS, buildRpc, buildVerifier } from "../src/main.js";
+import { feeSettings } from "../src/settlement/fees.js";
 
 const XLM_SAC_TESTNET = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 const network = "stellar:testnet";
@@ -55,52 +62,40 @@ const requirements: PaymentRequirements = {
 const signed = await new ExactStellarScheme(client).createPaymentPayload(2, requirements);
 const paymentPayload = { ...signed, accepted: requirements };
 
-/** The facilitators' log events, from `main()`'s log sink; the lines go on to stderr. */
+/** The verifiers' log events; the lines go on to stderr. */
 const events: { event: string; rpc?: string }[] = [];
 const write = (line: string) => {
   events.push(JSON.parse(line) as { event: string; rpc?: string });
   process.stderr.write(line);
 };
 
-/** The script's own HTTP client, apart from the global one `main()` sets for the facilitator. */
-const http = new Agent({ headersTimeout: 120_000 });
+// The same bounds `main()` sets for stellar-sdk's fetch: a hung RPC URL fails after 10 s.
+setGlobalDispatcher(
+  new Agent({ headersTimeout: UPSTREAM_TIMEOUT_MS, bodyTimeout: UPSTREAM_TIMEOUT_MS }),
+);
 
 async function verifyWith(
   channels: string,
 ): Promise<{ answer: VerifyResponse; rpc?: string; failedOver: boolean }> {
   const from = events.length;
   // A fresh facilitator key: verify never spends from it.
-  const server = await main(
-    {
-      FACILITATOR_SECRET: Keypair.random().secret(),
-      CHANNELS: channels,
-      PORT: "0",
-      LOG_LEVEL: "info",
-      MIN_VALIDITY_LEDGERS: process.env.MIN_VALIDITY_LEDGERS,
-      RPC_URLS: process.env.RPC_URLS,
-    },
-    { write },
-  );
-  try {
-    const response = await fetch(`http://127.0.0.1:${server.port}/verify`, {
-      // `main()` bounds this process's `fetch` at 10 s without headers; a hung first RPC URL makes
-      // `/verify` itself take longer.
-      dispatcher: http,
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ x402Version: 2, paymentPayload, paymentRequirements: requirements }),
-    });
-    if (response.status !== 200) throw new Error(`/verify answered ${response.status}`);
-    const answer = (await response.json()) as VerifyResponse;
-    const own = events.slice(from);
-    return {
-      answer,
-      rpc: own.find((e) => e.event === "verified")?.rpc,
-      failedOver: own.some((e) => e.event === "rpc_failover"),
-    };
-  } finally {
-    await server.close();
-  }
+  const config = parseConfig({
+    FACILITATOR_SECRET: Keypair.random().secret(),
+    CHANNELS: channels,
+    LOG_LEVEL: "info",
+    MIN_VALIDITY_LEDGERS: process.env.MIN_VALIDITY_LEDGERS,
+    RPC_URLS: process.env.RPC_URLS,
+  });
+  const logger = jsonLogger(config.logLevel, write, config.rpcUrls);
+  const rpc = buildRpc(config, logger);
+  const verify = buildVerifier(config, rpc, feeSettings(config.fees, rpc), logger);
+  const trace: { rpc?: string } = {};
+  const answer = await verify(paymentPayload, requirements, trace);
+  return {
+    answer,
+    rpc: trace.rpc,
+    failedOver: events.slice(from).some((e) => e.event === "rpc_failover"),
+  };
 }
 
 const plain = await verifyWith(Keypair.random().publicKey());
