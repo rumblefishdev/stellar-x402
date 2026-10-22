@@ -15,6 +15,7 @@ import {
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { memoryStores } from "../src/adapters/memory.js";
 import { ConfigError, parseConfig } from "../src/config.js";
+import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger, rpcEndpointName } from "../src/logger.js";
 import { main, start, type Started } from "../src/main.js";
 
@@ -44,24 +45,18 @@ describe("facilitator boot", () => {
       verify,
       settle,
       extensionResponses: () => undefined,
+      supported: supportedResponse(config.network, Keypair.fromSecret(secret).publicKey()),
     });
     url = `http://127.0.0.1:${app.port}`;
   });
   afterAll(() => app.close());
 
-  it("answers the stub routes, with no CORS headers", async () => {
-    const routes = [
-      ["GET", "/supported"],
-      ["GET", "/discovery/resources"],
-    ] as const;
-    for (const [method, path] of routes) {
-      const response = await fetch(`${url}${path}`, {
-        method,
-        headers: { origin: "https://other.example" },
-      });
-      expect(response.status, path).toBe(501);
-      expect(response.headers.get("access-control-allow-origin"), path).toBeNull();
-    }
+  it("answers the stub route, with no CORS headers", async () => {
+    const response = await fetch(`${url}/discovery/resources`, {
+      headers: { origin: "https://other.example" },
+    });
+    expect(response.status).toBe(501);
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
     expect((await fetch(`${url}/unknown`)).status).toBe(404);
   });
 
@@ -161,6 +156,22 @@ describe("main()", () => {
     } finally {
       write.mockRestore();
       console.error = original;
+      await app.close();
+    }
+  });
+
+  it("serves /supported for its own key, never a channel", async () => {
+    const app = await main({ ...env, PORT: "47136", LOG_LEVEL: "error" });
+    try {
+      const response = await fetch("http://127.0.0.1:47136/supported", {
+        headers: { origin: "https://other.example" },
+      });
+      expect(response.headers.get("access-control-allow-origin")).toBeNull();
+      const body = await response.text();
+      const facilitator = Keypair.fromSecret(secret).publicKey();
+      expect(JSON.parse(body)).toEqual(supportedResponse("stellar:testnet", facilitator));
+      expect(body).not.toContain(env.CHANNELS);
+    } finally {
       await app.close();
     }
   });

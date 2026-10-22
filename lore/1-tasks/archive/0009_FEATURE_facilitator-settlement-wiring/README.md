@@ -2,7 +2,7 @@
 id: "0009"
 title: "Settle exact payments once through the channel pool"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0003", "0004", "0005", "0006", "0007", "0011"]
 related_tasks: ["0007", "0006", "0012", "0013", "0014", "0015", "0016", "0017", "0018", "0019", "0020", "0022", "0023", "0024", "0025", "0026", "0027", "0031", "0043", "0045", "0047", "0049"]
@@ -72,6 +72,14 @@ history:
       Seventh PR #41 review (Adam, approved): decisions 56–59 (a fallback success counts as
       answered once sent, a depth cap of 256, an unexpected error after a send stays pending, bare
       RPC hosts named in logs); 0019's bullet, 0024's and 0049's. Facilitator 320 → 327.
+  - date: "2026-10-21"
+    status: completed
+    who: okarcz
+    note: >
+      PR #41 merged into develop by rebase (ef10461), approved by Adam and Stan after seven review
+      rounds; all acceptance criteria met. 59 design decisions; facilitator tests 103 → 327,
+      signer-pool 99 → 111. Its open points are "From 0009" bullets in 0019, 0020, 0023–0027,
+      0045 and 0049.
 ---
 
 # Settle exact payments once through the channel pool
