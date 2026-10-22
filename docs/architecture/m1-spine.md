@@ -297,6 +297,7 @@ graph TD
     - The validator accepts both `http` and `mcp` input types.
     - Required fields that are malformed reject the listing. Optional fields that are malformed (`serviceName`, `tags`, `iconUrl`) are dropped.
   - **`iconUrl`.** It must be absolute https, with no IP literals and no loopback or private hosts. The facilitator never fetches any seller-supplied URL in T1.
+  - **Resource URLs.** A scheme allowlist by listing type (`http`: `https`, `http`; `mcp`: also `mcp`) and no host rules; SSRF is checked by whoever fetches them (task 0053, ADR 0008). An empty `description` or `mimeType` counts as absent.
   - **Catalog key.** It is `network + payTo + method + normalized resource URL` (with `routeTemplate` applied).
   - **Upserts.** They are idempotent and update `lastUpdated`.
 
