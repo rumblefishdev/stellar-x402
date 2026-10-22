@@ -377,7 +377,8 @@ One request or one stop must never outlast the layer in front of it:
     submitter didn't send, read from Horizon; and OpenBao's audit log disk at 80%;
   - WAL archiving failing (`pg_stat_archiver.failed_count` rising, or the last archived segment
     older than 10 minutes), since a stuck archive fills a disk ClickHouse shares;
-  - the last backup shipped off the server (WAL or OpenBao snapshot) older than 30 minutes;
+  - the last WAL segment shipped off the server older than 30 minutes, or the last OpenBao
+    snapshot older than 26 hours (they run daily);
   - the Roles Anywhere certificate expiring within 30 days;
   - low free disk and memory on the server.
 - **Uptime:** a Route 53 HTTPS health check on the public URL.
