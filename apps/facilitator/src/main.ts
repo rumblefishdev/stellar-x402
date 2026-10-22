@@ -27,6 +27,12 @@ import { checkChannels } from "./settlement/channel-check.js";
 import { checkRpcNetworks } from "./settlement/network-check.js";
 import { atCurrentBid, feeSettings, type FeeSettings } from "./settlement/fees.js";
 import type { SettlementHooks } from "./settlement/hooks.js";
+import {
+  createReconciler,
+  scheduleReconciliation,
+  type Reconciliation,
+} from "./settlement/reconcile.js";
+import { createRecords } from "./settlement/records.js";
 import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler, type Settle } from "./settlement/settle.js";
 import { failoverUpstream, type EndpointFailure } from "./settlement/upstream-failover.js";
 import {
@@ -49,6 +55,8 @@ export interface Started {
 export async function start(deps: AppDeps): Promise<Started> {
   const server = createApp(deps).listen(deps.config.port);
   await once(server, "listening");
+  // After listening, so `/health` answers while it runs; `/settle` answers 503 until it ends.
+  deps.reconciliation?.start();
   const { port } = server.address() as AddressInfo;
   deps.logger.info("listening", {
     port,
@@ -57,7 +65,10 @@ export async function start(deps: AppDeps): Promise<Started> {
   });
   return {
     port,
-    close: () => new Promise((resolve, reject) => server.close((e) => (e ? reject(e) : resolve()))),
+    close: () => {
+      deps.reconciliation?.close();
+      return new Promise((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())));
+    },
   };
 }
 
@@ -260,8 +271,8 @@ export function settleCheck(checks: VerifierDeps): Check {
 /**
  * `/settle` from the config (AD-2, AD-6, AD-10, ADR 0011): the pool, built from the same
  * `fees.pool` as the checks' fees, and the settler with `/settle`'s checks and the settle budget.
- * The pool's events go to the metrics; 0019 finishes the record of a settlement answered
- * `pending`, until then its `resolved` event is logged.
+ * The pool's events go to the metrics; its `resolved` event finishes the record of a settlement
+ * answered `pending`. Reconciliation (0019) shares the settler's record writes.
  */
 export function buildSettlement(
   config: Config,
@@ -276,8 +287,19 @@ export function buildSettlement(
     /** Tests pass the pool's `sleep`. */
     sleep?: (ms: number) => Promise<void>;
   },
-): { settle: Settle; submitter: SettlementSubmitter } {
+): { settle: Settle; submitter: SettlementSubmitter; reconciliation: Reconciliation } {
   const { logger, metrics } = deps;
+  const network = config.network;
+  const records = createRecords({ network, store: deps.store, hooks: deps.hooks, logger, metrics });
+  const reconciler = createReconciler({
+    network,
+    store: deps.store,
+    rpc: deps.rpc,
+    records,
+    logger,
+    metrics,
+    budgetMs: config.settlement.settleBudgetMs,
+  });
   // The only sender of transactions in the service (AD-2). `main()` checks its channels before
   // it starts; the lease comes with 0025.
   const submitter = new SettlementSubmitter({
@@ -297,9 +319,18 @@ export function buildSettlement(
       );
       if (event.type === "resolved") {
         logger.info("settlement_resolved", {
-          network: config.network,
+          network,
           transaction: event.result.hash,
           status: event.result.status,
+        });
+        // A store that fails here leaves the record to the next sweep, armed by the failure.
+        reconciler.resolved(event.result).catch((error: unknown) => {
+          logger.warn("settlement_resolve_failed", {
+            network,
+            transaction: event.result.hash,
+            error,
+          });
+          records.storeFailed();
         });
       }
     },
@@ -315,8 +346,10 @@ export function buildSettlement(
     maxFeeStroops: config.fees.maxFeeStroops,
     settleTimeoutMs: config.settlement.settleTimeoutMs,
     budgetMs: config.settlement.settleBudgetMs,
+    records,
   });
-  return { settle, submitter };
+  const reconciliation = scheduleReconciliation({ reconciler, records, logger, network });
+  return { settle, submitter, reconciliation };
 }
 
 /**
@@ -351,7 +384,7 @@ export function compose(
   // they share one ceiling and one bid (AD-10).
   const fees = feeSettings(config.fees, rpc);
   const checks = buildChecks(config, rpc, fees, logger, opts.seams);
-  const { settle } = buildSettlement(config, {
+  const { settle, reconciliation } = buildSettlement(config, {
     rpc,
     fees,
     checks,
@@ -376,6 +409,7 @@ export function compose(
       settle,
       extensionResponses: cataloger.extensionResponses,
       supported: supportedResponse(config.network, checks.facilitator),
+      reconciliation,
     },
     cataloger,
     metrics,
@@ -471,6 +505,8 @@ export async function main(
       pruner,
       /** The logger every part writes to: for tests. */
       logger,
+      /** Settles once `/settle` serves (the startup sweep ended): for tests. */
+      reconciled: deps.reconciliation?.reconciled ?? Promise.resolve(),
       // A second signal (SIGINT after SIGTERM) gets the first call's promise: running it again
       // would end the pools under requests the first is still waiting for.
       close: () => (closing ??= closeOnce()),

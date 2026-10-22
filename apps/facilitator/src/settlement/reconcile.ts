@@ -244,3 +244,118 @@ export function createReconciler(deps: ReconcilerDeps) {
 }
 
 export type Reconciler = ReturnType<typeof createReconciler>;
+
+/** When reconciliation runs in a serving process, and whether `/settle` may answer yet. */
+export interface Reconciliation {
+  /** `/settle` answers 503 until the startup sweep has tried every record (decisions 4, 21). */
+  ready(): boolean;
+  /** Settles once the startup sweep has finished: for tests. */
+  readonly reconciled: Promise<void>;
+  /** Starts the startup sweep; the server already listens, so `/health` answers. */
+  start(): void;
+  /** Stops every timer; a sweep under way finishes on its own. */
+  close(): void;
+}
+
+export interface ReconciliationOptions {
+  reconciler: Reconciler;
+  records: Records;
+  logger: Logger;
+  network: StellarNetwork;
+  /** The safety-net sweep (decision 8): 5 minutes. */
+  intervalMs?: number;
+  /** The first retry after a failed sweep, doubled up to `maxBackoffMs`. */
+  minBackoffMs?: number;
+  maxBackoffMs?: number;
+}
+
+/**
+ * Runs the reconciler (decisions 4, 8, 21): the startup sweep, retried with backoff until the store
+ * lists the records; then a sweep, retried until every record is checked, once the store answers
+ * again after a failed write or when the startup sweep left records unchecked; and one every
+ * `intervalMs` regardless. Timers don't keep the process alive.
+ */
+export function scheduleReconciliation(opts: ReconciliationOptions): Reconciliation {
+  const { reconciler, records, logger, network } = opts;
+  const intervalMs = opts.intervalMs ?? 5 * 60_000;
+  const minBackoffMs = opts.minBackoffMs ?? 1_000;
+  const maxBackoffMs = opts.maxBackoffMs ?? 30_000;
+  let ready = false;
+  let closed = false;
+  /** A live sweep is due or retrying: after a store failure, or a record left unchecked. */
+  let armed = false;
+  let retry: ReturnType<typeof setTimeout> | undefined;
+  let interval: ReturnType<typeof setInterval> | undefined;
+  let reconciled!: () => void;
+  const done = new Promise<void>((resolve) => (reconciled = resolve));
+
+  const later = (run: () => void, ms: number) => {
+    const timer = setTimeout(run, ms);
+    timer.unref();
+    return timer;
+  };
+
+  /**
+   * Sweeps until one lists the records and, with `checkAll`, until it has checked every one,
+   * waiting `delay` (doubled each time, up to `maxBackoffMs`) between tries.
+   */
+  const untilSwept = (
+    mode: SweepMode,
+    then: (report: SweepReport) => void,
+    checkAll: boolean,
+    delay = minBackoffMs,
+  ) => {
+    if (closed) return;
+    const again = (fields: Record<string, unknown>) => {
+      logger.warn("reconcile_retry", { network, mode, retryInMs: delay, ...fields });
+      retry = later(
+        () => untilSwept(mode, then, checkAll, Math.min(delay * 2, maxBackoffMs)),
+        delay,
+      );
+    };
+    reconciler.sweep(mode).then(
+      (report) => (checkAll && report.errors > 0 ? again({ errors: report.errors }) : then(report)),
+      (error: unknown) => again({ error }),
+    );
+  };
+
+  /** A live sweep, retried until every record has been checked; one at a time. */
+  const arm = () => {
+    if (armed || closed) return;
+    armed = true;
+    retry = later(() => untilSwept("live", () => (armed = false), true), minBackoffMs);
+  };
+
+  records.onStoreFailure(() => {
+    if (ready) arm();
+  });
+
+  return {
+    ready: () => ready,
+    reconciled: done,
+    start() {
+      // `/settle` opens once every record has been tried (0019 decision 21): one the RPC or the
+      // store couldn't check answers `settlement_pending` meanwhile, and is retried at once.
+      untilSwept(
+        "startup",
+        (report) => {
+          ready = true;
+          reconciled();
+          if (report.errors > 0) arm();
+          interval = setInterval(() => {
+            reconciler
+              .sweep("live")
+              .catch((error: unknown) => logger.warn("reconcile_failed", { network, error }));
+          }, intervalMs);
+          interval.unref();
+        },
+        false,
+      );
+    },
+    close() {
+      closed = true;
+      clearTimeout(retry);
+      clearInterval(interval);
+    },
+  };
+}
