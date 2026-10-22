@@ -62,7 +62,6 @@ the Stellar Prices API.
   and half a CPU.
   - Each network gets its own listener socket in its own volume, mounted only into that
     network's facilitator, so neither facilitator can reach the other network's socket.
-  - Whether mainnet needs an OpenBao of its own is decided with 0038.
 - **The limits add up to 1.5 GiB per network:** 1.75 GiB on testnet with OpenBao, 3.25 GiB with
   both networks. They are ceilings; testnet uses less.
 - **Testnet and mainnet never share a facilitator,** a database, a key or a channel set (AD-12).
@@ -480,7 +479,7 @@ One request or one stop must never outlast the layer in front of it:
   - the runbook: deploy, rollback, key rotation, certificate renewal, restore on another machine.
 - **0027 builds:** log shipping through the CloudWatch agent, the EMF adapter, the alarms above,
   the us-east-1 uptime stack and the Slack integration.
-- **0009 gives `/settle` its response budget;** 0023 implements `TRUSTED_PROXY_HOPS` as above.
+- **0023 implements `TRUSTED_PROXY_HOPS`** as above.
 - **Cost:**
   - The server adds nothing.
   - CloudWatch logs, metrics and alarms, and the health check, come to a few dollars.

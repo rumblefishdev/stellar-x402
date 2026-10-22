@@ -5,7 +5,7 @@ type: DOCS
 status: active
 milestone: 1
 related_adr: ["0011", "0012", "0013"]
-related_tasks: ["0014", "0009", "0013", "0019", "0023", "0025", "0026", "0027", "0036", "0038", "0047"]
+related_tasks: ["0014", "0009", "0013", "0019", "0020", "0023", "0025", "0026", "0027", "0036", "0038", "0047"]
 tags: [facilitator, deploy, hosting, operations, priority-high, effort-small, platform]
 links:
   - ../../../docs/adr/0011-facilitator-hosting.md
