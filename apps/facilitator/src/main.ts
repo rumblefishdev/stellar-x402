@@ -395,16 +395,16 @@ export async function main(
 ) {
   const config = parseConfig(env);
   const logger = jsonLogger(config.logLevel, opts.write, config.rpcUrls);
-  // stellar-sdk's RPC and Horizon clients use the global fetch with no timeout of their own, and an
-  // upstream call cut off by its deadline can't be cancelled. undici's defaults would hold its
-  // socket for 300 s; these end it after 10 s without headers or body data. Process-wide: any other
-  // `fetch` in this process gets the same bounds (the facilitator makes no other).
-  setGlobalDispatcher(
-    new Agent({ headersTimeout: UPSTREAM_TIMEOUT_MS, bodyTimeout: UPSTREAM_TIMEOUT_MS }),
-  );
   let pools: { main: pg.Pool; reserve: pg.Pool; rateLimits: pg.Pool } | undefined;
   const endPools = () => Promise.all(Object.values(pools ?? {}).map((p) => p.end()));
   try {
+    // stellar-sdk's RPC and Horizon clients use the global fetch with no timeout of their own, and
+    // an upstream call cut off by its deadline can't be cancelled. undici's defaults would hold its
+    // socket for 300 s; these end it after 10 s without headers or body data. Process-wide: any
+    // other `fetch` in this process gets the same bounds (the facilitator makes no other).
+    setGlobalDispatcher(
+      new Agent({ headersTimeout: UPSTREAM_TIMEOUT_MS, bodyTimeout: UPSTREAM_TIMEOUT_MS }),
+    );
     // STORE=postgres needs a migrated schema (`pnpm migrate`); the service never migrates it.
     if (config.store === "postgres") {
       const url = config.databaseUrl;
