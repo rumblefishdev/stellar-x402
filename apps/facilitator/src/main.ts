@@ -424,7 +424,7 @@ export async function main(
     const stores = pools ? postgresStores(pools.main, pools) : memoryStores();
     const { deps, cataloger, rpc } = compose(config, { logger, stores });
     // AD-12: the service starts only when no other key can move a channel. An RPC that doesn't
-    // answer fails the check too. `compose()` only wires parts; nothing has called the RPC yet.
+    // answer fails the check with its error. `compose()` only wires parts; nothing has called the RPC yet.
     const facilitator = Keypair.fromSecret(config.facilitatorSecret).publicKey();
     await checkChannels(rpc, config.channels, facilitator);
     // For the life of the process: an upstream call cut off by the deadline keeps running after

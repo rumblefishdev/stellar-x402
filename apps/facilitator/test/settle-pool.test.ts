@@ -1,4 +1,4 @@
-import { Account, Keypair, StrKey, nativeToScVal, xdr, type rpc } from "@stellar/stellar-sdk";
+import { Keypair, StrKey, nativeToScVal, xdr, type rpc } from "@stellar/stellar-sdk";
 import type { SorobanRpc } from "@stellar-x402/signer-pool";
 import { FakeRpc } from "@stellar-x402/signer-pool/testing";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
@@ -43,12 +43,14 @@ const requirements: PaymentRequirements = {
 
 /** `FakeRpc` whose simulation emits the payment's transfer, for the balance-change check. */
 class PaymentRpc extends FakeRpc {
-  /** Delay before `getAccount` answers, to hold a settlement before it signs. */
+  /** Delay before an account read answers, to hold a settlement before it signs. */
   accountDelayMs = 0;
 
-  override async getAccount(address: string): Promise<Account> {
+  override async getLedgerEntries(
+    ...keys: Parameters<FakeRpc["getLedgerEntries"]>
+  ): Promise<rpc.Api.GetLedgerEntriesResponse> {
     if (this.accountDelayMs) await new Promise((r) => setTimeout(r, this.accountDelayMs));
-    return super.getAccount(address);
+    return super.getLedgerEntries(...keys);
   }
 
   override async simulateTransaction(

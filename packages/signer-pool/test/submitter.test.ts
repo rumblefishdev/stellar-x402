@@ -62,7 +62,7 @@ describe("SettlementSubmitter", () => {
 
     await submitter.submit(call());
     expect((fake.sent[1] as FeeBumpTransaction).innerTransaction.sequence).toBe("1002");
-    expect(fake.calls.getAccount).toBe(1); // the sequence is tracked locally after the first read
+    expect(fake.calls.getLedgerEntries).toBe(1); // the sequence is tracked locally after the first read
   });
 
   it("simulates with auth enforced and rejects invalid channel addresses", async () => {
@@ -96,16 +96,16 @@ describe("SettlementSubmitter", () => {
     // The first envelope (1002) gets txBadSeq; it is rebuilt once with the re-read sequence.
     const ok = await submitter.submit(call());
     expect(ok.status).toBe("success");
-    expect(fake.calls.getAccount).toBe(2);
+    expect(fake.calls.getLedgerEntries).toBe(2);
     expect((fake.sent.at(-1) as FeeBumpTransaction).innerTransaction.sequence).toBe("5001");
 
     fake.sendScript.push("ERROR_INSUFFICIENT_FEE");
-    const reads = fake.calls.getAccount;
+    const reads = fake.calls.getLedgerEntries;
     const fee = await submitter.submit(call());
     expect(fee).toMatchObject({ status: "rejected", errorCode: "txInsufficientFee" });
     const after = await submitter.submit(call());
     expect(after.status).toBe("success");
-    expect(fake.calls.getAccount).toBe(reads); // not re-read: the sequence was not consumed
+    expect(fake.calls.getLedgerEntries).toBe(reads); // not re-read: the sequence was not consumed
     expect((fake.sent.at(-1) as FeeBumpTransaction).innerTransaction.sequence).toBe("5002");
   });
 
@@ -123,7 +123,7 @@ describe("SettlementSubmitter", () => {
     fake.statusScript.push("THROW", "THROW", "THROW");
     const res = await submitter.submit(call());
     expect(res.status).toBe("success");
-    expect(fake.calls.getAccount).toBe(1);
+    expect(fake.calls.getLedgerEntries).toBe(1);
     const next = await submitter.submit(call());
     expect(next.status).toBe("success");
   });

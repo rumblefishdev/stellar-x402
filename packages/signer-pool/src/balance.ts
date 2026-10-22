@@ -1,4 +1,5 @@
 import type { xdr } from "@stellar/stellar-sdk";
+import { readAccountEntry } from "./account.js";
 import type { SorobanRpc } from "./types.js";
 
 const BASE_RESERVE = 5_000_000n; // 0.5 XLM in stroops
@@ -28,13 +29,14 @@ export interface BalanceCheckOptions {
  * spend. Run it on a timer and alert when `low` is true.
  */
 export async function checkFacilitatorBalance(
-  rpc: Pick<SorobanRpc, "getAccountEntry">,
+  rpc: Pick<SorobanRpc, "getLedgerEntries">,
   address: string,
   opts: BalanceCheckOptions = {},
 ): Promise<BalanceReport> {
   const minSpendable = opts.minSpendableStroops ?? 1_000_000_000n;
   const perSettlement = opts.feePerSettlementStroops ?? 45_000n;
-  const entry = await rpc.getAccountEntry(address);
+  const entry = await readAccountEntry(rpc, address);
+  if (!entry) throw new Error(`Account not found: ${address}`);
   const balance = entry.balance().toBigInt();
   const { sponsoring, sponsored, selling } = extensions(entry);
   const reserve = (2n + BigInt(entry.numSubEntries()) + sponsoring - sponsored) * BASE_RESERVE;

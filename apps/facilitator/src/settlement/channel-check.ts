@@ -6,7 +6,7 @@ import { checkChannel, type SorobanRpc } from "@stellar-x402/signer-pool";
  * channel with its problem, or with the error its read failed with.
  */
 export async function checkChannels(
-  rpc: Pick<SorobanRpc, "getAccountEntry">,
+  rpc: Pick<SorobanRpc, "getLedgerEntries">,
   channels: readonly string[],
   facilitator: string,
 ): Promise<void> {
