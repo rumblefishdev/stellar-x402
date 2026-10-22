@@ -24,8 +24,6 @@
  * Nothing is submitted: `/verify` only simulates. The facilitators' log lines go to stderr, so
  * stdout carries only the result.
  */
-import { once } from "node:events";
-import { createServer, type AddressInfo } from "node:net";
 import { Keypair } from "@stellar/stellar-sdk";
 import type { PaymentRequirements, VerifyResponse } from "@x402/core/types";
 import { createEd25519Signer } from "@x402/stellar";
@@ -57,15 +55,6 @@ const requirements: PaymentRequirements = {
 const signed = await new ExactStellarScheme(client).createPaymentPayload(2, requirements);
 const paymentPayload = { ...signed, accepted: requirements };
 
-/** A port the OS reports free (`PORT` must be 1–65535, so not 0). */
-async function freePort(): Promise<number> {
-  const probe = createServer().listen(0);
-  await once(probe, "listening");
-  const { port } = probe.address() as AddressInfo;
-  await new Promise((resolve) => probe.close(resolve));
-  return port;
-}
-
 /** The facilitators' log events, from `main()`'s log sink; the lines go on to stderr. */
 const events: { event: string; rpc?: string }[] = [];
 const write = (line: string) => {
@@ -79,14 +68,13 @@ const http = new Agent({ headersTimeout: 120_000 });
 async function verifyWith(
   channels: string,
 ): Promise<{ answer: VerifyResponse; rpc?: string; failedOver: boolean }> {
-  const port = await freePort();
   const from = events.length;
   // A fresh facilitator key: verify never spends from it.
   const server = await main(
     {
       FACILITATOR_SECRET: Keypair.random().secret(),
       CHANNELS: channels,
-      PORT: String(port),
+      PORT: "0",
       LOG_LEVEL: "info",
       MIN_VALIDITY_LEDGERS: process.env.MIN_VALIDITY_LEDGERS,
       RPC_URLS: process.env.RPC_URLS,
@@ -94,7 +82,7 @@ async function verifyWith(
     { write },
   );
   try {
-    const response = await fetch(`http://127.0.0.1:${port}/verify`, {
+    const response = await fetch(`http://127.0.0.1:${server.port}/verify`, {
       // `main()` bounds this process's `fetch` at 10 s without headers; a hung first RPC URL makes
       // `/verify` itself take longer.
       dispatcher: http,

@@ -337,7 +337,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
       DATABASE_URL: urlFor(schema),
       FACILITATOR_SECRET: Keypair.random().secret(),
       CHANNELS: Keypair.random().publicKey(),
-      PORT: "47131",
+      PORT: "0",
       LOG_LEVEL: "error",
     });
     const pools = app.pools;
@@ -403,7 +403,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
       DATABASE_URL: urlFor(schema),
       FACILITATOR_SECRET: Keypair.random().secret(),
       CHANNELS: Keypair.random().publicKey(),
-      PORT: "47133",
+      PORT: "0",
       LOG_LEVEL: "error",
     });
     try {
@@ -430,7 +430,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
       DATABASE_URL: urlFor(schema),
       FACILITATOR_SECRET: Keypair.random().secret(),
       CHANNELS: Keypair.random().publicKey(),
-      PORT: "47132",
+      PORT: "0",
       LOG_LEVEL: "error",
     });
     // SIGTERM then SIGINT: the second call waits for the first instead of ending the pools early.

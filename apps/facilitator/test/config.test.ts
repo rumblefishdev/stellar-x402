@@ -177,6 +177,10 @@ describe("parseConfig", () => {
     ]);
   });
 
+  it("accepts PORT 0, which lets the system pick a free port", () => {
+    expect(parseConfig({ ...minimal, PORT: "0" }).port).toBe(0);
+  });
+
   it("keeps the settle budget below the seller's 90 s and the repeat wait within the budget", () => {
     expect(problems({ ...minimal, SETTLE_BUDGET_MS: "80001" })).toEqual([
       "SETTLE_BUDGET_MS must be between 1000 and 80000",
@@ -206,7 +210,7 @@ describe("parseConfig", () => {
 
   it("accepts only plain decimal numbers in range", () => {
     expect(problems({ ...minimal, PORT: "0x10" })).toEqual(["PORT must be a whole number"]);
-    expect(problems({ ...minimal, PORT: "70000" })).toEqual(["PORT must be between 1 and 65535"]);
+    expect(problems({ ...minimal, PORT: "70000" })).toEqual(["PORT must be between 0 and 65535"]);
     expect(problems({ ...minimal, SETTLE_TIMEOUT_MS: "1e20" })).toEqual([
       "SETTLE_TIMEOUT_MS must be a whole number",
     ]);
