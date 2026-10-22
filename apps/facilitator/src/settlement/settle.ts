@@ -99,6 +99,11 @@ export const SETTLE_REASONS = {
   rpcUnavailable: "settle_exact_stellar_rpc_unavailable",
   /** An auth entry with source-account credentials would authorize as the facilitator (AD-5). */
   unsupportedCredential: UNSUPPORTED_CREDENTIAL_REASON,
+  /**
+   * The facilitator stopped before anything was signed (a crash or a restart), and reconciliation
+   * closed the record: nothing was or will be sent for this payment. Sign a new payment.
+   */
+  interrupted: "settle_exact_stellar_interrupted",
   /** Anything else (upstream's code). */
   unexpected: "unexpected_settle_error",
 } as const;
@@ -233,7 +238,8 @@ export function createSettler(deps: SettlerDeps): Settle {
 
   const records =
     deps.records ?? createRecords({ network, store, hooks: deps.hooks, logger, metrics, now });
-  const { hookFailed, recordFailed, onFinal, onSuccess, advance, finish, answeredHere } = records;
+  const { hookFailed, recordFailed, onFinal, onSuccess, advance, finish, answeredHere, unmarked } =
+    records;
 
   /**
    * A refusal that means the pool, or `/settle`'s own re-check, disagreed with a `/verify` that
@@ -315,8 +321,10 @@ export function createSettler(deps: SettlerDeps): Settle {
         answeredHere.delete(record.key);
       } catch (error) {
         // The payment landed; a store that can't say whether it was answered gets the success.
-        // The key stays here, so this process doesn't answer it again.
+        // The key stays here, so this process doesn't answer it again, until reconciliation marks
+        // it once the store is back (0019 decision 9).
         recordFailed(record.key, error);
+        unmarked.add(record.key);
         first = true;
       }
     }
@@ -721,7 +729,10 @@ export function createSettler(deps: SettlerDeps): Settle {
       if (fallback) {
         // Only a success this call sends is answered: one the budget answer replaced was never
         // sent, so a repeat still gets it (and a client that left marks nothing, as in `respond`).
-        if (fallback.record && !signal?.aborted) answeredHere.add(key);
+        if (fallback.record && !signal?.aborted) {
+          answeredHere.add(key);
+          unmarked.add(key);
+        }
         return { key, ...fallback };
       }
       if (!record) return { key, response: failure(SETTLE_REASONS.unexpected, payer) };
