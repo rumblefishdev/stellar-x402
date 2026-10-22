@@ -2,7 +2,7 @@
 id: "0045"
 title: "Fail over upstream verify across RPC_URLS before pubnet"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0004", "0011"]
 related_tasks: ["0018", "0009", "0049", "0023", "0027"]
@@ -39,6 +39,14 @@ history:
       Rebased onto develop after #41 merged. Testnet showed a hung RPC_URLS[0] waited out by
       upstream and FallbackRpc each, past /settle's budget: one active URL, owned by FallbackRpc,
       now serves both (decisions 21-25). Failover logs name RPC_URLS[i]#<fingerprint>.
+  - date: "2026-10-22"
+    status: completed
+    who: okarcz
+    note: >
+      PR #45 merged into develop by rebase (ed3b975), approved by Adam after four review rounds
+      and Karol's review; all three acceptance criteria met. 26 design decisions; facilitator
+      tests 103 → 296 (+71 PostgreSQL), signer-pool 111 → 126. Its open points are in 0049
+      (frozen endpoints, fromUrls names, Adam's final three) and 0027 (a failover alarm).
 ---
 
 # Fail over upstream verify across `RPC_URLS` before pubnet
@@ -284,7 +292,9 @@ so one outage moves `/verify`, `/settle`'s checks and the pool once.
 
 - **0049**: what's left after decision 21: `FallbackRpc.fromUrls` still names endpoints by full
   URL (`main()` no longer uses it), and a frozen endpoint (its ledger stuck) isn't a failure yet.
-  The late-answer fix, the return to the first URL and the switch logs are done here.
+  The late-answer fix, the return to the first URL and the switch logs are done here. Adam's
+  three non-blocking points from the final review (the `RPC_URLS` docstring, duplicate entries,
+  the loop running past `/settle`'s budget) are in 0049 too.
 - **0027**: an alarm or a `rpc_failovers_total{from,to}` counter, so the lag risk can be alarmed
   on (recorded in 0027 by #41).
 - **Calls already waiting on a hung URL** still wait their own 10 s when another caller moves the
