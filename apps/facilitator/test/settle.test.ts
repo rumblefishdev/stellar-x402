@@ -61,6 +61,8 @@ const payTo = Keypair.random().publicKey();
 const CURRENT = 1_000;
 const EXPIRATION = 1_012;
 const HASH = "a".repeat(64);
+/** The bounds the pool gives `onSigned` with each hash. */
+const BOUNDS = { maxTime: 1_700_000_060, maxLedger: 1_000 };
 const ACCEPTED_PAY_TO = Keypair.random().publicKey();
 
 const requirements: PaymentRequirements = {
@@ -201,7 +203,7 @@ const result = (status: SubmitResult["status"] = "success", hash = HASH): Submit
 const landing =
   (status: SubmitResult["status"] = "success", hash = HASH): Behaviour =>
   async (opts) => {
-    await opts.onSigned?.(hash);
+    await opts.onSigned?.(hash, BOUNDS);
     return result(status, hash);
   };
 
@@ -365,7 +367,7 @@ describe("createSettler", () => {
     let land!: () => void;
     const landed = new Promise<void>((resolve) => (land = resolve));
     const { settle, store, submit } = setup(async (opts) => {
-      await opts.onSigned?.(HASH);
+      await opts.onSigned?.(HASH, BOUNDS);
       await landed;
       return result();
     });
@@ -383,7 +385,7 @@ describe("createSettler", () => {
     let land!: () => void;
     const { settle, store } = setup(
       async (opts) => {
-        await opts.onSigned?.(HASH);
+        await opts.onSigned?.(HASH, BOUNDS);
         await new Promise<void>((resolve) => (land = resolve));
         return result();
       },
@@ -403,7 +405,7 @@ describe("createSettler", () => {
   it("shares one store read per poll among the repeats of a key, and stops a repeat whose client left", async () => {
     const { settle, store } = setup(
       async (opts) => {
-        await opts.onSigned?.(HASH);
+        await opts.onSigned?.(HASH, BOUNDS);
         return new Promise(() => {});
       },
       { settleTimeoutMs: 100, budgetMs: 10_000, pollMs: 10 },
@@ -427,7 +429,7 @@ describe("createSettler", () => {
   it("answers settlement_pending to a repeat once the settle timeout runs out", async () => {
     const { settle } = setup(
       async (opts) => {
-        await opts.onSigned?.(HASH);
+        await opts.onSigned?.(HASH, BOUNDS);
         return new Promise(() => {});
       },
       { settleTimeoutMs: 30, budgetMs: 50 },
@@ -635,7 +637,7 @@ describe("createSettler", () => {
 
   it("keeps the record open and answers pending when a thrown send may have reached the network", async () => {
     const { settle, store, hooks, metrics } = setup(async (opts) => {
-      await opts.onSigned?.(HASH);
+      await opts.onSigned?.(HASH, BOUNDS);
       throw Object.assign(new SignedHookError("x"), {
         attempts: [{ hash: HASH, sent: "unknown" }],
       });
@@ -652,7 +654,7 @@ describe("createSettler", () => {
   it("keeps the record open after an unexpected error that follows a send the network answered", async () => {
     // `sent: "yes"` may be an accepted send: nothing says this one won't land.
     const { settle, store, hooks } = setup(async (opts) => {
-      await opts.onSigned?.(HASH);
+      await opts.onSigned?.(HASH, BOUNDS);
       throw Object.assign(new Error("bug after the send"), {
         attempts: [{ hash: HASH, sent: "yes" }],
       });
@@ -668,7 +670,7 @@ describe("createSettler", () => {
   it("ends the record on a classified error after a refused send: the pool knows it won't land", async () => {
     // A txBadSeq refusal, then the rebuild's simulation fails.
     const { settle, store } = setup(async (opts) => {
-      await opts.onSigned?.(HASH);
+      await opts.onSigned?.(HASH, BOUNDS);
       throw Object.assign(new SimulationError("rebuild failed"), {
         attempts: [{ hash: HASH, sent: "yes" }],
       });
@@ -681,7 +683,7 @@ describe("createSettler", () => {
 
   it("answers pending with the hash of a send that may have reached the network, even when the store fails", async () => {
     const { settle, store } = setup(async (opts) => {
-      await opts.onSigned?.(HASH);
+      await opts.onSigned?.(HASH, BOUNDS);
       throw Object.assign(new Error("connection reset"), {
         attempts: [{ hash: HASH, sent: "unknown" }],
       });
@@ -860,7 +862,7 @@ describe("createSettler", () => {
       let land!: () => void;
       const { settle, store } = setup(
         async (opts) => {
-          await opts.onSigned?.(HASH);
+          await opts.onSigned?.(HASH, BOUNDS);
           await new Promise<void>((resolve) => (land = resolve));
           return result();
         },
@@ -899,7 +901,7 @@ describe("createSettler", () => {
 
   it("answers pending with the hash of an uncertain send when the store fails, its reads too", async () => {
     const { settle, store } = setup(async (opts) => {
-      await opts.onSigned?.(HASH);
+      await opts.onSigned?.(HASH, BOUNDS);
       throw Object.assign(new Error("connection reset"), {
         attempts: [{ hash: HASH, sent: "unknown" }],
       });
@@ -990,7 +992,7 @@ describe("createSettler", () => {
       let land!: () => void;
       const { settle, store, hooks } = setup(
         async (opts) => {
-          await opts.onSigned?.(HASH);
+          await opts.onSigned?.(HASH, BOUNDS);
           await new Promise<void>((resolve) => (land = resolve));
           return result();
         },
@@ -1012,7 +1014,7 @@ describe("createSettler", () => {
     it("answers a success that lands as the budget runs out with the record, for the header", async () => {
       const { settle, store } = setup(
         async (opts) => {
-          await opts.onSigned?.(HASH);
+          await opts.onSigned?.(HASH, BOUNDS);
           return new Promise(() => {});
         },
         { budgetMs: 30 },
@@ -1059,7 +1061,7 @@ describe("createSettler", () => {
       const { settle, store } = setup(
         async (opts) => {
           await signing;
-          signed = await Promise.resolve(opts.onSigned!(HASH)).then(
+          signed = await Promise.resolve(opts.onSigned!(HASH, BOUNDS)).then(
             () => "stored",
             (error: unknown) => error,
           );
@@ -1083,7 +1085,7 @@ describe("createSettler", () => {
       const { settle, store } = setup(
         async (opts) => {
           await signing;
-          signed = await Promise.resolve(opts.onSigned!(HASH)).then(
+          signed = await Promise.resolve(opts.onSigned!(HASH, BOUNDS)).then(
             () => "stored",
             (error: unknown) => error,
           );
@@ -1109,10 +1111,10 @@ describe("createSettler", () => {
       let second: unknown = "not called";
       const { settle, store } = setup(
         async (opts) => {
-          await opts.onSigned?.(HASH);
+          await opts.onSigned?.(HASH, BOUNDS);
           // `txBadSeq`: the pool rebuilds and signs a new envelope.
           await new Promise<void>((resolve) => (rebuild = resolve));
-          second = await Promise.resolve(opts.onSigned!("b".repeat(64))).then(
+          second = await Promise.resolve(opts.onSigned!("b".repeat(64), BOUNDS)).then(
             () => "stored",
             (error: unknown) => error,
           );
@@ -1133,7 +1135,7 @@ describe("createSettler", () => {
       for (const signs of [false, true]) {
         const { settle, store, lines } = setup(
           async (opts) => {
-            if (signs) await opts.onSigned?.(HASH);
+            if (signs) await opts.onSigned?.(HASH, BOUNDS);
             return new Promise(() => {});
           },
           { budgetMs: 30 },
@@ -1249,7 +1251,7 @@ describe("createSettler", () => {
       let signed: unknown = "not called";
       const { settle, store } = setup(
         async (opts) => {
-          signed = await Promise.resolve(opts.onSigned!(HASH)).then(
+          signed = await Promise.resolve(opts.onSigned!(HASH, BOUNDS)).then(
             () => "stored",
             (error: unknown) => error,
           );
@@ -1333,7 +1335,7 @@ describe("createSettler", () => {
       const { settle, submit } = setup(
         async (opts) => {
           await delay(60);
-          await opts.onSigned?.(HASH);
+          await opts.onSigned?.(HASH, BOUNDS);
           await delay(15);
           return result();
         },

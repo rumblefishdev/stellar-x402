@@ -97,6 +97,14 @@ export interface ContractCall {
   auth: xdr.SorobanAuthorizationEntry[];
 }
 
+/** The bounds of a signed envelope: past either one it can no longer land. */
+export interface SignedBounds {
+  /** The time bound, in Unix seconds: the envelope's `maxTime`. */
+  maxTime: number;
+  /** The last ledger it may land in (inclusive), when the call set `maxLedger`. */
+  maxLedger?: number;
+}
+
 export interface SubmitOptions {
   /**
    * Inspects the simulation before anything is signed; throw to abort. Schemes put their
@@ -117,9 +125,9 @@ export interface SubmitOptions {
    * with. After a `txBadSeq` the first envelope was sent before the rebuild's hook runs; a hook that
    * timed out may still finish its write after the channel has reused the sequence. An attempt
    * cannot land once its time bound or ledger bound has passed, so the caller can resolve each
-   * stored hash with `getTransaction` and the bounds.
+   * stored hash with `getTransaction` and the bounds, which `bounds` carries.
    */
-  onSigned?: (hash: string) => void | Promise<void>;
+  onSigned?: (hash: string, bounds: SignedBounds) => void | Promise<void>;
   /**
    * Called once the network accepts the transaction (`PENDING`), before it is final. Must not
    * throw (errors are ignored).
@@ -701,7 +709,7 @@ export class SettlementSubmitter {
    * `getLatestLedger` poll.
    */
   private async awaitSigned(
-    onSigned: (hash: string) => void | Promise<void>,
+    onSigned: (hash: string, bounds: SignedBounds) => void | Promise<void>,
     hash: string,
     maxTime: number,
     maxLedger: number | undefined,
@@ -728,7 +736,8 @@ export class SettlementSubmitter {
       }, this.pollIntervalMs);
     });
     try {
-      const written = Promise.resolve().then(() => onSigned(hash)); // a synchronous throw too
+      const bounds: SignedBounds = { maxTime, ...(maxLedger !== undefined && { maxLedger }) };
+      const written = Promise.resolve().then(() => onSigned(hash, bounds)); // a synchronous throw too
       const outcome = await Promise.race([written, timedOut, pastLedger]).catch(
         (error: unknown) => {
           throw new SignedHookError(
