@@ -114,6 +114,16 @@ returns to its first endpoint, names endpoints by their full URL, and logs no sw
   accepted and refused. `/settle` now keeps a record `pending` after an unexpected error that
   follows any answered send, since `"yes"` can't tell an accepted send from a refused one; with
   the split, only an accepted one needs to.
+- From 0045 (Adam's last PR #45 review), none of them blocking it:
+  - The `RPC_URLS` docstring in `apps/facilitator/src/config.ts` still says the pool's reads stay
+    on the URL they moved to and upstream verify fails over on its own. Since 0045 decision 21
+    they share one active URL, and the pool returns to the first one too. Rewrite it to match.
+  - Refuse duplicate `RPC_URLS` entries: with `a,a` failover lands on the same provider and costs
+    a second 10 s.
+  - `failoverUpstream` keeps going after `/settle`'s budget has answered, since `bounded()` can't
+    cancel it: it tries the next URLs, reports their timeouts with `markFailed` and logs
+    `rpc_exhausted` for a request already answered. Stop it once the caller gives up, for example
+    with an abort signal or a deadline passed in.
 
 ## Acceptance Criteria
 
