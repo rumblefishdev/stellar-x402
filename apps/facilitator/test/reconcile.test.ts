@@ -11,13 +11,13 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import type { PaymentPayload } from "@x402/core/types";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemorySettlementStore } from "../src/adapters/memory.js";
 import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import type { AttemptBounds, SettlementKey } from "../src/ports/index.js";
 import type { SettlementHooks } from "../src/settlement/hooks.js";
-import { createReconciler } from "../src/settlement/reconcile.js";
+import { createReconciler, scheduleReconciliation } from "../src/settlement/reconcile.js";
 import { createRecords } from "../src/settlement/records.js";
 import { SETTLE_REASONS } from "../src/settlement/settle.js";
 import { settlement } from "./port-contracts.js";
@@ -345,5 +345,101 @@ describe("createReconciler", () => {
         errorReason: SETTLE_REASONS.expired,
       });
     });
+  });
+});
+
+describe("scheduleReconciliation (decisions 4, 8)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  function scheduled() {
+    const t = setup();
+    const sweep = vi.spyOn(t.reconciler, "sweep");
+    const schedule = scheduleReconciliation({
+      reconciler: t.reconciler,
+      records: t.records,
+      logger: jsonLogger("error"),
+      network,
+    });
+    return { ...t, sweep, schedule };
+  }
+
+  it("retries the startup sweep with backoff until the store answers, then serves", async () => {
+    vi.useFakeTimers();
+    const { store, schedule, sweep } = scheduled();
+    const list = store.listNonFinal.bind(store);
+    let down = 2;
+    store.listNonFinal = async (n) => {
+      if (down-- > 0) throw new Error("store down");
+      return list(n);
+    };
+    schedule.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(schedule.ready()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_000); // the first retry
+    expect(schedule.ready()).toBe(false);
+    // The next retry waits twice as long.
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(schedule.ready()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(schedule.ready()).toBe(true);
+    await schedule.reconciled;
+    expect(sweep.mock.calls.map(([mode]) => mode)).toEqual(["startup", "startup", "startup"]);
+    schedule.close();
+  });
+
+  it("opens /settle once every record was tried, and retries one the RPC couldn't check (decision 21)", async () => {
+    vi.useFakeTimers();
+    const answers: Record<string, rpc.Api.GetTransactionResponse | Error> = {
+      [A]: new Error("rpc down"),
+    };
+    const t = setup(answers);
+    const key = await signed(t.store, [A]);
+    const schedule = scheduleReconciliation({
+      reconciler: t.reconciler,
+      records: t.records,
+      logger: jsonLogger("error"),
+      network,
+    });
+    schedule.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(schedule.ready()).toBe(true);
+    // Still failing: the retry backs off and tries again.
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect((await t.store.get(key))?.state).toBe("signed");
+    answers[A] = landed("SUCCESS");
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect((await t.store.get(key))?.state).toBe("success");
+    expect(t.getTransaction).toHaveBeenCalledTimes(3);
+    // Checked: no more retries before the 5-minute sweep.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(t.getTransaction).toHaveBeenCalledTimes(3);
+    schedule.close();
+  });
+
+  it("sweeps once the store answers after a failed write, and every 5 minutes", async () => {
+    vi.useFakeTimers();
+    const { schedule, sweep, records } = scheduled();
+    schedule.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sweep).toHaveBeenCalledTimes(1);
+    // Two failures arm one sweep, a second after.
+    records.recordFailed(settlement("1").key, new Error("store down"));
+    records.recordFailed(settlement("1").key, new Error("store down"));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(sweep.mock.calls.map(([mode]) => mode)).toEqual(["startup", "live"]);
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(sweep).toHaveBeenCalledTimes(3);
+    schedule.close();
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(sweep).toHaveBeenCalledTimes(3);
+  });
+
+  it("ignores store failures before it serves: the startup sweep retries on its own", async () => {
+    vi.useFakeTimers();
+    const { schedule, sweep, records } = scheduled();
+    records.recordFailed(settlement("1").key, new Error("store down"));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(sweep).not.toHaveBeenCalled();
+    schedule.close();
   });
 });
