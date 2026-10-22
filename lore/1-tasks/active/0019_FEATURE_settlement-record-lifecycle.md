@@ -117,31 +117,147 @@ As a facilitator operator, I want settlement records that are written before sen
 
 ## Acceptance Criteria
 
-- [ ] Given a claimed settlement, when the pool signs its transaction, then the hash is written to `SettlementStore` through the awaited `onSigned` before the first send; if the write fails, nothing is sent
-- [ ] Given a rebuild that produces a new hash, when it is signed, then the record keeps every hash and can be found by any of them
-- [ ] Given a write that would move a record backwards, such as `pending` after `success`, when it arrives late, then the compare-and-set drops it; states only move `claimed → signed → pending → success | failed | rejected | expired`
-- [ ] Given non-final records in the store, when the app starts, then before serving `/settle` it checks each one on chain by its hashes and finalizes it; a record that turns `success` this way fires the on-success hook
-- [ ] Given a `claimed` record with no hashes at startup, when reconciliation runs while holding the lease, then it is closed as `rejected` with reason "interrupted before signing" and `onFinal` runs to release any spend reservation; nothing was sent, because 0016 sends only after `onSigned` succeeds
-- [ ] Given any handler or event listener, when it needs to change a record, then it calls the single settlement module, which owns every write to `SettlementStore`
+- [x] Given a claimed settlement, when the pool signs its transaction, then the hash is written to `SettlementStore` through the awaited `onSigned` before the first send; if the write fails, nothing is sent
+- [x] Given a rebuild that produces a new hash, when it is signed, then the record keeps every hash and can be found by any of them
+- [x] Given a write that would move a record backwards, such as `pending` after `success`, when it arrives late, then the compare-and-set drops it; states only move `claimed → signed → pending → success | failed | rejected | expired`
+- [x] Given non-final records in the store, when the app starts, then before serving `/settle` it checks each one on chain by its hashes and finalizes it; a record that turns `success` this way fires the on-success hook
+- [x] Given a `claimed` record with no hashes at startup, when reconciliation runs while holding the lease, then it is closed as `rejected` with reason "interrupted before signing" and `onFinal` runs to release any spend reservation; nothing was sent, because 0016 sends only after `onSigned` succeeds (the reason is the code `settle_exact_stellar_interrupted`, decision 15; the lease comes with 0025)
+- [x] Given any handler or event listener, when it needs to change a record, then it calls the single settlement module, which owns every write to `SettlementStore`
+- [x] Given a signed hash, when the pool stores it, sends it and resolves it, then its attempt moves `stored → sent | unknown → landed | dead` with its time and ledger bounds, and reconciliation decides from the network, never from these states (decision 7)
 
 ## Open Questions
 
-- **Should the record keep attempt state apart from settlement state?** Raised by Adam on the
-  [PR #22 review](https://github.com/rumblefishdev/stellar-x402/pull/22#pullrequestreview-5491880790).
-  A hash given to `onSigned` is an attempt, not a send: after a `txBadSeq` rebuild the first
-  envelope reached the network even if `submit()` then rejects, a bound can pass while the hook
-  runs, and a timed-out write can commit after the channel reused the sequence. Since 0016,
-  `SubmitResult.attempts` and `attemptsOf(error)` say for each hash whether it was sent (`yes`,
-  `no` or `unknown`). His proposal, after card reversals (ISO 8583 0400), SEPA Inst status
-  requests (pacs.028), Stripe's recovery points and CDP's `settlement_pending`:
-  - Per hash: `stored` (`onSigned` resolved) → `sent` (`onSent`) → `landed` (`getTransaction`
-    SUCCESS or FAILED), or `dead` (a send `ERROR` on a certain send, or NOT_FOUND once
-    `latestLedger >= maxLedger` or the close time is past `maxTime`). The bounds are our reversal:
-    past them an attempt provably can't land.
-  - Per settlement, keeping AD-16's forward-only CAS: `signed` means at least one attempt is
-    neither `landed` nor `dead`; `success`/`failed` come from the attempt that landed;
-    `rejected`/`expired` only once every attempt is `dead`.
-  - Never build a new attempt for a nonce while one is `stored` or `sent`: a retried `/settle`
-    reconciles the existing attempts.
-  - Startup reconciliation treats every `stored` attempt as possibly sent and resolves it by
-    `getTransaction` plus the bounds.
+- ~~**Should the record keep attempt state apart from settlement state?**~~ Yes: Adam's model
+  ([PR #22 review](https://github.com/rumblefishdev/stellar-x402/pull/22#pullrequestreview-5491880790)),
+  decided as decision 7, with `unknown` for an uncertain send. His rule "never build a new attempt
+  while one is `stored` or `sent`" already holds: a repeat replays the record and never submits.
+  "`rejected`/`expired` only once every attempt is `dead`" is decision 5.
+
+## Implementation Notes
+
+- **signer-pool:** `onSigned(hash, bounds)`, `SignedBounds { maxTime, maxLedger? }` from the
+  envelope (`submitter.ts`).
+- **Store port and adapters:** migration `0003_settlement_attempts` (nullable `state`,
+  `max_time`, `max_ledger`, `channel`, `error_code`, `updated_at` on `settlement_hashes`);
+  `addHash(key, hash, updatedAt, bounds?)` writes `stored`; `attempts(key)`;
+  `markAttempts(key, updates, updatedAt)` and `transition`'s `update.attempts`, forward-only per
+  hash (`isAttemptForward`, `attemptRankSql` in `rules.ts`).
+- **`settlement/records.ts`:** the record writes and hooks moved out of `createSettler`
+  (`advance`, `finish`, `recordFailed`, `answeredHere`), plus `unmarked`, `storeFailed` /
+  `onStoreFailure`, and `attemptUpdates(attempts, outcome)`.
+- **`settle.ts`:** passes the bounds to `addHash`, wires `onSent` to `markAttempts(sent)` without
+  waiting, writes each result's attempts with the record; new reason
+  `settle_exact_stellar_interrupted`.
+- **`settlement/reconcile.ts`:** `createReconciler` (`sweep(mode)`, `resolved(result)`) and
+  `scheduleReconciliation` (startup with backoff, store-recovery sweep, 5-minute timer,
+  `ready()`).
+- **Wiring:** `buildSettlement` shares one `Records` between the settler and the reconciler, and
+  sends the pool's `resolved` event to it; `start()` starts reconciliation after listening;
+  `/settle` answers 503 `{error: "reconciling"}` with `Retry-After: 5` until it is ready.
+- **Docs:** README (`…_interrupted`, reconciliation, the 503, `0003`), spine AD-16, ADR 0006
+  (amended 2026-10-22), 0025 (start reconciliation after the lease) and 0027 (counters and logs).
+- **Tests:** facilitator 327 → 368 (256 → 290 without PostgreSQL; with it also the 2
+  two-settler tests and the 5 attempt contract cases on PostgreSQL); signer-pool 111 → 112. New files `reconcile.test.ts`
+  (20), `records.test.ts` (4). Each new rule was checked against its mutant.
+- **Modified tests:** `settle.test.ts`'s fake pool passes `BOUNDS` to `onSigned` (its type
+  changed); `postgres.test.ts`'s two `main()` tests wait for `app.reconciled`, since the startup
+  sweep opens a main-pool connection and `/settle` answers 503 until it ends. Intentional.
+
+## Issues Encountered
+
+- **A mutant that couldn't be caught:** closing a hashless claim from its listed state instead of
+  `claimed` is equivalent (it is listed as `claimed`); the risky variant, closing from the current
+  state, fails the race test.
+- **The backoff test missed a fixed delay** at first; it now checks the doubled wait to the
+  millisecond.
+
+## Design Decisions
+
+### From Plan
+
+1. **A hash the chain doesn't know waits out its time bound** (okarcz, 2026-10-22). `NOT_FOUND`
+   keeps the record non-final until the hash's `maxLedger` / `maxTime` has passed, then it turns
+   `expired`; never `failed` on `NOT_FOUND` alone, since a transaction in flight can still land.
+   Each hash's bound is stored next to it.
+2. **Every `claimed` record with no hash is closed at startup** (okarcz, 2026-10-22): `rejected`
+   with "interrupted before signing", and `onFinal` runs. Karol's age rule (close only claims
+   older than `createdAt + SETTLE_BUDGET_MS + margin`) was considered; `addHash` refusing a final
+   record keeps money safe without it.
+3. **Reconciliation relies on compare-and-set now; the lease comes with 0025** (okarcz,
+   2026-10-22). Every write is a CAS and decision 1 never ends a hash that can still land, so
+   records stay correct without the lease. What the lease prevents, two processes using one
+   channel's sequence numbers, is `/settle`'s problem; 0025 takes the lease at startup and runs
+   reconciliation after it.
+4. **`/settle` answers 503 until reconciliation has finished** (okarcz, 2026-10-22). The server
+   listens at once so `/health` answers; if the store or the RPC is down at startup, the process
+   retries with backoff and logs, without crashing.
+5. **A record with several hashes expires only when every hash's bound has passed** (okarcz,
+   2026-10-22). A hash that landed decides the record (`success` or `failed`); otherwise it stays
+   non-final until none of its hashes can still land.
+6. **The per-hash bound arrives in a new `0003` migration** (okarcz, 2026-10-22), as nullable
+   columns, not by editing `0001_init`; rows written before it fall back to the auth-entry expiry
+   in `payment_payload`.
+7. **Every hash keeps its own attempt state** (okarcz, 2026-10-22, Adam's model): `stored` →
+   `sent` | `unknown` → `landed` | `dead`, in `settlement_hashes` next to the bound. `stored`
+   comes with `addHash`; `sent` from signer-pool's existing `onSent`, not awaited (the
+   transaction is already out, so a failed write changes nothing); `unknown` (the send threw) and
+   `landed` / `dead` from the pool's result (`SubmitResult.attempts`, `attemptsOf(error)`), in
+   the same transaction as the record's update.
+8. **Reconciliation also sweeps after a store failure, with a 5-minute timer as a safety net**
+   (okarcz, 2026-10-22). Besides startup, a failed store write arms a sweep that runs once the
+   store answers again (with backoff); every 5 minutes a sweep runs regardless. A fixed 60 s timer
+   was considered: it queries when nothing failed, and alone decides how long a leftover waits.
+9. **A success answered during a store outage is marked answered only when this process knows
+   it sent it** (okarcz, 2026-10-22). A live process finishing such a record sets
+   `successAnsweredAt` if the key is in `answeredHere`. After a restart that set is gone, so the
+   record is finished unmarked: a repeat may get one more `success`, at most once (it wins the
+   mark), and no money moves twice. Marking it was considered: a client that got
+   `settlement_pending` would then get `already_settled`, paid and with nothing to show
+   (0009 decisions 29, 56).
+10. **Clock skew on `unsignedUntil` is accepted and documented** (okarcz, 2026-10-22). With one
+    lease holder per network (0025) only a deploy overlap compares one instance's `createdAt` with
+    another's clock; NTP keeps the skew far below the 30 s budget, so the cost is a
+    `settlement_pending` slightly early or late. A margin and the database's clock were
+    considered; the latter breaks the schema's rule that SQL never reads it.
+11. **Two settlers on one Postgres store get their own tests** (okarcz, 2026-10-22): a parallel
+    claim, a repeat while the first call runs, and a success marked once, with two settlers on
+    one store; skipped without a database, like the other PostgreSQL tests.
+12. **No `StoreUnavailableError`** (okarcz, 2026-10-22). `/settle` has nothing different to do on
+    a busy store: before the claim it stays a 500, after it ADR 0006's outage rule applies, and
+    decision 4's 503 covers startup.
+13. **A live sweep closes a hashless `claimed` record only past its budget** (okarcz,
+    2026-10-22): older than `createdAt + SETTLE_BUDGET_MS` plus a margin. Past the budget no call
+    adds a hash (`onSigned` refuses), and `addHash` and `transition` are atomic, so no live payment
+    fails. The startup sweep still closes every one (decision 2). Considered: leaving them to the
+    next restart, and skipping only this process's in-flight keys (another instance's claims
+    would be closed). Reconciliation still decides from `getTransaction` and the bound: `stored` and `sent`
+   are hints, since a crash or an uncertain send can leave them behind the network. Considered:
+   the bound only (no extra write, history in logs) and the bound plus a sent flag.
+
+### Emerged
+
+14. **Attempts are read with `attempts(key)`, not carried on `SettlementRecord`**: the proposed
+    `attempts[]` beside `hashes` would have changed every record comparison; only reconciliation
+    reads them.
+15. **The interrupted claim's reason is a code, `settle_exact_stellar_interrupted`**, not the text
+    "interrupted before signing": a repeat answers with the record's `errorReason`.
+16. **`unmarked` tracks successes answered without the store's mark**, and each sweep retries
+    their mark, also for a record already `success` (the mark failed, not the transition). Keys
+    in flight in `respond` aren't in it, so a sweep never takes a live call's success.
+17. **What a result says per hash** (`attemptUpdates`): every attempt before the last was refused
+    with `txBadSeq` (the only rebuild); a last attempt never sent is `dead`; after an unexpected
+    error an accepted one stays `sent`.
+18. **Attempt facts are written even when the record's write loses**: `transition` applies
+    `update.attempts` whether or not the state moves, and `advance` writes them to a final record.
+19. **The pool's `resolved` event goes through the reconciler** (`findByHash`), and a failure
+    there arms a store-recovery sweep.
+20. **Defaults:** live-sweep margin 5 s, 4 records at a time, `Retry-After: 5`, backoff 1–30 s.
+    No partial index on open attempts: they are read by key, which `settlement_hashes_key` covers.
+21. **`/settle` opens once the startup sweep has tried every record** (okarcz, 2026-10-22), not
+    once each has been checked. A record the RPC or the store couldn't check is retried at once
+    in the background, with backoff, until it is. Meanwhile a repeat of it answers
+    `settlement_pending` with its hash, which is true, and new payments have their own keys.
+    Waiting for every record (as first built) let one record that keeps failing close `/settle`
+    for everyone, and a 2-minute cap still blocked every payment for it. In both, a transaction
+    the dead process sent may still land on a channel a new payment reads its sequence from (ADR
+    0011's 60 s): one of the two gets `txBadSeq`, and no money moves twice.

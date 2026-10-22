@@ -30,6 +30,11 @@ As a facilitator operator, I want only one process at a time to settle through a
 - Deploys stop the old process before the new one starts (0014, 0026).
 - Builds on the record lifecycle from 0019 so in-flight work is recorded before release.
 - Related tasks: 0009, 0019, 0022.
+- From 0019: `scheduleReconciliation` starts right after the server listens. With the lease, it
+  must start once the lease is taken: the startup sweep closes every claim with no hash (0019
+  decision 2), which is right only while this process is the one lease holder. `/settle`'s 503
+  already waits for the sweep (`Reconciliation.ready()`); add the lease to that check. 0019
+  decision 10 (clock skew on `unsignedUntil`) assumes one lease holder too.
 
 ## Implementation
 
