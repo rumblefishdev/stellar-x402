@@ -35,6 +35,10 @@ As a facilitator operator, I want only one process at a time to settle through a
   decision 2), which is right only while this process is the one lease holder. `/settle`'s 503
   already waits for the sweep (`Reconciliation.ready()`); add the lease to that check. 0019
   decision 10 (clock skew on `unsignedUntil`) assumes one lease holder too.
+- From 0019's code review: `Reconciliation.close()` stops the timers but doesn't wait for a sweep
+  under way, and `main` ends the pools right after. That sweep's writes then fail and log
+  `settlement_reconcile_failed` (the next start redoes it). The drain should wait for it, within
+  its deadline, like the submissions below.
 
 ## Implementation
 

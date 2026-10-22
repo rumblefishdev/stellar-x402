@@ -90,10 +90,12 @@ As a facilitator operator, I want settlement records that are written before sen
   - **the `addHash` / budget race** (0009 decision 35): `onSigned` checks the budget flag again
     after `addHash`; keep that order, and test a slow `addHash`;
   - **a timeout per store call:** `/settle` bounds each one by its budget and a 1 s grace, but a
-    hung driver call still holds a connection;
+    hung driver call still holds a connection; *answered:* the PostgreSQL pools already set
+    `statement_timeout` 10 s and `query_timeout` 15 s, so a sweep's store call ends too;
   - **Multi-AZ against decision 29's window:** a success the store couldn't mark can be answered
     twice across instances or after recovery until this task; say whether the store's failover
-    (ADR 0012: Multi-AZ on mainnet) shortens that window;
+    (ADR 0012: Multi-AZ on mainnet) shortens that window; *answered:* it doesn't, since a failover
+    is an outage like any other; decision 9 closes the window instead, once the store is back;
   - **a typed `StoreUnavailableError` at the ports**, an option to verify: only if `/settle` needs
     to tell "busy" from a bug (today both are a 500 before the claim, or the store-outage rule
     after it).
@@ -120,8 +122,8 @@ As a facilitator operator, I want settlement records that are written before sen
 - [x] Given a claimed settlement, when the pool signs its transaction, then the hash is written to `SettlementStore` through the awaited `onSigned` before the first send; if the write fails, nothing is sent
 - [x] Given a rebuild that produces a new hash, when it is signed, then the record keeps every hash and can be found by any of them
 - [x] Given a write that would move a record backwards, such as `pending` after `success`, when it arrives late, then the compare-and-set drops it; states only move `claimed → signed → pending → success | failed | rejected | expired`
-- [x] Given non-final records in the store, when the app starts, then before serving `/settle` it checks each one on chain by its hashes and finalizes it; a record that turns `success` this way fires the on-success hook
-- [x] Given a `claimed` record with no hashes at startup, when reconciliation runs while holding the lease, then it is closed as `rejected` with reason "interrupted before signing" and `onFinal` runs to release any spend reservation; nothing was sent, because 0016 sends only after `onSigned` succeeds (the reason is the code `settle_exact_stellar_interrupted`, decision 15; the lease comes with 0025)
+- [x] Given non-final records in the store, when the app starts, then before serving `/settle` it tries each one on chain by its hashes and finalizes those the network has decided; one it couldn't check is retried in the background (decisions 21, 24); a record that turns `success` this way fires the on-success hook
+- [x] Given a `claimed` record with no hashes at startup, when reconciliation runs (holding the lease once 0025 adds it), then it is closed as `rejected` with reason "interrupted before signing" and `onFinal` runs to release any spend reservation; nothing was sent, because 0016 sends only after `onSigned` succeeds (the reason is the code `settle_exact_stellar_interrupted`, decision 15; the lease comes with 0025)
 - [x] Given any handler or event listener, when it needs to change a record, then it calls the single settlement module, which owns every write to `SettlementStore`
 - [x] Given a signed hash, when the pool stores it, sends it and resolves it, then its attempt moves `stored → sent | unknown → landed | dead` with its time and ledger bounds, and reconciliation decides from the network, never from these states (decision 7)
 
@@ -159,6 +161,11 @@ As a facilitator operator, I want settlement records that are written before sen
 - **Tests:** facilitator 327 → 368 (256 → 290 without PostgreSQL; with it also the 2
   two-settler tests and the 5 attempt contract cases on PostgreSQL); signer-pool 111 → 112. New files `reconcile.test.ts`
   (20), `records.test.ts` (4). Each new rule was checked against its mutant.
+- **Code review fixes** (decisions 22–25): after the rebase onto develop with 0045, facilitator
+  409 → 418 with PostgreSQL: `reconcile.test.ts` +5 (history window, live budget guard, mark
+  failure, retry cap, close during startup), `settle-pool.test.ts` +2 (the pool's `resolved`
+  event through `buildSettlement`), `settle.test.ts` +2 (a settler and a reconciler sharing
+  `records`; a crash between signing and sending). Each new rule was checked against its mutant.
 - **Modified tests:** `settle.test.ts`'s fake pool passes `BOUNDS` to `onSigned` (its type
   changed); `postgres.test.ts`'s two `main()` tests wait for `app.reconciled`, since the startup
   sweep opens a main-pool connection and `/settle` answers 503 until it ends. Intentional.
@@ -202,7 +209,10 @@ As a facilitator operator, I want settlement records that are written before sen
    comes with `addHash`; `sent` from signer-pool's existing `onSent`, not awaited (the
    transaction is already out, so a failed write changes nothing); `unknown` (the send threw) and
    `landed` / `dead` from the pool's result (`SubmitResult.attempts`, `attemptsOf(error)`), in
-   the same transaction as the record's update.
+   the same transaction as the record's update. Reconciliation still decides from
+   `getTransaction` and the bound: `stored` and `sent` are hints, since a crash or an uncertain
+   send can leave them behind the network. Considered: the bound only (no extra write, history in
+   logs) and the bound plus a sent flag.
 8. **Reconciliation also sweeps after a store failure, with a 5-minute timer as a safety net**
    (okarcz, 2026-10-22). Besides startup, a failed store write arms a sweep that runs once the
    store answers again (with backoff); every 5 minutes a sweep runs regardless. A fixed 60 s timer
@@ -230,9 +240,7 @@ As a facilitator operator, I want settlement records that are written before sen
     adds a hash (`onSigned` refuses), and `addHash` and `transition` are atomic, so no live payment
     fails. The startup sweep still closes every one (decision 2). Considered: leaving them to the
     next restart, and skipping only this process's in-flight keys (another instance's claims
-    would be closed). Reconciliation still decides from `getTransaction` and the bound: `stored` and `sent`
-   are hints, since a crash or an uncertain send can leave them behind the network. Considered:
-   the bound only (no extra write, history in logs) and the bound plus a sent flag.
+    would be closed).
 
 ### Emerged
 
@@ -255,9 +263,38 @@ As a facilitator operator, I want settlement records that are written before sen
     No partial index on open attempts: they are read by key, which `settlement_hashes_key` covers.
 21. **`/settle` opens once the startup sweep has tried every record** (okarcz, 2026-10-22), not
     once each has been checked. A record the RPC or the store couldn't check is retried at once
-    in the background, with backoff, until it is. Meanwhile a repeat of it answers
+    in the background, with backoff, until it is (at most 5 sweeps since decision 24). Meanwhile a repeat of it answers
     `settlement_pending` with its hash, which is true, and new payments have their own keys.
     Waiting for every record (as first built) let one record that keeps failing close `/settle`
     for everyone, and a 2-minute cap still blocked every payment for it. In both, a transaction
     the dead process sent may still land on a channel a new payment reads its sequence from (ADR
     0011's 60 s): one of the two gets `txBadSeq`, and no money moves twice.
+22. **`NOT_FOUND` proves nothing before the RPC's history** (okarcz, 2026-10-22, from the code
+    review). RPC keeps a window of ledgers (a day by default; providers differ). A hash past its
+    bound turns `dead` only when the RPC's oldest ledger closed at or before the record's claim;
+    otherwise the record stays open and is logged once per process as `settlement_history_gone`
+    (`settlement_history_gone_total`), for an operator to check its hashes. Considered: the same
+    without the alarm (the record can sit unnoticed), and deferring it (a long outage could
+    expire payments that landed, after the buyer paid).
+23. **A live sweep doesn't expire a record inside its call's budget** (okarcz, 2026-10-22, from
+    the code review): not before `createdAt + SETTLE_BUDGET_MS` plus the margin, the rule of
+    decision 13. A sweep reads the hashes once; a `txBadSeq` rebuild stored after that read, near
+    the first hash's time bound, could land on a record the sweep had just expired. Past the
+    budget no call stores a hash. Dead hashes are written anyway. Considered: requiring no
+    non-final hash in the store's compare-and-set (a port change in both adapters), and both.
+24. **The retry after a store failure or an unchecked record stops after 5 sweeps** (okarcz,
+    2026-10-22, from the code review), logging `reconcile_gave_up`; the 5-minute sweep tries again.
+    Each try re-checks every open record, so one record the RPC keeps failing on cost about one
+    RPC call per open hash every 30 s, indefinitely. Considered: retrying only the failed keys
+    (least load, a second retry path) and keeping it as built.
+25. **Code review fixes that needed no decision** (2026-10-22):
+    - `onSuccess` runs even when the answered mark fails: the record is final, so no sweep
+      returns to it;
+    - a sweep asked for during one runs after it (calls during one share it), so a store failure
+      during a sweep isn't answered by that sweep's report;
+    - a failed `sent` hint logs `settlement_attempt_mark_failed` at warn level: not a record
+      failure, so no outage alarm and no sweep (decision 7: it changes nothing);
+    - nothing starts once `close()` ran, also when the startup sweep ends after it; `close()`
+      still doesn't wait for a sweep under way (0025's drain);
+    - `isFinalRecord` stays next to `rules.ts`'s `isFinal`: `settlement/` doesn't import
+      `adapters/`.

@@ -76,12 +76,21 @@ gets the same answer again, so a retry needs a new payment (a new nonce); only
 A `pending` record is finished by reconciliation (task 0019): the pool's late result, or a sweep
 that asks the network about each of the record's hashes. A hash the network doesn't know turns
 `…_transaction_expired` only once its time or ledger bound has passed, so a repeat may get
-`settlement_pending` for up to that long. Sweeps run at startup, when the store answers again
-after a failed write, and every 5 minutes. With `STORE=memory` a restart drops every record.
+`settlement_pending` for up to that long. A live sweep also waits out the call's settle budget
+first. Sweeps run at startup, when the store answers again after a failed write, and every 5
+minutes; a record the RPC keeps failing on is retried 5 times, then left to the 5-minute sweep
+(`reconcile_gave_up`). With `STORE=memory` a restart drops every record.
+
+The RPC keeps only a window of history (a day by default; providers differ). A record claimed
+before the oldest ledger it keeps can't be told from one that never landed, so it stays open and
+is logged once as `settlement_history_gone` (counted in `settlement_history_gone_total`): check
+its hashes on a block explorer or Horizon before acting on it.
 
 After a restart `/settle` answers 503 with `Retry-After: 5` and `{"error": "reconciling"}` until
 the startup sweep has tried every open record; `/verify` and `/health` answer meanwhile. A record
 the RPC couldn't check is retried in the background and answers `settlement_pending` until then.
+The 503 isn't an x402 settle answer: a resource server should retry the same payment after
+`Retry-After` rather than show the buyer an error, since nothing was settled or refused.
 
 A success answered while the store was down is marked answered once the store is back. After a
 restart the process can't know it answered one, so a repeat may get that payment's success a

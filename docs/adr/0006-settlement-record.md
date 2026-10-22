@@ -92,13 +92,17 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
   - A record keeps every hash it was signed with, and can be found by any of them.
   - Each hash keeps its attempt state (`stored → sent | unknown → landed | dead`) and its time
     and ledger bounds (0019 decision 7). `sent` is written without waiting, so it can lag;
-    reconciliation decides from the network, never from these states.
+    reconciliation decides from the network, not from `stored`, `sent` or `unknown`. It skips a
+    `dead` hash: one is `dead` only once the pool saw it refused or past its bounds, or the
+    network didn't know it past its bound.
 - **Durable hash.** `signer-pool` awaits an async `onSigned` before every send and aborts the
   send if it rejects (task 0016).
 - **Startup.** Before serving traffic, the module re-checks every non-final record on chain by its
   hashes; until each has been tried, `/settle` answers 503, and one the RPC couldn't check is
   retried in the background. A hash the network doesn't know stays non-final until
-  its bound has passed; a record expires only once every hash's has. A claim with no hash is
+  its bound has passed, and while the RPC's history doesn't reach back to the record's claim; a
+  record expires only once every hash's has, and in a live sweep only past its settle budget
+  (0019 decisions 22, 23). A claim with no hash is
   closed as `settle_exact_stellar_interrupted`. Sweeps run again when the store answers after a
   failed write, and every 5 minutes; a live sweep closes a hashless claim only past its settle
   budget plus a margin (0019 decisions 1–13).
