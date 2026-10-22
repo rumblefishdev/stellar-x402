@@ -6,14 +6,7 @@ export {
   type BazaarRejectReason,
 } from "./limits.js";
 export { isSchemaWithinLimits } from "./schema.js";
-export {
-  canonicalizeUrl,
-  catalogKey,
-  sanitizeIconUrl,
-  type CatalogKey,
-  type CatalogKeyInput,
-  type ResourceType,
-} from "./url.js";
+export { canonicalizeUrl, sanitizeIconUrl, type CatalogKey, type ResourceType } from "./url.js";
 export {
   toExtensionResponses,
   validate,

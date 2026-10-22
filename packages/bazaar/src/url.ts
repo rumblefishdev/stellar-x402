@@ -38,9 +38,10 @@ export type ResourceType = "http" | "mcp";
 /**
  * Resource URL schemes per listing type. `http:` and loopback hosts are what upstream servers send
  * by default (e2e suite, local sellers); `mcp:` is `@x402/mcp`'s `mcp://tool/<name>`, a name rather
- * than an address, so only an `mcp` listing may use it. Host rules are not applied: the
+ * than an address, so only an `mcp` listing may use it. `http(s)` hosts carry no host rules: the
  * facilitator never fetches a resource URL (ADR 0008), and a client that does checks the address
- * it resolves (`packages/mcp` guard), which no check on the URL text can match.
+ * it resolves (`packages/mcp` guard), which no check on the URL text can match. An `mcp:` host
+ * must be a DNS-style name (`MCP_HOST`), for one canonical form.
  */
 const RESOURCE_SCHEMES: Record<ResourceType, readonly string[]> = {
   http: ["https:", "http:"],
@@ -93,7 +94,7 @@ export function canonicalizeUrl(raw: string, type: ResourceType): string | undef
   let canonical: string;
   if (url.protocol === "mcp:") {
     const host = url.hostname.toLowerCase();
-    if (!MCP_HOST.test(host) || raw.includes("\\")) return undefined;
+    if (!MCP_HOST.test(host) || url.pathname.includes("\\")) return undefined;
     const port = url.port === "" ? "" : `:${url.port}`;
     canonical = `mcp://${host}${port}${normalizePercentEncoding(url.pathname || "/")}`;
   } else {
@@ -154,29 +155,4 @@ export interface CatalogKey {
   method: string;
   /** Canonical URL; for `http`, with an accepted template applied and its parameter names erased. */
   resourceUrl: string;
-}
-
-export interface CatalogKeyInput {
-  network: string;
-  payTo: string;
-  type: "http" | "mcp";
-  method?: string;
-  toolName?: string;
-  resourceUrl: string;
-  routeTemplate?: string;
-}
-
-/** The catalog key, or `undefined` when the input can't be cataloged. */
-export function catalogKey(input: CatalogKeyInput): CatalogKey | undefined {
-  const canonical = canonicalizeUrl(input.resourceUrl, input.type);
-  if (!canonical || !input.network || !input.payTo) return undefined;
-  const method = input.type === "mcp" ? input.toolName : input.method;
-  if (!method) return undefined;
-  let resourceUrl = canonical;
-  if (input.type === "http") {
-    const { origin, pathname } = new URL(canonical);
-    const template = matchRouteTemplate(input.routeTemplate, pathname);
-    if (template) resourceUrl = `${origin}${eraseParamNames(template)}`;
-  }
-  return { network: input.network, payTo: input.payTo, method, resourceUrl };
 }

@@ -125,6 +125,13 @@ describe("packages/bazaar", () => {
       pay(`mcp://${"a".repeat(64)}/t`, { info: mcp }),
       "invalid_resource_url",
     ],
+    [
+      "mcp: host over 253 characters",
+      pay(`mcp://${Array(5).fill("a".repeat(63)).join(".")}/t`, { info: mcp }),
+      "invalid_resource_url",
+    ],
+    ["mcp: userinfo", pay("mcp://u:p@tool/x", { info: mcp }), "invalid_resource_url"],
+    ["mcp: // in the path", pay("mcp://tool//x", { info: mcp }), "invalid_resource_url"],
     ["mimeType null", pay("https://x.com/a", { info: http }, { mimeType: null }), "invalid_info"],
     ["mimeType 0", pay("https://x.com/a", { info: http }, { mimeType: 0 }), "invalid_info"],
     ["mcp: without a host", pay("mcp:weather", { info: mcp }), "invalid_resource_url"],
@@ -283,10 +290,17 @@ describe("packages/bazaar", () => {
     ["mcp://srv.example.com", "mcp://srv.example.com/"],
     ["mcp://srv.example.com/", "mcp://srv.example.com/"],
     ["mcp://tool:8080/weather", "mcp://tool:8080/weather"],
+    ["mcp://tool/x?a=\\b", "mcp://tool/x"],
     ["http://localhost:4022/mcp", "http://localhost:4022/mcp"],
     ["https://x.com/mcp", "https://x.com/mcp"],
   ])("gives an mcp listing one canonical URL: %s", (url, canonical) => {
     expect(entry(pay(url, { info: mcp })).key.resourceUrl).toBe(canonical);
+  });
+
+  it("ignores a routeTemplate on an mcp listing and keys the tool URL", () => {
+    const p = pay("mcp://tool/a", { info: mcp, routeTemplate: "/a" });
+    expect(validate(p, req)).toMatchObject({ routeTemplateIgnored: true });
+    expect(entry(p).key.resourceUrl).toBe("mcp://tool/a");
   });
 
   it("applies the same URL rules on pubnet: no network decides them", () => {
