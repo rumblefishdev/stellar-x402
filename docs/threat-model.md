@@ -247,7 +247,9 @@ Scope: upstream verify's failover across `RPC_URLS` (spine AD-3, task 0045).
   traffic there needs only to keep `RPC_URLS[0]` failing.
 - **Mitigation:** Calls return to `RPC_URLS[0]` only when a probe (`getLatestLedger`, no client
   payload) finds it healthy and at most 2 ledgers behind, so no payload can bring it back early or
-  keep traffic away once it answers. A verify call never moves the shared URL on an answer, and an
+  keep traffic away once it answers. A failure of a fallback doesn't bring it back either: calls go
+  to the next fallback, or stay and probe at once (0045 decision 26). A verify call never moves the
+  shared URL on an answer, and an
   odd payload's `unexpected_verify_error` doesn't move it either (0045 decision 22). A client's own
   verdict can't be chosen this way: a rejection is never failed over.
 - **Residual risk:** Until the rate limit (0023), anyone can spend `RPC_URLS[0]`'s quota, and

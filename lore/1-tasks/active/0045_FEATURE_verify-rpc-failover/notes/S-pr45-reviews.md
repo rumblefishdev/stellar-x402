@@ -193,6 +193,18 @@ onto develop with no conflicts; build, lint, typecheck and every package's tests
   reporting a timeout, reporting `unexpected_verify_error`). In `settle-pool.test.ts` the fixed-bid
   test catches the second and the fee-stats test the first: the two halves of the testnet failure.
 
+## Final review (Adam, 2026-10-22, at d033b8e; approved)
+
+Approved on the condition that two points go in; Adam checks only those. Merge bar from here on:
+a regression against `develop`, a broken AC or a payment-safety problem; the rest goes to 0049.
+
+- **1. A failure on the last URL returned to `RPC_URLS[0]` without the probe**
+  (`fallback-rpc.ts:125`, `:148`). **Fixed** with his option (a): decision 26.
+- **2. A hung Horizon switches the shared URL.** **Docs fixed**: AD-3, decision 6, PR body item 7.
+- **For 0049:** the `RPC_URLS` docstring at `config.ts:96` predates decision 21; duplicate
+  `RPC_URLS` entries are accepted; the failover loop keeps running and logging after `/settle`'s
+  budget has answered.
+
 ## Modified tests
 
 - **Before review:** `build-verifier.test.ts`'s `setup` takes an answer that may depend on the
@@ -230,3 +242,6 @@ onto develop with no conflicts; build, lint, typecheck and every package's tests
   first URL expects no switch, and `main.test.ts`'s secret check looks for `verified` instead of
   `rpc_failover`. `settle-pool.test.ts`'s `setup` builds the shared client. Name assertions use
   `rpcEndpointName` (`8dd7f6f`).
+- **Final review:** `build-verifier.test.ts`'s "every RPC URL hangs" expects one `rpc_failover`
+  (`[0] → [1]`), not a second back to `[0]` (decision 26). `resilience.test.ts`'s `switchable`
+  endpoint gates `sendTransaction` too.

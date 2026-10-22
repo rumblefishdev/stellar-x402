@@ -135,6 +135,11 @@ so one outage moves `/verify`, `/settle`'s checks and the pool once.
   +2 (`RPC_URLS[0]` hung for every client, one per bid mode). signer-pool 111 → 124 (the shared
   state, the switch counter and the probe). Each new rule has a test that fails on its mutant.
 
+- **After Adam's final review** (2026-10-22, approved at `d033b8e`): decision 26 in
+  `FallbackRpc.moveOn`, decision 6 corrected in AD-3 and here. signer-pool 124 → 126 (the A1
+  case for `markFailed` and `sendTransaction`, and three URLs); each fails without the rule, and
+  the A1 test also without the immediate probe. Facilitator 296.
+
 **Modified tests:** listed per round in [the note](notes/S-pr45-reviews.md#modified-tests).
 
 ## Issues Encountered
@@ -170,9 +175,12 @@ so one outage moves `/verify`, `/settle`'s checks and the pool once.
    24), because an RPC URL can carry an API key
    (0018 decision 22). Whether ADR 0011 and 0027 adopt it, instead of host names, is recorded in
    #41's ADR 0011 amendment.
-6. **The Horizon read stays as it is.** A hung Horizon times out every URL: no switch, an
-   `rpc_exhausted` line, a 500. Only an intermittently slow one logs `rpc_failover`, blaming an
-   RPC URL. Fixing it needs an upstream change.
+6. **The Horizon read stays as it is** (corrected after Adam's final review, 2026-10-22). Since
+   decision 21 a hung Horizon switches the shared URL: upstream reads it after its RPC calls, so
+   our per-URL 10 s fires first and counts as that URL's timeout. With healthy RPCs the calls go
+   `[0] → [1]` (`rpc_failover`, `by: "verify"`) and the probe brings them back (`rpc_failback`),
+   again on each call while Horizon hangs; `rpc_exhausted` lists every URL and the 500 carries the
+   first URL tried, the active one. Payments are unaffected. Fixing it needs an upstream change.
 7. **The deadline travels with the upstream; #41 merges first** (okarcz, 2026-10-16).
    `buildUpstream` returns `{ upstream, upstreamTimeoutMs }`, and this PR's rebase spreads it into
    #41's `buildChecks`. Watch for the two silent breaks Adam found: `Check` has no `trace`, and
@@ -208,7 +216,7 @@ so one outage moves `/verify`, `/settle`'s checks and the pool once.
     active fallback fails and that wraps around to `RPC_URLS[0]` returns its answer without
     switching, and makes a probe due at once. Otherwise a payload upstream answers before any RPC
     call (a wrong amount) would bring back a dead primary, which decision 11 rules out. Only the
-    probe returns to it.
+    probe returns to it. A failure doesn't either: decision 26.
 17. **The return to `RPC_URLS[0]` stays; a wrap-around probe waits 5 s after the last one**
     (the 5 s gap went with the wrap-around probe in decision 23)
     (okarcz, 2026-10-20, Karol's review). Karol asked whether failover that stays on the new URL
@@ -262,6 +270,15 @@ so one outage moves `/verify`, `/settle`'s checks and the pool once.
     `getLatestLedger` calls and once took 4.8 s, which failed about one hung run in three, old code
     and new alike. `https://soroban-rpc.testnet.stellar.gateway.fm` (keyless, listed on
     developers.stellar.org) answered 20 of 20 within 202 ms; Nodies' public URL answered no JSON.
+
+26. **A failure never moves calls to `RPC_URLS[0]`** (Adam's final review, 2026-10-22, his option
+    (a)). Since decision 21, `markFailed` and a failed `sendTransaction` moved calls to `index + 1`,
+    which wraps to 0: with two URLs, one timeout on `[1]` brought back a dead `[0]` with no probe and
+    no lag check (the A1 case again). With `failback` set, a failure now moves calls to the next
+    fallback, skipping 0, or, with none left, keeps them where they are and starts a probe at once,
+    as `83e8c29` did. Without `failback` the wrap stays, since nothing else would return. A read of
+    the shared client's own that fails on the active URL and is answered by `[0]` still moves calls
+    there (decision 23): that is a real RPC answer, not a payload.
 
 ## Future Work
 
