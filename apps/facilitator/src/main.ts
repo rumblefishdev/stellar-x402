@@ -204,7 +204,6 @@ export function compose(
     store: stores.catalog,
     logger,
     metrics,
-    allowHttp: config.catalog.allowHttp,
   });
   const rpc = opts.rpc ?? FallbackRpc.fromUrls(config.rpcUrls);
   // One fee configuration: `/verify` and `/settle` check with it, and the pool pays with it, so
