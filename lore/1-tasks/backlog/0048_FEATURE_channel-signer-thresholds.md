@@ -17,6 +17,12 @@ history:
     note: >
       Spawned from 0047's research (okarcz asked for it): channel setup leaves every threshold at
       0, so the facilitator key alone can change signers on every channel.
+  - date: "2026-10-19"
+    status: backlog
+    who: okarcz
+    note: >
+      0047 (ADR 0013) declined the cold recovery key for now: keep only the hot key. Still a mainnet
+      blocker; re-check this design before mainnet.
 ---
 
 # Keep the hot key below the high threshold, with a cold recovery signer
@@ -30,6 +36,15 @@ raise the thresholds and lock us out of every channel at once. Losing the key (a
 a lost OpenBao cluster) freezes every channel for good, since even `AccountMerge` needs high.
 Set thresholds so the hot key can settle but not change signers, and add a cold recovery signer
 that can. This holds whichever custody option 0047 picks, and is a mainnet blocker.
+
+> **Re-check before mainnet** (okarcz, 2026-10-19): 0047 decided on OpenBao Transit with **no cold
+> key**; only the hot key is kept ([ADR 0013](../../../docs/adr/0013-facilitator-key-custody.md)).
+> The design below needs a cold key, so it is on hold. Before mainnet, decide again: a cold
+> recovery key, another way to keep the hot key below high, or accept the hot key's full power and
+> record why. What declining it costs: a stolen key can lock us out of every channel, and losing
+> OpenBao's data and its unseal key loses the fee account and every channel. Build order (0047):
+> 0036 → 0026 on testnet → this re-check → mainnet. The testnet move to the OpenBao key is signed by
+> the current key, in 0026, not cold-signed.
 
 **Lane:** Payments
 
