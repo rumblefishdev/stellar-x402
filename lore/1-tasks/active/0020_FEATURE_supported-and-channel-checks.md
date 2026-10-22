@@ -65,7 +65,7 @@ PR #51, the bypass options in PR #56.
 | 2 | `maxTimeoutSeconds` is not advertised | grilling | drops 0018's "could" note | spec v2 §7.3 has no such field; x402.org doesn't list it | — |
 | 3 | Every channel is checked at once; the startup error names each failing channel with its problem or its read error | grilling | matches AC 2 | — | `settlement/channel-check.ts` · `channel-check.test.ts` |
 | 4 | No RPC answers at startup: the service refuses to start | grilling | matches AC 2 and AD-12 | — | `main.ts` · `main.test.ts` "no RPC answers" (reads as `missing` until 0051) |
-| 5 | The check runs in `main()` before `compose()`, which gets the same RPC; `compose()` now requires `rpc` | agent | beyond the task | — | `main.ts` · `main.test.ts` |
+| 5 | The check runs in `main()` after `compose()`, which only wires parts and returns the shared `FallbackRpc` it builds (0045), and before `start()` | agent | beyond the task | — | `main.ts` · `main.test.ts` |
 | 6 | `main()` tests get a JSON-RPC stub over HTTP in `RPC_URLS`; `FakeRpc` is unchanged | agent (plan review) | changes the task's `FakeRpc` note | `fee-agreement.test.ts` stubs the RPC the same way | `test/rpc-stub.ts` |
 | 7 | `main()` logs every startup failure with RPC URLs named as their `RPC_URLS` entry; `server.ts` logs only a `ConfigError` | grilling | beyond the task (ADR 0011: no host in logs) | — | `main.ts`, `server.ts` · `main.test.ts` "no RPC answers" |
 | 8 | `scripts/verify-smoke.ts` builds the verifier with `buildVerifier`, not `main()` | grilling | beyond the task | `scripts/settle-smoke.ts` runs `main()` on real channels | `scripts/verify-smoke.ts` · manual testnet run |
