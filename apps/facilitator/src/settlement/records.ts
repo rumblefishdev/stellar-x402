@@ -96,6 +96,12 @@ export function createRecords(deps: RecordsDeps) {
    * is down (0009 decision 29). Keys leave once the store holds the mark (or refused it).
    */
   const answeredHere = new Set<SettlementKey>();
+  /**
+   * Keys of `answeredHere` whose success went out without the store's mark: the mark failed, or
+   * the store failed to record the pool's success. Reconciliation marks them once the store is
+   * back (0019 decision 9); a restart forgets them, and they stay unmarked.
+   */
+  const unmarked = new Set<SettlementKey>();
 
   return {
     hookFailed,
@@ -105,6 +111,7 @@ export function createRecords(deps: RecordsDeps) {
     advance,
     finish,
     answeredHere,
+    unmarked,
   };
 }
 
