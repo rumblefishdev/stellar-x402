@@ -1,8 +1,10 @@
 import type { StellarNetwork } from "@stellar-x402/config";
+import type { Attempt, SubmitResult } from "@stellar-x402/signer-pool";
 import type { Logger } from "../logger.js";
 import type { Metrics } from "../metrics.js";
 import {
   FINAL_SETTLEMENT_STATES,
+  type AttemptUpdate,
   type SettlementKey,
   type SettlementRecord,
   type SettlementStore,
@@ -59,12 +61,17 @@ export function createRecords(deps: RecordsDeps) {
 
   /**
    * Moves a record forward from whatever state it is in now. `undefined` means another writer got
-   * there first, or the record is already final.
+   * there first, or the record is already final. `update.attempts` are written either way: they
+   * say what the network did, whoever finishes the record.
    */
   const advance = async (key: SettlementKey, update: Omit<SettlementUpdate, "updatedAt">) => {
     for (let tries = 0; tries < 3; tries++) {
       const current = await store.get(key);
-      if (!current || isFinalRecord(current)) return undefined;
+      if (!current || isFinalRecord(current)) {
+        if (current && update.attempts?.length)
+          await store.markAttempts(key, update.attempts, now());
+        return undefined;
+      }
       const moved = await store.transition(key, current.state, { ...update, updatedAt: now() });
       if (moved) return moved;
     }
@@ -102,3 +109,42 @@ export function createRecords(deps: RecordsDeps) {
 }
 
 export type Records = ReturnType<typeof createRecords>;
+
+/**
+ * What a submission's attempts say about each hash (0019 decision 7), from its result, or from
+ * the error `submit()` rejected with. Every attempt before the last was refused with `txBadSeq`:
+ * only that makes the pool rebuild. The last one is `landed` once in a ledger, `dead` once
+ * refused or past its bounds, and otherwise `sent` or `unknown` as the pool saw the send; one the
+ * pool never sent is `dead`, since nothing else holds the envelope.
+ */
+export function attemptUpdates(
+  attempts: readonly Attempt[],
+  outcome: Pick<SubmitResult, "status" | "channel" | "errorCode"> | { error: unknown },
+): AttemptUpdate[] {
+  const channel = "status" in outcome ? outcome.channel : undefined;
+  const at = (hash: string, update: Omit<AttemptUpdate, "hash">): AttemptUpdate => ({
+    hash,
+    ...update,
+    ...(channel !== undefined && { channel }),
+  });
+  return attempts.map((attempt, i) => {
+    if (i < attempts.length - 1) return at(attempt.hash, { state: "dead", errorCode: "txBadSeq" });
+    if ("status" in outcome) {
+      switch (outcome.status) {
+        case "success":
+        case "failed":
+          return at(attempt.hash, { state: "landed" });
+        case "rejected":
+        case "expired":
+          return at(attempt.hash, {
+            state: "dead",
+            ...(outcome.errorCode !== undefined && { errorCode: outcome.errorCode }),
+          });
+        case "pending":
+          break;
+      }
+    }
+    if (attempt.sent === "no") return at(attempt.hash, { state: "dead" });
+    return at(attempt.hash, { state: attempt.sent === "yes" ? "sent" : "unknown" });
+  });
+}

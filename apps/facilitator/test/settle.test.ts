@@ -1463,6 +1463,69 @@ describe("createSettler", () => {
   });
 });
 
+describe("attempt states (0019 decision 7)", () => {
+  const OTHER = "b".repeat(64);
+
+  it("stores the hash with its bounds, marks it sent, and records the outcome per hash", async () => {
+    const seen: (string | undefined)[] = [];
+    const { settle, store } = setup(async (opts) => {
+      await opts.onSigned?.(OTHER, BOUNDS);
+      await opts.onSigned?.(HASH, BOUNDS);
+      opts.onSent?.(HASH);
+      await delay(5);
+      seen.push((await store.attempts(key)).at(-1)?.state);
+      // The first envelope was refused with `txBadSeq`, the rebuild landed.
+      return {
+        ...result("success"),
+        attempts: [
+          { hash: OTHER, sent: "yes" },
+          { hash: HASH, sent: "yes" },
+        ],
+      };
+    });
+    const settled = await settle(payload(), requirements);
+    expect(settled.response.success).toBe(true);
+    expect(seen).toEqual(["sent"]);
+    expect(await store.attempts(key)).toEqual([
+      {
+        hash: OTHER,
+        state: "dead",
+        errorCode: "txBadSeq",
+        channel: "GCHANNEL",
+        ...BOUNDS,
+        updatedAt: expect.any(Number),
+      },
+      {
+        hash: HASH,
+        state: "landed",
+        channel: "GCHANNEL",
+        ...BOUNDS,
+        updatedAt: expect.any(Number),
+      },
+    ]);
+  });
+
+  it("leaves a pending attempt sent, for reconciliation to resolve", async () => {
+    const { settle, store } = setup(landing("pending"));
+    await settle(payload(), requirements);
+    expect(await store.get(key)).toMatchObject({ state: "pending" });
+    expect((await store.attempts(key)).map((a) => a.state)).toEqual(["sent"]);
+  });
+
+  it("answers the same when the sent mark fails, and logs it", async () => {
+    const { settle, store, lines } = setup(async (opts) => {
+      await opts.onSigned?.(HASH, BOUNDS);
+      opts.onSent?.(HASH);
+      await delay(5);
+      return result("success");
+    });
+    store.markAttempts = vi.fn(() => Promise.reject(new Error("store down")));
+    const settled = await settle(payload(), requirements);
+    expect(settled.response.success).toBe(true);
+    expect(lines.some((line) => line.includes('"settlement_record_failed"'))).toBe(true);
+  });
+});
+
 describe("expectTransfer", () => {
   const transfer = transferEvent;
   const check = expectTransfer({ asset, from: payer, to: payTo, amount: 1000n });
