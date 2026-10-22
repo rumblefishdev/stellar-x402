@@ -66,6 +66,7 @@ Measured on testnet (2026-10-21): `getLedgerEntries` for an account that does no
 | The RPC answers no entry | `AccountNotFoundError`: `checkChannel` returns `missing`, `readSequence` retires the channel after `timeoutSeconds` | 2026-10-21 |
 | The read fails (error status, refused connection, timeout, JSON-RPC error) | The error is thrown as it is; `checkChannel` throws, `readSequence` refuses the call and keeps the channel | 2026-10-21 |
 | The read gets a JSON-RPC error answer | `rpc.Server` throws it as a plain `{ code, message }` object; `readAccountEntry` throws it as an `Error` naming the code and message, so logs and events carry it | 2026-10-21 |
+| One RPC answers no entry while others would find the account | The answer is final: no other endpoint is asked. Only an RPC of another network does this (measured 2026-10-22: Gateway mainnet answered 50 of 50 testnet accounts with no entry; SDF and Gateway testnet found 1,440 of 1,440), so startup refuses an `RPC_URLS` entry that serves another network or doesn't answer (PR #58) | 2026-10-22 |
 
 ## Measurement: 0007's "Account not found under load"
 
