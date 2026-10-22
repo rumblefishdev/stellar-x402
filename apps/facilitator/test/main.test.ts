@@ -187,11 +187,28 @@ describe("the startup channel check", () => {
       const { code, events, output } = await serve({ RPC_URLS: url });
       expect(code, output).toBe(1);
       expect(events.map((event) => event.event)).toEqual(["startup_failed"]);
-      expect(output).toContain(env.CHANNELS);
+      expect(output).toContain(rpcEndpointName(url, 0));
       expect(output).not.toContain("S3CR3T");
       expect(output).not.toContain("127.0.0.1");
     } finally {
       down.close();
+    }
+  }, 20_000);
+
+  it("refuses to start when an RPC_URLS entry serves another network, and names it", async () => {
+    // An RPC of another network answers every channel read with no entry: the pool would retire
+    // live channels as missing once calls fail over to it.
+    const pubnet = await rpcStub({}, Networks.PUBLIC);
+    try {
+      const { code, events, output } = await serve({ RPC_URLS: `${rpc.url},${pubnet.url}` });
+      expect(code, output).toBe(1);
+      expect(events.map((event) => event.event)).toEqual(["startup_failed"]);
+      // Quotes arrive escaped inside the JSON log line.
+      expect(output).toContain(`${rpcEndpointName(pubnet.url, 1)}: serves \\"${Networks.PUBLIC}`);
+      expect(output).not.toContain(`${rpcEndpointName(rpc.url, 0)}:`);
+      expect(output).not.toContain("127.0.0.1");
+    } finally {
+      await pubnet.close();
     }
   }, 20_000);
 });
@@ -301,7 +318,12 @@ describe("upstream's console.error in main()", () => {
           params: { keys: string[] };
         };
         res.setHeader("content-type", "application/json");
-        // The startup check's reads find the channel set up as AD-12 requires.
+        // The startup checks: both URLs serve testnet, and the channel is set up as AD-12 requires.
+        if (method === "getNetwork") {
+          return void res.end(
+            JSON.stringify({ jsonrpc: "2.0", id, result: { passphrase: Networks.TESTNET } }),
+          );
+        }
         if (method === "getLedgerEntries") {
           const accounts = { [env.CHANNELS]: hardened(facilitator) };
           return void res.end(
