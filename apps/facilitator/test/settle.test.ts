@@ -773,7 +773,7 @@ describe("createSettler", () => {
 
   it("answers rpc_unavailable when every RPC endpoint refuses the connection", async () => {
     const refusing = {
-      getAccount: async () => {
+      getLedgerEntries: async () => {
         throw Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:1"), {
           code: "ECONNREFUSED",
         });
@@ -784,7 +784,7 @@ describe("createSettler", () => {
       { name: "b", rpc: refusing },
     ]);
     // What the pool's sequence read passes on from `FallbackRpc`.
-    const error = await rpc.getAccount("G").catch((e: unknown) => e);
+    const error = await rpc.getLedgerEntries().catch((e: unknown) => e);
     const { settle } = setup(async () => {
       throw error;
     });

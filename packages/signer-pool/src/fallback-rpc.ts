@@ -1,5 +1,4 @@
 import { rpc } from "@stellar/stellar-sdk";
-import { isNotFound } from "./errors.js";
 import type { SorobanRpc } from "./types.js";
 
 export interface RpcEndpoint {
@@ -57,8 +56,8 @@ export class RpcUnavailableError extends Error {
  * A {@link SorobanRpc} over several endpoints. Calls go to the active endpoint; when it throws
  * or times out, the same call is tried on the next ones, and the first that answers becomes
  * active. If every endpoint fails, the active one stays and an {@link RpcUnavailableError} is
- * thrown with the first error as its `cause`, unless that error says the account or entry doesn't
- * exist: that is an answer, and it is thrown as it is.
+ * thrown with the first error as its `cause`. An account that doesn't exist is an answer, not a
+ * failure: `getLedgerEntries` returns no entry (see `readAccountEntry`).
  *
  * `sendTransaction` is the exception: it is never retried here, because a failed send may still
  * have reached the network. It moves the active endpoint and rethrows, and the submitter decides
@@ -128,10 +127,8 @@ export class FallbackRpc implements SorobanRpc {
     return this.moveOn(error, by) ? this.generation : undefined;
   }
 
-  getAccount: SorobanRpc["getAccount"] = (...a) =>
-    this.call("getAccount", (r) => r.getAccount(...a));
-  getAccountEntry: SorobanRpc["getAccountEntry"] = (...a) =>
-    this.call("getAccountEntry", (r) => r.getAccountEntry(...a));
+  getLedgerEntries: SorobanRpc["getLedgerEntries"] = (...a) =>
+    this.call("getLedgerEntries", (r) => r.getLedgerEntries(...a));
   simulateTransaction: SorobanRpc["simulateTransaction"] = (...a) =>
     this.call("simulateTransaction", (r) => r.simulateTransaction(...a));
   getTransaction: SorobanRpc["getTransaction"] = (...a) =>
@@ -166,8 +163,8 @@ export class FallbackRpc implements SorobanRpc {
         if (i === 0) firstError = error;
       }
     }
-    if (isNotFound(firstError)) throw firstError;
-    const message = firstError instanceof Error ? firstError.message : String(firstError);
+    // `rpc.Server` throws a JSON-RPC error answer as the plain `{ code, message }` object.
+    const message = firstError instanceof Error ? firstError.message : JSON.stringify(firstError);
     throw new RpcUnavailableError(`every RPC endpoint failed: ${message}`, { cause: firstError });
   }
 

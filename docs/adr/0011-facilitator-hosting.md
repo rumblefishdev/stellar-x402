@@ -1,6 +1,6 @@
 # ADR 0011: Host the facilitator on ECS Fargate in the company AWS account
 
-- Status: accepted
+- Status: accepted; key custody superseded by [ADR 0013](0013-facilitator-key-custody.md)
 - Date: 2026-10-09, amended 2026-10-15 (task 0009: the `/settle` budget is 30 s, below the
   seller's own 90 s timeout), 2026-10-16 (task 0009: the checks are inside the budget; RPC
   endpoints are logged as `RPC_URLS[i]`) and 2026-10-20 (task 0009: `RPC_URLS[i]#<fingerprint>`
@@ -168,6 +168,9 @@ One request or one stop must never outlast the layer in front of it:
 
 ### Keys, secrets and access
 
+> Superseded for the facilitator key by [ADR 0013](0013-facilitator-key-custody.md) (2026-10-19):
+> the key lives in OpenBao Transit on the facilitator's Hetzner server, on both networks.
+
 - **`FACILITATOR_SECRET` is an SSM Parameter Store SecureString** under `/x402/<network>/`.
   - It is encrypted with that network's own KMS key, not the default `aws/ssm` key: anyone in
     the account allowed `ssm:GetParameter` could decrypt with `aws/ssm`.
@@ -181,7 +184,9 @@ One request or one stop must never outlast the layer in front of it:
 - **Rotating the key is an on-chain change.** AD-12 makes the facilitator key the only signer of
   every channel, so the service won't start with a new key. Rotation means:
   1. stop the service;
-  2. with the old key, make the new key the signer of every channel and the fee account;
+  2. with the old key, create the new key's own account, make the new key the signer of every
+     channel, and merge the old fee account into the new one (the pool pays from the signer's
+     address, so the fee account is the key's own account);
   3. update the parameter;
   4. start the service.
 
