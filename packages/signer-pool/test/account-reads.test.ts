@@ -4,7 +4,6 @@ import type { AddressInfo } from "node:net";
 import { Address, StrKey, xdr } from "@stellar/stellar-sdk";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  AccountNotFoundError,
   FallbackRpc,
   RpcTimeoutError,
   RpcUnavailableError,
@@ -115,20 +114,19 @@ describe("checkChannel over HTTP", () => {
 describe("account reads through FallbackRpc", () => {
   it("moves past a failing endpoint to one that says the account does not exist", async () => {
     const rpc = FallbackRpc.fromUrls([await stub("503"), await stub("no-entry")]);
-    await expect(readAccountEntry(rpc, channel)).rejects.toBeInstanceOf(AccountNotFoundError);
+    expect(await readAccountEntry(rpc, channel)).toBeUndefined();
   });
 
   it("does not report not-found when every endpoint failed", async () => {
     const rpc = FallbackRpc.fromUrls([await stub("503"), REFUSED]);
     const error = await readAccountEntry(rpc, channel).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(Error);
-    expect(error).not.toBeInstanceOf(AccountNotFoundError);
     expect((error as Error).message).not.toMatch(/not found/i);
   });
 
   it("reads the sequence number from the entry", async () => {
     const rpc = FallbackRpc.fromUrls([await stub("entry")]);
-    expect((await readAccountEntry(rpc, channel)).seqNum().toString()).toBe("4000");
+    expect((await readAccountEntry(rpc, channel))?.seqNum().toString()).toBe("4000");
   });
 });
 

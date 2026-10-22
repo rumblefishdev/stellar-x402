@@ -1,4 +1,4 @@
-export { AccountNotFoundError, readAccountEntry } from "./account.js";
+export { readAccountEntry } from "./account.js";
 export {
   checkFacilitatorBalance,
   type BalanceCheckOptions,

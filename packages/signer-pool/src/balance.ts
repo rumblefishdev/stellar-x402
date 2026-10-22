@@ -36,6 +36,7 @@ export async function checkFacilitatorBalance(
   const minSpendable = opts.minSpendableStroops ?? 1_000_000_000n;
   const perSettlement = opts.feePerSettlementStroops ?? 45_000n;
   const entry = await readAccountEntry(rpc, address);
+  if (!entry) throw new Error(`Account not found: ${address}`);
   const balance = entry.balance().toBigInt();
   const { sponsoring, sponsored, selling } = extensions(entry);
   const reserve = (2n + BigInt(entry.numSubEntries()) + sponsoring - sponsored) * BASE_RESERVE;

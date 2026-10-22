@@ -8,7 +8,7 @@ import {
   rpc,
   xdr,
 } from "@stellar/stellar-sdk";
-import { AccountNotFoundError, readAccountEntry } from "./account.js";
+import { readAccountEntry } from "./account.js";
 import { ChannelPool, NoChannelsError, QueueTimeoutError, type Channel } from "./channel-pool.js";
 import { feeStatsInclusionFee } from "./fees.js";
 import { LedgerClock } from "./ledger-clock.js";
@@ -478,22 +478,28 @@ export class SettlementSubmitter {
   private async readSequence(channel: Channel, hold: Hold): Promise<bigint> {
     const giveUpAt = this.now() + this.timeoutSeconds * 1000;
     for (;;) {
+      let account: xdr.AccountEntry | undefined;
+      let failure: unknown;
       try {
-        const account = await readAccountEntry(this.rpc, channel.address);
-        return account.seqNum().toBigInt();
+        account = await readAccountEntry(this.rpc, channel.address);
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (this.now() >= giveUpAt) {
-          if (error instanceof AccountNotFoundError) {
-            this.pool.retire(channel);
-            hold.retired = true;
-            this.emit({ type: "channel-quarantined", channel: channel.address, reason: message });
-          }
-          throw error;
-        }
-        this.emit({ type: "read-retry", channel: channel.address, message });
-        await this.clock.following(giveUpAt);
+        failure = error;
       }
+      if (account) return account.seqNum().toBigInt();
+      // No entry and no failure: the RPC answered that the channel does not exist.
+      const missing = failure === undefined;
+      const error = missing ? new Error(`Account not found: ${channel.address}`) : failure;
+      const message = error instanceof Error ? error.message : String(error);
+      if (this.now() >= giveUpAt) {
+        if (missing) {
+          this.pool.retire(channel);
+          hold.retired = true;
+          this.emit({ type: "channel-quarantined", channel: channel.address, reason: message });
+        }
+        throw error;
+      }
+      this.emit({ type: "read-retry", channel: channel.address, message });
+      await this.clock.following(giveUpAt);
     }
   }
 

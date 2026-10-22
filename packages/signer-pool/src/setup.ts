@@ -7,7 +7,7 @@ import {
   type Transaction,
   type xdr,
 } from "@stellar/stellar-sdk";
-import { AccountNotFoundError, readAccountEntry } from "./account.js";
+import { readAccountEntry } from "./account.js";
 import type { SorobanRpc } from "./types.js";
 
 /** Base reserve (0.5 XLM) x (2 + one extra signer): a channel never pays fees itself. */
@@ -80,13 +80,8 @@ export async function checkChannel(
   channel: string,
   facilitator: string,
 ): Promise<ChannelProblem | undefined> {
-  let entry;
-  try {
-    entry = await readAccountEntry(rpc, channel);
-  } catch (error) {
-    if (error instanceof AccountNotFoundError) return "missing";
-    throw error;
-  }
+  const entry = await readAccountEntry(rpc, channel);
+  if (!entry) return "missing";
   const isFacilitator = (s: xdr.Signer) =>
     s.key().switch().name === "signerKeyTypeEd25519" &&
     StrKey.encodeEd25519PublicKey(s.key().ed25519()) === facilitator;

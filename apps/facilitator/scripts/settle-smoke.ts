@@ -71,6 +71,7 @@ const payTo = process.env.PAY_TO ?? (await funded(undefined)).publicKey();
 // Two delegated channels: master key off, the facilitator their only signer.
 const channelKeys = [Keypair.random(), Keypair.random()];
 const facilitatorEntry = await readAccountEntry(server, facilitator.publicKey());
+if (!facilitatorEntry) throw new Error("the facilitator account does not exist");
 const setup = buildCreateChannelsTx({
   facilitator: new Account(facilitator.publicKey(), facilitatorEntry.seqNum().toString()),
   channels: channelKeys,

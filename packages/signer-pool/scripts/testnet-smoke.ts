@@ -143,6 +143,7 @@ const fresh = Array.from({ length: Math.max(0, nChannels - known.length) }, () =
 for (let i = 0; i < fresh.length; i += MAX_CHANNELS_PER_TX) {
   const batch = fresh.slice(i, i + MAX_CHANNELS_PER_TX);
   const facilitatorEntry = await readAccountEntry(server, facilitator.publicKey());
+  if (!facilitatorEntry) throw new Error("the facilitator account does not exist");
   const setupTx = buildCreateChannelsTx({
     facilitator: new Account(facilitator.publicKey(), facilitatorEntry.seqNum().toString()),
     channels: batch,

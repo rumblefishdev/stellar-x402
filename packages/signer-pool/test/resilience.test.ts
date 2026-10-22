@@ -1,7 +1,6 @@
 import { Address, FeeBumpTransaction, Keypair, StrKey, xdr } from "@stellar/stellar-sdk";
 import { describe, expect, it, vi } from "vitest";
 import {
-  AccountNotFoundError,
   FallbackRpc,
   NoChannelsError,
   QueueTimeoutError,
@@ -418,8 +417,7 @@ describe("FallbackRpc", () => {
       { name: "a", rpc: missing },
       { name: "b", rpc: missing },
     ]);
-    const error = await readAccountEntry(rpc, channels[0]!).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(AccountNotFoundError);
+    expect(await readAccountEntry(rpc, channels[0]!)).toBeUndefined();
     expect(rpc.active).toBe("a");
   });
 
@@ -437,8 +435,7 @@ describe("FallbackRpc", () => {
       { name: "a", rpc: answering("a") },
       { name: "b", rpc: answering("b", found.account()) },
     ]);
-    const error = await readAccountEntry(rpc, channels[0]!).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(AccountNotFoundError);
+    expect(await readAccountEntry(rpc, channels[0]!)).toBeUndefined();
     expect(asked).toEqual(["a"]);
   });
 
