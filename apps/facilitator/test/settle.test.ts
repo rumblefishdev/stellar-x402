@@ -1106,6 +1106,33 @@ describe("createSettler", () => {
       void settled;
     });
 
+    it("refuses to send a hash whose slow addHash ends after the budget answer (0009 decision 35)", async () => {
+      let signed: unknown = "not called";
+      const { settle, store } = setup(
+        async (opts) => {
+          signed = await Promise.resolve(opts.onSigned!(HASH, BOUNDS)).then(
+            () => "sent",
+            (error: unknown) => error,
+          );
+          return new Promise(() => {});
+        },
+        { budgetMs: 30 },
+      );
+      // The hash is stored at once, but the store answers only after the budget answer is out.
+      const addHash = store.addHash.bind(store);
+      store.addHash = async (...args) => {
+        const added = await addHash(...args);
+        await delay(60);
+        return added;
+      };
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.pending,
+        transaction: HASH,
+      });
+      // The answer named this hash, but the order (write, then the budget flag) keeps it unsent.
+      await vi.waitFor(() => expect(signed).toBeInstanceOf(Error));
+    });
+
     it("refuses a rebuild's new hash once the budget answer named the first", async () => {
       let rebuild!: () => void;
       let second: unknown = "not called";

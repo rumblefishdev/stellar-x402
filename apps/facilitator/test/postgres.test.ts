@@ -1,5 +1,5 @@
 import { CATALOG_KEY_VERSION } from "@stellar-x402/bazaar";
-import { Keypair, StrKey } from "@stellar/stellar-sdk";
+import { Keypair, Networks, StrKey, Transaction } from "@stellar/stellar-sdk";
 import type { PaymentRequirements } from "@x402/core/types";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -8,7 +8,16 @@ import { MIGRATIONS, migrate } from "../src/adapters/postgres-schema.js";
 import { NON_FINAL_STATES } from "../src/adapters/rules.js";
 import { main, migrateMain } from "../src/main.js";
 import { HashConflictError, type Stores } from "../src/ports/index.js";
-import { fingerprintOf, keyOf } from "../src/settlement/settle.js";
+import { jsonLogger } from "../src/logger.js";
+import { memoryMetrics } from "../src/metrics.js";
+import {
+  SETTLE_REASONS,
+  createSettler,
+  fingerprintOf,
+  keyOf,
+  type Submitter,
+} from "../src/settlement/settle.js";
+import type { Check } from "../src/settlement/verify.js";
 import { transferPayload } from "./payment.js";
 import {
   catalogStoreContract,
@@ -97,6 +106,110 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
   };
 
   settlementStoreContract(async () => (await stores()).settlements);
+
+  // What the memory store can't show (0019 decision 11): two settlers, as two instances during a
+  // deploy overlap, sharing one PostgreSQL store.
+  describe("two settlers on one store", () => {
+    const HASH = "c".repeat(64);
+    const requirements = {
+      scheme: "exact",
+      network: "stellar:testnet",
+      asset: StrKey.encodeContract(Buffer.alloc(32, 7)),
+      amount: "1000",
+      payTo: Keypair.random().publicKey(),
+      maxTimeoutSeconds: 60,
+      extra: {},
+    } satisfies PaymentRequirements;
+    const payer = Keypair.random().publicKey();
+    const paymentPayload = transferPayload(
+      { payer, payTo: requirements.payTo, requirements },
+      1_012,
+    );
+    const check: Check = async (p) => ({
+      response: { isValid: true, payer },
+      verified: {
+        transaction: new Transaction(
+          (p.payload as { transaction: string }).transaction,
+          Networks.TESTNET,
+        ),
+        payer,
+        nonce: "7",
+        expirationLedger: 1_012,
+        currentLedger: 1_000,
+      },
+    });
+
+    /** Two settlers on the store, with one pool that signs and lands once `land()` is called. */
+    async function twoSettlers(settleTimeoutMs = 2_000) {
+      const { settlements } = await stores();
+      let land!: () => void;
+      const landed = new Promise<void>((resolve) => (land = resolve));
+      const submit = vi.fn<Submitter["submit"]>(async (_call, opts = {}) => {
+        await opts.onSigned?.(HASH, { maxTime: 2_000_000_000, maxLedger: 1_012 });
+        await landed;
+        return {
+          status: "success",
+          hash: HASH,
+          channel: "GCHANNEL",
+          ledger: 1_001,
+          feeCharged: 41_000n,
+          attempts: [{ hash: HASH, sent: "yes" }],
+        };
+      });
+      const settler = () =>
+        createSettler({
+          network: "stellar:testnet",
+          check,
+          store: settlements,
+          submitter: { submit },
+          hooks: {
+            beforeSubmit: async () => ({ allow: true }),
+            onFinal: async () => {},
+            onSuccess: async () => {},
+          },
+          logger: jsonLogger("error"),
+          metrics: memoryMetrics(),
+          maxFeeStroops: 250_000n,
+          settleTimeoutMs,
+          budgetMs: 5_000,
+          pollMs: 5,
+        });
+      return { a: settler(), b: settler(), submit, land, settlements };
+    }
+
+    it("claims once: one submits, and one success is answered across both", async () => {
+      const { a, b, submit, land } = await twoSettlers();
+      const answers = Promise.all([
+        a(paymentPayload, requirements),
+        b(paymentPayload, requirements),
+      ]);
+      await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+      land();
+      const responses = (await answers).map((settled) => settled.response);
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(responses.filter((r) => r.success)).toHaveLength(1);
+      expect(responses.filter((r) => !r.success)).toEqual([
+        expect.objectContaining({ errorReason: SETTLE_REASONS.alreadySettled, transaction: HASH }),
+      ]);
+    });
+
+    it("answers a repeat on the other settler settlement_pending while the first runs, then once", async () => {
+      const { a, b, land, settlements } = await twoSettlers(50);
+      const first = a(paymentPayload, requirements);
+      const key = keyOf(paymentPayload, "stellar:testnet")!;
+      await vi.waitFor(async () => expect((await settlements.get(key))?.hashes).toEqual([HASH]));
+      expect((await b(paymentPayload, requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.pending,
+        transaction: HASH,
+      });
+      land();
+      expect((await first).response.success).toBe(true);
+      expect((await b(paymentPayload, requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.alreadySettled,
+      });
+      expect((await settlements.attempts(key)).map((attempt) => attempt.state)).toEqual(["landed"]);
+    });
+  });
   spendStoreContract(async () => (await stores()).spend);
   rateLimitStoreContract(async () => (await stores()).rateLimits);
   catalogStoreContract(async () => (await stores()).catalog);
