@@ -2,7 +2,7 @@
 id: "0053"
 title: "Catalog what upstream x402 servers send: empty mimeType, http, loopback and mcp URLs"
 type: BUG
-status: backlog
+status: active
 related_adr: ["0008"]
 related_tasks: ["0030", "0032", "0028"]
 tags: [bazaar, discovery, priority-medium, effort-small]
@@ -14,6 +14,10 @@ history:
     note: >
       Found in a local gate run of the 0028 harness. Decided: treat an empty mimeType as absent;
       drop the host rules on resource URLs and keep a scheme allowlist (https, http, mcp).
+  - date: "2026-10-22"
+    status: active
+    who: akot
+    note: "Work starts."
 ---
 
 # Catalog what upstream x402 servers send: empty mimeType, http, loopback and mcp URLs
