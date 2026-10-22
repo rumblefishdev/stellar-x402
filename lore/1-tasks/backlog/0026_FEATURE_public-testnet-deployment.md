@@ -99,14 +99,16 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     (`deploy/testnet` only; `v*` tags, required reviewers, "Prevent self-review");
   - `deploy/testnet` is a protected branch: a pull request from `develop` with an approving
     review, and no bypass, admins included;
-  - `x402-deploy@testnet.service` (a oneshot, as root) takes the network's lock, saves the
-    current digest, moves `digest.next` into `digest`, restarts `x402@testnet` and waits up to
-    120 s for `ready: true` from `/health`; if the restart fails or `ready` doesn't come, it
-    restores the previous digest, restarts again and fails. `systemctl start` waits for it, so
-    the job gets the result, and a dropped SSH session doesn't cut it;
+  - `x402-deploy@testnet.service` (a oneshot, as root) takes the network's lock, pulls the new
+    image and runs `migrate-testnet` from it while the old facilitator still serves; a failed
+    migration fails the deploy and the old one keeps serving. Then it saves the current digest,
+    moves `digest.next` into `digest`, restarts `x402@testnet` and waits up to 120 s for
+    `ready: true` from `/health`; if the restart fails or `ready` doesn't come, it restores the
+    previous digest, restarts again and fails. `systemctl start` waits for it, so the job gets
+    the result, and a dropped SSH session doesn't cut it;
   - `x402@testnet.service` decrypts the credentials to `/run/x402/testnet/` (tmpfs, 0700),
-    creates the edge network if it's missing, pulls the image, runs `migrate-testnet` and starts
-    only the facilitator (`--no-deps`); `ExecStop` stops it. It requires and runs after
+    creates the edge network if it's missing and starts only the facilitator (`--no-deps`) from
+    the image in `digest`, without pulling or migrating; `ExecStop` stops it. It requires and runs after
     `x402-db@testnet.service`, which runs Postgres. Both run after `docker.service`, the
     facilitator's with `TimeoutStopSec` 200 s, and both are enabled at boot;
   - it runs on a push to `deploy/testnet` unless only `lore/**`, `docs/**` or Markdown changed,
@@ -149,8 +151,8 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   server (ADR 0011):
   - the `postgres-testnet` container above, its credentials a Compose secret file;
   - the upgrade policy and a restore drill in the runbook; there is no failover on one server.
-- From 0039, migrations: the unit runs `node dist/migrate.js` in a one-off container of the new
-  image, since the runtime image has no pnpm. Locally it is
+- From 0039, migrations: the deploy unit runs `node dist/migrate.js` in a one-off container of
+  the new image, before the old facilitator stops, since the runtime image has no pnpm. Locally it is
   `pnpm --filter @stellar-x402/facilitator migrate` after `pnpm build`; the root has no `migrate`
   script.
 - From 0022: at startup the facilitator checks that the database is reachable and every migration

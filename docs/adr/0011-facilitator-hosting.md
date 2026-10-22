@@ -96,7 +96,8 @@ the Stellar Prices API.
 ### Deploys, liveness and readiness
 
 - **Stop-before-start:** a deploy restarts the network's facilitator unit, which stops the old
-  container and only then starts the new one. Postgres keeps running.
+  container and only then starts the new one. Postgres keeps running, and the migrations have
+  already run (Store).
   - Docker sends SIGTERM and waits `stop_grace_period` before SIGKILL.
   - The lease, not the ordering, guarantees one owner (AD-17). A process that finds the lease
     taken waits for it and never exits for lack of it.
@@ -198,16 +199,20 @@ One request or one stop must never outlast the layer in front of it:
     starting the new one. `deploy.sh` only checks the digest, writes `digest.next` and starts the
     unit; `systemctl start` waits for it, so the job still gets the result.
   - The deploy unit takes the network's lock (`flock`), so two deploys of one network can't
-    overlap. It saves the current digest, moves the new one into `digest`, restarts
-    `x402@<network>` and waits up to 120 s for `ready: true`. If the restart fails or `ready`
-    doesn't come, it puts the previous digest back, restarts again and fails.
-  - That rollback is safe because `migrate()` applies all pending migrations in one transaction,
-    so a failed run leaves the schema as it was, and expand/contract keeps the previous image
-    working on a schema that did move forward.
+    overlap. It pulls the new image and runs the migration service from it while the old
+    facilitator still serves (ADR 0012). A failed migration fails the deploy and leaves the old
+    facilitator serving; nothing needs rolling back. Then it saves the current digest, moves the
+    new one into `digest`, restarts `x402@<network>` and waits up to 120 s for `ready: true`. If
+    the restart fails or `ready` doesn't come, it puts the previous digest back, restarts again
+    and fails.
+  - Migrating before the stop and that rollback are both safe because `migrate()` applies all
+    pending migrations in one transaction, so a failed run leaves the schema as it was, and
+    expand/contract keeps the older image working on a schema that did move forward. If
+    `lock_timeout` hits, the deploy fails before anything was stopped.
   - **`x402@<network>.service` owns the facilitator.** Its `ExecStartPre` decrypts the network's
-    credentials (below), creates the edge network if it's missing, pulls the image and runs the
-    migration service (ADR 0012). `ExecStart` starts only the facilitator (`--no-deps`), and
-    `ExecStop` stops it, which gives it its `stop_grace_period`.
+    credentials (below) and creates the edge network if it's missing. It neither pulls nor
+    migrates: `ExecStart` starts only the facilitator (`--no-deps`) from the image in `digest`,
+    which the deploy pulled, and `ExecStop` stops it, which gives it its `stop_grace_period`.
   - **`x402-db@<network>.service` owns Postgres.** The facilitator's unit requires it and runs
     after it, so at a reboot the facilitator drains while the database is still up. Both are
     enabled at boot, and `x402@` reads the same `digest`, so a reboot starts the image that was
@@ -330,10 +335,10 @@ One request or one stop must never outlast the layer in front of it:
     write-only role, never the logging role;
   - a restore drill, with `pgbackrest check` and `pgbackrest verify`, runs on testnet before
     mainnet, and 0038 sets mainnet's targets for downtime and data loss.
-- **The migrations** run from the new image in the stop-before-start gap: after the old
-  facilitator stops and before the new one starts (ADR 0012). Nothing serves while they run, so
-  they add to the deploy's downtime. Every migration is still expand/contract, so a rollback to an
-  earlier image runs against the newer schema. A long one, such as an index build on a big table,
+- **The migrations** run from the new image before the old facilitator stops, in the deploy unit
+  (ADR 0012), so they add nothing to the deploy's downtime. Every migration is expand/contract, so
+  the running image, and a rollback to an earlier one, work on the newer schema. A long one, such
+  as an index build on a big table,
   runs outside the deploy as a planned step (`CREATE INDEX CONCURRENTLY`), so a deploy's
   migrations stay short. The migration service gets its own bounds, longer than the app pool's
   10 s statement timeout (0026).
@@ -460,10 +465,10 @@ One request or one stop must never outlast the layer in front of it:
   Restoring elsewhere is a runbook step (0026) and a mainnet risk (0038).
 - **Operations are ours:** Docker and OS updates, PostgreSQL upgrades, backups and restore drills,
   and the Caddy site block.
-- **Deploy downtime is usually under a minute:** a quick drain when idle, the pull and the
-  migrations, a container start, and reconciliation. At worst it is about 5 minutes and more: a
-  180 s drain, the migrations, and up to 120 s for `ready: true`. The uptime alarm waits 7
-  failing minutes for that reason.
+- **Deploy downtime is usually under a minute:** a quick drain when idle, a container start, and
+  reconciliation; the pull and the migrations run before the stop. At worst it is about 5
+  minutes: a 180 s drain and up to 120 s for `ready: true`. The uptime alarm waits 7 failing
+  minutes for that reason.
 - **After a crash,** Docker restarts the container (`on-failure`). The new process waits up to
   30 s for the lease and reconciles. Records keep each transaction's time bound, so a hash that
   can't be found yet stays non-final until that bound passes (0019).

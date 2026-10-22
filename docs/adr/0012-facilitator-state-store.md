@@ -3,7 +3,8 @@
 - Status: accepted
 - Date: 2026-10-12, amended 2026-10-20 (task 0022: pools for `reserve` and the rate limiter; 0026
   measures; hosting note; task 0039: PostgreSQL in a container on the Hetzner server) and
-  2026-10-21 (task 0039: how backups leave the server, the migration service and its bounds)
+  2026-10-21 (task 0039: how backups leave the server, the migration service and its bounds) and
+  2026-10-22 (task 0039: pgBackRest; migrations before the old facilitator stops)
 
 ## Context
 
@@ -58,10 +59,12 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
 - **Schema.**
   - Plain SQL migrations, applied by one command, under a transaction-level advisory lock with a
     `lock_timeout`.
-  - Deploys run the migrations as a one-off service of the new image, after the old facilitator
-    stops and before the new one starts (ADR 0011).
+  - Deploys run the migrations as a one-off service of the new image while the old facilitator
+    still serves, before it stops (ADR 0011). A failed migration fails the deploy, and the old
+    facilitator keeps serving.
   - `migrate()` applies all pending migrations in one transaction, so a failed run leaves the
-    schema as it was. That is what makes a deploy's automatic rollback safe.
+    schema as it was. With expand/contract, that is what makes migrating before the stop, and a
+    deploy's automatic rollback, safe.
   - The migration service has its own bounds, longer than the app pool's 10 s statement timeout
     (0026). An index build on a big table runs outside the deploy (ADR 0011).
   - Every change is expand/contract: new columns are nullable or have a default, and nothing is
