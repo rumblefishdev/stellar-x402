@@ -276,6 +276,8 @@ Scope: the facilitator key in OpenBao Transit on the facilitator's Hetzner serve
 bumps (AD-12). It can't move buyers' or sellers' tokens: a theft reaches the fee account's float and
 the channels' reserves, about 130 XLM at launch (a 100 XLM float plus ~30 XLM of reserves).
 
+### Threats
+
 #### A bug in the facilitator leaks its memory or environment
 
 - **Attack:** A bug, a crash dump or a debugging session exposes what the facilitator holds.
@@ -321,8 +323,9 @@ the channels' reserves, about 130 XLM at launch (a 100 XLM float plus ~30 XLM of
   over such an admin, reads `x402/production/openbao-backup` and, with the read-only Storage Box key
   it holds, copies one snapshot. Together they open OpenBao's data and give the key.
 - **Mitigation:** The facilitator's server has no AWS credentials that can read the secret (only
-  ADR 0011's logs-and-metrics role), so a break-in there doesn't reach it. People sign in to AWS through SSO only. Each restore drill checks the 90-day CloudTrail
-  event history for reads that weren't drills; the theft and balance alarms catch a theft.
+  ADR 0011's logs-and-metrics role), so a break-in there doesn't reach it. People sign in to AWS
+  through SSO only. Each restore drill checks the 90-day CloudTrail event history for reads that
+  weren't drills; the theft and balance alarms catch a theft.
 - **Residual risk:** Accepted at today's stakes, as for root on the server. The account has no
   CloudTrail trail, so nothing alarms on a read; an alarm is a 0027 follow-up.
 
@@ -330,7 +333,7 @@ the channels' reserves, about 130 XLM at launch (a 100 XLM float plus ~30 XLM of
 
 - **Attack:** OpenBao's disk dies, or it is sealed, down, or can't write its audit log.
 - **Mitigation:** `/settle` fails closed and an alarm fires; `/verify` keeps working. Daily snapshots
-  leave the server. The backup set (seal key and key ID, recovery key, Borg passphrase, seal config)
-  is in AWS Secrets Manager, and a restore drill proves it before mainnet and every quarter.
+  leave the server. The backup set (seal key and key ID, recovery key, Borg passphrase, seal config,
+  the read-only Storage Box key) is in AWS Secrets Manager, and a restore drill proves it before mainnet and every quarter.
 - **Residual risk:** The key can't be exported and has no cold backup. Losing both the snapshots and
   the backup set, or access to the shared AWS account, loses the fee account and every channel.
