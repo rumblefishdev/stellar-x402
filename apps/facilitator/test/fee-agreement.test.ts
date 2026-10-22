@@ -112,7 +112,9 @@ function payload(): PaymentPayload {
 
 /** The pool's RPC: one channel, a ledger per call, and the same simulation. */
 const poolRpc = {
-  getAccount: async (address: string) => new Account(address, "1000"),
+  getLedgerEntries: async () => ({
+    entries: [{ val: { account: () => ({ seqNum: () => xdr.Int64.fromString("1000") }) } }],
+  }),
   getLatestLedger: async () =>
     ({ sequence: ++latestLedger }) as unknown as rpc.Api.GetLatestLedgerResponse,
   simulateTransaction: async () => rpc.parseRawSimulation(simulation()),

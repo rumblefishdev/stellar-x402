@@ -1,3 +1,4 @@
+export { readAccountEntry } from "./account.js";
 export {
   checkFacilitatorBalance,
   type BalanceCheckOptions,
