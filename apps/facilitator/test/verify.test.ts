@@ -128,8 +128,10 @@ describe("createVerifier", () => {
   it("returns upstream's valid answer when no channel appears and the auth lasts long enough", async () => {
     const { verify, upstream } = setup();
     const p = payload();
-    await expect(verify(p, requirements)).resolves.toEqual({ isValid: true, payer });
-    expect(upstream.verify).toHaveBeenCalledWith(p, requirements);
+    const trace = {};
+    await expect(verify(p, requirements, trace)).resolves.toEqual({ isValid: true, payer });
+    // The trace goes to upstream, which names the RPC URL that answered.
+    expect(upstream.verify).toHaveBeenCalledWith(p, requirements, trace);
   });
 
   it("throws upstream's unexpected_verify_error, which is a failure of ours, not a verdict", async () => {

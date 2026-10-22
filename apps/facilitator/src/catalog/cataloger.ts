@@ -18,8 +18,6 @@ export interface CatalogerDeps {
   metrics: Metrics;
   /** Injectable for fault-injection tests; the real package otherwise. */
   bazaar?: BazaarApi;
-  /** Development only: catalog `http:` resources too (`packages/bazaar` `allowHttp`). */
-  allowHttp?: boolean;
   /** A slower write counts as failed, so a hung store can't pile up writes or block `drain()`. */
   upsertTimeoutMs?: number;
 }
@@ -39,10 +37,8 @@ export function createCataloger({
   logger,
   metrics,
   bazaar = bazaarLib,
-  allowHttp = false,
   upsertTimeoutMs = 10_000,
 }: CatalogerDeps): Cataloger {
-  const options = { allowHttp };
   const inFlight = new Set<Promise<void>>();
 
   const context = (record: SettlementRecord, origin: SettlementOrigin) => ({
@@ -90,7 +86,7 @@ export function createCataloger({
     try {
       // Validated again rather than cached: pure, so header and catalog agree, and a late
       // `resolved` success never computed a header.
-      const result = bazaar.validate(record.paymentPayload, record.paymentRequirements, options);
+      const result = bazaar.validate(record.paymentPayload, record.paymentRequirements);
       if (!result) return;
       if (!result.ok) {
         // A library failure, not a bad listing.
@@ -147,7 +143,7 @@ export function createCataloger({
     extensionResponses(record) {
       if (record.state !== "success") return undefined;
       try {
-        const result = bazaar.validate(record.paymentPayload, record.paymentRequirements, options);
+        const result = bazaar.validate(record.paymentPayload, record.paymentRequirements);
         return result && bazaar.toExtensionResponses(result);
       } catch (error) {
         internalError("header", record, "settle", error);

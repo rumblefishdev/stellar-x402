@@ -44,14 +44,7 @@ export async function rpcStub(
         res.writeHead(503).end();
         return;
       }
-      const entries = params.keys.flatMap((key) => {
-        const accountId = xdr.LedgerKey.fromXDR(key, "base64").account().accountId();
-        const account = accounts[StrKey.encodeEd25519PublicKey(accountId.ed25519())];
-        if (!account) return [];
-        const data = xdr.LedgerEntryData.account(accountEntry(accountId, account));
-        return [{ key, xdr: data.toXDR("base64"), lastModifiedLedgerSeq: 1 }];
-      });
-      res.end(JSON.stringify({ jsonrpc: "2.0", id, result: { entries, latestLedger: 100 } }));
+      res.end(JSON.stringify({ jsonrpc: "2.0", id, result: ledgerEntries(params.keys, accounts) }));
     });
   }).listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -59,6 +52,18 @@ export async function rpcStub(
     url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
     close: () => new Promise((resolve) => server.close(() => resolve())),
   };
+}
+
+/** A `getLedgerEntries` result for these keys: an entry for each of `accounts`, none for others. */
+export function ledgerEntries(keys: string[], accounts: Record<string, StubAccount>) {
+  const entries = keys.flatMap((key) => {
+    const accountId = xdr.LedgerKey.fromXDR(key, "base64").account().accountId();
+    const account = accounts[StrKey.encodeEd25519PublicKey(accountId.ed25519())];
+    if (!account) return [];
+    const data = xdr.LedgerEntryData.account(accountEntry(accountId, account));
+    return [{ key, xdr: data.toXDR("base64"), lastModifiedLedgerSeq: 1 }];
+  });
+  return { entries, latestLedger: 100 };
 }
 
 /** The ledger's entry for an account with these signers and this master key weight. */

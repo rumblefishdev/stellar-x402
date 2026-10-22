@@ -1,6 +1,12 @@
 import { Keypair } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
-import { type Config, ConfigError, parseConfig, parseMigrateConfig } from "../src/config.js";
+import {
+  type Config,
+  ConfigError,
+  MAX_RPC_URLS,
+  parseConfig,
+  parseMigrateConfig,
+} from "../src/config.js";
 
 const keypair = (byte: number) => Keypair.fromRawEd25519Seed(Buffer.alloc(32, byte));
 const SECRET = keypair(1).secret();
@@ -58,7 +64,6 @@ describe("parseConfig", () => {
         breakerFailures: 5,
         breakerCooldownMs: 600_000,
       },
-      catalog: { allowHttp: false },
     });
   });
 
@@ -130,7 +135,6 @@ describe("parseConfig", () => {
         breakerFailures: 7,
         breakerCooldownMs: 5_000,
       },
-      catalog: { allowHttp: false },
     });
   });
 
@@ -248,8 +252,8 @@ describe("parseConfig", () => {
     ).toMatchObject({ maxFeeStroops: 201n, inclusionFeeStroops: 100n });
   });
 
-  it("allows http catalog URLs on testnet only", () => {
-    expect(parseConfig({ ...minimal, CATALOG_ALLOW_HTTP: "true" }).catalog.allowHttp).toBe(true);
+  it("ignores a leftover CATALOG_ALLOW_HTTP: every network catalogs http now (0053)", () => {
+    expect(parseConfig({ ...minimal, CATALOG_ALLOW_HTTP: "true" })).toEqual(parseConfig(minimal));
     expect(
       problems({
         ...minimal,
@@ -257,7 +261,7 @@ describe("parseConfig", () => {
         RPC_URLS: "https://rpc.example",
         CATALOG_ALLOW_HTTP: "true",
       }),
-    ).toEqual(["CATALOG_ALLOW_HTTP is only allowed on testnet", PUBNET_REFUSED]);
+    ).toEqual([PUBNET_REFUSED]);
   });
 
   it("selects the PostgreSQL store with its URL", () => {
@@ -349,5 +353,16 @@ describe("parseMigrateConfig", () => {
     expect(parseMigrateConfig({ DATABASE_URL: " postgresql://db/x402\n" })).toEqual({
       databaseUrl: "postgresql://db/x402",
     });
+  });
+
+  it(`lists at most ${MAX_RPC_URLS} RPC URLs, as each adds 10 s to upstream verify's deadline`, () => {
+    const urls = (n: number) =>
+      Array.from({ length: n }, (_, i) => `https://rpc-${i}.example`).join(",");
+    expect(parseConfig({ ...minimal, RPC_URLS: urls(MAX_RPC_URLS) }).rpcUrls).toHaveLength(
+      MAX_RPC_URLS,
+    );
+    expect(problems({ ...minimal, RPC_URLS: urls(MAX_RPC_URLS + 1) })).toEqual([
+      `RPC_URLS must list at most ${MAX_RPC_URLS} URLs`,
+    ]);
   });
 });

@@ -56,7 +56,8 @@ As a resource server, and as the operator, I want `GET /supported` to describe e
 ## Decisions so far
 
 One row per atomic decision. "From" says who settled it; "vs the task" compares it with the
-acceptance criteria above. Code and tests are on PR #51.
+acceptance criteria above. Code and tests: `/supported` in PR #54 (merged), the startup check in
+PR #51, the bypass options in PR #56.
 
 | # | What is done | From | vs the task | Who does the same (checked) | Code · test |
 | --- | --- | --- | --- | --- | --- |
@@ -74,6 +75,8 @@ acceptance criteria above. Code and tests are on PR #51.
 | 12 | The facilitator address is derived twice from the secret: for the check and for `/supported` | agent | beyond the task | — | `main.ts` · `main.test.ts` "serves /supported" catches a drift |
 | 13 | No startup time limit of its own: about 10 s per RPC URL, from `FallbackRpc` | agent | beyond the task | — | `signer-pool/src/fallback-rpc.ts` |
 | 14 | The branch was stacked on PR #41 and moved to `develop` once #41 merged | grilling | beyond the task | — | PR #51 |
+| 15 | A channel another key could move stops the whole service at startup; it doesn't start without that channel | task (AD-12, ADR 0005), kept after weighing a start without the bad channels | matches AC 2 | — | `main.ts` · `main.test.ts` "refuses to start on a channel another key can sign for" |
+| 16 | signer-pool drops `disableMasterKey: false` and `allowMasterKey`, which no code passed | agent | beyond the task | — | `signer-pool/src/setup.ts` · PR #56 |
 
 ## Recon (2026-10-21)
 

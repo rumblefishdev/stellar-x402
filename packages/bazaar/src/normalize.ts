@@ -24,7 +24,8 @@ export function normalize(
   const type = discovered.discoveryInfo.input.type === "mcp" ? "mcp" : "http";
   const method = "toolName" in discovered ? discovered.toolName : discovered.method;
   if (!method) throw new Error("normalize: the validation result has no method or tool name");
-  // Built from the validated URL and template, not re-validated, so `validate()` options carry.
+  // Built from the validated URL and template, not re-validated. Only an `http` listing keeps a
+  // template, and only `http(s)` URLs, so `origin` is never the `"null"` of an `mcp:` URL.
   // The listing shows the erased template too, so payments that name the parameter differently
   // don't keep rewriting it.
   const resourceUrl = result.routeTemplate
