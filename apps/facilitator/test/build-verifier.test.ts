@@ -407,15 +407,13 @@ describe("buildVerifier (the /verify wiring in main)", () => {
       );
       await vi.advanceTimersByTimeAsync(2 * UPSTREAM_TIMEOUT_MS);
       await settled;
-      // Each timeout moved the shared client on: [0] → [1], then [1] → [0].
+      // [0]'s timeout moved the shared client to [1]; [1]'s keeps it there, since only the probe
+      // returns to [0].
       expect(
         logger.warn.mock.calls
           .filter(([event]) => event === "rpc_failover")
           .map(([, fields]) => [fields.from, fields.to, fields.reason]),
-      ).toEqual([
-        [rpc(0), rpc(1), "timeout"],
-        [rpc(1), rpc(0), "timeout"],
-      ]);
+      ).toEqual([[rpc(0), rpc(1), "timeout"]]);
       expect(logger.warn).toHaveBeenCalledWith("rpc_exhausted", {
         component: "verify",
         network: config.network,

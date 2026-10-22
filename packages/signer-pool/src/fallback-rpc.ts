@@ -22,8 +22,10 @@ export interface FallbackRpcOptions {
    * within `timeoutMs`. Calls go back only if the first answers and trails the active one by at
    * most `maxLagLedgers` (2 by default); an active endpoint that can't read its own ledger is no
    * reason to stay on it. The first probe is due `intervalMs` (60 s by default) after calls left
-   * the first endpoint, and the next one `intervalMs` after it began. Without `failback`, calls
-   * stay where they moved.
+   * the first endpoint, and the next one `intervalMs` after it began. Only the probe returns calls
+   * to the first endpoint: a failure of the last one moves them to the next fallback, or, with none
+   * left, keeps them where they are and makes a probe due at once. Without `failback`, calls stay
+   * where they moved, and a failure of the last endpoint wraps around to the first.
    */
   failback?: { intervalMs?: number; maxLagLedgers?: number };
   /** A probe found the first endpoint healthy, and calls went back to it. */
@@ -116,14 +118,14 @@ export class FallbackRpc implements SorobanRpc {
    * A call on endpoint `index` that began at `token` failed, made by a caller that reaches the
    * endpoints another way (`by` names it): calls move to the next endpoint, unless they moved since
    * `token`. Returns the token to report the next endpoint's failure with, or `undefined` if calls
-   * had moved, and then the caller reports nothing more for this call.
+   * had moved or stayed (see {@link FallbackRpcOptions.failback}), and then the caller reports
+   * nothing more for this call.
    */
   markFailed(index: number, token: number, error: unknown, by: string): number | undefined {
     if (this.endpoints.length < 2 || token !== this.generation || index !== this.current) {
       return undefined;
     }
-    this.switchTo(index + 1, error, by);
-    return this.generation;
+    return this.moveOn(error, by) ? this.generation : undefined;
   }
 
   getAccount: SorobanRpc["getAccount"] = (...a) =>
@@ -145,7 +147,7 @@ export class FallbackRpc implements SorobanRpc {
       return await this.withTimeout(this.endpoints[from]!.rpc.sendTransaction(...a));
     } catch (error) {
       if (this.endpoints.length > 1 && this.generation === token) {
-        this.switchTo(from + 1, error, "sendTransaction");
+        this.moveOn(error, "sendTransaction");
       }
       throw error;
     }
@@ -167,6 +169,23 @@ export class FallbackRpc implements SorobanRpc {
     if (isNotFound(firstError)) throw firstError;
     const message = firstError instanceof Error ? firstError.message : String(firstError);
     throw new RpcUnavailableError(`every RPC endpoint failed: ${message}`, { cause: firstError });
+  }
+
+  /**
+   * Moves calls past the active endpoint after its failure, and says whether they moved. With
+   * `failback` they never move to the first endpoint, whose return is the probe's alone: a dead
+   * first endpoint would otherwise be back after one failure of the last one (AD-3).
+   */
+  private moveOn(error: unknown, by: string): boolean {
+    let next = (this.current + 1) % this.endpoints.length;
+    if (this.opts.failback && next === 0) next = 1;
+    if (next === this.current) {
+      this.nextProbeAt = this.now();
+      this.maybeProbe();
+      return false;
+    }
+    this.switchTo(next, error, by);
+    return true;
   }
 
   private switchTo(idx: number, error: unknown, by: string): void {
