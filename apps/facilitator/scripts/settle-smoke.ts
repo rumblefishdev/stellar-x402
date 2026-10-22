@@ -26,8 +26,8 @@
  *
  * The facilitator's log lines go to stderr, so stdout carries only the result.
  */
-import { Keypair, Networks, rpc } from "@stellar/stellar-sdk";
-import { buildCreateChannelsTx } from "@stellar-x402/signer-pool";
+import { Account, Keypair, Networks, rpc } from "@stellar/stellar-sdk";
+import { buildCreateChannelsTx, readAccountEntry } from "@stellar-x402/signer-pool";
 import type { PaymentRequirements, SettleResponse, VerifyResponse } from "@x402/core/types";
 import { createEd25519Signer } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/client";
@@ -68,8 +68,10 @@ const payTo = process.env.PAY_TO ?? (await funded(undefined)).publicKey();
 
 // Two delegated channels: master key off, the facilitator their only signer.
 const channelKeys = [Keypair.random(), Keypair.random()];
+const facilitatorEntry = await readAccountEntry(server, facilitator.publicKey());
+if (!facilitatorEntry) throw new Error("the facilitator account does not exist");
 const setup = buildCreateChannelsTx({
-  facilitator: await server.getAccount(facilitator.publicKey()),
+  facilitator: new Account(facilitator.publicKey(), facilitatorEntry.seqNum().toString()),
   channels: channelKeys,
   networkPassphrase: Networks.TESTNET,
   fee: 1000,
