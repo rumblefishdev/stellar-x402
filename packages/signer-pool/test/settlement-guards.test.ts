@@ -139,6 +139,19 @@ describe("onSigned", () => {
     expect(log).toEqual([`stored ${res.hash} after 0 sends`]);
   });
 
+  it("is given the envelope's bounds, so a stored hash can be resolved after a crash", async () => {
+    const { fake, submitter } = setup();
+    const maxLedger = fake.ledger + 10;
+    const given: unknown[] = [];
+    await submitter.submit(call(), { maxLedger, onSigned: (_, bounds) => void given.push(bounds) });
+    expect(given).toEqual([{ maxTime: Number(inner(fake).timeBounds?.maxTime), maxLedger }]);
+
+    // Without a ledger bound only the time bound is given.
+    given.length = 0;
+    await submitter.submit(call(), { onSigned: (_, bounds) => void given.push(bounds) });
+    expect(given).toEqual([{ maxTime: Number(inner(fake).timeBounds?.maxTime) }]);
+  });
+
   it("sends nothing and frees the channel when it rejects", async () => {
     const { fake, submitter } = setup();
     const failure = new Error("store down");
