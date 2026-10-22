@@ -28,14 +28,9 @@ import type { PaymentPayload, PaymentRequirements, SettleResponse } from "@x402/
 import { getNetworkPassphrase } from "@x402/stellar";
 import type { Logger } from "../logger.js";
 import type { Metrics } from "../metrics.js";
-import {
-  FINAL_SETTLEMENT_STATES,
-  type SettlementKey,
-  type SettlementRecord,
-  type SettlementStore,
-  type SettlementUpdate,
-} from "../ports/index.js";
+import type { SettlementKey, SettlementRecord, SettlementStore } from "../ports/index.js";
 import type { BeforeSubmitResult, SettlementHooks, SettlementOrigin } from "./hooks.js";
+import { createRecords, isFinalRecord as isFinal, type Records } from "./records.js";
 import {
   PAYER_AUTH_REASON,
   UNSUPPORTED_CREDENTIAL_REASON,
@@ -145,6 +140,8 @@ export interface SettlerDeps {
   budgetMs: number;
   /** Estimated ledger close time, to turn the auth expiry into a deadline. */
   ledgerMs?: number;
+  /** The record writes and hooks to share, e.g. with reconciliation; its own by default. */
+  records?: Records;
   /** How often a repeat call re-reads a non-final record. */
   pollMs?: number;
   /** How long a store call may take once the budget is out, or while a repeat polls. */
@@ -174,8 +171,6 @@ export type Settle = (
   requirements: PaymentRequirements,
   signal?: AbortSignal,
 ) => Promise<Settled>;
-
-const isFinal = (record: SettlementRecord) => FINAL_SETTLEMENT_STATES.includes(record.state);
 
 /**
  * `/settle` for `exact` (AD-2, AD-3, AD-6): rerun the `/verify` checks, claim
@@ -231,15 +226,9 @@ export function createSettler(deps: SettlerDeps): Settle {
     return failure(SETTLE_REASONS[result.status], payer, undefined, transaction);
   };
 
-  const hookFailed = (hook: keyof SettlementHooks, key: SettlementKey, error: unknown) => {
-    logger.error("settlement_hook_failed", { hook, network, settlementKey: key, error });
-    metrics.increment("settlement_hook_failures_total", { hook });
-  };
-
-  const recordFailed = (key: SettlementKey, error: unknown) => {
-    logger.error("settlement_record_failed", { network, settlementKey: key, error });
-    metrics.increment("settlement_record_failures_total");
-  };
+  const records =
+    deps.records ?? createRecords({ network, store, hooks: deps.hooks, logger, metrics, now });
+  const { hookFailed, recordFailed, onFinal, onSuccess, advance, finish, answeredHere } = records;
 
   /**
    * A refusal that means the pool, or `/settle`'s own re-check, disagreed with a `/verify` that
@@ -260,47 +249,6 @@ export function createSettler(deps: SettlerDeps): Settle {
       stage,
     });
     metrics.increment("settlement_refused_after_verify_total", { reason: errorReason, stage });
-  };
-
-  /** Runs a hook without letting it reach the caller (hooks.ts). */
-  const runHook = (hook: "onFinal" | "onSuccess", key: SettlementKey, run: () => Promise<void>) => {
-    const failed = (error: unknown) => hookFailed(hook, key, error);
-    try {
-      run().catch(failed);
-    } catch (error) {
-      failed(error);
-    }
-  };
-
-  const onFinal = (record: SettlementRecord, origin: SettlementOrigin) =>
-    runHook("onFinal", record.key, () => deps.hooks.onFinal(record, origin));
-
-  const onSuccess = (record: SettlementRecord, origin: SettlementOrigin) =>
-    runHook("onSuccess", record.key, () => deps.hooks.onSuccess(record, origin));
-
-  /**
-   * Moves a record forward from whatever state it is in now. `undefined` means another writer got
-   * there first, or the record is already final.
-   */
-  const advance = async (key: SettlementKey, update: Omit<SettlementUpdate, "updatedAt">) => {
-    for (let tries = 0; tries < 3; tries++) {
-      const current = await store.get(key);
-      if (!current || isFinal(current)) return undefined;
-      const moved = await store.transition(key, current.state, { ...update, updatedAt: now() });
-      if (moved) return moved;
-    }
-    return undefined;
-  };
-
-  /** {@link advance}, then `onFinal` once for the writer that made the record final. */
-  const finish = async (
-    key: SettlementKey,
-    update: Omit<SettlementUpdate, "updatedAt">,
-    origin: SettlementOrigin,
-  ) => {
-    const record = await advance(key, update);
-    if (record && isFinal(record)) onFinal(record, origin);
-    return { record: record ?? (await store.get(key)), won: record !== undefined, origin };
   };
 
   /**
@@ -333,14 +281,6 @@ export function createSettler(deps: SettlerDeps): Settle {
       return undefined;
     }
   };
-
-  /**
-   * Keys whose success this process is answering, or answered without the store's mark: a mark
-   * in flight, a mark that failed, or a success answered from the pool's result when the store
-   * failed. Checked before the store, so one process answers a success once even while the store
-   * is down (0009 decision 29). Keys leave once the store holds the mark (or refused it).
-   */
-  const answeredHere = new Set<SettlementKey>();
 
   /**
    * The answer for `record`. A `success` is answered once (AD-6): the caller that marks it gets
