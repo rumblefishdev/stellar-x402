@@ -473,6 +473,7 @@ function switchable(state: { mode: "ok" | "fail" | "hang"; ledger: number }): So
     ...endpoint("ok"),
     getLatestLedger: () => run(() => ({ sequence: state.ledger })),
     getFeeStats: () => run(() => "fees"),
+    sendTransaction: () => run(() => "sent"),
   } as unknown as SorobanRpc;
 }
 
@@ -651,6 +652,35 @@ describe("FallbackRpc's shared active endpoint", () => {
       clock.t = 2_000;
       rpc.begin();
       await vi.waitFor(() => expect(rpc.active).toBe("a"));
+    });
+
+    it("never returns to the first endpoint on a failure of the last one: it probes at once", async () => {
+      // The A1 case: `a` is dead, calls moved to `b`, and then `b` fails too.
+      const { rpc, a, b, switches, probeFailures } = withClock();
+      a.mode = "fail";
+      b.mode = "fail";
+      expect(rpc.markFailed(1, rpc.begin().token, new Error("timeout"), "verify")).toBeUndefined();
+      expect(rpc.active).toBe("b");
+      await vi.waitFor(() => expect(probeFailures).toHaveLength(1));
+      await expect(rpc.sendTransaction({} as never)).rejects.toThrow("down");
+      expect(rpc.active).toBe("b");
+      expect(switches).toEqual(["a->b by verify"]);
+    });
+
+    it("moves a failure of the last endpoint to the next fallback, skipping the first", async () => {
+      const switches: string[] = [];
+      const rpc = new FallbackRpc(
+        ["a", "b", "c"].map((name) => ({ name, rpc: endpoint("ok") })),
+        {
+          failback: { intervalMs: 1_000 },
+          now: () => 0,
+          onSwitch: (from, to) => switches.push(`${from}->${to}`),
+        },
+      );
+      const t1 = rpc.markFailed(0, rpc.begin().token, new Error("x"), "verify")!;
+      const t2 = rpc.markFailed(1, t1, new Error("x"), "verify")!;
+      expect(rpc.markFailed(2, t2, new Error("x"), "verify")).toBeDefined();
+      expect(switches).toEqual(["a->b", "b->c", "c->b"]);
     });
 
     it("returns to a healthy first endpoint when the active one can't read its ledger", async () => {
