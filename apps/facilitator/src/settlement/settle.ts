@@ -30,7 +30,12 @@ import type { Logger } from "../logger.js";
 import type { Metrics } from "../metrics.js";
 import type { SettlementKey, SettlementRecord, SettlementStore } from "../ports/index.js";
 import type { BeforeSubmitResult, SettlementHooks, SettlementOrigin } from "./hooks.js";
-import { createRecords, isFinalRecord as isFinal, type Records } from "./records.js";
+import {
+  attemptUpdates,
+  createRecords,
+  isFinalRecord as isFinal,
+  type Records,
+} from "./records.js";
 import {
   PAYER_AUTH_REASON,
   UNSUPPORTED_CREDENTIAL_REASON,
@@ -378,18 +383,24 @@ export function createSettler(deps: SettlerDeps): Settle {
             to: requirements.payTo,
             amount: BigInt(requirements.amount),
           }),
-          onSigned: async (hash) => {
+          onSigned: async (hash, bounds) => {
             // After the budget answer nothing new is signed: the answer named the last hash, and
             // a rebuild's would land under another.
             if (call.budgetOver) throw new Error("the settle budget ran out");
             call.signing = hash;
             // Durable before the first send (AD-16); a final or missing record stops the send.
-            if (!(await store.addHash(key, hash, now())))
+            if (!(await store.addHash(key, hash, now(), bounds)))
               throw new Error("the settlement record is final or missing");
             // The budget answer may have gone out while the store wrote: it named the hash it
             // could read, so this one isn't sent.
             if (call.budgetOver) throw new Error("the settle budget ran out");
           },
+          // A hint for debugging, never awaited: the send has happened, so a failed write changes
+          // nothing (0019 decision 7).
+          onSent: (hash) =>
+            void store
+              .markAttempts(key, [{ hash, state: "sent" }], now())
+              .catch((error: unknown) => recordFailed(key, error)),
           deadline,
           maxLedger: verified.expirationLedger,
         });
@@ -398,6 +409,7 @@ export function createSettler(deps: SettlerDeps): Settle {
         // `sent: "yes"` is an accepted send or a refused one, so after an unexpected error it may
         // still land too; a classified error says the pool knows it won't.
         const errorReason = reasonFor(error);
+        const attempts = attemptUpdates(attemptsOf(error), { error });
         const unknown = attemptsOf(error).filter((attempt) =>
           errorReason === SETTLE_REASONS.unexpected
             ? attempt.sent !== "no"
@@ -413,7 +425,7 @@ export function createSettler(deps: SettlerDeps): Settle {
           });
           metrics.increment("settlement_uncertain_total");
           return {
-            record: (await advance(key, { state: "pending" })) ?? (await store.get(key)),
+            record: (await advance(key, { state: "pending", attempts })) ?? (await store.get(key)),
             won: false,
             origin: call.origin,
           };
@@ -424,12 +436,13 @@ export function createSettler(deps: SettlerDeps): Settle {
         }
         // The answer is the same fixed reason, and the client needs a new payment.
         flagDrift(key, errorReason, "pool");
-        return await finish(key, { state: "rejected", errorReason }, call.origin);
+        return await finish(key, { state: "rejected", errorReason, attempts }, call.origin);
       }
       const fields = {
         channel: result.channel,
         ledger: result.ledger,
         feeCharged: result.feeCharged,
+        attempts: attemptUpdates(result.attempts, result),
       };
       switch (result.status) {
         case "success":
