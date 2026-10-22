@@ -108,7 +108,15 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
   - `settlement_budget_exhausted_total{signed}`, `settlement_uncertain_total`,
     `settlement_submit_failures_total`, `settlement_hook_failures_total{hook}`;
   - `settlement_record_failures_total`: the store-outage alarm (0009 decision 30);
-  - `pool_events_total{type}`, with `status` on `resolved`, for a "pending settlements" alarm.
+  - `pool_events_total{type}`, with `status` on `resolved`, for a "pending settlements" alarm;
+  - from 0019: `settlement_reconciled_total{state}` (a record a sweep finished: `rejected`,
+    `success`, `failed`, `expired`), and the logs `reconcile_finished` (each sweep's counts,
+    `open` and `errors` among them), `reconcile_retry` (`/settle` still 503 at startup),
+    `settlement_reconcile_failed` and `settlement_resolve_failed`. A non-zero `open` that never
+    drops, or `reconcile_retry` past the alarm window, is the "not ready to settle" case above
+    (at startup), or a record no sweep can check (live).
+    Each hash's attempt state (`settlement_hashes.state`) can be queried for dead attempts and
+    rebuilds.
 - From 0045 (via 0009): `/verify`'s upstream failover logs `rpc_failover` with `rpcEndpointName`
   names (`RPC_URLS[i]#<fingerprint>`). Add a `rpc_failovers_total{from,to}` counter, or an alarm on the log, since a lagging
   fallback answers valid payments with rejections (0045 decision 9). A return to the first URL
