@@ -25,9 +25,12 @@ export const isFinalRecord = (record: SettlementRecord) =>
   FINAL_SETTLEMENT_STATES.includes(record.state);
 
 /**
- * The settlement module's record writes (AD-16): every change to a record goes through
+ * The settlement module's record writes (AD-16): every state change after the claim goes through
  * {@link Records.advance} or {@link Records.finish}, forward-only compare-and-sets, and the hooks
- * run here, once for the writer that made a record final. `/settle` and reconciliation share one,
+ * run here, once for the writer that made a record final. The rest of `settlement/` writes only
+ * what moves no state: a hash (`addHash`), an attempt hint (`markAttempts`), the answered mark,
+ * and reconciliation's close of a hashless claim, a compare-and-set from `claimed` that must not
+ * retry from a later state. `/settle` and reconciliation share one,
  * so `answeredHere` is one process-wide set.
  */
 export function createRecords(deps: RecordsDeps) {

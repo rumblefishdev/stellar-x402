@@ -95,9 +95,13 @@ export function createReconciler(deps: ReconcilerDeps) {
     records.answeredHere.delete(key);
   };
 
+  /** The hook runs even when the mark fails: the record is final, so no sweep comes back to it. */
   const markIfAnswered = async (record: SettlementRecord) => {
-    await markAnswered(record.key);
-    records.onSuccess(record, "resolved");
+    try {
+      await markAnswered(record.key);
+    } finally {
+      records.onSuccess(record, "resolved");
+    }
   };
 
   /** Successes already stored whose mark failed: their record is final, so no sweep reads it. */
@@ -117,6 +121,17 @@ export function createReconciler(deps: ReconcilerDeps) {
       return undefined;
     }
   };
+
+  /**
+   * Whether the RPC's history reaches back to the record's claim: only then does `NOT_FOUND` say a
+   * hash never landed. RPC keeps a window of ledgers (a day by default, other providers differ),
+   * so after a longer outage a landed hash is `NOT_FOUND` too.
+   */
+  const historyCovers = (record: SettlementRecord, res: rpc.Api.GetMissingTransactionResponse) =>
+    res.oldestLedgerCloseTime <= record.createdAt / 1000;
+
+  /** Keys already reported by `settlement_history_gone`, so each is logged once per process. */
+  const historyGone = new Set<SettlementRecord["key"]>();
 
   const pastBound = (
     record: SettlementRecord,
@@ -152,14 +167,30 @@ export function createReconciler(deps: ReconcilerDeps) {
       if (attempt.state === "dead") continue;
       const res = await deps.rpc.getTransaction(attempt.hash);
       if (res.status === rpc.Api.GetTransactionStatus.NOT_FOUND) {
-        if (pastBound(record, attempt, res)) dead.push({ hash: attempt.hash, state: "dead" });
-        else open++;
+        if (!pastBound(record, attempt, res)) open++;
+        else if (historyCovers(record, res)) dead.push({ hash: attempt.hash, state: "dead" });
+        else {
+          // It may have landed before the RPC's history: an operator checks it (decision 22).
+          open++;
+          if (!historyGone.has(record.key)) {
+            historyGone.add(record.key);
+            logger.warn("settlement_history_gone", {
+              network,
+              settlementKey: record.key,
+              transaction: attempt.hash,
+              oldestLedger: res.oldestLedger,
+            });
+            metrics.increment("settlement_history_gone_total");
+          }
+        }
         continue;
       }
       return land(record, attempt, res, dead);
     }
-    // Every hash is dead: none can land any more.
-    if (open === 0) {
+    // Every hash is dead: none can land any more. A live sweep waits out the call's budget first:
+    // until then `/settle` may still store a rebuilt hash this read missed (decision 23).
+    const callMayRun = mode === "live" && now() <= record.createdAt + deps.budgetMs + marginMs;
+    if (open === 0 && !callMayRun) {
       const { won } = await records.finish(
         record.key,
         { state: "expired", errorReason: SETTLE_REASONS.expired, attempts: dead },
@@ -172,14 +203,25 @@ export function createReconciler(deps: ReconcilerDeps) {
   };
 
   let running: Promise<SweepReport> | undefined;
+  let next: Promise<SweepReport> | undefined;
 
   /**
    * One pass over the network's non-final records, at most `concurrency` at a time. A store that
    * fails to list rejects the sweep; a record whose RPC or store call fails is counted in
-   * `errors` and stays as it is. One sweep runs at a time: a call during one gets its report.
+   * `errors` and stays as it is. One sweep runs at a time: a call during one gets the next one,
+   * which starts after it, so a store failure during a sweep isn't answered by its report.
    */
   const sweep = (mode: SweepMode): Promise<SweepReport> => {
-    running ??= (async () => {
+    if (running) {
+      next ??= running
+        .catch(() => undefined)
+        .then(() => {
+          next = undefined;
+          return sweep(mode);
+        });
+      return next;
+    }
+    running = (async () => {
       const report: SweepReport = {
         rejected: 0,
         success: 0,
@@ -253,7 +295,7 @@ export interface Reconciliation {
   readonly reconciled: Promise<void>;
   /** Starts the startup sweep; the server already listens, so `/health` answers. */
   start(): void;
-  /** Stops every timer; a sweep under way finishes on its own. */
+  /** Stops every timer, and no sweep under way starts one; that sweep finishes on its own. */
   close(): void;
 }
 
@@ -267,6 +309,8 @@ export interface ReconciliationOptions {
   /** The first retry after a failed sweep, doubled up to `maxBackoffMs`. */
   minBackoffMs?: number;
   maxBackoffMs?: number;
+  /** Sweeps tried for records left unchecked before the 5-minute sweep takes over (decision 24). */
+  maxTries?: number;
 }
 
 /**
@@ -280,6 +324,7 @@ export function scheduleReconciliation(opts: ReconciliationOptions): Reconciliat
   const intervalMs = opts.intervalMs ?? 5 * 60_000;
   const minBackoffMs = opts.minBackoffMs ?? 1_000;
   const maxBackoffMs = opts.maxBackoffMs ?? 30_000;
+  const maxTries = opts.maxTries ?? 5;
   let ready = false;
   let closed = false;
   /** A live sweep is due or retrying: after a store failure, or a record left unchecked. */
@@ -296,26 +341,40 @@ export function scheduleReconciliation(opts: ReconciliationOptions): Reconciliat
   };
 
   /**
-   * Sweeps until one lists the records and, with `checkAll`, until it has checked every one,
-   * waiting `delay` (doubled each time, up to `maxBackoffMs`) between tries.
+   * Sweeps until one lists the records and, with `checkAll`, until it has checked every one or
+   * `maxTries` sweeps have run, waiting `delay` (doubled each time, up to `maxBackoffMs`) between
+   * tries. Each try sweeps every open record, so the cap bounds the RPC calls when one keeps
+   * failing; the 5-minute sweep tries it again.
    */
   const untilSwept = (
     mode: SweepMode,
-    then: (report: SweepReport) => void,
+    then: (report?: SweepReport) => void,
     checkAll: boolean,
     delay = minBackoffMs,
+    tries = 1,
   ) => {
     if (closed) return;
     const again = (fields: Record<string, unknown>) => {
+      if (checkAll && tries >= maxTries) {
+        logger.warn("reconcile_gave_up", { network, mode, tries, ...fields });
+        then();
+        return;
+      }
       logger.warn("reconcile_retry", { network, mode, retryInMs: delay, ...fields });
       retry = later(
-        () => untilSwept(mode, then, checkAll, Math.min(delay * 2, maxBackoffMs)),
+        () => untilSwept(mode, then, checkAll, Math.min(delay * 2, maxBackoffMs), tries + 1),
         delay,
       );
     };
     reconciler.sweep(mode).then(
-      (report) => (checkAll && report.errors > 0 ? again({ errors: report.errors }) : then(report)),
-      (error: unknown) => again({ error }),
+      (report) => {
+        if (closed) return;
+        if (checkAll && report.errors > 0) again({ errors: report.errors });
+        else then(report);
+      },
+      (error: unknown) => {
+        if (!closed) again({ error });
+      },
     );
   };
 
@@ -341,7 +400,7 @@ export function scheduleReconciliation(opts: ReconciliationOptions): Reconciliat
         (report) => {
           ready = true;
           reconciled();
-          if (report.errors > 0) arm();
+          if (report && report.errors > 0) arm();
           interval = setInterval(() => {
             reconciler
               .sweep("live")
