@@ -343,18 +343,23 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     const pools = app.pools;
     expect(pools).toBeDefined();
     try {
+      // The startup sweep reads the settlements on the main pool, and only there.
+      await app.reconciled;
+      const main = pools?.main.totalCount;
+      expect(main).toBeGreaterThan(0);
       const limits = [{ scope: "global" as const, maxStroops: 10n, windowMs: 1_000 }];
       const counts = () => [
         pools?.main.totalCount,
         pools?.reserve.totalCount,
         pools?.rateLimits.totalCount,
       ];
+      expect(counts()).toEqual([main, 0, 0]);
       await app.stores.spend.reserve({ id: "a", amount: 1n, limits, now: 0 });
-      expect(counts()).toEqual([0, 1, 0]);
+      expect(counts()).toEqual([main, 1, 0]);
       await app.stores.rateLimits.hit("k", 60_000, 0);
-      expect(counts()).toEqual([0, 1, 1]);
+      expect(counts()).toEqual([main, 1, 1]);
       expect((await app.stores.settlements.claim(settlement("1"))).claimed).toBe(true);
-      expect(counts()).toEqual([1, 1, 1]);
+      expect(counts()).toEqual([main, 1, 1]);
     } finally {
       await app.close();
     }
@@ -407,6 +412,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
       LOG_LEVEL: "error",
     });
     try {
+      await app.reconciled;
       const response = await fetch(`http://127.0.0.1:${app.port}/settle`, {
         method: "POST",
         headers: { "content-type": "application/json" },

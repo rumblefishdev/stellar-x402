@@ -6,6 +6,7 @@ import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
 import type { Stores } from "../ports/index.js";
 import type { SettlementHooks } from "../settlement/hooks.js";
+import type { Reconciliation } from "../settlement/reconcile.js";
 import type { Settle } from "../settlement/settle.js";
 import type { Verify, VerifyTrace } from "../settlement/verify.js";
 import { EXTENSION_RESPONSES_HEADER, encodeExtensionResponses } from "./extension-responses.js";
@@ -21,6 +22,8 @@ export interface AppDeps {
   extensionResponses: SettlementHooks["extensionResponses"];
   /** The `GET /supported` answer, fixed for the life of the process. */
   supported: SupportedResponse;
+  /** Settlement reconciliation (0019); without it `/settle` answers at once. */
+  reconciliation?: Reconciliation;
 }
 
 /** The status as a body code, like `not_found`: 413 → `payload_too_large`. */
@@ -84,6 +87,7 @@ export function createApp({
   settle,
   extensionResponses,
   supported,
+  reconciliation,
 }: AppDeps): Express {
   const app = express();
   app.disable("x-powered-by");
@@ -113,6 +117,13 @@ export function createApp({
   // Like `/verify`: any settle outcome is a 200 with an x402 body (AD-6). A thrown error, such as
   // upstream verify failing or the store down before the claim, is a 500.
   app.post("/settle", async (req, res) => {
+    // Until the startup sweep has checked every open record on chain (0019 decision 4): a repeat
+    // would answer from a record that may already have landed or expired.
+    if (reconciliation && !reconciliation.ready()) {
+      res.setHeader("Retry-After", "5");
+      res.status(503).json({ error: "reconciling" });
+      return;
+    }
     const request = parsePaymentRequest(req.body);
     if (!request) {
       res.status(400).json({ error: code(400) });
