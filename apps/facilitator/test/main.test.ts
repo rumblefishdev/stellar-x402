@@ -35,7 +35,7 @@ let rpc: Awaited<ReturnType<typeof rpcStub>>;
 beforeAll(async () => {
   rpc = await rpcStub({
     [env.CHANNELS]: hardened(facilitator),
-    [masterActive]: { signers: [{ key: facilitator, weight: 1 }], masterWeight: 1 },
+    [masterActive]: { signers: [facilitator], masterWeight: 1 },
   });
 });
 afterAll(() => rpc.close());
@@ -73,17 +73,6 @@ describe("facilitator boot", () => {
     expect(response.status).toBe(501);
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
     expect((await fetch(`${url}/unknown`)).status).toBe(404);
-  });
-
-  it("answers /supported with the facilitator key as its only signer, never a channel", async () => {
-    const response = await fetch(`${url}/supported`, {
-      headers: { origin: "https://other.example" },
-    });
-    expect(response.status).toBe(200);
-    expect(response.headers.get("access-control-allow-origin")).toBeNull();
-    const body = await response.text();
-    expect(JSON.parse(body)).toEqual(supportedResponse("stellar:testnet", facilitator));
-    expect(body).not.toContain(env.CHANNELS);
   });
 
   it("answers a client's bad body with a 4xx and doesn't log it as an error", async () => {
@@ -237,7 +226,11 @@ describe("main()", () => {
   it("serves /supported for the key it checked the channels against", async () => {
     const app = await main({ ...env, RPC_URLS: rpc.url, PORT: "47136", LOG_LEVEL: "error" });
     try {
-      const body = await (await fetch("http://127.0.0.1:47136/supported")).text();
+      const response = await fetch("http://127.0.0.1:47136/supported", {
+        headers: { origin: "https://other.example" },
+      });
+      expect(response.headers.get("access-control-allow-origin")).toBeNull();
+      const body = await response.text();
       expect(JSON.parse(body)).toEqual(supportedResponse("stellar:testnet", facilitator));
       expect(body).not.toContain(env.CHANNELS);
     } finally {

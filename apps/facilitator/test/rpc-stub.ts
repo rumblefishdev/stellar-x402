@@ -3,15 +3,15 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Keypair, StrKey, xdr } from "@stellar/stellar-sdk";
 
-/** An account as the stub serves it: its signers and its master key weight. */
+/** An account as the stub serves it: its signers (each at weight 1) and its master key weight. */
 export interface StubAccount {
-  signers: { key: string; weight: number }[];
+  signers: string[];
   masterWeight: number;
 }
 
 /** A channel set up as AD-12 requires: master key weight 0, the facilitator its only signer. */
 export const hardened = (facilitator: string): StubAccount => ({
-  signers: [{ key: facilitator, weight: 1 }],
+  signers: [facilitator],
   masterWeight: 0,
 });
 
@@ -40,7 +40,8 @@ export async function rpcStub(
         const accountId = xdr.LedgerKey.fromXDR(key, "base64").account().accountId();
         const account = accounts[StrKey.encodeEd25519PublicKey(accountId.ed25519())];
         if (!account) return [];
-        return [{ key, xdr: accountData(accountId, account), lastModifiedLedgerSeq: 1 }];
+        const data = xdr.LedgerEntryData.account(accountEntry(accountId, account));
+        return [{ key, xdr: data.toXDR("base64"), lastModifiedLedgerSeq: 1 }];
       });
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify({ jsonrpc: "2.0", id, result: { entries, latestLedger: 100 } }));
@@ -53,9 +54,9 @@ export async function rpcStub(
   };
 }
 
-/** The account's `LedgerEntryData`, base64, as `getLedgerEntries` returns it. */
-function accountData(accountId: xdr.PublicKey, account: StubAccount): string {
-  const entry = new xdr.AccountEntry({
+/** The ledger's entry for an account with these signers and this master key weight. */
+export function accountEntry(accountId: xdr.PublicKey, account: StubAccount): xdr.AccountEntry {
+  return new xdr.AccountEntry({
     accountId,
     balance: xdr.Int64.fromString("15000000"),
     seqNum: xdr.Int64.fromString("1"),
@@ -66,13 +67,12 @@ function accountData(accountId: xdr.PublicKey, account: StubAccount): string {
     // [master weight, low, medium, high]
     thresholds: Buffer.from([account.masterWeight, 0, 0, 0]),
     signers: account.signers.map(
-      (s) =>
+      (key) =>
         new xdr.Signer({
-          key: xdr.SignerKey.signerKeyTypeEd25519(Keypair.fromPublicKey(s.key).rawPublicKey()),
-          weight: s.weight,
+          key: xdr.SignerKey.signerKeyTypeEd25519(Keypair.fromPublicKey(key).rawPublicKey()),
+          weight: 1,
         }),
     ),
     ext: new xdr.AccountEntryExt(0),
   });
-  return xdr.LedgerEntryData.account(entry).toXDR("base64");
 }

@@ -1,6 +1,7 @@
-import { Keypair, xdr } from "@stellar/stellar-sdk";
+import { Keypair } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
 import { checkChannels } from "../src/settlement/channel-check.js";
+import { accountEntry, type StubAccount } from "./rpc-stub.js";
 
 const facilitator = Keypair.random().publicKey();
 const good = Keypair.random().publicKey();
@@ -8,25 +9,14 @@ const masterActive = Keypair.random().publicKey();
 const missing = Keypair.random().publicKey();
 const unreadable = Keypair.random().publicKey();
 
-/** An account entry with these signers and this master key weight. */
-function entry(signers: string[], masterWeight: number): xdr.AccountEntry {
-  return {
-    signers: () =>
-      signers.map(
-        (key) =>
-          new xdr.Signer({
-            key: xdr.SignerKey.signerKeyTypeEd25519(Keypair.fromPublicKey(key).rawPublicKey()),
-            weight: 1,
-          }),
-      ),
-    thresholds: () => Buffer.from([masterWeight, 0, 0, 0]),
-  } as unknown as xdr.AccountEntry;
-}
+const entry = (address: string, account: StubAccount) =>
+  accountEntry(Keypair.fromPublicKey(address).xdrAccountId(), account);
 
 const rpc = {
   getAccountEntry: async (address: string) => {
-    if (address === good) return entry([facilitator], 0);
-    if (address === masterActive) return entry([facilitator], 1);
+    if (address === good) return entry(address, { signers: [facilitator], masterWeight: 0 });
+    if (address === masterActive)
+      return entry(address, { signers: [facilitator], masterWeight: 1 });
     if (address === unreadable) throw new Error("fetch failed");
     throw new Error(`Account not found: ${address}`);
   },

@@ -182,9 +182,9 @@ export function buildSettlement(
 
 /**
  * Every part `main()` serves, built from the config on the given stores: the cataloger, one RPC
- * and one fee configuration shared by `/verify`, `/settle` and the pool. `main()` passes the
- * PostgreSQL stores when `STORE=postgres`; tests pass their own `rpc`, `makeScheme` and pool
- * `sleep`.
+ * and one fee configuration shared by `/verify`, `/settle` and the pool. `main()` passes the RPC
+ * it checked the channels on, and the PostgreSQL stores when `STORE=postgres`; tests pass their
+ * own `rpc`, `makeScheme` and pool `sleep`.
  */
 export function compose(
   config: Config,
@@ -192,7 +192,7 @@ export function compose(
     logger: Logger;
     /** The memory stores when absent. */
     stores?: AppDeps["stores"];
-    rpc?: SorobanRpc;
+    rpc: SorobanRpc;
     makeScheme?: MakeScheme;
     sleep?: (ms: number) => Promise<void>;
   },
@@ -207,7 +207,7 @@ export function compose(
     metrics,
     allowHttp: config.catalog.allowHttp,
   });
-  const rpc = opts.rpc ?? FallbackRpc.fromUrls(config.rpcUrls);
+  const { rpc } = opts;
   // One fee configuration: `/verify` and `/settle` check with it, and the pool pays with it, so
   // they share one ceiling and one bid (AD-10).
   const fees = feeSettings(config.fees, rpc);
