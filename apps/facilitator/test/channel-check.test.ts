@@ -1,4 +1,4 @@
-import { Keypair } from "@stellar/stellar-sdk";
+import { Keypair, StrKey, xdr } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
 import { checkChannels } from "../src/settlement/channel-check.js";
 import { accountEntry, type StubAccount } from "./rpc-stub.js";
@@ -9,16 +9,23 @@ const masterActive = Keypair.random().publicKey();
 const missing = Keypair.random().publicKey();
 const unreadable = Keypair.random().publicKey();
 
-const entry = (address: string, account: StubAccount) =>
-  accountEntry(Keypair.fromPublicKey(address).xdrAccountId(), account);
+const accounts: Record<string, StubAccount> = {
+  [good]: { signers: [facilitator], masterWeight: 0 },
+  [masterActive]: { signers: [facilitator], masterWeight: 1 },
+};
 
+/** Answers a channel's read with its entry, an empty answer, or a failed call. */
 const rpc = {
-  getAccountEntry: async (address: string) => {
-    if (address === good) return entry(address, { signers: [facilitator], masterWeight: 0 });
-    if (address === masterActive)
-      return entry(address, { signers: [facilitator], masterWeight: 1 });
+  getLedgerEntries: async (key: xdr.LedgerKey) => {
+    const accountId = key.account().accountId();
+    const address = StrKey.encodeEd25519PublicKey(accountId.ed25519());
     if (address === unreadable) throw new Error("fetch failed");
-    throw new Error(`Account not found: ${address}`);
+    const account = accounts[address];
+    const val = account && xdr.LedgerEntryData.account(accountEntry(accountId, account));
+    return {
+      latestLedger: 100,
+      entries: val ? [{ key, val, lastModifiedLedgerSeq: 1 }] : [],
+    };
   },
 };
 
