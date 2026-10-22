@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import { describe, expect, it } from "vitest";
-import { normalize, toExtensionResponses, validate } from "../src/index.js";
+import { canonicalizeUrl, normalize, toExtensionResponses, validate } from "../src/index.js";
 
 const req = {
   scheme: "exact",
@@ -98,9 +98,43 @@ describe("packages/bazaar", () => {
     ],
     ["non-object block", pay("https://x.com/a", "x"), "invalid_extension"],
     ["missing url", pay(undefined, { info: http }), "invalid_resource_url"],
-    ["http url", pay("http://x.com/a", { info: http }), "invalid_resource_url"],
-    ["IP host", pay("https://127.0.0.1/a", { info: http }), "invalid_resource_url"],
-    ["localhost", pay("https://foo.localhost/a", { info: http }), "invalid_resource_url"],
+    ...[
+      "javascript:alert(1)",
+      "data:text/html,x",
+      "file:///etc/passwd",
+      "ftp://x.com/a",
+      "ws://x.com/a",
+    ].map((url) => [`scheme of ${url}`, pay(url, { info: http }), "invalid_resource_url"]),
+    [
+      "mcp: url on an http listing",
+      pay("mcp://tool/weather", { info: http }),
+      "invalid_resource_url",
+    ],
+    [
+      "javascript: on an mcp listing",
+      pay("javascript:alert(1)", { info: mcp }),
+      "invalid_resource_url",
+    ],
+    ["userinfo", pay("http://u:p@localhost/a", { info: http }), "invalid_resource_url"],
+    ["data: on an mcp listing", pay("data:text/html,x", { info: mcp }), "invalid_resource_url"],
+    ["file: on an mcp listing", pay("file:///etc/passwd", { info: mcp }), "invalid_resource_url"],
+    ["host ending in a dot", pay("https://x.com./a", { info: http }), "invalid_resource_url"],
+    ["mcp: with a backslash", pay("mcp://tool/a\\b", { info: mcp }), "invalid_resource_url"],
+    [
+      "mcp: with a 64-character label",
+      pay(`mcp://${"a".repeat(64)}/t`, { info: mcp }),
+      "invalid_resource_url",
+    ],
+    ["mimeType null", pay("https://x.com/a", { info: http }, { mimeType: null }), "invalid_info"],
+    ["mimeType 0", pay("https://x.com/a", { info: http }, { mimeType: 0 }), "invalid_info"],
+    ["mcp: without a host", pay("mcp:weather", { info: mcp }), "invalid_resource_url"],
+    ["mcp: with an odd host", pay("mcp://to%20ol/weather", { info: mcp }), "invalid_resource_url"],
+    [
+      "mimeType of one space",
+      pay("https://x.com/a", { info: http }, { mimeType: " " }),
+      "invalid_info",
+    ],
+    ["mimeType json", pay("https://x.com/a", { info: http }, { mimeType: "json" }), "invalid_info"],
     ["x402 v1", pay("https://x.com/a", { info: http }, {}, 1), "unsupported_version"],
     ["x402 v3", pay("https://x.com/a", { info: http }, {}, 3), "unsupported_version"],
     [
@@ -119,17 +153,6 @@ describe("packages/bazaar", () => {
       pay("https://x.com/a", { info: http, schema: deep(100_000) }),
       "too_large",
     ],
-    ...[
-      "ip6-localhost",
-      "localhost.localdomain",
-      "metadata.google.internal",
-      "intranet",
-      "printer.local",
-    ].map((host) => [
-      `private host ${host}`,
-      pay(`https://${host}/a`, { info: http }),
-      "invalid_resource_url",
-    ]),
     [
       "mcp inputSchema external $ref",
       pay("https://x.com/a", {
@@ -221,15 +244,84 @@ describe("packages/bazaar", () => {
   });
 
   it("builds the header without detail", () => {
-    expect(toExtensionResponses(validate(pay("http://x.com/a", { info: http }), req)!)).toEqual({
+    expect(
+      toExtensionResponses(validate(pay("javascript:alert(1)", { info: http }), req)!),
+    ).toEqual({
       bazaar: { status: "rejected", rejectedReason: "invalid_resource_url" },
     });
   });
 
-  it("accepts http only behind the allowHttp option, through normalize too", () => {
-    const r = validate(pay("http://x.com/a", { info: http }), req, { allowHttp: true });
-    if (!r?.ok) throw new Error("expected ok");
-    expect(normalize(r, req).key.resourceUrl).toBe("http://x.com/a");
+  it('catalogs what upstream servers send by default: mimeType "", http, loopback, mcp://', () => {
+    const local = entry(
+      pay("http://localhost:4022/exact/stellar", { info: http }, { description: "", mimeType: "" }),
+    );
+    expect(local.key.resourceUrl).toBe("http://localhost:4022/exact/stellar");
+    expect(local.resource.resource).toBe("http://localhost:4022/exact/stellar");
+    expect(local.resource).not.toHaveProperty("mimeType");
+    expect(local.resource).not.toHaveProperty("description");
+    const tool = entry(
+      pay("mcp://tool/get_weather", { info: mcp }, { mimeType: "application/json" }),
+    );
+    expect(tool.key).toMatchObject({ method: "weather", resourceUrl: "mcp://tool/get_weather" });
+    expect(tool.resource.mimeType).toBe("application/json");
+  });
+
+  it.each([
+    ["http://127.0.0.1:8080/a", "http://127.0.0.1:8080/a"],
+    ["https://[::1]/a", "https://[::1]/a"],
+    ["https://intranet/a?x=1#f", "https://intranet/a"],
+    ["http://printer.local:80/a", "http://printer.local/a"],
+    ["https://metadata.google.internal/a", "https://metadata.google.internal/a"],
+  ])("keeps no host rules on resource URLs: %s", (url, canonical) => {
+    expect(entry(pay(url, { info: http })).key.resourceUrl).toBe(canonical);
+  });
+
+  it.each([
+    ["mcp://TOOL/get_weather", "mcp://tool/get_weather"],
+    ["MCP://tool/get_weather?x=1#f", "mcp://tool/get_weather"],
+    ["mcp://tool/a/../get_%77eather", "mcp://tool/get_weather"],
+    ["mcp://srv.example.com", "mcp://srv.example.com/"],
+    ["mcp://srv.example.com/", "mcp://srv.example.com/"],
+    ["mcp://tool:8080/weather", "mcp://tool:8080/weather"],
+    ["http://localhost:4022/mcp", "http://localhost:4022/mcp"],
+    ["https://x.com/mcp", "https://x.com/mcp"],
+  ])("gives an mcp listing one canonical URL: %s", (url, canonical) => {
+    expect(entry(pay(url, { info: mcp })).key.resourceUrl).toBe(canonical);
+  });
+
+  it("applies the same URL rules on pubnet: no network decides them", () => {
+    const pubnet = { ...req, network: "stellar:pubnet" } as PaymentRequirements;
+    for (const [url, info] of [
+      ["http://localhost:4022/exact/stellar", http],
+      ["mcp://tool/get_weather", mcp],
+    ] as const) {
+      const r = validate(pay(url, { info }, { mimeType: "" }), pubnet);
+      if (!r?.ok) throw new Error(JSON.stringify(r));
+      expect(normalize(r, pubnet).key).toMatchObject({
+        network: "stellar:pubnet",
+        resourceUrl: url,
+      });
+    }
+  });
+
+  it("answers undefined, not a throw, for a type it doesn't know", () => {
+    expect(canonicalizeUrl("https://x.com/a", "a2a" as never)).toBeUndefined();
+    expect(canonicalizeUrl("https://x.com/a", "toString" as never)).toBeUndefined();
+  });
+
+  it("keeps icons https-only with the host rules, since a browser fetches them", () => {
+    for (const iconUrl of [
+      "https://foo.localhost/i.png",
+      "https://intranet/i.png",
+      "https://printer.local/i.png",
+      "https://metadata.google.internal/i.png",
+      "http://x.com/i.png",
+      "https://localhost/i.png",
+      "https://10.0.0.1/i.png",
+    ])
+      expect(
+        entry(pay("https://x.com/a", { info: http }, { iconUrl })).resource,
+      ).not.toHaveProperty("iconUrl");
   });
 
   it("does no I/O, reads no env or clock, and compiles no schema", () => {

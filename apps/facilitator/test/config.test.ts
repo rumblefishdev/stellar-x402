@@ -58,7 +58,6 @@ describe("parseConfig", () => {
         breakerFailures: 5,
         breakerCooldownMs: 600_000,
       },
-      catalog: { allowHttp: false },
     });
   });
 
@@ -130,7 +129,6 @@ describe("parseConfig", () => {
         breakerFailures: 7,
         breakerCooldownMs: 5_000,
       },
-      catalog: { allowHttp: false },
     });
   });
 
@@ -248,8 +246,8 @@ describe("parseConfig", () => {
     ).toMatchObject({ maxFeeStroops: 201n, inclusionFeeStroops: 100n });
   });
 
-  it("allows http catalog URLs on testnet only", () => {
-    expect(parseConfig({ ...minimal, CATALOG_ALLOW_HTTP: "true" }).catalog.allowHttp).toBe(true);
+  it("ignores a leftover CATALOG_ALLOW_HTTP: every network catalogs http now (0053)", () => {
+    expect(parseConfig({ ...minimal, CATALOG_ALLOW_HTTP: "true" })).toEqual(parseConfig(minimal));
     expect(
       problems({
         ...minimal,
@@ -257,7 +255,7 @@ describe("parseConfig", () => {
         RPC_URLS: "https://rpc.example",
         CATALOG_ALLOW_HTTP: "true",
       }),
-    ).toEqual(["CATALOG_ALLOW_HTTP is only allowed on testnet", PUBNET_REFUSED]);
+    ).toEqual([PUBNET_REFUSED]);
   });
 
   it("selects the PostgreSQL store with its URL", () => {

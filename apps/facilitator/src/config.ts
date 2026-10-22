@@ -184,11 +184,6 @@ const envSchema = z
     /** Consecutive on-chain failures that open an asset or `payTo` breaker. */
     BREAKER_FAILURES: int(1).default("5"),
     BREAKER_COOLDOWN_MS: int(1_000).default("600000"),
-
-    /** Development only: also catalog `http:` resource URLs (testnet). */
-    CATALOG_ALLOW_HTTP: oneOf(["true", "false"])
-      .default("false")
-      .transform((value) => value === "true"),
   })
   .refine((env) => env.RPC_URLS !== undefined || env.NETWORK === STELLAR_NETWORKS.testnet, {
     message: "is required outside testnet",
@@ -223,10 +218,6 @@ const envSchema = z
   .refine((env) => (env.SETTLE_TIMEOUT_MS ?? 0) <= env.SETTLE_BUDGET_MS, {
     message: "must be at most SETTLE_BUDGET_MS",
     path: ["SETTLE_TIMEOUT_MS"],
-  })
-  .refine((env) => !env.CATALOG_ALLOW_HTTP || env.NETWORK === STELLAR_NETWORKS.testnet, {
-    message: "is only allowed on testnet",
-    path: ["CATALOG_ALLOW_HTTP"],
   })
   .refine((env) => env.STORE !== "memory" || env.NETWORK === STELLAR_NETWORKS.testnet, {
     message: "must be postgres outside testnet",
@@ -293,7 +284,6 @@ export interface Config {
     breakerFailures: number;
     breakerCooldownMs: number;
   };
-  catalog: { allowHttp: boolean };
 }
 
 /** Names every invalid setting; never echoes a value, so a secret can't leak into logs. */
@@ -377,7 +367,6 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
       breakerFailures: e.BREAKER_FAILURES,
       breakerCooldownMs: e.BREAKER_COOLDOWN_MS,
     },
-    catalog: { allowHttp: e.CATALOG_ALLOW_HTTP },
   };
 }
 

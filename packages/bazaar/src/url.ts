@@ -10,7 +10,7 @@ const PARAM_SEGMENT = /^:[A-Za-z_][A-Za-z0-9_]*$/;
 const PRIVATE_SUFFIXES = ["localhost", "localdomain", "local", "internal", "home.arpa", "invalid"];
 
 /**
- * Hosts we never catalog, on top of upstream's icon host rules: IP literals (WHATWG has already
+ * Icon hosts we refuse, on top of upstream's icon host rules: IP literals (WHATWG has already
  * turned decimal, hex and octal IPv4 forms into dotted quads), single-label names such as
  * `intranet`, trailing-dot names, and private suffixes.
  */
@@ -32,26 +32,42 @@ function normalizePercentEncoding(path: string): string {
   });
 }
 
-/** Options shared by the URL checks. */
-export interface UrlOptions {
-  /**
-   * Development only: also accept `http:` resource URLs. Host rules still apply (no IP literal,
-   * `localhost` or trailing dot), and icons stay https-only. Off by default; the facilitator sets
-   * it from its own config, since this package reads no env.
-   */
-  allowHttp?: boolean;
-}
+/** What a listing is, from `info.input.type`; it decides which resource URL schemes it may use. */
+export type ResourceType = "http" | "mcp";
 
-function parseWebUrl(raw: string, allowHttp = false): URL | undefined {
+/**
+ * Resource URL schemes per listing type. `http:` and loopback hosts are what upstream servers send
+ * by default (e2e suite, local sellers); `mcp:` is `@x402/mcp`'s `mcp://tool/<name>`, a name rather
+ * than an address, so only an `mcp` listing may use it. Host rules are not applied: the
+ * facilitator never fetches a resource URL (ADR 0008), and a client that does checks the address
+ * it resolves (`packages/mcp` guard), which no check on the URL text can match.
+ */
+const RESOURCE_SCHEMES: Record<ResourceType, readonly string[]> = {
+  http: ["https:", "http:"],
+  mcp: ["https:", "http:", "mcp:"],
+};
+
+/**
+ * An `mcp:` host: a DNS-style name of labels up to 63 characters, lowercased first, since WHATWG
+ * keeps the case of opaque hosts.
+ */
+const MCP_HOST =
+  /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/;
+
+function parseUrl(raw: string): URL | undefined {
   if (raw.length > LIMITS.urlChars) return undefined;
-  let url: URL;
   try {
-    url = new URL(raw);
+    return new URL(raw);
   } catch {
     return undefined;
   }
-  const schemeOk = url.protocol === "https:" || (allowHttp && url.protocol === "http:");
-  if (!schemeOk || url.username !== "" || url.password !== "") return undefined;
+}
+
+/** Icons only: https, and upstream's host rules plus ours, since a browser fetches every icon. */
+function parseIconUrl(raw: string): URL | undefined {
+  const url = parseUrl(raw);
+  if (!url || url.protocol !== "https:" || url.username !== "" || url.password !== "")
+    return undefined;
   // Upstream's host rules (loopback names, IP forms), then ours.
   if (!isValidIconUrl(url.href) || isForbiddenHost(url.hostname)) return undefined;
   return url;
@@ -60,25 +76,40 @@ function parseWebUrl(raw: string, allowHttp = false): URL | undefined {
 /**
  * The canonical form of a resource URL, or `undefined` when it can't be cataloged.
  *
- * https only (unless `allowHttp`); no userinfo, IP literal, loopback, private or single-label
- * host; the default port, query and fragment are dropped; dot segments are resolved and percent-encoding normalized. Path case
- * and the trailing slash are kept (RFC 9110: only scheme and host are case-insensitive).
+ * The scheme must be one `type` allows (`RESOURCE_SCHEMES`); no userinfo, no host ending in a
+ * dot (`x.com.` would key apart from `x.com`). The query and fragment are dropped, dot segments
+ * resolved and percent-encoding normalized; path case and the trailing slash are kept (RFC 9110:
+ * only scheme and host are case-insensitive). `http(s)`: the default port is dropped. `mcp`:
+ * `mcp://<host>[:port]<path>` with a lowercased DNS-style host and `/` for an empty path, as
+ * `http(s)` has; WHATWG gives it the `origin` `"null"`, so it is built by hand (0030 gap G11), and
+ * keeps a backslash, which other parsers read as a separator, so one is refused.
  */
-export function canonicalizeUrl(raw: string, options: UrlOptions = {}): string | undefined {
-  const url = parseWebUrl(raw, options.allowHttp);
-  if (!url || url.pathname.includes("//")) return undefined;
-  const canonical = `${url.origin}${normalizePercentEncoding(url.pathname)}`;
+export function canonicalizeUrl(raw: string, type: ResourceType): string | undefined {
+  const url = parseUrl(raw);
+  const schemes = Object.hasOwn(RESOURCE_SCHEMES, type) ? RESOURCE_SCHEMES[type] : undefined;
+  if (!url || !schemes?.includes(url.protocol)) return undefined;
+  if (url.username !== "" || url.password !== "" || url.hostname.endsWith(".")) return undefined;
+  if (url.pathname.includes("//")) return undefined;
+  let canonical: string;
+  if (url.protocol === "mcp:") {
+    const host = url.hostname.toLowerCase();
+    if (!MCP_HOST.test(host) || raw.includes("\\")) return undefined;
+    const port = url.port === "" ? "" : `:${url.port}`;
+    canonical = `mcp://${host}${port}${normalizePercentEncoding(url.pathname || "/")}`;
+  } else {
+    canonical = `${url.origin}${normalizePercentEncoding(url.pathname)}`;
+  }
   return canonical.length > LIMITS.urlChars ? undefined : canonical;
 }
 
 /**
  * Our checks on top of upstream `isValidIconUrl`: https only, no backslash (parser differential),
- * the host rules of resource URLs. Returns the canonical `href` without the fragment, or
- * `undefined` to drop the field.
+ * no IP literal, loopback, private or single-label host. Returns the canonical `href` without the
+ * fragment, or `undefined` to drop the field.
  */
 export function sanitizeIconUrl(raw: string | undefined): string | undefined {
   if (!isValidIconUrl(raw) || raw.includes("\\")) return undefined;
-  const url = parseWebUrl(raw);
+  const url = parseIconUrl(raw);
   if (!url) return undefined;
   url.hash = "";
   // Checked again after parsing: the parser percent-encodes, so the href can outgrow the input.
@@ -136,11 +167,8 @@ export interface CatalogKeyInput {
 }
 
 /** The catalog key, or `undefined` when the input can't be cataloged. */
-export function catalogKey(
-  input: CatalogKeyInput,
-  options: UrlOptions = {},
-): CatalogKey | undefined {
-  const canonical = canonicalizeUrl(input.resourceUrl, options);
+export function catalogKey(input: CatalogKeyInput): CatalogKey | undefined {
+  const canonical = canonicalizeUrl(input.resourceUrl, input.type);
   if (!canonical || !input.network || !input.payTo) return undefined;
   const method = input.type === "mcp" ? input.toolName : input.method;
   if (!method) return undefined;

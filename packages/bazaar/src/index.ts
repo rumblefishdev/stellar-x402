@@ -12,7 +12,7 @@ export {
   sanitizeIconUrl,
   type CatalogKey,
   type CatalogKeyInput,
-  type UrlOptions,
+  type ResourceType,
 } from "./url.js";
 export {
   toExtensionResponses,
