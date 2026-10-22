@@ -2,7 +2,7 @@
 id: "0050"
 title: "Prune old rate-limit windows and spend reservations"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0012"]
 related_tasks: ["0022", "0023", "0024"]
@@ -18,6 +18,10 @@ history:
     status: backlog
     who: akot
     note: "Renumbered from 0042, which develop already uses for the MCP Claude Desktop task (Karol's review)."
+  - date: "2026-10-22"
+    status: active
+    who: akot
+    note: "Work starts."
 ---
 
 # Prune old rate-limit windows and spend reservations
