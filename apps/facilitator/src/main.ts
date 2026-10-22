@@ -22,6 +22,7 @@ import { captureConsoleError, jsonLogger, type Logger } from "./logger.js";
 import { memoryMetrics, type Metrics } from "./metrics.js";
 import type { SettlementStore } from "./ports/index.js";
 import { checkChannels } from "./settlement/channel-check.js";
+import { checkRpcNetworks } from "./settlement/network-check.js";
 import { feeSettings, upstreamAtCurrentBid, type FeeSettings } from "./settlement/fees.js";
 import type { SettlementHooks } from "./settlement/hooks.js";
 import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler, type Settle } from "./settlement/settle.js";
@@ -264,6 +265,9 @@ export async function main(env: Record<string, string | undefined> = process.env
         rateLimits: createPool(url, poolErrorLogger(logger), 3),
       };
     }
+    // Every RPC_URLS entry must serve NETWORK: another network's RPC reads every channel as
+    // missing. Checked first, so a wrong URL is named instead of every channel.
+    await checkRpcNetworks(config.rpcUrls, getNetworkPassphrase(config.network));
     const rpc = FallbackRpc.fromUrls(config.rpcUrls);
     // AD-12: the service starts only when no other key can move a channel. An RPC that doesn't
     // answer fails the check too.

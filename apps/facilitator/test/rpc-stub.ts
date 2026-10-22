@@ -1,7 +1,7 @@
 import { once } from "node:events";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { Keypair, StrKey, xdr } from "@stellar/stellar-sdk";
+import { Keypair, Networks, StrKey, xdr } from "@stellar/stellar-sdk";
 
 /** An account as the stub serves it: its signers (each at weight 1) and its master key weight. */
 export interface StubAccount {
@@ -17,11 +17,12 @@ export const hardened = (facilitator: string): StubAccount => ({
 
 /**
  * A Stellar RPC over HTTP for `main()`, which builds its own RPC from `RPC_URLS`: it answers
- * `getLedgerEntries` for `accounts` (any other account doesn't exist), and every other method
- * with a 503.
+ * `getNetwork` with `passphrase`, `getLedgerEntries` for `accounts` (any other account doesn't
+ * exist), and every other method with a 503.
  */
 export async function rpcStub(
   accounts: Record<string, StubAccount>,
+  passphrase: string = Networks.TESTNET,
 ): Promise<{ url: string; close(): Promise<void> }> {
   const server = createServer((req, res) => {
     let body = "";
@@ -32,6 +33,13 @@ export async function rpcStub(
         method: string;
         params: { keys: string[] };
       };
+      res.setHeader("content-type", "application/json");
+      if (method === "getNetwork") {
+        res.end(
+          JSON.stringify({ jsonrpc: "2.0", id, result: { passphrase, protocolVersion: 23 } }),
+        );
+        return;
+      }
       if (method !== "getLedgerEntries") {
         res.writeHead(503).end();
         return;
@@ -43,7 +51,6 @@ export async function rpcStub(
         const data = xdr.LedgerEntryData.account(accountEntry(accountId, account));
         return [{ key, xdr: data.toXDR("base64"), lastModifiedLedgerSeq: 1 }];
       });
-      res.setHeader("content-type", "application/json");
       res.end(JSON.stringify({ jsonrpc: "2.0", id, result: { entries, latestLedger: 100 } }));
     });
   }).listen(0, "127.0.0.1");
