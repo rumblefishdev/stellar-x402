@@ -56,6 +56,13 @@ so one outage moves `/verify`, `/settle`'s checks and the pool once.
 - 0018 built upstream with `rpcUrls[0]` and answered its `unexpected_verify_error`, and any call
   past a 10 s deadline, with a 500.
 - Upstream also reads Horizon for the ledger close time, with no failover and no timeout.
+- A local gate run on 2026-10-22 (0028 harness, PR #51 build, default single RPC URL) passed 14 of
+  18: from 09:33 to 09:37 UTC `soroban-testnet.stellar.org` gave no answer within 10 s, so
+  `/verify` and the checks inside `/settle` answered 500 three times. With one URL, failover has
+  nowhere to go, so `deploy/testnet.env.example` lists more than one provider (decided
+  2026-10-22). Public testnet RPCs on the Stellar providers page
+  (developers.stellar.org/docs/data/apis/rpc/providers): SDF and Gateway answered
+  `getLatestLedger` that day; Nodies' listed URL answered 404 on `/`.
 - The review history (two rounds, C1–C6 and the second's points) is in
   [notes/S-pr45-reviews.md](notes/S-pr45-reviews.md).
 
@@ -65,6 +72,8 @@ so one outage moves `/verify`, `/settle`'s checks and the pool once.
       answers from the second URL, not with a 500 (also with the real upstream:
       `fee-agreement.test.ts`)
 - [x] The choice is recorded in spine AD-3
+- [x] Given `deploy/testnet.env.example`, when it is read, then `RPC_URLS` names at least two
+      public testnet providers (SDF, then Gateway, as in decision 25)
 
 ## Implementation Notes
 
