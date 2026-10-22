@@ -122,6 +122,6 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
 ## Acceptance Criteria
 
 - [ ] Given the running facilitator, when it serves traffic, then pool `onEvent` events, per-route request counts and settle outcomes are exported as metrics
-- [ ] Given each alert condition: budget nearly used, breaker open, low facilitator balance (`checkFacilitatorBalance`), quarantined channel, pending settlements, when it occurs, then an alert fires on the backend chosen in 0014; each alert has been triggered once on testnet or with a fake
+- [ ] Given each alert condition: budget nearly used, breaker open, low facilitator balance (`checkFacilitatorBalance`), quarantined channel, pending settlements, when it occurs, then an alert fires on CloudWatch (ADR 0011); each alert has been triggered once on testnet or with a fake
 - [ ] Given a process that stays not ready to settle (no lease, or reconciliation unfinished) longer than the alarm window, when the alarm evaluates, then it fires (ADR 0011)
 - [ ] Given `docs/monitoring.md`, when this story is done, then it lists every metric and alert

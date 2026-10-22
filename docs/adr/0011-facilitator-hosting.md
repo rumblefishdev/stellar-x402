@@ -197,10 +197,10 @@ One request or one stop must never outlast the layer in front of it:
     fixes its network: `command="/srv/x402/testnet/deploy.sh",restrict` for the testnet key,
     `/srv/x402/mainnet/deploy.sh` for the mainnet key. The script reads only an image digest from
     `SSH_ORIGINAL_COMMAND` and refuses anything but `sha256:` and 64 hex digits.
-  - The deploy user isn't in the `docker` group. It may write only its network's `digest.next`
+  - The deploy user isn't in the `docker` group. It may write the networks' `digest.next` files
     and run one command through `sudo`, `systemctl start x402-deploy@<network>`. Both networks
-    share the user, so the forced command picks the network; a user per network is a mainnet
-    option (0038).
+    share the user, so it can write either network's file: the forced command is what keeps each
+    key to its network. A user per network is a mainnet option (0038).
   - **The deploy itself is a unit, `x402-deploy@<network>.service`** (a oneshot, as root), so a
     cancelled job or a dropped runner can't cut it between stopping the old facilitator and
     starting the new one. `deploy.sh` only checks the digest, writes `digest.next` and starts the
