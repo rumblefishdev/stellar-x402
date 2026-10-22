@@ -1,5 +1,5 @@
 import { Keypair, StrKey, nativeToScVal, xdr, type rpc } from "@stellar/stellar-sdk";
-import type { SorobanRpc } from "@stellar-x402/signer-pool";
+import type { SorobanRpc, SubmitterEvent } from "@stellar-x402/signer-pool";
 import { FakeRpc } from "@stellar-x402/signer-pool/testing";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import { describe, expect, it, vi } from "vitest";
@@ -17,6 +17,7 @@ import { memoryMetrics } from "../src/metrics.js";
 import { feeSettings } from "../src/settlement/fees.js";
 import { SETTLE_REASONS } from "../src/settlement/settle.js";
 import { transferPayload } from "./payment.js";
+import { settlement } from "./port-contracts.js";
 
 /**
  * `main()`'s `/settle` wiring with the real pool on `FakeRpc`: `/settle`'s checks, the pool's fee
@@ -121,21 +122,26 @@ function setup(
     upstreamLogger,
     seams ?? { makeScheme: () => ({ verify: async () => ({ isValid: true, payer }) }) },
   );
-  const { settle } = buildSettlement(config, {
+  const store = new MemorySettlementStore();
+  const lines: string[] = [];
+  const { settle, submitter } = buildSettlement(config, {
     rpc: shared,
     fees,
     checks,
-    store: new MemorySettlementStore(),
+    store,
     hooks: {
       beforeSubmit: async () => ({ allow: true }),
       onFinal: async () => {},
       onSuccess: async () => {},
     },
-    logger: jsonLogger("error", () => {}),
+    logger: jsonLogger("warn", (line) => lines.push(line)),
     metrics: memoryMetrics(),
     sleep: async () => {},
   });
-  return { settle, fake, upstreamLogger };
+  /** The pool's `onEvent`, as it reports a submission it answered `pending` ending. */
+  const emit = (event: SubmitterEvent) =>
+    (submitter as unknown as { emit(event: SubmitterEvent): void }).emit(event);
+  return { settle, fake, upstreamLogger, store, lines, emit };
 }
 
 describe("main()'s /settle wiring, with a hung RPC_URLS[0]", () => {
@@ -297,5 +303,48 @@ describe("main()'s composition (compose)", () => {
     expect((await deps.settle(p, requirements)).response).toMatchObject({ success: true });
     // One provider, read again only after 30 s: a second fee configuration would read it again.
     expect(fake.calls.getFeeStats).toBe(1);
+  });
+});
+
+describe("main()'s pool events (0019)", () => {
+  const HASH = "c".repeat(64);
+  const resolvedSuccess: SubmitterEvent = {
+    type: "resolved",
+    result: {
+      status: "success",
+      hash: HASH,
+      channel,
+      ledger: 101,
+      feeCharged: 41_000n,
+      attempts: [{ hash: HASH, sent: "yes" }],
+    },
+  };
+
+  async function pendingRecord(store: MemorySettlementStore) {
+    const s = settlement("1");
+    await store.claim(s);
+    await store.addHash(s.key, HASH, 0, { maxTime: 1 });
+    await store.transition(s.key, "signed", { state: "pending", updatedAt: 0 });
+    return s.key;
+  }
+
+  it("finishes a pending record when the pool resolves its submission", async () => {
+    const { store, emit } = setup();
+    const key = await pendingRecord(store);
+    emit(resolvedSuccess);
+    await vi.waitFor(async () => expect((await store.get(key))?.state).toBe("success"));
+    expect(await store.get(key)).toMatchObject({ ledger: 101, channel });
+    expect((await store.attempts(key))[0]?.state).toBe("landed");
+  });
+
+  it("logs a store that fails to finish it, for the next sweep", async () => {
+    const { store, lines, emit } = setup();
+    const key = await pendingRecord(store);
+    vi.spyOn(store, "transition").mockRejectedValue(new Error("store down"));
+    emit(resolvedSuccess);
+    await vi.waitFor(() =>
+      expect(lines.some((line) => line.includes('"settlement_resolve_failed"'))).toBe(true),
+    );
+    expect((await store.get(key))?.state).toBe("pending");
   });
 });

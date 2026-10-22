@@ -404,11 +404,16 @@ export function createSettler(deps: SettlerDeps): Settle {
             if (call.budgetOver) throw new Error("the settle budget ran out");
           },
           // A hint for debugging, never awaited: the send has happened, so a failed write changes
-          // nothing (0019 decision 7).
+          // nothing (0019 decision 7). Not a record failure: no outage alarm, no sweep.
           onSent: (hash) =>
-            void store
-              .markAttempts(key, [{ hash, state: "sent" }], now())
-              .catch((error: unknown) => recordFailed(key, error)),
+            void store.markAttempts(key, [{ hash, state: "sent" }], now()).catch((error: unknown) =>
+              logger.warn("settlement_attempt_mark_failed", {
+                network,
+                settlementKey: key,
+                transaction: hash,
+                error,
+              }),
+            ),
           deadline,
           maxLedger: verified.expirationLedger,
         });
