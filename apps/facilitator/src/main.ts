@@ -17,6 +17,7 @@ import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
 import { parseConfig, parseMigrateConfig } from "./config.js";
 import type { Config } from "./config.js";
 import { createApp, type AppDeps } from "./http/app.js";
+import { supportedResponse } from "./http/supported.js";
 import { captureConsoleError, jsonLogger, type Logger } from "./logger.js";
 import { memoryMetrics, type Metrics } from "./metrics.js";
 import type { SettlementStore } from "./ports/index.js";
@@ -233,6 +234,7 @@ export function compose(
       verify: createVerifier(checks),
       settle,
       extensionResponses: cataloger.extensionResponses,
+      supported: supportedResponse(config.network, checks.facilitator),
     },
     cataloger,
     metrics,

@@ -3,6 +3,7 @@ import type { PaymentRequirements } from "@x402/core/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { memoryStores } from "../src/adapters/memory.js";
 import { parseConfig } from "../src/config.js";
+import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
 import { MAX_BODY_DEPTH } from "../src/http/app.js";
 import { start, type Started } from "../src/main.js";
@@ -56,6 +57,7 @@ describe("POST /settle", () => {
       verify: async () => ({ isValid: true }),
       settle,
       extensionResponses,
+      supported: supportedResponse(config.network, Keypair.random().publicKey()),
     });
     url = `http://127.0.0.1:${app.port}/settle`;
   });
