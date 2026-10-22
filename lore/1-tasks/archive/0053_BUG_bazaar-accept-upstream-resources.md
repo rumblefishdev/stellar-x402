@@ -2,7 +2,7 @@
 id: "0053"
 title: "Catalog what upstream x402 servers send: empty mimeType, http, loopback and mcp URLs"
 type: BUG
-status: active
+status: completed
 related_adr: ["0008"]
 related_tasks: ["0030", "0032", "0028"]
 tags: [bazaar, discovery, priority-medium, effort-small]
@@ -18,6 +18,13 @@ history:
     status: active
     who: akot
     note: "Work starts."
+  - date: "2026-10-22"
+    status: completed
+    who: akot
+    note: >
+      PR #55 merged; all five acceptance criteria met. Oskar's review fixed in the PR (mcp path
+      backslash, mcp host wording, four test gaps, catalogKey dropped). Spawned 0054 (pubnet
+      resource hosts) from Future Work, linked from 0023.
 ---
 
 # Catalog what upstream x402 servers send: empty mimeType, http, loopback and mcp URLs
@@ -163,7 +170,7 @@ catalog, so that the catalog takes what upstream servers actually send.
 
 - Before mainnet: decide whether pubnet refuses loopback, private and IP resource URLs as a
   listing-quality rule (the network is in `paymentRequirements`, so no config is needed). Not
-  taken now because pubnet is refused until 0023, 0024 and 0025. Spawned as a backlog task when
-  0053 closes and linked from a pubnet blocker (0053 review).
+  taken now because pubnet is refused until 0023, 0024 and 0025. Spawned as 0054, linked from
+  0023.
 - The suite's whole Bazaar check, once `/discovery/search` exists (Tranche 2); then the gate can
   run with `--extensions=bazaar` (0028).
