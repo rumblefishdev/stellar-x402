@@ -5,6 +5,7 @@ import { memoryStores } from "../src/adapters/memory.js";
 import { MAX_BODY_DEPTH } from "../src/http/app.js";
 import { parseConfig } from "../src/config.js";
 import { jsonLogger } from "../src/logger.js";
+import { memoryMetrics } from "../src/metrics.js";
 import { start, type Started } from "../src/main.js";
 import type { Verify } from "../src/settlement/verify.js";
 import { bazaarExtensions, depthOf } from "./payment.js";
@@ -42,6 +43,7 @@ describe("POST /verify", () => {
     app = await start({
       config,
       logger,
+      metrics: memoryMetrics(),
       stores: memoryStores(),
       verify,
       settle: async () => {

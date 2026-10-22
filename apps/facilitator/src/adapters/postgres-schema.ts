@@ -104,6 +104,12 @@ CREATE TABLE spend_scopes (
     name: "0002_success_answered",
     sql: "ALTER TABLE settlements ADD COLUMN success_answered_at bigint;",
   },
+  {
+    // 0032: answers a listing's type filter, matched or not, without scanning the catalog. IF NOT
+    // EXISTS for a database built from 0032's branch, whose 0001_init carried it.
+    name: "0003_catalog_type_seq",
+    sql: "CREATE INDEX IF NOT EXISTS catalog_type_seq ON catalog (type, seq);",
+  },
 ];
 
 /** Serializes concurrent `migrate` runs, e.g. two tasks of one deploy; held until commit. */

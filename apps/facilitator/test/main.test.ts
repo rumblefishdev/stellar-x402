@@ -17,6 +17,7 @@ import { memoryStores } from "../src/adapters/memory.js";
 import { ConfigError, parseConfig } from "../src/config.js";
 import { jsonLogger, rpcEndpointName } from "../src/logger.js";
 import { main, start, type Started } from "../src/main.js";
+import { memoryMetrics } from "../src/metrics.js";
 
 const secret = Keypair.random().secret();
 const env = {
@@ -41,6 +42,7 @@ describe("facilitator boot", () => {
     app = await start({
       config,
       logger,
+      metrics: memoryMetrics(),
       stores: memoryStores(),
       verify,
       settle,
@@ -51,10 +53,7 @@ describe("facilitator boot", () => {
   afterAll(() => app.close());
 
   it("answers the stub routes, with no CORS headers", async () => {
-    const routes = [
-      ["GET", "/supported"],
-      ["GET", "/discovery/resources"],
-    ] as const;
+    const routes = [["GET", "/supported"]] as const;
     for (const [method, path] of routes) {
       const response = await fetch(`${url}${path}`, {
         method,

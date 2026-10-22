@@ -229,6 +229,7 @@ export function compose(
     deps: {
       config,
       logger,
+      metrics,
       stores,
       verify: createVerifier(checks),
       settle,
@@ -247,16 +248,18 @@ export async function main(env: Record<string, string | undefined> = process.env
   const config = parseConfig(env);
   const logger = jsonLogger(config.logLevel, undefined, config.rpcUrls);
   // STORE=postgres needs a migrated schema (`pnpm migrate`); the service never migrates it.
-  let pools: { main: pg.Pool; reserve: pg.Pool; rateLimits: pg.Pool } | undefined;
+  let pools:
+    { main: pg.Pool; reserve: pg.Pool; rateLimits: pg.Pool; discovery: pg.Pool } | undefined;
   if (config.store === "postgres") {
     const url = config.databaseUrl;
     if (url === undefined) throw new Error("STORE=postgres needs a DATABASE_URL");
-    // Reservations queue on the global scope's lock, and a flood's hits on its key's row lock;
-    // their own pools keep those queues off the others.
+    // Reservations queue on the global scope's lock, a flood's hits on its key's row lock, and a
+    // burst of public listings on the pool itself; their own pools keep those off the others.
     pools = {
       main: createPool(url, poolErrorLogger(logger)),
       reserve: createPool(url, poolErrorLogger(logger), 3),
       rateLimits: createPool(url, poolErrorLogger(logger), 3),
+      discovery: createPool(url, poolErrorLogger(logger), 3),
     };
   }
   const endPools = () => Promise.all(Object.values(pools ?? {}).map((p) => p.end()));
