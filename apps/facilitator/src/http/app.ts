@@ -143,7 +143,7 @@ export function createApp({
   // Like `/verify`: any settle outcome is a 200 with an x402 body (AD-6). A thrown error, such as
   // upstream verify failing or the store down before the claim, is a 500.
   app.post("/settle", limit("settle", config.http.rateLimit.settle), json, async (req, res) => {
-    // Until the startup sweep has checked every open record on chain (0019 decision 4): a repeat
+    // Until the startup sweep has tried every open record on chain (0019 decisions 4, 21): a repeat
     // would answer from a record that may already have landed or expired.
     if (reconciliation && !reconciliation.ready()) {
       res.setHeader("Retry-After", "5");

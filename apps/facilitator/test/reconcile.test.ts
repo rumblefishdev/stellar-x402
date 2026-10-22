@@ -79,11 +79,14 @@ const landed = (status: "SUCCESS" | "FAILED", ledger = 4_000) =>
     resultXdr: { feeCharged: () => ({ toBigInt: () => 41_000n }) },
   }) as unknown as rpc.Api.GetTransactionResponse;
 
-const missing = (latestLedger: number, latestLedgerCloseTime = 0) =>
+/** `NOT_FOUND`; by default the RPC's history reaches back before every record. */
+const missing = (latestLedger: number, latestLedgerCloseTime = 0, oldestLedgerCloseTime = 0) =>
   ({
     status: rpc.Api.GetTransactionStatus.NOT_FOUND,
     latestLedger,
     latestLedgerCloseTime,
+    oldestLedger: 1,
+    oldestLedgerCloseTime,
   }) as unknown as rpc.Api.GetTransactionResponse;
 
 function setup(answers: Record<string, rpc.Api.GetTransactionResponse | Error> = {}) {
@@ -224,11 +227,12 @@ describe("createReconciler", () => {
 
     it("keeps a hash the network doesn't know open until its ledger bound passes (decision 1)", async () => {
       const answers = { [A]: missing(4_009) };
-      const { store, reconciler } = setup(answers);
+      const { store, reconciler, advance } = setup(answers);
       const key = await signed(store, [A]);
       expect(await reconciler.sweep("startup")).toMatchObject({ open: 1 });
       expect((await store.get(key))?.state).toBe("signed");
       answers[A] = missing(4_010);
+      advance(BUDGET_MS + 5_001);
       expect(await reconciler.sweep("live")).toMatchObject({ expired: 1 });
       expect(await store.get(key)).toMatchObject({
         state: "expired",
@@ -253,8 +257,36 @@ describe("createReconciler", () => {
       expect((await store.get(key))?.state).toBe("signed");
       expect((await store.attempts(key)).map((a) => a.state)).toEqual(["dead", "stored"]);
       answers[B] = missing(4_020);
-      await reconciler.sweep("live");
+      await reconciler.sweep("startup");
       expect((await store.get(key))?.state).toBe("expired");
+    });
+
+    it("keeps a record open while the RPC's history doesn't reach back to it, and reports it once (decision 22)", async () => {
+      // The oldest ledger the RPC keeps closed after the claim: a landed hash would be NOT_FOUND too.
+      const answers = { [A]: missing(4_010, 0, NOW / 1000 + 1) };
+      const { store, reconciler, lines, metrics } = setup(answers);
+      const key = await signed(store, [A]);
+      expect(await reconciler.sweep("startup")).toMatchObject({ open: 1, expired: 0 });
+      await reconciler.sweep("startup");
+      expect((await store.get(key))?.state).toBe("signed");
+      expect((await store.attempts(key))[0]?.state).toBe("stored");
+      expect(lines.filter((line) => line.includes('"settlement_history_gone"'))).toHaveLength(1);
+      expect(metrics.value("settlement_history_gone_total")).toBe(1);
+      // History from the claim on: NOT_FOUND past the bound now means it never landed.
+      answers[A] = missing(4_010, 0, NOW / 1000);
+      expect(await reconciler.sweep("startup")).toMatchObject({ expired: 1 });
+    });
+
+    it("doesn't expire a record in a live sweep while its call may still store a hash (decision 23)", async () => {
+      const { store, reconciler, advance } = setup({ [A]: missing(4_010) });
+      const key = await signed(store, [A]);
+      advance(BUDGET_MS + 5_000);
+      expect(await reconciler.sweep("live")).toMatchObject({ open: 1 });
+      expect((await store.get(key))?.state).toBe("signed");
+      // The dead hash is written anyway.
+      expect((await store.attempts(key))[0]?.state).toBe("dead");
+      advance(1);
+      expect(await reconciler.sweep("live")).toMatchObject({ expired: 1 });
     });
 
     it("finishes by the hash that landed, also when another died (decision 5)", async () => {
@@ -291,15 +323,40 @@ describe("createReconciler", () => {
       expect(lines.some((line) => line.includes('"settlement_reconcile_failed"'))).toBe(true);
     });
 
-    it("runs one sweep at a time", async () => {
+    it("runs one sweep at a time: calls during one share the next, which starts after it", async () => {
       const { store, reconciler, getTransaction } = setup();
       await signed(store, [A]);
-      const [first, second] = await Promise.all([
+      let inFlight = 0;
+      let most = 0;
+      getTransaction.mockImplementation(async () => {
+        most = Math.max(most, ++inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        inFlight--;
+        return missing(1);
+      });
+      const [first, second, third] = await Promise.all([
         reconciler.sweep("startup"),
         reconciler.sweep("live"),
+        reconciler.sweep("live"),
       ]);
-      expect(first).toBe(second);
-      expect(getTransaction).toHaveBeenCalledTimes(1);
+      expect(first).not.toBe(second);
+      expect(second).toBe(third);
+      expect(getTransaction).toHaveBeenCalledTimes(2);
+      expect(most).toBe(1);
+    });
+
+    it("runs onSuccess when the answered mark fails, and counts the record as an error", async () => {
+      const { store, hooks, reconciler, records } = setup({ [A]: landed("SUCCESS") });
+      const key = await signed(store, [A]);
+      records.answeredHere.add(key);
+      records.unmarked.add(key);
+      vi.spyOn(store, "markSuccessAnswered").mockRejectedValueOnce(new Error("store down"));
+      expect(await reconciler.sweep("live")).toMatchObject({ errors: 1 });
+      expect((await store.get(key))?.state).toBe("success");
+      expect(hooks.onSuccess).toHaveBeenCalledWith(expect.objectContaining({ key }), "resolved");
+      // The next sweep marks it.
+      await reconciler.sweep("live");
+      expect((await store.get(key))?.successAnsweredAt).toBe(NOW);
     });
   });
 
@@ -432,6 +489,45 @@ describe("scheduleReconciliation (decisions 4, 8)", () => {
     schedule.close();
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(sweep).toHaveBeenCalledTimes(3);
+  });
+
+  it("stops retrying a record the RPC keeps failing after 5 sweeps; the 5-minute sweep tries again (decision 24)", async () => {
+    vi.useFakeTimers();
+    const t = setup({ [A]: new Error("rpc down") });
+    await signed(t.store, [A]);
+    const lines: string[] = [];
+    const schedule = scheduleReconciliation({
+      reconciler: t.reconciler,
+      records: t.records,
+      logger: jsonLogger("warn", (line) => lines.push(line)),
+      network,
+    });
+    schedule.start();
+    // The startup sweep, then 5 tries: 1 + 2 + 4 + 8 s of backoff between them.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(t.getTransaction).toHaveBeenCalledTimes(6);
+    expect(lines.filter((line) => line.includes('"reconcile_gave_up"'))).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(4 * 60_000);
+    expect(t.getTransaction).toHaveBeenCalledTimes(7);
+    schedule.close();
+  });
+
+  it("starts nothing once closed during the startup sweep", async () => {
+    vi.useFakeTimers();
+    const { store, schedule, sweep } = scheduled();
+    const list = store.listNonFinal.bind(store);
+    let release!: () => void;
+    store.listNonFinal = async (n) => {
+      await new Promise<void>((resolve) => (release = resolve));
+      return list(n);
+    };
+    schedule.start();
+    await vi.advanceTimersByTimeAsync(0);
+    schedule.close();
+    release();
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(schedule.ready()).toBe(false);
+    expect(sweep).toHaveBeenCalledTimes(1);
   });
 
   it("ignores store failures before it serves: the startup sweep retries on its own", async () => {
