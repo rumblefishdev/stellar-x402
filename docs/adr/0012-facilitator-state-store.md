@@ -52,7 +52,7 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
   - No TLS: the connection stays on one host's internal Docker network (ADR 0011). Passwords use
     `scram-sha-256`. TLS comes back if the database leaves the host.
   - The database password is an encrypted systemd credential, mounted as a Compose `file:`
-    secret; the app reads its URL from a file (`DATABASE_URL_FILE`, 0020), never from
+    secret; the app reads its URL from a file (`DATABASE_URL_FILE`, 0026), never from
     `environment:`.
   - `STORE=memory|postgres` picks the adapters in the composition root.
 - **Schema.**

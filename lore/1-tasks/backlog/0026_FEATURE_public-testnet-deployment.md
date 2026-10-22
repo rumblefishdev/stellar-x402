@@ -31,6 +31,10 @@ history:
     status: backlog
     who: stkrolikiewicz
     note: "Units per network for deploys, Postgres and rollback, secrets in tmpfs, backups from the host, deploy/testnet, from Oskar's and Adam's PR #24 reviews."
+  - date: "2026-10-22"
+    status: backlog
+    who: stkrolikiewicz
+    note: "Reading secrets from files (`*_FILE`) moved here from 0020, which was nearly done when #24 was rebased."
 ---
 
 # Public testnet deployment
@@ -118,7 +122,9 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     off the ClickHouse site's allowlist. Ask that project to tell us when it rotates its CA;
   - the database password and any keyed RPC URL are encrypted systemd credentials
     (`systemd-creds`), decrypted by `x402@testnet.service` to `/run/x402/testnet/` and mounted as
-    Compose `file:` secrets, never `environment:`; the app reads them as files (0020);
+    Compose `file:` secrets, never `environment:`;
+  - the config reads `DATABASE_URL_FILE`, `RPC_URLS_FILE` and the OpenBao AppRole files when
+    they are set, and the plain variables otherwise, for local runs;
   - no TLS to `postgres-testnet` on the internal network; `scram-sha-256` passwords.
 - From 0039: backups of `postgres-testnet` leave from the host. Postgres archives WAL to a local
   volume (`archive_timeout` 60 s); a timer takes a daily `pg_basebackup` and sends the archive
@@ -245,5 +251,6 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 - [ ] Given the Hetzner server and Docker Compose of ADR 0011 (revised in 0039), when a deploy runs, then a container image built from the repo is deployed to it as the ADR describes, and the service answers `/supported` at a public HTTPS URL
 - [ ] Given a running instance, when a new version is deployed, then the old process stops before the new one starts; the process is long-lived and never scaled to zero
 - [ ] Given the facilitator key, when the service is deployed, then it signs through the testnet OpenBao Transit key, and the raw key never reaches the facilitator's process, the image or the logs (ADR 0013)
+- [ ] Given `DATABASE_URL_FILE` or `RPC_URLS_FILE`, when the service starts, then it reads the value from that file, and with neither set it falls back to `DATABASE_URL` and `RPC_URLS`
 - [ ] Given the durable stores from 0022, when the service runs, then it uses them, and `docs/runbook.md` has the deploy and rollback steps
 - [ ] Given the deployed facilitator, when it settles, then it signs through OpenBao Transit over the unix socket, no secret seed is on the server outside OpenBao, the backup secret exists in AWS, and a restore drill from it has passed

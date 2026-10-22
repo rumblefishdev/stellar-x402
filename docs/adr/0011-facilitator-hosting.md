@@ -291,7 +291,7 @@ One request or one stop must never outlast the layer in front of it:
   - They stay there until a reboot, so Docker's crash restart and the watchdog still find them.
     At boot the unit writes them again before it starts anything.
   - The app reads them from files (`DATABASE_URL_FILE`, `RPC_URLS_FILE` and the AppRole files),
-    a config change in 0020.
+    a config change in 0026.
   - They never go into the image, the repo or the logs, and never into `environment:`, which
     `docker inspect` shows in plain text.
 - **Rotating the key is an on-chain change.** AD-12 makes the facilitator key the only signer of
@@ -476,8 +476,8 @@ One request or one stop must never outlast the layer in front of it:
   - the backups (WAL archive, base backups, encrypted Borg), the Caddy site block (a pull request
     to the ClickHouse project's repo) and the DNS record;
   - `GET /health` with `ready`, the Node keep-alive setting, and the migration bounds;
+  - the config reading secrets from files (`*_FILE`), since nothing reads them today;
   - the runbook: deploy, rollback, key rotation, certificate renewal, restore on another machine.
-- **0020 reads secrets from files** (`*_FILE`), since nothing reads `/run/secrets/*` today.
 - **0027 builds:** log shipping through the CloudWatch agent, the EMF adapter, the alarms above,
   the us-east-1 uptime stack and the Slack integration.
 - **0009 gives `/settle` its response budget;** 0023 implements `TRUSTED_PROXY_HOPS` as above.
