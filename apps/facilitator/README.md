@@ -25,14 +25,14 @@ Each client has a budget per route and window. Past it the route answers 429
 `{"error":"too_many_requests"}` with `Retry-After` in seconds; the other routes still answer.
 Every request counts, a malformed or oversized one too. `/supported` has no limit.
 
-| Setting                | Default | Meaning                                                        |
-| ---------------------- | ------- | -------------------------------------------------------------- |
-| `RATE_LIMIT_WINDOW_MS` | 60 000  | the window, fixed: a client's count starts again after it      |
-| `RATE_LIMIT_VERIFY`    | 600     | `/verify` requests per window and client                       |
-| `RATE_LIMIT_SETTLE`    | 600     | `/settle` requests per window and client; at least `/verify`'s |
-| `RATE_LIMIT_DISCOVERY` | 120     | `/discovery/*` requests per window and client                  |
-| `BODY_LIMIT_BYTES`     | 65 536  | a larger request body is a 413                                 |
-| `CLIENT_IP_HEADER`     | unset   | the header with the client's IP; unset, the socket address     |
+| Setting                | Default | Meaning                                                               |
+| ---------------------- | ------- | --------------------------------------------------------------------- |
+| `RATE_LIMIT_WINDOW_MS` | 60 000  | the window, aligned to the clock: every count starts again at its end |
+| `RATE_LIMIT_VERIFY`    | 600     | `/verify` requests per window and client                              |
+| `RATE_LIMIT_SETTLE`    | 600     | `/settle` requests per window and client; at least `/verify`'s        |
+| `RATE_LIMIT_DISCOVERY` | 120     | `/discovery/*` requests per window and client                         |
+| `BODY_LIMIT_BYTES`     | 65 536  | a larger request body is a 413                                        |
+| `CLIENT_IP_HEADER`     | unset   | the header with the client's IP; unset, the socket address            |
 
 - **A client is its IP**, an IPv6 one its /56. The seller's server calls `/verify` and `/settle`
   for all of its buyers, so a budget is a budget per seller: a seller above about 10 paid requests
@@ -44,6 +44,8 @@ Every request counts, a malformed or oversized one too. `/supported` has no limi
   address in it. A request without the configured header is a 500 and an error log line, since
   only the proxy should reach the service. `TRUSTED_PROXY_HOPS` is refused: this setting replaced
   it.
+- **Windows are aligned to the clock**, so a client can send up to twice its budget across a
+  window's end, and every blocked client is released at the same moment.
 - **The counters live in the store** (`rate_limits` with `STORE=postgres`). A store error is a 500,
   logged. A client over its budget is answered from the process until its window ends, without a
   store write.
