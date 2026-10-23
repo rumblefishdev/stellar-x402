@@ -191,3 +191,5 @@ From the rest of round three (Stan, 2026-10-23):
 39. **The uptime alarm sits above the worst successful deploy;** a failed one should alarm.
 40. **The database volume isn't encrypted at rest, and nothing relies on it:** the data is mostly
     public on chain, the secrets are encrypted on their own, and LUKS would be an extra layer.
+41. **The Hetzner Cloud VM is rejected for mainnet too** (Stan, 2026-10-23), so 0038 no longer
+    asks it; ADR 0011's Alternatives say why the shared server is kept.

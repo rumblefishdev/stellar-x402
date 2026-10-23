@@ -13,7 +13,8 @@
   promoted by a recorded digest, and the Hetzner Cloud VM weighed on its coupling (third round);
   the facilitator is reached through Cloudflare Tunnel on `sorobanscan.com` instead of the
   server's Caddy. 2026-10-23: the third round's last threads (units restart with Docker, the
-  deploy lock, `digest.good`, the units' timeouts, secret file owners, encryption at rest).
+  deploy lock, `digest.good`, the units' timeouts, secret file owners, encryption at rest), and
+  the Hetzner Cloud VM rejected for mainnet too.
 
 ## Context
 
@@ -495,9 +496,9 @@ One request or one stop must never outlast the layer in front of it:
   - What it costs: about €12–20 a month on testnet (CPX12 to CPX22 after Hetzner's 2026 price
     rises, from task 0047's `notes/R-openbao-on-hetzner.md`), more with mainnet, and the VM's
     system, Docker and proxy are ours to run.
-  - Not chosen for testnet: the shared server has the room, limits contain the contention, and
-    the coupling above is accepted knowingly. It is the first step if isolation becomes a
-    concern, and an explicit mainnet question (0038).
+  - Not chosen, for testnet or mainnet (decided 2026-10-23): the shared server has the room,
+    limits contain the contention, and the coupling above is accepted knowingly. It stays the
+    first step if isolation becomes a concern.
 
 - **Fly.io, Render, Railway, Google Cloud Run, AWS App Runner, ECS Express Mode, Lightsail, EKS,
   Lambda.** Compared in task 0014: they overlap deploys, cap the drain too low, cost more, or run
