@@ -12,7 +12,49 @@ discovery routes. Design: [the M1 spine](../../docs/architecture/m1-spine.md) (A
 - `SETTLE_TIMEOUT_MS` (20 s, or the budget when that is shorter; at least 1 s, at most the
   budget): how long a repeat of a sent payment waits for it to turn final.
 - `NETWORK=stellar:pubnet` refuses to start, whatever the store: `/settle` would spend there
-  with no spend budgets (0024), no rate limits (0023) and no channel lease (0025) yet.
+  with no spend budgets (0024) and no channel lease (0025) yet, and the store's tables would
+  grow without bound until pruning (0050) lands.
+
+## Callers and rate limits
+
+Every route is open: no caller authenticates, and there are no API keys (task 0060). `/verify`
+and `/settle` send no CORS headers, so a browser page can't call them; a seller's server calls
+them for its buyers.
+
+Each client has a budget per route and window. Past it the route answers 429
+`{"error":"too_many_requests"}` with `Retry-After` in seconds; the other routes still answer.
+Every request counts, a malformed or oversized one too. `/supported` has no limit.
+
+| Setting                | Default  | Meaning                                                                       |
+| ---------------------- | -------- | ----------------------------------------------------------------------------- |
+| `RATE_LIMIT_WINDOW_MS` | 60 000   | the window, aligned to the clock: every count starts again at its end         |
+| `RATE_LIMIT_VERIFY`    | 600      | `/verify` requests per window and client                                      |
+| `RATE_LIMIT_SETTLE`    | 600      | `/settle` requests per window and client; at least `/verify`'s                |
+| `RATE_LIMIT_DISCOVERY` | 120      | `/discovery/*` requests per window and client                                 |
+| `BODY_LIMIT_BYTES`     | 65 536   | a larger request body is a 413                                                |
+| `CLIENT_IP_HEADER`     | required | the header with the client's IP, or `socket` for the connection's own address |
+
+- **A client is its IP**, an IPv6 one its /56. The seller's server calls `/verify` and `/settle`
+  for all of its buyers, so a budget is a budget per seller: a seller above about 10 paid requests
+  a second needs higher values. `/settle`'s budget is never below `/verify`'s, since the seller
+  settles after serving: a payment refused there was work given away. The spend budgets (AD-18),
+  not these, bound the fees the facilitator pays.
+- **Sellers on Cloudflare Workers share one budget.** A Worker's request to another Cloudflare
+  zone arrives with `CF-Connecting-IP: 2a06:98c0:3600::103` for every Worker, and sellers behind
+  one cloud NAT share its address the same way. A per-seller budget needs API keys (0060).
+- **`CLIENT_IP_HEADER` is required**, so it can't be forgotten behind a proxy, where every
+  client would share the proxy's address and one budget. Use `socket` only with no proxy in front,
+  as in local runs and tests.
+- **Behind Cloudflare set `CLIENT_IP_HEADER=cf-connecting-ip`.** Cloudflare sets it on every
+  request and refuses it from a client. `X-Forwarded-For` is never read: a client can put any
+  address in it. A request without the configured header, or with anything but one address in it,
+  is a 500 and an error log line, since only the proxy should reach the service. `TRUSTED_PROXY_HOPS` is refused: this setting replaced
+  it.
+- **Windows are aligned to the clock**, so a client can send up to twice its budget across a
+  window's end, and every blocked client is released at the same moment.
+- **The counters live in the store** (`rate_limits` with `STORE=postgres`). A store error is a 500,
+  logged. A client over its budget is answered from the process until its window ends, without a
+  store write.
 
 ## The store
 
