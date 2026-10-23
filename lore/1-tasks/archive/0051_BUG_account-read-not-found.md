@@ -2,7 +2,7 @@
 id: "0051"
 title: "Report an RPC failure on an account read as an error, never as account not found"
 type: BUG
-status: active
+status: completed
 milestone: 1
 related_adr: []
 related_tasks: ["0007", "0009", "0020", "0049"]
@@ -22,6 +22,14 @@ history:
     note: >
       Red tests for the three effects, the fix (readAccountEntry on getLedgerEntries) and a testnet
       burst that reproduces masked 502 and -32603 reads. The owner chose one read function.
+  - date: "2026-10-23"
+    status: completed
+    who: karolkow
+    note: >
+      PR #52 (account reads) and PR #58 (startup RPC network check) merged. signer-pool 140 tests,
+      facilitator 307 (378 with PostgreSQL). Spawned 0056 (sequence read past the caller's
+      deadline), 0057 (one test account builder, signer-kind tests) and 0058 (upto-proxy e2e
+      account reads).
 ---
 
 # Report an RPC failure on an account read as an error, never as account not found
@@ -111,3 +119,33 @@ constructor, message, `code`, `response.status` and the JSON-RPC error object; c
 - [x] Given the RPC answers no entry for a channel, then `checkChannel` returns `missing` and the
       submitter still retires the channel after `timeoutSeconds`
 - [x] 0007's "Account not found under load" is confirmed or refuted with a testnet measurement
+
+## Issues Encountered
+
+- **The SDK's catch, not the RPC:** stellar-rpc answers an outage with distinct errors (HTTP 502,
+  503, JSON-RPC `-32603`); `rpc.Server.getAccountEntry` (js-stellar-sdk `src/rpc/server.ts`
+  238-251) folds them all into "Account not found". 17.2.1 still does; upstream issue #1763 is
+  open and fix PR #1774 was closed unmerged.
+- **Merges while open:** #41, #45, #56 and #53 landed during review; each merge of `develop` moved
+  their new `getAccount` uses and test fakes to `getLedgerEntries`.
+
+## Design Decisions
+
+### Emerged
+
+1. **No entry is `undefined`, not an error class** (owner, review of #52): `readAccountEntry`
+   returns `undefined`; callers decide whether a missing account is an answer (`checkChannel`,
+   `readSequence`) or an error (balance check, smoke scripts).
+2. **A missing `entries` field is not guarded** (owner, review of #52): stellar-rpc always sends
+   the field (`make([]…, 0, …)`, no `omitempty`, checked at v20.0.0 and on develop).
+3. **Startup refuses an RPC URL of another network** (PR #58): the only RPC that answers no entry
+   for an existing account is one of another network (measured 2026-10-22).
+4. **A transient RPC failure at startup still stops the service** (owner, 2026-10-23): no retry;
+   0027 already asks for an alert on the restart loop.
+
+## Future Work
+
+- 0056: the sequence read retries past the caller's deadline (60 s against a 30 s `/settle` budget).
+- 0057: one test account builder for signer-pool and the facilitator, and tests for non-ed25519
+  signer kinds in `checkChannel`.
+- 0058: upto-proxy e2e reads accounts through the SDK's masking `getAccount`.
