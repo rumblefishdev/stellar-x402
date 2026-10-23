@@ -21,7 +21,7 @@ history:
 ## Summary
 
 With `failback` set, only the probe should return calls to `RPC_URLS[0]`, after it finds it at
-most `FAILBACK_MAX_LAG_LEDGERS` (2) behind (AD-3, GLOSSARY "Failback / probe"). PR #45 closed two
+most `FAILBACK_MAX_LAG_LEDGERS` (2) behind (AD-3). PR #45 closed two
 ways back: a verify call never switches (decision 16), and `markFailed` and a failed
 `sendTransaction` skip `[0]` through `moveOn()` (decision 26). `FallbackRpc.call()`, which every
 pool and ledger read uses (`getFeeStats`, `getLatestLedger`, `getAccount`, `simulateTransaction`,
