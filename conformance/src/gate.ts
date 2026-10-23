@@ -14,7 +14,6 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
@@ -56,14 +55,18 @@ if (stellarSigners.length === 0) {
   );
 }
 
-// A new folder per run, gone when the gate exits, failed or not (~6 GB). Its real path, as stack
-// traces print it (macOS links /var to /private/var).
-const checkout = realpathSync(mkdtempSync(join(tmpdir(), "x402-gate-")));
+// A new folder per run, gone when the gate exits, failed or not (~6 GB). In /tmp, not $TMPDIR:
+// the suite's stack traces print this path into suite.json, which is committed as is, and
+// $TMPDIR on macOS names a per-user folder. Its real path, as stack traces print it (macOS links
+// /tmp to /private/tmp).
+const checkout = realpathSync(mkdtempSync("/tmp/x402-gate-"));
 process.on("exit", () => rmSync(checkout, { recursive: true, force: true }));
-// Node exits on these signals without emitting "exit"; exiting here runs the cleanup above.
-process.once("SIGINT", () => process.exit(130));
-process.once("SIGTERM", () => process.exit(143));
-process.once("SIGHUP", () => process.exit(129));
+// Node exits on these signals without emitting "exit"; exiting here runs the cleanup above. The
+// handlers stay for every signal: a second one (Ctrl+C again, or pnpm passing it on) during the
+// cleanup would otherwise kill the gate halfway through it.
+process.on("SIGINT", () => process.exit(130));
+process.on("SIGTERM", () => process.exit(143));
+process.on("SIGHUP", () => process.exit(129));
 prepare(checkout);
 
 // The proxy goes in under its config's name, which is what --facilitators matches.

@@ -23,8 +23,9 @@ The suite kills whatever listens on ports 4022–4060 before it starts.
 ## What it does
 
 1. Reads the Stellar signers from `GATE_FACILITATOR_URL/supported`, before any payment.
-2. Clones the suite at the commit pinned in `src/upstream.ts` into a new temporary folder, which
-   is deleted when the gate exits, so no build from an earlier run is reused.
+2. Clones the suite at the commit pinned in `src/upstream.ts` into a new folder in `/tmp`
+   (not `$TMPDIR`, which on macOS names a per-user folder that stack traces in `suite.json` would
+   carry), deleted when the gate exits, so no build from an earlier run is reused.
 3. Installs and builds upstream's TypeScript SDK, the suite and its TypeScript components, the way
    upstream's CI does (~2.5 minutes, ~6 GB on disk while the run lasts). Upstream's
    `setup.sh` is not run: it also builds the Go and Python components, which the Stellar scenarios
