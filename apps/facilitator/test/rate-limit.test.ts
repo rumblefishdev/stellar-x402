@@ -13,7 +13,11 @@ afterEach(async () => {
   app = undefined;
 });
 
-/** A facilitator with a budget of 2 on each limited route; `/verify` and `/settle` are stubs. */
+/**
+ * A facilitator with a budget of 2 on each limited route; `/verify` and `/settle` are stubs. Windows
+ * are aligned to the clock, so a test's requests share one only if no boundary falls between them:
+ * an hour's window makes that all but certain.
+ */
 async function serve(env: Record<string, string> = {}, stores: Stores = memoryStores()) {
   const config = parseConfig({
     FACILITATOR_SECRET: Keypair.random().secret(),
@@ -22,6 +26,7 @@ async function serve(env: Record<string, string> = {}, stores: Stores = memorySt
     RATE_LIMIT_VERIFY: "2",
     RATE_LIMIT_SETTLE: "2",
     RATE_LIMIT_DISCOVERY: "2",
+    RATE_LIMIT_WINDOW_MS: "3600000",
     ...env,
   });
   const lines: string[] = [];
@@ -63,7 +68,7 @@ describe("the rate limiter", () => {
     expect([limited.status, await limited.json()]).toEqual([429, { error: "too_many_requests" }]);
     const retryAfter = Number(limited.headers.get("retry-after"));
     expect(retryAfter).toBeGreaterThanOrEqual(1);
-    expect(retryAfter).toBeLessThanOrEqual(60);
+    expect(retryAfter).toBeLessThanOrEqual(3600);
     // No counting headers: upstream's client reads only Retry-After.
     expect(limited.headers.get("x-ratelimit-limit")).toBeNull();
     expect(limited.headers.get("ratelimit")).toBeNull();
