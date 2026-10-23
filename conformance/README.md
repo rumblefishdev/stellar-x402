@@ -46,8 +46,9 @@ The gate runs as one Node process (`node --import tsx`), not under the `tsx` com
 wrapper kills its child outright when the child does not answer a signal within ~30 ms, and the
 gate cannot while it waits for a build step or the suite, so its temporary folder stayed behind.
 A signal sent to the whole process group (Ctrl+C, a closed terminal) stops the running step at
-once; one sent to the gate's process alone takes effect when that step ends, which can be
-minutes. `pnpm` returns before the gate has finished deleting the folder.
+once. One sent to the gate's process alone takes effect at the gate's next wait on the network:
+after the whole build, or after the whole suite, its payments made and the run not saved. `pnpm`
+returns before the gate has finished deleting the folder.
 
 The proxy (`external-proxy/proxy.mjs`) answers the suite's `/health` and `/close` itself and
 forwards `/verify`, `/settle` and `/supported` to `GATE_FACILITATOR_URL` unchanged. It uses Node
@@ -67,8 +68,8 @@ One folder per run, `results/<date>-<facilitator host>/`, with two files:
 - `gate.json`: what the gate says about it: `suite.json`'s name and SHA-256, the upstream repo and
   commit, the date, the facilitator URL and its signers, the command, when the run started and the
   last ledger closed before it, the suite's exit code, whether the gate passed and why not, and each transaction as the chain shows
-  it (ledger, time, fee payer, call). Only runs against our facilitator are committed (task 0029); dry runs against
-  a public facilitator stay out of git.
+  it (ledger, time, fee payer, call). Only runs against our facilitator are committed (task 0029);
+  dry runs against a public facilitator stay out of git.
 
 The suite's Bazaar check (`--extensions=bazaar`) is not run: it also calls `/discovery/search`,
 which comes after Tranche 1.

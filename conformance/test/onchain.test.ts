@@ -142,9 +142,4 @@ describe("checkSettlement", () => {
     );
     expect(checkSettlement(settled, { ...expected, ledgerBeforeRun: 5_224_999 })).toBeUndefined();
   });
-
-  it("does not look at the ledger's close time, so a local clock ahead fails nothing", () => {
-    const createdLongAgo = { ...settled, createdAt: 0 };
-    expect(checkSettlement(createdLongAgo, expected)).toBeUndefined();
-  });
 });

@@ -19,7 +19,7 @@ export interface Expected {
   signers: string[];
   /**
    * The last ledger RPC had closed before the suite started, read from the same RPC: a settlement
-   * of this run is in a later one. Ledgers, not the local clock, which may run ahead.
+   * of this run is in a later one.
    */
   ledgerBeforeRun: number;
 }
