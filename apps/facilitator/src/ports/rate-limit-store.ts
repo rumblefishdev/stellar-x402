@@ -14,4 +14,9 @@ export interface RateLimitStore {
    * (a caller with a lagging clock) counts in the stored window and keeps its `resetAt`.
    */
   hit(key: string, windowMs: number, now: number): Promise<RateLimitHit>;
+  /**
+   * Deletes at most `limit` keys whose window ended before `before`, and resolves how many. A
+   * pruned key's next hit starts a new window. Skips a key a hit is writing instead of waiting.
+   */
+  prune(before: number, limit: number): Promise<number>;
 }

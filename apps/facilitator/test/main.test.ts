@@ -254,6 +254,33 @@ describe("main()", () => {
     }
   });
 
+  it("prunes the stores with the config's windows", async () => {
+    const day = 86_400_000;
+    const app = await main({
+      ...env,
+      RPC_URLS: rpc.url,
+      PORT: "0",
+      LOG_LEVEL: "error",
+      SPEND_WINDOW_MS: String(5 * day),
+    });
+    try {
+      const reserve = (id: string, at: number) =>
+        app.stores.spend.reserve({
+          id,
+          amount: 1n,
+          limits: [{ scope: "global", maxStroops: 10n, windowMs: 30 * day }],
+          now: at,
+        });
+      // A 5-day window keeps 10 days.
+      await reserve("old", Date.now() - 10 * day - 60_000);
+      await reserve("kept", Date.now() - 9 * day);
+      await app.pruner.runOnce();
+      expect(await app.stores.spend.used("global", 30 * day, Date.now())).toBe(1n);
+    } finally {
+      await app.close();
+    }
+  });
+
   it("answers /verify with the real verifier, then exits 0 on SIGTERM", async () => {
     const child = spawn(process.execPath, ["--import", "tsx", "src/server.ts"], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),

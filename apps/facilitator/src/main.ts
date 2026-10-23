@@ -23,6 +23,7 @@ import { supportedResponse } from "./http/supported.js";
 import { captureConsoleError, jsonLogger, rpcEndpointName, type Logger } from "./logger.js";
 import { memoryMetrics, type Metrics } from "./metrics.js";
 import type { SettlementStore } from "./ports/index.js";
+import { createPruner } from "./pruner.js";
 import { checkChannels } from "./settlement/channel-check.js";
 import { checkRpcNetworks } from "./settlement/network-check.js";
 import { atCurrentBid, feeSettings, type FeeSettings } from "./settlement/fees.js";
@@ -422,7 +423,7 @@ export async function main(
     // missing. Checked first, so a wrong URL is named instead of every channel.
     await checkRpcNetworks(config.rpcUrls, getNetworkPassphrase(config.network));
     const stores = pools ? postgresStores(pools.main, pools) : memoryStores();
-    const { deps, cataloger, rpc } = compose(config, { logger, stores });
+    const { deps, cataloger, metrics, rpc } = compose(config, { logger, stores });
     // AD-12: the service starts only when no other key can move a channel. An RPC that doesn't
     // answer fails the check with its error. `compose()` only wires parts, so nothing has called
     // the RPC yet.
@@ -435,14 +436,24 @@ export async function main(
       restoreConsole();
       throw error;
     });
-    // Catalog writes already under way finish before the process exits, and before the pools
-    // end, even if closing the server fails; the pools end even if draining fails.
+    // One window today; with per-budget windows (0024), the longest of them.
+    const pruner = createPruner({
+      spend: stores.spend,
+      rateLimits: stores.rateLimits,
+      spendWindowMs: config.spend.windowMs,
+      rateLimitWindowMs: config.http.rateLimit.windowMs,
+      logger,
+      metrics,
+    });
+    pruner.start();
+    // Catalog writes and a prune already under way finish before the process exits, and before
+    // the pools end, even if closing the server fails; the pools end even if draining fails.
     const closeOnce = async () => {
       try {
         await started.close();
       } finally {
         try {
-          await cataloger.drain();
+          await Promise.all([cataloger.drain(), pruner.close()]);
         } finally {
           await endPools();
         }
@@ -454,6 +465,8 @@ export async function main(
       /** The graph's stores, and with `STORE=postgres` its pools: for tests. */
       stores,
       pools,
+      /** For tests, which run a tick instead of waiting a minute. */
+      pruner,
       /** The logger every part writes to: for tests. */
       logger,
       // A second signal (SIGINT after SIGTERM) gets the first call's promise: running it again
