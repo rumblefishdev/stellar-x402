@@ -39,10 +39,13 @@ Every request counts, a malformed or oversized one too. `/supported` has no limi
   a second needs higher values. `/settle`'s budget is never below `/verify`'s, since the seller
   settles after serving: a payment refused there was work given away. The spend budgets (AD-18),
   not these, bound the fees the facilitator pays.
+- **Sellers on Cloudflare Workers share one budget.** A Worker's request to another Cloudflare
+  zone arrives with `CF-Connecting-IP: 2a06:98c0:3600::103` for every Worker, and sellers behind
+  one cloud NAT share its address the same way. A per-seller budget needs API keys (0060).
 - **Behind Cloudflare set `CLIENT_IP_HEADER=cf-connecting-ip`.** Cloudflare sets it on every
   request and refuses it from a client. `X-Forwarded-For` is never read: a client can put any
-  address in it. A request without the configured header is a 500 and an error log line, since
-  only the proxy should reach the service. `TRUSTED_PROXY_HOPS` is refused: this setting replaced
+  address in it. A request without the configured header, or with anything but one address in it,
+  is a 500 and an error log line, since only the proxy should reach the service. `TRUSTED_PROXY_HOPS` is refused: this setting replaced
   it.
 - **Windows are aligned to the clock**, so a client can send up to twice its budget across a
   window's end, and every blocked client is released at the same moment.
