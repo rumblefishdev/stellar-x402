@@ -187,6 +187,18 @@ export class MemoryRateLimitStore implements RateLimitStore {
     this.windows.set(key, counted);
     return { ...counted };
   }
+
+  async prune(before: number, limit: number): Promise<number> {
+    let pruned = 0;
+    for (const [key, { resetAt }] of this.windows) {
+      if (pruned === limit) break;
+      if (resetAt < before) {
+        this.windows.delete(key);
+        pruned++;
+      }
+    }
+    return pruned;
+  }
 }
 
 interface Reservation {
@@ -234,6 +246,18 @@ export class MemorySpendStore implements SpendStore {
 
   async used(scope: SpendScope, windowMs: number, now: number): Promise<bigint> {
     return this.sum(scope, windowMs, now);
+  }
+
+  async prune(before: number, limit: number): Promise<number> {
+    let pruned = 0;
+    for (const [id, { at }] of this.reservations) {
+      if (pruned === limit) break;
+      if (at < before) {
+        this.reservations.delete(id);
+        pruned++;
+      }
+    }
+    return pruned;
   }
 
   async recordFailure(scope: SpendScope): Promise<number> {

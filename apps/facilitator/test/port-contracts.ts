@@ -605,6 +605,22 @@ export function spendStoreContract(make: Make<SpendStore>) {
       );
     });
 
+    it("prunes reservations stamped before a time, in either state, at most a limit at a time", async () => {
+      await store.reserve({ id: "a", amount: 10n, limits: limits(1_000n), now: 1 });
+      await store.reserve({ id: "b", amount: 20n, limits: limits(1_000n), now: 2 });
+      await store.reserve({ id: "c", amount: 40n, limits: limits(1_000n), now: 3 });
+      await store.commit("a", 5n);
+      // `b` stays reserved: a crash between reserve and commit.
+      expect(await store.prune(3, 1)).toBe(1);
+      expect(await store.prune(3, 10)).toBe(1);
+      expect(await store.prune(3, 10)).toBe(0);
+      // `c`, stamped at the cutoff, is kept.
+      expect(await store.used("global", DAY, 3)).toBe(40n);
+      expect(await store.used(`payer:${PAYER}`, DAY, 3)).toBe(40n);
+      expect(await store.commit("a", 5n)).toBe(false);
+      expect(await store.commit("b", 5n)).toBe(false);
+    });
+
     it("counts each scope on its own, and only the scopes a reservation lists", async () => {
       const payer = (name: string): SpendLimit[] => [
         { scope: `payer:${name}`, maxStroops: 100n, windowMs: DAY },
@@ -679,6 +695,20 @@ export function rateLimitStoreContract(make: Make<RateLimitStore>) {
     it("counts concurrent hits exactly", async () => {
       await Promise.all(Array.from({ length: 10 }, () => store.hit("k", 60_000, 0)));
       expect(await store.hit("k", 60_000, 0)).toEqual({ count: 11, resetAt: 60_000 });
+    });
+
+    it("prunes windows that ended before a time, at most a limit at a time", async () => {
+      await store.hit("a", 60_000, 0);
+      await store.hit("b", 60_000, 1);
+      await store.hit("c", 60_000, 60_000);
+      // `a` and `b` end at 60 000, `c` at 120 000; a window ending at the cutoff is kept.
+      expect(await store.prune(60_000, 10)).toBe(0);
+      expect(await store.prune(60_001, 1)).toBe(1);
+      expect(await store.prune(60_001, 10)).toBe(1);
+      expect(await store.prune(60_001, 10)).toBe(0);
+      // A pruned key starts a new window; a kept one goes on counting.
+      expect(await store.hit("a", 60_000, 0)).toEqual({ count: 1, resetAt: 60_000 });
+      expect(await store.hit("c", 60_000, 60_000)).toEqual({ count: 2, resetAt: 120_000 });
     });
   });
 }

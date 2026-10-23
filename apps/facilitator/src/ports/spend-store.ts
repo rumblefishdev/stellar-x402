@@ -52,6 +52,13 @@ export interface SpendStore {
   release(id: string): Promise<void>;
   /** Stroops reserved or spent after `now - windowMs`, for alerts. */
   used(scope: SpendScope, windowMs: number, now: number): Promise<bigint>;
+  /**
+   * Deletes at most `limit` reservations stamped before `before`, reserved or committed, and
+   * resolves how many. The caller keeps `before` past every window it sums, with a margin: a
+   * pruned reservation counts against nothing, and a later `commit` of it resolves `false`.
+   * Skips a reservation another call is writing instead of waiting on it.
+   */
+  prune(before: number, limit: number): Promise<number>;
 
   /** Counts an on-chain failure; resolves the consecutive failures for `scope`. */
   recordFailure(scope: SpendScope, now: number): Promise<number>;
