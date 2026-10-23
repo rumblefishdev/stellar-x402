@@ -178,11 +178,25 @@ const envSchema = z
     LEASE_TTL_MS: ms(1_000).default("30000"),
 
     BODY_LIMIT_BYTES: int(1_024).default("65536"),
-    /** Proxy hops in front of the service whose `X-Forwarded-For` entries are trusted (AD-11). */
-    TRUSTED_PROXY_HOPS: int(0, 10).default("0"),
+    /**
+     * The request header that carries the client's IP (AD-11): `cf-connecting-ip` behind
+     * Cloudflare, which sets it on every request and refuses it from a client (ADR 0011). Unset,
+     * the client is the socket address. `X-Forwarded-For` is never read.
+     */
+    CLIENT_IP_HEADER: z
+      .string()
+      .regex(/^[A-Za-z0-9-]+$/, "must be a header name")
+      .transform((name) => name.toLowerCase())
+      .optional(),
+    /** Replaced by `CLIENT_IP_HEADER`; refused, so a leftover can't look like it still applies. */
+    TRUSTED_PROXY_HOPS: z.string().optional(),
     RATE_LIMIT_WINDOW_MS: ms(1_000).default("60000"),
-    RATE_LIMIT_VERIFY: int(1).default("120"),
-    RATE_LIMIT_SETTLE: int(1).default("60"),
+    /**
+     * Requests per window and client. The seller's server calls `/verify` and `/settle` for all of
+     * its buyers, so these are budgets per seller; fees are bounded by the spend budgets (AD-18).
+     */
+    RATE_LIMIT_VERIFY: int(1).default("600"),
+    RATE_LIMIT_SETTLE: int(1).default("600"),
     RATE_LIMIT_DISCOVERY: int(1).default("120"),
 
     /** Rolling window of every spend budget (AD-18); a store window, not a timer. */
@@ -229,15 +243,25 @@ const envSchema = z
     message: "must be at most SETTLE_BUDGET_MS",
     path: ["SETTLE_TIMEOUT_MS"],
   })
+  // The seller settles after serving the resource, so a payment that passed `/verify` and is
+  // refused at `/settle` was work given away.
+  .refine((env) => env.RATE_LIMIT_SETTLE >= env.RATE_LIMIT_VERIFY, {
+    message: "must be at least RATE_LIMIT_VERIFY",
+    path: ["RATE_LIMIT_SETTLE"],
+  })
+  .refine((env) => env.TRUSTED_PROXY_HOPS === undefined, {
+    message: "is replaced by CLIENT_IP_HEADER",
+    path: ["TRUSTED_PROXY_HOPS"],
+  })
   .refine((env) => env.STORE !== "memory" || env.NETWORK === STELLAR_NETWORKS.testnet, {
     message: "must be postgres outside testnet",
     path: ["STORE"],
   })
-  // `/settle` spends on pubnet, so not before spend budgets, rate limits and the channel lease.
-  // The task that lands the last of them lifts this.
+  // `/settle` spends on pubnet, so not before spend budgets and the channel lease, nor while the
+  // store's tables grow without bound. The task that lands the last of them lifts this.
   .refine((env) => env.NETWORK !== STELLAR_NETWORKS.pubnet, {
     message:
-      "stellar:pubnet is refused until spend budgets (0024), rate limits (0023) and the channel lease (0025) land",
+      "stellar:pubnet is refused until spend budgets (0024), the channel lease (0025) and store pruning (0050) land",
     path: ["NETWORK"],
   })
   .refine((env) => env.DATABASE_URL !== undefined || env.STORE !== "postgres", {
@@ -282,7 +306,8 @@ export interface Config {
   };
   http: {
     bodyLimitBytes: number;
-    trustedProxyHops: number;
+    /** Lower case; unset, the client is the socket address. */
+    clientIpHeader?: string;
     rateLimit: { windowMs: number; verify: number; settle: number; discovery: number };
   };
   spend: {
@@ -360,7 +385,7 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
     },
     http: {
       bodyLimitBytes: e.BODY_LIMIT_BYTES,
-      trustedProxyHops: e.TRUSTED_PROXY_HOPS,
+      clientIpHeader: e.CLIENT_IP_HEADER,
       rateLimit: {
         windowMs: e.RATE_LIMIT_WINDOW_MS,
         verify: e.RATE_LIMIT_VERIFY,

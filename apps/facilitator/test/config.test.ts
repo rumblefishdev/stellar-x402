@@ -14,14 +14,14 @@ const CHANNEL_A = keypair(2).publicKey();
 const CHANNEL_B = keypair(3).publicKey();
 
 const minimal = { FACILITATOR_SECRET: SECRET, CHANNELS: `${CHANNEL_A}, ${CHANNEL_B}` };
-/** Pubnet needs the PostgreSQL store, and is refused until 0023, 0024 and 0025 land. */
+/** Pubnet needs the PostgreSQL store, and is refused until 0024, 0025 and 0050 land. */
 const pubnet = {
   NETWORK: "stellar:pubnet",
   STORE: "postgres",
   DATABASE_URL: "postgres://db.internal/x402",
 };
 const PUBNET_REFUSED =
-  "NETWORK stellar:pubnet is refused until spend budgets (0024), rate limits (0023) and the channel lease (0025) land";
+  "NETWORK stellar:pubnet is refused until spend budgets (0024), the channel lease (0025) and store pruning (0050) land";
 
 function problems(env: Record<string, string | undefined>): string[] {
   try {
@@ -52,8 +52,8 @@ describe("parseConfig", () => {
       },
       http: {
         bodyLimitBytes: 65_536,
-        trustedProxyHops: 0,
-        rateLimit: { windowMs: 60_000, verify: 120, settle: 60, discovery: 120 },
+        clientIpHeader: undefined,
+        rateLimit: { windowMs: 60_000, verify: 600, settle: 600, discovery: 120 },
       },
       spend: {
         windowMs: 86_400_000,
@@ -88,10 +88,10 @@ describe("parseConfig", () => {
       SETTLE_BUDGET_MS: "60000",
       LEASE_TTL_MS: "32000",
       BODY_LIMIT_BYTES: "70000",
-      TRUSTED_PROXY_HOPS: "2",
+      CLIENT_IP_HEADER: "CF-Connecting-IP",
       RATE_LIMIT_WINDOW_MS: "61000",
       RATE_LIMIT_VERIFY: "121",
-      RATE_LIMIT_SETTLE: "62",
+      RATE_LIMIT_SETTLE: "122",
       RATE_LIMIT_DISCOVERY: "123",
       SPEND_WINDOW_MS: "3600000",
       SPEND_GLOBAL_STROOPS: "11",
@@ -123,8 +123,8 @@ describe("parseConfig", () => {
       },
       http: {
         bodyLimitBytes: 70_000,
-        trustedProxyHops: 2,
-        rateLimit: { windowMs: 61_000, verify: 121, settle: 62, discovery: 123 },
+        clientIpHeader: "cf-connecting-ip",
+        rateLimit: { windowMs: 61_000, verify: 121, settle: 122, discovery: 123 },
       },
       spend: {
         windowMs: 3_600_000,
@@ -256,6 +256,29 @@ describe("parseConfig", () => {
     ).toMatchObject({ maxFeeStroops: 201n, inclusionFeeStroops: 100n });
   });
 
+  it("keeps the /settle budget at or above /verify's: the seller calls both, settle after serving", () => {
+    expect(problems({ ...minimal, RATE_LIMIT_VERIFY: "100", RATE_LIMIT_SETTLE: "99" })).toEqual([
+      "RATE_LIMIT_SETTLE must be at least RATE_LIMIT_VERIFY",
+    ]);
+    expect(problems({ ...minimal, RATE_LIMIT_VERIFY: "700" })).toEqual([
+      "RATE_LIMIT_SETTLE must be at least RATE_LIMIT_VERIFY",
+    ]);
+    expect(
+      parseConfig({ ...minimal, RATE_LIMIT_VERIFY: "100", RATE_LIMIT_SETTLE: "100" }).http
+        .rateLimit,
+    ).toMatchObject({ verify: 100, settle: 100 });
+  });
+
+  it("takes CLIENT_IP_HEADER as a lower-case header name, and refuses a leftover TRUSTED_PROXY_HOPS", () => {
+    expect(problems({ ...minimal, CLIENT_IP_HEADER: "cf connecting ip" })).toEqual([
+      "CLIENT_IP_HEADER must be a header name",
+    ]);
+    // Left set, it would look like the client IP still came from X-Forwarded-For.
+    expect(problems({ ...minimal, TRUSTED_PROXY_HOPS: "1" })).toEqual([
+      "TRUSTED_PROXY_HOPS is replaced by CLIENT_IP_HEADER",
+    ]);
+  });
+
   it("ignores a leftover CATALOG_ALLOW_HTTP: every network catalogs http now (0053)", () => {
     expect(parseConfig({ ...minimal, CATALOG_ALLOW_HTTP: "true" })).toEqual(parseConfig(minimal));
     expect(
@@ -307,7 +330,7 @@ describe("parseConfig", () => {
     ]);
   });
 
-  it("refuses stellar:pubnet with nothing else wrong, until 0023, 0024 and 0025 land", () => {
+  it("refuses stellar:pubnet with nothing else wrong, until 0024, 0025 and 0050 land", () => {
     // `/settle` would spend there with allow-all spend hooks, no rate limit and no lease.
     expect(problems({ ...minimal, ...pubnet, RPC_URLS: "https://rpc.example" })).toEqual([
       PUBNET_REFUSED,
