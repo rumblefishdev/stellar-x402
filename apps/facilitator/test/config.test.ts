@@ -13,7 +13,11 @@ const SECRET = keypair(1).secret();
 const CHANNEL_A = keypair(2).publicKey();
 const CHANNEL_B = keypair(3).publicKey();
 
-const minimal = { FACILITATOR_SECRET: SECRET, CHANNELS: `${CHANNEL_A}, ${CHANNEL_B}` };
+const minimal = {
+  FACILITATOR_SECRET: SECRET,
+  CHANNELS: `${CHANNEL_A}, ${CHANNEL_B}`,
+  CLIENT_IP_HEADER: "socket",
+};
 /** Pubnet needs the PostgreSQL store, and is refused until 0024, 0025 and 0050 land. */
 const pubnet = {
   NETWORK: "stellar:pubnet",
@@ -142,16 +146,22 @@ describe("parseConfig", () => {
     const config = parseConfig({
       FACILITATOR_SECRET: `${SECRET}\n`,
       CHANNELS: ` ${CHANNEL_A} `,
+      CLIENT_IP_HEADER: " socket ",
       RPC_URLS: "",
       PORT: " ",
     });
     expect(config.facilitatorSecret).toBe(SECRET);
     expect(config.channels).toEqual([CHANNEL_A]);
+    expect(config.http.clientIpHeader).toBeUndefined();
     expect(config.port).toBe(4021);
   });
 
   it("names missing required values", () => {
-    expect(problems({})).toEqual(["FACILITATOR_SECRET is required", "CHANNELS is required"]);
+    expect(problems({})).toEqual([
+      "FACILITATOR_SECRET is required",
+      "CHANNELS is required",
+      "CLIENT_IP_HEADER is required",
+    ]);
   });
 
   it("names invalid values without echoing them", () => {
@@ -267,6 +277,17 @@ describe("parseConfig", () => {
       parseConfig({ ...minimal, RATE_LIMIT_VERIFY: "100", RATE_LIMIT_SETTLE: "100" }).http
         .rateLimit,
     ).toMatchObject({ verify: 100, settle: 100 });
+  });
+
+  it("requires CLIENT_IP_HEADER, where socket means the connection's own address", () => {
+    // Forgotten behind a proxy, every client would share the proxy's address and one budget.
+    expect(problems({ ...minimal, CLIENT_IP_HEADER: undefined })).toEqual([
+      "CLIENT_IP_HEADER is required",
+    ]);
+    expect(parseConfig(minimal).http.clientIpHeader).toBeUndefined();
+    expect(
+      parseConfig({ ...minimal, CLIENT_IP_HEADER: "cf-connecting-ip" }).http.clientIpHeader,
+    ).toBe("cf-connecting-ip");
   });
 
   it("refuses a leftover TRUSTED_PROXY_HOPS", () => {

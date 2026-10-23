@@ -46,6 +46,7 @@ const CURRENT = 1_000;
 
 const config = parseConfig({
   FACILITATOR_SECRET: secret,
+  CLIENT_IP_HEADER: "socket",
   CHANNELS: channel,
   RPC_URLS: "https://rpc-a.example,https://rpc-b.example",
   MAX_FEE_STROOPS: "300000",

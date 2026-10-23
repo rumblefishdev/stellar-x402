@@ -21,6 +21,7 @@ afterEach(async () => {
 async function serve(env: Record<string, string> = {}, stores: Stores = memoryStores()) {
   const config = parseConfig({
     FACILITATOR_SECRET: Keypair.random().secret(),
+    CLIENT_IP_HEADER: "socket",
     CHANNELS: Keypair.random().publicKey(),
     PORT: "0",
     RATE_LIMIT_VERIFY: "2",
@@ -85,7 +86,7 @@ describe("the rate limiter", () => {
     expect((await fetch(`${url}/discovery/search`)).status).toBe(429);
   });
 
-  it("ignores X-Forwarded-For: without CLIENT_IP_HEADER the client is the socket address", async () => {
+  it("ignores X-Forwarded-For: with CLIENT_IP_HEADER=socket the client is the connection's address", async () => {
     const { post } = await serve();
     const forged = ["1.2.3.4", "5.6.7.8", "9.9.9.9"];
     const statuses = [];

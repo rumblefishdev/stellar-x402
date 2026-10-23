@@ -46,6 +46,7 @@ describe("POST /settle", () => {
   beforeAll(async () => {
     const env = {
       FACILITATOR_SECRET: Keypair.random().secret(),
+      CLIENT_IP_HEADER: "socket",
       CHANNELS: Keypair.random().publicKey(),
     };
     const config = { ...parseConfig(env), port: 0 };

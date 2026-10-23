@@ -179,11 +179,13 @@ const envSchema = z
 
     BODY_LIMIT_BYTES: int(1_024).default("65536"),
     /**
-     * The request header that carries the client's IP (AD-11): `cf-connecting-ip` behind
-     * Cloudflare, which sets it on every request and refuses it from a client (ADR 0011). Unset,
-     * the client is the socket address. `X-Forwarded-For` is never read.
+     * Where the client's IP comes from (AD-11): the request header a proxy sets, such as
+     * `cf-connecting-ip` behind Cloudflare, which sets it on every request and refuses it from a
+     * client (ADR 0011); or `socket`, the connection's own address, with no proxy in front.
+     * Required: forgotten behind a proxy, every client would share the proxy's address and one
+     * budget. `X-Forwarded-For` is never read.
      */
-    CLIENT_IP_HEADER: z.string().optional(),
+    CLIENT_IP_HEADER: z.string(),
     /** Replaced by `CLIENT_IP_HEADER`; refused, so a leftover can't look like it still applies. */
     TRUSTED_PROXY_HOPS: z.string().optional(),
     RATE_LIMIT_WINDOW_MS: ms(1_000).default("60000"),
@@ -302,7 +304,7 @@ export interface Config {
   };
   http: {
     bodyLimitBytes: number;
-    /** Unset, the client is the socket address. */
+    /** Unset, the client is the connection's own address (`CLIENT_IP_HEADER=socket`). */
     clientIpHeader?: string;
     rateLimit: { windowMs: number; verify: number; settle: number; discovery: number };
   };
@@ -381,7 +383,7 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
     },
     http: {
       bodyLimitBytes: e.BODY_LIMIT_BYTES,
-      clientIpHeader: e.CLIENT_IP_HEADER,
+      clientIpHeader: e.CLIENT_IP_HEADER === "socket" ? undefined : e.CLIENT_IP_HEADER,
       rateLimit: {
         windowMs: e.RATE_LIMIT_WINDOW_MS,
         verify: e.RATE_LIMIT_VERIFY,
