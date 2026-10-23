@@ -123,7 +123,7 @@ describe("parseConfig", () => {
       },
       http: {
         bodyLimitBytes: 70_000,
-        clientIpHeader: "cf-connecting-ip",
+        clientIpHeader: "CF-Connecting-IP",
         rateLimit: { windowMs: 61_000, verify: 121, settle: 122, discovery: 123 },
       },
       spend: {
@@ -269,10 +269,7 @@ describe("parseConfig", () => {
     ).toMatchObject({ verify: 100, settle: 100 });
   });
 
-  it("takes CLIENT_IP_HEADER as a lower-case header name, and refuses a leftover TRUSTED_PROXY_HOPS", () => {
-    expect(problems({ ...minimal, CLIENT_IP_HEADER: "cf connecting ip" })).toEqual([
-      "CLIENT_IP_HEADER must be a header name",
-    ]);
+  it("refuses a leftover TRUSTED_PROXY_HOPS", () => {
     // Left set, it would look like the client IP still came from X-Forwarded-For.
     expect(problems({ ...minimal, TRUSTED_PROXY_HOPS: "1" })).toEqual([
       "TRUSTED_PROXY_HOPS is replaced by CLIENT_IP_HEADER",

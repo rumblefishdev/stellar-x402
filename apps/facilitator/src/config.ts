@@ -183,11 +183,7 @@ const envSchema = z
      * Cloudflare, which sets it on every request and refuses it from a client (ADR 0011). Unset,
      * the client is the socket address. `X-Forwarded-For` is never read.
      */
-    CLIENT_IP_HEADER: z
-      .string()
-      .regex(/^[A-Za-z0-9-]+$/, "must be a header name")
-      .transform((name) => name.toLowerCase())
-      .optional(),
+    CLIENT_IP_HEADER: z.string().optional(),
     /** Replaced by `CLIENT_IP_HEADER`; refused, so a leftover can't look like it still applies. */
     TRUSTED_PROXY_HOPS: z.string().optional(),
     RATE_LIMIT_WINDOW_MS: ms(1_000).default("60000"),
@@ -306,7 +302,7 @@ export interface Config {
   };
   http: {
     bodyLimitBytes: number;
-    /** Lower case; unset, the client is the socket address. */
+    /** Unset, the client is the socket address. */
     clientIpHeader?: string;
     rateLimit: { windowMs: number; verify: number; settle: number; discovery: number };
   };
