@@ -168,8 +168,11 @@ export class FallbackRpc implements SorobanRpc {
         const result = await this.withTimeout(fn(this.endpoints[idx]!.rpc));
         if (idx !== start && this.generation === token) {
           // An answer says the first endpoint is up, not that it is caught up: the probe decides.
-          if (this.opts.failback && idx === 0) this.moveOn(firstError, by);
-          else this.switchTo(idx, firstError, by);
+          if (this.opts.failback && idx === 0) {
+            // A read that started on `[1]` has tried every fallback: there is nowhere to move.
+            if (start === 1) this.probeNow();
+            else this.moveOn(firstError, by);
+          } else this.switchTo(idx, firstError, by);
         }
         return result;
       } catch (error) {

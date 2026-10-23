@@ -806,6 +806,32 @@ describe("FallbackRpc's shared active endpoint", () => {
       expect(switches).toEqual(["a->b by verify", "b->c by verify", "c->b by getFeeStats"]);
     });
 
+    it("probes, not moves, when a read from the first fallback failed on every fallback", async () => {
+      // Adam's case on PR #62: calls on `b`, `b` and `c` down, `a` up. Moving to `c`, which
+      // failed in the same read, would bounce calls between `b` and `c` until the 60 s probe.
+      const switches: string[] = [];
+      const failbacks: string[] = [];
+      const rpc = new FallbackRpc(
+        [
+          { name: "a", rpc: endpoint("ok") },
+          { name: "b", rpc: endpoint("fail") },
+          { name: "c", rpc: endpoint("fail") },
+        ],
+        {
+          failback: { intervalMs: 60_000 },
+          now: () => 0,
+          onSwitch: (from, to, _e, by) => switches.push(`${from}->${to} by ${by}`),
+          onFailback: (from, to, lag) => failbacks.push(`${from}->${to} lag ${lag}`),
+        },
+      );
+      rpc.markFailed(0, rpc.begin().token, new Error("x"), "verify");
+      expect(await rpc.getFeeStats()).toBe("fees");
+      // `b` can't read its own ledger, so the probe returns calls to `a` (0045 decision 11).
+      await vi.waitFor(() => expect(failbacks).toEqual(["b->a lag 0"]));
+      expect(rpc.active).toBe("a");
+      expect(switches).toEqual(["a->b by verify"]);
+    });
+
     it("returns to a healthy first endpoint when the active one can't read its ledger", async () => {
       const { rpc, b, clock, failbacks } = withClock();
       b.mode = "fail";
