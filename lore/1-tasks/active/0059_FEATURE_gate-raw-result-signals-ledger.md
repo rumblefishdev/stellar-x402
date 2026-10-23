@@ -2,7 +2,7 @@
 id: "0059"
 title: "Gate: the suite's raw result apart, cleanup on every signal, ledger instead of the clock"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0009"]
 related_tasks: ["0028", "0029"]
@@ -13,6 +13,10 @@ history:
     status: backlog
     who: karolkow
     note: "Spawned from 0028 future work (review of PR #47)."
+  - date: "2026-10-23"
+    status: active
+    who: karolkow
+    note: "Started."
 ---
 
 # Gate: the suite's raw result apart, cleanup on every signal, ledger instead of the clock
