@@ -472,10 +472,13 @@ export class PostgresRateLimitStore implements RateLimitStore {
  */
 const RESERVE_LOCK_TIMEOUT = "2s";
 
-/** Stroops reserved or spent in one scope after `$2`, as text; `reserve` and `used` share it. */
-const WINDOW_SUM = `SELECT coalesce(sum(r.amount), 0)::text AS used
-  FROM spend_reservation_scopes rs JOIN spend_reservations r ON r.id = rs.id
-  WHERE rs.scope = $1 AND r.at > $2`;
+/**
+ * Stroops reserved or spent in one scope after `$2`, as text; `reserve` and `used` share it. An
+ * index-only range scan of `spend_reservation_scopes_window`: it reads the window's rows only,
+ * however many the scope has had, and never `spend_reservations`.
+ */
+const WINDOW_SUM = `SELECT coalesce(sum(amount), 0)::text AS used
+  FROM spend_reservation_scopes WHERE scope = $1 AND at > $2`;
 
 /** Thrown inside `reserve`'s transaction so a breach rolls the reservation back. */
 class LimitExceeded extends Error {
@@ -531,8 +534,9 @@ export class PostgresSpendStore implements SpendStore {
             throw new LimitExceeded(limit.scope);
         }
         await client.query(
-          "INSERT INTO spend_reservation_scopes (id, scope) SELECT $1, unnest($2::text[])",
-          [id, scopes],
+          `INSERT INTO spend_reservation_scopes (id, scope, at, amount)
+           SELECT $1, unnest($2::text[]), $3, $4`,
+          [id, scopes, now, amount.toString()],
         );
         return { reserved: true };
       });
@@ -542,13 +546,19 @@ export class PostgresSpendStore implements SpendStore {
     }
   }
 
+  /** One statement, so the scope rows' copy of the amount never differs from the reservation's. */
   async commit(id: string, feeCharged: bigint): Promise<boolean> {
     assertStroops(feeCharged, "feeCharged");
-    const { rowCount } = await this.pool.query(
-      "UPDATE spend_reservations SET amount = $2, state = 'committed' WHERE id = $1",
+    const { rows } = await this.pool.query<{ matched: boolean }>(
+      `WITH r AS (
+         UPDATE spend_reservations SET amount = $2, state = 'committed' WHERE id = $1 RETURNING id
+       ), s AS (
+         UPDATE spend_reservation_scopes rs SET amount = $2 FROM r WHERE rs.id = r.id
+       )
+       SELECT EXISTS (SELECT 1 FROM r) AS matched`,
       [id, feeCharged.toString()],
     );
-    return rowCount === 1;
+    return rows[0]!.matched;
   }
 
   /** The delete cascades to the reservation's scopes. */
