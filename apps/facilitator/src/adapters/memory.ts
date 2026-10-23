@@ -173,7 +173,7 @@ export class MemoryCatalogStore implements CatalogStore {
 }
 
 export class MemoryRateLimitStore implements RateLimitStore {
-  // ponytail: one entry per key, never pruned; add a sweep if a long-lived process sees many IPs.
+  // One entry per key; the pruner deletes ended windows.
   private readonly windows = new Map<string, RateLimitHit>();
 
   async hit(key: string, windowMs: number, now: number): Promise<RateLimitHit> {
@@ -209,9 +209,8 @@ interface Reservation {
 }
 
 export class MemorySpendStore implements SpendStore {
-  // ponytail: reservations are never pruned, so memory and each `sum` scan grow with the process's
-  // settlements. Fine for tests and dev runs (deployments use the PostgreSQL stores); prune past the
-  // longest window if a memory store ever runs for long.
+  // `sum` scans every reservation, the pruned ones gone: fine for tests and dev runs (deployments
+  // use the PostgreSQL stores).
   private readonly reservations = new Map<string, Reservation>();
   private readonly failures = new Map<SpendScope, number>();
   private readonly breakers = new Map<SpendScope, number>();
