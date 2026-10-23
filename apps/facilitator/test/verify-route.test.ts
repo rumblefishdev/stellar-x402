@@ -164,6 +164,31 @@ describe("POST /verify", () => {
     expect(verify).toHaveBeenCalledTimes(1);
   });
 
+  it("answers 400 for a NUL or a lone surrogate in any string or key, without verifying", async () => {
+    for (const text of ["a\u0000b", "a\ud800b"]) {
+      const bodies = [
+        { ...request, paymentRequirements: { ...requirements, payTo: text } },
+        { ...request, paymentPayload: { ...paymentPayload, extensions: { [text]: 1 } } },
+      ];
+      for (const body of bodies) {
+        const response = await post(body);
+        expect([response.status, await response.json()]).toEqual([400, { error: "bad_request" }]);
+      }
+    }
+    expect(verify).not.toHaveBeenCalled();
+  });
+
+  it("sends no CORS headers", async () => {
+    verify.mockResolvedValueOnce({ isValid: true, payer: "GPAYER" });
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://other.example" },
+      body: JSON.stringify(request),
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
   it("answers 500 and logs the error when verification throws", async () => {
     verify.mockRejectedValueOnce(new Error("rpc down"));
     const response = await post(request);

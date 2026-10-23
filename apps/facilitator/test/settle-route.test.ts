@@ -199,6 +199,27 @@ describe("POST /settle", () => {
     expect(lines.join("")).toContain("extension_responses_failed");
   });
 
+  it("answers 400 for a NUL or a lone surrogate in any string or key, without settling", async () => {
+    // PostgreSQL refuses a NUL in text and jsonb, and jsonb a lone surrogate: a 500 before money
+    // moves, instead of the client's 400.
+    for (const text of ["a\u0000b", "a\ud800b"]) {
+      const bodies = [
+        { ...request, paymentRequirements: { ...requirements, payTo: text } },
+        { ...request, paymentPayload: { ...paymentPayload, extensions: { note: text } } },
+        { ...request, paymentPayload: { ...paymentPayload, extensions: { [text]: 1 } } },
+      ];
+      for (const body of bodies) {
+        const response = await post(body);
+        expect([response.status, await response.json()]).toEqual([400, { error: "bad_request" }]);
+      }
+    }
+    expect(settle).not.toHaveBeenCalled();
+    // A pair of surrogates is one character, and well formed.
+    settle.mockResolvedValueOnce({ response: success, record });
+    const emoji = { ...paymentPayload, extensions: { note: "\ud83d\ude00" } };
+    expect((await post({ ...request, paymentPayload: emoji })).status).toBe(200);
+  });
+
   it("answers 400 for a bad body, without settling", async () => {
     const response = await post({ ...request, x402Version: 1 });
     expect([response.status, await response.json()]).toEqual([400, { error: "bad_request" }]);

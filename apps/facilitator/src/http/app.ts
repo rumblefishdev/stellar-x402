@@ -39,14 +39,28 @@ const notImplemented: RequestHandler = (_req, res) => {
  */
 export const MAX_BODY_DEPTH = 256;
 
-/** Whether `value` nests deeper than `max` arrays and objects, counted without recursion. */
-function nestsDeeper(value: unknown, max: number): boolean {
+/**
+ * A NUL, or a lone UTF-16 surrogate (`\p{Cs}` matches only an unpaired one under the `u` flag).
+ * PostgreSQL refuses a NUL in `text` and `jsonb`, and `jsonb` a lone surrogate, so either would
+ * fail the settlement's store write with a 500.
+ */
+const UNSTORABLE_TEXT = /[\0\p{Cs}]/u;
+
+/**
+ * Whether `value` nests deeper than `max` arrays and objects, or holds a string or key matching
+ * {@link UNSTORABLE_TEXT}; walked without recursion.
+ */
+function refusedBody(value: unknown, max: number): boolean {
   const stack: [unknown, number][] = [[value, 0]];
   while (stack.length > 0) {
     const [item, depth] = stack.pop()!;
+    if (typeof item === "string" && UNSTORABLE_TEXT.test(item)) return true;
     if (item === null || typeof item !== "object") continue;
     if (depth >= max) return true;
-    for (const child of Object.values(item)) stack.push([child, depth + 1]);
+    for (const [key, child] of Object.entries(item)) {
+      if (UNSTORABLE_TEXT.test(key)) return true;
+      stack.push([child, depth + 1]);
+    }
   }
   return false;
 }
@@ -57,11 +71,12 @@ function nestsDeeper(value: unknown, max: number): boolean {
  *
  * The schema takes any non-empty `amount`, and upstream's `BigInt(amount)` throws on anything but
  * an integer, which it reports as `unexpected_verify_error`: our 500. So `amount` must be digits.
- * A body nested deeper than {@link MAX_BODY_DEPTH} is a 400 too, before anything recurses on it.
+ * A body nested deeper than {@link MAX_BODY_DEPTH} is a 400 too, before anything recurses on it,
+ * and so is a NUL or a lone surrogate anywhere in it.
  */
 export function parsePaymentRequest(body: unknown): VerifyRequest | undefined {
   if (typeof body !== "object" || body === null) return undefined;
-  if (nestsDeeper(body, MAX_BODY_DEPTH)) return undefined;
+  if (refusedBody(body, MAX_BODY_DEPTH)) return undefined;
   const { x402Version, paymentPayload, paymentRequirements } = body as Record<string, unknown>;
   const requirements = PaymentRequirementsV2Schema.safeParse(paymentRequirements);
   const valid =
