@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import type { RequestHandler } from "express";
 import { ipKeyGenerator } from "express-rate-limit";
 import type { Logger } from "../logger.js";
@@ -9,7 +10,7 @@ export interface RateLimit {
   /** Requests per window and client. */
   limit: number;
   windowMs: number;
-  /** The header that carries the client's IP, lower case; unset, the socket address. */
+  /** The header that carries the client's IP; unset, the socket address. */
   clientIpHeader?: string;
   store: RateLimitStore;
   logger: Logger;
@@ -36,9 +37,14 @@ export function rateLimit({
 
   return async (req, res, next) => {
     const ip = clientIpHeader === undefined ? req.socket.remoteAddress : req.get(clientIpHeader);
-    if (!ip) {
-      // Only the proxy reaches the service, and it sets the header on every request.
-      logger.error("client_ip_missing", { route, header: clientIpHeader });
+    if (!ip || isIP(ip) === 0) {
+      // Only the proxy reaches the service, and it sets the header to one address on every
+      // request. Anything else never reaches the store; the value is the caller's, so it isn't
+      // logged.
+      logger.error(ip ? "client_ip_invalid" : "client_ip_missing", {
+        route,
+        header: clientIpHeader,
+      });
       res.status(500).json({ error: "internal_error" });
       return;
     }
@@ -54,9 +60,11 @@ export function rateLimit({
         return;
       }
       resetAt = hit.resetAt;
+      // Requests already in flight find the budget spent too; only the first one logs.
+      const logged = (blocked.get(client) ?? 0) > now;
       for (const [key, end] of blocked) if (end <= now) blocked.delete(key);
       blocked.set(client, resetAt);
-      logger.warn("rate_limited", { route, client, limit, windowMs });
+      if (!logged) logger.warn("rate_limited", { route, client, limit, windowMs });
     }
     res.setHeader("Retry-After", String(Math.max(1, Math.ceil((resetAt - now) / 1000))));
     res.status(429).json({ error: "too_many_requests" });

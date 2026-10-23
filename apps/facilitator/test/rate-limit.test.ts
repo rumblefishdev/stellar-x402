@@ -122,6 +122,23 @@ describe("the rate limiter", () => {
     );
   });
 
+  it("answers 500 without a store hit when the header holds anything but one address", async () => {
+    const { stores, hit } = spiedStores();
+    const { lines, post } = await serve({ CLIENT_IP_HEADER: "cf-connecting-ip" }, stores);
+    // A header sent twice arrives joined; a value this long wouldn't fit the store's key index.
+    for (const value of ["203.0.113.7, 203.0.113.8", "a".repeat(8_000), "localhost"]) {
+      const response = await post("/verify", { "cf-connecting-ip": value });
+      expect([response.status, await response.json()]).toEqual([500, { error: "internal_error" }]);
+    }
+    expect(hit).not.toHaveBeenCalled();
+    const invalid = lines
+      .map((line) => JSON.parse(line))
+      .filter((e) => e.event === "client_ip_invalid");
+    expect(invalid).toHaveLength(3);
+    // The value is the caller's, so the log never carries it.
+    expect(lines.join("")).not.toContain("aaaa");
+  });
+
   it("answers 500 and logs the cause when the store fails", async () => {
     const failing: RateLimitStore = {
       hit: async () => {
@@ -151,6 +168,27 @@ describe("the rate limiter", () => {
     expect(limited).toEqual([
       expect.objectContaining({ route: "verify", client: "203.0.113.7", limit: 2 }),
     ]);
+  });
+
+  it("logs one rate_limited line for a burst of requests already in flight", async () => {
+    // A store that answers after 20 ms, as a database does, so every request is in flight at once.
+    const memory = new MemoryRateLimitStore();
+    const slow: RateLimitStore = {
+      hit: async (...args) => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return memory.hit(...args);
+      },
+    };
+    const { lines, post } = await serve(
+      { CLIENT_IP_HEADER: "cf-connecting-ip" },
+      { ...memoryStores(), rateLimits: slow },
+    );
+    const burst = await Promise.all(
+      Array.from({ length: 20 }, () => post("/verify", { "cf-connecting-ip": "203.0.113.7" })),
+    );
+    expect(burst.filter((response) => response.status === 429)).toHaveLength(18);
+    const limited = lines.map((line) => JSON.parse(line)).filter((e) => e.event === "rate_limited");
+    expect(limited).toHaveLength(1);
   });
 
   it("hands the store the route, the client and the configured window", async () => {
