@@ -60,7 +60,10 @@ if (stellarSigners.length === 0) {
 // traces print it (macOS links /var to /private/var).
 const checkout = realpathSync(mkdtempSync(join(tmpdir(), "x402-gate-")));
 process.on("exit", () => rmSync(checkout, { recursive: true, force: true }));
+// Node exits on these signals without emitting "exit"; exiting here runs the cleanup above.
 process.once("SIGINT", () => process.exit(130));
+process.once("SIGTERM", () => process.exit(143));
+process.once("SIGHUP", () => process.exit(129));
 prepare(checkout);
 
 // The proxy goes in under its config's name, which is what --facilitators matches.
