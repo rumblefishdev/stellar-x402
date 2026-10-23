@@ -44,13 +44,15 @@ facilitator roles, so we don't contribute new fixtures.
      `pnpm test --testnet --families=stellar --schemes=exact --facilitators=stellar-x402 --output-json=<file>`;
   5. fails unless every scenario passed with its own transaction hash, and Stellar RPC shows each
      hash as a successful `transfer` of the route's price from the buyer to the seller, its fee
-     paid by a signer the facilitator lists in `/supported`, made after the run started. The suite
+     paid by a signer the facilitator lists in `/supported`, in a ledger after the last one the
+     same RPC had closed before the suite started (ledgers, not the local clock). The suite
      itself exits 0 when no scenario matched, its axios client can pass without a hash, and it
      never reads the chain, so a replayed hash would pass it. The signer check trusts the
      facilitator's own `/supported`: a facilitator that relays to another and lists that one's
      fee payer as its signer still passes.
-- **The evidence is committed.** Results, including the pinned upstream commit and the settled
-  transaction hashes, go into `conformance/results/`.
+- **The evidence is committed.** Each run is a folder in `conformance/results/`: the suite's own
+  JSON unchanged (`suite.json`), and the gate's verdict on it (`gate.json`) with the pinned upstream
+  commit, the settled transaction hashes as the chain shows them, and `suite.json`'s SHA-256.
 - **Nothing is pushed** to `x402-foundation/x402` or to our fork of it during M1.
 
 ## Rationale
