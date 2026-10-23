@@ -2,10 +2,10 @@
 id: "0028"
 title: "Gate harness: external proxy and runner"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0009"]
-related_tasks: ["0012", "0029", "0032"]
+related_tasks: ["0012", "0029", "0032", "0059"]
 tags: [conformance, e2e, priority-high, effort-medium, platform]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -21,6 +21,14 @@ history:
     note: >
       Started after a recon of the upstream harness at 10b2d06 and a grilling round: full Stellar
       matrix instead of --min, bazaar declared but not checked in T1, local script only.
+  - date: "2026-10-23"
+    status: completed
+    who: karolkow
+    note: >
+      PR #47 merged 2026-10-20. `pnpm conformance:e2e` runs the unmodified x402 e2e suite at
+      10b2d06 against any facilitator URL through an external proxy, judges the suite's JSON and
+      checks every hash on chain. 32 unit tests; gate passed 18 of 18 on the final code (Vellar).
+      Follow-ups in 0059.
 ---
 
 # Gate harness: external proxy and runner
@@ -157,6 +165,24 @@ harness, not Vellar.
 | 16 | http | fetch | next | upfront | `63c779a2b09f6d4e4ec9ae54b263975c5ed1600da18e70ae6dec215ba6e3ef23` |
 | 17 | mcp | mcp | mcp | authorization | `53809c8792cfc9c5088fbd05445fb4e8a724ce8784a8de0ae8777612f0086fb1` |
 | 18 | mcp | mcp | mcp | upfront | `370b2556a13f5b00c63f6aa48f73c3ba04d1a0a7dc376e177a493bfa22697c3d` |
+
+## Issues Encountered
+
+- **x402.org's `/settle` is unreliable**: on 2026-10-16 and 2026-10-19 it answered a Cloudflare 504
+  page or "Settlement failed" for 14 of 108 payments, and most of those payments landed on chain
+  anyway. The gate failed those runs, as it should; the final run used Vellar.
+- **StrykerJS 10 ran 0 tests per mutant** under vitest 5, so mutants were hand-written (30 of 30
+  killed before the review fixes).
+- **A port flake** after binding the proxy to `localhost` (IPv6 first on macOS): the proxy test
+  picked a free port on 127.0.0.1; fixed by picking it on the proxy's own host.
+
+## Future Work
+
+- 0059: keep the suite's raw JSON apart from the gate's verdict (a ready commit is on the local
+  branch `lore-0028-raw-suite-result`), handle SIGTERM/SIGHUP so the ~6 GB checkout never stays
+  behind, and check "made in this run" by ledger sequence instead of the local clock.
+- 0029: decide whether to bump the pin before the run of record (upstream's Stellar mechanism
+  changed after 10b2d06).
 
 ## Not yet decided
 
