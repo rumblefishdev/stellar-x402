@@ -5,8 +5,40 @@
 //! Allowances follow SEP-41: `approve` overwrites, carries an expiration ledger, and an
 //! expired allowance reads as 0. `mint` is unauthenticated test scaffolding: anyone can mint, so
 //! never deploy it outside testnet.
+//!
+//! Events follow SEP-41 too: `transfer` with topics `[from, to]` and the amount as data, `approve`
+//! with `[from, spender]` and `[amount, expiration_ledger]`, and `mint` with `[to]` and the
+//! amount. The Stellar Asset Contract adds the SEP-11 asset as a fourth topic; a non-SAC token has
+//! none. Upstream's `exact` verifier reads the simulated `transfer` event (its first three topics
+//! and the bare amount), so a token without it can't be paid in (0021).
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String};
+use soroban_sdk::{contract, contractevent, contractimpl, contracttype, Address, Env, String};
+
+#[contractevent(topics = ["transfer"], data_format = "single-value")]
+struct Transfer {
+    #[topic]
+    from: Address,
+    #[topic]
+    to: Address,
+    amount: i128,
+}
+
+#[contractevent(topics = ["approve"], data_format = "vec")]
+struct Approve {
+    #[topic]
+    from: Address,
+    #[topic]
+    spender: Address,
+    amount: i128,
+    expiration_ledger: u32,
+}
+
+#[contractevent(topics = ["mint"], data_format = "single-value")]
+struct Mint {
+    #[topic]
+    to: Address,
+    amount: i128,
+}
 
 #[contracttype]
 #[derive(Clone)]
@@ -52,12 +84,19 @@ fn move_balance(env: &Env, from: &Address, to: &Address, amount: i128) {
     assert!(from_balance >= amount, "insufficient balance");
     write_balance(env, from, from_balance - amount);
     write_balance(env, to, read_balance(env, to) + amount);
+    Transfer {
+        from: from.clone(),
+        to: to.clone(),
+        amount,
+    }
+    .publish(env);
 }
 
 #[contractimpl]
 impl TestToken {
     pub fn mint(env: Env, to: Address, amount: i128) {
         write_balance(&env, &to, read_balance(&env, &to) + amount);
+        Mint { to, amount }.publish(&env);
     }
 
     pub fn balance(env: Env, id: Address) -> i128 {
@@ -82,7 +121,7 @@ impl TestToken {
             amount == 0 || expiration_ledger >= seq,
             "expiration_ledger is in the past"
         );
-        let key = TokenKey::Allowance(from, spender);
+        let key = TokenKey::Allowance(from.clone(), spender.clone());
         env.storage().temporary().set(
             &key,
             &AllowanceValue {
@@ -98,6 +137,13 @@ impl TestToken {
                     .extend_ttl(&key, live_for, live_for);
             }
         }
+        Approve {
+            from,
+            spender,
+            amount,
+            expiration_ledger,
+        }
+        .publish(&env);
     }
 
     pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
@@ -128,5 +174,80 @@ impl TestToken {
 
     pub fn symbol(env: Env) -> String {
         String::from_str(&env, "TEST")
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use soroban_sdk::{
+        testutils::Address as _, testutils::Events as _, vec, IntoVal, Symbol, Val, Vec,
+    };
+
+    /// The event as upstream's `exact` verifier reads it: literal topics and data, not this
+    /// crate's own structs, so a change to their shape fails here.
+    fn event(
+        env: &Env,
+        token: &Address,
+        topics: Vec<Val>,
+        data: Val,
+    ) -> Vec<(Address, Vec<Val>, Val)> {
+        vec![env, (token.clone(), topics, data)]
+    }
+
+    #[test]
+    fn publishes_sep41_events_for_mint_approve_and_transfers() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let token = env.register(TestToken, ());
+        let client = TestTokenClient::new(&env, &token);
+        let (from, spender, to) = (
+            Address::generate(&env),
+            Address::generate(&env),
+            Address::generate(&env),
+        );
+        let amount = |n: i128| -> Val { n.into_val(&env) };
+
+        client.mint(&from, &100);
+        assert_eq!(
+            env.events().all().filter_by_contract(&token),
+            event(
+                &env,
+                &token,
+                (Symbol::new(&env, "mint"), from.clone()).into_val(&env),
+                amount(100)
+            )
+        );
+        client.transfer(&from, &to, &30);
+        assert_eq!(
+            env.events().all().filter_by_contract(&token),
+            event(
+                &env,
+                &token,
+                (Symbol::new(&env, "transfer"), from.clone(), to.clone()).into_val(&env),
+                amount(30)
+            )
+        );
+        client.approve(&from, &spender, &50, &1_000);
+        assert_eq!(
+            env.events().all().filter_by_contract(&token),
+            event(
+                &env,
+                &token,
+                (Symbol::new(&env, "approve"), from.clone(), spender.clone()).into_val(&env),
+                vec![&env, amount(50), 1_000u32.into_val(&env)].into_val(&env)
+            )
+        );
+        // `transfer_from` moves `from`'s tokens, so its event names `from`, not the spender.
+        client.transfer_from(&spender, &from, &to, &20);
+        assert_eq!(
+            env.events().all().filter_by_contract(&token),
+            event(
+                &env,
+                &token,
+                (Symbol::new(&env, "transfer"), from, to).into_val(&env),
+                amount(20)
+            )
+        );
     }
 }
