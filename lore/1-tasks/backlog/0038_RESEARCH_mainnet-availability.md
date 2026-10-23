@@ -29,6 +29,10 @@ history:
     status: backlog
     who: stkrolikiewicz
     note: "The Hetzner Cloud VM is rejected for mainnet too (ADR 0011, Alternatives); it is no longer a question here."
+  - date: "2026-10-23"
+    status: backlog
+    who: stkrolikiewicz
+    note: "PR #24 round four: the Hetzner Cloud VM is a mainnet question here again, as Oskar's condition for the shared server; the rejection is only proposed (0039 decision 41)."
 ---
 
 # Decide the mainnet availability setup on the Hetzner server
@@ -66,6 +70,10 @@ launch, this task decides how much of that to remove.
     by default, so until then they can;
   - a deploy user per network;
   - the mainnet tunnel (`x402-facilitator.sorobanscan.com`) in `soroban-infrastructure`;
+  - a Hetzner Cloud VM of our own instead of the shared server: ADR 0011's Alternatives list
+    what it would remove and what it costs (about €12–20 a month on testnet). Testnet accepts the
+    shared server knowingly; mainnet decides here, weighing the risk rows most (root reaching
+    the OpenBao key, testnet code and runners on the production server).
 - Related tasks: 0014, 0025, 0026, 0027, 0039.
 
 ## Implementation

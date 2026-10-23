@@ -47,6 +47,10 @@ history:
     status: backlog
     who: stkrolikiewicz
     note: "An Ansible playbook provisions x402's parts of the server, confirmed with Marek; deploys stay a digest over SSH (ADR 0011)."
+  - date: "2026-10-23"
+    status: backlog
+    who: stkrolikiewicz
+    note: "PR #24 round four: Compose exit codes and a start limit, the tunnel token for nonroot, 7844 over UDP and TCP, the zone settings that stay off, token rotation in the runbook; 0062 named as the tunnel's prerequisite."
 ---
 
 # Public testnet deployment
@@ -95,7 +99,8 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     so it keeps forwarding while the facilitator drains; `x402@testnet` runs after it. The unit
     decrypts the tunnel token, an encrypted systemd credential, and `cloudflared` reads it from a
     file (`--token-file`; check that the pinned version has it), never from `environment:`. The
-    server must allow outbound connections on port 7844.
+    token file is mode 0400 for `nonroot` (uid 65532; check it on the pinned digest). The
+    server must allow outbound connections on port 7844, UDP and TCP.
   - OpenBao (ADR 0013): one container for both networks in `/srv/x402/openbao/`, pinned by
     digest, memory limit 256 MiB and half a CPU, a listener socket per network in its own volume,
     its own unit `x402-openbao.service` for the unseal credential. Its snapshots and restore
@@ -139,12 +144,14 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     doesn't cut it;
   - `x402@testnet.service` decrypts the credentials to `/run/x402/testnet/` (tmpfs, 0700) and
     puts `digest.good` into `digest` unless the deploy's marker is there, then runs Compose in
-    the foreground for the facilitator only (`--no-deps`), without pulling or migrating, with
-    `Restart=on-failure` and `TimeoutStartSec` 60 s; `ExecStop` stops it. It requires and runs
+    the foreground for the facilitator only (`--no-deps --exit-code-from facilitator-testnet`,
+    since a plain `up` exits 0), without pulling or migrating, with `Restart=on-failure`,
+    `RestartSec` 5 s, a start limit of 5 in 300 s and `TimeoutStartSec` 60 s; `ExecStop` stops
+    it. It requires and runs
     after `x402-db@testnet.service`, which runs Postgres, decrypts its own credentials and has
-    `TimeoutStopSec` 150 s, and it wants and runs after `x402-openbao.service`. All our units are
-    `PartOf=docker.service` and run after it, the facilitator's with `TimeoutStopSec` 200 s, and
-    they are enabled at boot;
+    `TimeoutStopSec` 150 s, and it wants and runs after `x402-openbao.service`. All our units run
+    Compose the same way, are `PartOf=docker.service` and run after it, the facilitator's with
+    `TimeoutStopSec` 200 s, and they are enabled at boot;
   - it runs on a push to `deploy/testnet` unless only `lore/**`, `docs/**` or Markdown changed,
     and by hand, in a `concurrency` group with `cancel-in-progress: false`;
   - actions are pinned by commit SHA, with minimal token permissions, and the SSH key is an
@@ -160,7 +167,8 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     (`systemd-creds`), decrypted to `/run/x402/testnet/` and mounted as Compose `file:` secrets,
     never `environment:`. Each file is mode 0400, owned by the user that reads it: the database
     URL, `RPC_URLS` and the AppRole files by `node` (uid 1000), the Postgres password by
-    `postgres` (uid 999);
+    `postgres` (uid 999), and the tunnel token by `nonroot` (uid 65532). Each unit decrypts
+    the files its container reads;
   - the config reads `DATABASE_URL_FILE`, `RPC_URLS_FILE` and the OpenBao AppRole files when
     they are set, and the plain variables otherwise, for local runs;
   - no TLS to `postgres-testnet` on the internal network; `scram-sha-256` passwords.
@@ -173,15 +181,18 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   Manager. Decide how the database reaches the box: a second network for Postgres, or pgBackRest
   on the host. The restore drill adds `pgbackrest check` and `pgbackrest verify`.
 - From 0039: the public URL is `x402-facilitator-testnet.sorobanscan.com` through Cloudflare
-  Tunnel (ADR 0011). Prerequisites: the `sorobanscan.com` zone on Cloudflare, and the testnet
+  Tunnel (ADR 0011). Prerequisites, set up by task 0062: the `sorobanscan.com` zone on
+  Cloudflare, and the testnet
   tunnel with its routing (the hostname to `http://facilitator-testnet:<port>`, anything else
   404) and DNS record, both Terraform in `soroban-infrastructure`'s `cloudflare/`
-  (stkrolikiewicz applies it for now). Nothing goes into the ClickHouse project's repo.
+  (stkrolikiewicz applies it for now). Bot Fight Mode, Browser Integrity Check and "I'm Under
+  Attack" stay off on the zone. Nothing goes into the ClickHouse project's repo.
 - From 0039: `GET /health` answers 200 and reports `ready` in its body.
 - From 0039, the runbook: running the playbook from a reviewed commit, deploy, rollback
   (automatic on a failed deploy; by hand, redeploy an earlier digest), long migrations outside
   the deploy, reboots, fetching the tunnel token from Cloudflare (dashboard, API or
-  `terraform output`) into its systemd credential, renewing the Roles Anywhere certificate, key
+  `terraform output`) into its systemd credential, rotating that token and checking the
+  tunnel's connector count, renewing the Roles Anywhere certificate, key
   rotation as an on-chain signer change, and restoring the service on another machine.
 - From 0013 ([ADR 0012](../../../docs/adr/0012-facilitator-state-store.md)), the database, on the
   server (ADR 0011):

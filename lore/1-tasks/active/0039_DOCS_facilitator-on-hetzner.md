@@ -191,10 +191,24 @@ From the rest of round three (Stan, 2026-10-23):
 39. **The uptime alarm sits above the worst successful deploy;** a failed one should alarm.
 40. **The database volume isn't encrypted at rest, and nothing relies on it:** the data is mostly
     public on chain, the secrets are encrypted on their own, and LUKS would be an extra layer.
-41. **The Hetzner Cloud VM is rejected for mainnet too** (Stan, 2026-10-23), so 0038 no longer
-    asks it; ADR 0011's Alternatives say why the shared server is kept.
+41. **Proposed, not decided: the Hetzner Cloud VM rejected for mainnet too** (Stan,
+    2026-10-23). Oskar's round four keeps decision 20, his condition for the shared server, so
+    the VM stays an open mainnet question in 0038.
 42. **An Ansible playbook provisions x402's parts of the server** (Marek confirmed on Slack,
     2026-10-23): the user, directories, units and timers, compose files, `deploy.sh`, the deploy
     user's `sudo` rule and forced command, `cloudflared`, pgBackRest and the CloudWatch agent, run
     by an admin from a reviewed commit. Per-merge deploys stay a digest over SSH, since Ansible
     from CI would need effectively root on the production ClickHouse server.
+
+From Oskar's round four (2026-10-23):
+
+43. **Compose runs with `--exit-code-from`,** since a plain `up` exits 0 when its container dies,
+    and the units get `RestartSec` 5 s and a start limit of 5 in 300 s, so a crash loop ends in
+    `failed`.
+44. **With the RPCs down the facilitator never listens** (0020's startup checks), so the unit
+    crash-loops and the readiness alarm treats missing data as breaching.
+45. **Each unit decrypts the files its container reads,** and the tunnel token is mode 0400 for
+    `cloudflared`'s `nonroot` (uid 65532).
+46. **The tunnel token is in Terraform state too,** so the runbook covers rotating it and checking
+    the connector count; port 7844 is open for UDP and TCP; Bot Fight Mode, Browser Integrity
+    Check and "I'm Under Attack" stay off on the zone; 0062 is the tunnel's prerequisite.

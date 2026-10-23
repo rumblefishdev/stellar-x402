@@ -14,8 +14,8 @@
   the facilitator is reached through Cloudflare Tunnel on `sorobanscan.com` instead of the
   server's Caddy. 2026-10-23: the third round's last threads (units restart with Docker, the
   deploy lock, `digest.good`, the units' timeouts, secret file owners, encryption at rest), and
-  the Hetzner Cloud VM rejected for mainnet too; an Ansible playbook provisions x402's parts of
-  the server.
+  an Ansible playbook that provisions x402's parts of the server. Round four: Compose's exit
+  code, a crash loop at startup, the tunnel token's owner, and the VM left open for mainnet.
 
 ## Context
 
@@ -88,8 +88,11 @@ to Cloudflare on the Free plan.
     the other network's facilitator. OpenBao is reached over a unix socket per network
     (ADR 0013), not a network.
 - **systemd restarts a facilitator that crashes, not Docker.** Its unit runs Compose in the
-  foreground with `Restart=on-failure`, so the unit ends when the container does and systemd
-  starts it again. The containers have no restart policy, so nothing starts at boot except
+  foreground with `--exit-code-from <service>`, since a plain `docker compose up` exits 0
+  whatever the container's code, and with `Restart=on-failure`, so the unit ends with the
+  container's code and systemd starts it again after `RestartSec` 5 s. A start limit of 5 in
+  300 s (`StartLimitBurst`, `StartLimitIntervalSec`) stops a crash loop in `failed`, which the
+  alarms see. The containers have no restart policy, so nothing starts at boot except
   through the units (below). Neither acts on `unhealthy`, so a hung one needs a watcher:
   - a systemd timer on the host runs every 30 s and restarts the `facilitator-<network>`
     container when it is `unhealthy`, with a 10 s stop timeout, since a hung process can't drain
@@ -230,9 +233,12 @@ One request or one stop must never outlast the layer in front of it:
     than this one and the previous good one, since the disk is shared. If the restart fails or
     `ready` doesn't come, it puts `digest.good` back into `digest`, restarts again and fails.
   - The first deploy has no `digest.good`, so it fails into the alarms. When `ready` fails
-    because of a dependency (OpenBao sealed, the RPCs down), the previous image isn't ready
-    either: the deploy fails, the facilitator stays down, and the not-ready and uptime alarms
-    fire.
+    because of a dependency, the previous image does no better: the deploy fails and the
+    facilitator stays down. With the RPCs down it never even listens: since 0020, `main()`
+    checks the RPC networks and the channels before it starts the HTTP server and exits with
+    `startup_failed`, so the unit crash-loops until its start limit leaves it `failed`.
+    `/health` then gives no data at all, so the readiness alarm treats missing data as
+    breaching (0027), and the uptime alarm fires too.
   - Migrating before the stop and that rollback are both safe because `migrate()` applies all
     pending migrations in one transaction, so a failed run leaves the schema as it was, and
     expand/contract keeps the older image working on a schema that did move forward. If
@@ -251,7 +257,8 @@ One request or one stop must never outlast the layer in front of it:
     script, since it starts first at boot, and its `TimeoutStopSec` of 150 s is above Postgres's
     120 s grace. The facilitator's unit requires it and runs after it, so at a reboot the
     facilitator drains while the database is still up. Both are enabled at boot.
-  - **Every unit that runs a container is `PartOf=docker.service` and runs after it.** A
+  - **Every unit that runs a container is `PartOf=docker.service`, runs after it, and runs
+    Compose the same way** (`--exit-code-from`, `Restart=on-failure`, the start limit). A
     Docker restart, such as a `docker-ce` upgrade, first stops them through their own
     `ExecStop`, so the facilitator drains with its full grace instead of `dockerd`'s 15 s, and
     starts them again afterwards.
@@ -300,15 +307,22 @@ One request or one stop must never outlast the layer in front of it:
   `x402-facilitator-testnet.sorobanscan.com` and `x402-facilitator.sorobanscan.com`, one label
   under the zone, since the Free plan's certificate covers only one level of subdomain.
   - Each network has its own tunnel. Its `cloudflared` opens outbound connections to Cloudflare
-    (port 7844) and forwards its hostname to `http://facilitator-<network>:<port>`; anything
-    else gets 404. The server opens no port for it.
+    (port 7844, UDP for QUIC and TCP) and forwards its hostname to
+    `http://facilitator-<network>:<port>`; anything else gets 404. The server opens no port for
+    it.
   - HTTPS ends at Cloudflare, so Cloudflare sees the requests in plain text. They carry signed
     payments, never keys.
   - The tunnel, its routing and the DNS record are Terraform in the `soroban-infrastructure`
     repo's `cloudflare/`, beside the `sorobanscan.com` zone, so routing changes are reviewed
-    there. The tunnel token is kept nowhere else: an operator fetches it from Cloudflare (the
-    dashboard, the API or `terraform output`) into an encrypted systemd credential (runbook),
-    also when the server is restored elsewhere.
+    there. Task 0062 sets up the zone and the testnet tunnel, the tunnel's prerequisite.
+  - The tunnel token lives only in Cloudflare and that repo's Terraform state. An operator
+    fetches it (the dashboard, the API or `terraform output`) into an encrypted systemd
+    credential (runbook), also when the server is restored elsewhere. Anyone with it can run a
+    second connector and receive part of the traffic, so the runbook covers rotating it and
+    checking the tunnel's connector count.
+  - Bot Fight Mode, Browser Integrity Check and "I'm Under Attack" stay off on the zone: they
+    apply zone-wide and would challenge sellers' server-to-server requests and the uptime
+    check.
   - Caddy and the ClickHouse project's repo are not involved.
 - **The client IP is `CF-Connecting-IP`** (AD-11), which Cloudflare sets on every request. Only
   `cloudflared` reaches the facilitator, so a client can't forge it, and `X-Forwarded-For` is
@@ -345,15 +359,19 @@ One request or one stop must never outlast the layer in front of it:
   signer instead.
 - **Other secrets are encrypted systemd credentials,** as in ADR 0013: the database password, an
   RPC URL that carries an API key, and the tunnel token.
-  - `systemd-creds` keeps them encrypted on disk with the host key. Each network's units decrypt
-    their own, in `x402@`'s `ExecStartPre` and in the deploy unit before it migrates, to
-    `/run/x402/<network>/` (tmpfs, mode 0700), and Compose mounts them as `file:` secrets, so
-    they are plain only in memory. Outside swarm those are bind mounts that keep the host's
-    owner and mode, so each file is written mode 0400 for the user of the container that reads
-    it: `node` (uid 1000) for the facilitator's, `postgres` (uid 999) for Postgres's password.
+  - `systemd-creds` keeps them encrypted on disk with the host key. Each unit decrypts the files
+    its container reads, with one shared script, to `/run/x402/<network>/` (tmpfs, mode
+    0700): `x402@` the facilitator's, `x402-db@` Postgres's password, `x402-tunnel@` the tunnel
+    token, and the deploy unit what the migration needs. Compose mounts them as `file:`
+    secrets, so they are plain only in memory. Outside swarm those are bind mounts that keep
+    the host's owner and mode, so each file is written mode 0400 for the user of the container
+    that reads it: `node` (uid 1000) for the facilitator's, `postgres` (uid 999) for
+    Postgres's password, and `nonroot` (uid 65532, checked on the pinned digest) for
+    `cloudflared`'s tunnel token.
     0026 lists them per file. OpenBao's unit (`x402-openbao.service`) does the same with its
     unseal credential.
-  - They stay there until a reboot, so Docker's crash restart and the watchdog still find them.
+  - They stay there until a reboot, so the unit's restart after a crash and the watchdog still
+    find them.
     At boot the unit writes them again before it starts anything.
   - The app reads them from files (`DATABASE_URL_FILE`, `RPC_URLS_FILE` and the AppRole files),
     a config change in 0026.
@@ -427,12 +445,12 @@ One request or one stop must never outlast the layer in front of it:
   `printf %s "$url" | sha256sum | cut -c1-8` matches it to a URL. The hash is unsalted: it keeps
   a long API key out of the logs, but anyone holding a log can confirm a guessed URL with few
   unknowns, such as a provider host named after the company, in seconds. We accept that: the logs
-  are ours, and an HMAC would need one more secret per deployment while key custody (0047) is
-  open. Upstream verify's failover logs
-  its switches with these names (0045). In an error message, the logger names a URL on an
+  are ours, and an HMAC would need one more secret per deployment. Upstream verify's failover
+  logs its switches with these names (0045). In an error message, the logger names a URL on an
   `RPC_URLS` entry the same way and reduces any other URL to its host; an entry's bare host, as
-  Node's network errors give it (`getaddrinfo ENOTFOUND <host>`), is named too. signer-pool's `FallbackRpc.fromUrls` still names endpoints by the full URL and logs no
-  switches (0049, 0027).
+  Node's network errors give it (`getaddrinfo ENOTFOUND <host>`), is named too. Since 0045,
+  `main()` names the shared `FallbackRpc`'s endpoints the same way and logs its switches
+  (`rpc_failover`).
 - **Metrics:** a metrics adapter (0027) writes CloudWatch Embedded Metric Format lines to stdout,
   which CloudWatch turns into metrics.
   - Namespace `x402-facilitator`.
@@ -505,9 +523,10 @@ One request or one stop must never outlast the layer in front of it:
   - What it costs: about €12–20 a month on testnet (CPX12 to CPX22 after Hetzner's 2026 price
     rises, from task 0047's `notes/R-openbao-on-hetzner.md`), more with mainnet, and the VM's
     system, Docker and proxy are ours to run.
-  - Not chosen, for testnet or mainnet (decided 2026-10-23): the shared server has the room,
-    limits contain the contention, and the coupling above is accepted knowingly. It stays the
-    first step if isolation becomes a concern.
+  - Not chosen for testnet: the shared server has the room, limits contain the contention, and
+    the coupling above is accepted knowingly. For mainnet it stays an open question (0038),
+    where the risk rows weigh most: root on that server reaching the OpenBao key, testnet code
+    on the production server, and runners that SSH into it.
 
 - **Fly.io, Render, Railway, Google Cloud Run, AWS App Runner, ECS Express Mode, Lightsail, EKS,
   Lambda.** Compared in task 0014: they overlap deploys, cap the drain too low, cost more, or run
@@ -557,7 +576,7 @@ One request or one stop must never outlast the layer in front of it:
     or port is a pull request there.
   - Cloudflare's Free plan has no uptime SLA, and an outage there takes the facilitator off the
     internet; the uptime alarm catches it. A paid plan is a mainnet question (0038).
-  - The server must allow outbound connections to Cloudflare on port 7844.
+  - The server must allow outbound connections to Cloudflare on port 7844, UDP and TCP.
 - **It is one physical machine.** A hardware fault takes the facilitator down until the server is
   repaired or the service is restored elsewhere from the off-server backups, which can take hours.
   Restoring elsewhere is a runbook step (0026) and a mainnet risk (0038).
@@ -615,7 +634,7 @@ One request or one stop must never outlast the layer in front of it:
 - Task 0014 notes (`0014_RESEARCH_facilitator-hosting/notes/`): the requirements, the platform
   research and the comparison behind the first version
 - Task 0039: the move to the Hetzner server
-- ADR 0013 (task 0047, in review): the facilitator key in OpenBao Transit
+- [ADR 0013](0013-facilitator-key-custody.md): the facilitator key in OpenBao Transit
 - [IAM Roles Anywhere](https://docs.aws.amazon.com/rolesanywhere/latest/userguide/introduction.html),
   [CloudWatch agent](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Install-CloudWatch-Agent.html),
   [Compose `stop_grace_period`](https://docs.docker.com/reference/compose-file/services/#stop_grace_period)
