@@ -17,8 +17,11 @@ export interface Expected {
   to: string;
   amount: bigint;
   signers: string[];
-  /** Unix seconds. */
-  notBefore: number;
+  /**
+   * The last ledger RPC had closed before the suite started, read from the same RPC: a settlement
+   * of this run is in a later one.
+   */
+  ledgerBeforeRun: number;
 }
 
 /** One transaction as the chain shows it, saved with the run. */
@@ -74,10 +77,8 @@ export function checkSettlement(settlement: Settlement, expected: Expected): str
   if (!expected.signers.includes(settlement.feePayer!)) {
     return `was paid for by ${settlement.feePayer}, not by a signer the facilitator lists (${expected.signers.join(", ")})`;
   }
-  if (settlement.createdAt! < expected.notBefore) {
-    const made = new Date(settlement.createdAt! * 1000).toISOString();
-    const started = new Date(expected.notBefore * 1000).toISOString();
-    return `was made at ${made}, before the run started at ${started}`;
+  if (settlement.ledger! <= expected.ledgerBeforeRun) {
+    return `is in ledger ${settlement.ledger}, not after ledger ${expected.ledgerBeforeRun} that closed before the run started`;
   }
   return undefined;
 }

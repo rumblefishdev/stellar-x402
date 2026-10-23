@@ -1,0 +1,387 @@
+{
+  "summary": {
+    "total": 18,
+    "passed": 18,
+    "failed": 0,
+    "networkMode": "testnet",
+    "durationMinutes": 4.9
+  },
+  "results": [
+    {
+      "testNumber": 1,
+      "client": "typescript/http/axios",
+      "server": "typescript/http/express",
+      "endpoint": "/exact/stellar",
+      "facilitator": "stellar-x402",
+      "protocolFamily": "stellar",
+      "scheme": "exact",
+      "assetTransferMethod": "n/a",
+      "paymentFlow": "authorization",
+      "transport": "http",
+      "version": "2",
+      "passed": true,
+      "transaction": "08b3989d5663dd554f1cee65336d47e8b5f20a0f7cde2af5259d65f62aee7ee8",
+      "network": "stellar:testnet"
+    },
+    {
+      "testNumber": 2,
+      "client": "typescript/http/axios",
+      "server": "typescript/http/express",
+      "endpoint": "/exact/stellar/upfront",
+      "facilitator": "stellar-x402",
+      "protocolFamily": "stellar",
+      "scheme": "exact",
+      "assetTransferMethod": "n/a",
+      "paymentFlow": "upfront",
+      "transport": "http",
+      "version": "2",
+      "passed": true,
+      "transaction": "a0055fcbded4f6616f7ae6dfc336420322aba829c04f584ef9577264a8a3423a",
+      "network": "stellar:testnet"
+    },
+    {
+      "testNumber": 3,
+      "client": "typescript/http/fetch",
+      "server": "typescript/http/express",
+      "endpoint": "/exact/stellar",
+      "facilitator": "stellar-x402",
+      "protocolFamily": "stellar",
+      "scheme": "exact",
+      "assetTransferMethod": "n/a",
+      "paymentFlow": "authorization",
+      "transport": "http",
+      "version": "2",
+      "passed": true,
+      "transaction": "e63cb9850ab8b3626543ae68fcacc3cd5aa4706db612b2c060b567b104d0c4e8",
+      "network": "stellar:testnet"
+    },
+    {
+      "testNumber": 4,
+      "client": "typescript/http/fetch",
+      "server": "typescript/http/express",
+      "endpoint": "/exact/stellar/upfront",
+      "facilitator": "stellar-x402",
+      "protocolFamily": "stellar",
+      "scheme": "exact",
+      "assetTransferMethod": "n/a",
+      "paymentFlow": "upfront",
+      "transport": "http",
+      "version": "2",
+      "passed": true,
+      "transaction": "8c9e9114f1f4046b44c35fcd4646a6be1c9f498cdc3e9024de7c79e20bf4d388",
+      "network": "stellar:testnet"
+    },
+    {
+      "testNumber": 5,
+      "client": "typescript/http/axios",
+      "server": "typescript/http/fastify",
+      "endpoint": "/exact/stellar",
+      "facilitator": "stellar-x402",
+      "protocolFamily": "stellar",
+      "scheme": "exact",
+      "assetTransferMethod": "n/a",
+      "paymentFlow": "authorization",
+      "transport": "http",
+      "version": "2",
+      "passed": true,
+      "transaction": "272dae0da17456943070226c7ee8eb10061b7abee6fea1341031ee8a40ad8baf",
+      "network": "stellar:testnet"
+    },
+    {
+      "testNumber": 6,
+      "client": "typescript/http/axios",
+      "server": "typescript/http/fastify",
+      "endpoint": "/exact/stellar/upfront",
+      "facilitator": "stellar-x402",
+      "protocolFamily": "stellar",
+      "scheme": "exact",
+      "assetTransferMethod": "n/a",
+      "paymentFlow": "upfront",
+      "transport": "http",
+      "version": "2",
+      "passed": true,
+      "transaction": "025f5dc99e5762db031e7eab71abb873b15af534d41742fb71f49d8a9895cdeb",
+      "network": "stellar:testnet"
+    },
+    {
+      "testNumber": 7,
+      "client": "typescript/http/fetch",
+      "server": "typescript/http/fastify",
+      "endpoint": "/exact/stellar",
+      "facilitator": "stellar-x402",
+      "protocolFamily": "stellar",
+      "scheme": "exact",
+      "assetTransferMethod": "n/a",
+      "paymentFlow": "authorization",
+      "transport": "http",
+      "version": "2",
+      "passed": true,
+      "transaction": "a75dc24016709aac90d0b16939251c671c6a2baac336ab9f7b5a9e7a4dc1ff3f",
+      "network": "stellar:testnet"
+    },
+    {
+      "testNumber": 8,
+      "client": "typescript/http/fetch",
+      "server": "typescript/http/fastify",
+      "endpoint": "/exact/stellar/upfront",
+      "facilitator": "stellar-x402",
+      "protocolFamily": "stellar",
+      "scheme": "exact",
+      "assetTransferMethod": "n/a",
+      "paymentFlow": "upfront",
+      "transport": "http",
+      "version": "2",
+      "passed": true,
+      "transaction": "19bf6fdf9baaeed4854b3924724c0e467dee9cecfcfa5950a2747d21cbc9191d",
+      "network": "stellar:testnet"
+    },
+    {
+      "testNumber": 9,
+      "client": "typescript/http/axios",
+      "server": "typescript/http/hono",
+      "endpoint": "/exact/stellar",
+      "facilitator": "stellar-x402",
+      "protocolFamily": "stellar",
+      "scheme": "exact",
+      "assetTransferMethod": "n/a",
+      "paymentFlow": "authorization",
+      "transport": "http",
+      "version": "2",
+      "passed": true,
+      "transaction": "69b4406a649cee881ae23dc7ca28be718bf4a0d9839cd7ebfef9dbe608f92ad0",
+      "network": "stellar:testnet"
+    },
+    {
+      "testNumber": 10,
+      "client": "typescript/http/axios",
+      "server": "typescript/http/hono",
+      "endpoint": "/exact/stellar/upfront",
+      "facilitator": "stellar-x402",
+      "protocolFamily": "stellar",
+      "scheme": "exact",
+      "assetTransferMethod": "n/a",
+      "paymentFlow": "upfront",
+      "transport": "http",
+      "version": "2",
+      "passed": true,
+      "transaction": "5f6c644ad37f8fcbad1b036c47daccc7c52b995d249578c1fc62908d3456e1e6",
+      "network": "stellar:testnet"
+    },
+    {
+      "testNumber": 11,
+      "client": "typescript/http/fetch",
+      "server": "typescript/http/hono",
+      "endpoint": "/exact/stellar",
+      "facilitator": "stellar-x402",
+      "protocolFamily": "stellar",
+      "scheme": "exact",
+      "assetTransferMethod": "n/a",
+      "paymentFlow": "authorization",
+      "transport": "http",
+      "version": "2",
+      "passed": true,
+      "transaction": "d62a8bc889c5645d2ed6de90bff00dba4758a81a7a5378296136524ef32f5fb1",
+      "network": "stellar:testnet"
+    },
+    {
+      "testNumber": 12,
+      "client": "typescript/http/fetch",
+      "server": "typescript/http/hono",
+      "endpoint": "/exact/stellar/upfront",
+      "facilitator": "stellar-x402",
+      "protocolFamily": "stellar",
+      "scheme": "exact",
+      "assetTransferMethod": "n/a",
+      "paymentFlow": "upfront",
+      "transport": "http",
+      "version": "2",
+      "passed": true,
+      "transaction": "fb8b20d2f9c1fdd3c662db50e97010aebed0e205cb821808bea783ce1f7c6fb0",
+      "network": "stellar:testnet"
+    },
+    {
+      "testNumber": 13,
+      "client": "typescript/http/axios",
+      "server": "typescript/http/next",
+      "endpoint": "/api/exact/stellar/withx402",
+      "facilitator": "stellar-x402",
+      "protocolFamily": "stellar",
+      "scheme": "exact",
+      "assetTransferMethod": "n/a",
+      "paymentFlow": "authorization",
+      "transport": "http",
+      "version": "2",
+      "passed": true,
+      "transaction": "4c0d99ef9b4a566e5749034bef6553c33f2c06e532fa066a6c84214495318b67",
+      "network": "stellar:testnet"
+    },
+    {
+      "testNumber": 14,
+      "client": "typescript/http/axios",
+      "server": "typescript/http/next",
+      "endpoint": "/api/exact/stellar/upfront/withx402",
+      "facilitator": "stellar-x402",
+      "protocolFamily": "stellar",
+      "scheme": "exact",
+      "assetTransferMethod": "n/a",
+      "paymentFlow": "upfront",
+      "transport": "http",
+      "version": "2",
+      "passed": true,
+      "transaction": "5a35eb13863d11d8b383940cad83663967eddcde532386d187600195f1a11ebb",
+      "network": "stellar:testnet"
+    },
+    {
+      "testNumber": 15,
+      "client": "typescript/http/fetch",
+      "server": "typescript/http/next",
+      "endpoint": "/api/exact/stellar/withx402",
+      "facilitator": "stellar-x402",
+      "protocolFamily": "stellar",
+      "scheme": "exact",
+      "assetTransferMethod": "n/a",
+      "paymentFlow": "authorization",
+      "transport": "http",
+      "version": "2",
+      "passed": true,
+      "transaction": "cd874b74e5620185d6f731c929a9eca557c2b601f1bd03cb312e3f1b1367ec33",
+      "network": "stellar:testnet"
+    },
+    {
+      "testNumber": 16,
+      "client": "typescript/http/fetch",
+      "server": "typescript/http/next",
+      "endpoint": "/api/exact/stellar/upfront/withx402",
+      "facilitator": "stellar-x402",
+      "protocolFamily": "stellar",
+      "scheme": "exact",
+      "assetTransferMethod": "n/a",
+      "paymentFlow": "upfront",
+      "transport": "http",
+      "version": "2",
+      "passed": true,
+      "transaction": "a3856edc64b1a7d100b2ad4085b83c88f9229d501159e24b931c7d1b09fbc6b2",
+      "network": "stellar:testnet"
+    },
+    {
+      "testNumber": 17,
+      "client": "typescript/mcp",
+      "server": "typescript/mcp",
+      "endpoint": "exact_stellar",
+      "facilitator": "stellar-x402",
+      "protocolFamily": "stellar",
+      "scheme": "exact",
+      "assetTransferMethod": "n/a",
+      "paymentFlow": "authorization",
+      "transport": "mcp",
+      "version": "2",
+      "passed": true,
+      "transaction": "78601429e6aa1efe92ad9282752063e3ec444b87d76dd26bb76e01f397f4162a",
+      "network": "stellar:testnet"
+    },
+    {
+      "testNumber": 18,
+      "client": "typescript/mcp",
+      "server": "typescript/mcp",
+      "endpoint": "exact_stellar_upfront",
+      "facilitator": "stellar-x402",
+      "protocolFamily": "stellar",
+      "scheme": "exact",
+      "assetTransferMethod": "n/a",
+      "paymentFlow": "upfront",
+      "transport": "mcp",
+      "version": "2",
+      "passed": true,
+      "transaction": "527b300c23638951c0c69e535ee4f62afd0bea60c5f5911c87f53ecaadc57462",
+      "network": "stellar:testnet"
+    }
+  ],
+  "breakdowns": {
+    "byFacilitator": {
+      "stellar-x402": {
+        "passed": 18,
+        "failed": 0
+      }
+    },
+    "byServer": {
+      "typescript/http/express": {
+        "passed": 4,
+        "failed": 0
+      },
+      "typescript/http/fastify": {
+        "passed": 4,
+        "failed": 0
+      },
+      "typescript/http/hono": {
+        "passed": 4,
+        "failed": 0
+      },
+      "typescript/http/next": {
+        "passed": 4,
+        "failed": 0
+      },
+      "typescript/mcp": {
+        "passed": 2,
+        "failed": 0
+      }
+    },
+    "byClient": {
+      "typescript/http/axios": {
+        "passed": 8,
+        "failed": 0
+      },
+      "typescript/http/fetch": {
+        "passed": 8,
+        "failed": 0
+      },
+      "typescript/mcp": {
+        "passed": 2,
+        "failed": 0
+      }
+    },
+    "byScheme": {
+      "exact": {
+        "passed": 18,
+        "failed": 0
+      }
+    },
+    "byAssetTransferMethod": {
+      "n/a": {
+        "passed": 18,
+        "failed": 0
+      }
+    },
+    "byTransport": {
+      "http": {
+        "passed": 16,
+        "failed": 0
+      },
+      "mcp": {
+        "passed": 2,
+        "failed": 0
+      }
+    },
+    "byVersion": {
+      "2": {
+        "passed": 18,
+        "failed": 0
+      }
+    },
+    "byPaymentFlow": {
+      "authorization": {
+        "passed": 9,
+        "failed": 0
+      },
+      "upfront": {
+        "passed": 9,
+        "failed": 0
+      }
+    },
+    "byProtocolFamily": {
+      "stellar": {
+        "passed": 18,
+        "failed": 0
+      }
+    }
+  }
+}
