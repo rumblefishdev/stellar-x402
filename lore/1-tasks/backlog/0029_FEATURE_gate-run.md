@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 milestone: 1
 related_adr: ["0009"]
-related_tasks: ["0012", "0028", "0026", "0009", "0020"]
+related_tasks: ["0012", "0028", "0026", "0009", "0020", "0059"]
 tags: [conformance, e2e, priority-high, effort-small, platform]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -29,6 +29,7 @@ As a reviewer of the grant, I want e2e results with real settled transaction has
 
 - First run around day 12, final rerun at the end of T1.
 - Related tasks: 0028, 0026, 0009, 0020.
+- The gate is pinned to upstream `10b2d06`. By 2026-10-22 upstream main was 63 commits ahead: the e2e harness unchanged, but the Stellar mechanism changed (client `exact` scheme, facilitator settle errors, typed simulation errors, x402-foundation/x402#3293, #2975). Decide whether to bump the pin before the run of record; a bump means a fresh gate run. 0059 (raw result file, signals, ledger check) should land first.
 - `/supported` (0020) must list `exact` on `stellar:testnet` with `extra.areFeesSponsored: true`: the canonical client throws without it (found in the 0028 recon).
 - From the 0028 review: the gate also needs `/supported` to list the facilitator key under a `stellar:` signer, because it fails any settlement whose fee another account paid.
 - From the 0028 review: the saved run holds the upstream commit, date, facilitator URL, its signers and each transaction, but no facilitator version; the facilitator has to expose one for this task's results.
