@@ -84,6 +84,9 @@ const filters = [
   "--facilitators=stellar-x402",
 ];
 const args = [...filters, `--output-json=${suiteJson}`];
+// A settlement of this run lands in a ledger after this one.
+const chain = new rpc.Server("https://soroban-testnet.stellar.org");
+const ledgerBeforeRun = (await chain.getLatestLedger()).sequence;
 console.log(`$ pnpm ${args.join(" ")}   (in ${e2e})`);
 const startedAt = Math.floor(Date.now() / 1000);
 const suite = spawnSync("pnpm", args, {
@@ -114,9 +117,8 @@ const expected = {
   to: accounts.E2E_SELLER_PUBLIC!,
   amount: 10000n,
   signers: stellarSigners,
-  notBefore: startedAt,
+  ledgerBeforeRun,
 };
-const chain = new rpc.Server("https://soroban-testnet.stellar.org");
 const settlements: Settlement[] = [];
 for (const result of run?.results ?? []) {
   if (!result.passed || !result.transaction) continue;
@@ -163,6 +165,7 @@ if (run) {
     command: `pnpm ${filters.join(" ")}`,
     signers: stellarSigners,
     startedAt: new Date(startedAt * 1000).toISOString(),
+    ledgerBeforeRun,
     suiteExitCode: suite.status,
     passed: problems.length === 0,
     problems,

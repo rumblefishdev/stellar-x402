@@ -44,7 +44,8 @@ facilitator roles, so we don't contribute new fixtures.
      `pnpm test --testnet --families=stellar --schemes=exact --facilitators=stellar-x402 --output-json=<file>`;
   5. fails unless every scenario passed with its own transaction hash, and Stellar RPC shows each
      hash as a successful `transfer` of the route's price from the buyer to the seller, its fee
-     paid by a signer the facilitator lists in `/supported`, made after the run started. The suite
+     paid by a signer the facilitator lists in `/supported`, in a ledger after the last one the
+     same RPC had closed before the suite started (ledgers, not the local clock). The suite
      itself exits 0 when no scenario matched, its axios client can pass without a hash, and it
      never reads the chain, so a replayed hash would pass it. The signer check trusts the
      facilitator's own `/supported`: a facilitator that relays to another and lists that one's

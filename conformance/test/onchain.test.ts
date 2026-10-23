@@ -31,7 +31,7 @@ const expected: Expected = {
   to: "GAS7JQRKLXPO5L7OFYDEILAM6AZGPHFJKQ2UJV7TAT5BNXPCXX54L5IF",
   amount: 10000n,
   signers: x402orgSigners,
-  notBefore: 1_792_150_000,
+  ledgerBeforeRun: 5_224_990,
 };
 
 const transfer = `transfer ${expected.from} -> ${expected.to} 10000 of ${expected.asset}`;
@@ -133,11 +133,18 @@ describe("checkSettlement", () => {
     );
   });
 
-  it("fails a transaction made before the run started", () => {
-    const later = { ...expected, notBefore: 1_792_150_101 };
-    expect(checkSettlement(settled, later)).toBe(
-      "was made at 2026-10-16T11:28:20.000Z, before the run started at 2026-10-16T11:28:21.000Z",
+  it("fails a transaction in a ledger closed before the run started", () => {
+    expect(checkSettlement(settled, { ...expected, ledgerBeforeRun: 5_225_000 })).toBe(
+      "is in ledger 5225000, not after ledger 5225000 that closed before the run started",
     );
-    expect(checkSettlement(settled, { ...expected, notBefore: 1_792_150_100 })).toBeUndefined();
+    expect(checkSettlement(settled, { ...expected, ledgerBeforeRun: 5_225_001 })).toBe(
+      "is in ledger 5225000, not after ledger 5225001 that closed before the run started",
+    );
+    expect(checkSettlement(settled, { ...expected, ledgerBeforeRun: 5_224_999 })).toBeUndefined();
+  });
+
+  it("does not look at the ledger's close time, so a local clock ahead fails nothing", () => {
+    const createdLongAgo = { ...settled, createdAt: 0 };
+    expect(checkSettlement(createdLongAgo, expected)).toBeUndefined();
   });
 });
