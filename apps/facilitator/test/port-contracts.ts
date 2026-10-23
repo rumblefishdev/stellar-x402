@@ -535,7 +535,7 @@ export function spendStoreContract(make: Make<SpendStore>) {
       }
       expect(await store.used("global", DAY, 0)).toBe(0n);
       await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 0 });
-      await expect(store.commit("a", -1n, 10)).rejects.toBeInstanceOf(RangeError);
+      await expect(store.commit("a", -1n)).rejects.toBeInstanceOf(RangeError);
       expect(await store.used("global", DAY, 10)).toBe(60n);
     });
 
@@ -572,20 +572,27 @@ export function spendStoreContract(make: Make<SpendStore>) {
     it("commits the fee actually paid and releases what was never spent", async () => {
       await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 0 });
       await store.reserve({ id: "b", amount: 30n, limits: limits(100n), now: 0 });
-      await store.commit("a", 20n, 10);
+      await store.commit("a", 20n);
       await store.release("b");
       expect(await store.used("global", DAY, 10)).toBe(20n);
-      // The commit stamped the fee at 10, so it outlives the reservation's window.
-      expect(await store.used("global", DAY, DAY + 5)).toBe(20n);
+    });
+
+    it("keeps a committed fee at its reservation's time, however late the commit", async () => {
+      await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 0 });
+      // Reconciliation can end a settlement hours after its transaction landed (0019); the fee
+      // was paid then, so it leaves the window with the reservation.
+      await store.commit("a", 20n);
+      expect(await store.used("global", DAY, DAY - 1)).toBe(20n);
+      expect(await store.used("global", DAY, DAY)).toBe(0n);
     });
 
     it("keeps a committed fee through a release, and reports a commit of an unknown id", async () => {
       await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 0 });
-      expect(await store.commit("a", 20n, 10)).toBe(true);
+      expect(await store.commit("a", 20n)).toBe(true);
       // The fee was paid on-chain; a late release (a timed-out path) can't hand it back.
       await store.release("a");
       expect(await store.used("global", DAY, 10)).toBe(20n);
-      expect(await store.commit("missing", 20n, 10)).toBe(false);
+      expect(await store.commit("missing", 20n)).toBe(false);
       expect(await store.used("global", DAY, 10)).toBe(20n);
     });
 

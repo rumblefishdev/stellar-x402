@@ -542,11 +542,11 @@ export class PostgresSpendStore implements SpendStore {
     }
   }
 
-  async commit(id: string, feeCharged: bigint, now: number): Promise<boolean> {
+  async commit(id: string, feeCharged: bigint): Promise<boolean> {
     assertStroops(feeCharged, "feeCharged");
     const { rowCount } = await this.pool.query(
-      "UPDATE spend_reservations SET amount = $2, at = $3, state = 'committed' WHERE id = $1",
-      [id, feeCharged.toString(), now],
+      "UPDATE spend_reservations SET amount = $2, state = 'committed' WHERE id = $1",
+      [id, feeCharged.toString()],
     );
     return rowCount === 1;
   }

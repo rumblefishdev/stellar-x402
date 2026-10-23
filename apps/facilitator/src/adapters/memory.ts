@@ -220,11 +220,11 @@ export class MemorySpendStore implements SpendStore {
     return { reserved: true };
   }
 
-  async commit(id: string, feeCharged: bigint, now: number): Promise<boolean> {
+  async commit(id: string, feeCharged: bigint): Promise<boolean> {
     assertStroops(feeCharged, "feeCharged");
     const reservation = this.reservations.get(id);
     if (!reservation) return false;
-    Object.assign(reservation, { amount: feeCharged, at: now, state: "committed" });
+    Object.assign(reservation, { amount: feeCharged, state: "committed" });
     return true;
   }
 

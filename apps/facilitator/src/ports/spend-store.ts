@@ -41,10 +41,13 @@ export interface SpendStore {
    */
   reserve(reservation: SpendReservation): Promise<ReserveResult>;
   /**
-   * Replaces a reservation with the fee actually paid, stamped at `now`. Resolves `false` when no
-   * reservation has `id`, so the fee counts against no budget; committing again replaces the fee.
+   * Replaces a reservation with the fee actually paid. The fee keeps the reservation's time, so
+   * it leaves the window with it however late the commit comes (a settlement reconciliation ends
+   * after a restart); the transaction landed within its time bound after `reserve`. Resolves
+   * `false` when no reservation has `id`, so the fee counts against no budget; committing again
+   * replaces the fee.
    */
-  commit(id: string, feeCharged: bigint, now: number): Promise<boolean>;
+  commit(id: string, feeCharged: bigint): Promise<boolean>;
   /** Drops a reservation that was never spent; a committed one stays, since its fee was paid. */
   release(id: string): Promise<void>;
   /** Stroops reserved or spent after `now - windowMs`, for alerts. */
