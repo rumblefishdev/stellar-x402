@@ -2,7 +2,7 @@
 id: "0059"
 title: "Gate: the suite's raw result apart, cleanup on every signal, ledger instead of the clock"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0009"]
 related_tasks: ["0028", "0029"]
@@ -17,6 +17,10 @@ history:
     status: active
     who: karolkow
     note: "Started."
+  - date: "2026-10-23"
+    status: completed
+    who: karolkow
+    note: "PR #59 merged."
 ---
 
 # Gate: the suite's raw result apart, cleanup on every signal, ledger instead of the clock
