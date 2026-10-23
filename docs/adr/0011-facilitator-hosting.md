@@ -14,7 +14,8 @@
   the facilitator is reached through Cloudflare Tunnel on `sorobanscan.com` instead of the
   server's Caddy. 2026-10-23: the third round's last threads (units restart with Docker, the
   deploy lock, `digest.good`, the units' timeouts, secret file owners, encryption at rest), and
-  the Hetzner Cloud VM rejected for mainnet too.
+  the Hetzner Cloud VM rejected for mainnet too; an Ansible playbook provisions x402's parts of
+  the server.
 
 ## Context
 
@@ -281,9 +282,17 @@ One request or one stop must never outlast the layer in front of it:
     environments.
 - **Rollback** redeploys an earlier digest through the same workflow; a failed deploy rolls back
   by itself (above).
-- **The compose files and the deploy scripts live in `deploy/`.** The SSH key can only send a
-  digest, so an operator copies them to `/srv/x402/<network>/` by hand from a reviewed commit
-  (runbook). Whoever writes these files is the real boundary between the networks.
+- **An Ansible playbook in `deploy/ansible/` provisions the server's x402 parts:** the `x402`
+  user, `/srv/x402/<network>/`, the systemd units and timers, the compose files, `deploy.sh`,
+  the deploy user's one `sudo` rule and its `authorized_keys` forced command, `cloudflared`,
+  and the pgBackRest and CloudWatch agent config. An admin runs it from a reviewed commit, as
+  the explorer's own playbook is run. It touches only x402's parts, never the server's base
+  setup (firewall, `daemon.json`, users), which the ClickHouse project owns. Whoever runs the
+  playbook, and from which commit, is the real boundary between the networks.
+- **Per-merge deploys stay a digest over SSH** (above), and CI never runs the playbook. Ansible
+  needs a full shell and, through `become`, effectively root on the production ClickHouse
+  server, which `sudo` rules can't narrow; the forced command lets the CI key pass only a
+  digest.
 
 ### Network and URL
 
@@ -514,6 +523,9 @@ One request or one stop must never outlast the layer in front of it:
   It still fits side jobs, such as topping up the fee balance and rebuilding channels after a
   testnet reset.
 
+- **Ansible from CI for every deploy.** Rejected: the CI key would need a full shell and
+  effectively root on the production ClickHouse server. The playbook provisions the server, and
+  a deploy stays a digest through the forced command.
 - **The server's Caddy, in the ClickHouse project,** as the edge and reverse proxy, with an
   A record in Route 53 (`testnet.x402.rumblefish.dev`). This was this section until 2026-10-22.
   Rejected: our site block would live in that project's repo and deploy, a deploy there that
@@ -550,19 +562,20 @@ One request or one stop must never outlast the layer in front of it:
   repaired or the service is restored elsewhere from the off-server backups, which can take hours.
   Restoring elsewhere is a runbook step (0026) and a mainnet risk (0038).
 - **Operations are ours:** Docker and OS updates, PostgreSQL upgrades, backups and restore drills,
-  and `cloudflared` upgrades.
+  `cloudflared` upgrades, and keeping the playbook in step with the server.
 - **Deploy downtime is usually under a minute:** a quick drain when idle, a container start, and
   reconciliation; the pull and the migrations run before the stop. At worst it is about 5
   minutes: a 180 s drain and up to 120 s for `ready: true`. The uptime alarm waits 7 failing
   minutes for that reason.
-- **After a crash,** Docker restarts the container (`on-failure`). The new process waits up to
-  30 s for the lease and reconciles. Records keep each transaction's time bound, so a hash that
-  can't be found yet stays non-final until that bound passes (0019).
+- **After a crash,** systemd restarts the container (`Restart=on-failure`). The new process waits
+  up to 30 s for the lease and reconciles. Records keep each transaction's time bound, so a hash
+  that can't be found yet stays non-final until that bound passes (0019).
 - **The OpenBao signer (0036, ADR 0013) blocks the testnet deploy (0026).**
 - **ADR 0012's store moves from RDS to a container on the server.** Its schema, adapter rules and
   migrations are unchanged; managed backups and failover become ours (task 0013).
 - **0026 builds:**
-  - the Dockerfile, the compose files and the deploy script;
+  - the Dockerfile, the compose files, the deploy script, and the Ansible playbook that puts
+    them, the units and the deploy user on the server;
   - the systemd units: `x402@<network>`, `x402-db@<network>`, `x402-deploy@<network>`,
     `x402-tunnel@<network>`, `x402-openbao`, the restart timer and the backup timer;
   - the `cloudflared` container, with the tunnel token fetched from Cloudflare into a systemd
@@ -575,7 +588,8 @@ One request or one stop must never outlast the layer in front of it:
   - the backups (pgBackRest to the Storage Box);
   - `GET /health` with `ready`, the Node keep-alive setting, and the migration bounds;
   - the config reading secrets from files (`*_FILE`), since nothing reads them today;
-  - the runbook: deploy, rollback, key rotation, certificate renewal, restore on another machine.
+  - the runbook: running the playbook, deploy, rollback, key rotation, certificate renewal,
+    restore on another machine.
 - **0027 builds:** log shipping through the CloudWatch agent, the EMF adapter, the alarms above,
   the us-east-1 uptime stack and the Slack integration.
 - **0023 keys the limiter on `CF-Connecting-IP`** as above.

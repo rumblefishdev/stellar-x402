@@ -43,6 +43,10 @@ history:
     status: backlog
     who: stkrolikiewicz
     note: "Public URL through Cloudflare Tunnel on sorobanscan.com, from Marek's and Marcin's Slack proposal; no Caddy site block or Route 53 record."
+  - date: "2026-10-23"
+    status: backlog
+    who: stkrolikiewicz
+    note: "An Ansible playbook provisions x402's parts of the server, confirmed with Marek; deploys stay a digest over SSH (ADR 0011)."
 ---
 
 # Public testnet deployment
@@ -67,7 +71,7 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   (x86_64), project `x402`, owned by its own Linux user, apart from ClickHouse's
   `app` project, in `/srv/x402` (the ClickHouse project's deploy overwrites its own directory).
   - `/srv/x402/testnet/` holds the compose file, `deploy.sh`, `digest` and the encrypted
-    credentials; an operator copies the first two there by hand from a reviewed commit (runbook).
+    credentials; the Ansible playbook puts the first two there from a reviewed commit (below).
   - `facilitator-testnet`: memory limit 512 MiB, one CPU, no restart policy (systemd restarts it),
     `stop_grace_period` 180 s, healthcheck on `/health` every 10 s set in the compose service,
     not the image (a Node one-liner, 5 s timeout, 30 s `start_period`, 3 failures), no published
@@ -104,6 +108,12 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   Images go to GHCR, tagged with the git SHA; the workflow skips the build when the SHA exists.
   A successful testnet deploy records its digest and SHA as a GitHub Deployment in the `testnet`
   environment, which mainnet later promotes from (ADR 0011).
+- From 0039, provisioning (ADR 0011): an Ansible playbook in `deploy/ansible/`, run by an admin
+  from a reviewed commit, sets up x402's parts of the server: the `x402` user,
+  `/srv/x402/<network>/`, the units and timers, the compose files, `deploy.sh`, the deploy
+  user's `sudo` rule and forced command, `cloudflared`, and the pgBackRest and CloudWatch agent
+  config. It never touches the server's base setup (firewall, `daemon.json`, users), and CI
+  never runs it.
 - From 0039, the deploy:
   - GitHub Actions connects over SSH to the server's existing SSH port, with the server's host
     key pinned in the workflow's `known_hosts`, as a deploy user with one key per network; each
@@ -168,12 +178,11 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   404) and DNS record, both Terraform in `soroban-infrastructure`'s `cloudflare/`
   (stkrolikiewicz applies it for now). Nothing goes into the ClickHouse project's repo.
 - From 0039: `GET /health` answers 200 and reports `ready` in its body.
-- From 0039, the runbook: deploy, copying the compose file and `deploy.sh` from a reviewed
-  commit, rollback (automatic on a failed deploy; by hand, redeploy an earlier digest), long
-  migrations outside the deploy, reboots, fetching the tunnel token from Cloudflare (dashboard,
-  API or `terraform output`) into its systemd credential, renewing the Roles Anywhere
-  certificate, key rotation as an on-chain signer change, and restoring the service on
-  another machine.
+- From 0039, the runbook: running the playbook from a reviewed commit, deploy, rollback
+  (automatic on a failed deploy; by hand, redeploy an earlier digest), long migrations outside
+  the deploy, reboots, fetching the tunnel token from Cloudflare (dashboard, API or
+  `terraform output`) into its systemd credential, renewing the Roles Anywhere certificate, key
+  rotation as an on-chain signer change, and restoring the service on another machine.
 - From 0013 ([ADR 0012](../../../docs/adr/0012-facilitator-state-store.md)), the database, on the
   server (ADR 0011):
   - the `postgres-testnet` container above, its credentials a Compose secret file;

@@ -193,3 +193,8 @@ From the rest of round three (Stan, 2026-10-23):
     public on chain, the secrets are encrypted on their own, and LUKS would be an extra layer.
 41. **The Hetzner Cloud VM is rejected for mainnet too** (Stan, 2026-10-23), so 0038 no longer
     asks it; ADR 0011's Alternatives say why the shared server is kept.
+42. **An Ansible playbook provisions x402's parts of the server** (Marek confirmed on Slack,
+    2026-10-23): the user, directories, units and timers, compose files, `deploy.sh`, the deploy
+    user's `sudo` rule and forced command, `cloudflared`, pgBackRest and the CloudWatch agent, run
+    by an admin from a reviewed commit. Per-merge deploys stay a digest over SSH, since Ansible
+    from CI would need effectively root on the production ClickHouse server.
