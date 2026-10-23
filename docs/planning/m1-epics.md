@@ -578,7 +578,7 @@ So that the e2e proxy and real resource servers can reach it.
 
 **Acceptance Criteria:**
 
-**Given** the platform chosen in the 0014 ADR  
+**Given** the company Hetzner server of ADR 0011 (revised in 0039)  
 **When** a deploy runs  
 **Then** a container image built from the repo is deployed to it as the ADR describes, and the service answers `/supported` at a public HTTPS URL
 
@@ -589,7 +589,7 @@ So that the e2e proxy and real resource servers can reach it.
 
 **Given** the facilitator key  
 **When** the service is deployed  
-**Then** it comes from the platform's secret store, never from the image or the logs, and is a testnet-only key
+**Then** it signs through the testnet key in OpenBao Transit (ADR 0013), the raw key never reaches the facilitator's process, the image or the logs, and it is a testnet-only key
 
 **Given** the durable stores from 0022  
 **When** the service runs  

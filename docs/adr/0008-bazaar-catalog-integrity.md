@@ -90,6 +90,9 @@ settlement.
 
 - Anyone who settles a real payment, even a tiny one, can create a listing. That is accepted for
   Tranche 1, and quality is handled by curation and ranking later.
+- The same holds for an existing listing: a newer settlement to the same `payTo` and resource
+  URL replaces its text and same-asset price, whoever paid. Accepted on testnet; task 0063
+  decides it before pubnet.
 - Loopback and private resource URLs can be listed on any network, including the entries gate
   runs leave. Whether
   pubnet should refuse them as a listing-quality rule, as the MCP registry does, is decided before

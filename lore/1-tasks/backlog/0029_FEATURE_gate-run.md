@@ -41,6 +41,10 @@ As a reviewer of the grant, I want e2e results with real settled transaction has
   deletes them), and 0042's demo lists them. The suite's Bazaar check still waits for
   `/discovery/search` (0028). Nothing owns removing them yet: decide before the first run whether
   the gate uses a separate catalog, or the catalog gets a TTL or an admin delete (0053 review).
+- From the PR #50 review: once the Bazaar check runs, it reads one `?limit=1000` page and looks
+  for its resources there (upstream `e2e/extensions/bazaar.ts:290`), while our route clamps to 100
+  (spec v2 §8.1) and lists oldest first. With more than 100 entries in the catalog the check
+  misses its own; run it against a catalog under 100 entries.
 - From the 0028 review: the first criterion says "verify → settle" for each scenario, but the 9 `upfront` scenarios settle without a `/verify` (answered in 0028); reword it before starting.
 
 ## Implementation
