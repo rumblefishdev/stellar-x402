@@ -69,6 +69,9 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
   - From 0020: `/supported` answers an object fixed at startup, so its 200 shows only that the
     process is up, not that the RPC answers or the channels can settle. Readiness to settle needs
     a check of its own, such as `/health` (0026).
+  - From 0020: a process whose startup check fails (an RPC down, a channel another key can move)
+    exits with `startup_failed` and is restarted in a loop; it never becomes ready, so the
+    readiness alarm (criterion 3) must cover it.
 - From 0014, amended by 0009 (decisions 44, 47; ADR 0011): RPC endpoints are logged and labelled
   as `RPC_URLS[i]#<fingerprint>` (`rpcEndpointName` in `logger.ts`), never by URL or host. The
   fingerprint tells an entry from the URL it replaced after a redeploy. signer-pool's
