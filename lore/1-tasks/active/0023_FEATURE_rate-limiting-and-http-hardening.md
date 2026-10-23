@@ -2,7 +2,7 @@
 id: "0023"
 title: "Rate limiting and HTTP hardening"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0007", "0011"]
 related_tasks: ["0012", "0017", "0014", "0009", "0022"]
@@ -15,6 +15,10 @@ history:
     status: backlog
     who: claude
     note: "Created by 0012 from M1 Story 2.2 (Platform lane)."
+  - date: "2026-10-23"
+    status: active
+    who: karolkow
+    note: "Work starts."
 ---
 
 # Rate limiting and HTTP hardening
