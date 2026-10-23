@@ -2,10 +2,10 @@
 id: "0061"
 title: "Keep a read answered by RPC_URLS[0] from returning calls there without the probe"
 type: BUG
-status: active
+status: completed
 milestone: 1
 related_adr: ["0004"]
-related_tasks: ["0045", "0049"]
+related_tasks: ["0045", "0049", "0065"]
 tags: [signer-pool, payments, priority-medium, effort-small]
 links:
   - ../../../docs/architecture/m1-spine.md
@@ -18,6 +18,14 @@ history:
     status: active
     who: okarcz
     note: "Work starts."
+  - date: "2026-10-23"
+    status: completed
+    who: okarcz
+    note: >
+      PR #62 merged (rebase). With failback, a read answered by RPC_URLS[0] no longer makes it
+      active: it counts as the active URL's failure (next fallback, or a probe at once when every
+      fallback was tried), and probes started at once stay 5 s apart. signer-pool 145 tests (+5),
+      facilitator 307. Spawned 0065 for the hung-URL smoke runs.
 ---
 
 # Keep a read answered by RPC_URLS[0] from returning calls there without the probe
@@ -79,6 +87,18 @@ dead `[0]`, not a lagging one, so this task replaces that part of decision 23.
 - AD-3 in `docs/architecture/m1-spine.md`: one sentence beside 0045 decision 26.
 - signer-pool 145 tests (+5), facilitator 307 (71 skipped, unchanged); typecheck and lint clean.
 
+## Issues Encountered
+
+- **The hung-`RPC_URLS[0]` smoke run no longer starts.** Since 0051 (#58), `main()` checks every
+  RPC URL's network at startup and exits with `startup_failed`, so 0045's setup (a local server
+  that never answers as `RPC_URLS[0]`) fails before `/settle` runs. PR #62's testnet run used a
+  stub that answers `getNetwork` through Gateway and hangs on every other method. Follow-up: 0065.
+- **The wrapped-read path can't be triggered on testnet on cue** (`[1]` failing a read while `[0]`
+  answers), so it is covered by the unit tests and their mutants only.
+- **Code review and PR review each found a path the first version got wrong** (decisions 3 and
+  4): a failing last URL kept with three URLs, probes re-armed per read, and a read from `[1]`
+  that bounced calls between two dead fallbacks. No existing test changed.
+
 ## Design Decisions
 
 ### From Plan
@@ -108,3 +128,8 @@ dead `[0]`, not a lagging one, so this task replaces that part of decision 23.
 5. **Left as is** (code review): a failed read that `[0]` answers logs nothing itself with two
    URLs; the probe it starts logs `rpc_failback` or `rpc_probe_failed` straight away. A hook of
    its own would add public surface for little gain.
+
+## Future Work
+
+- **0065**: make the hung-URL smoke runs start again under 0051's startup check, and update
+  `settle-smoke.ts`'s and `verify-smoke.ts`'s headers.
