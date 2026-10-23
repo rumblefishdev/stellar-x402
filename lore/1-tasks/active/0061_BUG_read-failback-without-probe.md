@@ -2,7 +2,7 @@
 id: "0061"
 title: "Keep a read answered by RPC_URLS[0] from returning calls there without the probe"
 type: BUG
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0004"]
 related_tasks: ["0045", "0049"]
@@ -14,6 +14,10 @@ history:
     status: backlog
     who: okarcz
     note: "Spawned from the re-review of PR #45 (0045 decisions 23 and 26)."
+  - date: "2026-10-23"
+    status: active
+    who: okarcz
+    note: "Work starts."
 ---
 
 # Keep a read answered by RPC_URLS[0] from returning calls there without the probe
