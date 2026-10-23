@@ -68,11 +68,12 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   `app` project, in `/srv/x402` (the ClickHouse project's deploy overwrites its own directory).
   - `/srv/x402/testnet/` holds the compose file, `deploy.sh`, `digest` and the encrypted
     credentials; an operator copies the first two there by hand from a reviewed commit (runbook).
-  - `facilitator-testnet`: memory limit 512 MiB, one CPU, `restart: on-failure`,
+  - `facilitator-testnet`: memory limit 512 MiB, one CPU, no restart policy (systemd restarts it),
     `stop_grace_period` 180 s, healthcheck on `/health` every 10 s set in the compose service,
     not the image (a Node one-liner, 5 s timeout, 30 s `start_period`, 3 failures), no published
     port.
-  - `migrate-testnet`: a one-off service of the facilitator image with its healthcheck disabled,
+  - `migrate-testnet`: a one-off service of the facilitator image in the `migrate` profile, memory
+    limit 512 MiB, with its healthcheck disabled,
     run only by `docker compose run --rm`, with its own statement and query timeouts instead of
     the app pool's 10 s and 15 s (`migrateMain` uses `createPool` today).
   - A systemd timer on the host restarts the `facilitator-testnet` container when it is
@@ -110,24 +111,30 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     (`command="/srv/x402/testnet/deploy.sh",restrict`), and the script accepts only an image
     digest (`sha256:` and 64 hex digits);
   - the deploy user isn't in the `docker` group: it may write only `digest.next` and run
-    `sudo systemctl start x402-deploy@testnet`, its one `sudo` rule;
+    `sudo systemctl start x402-deploy@testnet`, its one `sudo` rule. `deploy.sh` holds a `flock`
+    on `digest.next` while it writes it and starts the unit, which takes no lock of its own;
   - the `testnet` and `mainnet` environments carry the protection rules from ADR 0011
     (`deploy/testnet` only; `v*` tags, required reviewers, "Prevent self-review");
   - `deploy/testnet` is a protected branch: a pull request from `develop` with an approving
     review, and no bypass, admins included;
-  - `x402-deploy@testnet.service` (a oneshot, as root) takes the network's lock, decrypts the
-    credentials with `x402@testnet`'s script (the migration needs the database password), pulls
-    the new image and runs `migrate-testnet` from it while the old facilitator still serves; a failed
-    migration fails the deploy and the old one keeps serving. Then it saves the current digest,
-    moves `digest.next` into `digest`, restarts `x402@testnet` and waits up to 120 s for
-    `ready: true` from `/health`; if the restart fails or `ready` doesn't come, it restores the
-    previous digest, restarts again and fails. `systemctl start` waits for it, so the job gets
-    the result, and a dropped SSH session doesn't cut it;
+  - `x402-deploy@testnet.service` (a oneshot, as root) sets a marker in `/run/x402/testnet/`,
+    decrypts the credentials with `x402@testnet`'s script (the migration needs the database
+    password), pulls the new image and runs `migrate-testnet` from it while the old facilitator
+    still serves; a failed migration fails the deploy and the old one keeps serving. Then it moves
+    `digest.next` into `digest`, restarts `x402@testnet` and waits up to 120 s for `ready: true`
+    (`docker exec` with the healthcheck's one-liner); on `ready` it writes `digest.good` and
+    prunes all but the current and previous good images, and otherwise it puts `digest.good`
+    back, restarts again and fails. The first deploy has no `digest.good` and fails into the
+    alarms. `systemctl start` waits for it, so the job gets the result, and a dropped SSH session
+    doesn't cut it;
   - `x402@testnet.service` decrypts the credentials to `/run/x402/testnet/` (tmpfs, 0700) and
-    starts only the facilitator (`--no-deps`) from the image in `digest`, without pulling or
-    migrating; `ExecStop` stops it. It requires and runs after
-    `x402-db@testnet.service`, which runs Postgres. Both run after `docker.service`, the
-    facilitator's with `TimeoutStopSec` 200 s, and both are enabled at boot;
+    puts `digest.good` into `digest` unless the deploy's marker is there, then runs Compose in
+    the foreground for the facilitator only (`--no-deps`), without pulling or migrating, with
+    `Restart=on-failure` and `TimeoutStartSec` 60 s; `ExecStop` stops it. It requires and runs
+    after `x402-db@testnet.service`, which runs Postgres, decrypts its own credentials and has
+    `TimeoutStopSec` 150 s, and it wants and runs after `x402-openbao.service`. All our units are
+    `PartOf=docker.service` and run after it, the facilitator's with `TimeoutStopSec` 200 s, and
+    they are enabled at boot;
   - it runs on a push to `deploy/testnet` unless only `lore/**`, `docs/**` or Markdown changed,
     and by hand, in a `concurrency` group with `cancel-in-progress: false`;
   - actions are pinned by commit SHA, with minimal token permissions, and the SSH key is an
@@ -140,8 +147,10 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     that project's script, valid for a year, its CN accepted by the role's trust policy and kept
     off the ClickHouse site's allowlist. Ask that project to tell us when it rotates its CA;
   - the database password and any keyed RPC URL are encrypted systemd credentials
-    (`systemd-creds`), decrypted by `x402@testnet.service` to `/run/x402/testnet/` and mounted as
-    Compose `file:` secrets, never `environment:`;
+    (`systemd-creds`), decrypted to `/run/x402/testnet/` and mounted as Compose `file:` secrets,
+    never `environment:`. Each file is mode 0400, owned by the user that reads it: the database
+    URL, `RPC_URLS` and the AppRole files by `node` (uid 1000), the Postgres password by
+    `postgres` (uid 999);
   - the config reads `DATABASE_URL_FILE`, `RPC_URLS_FILE` and the OpenBao AppRole files when
     they are set, and the plain variables otherwise, for local runs;
   - no TLS to `postgres-testnet` on the internal network; `scram-sha-256` passwords.

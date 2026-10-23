@@ -12,7 +12,8 @@
   2026-10-22: pgBackRest for Postgres, migrations before the old facilitator stops, mainnet
   promoted by a recorded digest, and the Hetzner Cloud VM weighed on its coupling (third round);
   the facilitator is reached through Cloudflare Tunnel on `sorobanscan.com` instead of the
-  server's Caddy.
+  server's Caddy. 2026-10-23: the third round's last threads (units restart with Docker, the
+  deploy lock, `digest.good`, the units' timeouts, secret file owners, encryption at rest).
 
 ## Context
 
@@ -65,7 +66,8 @@ to Cloudflare on the Free plan.
     on the server's RAID. It has a unit of its own (below), so a facilitator deploy never
     restarts it;
   - `migrate-<network>`, a one-off service of the facilitator image that runs the migrations,
-    with its healthcheck disabled. `docker compose up` never starts it.
+    with its healthcheck disabled and a 512 MiB limit, left out of the totals since it runs only
+    during a deploy. It is in the `migrate` profile, so `docker compose up` never starts it.
 - **One OpenBao container for both networks** (ADR 0013), pinned by digest, memory limit 256 MiB
   and half a CPU.
   - Each network gets its own listener socket in its own volume, mounted only into that
@@ -83,9 +85,10 @@ to Cloudflare on the Free plan.
   - No facilitator joins the ClickHouse project's `app` network, so neither reaches ClickHouse or
     the other network's facilitator. OpenBao is reached over a unix socket per network
     (ADR 0013), not a network.
-- **`restart: on-failure`:** Docker restarts a facilitator that crashes, but doesn't start
-  containers by itself at boot; the units do (below). Compose doesn't act on `unhealthy`, so a
-  hung one needs a watcher:
+- **systemd restarts a facilitator that crashes, not Docker.** Its unit runs Compose in the
+  foreground with `Restart=on-failure`, so the unit ends when the container does and systemd
+  starts it again. The containers have no restart policy, so nothing starts at boot except
+  through the units (below). Neither acts on `unhealthy`, so a hung one needs a watcher:
   - a systemd timer on the host runs every 30 s and restarts the `facilitator-<network>`
     container when it is `unhealthy`, with a 10 s stop timeout, since a hung process can't drain
     anyway. It finds the container by its Compose service label and skips one-off containers;
@@ -135,7 +138,9 @@ One request or one stop must never outlast the layer in front of it:
 | `LEASE_TTL_MS`                    | 30 s               | after a crash, a new process waits at most this long               |
 | Wait for `ready: true`            | 120 s              | past it, the deploy rolls back to the previous digest              |
 | Unit `TimeoutStopSec`             | 200 s              | above `stop_grace_period`, so a reboot waits for the drain         |
+| Unit `TimeoutStartSec`            | 60 s               | covers `ExecStartPre` only: credentials and the digest, no pull    |
 | Postgres `stop_grace_period`      | 120 s              | a clean shutdown; the Compose default is 10 s                      |
+| `x402-db@` `TimeoutStopSec`       | 150 s              | above Postgres's 120 s, so a reboot doesn't kill it                |
 
 - **Past the budget,** `/settle` answers `settlement_pending` with the hash if one was signed,
   and nothing new is signed after it. If nothing was signed, the record ends and the answer is
@@ -207,32 +212,47 @@ One request or one stop must never outlast the layer in front of it:
     key to its network. A user per network is a mainnet option (0038).
   - **The deploy itself is a unit, `x402-deploy@<network>.service`** (a oneshot, as root), so a
     cancelled job or a dropped runner can't cut it between stopping the old facilitator and
-    starting the new one. `deploy.sh` only checks the digest, writes `digest.next` and starts the
-    unit; `systemctl start` waits for it, so the job still gets the result.
-  - The deploy unit takes the network's lock (`flock`), so two deploys of one network can't
-    overlap. It decrypts the network's credentials with the script `x402@`'s `ExecStartPre`
+    starting the new one. `deploy.sh` checks the digest, then, holding a `flock` on `digest.next`,
+    writes it and starts the unit. `systemctl start` waits for the unit, so the job still gets
+    the result, and a second deploy waits for the lock instead of joining the running job with
+    another digest. The unit takes no lock of its own, which would deadlock, and a deploy by
+    hand goes through `deploy.sh` too (runbook).
+  - The deploy unit decrypts the network's credentials with the script `x402@`'s `ExecStartPre`
     uses, since the migration needs the database password before `x402@` has ever run (the
     first deploy). It pulls the new image and runs the migration service from it while the old
     facilitator still serves (ADR 0012). A failed migration fails the deploy and leaves the old
-    facilitator serving; nothing needs rolling back. Then it saves the current digest, moves the
-    new one into `digest`, restarts `x402@<network>` and waits up to 120 s for `ready: true`. If
-    the restart fails or `ready` doesn't come, it puts the previous digest back, restarts again
-    and fails.
+    facilitator serving; nothing needs rolling back. Then it moves the new digest into `digest`,
+    restarts `x402@<network>` and waits up to 120 s for `ready: true`, read with `docker exec`
+    and the healthcheck's Node one-liner, so the check depends on neither the tunnel nor DNS.
+  - Only after `ready: true` does it write the digest to `digest.good` and remove images other
+    than this one and the previous good one, since the disk is shared. If the restart fails or
+    `ready` doesn't come, it puts `digest.good` back into `digest`, restarts again and fails.
+  - The first deploy has no `digest.good`, so it fails into the alarms. When `ready` fails
+    because of a dependency (OpenBao sealed, the RPCs down), the previous image isn't ready
+    either: the deploy fails, the facilitator stays down, and the not-ready and uptime alarms
+    fire.
   - Migrating before the stop and that rollback are both safe because `migrate()` applies all
     pending migrations in one transaction, so a failed run leaves the schema as it was, and
     expand/contract keeps the older image working on a schema that did move forward. If
     `lock_timeout` hits, the deploy fails before anything was stopped.
   - **`x402@<network>.service` owns the facilitator.** Its `ExecStartPre` decrypts the network's
-    credentials (below). It neither pulls nor migrates: `ExecStart` starts only the facilitator
-    (`--no-deps`) from the image in `digest`, which the deploy pulled, and `ExecStop` stops it,
-    which gives it its `stop_grace_period`.
+    credentials (below) and, unless a deploy is running (a marker in `/run/x402/<network>/`,
+    which a reboot clears), puts `digest.good` into `digest`, so a reboot during a deploy starts
+    the last image that was ready. It neither pulls nor migrates: `ExecStart` runs Compose in
+    the foreground for the facilitator only (`--no-deps`), from the image the deploy pulled, with
+    `Restart=on-failure`, and `ExecStop` stops it, which gives it its `stop_grace_period`. It
+    wants and runs after `x402-openbao.service`, though it starts without OpenBao (ADR 0013).
   - **`x402-tunnel@<network>.service` owns `cloudflared`.** It decrypts the tunnel token itself,
     as OpenBao's unit does, and is enabled at boot. `x402@` runs after it, so at a reboot the
     tunnel stops last and answers reach the clients while the facilitator drains.
-  - **`x402-db@<network>.service` owns Postgres.** The facilitator's unit requires it and runs
-    after it, so at a reboot the facilitator drains while the database is still up. Both are
-    enabled at boot, and `x402@` reads the same `digest`, so a reboot starts the image that was
-    last deployed.
+  - **`x402-db@<network>.service` owns Postgres.** It decrypts its own credentials with the same
+    script, since it starts first at boot, and its `TimeoutStopSec` of 150 s is above Postgres's
+    120 s grace. The facilitator's unit requires it and runs after it, so at a reboot the
+    facilitator drains while the database is still up. Both are enabled at boot.
+  - **Every unit that runs a container is `PartOf=docker.service` and runs after it.** A
+    Docker restart, such as a `docker-ce` upgrade, first stops them through their own
+    `ExecStop`, so the facilitator drains with its full grace instead of `dockerd`'s 15 s, and
+    starts them again afterwards.
   - Testnet deploys on a push to `deploy/testnet` unless only `lore/**`, `docs/**` or Markdown
     files changed, or by hand. A deploy is a pull request from `develop` to `deploy/testnet`.
     `develop` stays open for direct pushes such as lore status changes.
@@ -318,7 +338,10 @@ One request or one stop must never outlast the layer in front of it:
   - `systemd-creds` keeps them encrypted on disk with the host key. Each network's units decrypt
     their own, in `x402@`'s `ExecStartPre` and in the deploy unit before it migrates, to
     `/run/x402/<network>/` (tmpfs, mode 0700), and Compose mounts them as `file:` secrets, so
-    they are plain only in memory. OpenBao's unit (`x402-openbao.service`) does the same with its
+    they are plain only in memory. Outside swarm those are bind mounts that keep the host's
+    owner and mode, so each file is written mode 0400 for the user of the container that reads
+    it: `node` (uid 1000) for the facilitator's, `postgres` (uid 999) for Postgres's password.
+    0026 lists them per file. OpenBao's unit (`x402-openbao.service`) does the same with its
     unseal credential.
   - They stay there until a reboot, so Docker's crash restart and the watchdog still find them.
     At boot the unit writes them again before it starts anything.
@@ -425,7 +448,9 @@ One request or one stop must never outlast the layer in front of it:
   - low free disk and memory on the server.
 - **Uptime:** a Route 53 HTTPS health check on the public URL.
   - Route 53 publishes its metrics only in us-east-1, so the alarm and its SNS topic live there.
-  - It fires after 7 failing minutes in a row, above the worst deploy (Consequences).
+  - It fires after 7 failing minutes in a row, above the worst successful deploy
+    (Consequences). A failed deploy that rolls back can take longer and should alarm; it also
+    fails the workflow.
   - It checks `/supported` once 0020 makes it real, and `/health` before that.
   - The 99% figure counts a minute as up only when the check passes and the facilitator is ready
     to settle.
@@ -510,7 +535,8 @@ One request or one stop must never outlast the layer in front of it:
     `docker.service`, so systemd stops them first, the facilitator before Postgres, and the
     facilitator unit's `TimeoutStopSec` of 200 s covers the drain, where `docker.service` itself
     gets 90 s. The shared `daemon.json` stays as it is. A reboot takes up to about 3 minutes
-    longer.
+    longer, and so does a Docker restart, such as a `docker-ce` upgrade, since our units drain
+    first; ClickHouse's own downtime doesn't change.
   - Patching needs an owner and a schedule, which the team decides.
 - **Cloudflare and `soroban-infrastructure` are dependencies instead.**
   - The tunnel, its routing and the DNS record live in another repo, applied with a Cloudflare API

@@ -168,3 +168,26 @@ From Stan's review of these commits (2026-10-23):
     source here backs.
 30. **Marek confirmed the tunnel and the names; the repo is `soroban-infrastructure`,** and Stan
     applies it until an owner is named.
+
+From the rest of round three (Stan, 2026-10-23):
+
+31. **systemd restarts the containers, not Docker** (Oskar's proposal): every unit that runs a
+    container is `PartOf=docker.service` and runs Compose in the foreground with
+    `Restart=on-failure`, so a Docker restart drains the facilitator with its full grace and starts
+    it again. `docker-ce` isn't held; that would be the ClickHouse team's call on a shared server.
+32. **`migrate-<network>` sits in the `migrate` profile,** with a 512 MiB limit outside the totals.
+33. **The deploy lock lives in `deploy.sh` only,** a `flock` on `digest.next` held through
+    `systemctl start`; a second lock in the unit would deadlock.
+34. **`digest.good` is written only after `ready`,** and `x402@` starts from it unless a deploy's
+    marker in `/run` says otherwise. The first deploy, and a deploy whose dependency is down,
+    fail into the alarms.
+35. **The deploy reads `ready` with `docker exec`,** so the check depends on neither the tunnel nor
+    DNS.
+36. **`x402@` has a 60 s `TimeoutStartSec` and runs after OpenBao;** the deploy keeps the current
+    and previous good images and prunes the rest.
+37. **`x402-db@` decrypts its own credentials and stops within 150 s,** above Postgres's 120 s.
+38. **Secret files are mode 0400 for the user that reads them** (`node` 1000, `postgres` 999),
+    since Compose's `file:` secrets keep the host's owner outside swarm.
+39. **The uptime alarm sits above the worst successful deploy;** a failed one should alarm.
+40. **The database volume isn't encrypted at rest, and nothing relies on it:** the data is mostly
+    public on chain, the secrets are encrypted on their own, and LUKS would be an extra layer.

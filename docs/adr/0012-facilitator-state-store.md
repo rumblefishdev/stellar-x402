@@ -45,6 +45,13 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
     alarm fires when archiving fails, since `pg_wal` then grows on a disk ClickHouse shares. An S3
     bucket in the company AWS account is the fallback. A restore drill, with `pgbackrest check`
     and `verify`, runs on testnet before mainnet.
+  - The volume isn't encrypted at rest, and nothing here relies on disk encryption. The database
+    holds mostly what the chain already shows (transaction hashes, payer addresses, amounts)
+    plus budgets and limits, never keys; the secrets are encrypted on their own (systemd
+    credentials, OpenBao's seal, pgBackRest's repository); and only root on the server reaches
+    the volume, who reaches everything else anyway. LUKS, if the disks have it, is an extra
+    layer, not a requirement. The 14 days of backups off the server stand in for RDS's deletion
+    protection.
   - Minor upgrades are a digest bump in a planned window; a major upgrade is planned on its own.
 - **Access.**
   - The `pg` driver and small fixed pools per process: 10 connections, plus 3 for
