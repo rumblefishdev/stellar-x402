@@ -155,3 +155,13 @@ Taken while writing the tunnel in:
 25. **The tunnel token reaches the server by hand** from AWS Secrets Manager into a systemd
     credential, like ADR 0013's backup secret in reverse, since the server can't read secrets.
 26. **The client IP is `CF-Connecting-IP`,** replacing `TRUSTED_PROXY_HOPS` (0023, spine).
+
+From Stan's review of these commits (2026-10-23):
+
+27. **One WAL alarm, and a 26-hour alarm on the daily backup:** pgBackRest acknowledges a segment
+    only once it is in the repository, so a separate "shipped" alarm repeated the archive one.
+    The daily `pgbackrest backup` gets the 26 hours OpenBao's snapshots have.
+28. **The deploy unit decrypts the credentials before it migrates,** with `x402@`'s script, since
+    the first deploy migrates before `x402@` has ever run.
+29. **The VM's hardware-fault row names a restore,** not an automatic move to a new host, which no
+    source here backs.

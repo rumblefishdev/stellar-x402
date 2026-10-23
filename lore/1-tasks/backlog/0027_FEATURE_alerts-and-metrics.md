@@ -69,9 +69,11 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
   - from ADR 0013: OpenBao sealed, down or failing to sign; theft (below, from 0047); and
     OpenBao's audit log disk at 80%;
   - WAL archiving failing: `pg_stat_archiver.failed_count` rising, or the last archived segment
-    older than 10 minutes, since a stuck archive fills a disk ClickHouse shares;
-  - the last WAL segment shipped off the server older than 30 minutes, or the last OpenBao
-    snapshot older than 26 hours (they run daily);
+    older than 10 minutes. pgBackRest acknowledges a segment only once it is in the repository,
+    so this covers a stuck archive, which fills a disk ClickHouse shares, and WAL that doesn't
+    leave the server;
+  - the last `pgbackrest backup` or the last OpenBao snapshot older than 26 hours (both run
+    daily);
   - the Roles Anywhere certificate expiring within 30 days;
   - low free disk and memory on the server.
 - From 0014: uptime is a Route 53 HTTPS health check.

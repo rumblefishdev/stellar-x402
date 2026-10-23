@@ -210,7 +210,9 @@ One request or one stop must never outlast the layer in front of it:
     starting the new one. `deploy.sh` only checks the digest, writes `digest.next` and starts the
     unit; `systemctl start` waits for it, so the job still gets the result.
   - The deploy unit takes the network's lock (`flock`), so two deploys of one network can't
-    overlap. It pulls the new image and runs the migration service from it while the old
+    overlap. It decrypts the network's credentials with the script `x402@`'s `ExecStartPre`
+    uses, since the migration needs the database password before `x402@` has ever run (the
+    first deploy). It pulls the new image and runs the migration service from it while the old
     facilitator still serves (ADR 0012). A failed migration fails the deploy and leaves the old
     facilitator serving; nothing needs rolling back. Then it saves the current digest, moves the
     new one into `digest`, restarts `x402@<network>` and waits up to 120 s for `ready: true`. If
@@ -312,10 +314,11 @@ One request or one stop must never outlast the layer in front of it:
   signer instead.
 - **Other secrets are encrypted systemd credentials,** as in ADR 0013: the database password, an
   RPC URL that carries an API key, and the tunnel token.
-  - `systemd-creds` keeps them encrypted on disk with the host key. The `ExecStartPre` of each
-    network's unit decrypts its own to `/run/x402/<network>/` (tmpfs, mode 0700), and Compose
-    mounts them as `file:` secrets, so they are plain only in memory. OpenBao's unit
-    (`x402-openbao.service`) does the same with its unseal credential.
+  - `systemd-creds` keeps them encrypted on disk with the host key. Each network's units decrypt
+    their own, in `x402@`'s `ExecStartPre` and in the deploy unit before it migrates, to
+    `/run/x402/<network>/` (tmpfs, mode 0700), and Compose mounts them as `file:` secrets, so
+    they are plain only in memory. OpenBao's unit (`x402-openbao.service`) does the same with its
+    unseal credential.
   - They stay there until a reboot, so Docker's crash restart and the watchdog still find them.
     At boot the unit writes them again before it starts anything.
   - The app reads them from files (`DATABASE_URL_FILE`, `RPC_URLS_FILE` and the AppRole files),
@@ -412,9 +415,11 @@ One request or one stop must never outlast the layer in front of it:
     account or a channel that our submitter didn't send, or a signer or threshold change on them,
     read from Horizon off the server); and OpenBao's audit log disk at 80%;
   - WAL archiving failing (`pg_stat_archiver.failed_count` rising, or the last archived segment
-    older than 10 minutes), since a stuck archive fills a disk ClickHouse shares;
-  - the last WAL segment shipped off the server older than 30 minutes, or the last OpenBao
-    snapshot older than 26 hours (they run daily);
+    older than 10 minutes). pgBackRest acknowledges a segment only once it is in the
+    repository, so this one alarm covers a stuck archive, which fills a disk ClickHouse shares,
+    and WAL that doesn't leave the server;
+  - the last `pgbackrest backup` or the last OpenBao snapshot older than 26 hours (both run
+    daily);
   - the Roles Anywhere certificate expiring within 30 days;
   - low free disk and memory on the server.
 - **Uptime:** a Route 53 HTTPS health check on the public URL.
@@ -452,15 +457,15 @@ One request or one stop must never outlast the layer in front of it:
 - **A separate small Hetzner Cloud VM,** which would isolate the facilitator from the production
   ClickHouse server. What the shared server couples, and what a VM of our own would change:
 
-  | On the shared server                                           | On a VM of our own                       |
-  | -------------------------------------------------------------- | ---------------------------------------- |
-  | one `dockerd`: restarting Docker touches ClickHouse            | our own `dockerd`                        |
-  | one disk: `pg_wal` growth and logs                             | our own disk                             |
-  | reboots and patching are shared, and their owner is open       | we patch on our schedule                 |
-  | root on that server, for any project, can copy the OpenBao key | only the VM's root                       |
-  | testnet code runs on the production ClickHouse server          | it runs on the VM only                   |
-  | GitHub runners SSH into the production ClickHouse server       | they SSH into the VM only                |
-  | a hardware fault waits for that server's repair                | Hetzner Cloud moves the VM to a new host |
+  | On the shared server                                           | On a VM of our own                                           |
+  | -------------------------------------------------------------- | ------------------------------------------------------------ |
+  | one `dockerd`: restarting Docker touches ClickHouse            | our own `dockerd`                                            |
+  | one disk: `pg_wal` growth and logs                             | our own disk                                                 |
+  | reboots and patching are shared, and their owner is open       | we patch on our schedule                                     |
+  | root on that server, for any project, can copy the OpenBao key | only the VM's root                                           |
+  | testnet code runs on the production ClickHouse server          | it runs on the VM only                                       |
+  | GitHub runners SSH into the production ClickHouse server       | they SSH into the VM only                                    |
+  | a hardware fault waits for that server's repair                | a new VM is restored from a Hetzner Cloud backup or snapshot |
   - What it costs: about €12–20 a month on testnet (CPX12 to CPX22 after Hetzner's 2026 price
     rises, from task 0047's `notes/R-openbao-on-hetzner.md`), more with mainnet, and the VM's
     system, Docker and proxy are ours to run.
