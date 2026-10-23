@@ -77,7 +77,7 @@ dead `[0]`, not a lagging one, so this task replaces that part of decision 23.
   `c` with three URLs moves calls to `b` (`c->b by getFeeStats`), and failing reads start one
   probe per 5 s. Each fails on its mutant.
 - AD-3 in `docs/architecture/m1-spine.md`: one sentence beside 0045 decision 26.
-- signer-pool 144 tests (+4), facilitator 307 (71 skipped, unchanged); typecheck and lint clean.
+- signer-pool 145 tests (+5), facilitator 307 (71 skipped, unchanged); typecheck and lint clean.
 
 ## Design Decisions
 
@@ -96,8 +96,10 @@ dead `[0]`, not a lagging one, so this task replaces that part of decision 23.
    `[0]` as before. The tests keep `b`'s ledger reads up to pin the blip case.
 3. **A wrapped read counts as the active URL's failure** (code review, applied): `call()` uses
    `moveOn()`, as `markFailed` and `sendTransaction` do, so with three URLs a failing `[2]` moves
-   calls to `[1]` and logs `rpc_failover` instead of keeping them on `[2]`. With two URLs nothing
-   is left to move to, so it probes at once.
+   calls to `[1]` and logs `rpc_failover` instead of keeping them on `[2]`. A read that started on
+   `[1]` has tried every fallback before `[0]`, so it probes at once instead of moving (Adam's PR
+   #62 review: with `[1]` and `[2]` down, `moveOn()` bounced calls between them until the 60 s
+   probe). With two URLs that is always the case.
 4. **Probes started at once stay 5 s apart** (okarcz, 2026-10-23, code review): without a gap,
    reads that keep failing on the active URL with a trailing `[0]` started a probe after every
    read once the last one ended. `MIN_PROBE_GAP_MS` bounds that at one probe, and one
