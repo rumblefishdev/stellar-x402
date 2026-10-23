@@ -2,7 +2,7 @@
 id: "0062"
 title: "Create the sorobanscan.com Cloudflare zone and the facilitator's testnet tunnel"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0011"]
 related_tasks: ["0039", "0026", "0023", "0027", "0038"]
@@ -17,6 +17,10 @@ history:
       From 0039 (PR #24): the facilitator is reached through Cloudflare Tunnel on sorobanscan.com,
       confirmed by Marek; Marcin proposed the soroban-infrastructure repo. Stan starts the repo with
       only the zone and the x402 testnet tunnel.
+  - date: "2026-10-23"
+    status: active
+    who: stkrolikiewicz
+    note: "Started."
 ---
 
 # Create the sorobanscan.com Cloudflare zone and the facilitator's testnet tunnel
