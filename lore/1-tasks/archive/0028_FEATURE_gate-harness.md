@@ -82,7 +82,6 @@ Read in a clone of upstream; paths are upstream's.
 - 2026-10-19 — **A hash proves this run through this facilitator**: the gate fails when two scenarios report one hash, when a transaction was made before the run started, or when its fee was paid by an account the facilitator does not list as a Stellar signer in `/supported` (read before any payment). Each transaction's ledger, time, fee payer and call are saved with the run.
 - 2026-10-19 — **A hash RPC cannot answer for is a problem of the run**, not a crash: the run is saved, unless the gate is interrupted.
 - 2026-10-19 — **The placeholder package files go in this PR** (`src/index.ts`, its build config, the unused `@stellar-x402/config`): the package existed for this task to fill; named in the PR body.
-- 2026-10-20 — **The suite's raw result is kept apart**: each run saves a folder with the suite's own JSON copied byte for byte (`suite.json`) and the gate's verdict (`gate.json`), which names that file and its SHA-256.
 - 2026-10-15 — **Dry-run evidence** (x402.org) goes into this task and the PR, not `conformance/results/`, which holds our facilitator's runs (0029).
 
 ### Emerged

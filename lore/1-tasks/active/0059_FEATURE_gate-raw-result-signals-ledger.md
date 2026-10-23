@@ -46,10 +46,22 @@ Three follow-ups of the gate harness (0028), all before the first run of record 
 
 ## Acceptance Criteria
 
-- [ ] Given a finished run, when it is saved, then its folder holds `suite.json` identical to the
+- [x] Given a finished run, when it is saved, then its folder holds `suite.json` identical to the
       suite's file and `gate.json` whose `suiteSha256` matches it
-- [ ] Given a running gate, when it gets SIGTERM or SIGHUP, then no `x402-gate-*` folder remains in
+- [x] Given a running gate, when it gets SIGTERM or SIGHUP, then no `x402-gate-*` folder remains in
       `$TMPDIR`
-- [ ] Given a settlement in a ledger before the one read at the start, when it is checked, then the
+- [x] Given a settlement in a ledger before the one read at the start, when it is checked, then the
       gate fails it; the local clock plays no part
-- [ ] One gate run on testnet passes 18 of 18
+- [x] One gate run on testnet passes 18 of 18
+
+## Design Decisions
+
+### From Plan
+
+- 2026-10-20 — **The suite's raw result is kept apart**: each run saves a folder with the suite's own JSON copied byte for byte (`suite.json`) and the gate's verdict (`gate.json`), which names that file and its SHA-256.
+
+### Emerged
+
+- 2026-10-23 — **The gate runs as one Node process** (`node --import tsx src/gate.ts`), not under the `tsx` command. Measured: with the signal handlers alone, a TERM to the process group still left the folder, because `tsx`'s wrapper SIGKILLs a child that does not acknowledge a signal within ~30 ms, and the gate cannot while `execFileSync`/`spawnSync` blocks its event loop. As one process: 10 of 10 group TERMs and one group HUP left no folder.
+- 2026-10-23 — **A signal to the gate's process alone waits for the running step**: the handler runs only when the synchronous build step or suite returns (measured 275 s during `prepare`). Making every step asynchronous would stop it at once but rewrites `prepare` and the suite call; not done here. Ctrl+C, a closed terminal and a group kill stop the running step at once.
+- 2026-10-23 — **A settlement in the ledger read before the start fails too** (`ledger <= ledgerBeforeRun`, not `<`): that ledger had already closed when it was read, so no transaction of this run can be in it.
