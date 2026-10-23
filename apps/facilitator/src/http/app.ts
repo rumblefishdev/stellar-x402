@@ -9,6 +9,7 @@ import type { SettlementHooks } from "../settlement/hooks.js";
 import type { Settle } from "../settlement/settle.js";
 import type { Verify, VerifyTrace } from "../settlement/verify.js";
 import { EXTENSION_RESPONSES_HEADER, encodeExtensionResponses } from "./extension-responses.js";
+import { rateLimit } from "./rate-limit.js";
 
 /** What the composition root hands to the HTTP adapter. Lanes add their services here. */
 export interface AppDeps {
@@ -89,12 +90,14 @@ export function parsePaymentRequest(body: unknown): VerifyRequest | undefined {
 
 /**
  * The inbound HTTP adapter (AD-13). `/discovery/resources` answers 501 until its task lands
- * (0032). There is a body size limit and
- * no CORS anywhere (spine "HTTP hardening"); rate limits come in 0023.
+ * (0032). There is a body size limit and no CORS anywhere (spine "HTTP hardening"). `/verify`,
+ * `/settle` and `/discovery/*` each have a rate limit (AD-11), applied before the body is read, so
+ * a malformed or oversized request counts too; `/supported` has none.
  */
 export function createApp({
   config,
   logger,
+  stores,
   verify,
   settle,
   extensionResponses,
@@ -102,10 +105,19 @@ export function createApp({
 }: AppDeps): Express {
   const app = express();
   app.disable("x-powered-by");
-  app.use(express.json({ limit: config.http.bodyLimitBytes }));
+  const limit = (route: string, budget: number) =>
+    rateLimit({
+      route,
+      limit: budget,
+      windowMs: config.http.rateLimit.windowMs,
+      clientIpHeader: config.http.clientIpHeader,
+      store: stores.rateLimits,
+      logger,
+    });
+  const json = express.json({ limit: config.http.bodyLimitBytes });
 
   // A verify outcome, valid or not, is a 200 with an x402 body; a thrown error is a 500.
-  app.post("/verify", async (req, res) => {
+  app.post("/verify", limit("verify", config.http.rateLimit.verify), json, async (req, res) => {
     const request = parsePaymentRequest(req.body);
     if (!request) {
       res.status(400).json({ error: code(400) });
@@ -127,7 +139,7 @@ export function createApp({
   });
   // Like `/verify`: any settle outcome is a 200 with an x402 body (AD-6). A thrown error, such as
   // upstream verify failing or the store down before the claim, is a 500.
-  app.post("/settle", async (req, res) => {
+  app.post("/settle", limit("settle", config.http.rateLimit.settle), json, async (req, res) => {
     const request = parsePaymentRequest(req.body);
     if (!request) {
       res.status(400).json({ error: code(400) });
@@ -172,6 +184,7 @@ export function createApp({
   app.get("/supported", (_req, res) => {
     res.json(supported);
   });
+  app.use("/discovery", limit("discovery", config.http.rateLimit.discovery));
   app.get("/discovery/resources", notImplemented);
 
   app.use((_req, res) => {
