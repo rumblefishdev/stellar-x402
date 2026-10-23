@@ -1,0 +1,133 @@
+{
+  "ranAt": "2026-10-23T14:16:58.968Z",
+  "network": "stellar:testnet",
+  "facilitator": "GBCSI5BKVUU7EYSPFQMRQU2BLNHI2VT3HJRKEHHPOQI3AQ3FPE3FG2EI",
+  "channels": [
+    "GAORS7OHSTLKALSGTBJJQLD67UYIF32OBT5JHBALC3FGKD56JSM7K4JZ",
+    "GDNC65R6VZMGYT4VLXESKZFCTBEKY7HB3Y3HRLJQXYLB33T5ZAUWCONG",
+    "GBMCFSPRWIGB7KQOKL7WRQ6I57DVCXEE3EMTI4HGVAGZCJ7D4ETV4NV6",
+    "GDX2LAQJ6S5IDELFGS43S7H7URWF3CRC4QRRWMGGP3GBMKYNI3DRPXS2"
+  ],
+  "buyer": "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+  "seller": "GCA7TADGTMSMUEDWMBVJCV3674FGDDFXWJROOHQHMP54QFX2Q7J4AZOF",
+  "amount": "1000",
+  "buyerAccount": {
+    "before": {
+      "xlm": "99999999800",
+      "sequence": "21842039003938817"
+    },
+    "after": {
+      "xlm": "99999999800",
+      "sequence": "21842039003938817"
+    }
+  },
+  "restoredBeforehand": {
+    "usdc": 0,
+    "sac": 0,
+    "sep41": 0
+  },
+  "matrix": [
+    {
+      "kind": "usdc",
+      "contract": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+      "verified": true,
+      "settled": true,
+      "sellerReceived": "1000",
+      "hash": "c5ce6c24d406db4b47186c90b57c69de52e20374aa7d430906755f4dcf80bee1",
+      "status": "SUCCESS",
+      "ledger": 5348278,
+      "channel": "GAORS7OHSTLKALSGTBJJQLD67UYIF32OBT5JHBALC3FGKD56JSM7K4JZ",
+      "feePayer": "GBCSI5BKVUU7EYSPFQMRQU2BLNHI2VT3HJRKEHHPOQI3AQ3FPE3FG2EI",
+      "feeCharged": "11948"
+    },
+    {
+      "kind": "sac",
+      "contract": "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
+      "verified": true,
+      "settled": true,
+      "sellerReceived": "1000",
+      "hash": "e1f4cb9381a0b74190398baae5016fa72e9091356680bb046a50815f8173e49c",
+      "status": "SUCCESS",
+      "ledger": 5348281,
+      "channel": "GDNC65R6VZMGYT4VLXESKZFCTBEKY7HB3Y3HRLJQXYLB33T5ZAUWCONG",
+      "feePayer": "GBCSI5BKVUU7EYSPFQMRQU2BLNHI2VT3HJRKEHHPOQI3AQ3FPE3FG2EI",
+      "feeCharged": "11995"
+    },
+    {
+      "kind": "sep41",
+      "contract": "CBFIYRHJG4C4E4AU3K5XCCMSZKZR3IMVFPCKNAJ3OBRQCHDLPCT3GV53",
+      "verified": true,
+      "settled": true,
+      "sellerReceived": "1000",
+      "hash": "4c7808428da492a602911a7191a0f2f8a291e5d38bd90af7df435361e6a45248",
+      "status": "SUCCESS",
+      "ledger": 5348283,
+      "channel": "GBMCFSPRWIGB7KQOKL7WRQ6I57DVCXEE3EMTI4HGVAGZCJ7D4ETV4NV6",
+      "feePayer": "GBCSI5BKVUU7EYSPFQMRQU2BLNHI2VT3HJRKEHHPOQI3AQ3FPE3FG2EI",
+      "feeCharged": "152649"
+    }
+  ],
+  "batch": {
+    "size": 6,
+    "token": "CBFIYRHJG4C4E4AU3K5XCCMSZKZR3IMVFPCKNAJ3OBRQCHDLPCT3GV53",
+    "transactions": [
+      {
+        "hash": "894dab7bb9bde26f85dbe3865836ec91630d58bef34e13f0b095af87881adddf",
+        "status": "SUCCESS",
+        "ledger": 5348285,
+        "channel": "GDX2LAQJ6S5IDELFGS43S7H7URWF3CRC4QRRWMGGP3GBMKYNI3DRPXS2",
+        "feePayer": "GBCSI5BKVUU7EYSPFQMRQU2BLNHI2VT3HJRKEHHPOQI3AQ3FPE3FG2EI",
+        "feeCharged": "10516"
+      },
+      {
+        "hash": "dc8cf318615b2b77e528747a8f791acabd452a8cd26c47666653f0c6785ce937",
+        "status": "SUCCESS",
+        "ledger": 5348286,
+        "channel": "GAORS7OHSTLKALSGTBJJQLD67UYIF32OBT5JHBALC3FGKD56JSM7K4JZ",
+        "feePayer": "GBCSI5BKVUU7EYSPFQMRQU2BLNHI2VT3HJRKEHHPOQI3AQ3FPE3FG2EI",
+        "feeCharged": "10516"
+      },
+      {
+        "hash": "a5ad83b8c654d5bc74036b6e5193dba4730303b9b2122c5ef86757b466f16d15",
+        "status": "SUCCESS",
+        "ledger": 5348286,
+        "channel": "GDX2LAQJ6S5IDELFGS43S7H7URWF3CRC4QRRWMGGP3GBMKYNI3DRPXS2",
+        "feePayer": "GBCSI5BKVUU7EYSPFQMRQU2BLNHI2VT3HJRKEHHPOQI3AQ3FPE3FG2EI",
+        "feeCharged": "10516"
+      },
+      {
+        "hash": "4475ef33909c98436083083aacfa744cd5bb9a6302cb6d632f3c5286f6149f0c",
+        "status": "SUCCESS",
+        "ledger": 5348285,
+        "channel": "GBMCFSPRWIGB7KQOKL7WRQ6I57DVCXEE3EMTI4HGVAGZCJ7D4ETV4NV6",
+        "feePayer": "GBCSI5BKVUU7EYSPFQMRQU2BLNHI2VT3HJRKEHHPOQI3AQ3FPE3FG2EI",
+        "feeCharged": "10516"
+      },
+      {
+        "hash": "355082892c83cf1a9335a62bdf0abaef3b88d9b74a59eb32ecfbe6146c52e337",
+        "status": "SUCCESS",
+        "ledger": 5348285,
+        "channel": "GDNC65R6VZMGYT4VLXESKZFCTBEKY7HB3Y3HRLJQXYLB33T5ZAUWCONG",
+        "feePayer": "GBCSI5BKVUU7EYSPFQMRQU2BLNHI2VT3HJRKEHHPOQI3AQ3FPE3FG2EI",
+        "feeCharged": "10516"
+      },
+      {
+        "hash": "99028575f85f617f97876c20961c048c0303d1311f13a1c7e26988f7caa52da9",
+        "status": "SUCCESS",
+        "ledger": 5348285,
+        "channel": "GAORS7OHSTLKALSGTBJJQLD67UYIF32OBT5JHBALC3FGKD56JSM7K4JZ",
+        "feePayer": "GBCSI5BKVUU7EYSPFQMRQU2BLNHI2VT3HJRKEHHPOQI3AQ3FPE3FG2EI",
+        "feeCharged": "10516"
+      }
+    ]
+  },
+  "checks": {
+    "everyTokenSettled": true,
+    "facilitatorPaidEveryFee": true,
+    "buyerPaidNoXlm": true,
+    "buyerSourcedNothing": true,
+    "batchSettled": true,
+    "batchUsedSeveralChannels": true,
+    "batchSharedALedgerAcrossChannels": true
+  }
+}
