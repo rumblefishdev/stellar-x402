@@ -276,8 +276,9 @@ One request or one stop must never outlast the layer in front of it:
     payments, never keys.
   - The tunnel, its routing and the DNS record are Terraform in the `soroban-infrastructure`
     repo's `cloudflare/`, beside the `sorobanscan.com` zone, so routing changes are reviewed
-    there. It writes the tunnel token to AWS Secrets Manager, and an operator moves it into an
-    encrypted systemd credential (runbook), since the server's only AWS role can't read secrets.
+    there. The tunnel token is kept nowhere else: an operator fetches it from Cloudflare (the
+    dashboard, the API or `terraform output`) into an encrypted systemd credential (runbook),
+    also when the server is restored elsewhere.
   - Caddy and the ClickHouse project's repo are not involved.
 - **The client IP is `CF-Connecting-IP`** (AD-11), which Cloudflare sets on every request. Only
   `cloudflared` reaches the facilitator, so a client can't forge it, and `X-Forwarded-For` is
@@ -512,8 +513,9 @@ One request or one stop must never outlast the layer in front of it:
     longer.
   - Patching needs an owner and a schedule, which the team decides.
 - **Cloudflare and `soroban-infrastructure` are dependencies instead.**
-  - The tunnel, its routing and the DNS record live in another repo, applied by whoever holds its
-    Cloudflare token, so renaming the facilitator's service or port is a pull request there.
+  - The tunnel, its routing and the DNS record live in another repo, applied with a Cloudflare API
+    token by that repo's operator (stkrolikiewicz for now), so renaming the facilitator's service
+    or port is a pull request there.
   - Cloudflare's Free plan has no uptime SLA, and an outage there takes the facilitator off the
     internet; the uptime alarm catches it. A paid plan is a mainnet question (0038).
   - The server must allow outbound connections to Cloudflare on port 7844.
@@ -536,8 +538,8 @@ One request or one stop must never outlast the layer in front of it:
   - the Dockerfile, the compose files and the deploy script;
   - the systemd units: `x402@<network>`, `x402-db@<network>`, `x402-deploy@<network>`,
     `x402-tunnel@<network>`, `x402-openbao`, the restart timer and the backup timer;
-  - the `cloudflared` container, with the tunnel token moved from AWS Secrets Manager into a
-    systemd credential. The tunnel, its routing and the DNS record come from
+  - the `cloudflared` container, with the tunnel token fetched from Cloudflare into a systemd
+    credential. The tunnel, its routing and the DNS record come from
     `soroban-infrastructure`, after the `sorobanscan.com` zone is on Cloudflare;
   - the deploy user, its one `sudo` rule, the SSH forced command, the workflow with the pinned
     host key, and the `deploy/testnet` branch with its protection;

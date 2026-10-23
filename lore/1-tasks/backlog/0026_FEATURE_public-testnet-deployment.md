@@ -156,14 +156,14 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 - From 0039: the public URL is `x402-facilitator-testnet.sorobanscan.com` through Cloudflare
   Tunnel (ADR 0011). Prerequisites: the `sorobanscan.com` zone on Cloudflare, and the testnet
   tunnel with its routing (the hostname to `http://facilitator-testnet:<port>`, anything else
-  404) and DNS record, both Terraform in `soroban-infrastructure`'s `cloudflare/`, which writes
-  the tunnel token to AWS Secrets Manager. Nothing goes into the ClickHouse project's repo.
+  404) and DNS record, both Terraform in `soroban-infrastructure`'s `cloudflare/`
+  (stkrolikiewicz applies it for now). Nothing goes into the ClickHouse project's repo.
 - From 0039: `GET /health` answers 200 and reports `ready` in its body.
 - From 0039, the runbook: deploy, copying the compose file and `deploy.sh` from a reviewed
   commit, rollback (automatic on a failed deploy; by hand, redeploy an earlier digest), long
-  migrations outside the deploy, reboots, moving the tunnel token from AWS Secrets Manager into
-  its systemd credential, renewing the Roles
-  Anywhere certificate, key rotation as an on-chain signer change, and restoring the service on
+  migrations outside the deploy, reboots, fetching the tunnel token from Cloudflare (dashboard,
+  API or `terraform output`) into its systemd credential, renewing the Roles Anywhere
+  certificate, key rotation as an on-chain signer change, and restoring the service on
   another machine.
 - From 0013 ([ADR 0012](../../../docs/adr/0012-facilitator-state-store.md)), the database, on the
   server (ADR 0011):

@@ -152,8 +152,9 @@ Taken while writing the tunnel in:
 24. **`cloudflared` gets its own unit (`x402-tunnel@`) and a 128 MiB limit,** so deploys never
     restart it and it stops after the facilitator at a reboot, while answers are still going
     out. The memory totals grow to 1.875 GiB on testnet and 3.5 GiB with both networks.
-25. **The tunnel token reaches the server by hand** from AWS Secrets Manager into a systemd
-    credential, like ADR 0013's backup secret in reverse, since the server can't read secrets.
+25. **The tunnel token reaches the server by hand,** fetched from Cloudflare into a systemd
+    credential and kept nowhere else, since Cloudflare gives it back at any time (changed on
+    2026-10-23 from a copy in AWS Secrets Manager).
 26. **The client IP is `CF-Connecting-IP`,** replacing `TRUSTED_PROXY_HOPS` (0023, spine).
 
 From Stan's review of these commits (2026-10-23):
@@ -165,3 +166,5 @@ From Stan's review of these commits (2026-10-23):
     the first deploy migrates before `x402@` has ever run.
 29. **The VM's hardware-fault row names a restore,** not an automatic move to a new host, which no
     source here backs.
+30. **Marek confirmed the tunnel and the names; the repo is `soroban-infrastructure`,** and Stan
+    applies it until an owner is named.
