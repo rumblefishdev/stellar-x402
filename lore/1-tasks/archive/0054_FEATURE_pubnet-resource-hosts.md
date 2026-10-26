@@ -2,7 +2,7 @@
 id: "0054"
 title: "Keep loopback, private and IP resource URLs out of the catalog"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0008"]
 related_tasks: ["0053", "0023", "0024", "0025", "0044"]
@@ -38,6 +38,14 @@ history:
       0053-era entries, since no durable catalog was deployed (docs say the rule applies from this
       version); stale scope in ADR 0008, 0029, 0063 and `conformance/README.md` fixed; the gate's
       Bazaar check moves to 0029; fixtures off `seller.example`; the task retitled.
+  - date: "2026-10-26"
+    status: completed
+    who: akot
+    note: >
+      PR #66 merged on 2026-10-26. The catalog leaves out loopback, private, special-use,
+      single-label and IP resource URLs and `mcp:` URLs on every network as `resource_not_public`;
+      the payment settles; `CATALOG_LIST_LOCAL=true` (testnet only) lists them. The gate's Bazaar
+      check moves to 0029.
 ---
 
 # Keep loopback, private and IP resource URLs out of the catalog
