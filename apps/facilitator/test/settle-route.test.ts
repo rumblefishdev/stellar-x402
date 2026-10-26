@@ -5,7 +5,7 @@ import { createCataloger } from "../src/catalog/cataloger.js";
 import { parseConfig } from "../src/config.js";
 import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
-import { MAX_BODY_DEPTH } from "../src/http/app.js";
+import { MAX_BODY_DEPTH, NO_LEASE_RETRY_AFTER_S } from "../src/http/app.js";
 import { start, type Started } from "../src/main.js";
 import { memoryMetrics } from "../src/metrics.js";
 import type { SettlementRecord } from "../src/ports/index.js";
@@ -310,5 +310,63 @@ describe("POST /settle beside reconciliation (0019 decision 27)", () => {
       await app.close();
     }
     expect(reconciliation.close).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("POST /settle without the channel lease (0025)", () => {
+  it("answers 503 at once, settles again once the lease is held, and starts and stops it", async () => {
+    const settle = vi.fn<Settle>(async () => ({ response: success }));
+    let holds = false;
+    const lease = {
+      held: () => holds,
+      start: vi.fn(async () => {}),
+      runOnce: vi.fn(),
+      close: vi.fn(async () => {}),
+    };
+    const rateLimits = memoryStores().rateLimits;
+    const hit = vi.spyOn(rateLimits, "hit");
+    const env = {
+      FACILITATOR_SECRET: Keypair.random().secret(),
+      CHANNELS: Keypair.random().publicKey(),
+      CLIENT_IP: "socket",
+    };
+    const config = { ...parseConfig(env), port: 0 };
+    const app = await start({
+      config,
+      logger: jsonLogger("error"),
+      stores: { ...memoryStores(), rateLimits },
+      verify: async () => ({ isValid: true }),
+      settle,
+      extensionResponses: () => undefined,
+      supported: supportedResponse(config.network, Keypair.random().publicKey()),
+      metrics: memoryMetrics(),
+      lease,
+    });
+    const post = (path: string) =>
+      fetch(`http://127.0.0.1:${app.port}${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(request),
+      });
+    try {
+      expect(lease.start).toHaveBeenCalledTimes(1);
+      const refused = await post("/settle");
+      expect([refused.status, refused.headers.get("retry-after"), await refused.json()]).toEqual([
+        503,
+        `${NO_LEASE_RETRY_AFTER_S}`,
+        { error: "no_lease" },
+      ]);
+      // No settle, and no store call for the rate limit either.
+      expect(settle).not.toHaveBeenCalled();
+      expect(hit).not.toHaveBeenCalled();
+      // `/verify` doesn't need the lease.
+      expect((await post("/verify")).status).toBe(200);
+      holds = true;
+      expect((await post("/settle")).status).toBe(200);
+      expect(settle).toHaveBeenCalledTimes(1);
+    } finally {
+      await app.close();
+    }
+    expect(lease.close).toHaveBeenCalledTimes(1);
   });
 });
