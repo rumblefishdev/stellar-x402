@@ -30,12 +30,12 @@ As a facilitator operator, I want only one process at a time to settle through a
 - Deploys stop the old process before the new one starts (0014, 0026).
 - Builds on the record lifecycle from 0019 so in-flight work is recorded before release.
 - Related tasks: 0009, 0019, 0022.
-- From 0019: `scheduleReconciliation` starts right after the server listens. With the lease, it
-  must start once the lease is taken: the startup sweep closes every claim with no hash (0019
-  decision 2), which is right only while this process is the one lease holder. `/settle`'s 503
-  already waits for the sweep (`Reconciliation.ready()`); add the lease to that check. 0019
-  decision 10 (clock skew on `unsignedUntil`) assumes one lease holder too.
-- From 0019's code review: `Reconciliation.close()` stops the timers but doesn't wait for a sweep
+- From 0019: `scheduleReconciliation` starts right after the server listens and sweeps every 10 s
+  beside `/settle` (0019 decision 27: no 503 for reconciliation, no startup mode). Its writes stay
+  correct without the lease (a record version guards expiry, decision 26), so starting it once
+  the lease is taken is optional; the 503 here is for the lease alone. 0019 decision 10 (clock
+  skew on `unsignedUntil`) assumes one lease holder.
+- From 0019's code review: `Reconciliation.close()` stops the timer but doesn't wait for a sweep
   under way, and `main` ends the pools right after. That sweep's writes then fail and log
   `settlement_reconcile_failed` (the next start redoes it). The drain should wait for it, within
   its deadline, like the submissions below.
@@ -61,7 +61,7 @@ As a facilitator operator, I want only one process at a time to settle through a
   The drain lasts at most the pool's bounds for a sent transaction (60 s + 30 s), so the 180 s
   grace leaves about 90 s for the store writes and the lease release.
 - From 0014: `GET /health` never looks at the lease. `/settle` answers 503 at once until the
-  process holds the lease and the 0019 startup reconciliation has finished. A process without the
+  process holds the lease (since 0019 decision 27, not for reconciliation). A process without the
   lease keeps trying to take it and never exits; one whose renewal fails stops new submissions
   until it holds the lease again. The lease, not the deploy order, keeps two processes apart.
 - From 0013 ([ADR 0012](../../../docs/adr/0012-facilitator-state-store.md)): decide whether
@@ -113,5 +113,5 @@ As a facilitator operator, I want only one process at a time to settle through a
 - [ ] Given a second process for the same channel set, when it starts, then it can't take the lease and submits nothing
 - [ ] Given a shutdown signal, when the process stops, then it refuses new `/settle` calls, waits until every in-flight submission is final or recorded as pending, then releases the lease
 - [ ] Given a process that dies without releasing, when the lease TTL passes, then a new process can take the lease
-- [ ] Given a process without the lease or still reconciling, when `/settle` is called, then it answers 503 at once, and the process keeps trying to take the lease without exiting (ADR 0011)
+- [ ] Given a process without the lease, when `/settle` is called, then it answers 503 at once, and the process keeps trying to take the lease without exiting (ADR 0011)
 - [ ] Given a shutdown signal with calls still waiting for a channel, when the process drains, then those calls are refused unsent and the drain finishes within the 180 s stop grace period (ADR 0011)

@@ -264,7 +264,7 @@ graph TD
   - **Hashes.** A record keeps every hash it was signed with, because a rebuild produces a new one. It can be found by any of them.
   - **Durable write.** The hash is stored durably before the first send. This requires `signer-pool` to await an async `onSigned` and to abort the send if it rejects; that change to the library is a T1 prerequisite.
   - **Attempts.** Each hash keeps its own state, `stored → sent | unknown → landed | dead`, and its time and ledger bounds. `stored` and `sent` are hints that can lag the network; only `landed` and `dead` are its answers.
-  - **Reconciliation.** Before accepting traffic, the module re-checks every non-final record on chain by its hashes and finalizes it; `/settle` answers 503 until each has been tried, and one the RPC couldn't check is retried in the background. A hash the network doesn't know stays open until its bound has passed, and a record expires only once every hash has. A claim with no hash is closed at startup, and in a live sweep once its settle budget has passed. Sweeps also run when the store answers after a failed write, and every 5 minutes.
+  - **Reconciliation.** From startup and every 10 s after, beside `/settle`, the module re-checks every non-final record on chain by its hashes and finalizes it. A hash the network doesn't know stays open until its bound has passed, and a record expires only once every hash has and no hash was stored since the sweep read them (the record's `version`). A claim with no hash is closed once its settle budget has passed.
 
 ### AD-17: One process owns a channel set
 

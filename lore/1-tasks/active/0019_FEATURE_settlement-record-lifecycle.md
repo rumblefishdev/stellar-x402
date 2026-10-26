@@ -31,6 +31,13 @@ history:
     status: active
     who: okarcz
     note: "Started after 0009 (PR #41), as the next Payments task."
+  - date: "2026-10-26"
+    status: active
+    who: okarcz
+    note: >
+      Applied Karol's (karolko9) PR #57 review: a record version guards expiry, one sweep loop
+      replaces the scheduling and the 503 gate, and two outage leftovers are fixed (decisions
+      26-30). Point 7 spawned 0070.
 ---
 
 # Settlement records survive restarts
@@ -123,8 +130,8 @@ As a facilitator operator, I want settlement records that are written before sen
 - [x] Given a claimed settlement, when the pool signs its transaction, then the hash is written to `SettlementStore` through the awaited `onSigned` before the first send; if the write fails, nothing is sent
 - [x] Given a rebuild that produces a new hash, when it is signed, then the record keeps every hash and can be found by any of them
 - [x] Given a write that would move a record backwards, such as `pending` after `success`, when it arrives late, then the compare-and-set drops it; states only move `claimed → signed → pending → success | failed | rejected | expired`
-- [x] Given non-final records in the store, when the app starts, then before serving `/settle` it tries each one on chain by its hashes and finalizes those the network has decided; one it couldn't check is retried in the background (decisions 21, 24); a record that turns `success` this way fires the on-success hook
-- [x] Given a `claimed` record with no hashes at startup, when reconciliation runs (holding the lease once 0025 adds it), then it is closed as `rejected` with reason "interrupted before signing" and `onFinal` runs to release any spend reservation; nothing was sent, because 0016 sends only after `onSigned` succeeds (the reason is the code `settle_exact_stellar_interrupted`, decision 15; the lease comes with 0025)
+- [x] Given non-final records in the store, when the app starts, then reconciliation checks each one on chain by its hashes, from the first sweep at start and every 10 s after, beside `/settle`, and finalizes those the network has decided; one it couldn't check is tried again by the next sweep (decision 27, which replaced "before serving `/settle`"); a record that turns `success` this way fires the on-success hook
+- [x] Given a `claimed` record with no hashes past its settle budget plus a margin, when reconciliation runs (holding the lease once 0025 adds it), then it is closed as `rejected` with reason "interrupted before signing" and `onFinal` runs to release any spend reservation; nothing was sent, because 0016 sends only after `onSigned` succeeds (the reason is the code `settle_exact_stellar_interrupted`, decision 15; the lease comes with 0025)
 - [x] Given any handler or event listener, when it needs to change a record, then it calls the single settlement module, which owns every write to `SettlementStore`
 - [x] Given a signed hash, when the pool stores it, sends it and resolves it, then its attempt moves `stored → sent | unknown → landed | dead` with its time and ledger bounds, and reconciliation decides from the network, never from these states (decision 7)
 
@@ -167,6 +174,22 @@ As a facilitator operator, I want settlement records that are written before sen
   failure, retry cap, close during startup), `settle-pool.test.ts` +2 (the pool's `resolved`
   event through `buildSettlement`), `settle.test.ts` +2 (a settler and a reconciler sharing
   `records`; a crash between signing and sending). Each new rule was checked against its mutant.
+- **PR #57 review (2026-10-26, decisions 26-31):** migration `0003` adds `settlements.version`;
+  `transition(…, expectedVersion?)` in the port and both adapters; `records.advance` / `finish`
+  pass it, and `records.finalWrite` / `unconfirmed` keep a final write that threw.
+  `reconcile.ts`: `sweep()` without modes, `runLostHooks`, per-key `try` in `retryMarks`, the
+  history-gone recheck; `scheduleReconciliation` is a 10 s loop with `start`, `close` and
+  `reconciled`. `records.storeFailed` / `onStoreFailure`, `Reconciliation.ready()` and the 503
+  branch are gone. Tests: facilitator 447 → 453 with PostgreSQL: contract +2 (version, `addHash`
+  racing a versioned `transition`, on both adapters), `reconcile.test.ts` +3 net (rebuild during a
+  sweep, lost hooks twice, one bad key; the scheduler tests rewritten for the loop, the
+  one-sweep-at-a-time test removed), `settle.test.ts` +1 (a success answered once while a sweep
+  stores it). Each fix was checked against its mutant.
+- **Modified tests in the review round:** the hashless-claim tests advance the clock past the
+  budget (decision 27 dropped "close all at startup"); the history-gone test waits 5 minutes for
+  its recheck; `settle.test.ts` expects `transition`'s fourth argument and no longer listens for
+  store failures; `settle-route.test.ts`'s 503 test now checks that `/settle` serves while the
+  first sweep runs. Intentional.
 - **Modified tests:** `settle.test.ts`'s fake pool passes `BOUNDS` to `onSigned` (its type
   changed); `postgres.test.ts`'s two `main()` tests wait for `app.reconciled`, since the startup
   sweep opens a main-pool connection and `/settle` answers 503 until it ends. Intentional.
@@ -177,7 +200,14 @@ As a facilitator operator, I want settlement records that are written before sen
   `claimed` is equivalent (it is listed as `claimed`); the risky variant, closing from the current
   state, fails the race test.
 - **The backoff test missed a fixed delay** at first; it now checks the doubled wait to the
-  millisecond.
+  millisecond. (The backoff went with decision 27.)
+- **Karol's PR #57 review (2026-10-26)** found six races and outage leftovers the tests missed:
+  the expiry time rule read after the RPC calls (1) and missing at startup (2), a fallback success
+  answered twice (3), `pending` for up to 5 minutes after a restart (4), lost hooks after a write
+  that committed and threw (5), a dropped store failure and one key stopping every sweep (6).
+  Fixed by decisions 26-29.
+- **Rebases onto develop:** `main.ts` (0020's channel check comment) and `app.ts` (0023's rate
+  limiter on `/settle`) conflicted; the 503 test needed `CLIENT_IP` after 0023 made it required.
 
 ## Design Decisions
 
@@ -191,6 +221,7 @@ As a facilitator operator, I want settlement records that are written before sen
    with "interrupted before signing", and `onFinal` runs. Karol's age rule (close only claims
    older than `createdAt + SETTLE_BUDGET_MS + margin`) was considered; `addHash` refusing a final
    record keeps money safe without it.
+   *Replaced by decision 27 (2026-10-26):* every sweep closes a hashless claim only past its budget plus the margin, also the first after a start.
 3. **Reconciliation relies on compare-and-set now; the lease comes with 0025** (okarcz,
    2026-10-22). Every write is a CAS and decision 1 never ends a hash that can still land, so
    records stay correct without the lease. What the lease prevents, two processes using one
@@ -199,6 +230,7 @@ As a facilitator operator, I want settlement records that are written before sen
 4. **`/settle` answers 503 until reconciliation has finished** (okarcz, 2026-10-22). The server
    listens at once so `/health` answers; if the store or the RPC is down at startup, the process
    retries with backoff and logs, without crashing.
+   *Replaced by decision 27 (2026-10-26):* `/settle` serves at once, beside the sweeps.
 5. **A record with several hashes expires only when every hash's bound has passed** (okarcz,
    2026-10-22). A hash that landed decides the record (`success` or `failed`); otherwise it stays
    non-final until none of its hashes can still land.
@@ -218,6 +250,7 @@ As a facilitator operator, I want settlement records that are written before sen
    (okarcz, 2026-10-22). Besides startup, a failed store write arms a sweep that runs once the
    store answers again (with backoff); every 5 minutes a sweep runs regardless. A fixed 60 s timer
    was considered: it queries when nothing failed, and alone decides how long a leftover waits.
+   *Replaced by decision 27 (2026-10-26):* one sweep every 10 s instead of the store-failure trigger and the 5-minute timer.
 9. **A success answered during a store outage is marked answered only when this process knows
    it sent it** (okarcz, 2026-10-22). A live process finishing such a record sets
    `successAnsweredAt` if the key is in `answeredHere`. After a restart that set is gone, so the
@@ -270,8 +303,9 @@ As a facilitator operator, I want settlement records that are written before sen
     for everyone, and a 2-minute cap still blocked every payment for it. In both, a transaction
     the dead process sent may still land on a channel a new payment reads its sequence from (ADR
     0011's 60 s): one of the two gets `txBadSeq`, and no money moves twice.
+    *Replaced by decision 27 (2026-10-26):* no gate.
 22. **`NOT_FOUND` proves nothing before the RPC's history** (okarcz, 2026-10-22, from the code
-    review). RPC keeps a window of ledgers (a day by default; providers differ). A hash past its
+    review). RPC keeps a window of ledgers (testnet keeps 120960, about 7 days; providers differ). A hash past its
     bound turns `dead` only when the RPC's oldest ledger closed at or before the record's claim;
     otherwise the record stays open and is logged once per process as `settlement_history_gone`
     (`settlement_history_gone_total`), for an operator to check its hashes. Considered: the same
@@ -283,11 +317,13 @@ As a facilitator operator, I want settlement records that are written before sen
     the first hash's time bound, could land on a record the sweep had just expired. Past the
     budget no call stores a hash. Dead hashes are written anyway. Considered: requiring no
     non-final hash in the store's compare-and-set (a port change in both adapters), and both.
+    *Replaced by decision 26 (2026-10-26):* the time rule was checked after the RPC calls, and not at all at startup.
 24. **The retry after a store failure or an unchecked record stops after 5 sweeps** (okarcz,
     2026-10-22, from the code review), logging `reconcile_gave_up`; the 5-minute sweep tries again.
     Each try re-checks every open record, so one record the RPC keeps failing on cost about one
     RPC call per open hash every 30 s, indefinitely. Considered: retrying only the failed keys
     (least load, a second retry path) and keeping it as built.
+    *Replaced by decision 27 (2026-10-26):* no retries apart from the loop; a record whose RPC history is gone is checked every 5 minutes.
 25. **Code review fixes that needed no decision** (2026-10-22):
     - `onSuccess` runs even when the answered mark fails: the record is final, so no sweep
       returns to it;
@@ -299,3 +335,56 @@ As a facilitator operator, I want settlement records that are written before sen
       still doesn't wait for a sweep under way (0025's drain);
     - `isFinalRecord` stays next to `rules.ts`'s `isFinal`: `settlement/` doesn't import
       `adapters/`.
+
+26. **A record version guards its expiry** (okarcz, 2026-10-26, from Karol's PR #57 review,
+    point 1-2). `addHash` adds one to `settlements.version` (in `0003`, `NOT NULL DEFAULT 0`), and
+    the sweep's `expired` write passes the version the record was listed with, read before
+    `attempts()`. A hash stored since, such as a `txBadSeq` rebuild while the sweep waited for the
+    RPC, makes the write fail, and the next sweep checks that hash. Decision 23's time rule was
+    read after the RPC calls and didn't run at startup, so a deploy overlap could expire a payment
+    that then landed. It needs no clock and no lease. A release before `0003` doesn't bump the
+    version, but its hashes have no bounds, so all expire with the auth entry together.
+    Considered: fixing the time rule (smallest, still clock-bound), and an "every hash dead"
+    condition in the write (no column, a special SQL condition).
+27. **One sweep every 10 s, beside `/settle`** (okarcz, 2026-10-26, Karol's point 4, 6, 8). The
+    startup sweep with backoff, the store-failure trigger, the 5-minute timer, the 5-sweep cap
+    and the 503 gate go: after a restart a landed payment answered `settlement_pending` for up to
+    5 minutes, and a store failure during a retry sweep was dropped. A sweep starts at once and
+    then 10 s after each one ends, so they never overlap; one that fails is logged
+    (`reconcile_failed`) and followed by the next. Sweeps have no modes: a hashless claim closes
+    past its budget plus 5 s in every sweep, so a new process doesn't close an old one's in-flight
+    claim. `/settle` serves at once: a repeat of a leftover gets the same outcome without the gate
+    (one with a hash waits and sees the sweep finish it; a hashless one past its budget is ended
+    by the repeat, `…_timeout`), and a new payment isn't refused for the first sweep. A record
+    whose RPC history is gone (decision 22) is checked every 5 minutes, not every tick.
+    `reconcile_finished` is logged only for a sweep that changed or failed something. Considered:
+    patching the scheduling (re-sweep while records are open, a rerun flag), and keeping the gate
+    tied to the loop's first sweep.
+28. **A fallback success holds its key from the moment it is built** (okarcz, 2026-10-26,
+    Karol's point 3). When the store fails to record a success, the key goes into `answeredHere`
+    before the call reads the record back, so a sweep that stores the success meanwhile doesn't let
+    a repeat answer it too; the key goes into `unmarked` once the answer is sent, and out of both
+    if it isn't (the client left, or the budget answer replaced it). If a repeat in this process is
+    already answering it, the call answers `…_already_settled` with the hash.
+29. **Hooks of a final write that threw run from the next sweep** (okarcz, 2026-10-26, Karol's
+    point 5, 6). `records.finalWrite` keeps the key of a write to a final state that threw
+    (`unconfirmed`); it may have committed, and then no sweep lists the record. Each sweep reads
+    those keys: a final record gets `onFinal` (and `onSuccess` for a success); one that isn't stays
+    until the writer that finishes it, which takes the key out, so the hooks run once in this
+    process. A restart forgets the keys, and another process finishing the record during a deploy
+    can make the hooks run twice: 0024's `onFinal` must tolerate a repeat. `retryMarks` and this
+    pass take one key at a time, so one that keeps failing doesn't stop the sweep. Considered: a
+    stored "hooks ran" flag (survives restarts, another column and query).
+
+### Emerged (PR #57 review)
+
+30. **`markAttempts` keeps its count** (2026-10-26). Point 9 suggested dropping it, unused in
+    `src`; the store contract tests need it to show that exactly one of concurrent updates moved
+    an attempt. Every other point-9 cleanup is done: the reconciler's options are constants, and
+    the RPC history comment says testnet keeps 120960 ledgers (about 7 days).
+31. **Point 7 is a backlog task, 0070** (okarcz, 2026-10-26): `expired` and `…_interrupted`
+    tell the payer to sign again while the auth entry they signed may stay valid for minutes.
+
+## Future Work
+
+- **0070**: answer "sign a new payment" only once the payer's auth entry can no longer land.

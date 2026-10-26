@@ -4,8 +4,9 @@
 - Date: 2026-10-07, amended 2026-10-15 (task 0009: a success is answered once; a repeat of an
   unsigned record ends it at the first call's budget), 2026-10-16 (task 0009: the store-outage
   rule; a success answered while the store can't mark it), 2026-10-20 (task 0009: a repeat's
-  settle timeout counts from the hash it sees; a refusal the store can't record) and 2026-10-22
-  (task 0019: attempt states, reconciliation sweeps, the outage leftovers)
+  settle timeout counts from the hash it sees; a refusal the store can't record), 2026-10-22
+  (task 0019: attempt states, reconciliation sweeps, the outage leftovers) and 2026-10-26 (task
+  0019: the record version, sweeps every 10 s beside `/settle`)
 
 ## Context
 
@@ -81,8 +82,9 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
     failures in a row, and the record is still open, so a repeat could answer otherwise;
   - at the success mark: the success, as above.
 
-  Reconciliation (0019) finishes unfinished records once the store is back: a failed write arms
-  a sweep that runs when the store answers again. How available the store must be is set by
+  Reconciliation (0019) finishes unfinished records once the store is back: it sweeps every
+  10 s. A final write that threw may have committed, so the next sweep runs the hooks of such a
+  record if it finds it final (0019 decision 29). How available the store must be is set by
   ADR 0012 (task 0013), and its alarms are 0027's.
 
 - **One owner of the lifecycle.** A single settlement module in `apps/facilitator` writes every
@@ -97,15 +99,14 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
     network didn't know it past its bound.
 - **Durable hash.** `signer-pool` awaits an async `onSigned` before every send and aborts the
   send if it rejects (task 0016).
-- **Startup.** Before serving traffic, the module re-checks every non-final record on chain by its
-  hashes; until each has been tried, `/settle` answers 503, and one the RPC couldn't check is
-  retried in the background. A hash the network doesn't know stays non-final until
-  its bound has passed, and while the RPC's history doesn't reach back to the record's claim; a
-  record expires only once every hash's has, and in a live sweep only past its settle budget
-  (0019 decisions 22, 23). A claim with no hash is
-  closed as `settle_exact_stellar_interrupted`. Sweeps run again when the store answers after a
-  failed write, and every 5 minutes; a live sweep closes a hashless claim only past its settle
-  budget plus a margin (0019 decisions 1–13).
+- **Reconciliation.** From startup, and every 10 s after, the module re-checks every non-final
+  record on chain by its hashes, beside `/settle`, which serves at once (0019 decision 27). A hash
+  the network doesn't know stays non-final until its bound has passed, and while the RPC's
+  history doesn't reach back to the record's claim (checked again every 5 minutes); a record
+  expires only once every hash's has, and only if no hash was stored since the sweep read them:
+  `addHash` bumps the record's `version`, and the expiry needs the one it read (0019 decisions 22,
+  26). A claim with no hash is closed as `settle_exact_stellar_interrupted` once its settle budget
+  plus a margin has passed (0019 decisions 1–13, 27).
 - **Channel lease.** A process takes an exclusive, renewable lease on its network's channel set,
   and doesn't serve `/settle` without it.
   - Deploys stop the old process before the new one starts.

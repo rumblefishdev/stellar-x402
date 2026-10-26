@@ -117,8 +117,8 @@ to Cloudflare on the Free plan.
 - **`GET /health` is liveness only.** It answers 200 while the HTTP server is up and checks nothing
   else: not the lease, the RPC or the store. Its body reports `ready`. The container healthcheck
   calls it every 10 s.
-- **Ready to settle** means the process holds the lease and has finished the AD-16 startup
-  reconciliation, which runs after the lease is taken.
+- **Ready to settle** means the process holds the lease. AD-16 reconciliation starts once the
+  lease is taken and runs beside `/settle`, not before it (0019 decision 27).
   - Until then, `/settle` answers 503 at once instead of hanging.
   - A process without the lease keeps trying to take it.
   - A process whose lease renewal fails stops new submissions until it holds the lease again.
