@@ -51,6 +51,15 @@ history:
       network we serve no longer filters and another Stellar network skips the store (29 ms to
       8 ms); the offset cap goes from 10 000 to 1 000 000, so every entry can be paged to; a
       `payTo` filter needs no index of its own. 389 facilitator tests.
+  - date: "2026-10-26"
+    status: active
+    who: akot
+    note: >
+      Karol's review of PR #50, after merging develop (`/supported` from 0020, 0053): the discovery
+      test passes `supported`, so `pnpm typecheck` is clean; `extensions=bazaar` filters nothing
+      and another extension skips the store, like `network`; the listings' pool cuts a statement
+      off at 2 s; ADR 0012 counts the fourth pool; `limit`'s bounds cite spec v2 §8.1; the 0015
+      note says `text[]` with a GIN index and a backfill.
 ---
 
 # List resources in `/discovery/resources`
@@ -104,22 +113,26 @@ As a agent, I want to list catalog resources with the standard discovery filters
 - `src/http/app.ts` wires it in place of the 501 stub; `AppDeps` gains `metrics`, the instance
   `compose()` already shares with the cataloger and the settlement.
 - `src/adapters/postgres.ts`: `list` writes its filter out twice instead of sharing a CTE, and runs
-  on its own pool (`pools.discovery`, 3 connections, built by `main()`). `postgres-schema.ts`:
+  on its own pool (`pools.discovery`, 3 connections and a 2 s statement timeout, built by
+  `main()`; `createPool` takes the timeout). `postgres-schema.ts`:
   `0003_catalog_type_seq` adds `catalog_type_seq` on `(type, seq)`.
-- `test/discovery.test.ts`: 61 cases. The parser's accepted and refused inputs, misspelled names
+- `test/discovery.test.ts`: 64 cases. The parser's accepted and refused inputs, misspelled names
   among them; the route through a running server with a seeded memory catalog (each filter,
-  combined filters, `scheme`, another network, stable paging, the total past the end, the clamp,
+  combined filters, `scheme`, another network, another extension, stable paging, the total past the end, the clamp,
   400s before the store, an empty page without the store, unknown params logged, capped and
   counted, a store failure, no CORS); and upstream's own `withBazaar` client. Mutants (no `scheme`
   guard, no clamp, no control-character check; for misspelled names no bracket cut, no trim, no
   lowercase, no exact-name guard, no cap on the echoed name; a nine-digit or unbounded `limit`; no
   log cap on names or their length; the store called for an empty page; the served network passed
-  on, another Stellar network sent to the store, the old offset cap) each fail a case.
-- `test/main.test.ts` no longer lists `/discovery/resources` among the 501 stubs, and
+  on, another Stellar network sent to the store, the old offset cap; `extensions=bazaar` passed
+  on, another extension sent to the store) each fail a case.
+- `test/main.test.ts` checks an unknown route's 404 instead of the 501 stubs, none of which is
+  left, and
   `test/verify-route.test.ts` and `test/settle-route.test.ts` pass `metrics`.
   `test/postgres.test.ts` counts checkouts per pool, so each store call is pinned to its own (a
-  catalog upsert to the main one), and checks that `0003` adds the index to a database past `0002`
-  or one that has it; the store contract checks `limit: 0`.
+  catalog upsert to the main one) and the listings' pool alone to a 2 s statement timeout, and
+  checks that `0003` adds the index to a database past `0002` or one that has it; the store
+  contract checks `limit: 0`.
 - `apps/facilitator/README.md`: a `/discovery/resources` section for integrators.
 
 ## Design Decisions
@@ -132,14 +145,14 @@ As a agent, I want to list catalog resources with the standard discovery filters
 2. **`offset` and an exact `total`, as upstream's list contract has them.** Cursors exist only in
    upstream's `/discovery/search`, so the keyset paging noted from 0022 doesn't fit this endpoint,
    and an estimated or cached `total` would break "total count of resources matching". `limit`
-   is 0 to 100 with a default of 20 (100 is every known x402 facilitator's maximum). `offset` is
-   at most 1 000 000 (400 beyond), so every entry can be paged to: the count, not the offset, is
-   most of a call's cost (decision 9), and a deep page costs little more (15 ms at offset 99 000
-   of 100 000 entries, 9 ms at 0). The cap was first 10 000, like Elasticsearch's result window,
-   which left every match past the first 10 100 out of reach, the newest first: no filter narrows
-   a catalog the caller doesn't know yet (`type` has two values, a database one network, and
-   `payTo` must be known beforehand). Raised in the GSD self-review. Fair ordering is Tranche 2's
-   curation.
+   is 0 to 100 with a default of 20, from x402 spec v2 §8.1 (default 20, range 1–100); a larger
+   one, which some facilitators allow, is clamped. `offset` is at most 1 000 000 (400 beyond), so
+   every entry can be paged to: the count, not the offset, is most of a call's cost (decision 9),
+   and a deep page costs little more (15 ms at offset 99 000 of 100 000 entries, 9 ms at 0). The
+   cap was first 10 000, like Elasticsearch's result window, which left every match past the
+   first 10 100 out of reach, the newest first: no filter narrows a catalog the caller doesn't
+   know yet (`type` has two values, a database one network, and `payTo` must be known
+   beforehand). Raised in the GSD self-review. Fair ordering is Tranche 2's curation.
 3. **Strict values, clamped size.** `limit`/`offset` must be plain digits (`Number()` reads `" "`
    as 0, `0x10` as 16, `1e3` as 1000); a repeated param, a misspelled known param (named as sent),
    a control character such as NUL, a value over 256 characters or a `network` that isn't CAIP-2
@@ -192,17 +205,25 @@ As a agent, I want to list catalog resources with the standard discovery filters
 10. **Listings run on their own pool.** `/discovery/resources` is public and unauthenticated until
     0023, and ten concurrent callers held all ten main connections (117 calls/s measured), which
     `/settle` needs. Like `reserve` and `hit`, `list` gets three of its own; catalog writes stay
-    on the main pool.
+    on the main pool. ADR 0012 counts it: 19 connections per process. Until 0023, three slow
+    listings hold the whole pool, and from 20 clients 50–90% of requests got a 500 (Karol's
+    review, 1 000 000 entries, PostgreSQL 17); the pool's statement timeout is 2 s instead of
+    10 s, well above the slowest listing measured (~0.5 s), so a stuck one frees it sooner.
+11. **`extensions` filters like `network`.** The validator, the only way into the catalog, writes
+    `extensions.bazaar` and drops every other key (pinned in `packages/bazaar`), so
+    `extensions=bazaar` matches every entry and is not passed on, and any other key is an empty
+    page that never reaches the store. As a filter, `bazaar` made PostgreSQL scan the table: 82 ms
+    at 100 000 entries against 8 ms unfiltered, and up to 461 ms at 1 000 000, 364 ms for an
+    unknown key (Karol's review). `CatalogQuery.extensions` stays for when a second extension is
+    cataloged.
 
 ## Future Work
 
 - If the catalog grows well past 100 000 entries: the count stays O(matches) (about 25 ms
   unfiltered at 1 000 000 after decision 9), so a cached or bounded count only if upstream's
   contract allows it. Until then the listing pool and 0023's rate limit bound it.
-- `extensions` can't be left out like `network`, since an entry's extensions are optional, and a
-  GIN index counts no row on its own: `extensions=bazaar`, which nearly every entry matches, scans
-  the table (82 ms at 100 000 entries, against 8 ms unfiltered). If listings ask for it often, a
-  partial index on `seq` for entries with `bazaar` may answer it (not measured).
+- Once a second extension is cataloged, `extensions` filters again (decision 11); a GIN index
+  counts no row on its own, so a common key would need its own partial index on `seq`.
 - A page of 100 entries at the 32 KiB extension cap is 3.2 MB and about 40 ms of Node CPU per
   call, 22 ms of it in `list` (measured). Each such entry takes a paid settlement, but listing
   them is free, so 0023's limit for this route should allow for it.
