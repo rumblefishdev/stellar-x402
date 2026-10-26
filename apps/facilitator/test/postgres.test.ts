@@ -359,7 +359,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     expect(connections).toBeGreaterThanOrEqual(10);
   });
 
-  it("boots main() with STORE=postgres, reserves, limits and listings on their own pools, catalog writes on the main one, a short timeout for listings, and ends them", async () => {
+  it("boots main() with STORE=postgres, reserves, limits and listings on their own pools, catalog writes and pruning on the main one, a short timeout for listings, and ends them", async () => {
     await stores();
     const app = await main({
       STORE: "postgres",
@@ -376,7 +376,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     try {
       const limits = [{ scope: "global" as const, maxStroops: 10n, windowMs: 1_000 }];
       // Checkouts, not connections: a pool reuses an idle connection, so only a checkout shows
-      // which pool a call ran on once the main pool has one.
+      // which pool a call ran on once the pool has one.
       const checkouts = { main: 0, reserve: 0, rateLimits: 0, discovery: 0 };
       const names = Object.keys(checkouts) as (keyof typeof checkouts)[];
       for (const name of names) pools?.[name].on("acquire", () => checkouts[name]++);
@@ -395,6 +395,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
       // Catalog writes come from `/settle`, so they stay off the public listings' pool.
       expect(await ranOn(() => app.stores.catalog.upsert(catalogEntry()))).toEqual(["main"]);
       expect(await ranOn(() => app.stores.settlements.claim(settlement("1")))).toEqual(["main"]);
+      // A flood's pruning takes no connection from `hit` or `reserve` (decision 9).
+      expect(await ranOn(() => app.stores.rateLimits.prune(0, 10))).toEqual(["main"]);
+      expect(await ranOn(() => app.stores.spend.prune(0, 10))).toEqual(["main"]);
       // Only the public listings' pool cuts a statement off early.
       const timeouts = await Promise.all(
         names.map(async (name) => {
@@ -587,13 +590,94 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
         if (built === "branch")
           await old.query("CREATE INDEX catalog_type_seq ON catalog (type, seq)");
         expect(await typeIndex(old), built).toBe(built === "branch" ? 1 : 0);
-        expect(await migrate(old), built).toEqual(["0003_catalog_type_seq"]);
+        expect(await migrate(old), built).toEqual(["0003_catalog_type_seq", "0004_spend_window"]);
         expect(await typeIndex(old), built).toBe(1);
       } finally {
         await old.end();
         await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
       }
     }
+  });
+
+  it("copies each reservation's time and amount to its scopes on a database that has some", async () => {
+    // Written by a release before `0004_spend_window`: the reservation and its scope rows only.
+    const fresh = `${schema}_0003`;
+    await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
+    await pool.query(`CREATE SCHEMA ${fresh}`);
+    const old = poolFor(fresh, 2);
+    try {
+      expect(await migrate(old, 0, MIGRATIONS.slice(0, 3))).toHaveLength(3);
+      await old.query(
+        `INSERT INTO spend_reservations (id, amount, at, state) VALUES ('a', 60, 5, 'committed');
+         INSERT INTO spend_reservation_scopes (id, scope) VALUES ('a', 'global'), ('a', 'payer:P')`,
+      );
+      expect(await migrate(old)).toEqual(["0004_spend_window"]);
+      const { rows } = await old.query(
+        "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",
+      );
+      expect(rows).toEqual([
+        { scope: "global", at: "5", amount: "60" },
+        { scope: "payer:P", at: "5", amount: "60" },
+      ]);
+      expect(await postgresStores(old).spend.used("payer:P", 10, 6)).toBe(60n);
+    } finally {
+      await old.end();
+      await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
+    }
+  });
+
+  it("sums a window from the scope rows' covering index, without reading the reservations", async () => {
+    const { spend } = await stores();
+    const limits = [{ scope: "global" as const, maxStroops: 1_000n, windowMs: 100 }];
+    await spend.reserve({ id: "a", amount: 60n, limits, now: 0 });
+    await spend.commit("a", 20n);
+    const { rows } = await pool.query<{ indexdef: string }>(
+      "SELECT indexdef FROM pg_indexes WHERE schemaname = $1 AND indexname = 'spend_reservation_scopes_window'",
+      [schema],
+    );
+    expect(rows[0]?.indexdef).toMatch(/\(scope, at\) INCLUDE \(amount\)$/);
+    // The sum runs under the global scope's lock: it must not wait on anything that writes or
+    // prunes `spend_reservations`.
+    await holding(async (client) => {
+      await client.query("LOCK TABLE spend_reservations IN ACCESS EXCLUSIVE MODE");
+      // A sum that waits fails here, and the rollback then lets it finish.
+      const blocked = new Promise((resolve) => setTimeout(() => resolve("blocked"), 1_000));
+      expect(await Promise.race([spend.used("global", 100, 50), blocked])).toBe(20n);
+    });
+  });
+
+  it("prunes a reservation with its scope rows, and skips rows another transaction holds", async () => {
+    const { spend } = await stores();
+    const limits = [
+      { scope: "global" as const, maxStroops: 1_000n, windowMs: 100 },
+      { scope: "payer:P" as const, maxStroops: 1_000n, windowMs: 100 },
+    ];
+    await spend.reserve({ id: "a", amount: 10n, limits, now: 1 });
+    await spend.reserve({ id: "b", amount: 10n, limits, now: 2 });
+    await holding(async (client) => {
+      // A commit or release in flight on `a`: the pruner takes `b` and doesn't wait on `a`.
+      await client.query("SELECT 1 FROM spend_reservations WHERE id = 'a' FOR UPDATE");
+      const blocked = new Promise((resolve) => setTimeout(() => resolve("blocked"), 1_000));
+      expect(await Promise.race([spend.prune(10, 10), blocked])).toBe(1);
+    });
+    const { rows } = await pool.query(
+      "SELECT id, scope FROM spend_reservation_scopes ORDER BY scope",
+    );
+    expect(rows).toEqual([
+      { id: "a", scope: "global" },
+      { id: "a", scope: "payer:P" },
+    ]);
+  });
+
+  it("prunes rate-limit windows without waiting on a key a hit holds", async () => {
+    const { rateLimits } = await stores();
+    await rateLimits.hit("a", 1_000, 0);
+    await rateLimits.hit("b", 1_000, 0);
+    await holding(async (client) => {
+      await client.query("SELECT 1 FROM rate_limits WHERE key = 'a' FOR UPDATE");
+      const blocked = new Promise((resolve) => setTimeout(() => resolve("blocked"), 1_000));
+      expect(await Promise.race([rateLimits.prune(5_000, 10), blocked])).toBe(1);
+    });
   });
 
   it("rolls back a whole run when one migration fails, then applies it again", async () => {

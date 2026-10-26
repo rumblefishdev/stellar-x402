@@ -173,7 +173,7 @@ export class MemoryCatalogStore implements CatalogStore {
 }
 
 export class MemoryRateLimitStore implements RateLimitStore {
-  // ponytail: one entry per key, never pruned; add a sweep if a long-lived process sees many IPs.
+  // One entry per key; the pruner deletes ended windows.
   private readonly windows = new Map<string, RateLimitHit>();
 
   async hit(key: string, windowMs: number, now: number): Promise<RateLimitHit> {
@@ -187,6 +187,18 @@ export class MemoryRateLimitStore implements RateLimitStore {
     this.windows.set(key, counted);
     return { ...counted };
   }
+
+  async prune(before: number, limit: number): Promise<number> {
+    let pruned = 0;
+    for (const [key, { resetAt }] of this.windows) {
+      if (pruned === limit) break;
+      if (resetAt < before) {
+        this.windows.delete(key);
+        pruned++;
+      }
+    }
+    return pruned;
+  }
 }
 
 interface Reservation {
@@ -197,9 +209,8 @@ interface Reservation {
 }
 
 export class MemorySpendStore implements SpendStore {
-  // ponytail: reservations are never pruned, so memory and each `sum` scan grow with the process's
-  // settlements. Fine for tests and dev runs (deployments use the PostgreSQL stores); prune past the
-  // longest window if a memory store ever runs for long.
+  // `sum` scans every reservation the pruner has kept: fine for tests and dev runs (deployments
+  // use the PostgreSQL stores).
   private readonly reservations = new Map<string, Reservation>();
   private readonly failures = new Map<SpendScope, number>();
   private readonly breakers = new Map<SpendScope, number>();
@@ -220,11 +231,11 @@ export class MemorySpendStore implements SpendStore {
     return { reserved: true };
   }
 
-  async commit(id: string, feeCharged: bigint, now: number): Promise<boolean> {
+  async commit(id: string, feeCharged: bigint): Promise<boolean> {
     assertStroops(feeCharged, "feeCharged");
     const reservation = this.reservations.get(id);
     if (!reservation) return false;
-    Object.assign(reservation, { amount: feeCharged, at: now, state: "committed" });
+    Object.assign(reservation, { amount: feeCharged, state: "committed" });
     return true;
   }
 
@@ -234,6 +245,18 @@ export class MemorySpendStore implements SpendStore {
 
   async used(scope: SpendScope, windowMs: number, now: number): Promise<bigint> {
     return this.sum(scope, windowMs, now);
+  }
+
+  async prune(before: number, limit: number): Promise<number> {
+    let pruned = 0;
+    for (const [id, { at }] of this.reservations) {
+      if (pruned === limit) break;
+      if (at < before) {
+        this.reservations.delete(id);
+        pruned++;
+      }
+    }
+    return pruned;
   }
 
   async recordFailure(scope: SpendScope): Promise<number> {

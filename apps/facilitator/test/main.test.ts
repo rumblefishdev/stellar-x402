@@ -145,7 +145,7 @@ describe("startup with a bad config", () => {
     const error = await main(pubnet).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ConfigError);
     expect((error as ConfigError).problems).toEqual([
-      "NETWORK stellar:pubnet is refused until spend budgets (0024), the channel lease (0025) and store pruning (0050) land",
+      "NETWORK stellar:pubnet is refused until spend budgets (0024) and the channel lease (0025) land",
     ]);
   });
 });
@@ -253,6 +253,65 @@ describe("main()", () => {
       expect(body).not.toContain(env.CHANNELS);
     } finally {
       await app.close();
+    }
+  });
+
+  it("prunes the stores with the config's windows", async () => {
+    const day = 86_400_000;
+    const hour = 3_600_000;
+    const app = await main({
+      ...env,
+      RPC_URLS: rpc.url,
+      PORT: "0",
+      LOG_LEVEL: "error",
+      SPEND_WINDOW_MS: String(5 * day),
+      RATE_LIMIT_WINDOW_MS: String(hour),
+    });
+    try {
+      // A budget's window is never longer than SPEND_WINDOW_MS, which 0024 keeps.
+      const reserve = (id: string, at: number) =>
+        app.stores.spend.reserve({
+          id,
+          amount: 1n,
+          limits: [{ scope: "global", maxStroops: 10n, windowMs: 5 * day }],
+          now: at,
+        });
+      const now = Date.now();
+      // A 5-day window keeps 10 days.
+      await reserve("old", now - 10 * day - 60_000);
+      await reserve("kept", now - 9 * day);
+      // An hour's window is kept for an hour after it ends: the one before this hour stays.
+      const hit = (key: string, at: number) => app.stores.rateLimits.hit(key, hour, at);
+      await hit("old", now - 3 * hour);
+      await hit("ended", now - hour);
+      await app.pruner.runOnce();
+      // Read over 11 days, past the window, to see which reservations are still stored.
+      expect(await app.stores.spend.used("global", 11 * day, Date.now())).toBe(1n);
+      // A stored window counts on; a pruned one starts again at 1.
+      expect((await hit("old", now - 3 * hour)).count).toBe(1);
+      expect((await hit("ended", now - hour)).count).toBe(2);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("prunes on its timer until it closes", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const app = await main({ ...env, RPC_URLS: rpc.url, PORT: "0", LOG_LEVEL: "error" });
+      const prune = vi.spyOn(app.stores.spend, "prune");
+      try {
+        // A tick comes within a minute, ±10%.
+        await vi.advanceTimersByTimeAsync(66_000);
+        expect(prune).toHaveBeenCalled();
+      } finally {
+        await app.close();
+      }
+      prune.mockClear();
+      await vi.advanceTimersByTimeAsync(10 * 66_000);
+      expect(prune).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
     }
   });
 

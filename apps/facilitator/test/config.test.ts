@@ -18,14 +18,14 @@ const minimal = {
   CHANNELS: `${CHANNEL_A}, ${CHANNEL_B}`,
   CLIENT_IP: "socket",
 };
-/** Pubnet needs the PostgreSQL store, and is refused until 0024, 0025 and 0050 land. */
+/** Pubnet needs the PostgreSQL store, and is refused until 0024 and 0025 land. */
 const pubnet = {
   NETWORK: "stellar:pubnet",
   STORE: "postgres",
   DATABASE_URL: "postgres://db.internal/x402",
 };
 const PUBNET_REFUSED =
-  "NETWORK stellar:pubnet is refused until spend budgets (0024), the channel lease (0025) and store pruning (0050) land";
+  "NETWORK stellar:pubnet is refused until spend budgets (0024) and the channel lease (0025) land";
 
 function problems(env: Record<string, string | undefined>): string[] {
   try {
@@ -348,8 +348,8 @@ describe("parseConfig", () => {
     ]);
   });
 
-  it("refuses stellar:pubnet with nothing else wrong, until 0024, 0025 and 0050 land", () => {
-    // `/settle` would spend there with allow-all spend hooks, no rate limit and no lease.
+  it("refuses stellar:pubnet with nothing else wrong, until 0024 and 0025 land", () => {
+    // `/settle` would spend there with allow-all spend hooks and no lease.
     expect(problems({ ...minimal, ...pubnet, RPC_URLS: "https://rpc.example" })).toEqual([
       PUBNET_REFUSED,
     ]);

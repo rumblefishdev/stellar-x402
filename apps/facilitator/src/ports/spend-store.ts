@@ -41,14 +41,24 @@ export interface SpendStore {
    */
   reserve(reservation: SpendReservation): Promise<ReserveResult>;
   /**
-   * Replaces a reservation with the fee actually paid, stamped at `now`. Resolves `false` when no
-   * reservation has `id`, so the fee counts against no budget; committing again replaces the fee.
+   * Replaces a reservation with the fee actually paid. The fee keeps the reservation's time, so
+   * it leaves the window with it however late the commit comes (a settlement reconciliation ends
+   * after a restart); the transaction landed within its time bound after `reserve`. Resolves
+   * `false` when no reservation has `id`, so the fee counts against no budget; committing again
+   * replaces the fee.
    */
-  commit(id: string, feeCharged: bigint, now: number): Promise<boolean>;
+  commit(id: string, feeCharged: bigint): Promise<boolean>;
   /** Drops a reservation that was never spent; a committed one stays, since its fee was paid. */
   release(id: string): Promise<void>;
   /** Stroops reserved or spent after `now - windowMs`, for alerts. */
   used(scope: SpendScope, windowMs: number, now: number): Promise<bigint>;
+  /**
+   * Deletes at most `limit` reservations stamped before `before`, reserved or committed, and
+   * resolves how many. The caller keeps `before` past every window it sums, with a margin: a
+   * pruned reservation counts against nothing, and a later `commit` of it resolves `false`.
+   * Skips a reservation another call is writing instead of waiting on it.
+   */
+  prune(before: number, limit: number): Promise<number>;
 
   /** Counts an on-chain failure; resolves the consecutive failures for `scope`. */
   recordFailure(scope: SpendScope, now: number): Promise<number>;

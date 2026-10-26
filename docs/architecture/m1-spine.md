@@ -283,6 +283,9 @@ graph TD
     - a global rolling fee budget
     - per-payer, per-`payTo` and per-asset budgets
   - **Over budget.** Returns `success: false` and submits nothing.
+  - **Windows.** A budget sums what was reserved or paid in its rolling window, exact to the
+    millisecond. A committed fee keeps its reservation's time, however late the commit. The store
+    keeps reservations for twice the longest window or 7 days, whichever is longer (task 0050).
   - **Circuit breaker.** A breaker per asset and per `payTo` opens after repeated on-chain failures.
   - **Alerts.** These raise alerts:
     - the budget nearing its limit

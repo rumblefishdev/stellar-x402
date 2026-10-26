@@ -78,10 +78,10 @@ As a facilitator operator, I want only one process at a time to settle through a
     transactions can still use a sequence number the new holder read, so expect `tx_bad_seq` and a
     sequence refresh.
 - From 0009 (PR #41, decision 49): the config refuses `NETWORK=stellar:pubnet` until spend
-  budgets (0024), rate limits (0023) and the channel lease (0025) land: the rule after the
-  `STORE` one in `config.ts`, with tests in `config.test.ts` and `main.test.ts`. Whichever of the
-  three lands last removes it; an earlier one narrows its message to what is still missing,
-  together with the facilitator README.
+  budgets (0024) and the channel lease (0025) land (rate limits, 0023, and store pruning, 0050,
+  already have): the rule after the `STORE` one in `config.ts`, with tests in `config.test.ts`
+  and `main.test.ts`. Whichever of the two lands last removes it; the other narrows its message
+  to what is still missing, together with the facilitator README.
   - **0025 on that list is an assumption, not yet shown** (okarcz, 2026-10-20). The double-charge
     guard held without a lease: two `main()` instances on one database settled one payment once
     (Adam, sixth review). Find out what two processes on one channel set cost on pubnet: fees, a

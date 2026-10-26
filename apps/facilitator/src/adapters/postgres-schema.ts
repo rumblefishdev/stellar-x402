@@ -110,6 +110,21 @@ CREATE TABLE spend_scopes (
     name: "0003_catalog_type_seq",
     sql: "CREATE INDEX IF NOT EXISTS catalog_type_seq ON catalog (type, seq);",
   },
+  {
+    // 0050: each scope row carries its reservation's time and amount, so a window's sum reads only
+    // the window's index entries instead of joining every reservation the scope ever had. `reserve`
+    // and `commit` write both copies in one statement. NOT NULL is safe because no release writes
+    // spend rows yet (0024 wires the store); one that wrote scope rows without the copy would
+    // fail, never under-count. In one transaction: every database holds few rows (0050, E17).
+    name: "0004_spend_window",
+    sql: `
+ALTER TABLE spend_reservation_scopes ADD COLUMN at bigint, ADD COLUMN amount bigint;
+UPDATE spend_reservation_scopes rs SET at = r.at, amount = r.amount
+  FROM spend_reservations r WHERE r.id = rs.id;
+ALTER TABLE spend_reservation_scopes ALTER COLUMN at SET NOT NULL, ALTER COLUMN amount SET NOT NULL;
+CREATE INDEX spend_reservation_scopes_window ON spend_reservation_scopes (scope, at) INCLUDE (amount);
+`,
+  },
 ];
 
 /** Serializes concurrent `migrate` runs, e.g. two tasks of one deploy; held until commit. */

@@ -56,6 +56,7 @@ import {
  * - `list` runs on `pools.discovery`: `/discovery/resources` is public, and a burst of listings
  *   must not take the connections `/settle` needs. Catalog writes stay on the main pool. `main()`
  *   gives that pool a short statement timeout, so a few slow listings can't hold it for long.
+ * - `prune` runs on the main pool for both, so pruning a flood's keys takes nothing from `hit`.
  */
 export function postgresStores(
   pool: pg.Pool,
@@ -64,7 +65,7 @@ export function postgresStores(
   return {
     settlements: new PostgresSettlementStore(pool),
     catalog: new PostgresCatalogStore(pool, pools.discovery ?? pool),
-    rateLimits: new PostgresRateLimitStore(pools.rateLimits ?? pool),
+    rateLimits: new PostgresRateLimitStore(pools.rateLimits ?? pool, pool),
     spend: new PostgresSpendStore(pool, pools.reserve ?? pool),
   };
 }
@@ -455,7 +456,10 @@ export class PostgresCatalogStore implements CatalogStore {
 }
 
 export class PostgresRateLimitStore implements RateLimitStore {
-  constructor(private readonly pool: pg.Pool) {}
+  constructor(
+    private readonly pool: pg.Pool,
+    private readonly prunePool: pg.Pool = pool,
+  ) {}
 
   /** A hit from an older window counts in the stored one, which `GREATEST` keeps. */
   async hit(key: string, windowMs: number, now: number): Promise<RateLimitHit> {
@@ -472,6 +476,20 @@ export class PostgresRateLimitStore implements RateLimitStore {
     const row = rows[0]!;
     return { count: row.count, resetAt: Number(row.reset_at) };
   }
+
+  /**
+   * No index on `reset_at`: one would turn the window-crossing `hit` updates into non-HOT ones,
+   * and the scan this costs the pruner instead stays off the request path (0050, E5 and E11).
+   * A key a concurrent `hit` moved into a new window fails the locked re-check and stays.
+   */
+  async prune(before: number, limit: number): Promise<number> {
+    const { rowCount } = await this.prunePool.query(
+      `DELETE FROM rate_limits WHERE key IN (
+         SELECT key FROM rate_limits WHERE reset_at < $1 LIMIT $2 FOR UPDATE SKIP LOCKED)`,
+      [before, limit],
+    );
+    return rowCount ?? 0;
+  }
 }
 
 /**
@@ -480,10 +498,15 @@ export class PostgresRateLimitStore implements RateLimitStore {
  */
 const RESERVE_LOCK_TIMEOUT = "2s";
 
-/** Stroops reserved or spent in one scope after `$2`, as text; `reserve` and `used` share it. */
-const WINDOW_SUM = `SELECT coalesce(sum(r.amount), 0)::text AS used
-  FROM spend_reservation_scopes rs JOIN spend_reservations r ON r.id = rs.id
-  WHERE rs.scope = $1 AND r.at > $2`;
+/**
+ * Stroops reserved or spent in one scope after `$2`, as text; `reserve` and `used` share it. A
+ * range scan of `spend_reservation_scopes_window` that reads the window's rows only, however many
+ * the scope has had, and never `spend_reservations`. It is index-only where the visibility map
+ * marks a page all-visible; pages that commits and prunes changed since the last vacuum are still
+ * read from `spend_reservation_scopes`.
+ */
+const WINDOW_SUM = `SELECT coalesce(sum(amount), 0)::text AS used
+  FROM spend_reservation_scopes WHERE scope = $1 AND at > $2`;
 
 /** Thrown inside `reserve`'s transaction so a breach rolls the reservation back. */
 class LimitExceeded extends Error {
@@ -539,8 +562,9 @@ export class PostgresSpendStore implements SpendStore {
             throw new LimitExceeded(limit.scope);
         }
         await client.query(
-          "INSERT INTO spend_reservation_scopes (id, scope) SELECT $1, unnest($2::text[])",
-          [id, scopes],
+          `INSERT INTO spend_reservation_scopes (id, scope, at, amount)
+           SELECT $1, unnest($2::text[]), $3, $4`,
+          [id, scopes, now, amount.toString()],
         );
         return { reserved: true };
       });
@@ -550,13 +574,19 @@ export class PostgresSpendStore implements SpendStore {
     }
   }
 
-  async commit(id: string, feeCharged: bigint, now: number): Promise<boolean> {
+  /** One statement, so the scope rows' copy of the amount never differs from the reservation's. */
+  async commit(id: string, feeCharged: bigint): Promise<boolean> {
     assertStroops(feeCharged, "feeCharged");
-    const { rowCount } = await this.pool.query(
-      "UPDATE spend_reservations SET amount = $2, at = $3, state = 'committed' WHERE id = $1",
-      [id, feeCharged.toString(), now],
+    const { rows } = await this.pool.query<{ matched: boolean }>(
+      `WITH r AS (
+         UPDATE spend_reservations SET amount = $2, state = 'committed' WHERE id = $1 RETURNING id
+       ), s AS (
+         UPDATE spend_reservation_scopes rs SET amount = $2 FROM r WHERE rs.id = r.id
+       )
+       SELECT EXISTS (SELECT 1 FROM r) AS matched`,
+      [id, feeCharged.toString()],
     );
-    return rowCount === 1;
+    return rows[0]!.matched;
   }
 
   /** The delete cascades to the reservation's scopes. */
@@ -569,6 +599,19 @@ export class PostgresSpendStore implements SpendStore {
   async used(scope: SpendScope, windowMs: number, now: number): Promise<bigint> {
     const { rows } = await this.pool.query<{ used: string }>(WINDOW_SUM, [scope, now - windowMs]);
     return BigInt(rows[0]!.used);
+  }
+
+  /**
+   * Oldest first on `spend_reservations_at`; the scope rows go with the cascade. Takes no scope
+   * lock, so it never queues behind `reserve`, and skips a reservation a commit or release holds.
+   */
+  async prune(before: number, limit: number): Promise<number> {
+    const { rowCount } = await this.pool.query(
+      `DELETE FROM spend_reservations WHERE id IN (
+         SELECT id FROM spend_reservations WHERE at < $1 ORDER BY at LIMIT $2 FOR UPDATE SKIP LOCKED)`,
+      [before, limit],
+    );
+    return rowCount ?? 0;
   }
 
   async recordFailure(scope: SpendScope): Promise<number> {

@@ -59,7 +59,8 @@ async function serve(env: Record<string, string> = {}, stores: Stores = memorySt
 function spiedStores(): { stores: Stores; hit: ReturnType<typeof vi.fn<RateLimitStore["hit"]>> } {
   const memory = new MemoryRateLimitStore();
   const hit = vi.fn<RateLimitStore["hit"]>((...args) => memory.hit(...args));
-  return { stores: { ...memoryStores(), rateLimits: { hit } }, hit };
+  const prune: RateLimitStore["prune"] = (...args) => memory.prune(...args);
+  return { stores: { ...memoryStores(), rateLimits: { hit, prune } }, hit };
 }
 
 describe("the rate limiter", () => {
@@ -147,6 +148,7 @@ describe("the rate limiter", () => {
       hit: async () => {
         throw new Error("database down");
       },
+      prune: async () => 0,
     };
     const { lines, post } = await serve({}, { ...memoryStores(), rateLimits: failing });
     const response = await post("/settle");
@@ -181,6 +183,7 @@ describe("the rate limiter", () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
         return memory.hit(...args);
       },
+      prune: (...args) => memory.prune(...args),
     };
     const { lines, post } = await serve(
       { CLIENT_IP: "cloudflare" },

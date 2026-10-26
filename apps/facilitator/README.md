@@ -12,8 +12,7 @@ discovery routes. Design: [the M1 spine](../../docs/architecture/m1-spine.md) (A
 - `SETTLE_TIMEOUT_MS` (20 s, or the budget when that is shorter; at least 1 s, at most the
   budget): how long a repeat of a sent payment waits for it to turn final.
 - `NETWORK=stellar:pubnet` refuses to start, whatever the store: `/settle` would spend there
-  with no spend budgets (0024) and no channel lease (0025) yet, and the store's tables would
-  grow without bound until pruning (0050) lands.
+  with no spend budgets (0024) and no channel lease (0025) yet.
 
 ## Callers and rate limits
 

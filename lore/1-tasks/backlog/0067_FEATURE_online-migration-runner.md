@@ -21,7 +21,7 @@ history:
 ## Summary
 
 `migrate()` applies every pending migration in one transaction on the main pool, under its 10 s
-`statement_timeout`. 0050 measured its `0003_spend_window` migration hitting that timeout at about
+`statement_timeout`. 0050 measured its `0004_spend_window` migration hitting that timeout at about
 200 000 reservations. Once the public testnet deployment (0026) holds weeks of traffic, the next
 change to these tables would fail the boot. Give `migrate()` a way to run such a migration online.
 
