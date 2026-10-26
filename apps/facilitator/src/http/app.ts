@@ -26,7 +26,7 @@ export interface AppDeps {
   extensionResponses: SettlementHooks["extensionResponses"];
   /** The `GET /supported` answer, fixed for the life of the process. */
   supported: SupportedResponse;
-  /** Settlement reconciliation (0019); without it `/settle` answers at once. */
+  /** Settlement reconciliation (0019), started and stopped with the server. */
   reconciliation?: Reconciliation;
 }
 
@@ -104,7 +104,6 @@ export function createApp({
   settle,
   extensionResponses,
   supported,
-  reconciliation,
 }: AppDeps): Express {
   const app = express();
   app.disable("x-powered-by");
@@ -143,13 +142,6 @@ export function createApp({
   // Like `/verify`: any settle outcome is a 200 with an x402 body (AD-6). A thrown error, such as
   // upstream verify failing or the store down before the claim, is a 500.
   app.post("/settle", limit("settle", config.http.rateLimit.settle), json, async (req, res) => {
-    // Until the startup sweep has tried every open record on chain (0019 decisions 4, 21): a repeat
-    // would answer from a record that may already have landed or expired.
-    if (reconciliation && !reconciliation.ready()) {
-      res.setHeader("Retry-After", "5");
-      res.status(503).json({ error: "reconciling" });
-      return;
-    }
     const request = parsePaymentRequest(req.body);
     if (!request) {
       res.status(400).json({ error: code(400) });

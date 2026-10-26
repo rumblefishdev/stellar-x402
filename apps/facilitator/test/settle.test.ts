@@ -1594,14 +1594,11 @@ describe("with reconciliation (0019)", () => {
 
   it("marks a success answered without the store's mark once the store is back (decision 9)", async () => {
     const { store, records, settle, reconcilerOn } = shared(landing(), notFound(1));
-    const failures = vi.fn();
-    records.onStoreFailure(failures);
     vi.spyOn(store, "markSuccessAnswered").mockRejectedValueOnce(new Error("store down"));
     expect((await settle(payload(), requirements)).response.success).toBe(true);
-    // The failure arms a sweep, and the key waits for it.
-    expect(failures).toHaveBeenCalled();
+    // The key waits for the next sweep.
     expect(records.unmarked.has(key)).toBe(true);
-    await reconcilerOn().sweep("live");
+    await reconcilerOn().sweep();
     expect((await store.get(key))?.successAnsweredAt).toEqual(expect.any(Number));
     expect((await settle(payload(), requirements)).response).toEqual(alreadySettled);
   });
@@ -1615,7 +1612,7 @@ describe("with reconciliation (0019)", () => {
     await vi.waitFor(async () => expect(await store.attempts(key)).toHaveLength(1));
     // After the restart: a new process, with its own records, on the same store.
     const restarted = createRecords({ network, store, hooks, logger, metrics });
-    expect(await reconcilerOn(restarted).sweep("startup")).toMatchObject({ expired: 1 });
+    expect(await reconcilerOn(restarted).sweep()).toMatchObject({ expired: 1 });
     expect(await store.get(key)).toMatchObject({
       state: "expired",
       errorReason: SETTLE_REASONS.expired,
