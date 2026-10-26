@@ -3,6 +3,7 @@ import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import pg from "pg";
 import {
   HashConflictError,
+  LEASE_SKEW_MARGIN_MS,
   type AttemptBounds,
   type AttemptState,
   type AttemptUpdate,
@@ -457,7 +458,8 @@ export class PostgresSettlementStore implements SettlementStore {
        ON CONFLICT (name) DO UPDATE SET holder = EXCLUDED.holder, expires_at = EXCLUDED.expires_at
        WHERE leases.holder = EXCLUDED.holder OR leases.expires_at < $4
        RETURNING name, holder, expires_at`,
-      [name, holder, now + ttlMs, now],
+      // Another holder's lease is taken only once it expired more than the margin ago.
+      [name, holder, now + ttlMs, now - LEASE_SKEW_MARGIN_MS],
     );
     const row = rows[0];
     return row && { name: row.name, holder: row.holder, expiresAt: Number(row.expires_at) };

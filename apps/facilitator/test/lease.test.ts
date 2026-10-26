@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemorySettlementStore } from "../src/adapters/memory.js";
 import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
+import { LEASE_SKEW_MARGIN_MS } from "../src/ports/index.js";
 import { createLeaseKeeper, leaseName, type LeaseKeeperDeps } from "../src/settlement/lease.js";
 
 const network = "stellar:testnet" as const;
@@ -60,12 +61,12 @@ describe("lease keeper (0025)", () => {
     expect([a.lease.held(), b.lease.held()]).toEqual([true, false]);
   });
 
-  it("lets a new process take the lease once a crashed holder's TTL has passed", async () => {
+  it("lets a new process take the lease once a crashed holder's TTL and the margin passed", async () => {
     const store = new MemorySettlementStore();
     const crashed = keeper(store);
     await crashed.lease.runOnce();
     const next = keeper(store);
-    next.clock.now = crashed.clock.now + TTL;
+    next.clock.now = crashed.clock.now + TTL + LEASE_SKEW_MARGIN_MS;
     await next.lease.runOnce();
     expect(next.lease.held()).toBe(false);
     next.clock.now += 1;
@@ -79,7 +80,7 @@ describe("lease keeper (0025)", () => {
     await a.lease.runOnce();
     // A holder whose clock runs ahead takes over early (the skew margin is a later decision).
     const b = keeper(store);
-    b.clock.now = a.clock.now + TTL + 1;
+    b.clock.now = a.clock.now + TTL + LEASE_SKEW_MARGIN_MS + 1;
     await b.lease.runOnce();
     a.clock.now += TTL / 3;
     await a.lease.runOnce();
