@@ -82,7 +82,8 @@ export function createPruner(deps: PrunerDeps): Pruner {
         if (clock() - started >= BUDGET_MS) break;
       }
     } catch (error) {
-      logger.warn("store_prune_failed", { table, error });
+      // `rows` counts what earlier batches of this tick deleted before the failure.
+      logger.warn("store_prune_failed", { table, rows, error });
       metrics.increment("store_prune_failures_total", { table });
       return;
     }

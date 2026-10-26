@@ -137,10 +137,26 @@ describe("pruner", () => {
     expect(events).toContainEqual({
       level: "warn",
       event: "store_prune_failed",
-      fields: { table: "spend_reservations", error },
+      fields: { table: "spend_reservations", rows: 0, error },
     });
     expect(metrics.value("store_prune_failures_total", { table: "spend_reservations" })).toBe(1);
     expect(await rateLimits.prune(NOW, 10)).toBe(0);
+  });
+
+  it("logs the rows earlier batches deleted when a later one fails", async () => {
+    const { logger, events } = recordingLogger();
+    const error = new Error("connection terminated");
+    const prune = vi
+      .fn<(before: number, limit: number) => Promise<number>>()
+      .mockResolvedValueOnce(1_000)
+      .mockResolvedValueOnce(1_000)
+      .mockRejectedValueOnce(error);
+    await createPruner(deps({ spend: { prune }, logger })).runOnce();
+    expect(events).toContainEqual({
+      level: "warn",
+      event: "store_prune_failed",
+      fields: { table: "spend_reservations", rows: 2_000, error },
+    });
   });
 
   it("runs every interval with ±10% jitter, and close() waits for a running tick and stops", async () => {
