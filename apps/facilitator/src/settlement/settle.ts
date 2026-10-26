@@ -238,8 +238,17 @@ export function createSettler(deps: SettlerDeps): Settle {
 
   const records =
     deps.records ?? createRecords({ network, store, hooks: deps.hooks, logger, metrics, now });
-  const { hookFailed, recordFailed, onFinal, onSuccess, advance, finish, answeredHere, unmarked } =
-    records;
+  const {
+    hookFailed,
+    recordFailed,
+    onFinal,
+    onSuccess,
+    advance,
+    finalWrite,
+    finish,
+    answeredHere,
+    unmarked,
+  } = records;
 
   /**
    * A refusal that means the pool, or `/settle`'s own re-check, disagreed with a `/verify` that
@@ -274,11 +283,13 @@ export function createSettler(deps: SettlerDeps): Settle {
     try {
       return await bounded(
         (async () => {
-          const ended = await store.transition(key, "claimed", {
-            state: "rejected",
-            errorReason: SETTLE_REASONS.timeout,
-            updatedAt: now(),
-          });
+          const ended = await finalWrite(key, () =>
+            store.transition(key, "claimed", {
+              state: "rejected",
+              errorReason: SETTLE_REASONS.timeout,
+              updatedAt: now(),
+            }),
+          );
           if (ended && after) {
             const run = () => onFinal(ended, "settle");
             after.then(run, run);

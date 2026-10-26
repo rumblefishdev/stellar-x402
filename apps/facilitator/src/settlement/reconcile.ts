@@ -10,7 +10,7 @@ import type {
   SettlementRecord,
   SettlementStore,
 } from "../ports/index.js";
-import { attemptUpdates, type Records } from "./records.js";
+import { attemptUpdates, isFinalRecord, type Records } from "./records.js";
 import { SETTLE_REASONS } from "./settle.js";
 import { authExpiration } from "./verify.js";
 
@@ -100,11 +100,42 @@ export function createReconciler(deps: ReconcilerDeps) {
     }
   };
 
-  /** Successes already stored whose mark failed: their record is final, so no sweep reads it. */
+  /** A key a pass below couldn't check: logged, and tried again by the next sweep. */
+  const keyFailed = (key: SettlementRecord["key"], error: unknown) =>
+    logger.warn("settlement_reconcile_failed", { network, settlementKey: key, error });
+
+  /**
+   * Successes already stored whose mark failed: their record is final, so no sweep reads it. One
+   * key at a time, so one that keeps failing doesn't stop the sweep.
+   */
   const retryMarks = async () => {
     for (const key of [...records.unmarked]) {
-      const record = await store.get(key);
-      if (record?.state === "success") await markAnswered(key);
+      try {
+        const record = await store.get(key);
+        if (record?.state === "success") await markAnswered(key);
+      } catch (error) {
+        keyFailed(key, error);
+      }
+    }
+  };
+
+  /**
+   * Records whose final write threw (decision 29): one that is final committed after all, so its
+   * hooks run here; one that isn't stays listed, and the writer that finishes it runs them.
+   */
+  const runLostHooks = async () => {
+    for (const key of [...records.unconfirmed]) {
+      try {
+        const record = await store.get(key);
+        if (!record) records.unconfirmed.delete(key);
+        else if (isFinalRecord(record)) {
+          records.unconfirmed.delete(key);
+          records.onFinal(record, "resolved");
+          if (record.state === "success") records.onSuccess(record, "resolved");
+        }
+      } catch (error) {
+        keyFailed(key, error);
+      }
     }
   };
 
@@ -150,11 +181,13 @@ export function createReconciler(deps: ReconcilerDeps) {
       // A call may still sign it, also another process's during a deploy (decisions 13, 27).
       if (now() <= record.createdAt + deps.budgetMs + MARGIN_MS) return "open";
       // Explicitly from `claimed`: atomic with `addHash`, so a hash stored meanwhile wins.
-      const ended = await store.transition(record.key, "claimed", {
-        state: "rejected",
-        errorReason: SETTLE_REASONS.interrupted,
-        updatedAt: now(),
-      });
+      const ended = await records.finalWrite(record.key, () =>
+        store.transition(record.key, "claimed", {
+          state: "rejected",
+          errorReason: SETTLE_REASONS.interrupted,
+          updatedAt: now(),
+        }),
+      );
       if (!ended) return "open";
       records.onFinal(ended, "resolved");
       return "rejected";
@@ -217,6 +250,7 @@ export function createReconciler(deps: ReconcilerDeps) {
       open: 0,
       errors: 0,
     };
+    await runLostHooks();
     await retryMarks();
     const queue = await store.listNonFinal(network);
     const worker = async () => {

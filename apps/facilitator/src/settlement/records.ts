@@ -93,6 +93,30 @@ export function createRecords(deps: RecordsDeps) {
     return undefined;
   };
 
+  /**
+   * Keys whose write to a final state threw: it may still have committed, and then nothing comes
+   * back to the record, so its hooks would never run. Reconciliation reads each, runs the hooks of
+   * one it finds final, and leaves one it doesn't to the usual path (0019 decision 29). A writer in
+   * this process that makes the record final takes the key out; a restart forgets it.
+   */
+  const unconfirmed = new Set<SettlementKey>();
+
+  /** Runs `write`, a write that may make the record final, keeping track of it for the hooks. */
+  const finalWrite = async (
+    key: SettlementKey,
+    write: () => Promise<SettlementRecord | undefined>,
+  ) => {
+    let record: SettlementRecord | undefined;
+    try {
+      record = await write();
+    } catch (error) {
+      unconfirmed.add(key);
+      throw error;
+    }
+    if (record && isFinalRecord(record)) unconfirmed.delete(key);
+    return record;
+  };
+
   /** {@link advance}, then `onFinal` once for the writer that made the record final. */
   const finish = async (
     key: SettlementKey,
@@ -100,7 +124,7 @@ export function createRecords(deps: RecordsDeps) {
     origin: SettlementOrigin,
     expectedVersion?: number,
   ) => {
-    const record = await advance(key, update, expectedVersion);
+    const record = await finalWrite(key, () => advance(key, update, expectedVersion));
     if (record && isFinalRecord(record)) onFinal(record, origin);
     return { record: record ?? (await store.get(key)), won: record !== undefined, origin };
   };
@@ -125,9 +149,11 @@ export function createRecords(deps: RecordsDeps) {
     onFinal,
     onSuccess,
     advance,
+    finalWrite,
     finish,
     answeredHere,
     unmarked,
+    unconfirmed,
   };
 }
 
