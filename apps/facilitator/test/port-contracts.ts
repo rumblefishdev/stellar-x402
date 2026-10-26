@@ -69,7 +69,7 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       const results = await Promise.all(Array.from({ length: 10 }, () => store.claim(s)));
       expect(results.filter((r) => r.claimed)).toHaveLength(1);
       // The whole record, so a payload or requirement that doesn't round-trip fails.
-      const record = { ...s, state: "claimed", hashes: [], updatedAt: 1_000 };
+      const record = { ...s, state: "claimed", hashes: [], version: 0, updatedAt: 1_000 };
       expect(results.find((r) => r.claimed)).toEqual({ claimed: true, record });
       expect(results.find((r) => !r.claimed)).toEqual({ claimed: false, existing: record });
       expect(await store.get(s.key)).toEqual(record);
@@ -80,10 +80,41 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       await store.claim(s);
       await store.addHash(s.key, "h1", 2_000);
       const update = { state: "pending", channel: "GCHANNEL", updatedAt: 3_000 } as const;
-      const pending = { ...s, ...update, hashes: ["h1"] };
+      const pending = { ...s, ...update, hashes: ["h1"], version: 1 };
       expect(await store.transition(s.key, "signed", update)).toEqual(pending);
       expect(await store.findByHash("h1")).toEqual(pending);
       expect(await store.listNonFinal("stellar:testnet")).toEqual([pending]);
+    });
+
+    it("bumps the version with each new hash, and fails a transition that expects an older one", async () => {
+      const { key } = settlement("1");
+      await store.claim(settlement("1"));
+      await store.addHash(key, "h1", 2_000);
+      await store.addHash(key, "h1", 2_500);
+      expect((await store.get(key))?.version).toBe(1);
+      await store.addHash(key, "h2", 3_000);
+      expect((await store.get(key))?.version).toBe(2);
+      const expired = { state: "expired", updatedAt: 4_000 } as const;
+      // A hash appended since version 1 was read: the write fails, and the record stays open.
+      expect(await store.transition(key, "signed", expired, 1)).toBeUndefined();
+      expect((await store.get(key))?.state).toBe("signed");
+      expect(await store.transition(key, "signed", expired, 2)).toMatchObject({
+        state: "expired",
+        version: 2,
+      });
+    });
+
+    it("lets exactly one of addHash and a versioned transition win when they race", async () => {
+      for (let i = 0; i < 10; i++) {
+        const s = settlement(String(i));
+        await store.claim(s);
+        await store.addHash(s.key, `a${i}`, 2_000);
+        const [added, ended] = await Promise.all([
+          store.addHash(s.key, `b${i}`, 3_000),
+          store.transition(s.key, "signed", { state: "expired", updatedAt: 3_000 }, 1),
+        ]);
+        expect(added !== (ended !== undefined)).toBe(true);
+      }
     });
 
     it("keeps every hash, finds the record by any of them, and moves claimed to signed", async () => {

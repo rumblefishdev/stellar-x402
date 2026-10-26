@@ -50,7 +50,8 @@ type Outcome = keyof SweepReport;
  * left non-final, from the network's answer for each of their hashes. Writes go through
  * `records`, forward-only compare-and-sets, so a sweep can run beside `/settle` and the pool's
  * `resolved` events. A hash the network doesn't know stays open until its bound has passed
- * (decision 1), and a record expires only once every hash is dead (decision 5).
+ * (decision 1), and a record expires only once every hash is dead (decision 5) and no hash was
+ * stored since the sweep read them (decision 26).
  */
 export function createReconciler(deps: ReconcilerDeps) {
   const { network, store, records, logger, metrics, now = Date.now } = deps;
@@ -187,14 +188,15 @@ export function createReconciler(deps: ReconcilerDeps) {
       }
       return land(record, attempt, res, dead);
     }
-    // Every hash is dead: none can land any more. A live sweep waits out the call's budget first:
-    // until then `/settle` may still store a rebuilt hash this read missed (decision 23).
-    const callMayRun = mode === "live" && now() <= record.createdAt + deps.budgetMs + marginMs;
-    if (open === 0 && !callMayRun) {
+    // Every hash this read saw is dead. A `/settle` call may still store a rebuilt one, so the
+    // write needs the version the record was listed with, which `attempts()` read after: a hash
+    // stored since makes it fail, and the next sweep checks that hash too (decision 26).
+    if (open === 0) {
       const { won } = await records.finish(
         record.key,
         { state: "expired", errorReason: SETTLE_REASONS.expired, attempts: dead },
         "resolved",
+        record.version,
       );
       return won ? "expired" : "open";
     }

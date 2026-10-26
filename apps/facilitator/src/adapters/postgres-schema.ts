@@ -128,9 +128,13 @@ CREATE INDEX spend_reservation_scopes_window ON spend_reservation_scopes (scope,
   {
     // 0019: each hash's attempt state and the bounds reconciliation resolves it by (decisions 6,
     // 7). Nullable, so the release before it keeps working; a null state reads as `stored`, and a
-    // hash without bounds falls back to the auth entry's expiry in `payment_payload`.
+    // hash without bounds falls back to the auth entry's expiry in `payment_payload`. `version`
+    // counts the hashes `addHash` appended (decision 26) and defaults to 0. A release before it
+    // doesn't bump it, but its hashes have no bounds, so they all expire with the auth entry and
+    // no rebuild outlives them.
     name: "0005_settlement_attempts",
     sql: `
+ALTER TABLE settlements ADD COLUMN version integer NOT NULL DEFAULT 0;
 ALTER TABLE settlement_hashes
   ADD COLUMN state text CHECK (state IN ('stored', 'sent', 'unknown', 'landed', 'dead')),
   ADD COLUMN max_time bigint,

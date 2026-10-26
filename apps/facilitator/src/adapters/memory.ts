@@ -68,6 +68,7 @@ export class MemorySettlementStore implements SettlementStore {
       ...structuredClone(settlement),
       state: "claimed",
       hashes: [],
+      version: 0,
       updatedAt: settlement.createdAt,
     };
     this.records.set(record.key, record);
@@ -100,6 +101,7 @@ export class MemorySettlementStore implements SettlementStore {
     attempts.push({ hash, state: "stored", ...structuredClone(bounds), updatedAt });
     this.attemptsOf.set(key, attempts);
     if (record.state === "claimed") record.state = "signed";
+    record.version++;
     record.updatedAt = updatedAt;
     return true;
   }
@@ -142,6 +144,7 @@ export class MemorySettlementStore implements SettlementStore {
     key: SettlementKey,
     expected: SettlementState,
     update: SettlementUpdate,
+    expectedVersion?: number,
   ): Promise<SettlementRecord | undefined> {
     if (update.feeCharged !== undefined) assertStroops(update.feeCharged, "feeCharged");
     const { attempts, ...fields } = update;
@@ -149,6 +152,7 @@ export class MemorySettlementStore implements SettlementStore {
     const record = this.records.get(key);
     if (!record || record.state !== expected || !isForward(expected, update.state))
       return undefined;
+    if (expectedVersion !== undefined && record.version !== expectedVersion) return undefined;
     Object.assign(record, structuredClone(fields));
     return structuredClone(record);
   }
