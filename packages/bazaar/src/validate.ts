@@ -6,7 +6,12 @@ import {
 } from "@x402/extensions/bazaar";
 import { LIMITS, type BazaarRejectReason } from "./limits.js";
 import { isSchemaWithinLimits } from "./schema.js";
-import { canonicalizeUrl, matchRouteTemplate, sanitizeIconUrl } from "./url.js";
+import {
+  canonicalizeUrl,
+  isPublicResourceUrl,
+  matchRouteTemplate,
+  sanitizeIconUrl,
+} from "./url.js";
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
@@ -29,6 +34,15 @@ export type ValidationResult =
     }
   /** `detail` is for logs only and never goes into the header. */
   | { ok: false; reason: BazaarRejectReason; detail?: string };
+
+export interface ValidateOptions {
+  /**
+   * Development only: also list loopback, private, special-use and IP hosts and `mcp:` URLs, for a
+   * facilitator run locally and the e2e gate (0054). The facilitator's config allows it on testnet
+   * only.
+   */
+  listLocal?: boolean;
+}
 
 /** The `EXTENSION-RESPONSES` value of a settle response (AD-8). */
 export type ExtensionResponses = {
@@ -96,6 +110,7 @@ function checkShape(
 function run(
   payload: PaymentPayload,
   requirements: PaymentRequirements,
+  options: ValidateOptions,
 ): ValidationResult | undefined {
   // 1. Presence, read from the raw payload: upstream's `null` mixes several cases.
   const extensions: unknown = payload.extensions;
@@ -124,6 +139,12 @@ function run(
       ? canonicalizeUrl(resource.url, input.type === "mcp" ? "mcp" : "http")
       : undefined;
   if (!resourceUrl) return reject("invalid_resource_url");
+  // The catalog lists public names only, on every network (0054): no buyer reaches a local,
+  // private or IP host or an `mcp:` tool name. The URL itself is fine and the payment settles,
+  // so this has its own reason rather than `invalid_resource_url`.
+  if (!options.listLocal && !isPublicResourceUrl(resourceUrl)) {
+    return reject("resource_not_public", "not a public http(s) host");
+  }
 
   // 6. Content limits. The schema is data: walked for limits, never compiled.
   if (
@@ -185,9 +206,10 @@ function run(
 export function validate(
   payload: PaymentPayload,
   requirements: PaymentRequirements,
+  options: ValidateOptions = {},
 ): ValidationResult | undefined {
   try {
-    return run(payload, requirements);
+    return run(payload, requirements, options);
   } catch (error) {
     return reject("internal_error", error instanceof Error ? error.message : String(error));
   }

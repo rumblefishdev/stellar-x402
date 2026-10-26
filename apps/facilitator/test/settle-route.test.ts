@@ -1,6 +1,7 @@
 import { Keypair } from "@stellar/stellar-sdk";
 import type { PaymentRequirements } from "@x402/core/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { createCataloger } from "../src/catalog/cataloger.js";
 import { parseConfig } from "../src/config.js";
 import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
@@ -202,6 +203,35 @@ describe("POST /settle", () => {
     const response = await post(request);
     expect([response.status, await response.json()]).toEqual([200, success]);
     expect(lines.join("")).toContain("extension_responses_failed");
+  });
+
+  it("settles a pubnet payment for a localhost resource, and only the listing is refused (0054)", async () => {
+    const cataloger = createCataloger({
+      store: db.stores().catalog,
+      metrics: memoryMetrics(),
+      logger: jsonLogger("debug", () => undefined),
+    });
+    const pubnet = {
+      key: "stellar:pubnet:GPAYER:7",
+      network: "stellar:pubnet",
+      state: "success",
+      ledger: 100,
+      paymentPayload: {
+        x402Version: 2,
+        resource: { url: "http://localhost:4022/exact/stellar" },
+        extensions: { bazaar: { info: { input: { type: "http", method: "GET" } } } },
+      },
+      paymentRequirements: { ...requirements, network: "stellar:pubnet" },
+      updatedAt: 0,
+    } as unknown as SettlementRecord;
+    settle.mockResolvedValueOnce({ response: success, record: pubnet });
+    extensionResponses.mockImplementationOnce(cataloger.extensionResponses);
+    const response = await post(request);
+    expect([response.status, await response.json()]).toEqual([200, success]);
+    const header = response.headers.get("extension-responses");
+    expect(JSON.parse(Buffer.from(header!, "base64").toString())).toEqual({
+      bazaar: { status: "rejected", rejectedReason: "resource_not_public" },
+    });
   });
 
   it("answers 400 for a NUL or a lone surrogate in any string or key, without settling", async () => {

@@ -342,6 +342,7 @@ export function compose(
     store: stores.catalog,
     logger,
     metrics,
+    listLocal: config.catalog.listLocal,
   });
   // One client for every RPC_URLS read and send, whose active URL upstream verify shares (AD-3).
   // A test's `rpc` serves every URL.

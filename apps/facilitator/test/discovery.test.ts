@@ -125,7 +125,7 @@ async function seed(stores: Stores) {
   for (let i = 0; i < N; i++) {
     const network = SERVED;
     const payTo = i % 2 ? "GB" : "GA";
-    const resourceUrl = `https://seller.example/${i}`;
+    const resourceUrl = `https://seller.example.com/${i}`;
     await stores.catalog.upsert({
       keyVersion: CATALOG_KEY_VERSION,
       ledger: 1,
@@ -208,7 +208,7 @@ describe("GET /discovery/resources", () => {
     expect(body.pagination).toEqual({ limit: DISCOVERY_LIMIT.default, offset: 0, total: N });
     expect(body.items).toHaveLength(DISCOVERY_LIMIT.default);
     expect(body.items[0]).toMatchObject({
-      resource: "https://seller.example/0",
+      resource: "https://seller.example.com/0",
       accepts: [{ scheme: "exact" }],
       extensions: { bazaar: { info: { input: { type: "http" } } } },
       lastUpdated: "2026-10-20T00:00:00.000Z",
@@ -240,7 +240,7 @@ describe("GET /discovery/resources", () => {
     const first = await list("limit=7");
     const second = await list("limit=7&offset=7");
     const urls = [...first.body.items, ...second.body.items].map((item) => item.resource);
-    expect(urls).toEqual(Array.from({ length: 14 }, (_, i) => `https://seller.example/${i}`));
+    expect(urls).toEqual(Array.from({ length: 14 }, (_, i) => `https://seller.example.com/${i}`));
     expect((await list("offset=500")).body).toMatchObject({
       items: [],
       pagination: { limit: 20, offset: 500, total: N },

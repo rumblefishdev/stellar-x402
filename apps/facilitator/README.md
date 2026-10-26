@@ -137,3 +137,19 @@ ranking. `total` counts every entry the filters match.
   character, a `network` that isn't CAIP-2, or a known name written otherwise (`type[]`, `payto`,
   `Type`).
 - Other parameters are ignored, so a client that sends a newer filter still gets a page.
+
+### What gets listed
+
+A settlement whose payload carries `extensions.bazaar` adds or refreshes an entry. The catalog
+lists only resource URLs a buyer can reach, on every network (task 0054, ADR 0008): `https` or
+`http` with a public DNS name. An IP literal, `localhost`, a single-label name, a private or
+special-use suffix (`.local`, `.internal`, `.home`, `.test`, `.example`, …) or an
+`mcp://tool/<name>` URL is left out. The payment settles as usual and `/settle` answers success;
+only the listing is dropped, and the response's `EXTENSION-RESPONSES` header says `rejected` with
+the reason `resource_not_public`. That is not an error in the request: the service works, it just
+isn't listed. A malformed URL is `invalid_resource_url`. The rule applies to writes from this
+version on: a local catalog written before it keeps its old entries until `docker compose down -v`.
+
+| Setting              | Default | Meaning                                                                    |
+| -------------------- | ------- | -------------------------------------------------------------------------- |
+| `CATALOG_LIST_LOCAL` | `false` | `true` lists those URLs too, for a local run or the e2e gate; testnet only |

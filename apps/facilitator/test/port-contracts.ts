@@ -740,7 +740,7 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
     });
 
     it("upserts by key, merging accepts by scheme, network and asset", async () => {
-      const url = "https://seller.example/data";
+      const url = "https://seller.example.com/data";
       await upsert({ key: key(url), resource: resource(url, { description: "old" }) });
       await upsert({
         key: key(url),
@@ -764,7 +764,7 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
     });
 
     it("reports the outcome; a write from an earlier ledger only adds what is missing", async () => {
-      const url = "https://seller.example/data";
+      const url = "https://seller.example.com/data";
       const at = (ledger: number, description: string, asset = "CASSET") =>
         upsert(
           {
@@ -790,7 +790,7 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
     });
 
     it("merges concurrent upserts of one key without losing a requirement", async () => {
-      const url = "https://seller.example/data";
+      const url = "https://seller.example.com/data";
       const assets = Array.from({ length: 10 }, (_, i) => `C${i}`);
       await Promise.all(
         assets.map((asset) =>
@@ -856,7 +856,7 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
     });
 
     it("filters on the stored fields after an update, and after a stale write", async () => {
-      const url = "https://seller.example/data";
+      const url = "https://seller.example.com/data";
       const at = (ledger: number, overrides: Partial<DiscoveryResource>) =>
         upsert({ key: key(url), resource: resource(url, overrides) }, ledger);
       await at(10, { type: "http", extensions: { bazaar: {} } });
