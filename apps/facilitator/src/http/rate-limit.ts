@@ -14,6 +14,7 @@ export interface RateLimit {
   clientIp: "cloudflare" | "socket";
   store: RateLimitStore;
   logger: Logger;
+  now?: () => number;
 }
 
 /**
@@ -31,6 +32,7 @@ export function rateLimit({
   clientIp,
   store,
   logger,
+  now: clock = Date.now,
 }: RateLimit): RequestHandler {
   /** Clients over budget, with the end of their window in milliseconds since the epoch. */
   const blocked = new Map<string, number>();
@@ -49,7 +51,7 @@ export function rateLimit({
       return;
     }
     const client = ipKeyGenerator(ip);
-    const now = Date.now();
+    const now = clock();
 
     let resetAt = blocked.get(client);
     if (resetAt === undefined || resetAt <= now) {
