@@ -202,7 +202,7 @@ graph TD
 - **Prevents:** one caller exhausting the pool or our fee budget, and limits implemented differently per route.
 - **Rule:**
   - One middleware, with separate budgets for `/verify`, `/settle` and `/discovery/*`. Exceeding a budget returns HTTP 429.
-  - **Client IP.** It comes only from the header the edge sets, named by `CLIENT_IP_HEADER` (`CF-Connecting-IP` behind Cloudflare Tunnel, ADR 0011), never from `X-Forwarded-For`. An IPv6 client is counted per /56.
+  - **Client IP.** It comes only from the header the edge sets (`CF-Connecting-IP` behind Cloudflare Tunnel, ADR 0011; `CLIENT_IP=cloudflare`), never from `X-Forwarded-For`. An IPv6 client is counted per /56.
   - **API key.** An optional per-caller API key as an alternative limiter key is not built in T1 (task 0060): without a registry of issued keys, a caller's own key would bypass the limit.
   - **Storage.** Counters go through `RateLimitStore`.
   - **Payer, recipient and asset.** Limits on these are AD-18's job, not the IP limiter's.
