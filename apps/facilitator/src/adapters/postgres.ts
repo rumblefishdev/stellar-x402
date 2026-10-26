@@ -54,7 +54,8 @@ import {
  * - `hit` runs on `pools.rateLimits`, for the same reason: one client's flood queues its hits on
  *   one key's row lock, and the rate limiter must still answer when settlements hold the main pool.
  * - `list` runs on `pools.discovery`: `/discovery/resources` is public, and a burst of listings
- *   must not take the connections `/settle` needs. Catalog writes stay on the main pool.
+ *   must not take the connections `/settle` needs. Catalog writes stay on the main pool. `main()`
+ *   gives that pool a short statement timeout, so a few slow listings can't hold it for long.
  */
 export function postgresStores(
   pool: pg.Pool,
@@ -69,8 +70,8 @@ export function postgresStores(
 }
 
 /**
- * A pool with the facilitator's limits: a statement runs at most 10 s on the server and a query
- * waits at most 15 s in the client. `onError` receives errors of idle connections, which would
+ * A pool with the facilitator's limits: a statement runs at most `statementTimeoutMs` (10 s by
+ * default) on the server and a query waits at most 5 s longer in the client. `onError` receives errors of idle connections, which would
  * otherwise crash the process. Every connection runs at Read Committed, or is closed and its
  * caller's query fails, and keeps an error listener while checked out, where pg-pool removes its
  * own: a connection lost mid-transaction then fails its queries instead of crashing the process.
@@ -79,6 +80,7 @@ export function createPool(
   connectionString: string,
   onError: (error: Error) => void,
   max = 10,
+  statementTimeoutMs = 10_000,
 ): pg.Pool {
   const pool = new pg.Pool({
     connectionString,
@@ -86,8 +88,8 @@ export function createPool(
     connectionTimeoutMillis: 5_000,
     idleTimeoutMillis: 30_000,
     keepAlive: true,
-    statement_timeout: 10_000,
-    query_timeout: 15_000,
+    statement_timeout: statementTimeoutMs,
+    query_timeout: statementTimeoutMs + 5_000,
     idle_in_transaction_session_timeout: 10_000,
     application_name: "x402-facilitator",
     // The pool waits for this before handing the client out; if it throws, it closes the client.

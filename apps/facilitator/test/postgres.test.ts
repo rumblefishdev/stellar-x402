@@ -359,7 +359,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     expect(connections).toBeGreaterThanOrEqual(10);
   });
 
-  it("boots main() with STORE=postgres, reserves, limits and listings on their own pools, catalog writes on the main one, and ends them", async () => {
+  it("boots main() with STORE=postgres, reserves, limits and listings on their own pools, catalog writes on the main one, a short timeout for listings, and ends them", async () => {
     await stores();
     const app = await main({
       STORE: "postgres",
@@ -394,6 +394,16 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
       // Catalog writes come from `/settle`, so they stay off the public listings' pool.
       expect(await ranOn(() => app.stores.catalog.upsert(catalogEntry()))).toEqual(["main"]);
       expect(await ranOn(() => app.stores.settlements.claim(settlement("1")))).toEqual(["main"]);
+      // Only the public listings' pool cuts a statement off early.
+      const timeouts = await Promise.all(
+        names.map(async (name) => {
+          const shown = await pools?.[name].query<{ statement_timeout: string }>(
+            "SHOW statement_timeout",
+          );
+          return shown?.rows[0]?.statement_timeout;
+        }),
+      );
+      expect(timeouts).toEqual(["10s", "10s", "10s", "2s"]);
     } finally {
       await app.close();
     }
