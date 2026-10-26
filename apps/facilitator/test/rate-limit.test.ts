@@ -1,9 +1,13 @@
+import { once } from "node:events";
+import type { AddressInfo } from "node:net";
 import { Keypair } from "@stellar/stellar-sdk";
+import express from "express";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseConfig } from "../src/config.js";
 import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
 import { start, type Started } from "../src/main.js";
+import { rateLimit } from "../src/http/rate-limit.js";
 import { memoryMetrics } from "../src/metrics.js";
 import type { RateLimitStore, Stores } from "../src/ports/index.js";
 import { testDatabase } from "./database.js";
@@ -227,5 +231,47 @@ describe("the rate limiter", () => {
     const { post } = await serve({ CLIENT_IP: "cloudflare", RATE_LIMIT_WINDOW_MS: "5000" }, stores);
     await post("/settle", { "cf-connecting-ip": "203.0.113.7" });
     expect(hit).toHaveBeenCalledWith("settle:ip:203.0.113.7", 5_000, expect.any(Number));
+  });
+
+  it("lets a client through again once its window ends, and logs it again when it is over", async () => {
+    let clock = 0;
+    const lines: string[] = [];
+    const limited = express().use(
+      rateLimit({
+        route: "verify",
+        limit: 2,
+        windowMs: 60_000,
+        clientIp: "socket",
+        store: db.stores().rateLimits,
+        logger: jsonLogger("debug", (line) => lines.push(line)),
+        now: () => clock,
+      }),
+      (_req, res) => {
+        res.json({ ok: true });
+      },
+    );
+    const server = limited.listen(0);
+    await once(server, "listening");
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
+    const statuses = async (count: number) => {
+      const seen = [];
+      for (let i = 0; i < count; i++) seen.push((await fetch(url)).status);
+      return seen;
+    };
+    try {
+      expect(await statuses(3)).toEqual([200, 200, 429]);
+      // Still the same window: answered from the process, not counted again.
+      clock = 59_999;
+      expect(await statuses(1)).toEqual([429]);
+      // The next window: a fresh budget, and a second rate_limited line when it runs out.
+      clock = 60_000;
+      expect(await statuses(3)).toEqual([200, 200, 429]);
+      const logged = lines
+        .map((line) => JSON.parse(line))
+        .filter((e) => e.event === "rate_limited");
+      expect(logged).toHaveLength(2);
+    } finally {
+      server.close();
+    }
   });
 });

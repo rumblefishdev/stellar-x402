@@ -2,7 +2,7 @@
 id: "0023"
 title: "Rate limiting and HTTP hardening"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0007", "0011"]
 related_tasks: ["0012", "0017", "0014", "0009", "0022"]
@@ -19,6 +19,16 @@ history:
     status: active
     who: karolkow
     note: "Work starts."
+  - date: "2026-10-26"
+    status: completed
+    who: karolkow
+    note: >
+      PR #60 merged on 2026-10-26 and PR #64 after it. Per-route limits for /verify, /settle and
+      /discovery/* (600/600/120 per minute, settle never below verify), the client IP from
+      CF-Connecting-IP through CLIENT_IP=cloudflare|socket, 429 with Retry-After, NUL and lone
+      surrogates refused as 400, the pubnet refusal waiting for 0024, 0025 and 0050. AC 3 (API
+      keys) moved to 0060. Open, not taken up: whether the counters could live in process memory
+      instead of PostgreSQL while one process serves a network.
 ---
 
 # Rate limiting and HTTP hardening
@@ -73,13 +83,13 @@ As a facilitator operator, I want per-route rate limits and basic HTTP hardening
 
 ## Acceptance Criteria
 
-- [ ] Given separate budgets for `/verify`, `/settle` and `/discovery/*`, when a client exceeds one, then it gets HTTP 429 on that route only; counters go through `RateLimitStore`
-- [ ] Given a request with a forged `X-Forwarded-For`, when the limiter keys it, then the client IP comes only from the configured client IP header (`CF-Connecting-IP` behind Cloudflare, decision 3)
+- [x] Given separate budgets for `/verify`, `/settle` and `/discovery/*`, when a client exceeds one, then it gets HTTP 429 on that route only; counters go through `RateLimitStore`
+- [x] Given a request with a forged `X-Forwarded-For`, when the limiter keys it, then the client IP comes only from the configured client IP header (`CF-Connecting-IP` behind Cloudflare, decision 3)
 - [ ] Given a request with an API key, when the limiter keys it, then the key is used instead of the IP; requests without a key still work, so the gate proxy can call keyless (deferred to 0060, decision 5)
-- [ ] Given the HTTP layer, when requests arrive, then bodies over the size limit are refused and `/verify` and `/settle` send no CORS headers
-- [ ] Given the facilitator docs, when this story is done, then caller authentication and the rate limits are documented
-- [ ] Given the rate-limit store unreachable, when a limited route is called, then it answers 500 and logs the cause (decision 6)
-- [ ] Given one client flooding a route, when another client calls it within its budget, then the other client is answered (decision 7)
+- [x] Given the HTTP layer, when requests arrive, then bodies over the size limit are refused and `/verify` and `/settle` send no CORS headers
+- [x] Given the facilitator docs, when this story is done, then caller authentication and the rate limits are documented
+- [x] Given the rate-limit store unreachable, when a limited route is called, then it answers 500 and logs the cause (decision 6)
+- [x] Given one client flooding a route, when another client calls it within its budget, then the other client is answered (decision 7)
 
 ## Decisions so far
 
