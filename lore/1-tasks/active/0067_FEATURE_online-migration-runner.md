@@ -2,7 +2,7 @@
 id: "0067"
 title: "Run migrations on a live database without the one-transaction limit"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0012"]
 related_tasks: ["0022", "0026", "0050"]
@@ -14,6 +14,10 @@ history:
     status: backlog
     who: okarcz
     note: "Spawned from the review of 0050 (PR #61): its migration fits one transaction only on a small database."
+  - date: "2026-10-26"
+    status: active
+    who: akot
+    note: "Work starts."
 ---
 
 # Run migrations on a live database without the one-transaction limit
