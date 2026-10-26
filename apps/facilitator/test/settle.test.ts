@@ -1603,6 +1603,34 @@ describe("with reconciliation (0019)", () => {
     expect((await settle(payload(), requirements)).response).toEqual(alreadySettled);
   });
 
+  it("answers a success once when a sweep stores it while the call reads back (decision 28)", async () => {
+    const landed = {
+      status: rpc.Api.GetTransactionStatus.SUCCESS,
+      ledger: 1001,
+      resultXdr: { feeCharged: () => ({ toBigInt: () => 41_000n }) },
+    } as unknown as rpc.Api.GetTransactionResponse;
+    const { store, settle, reconcilerOn } = shared(landing(), landed);
+    // The success write fails, and the call's read-back waits until the store is back.
+    const transition = store.transition.bind(store);
+    let readBack: (() => void) | undefined;
+    vi.spyOn(store, "transition").mockImplementation(async (k, from, update, version) => {
+      if (update.state !== "success" || readBack) return transition(k, from, update, version);
+      const get = store.get.bind(store);
+      vi.spyOn(store, "get").mockImplementationOnce(async (gk) => {
+        await new Promise<void>((resolve) => (readBack = resolve));
+        return get(gk);
+      });
+      throw new Error("store down");
+    });
+    const first = settle(payload(), requirements);
+    await vi.waitFor(() => expect(readBack).toBeDefined());
+    // Meanwhile a sweep stores the success, and a repeat asks for it.
+    expect(await reconcilerOn().sweep()).toMatchObject({ success: 1 });
+    expect((await settle(payload(), requirements)).response).toEqual(alreadySettled);
+    readBack!();
+    expect((await first).response.success).toBe(true);
+  });
+
   it("finishes a payment whose process crashed between signing and sending", async () => {
     const { store, hooks, logger, metrics, settle, reconcilerOn } = shared(async (opts) => {
       await opts.onSigned?.(HASH, BOUNDS);
