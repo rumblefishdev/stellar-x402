@@ -491,9 +491,11 @@ export class PostgresRateLimitStore implements RateLimitStore {
 const RESERVE_LOCK_TIMEOUT = "2s";
 
 /**
- * Stroops reserved or spent in one scope after `$2`, as text; `reserve` and `used` share it. An
- * index-only range scan of `spend_reservation_scopes_window`: it reads the window's rows only,
- * however many the scope has had, and never `spend_reservations`.
+ * Stroops reserved or spent in one scope after `$2`, as text; `reserve` and `used` share it. A
+ * range scan of `spend_reservation_scopes_window` that reads the window's rows only, however many
+ * the scope has had, and never `spend_reservations`. It is index-only where the visibility map
+ * marks a page all-visible; pages that commits and prunes changed since the last vacuum are still
+ * read from `spend_reservation_scopes`.
  */
 const WINDOW_SUM = `SELECT coalesce(sum(amount), 0)::text AS used
   FROM spend_reservation_scopes WHERE scope = $1 AND at > $2`;

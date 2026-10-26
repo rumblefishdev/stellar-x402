@@ -157,15 +157,16 @@ moves back there.
   - `reserve` takes about six round trips plus one per budget, and holds the global scope's row
     lock, so reservations are serialized across processes.
   - A window's sum reads only that window's rows. Each scope row carries its reservation's time
-    and amount, indexed `(scope, at) INCLUDE (amount)`, so the sum is an index-only scan and never
-    reads `spend_reservations` (task 0050).
+    and amount, indexed `(scope, at) INCLUDE (amount)`, so the sum is an index range scan that
+    never reads `spend_reservations` (task 0050).
   - Every process runs a pruner (task 0050):
     - spend reservations go after twice the window or 7 days, whichever is longer;
     - rate-limit windows go one window after they end;
     - deletes run in batches, 1 s per table each minute, and skip locked rows.
   - A migration that rewrites these tables while they hold weeks of traffic needs an online
     runner: batched backfill, `CREATE INDEX CONCURRENTLY`, lock retries. The one-transaction
-    runner hit the 10 s statement timeout at about 200 000 reservations (task 0050).
+    runner hit the 10 s statement timeout at about 200 000 reservations (task 0050). Task 0067
+    builds it.
   - Task 0026 measures the full settle path and `addHash` on the testnet database it creates;
     0022 had no instance to measure on.
 - **Task 0022 builds the adapters.** CI runs the contract suites against a PostgreSQL service

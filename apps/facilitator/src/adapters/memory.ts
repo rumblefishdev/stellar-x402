@@ -209,7 +209,7 @@ interface Reservation {
 }
 
 export class MemorySpendStore implements SpendStore {
-  // `sum` scans every reservation, the pruned ones gone: fine for tests and dev runs (deployments
+  // `sum` scans every reservation the pruner has kept: fine for tests and dev runs (deployments
   // use the PostgreSQL stores).
   private readonly reservations = new Map<string, Reservation>();
   private readonly failures = new Map<SpendScope, number>();

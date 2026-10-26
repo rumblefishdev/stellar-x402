@@ -22,6 +22,15 @@ history:
     status: active
     who: akot
     note: "Work starts."
+  - date: "2026-10-26"
+    status: active
+    who: akot
+    note: >
+      Oskar's review of PR #61, after merging develop: `main()`'s tests now catch a pruner never
+      started or never closed and a wrong rate-limit window; the boot test pins both prunes to the
+      main pool by checkouts; `store_prune_failed` logs the rows already deleted; 0024 notes that
+      the pruner's window must be the longest budget window; the sum is called an index range
+      scan, since it is index-only only on all-visible pages.
 ---
 
 # Prune old rate-limit windows and spend reservations
@@ -84,19 +93,23 @@ day (ADR 0011's mainnet sizing) a 1-day window alone holds about 10 000 reservat
 - `src/pruner.ts`, started by `main()` and closed before the pools end: every minute ±10%,
   batches of 1000 per table until a short one or 1 s; spend horizon `max(2 × window, 7 days)`,
   rate limits one window. Logs `store_pruned` (`complete: false` when the budget ran out) and
-  `store_prune_failed`, counts `store_prune_failures_total`.
+  `store_prune_failed` (with the rows earlier batches deleted), counts
+  `store_prune_failures_total`.
 - ADR 0012 (throughput, the online-runner limit) and AD-18 (windows) updated.
 - Tests: contract cases for both adapters (commit keeps the time, prune in both states and at
   the cutoff, rate-limit prune), PostgreSQL cases (backfill on a database with reservations, the
-  sum not reading `spend_reservations`, prune skipping locked rows), `pruner.test.ts`, and a
-  `main()` case. 393 tests. Mutants each failing a case: the join back in the sum, commit skipping
-  the copy, no SKIP LOCKED, `<=` at the cutoff, a `W + 1h` horizon, a 10-batch cap, `close()` not
-  waiting for a tick.
+  sum not reading `spend_reservations`, prune skipping locked rows, both prunes on the main pool
+  by checkouts), `pruner.test.ts`, and two `main()` cases (both tables pruned with the config's
+  windows; the timer ticks under fake timers and stops at `close()`). Mutants each failing a
+  case: the join back in the sum, commit skipping the copy, no SKIP LOCKED, `<=` at the cutoff, a
+  `W + 1h` horizon, a 10-batch cap, `close()` not waiting for a tick; in `main()` no
+  `pruner.start()`, no `pruner.close()`, the spend window or a fixed 60 s for rate limits; the
+  rate-limit prune on its own pool.
 
 ## Design Decisions
 
-Researched by three GSD advisors and a BMAD architect, then measured on PostgreSQL 18.3 with a
-simulated clock (10 000 and 100 000 payments a day). The experiment scripts stayed local.
+Researched, then measured on PostgreSQL 18.3 with a simulated clock (10 000 and 100 000 payments
+a day). The experiment scripts stayed local.
 
 ### From Plan
 
