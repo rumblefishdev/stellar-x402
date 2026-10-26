@@ -72,7 +72,7 @@ As a facilitator operator, I want only one process at a time to settle through a
 - From 0013 ([ADR 0012](../../../docs/adr/0012-facilitator-state-store.md)): decide whether
   `ChannelLease` carries a fencing token, so writes from a holder whose lease has expired are
   rejected. Without one, a paused holder can still write after a new one takes over. This is a
-  contract change in the store port.
+  contract change in the store port. **Moved to 0071** (decision 15).
 - From 0022: once `server.close()` runs, Node 22 stops enforcing `headersTimeout` and
   `requestTimeout`, so a client that stalls mid-headers keeps the server open indefinitely. With
   `STORE=postgres` the process was still running 137 s after SIGTERM, past the 120 s SIGKILL of
@@ -91,6 +91,7 @@ As a facilitator operator, I want only one process at a time to settle through a
     doesn't record, the new holder's startup re-check resolves through the stored hashes. Its late
     transactions can still use a sequence number the new holder read, so expect `tx_bad_seq` and a
     sequence refresh.
+  - **Done:** the 5 s margin (decision 16). **The token moved to 0071** (decision 15).
 - From 0009 (PR #41, decision 49): the config refuses `NETWORK=stellar:pubnet` until spend
   budgets (0024) and the channel lease (0025) land (rate limits, 0023, and store pruning, 0050,
   already have): the rule after the `STORE` one in `config.ts`, with tests in `config.test.ts`
@@ -101,6 +102,7 @@ As a facilitator operator, I want only one process at a time to settle through a
     (Adam, sixth review). Find out what two processes on one channel set cost on pubnet: fees, a
     buyer charged and not served, or only `tx_bad_seq` rebuilds and slower answers. Then confirm
     the lease belongs in the refusal, or take it out.
+  - **Done:** 0025 left the refusal, which now names 0024 alone (decision 17).
 - From 0009 (Adam's sixth PR #41 review): a submission that runs on after its budget answer
   writes to pools `close()` has ended. Reproduced: the transaction is sent, the row stays `signed`,
   and two `settlement_record_failed` lines are logged. Not a regression (0019 resolves the
@@ -111,6 +113,7 @@ As a facilitator operator, I want only one process at a time to settle through a
   so a rollback still starts). PR #41's release is the first to add a migration
   (`0002_success_answered`). Started on a database without it, it ran: every success was answered
   once per process instead of once per payment, because `markSuccessAnswered` failed with `42703`.
+  **Moved to 0072** (decision 18).
 
 ## Acceptance Criteria
 
@@ -167,6 +170,10 @@ As a facilitator operator, I want only one process at a time to settle through a
   waiters kept, a read retry not stopped (the loop then spins until the worker runs out of
   memory), no release after the drain, a release at the deadline, no shutdown reason, a no-op
   settle drain, no `shutting_down` 503, the drain skipped.
+- **Skew margin and pubnet:** `LEASE_SKEW_MARGIN_MS` (5 s) in `ports/settlement-store.ts`; both
+  adapters take another holder's lease only once it expired more than that ago, and the contract
+  tests and the crash takeover in `lease.test.ts` move by it. The pubnet refusal names 0024 alone
+  (`config.ts`, `config.test.ts`, `main.test.ts`, README).
 
 ## Design Decisions
 
@@ -199,6 +206,18 @@ As a facilitator operator, I want only one process at a time to settle through a
     before Docker's SIGKILL, the process force-closes open connections, ends the pools and exits
     without releasing, so a transaction still unresolved gets the TTL before another process sends
     on its channel. Releasing anyway was rejected.
+15. **The fencing token is a backlog task, 0071, due before pubnet** (okarcz, 2026-10-26): on one
+    host with `held()`'s local expiry, the window left is a call already past the lease check when
+    its process freezes past the TTL, and its cost is `tx_bad_seq`, not a double charge. The port
+    change and its migration get their own review.
+16. **An acquirer takes over only 5 s after `expires_at`** (okarcz, 2026-10-26): a skew margin
+    against a holder whose clock lags, for the day the facilitator runs on two hosts. A clean
+    release deletes the row, so only a crash's handover waits the extra 5 s.
+17. **0025 leaves the pubnet refusal** (okarcz, 2026-10-26): the lease and the drain landed, as
+    0009's rule expects, so the message names spend budgets (0024) alone. PR #66 (0054) had
+    already taken its decision off the path; the fencing window goes with 0071.
+18. **The startup schema check is its own backlog task, 0072** (okarcz, 2026-10-26): it concerns
+    migrations, not the lease.
 
 ### Emerged
 
@@ -222,3 +241,8 @@ As a facilitator operator, I want only one process at a time to settle through a
    only for a call prepared ahead.
 14. **No `/health` route yet** (claude, 2026-10-26): ADR 0011 names one, and the code has none; the
     shutdown tests use `GET /supported` to show the server still answers during the drain.
+
+## Future Work
+
+- **0071**: fence the lease with a token checked in `addHash`, before pubnet.
+- **0072**: refuse to start on a database missing a migration.
