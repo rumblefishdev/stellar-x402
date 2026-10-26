@@ -2,7 +2,9 @@
 // scenario against the facilitator at GATE_FACILITATOR_URL through the proxy in
 // `conformance/external-proxy/`, and the run is saved with the pin and the transaction hashes.
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
+  copyFileSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -12,7 +14,6 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
@@ -54,11 +55,18 @@ if (stellarSigners.length === 0) {
   );
 }
 
-// A new folder per run, gone when the gate exits, failed or not (~6 GB). Its real path, as stack
-// traces print it (macOS links /var to /private/var).
-const checkout = realpathSync(mkdtempSync(join(tmpdir(), "x402-gate-")));
+// A new folder per run, gone when the gate exits, failed or not (~6 GB). In /tmp, not $TMPDIR:
+// the suite's stack traces print this path into suite.json, which is committed as is, and
+// $TMPDIR on macOS names a per-user folder. Its real path, as stack traces print it (macOS links
+// /tmp to /private/tmp).
+const checkout = realpathSync(mkdtempSync("/tmp/x402-gate-"));
 process.on("exit", () => rmSync(checkout, { recursive: true, force: true }));
-process.once("SIGINT", () => process.exit(130));
+// Node exits on these signals without emitting "exit"; exiting here runs the cleanup above. The
+// handlers stay for every signal: a second one (Ctrl+C again, or pnpm passing it on) during the
+// cleanup would otherwise kill the gate halfway through it.
+process.on("SIGINT", () => process.exit(130));
+process.on("SIGTERM", () => process.exit(143));
+process.on("SIGHUP", () => process.exit(129));
 prepare(checkout);
 
 // The proxy goes in under its config's name, which is what --facilitators matches.
@@ -79,6 +87,9 @@ const filters = [
   "--facilitators=stellar-x402",
 ];
 const args = [...filters, `--output-json=${suiteJson}`];
+// A settlement of this run lands in a ledger after this one.
+const chain = new rpc.Server("https://soroban-testnet.stellar.org");
+const ledgerBeforeRun = (await chain.getLatestLedger()).sequence;
 console.log(`$ pnpm ${args.join(" ")}   (in ${e2e})`);
 const startedAt = Math.floor(Date.now() / 1000);
 const suite = spawnSync("pnpm", args, {
@@ -109,9 +120,8 @@ const expected = {
   to: accounts.E2E_SELLER_PUBLIC!,
   amount: 10000n,
   signers: stellarSigners,
-  notBefore: startedAt,
+  ledgerBeforeRun,
 };
-const chain = new rpc.Server("https://soroban-testnet.stellar.org");
 const settlements: Settlement[] = [];
 for (const result of run?.results ?? []) {
   if (!result.passed || !result.transaction) continue;
@@ -138,32 +148,36 @@ for (const result of run?.results ?? []) {
 }
 console.log(`Read ${settlements.length} transactions on chain`);
 
+// One folder per run: the suite's own file, copied byte for byte, and the gate's verdict on it,
+// which names that file and its hash so the two are read as one run.
 if (run) {
   const date = new Date().toISOString();
-  const file = join(
+  const folder = join(
     conformance,
     "results",
-    `${date.replace(/[:.]/g, "-")}-${new URL(facilitatorUrl).host}.json`,
+    `${date.replace(/[:.]/g, "-")}-${new URL(facilitatorUrl).host}`,
   );
-  mkdirSync(join(conformance, "results"), { recursive: true });
+  mkdirSync(folder, { recursive: true });
+  copyFileSync(suiteJson, join(folder, "suite.json"));
   const record = {
+    suiteFile: "suite.json",
+    suiteSha256: createHash("sha256").update(readFileSync(suiteJson)).digest("hex"),
     upstream: { repo: UPSTREAM_REPO, commit: UPSTREAM_COMMIT },
     date,
     facilitatorUrl,
     command: `pnpm ${filters.join(" ")}`,
     signers: stellarSigners,
     startedAt: new Date(startedAt * 1000).toISOString(),
+    ledgerBeforeRun,
     suiteExitCode: suite.status,
     passed: problems.length === 0,
     problems,
     settlements,
-    ...run,
   };
-  // Errors carry stack traces through the local checkout; results are committed (task 0029), so
-  // the machine's own path stays out.
+  // Problems quote the suite's errors, whose stack traces run through the temporary checkout.
   const text = JSON.stringify(record, null, 2).replaceAll(checkout, "<x402 checkout>");
-  writeFileSync(file, `${text}\n`);
-  console.log(`Saved ${file}`);
+  writeFileSync(join(folder, "gate.json"), `${text}\n`);
+  console.log(`Saved ${folder}/suite.json and gate.json`);
 }
 
 if (problems.length > 0) {

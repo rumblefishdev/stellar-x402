@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 milestone: 1
 related_adr: ["0006", "0011", "0012"]
-related_tasks: ["0012", "0009", "0019", "0022", "0014", "0013"]
+related_tasks: ["0012", "0009", "0019", "0022", "0014", "0013", "0039"]
 tags: [facilitator, signer-pool, operations, priority-high, effort-small, payments]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -36,28 +36,36 @@ As a facilitator operator, I want only one process at a time to settle through a
 - Lease acquire, renew and release through the store port (fake first, real adapter from 0022).
 - Shutdown handler that drains the pool.
 - Tests for a second process, a crash and a clean stop.
-- From 0014 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md)): ECS takes the task out of the ALB for 100 s before SIGTERM,
-  so in-flight HTTP has finished; Fargate then sends SIGKILL 120 s after SIGTERM, a hard limit.
-  The drain must finish within about 110 s:
-  - refuse every call not yet signed and sent: waiting for a channel, prepared ahead, or still
-    reading a sequence. The pool can't cancel those today, so signer-pool needs a `close()` that
-    rejects them;
-  - wait until sent submissions are final or recorded as pending, then release the lease.
+- From 0039 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md), revised for the Hetzner server): a deploy stops the old
+  container first. Docker sends SIGTERM, then SIGKILL after `stop_grace_period` 180 s. There's no
+  load-balancer deregistration, so on SIGTERM the process itself:
+  - answers new `/settle` with 503;
+  - refuses at once every call not yet signed and sent: waiting for a channel, prepared ahead,
+    or still reading a sequence. Nothing is sent; the record ends with its own reason,
+    `settle_exact_stellar_shutting_down`, which this task adds to 0009's mapping, so the buyer
+    signs a new payment and deploy cuts stay out of the no-channel metric. The pool can't cancel
+    those today, so signer-pool needs a `close()` that rejects them;
+  - lets only calls already sent run on: each answers within its `/settle` budget (0009), with
+    the result or `settlement_pending` and the hash, while the drain follows the transaction;
+  - waits until sent submissions are final or recorded as pending, then releases the lease.
+
+  The drain lasts at most the pool's bounds for a sent transaction (60 s + 30 s), so the 180 s
+  grace leaves about 90 s for the store writes and the lease release.
 - From 0014: `GET /health` never looks at the lease. `/settle` answers 503 at once until the
   process holds the lease and the 0019 startup reconciliation has finished. A process without the
   lease keeps trying to take it and never exits; one whose renewal fails stops new submissions
-  until it holds the lease again. ECS may start the new task while the old one is still
-  deregistering, so the lease, not ECS, keeps them apart.
+  until it holds the lease again. The lease, not the deploy order, keeps two processes apart.
 - From 0013 ([ADR 0012](../../../docs/adr/0012-facilitator-state-store.md)): decide whether
   `ChannelLease` carries a fencing token, so writes from a holder whose lease has expired are
   rejected. Without one, a paused holder can still write after a new one takes over. This is a
   contract change in the store port.
 - From 0022: once `server.close()` runs, Node 22 stops enforcing `headersTimeout` and
   `requestTimeout`, so a client that stalls mid-headers keeps the server open indefinitely. With
-  `STORE=postgres` the process was still running 137 s after SIGTERM, past the 120 s SIGKILL; a
-  bare `http` server reproduces it. The ALB normally doesn't forward such clients, but the drain
-  and the lease release run after `close()`, so they need a deadline, e.g. `closeAllConnections()`
-  once in-flight requests had their time.
+  `STORE=postgres` the process was still running 137 s after SIGTERM, past the 120 s SIGKILL of
+  the time (180 s now); a bare `http` server reproduces it. Cloudflare normally doesn't forward
+  such clients, since it reads the whole request head first, but the drain and the lease release run
+  after `close()`, so they need a deadline, e.g. `closeAllConnections()` once in-flight requests
+  had their time.
 - From 0022: `acquireLease` compares `expires_at`, stamped by the holder's clock, with the
   acquirer's `now`, so an acquirer whose clock runs ahead by more than the TTL takes a live lease,
   and both processes sign on the same channels until the holder's next renewal fails. The review
@@ -97,4 +105,4 @@ As a facilitator operator, I want only one process at a time to settle through a
 - [ ] Given a shutdown signal, when the process stops, then it refuses new `/settle` calls, waits until every in-flight submission is final or recorded as pending, then releases the lease
 - [ ] Given a process that dies without releasing, when the lease TTL passes, then a new process can take the lease
 - [ ] Given a process without the lease or still reconciling, when `/settle` is called, then it answers 503 at once, and the process keeps trying to take the lease without exiting (ADR 0011)
-- [ ] Given a shutdown signal with calls still waiting for a channel, when the process drains, then those calls are refused unsent and the drain finishes within 110 s (ADR 0011)
+- [ ] Given a shutdown signal with calls still waiting for a channel, when the process drains, then those calls are refused unsent and the drain finishes within the 180 s stop grace period (ADR 0011)

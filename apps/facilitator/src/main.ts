@@ -1,8 +1,9 @@
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
-import { Keypair } from "@stellar/stellar-sdk";
+import { Keypair, rpc as stellarRpc } from "@stellar/stellar-sdk";
 import {
   FallbackRpc,
+  RpcTimeoutError,
   SettlementSubmitter,
   keypairSigner,
   type SorobanRpc,
@@ -10,6 +11,7 @@ import {
 import { createEd25519Signer, getNetworkPassphrase } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/facilitator";
 import type pg from "pg";
+import { Agent, setGlobalDispatcher } from "undici";
 import { memoryStores } from "./adapters/memory.js";
 import { migrate } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
@@ -17,13 +19,19 @@ import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
 import { parseConfig, parseMigrateConfig } from "./config.js";
 import type { Config } from "./config.js";
 import { createApp, type AppDeps } from "./http/app.js";
-import { captureConsoleError, jsonLogger, type Logger } from "./logger.js";
+import { supportedResponse } from "./http/supported.js";
+import { captureConsoleError, jsonLogger, rpcEndpointName, type Logger } from "./logger.js";
 import { memoryMetrics, type Metrics } from "./metrics.js";
 import type { SettlementStore } from "./ports/index.js";
-import { feeSettings, upstreamAtCurrentBid, type FeeSettings } from "./settlement/fees.js";
+import { checkChannels } from "./settlement/channel-check.js";
+import { checkRpcNetworks } from "./settlement/network-check.js";
+import { atCurrentBid, feeSettings, type FeeSettings } from "./settlement/fees.js";
 import type { SettlementHooks } from "./settlement/hooks.js";
 import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler, type Settle } from "./settlement/settle.js";
+import { failoverUpstream, type EndpointFailure } from "./settlement/upstream-failover.js";
 import {
+  UNEXPECTED_VERIFY_ERROR,
+  UpstreamTimeoutError,
   createChecker,
   createVerifier,
   type Check,
@@ -54,7 +62,36 @@ export async function start(deps: AppDeps): Promise<Started> {
   };
 }
 
-/** What `buildChecks` passes to `ExactStellarScheme`, besides the facilitator's signer. */
+/**
+ * How long upstream `verify()` may take on one RPC URL, the same as `FallbackRpc`'s timeout, which
+ * `main()` sets to it. The fee-stats bid is read before it starts (AD-10), so it covers the
+ * upstream call alone. Also the bound of each probe read and of undici's header and body waits.
+ */
+export const UPSTREAM_TIMEOUT_MS = 10_000;
+
+/** Slack on the whole upstream call's deadline, so the last URL's own deadline fires first. */
+export const UPSTREAM_DEADLINE_SLACK_MS = 1_000;
+
+/** How often the shared `FallbackRpc` probes `RPC_URLS[0]` while calls are off it (AD-3). */
+export const PRIMARY_PROBE_INTERVAL_MS = 60_000;
+
+/** How many ledgers `RPC_URLS[0]` may trail the active URL by when calls return to it (AD-3). */
+export const FAILBACK_MAX_LAG_LEDGERS = 2;
+
+/**
+ * The deadline of the whole upstream call (AD-3): `timeoutMs` (10 s) for each of `urls` RPC URLs,
+ * plus, with fee-stats bids, the bid read before them, which `FallbackRpc` bounds at 10 s per URL,
+ * plus 1 s of slack. The AD-22 ledger read after it is not included.
+ */
+export function upstreamDeadlineMs(
+  urls: number,
+  feeStats: boolean,
+  timeoutMs = UPSTREAM_TIMEOUT_MS,
+): number {
+  return (timeoutMs + (feeStats ? UPSTREAM_TIMEOUT_MS : 0)) * urls + UPSTREAM_DEADLINE_SLACK_MS;
+}
+
+/** What `buildUpstream` passes to `ExactStellarScheme`, besides the facilitator's signer. */
 export type SchemeOptions = NonNullable<ConstructorParameters<typeof ExactStellarScheme>[1]>;
 
 export type MakeScheme = (
@@ -63,32 +100,133 @@ export type MakeScheme = (
 ) => UpstreamVerifier;
 
 /**
- * The verify checks' dependencies from the config (AD-3, AD-5, AD-10, AD-22): upstream
- * `ExactStellarScheme` with the fee ceiling and the fee a settlement pays at the shared bid, the
- * channels and the validity minimum. `/verify` and `/settle` build their checks from the same
+ * Test seams of {@link buildUpstream}: the scheme per URL, and how long one URL may take
+ * (`UPSTREAM_TIMEOUT_MS` by default), so a hung URL needn't cost a test 10 s.
+ */
+export interface UpstreamSeams {
+  makeScheme?: MakeScheme;
+  timeoutMs?: number;
+}
+
+/** A short, URL-free reason for the logs: an error's message can carry an RPC URL. */
+export function failureReason(failure: EndpointFailure | { error: unknown }): string {
+  if ("answer" in failure) return UNEXPECTED_VERIFY_ERROR;
+  const { error } = failure;
+  if (error instanceof UpstreamTimeoutError || error instanceof RpcTimeoutError) return "timeout";
+  return error instanceof Error ? `error:${error.name}` : "error";
+}
+
+/**
+ * The one RPC client over `RPC_URLS` (AD-3): the pool, the AD-22 ledger read and the fee-stats bid
+ * read go through it, and upstream verify shares its active URL ({@link buildUpstream}), so one
+ * outage moves them all once. Each URL is named `RPC_URLS[i]#<fingerprint>` (ADR 0011); a call
+ * gives up on a URL after `UPSTREAM_TIMEOUT_MS`, and calls return to `RPC_URLS[0]` after a probe
+ * every `PRIMARY_PROBE_INTERVAL_MS` finds it within `FAILBACK_MAX_LAG_LEDGERS`. Logs, each with
+ * `component: "rpc"` and the network: `rpc_failover` (warn) on a switch, with `by`, the method or
+ * caller that saw the failure; `rpc_failback` (info) on the return; `rpc_probe_failed` (warn).
+ * `makeRpc` and `timeoutMs` are test seams: the client of one URL, and how long a call may take on
+ * it.
+ */
+export function buildRpc(
+  config: Config,
+  logger: Pick<Logger, "warn" | "info">,
+  makeRpc: (url: string) => SorobanRpc = (url) =>
+    new stellarRpc.Server(url, { allowHttp: url.startsWith("http:") }),
+  timeoutMs = UPSTREAM_TIMEOUT_MS,
+): FallbackRpc {
+  const fields = { component: "rpc", network: config.network };
+  return new FallbackRpc(
+    config.rpcUrls.map((url, i) => ({ name: rpcEndpointName(url, i), rpc: makeRpc(url) })),
+    {
+      timeoutMs,
+      failback: { intervalMs: PRIMARY_PROBE_INTERVAL_MS, maxLagLedgers: FAILBACK_MAX_LAG_LEDGERS },
+      onSwitch: (from, to, error, by) =>
+        logger.warn("rpc_failover", { ...fields, by, from, to, reason: failureReason({ error }) }),
+      onFailback: (from, to, lagLedgers) =>
+        logger.info("rpc_failback", { ...fields, from, to, lagLedgers }),
+      onProbeFailed: (rpc, failure) =>
+        logger.warn("rpc_probe_failed", {
+          ...fields,
+          rpc,
+          ...("lagLedgers" in failure
+            ? { reason: "lagging", lagLedgers: failure.lagLedgers }
+            : { reason: failureReason(failure) }),
+        }),
+    },
+  );
+}
+
+/**
+ * Upstream verify from the config, with its deadline (AD-3, AD-10): one `ExactStellarScheme` per
+ * `RPC_URLS` entry, with the fee ceiling and the fee a settlement pays at the shared bid, read once
+ * per call, behind `failoverUpstream`, which starts each call on `active`'s URL (the shared
+ * {@link buildRpc}) and reports a throw or a timeout there. Logs `rpc_exhausted` (warn, with
+ * `component: "verify"`, the network and `RPC_URLS[i]#…` names) when every URL failed; switches
+ * are `active`'s to log.
+ * The two belong together: spread both into `VerifierDeps`, or the deadline falls back to 10 s and
+ * cuts off the second URL.
+ */
+export function buildUpstream(
+  config: Config,
+  fees: FeeSettings,
+  logger: Pick<Logger, "warn">,
+  facilitator: ReturnType<typeof createEd25519Signer>,
+  active: Pick<FallbackRpc, "begin" | "markFailed">,
+  seams: UpstreamSeams = {},
+): Pick<VerifierDeps, "upstream" | "upstreamTimeoutMs"> {
+  const {
+    makeScheme = (signer, options) => new ExactStellarScheme([signer], options),
+    timeoutMs = UPSTREAM_TIMEOUT_MS,
+  } = seams;
+  // `RPC_URLS[i]#<fingerprint>`, as everywhere else in the logs (ADR 0011, 0009 decision 47).
+  const name = (i: number) => rpcEndpointName(config.rpcUrls[i]!, i);
+  // Upstream reads one RPC URL, so there is one scheme per URL, in `RPC_URLS` order: the order of
+  // `active`'s endpoints.
+  const endpoints = atCurrentBid(fees.inclusionFee, (inclusionFeeStroops) =>
+    config.rpcUrls.map((url, i) => ({
+      name: name(i),
+      verifier: makeScheme(facilitator, {
+        rpcConfig: { url },
+        maxTransactionFeeStroops: fees.maxFeeStroops,
+        inclusionFeeStroops,
+      }),
+    })),
+  );
+  return {
+    upstream: failoverUpstream(endpoints, {
+      timeoutMs,
+      active,
+      onExhausted: (tried) =>
+        logger.warn("rpc_exhausted", {
+          component: "verify",
+          network: config.network,
+          tried: tried.map((t) => ({ rpc: t.name, reason: failureReason(t.failure) })),
+        }),
+    }),
+    upstreamTimeoutMs: upstreamDeadlineMs(config.rpcUrls.length, fees.feeStats, timeoutMs),
+  };
+}
+
+/**
+ * The verify checks' dependencies from the config (AD-3, AD-5, AD-10, AD-22): {@link buildUpstream},
+ * the channels and the validity minimum. `/verify` and `/settle` build their checks from the same
  * object. `fees` is the caller's, so the pool is built from the same `fees.pool` and shares its
- * bid. Tests pass their own `makeScheme`.
+ * bid.
  */
 export function buildChecks(
   config: Config,
-  rpc: Pick<FallbackRpc, "getLatestLedger">,
+  rpc: Pick<FallbackRpc, "getLatestLedger" | "begin" | "markFailed">,
   fees: FeeSettings,
-  makeScheme: MakeScheme = (signer, options) => new ExactStellarScheme([signer], options),
+  logger: Pick<Logger, "warn" | "info">,
+  seams?: UpstreamSeams,
 ): VerifierDeps {
   // Upstream knows only the facilitator key, and only in plain form; the channels and the muxed
-  // facilitator are `createChecker`'s check (AD-5). It reads the first RPC URL only.
-  const signer = createEd25519Signer(config.facilitatorSecret, config.network);
-  const upstream = upstreamAtCurrentBid(fees.inclusionFee, (inclusionFeeStroops) =>
-    makeScheme(signer, {
-      rpcConfig: { url: config.rpcUrls[0] },
-      maxTransactionFeeStroops: fees.maxFeeStroops,
-      inclusionFeeStroops,
-    }),
-  );
+  // facilitator are `createChecker`'s check (AD-5).
+  const facilitator = createEd25519Signer(config.facilitatorSecret, config.network);
   return {
     network: config.network,
-    upstream,
-    facilitator: signer.address,
+    ...buildUpstream(config, fees, logger, facilitator, rpc, seams),
+    facilitator: facilitator.address,
     channels: config.channels,
     minValidityLedgers: config.settlement.minValidityLedgers,
     latestLedger: async () => (await rpc.getLatestLedger()).sequence,
@@ -101,11 +239,12 @@ export function buildChecks(
  */
 export function buildVerifier(
   config: Config,
-  rpc: Pick<FallbackRpc, "getLatestLedger">,
+  rpc: Pick<FallbackRpc, "getLatestLedger" | "begin" | "markFailed">,
   fees: FeeSettings,
-  makeScheme?: MakeScheme,
+  logger: Pick<Logger, "warn" | "info">,
+  seams?: UpstreamSeams,
 ): Verify {
-  return createVerifier(buildChecks(config, rpc, fees, makeScheme));
+  return createVerifier(buildChecks(config, rpc, fees, logger, seams));
 }
 
 /**
@@ -137,8 +276,8 @@ export function buildSettlement(
   },
 ): { settle: Settle; submitter: SettlementSubmitter } {
   const { logger, metrics } = deps;
-  // The only sender of transactions in the service (AD-2). The channel check at startup comes
-  // with 0020, the lease with 0025.
+  // The only sender of transactions in the service (AD-2). `main()` checks its channels before
+  // it starts; the lease comes with 0025.
   const submitter = new SettlementSubmitter({
     rpc: deps.rpc,
     networkPassphrase: getNetworkPassphrase(config.network),
@@ -191,10 +330,10 @@ export function compose(
     /** The memory stores when absent. */
     stores?: AppDeps["stores"];
     rpc?: SorobanRpc;
-    makeScheme?: MakeScheme;
+    seams?: UpstreamSeams;
     sleep?: (ms: number) => Promise<void>;
   },
-): { deps: AppDeps; cataloger: Cataloger; metrics: Metrics } {
+): { deps: AppDeps; cataloger: Cataloger; metrics: Metrics; rpc: FallbackRpc } {
   const { logger } = opts;
   const stores = opts.stores ?? memoryStores();
   // Cataloging plugs into `/settle` through `extensionResponses` and `onSuccess` (AD-8).
@@ -203,13 +342,14 @@ export function compose(
     store: stores.catalog,
     logger,
     metrics,
-    allowHttp: config.catalog.allowHttp,
   });
-  const rpc = opts.rpc ?? FallbackRpc.fromUrls(config.rpcUrls);
+  // One client for every RPC_URLS read and send, whose active URL upstream verify shares (AD-3).
+  // A test's `rpc` serves every URL.
+  const rpc = buildRpc(config, logger, opts.rpc && (() => opts.rpc!));
   // One fee configuration: `/verify` and `/settle` check with it, and the pool pays with it, so
   // they share one ceiling and one bid (AD-10).
   const fees = feeSettings(config.fees, rpc);
-  const checks = buildChecks(config, rpc, fees, opts.makeScheme);
+  const checks = buildChecks(config, rpc, fees, logger, opts.seams);
   const { settle } = buildSettlement(config, {
     rpc,
     fees,
@@ -234,38 +374,63 @@ export function compose(
       verify: createVerifier(checks),
       settle,
       extensionResponses: cataloger.extensionResponses,
+      supported: supportedResponse(config.network, checks.facilitator),
     },
     cataloger,
     metrics,
+    rpc,
   };
+}
+
+export interface MainOptions {
+  /** Where the log lines go; stdout by default. The smoke scripts read them here. */
+  write?: (line: string) => void;
 }
 
 /**
  * The composition root (AD-1): the only module that reads `process.env`. It validates the config
  * once and builds every part from it ({@link compose}).
  */
-export async function main(env: Record<string, string | undefined> = process.env) {
+export async function main(
+  env: Record<string, string | undefined> = process.env,
+  opts: MainOptions = {},
+) {
   const config = parseConfig(env);
-  const logger = jsonLogger(config.logLevel, undefined, config.rpcUrls);
-  // STORE=postgres needs a migrated schema (`pnpm migrate`); the service never migrates it.
+  const logger = jsonLogger(config.logLevel, opts.write, config.rpcUrls);
   let pools:
     { main: pg.Pool; reserve: pg.Pool; rateLimits: pg.Pool; discovery: pg.Pool } | undefined;
-  if (config.store === "postgres") {
-    const url = config.databaseUrl;
-    if (url === undefined) throw new Error("STORE=postgres needs a DATABASE_URL");
-    // Reservations queue on the global scope's lock, a flood's hits on its key's row lock, and a
-    // burst of public listings on the pool itself; their own pools keep those off the others.
-    pools = {
-      main: createPool(url, poolErrorLogger(logger)),
-      reserve: createPool(url, poolErrorLogger(logger), 3),
-      rateLimits: createPool(url, poolErrorLogger(logger), 3),
-      discovery: createPool(url, poolErrorLogger(logger), 3),
-    };
-  }
   const endPools = () => Promise.all(Object.values(pools ?? {}).map((p) => p.end()));
   try {
+    // stellar-sdk's RPC and Horizon clients use the global fetch with no timeout of their own, and
+    // an upstream call cut off by its deadline can't be cancelled. undici's defaults would hold its
+    // socket for 300 s; these end it after 10 s without headers or body data. Process-wide: any
+    // other `fetch` in this process gets the same bounds (the facilitator makes no other).
+    setGlobalDispatcher(
+      new Agent({ headersTimeout: UPSTREAM_TIMEOUT_MS, bodyTimeout: UPSTREAM_TIMEOUT_MS }),
+    );
+    // STORE=postgres needs a migrated schema (`pnpm migrate`); the service never migrates it.
+    if (config.store === "postgres") {
+      const url = config.databaseUrl;
+      if (url === undefined) throw new Error("STORE=postgres needs a DATABASE_URL");
+      // Reservations queue on the global scope's lock, a flood's hits on its key's row lock, and a
+      // burst of public listings on the pool itself; their own pools keep those off the others.
+      pools = {
+        main: createPool(url, poolErrorLogger(logger)),
+        reserve: createPool(url, poolErrorLogger(logger), 3),
+        rateLimits: createPool(url, poolErrorLogger(logger), 3),
+        discovery: createPool(url, poolErrorLogger(logger), 3),
+      };
+    }
+    // Every RPC_URLS entry must serve NETWORK: another network's RPC reads every channel as
+    // missing. Checked first, so a wrong URL is named instead of every channel.
+    await checkRpcNetworks(config.rpcUrls, getNetworkPassphrase(config.network));
     const stores = pools ? postgresStores(pools.main, pools) : memoryStores();
-    const { deps, cataloger } = compose(config, { logger, stores });
+    const { deps, cataloger, rpc } = compose(config, { logger, stores });
+    // AD-12: the service starts only when no other key can move a channel. An RPC that doesn't
+    // answer fails the check with its error. `compose()` only wires parts, so nothing has called
+    // the RPC yet.
+    const facilitator = Keypair.fromSecret(config.facilitatorSecret).publicKey();
+    await checkChannels(rpc, config.channels, facilitator);
     // For the life of the process: an upstream call cut off by the deadline keeps running after
     // `close()`, and its error would reach stderr with the RPC URL in it.
     const restoreConsole = captureConsoleError(logger, config.rpcUrls);
@@ -299,6 +464,9 @@ export async function main(env: Record<string, string | undefined> = process.env
       close: () => (closing ??= closeOnce()),
     };
   } catch (error) {
+    // Logged here, where an RPC URL is named as its `RPC_URLS` entry, never by its host
+    // (ADR 0011); `server.ts` logs only a `ConfigError`, which comes before the logger.
+    logger.error("startup_failed", { error });
     await endPools();
     throw error;
   }

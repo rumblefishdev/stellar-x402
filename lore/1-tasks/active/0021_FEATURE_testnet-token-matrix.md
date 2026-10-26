@@ -2,7 +2,7 @@
 id: "0021"
 title: "Testnet token matrix"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0007"]
 related_tasks: ["0012", "0009", "0018"]
@@ -15,6 +15,10 @@ history:
     status: backlog
     who: claude
     note: "Created by 0012 from M1 Story 1.7 (Payments lane)."
+  - date: "2026-10-23"
+    status: active
+    who: okarcz
+    note: "Work starts."
 ---
 
 # Testnet token matrix

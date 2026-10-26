@@ -1,14 +1,14 @@
 import { STATUS_CODES } from "node:http";
 import { PaymentPayloadV2Schema, PaymentRequirementsV2Schema } from "@x402/core/schemas";
-import type { VerifyRequest } from "@x402/core/types";
-import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
+import type { SupportedResponse, VerifyRequest } from "@x402/core/types";
+import express, { type ErrorRequestHandler, type Express } from "express";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
 import type { Metrics } from "../metrics.js";
 import type { Stores } from "../ports/index.js";
 import type { SettlementHooks } from "../settlement/hooks.js";
 import type { Settle } from "../settlement/settle.js";
-import type { Verify } from "../settlement/verify.js";
+import type { Verify, VerifyTrace } from "../settlement/verify.js";
 import { discoveryResources } from "./discovery.js";
 import { EXTENSION_RESPONSES_HEADER, encodeExtensionResponses } from "./extension-responses.js";
 
@@ -22,15 +22,13 @@ export interface AppDeps {
   settle: Settle;
   /** The `EXTENSION-RESPONSES` header of a `success` settle answer (AD-8). */
   extensionResponses: SettlementHooks["extensionResponses"];
+  /** The `GET /supported` answer, fixed for the life of the process. */
+  supported: SupportedResponse;
 }
 
 /** The status as a body code, like `not_found`: 413 → `payload_too_large`. */
 const code = (status: number) =>
   (STATUS_CODES[status] ?? "error").toLowerCase().replace(/[^a-z]+/g, "_");
-
-const notImplemented: RequestHandler = (_req, res) => {
-  res.status(501).json({ error: "not_implemented" });
-};
 
 /**
  * How deeply a request body may nest. The x402 objects need about 6 levels, but `extensions` is
@@ -74,8 +72,8 @@ export function parsePaymentRequest(body: unknown): VerifyRequest | undefined {
 }
 
 /**
- * The inbound HTTP adapter (AD-13). `/supported` answers 501 until 0020 lands. There is a body
- * size limit and no CORS anywhere (spine "HTTP hardening"); rate limits come in 0023.
+ * The inbound HTTP adapter (AD-13). There is a body size limit and no CORS anywhere (spine "HTTP
+ * hardening"); rate limits come in 0023.
  */
 export function createApp({
   config,
@@ -85,6 +83,7 @@ export function createApp({
   verify,
   settle,
   extensionResponses,
+  supported,
 }: AppDeps): Express {
   const app = express();
   app.disable("x-powered-by");
@@ -97,7 +96,8 @@ export function createApp({
       res.status(400).json({ error: code(400) });
       return;
     }
-    const response = await verify(request.paymentPayload, request.paymentRequirements);
+    const trace: VerifyTrace = {};
+    const response = await verify(request.paymentPayload, request.paymentRequirements, trace);
     logger.info("verified", {
       network: request.paymentRequirements.network,
       isValid: response.isValid,
@@ -105,6 +105,8 @@ export function createApp({
       // Our own code next to upstream's, e.g. for a channel account.
       reason: response.extra?.reason,
       payer: response.payer,
+      // Which RPC URL answered: a lagging fallback rejects valid payments (AD-3).
+      rpc: trace.rpc,
     });
     res.json(response);
   });
@@ -152,7 +154,9 @@ export function createApp({
       else res.once("close", afterResponse);
     }
   });
-  app.get("/supported", notImplemented);
+  app.get("/supported", (_req, res) => {
+    res.json(supported);
+  });
   app.get(
     "/discovery/resources",
     discoveryResources(stores.catalog, logger, metrics, config.network),

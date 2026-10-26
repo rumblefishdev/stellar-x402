@@ -34,7 +34,10 @@ Follow-ups to `packages/signer-pool` that 0007 left out. None of them blocks the
 - **Resize the pool at runtime (0007 step 1):**
   - add and remove channels on a running submitter;
   - merge a removed channel back into the facilitator to reclaim its 1.5 XLM;
-  - derive a default pool size from a target rate.
+  - derive a default pool size from a target rate;
+  - from 0020: read every channel at startup in one `getLedgerEntries` call (up to 200 keys)
+    instead of one call per channel. 0007 measured 14–30 refusals in 200 simultaneous reads on the
+    public testnet RPC, and since 0051 a refused read stops startup.
 - **Detailed errors:** an on-chain failure now reports only `txFailed`. Add the operation result
   and the host error from the result meta.
 - **XDR fixture:** moved to 0016.

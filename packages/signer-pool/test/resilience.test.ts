@@ -1,4 +1,4 @@
-import { Account, Address, FeeBumpTransaction, Keypair, StrKey, xdr } from "@stellar/stellar-sdk";
+import { Address, FeeBumpTransaction, Keypair, StrKey, xdr } from "@stellar/stellar-sdk";
 import { describe, expect, it, vi } from "vitest";
 import {
   FallbackRpc,
@@ -10,11 +10,13 @@ import {
   SimulationCheckError,
   checkFacilitatorBalance,
   keypairSigner,
+  readAccountEntry,
+  type FallbackRpcOptions,
   type SorobanRpc,
   type SubmitterEvent,
   type SubmitterOptions,
 } from "../src/index.js";
-import { FakeRpc, channels, facilitator } from "./fake-rpc.js";
+import { FakeRpc, accountEntry, channels, facilitator, ledgerEntries } from "./fake-rpc.js";
 
 const PASSPHRASE = "Test SDF Network ; September 2015";
 
@@ -80,11 +82,11 @@ describe("uncertain sends", () => {
     fake.sendScript.push(...Array<"THROW">(10).fill("THROW"));
     const res = await submitter.submit(call());
     expect(res.status).toBe("expired");
-    const reads = fake.calls.getAccount!;
+    const reads = fake.calls.getLedgerEntries!;
     fake.sendScript = [];
     const next = await submitter.submit(call());
     expect(next.status).toBe("success");
-    expect(fake.calls.getAccount).toBe(reads + 1);
+    expect(fake.calls.getLedgerEntries).toBe(reads + 1);
   });
 
   it("rebuilds once after a plain txBadSeq, and rejects if it repeats", async () => {
@@ -98,7 +100,12 @@ describe("uncertain sends", () => {
 
     // A reader that keeps returning a stale sequence: the rebuild is rejected too.
     fake.sequences.set(channels[0]!, 12_000n);
-    Object.assign(fake, { getAccount: async (a: string) => new Account(a, "1") });
+    Object.assign(fake, {
+      getLedgerEntries: async (key: xdr.LedgerKey) => ({
+        entries: [accountEntry(key.account().accountId(), 1n)],
+        latestLedger: fake.ledger,
+      }),
+    });
     const again = await submitter.submit(call());
     expect(again).toMatchObject({ status: "rejected", errorCode: "txBadSeq" });
     expect(submitter.stats().sequenceResyncs).toBe(2);
@@ -106,13 +113,13 @@ describe("uncertain sends", () => {
 });
 
 describe("sequence reads", () => {
-  /** Makes the first `n` getAccount calls throw, as the public RPC did under load. */
+  /** Makes the first `n` account reads answer no entry, as the public RPC seemed to under load. */
   const failReads = (fake: FakeRpc, n: number) => {
-    const getAccount = fake.getAccount.bind(fake);
+    const getLedgerEntries = fake.getLedgerEntries.bind(fake);
     Object.assign(fake, {
-      getAccount: async (address: string) => {
-        if (n-- > 0) throw new Error(`Account not found: ${address}`);
-        return getAccount(address);
+      getLedgerEntries: async (key: xdr.LedgerKey) => {
+        if (n-- > 0) return { entries: [], latestLedger: fake.ledger };
+        return getLedgerEntries(key);
       },
     });
   };
@@ -147,7 +154,7 @@ describe("sequence reads", () => {
   it("keeps the channel when reads fail for another reason", async () => {
     const { fake, submitter } = setup({ timeoutSeconds: 20 });
     Object.assign(fake, {
-      getAccount: async () => Promise.reject(new Error("fetch failed")),
+      getLedgerEntries: async () => Promise.reject(new Error("fetch failed")),
     });
     await expect(submitter.submit(call())).rejects.toThrow("fetch failed");
     expect(submitter.stats()).toMatchObject({ quarantined: 0, channels: 1, busy: 0 });
@@ -350,8 +357,7 @@ function endpoint(behaviour: "ok" | "fail" | "hang", calls: string[] = []): Soro
     return Promise.resolve(value);
   };
   return {
-    getAccount: answer("getAccount", "acct"),
-    getAccountEntry: answer("getAccountEntry", "entry"),
+    getLedgerEntries: answer("getLedgerEntries", "entries"),
     simulateTransaction: answer("simulateTransaction", "sim"),
     sendTransaction: answer("sendTransaction", "sent"),
     getTransaction: answer("getTransaction", "tx"),
@@ -397,25 +403,55 @@ describe("FallbackRpc", () => {
       { name: "a", rpc: endpoint("fail") },
       { name: "b", rpc: endpoint("fail") },
     ]);
-    const error = await rpc.getAccount("G").catch((e: unknown) => e);
+    const error = await rpc.getLedgerEntries().catch((e: unknown) => e);
     expect(error).toBeInstanceOf(RpcUnavailableError);
-    expect((error as Error).cause).toEqual(new Error("getAccount failed"));
+    expect((error as Error).cause).toEqual(new Error("getLedgerEntries failed"));
     expect(rpc.active).toBe("a");
   });
 
-  it("throws a not-found answer as it is: the endpoint answered", async () => {
+  it("passes a not-found answer on as an answer: the endpoint answered", async () => {
     const missing = {
-      getAccount: async () => {
-        throw new Error("Account not found: G");
-      },
+      getLedgerEntries: async () => ledgerEntries(),
     } as unknown as SorobanRpc;
     const rpc = new FallbackRpc([
       { name: "a", rpc: missing },
       { name: "b", rpc: missing },
     ]);
-    const error = await rpc.getAccount("G").catch((e: unknown) => e);
-    expect(error).not.toBeInstanceOf(RpcUnavailableError);
-    expect((error as Error).message).toBe("Account not found: G");
+    expect(await readAccountEntry(rpc, channels[0]!)).toBeUndefined();
+    expect(rpc.active).toBe("a");
+  });
+
+  it("never asks the next endpoint after one answered that the account does not exist", async () => {
+    const asked: string[] = [];
+    const answering = (name: string, entry?: xdr.AccountEntry) =>
+      ({
+        getLedgerEntries: async () => {
+          asked.push(name);
+          return ledgerEntries(entry);
+        },
+      }) as unknown as SorobanRpc;
+    const found = accountEntry(Keypair.fromPublicKey(channels[0]!).xdrAccountId(), 1n).val;
+    const rpc = new FallbackRpc([
+      { name: "a", rpc: answering("a") },
+      { name: "b", rpc: answering("b", found.account()) },
+    ]);
+    expect(await readAccountEntry(rpc, channels[0]!)).toBeUndefined();
+    expect(asked).toEqual(["a"]);
+  });
+
+  it("names a JSON-RPC error answer when every endpoint gave one", async () => {
+    const failing = {
+      getLedgerEntries: async () => {
+        throw { code: -32603, message: "could not query captive core" };
+      },
+    } as unknown as SorobanRpc;
+    const rpc = new FallbackRpc([
+      { name: "a", rpc: failing },
+      { name: "b", rpc: failing },
+    ]);
+    const error = await rpc.getLedgerEntries().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RpcUnavailableError);
+    expect((error as Error).message).toContain('"code":-32603');
   });
 
   it("never retries sendTransaction itself, but moves on for the next call", async () => {
@@ -460,6 +496,421 @@ describe("FallbackRpc", () => {
   });
 });
 
+/** An endpoint whose behaviour and latest ledger a test changes while it runs. */
+function switchable(state: { mode: "ok" | "fail" | "hang"; ledger: number }): SorobanRpc {
+  const run = <T>(value: () => T) =>
+    state.mode === "fail"
+      ? Promise.reject(new Error("down"))
+      : state.mode === "hang"
+        ? new Promise<never>(() => {})
+        : Promise.resolve(value());
+  return {
+    ...endpoint("ok"),
+    getLatestLedger: () => run(() => ({ sequence: state.ledger })),
+    getFeeStats: () => run(() => "fees"),
+    sendTransaction: () => run(() => "sent"),
+  } as unknown as SorobanRpc;
+}
+
+describe("FallbackRpc's shared active endpoint", () => {
+  const pair = (opts: FallbackRpcOptions = {}) => {
+    const a = { mode: "ok" as "ok" | "fail" | "hang", ledger: 100 };
+    const b = { mode: "ok" as "ok" | "fail" | "hang", ledger: 100 };
+    const switches: string[] = [];
+    const rpc = new FallbackRpc(
+      [
+        { name: "a", rpc: switchable(a) },
+        { name: "b", rpc: switchable(b) },
+      ],
+      {
+        timeoutMs: 20,
+        onSwitch: (from, to, _error, by) => switches.push(`${from}->${to} by ${by}`),
+        ...opts,
+      },
+    );
+    return { rpc, a, b, switches };
+  };
+
+  it("moves every caller on a failure another caller reports, once", async () => {
+    const { rpc, switches } = pair();
+    const { index, token } = rpc.begin();
+    expect(index).toBe(0);
+    const next = rpc.markFailed(0, token, new Error("timeout"), "verify");
+    expect(next).toBeDefined();
+    expect(rpc.begin().index).toBe(1);
+    // A second report from a call that began before the move changes nothing.
+    expect(rpc.markFailed(0, token, new Error("timeout"), "verify")).toBeUndefined();
+    expect(switches).toEqual(["a->b by verify"]);
+    // The next read starts on the new endpoint, and the reporter's next failure moves on again.
+    expect(rpc.markFailed(1, next!, new Error("timeout"), "verify")).toBeDefined();
+    expect(rpc.active).toBe("a");
+    // Back on `a` (A → B → A): a report from the first call names `a` again, with its old token.
+    expect(rpc.markFailed(0, token, new Error("timeout"), "verify")).toBeUndefined();
+    expect(rpc.active).toBe("a");
+  });
+
+  it("ignores a report for an endpoint calls aren't on, and never moves a single endpoint", async () => {
+    const { rpc, switches } = pair();
+    const { token } = rpc.begin();
+    expect(rpc.markFailed(1, token, new Error("x"), "verify")).toBeUndefined();
+    expect(rpc.active).toBe("a");
+    const single = new FallbackRpc([{ name: "only", rpc: endpoint("ok") }]);
+    expect(single.markFailed(0, single.begin().token, new Error("x"), "verify")).toBeUndefined();
+    expect(switches).toEqual([]);
+  });
+
+  it("starts a read on the endpoint another caller moved to: the hung one costs one timeout", async () => {
+    const { rpc, a, switches } = pair();
+    a.mode = "hang";
+    rpc.markFailed(0, rpc.begin().token, new Error("timeout"), "verify");
+    const started = Date.now();
+    expect(await rpc.getLatestLedger()).toEqual({ sequence: 100 });
+    expect(Date.now() - started).toBeLessThan(20);
+    expect(switches).toEqual(["a->b by verify"]);
+  });
+
+  it("doesn't switch for a call whose answer comes after another one switched (A → B → A)", async () => {
+    let release!: () => void;
+    const slowB = new Promise<void>((resolve) => (release = resolve));
+    const switches: string[] = [];
+    const rpc = new FallbackRpc(
+      [
+        { name: "a", rpc: endpoint("fail") },
+        {
+          name: "b",
+          rpc: {
+            ...endpoint("ok"),
+            getLatestLedger: async () => {
+              await slowB;
+              return { sequence: 2 };
+            },
+          } as unknown as SorobanRpc,
+        },
+      ],
+      {
+        timeoutMs: 1_000,
+        onSwitch: (from, to, _e, by) => switches.push(`${from}->${to} by ${by}`),
+      },
+    );
+    // The read fails on `a` and waits on `b`; meanwhile a caller moves A → B, then B → A.
+    const pending = rpc.getLatestLedger();
+    const next = rpc.markFailed(0, rpc.begin().token, new Error("timeout"), "verify")!;
+    rpc.markFailed(1, next, new Error("timeout"), "verify");
+    release();
+    expect(await pending).toEqual({ sequence: 2 });
+    expect(rpc.active).toBe("a");
+    expect(switches).toEqual(["a->b by verify", "b->a by verify"]);
+  });
+
+  it("names the method whose call failed in onSwitch", async () => {
+    const { rpc, a, switches } = pair();
+    a.mode = "fail";
+    await rpc.getFeeStats();
+    expect(switches).toEqual(["a->b by getFeeStats"]);
+  });
+
+  it("keeps the answer when onSwitch throws", async () => {
+    const { rpc, a } = pair({
+      onSwitch: () => {
+        throw new Error("logger down");
+      },
+    });
+    a.mode = "fail";
+    expect(await rpc.getLatestLedger()).toEqual({ sequence: 100 });
+    expect(rpc.active).toBe("b");
+  });
+
+  describe("failback", () => {
+    const withClock = (extra: FallbackRpcOptions = {}) => {
+      const clock = { t: 0 };
+      const failbacks: string[] = [];
+      const probeFailures: unknown[] = [];
+      const setup = pair({
+        failback: { intervalMs: 1_000 },
+        now: () => clock.t,
+        onFailback: (from, to, lag) => failbacks.push(`${from}->${to} lag ${lag}`),
+        onProbeFailed: (name, failure) => probeFailures.push({ name, ...failure }),
+        ...extra,
+      });
+      // Calls leave `a` at t = 0.
+      setup.rpc.markFailed(0, setup.rpc.begin().token, new Error("timeout"), "verify");
+      return { ...setup, clock, failbacks, probeFailures };
+    };
+
+    it("never probes without the option: calls stay where they moved", async () => {
+      const { rpc } = pair();
+      rpc.markFailed(0, rpc.begin().token, new Error("timeout"), "verify");
+      rpc.begin();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(rpc.active).toBe("b");
+    });
+
+    it("returns to a healthy first endpoint once a probe is due, never before", async () => {
+      const { rpc, clock, failbacks } = withClock();
+      clock.t = 999;
+      rpc.begin();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(rpc.active).toBe("b");
+      clock.t = 1_000;
+      rpc.begin();
+      await vi.waitFor(() => expect(rpc.active).toBe("a"));
+      expect(failbacks).toEqual(["b->a lag 0"]);
+      // A late report from before the return changes nothing.
+      expect(rpc.markFailed(1, 1, new Error("x"), "verify")).toBeUndefined();
+    });
+
+    it("stays off a first endpoint that is down, or trails by more than maxLagLedgers", async () => {
+      const { rpc, a, b, clock, probeFailures } = withClock();
+      a.mode = "fail";
+      clock.t = 1_000;
+      rpc.begin();
+      await vi.waitFor(() => expect(probeFailures).toHaveLength(1));
+      expect(probeFailures[0]).toMatchObject({ name: "a", error: new Error("down") });
+      a.mode = "ok";
+      a.ledger = 100;
+      b.ledger = 103;
+      clock.t = 2_000;
+      rpc.begin();
+      await vi.waitFor(() => expect(probeFailures).toHaveLength(2));
+      expect(probeFailures[1]).toEqual({ name: "a", lagLedgers: 3 });
+      expect(rpc.active).toBe("b");
+    });
+
+    it("counts a first endpoint whose probe hangs past timeoutMs as down, and probes again later", async () => {
+      const { rpc, a, clock, probeFailures } = withClock();
+      a.mode = "hang";
+      clock.t = 1_000;
+      rpc.begin();
+      await vi.waitFor(() => expect(probeFailures).toHaveLength(1));
+      expect(probeFailures[0]).toMatchObject({ name: "a", error: expect.any(RpcTimeoutError) });
+      a.mode = "ok";
+      clock.t = 2_000;
+      rpc.begin();
+      await vi.waitFor(() => expect(rpc.active).toBe("a"));
+    });
+
+    it("never returns to the first endpoint on a failure of the last one: it probes at once", async () => {
+      // The A1 case: `a` is dead, calls moved to `b`, and then `b` fails too.
+      const { rpc, a, b, switches, probeFailures } = withClock();
+      a.mode = "fail";
+      b.mode = "fail";
+      expect(rpc.markFailed(1, rpc.begin().token, new Error("timeout"), "verify")).toBeUndefined();
+      expect(rpc.active).toBe("b");
+      await vi.waitFor(() => expect(probeFailures).toHaveLength(1));
+      await expect(rpc.sendTransaction({} as never)).rejects.toThrow("down");
+      expect(rpc.active).toBe("b");
+      expect(switches).toEqual(["a->b by verify"]);
+    });
+
+    it("moves a failure of the last endpoint to the next fallback, skipping the first", async () => {
+      const switches: string[] = [];
+      const rpc = new FallbackRpc(
+        ["a", "b", "c"].map((name) => ({ name, rpc: endpoint("ok") })),
+        {
+          failback: { intervalMs: 1_000 },
+          now: () => 0,
+          onSwitch: (from, to) => switches.push(`${from}->${to}`),
+        },
+      );
+      const t1 = rpc.markFailed(0, rpc.begin().token, new Error("x"), "verify")!;
+      const t2 = rpc.markFailed(1, t1, new Error("x"), "verify")!;
+      expect(rpc.markFailed(2, t2, new Error("x"), "verify")).toBeDefined();
+      expect(switches).toEqual(["a->b", "b->c", "c->b"]);
+    });
+
+    // `b` fails one fee-stats read, which wraps around to `a`; its ledger reads still answer.
+    const blip = (aLedger: number, intervalMs = 1_000) => {
+      const clock = { t: 0 };
+      const switches: string[] = [];
+      const failbacks: string[] = [];
+      const probeFailures: unknown[] = [];
+      const ep = (name: string, ledger: number, fees: () => Promise<unknown>) =>
+        ({
+          ...endpoint("ok"),
+          getLatestLedger: async () => ({ sequence: ledger }),
+          getFeeStats: fees,
+        }) as unknown as SorobanRpc;
+      const rpc = new FallbackRpc(
+        [
+          { name: "a", rpc: ep("a", aLedger, async () => "fees from a") },
+          { name: "b", rpc: ep("b", 100, () => Promise.reject(new Error("blip"))) },
+        ],
+        {
+          failback: { intervalMs },
+          now: () => clock.t,
+          onSwitch: (from, to, _e, by) => switches.push(`${from}->${to} by ${by}`),
+          onFailback: (from, to, lag) => failbacks.push(`${from}->${to} lag ${lag}`),
+          onProbeFailed: (name, failure) => probeFailures.push({ name, ...failure }),
+        },
+      );
+      rpc.markFailed(0, rpc.begin().token, new Error("timeout"), "verify");
+      return { rpc, clock, switches, failbacks, probeFailures };
+    };
+
+    it("keeps calls off a first endpoint that answers a wrapped-around read: it probes at once", async () => {
+      // `a` came back 50 ledgers behind; its answer to the read must not bring calls back.
+      const { rpc, switches, failbacks, probeFailures } = blip(50);
+      expect(await rpc.getFeeStats()).toBe("fees from a");
+      expect(rpc.active).toBe("b");
+      await vi.waitFor(() => expect(probeFailures).toEqual([{ name: "a", lagLedgers: 50 }]));
+      expect(rpc.active).toBe("b");
+      expect(switches).toEqual(["a->b by verify"]);
+      expect(failbacks).toEqual([]);
+    });
+
+    it("returns to a first endpoint that answers a wrapped-around read once its probe finds it caught up", async () => {
+      const { rpc, switches, failbacks, probeFailures } = blip(99);
+      expect(await rpc.getFeeStats()).toBe("fees from a");
+      await vi.waitFor(() => expect(failbacks).toEqual(["b->a lag 1"]));
+      expect(rpc.active).toBe("a");
+      expect(switches).toEqual(["a->b by verify"]);
+      expect(probeFailures).toEqual([]);
+    });
+
+    it("starts one probe per 5 s for reads that keep failing on the active endpoint", async () => {
+      const { rpc, clock, probeFailures } = blip(50, 60_000);
+      await rpc.getFeeStats();
+      await vi.waitFor(() => expect(probeFailures).toHaveLength(1));
+      clock.t = 4_999;
+      await rpc.getFeeStats();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(probeFailures).toHaveLength(1);
+      clock.t = 5_000;
+      await rpc.getFeeStats();
+      await vi.waitFor(() => expect(probeFailures).toHaveLength(2));
+      expect(rpc.active).toBe("b");
+    });
+
+    it("moves a read that fails on the last endpoint to the next fallback, though the first answers", async () => {
+      const switches: string[] = [];
+      const fees = (from: string) => async () => `fees from ${from}`;
+      const ep = (getFeeStats: () => Promise<unknown>) =>
+        ({ ...endpoint("ok"), getFeeStats }) as unknown as SorobanRpc;
+      const rpc = new FallbackRpc(
+        [
+          { name: "a", rpc: ep(fees("a")) },
+          { name: "b", rpc: ep(fees("b")) },
+          { name: "c", rpc: ep(() => Promise.reject(new Error("blip"))) },
+        ],
+        {
+          failback: { intervalMs: 60_000 },
+          now: () => 0,
+          onSwitch: (from, to, _e, by) => switches.push(`${from}->${to} by ${by}`),
+        },
+      );
+      const t1 = rpc.markFailed(0, rpc.begin().token, new Error("x"), "verify")!;
+      rpc.markFailed(1, t1, new Error("x"), "verify");
+      // `c` fails, and the read wraps around to `a` before it reaches `b`.
+      expect(await rpc.getFeeStats()).toBe("fees from a");
+      expect(rpc.active).toBe("b");
+      expect(switches).toEqual(["a->b by verify", "b->c by verify", "c->b by getFeeStats"]);
+    });
+
+    it("probes, not moves, when a read from the first fallback failed on every fallback", async () => {
+      // Adam's case on PR #62: calls on `b`, `b` and `c` down, `a` up. Moving to `c`, which
+      // failed in the same read, would bounce calls between `b` and `c` until the 60 s probe.
+      const switches: string[] = [];
+      const failbacks: string[] = [];
+      const rpc = new FallbackRpc(
+        [
+          { name: "a", rpc: endpoint("ok") },
+          { name: "b", rpc: endpoint("fail") },
+          { name: "c", rpc: endpoint("fail") },
+        ],
+        {
+          failback: { intervalMs: 60_000 },
+          now: () => 0,
+          onSwitch: (from, to, _e, by) => switches.push(`${from}->${to} by ${by}`),
+          onFailback: (from, to, lag) => failbacks.push(`${from}->${to} lag ${lag}`),
+        },
+      );
+      rpc.markFailed(0, rpc.begin().token, new Error("x"), "verify");
+      expect(await rpc.getFeeStats()).toBe("fees");
+      // `b` can't read its own ledger, so the probe returns calls to `a` (0045 decision 11).
+      await vi.waitFor(() => expect(failbacks).toEqual(["b->a lag 0"]));
+      expect(rpc.active).toBe("a");
+      expect(switches).toEqual(["a->b by verify"]);
+    });
+
+    it("returns to a healthy first endpoint when the active one can't read its ledger", async () => {
+      const { rpc, b, clock, failbacks } = withClock();
+      b.mode = "fail";
+      clock.t = 1_000;
+      rpc.begin();
+      await vi.waitFor(() => expect(failbacks).toEqual(["b->a lag 0"]));
+    });
+
+    it("drops a probe's answer when calls switched while it ran", async () => {
+      let release!: () => void;
+      const slow = new Promise<void>((resolve) => (release = resolve));
+      const clock = { t: 0 };
+      const failbacks: string[] = [];
+      const rpc = new FallbackRpc(
+        [
+          {
+            name: "a",
+            rpc: {
+              ...endpoint("ok"),
+              getLatestLedger: async () => {
+                await slow;
+                return { sequence: 1 };
+              },
+            } as unknown as SorobanRpc,
+          },
+          { name: "b", rpc: endpoint("ok") },
+          { name: "c", rpc: endpoint("ok") },
+        ],
+        {
+          timeoutMs: 1_000,
+          failback: { intervalMs: 1_000 },
+          now: () => clock.t,
+          onFailback: (from, to) => failbacks.push(`${from}->${to}`),
+        },
+      );
+      rpc.markFailed(0, rpc.begin().token, new Error("x"), "verify");
+      clock.t = 1_000;
+      // The probe starts and waits for `a`; meanwhile a caller moves B → C.
+      const { token } = rpc.begin();
+      rpc.markFailed(1, token, new Error("x"), "verify");
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(failbacks).toEqual([]);
+      expect(rpc.active).toBe("c");
+    });
+
+    it("runs one probe at a time, and keeps its time across a switch between the others", async () => {
+      const calls: string[] = [];
+      const clock = { t: 0 };
+      const ledgerOf = (name: string, mode: "ok" | "hang") =>
+        ({
+          ...endpoint("ok"),
+          getLatestLedger: () => {
+            calls.push(name);
+            return mode === "hang" ? new Promise(() => {}) : Promise.resolve({ sequence: 1 });
+          },
+        }) as unknown as SorobanRpc;
+      const rpc = new FallbackRpc(
+        [
+          { name: "a", rpc: ledgerOf("a", "hang") },
+          { name: "b", rpc: ledgerOf("b", "ok") },
+          { name: "c", rpc: ledgerOf("c", "ok") },
+        ],
+        { timeoutMs: 1_000, failback: { intervalMs: 1_000 }, now: () => clock.t },
+      );
+      const t0 = rpc.markFailed(0, rpc.begin().token, new Error("x"), "verify")!;
+      clock.t = 500;
+      // b → c doesn't restart the probe's clock: it is still due at 1 000.
+      rpc.markFailed(1, t0, new Error("x"), "verify");
+      clock.t = 1_000;
+      rpc.begin();
+      // The first probe still waits for `a` when the next one would be due.
+      clock.t = 2_000;
+      rpc.begin();
+      expect(calls).toEqual(["a", "c"]);
+    });
+  });
+});
+
 describe("checkFacilitatorBalance", () => {
   function entry(
     balance: bigint,
@@ -496,7 +947,7 @@ describe("checkFacilitatorBalance", () => {
 
   it("subtracts the reserve and estimates settlements left", async () => {
     const r = await checkFacilitatorBalance(
-      { getAccountEntry: async () => entry(2_000_000_000n, 0) },
+      { getLedgerEntries: async () => ledgerEntries(entry(2_000_000_000n, 0)) },
       addr,
     );
     expect(r.reserveStroops).toBe(10_000_000n);
@@ -508,8 +959,10 @@ describe("checkFacilitatorBalance", () => {
   it("counts sub-entries, sponsorships and selling liabilities, and flags a low balance", async () => {
     const r = await checkFacilitatorBalance(
       {
-        getAccountEntry: async () =>
-          entry(600_000_000n, 2, { selling: 100_000_000n, sponsoring: 3, sponsored: 1 }),
+        getLedgerEntries: async () =>
+          ledgerEntries(
+            entry(600_000_000n, 2, { selling: 100_000_000n, sponsoring: 3, sponsored: 1 }),
+          ),
       },
       addr,
       { minSpendableStroops: 500_000_000n },

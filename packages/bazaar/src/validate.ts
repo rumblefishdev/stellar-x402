@@ -6,7 +6,7 @@ import {
 } from "@x402/extensions/bazaar";
 import { LIMITS, type BazaarRejectReason } from "./limits.js";
 import { isSchemaWithinLimits } from "./schema.js";
-import { canonicalizeUrl, matchRouteTemplate, sanitizeIconUrl, type UrlOptions } from "./url.js";
+import { canonicalizeUrl, matchRouteTemplate, sanitizeIconUrl } from "./url.js";
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
@@ -79,8 +79,10 @@ function checkShape(
   ) {
     return "resource.description must be a string without control characters";
   }
+  // "" is upstream's "none" (dropped from the entry in `run`), not a media type to check.
   if (
     mimeType !== undefined &&
+    mimeType !== "" &&
     (typeof mimeType !== "string" ||
       mimeType.length > LIMITS.mimeTypeChars ||
       CONTROL_CHARS.test(mimeType) ||
@@ -94,7 +96,6 @@ function checkShape(
 function run(
   payload: PaymentPayload,
   requirements: PaymentRequirements,
-  options: UrlOptions,
 ): ValidationResult | undefined {
   // 1. Presence, read from the raw payload: upstream's `null` mixes several cases.
   const extensions: unknown = payload.extensions;
@@ -119,7 +120,9 @@ function run(
 
   // 5. Resource URL. This is also what keeps upstream's unguarded `new URL()` from throwing.
   const resourceUrl =
-    typeof resource.url === "string" ? canonicalizeUrl(resource.url, options) : undefined;
+    typeof resource.url === "string"
+      ? canonicalizeUrl(resource.url, input.type === "mcp" ? "mcp" : "http")
+      : undefined;
   if (!resourceUrl) return reject("invalid_resource_url");
 
   // 6. Content limits. The schema is data: walked for limits, never compiled.
@@ -155,6 +158,10 @@ function run(
   const discovered: Record<string, unknown> = { ...extracted, extensions: { bazaar: bazaarBlock } };
   delete discovered.resourceUrl;
   delete discovered.routeTemplate;
+  // Upstream servers send `description` and `mimeType` as `routeConfig.… || ""` (`@x402/core`
+  // 2.28.0): "" means none, so the entry leaves it out.
+  if (discovered.description === "") delete discovered.description;
+  if (discovered.mimeType === "") delete discovered.mimeType;
   const iconUrl = sanitizeIconUrl(extracted.iconUrl);
   if (iconUrl) discovered.iconUrl = iconUrl;
   else delete discovered.iconUrl;
@@ -178,10 +185,9 @@ function run(
 export function validate(
   payload: PaymentPayload,
   requirements: PaymentRequirements,
-  options: UrlOptions = {},
 ): ValidationResult | undefined {
   try {
-    return run(payload, requirements, options);
+    return run(payload, requirements);
   } catch (error) {
     return reject("internal_error", error instanceof Error ? error.message : String(error));
   }

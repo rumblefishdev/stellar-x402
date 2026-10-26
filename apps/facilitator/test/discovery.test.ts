@@ -7,6 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { memoryStores } from "../src/adapters/memory.js";
 import { parseConfig } from "../src/config.js";
 import { DISCOVERY_LIMIT, MAX_OFFSET, parseDiscoveryQuery } from "../src/http/discovery.js";
+import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
 import { start, type Started } from "../src/main.js";
 import { memoryMetrics } from "../src/metrics.js";
@@ -170,6 +171,7 @@ describe("GET /discovery/resources", () => {
       verify: vi.fn<Verify>(),
       settle: vi.fn<Settle>(),
       extensionResponses: () => undefined,
+      supported: supportedResponse(config.network, Keypair.random().publicKey()),
     });
     url = `http://127.0.0.1:${app.port}`;
   });

@@ -21,10 +21,12 @@ import {
   type SorobanRpc,
 } from "@stellar-x402/signer-pool";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { parseConfig } from "../src/config.js";
-import { buildVerifier } from "../src/main.js";
+import { rpcEndpointName } from "../src/logger.js";
+import { buildRpc, buildVerifier } from "../src/main.js";
 import { feeSettings } from "../src/settlement/fees.js";
+import type { VerifyTrace } from "../src/settlement/verify.js";
 
 const MAX_FEE = 250_000;
 const BID = 1_000;
@@ -110,7 +112,9 @@ function payload(): PaymentPayload {
 
 /** The pool's RPC: one channel, a ledger per call, and the same simulation. */
 const poolRpc = {
-  getAccount: async (address: string) => new Account(address, "1000"),
+  getLedgerEntries: async () => ({
+    entries: [{ val: { account: () => ({ seqNum: () => xdr.Int64.fromString("1000") }) } }],
+  }),
   getLatestLedger: async () =>
     ({ sequence: ++latestLedger }) as unknown as rpc.Api.GetLatestLedgerResponse,
   simulateTransaction: async () => rpc.parseRawSimulation(simulation()),
@@ -129,7 +133,14 @@ describe("the fee ceiling at /verify and in the pool (AD-10)", () => {
 
   /** Real upstream `ExactStellarScheme`, as `main()` wires it: did it refuse the fee? */
   async function verifyRefuses(): Promise<boolean> {
-    const verify = buildVerifier({ ...config, rpcUrls: [rpcUrl] }, poolRpc, fees);
+    const cfg = { ...config, rpcUrls: [rpcUrl] };
+    const logger = { warn() {}, info() {} };
+    const verify = buildVerifier(
+      cfg,
+      buildRpc(cfg, logger, () => poolRpc),
+      fees,
+      logger,
+    );
     const answer = await verify(payload(), requirements);
     // A fee it accepts goes on to the event check, which an empty simulation fails.
     expect(answer.invalidReason).toMatch(/fee_exceeds_maximum|no_transfer_events/);
@@ -173,5 +184,34 @@ describe("the fee ceiling at /verify and in the pool (AD-10)", () => {
     resourceFee = fee;
     expect(await verifyRefuses()).toBe(refused);
     expect(await poolRefuses()).toBe(refused);
+  });
+});
+
+describe("real upstream with a down first RPC URL (AD-3)", () => {
+  it("answers from the second URL, and leaves the shared client on the first (decision 22)", async () => {
+    const config = parseConfig({
+      FACILITATOR_SECRET: facilitator.secret(),
+      CHANNELS: channel,
+      // Nothing listens on port 1: upstream's simulation gets a refused connection.
+      RPC_URLS: `http://127.0.0.1:1,${rpcUrl}`,
+      MAX_FEE_STROOPS: String(MAX_FEE),
+      INCLUSION_FEE_STROOPS: String(BID),
+    });
+    resourceFee = 100_000;
+    const rpc = (i: number) => rpcEndpointName(config.rpcUrls[i]!, i);
+    const logger = { warn: vi.fn(), info: vi.fn() };
+    // The pool's reads still work on both URLs: only upstream's simulation is refused.
+    const shared = buildRpc(config, logger, () => poolRpc);
+    const verify = buildVerifier(config, shared, feeSettings(config.fees, shared), logger);
+    const trace: VerifyTrace = {};
+    // The second URL's verdict: the fee passes, and the empty simulation has no transfer events.
+    await expect(verify(payload(), requirements, trace)).resolves.toMatchObject({
+      isValid: false,
+      invalidReason: "invalid_exact_stellar_payload_no_transfer_events",
+    });
+    expect(trace).toEqual({ rpc: rpc(1) });
+    // Upstream answers a refused connection with unexpected_verify_error, which moves nothing.
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect(shared.active).toBe(rpc(0));
   });
 });

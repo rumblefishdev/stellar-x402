@@ -5,7 +5,7 @@ type: FEATURE
 status: active
 milestone: 1
 related_adr: ["0006", "0011"]
-related_tasks: ["0012", "0009", "0016", "0014", "0013"]
+related_tasks: ["0012", "0009", "0016", "0014", "0013", "0039"]
 tags: [facilitator, settlement, priority-high, effort-medium, payments]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -99,7 +99,8 @@ As a facilitator operator, I want settlement records that are written before sen
     after it).
 - From 0014 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md)): reconciliation runs after the process takes the
   lease and before `/settle` is served.
-  - The HTTP server listens at once, because ECS needs `/health` to answer.
+  - The HTTP server listens at once, because the container healthcheck needs `/health` to answer
+    (ADR 0011, revised in 0039).
   - Store each transaction's time bound next to its hash. After a crash the lease expires in 30 s,
     but the dead process's transactions stay valid for up to 60 s. A hash that isn't found stays
     non-final until its bound has passed.

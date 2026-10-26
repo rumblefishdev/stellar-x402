@@ -12,6 +12,7 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import {
+  Account,
   Address,
   FeeBumpTransaction,
   Keypair,
@@ -30,6 +31,7 @@ import {
   checkChannel,
   feeStatsInclusionFee,
   keypairSigner,
+  readAccountEntry,
 } from "../src/index.js";
 
 const need = (k: string) =>
@@ -140,8 +142,10 @@ const known: string[] =
 const fresh = Array.from({ length: Math.max(0, nChannels - known.length) }, () => Keypair.random());
 for (let i = 0; i < fresh.length; i += MAX_CHANNELS_PER_TX) {
   const batch = fresh.slice(i, i + MAX_CHANNELS_PER_TX);
+  const facilitatorEntry = await readAccountEntry(server, facilitator.publicKey());
+  if (!facilitatorEntry) throw new Error("the facilitator account does not exist");
   const setupTx = buildCreateChannelsTx({
-    facilitator: await server.getAccount(facilitator.publicKey()),
+    facilitator: new Account(facilitator.publicKey(), facilitatorEntry.seqNum().toString()),
     channels: batch,
     networkPassphrase: passphrase,
     fee: 1000,

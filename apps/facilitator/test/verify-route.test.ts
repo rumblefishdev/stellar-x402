@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { memoryStores } from "../src/adapters/memory.js";
 import { MAX_BODY_DEPTH } from "../src/http/app.js";
 import { parseConfig } from "../src/config.js";
+import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import { start, type Started } from "../src/main.js";
@@ -50,6 +51,7 @@ describe("POST /verify", () => {
         throw new Error("not used");
       },
       extensionResponses: () => undefined,
+      supported: supportedResponse(config.network, Keypair.random().publicKey()),
     });
     url = `http://127.0.0.1:${app.port}/verify`;
   });
@@ -81,9 +83,19 @@ describe("POST /verify", () => {
       verify.mockResolvedValueOnce(answer);
       const response = await post(request);
       expect([response.status, await response.json()]).toEqual([200, answer]);
-      expect(verify).toHaveBeenCalledWith(paymentPayload, requirements);
+      expect(verify).toHaveBeenCalledWith(paymentPayload, requirements, expect.any(Object));
     },
   );
+
+  it("logs the RPC URL that answered", async () => {
+    verify.mockImplementationOnce(async (_payload, _requirements, trace) => {
+      trace!.rpc = "RPC_URLS[1]";
+      return { isValid: false, invalidReason: "invalid_exact_stellar_payload_simulation_failed" };
+    });
+    await post(request);
+    const verified = lines.map((line) => JSON.parse(line)).find((l) => l.event === "verified");
+    expect(verified).toMatchObject({ isValid: false, rpc: "RPC_URLS[1]" });
+  });
 
   it("logs our own reason next to upstream's", async () => {
     verify.mockResolvedValueOnce({

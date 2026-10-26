@@ -17,6 +17,16 @@ import {
   settlementStoreContract,
   spendStoreContract,
 } from "./port-contracts.js";
+import { hardened, rpcStub } from "./rpc-stub.js";
+
+// `main()` checks its channel at startup, on the RPC it builds from `RPC_URLS`.
+const bootSecret = Keypair.random().secret();
+const bootChannel = Keypair.random().publicKey();
+let rpc: Awaited<ReturnType<typeof rpcStub>>;
+beforeAll(async () => {
+  rpc = await rpcStub({ [bootChannel]: hardened(Keypair.fromSecret(bootSecret).publicKey()) });
+});
+afterAll(() => rpc.close());
 
 /** One catalog entry, as the cataloger writes it after a settlement. */
 const catalogEntry = () => ({
@@ -354,9 +364,10 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     const app = await main({
       STORE: "postgres",
       DATABASE_URL: urlFor(schema),
-      FACILITATOR_SECRET: Keypair.random().secret(),
-      CHANNELS: Keypair.random().publicKey(),
-      PORT: "47131",
+      FACILITATOR_SECRET: bootSecret,
+      CHANNELS: bootChannel,
+      RPC_URLS: rpc.url,
+      PORT: "0",
       LOG_LEVEL: "error",
     });
     const pools = app.pools;
@@ -430,9 +441,10 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     const app = await main({
       STORE: "postgres",
       DATABASE_URL: urlFor(schema),
-      FACILITATOR_SECRET: Keypair.random().secret(),
-      CHANNELS: Keypair.random().publicKey(),
-      PORT: "47133",
+      FACILITATOR_SECRET: bootSecret,
+      CHANNELS: bootChannel,
+      RPC_URLS: rpc.url,
+      PORT: "0",
       LOG_LEVEL: "error",
     });
     try {
@@ -457,9 +469,10 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     const app = await main({
       STORE: "postgres",
       DATABASE_URL: urlFor(schema),
-      FACILITATOR_SECRET: Keypair.random().secret(),
-      CHANNELS: Keypair.random().publicKey(),
-      PORT: "47132",
+      FACILITATOR_SECRET: bootSecret,
+      CHANNELS: bootChannel,
+      RPC_URLS: rpc.url,
+      PORT: "0",
       LOG_LEVEL: "error",
     });
     // SIGTERM then SIGINT: the second call waits for the first instead of ending the pools early.
