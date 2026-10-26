@@ -228,7 +228,7 @@ describe("POST /settle", () => {
     expect([response.status, await response.json()]).toEqual([200, success]);
     const header = response.headers.get("extension-responses");
     expect(JSON.parse(Buffer.from(header!, "base64").toString())).toEqual({
-      bazaar: { status: "rejected", rejectedReason: "invalid_resource_url" },
+      bazaar: { status: "rejected", rejectedReason: "resource_not_public" },
     });
   });
 

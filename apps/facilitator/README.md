@@ -143,8 +143,10 @@ A settlement whose payload carries `extensions.bazaar` adds or refreshes an entr
 lists only resource URLs a buyer can reach, on every network (task 0054, ADR 0008): `https` or
 `http` with a public DNS name. An IP literal, `localhost`, a single-label name, a private or
 special-use suffix (`.local`, `.internal`, `.test`, `.example`, …) or an `mcp://tool/<name>` URL
-is refused as `invalid_resource_url`. The payment settles as usual: only the listing is dropped,
-and the settle response's `EXTENSION-RESPONSES` header says `rejected` with that reason.
+is left out. The payment settles as usual and `/settle` answers success; only the listing is
+dropped, and the response's `EXTENSION-RESPONSES` header says `rejected` with the reason
+`resource_not_public`. That is not an error in the request: the service works, it just isn't
+listed. A malformed URL is `invalid_resource_url`.
 
 | Setting              | Default | Meaning                                                                    |
 | -------------------- | ------- | -------------------------------------------------------------------------- |

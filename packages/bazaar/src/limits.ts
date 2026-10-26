@@ -15,11 +15,16 @@ export const LIMITS = {
   mimeTypeChars: 127,
 } as const;
 
-/** Closed set; the value goes into `bazaar.rejectedReason` of `EXTENSION-RESPONSES` as is. */
+/**
+ * Closed set; the value goes into `bazaar.rejectedReason` of `EXTENSION-RESPONSES` as is.
+ * `resource_not_public`: a well-formed URL no buyer can reach (0054), so the entry is left out of
+ * the catalog while the payment settles; not a fault in the seller's request.
+ */
 export const REJECT_REASONS = [
   "invalid_extension",
   "invalid_info",
   "invalid_resource_url",
+  "resource_not_public",
   "too_large",
   "schema_too_complex",
   "unsupported_version",

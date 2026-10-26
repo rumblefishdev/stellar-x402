@@ -127,8 +127,8 @@ describe("cataloger", () => {
   });
 
   it.each([
-    ["stellar:pubnet", false, { status: "rejected", rejectedReason: "invalid_resource_url" }, 0],
-    ["stellar:testnet", false, { status: "rejected", rejectedReason: "invalid_resource_url" }, 0],
+    ["stellar:pubnet", false, { status: "rejected", rejectedReason: "resource_not_public" }, 0],
+    ["stellar:testnet", false, { status: "rejected", rejectedReason: "resource_not_public" }, 0],
     ["stellar:testnet", true, { status: "processing" }, 1],
   ] as const)(
     "on %s with listLocal %s, a localhost listing gets %j and %i entries (0054)",
@@ -153,13 +153,13 @@ describe("cataloger", () => {
       expect(
         metrics.value("catalog_rejections_total", {
           origin: "settle",
-          reason: "invalid_resource_url",
+          reason: "resource_not_public",
         }),
       ).toBe(1 - listed);
       if (listed === 0)
         expect(logger.info).toHaveBeenCalledWith(
           "catalog_rejected",
-          expect.objectContaining({ reason: "invalid_resource_url", detail: expect.any(String) }),
+          expect.objectContaining({ reason: "resource_not_public", detail: expect.any(String) }),
         );
     },
   );

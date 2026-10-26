@@ -355,19 +355,22 @@ describe("packages/bazaar", () => {
     ["mcp://tool/get_weather", mcp],
     ["mcp://srv.example.com/x", mcp],
     ["http://localhost:4022/mcp", mcp],
-  ])("refuses %s on testnet and pubnet, and lists it with listLocal", (url, info) => {
-    for (const requirements of [req, pubnet]) {
-      const refused = validate(pay(url, { info }), requirements)!;
-      expect(refused).toMatchObject({ ok: false, reason: "invalid_resource_url" });
-      expect(toExtensionResponses(refused)).toEqual({
-        bazaar: { status: "rejected", rejectedReason: "invalid_resource_url" },
+  ])(
+    "refuses %s as resource_not_public on testnet and pubnet, and lists it with listLocal",
+    (url, info) => {
+      for (const requirements of [req, pubnet]) {
+        const refused = validate(pay(url, { info }), requirements)!;
+        expect(refused).toMatchObject({ ok: false, reason: "resource_not_public" });
+        expect(toExtensionResponses(refused)).toEqual({
+          bazaar: { status: "rejected", rejectedReason: "resource_not_public" },
+        });
+      }
+      expect(validate(pay(url, { info }), req, LOCAL)).toMatchObject({
+        ok: true,
+        resourceUrl: canonicalizeUrl(url, info.input.type as "http" | "mcp"),
       });
-    }
-    expect(validate(pay(url, { info }), req, LOCAL)).toMatchObject({
-      ok: true,
-      resourceUrl: canonicalizeUrl(url, info.input.type as "http" | "mcp"),
-    });
-  });
+    },
+  );
 
   it.each([
     ["https://API.x.com:443/a?q=1", http, "https://api.x.com/a"],

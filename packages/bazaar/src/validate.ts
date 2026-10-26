@@ -140,9 +140,10 @@ function run(
       : undefined;
   if (!resourceUrl) return reject("invalid_resource_url");
   // The catalog lists public names only, on every network (0054): no buyer reaches a local,
-  // private or IP host or an `mcp:` tool name. The payment settles either way.
+  // private or IP host or an `mcp:` tool name. The URL itself is fine and the payment settles,
+  // so this has its own reason rather than `invalid_resource_url`.
   if (!options.listLocal && !isPublicResourceUrl(resourceUrl)) {
-    return reject("invalid_resource_url", "not a public http(s) host");
+    return reject("resource_not_public", "not a public http(s) host");
   }
 
   // 6. Content limits. The schema is data: walked for limits, never compiled.

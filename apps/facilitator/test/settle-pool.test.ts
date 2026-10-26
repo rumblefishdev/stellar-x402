@@ -294,7 +294,7 @@ describe("main()'s composition (compose)", () => {
   });
 
   it.each([
-    [{}, { status: "rejected", rejectedReason: "invalid_resource_url" }, 0],
+    [{}, { status: "rejected", rejectedReason: "resource_not_public" }, 0],
     [{ CATALOG_LIST_LOCAL: "true" }, { status: "processing" }, 1],
   ] as const)(
     "settles a localhost resource and lists it only with %j (0054)",
