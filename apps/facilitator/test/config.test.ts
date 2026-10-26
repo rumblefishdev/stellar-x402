@@ -16,7 +16,7 @@ const CHANNEL_B = keypair(3).publicKey();
 const minimal = {
   FACILITATOR_SECRET: SECRET,
   CHANNELS: `${CHANNEL_A}, ${CHANNEL_B}`,
-  CLIENT_IP_HEADER: "socket",
+  CLIENT_IP: "socket",
 };
 /** Pubnet needs the PostgreSQL store, and is refused until 0024, 0025 and 0050 land. */
 const pubnet = {
@@ -56,7 +56,7 @@ describe("parseConfig", () => {
       },
       http: {
         bodyLimitBytes: 65_536,
-        clientIpHeader: undefined,
+        clientIp: "socket",
         rateLimit: { windowMs: 60_000, verify: 600, settle: 600, discovery: 120 },
       },
       spend: {
@@ -92,7 +92,7 @@ describe("parseConfig", () => {
       SETTLE_BUDGET_MS: "60000",
       LEASE_TTL_MS: "32000",
       BODY_LIMIT_BYTES: "70000",
-      CLIENT_IP_HEADER: "CF-Connecting-IP",
+      CLIENT_IP: "cloudflare",
       RATE_LIMIT_WINDOW_MS: "61000",
       RATE_LIMIT_VERIFY: "121",
       RATE_LIMIT_SETTLE: "122",
@@ -127,7 +127,7 @@ describe("parseConfig", () => {
       },
       http: {
         bodyLimitBytes: 70_000,
-        clientIpHeader: "CF-Connecting-IP",
+        clientIp: "cloudflare",
         rateLimit: { windowMs: 61_000, verify: 121, settle: 122, discovery: 123 },
       },
       spend: {
@@ -146,13 +146,13 @@ describe("parseConfig", () => {
     const config = parseConfig({
       FACILITATOR_SECRET: `${SECRET}\n`,
       CHANNELS: ` ${CHANNEL_A} `,
-      CLIENT_IP_HEADER: " socket ",
+      CLIENT_IP: " socket ",
       RPC_URLS: "",
       PORT: " ",
     });
     expect(config.facilitatorSecret).toBe(SECRET);
     expect(config.channels).toEqual([CHANNEL_A]);
-    expect(config.http.clientIpHeader).toBeUndefined();
+    expect(config.http.clientIp).toBe("socket");
     expect(config.port).toBe(4021);
   });
 
@@ -160,7 +160,7 @@ describe("parseConfig", () => {
     expect(problems({})).toEqual([
       "FACILITATOR_SECRET is required",
       "CHANNELS is required",
-      "CLIENT_IP_HEADER is required",
+      "CLIENT_IP is required",
     ]);
   });
 
@@ -279,39 +279,21 @@ describe("parseConfig", () => {
     ).toMatchObject({ verify: 100, settle: 100 });
   });
 
-  it("requires CLIENT_IP_HEADER, where socket means the connection's own address", () => {
+  it("requires CLIENT_IP: cloudflare behind the tunnel, socket with no proxy in front", () => {
     // Forgotten behind a proxy, every client would share the proxy's address and one budget.
-    expect(problems({ ...minimal, CLIENT_IP_HEADER: undefined })).toEqual([
-      "CLIENT_IP_HEADER is required",
-    ]);
-    expect(parseConfig(minimal).http.clientIpHeader).toBeUndefined();
-    expect(
-      parseConfig({ ...minimal, CLIENT_IP_HEADER: "cf-connecting-ip" }).http.clientIpHeader,
-    ).toBe("cf-connecting-ip");
-  });
-
-  it("checks CLIENT_IP_HEADER at startup, so a typo never reaches the first request", () => {
-    for (const value of ["Socket", "SOCKET"]) {
-      expect(
-        parseConfig({ ...minimal, CLIENT_IP_HEADER: value }).http.clientIpHeader,
-      ).toBeUndefined();
-    }
-    for (const value of ["x-forwarded-for", "X-Forwarded-For"]) {
-      expect(problems({ ...minimal, CLIENT_IP_HEADER: value })).toEqual([
-        "CLIENT_IP_HEADER must not be X-Forwarded-For: a client can write any address there",
+    expect(problems({ ...minimal, CLIENT_IP: undefined })).toEqual(["CLIENT_IP is required"]);
+    for (const value of ["cf-connecting-ip", "x-forwarded-for", "Cloudflare"]) {
+      expect(problems({ ...minimal, CLIENT_IP: value })).toEqual([
+        "CLIENT_IP must be one of cloudflare, socket",
       ]);
     }
-    for (const value of ["cf connecting ip", "cf-connecting-ip:"]) {
-      expect(problems({ ...minimal, CLIENT_IP_HEADER: value })).toEqual([
-        "CLIENT_IP_HEADER must be socket or a header name",
-      ]);
-    }
+    expect(parseConfig({ ...minimal, CLIENT_IP: "cloudflare" }).http.clientIp).toBe("cloudflare");
   });
 
   it("refuses a leftover TRUSTED_PROXY_HOPS", () => {
     // Left set, it would look like the client IP still came from X-Forwarded-For.
     expect(problems({ ...minimal, TRUSTED_PROXY_HOPS: "1" })).toEqual([
-      "TRUSTED_PROXY_HOPS is replaced by CLIENT_IP_HEADER",
+      "TRUSTED_PROXY_HOPS is replaced by CLIENT_IP",
     ]);
   });
 

@@ -10,8 +10,8 @@ export interface RateLimit {
   /** Requests per window and client. */
   limit: number;
   windowMs: number;
-  /** The header that carries the client's IP; unset, the socket address. */
-  clientIpHeader?: string;
+  /** `cloudflare`: the `CF-Connecting-IP` header; `socket`: the connection's own address. */
+  clientIp: "cloudflare" | "socket";
   store: RateLimitStore;
   logger: Logger;
 }
@@ -28,7 +28,7 @@ export function rateLimit({
   route,
   limit,
   windowMs,
-  clientIpHeader,
+  clientIp,
   store,
   logger,
 }: RateLimit): RequestHandler {
@@ -36,14 +36,14 @@ export function rateLimit({
   const blocked = new Map<string, number>();
 
   return async (req, res, next) => {
-    const ip = clientIpHeader === undefined ? req.socket.remoteAddress : req.get(clientIpHeader);
+    const ip = clientIp === "cloudflare" ? req.get("cf-connecting-ip") : req.socket.remoteAddress;
     if (!ip || isIP(ip) === 0) {
-      // Only the proxy reaches the service, and it sets the header to one address on every
-      // request. Anything else never reaches the store; the value is the caller's, so it isn't
+      // Only `cloudflared` reaches the service, and Cloudflare sets the header to one address on
+      // every request. Anything else never reaches the store; the value is the caller's, so it isn't
       // logged.
       logger.error(ip ? "client_ip_invalid" : "client_ip_missing", {
         route,
-        header: clientIpHeader,
+        source: clientIp,
       });
       res.status(500).json({ error: "internal_error" });
       return;

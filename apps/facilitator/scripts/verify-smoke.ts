@@ -81,7 +81,7 @@ async function verifyWith(
   // A fresh facilitator key: verify never spends from it.
   const config = parseConfig({
     FACILITATOR_SECRET: Keypair.random().secret(),
-    CLIENT_IP_HEADER: "socket",
+    CLIENT_IP: "socket",
     CHANNELS: channels,
     LOG_LEVEL: "info",
     MIN_VALIDITY_LEDGERS: process.env.MIN_VALIDITY_LEDGERS,

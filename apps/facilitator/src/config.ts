@@ -179,23 +179,14 @@ const envSchema = z
 
     BODY_LIMIT_BYTES: int(1_024).default("65536"),
     /**
-     * Where the client's IP comes from (AD-11): the request header a proxy sets, such as
-     * `cf-connecting-ip` behind Cloudflare, which sets it on every request and refuses it from a
-     * client (ADR 0011); or `socket`, the connection's own address, with no proxy in front.
-     * Required: forgotten behind a proxy, every client would share the proxy's address and one
-     * budget. `X-Forwarded-For` is never read.
+     * Where the client's IP comes from (AD-11). `cloudflare`: the `CF-Connecting-IP` header, which
+     * Cloudflare sets on every request and refuses from a client; only `cloudflared` reaches the
+     * service (ADR 0011). `socket`: the connection's own address, with no proxy in front, as in
+     * local runs and tests. Required: forgotten behind the tunnel, every client would share the
+     * tunnel's address and one budget. `X-Forwarded-For` is never read.
      */
-    CLIENT_IP_HEADER: z
-      .string()
-      .refine(
-        (value) => value.toLowerCase() === "socket" || /^[A-Za-z0-9-]+$/.test(value),
-        "must be socket or a header name",
-      )
-      .refine(
-        (value) => value.toLowerCase() !== "x-forwarded-for",
-        "must not be X-Forwarded-For: a client can write any address there",
-      ),
-    /** Replaced by `CLIENT_IP_HEADER`; refused, so a leftover can't look like it still applies. */
+    CLIENT_IP: oneOf(["cloudflare", "socket"]),
+    /** Replaced by `CLIENT_IP`; refused, so a leftover can't look like it still applies. */
     TRUSTED_PROXY_HOPS: z.string().optional(),
     RATE_LIMIT_WINDOW_MS: ms(1_000).default("60000"),
     /**
@@ -257,7 +248,7 @@ const envSchema = z
     path: ["RATE_LIMIT_SETTLE"],
   })
   .refine((env) => env.TRUSTED_PROXY_HOPS === undefined, {
-    message: "is replaced by CLIENT_IP_HEADER",
+    message: "is replaced by CLIENT_IP",
     path: ["TRUSTED_PROXY_HOPS"],
   })
   .refine((env) => env.STORE !== "memory" || env.NETWORK === STELLAR_NETWORKS.testnet, {
@@ -313,8 +304,7 @@ export interface Config {
   };
   http: {
     bodyLimitBytes: number;
-    /** Unset, the client is the connection's own address (`CLIENT_IP_HEADER=socket`). */
-    clientIpHeader?: string;
+    clientIp: "cloudflare" | "socket";
     rateLimit: { windowMs: number; verify: number; settle: number; discovery: number };
   };
   spend: {
@@ -392,8 +382,7 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
     },
     http: {
       bodyLimitBytes: e.BODY_LIMIT_BYTES,
-      clientIpHeader:
-        e.CLIENT_IP_HEADER.toLowerCase() === "socket" ? undefined : e.CLIENT_IP_HEADER,
+      clientIp: e.CLIENT_IP,
       rateLimit: {
         windowMs: e.RATE_LIMIT_WINDOW_MS,
         verify: e.RATE_LIMIT_VERIFY,

@@ -24,7 +24,7 @@ const secret = Keypair.random().secret();
 const facilitator = Keypair.fromSecret(secret).publicKey();
 const env = {
   FACILITATOR_SECRET: secret,
-  CLIENT_IP_HEADER: "socket",
+  CLIENT_IP: "socket",
   CHANNELS: Keypair.random().publicKey(),
   BODY_LIMIT_BYTES: "1024",
 };

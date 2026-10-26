@@ -110,7 +110,7 @@ export function createApp({
       route,
       limit: budget,
       windowMs: config.http.rateLimit.windowMs,
-      clientIpHeader: config.http.clientIpHeader,
+      clientIp: config.http.clientIp,
       store: stores.rateLimits,
       logger,
     });

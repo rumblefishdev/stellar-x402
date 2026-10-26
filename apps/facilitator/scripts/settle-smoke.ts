@@ -85,7 +85,7 @@ if (created.status !== "SUCCESS") throw new Error(`channel setup ${created.statu
 const facilitatorServer = await main(
   {
     FACILITATOR_SECRET: facilitator.secret(),
-    CLIENT_IP_HEADER: "socket",
+    CLIENT_IP: "socket",
     CHANNELS: channelKeys.map((keypair) => keypair.publicKey()).join(","),
     PORT: "0",
     LOG_LEVEL: "warn",

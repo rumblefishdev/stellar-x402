@@ -123,7 +123,7 @@ const poolRpc = {
 describe("the fee ceiling at /verify and in the pool (AD-10)", () => {
   const config = parseConfig({
     FACILITATOR_SECRET: facilitator.secret(),
-    CLIENT_IP_HEADER: "socket",
+    CLIENT_IP: "socket",
     CHANNELS: channel,
     RPC_URLS: "http://127.0.0.1:1",
     MAX_FEE_STROOPS: String(MAX_FEE),
@@ -192,7 +192,7 @@ describe("real upstream with a down first RPC URL (AD-3)", () => {
   it("answers from the second URL, and leaves the shared client on the first (decision 22)", async () => {
     const config = parseConfig({
       FACILITATOR_SECRET: facilitator.secret(),
-      CLIENT_IP_HEADER: "socket",
+      CLIENT_IP: "socket",
       CHANNELS: channel,
       // Nothing listens on port 1: upstream's simulation gets a refused connection.
       RPC_URLS: `http://127.0.0.1:1,${rpcUrl}`,
