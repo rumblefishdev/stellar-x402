@@ -25,7 +25,6 @@ const db = testDatabase();
 const secret = Keypair.random().secret();
 const facilitator = Keypair.fromSecret(secret).publicKey();
 const env = {
-  STORE: "postgres",
   DATABASE_URL: db.urlFor(db.schema),
   FACILITATOR_SECRET: secret,
   CLIENT_IP: "socket",
@@ -136,14 +135,12 @@ describe("startup with a bad config", () => {
     expect(output).not.toContain("secret");
   }, 20_000);
 
-  it("refuses stellar:pubnet even with a durable store, before serving anything", async () => {
+  it("refuses stellar:pubnet before serving anything", async () => {
     // `/settle` spends there: not without spend budgets, rate limits and the channel lease.
     const pubnet = {
       ...env,
       NETWORK: "stellar:pubnet",
       RPC_URLS: "https://rpc.example",
-      STORE: "postgres",
-      DATABASE_URL: "postgres://db.internal/x402",
     };
     const error = await main(pubnet).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ConfigError);

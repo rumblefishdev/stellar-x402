@@ -48,6 +48,7 @@ describe("POST /settle", () => {
   beforeAll(async () => {
     const env = {
       FACILITATOR_SECRET: Keypair.random().secret(),
+      DATABASE_URL: db.urlFor(db.schema),
       CLIENT_IP: "socket",
       CHANNELS: Keypair.random().publicKey(),
     };

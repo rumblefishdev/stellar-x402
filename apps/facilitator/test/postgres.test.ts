@@ -324,10 +324,9 @@ describe("PostgreSQL stores", () => {
     expect(connections).toBeGreaterThanOrEqual(10);
   });
 
-  it("boots main() with STORE=postgres, reserves, limits and listings on their own pools, catalog writes and pruning on the main one, a short timeout for listings, and ends them", async () => {
+  it("boots main() with reserves, limits and listings on their own pools, catalog writes and pruning on the main one, a short timeout for listings, and ends them", async () => {
     await stores();
     const app = await main({
-      STORE: "postgres",
       DATABASE_URL: urlFor(schema),
       FACILITATOR_SECRET: bootSecret,
       CLIENT_IP: "socket",
@@ -386,7 +385,7 @@ describe("PostgreSQL stores", () => {
 
   it("answers main()'s /settle from the PostgreSQL record", async () => {
     // A repeat is answered from its record before any check or RPC call, so only a `/settle` wired
-    // to these stores gives this answer; on memory stores it would start a new settlement.
+    // to these stores gives this answer; on other stores it would start a new settlement.
     const { settlements } = await stores();
     const requirements = {
       scheme: "exact",
@@ -418,7 +417,6 @@ describe("PostgreSQL stores", () => {
     await settlements.addHash(key, "h1", now);
     await settlements.transition(key, "signed", { state: "success", updatedAt: now });
     const app = await main({
-      STORE: "postgres",
       DATABASE_URL: urlFor(schema),
       FACILITATOR_SECRET: bootSecret,
       CLIENT_IP: "socket",
@@ -447,7 +445,6 @@ describe("PostgreSQL stores", () => {
 
   it("closes once when two signals call close()", async () => {
     const app = await main({
-      STORE: "postgres",
       DATABASE_URL: urlFor(schema),
       FACILITATOR_SECRET: bootSecret,
       CLIENT_IP: "socket",

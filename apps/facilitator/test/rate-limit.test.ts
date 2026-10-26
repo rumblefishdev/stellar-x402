@@ -29,6 +29,7 @@ afterEach(async () => {
 async function serve(env: Record<string, string> = {}, stores: Stores = db.stores()) {
   const config = parseConfig({
     FACILITATOR_SECRET: Keypair.random().secret(),
+    DATABASE_URL: db.urlFor(db.schema),
     CLIENT_IP: "socket",
     CHANNELS: Keypair.random().publicKey(),
     PORT: "0",

@@ -16,9 +16,8 @@ import {
 } from "../src/ports/index.js";
 
 /**
- * Behaviour every adapter of the four ports must have (AD-6, AD-7, AD-11, AD-16 to AD-20). The
- * in-memory adapters run these in `memory.test.ts`, the PostgreSQL adapters in `postgres.test.ts`.
- * `make` must return an empty store.
+ * Behaviour every adapter of the four ports must have (AD-6, AD-7, AD-11, AD-16 to AD-20), run
+ * against the PostgreSQL adapters in `postgres.test.ts`. `make` must return an empty store.
  */
 type Make<T> = () => T | Promise<T>;
 
