@@ -8,7 +8,6 @@ import { memoryStores } from "../src/adapters/memory.js";
 import { parseConfig } from "../src/config.js";
 import { DISCOVERY_LIMIT, MAX_OFFSET, parseDiscoveryQuery } from "../src/http/discovery.js";
 import { supportedResponse } from "../src/http/supported.js";
-import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
 import { start, type Started } from "../src/main.js";
 import { memoryMetrics } from "../src/metrics.js";
@@ -43,6 +42,12 @@ describe("parseDiscoveryQuery", () => {
     ],
     ["the scheme we settle", { scheme: "exact" }, { kind: "query" }],
     ["a scheme we never settle", { scheme: "upto" }, { kind: "empty" }],
+    [
+      "the extension every entry has, as no filter",
+      { extensions: "bazaar" },
+      { kind: "query", query: { limit: 20, offset: 0 } },
+    ],
+    ["an extension we never catalog", { extensions: "sign-in-with-x" }, { kind: "empty" }],
     ["an unknown param", { foo: "1" }, { kind: "query", ignored: ["foo"] }],
     ["an unknown param in brackets", { "foo[]": "1" }, { kind: "query", ignored: ["foo[]"] }],
     ["a name a separator away", { pay_to: "GB" }, { kind: "query", ignored: ["pay_to"] }],
@@ -100,7 +105,6 @@ describe("parseDiscoveryQuery", () => {
       query: {
         type: "http",
         payTo: "GB",
-        extensions: "bazaar",
         limit: DISCOVERY_LIMIT.default,
         offset: 0,
       },
@@ -113,7 +117,10 @@ describe("parseDiscoveryQuery", () => {
 
 const N = 30;
 
-/** Entry i, all on the served network: mcp when i % 4 is 0, payTo GB when odd, bazaar when i % 5 is 0. */
+/**
+ * Entry i, each on the served network with `extensions.bazaar`, as the cataloger writes them: mcp
+ * when i % 4 is 0, payTo GB when odd.
+ */
 async function seed(stores: Stores) {
   for (let i = 0; i < N; i++) {
     const network = SERVED;
@@ -139,7 +146,7 @@ async function seed(stores: Stores) {
           },
         ],
         lastUpdated: "2026-10-20T00:00:00.000Z",
-        ...(i % 5 === 0 ? { extensions: { bazaar: { info: { input: { type: "http" } } } } } : {}),
+        extensions: { bazaar: { info: { input: { type: "http" } } } },
       },
     });
   }
@@ -207,11 +214,12 @@ describe("GET /discovery/resources", () => {
     ["type=mcp", matching((i) => i % 4 === 0)],
     ["payTo=GB", matching((i) => i % 2 === 1)],
     [`network=${SERVED}`, N],
-    ["extensions=bazaar", matching((i) => i % 5 === 0)],
+    ["extensions=bazaar", N],
     [
       `type=mcp&payTo=GA&network=${SERVED}&extensions=bazaar`,
-      matching((i) => i % 4 === 0 && i % 2 === 0 && i % 5 === 0),
+      matching((i) => i % 4 === 0 && i % 2 === 0),
     ],
+    ["extensions=sign-in-with-x", 0],
     ["scheme=exact", N],
     ["scheme=upto", 0],
     [`network=${STELLAR_NETWORKS.pubnet}`, 0],
@@ -287,6 +295,7 @@ describe("GET /discovery/resources", () => {
       "scheme=upto",
       "network=eip155:8453",
       `network=${STELLAR_NETWORKS.pubnet}`,
+      "extensions=sign-in-with-x",
     ]) {
       const { response, body } = await list(query);
       expect(response.status, query).toBe(200);

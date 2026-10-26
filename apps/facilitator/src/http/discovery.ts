@@ -6,7 +6,10 @@ import type { Logger } from "../logger.js";
 import type { Metrics } from "../metrics.js";
 import type { CatalogQuery, CatalogStore } from "../ports/index.js";
 
-/** AD-20: `limit` is bounded, with a fixed default. 100 is every known x402 facilitator's max. */
+/**
+ * AD-20: `limit` is bounded, with a fixed default: x402 spec v2 §8.1's 20, and its range's top.
+ * Some facilitators allow more; a larger `limit` is clamped here, not refused.
+ */
 export const DISCOVERY_LIMIT = { default: 20, max: 100 } as const;
 /**
  * Deeper pages are refused. The cap is high, so every entry of a catalog this size can be paged
@@ -18,6 +21,11 @@ export const MAX_OFFSET = 1_000_000;
 const MAX_VALUE_LENGTH = 256;
 /** Entries come only from our own settlements, and T1 settles `exact` alone (0015 adds `upto`). */
 const CATALOGED_SCHEMES: readonly string[] = ["exact"];
+/**
+ * Every entry's extensions are `bazaar` alone: `@stellar-x402/bazaar`'s validator, the only way
+ * into the catalog, writes that block and drops the rest.
+ */
+const CATALOGED_EXTENSIONS: readonly string[] = ["bazaar"];
 /** The parameters upstream's `listResources` sends. */
 const KNOWN_PARAMS = ["type", "payTo", "scheme", "network", "extensions", "limit", "offset"];
 const KNOWN_LOWER = new Set(KNOWN_PARAMS.map((param) => param.toLowerCase()));
@@ -61,7 +69,8 @@ const QUERY = z.object({
 
 /**
  * What the route does with a request. `empty` is a well-formed query nothing in the catalog can
- * match: another network, or a scheme we never settle. `ignored` names unknown parameters.
+ * match: another network, a scheme we never settle or an extension we never catalog. `ignored`
+ * names unknown parameters.
  */
 export type DiscoveryQuery =
   | { kind: "query"; query: CatalogQuery; limit: number; offset: number; ignored: string[] }
@@ -77,6 +86,7 @@ export type DiscoveryQuery =
  * param (`type[]`, `payto`) is refused whatever its value, naming it as sent. `served` is the
  * network this facilitator settles on, the only one its catalog holds (ADR 0012): asking for it
  * filters nothing, and is not passed on, since a filter every entry matches only slows the count.
+ * `extensions=bazaar` is the same: every entry has it, and its GIN lookup scans the whole table.
  */
 export function parseDiscoveryQuery(
   raw: Record<string, unknown>,
@@ -87,12 +97,13 @@ export function parseDiscoveryQuery(
   const given = Object.fromEntries(Object.entries(raw).filter(([, value]) => value !== ""));
   const parsed = QUERY.safeParse(given);
   if (!parsed.success) return { kind: "invalid", param: String(parsed.error.issues[0]!.path[0]) };
-  const { scheme, network, limit: asked, offset = 0, ...filters } = parsed.data;
+  const { scheme, network, extensions, limit: asked, offset = 0, ...filters } = parsed.data;
   const limit = Math.min(asked ?? DISCOVERY_LIMIT.default, DISCOVERY_LIMIT.max);
   const ignored = Object.keys(raw).filter((param) => !KNOWN_PARAMS.includes(param));
   if (
     (network !== undefined && network !== served) ||
-    (scheme !== undefined && !CATALOGED_SCHEMES.includes(scheme))
+    (scheme !== undefined && !CATALOGED_SCHEMES.includes(scheme)) ||
+    (extensions !== undefined && !CATALOGED_EXTENSIONS.includes(extensions))
   )
     return { kind: "empty", limit, offset, ignored };
   return { kind: "query", query: { ...filters, limit, offset }, limit, offset, ignored };

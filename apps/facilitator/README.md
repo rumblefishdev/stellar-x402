@@ -83,8 +83,9 @@ drops it. Look the hash up on chain instead of repeating for long.
 ranking. `total` counts every entry the filters match.
 
 - Filters: `type`, `payTo`, `network`, `extensions` and `scheme`, alone or combined. A
-  well-formed network we don't serve, such as `eip155:8453` or the other Stellar network, and any
-  `scheme` but `exact` give an empty page.
+  well-formed network we don't serve, such as `eip155:8453` or the other Stellar network, any
+  `scheme` but `exact` and any `extensions` but `bazaar` give an empty page. Every entry has
+  `bazaar`.
 - `limit`: 20 by default, at most 100. A larger one is clamped, and `pagination.limit` echoes the
   limit used. `limit=0` gives `total` alone.
 - `offset`: at most 1 000 000, so every entry can be paged to.
