@@ -4,7 +4,8 @@
 - Date: 2026-10-12, amended 2026-10-20 (task 0022: pools for `reserve` and the rate limiter; 0026
   measures; hosting note; task 0039: PostgreSQL in a container on the Hetzner server) and
   2026-10-21 (task 0039: how backups leave the server, the migration service and its bounds) and
-  2026-10-22 (task 0039: pgBackRest; migrations before the old facilitator stops)
+  2026-10-22 (task 0039: pgBackRest; migrations before the old facilitator stops) and 2026-10-26
+  (task 0032: a pool for listings)
 
 ## Context
 
@@ -55,8 +56,10 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
   - Minor upgrades are a digest bump in a planned window; a major upgrade is planned on its own.
 - **Access.**
   - The `pg` driver and small fixed pools per process: 10 connections, plus 3 for
-    `reserve` and 3 for the rate limiter, so reservations queued on the global scope's lock, or a
-    flood's hits on its key's row lock, can't starve the other stores.
+    `reserve`, 3 for the rate limiter and 3 for `/discovery/resources` listings, so reservations
+    queued on the global scope's lock, a flood's hits on its key's row lock, or a burst of public
+    listings can't starve the other stores. 19 connections per process. The listings' pool has a
+    2 s statement timeout instead of 10 s, so a few slow listings hold it only briefly.
   - No TLS: the connection stays on one host's internal Docker network (ADR 0011). Passwords use
     `scram-sha-256`. TLS comes back if the database leaves the host.
   - The database password is an encrypted systemd credential, mounted as a Compose `file:`

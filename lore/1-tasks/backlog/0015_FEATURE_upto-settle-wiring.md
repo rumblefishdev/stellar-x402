@@ -89,6 +89,13 @@ after T1.
 - The `deadline` comes from the client's signature expiry, with the minimum-validity check
   (AD-22).
 - Advertise `upto` in `/supported` (AD-13) once it works end to end.
+- From 0032: `/discovery/resources` answers upstream's `scheme` filter from the schemes T1 settles
+  (`CATALOGED_SCHEMES` in `http/discovery.ts`: `exact` matches every entry, anything else none).
+  Once `upto` settlements are cataloged, that shortcut is wrong: filter on the entry's
+  `accepts[].scheme` instead. An upsert merges `accepts` by `scheme + network + asset`
+  (`adapters/rules.ts`), so one entry can hold both `exact` and `upto`: keep the schemes in a
+  `text[]` column with a GIN index, like `extension_keys`, and backfill the existing rows
+  (agreed in PR #50).
 
 ## Acceptance Criteria
 

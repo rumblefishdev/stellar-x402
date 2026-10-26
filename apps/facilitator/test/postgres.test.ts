@@ -28,6 +28,25 @@ beforeAll(async () => {
 });
 afterAll(() => rpc.close());
 
+/** One catalog entry, as the cataloger writes it after a settlement. */
+const catalogEntry = () => ({
+  key: {
+    network: "stellar:testnet" as const,
+    payTo: "GPAYTO",
+    method: "GET",
+    resourceUrl: "https://seller.example/data",
+  },
+  keyVersion: CATALOG_KEY_VERSION,
+  ledger: 1,
+  resource: {
+    resource: "https://seller.example/data",
+    type: "http",
+    x402Version: 2 as const,
+    accepts: [],
+    lastUpdated: "2026-10-08T00:00:00.000Z",
+  },
+});
+
 /**
  * The contract suites against a real PostgreSQL, set by `TEST_DATABASE_URL`. Skipped only when
  * neither it nor `CI` is set. Each run gets its own schema, so runs never share tables.
@@ -340,7 +359,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     expect(connections).toBeGreaterThanOrEqual(10);
   });
 
-  it("boots main() with STORE=postgres, reserves and limits on their own pools, pruning on the main one, and ends them", async () => {
+  it("boots main() with STORE=postgres, reserves, limits and listings on their own pools, catalog writes and pruning on the main one, a short timeout for listings, and ends them", async () => {
     await stores();
     const app = await main({
       STORE: "postgres",
@@ -358,7 +377,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
       const limits = [{ scope: "global" as const, maxStroops: 10n, windowMs: 1_000 }];
       // Checkouts, not connections: a pool reuses an idle connection, so only a checkout shows
       // which pool a call ran on once the pool has one.
-      const checkouts = { main: 0, reserve: 0, rateLimits: 0 };
+      const checkouts = { main: 0, reserve: 0, rateLimits: 0, discovery: 0 };
       const names = Object.keys(checkouts) as (keyof typeof checkouts)[];
       for (const name of names) pools?.[name].on("acquire", () => checkouts[name]++);
       const ranOn = async (call: () => Promise<unknown>) => {
@@ -370,18 +389,34 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
         await ranOn(() => app.stores.spend.reserve({ id: "a", amount: 1n, limits, now: 0 })),
       ).toEqual(["reserve"]);
       expect(await ranOn(() => app.stores.rateLimits.hit("k", 60_000, 0))).toEqual(["rateLimits"]);
+      expect(await ranOn(() => app.stores.catalog.list({ limit: 1, offset: 0 }))).toEqual([
+        "discovery",
+      ]);
+      // Catalog writes come from `/settle`, so they stay off the public listings' pool.
+      expect(await ranOn(() => app.stores.catalog.upsert(catalogEntry()))).toEqual(["main"]);
       expect(await ranOn(() => app.stores.settlements.claim(settlement("1")))).toEqual(["main"]);
       // A flood's pruning takes no connection from `hit` or `reserve` (decision 9).
       expect(await ranOn(() => app.stores.rateLimits.prune(0, 10))).toEqual(["main"]);
       expect(await ranOn(() => app.stores.spend.prune(0, 10))).toEqual(["main"]);
+      // Only the public listings' pool cuts a statement off early.
+      const timeouts = await Promise.all(
+        names.map(async (name) => {
+          const shown = await pools?.[name].query<{ statement_timeout: string }>(
+            "SHOW statement_timeout",
+          );
+          return shown?.rows[0]?.statement_timeout;
+        }),
+      );
+      expect(timeouts).toEqual(["10s", "10s", "10s", "2s"]);
     } finally {
       await app.close();
     }
-    expect([pools?.main.ended, pools?.reserve.ended, pools?.rateLimits.ended]).toEqual([
-      true,
-      true,
-      true,
-    ]);
+    expect([
+      pools?.main.ended,
+      pools?.reserve.ended,
+      pools?.rateLimits.ended,
+      pools?.discovery.ended,
+    ]).toEqual([true, true, true, true]);
   });
 
   it("answers main()'s /settle from the PostgreSQL record", async () => {
@@ -477,6 +512,14 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
       [schema],
     );
     expect(byId.rows.map((row) => row.indexdef)).toContainEqual(expect.stringMatching(/\(id\)$/));
+    // A listing's `type` filter, matched or not, would otherwise scan the whole catalog twice.
+    const catalog = await pool.query<{ indexdef: string }>(
+      "SELECT indexdef FROM pg_indexes WHERE schemaname = $1 AND tablename = 'catalog'",
+      [schema],
+    );
+    expect(catalog.rows.map((row) => row.indexdef)).toContainEqual(
+      expect.stringMatching(/\(type, seq\)$/),
+    );
   });
 
   it("applies the migrations once when two runs race", async () => {
@@ -528,19 +571,47 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     }
   });
 
+  it("adds the catalog's type index to a database past 0002, or one that has it", async () => {
+    // A database `migrate` brought to 0002 before 0032 gets the index from 0003; one built from
+    // 0032's branch, whose `0001_init` carried it, takes 0003 without an error.
+    const typeIndex = async (on: pg.Pool) =>
+      (
+        await on.query(
+          "SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'catalog_type_seq'",
+        )
+      ).rowCount;
+    for (const built of ["develop", "branch"]) {
+      const fresh = `${schema}_0002_${built}`;
+      await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
+      await pool.query(`CREATE SCHEMA ${fresh}`);
+      const old = poolFor(fresh, 1);
+      try {
+        await migrate(old, 0, MIGRATIONS.slice(0, 2));
+        if (built === "branch")
+          await old.query("CREATE INDEX catalog_type_seq ON catalog (type, seq)");
+        expect(await typeIndex(old), built).toBe(built === "branch" ? 1 : 0);
+        expect(await migrate(old), built).toEqual(["0003_catalog_type_seq", "0004_spend_window"]);
+        expect(await typeIndex(old), built).toBe(1);
+      } finally {
+        await old.end();
+        await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
+      }
+    }
+  });
+
   it("copies each reservation's time and amount to its scopes on a database that has some", async () => {
-    // Written by a release before `0003_spend_window`: the reservation and its scope rows only.
-    const fresh = `${schema}_0002`;
+    // Written by a release before `0004_spend_window`: the reservation and its scope rows only.
+    const fresh = `${schema}_0003`;
     await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
     await pool.query(`CREATE SCHEMA ${fresh}`);
     const old = poolFor(fresh, 2);
     try {
-      expect(await migrate(old, 0, MIGRATIONS.slice(0, 2))).toHaveLength(2);
+      expect(await migrate(old, 0, MIGRATIONS.slice(0, 3))).toHaveLength(3);
       await old.query(
         `INSERT INTO spend_reservations (id, amount, at, state) VALUES ('a', 60, 5, 'committed');
          INSERT INTO spend_reservation_scopes (id, scope) VALUES ('a', 'global'), ('a', 'payer:P')`,
       );
-      expect(await migrate(old)).toEqual(MIGRATIONS.slice(2).map((migration) => migration.name));
+      expect(await migrate(old)).toEqual(["0004_spend_window"]);
       const { rows } = await old.query(
         "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",
       );
@@ -633,23 +704,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
 
   it("stores the catalog key version", async () => {
     const { catalog } = await stores();
-    await catalog.upsert({
-      key: {
-        network: "stellar:testnet",
-        payTo: "GPAYTO",
-        method: "GET",
-        resourceUrl: "https://seller.example/data",
-      },
-      keyVersion: CATALOG_KEY_VERSION,
-      ledger: 1,
-      resource: {
-        resource: "https://seller.example/data",
-        type: "http",
-        x402Version: 2,
-        accepts: [],
-        lastUpdated: "2026-10-08T00:00:00.000Z",
-      },
-    });
+    await catalog.upsert(catalogEntry());
     const { rows } = await pool.query("SELECT key_version FROM catalog");
     expect(rows).toEqual([{ key_version: CATALOG_KEY_VERSION }]);
   });

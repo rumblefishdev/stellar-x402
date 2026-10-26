@@ -37,8 +37,8 @@ import {
 
 /**
  * PostgreSQL adapters of the four ports (AD-7, ADR 0012), on the schema in `postgres-schema.ts`.
- * They share one pool, except `reserve` and the rate limiter's `hit`, which can each run on their
- * own; concurrent calls run on separate connections.
+ * They share one pool, except `reserve`, the rate limiter's `hit` and the catalog's `list`, which
+ * can each run on their own; concurrent calls run on separate connections.
  *
  * - Every time comes from the caller; the SQL never reads the database's clock.
  * - Every statement runs at Read Committed, so a role or server default can't change it: each
@@ -53,23 +53,26 @@ import {
  *   `hit`. Its own small pool keeps that queue off the others.
  * - `hit` runs on `pools.rateLimits`, for the same reason: one client's flood queues its hits on
  *   one key's row lock, and the rate limiter must still answer when settlements hold the main pool.
+ * - `list` runs on `pools.discovery`: `/discovery/resources` is public, and a burst of listings
+ *   must not take the connections `/settle` needs. Catalog writes stay on the main pool. `main()`
+ *   gives that pool a short statement timeout, so a few slow listings can't hold it for long.
  * - `prune` runs on the main pool for both, so pruning a flood's keys takes nothing from `hit`.
  */
 export function postgresStores(
   pool: pg.Pool,
-  pools: { reserve?: pg.Pool; rateLimits?: pg.Pool } = {},
+  pools: { reserve?: pg.Pool; rateLimits?: pg.Pool; discovery?: pg.Pool } = {},
 ): Stores {
   return {
     settlements: new PostgresSettlementStore(pool),
-    catalog: new PostgresCatalogStore(pool),
+    catalog: new PostgresCatalogStore(pool, pools.discovery ?? pool),
     rateLimits: new PostgresRateLimitStore(pools.rateLimits ?? pool, pool),
     spend: new PostgresSpendStore(pool, pools.reserve ?? pool),
   };
 }
 
 /**
- * A pool with the facilitator's limits: a statement runs at most 10 s on the server and a query
- * waits at most 15 s in the client. `onError` receives errors of idle connections, which would
+ * A pool with the facilitator's limits: a statement runs at most `statementTimeoutMs` (10 s by
+ * default) on the server and a query waits at most 5 s longer in the client. `onError` receives errors of idle connections, which would
  * otherwise crash the process. Every connection runs at Read Committed, or is closed and its
  * caller's query fails, and keeps an error listener while checked out, where pg-pool removes its
  * own: a connection lost mid-transaction then fails its queries instead of crashing the process.
@@ -78,6 +81,7 @@ export function createPool(
   connectionString: string,
   onError: (error: Error) => void,
   max = 10,
+  statementTimeoutMs = 10_000,
 ): pg.Pool {
   const pool = new pg.Pool({
     connectionString,
@@ -85,8 +89,8 @@ export function createPool(
     connectionTimeoutMillis: 5_000,
     idleTimeoutMillis: 30_000,
     keepAlive: true,
-    statement_timeout: 10_000,
-    query_timeout: 15_000,
+    statement_timeout: statementTimeoutMs,
+    query_timeout: statementTimeoutMs + 5_000,
     idle_in_transaction_session_timeout: 10_000,
     application_name: "x402-facilitator",
     // The pool waits for this before handing the client out; if it throws, it closes the client.
@@ -374,7 +378,10 @@ const resourceColumns = (resource: DiscoveryResource) => [
 const CATALOG_KEY_WHERE = "network = $1 AND pay_to = $2 AND method = $3 AND resource_url = $4";
 
 export class PostgresCatalogStore implements CatalogStore {
-  constructor(private readonly pool: pg.Pool) {}
+  constructor(
+    private readonly pool: pg.Pool,
+    private readonly listPool: pg.Pool = pool,
+  ) {}
 
   /** Inserts, or locks the stored entry and applies the shared merge to it, in one transaction. */
   async upsert(entry: CatalogEntry): Promise<UpsertOutcome> {
@@ -421,23 +428,24 @@ export class PostgresCatalogStore implements CatalogStore {
   }
 
   /**
-   * `total` counts the matches in a CTE, so it stays right for an offset past the end, where a
-   * window count would return no row. The filters and the count read only the narrow columns;
-   * `resource` is read for the page's rows alone, so padded listings can't make a query costly.
+   * `total` is a separate count, so it stays right for an offset past the end, where a window
+   * count would return no row. The filter is written out twice rather than shared through a CTE,
+   * which PostgreSQL would materialize in full for its two readers; this way the count and the
+   * page each scan an index (measured on 18.3 at 100 000 entries: 14–25 ms with the CTE, 3–10 ms
+   * without). They read only the narrow columns; `resource` is read for the page's rows alone, so
+   * padded listings can't make a query costly.
    */
   async list(query: CatalogQuery): Promise<CatalogPage> {
     const { type, payTo, network, extensions, limit, offset } = query;
-    const { rows } = await this.pool.query<{ total: string; items: DiscoveryResource[] }>(
-      `WITH m AS (
-         SELECT seq FROM catalog
+    const matches = `catalog
          WHERE ($1::text IS NULL OR type = $1)
            AND ($2::text IS NULL OR pay_to = $2)
            AND ($3::text IS NULL OR network = $3)
-           AND ($4::text IS NULL OR extension_keys @> ARRAY[$4::text])
-       )
-       SELECT (SELECT count(*) FROM m) AS total,
+           AND ($4::text IS NULL OR extension_keys @> ARRAY[$4::text])`;
+    const { rows } = await this.listPool.query<{ total: string; items: DiscoveryResource[] }>(
+      `SELECT (SELECT count(*) FROM ${matches}) AS total,
               coalesce((SELECT jsonb_agg(c.resource ORDER BY c.seq)
-                        FROM (SELECT seq FROM m ORDER BY seq LIMIT $5 OFFSET $6) p
+                        FROM (SELECT seq FROM ${matches} ORDER BY seq LIMIT $5 OFFSET $6) p
                         JOIN catalog c USING (seq)),
                        '[]') AS items`,
       [type ?? null, payTo ?? null, network ?? null, extensions ?? null, limit, offset],

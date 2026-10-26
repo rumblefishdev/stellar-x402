@@ -7,6 +7,7 @@ import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
 import { MAX_BODY_DEPTH } from "../src/http/app.js";
 import { start, type Started } from "../src/main.js";
+import { memoryMetrics } from "../src/metrics.js";
 import type { SettlementRecord } from "../src/ports/index.js";
 import type { SettlementHooks } from "../src/settlement/hooks.js";
 import type { Settle } from "../src/settlement/settle.js";
@@ -54,6 +55,7 @@ describe("POST /settle", () => {
     app = await start({
       config,
       logger,
+      metrics: memoryMetrics(),
       stores: memoryStores(),
       verify: async () => ({ isValid: true }),
       settle,

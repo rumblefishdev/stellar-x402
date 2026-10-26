@@ -1,7 +1,8 @@
 # ADR 0008: Bazaar foundation: catalog after settle, validated and SSRF-safe
 
 - Status: accepted
-- Date: 2026-10-07, amended 2026-10-22 (task 0053: resource URLs and empty fields)
+- Date: 2026-10-07, amended 2026-10-20 (task 0032: the `scheme` filter) and 2026-10-22 (task 0053:
+  resource URLs and empty fields)
 
 ## Context
 
@@ -58,7 +59,7 @@ settlement.
 - **`GET /discovery/resources`.**
   - It uses the upstream discovery list types.
   - Filters: `type`, `payTo`, `network`, `extensions`, `limit` (bounded, with a fixed default),
-    `offset`.
+    `offset`, and upstream's `scheme`, which T1 answers from the schemes it settles (task 0032).
   - No ranking in Tranche 1.
 
 ## Rationale

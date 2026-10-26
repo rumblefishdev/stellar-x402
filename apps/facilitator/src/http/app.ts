@@ -1,13 +1,15 @@
 import { STATUS_CODES } from "node:http";
 import { PaymentPayloadV2Schema, PaymentRequirementsV2Schema } from "@x402/core/schemas";
 import type { SupportedResponse, VerifyRequest } from "@x402/core/types";
-import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
+import express, { type ErrorRequestHandler, type Express } from "express";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
+import type { Metrics } from "../metrics.js";
 import type { Stores } from "../ports/index.js";
 import type { SettlementHooks } from "../settlement/hooks.js";
 import type { Settle } from "../settlement/settle.js";
 import type { Verify, VerifyTrace } from "../settlement/verify.js";
+import { discoveryResources } from "./discovery.js";
 import { EXTENSION_RESPONSES_HEADER, encodeExtensionResponses } from "./extension-responses.js";
 import { rateLimit } from "./rate-limit.js";
 
@@ -15,6 +17,7 @@ import { rateLimit } from "./rate-limit.js";
 export interface AppDeps {
   config: Config;
   logger: Logger;
+  metrics: Metrics;
   stores: Stores;
   verify: Verify;
   settle: Settle;
@@ -27,10 +30,6 @@ export interface AppDeps {
 /** The status as a body code, like `not_found`: 413 → `payload_too_large`. */
 const code = (status: number) =>
   (STATUS_CODES[status] ?? "error").toLowerCase().replace(/[^a-z]+/g, "_");
-
-const notImplemented: RequestHandler = (_req, res) => {
-  res.status(501).json({ error: "not_implemented" });
-};
 
 /**
  * How deeply a request body may nest. The x402 objects need about 6 levels, but `extensions` is
@@ -89,14 +88,14 @@ export function parsePaymentRequest(body: unknown): VerifyRequest | undefined {
 }
 
 /**
- * The inbound HTTP adapter (AD-13). `/discovery/resources` answers 501 until its task lands
- * (0032). There is a body size limit and no CORS anywhere (spine "HTTP hardening"). `/verify`,
- * `/settle` and `/discovery/*` each have a rate limit (AD-11), applied before the body is read, so
- * a malformed or oversized request counts too; `/supported` has none.
+ * The inbound HTTP adapter (AD-13). There is a body size limit and no CORS anywhere (spine "HTTP
+ * hardening"). `/verify`, `/settle` and `/discovery/*` each have a rate limit (AD-11), applied
+ * before the body is read, so a malformed or oversized request counts too; `/supported` has none.
  */
 export function createApp({
   config,
   logger,
+  metrics,
   stores,
   verify,
   settle,
@@ -185,7 +184,10 @@ export function createApp({
     res.json(supported);
   });
   app.use("/discovery", limit("discovery", config.http.rateLimit.discovery));
-  app.get("/discovery/resources", notImplemented);
+  app.get(
+    "/discovery/resources",
+    discoveryResources(stores.catalog, logger, metrics, config.network),
+  );
 
   app.use((_req, res) => {
     res.status(404).json({ error: "not_found" });

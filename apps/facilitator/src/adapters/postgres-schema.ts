@@ -105,12 +105,18 @@ CREATE TABLE spend_scopes (
     sql: "ALTER TABLE settlements ADD COLUMN success_answered_at bigint;",
   },
   {
+    // 0032: answers a listing's type filter, matched or not, without scanning the catalog. IF NOT
+    // EXISTS for a database built from 0032's branch, whose 0001_init carried it.
+    name: "0003_catalog_type_seq",
+    sql: "CREATE INDEX IF NOT EXISTS catalog_type_seq ON catalog (type, seq);",
+  },
+  {
     // 0050: each scope row carries its reservation's time and amount, so a window's sum reads only
     // the window's index entries instead of joining every reservation the scope ever had. `reserve`
     // and `commit` write both copies in one statement. NOT NULL is safe because no release writes
     // spend rows yet (0024 wires the store); one that wrote scope rows without the copy would
     // fail, never under-count. In one transaction: every database holds few rows (0050, E17).
-    name: "0003_spend_window",
+    name: "0004_spend_window",
     sql: `
 ALTER TABLE spend_reservation_scopes ADD COLUMN at bigint, ADD COLUMN amount bigint;
 UPDATE spend_reservation_scopes rs SET at = r.at, amount = r.amount

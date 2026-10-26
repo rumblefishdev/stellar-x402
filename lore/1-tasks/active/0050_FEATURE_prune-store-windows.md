@@ -85,7 +85,7 @@ day (ADR 0011's mainnet sizing) a 1-day window alone holds about 10 000 reservat
 
 ## Result
 
-- `0003_spend_window`: `spend_reservation_scopes` gets `at` and `amount` (backfilled, NOT NULL)
+- `0004_spend_window`: `spend_reservation_scopes` gets `at` and `amount` (backfilled, NOT NULL)
   and `spend_reservation_scopes_window (scope, at) INCLUDE (amount)`. `WINDOW_SUM` reads that
   table alone; `reserve` writes the copy, `commit` updates both amounts in one statement.
 - `SpendStore.commit(id, feeCharged)` keeps the reservation's time (the `now` argument is gone).
@@ -152,5 +152,6 @@ a day). The experiment scripts stayed local.
    transaction's time bound of it. `commit` has no caller yet, so the port drops `now`.
 9. **Rate-limit pruning runs on the main pool**, so a flood's pruning takes no connection from
    `hit`.
-10. **The migration's number:** `0003_spend_window`, as on develop today; 0019 (#57) and 0032 (#50)
-    each add a `0003_*`, so the later merge renumbers.
+10. **The migration's number:** `0004_spend_window`. It was `0003_spend_window`, as on develop
+    when the PR opened; 0032 (#50) merged its `0003_catalog_type_seq` first, so this one follows
+    it. 0019 (#57) also adds a `0003_*` and renumbers when it merges after this.

@@ -79,6 +79,9 @@ export const PRIMARY_PROBE_INTERVAL_MS = 60_000;
 /** How many ledgers `RPC_URLS[0]` may trail the active URL by when calls return to it (AD-3). */
 export const FAILBACK_MAX_LAG_LEDGERS = 2;
 
+/** The statement timeout of the public listings' pool, against the other pools' 10 s. */
+export const DISCOVERY_STATEMENT_TIMEOUT_MS = 2_000;
+
 /**
  * The deadline of the whole upstream call (AD-3): `timeoutMs` (10 s) for each of `urls` RPC URLs,
  * plus, with fee-stats bids, the bid read before them, which `FallbackRpc` bounds at 10 s per URL,
@@ -370,6 +373,7 @@ export function compose(
     deps: {
       config,
       logger,
+      metrics,
       stores,
       verify: createVerifier(checks),
       settle,
@@ -397,7 +401,8 @@ export async function main(
 ) {
   const config = parseConfig(env);
   const logger = jsonLogger(config.logLevel, opts.write, config.rpcUrls);
-  let pools: { main: pg.Pool; reserve: pg.Pool; rateLimits: pg.Pool } | undefined;
+  let pools:
+    { main: pg.Pool; reserve: pg.Pool; rateLimits: pg.Pool; discovery: pg.Pool } | undefined;
   const endPools = () => Promise.all(Object.values(pools ?? {}).map((p) => p.end()));
   try {
     // stellar-sdk's RPC and Horizon clients use the global fetch with no timeout of their own, and
@@ -411,12 +416,15 @@ export async function main(
     if (config.store === "postgres") {
       const url = config.databaseUrl;
       if (url === undefined) throw new Error("STORE=postgres needs a DATABASE_URL");
-      // Reservations queue on the global scope's lock, and a flood's hits on its key's row lock;
-      // their own pools keep those queues off the others.
+      // Reservations queue on the global scope's lock, a flood's hits on its key's row lock, and a
+      // burst of public listings on the pool itself; their own pools keep those off the others.
+      // A listing takes milliseconds (at most ~0.5 s measured at 1 000 000 entries), so the
+      // discovery pool cuts one off sooner: until 0023's rate limits, 3 slow ones hold it.
       pools = {
         main: createPool(url, poolErrorLogger(logger)),
         reserve: createPool(url, poolErrorLogger(logger), 3),
         rateLimits: createPool(url, poolErrorLogger(logger), 3),
+        discovery: createPool(url, poolErrorLogger(logger), 3, DISCOVERY_STATEMENT_TIMEOUT_MS),
       };
     }
     // Every RPC_URLS entry must serve NETWORK: another network's RPC reads every channel as
