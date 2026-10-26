@@ -69,7 +69,7 @@ export function transferPayload(
     x402Version: 2,
     accepted: requirements,
     payload: { transaction: transaction.toXDR() },
-    ...(extensions && { resource: { url: "https://seller.example/users/42" }, extensions }),
+    ...(extensions && { resource: { url: "https://seller.example.com/users/42" }, extensions }),
   } as PaymentPayload;
 }
 

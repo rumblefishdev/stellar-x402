@@ -28,7 +28,7 @@ const PRIVATE_SUFFIXES = [
  * Hosts that are not a public DNS name: IP literals (WHATWG has already turned decimal, hex and
  * octal IPv4 forms into dotted quads, and serializes IPv6 bracketed), single-label names such as
  * `intranet`, trailing-dot names, and private suffixes. Refused for icons on top of upstream's
- * icon host rules, and for resource URLs outside testnet (`isPublicResourceUrl`).
+ * icon host rules, and for resource URLs (`isPublicResourceUrl`).
  */
 function isForbiddenHost(hostname: string): boolean {
   return (
@@ -56,8 +56,9 @@ export type ResourceType = "http" | "mcp";
  * by default (e2e suite, local sellers); `mcp:` is `@x402/mcp`'s `mcp://tool/<name>`, a name rather
  * than an address, so only an `mcp` listing may use it. `canonicalizeUrl` puts no host rules on
  * `http(s)`: the facilitator never fetches a resource URL (ADR 0008), and a client that does checks
- * the address it resolves (`packages/mcp` guard), which no check on the URL text can match. Outside
- * testnet the validator also requires a public host (`isPublicResourceUrl`), for listing quality.
+ * the address it resolves (`packages/mcp` guard), which no check on the URL text can match. The
+ * validator also requires a public host (`isPublicResourceUrl`), for listing quality, unless
+ * `listLocal` is set.
  * An `mcp:` host must be a DNS-style name (`MCP_HOST`), for one canonical form.
  */
 const RESOURCE_SCHEMES: Record<ResourceType, readonly string[]> = {
@@ -121,11 +122,12 @@ export function canonicalizeUrl(raw: string, type: ResourceType): string | undef
 }
 
 /**
- * Whether a canonical resource URL may be listed outside testnet (0054, ADR 0008): `http(s)` with a
- * host that is a public DNS name, not an IP literal, loopback, private, special-use or single-label
- * name (`isForbiddenHost`, the icon rule). Listing quality, not SSRF: no buyer can reach such a
- * host, and a public name that resolves to one still passes, as the fetcher checks the address. An
- * `mcp:` URL names a tool, not a server a buyer can reach, so it is refused too.
+ * Whether a canonical resource URL may be listed (0054, ADR 0008), on every network unless the
+ * validator's `listLocal` is set: `http(s)` with a host that is a public DNS name, not an IP
+ * literal, loopback, private, special-use or single-label name (`isForbiddenHost`, the icon rule).
+ * Listing quality, not SSRF: no buyer can reach such a host, and a public name that resolves to
+ * one still passes, as the fetcher checks the address. An `mcp:` URL names a tool, not a server a
+ * buyer can reach, so it is refused too.
  */
 export function isPublicResourceUrl(canonical: string): boolean {
   const url = new URL(canonical);

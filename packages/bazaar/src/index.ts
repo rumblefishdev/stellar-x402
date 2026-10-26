@@ -12,6 +12,7 @@ export {
   validate,
   type Discovered,
   type ExtensionResponses,
+  type ValidateOptions,
   type ValidationResult,
 } from "./validate.js";
 export { normalize, type NormalizedEntry } from "./normalize.js";

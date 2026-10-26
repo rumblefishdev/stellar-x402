@@ -20,6 +20,8 @@ export interface CatalogerDeps {
   bazaar?: BazaarApi;
   /** A slower write counts as failed, so a hung store can't pile up writes or block `drain()`. */
   upsertTimeoutMs?: number;
+  /** Development only: list local, private and IP resource URLs too (`CATALOG_LIST_LOCAL`). */
+  listLocal?: boolean;
 }
 
 export type Cataloger = Pick<SettlementHooks, "extensionResponses" | "onSuccess"> & {
@@ -38,8 +40,10 @@ export function createCataloger({
   metrics,
   bazaar = bazaarLib,
   upsertTimeoutMs = 10_000,
+  listLocal = false,
 }: CatalogerDeps): Cataloger {
   const inFlight = new Set<Promise<void>>();
+  const options = { listLocal };
 
   const context = (record: SettlementRecord, origin: SettlementOrigin) => ({
     network: record.network,
@@ -86,7 +90,7 @@ export function createCataloger({
     try {
       // Validated again rather than cached: pure, so header and catalog agree, and a late
       // `resolved` success never computed a header.
-      const result = bazaar.validate(record.paymentPayload, record.paymentRequirements);
+      const result = bazaar.validate(record.paymentPayload, record.paymentRequirements, options);
       if (!result) return;
       if (!result.ok) {
         // A library failure, not a bad listing.
@@ -143,7 +147,7 @@ export function createCataloger({
     extensionResponses(record) {
       if (record.state !== "success") return undefined;
       try {
-        const result = bazaar.validate(record.paymentPayload, record.paymentRequirements);
+        const result = bazaar.validate(record.paymentPayload, record.paymentRequirements, options);
         return result && bazaar.toExtensionResponses(result);
       } catch (error) {
         internalError("header", record, "settle", error);

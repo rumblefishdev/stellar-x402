@@ -203,6 +203,15 @@ const envSchema = z
     SPEND_PER_PAYER_STROOPS: stroops(1n).default("50000000"),
     SPEND_PER_PAY_TO_STROOPS: stroops(1n).default("500000000"),
     SPEND_PER_ASSET_STROOPS: stroops(1n).default("2000000000"),
+    /**
+     * Development only: also list loopback, private and IP resource URLs and `mcp:` tool names,
+     * which the catalog refuses on every network (0054), for a facilitator run locally and the
+     * e2e gate. Testnet only.
+     */
+    CATALOG_LIST_LOCAL: oneOf(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
+
     /** Consecutive on-chain failures that open an asset or `payTo` breaker. */
     BREAKER_FAILURES: int(1).default("5"),
     BREAKER_COOLDOWN_MS: int(1_000).default("600000"),
@@ -246,6 +255,10 @@ const envSchema = z
   .refine((env) => env.RATE_LIMIT_SETTLE >= env.RATE_LIMIT_VERIFY, {
     message: "must be at least RATE_LIMIT_VERIFY",
     path: ["RATE_LIMIT_SETTLE"],
+  })
+  .refine((env) => !env.CATALOG_LIST_LOCAL || env.NETWORK === STELLAR_NETWORKS.testnet, {
+    message: "is only allowed on testnet",
+    path: ["CATALOG_LIST_LOCAL"],
   })
   .refine((env) => env.TRUSTED_PROXY_HOPS === undefined, {
     message: "is replaced by CLIENT_IP",
@@ -316,6 +329,7 @@ export interface Config {
     breakerFailures: number;
     breakerCooldownMs: number;
   };
+  catalog: { listLocal: boolean };
 }
 
 /** Names every invalid setting; never echoes a value, so a secret can't leak into logs. */
@@ -399,6 +413,7 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
       breakerFailures: e.BREAKER_FAILURES,
       breakerCooldownMs: e.BREAKER_COOLDOWN_MS,
     },
+    catalog: { listLocal: e.CATALOG_LIST_LOCAL },
   };
 }
 

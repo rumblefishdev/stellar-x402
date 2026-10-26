@@ -2,7 +2,13 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import { describe, expect, it } from "vitest";
-import { canonicalizeUrl, normalize, toExtensionResponses, validate } from "../src/index.js";
+import {
+  canonicalizeUrl,
+  normalize,
+  toExtensionResponses,
+  validate,
+  type ValidateOptions,
+} from "../src/index.js";
 
 const req = {
   scheme: "exact",
@@ -30,8 +36,11 @@ const reason = (p: PaymentPayload) => {
   return r?.ok ? "ok" : r?.reason;
 };
 
-function entry(p: PaymentPayload) {
-  const r = validate(p, req);
+/** `CATALOG_LIST_LOCAL`: what a facilitator run locally and the e2e gate list (0054). */
+const LOCAL: ValidateOptions = { listLocal: true };
+
+function entry(p: PaymentPayload, options: ValidateOptions = {}) {
+  const r = validate(p, req, options);
   if (!r?.ok) throw new Error(JSON.stringify(r));
   return normalize(r, req);
 }
@@ -258,9 +267,10 @@ describe("packages/bazaar", () => {
     });
   });
 
-  it('catalogs upstream defaults on testnet: mimeType "", http, loopback, mcp://', () => {
+  it('catalogs upstream defaults with listLocal: mimeType "", http, loopback, mcp://', () => {
     const local = entry(
       pay("http://localhost:4022/exact/stellar", { info: http }, { description: "", mimeType: "" }),
+      LOCAL,
     );
     expect(local.key.resourceUrl).toBe("http://localhost:4022/exact/stellar");
     expect(local.resource.resource).toBe("http://localhost:4022/exact/stellar");
@@ -268,6 +278,7 @@ describe("packages/bazaar", () => {
     expect(local.resource).not.toHaveProperty("description");
     const tool = entry(
       pay("mcp://tool/get_weather", { info: mcp }, { mimeType: "application/json" }),
+      LOCAL,
     );
     expect(tool.key).toMatchObject({ method: "weather", resourceUrl: "mcp://tool/get_weather" });
     expect(tool.resource.mimeType).toBe("application/json");
@@ -279,8 +290,8 @@ describe("packages/bazaar", () => {
     ["https://intranet/a?x=1#f", "https://intranet/a"],
     ["http://printer.local:80/a", "http://printer.local/a"],
     ["https://metadata.google.internal/a", "https://metadata.google.internal/a"],
-  ])("keeps no host rules on testnet resource URLs: %s", (url, canonical) => {
-    expect(entry(pay(url, { info: http })).key.resourceUrl).toBe(canonical);
+  ])("keeps no host rules on resource URLs with listLocal: %s", (url, canonical) => {
+    expect(entry(pay(url, { info: http }), LOCAL).key.resourceUrl).toBe(canonical);
   });
 
   it.each([
@@ -294,16 +305,18 @@ describe("packages/bazaar", () => {
     ["http://localhost:4022/mcp", "http://localhost:4022/mcp"],
     ["https://x.com/mcp", "https://x.com/mcp"],
   ])("gives an mcp listing one canonical URL: %s", (url, canonical) => {
-    expect(entry(pay(url, { info: mcp })).key.resourceUrl).toBe(canonical);
+    expect(entry(pay(url, { info: mcp }), LOCAL).key.resourceUrl).toBe(canonical);
   });
 
   it("ignores a routeTemplate on an mcp listing and keys the tool URL", () => {
     const p = pay("mcp://tool/a", { info: mcp, routeTemplate: "/a" });
-    expect(validate(p, req)).toMatchObject({ routeTemplateIgnored: true });
-    expect(entry(p).key.resourceUrl).toBe("mcp://tool/a");
+    expect(validate(p, req, LOCAL)).toMatchObject({ routeTemplateIgnored: true });
+    expect(entry(p, LOCAL).key.resourceUrl).toBe("mcp://tool/a");
   });
 
-  // 0054: pubnet lists only public `http(s)` hosts; testnet keeps the local ones.
+  const pubnet = { ...req, network: "stellar:pubnet" } as PaymentRequirements;
+
+  // 0054: the catalog lists only public `http(s)` hosts, on every network, unless `listLocal`.
   it.each([
     // Loopback names, in the spellings WHATWG folds into `localhost`.
     ["http://localhost:4022/exact/stellar", http],
@@ -342,14 +355,15 @@ describe("packages/bazaar", () => {
     ["mcp://tool/get_weather", mcp],
     ["mcp://srv.example.com/x", mcp],
     ["http://localhost:4022/mcp", mcp],
-  ])("refuses %s on pubnet as invalid_resource_url and lists it on testnet", (url, info) => {
-    const pubnet = { ...req, network: "stellar:pubnet" } as PaymentRequirements;
-    const refused = validate(pay(url, { info }), pubnet)!;
-    expect(refused).toMatchObject({ ok: false, reason: "invalid_resource_url" });
-    expect(toExtensionResponses(refused)).toEqual({
-      bazaar: { status: "rejected", rejectedReason: "invalid_resource_url" },
-    });
-    expect(validate(pay(url, { info }), req)).toMatchObject({
+  ])("refuses %s on testnet and pubnet, and lists it with listLocal", (url, info) => {
+    for (const requirements of [req, pubnet]) {
+      const refused = validate(pay(url, { info }), requirements)!;
+      expect(refused).toMatchObject({ ok: false, reason: "invalid_resource_url" });
+      expect(toExtensionResponses(refused)).toEqual({
+        bazaar: { status: "rejected", rejectedReason: "invalid_resource_url" },
+      });
+    }
+    expect(validate(pay(url, { info }), req, LOCAL)).toMatchObject({
       ok: true,
       resourceUrl: canonicalizeUrl(url, info.input.type as "http" | "mcp"),
     });
@@ -364,23 +378,26 @@ describe("packages/bazaar", () => {
     // Names that resolve to loopback are the fetcher's to check (ADR 0008), not the catalog's.
     ["https://127.0.0.1.nip.io/a", http, "https://127.0.0.1.nip.io/a"],
     ["https://localtest.me/a", http, "https://localtest.me/a"],
-  ])("lists %s on pubnet", (url, info, canonical) => {
-    const pubnet = { ...req, network: "stellar:pubnet" } as PaymentRequirements;
-    const r = validate(pay(url, { info }, { mimeType: "" }), pubnet);
-    if (!r?.ok) throw new Error(JSON.stringify(r));
-    expect(normalize(r, pubnet).key).toMatchObject({
-      network: "stellar:pubnet",
-      resourceUrl: canonical,
-    });
+  ])("lists %s on testnet and pubnet", (url, info, canonical) => {
+    for (const requirements of [req, pubnet]) {
+      const r = validate(pay(url, { info }, { mimeType: "" }), requirements);
+      if (!r?.ok) throw new Error(JSON.stringify(r));
+      expect(normalize(r, requirements).key).toMatchObject({
+        network: requirements.network,
+        resourceUrl: canonical,
+      });
+    }
   });
 
-  it("refuses local hosts on any network but testnet, not only on pubnet", () => {
-    const other = { ...req, network: "stellar:futurenet" } as PaymentRequirements;
-    expect(validate(pay("http://localhost:4022/a", { info: http }), other)).toMatchObject({
+  it.each([
+    ["javascript:alert(1)", http],
+    ["http://u:p@localhost/a", http],
+    ["mcp://tool/a\\b", mcp],
+  ])("still refuses %s with listLocal: it opens hosts, not schemes", (url, info) => {
+    expect(validate(pay(url, { info }), req, LOCAL)).toMatchObject({
       ok: false,
       reason: "invalid_resource_url",
     });
-    expect(validate(pay("https://x.com/a", { info: http }), other)?.ok).toBe(true);
   });
 
   it("answers undefined, not a throw, for a type it doesn't know", () => {

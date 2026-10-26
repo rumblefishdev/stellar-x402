@@ -1,4 +1,3 @@
-import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import {
   extractDiscoveryInfo,
@@ -35,6 +34,15 @@ export type ValidationResult =
     }
   /** `detail` is for logs only and never goes into the header. */
   | { ok: false; reason: BazaarRejectReason; detail?: string };
+
+export interface ValidateOptions {
+  /**
+   * Development only: also list loopback, private, special-use and IP hosts and `mcp:` URLs, for a
+   * facilitator run locally and the e2e gate (0054). The facilitator's config allows it on testnet
+   * only.
+   */
+  listLocal?: boolean;
+}
 
 /** The `EXTENSION-RESPONSES` value of a settle response (AD-8). */
 export type ExtensionResponses = {
@@ -102,6 +110,7 @@ function checkShape(
 function run(
   payload: PaymentPayload,
   requirements: PaymentRequirements,
+  options: ValidateOptions,
 ): ValidationResult | undefined {
   // 1. Presence, read from the raw payload: upstream's `null` mixes several cases.
   const extensions: unknown = payload.extensions;
@@ -130,11 +139,10 @@ function run(
       ? canonicalizeUrl(resource.url, input.type === "mcp" ? "mcp" : "http")
       : undefined;
   if (!resourceUrl) return reject("invalid_resource_url");
-  // Only testnet lists local, private and IP hosts and `mcp:` URLs (local sellers, upstream's e2e
-  // suite); every other network, pubnet first, lists public names only (0054). The network is the
-  // verified one: the checker refuses requirements for a network this process doesn't serve.
-  if (requirements.network !== STELLAR_NETWORKS.testnet && !isPublicResourceUrl(resourceUrl)) {
-    return reject("invalid_resource_url", "not a public http(s) host, listed on testnet only");
+  // The catalog lists public names only, on every network (0054): no buyer reaches a local,
+  // private or IP host or an `mcp:` tool name. The payment settles either way.
+  if (!options.listLocal && !isPublicResourceUrl(resourceUrl)) {
+    return reject("invalid_resource_url", "not a public http(s) host");
   }
 
   // 6. Content limits. The schema is data: walked for limits, never compiled.
@@ -197,9 +205,10 @@ function run(
 export function validate(
   payload: PaymentPayload,
   requirements: PaymentRequirements,
+  options: ValidateOptions = {},
 ): ValidationResult | undefined {
   try {
-    return run(payload, requirements);
+    return run(payload, requirements, options);
   } catch (error) {
     return reject("internal_error", error instanceof Error ? error.message : String(error));
   }

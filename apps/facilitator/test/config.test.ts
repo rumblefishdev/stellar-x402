@@ -68,6 +68,7 @@ describe("parseConfig", () => {
         breakerFailures: 5,
         breakerCooldownMs: 600_000,
       },
+      catalog: { listLocal: false },
     });
   });
 
@@ -104,6 +105,7 @@ describe("parseConfig", () => {
       SPEND_PER_ASSET_STROOPS: "14",
       BREAKER_FAILURES: "7",
       BREAKER_COOLDOWN_MS: "5000",
+      CATALOG_LIST_LOCAL: "true",
     });
     expect(config).toEqual<Config>({
       network: "stellar:testnet",
@@ -139,6 +141,7 @@ describe("parseConfig", () => {
         breakerFailures: 7,
         breakerCooldownMs: 5_000,
       },
+      catalog: { listLocal: true },
     });
   });
 
@@ -307,6 +310,21 @@ describe("parseConfig", () => {
         CATALOG_ALLOW_HTTP: "true",
       }),
     ).toEqual([PUBNET_REFUSED]);
+  });
+
+  it("lists local resource URLs on testnet only, and only when asked (0054)", () => {
+    expect(parseConfig({ ...minimal, CATALOG_LIST_LOCAL: "false" }).catalog.listLocal).toBe(false);
+    expect(problems({ ...minimal, CATALOG_LIST_LOCAL: "yes" })).toEqual([
+      "CATALOG_LIST_LOCAL must be one of true, false",
+    ]);
+    expect(
+      problems({
+        ...minimal,
+        ...pubnet,
+        RPC_URLS: "https://rpc.example",
+        CATALOG_LIST_LOCAL: "true",
+      }),
+    ).toEqual(["CATALOG_LIST_LOCAL is only allowed on testnet", PUBNET_REFUSED]);
   });
 
   it("selects the PostgreSQL store with its URL", () => {

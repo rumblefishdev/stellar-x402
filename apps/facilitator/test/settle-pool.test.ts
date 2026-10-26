@@ -260,12 +260,13 @@ describe("main()'s /settle wiring, with the real pool", () => {
 });
 
 describe("main()'s composition (compose)", () => {
-  function composed() {
+  function composed(env: Record<string, string> = {}) {
     const config = parseConfig({
       FACILITATOR_SECRET: facilitator.secret(),
       CLIENT_IP: "socket",
       CHANNELS: channel,
       MAX_FEE_STROOPS: String(MAX_FEE),
+      ...env,
     });
     const fake = new PaymentRpc({ [channel]: 1_000n });
     fake.feeStats = {
@@ -291,6 +292,27 @@ describe("main()'s composition (compose)", () => {
     const { items } = await deps.stores.catalog.list({ limit: 10, offset: 0 });
     expect(items).toHaveLength(1);
   });
+
+  it.each([
+    [{}, { status: "rejected", rejectedReason: "invalid_resource_url" }, 0],
+    [{ CATALOG_LIST_LOCAL: "true" }, { status: "processing" }, 1],
+  ] as const)(
+    "settles a localhost resource and lists it only with %j (0054)",
+    async (env, header, listed) => {
+      const { deps, cataloger, fake } = composed(env);
+      const local = {
+        ...payload(fake.ledger + 30, { bazaar }),
+        resource: { url: "http://localhost:4022/users/42" },
+      } as PaymentPayload;
+      const settled = await deps.settle(local, requirements);
+      expect(settled.response).toMatchObject({ success: true });
+      expect(deps.extensionResponses(settled.record!)).toEqual({ bazaar: header });
+      settled.afterResponse!();
+      await cataloger.drain();
+      const { items } = await deps.stores.catalog.list({ limit: 10, offset: 0 });
+      expect(items).toHaveLength(listed);
+    },
+  );
 
   it("reads the fee-stats bid once for /verify, /settle and the pool (AD-10)", async () => {
     const { deps, fake } = composed();

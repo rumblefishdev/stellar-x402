@@ -31,7 +31,7 @@ function record(bazaar: unknown, overrides: Partial<SettlementRecord> = {}): Set
     ledger: 100,
     paymentPayload: {
       x402Version: 2,
-      resource: { url: "https://seller.example/users/42" },
+      resource: { url: "https://seller.example.com/users/42" },
       extensions,
     } as unknown as PaymentPayload,
     paymentRequirements: requirements,
@@ -76,7 +76,7 @@ describe("cataloger", () => {
     await cataloger.onSuccess(record(valid), "settle");
     const [entry] = await list();
     expect(entry).toMatchObject({
-      resource: "https://seller.example/users/:",
+      resource: "https://seller.example.com/users/:",
       lastUpdated: "2026-10-09T10:00:00.000Z",
       accepts: [requirements],
     });
@@ -89,8 +89,8 @@ describe("cataloger", () => {
     );
   });
 
-  it("catalogs what upstream 2.28 servers send by default (0053)", async () => {
-    const { cataloger, list } = setup();
+  it("catalogs what upstream 2.28 servers send by default with listLocal (0053, 0054)", async () => {
+    const { cataloger, list } = setup({ listLocal: true });
     // `@x402/core` sends `mimeType` and `description` as `|| ""`; `@x402/mcp` names a tool
     // `mcp://tool/<name>` with `application/json`.
     const http = record(
@@ -127,12 +127,13 @@ describe("cataloger", () => {
   });
 
   it.each([
-    ["stellar:pubnet", { status: "rejected", rejectedReason: "invalid_resource_url" }, 0],
-    ["stellar:testnet", { status: "processing" }, 1],
+    ["stellar:pubnet", false, { status: "rejected", rejectedReason: "invalid_resource_url" }, 0],
+    ["stellar:testnet", false, { status: "rejected", rejectedReason: "invalid_resource_url" }, 0],
+    ["stellar:testnet", true, { status: "processing" }, 1],
   ] as const)(
-    "on %s, a localhost listing gets %j and %i entries (0054)",
-    async (network, header, listed) => {
-      const { cataloger, metrics, logger, list } = setup();
+    "on %s with listLocal %s, a localhost listing gets %j and %i entries (0054)",
+    async (network, listLocal, header, listed) => {
+      const { cataloger, metrics, logger, list } = setup({ listLocal });
       const local = record(
         { info: { input: { type: "http", method: "GET" } } },
         {
