@@ -1628,3 +1628,64 @@ describe("expectTransfer", () => {
     expect(() => check(simulation)).toThrow();
   });
 });
+
+// Review finding 3 on PR #57: fails on ce282e3, passes once it is fixed.
+describe("finding 3: one process answers a success once", () => {
+  it("a sweep that lands the record while the settler's read-back hangs doesn't give a repeat a second success", async () => {
+    const store = new MemorySettlementStore();
+    const hooks = {
+      onFinal: vi.fn<SettlementHooks["onFinal"]>(async () => {}),
+      onSuccess: vi.fn<SettlementHooks["onSuccess"]>(async () => {}),
+    };
+    const logger = jsonLogger("error", () => {});
+    const metrics = memoryMetrics();
+    const records = createRecords({ network, store, hooks, logger, metrics });
+    const { settle } = setup(landing(), { store, records, budgetMs: 10_000 });
+    const reconciler = createReconciler({
+      network,
+      store,
+      rpc: {
+        getTransaction: async () =>
+          ({
+            status: rpc.Api.GetTransactionStatus.SUCCESS,
+            ledger: 1_001,
+            resultXdr: { feeCharged: () => ({ toBigInt: () => 41_000n }) },
+          }) as unknown as rpc.Api.GetTransactionResponse,
+      },
+      records,
+      logger,
+      metrics,
+      budgetMs: 10_000,
+    });
+    // The store fails the settler's success write (a failover), and its read-back hangs on a dead
+    // connection; new connections work.
+    const realTransition = store.transition.bind(store);
+    let failed = false;
+    vi.spyOn(store, "transition").mockImplementation(async (k, e, u) => {
+      if (!failed && u.state === "success") {
+        failed = true;
+        throw new Error("connection terminated");
+      }
+      return realTransition(k, e, u);
+    });
+    const realGet = store.get.bind(store);
+    let release!: () => void;
+    const hung = new Promise<void>((r) => (release = r));
+    let gets = 0;
+    vi.spyOn(store, "get").mockImplementation(async (k) => {
+      gets++;
+      if (gets === 3) await hung; // settle(): lookup, advance's read, then the read-back
+      return realGet(k);
+    });
+    const first = settle(payload(), requirements);
+    await vi.waitFor(() => expect(gets).toBe(3));
+    // The store-recovery sweep runs and lands the record.
+    expect(await reconciler.sweep("live")).toMatchObject({ success: 1 });
+    // The buyer's retry reaches the same process.
+    const repeat = await settle(payload(), requirements);
+    release();
+    const original = await first;
+
+    expect([repeat, original].filter((s) => s.response.success)).toHaveLength(1);
+  });
+});
