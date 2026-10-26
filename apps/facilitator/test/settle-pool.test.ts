@@ -96,6 +96,7 @@ function setup(
 ) {
   const config = parseConfig({
     FACILITATOR_SECRET: facilitator.secret(),
+    CLIENT_IP: "socket",
     CHANNELS: channel,
     MAX_FEE_STROOPS: String(MAX_FEE),
     INCLUSION_FEE_STROOPS: String(BID),
@@ -262,6 +263,7 @@ describe("main()'s composition (compose)", () => {
   function composed() {
     const config = parseConfig({
       FACILITATOR_SECRET: facilitator.secret(),
+      CLIENT_IP: "socket",
       CHANNELS: channel,
       MAX_FEE_STROOPS: String(MAX_FEE),
     });

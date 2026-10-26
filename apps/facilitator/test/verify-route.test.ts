@@ -37,6 +37,7 @@ describe("POST /verify", () => {
   beforeAll(async () => {
     const env = {
       FACILITATOR_SECRET: Keypair.random().secret(),
+      CLIENT_IP: "socket",
       CHANNELS: Keypair.random().publicKey(),
     };
     const config = { ...parseConfig(env), port: 0 };
@@ -164,6 +165,31 @@ describe("POST /verify", () => {
     expect((await post(nested(MAX_BODY_DEPTH - 3))).status).toBe(200);
     expect((await post(nested(MAX_BODY_DEPTH - 2))).status).toBe(400);
     expect(verify).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers 400 for a NUL or a lone surrogate in any string or key, without verifying", async () => {
+    for (const text of ["a\u0000b", "a\ud800b"]) {
+      const bodies = [
+        { ...request, paymentRequirements: { ...requirements, payTo: text } },
+        { ...request, paymentPayload: { ...paymentPayload, extensions: { [text]: 1 } } },
+      ];
+      for (const body of bodies) {
+        const response = await post(body);
+        expect([response.status, await response.json()]).toEqual([400, { error: "bad_request" }]);
+      }
+    }
+    expect(verify).not.toHaveBeenCalled();
+  });
+
+  it("sends no CORS headers", async () => {
+    verify.mockResolvedValueOnce({ isValid: true, payer: "GPAYER" });
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://other.example" },
+      body: JSON.stringify(request),
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
   });
 
   it("answers 500 and logs the error when verification throws", async () => {

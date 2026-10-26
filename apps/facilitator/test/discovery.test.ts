@@ -166,6 +166,9 @@ describe("GET /discovery/resources", () => {
     const env = {
       FACILITATOR_SECRET: Keypair.random().secret(),
       CHANNELS: Keypair.random().publicKey(),
+      CLIENT_IP: "socket",
+      // Every case calls from one address; rate-limit.test.ts covers the route's limit.
+      RATE_LIMIT_DISCOVERY: "1000000",
     };
     const config = { ...parseConfig(env), port: 0 };
     const logger = jsonLogger("debug", (line) => lines.push(line));
