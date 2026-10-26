@@ -2,7 +2,7 @@
 id: "0064"
 title: "Run tests, local runs and deploys on PostgreSQL only, and drop the memory store"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0012"]
 related_tasks: ["0022", "0023", "0050"]
@@ -19,6 +19,15 @@ history:
     status: active
     who: karolkow
     note: "Work starts."
+  - date: "2026-10-26"
+    status: completed
+    who: karolkow
+    note: >
+      PRs #65 and #68 merged (#67 reached develop through #68). Every facilitator test runs on
+      PostgreSQL from the repo's compose database (port 15432) or TEST_DATABASE_URL; STORE is
+      refused and the memory adapters are gone (264 lines). Four tests that passed only on the
+      memory store were fixed, and the settle timing tests hold on a loaded machine: 0 failures in
+      20 paired runs, suite 7.2 s (5.8 s before). No follow-up tasks.
 ---
 
 # Run tests, local runs and deploys on PostgreSQL only, and drop the memory store
@@ -86,3 +95,14 @@ One row per atomic decision, settled before the code. Each row becomes a test be
 | 6   | The settler's unit tests also run on PostgreSQL; no fake store is kept in a test file | agent | matches AC 1 | | `settle.test.ts` · its suite |
 | 7   | Port 15432, not 5432: a developer's own PostgreSQL often holds 5432. Not 54320 either: it lies in the random port range (macOS 49152–65535, Linux 32768–60999), and a test server on port 0 got it and sent its requests to PostgreSQL | agent | beyond it | | `compose.yaml` · `database.test.ts` |
 | 8   | Timing tests hold on a loaded machine: a budget that must outlast the claim and the hash's write is one 100 ms constant, the lost-claim race waits for events instead of fixed delays, and the lock tests count only backends their own lock blocks | agent | beyond it | | `settle.test.ts` `BUDGET_MS`, `postgres.test.ts` `lockWaiter` · 20 paired runs (Measurements) |
+
+## Issues encountered
+
+- Four tests passed on the memory store for the wrong reason: they relied on a fresh store per
+  `setup()` call, or on the submitting call marking a success first. On shared tables the second
+  case answered as a repeat; on PostgreSQL a repeat can mark first, as `respond` documents.
+- Settle timing tests had 30–50 ms budgets that a few database round trips outgrow on a loaded
+  machine (decision 8). `lockWaiter` saw lock waits of other test files sharing the database.
+- Port 54320 lay in the random port range: a test server on port 0 got it and sent `/verify` to
+  PostgreSQL. Moved to 15432 (decision 7).
+- #65 merged before #67 reached its branch, so #67 and the timing fixes went to develop as #68.
