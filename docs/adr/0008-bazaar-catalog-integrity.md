@@ -42,13 +42,15 @@ settlement.
   - Resource URLs carry a scheme allowlist by listing type (task 0053): an `http` listing takes
     `https` and `http`, an `mcp` listing also `mcp` (`@x402/mcp`'s `mcp://tool/<name>`). An `mcp:`
     host must be a DNS-style name (letters, digits, hyphens; labels up to 63 characters, the host
-    up to 253), so `mcp://127.0.0.1/x` passes and `mcp://[::1]/x`, `mcp://my_srv/x` and non-ASCII
-    hosts don't. A host ending in a dot is refused on every scheme.
+    up to 253), so `mcp://127.0.0.1/x` has a canonical form and `mcp://[::1]/x`, `mcp://my_srv/x`
+    and non-ASCII hosts don't. A host ending in a dot is refused on every scheme. An `mcp:` URL is
+    listed only with `CATALOG_LIST_LOCAL` (below).
   - On every network, a listed resource URL must be `http(s)` with a public host (task 0054).
     Refused as `resource_not_public`, a reason of its own, since the URL is well formed and its
     payment settles: IP literals (public ones too, in every spelling WHATWG folds into one),
     loopback, private and special-use names (`localhost`, `localdomain`, `local`, `internal`,
-    `home.arpa`, `invalid`, `test`, `example`, `alt`, `onion` and their subdomains),
+    `home.arpa`, `invalid`, `test`, `example`, `alt`, `onion`, the TLDs ICANN will never
+    delegate, `home`, `corp` and `mail`, and their subdomains),
     single-label names, and `mcp:` URLs. It is the `iconUrl` host rule, run on the canonical URL.
     `http` with a public name stays listable. The payment settles as usual: only the listing is
     dropped, and the seller sees `rejected` in the header.
@@ -100,8 +102,9 @@ settlement.
     catalog, which demos, our MCP server and reviewers read. The seller still pays, and the
     header tells it why nothing was listed.
   - A facilitator run locally can list them with `CATALOG_LIST_LOCAL`, and so can the e2e gate,
-    whose upstream Bazaar check expects `http://localhost:<port>` and `mcp://tool/<name>` (task
-    0028 turns it on with `/discovery/search`). The switch is config, not the payload, so no client
+    whose upstream Bazaar check expects `http://localhost:<port>` and `mcp://tool/<name>`. That
+    check waits for `/discovery/search` (after Tranche 1); task 0029 decides which facilitator the
+    gate runs against. The switch is config, not the payload, so no client
     can turn it on, and the config refuses it on pubnet.
   - The rule sits in the pure validator, which both the header and the store write call, so the
     two agree. Its reason is `resource_not_public`, not `invalid_resource_url`: the URL is not
@@ -133,18 +136,24 @@ settlement.
   URL replaces its text and same-asset price, whoever paid. Accepted on testnet; task 0063
   decides it before pubnet.
 - Loopback, private and IP resource URLs are listed nowhere unless `CATALOG_LIST_LOCAL` is set
-  (task 0054), so gate runs leave none in a catalog without the switch.
+  (task 0054), so gate runs leave none in a catalog without the switch. The rule applies to
+  writes from this version on. Entries written before it stay, and can't be refreshed: a new
+  payment for the same key is refused. Only local catalogs can hold them, since no durable
+  catalog was deployed before (task 0026); `docker compose down -v` clears a local one.
 - A seller testing a localhost route against our facilitator pays as usual and gets
   `rejected` / `resource_not_public` in `EXTENSION-RESPONSES`, next to a successful settle
   response; the buyer sees nothing of it.
 - An MCP seller must set a real https URL (`@x402/mcp`'s `config.resource.url`) to be listed: the
   default `mcp://tool/<name>` is refused.
-- The e2e gate's Bazaar check needs `CATALOG_LIST_LOCAL=true` once task 0028 turns it on.
+- The e2e gate's Bazaar check, once `/discovery/search` exists, needs a facilitator with
+  `CATALOG_LIST_LOCAL=true` (task 0029).
 - A name that resolves to loopback (`localtest.me`, `*.nip.io`) is still listed. The
   catalog never resolves names; a client that calls the URL checks the address.
 - A client that calls catalog URLs must check the address it connects to.
 - The store (task 0013) must enforce the catalog key and support the `resources` filters.
-- The e2e gate routes carry the `bazaar` extension, so a gate run also exercises cataloging.
+- The e2e gate routes carry the `bazaar` extension, so a gate run also exercises cataloging:
+  without the switch only the `resource_not_public` rejection, since its URLs are `localhost` and
+  `mcp://`; with it, the listing.
 
 ## References
 

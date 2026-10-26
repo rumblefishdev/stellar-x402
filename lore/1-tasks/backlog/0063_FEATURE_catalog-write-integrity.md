@@ -44,7 +44,8 @@ description or price, and nobody can make `/discovery/resources` answer megabyte
   cover replacing someone else's. `packages/mcp` pays whatever `payTo` a 402 names
   (`packages/mcp/src/pay.ts`), so a buyer that picks resources by `payTo` from the catalog can be
   sent elsewhere.
-- Not here: loopback and private resource URLs on pubnet (0054); rate limits (0023).
+- Not here: loopback, private and IP resource URLs, refused on every network since 0054; rate
+  limits (0023).
 
 ## Options to decide
 

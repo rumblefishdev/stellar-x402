@@ -35,12 +35,12 @@ As a reviewer of the grant, I want e2e results with real settled transaction has
 - `/supported` (0020) must list `exact` on `stellar:testnet` with `extra.areFeesSponsored: true`: the canonical client throws without it (found in the 0028 recon).
 - From the 0028 review: the gate also needs `/supported` to list the facilitator key under a `stellar:` signer, because it fails any settlement whose fee another account paid.
 - From the 0028 review: the saved run holds the upstream commit, date, facilitator URL, its signers and each transaction, but no facilitator version; the facilitator has to expose one for this task's results.
-- From 0053: the catalog now takes the suite's `http://localhost:<port>/…` and
-  `mcp://tool/<name>` URLs, so a run against the public testnet facilitator leaves about 18 such
-  entries in its durable catalog (one key per server and route, refreshed by each run; nothing
-  deletes them), and 0042's demo lists them. The suite's Bazaar check still waits for
-  `/discovery/search` (0028). Nothing owns removing them yet: decide before the first run whether
-  the gate uses a separate catalog, or the catalog gets a TTL or an admin delete (0053 review).
+- From 0054 (replacing 0053's note): the catalog refuses the suite's `http://localhost:<port>/…`
+  and `mcp://tool/<name>` URLs on every network (`resource_not_public`; the payments settle), so
+  a run against the hosted testnet facilitator leaves no entries. The suite's Bazaar check, once
+  `/discovery/search` exists, needs them listed: decide whether it runs against a facilitator of
+  its own with `CATALOG_LIST_LOCAL=true`, or turns the switch on for the hosted testnet one, which
+  brings back the entries 0054 keeps out of the public catalog (0054 review).
 - From the PR #50 review: once the Bazaar check runs, it reads one `?limit=1000` page and looks
   for its resources there (upstream `e2e/extensions/bazaar.ts:290`), while our route clamps to 100
   (spec v2 §8.1) and lists oldest first. With more than 100 entries in the catalog the check

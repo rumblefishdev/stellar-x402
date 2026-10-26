@@ -1,6 +1,6 @@
 ---
 id: "0054"
-title: "Decide whether pubnet refuses loopback, private and IP resource URLs"
+title: "Keep loopback, private and IP resource URLs out of the catalog"
 type: FEATURE
 status: active
 milestone: 1
@@ -30,15 +30,27 @@ history:
       `CATALOG_LIST_LOCAL=true` (testnet only) lists them for local runs and the e2e gate. The
       payment always settles. Built on a GSD research and implementation, compared with a first
       pubnet-only version. 112 bazaar tests, 405 facilitator tests.
+  - date: "2026-10-26"
+    status: active
+    who: akot
+    note: >
+      Oskar's review of PR #66: `.home`, `.corp` and `.mail` join the host rule; no cleanup of
+      0053-era entries, since no durable catalog was deployed (docs say the rule applies from this
+      version); stale scope in ADR 0008, 0029, 0063 and `conformance/README.md` fixed; the gate's
+      Bazaar check moves to 0029; fixtures off `seller.example`; the task retitled.
 ---
 
-# Decide whether pubnet refuses loopback, private and IP resource URLs
+# Keep loopback, private and IP resource URLs out of the catalog
 
 ## Summary
 
-As the operator of a pubnet facilitator, I want a decision on whether the catalog refuses
-loopback, private and IP resource URLs on pubnet, so that the public catalog doesn't list entries
-no buyer can reach, or so that we say on purpose that it does.
+As the operator of a facilitator, I want the catalog to leave out loopback, private and IP
+resource URLs, so that the public catalog doesn't list entries no buyer can reach, while a
+payment for such a resource still settles.
+
+Spawned as "Decide whether pubnet refuses loopback, private and IP resource URLs"; the decision
+(decision 1) covers every network, so the title changed. The file and branch keep the
+`pubnet-resource-hosts` slug.
 
 ## Context
 
@@ -70,7 +82,8 @@ resource URL, on mainnet or testnet, and none lists an `mcp://` URL.
   ask for "a public HTTPS URL" and send testnet sellers to the same catalog. Whether a
   `localhost` URL fails CDP's settle or only its listing isn't documented. Its `network` filter
   is ignored.
-- **PayAI:** 23,836 entries, 9,519 testnet-only; 798 `http://` with public names.
+- **PayAI:** 23,836 entries, 9,519 testnet-only; 798 `http://` with public names on all
+  networks, 783 of them on mainnets.
 - **OpenX402:** 50 entries (0053 saw `localhost` ones; gone now).
 - **MCP registry:** refuses `localhost`, `127.0.0.1` and `*.localhost` remotes, requires https.
 - **Upstream x402:** no host rules on resource URLs.
@@ -90,14 +103,15 @@ resource URL, on mainnet or testnet, and none lists an `mcp://` URL.
   `!isForbiddenHost(hostname)`, the icon host rule, on the WHATWG-parsed canonical URL: every
   IPv4 spelling WHATWG folds into a dotted quad, bracketed IPv6, public IP literals, single-label
   names, encoded `localhost` and the private suffixes. `PRIVATE_SUFFIXES` gains `test`,
-  `example`, `alt` and `onion`, for icons too.
+  `example`, `alt` and `onion`, and after the review `home`, `corp` and `mail`, for icons too.
 - Still listed: public names over `https` or `http`, and names that resolve to loopback
   (`localtest.me`, `127.0.0.1.nip.io`): the catalog never resolves names (ADR 0008).
 - `apps/facilitator`: `CATALOG_LIST_LOCAL` (`true`/`false`, default `false`), refused outside
   testnet ("is only allowed on testnet"), into `Config.catalog.listLocal`, `compose()` and the
   cataloger's `listLocal`, which passes it to `validate`. README section "What gets listed".
-- No migration: `CATALOG_KEY_VERSION` stays 1. Entries a testnet catalog already holds stay until
-  0069's expiry or a cleanup; new ones are refused.
+- No migration and no cleanup: `CATALOG_KEY_VERSION` stays 1, and no durable catalog has been
+  deployed (0026 is in the backlog), so the first one starts under this rule (decision 13). A
+  local catalog written before keeps its old entries until `docker compose down -v`.
 - Tests: `packages/bazaar` 72 to 112. A 32-row table refused on testnet and pubnet with the
   header and listed with `listLocal`; 6 rows listed on both networks; `listLocal` still refusing
   a bad scheme, userinfo and a backslash; 0053's canonical-form cases run with `listLocal`; 4 icon
@@ -105,7 +119,10 @@ resource URL, on mainnet or testnet, and none lists an `mcp://` URL.
   entries, rejection metric, the `catalog_rejected` detail); 0053's upstream-defaults case with
   `listLocal`; a settle route case (pubnet localhost payment: 200, the settler's body, the
   rejected header from the real cataloger); config cases for the switch. Test fixtures move from
-  `seller.example` to `seller.example.com`, since `.example` is now refused.
+  `seller.example` to `seller.example.com`, since `.example` is now refused (after the review
+  also in `discovery.test.ts`, `port-contracts.ts` and `postgres.test.ts`, which skip the
+  validator). After the review: `.home`, `.corp` and `.mail` refused, and `mail.x.com`,
+  `home.x.com` and `nas.lan` listed; bazaar 118.
 - Mutants, each failing a case (GSD's run on the pubnet-only version, rerun for the switch): no
   switch check, the switch ignored, no scheme check, https only, no host check, `url.host` for
   `hostname`, no IPv4, single-label or suffix clause, suffixes without subdomains, no `onion`,
@@ -147,7 +164,7 @@ resource URL, on mainnet or testnet, and none lists an `mcp://` URL.
 
 7. **Plain `http` with a public name stays listable** (GSD's call, kept). A seller behind a TLS
    proxy without `trust proxy` sends `http://` (0053 decision 9), and PayAI lists 783 such
-   mainnet entries. CDP lists only https; parity can come with curation.
+   entries on mainnets (798 on all networks). CDP lists only https; parity can come with curation.
 8. **`mcp:` URLs are refused** (GSD's call, in line with the teammate's proposal; to confirm in
    review). `mcp://tool/<name>` names a tool, not a server a buyer can reach, and no public
    catalog lists one. An MCP seller sets a real https URL through `@x402/mcp`'s
@@ -161,3 +178,16 @@ resource URL, on mainnet or testnet, and none lists an `mcp://` URL.
     reason; GSD's had the route and cataloger tests and the AD-19 and notes updates, so it became
     the base, with decision 1 on top.
 12. **The IPv6 bracket clause stays although its mutant survives.**
+
+### From the review (PR #66, Oskar)
+
+13. **No one-off cleanup of entries listed under 0053** (decided by Adam). They can't refresh any
+    more, but no durable catalog was ever deployed (0026 is in the backlog), so only local
+    catalogs hold them; ADR 0008 and the README say the rule applies to writes from this version
+    on.
+14. **`.home`, `.corp` and `.mail` join the host rule; `.lan` doesn't** (decided by Adam). ICANN
+    decided in 2018 never to delegate the first three, so like `.internal` they can only be
+    internal names. `.lan` is a router default but not reserved.
+15. **The gate's Bazaar check moves to 0029.** 0028 is completed; 0029 decides whether the check
+    runs against a facilitator of its own with `CATALOG_LIST_LOCAL=true` or the hosted one with
+    the switch on.

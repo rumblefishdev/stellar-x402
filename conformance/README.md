@@ -75,4 +75,4 @@ One folder per run, `results/<date>-<facilitator host>/`, with two files:
 The suite's Bazaar check (`--extensions=bazaar`) is not run: it also calls `/discovery/search`,
 which comes after Tranche 1. It expects `http://localhost:<port>` and `mcp://tool/<name>` entries,
 which our catalog refuses unless the facilitator runs with `CATALOG_LIST_LOCAL=true` (testnet
-only, task 0054), so that check runs against such a facilitator, not the hosted one.
+only, task 0054), so that check runs against such a facilitator; task 0029 decides which one.
