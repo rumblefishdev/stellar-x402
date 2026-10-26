@@ -2,7 +2,7 @@
 id: "0050"
 title: "Prune old rate-limit windows and spend reservations"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0012"]
 related_tasks: ["0022", "0023", "0024"]
@@ -32,6 +32,13 @@ history:
       the pruner's window must be the longest budget window; the sum is called an index range
       scan, since it is index-only only on all-visible pages. After develop brought 0023: its
       rate-limit test stores get `prune`, and the pubnet refusal no longer names 0050.
+  - date: "2026-10-26"
+    status: completed
+    who: akot
+    note: >
+      PR #61 merged on 2026-10-26: 14 commits, 21 files. 0003_spend_window sums each spend window
+      from the scope rows by index; a pruner in every process deletes expired rate-limit rows and
+      reservations past max(2 x window, 7 days) in bounded batches.
 ---
 
 # Prune old rate-limit windows and spend reservations
