@@ -1,3 +1,4 @@
+import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import {
   extractDiscoveryInfo,
@@ -6,7 +7,12 @@ import {
 } from "@x402/extensions/bazaar";
 import { LIMITS, type BazaarRejectReason } from "./limits.js";
 import { isSchemaWithinLimits } from "./schema.js";
-import { canonicalizeUrl, matchRouteTemplate, sanitizeIconUrl } from "./url.js";
+import {
+  canonicalizeUrl,
+  isPublicResourceUrl,
+  matchRouteTemplate,
+  sanitizeIconUrl,
+} from "./url.js";
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
@@ -124,6 +130,12 @@ function run(
       ? canonicalizeUrl(resource.url, input.type === "mcp" ? "mcp" : "http")
       : undefined;
   if (!resourceUrl) return reject("invalid_resource_url");
+  // Only testnet lists local, private and IP hosts and `mcp:` URLs (local sellers, upstream's e2e
+  // suite); every other network, pubnet first, lists public names only (0054). The network is the
+  // verified one: the checker refuses requirements for a network this process doesn't serve.
+  if (requirements.network !== STELLAR_NETWORKS.testnet && !isPublicResourceUrl(resourceUrl)) {
+    return reject("invalid_resource_url", "not a public http(s) host, listed on testnet only");
+  }
 
   // 6. Content limits. The schema is data: walked for limits, never compiled.
   if (
