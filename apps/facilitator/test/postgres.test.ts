@@ -66,12 +66,18 @@ describe("PostgreSQL stores", () => {
   rateLimitStoreContract(async () => (await stores()).rateLimits);
   catalogStoreContract(async () => (await stores()).catalog);
 
-  /** Resolves the pid of a backend waiting on a lock, once one is. */
-  const lockWaiter = async (): Promise<number> => {
+  /**
+   * Resolves the pid of a backend waiting on a lock `holder` holds, once one is. Other test files
+   * share the database, so a lock wait of theirs doesn't count.
+   */
+  const lockWaiter = async (holder: pg.PoolClient): Promise<number> => {
+    const held = await holder.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
     for (;;) {
       const { rows } = await pool.query<{ pid: number }>(
         `SELECT pid FROM pg_stat_activity
-         WHERE datname = current_database() AND wait_event_type = 'Lock'`,
+         WHERE datname = current_database() AND wait_event_type = 'Lock'
+           AND $1 = ANY(pg_blocking_pids(pid))`,
+        [held.rows[0]!.pid],
       );
       if (rows[0]) return rows[0].pid;
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -98,7 +104,7 @@ describe("PostgreSQL stores", () => {
     await holding(async (client) => {
       await client.query("INSERT INTO settlement_hashes (hash, key) VALUES ('h1', $1)", [s1.key]);
       const adding = settlements.addHash(s2.key, "h1", 3_000);
-      await lockWaiter();
+      await lockWaiter(client);
       await client.query("COMMIT");
       await expect(adding).rejects.toBeInstanceOf(HashConflictError);
     });
@@ -115,7 +121,7 @@ describe("PostgreSQL stores", () => {
         [key],
       );
       const adding = settlements.addHash(key, "h1", 3_000);
-      await lockWaiter();
+      await lockWaiter(client);
       await client.query("COMMIT");
       expect(await adding).toBe(true);
     });
@@ -141,7 +147,7 @@ describe("PostgreSQL stores", () => {
         ledger: 1,
         updatedAt: 3_000,
       });
-      await lockWaiter();
+      await lockWaiter(client);
       await client.query("COMMIT");
       expect(await moving).toMatchObject({ state: "success", hashes: ["h1", "h2"] });
     });
@@ -157,7 +163,7 @@ describe("PostgreSQL stores", () => {
       await holding(async (client) => {
         await client.query("INSERT INTO spend_scopes (scope) VALUES ('global')");
         const reserving = spend.reserve({ id: "a", amount: 1n, limits, now: 0 });
-        await pool.query("SELECT pg_terminate_backend($1)", [await lockWaiter()]);
+        await pool.query("SELECT pg_terminate_backend($1)", [await lockWaiter(client)]);
         await expect(reserving).rejects.toThrow();
       });
       expect(await spend.reserve({ id: "b", amount: 1n, limits, now: 0 })).toEqual({
@@ -213,7 +219,7 @@ describe("PostgreSQL stores", () => {
         await client.query("SELECT scope FROM spend_scopes WHERE scope = 'global' FOR UPDATE");
         // More reservations than the main pool has connections, all waiting on the lock.
         queued = ["a", "b", "c"].map((id) => spend.reserve({ id, amount: 1n, limits, now: 0 }));
-        await lockWaiter();
+        await lockWaiter(client);
         const started = Date.now();
         expect((await settlements.claim(settlement("1"))).claimed).toBe(true);
         expect(Date.now() - started).toBeLessThan(1_000);
@@ -237,7 +243,7 @@ describe("PostgreSQL stores", () => {
         await client.query("SELECT key FROM rate_limits WHERE key = 'k' FOR UPDATE");
         // One client's flood: more hits on its key than the main pool has connections.
         queued = [0, 1, 2].map(() => rateLimits.hit("k", 60_000, 0));
-        await lockWaiter();
+        await lockWaiter(client);
         const started = Date.now();
         expect((await settlements.claim(settlement("1"))).claimed).toBe(true);
         expect(Date.now() - started).toBeLessThan(1_000);
