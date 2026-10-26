@@ -255,11 +255,11 @@ const envSchema = z
     message: "must be postgres outside testnet",
     path: ["STORE"],
   })
-  // `/settle` spends on pubnet, so not before spend budgets and the channel lease, nor while the
-  // store's tables grow without bound. The task that lands the last of them lifts this.
+  // `/settle` spends on pubnet, so not before spend budgets and the channel lease. The task that
+  // lands the last of them lifts this.
   .refine((env) => env.NETWORK !== STELLAR_NETWORKS.pubnet, {
     message:
-      "stellar:pubnet is refused until spend budgets (0024), the channel lease (0025) and store pruning (0050) land",
+      "stellar:pubnet is refused until spend budgets (0024) and the channel lease (0025) land",
     path: ["NETWORK"],
   })
   .refine((env) => env.DATABASE_URL !== undefined || env.STORE !== "postgres", {

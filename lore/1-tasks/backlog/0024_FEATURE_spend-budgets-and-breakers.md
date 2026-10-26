@@ -91,10 +91,10 @@ As a facilitator operator, I want fee spending capped and failing assets or reci
   parallel spend. Zero-amount transfers (`amount: "0"`) are the same class. Per-payer single-flight
   and balance reservation don't stop it; it needs per-`payTo` and global fee budgets.
 - From 0009 (PR #41, decision 49): the config refuses `NETWORK=stellar:pubnet` until spend
-  budgets (0024), rate limits (0023) and the channel lease (0025) land: the rule after the
-  `STORE` one in `config.ts`, with tests in `config.test.ts` and `main.test.ts`. Whichever of the
-  three lands last removes it; an earlier one narrows its message to what is still missing,
-  together with the facilitator README.
+  budgets (0024) and the channel lease (0025) land (rate limits, 0023, and store pruning, 0050,
+  already have): the rule after the `STORE` one in `config.ts`, with tests in `config.test.ts`
+  and `main.test.ts`. Whichever of the two lands last removes it; the other narrows its message
+  to what is still missing, together with the facilitator README.
 - From 0050 (Oskar's PR #61 review): **the pruner's `spendWindowMs` must be the longest budget
   window.** `main()` passes `config.spend.windowMs` to `createPruner`, which keeps reservations
   for `max(2 × window, 7 days)`; a budget summing a longer window would lose its oldest spend to

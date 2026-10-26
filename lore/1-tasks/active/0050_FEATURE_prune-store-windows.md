@@ -30,7 +30,8 @@ history:
       started or never closed and a wrong rate-limit window; the boot test pins both prunes to the
       main pool by checkouts; `store_prune_failed` logs the rows already deleted; 0024 notes that
       the pruner's window must be the longest budget window; the sum is called an index range
-      scan, since it is index-only only on all-visible pages.
+      scan, since it is index-only only on all-visible pages. After develop brought 0023: its
+      rate-limit test stores get `prune`, and the pubnet refusal no longer names 0050.
 ---
 
 # Prune old rate-limit windows and spend reservations
@@ -95,7 +96,8 @@ day (ADR 0011's mainnet sizing) a 1-day window alone holds about 10 000 reservat
   rate limits one window. Logs `store_pruned` (`complete: false` when the budget ran out) and
   `store_prune_failed` (with the rows earlier batches deleted), counts
   `store_prune_failures_total`.
-- ADR 0012 (throughput, the online-runner limit) and AD-18 (windows) updated.
+- ADR 0012 (throughput, the online-runner limit) and AD-18 (windows) updated. The pubnet refusal
+  (`config.ts`, from 0023) waits only for 0024 and 0025 now.
 - Tests: contract cases for both adapters (commit keeps the time, prune in both states and at
   the cutoff, rate-limit prune), PostgreSQL cases (backfill on a database with reservations, the
   sum not reading `spend_reservations`, prune skipping locked rows, both prunes on the main pool
