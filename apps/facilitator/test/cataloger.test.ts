@@ -1,12 +1,12 @@
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import { safeBase64Decode } from "@x402/core/utils";
-import { describe, expect, it, vi } from "vitest";
-import { MemoryCatalogStore } from "../src/adapters/memory.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createCataloger, type CatalogerDeps } from "../src/catalog/cataloger.js";
 import { encodeExtensionResponses } from "../src/http/extension-responses.js";
 import type { Logger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import type { SettlementRecord } from "../src/ports/index.js";
+import { testDatabase } from "./database.js";
 
 const requirements = {
   scheme: "exact",
@@ -43,8 +43,11 @@ function record(bazaar: unknown, overrides: Partial<SettlementRecord> = {}): Set
 
 const valid = { info: { input: { type: "http", method: "GET" } }, routeTemplate: "/users/:id" };
 
+const db = testDatabase();
+beforeEach(db.empty);
+
 function setup(deps: Partial<CatalogerDeps> = {}) {
-  const store = new MemoryCatalogStore();
+  const store = db.stores().catalog;
   const metrics = memoryMetrics();
   const logger: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
   const cataloger = createCataloger({ store, metrics, logger, ...deps });

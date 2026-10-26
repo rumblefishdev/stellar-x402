@@ -1,7 +1,6 @@
 import { Keypair } from "@stellar/stellar-sdk";
 import type { PaymentRequirements, VerifyResponse } from "@x402/core/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { memoryStores } from "../src/adapters/memory.js";
 import { MAX_BODY_DEPTH } from "../src/http/app.js";
 import { parseConfig } from "../src/config.js";
 import { supportedResponse } from "../src/http/supported.js";
@@ -9,6 +8,7 @@ import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import { start, type Started } from "../src/main.js";
 import type { Verify } from "../src/settlement/verify.js";
+import { testDatabase } from "./database.js";
 import { bazaarExtensions, depthOf } from "./payment.js";
 
 const requirements: PaymentRequirements = {
@@ -29,6 +29,7 @@ const paymentPayload = {
 const request = { x402Version: 2, paymentPayload, paymentRequirements: requirements };
 
 describe("POST /verify", () => {
+  const db = testDatabase();
   const lines: string[] = [];
   const verify = vi.fn<Verify>();
   let app: Started;
@@ -46,7 +47,7 @@ describe("POST /verify", () => {
       config,
       logger,
       metrics: memoryMetrics(),
-      stores: memoryStores(),
+      stores: db.stores(),
       verify,
       settle: async () => {
         throw new Error("not used");

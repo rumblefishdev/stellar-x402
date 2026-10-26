@@ -2,8 +2,7 @@ import { Keypair, StrKey, nativeToScVal, xdr, type rpc } from "@stellar/stellar-
 import type { SorobanRpc } from "@stellar-x402/signer-pool";
 import { FakeRpc } from "@stellar-x402/signer-pool/testing";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
-import { describe, expect, it, vi } from "vitest";
-import { MemorySettlementStore } from "../src/adapters/memory.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { parseConfig, type Env } from "../src/config.js";
 import { jsonLogger, rpcEndpointName } from "../src/logger.js";
 import {
@@ -16,6 +15,7 @@ import {
 import { memoryMetrics } from "../src/metrics.js";
 import { feeSettings } from "../src/settlement/fees.js";
 import { SETTLE_REASONS } from "../src/settlement/settle.js";
+import { testDatabase } from "./database.js";
 import { transferPayload } from "./payment.js";
 
 /**
@@ -89,6 +89,9 @@ function payload(expiration: number, extensions?: Record<string, unknown>): Paym
  * `rpc` gives the shared client's endpoints: each RPC URL is `fake` unless it returns another
  * client for that URL; `rpcTimeoutMs` is how long a call may take on one.
  */
+const db = testDatabase();
+beforeEach(db.empty);
+
 function setup(
   env: Partial<Env> = {},
   seams?: UpstreamSeams,
@@ -126,7 +129,7 @@ function setup(
     rpc: shared,
     fees,
     checks,
-    store: new MemorySettlementStore(),
+    store: db.stores().settlements,
     hooks: {
       beforeSubmit: async () => ({ allow: true }),
       onFinal: async () => {},
@@ -274,6 +277,7 @@ describe("main()'s composition (compose)", () => {
     } as unknown as NonNullable<FakeRpc["feeStats"]>;
     const { deps, cataloger, metrics } = compose(config, {
       logger: jsonLogger("error", () => {}),
+      stores: db.stores(),
       rpc: fake,
       seams: { makeScheme: () => ({ verify: async () => ({ isValid: true, payer }) }) },
       sleep: async () => {},

@@ -3,12 +3,13 @@ import { Keypair, StrKey } from "@stellar/stellar-sdk";
 import type { PaymentRequirements } from "@x402/core/types";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { createPool, postgresStores } from "../src/adapters/postgres.js";
+import { postgresStores } from "../src/adapters/postgres.js";
 import { MIGRATIONS, migrate } from "../src/adapters/postgres-schema.js";
 import { NON_FINAL_STATES } from "../src/adapters/rules.js";
 import { main, migrateMain } from "../src/main.js";
 import { HashConflictError, type Stores } from "../src/ports/index.js";
 import { fingerprintOf, keyOf } from "../src/settlement/settle.js";
+import { testDatabase } from "./database.js";
 import { transferPayload } from "./payment.js";
 import {
   catalogStoreContract,
@@ -47,53 +48,17 @@ const catalogEntry = () => ({
   },
 });
 
-/**
- * The contract suites against a real PostgreSQL, set by `TEST_DATABASE_URL`. Skipped only when
- * neither it nor `CI` is set. Each run gets its own schema, so runs never share tables.
- */
-describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL stores", () => {
-  const schema = `x402_test_${process.pid}`;
-  let pool: pg.Pool;
+/** The contract suites and the PostgreSQL-only cases (locks, pools, migrations). */
+describe("PostgreSQL stores", () => {
+  // More connections than the contracts' 10-way concurrent cases, so each runs on its own.
+  const db = testDatabase(20);
+  const { schema, pool, urlFor, poolFor } = db;
   let connections = 0;
-  let applied: string[];
-  let truncate: string;
-
-  /** The test database's URL, its connections using `searchPath` and any further `options`. */
-  const urlFor = (searchPath: string, options = "") => {
-    const base = process.env.TEST_DATABASE_URL;
-    if (!base) throw new Error("TEST_DATABASE_URL is required to run the PostgreSQL stores");
-    const url = new URL(base);
-    url.searchParams.set("options", `-c search_path=${searchPath} ${options}`.trim());
-    return url.toString();
-  };
-  /** A pool whose connections use `searchPath`. */
-  const poolFor = (searchPath: string, max: number, options?: string) =>
-    createPool(urlFor(searchPath, options), () => {}, max);
-
-  beforeAll(async () => {
-    // More connections than the contracts' 10-way concurrent cases, so each runs on its own.
-    pool = poolFor(schema, 20);
-    pool.on("connect", () => connections++);
-    await pool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
-    await pool.query(`CREATE SCHEMA ${schema}`);
-    applied = await migrate(pool);
-    const { rows } = await pool.query<{ tablename: string }>(
-      `SELECT tablename FROM pg_tables
-       WHERE schemaname = $1 AND tablename <> 'schema_migrations' ORDER BY tablename`,
-      [schema],
-    );
-    truncate = `TRUNCATE ${rows.map((row) => row.tablename).join(", ")} RESTART IDENTITY CASCADE`;
-  });
-
-  afterAll(async () => {
-    if (!pool) return;
-    await pool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
-    await pool.end();
-  });
+  pool.on("connect", () => connections++);
 
   const stores = async (): Promise<Stores> => {
-    await pool.query(truncate);
-    return postgresStores(pool);
+    await db.empty();
+    return db.stores();
   };
 
   settlementStoreContract(async () => (await stores()).settlements);
@@ -499,7 +464,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
   });
 
   it("applies every migration once, in order", async () => {
-    expect(applied).toEqual(MIGRATIONS.map((migration) => migration.name));
+    expect(db.applied).toEqual(MIGRATIONS.map((migration) => migration.name));
     expect(await migrate(pool)).toEqual([]);
     const { rows } = await pool.query<{ indexdef: string }>(
       "SELECT indexdef FROM pg_indexes WHERE schemaname = $1 AND indexname = 'settlements_non_final'",

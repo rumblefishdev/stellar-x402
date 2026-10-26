@@ -1,7 +1,7 @@
 import { Keypair } from "@stellar/stellar-sdk";
 import type { PaymentRequirements } from "@x402/core/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryCatalogStore, memoryStores } from "../src/adapters/memory.js";
+import { MemoryCatalogStore } from "../src/adapters/memory.js";
 import { createCataloger } from "../src/catalog/cataloger.js";
 import { parseConfig } from "../src/config.js";
 import { supportedResponse } from "../src/http/supported.js";
@@ -12,6 +12,7 @@ import { memoryMetrics } from "../src/metrics.js";
 import type { SettlementRecord } from "../src/ports/index.js";
 import type { SettlementHooks } from "../src/settlement/hooks.js";
 import type { Settle } from "../src/settlement/settle.js";
+import { testDatabase } from "./database.js";
 import { bazaarExtensions, depthOf } from "./payment.js";
 
 const requirements: PaymentRequirements = {
@@ -39,6 +40,7 @@ const success = {
 const record = { key: "stellar:testnet:GPAYER:7" } as unknown as SettlementRecord;
 
 describe("POST /settle", () => {
+  const db = testDatabase();
   const lines: string[] = [];
   const settle = vi.fn<Settle>();
   const extensionResponses = vi.fn<SettlementHooks["extensionResponses"]>();
@@ -57,7 +59,7 @@ describe("POST /settle", () => {
       config,
       logger,
       metrics: memoryMetrics(),
-      stores: memoryStores(),
+      stores: db.stores(),
       verify: async () => ({ isValid: true }),
       settle,
       extensionResponses,

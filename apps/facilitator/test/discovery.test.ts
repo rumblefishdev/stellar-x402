@@ -4,7 +4,6 @@ import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import { HTTPFacilitatorClient } from "@x402/core/server";
 import { withBazaar, type DiscoveryResourcesResponse } from "@x402/extensions/bazaar";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { memoryStores } from "../src/adapters/memory.js";
 import { parseConfig } from "../src/config.js";
 import { DISCOVERY_LIMIT, MAX_OFFSET, parseDiscoveryQuery } from "../src/http/discovery.js";
 import { supportedResponse } from "../src/http/supported.js";
@@ -14,6 +13,7 @@ import { memoryMetrics } from "../src/metrics.js";
 import type { Stores } from "../src/ports/index.js";
 import type { Settle } from "../src/settlement/settle.js";
 import type { Verify } from "../src/settlement/verify.js";
+import { testDatabase } from "./database.js";
 
 /** The network `parseConfig` defaults to, and so the one the route below serves. */
 const SERVED = STELLAR_NETWORKS.testnet;
@@ -156,6 +156,7 @@ const matching = (match: (i: number) => boolean) =>
   Array.from({ length: N }, (_, i) => i).filter(match).length;
 
 describe("GET /discovery/resources", () => {
+  const db = testDatabase();
   const lines: string[] = [];
   const metrics = memoryMetrics();
   let stores: Stores;
@@ -172,7 +173,7 @@ describe("GET /discovery/resources", () => {
     };
     const config = { ...parseConfig(env), port: 0 };
     const logger = jsonLogger("debug", (line) => lines.push(line));
-    stores = memoryStores();
+    stores = db.stores();
     await seed(stores);
     app = await start({
       config,
