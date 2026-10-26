@@ -2,7 +2,7 @@
 id: "0021"
 title: "Testnet token matrix"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0007"]
 related_tasks: ["0012", "0009", "0018", "0004", "0066"]
@@ -19,6 +19,14 @@ history:
     status: active
     who: okarcz
     note: "Work starts."
+  - date: "2026-10-26"
+    status: completed
+    who: okarcz
+    note: >
+      PR #63 merged. USDC, a self-issued SAC and the non-SAC test token each verified and settled
+      through the facilitator on testnet, the facilitator paying every fee; 4 of 6 concurrent
+      payments landed in one ledger through 4 channels. The test token now publishes SEP-41
+      events (redeployed at CBFIYRHJ…GV53). Follow-up: 0066.
 ---
 
 # Testnet token matrix
