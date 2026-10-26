@@ -116,10 +116,10 @@ As a facilitator operator, I want only one process at a time to settle through a
 
 - [x] Given a process starting, when it boots, then it takes an exclusive lease on its network's channel set through the store and keeps renewing it; without the lease it doesn't serve `/settle`
 - [x] Given a second process for the same channel set, when it starts, then it can't take the lease and submits nothing
-- [ ] Given a shutdown signal, when the process stops, then it refuses new `/settle` calls, waits until every in-flight submission is final or recorded as pending, then releases the lease
+- [x] Given a shutdown signal, when the process stops, then it refuses new `/settle` calls, waits until every in-flight submission is final or recorded as pending, then releases the lease
 - [x] Given a process that dies without releasing, when the lease TTL passes, then a new process can take the lease
 - [x] Given a process without the lease, when `/settle` is called, then it answers 503 at once, and the process keeps trying to take the lease without exiting (ADR 0011)
-- [ ] Given a shutdown signal with calls still waiting for a channel, when the process drains, then those calls are refused unsent and the drain finishes within the 180 s stop grace period (ADR 0011)
+- [x] Given a shutdown signal with calls still waiting for a channel, when the process drains, then those calls are refused unsent and the drain finishes within the 180 s stop grace period (ADR 0011)
 
 ## Implementation Notes
 
@@ -143,6 +143,30 @@ As a facilitator operator, I want only one process at a time to settle through a
   `postgres.test.ts`, the second taking over once the first stops. Facilitator 535 → 549 with
   PostgreSQL. Mutants caught: `held()` always true, no local expiry, store errors ignored, a TTL/2
   interval.
+- **Shutdown, signer-pool** (`submitter.ts`, `channel-pool.ts`): `SettlementSubmitter.close()` and
+  `ShutdownError`. The pool refuses its waiters and every later `acquire()`; a call prepared ahead
+  stops waiting behind the pending transaction, a sequence read stops retrying, and the check
+  right before `onSigned` stops anything else, a `txBadSeq` rebuild included. Calls past `onSigned`
+  run on. `close()` resolves once every `submit()` under way has returned. Refusals count as
+  `refused.shutdown`.
+- **Shutdown, facilitator:** `settle_exact_stellar_shutting_down` for a `ShutdownError` (the record
+  closes `rejected`, `onFinal` runs); the settler's `drain()` waits for every submission and its
+  record write, those past the budget answer included; `buildSettlement`'s `drain` closes the pool
+  first. The keeper's `release()` stops it and deletes the lease row. `start()`'s `close()`: sets
+  `closing` (`/settle` → `503 shutting_down`), stops the sweeps, drains, then closes the server and
+  releases; past `SHUTDOWN_DEADLINE_MS` (150 s) it closes the server, cuts open connections and
+  leaves the lease. Logs `shutdown_started`, `shutdown_drained`, `shutdown_deadline`,
+  `lease_released`.
+- **Shutdown tests:** `packages/signer-pool/test/shutdown.test.ts` (5: a queued call, one prepared
+  ahead, a read retry, a rebuild, a `submit()` after `close()`; the sent call runs on and
+  `close()` waits for it); the reason and the drain in `settle.test.ts`; a call refused during its
+  sequence read through the real pool in `settle-pool.test.ts`; the drain order and the deadline
+  in `settle-route.test.ts`; `release()` in `lease.test.ts`; the two-process PostgreSQL test now
+  takes over within one attempt. Signer-pool 146 → 151, facilitator 549 → 556 with PostgreSQL.
+  Mutants caught: no check before `onSigned`, a confirmation cut short by `close()`, queued
+  waiters kept, a read retry not stopped (the loop then spins until the worker runs out of
+  memory), no release after the drain, a release at the deadline, no shutdown reason, a no-op
+  settle drain, no `shutting_down` 503, the drain skipped.
 
 ## Design Decisions
 
@@ -162,6 +186,19 @@ As a facilitator operator, I want only one process at a time to settle through a
    acquire/renew loop and the flag, so the check costs no store call. The flag is at most one
    renew interval stale; a lease lost between the check and the send is the fencing-token
    question.
+8. **After SIGTERM `/settle` answers `503 shutting_down`** (okarcz, 2026-10-26): with `Retry-After`,
+   like `no_lease`, but its own code, so logs and 0027's alerts tell a deploy from a lost lease.
+9. **`close()` in signer-pool rejects every call that sent nothing** (okarcz, 2026-10-26): queued
+   for a channel, prepared ahead or reading a sequence, and takes no new ones. `/settle` closes
+   each record `rejected` with `settle_exact_stellar_shutting_down` and runs `onFinal`. A
+   per-call abort signal was the alternative.
+10. **The lease is renewed until the drain ends, then released** (okarcz, 2026-10-26): no other
+    process sends while this one's transactions are in flight, and the next takes over within one
+    attempt of the release.
+11. **A drain past the process's own deadline leaves the lease to expire** (okarcz, 2026-10-26):
+    before Docker's SIGKILL, the process force-closes open connections, ends the pools and exits
+    without releasing, so a transaction still unresolved gets the TTL before another process sends
+    on its channel. Releasing anyway was rejected.
 
 ### Emerged
 
@@ -175,3 +212,13 @@ As a facilitator operator, I want only one process at a time to settle through a
    a process that takes the lease at once also sweeps at once instead of 10 s later. The server
    already listens, so `/health` answers meanwhile. `reconciled` settles after a skipped first
    sweep too, so tests of a process without the lease don't hang.
+12. **The server listens until the drain ends** (claude, 2026-10-26): the checkpoint closed it
+   beside the drain, but a closed server refuses new connections, so a client would get a refused
+   connection (a 502 through the tunnel) instead of decision 8's `503 shutting_down`. It closes
+   after the drain, or at the deadline.
+13. **Only a call that sent nothing stops waiting on `close()`** (claude, 2026-10-26): the first
+   version made every ledger wait end on `close()`, which cut a sent call's confirmation short and
+   reported it `pending` at once; the shutdown tests caught it. `settlesBy` takes `untilClose`, set
+   only for a call prepared ahead.
+14. **No `/health` route yet** (claude, 2026-10-26): ADR 0011 names one, and the code has none; the
+    shutdown tests use `GET /supported` to show the server still answers during the drain.
