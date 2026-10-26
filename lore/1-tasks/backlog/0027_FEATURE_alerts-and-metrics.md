@@ -65,7 +65,7 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     the machine.
 - From 0039: alarms go through SNS and Amazon Q Developer in chat applications to the team's
   Slack channel. Besides the five AD-18 conditions:
-  - "ready to settle" (lease held, reconciliation done);
+  - "ready to settle" (lease held; since 0019 decision 27 reconciliation runs beside `/settle`);
   - from ADR 0013: OpenBao sealed, down or failing to sign; theft (below, from 0047); and
     OpenBao's audit log disk at 80%;
   - WAL archiving failing: `pg_stat_archiver.failed_count` rising, or the last archived segment
@@ -110,21 +110,18 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
   - `settlement_record_failures_total`: the store-outage alarm (0009 decision 30);
   - `pool_events_total{type}`, with `status` on `resolved`, for a "pending settlements" alarm;
   - from 0019: `settlement_reconciled_total{state}` (a record a sweep finished: `rejected`,
-    `success`, `failed`, `expired`), and the logs `reconcile_finished` (each sweep's counts,
-    `open` and `errors` among them), `reconcile_retry` (`/settle` still 503 at startup),
-    `settlement_reconcile_failed` and `settlement_resolve_failed`. A non-zero `open` that never
-    drops, or `reconcile_retry` past the alarm window, is the "not ready to settle" case above
-    (at startup), or a record no sweep can check (live).
+    `success`, `failed`, `expired`), and the logs `reconcile_finished` (the counts of a sweep that
+    changed or failed something, `open` and `errors` among them; sweeps run every 10 s),
+    `reconcile_failed` (a sweep that couldn't list the records), `settlement_reconcile_failed` and
+    `settlement_resolve_failed`. `errors` that never drop, or `reconcile_failed` past the alarm
+    window, is a record no sweep can check.
     Each hash's attempt state (`settlement_hashes.state`) can be queried for dead attempts and
     rebuilds. Also from 0019's code review:
     - `settlement_history_gone` / `settlement_history_gone_total`: a record whose hashes the RPC's
       history no longer reaches; it stays open until an operator checks it (0019 decision 22).
-      `reconcile_gave_up`: a live retry stopped after 5 sweeps (decision 24);
       `settlement_attempt_mark_failed`: a `sent` hint not written (warn, not an outage);
-    - `/health` answers OK while `/settle` answers 503 (`Reconciliation.ready()` is false), so a
-      load balancer can't tell; add readiness to `/health` or a gauge;
-    - the startup sweep has no overall time cap when the RPC fails for every record: N records
-      take about N × the RPC timeout ÷ 4 before `/settle` opens. Decide a cap from real backlog
+    - a sweep has no overall time cap when the RPC fails for every record: N records take about
+      N × the RPC timeout ÷ 4, and the next sweep waits for it. Decide a cap from real backlog
       sizes;
     - `open` in `reconcile_finished` also counts a record another writer finished during the
       sweep (its compare-and-set lost), so an `open` alarm should allow for that, or 0027 adds a
@@ -152,5 +149,5 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
 
 - [ ] Given the running facilitator, when it serves traffic, then pool `onEvent` events, per-route request counts and settle outcomes are exported as metrics
 - [ ] Given each alert condition: budget nearly used, breaker open, low facilitator balance (`checkFacilitatorBalance`), quarantined channel, pending settlements, when it occurs, then an alert fires on CloudWatch (ADR 0011); each alert has been triggered once on testnet or with a fake
-- [ ] Given a process that stays not ready to settle (no lease, or reconciliation unfinished) longer than the alarm window, when the alarm evaluates, then it fires (ADR 0011)
+- [ ] Given a process that stays not ready to settle (no lease) longer than the alarm window, when the alarm evaluates, then it fires (ADR 0011)
 - [ ] Given `docs/monitoring.md`, when this story is done, then it lists every metric and alert

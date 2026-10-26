@@ -396,7 +396,7 @@ So that a crash or restart never loses a payment that may still land and never c
 
 **Given** non-final records in the store  
 **When** the app starts  
-**Then** before accepting traffic it checks each one on chain by its hashes and finalizes it  
+**Then** it checks each one on chain by its hashes and finalizes it, from startup and on a short loop beside `/settle`  
 **And** a record that turns `success` this way fires the on-success hook
 
 **Given** any handler or event listener  
