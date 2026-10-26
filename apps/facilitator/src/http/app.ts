@@ -9,6 +9,7 @@ import type { SettlementHooks } from "../settlement/hooks.js";
 import type { Settle } from "../settlement/settle.js";
 import type { Verify, VerifyTrace } from "../settlement/verify.js";
 import { EXTENSION_RESPONSES_HEADER, encodeExtensionResponses } from "./extension-responses.js";
+import { rateLimit } from "./rate-limit.js";
 
 /** What the composition root hands to the HTTP adapter. Lanes add their services here. */
 export interface AppDeps {
@@ -39,14 +40,28 @@ const notImplemented: RequestHandler = (_req, res) => {
  */
 export const MAX_BODY_DEPTH = 256;
 
-/** Whether `value` nests deeper than `max` arrays and objects, counted without recursion. */
-function nestsDeeper(value: unknown, max: number): boolean {
+/**
+ * A NUL, or a lone UTF-16 surrogate (`\p{Cs}` matches only an unpaired one under the `u` flag).
+ * PostgreSQL refuses a NUL in `text` and `jsonb`, and `jsonb` a lone surrogate, so either would
+ * fail the settlement's store write with a 500.
+ */
+const UNSTORABLE_TEXT = /[\0\p{Cs}]/u;
+
+/**
+ * Whether `value` nests deeper than `max` arrays and objects, or holds a string or key matching
+ * {@link UNSTORABLE_TEXT}; walked without recursion.
+ */
+function refusedBody(value: unknown, max: number): boolean {
   const stack: [unknown, number][] = [[value, 0]];
   while (stack.length > 0) {
     const [item, depth] = stack.pop()!;
+    if (typeof item === "string" && UNSTORABLE_TEXT.test(item)) return true;
     if (item === null || typeof item !== "object") continue;
     if (depth >= max) return true;
-    for (const child of Object.values(item)) stack.push([child, depth + 1]);
+    for (const [key, child] of Object.entries(item)) {
+      if (UNSTORABLE_TEXT.test(key)) return true;
+      stack.push([child, depth + 1]);
+    }
   }
   return false;
 }
@@ -57,11 +72,12 @@ function nestsDeeper(value: unknown, max: number): boolean {
  *
  * The schema takes any non-empty `amount`, and upstream's `BigInt(amount)` throws on anything but
  * an integer, which it reports as `unexpected_verify_error`: our 500. So `amount` must be digits.
- * A body nested deeper than {@link MAX_BODY_DEPTH} is a 400 too, before anything recurses on it.
+ * A body nested deeper than {@link MAX_BODY_DEPTH} is a 400 too, before anything recurses on it,
+ * and so is a NUL or a lone surrogate anywhere in it.
  */
 export function parsePaymentRequest(body: unknown): VerifyRequest | undefined {
   if (typeof body !== "object" || body === null) return undefined;
-  if (nestsDeeper(body, MAX_BODY_DEPTH)) return undefined;
+  if (refusedBody(body, MAX_BODY_DEPTH)) return undefined;
   const { x402Version, paymentPayload, paymentRequirements } = body as Record<string, unknown>;
   const requirements = PaymentRequirementsV2Schema.safeParse(paymentRequirements);
   const valid =
@@ -74,12 +90,14 @@ export function parsePaymentRequest(body: unknown): VerifyRequest | undefined {
 
 /**
  * The inbound HTTP adapter (AD-13). `/discovery/resources` answers 501 until its task lands
- * (0032). There is a body size limit and
- * no CORS anywhere (spine "HTTP hardening"); rate limits come in 0023.
+ * (0032). There is a body size limit and no CORS anywhere (spine "HTTP hardening"). `/verify`,
+ * `/settle` and `/discovery/*` each have a rate limit (AD-11), applied before the body is read, so
+ * a malformed or oversized request counts too; `/supported` has none.
  */
 export function createApp({
   config,
   logger,
+  stores,
   verify,
   settle,
   extensionResponses,
@@ -87,10 +105,19 @@ export function createApp({
 }: AppDeps): Express {
   const app = express();
   app.disable("x-powered-by");
-  app.use(express.json({ limit: config.http.bodyLimitBytes }));
+  const limit = (route: string, budget: number) =>
+    rateLimit({
+      route,
+      limit: budget,
+      windowMs: config.http.rateLimit.windowMs,
+      clientIp: config.http.clientIp,
+      store: stores.rateLimits,
+      logger,
+    });
+  const json = express.json({ limit: config.http.bodyLimitBytes });
 
   // A verify outcome, valid or not, is a 200 with an x402 body; a thrown error is a 500.
-  app.post("/verify", async (req, res) => {
+  app.post("/verify", limit("verify", config.http.rateLimit.verify), json, async (req, res) => {
     const request = parsePaymentRequest(req.body);
     if (!request) {
       res.status(400).json({ error: code(400) });
@@ -112,7 +139,7 @@ export function createApp({
   });
   // Like `/verify`: any settle outcome is a 200 with an x402 body (AD-6). A thrown error, such as
   // upstream verify failing or the store down before the claim, is a 500.
-  app.post("/settle", async (req, res) => {
+  app.post("/settle", limit("settle", config.http.rateLimit.settle), json, async (req, res) => {
     const request = parsePaymentRequest(req.body);
     if (!request) {
       res.status(400).json({ error: code(400) });
@@ -157,6 +184,7 @@ export function createApp({
   app.get("/supported", (_req, res) => {
     res.json(supported);
   });
+  app.use("/discovery", limit("discovery", config.http.rateLimit.discovery));
   app.get("/discovery/resources", notImplemented);
 
   app.use((_req, res) => {

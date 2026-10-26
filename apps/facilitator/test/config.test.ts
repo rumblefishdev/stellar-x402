@@ -13,15 +13,19 @@ const SECRET = keypair(1).secret();
 const CHANNEL_A = keypair(2).publicKey();
 const CHANNEL_B = keypair(3).publicKey();
 
-const minimal = { FACILITATOR_SECRET: SECRET, CHANNELS: `${CHANNEL_A}, ${CHANNEL_B}` };
-/** Pubnet needs the PostgreSQL store, and is refused until 0023, 0024 and 0025 land. */
+const minimal = {
+  FACILITATOR_SECRET: SECRET,
+  CHANNELS: `${CHANNEL_A}, ${CHANNEL_B}`,
+  CLIENT_IP: "socket",
+};
+/** Pubnet needs the PostgreSQL store, and is refused until 0024, 0025 and 0050 land. */
 const pubnet = {
   NETWORK: "stellar:pubnet",
   STORE: "postgres",
   DATABASE_URL: "postgres://db.internal/x402",
 };
 const PUBNET_REFUSED =
-  "NETWORK stellar:pubnet is refused until spend budgets (0024), rate limits (0023) and the channel lease (0025) land";
+  "NETWORK stellar:pubnet is refused until spend budgets (0024), the channel lease (0025) and store pruning (0050) land";
 
 function problems(env: Record<string, string | undefined>): string[] {
   try {
@@ -52,8 +56,8 @@ describe("parseConfig", () => {
       },
       http: {
         bodyLimitBytes: 65_536,
-        trustedProxyHops: 0,
-        rateLimit: { windowMs: 60_000, verify: 120, settle: 60, discovery: 120 },
+        clientIp: "socket",
+        rateLimit: { windowMs: 60_000, verify: 600, settle: 600, discovery: 120 },
       },
       spend: {
         windowMs: 86_400_000,
@@ -88,10 +92,10 @@ describe("parseConfig", () => {
       SETTLE_BUDGET_MS: "60000",
       LEASE_TTL_MS: "32000",
       BODY_LIMIT_BYTES: "70000",
-      TRUSTED_PROXY_HOPS: "2",
+      CLIENT_IP: "cloudflare",
       RATE_LIMIT_WINDOW_MS: "61000",
       RATE_LIMIT_VERIFY: "121",
-      RATE_LIMIT_SETTLE: "62",
+      RATE_LIMIT_SETTLE: "122",
       RATE_LIMIT_DISCOVERY: "123",
       SPEND_WINDOW_MS: "3600000",
       SPEND_GLOBAL_STROOPS: "11",
@@ -123,8 +127,8 @@ describe("parseConfig", () => {
       },
       http: {
         bodyLimitBytes: 70_000,
-        trustedProxyHops: 2,
-        rateLimit: { windowMs: 61_000, verify: 121, settle: 62, discovery: 123 },
+        clientIp: "cloudflare",
+        rateLimit: { windowMs: 61_000, verify: 121, settle: 122, discovery: 123 },
       },
       spend: {
         windowMs: 3_600_000,
@@ -142,16 +146,22 @@ describe("parseConfig", () => {
     const config = parseConfig({
       FACILITATOR_SECRET: `${SECRET}\n`,
       CHANNELS: ` ${CHANNEL_A} `,
+      CLIENT_IP: " socket ",
       RPC_URLS: "",
       PORT: " ",
     });
     expect(config.facilitatorSecret).toBe(SECRET);
     expect(config.channels).toEqual([CHANNEL_A]);
+    expect(config.http.clientIp).toBe("socket");
     expect(config.port).toBe(4021);
   });
 
   it("names missing required values", () => {
-    expect(problems({})).toEqual(["FACILITATOR_SECRET is required", "CHANNELS is required"]);
+    expect(problems({})).toEqual([
+      "FACILITATOR_SECRET is required",
+      "CHANNELS is required",
+      "CLIENT_IP is required",
+    ]);
   });
 
   it("names invalid values without echoing them", () => {
@@ -256,6 +266,37 @@ describe("parseConfig", () => {
     ).toMatchObject({ maxFeeStroops: 201n, inclusionFeeStroops: 100n });
   });
 
+  it("keeps the /settle budget at or above /verify's: the seller calls both, settle after serving", () => {
+    expect(problems({ ...minimal, RATE_LIMIT_VERIFY: "100", RATE_LIMIT_SETTLE: "99" })).toEqual([
+      "RATE_LIMIT_SETTLE must be at least RATE_LIMIT_VERIFY",
+    ]);
+    expect(problems({ ...minimal, RATE_LIMIT_VERIFY: "700" })).toEqual([
+      "RATE_LIMIT_SETTLE must be at least RATE_LIMIT_VERIFY",
+    ]);
+    expect(
+      parseConfig({ ...minimal, RATE_LIMIT_VERIFY: "100", RATE_LIMIT_SETTLE: "100" }).http
+        .rateLimit,
+    ).toMatchObject({ verify: 100, settle: 100 });
+  });
+
+  it("requires CLIENT_IP: cloudflare behind the tunnel, socket with no proxy in front", () => {
+    // Forgotten behind a proxy, every client would share the proxy's address and one budget.
+    expect(problems({ ...minimal, CLIENT_IP: undefined })).toEqual(["CLIENT_IP is required"]);
+    for (const value of ["cf-connecting-ip", "x-forwarded-for", "Cloudflare"]) {
+      expect(problems({ ...minimal, CLIENT_IP: value })).toEqual([
+        "CLIENT_IP must be one of cloudflare, socket",
+      ]);
+    }
+    expect(parseConfig({ ...minimal, CLIENT_IP: "cloudflare" }).http.clientIp).toBe("cloudflare");
+  });
+
+  it("refuses a leftover TRUSTED_PROXY_HOPS", () => {
+    // Left set, it would look like the client IP still came from X-Forwarded-For.
+    expect(problems({ ...minimal, TRUSTED_PROXY_HOPS: "1" })).toEqual([
+      "TRUSTED_PROXY_HOPS is replaced by CLIENT_IP",
+    ]);
+  });
+
   it("ignores a leftover CATALOG_ALLOW_HTTP: every network catalogs http now (0053)", () => {
     expect(parseConfig({ ...minimal, CATALOG_ALLOW_HTTP: "true" })).toEqual(parseConfig(minimal));
     expect(
@@ -307,7 +348,7 @@ describe("parseConfig", () => {
     ]);
   });
 
-  it("refuses stellar:pubnet with nothing else wrong, until 0023, 0024 and 0025 land", () => {
+  it("refuses stellar:pubnet with nothing else wrong, until 0024, 0025 and 0050 land", () => {
     // `/settle` would spend there with allow-all spend hooks, no rate limit and no lease.
     expect(problems({ ...minimal, ...pubnet, RPC_URLS: "https://rpc.example" })).toEqual([
       PUBNET_REFUSED,
