@@ -166,6 +166,7 @@ describe("GET /discovery/resources", () => {
   beforeAll(async () => {
     const env = {
       FACILITATOR_SECRET: Keypair.random().secret(),
+      DATABASE_URL: db.urlFor(db.schema),
       CHANNELS: Keypair.random().publicKey(),
       CLIENT_IP: "socket",
       // Every case calls from one address; rate-limit.test.ts covers the route's limit.

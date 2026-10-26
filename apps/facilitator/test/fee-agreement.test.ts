@@ -123,6 +123,7 @@ const poolRpc = {
 describe("the fee ceiling at /verify and in the pool (AD-10)", () => {
   const config = parseConfig({
     FACILITATOR_SECRET: facilitator.secret(),
+    DATABASE_URL: "postgres://db.internal/x402",
     CLIENT_IP: "socket",
     CHANNELS: channel,
     RPC_URLS: "http://127.0.0.1:1",
@@ -192,6 +193,7 @@ describe("real upstream with a down first RPC URL (AD-3)", () => {
   it("answers from the second URL, and leaves the shared client on the first (decision 22)", async () => {
     const config = parseConfig({
       FACILITATOR_SECRET: facilitator.secret(),
+      DATABASE_URL: "postgres://db.internal/x402",
       CLIENT_IP: "socket",
       CHANNELS: channel,
       // Nothing listens on port 1: upstream's simulation gets a refused connection.

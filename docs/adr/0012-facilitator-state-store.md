@@ -5,7 +5,7 @@
   measures; hosting note; task 0039: PostgreSQL in a container on the Hetzner server) and
   2026-10-21 (task 0039: how backups leave the server, the migration service and its bounds) and
   2026-10-22 (task 0039: pgBackRest; migrations before the old facilitator stops) and 2026-10-26
-  (task 0032: a pool for listings)
+  (task 0032: a pool for listings; task 0064: no memory store, tests run on PostgreSQL)
 
 ## Context
 
@@ -18,7 +18,7 @@ All facilitator state goes through four ports that `apps/facilitator` owns (AD-7
 | `RateLimitStore`  | fixed-window counters (AD-11)                                 |
 | `SpendStore`      | fee budgets and breakers (AD-18)                              |
 
-`test/port-contracts.ts` checks every adapter against the same suites, including concurrent claims,
+`test/port-contracts.ts` checks the adapters against the same suites, including concurrent claims,
 transitions and reservations. `addHash` is awaited before every send, so its write latency adds to
 each settlement.
 
@@ -65,7 +65,9 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
   - The database password is an encrypted systemd credential, mounted as a Compose `file:`
     secret; the app reads its URL from a file (`DATABASE_URL_FILE`, 0026), never from
     `environment:`.
-  - `STORE=memory|postgres` picks the adapters in the composition root.
+  - Every store is PostgreSQL, in tests and local runs too: a second, in-memory implementation
+    passed what PostgreSQL refused (a NUL in a `/settle` body, 0009). Each test file takes its
+    own schema in the repo's compose database or `TEST_DATABASE_URL` (task 0064).
 - **Schema.**
   - Plain SQL migrations, applied by one command, under a transaction-level advisory lock with a
     `lock_timeout`.
