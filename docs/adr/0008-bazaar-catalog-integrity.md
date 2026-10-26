@@ -1,8 +1,8 @@
 # ADR 0008: Bazaar foundation: catalog after settle, validated and SSRF-safe
 
 - Status: accepted
-- Date: 2026-10-07, amended 2026-10-20 (task 0032: the `scheme` filter) and 2026-10-22 (task 0053:
-  resource URLs and empty fields)
+- Date: 2026-10-07, amended 2026-10-20 (task 0032: the `scheme` filter), 2026-10-22 (task 0053:
+  resource URLs and empty fields) and 2026-10-26 (task 0054: pubnet resource hosts)
 
 ## Context
 
@@ -36,14 +36,23 @@ settlement.
   - An empty `description` or `mimeType` counts as absent: upstream's resource server sends both
     as `|| ""` when a route sets none (task 0053).
 - **SSRF safety.**
-  - `iconUrl` must be absolute https, with no IP literals and no loopback or private hosts.
+  - `iconUrl` must be absolute https, with no IP literals and no loopback, private or special-use
+    hosts.
   - The facilitator never fetches any seller-supplied URL in Tranche 1.
   - Resource URLs carry a scheme allowlist by listing type (task 0053): an `http` listing takes
-    `https` and `http`, an `mcp` listing also `mcp` (`@x402/mcp`'s `mcp://tool/<name>`). `http(s)`
-    hosts carry no host rules: loopback, private and IP hosts are cataloged as sent. An `mcp:` host
-    must be a DNS-style name (letters, digits, hyphens; labels up to 63 characters, the host up to
-    253), so `mcp://127.0.0.1/x` passes and `mcp://[::1]/x`, `mcp://my_srv/x` and non-ASCII hosts
-    don't. A host ending in a dot is refused on every scheme.
+    `https` and `http`, an `mcp` listing also `mcp` (`@x402/mcp`'s `mcp://tool/<name>`). An `mcp:`
+    host must be a DNS-style name (letters, digits, hyphens; labels up to 63 characters, the host
+    up to 253), so `mcp://127.0.0.1/x` passes and `mcp://[::1]/x`, `mcp://my_srv/x` and non-ASCII
+    hosts don't. A host ending in a dot is refused on every scheme.
+  - On testnet, `http(s)` hosts carry no host rules: loopback, private and IP hosts are cataloged
+    as sent, and so are `mcp:` URLs.
+  - On pubnet, and on any network other than testnet, a resource URL must be `http(s)` with a
+    public host (task 0054). Refused as `invalid_resource_url`: IP literals (public ones too, in
+    every spelling WHATWG folds into one), loopback, private and special-use names (`localhost`,
+    `localdomain`, `local`, `internal`, `home.arpa`, `invalid`, `test`, `example`, `alt`,
+    `onion` and their subdomains), single-label names, and `mcp:` URLs. It is the `iconUrl` host
+    rule, run on the canonical URL. `http` with a public name stays listable. The payment settles
+    as usual: only the listing is dropped, and the seller sees `rejected` in the header.
 - **Catalog key.**
   - The key is `network + payTo + method + normalized resource URL` (with `routeTemplate`
     applied). An `mcp:` URL is normalized by hand: lowercased host, `/` for an empty path, no
@@ -75,6 +84,26 @@ settlement.
   upstream servers send by default (`http://localhost:<port>`, the e2e suite, local sellers). The
   scheme allowlist stays, since a catalog rendered as links would run `javascript:`. `iconUrl`
   keeps its host rules: a browser fetches an icon as soon as the catalog is shown.
+- **Pubnet lists only what a buyer can reach** (task 0054). This is listing quality, not SSRF: a
+  public name that resolves to `127.0.0.1` is still listed, and its fetcher checks the address.
+  - A loopback, private or IP resource URL names a machine no buyer can reach, or one that differs
+    per buyer, and an `mcp://tool/<name>` URL names a tool, not a server. On the public pubnet
+    catalog such entries are noise, and they publish internal host names.
+  - No public catalog lists one. Measured 2026-10-26 across about 98,800 entries: CDP, PayAI and
+    OpenX402 list none on mainnet or testnet, and no `mcp://` URL either. CDP asks sellers for "a
+    public HTTPS URL". The MCP registry refuses `localhost`, `127.0.0.1` and `*.localhost`
+    remotes.
+  - Testnet keeps them, on purpose: upstream's e2e suite expects `http://localhost:<port>` and
+    `mcp://tool/<name>`, and local sellers send them.
+  - The network comes from the verified `paymentRequirements`: the checker refuses a network this
+    process doesn't serve before anything is claimed, so a client can't pick testnet to get
+    around the rule. Testnet is the named exception, so a network added later gets the strict
+    rule.
+  - The rule sits in the pure validator, which both the header and the store write call, so the
+    two agree. The reason is the existing `invalid_resource_url`. A log-only detail tells it apart
+    from a malformed URL.
+  - Plain `http` with a public name is still listed on pubnet: a seller behind a TLS proxy without
+    `trust proxy` sends it (task 0053), and PayAI lists such entries.
 - **Validation before, storage after.** Reporting the validation result costs microseconds and
   can't fail a payment. Waiting for the store write could.
 
@@ -94,10 +123,14 @@ settlement.
 - The same holds for an existing listing: a newer settlement to the same `payTo` and resource
   URL replaces its text and same-asset price, whoever paid. Accepted on testnet; task 0063
   decides it before pubnet.
-- Loopback and private resource URLs can be listed on any network, including the entries gate
-  runs leave. Whether
-  pubnet should refuse them as a listing-quality rule, as the MCP registry does, is decided before
-  mainnet (task 0053, Future Work).
+- Loopback, private and IP resource URLs are listed on testnet, including the entries gate runs
+  leave. Pubnet refuses them (task 0054).
+- A seller testing a localhost route against a pubnet facilitator pays as usual and gets
+  `rejected` / `invalid_resource_url` in `EXTENSION-RESPONSES`; the buyer sees nothing of it.
+- An MCP seller on pubnet must set a real https URL (`@x402/mcp`'s `config.resource.url`) to be
+  listed: the default `mcp://tool/<name>` is refused there.
+- A name that resolves to loopback (`localtest.me`, `*.nip.io`) is still listed on pubnet. The
+  catalog never resolves names; a client that calls the URL checks the address.
 - A client that calls catalog URLs must check the address it connects to.
 - The store (task 0013) must enforce the catalog key and support the `resources` filters.
 - The e2e gate routes carry the `bazaar` extension, so a gate run also exercises cataloging.

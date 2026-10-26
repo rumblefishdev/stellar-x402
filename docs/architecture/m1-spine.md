@@ -308,8 +308,8 @@ graph TD
     - Types come from `@x402/extensions` (bazaar). `packages/bazaar` holds only a pure validator and normalizer.
     - The validator accepts both `http` and `mcp` input types.
     - Required fields that are malformed reject the listing. Optional fields that are malformed (`serviceName`, `tags`, `iconUrl`) are dropped.
-  - **`iconUrl`.** It must be absolute https, with no IP literals and no loopback or private hosts. The facilitator never fetches any seller-supplied URL in T1.
-  - **Resource URLs.** A scheme allowlist by listing type (`http`: `https`, `http`; `mcp`: also `mcp`), no host rules on `http(s)` hosts, and a DNS-style name for an `mcp:` host; SSRF is checked by whoever fetches them (task 0053, ADR 0008). An empty `description` or `mimeType` counts as absent.
+  - **`iconUrl`.** It must be absolute https, with no IP literals and no loopback, private or special-use hosts. The facilitator never fetches any seller-supplied URL in T1.
+  - **Resource URLs.** A scheme allowlist by listing type (`http`: `https`, `http`; `mcp`: also `mcp`) and a DNS-style name for an `mcp:` host; SSRF is checked by whoever fetches them (task 0053, ADR 0008). On testnet, no host rules on `http(s)` hosts. On pubnet and any other network, only `http(s)` with a public host: IP literals, loopback, private, special-use and single-label hosts and `mcp:` URLs are refused as `invalid_resource_url`, and the payment settles as usual (task 0054). An empty `description` or `mimeType` counts as absent.
   - **Catalog key.** It is `network + payTo + method + normalized resource URL` (with `routeTemplate` applied).
   - **Upserts.** They are idempotent and update `lastUpdated`.
 
