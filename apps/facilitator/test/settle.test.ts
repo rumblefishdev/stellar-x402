@@ -900,6 +900,7 @@ describe("createSettler", () => {
           key,
           "signed",
           expect.objectContaining({ state: "success" }),
+          undefined,
         ),
       );
       // The record turns `success` later (0019, or a write whose client timed out).

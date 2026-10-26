@@ -277,17 +277,29 @@ describe("createReconciler", () => {
       expect(await reconciler.sweep("startup")).toMatchObject({ expired: 1 });
     });
 
-    it("doesn't expire a record in a live sweep while its call may still store a hash (decision 23)", async () => {
-      const { store, reconciler, advance } = setup({ [A]: missing(4_010) });
-      const key = await signed(store, [A]);
-      advance(BUDGET_MS + 5_000);
-      expect(await reconciler.sweep("live")).toMatchObject({ open: 1 });
-      expect((await store.get(key))?.state).toBe("signed");
-      // The dead hash is written anyway.
-      expect((await store.attempts(key))[0]?.state).toBe("dead");
-      advance(1);
-      expect(await reconciler.sweep("live")).toMatchObject({ expired: 1 });
-    });
+    it.each(["live", "startup"] as const)(
+      "doesn't expire a record when a rebuild stores a hash during the %s sweep (decision 26)",
+      async (mode) => {
+        const answers: Record<string, rpc.Api.GetTransactionResponse> = {
+          [A]: missing(4_010),
+          [B]: landed("SUCCESS"),
+        };
+        const { store, reconciler, getTransaction, advance } = setup(answers);
+        const key = await signed(store, [A]);
+        // Past the budget, so no time rule holds the write back: only the version does.
+        advance(BUDGET_MS + 60_000);
+        // The call's `txBadSeq` rebuild is stored while the sweep waits for the RPC.
+        getTransaction.mockImplementationOnce(async () => {
+          await store.addHash(key, B, NOW, { maxTime: NOW / 1000 + 60 });
+          return answers[A]!;
+        });
+        expect(await reconciler.sweep(mode)).toMatchObject({ open: 1, expired: 0 });
+        expect((await store.get(key))?.state).toBe("signed");
+        // The dead hash is written anyway, and the next sweep finds the rebuild landed.
+        expect((await store.attempts(key))[0]?.state).toBe("dead");
+        expect(await reconciler.sweep(mode)).toMatchObject({ success: 1 });
+      },
+    );
 
     it("finishes by the hash that landed, also when another died (decision 5)", async () => {
       const { store, reconciler } = setup({ [A]: missing(4_010), [B]: landed("SUCCESS") });

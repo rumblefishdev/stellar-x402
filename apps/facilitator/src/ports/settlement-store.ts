@@ -40,6 +40,11 @@ export interface SettlementRecord {
   errorReason?: string;
   /** When a `/settle` call first answered this record's `success` (AD-6: once per record). */
   successAnsweredAt?: number;
+  /**
+   * Starts at 0 and goes up by one with every hash `addHash` appends, so a write that passes the
+   * version it read fails once a hash was stored after that read (0019 decision 26).
+   */
+  version: number;
   /** Milliseconds since the epoch. */
   createdAt: number;
   updatedAt: number;
@@ -54,6 +59,7 @@ export type NewSettlement = Omit<
   | "feeCharged"
   | "errorReason"
   | "successAnsweredAt"
+  | "version"
   | "updatedAt"
 >;
 
@@ -137,7 +143,8 @@ export interface SettlementStore {
   /** Finds a record by any of its hashes. */
   findByHash(hash: string): Promise<SettlementRecord | undefined>;
   /**
-   * Appends a signed hash, durably, before it is first sent, and moves `claimed` to `signed`.
+   * Appends a signed hash, durably, before it is first sent, moves `claimed` to `signed` and adds
+   * one to the record's `version`.
    * In order of precedence:
    * 1. a missing or final record resolves `false`;
    * 2. a hash already on this record resolves `true`, a no-op;
@@ -175,12 +182,14 @@ export interface SettlementStore {
    * the same way, so exactly one of several concurrent callers wins. A record in a final state
    * never moves on (AD-16). Rejects a `feeCharged` that isn't a non-negative int64.
    * `update.attempts` are applied as {@link markAttempts} would, in the same transaction, also
-   * when the state doesn't move.
+   * when the state doesn't move. With `expectedVersion`, the record must also still have that
+   * `version`: no hash was appended since the caller read it.
    */
   transition(
     key: SettlementKey,
     expected: SettlementState,
     update: SettlementUpdate,
+    expectedVersion?: number,
   ): Promise<SettlementRecord | undefined>;
   /** Records not yet final, for the startup re-check (AD-16). */
   listNonFinal(network: StellarNetwork): Promise<SettlementRecord[]>;
