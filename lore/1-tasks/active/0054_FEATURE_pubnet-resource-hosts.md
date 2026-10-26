@@ -25,10 +25,11 @@ history:
     status: active
     who: akot
     note: >
-      Implemented: pubnet (any network but testnet) refuses loopback, private, special-use,
-      single-label and IP resource URLs and `mcp:` URLs as `invalid_resource_url`; testnet keeps
-      listing them; the payment is untouched. ADR 0008 and AD-19 amended. Four scope choices
-      (http, mcp, special-use suffixes, testnet exemption) follow the research and wait for review.
+      Decided with the team (Adam): the catalog refuses loopback, private, special-use,
+      single-label and IP resource URLs and `mcp:` URLs on every network, testnet included;
+      `CATALOG_LIST_LOCAL=true` (testnet only) lists them for local runs and the e2e gate. The
+      payment always settles. Built on a GSD research and implementation, compared with a first
+      pubnet-only version. 112 bazaar tests, 405 facilitator tests.
 ---
 
 # Decide whether pubnet refuses loopback, private and IP resource URLs
@@ -55,87 +56,104 @@ no buyer can reach, or so that we say on purpose that it does.
 - [x] Decided and written into ADR 0008: pubnet refuses loopback, private and IP resource URLs,
       or lists them as sent, and why
 - [x] If refused: given a pubnet payment with such a resource URL, when it is validated, then it
-      is refused as `invalid_resource_url`, and testnet keeps accepting it
+      is refused as `invalid_resource_url`. Testnet does not keep accepting it, by decision 1: it
+      refuses it too unless `CATALOG_LIST_LOCAL=true`
+
+## Research
+
+Measured 2026-10-26 from the live `/discovery/resources` of each catalog (GSD research, about
+98,800 entries; CDP crawled twice). None lists a loopback, private, single-label or IP-literal
+resource URL, on mainnet or testnet, and none lists an `mcp://` URL.
+
+- **CDP:** about 74,100 entries, all `https`; 1,482 on Base Sepolia and Solana Devnet. Its docs
+  ask for "a public HTTPS URL" and send testnet sellers to the same catalog. Whether a
+  `localhost` URL fails CDP's settle or only its listing isn't documented. Its `network` filter
+  is ignored.
+- **PayAI:** 23,836 entries, 9,519 testnet-only; 798 `http://` with public names.
+- **OpenX402:** 50 entries (0053 saw `localhost` ones; gone now).
+- **MCP registry:** refuses `localhost`, `127.0.0.1` and `*.localhost` remotes, requires https.
+- **Upstream x402:** no host rules on resource URLs.
+- Whether CDP and PayAI refuse such URLs or never receive them isn't documented; the ADR says
+  "list none". "Vellar", named in a team message as refusing them, wasn't found.
 
 ## Result
 
-- Decided (product owner): pubnet refuses loopback, private and IP resource URLs; testnet keeps
-  listing them; the payment settles as usual and only the listing is dropped.
-- `packages/bazaar/src/validate.ts` step 5: after `canonicalizeUrl`, on any network but
-  `STELLAR_NETWORKS.testnet`, a URL that fails `isPublicResourceUrl` is refused as
-  `invalid_resource_url` with the log-only detail "not a public http(s) host, listed on testnet
-  only". Both the `EXTENSION-RESPONSES` header and the store write call `validate`, so the seller
-  sees `rejected` / `invalid_resource_url` and no row is written; the settle body and status
-  don't change.
+- `packages/bazaar/src/validate.ts` step 5: after `canonicalizeUrl`, unless
+  `options.listLocal`, a URL that fails `isPublicResourceUrl` is refused as
+  `invalid_resource_url` (log-only detail "not a public http(s) host"). `validate` takes a third
+  argument, `ValidateOptions { listLocal?: boolean }`, exported. Both the `EXTENSION-RESPONSES`
+  header and the store write call `validate`, so the seller sees `rejected` and no row is
+  written; the settle body and status don't change.
 - `packages/bazaar/src/url.ts`: `isPublicResourceUrl(canonical)` is `http(s)` and
-  `!isForbiddenHost(hostname)`, the icon host rule, on the WHATWG-parsed canonical URL. It
-  catches every IPv4 spelling WHATWG folds into a dotted quad (`127.1`, `2130706433`,
-  `0x7f000001`, `0177.0.0.1`, `127.0.0.1.`, `0`), bracketed IPv6 (also `[::ffff:127.0.0.1]`),
-  public IP literals, single-label names, encoded `localhost` (`local%68ost`, full-width) and the
-  private suffixes. `PRIVATE_SUFFIXES` gains `test`, `example`, `alt` and `onion`, for icons too.
-  Not exported from the package.
-- Still listed on pubnet: public names over `https` or `http`, and names that resolve to loopback
+  `!isForbiddenHost(hostname)`, the icon host rule, on the WHATWG-parsed canonical URL: every
+  IPv4 spelling WHATWG folds into a dotted quad, bracketed IPv6, public IP literals, single-label
+  names, encoded `localhost` and the private suffixes. `PRIVATE_SUFFIXES` gains `test`,
+  `example`, `alt` and `onion`, for icons too.
+- Still listed: public names over `https` or `http`, and names that resolve to loopback
   (`localtest.me`, `127.0.0.1.nip.io`): the catalog never resolves names (ADR 0008).
-- No new reject reason, no config, no migration: `CATALOG_KEY_VERSION` stays 1, and no pubnet
-  rows can exist yet (the config refuses pubnet).
-- Tests: `packages/bazaar` 72 to 110. The old "no network decides them" case became a 32-row
-  table (refused on pubnet with the header, listed on testnet with today's canonical URL), 6
-  rows listed on pubnet, a third network refused like pubnet, 4 icon rows for the new suffixes.
-  `apps/facilitator`: a cataloger case per network (header, entries, rejection metric, the
-  `catalog_rejected` detail) and a settle route case (pubnet localhost payment: 200, the
-  settler's body, the rejected header from the real cataloger).
-- Mutants, each failing a case: no network condition, `=== pubnet` for `!== testnet`, no scheme
-  check, https only, no host check, `url.host` (with the port) for `hostname`, no IPv4,
-  single-label or suffix clause, suffixes without subdomains, no `onion`, no `example`, no log
-  detail. The IPv6 bracket clause is an equivalent mutant: a WHATWG IPv6 host never has a dot, so
-  the single-label clause catches it; kept for intent.
-- `docs/adr/0008-bazaar-catalog-integrity.md` (Decision, Rationale, Consequences) and AD-19 in
-  `docs/architecture/m1-spine.md`. Notes added to 0041, 0044 and 0023.
+- `apps/facilitator`: `CATALOG_LIST_LOCAL` (`true`/`false`, default `false`), refused outside
+  testnet ("is only allowed on testnet"), into `Config.catalog.listLocal`, `compose()` and the
+  cataloger's `listLocal`, which passes it to `validate`. README section "What gets listed".
+- No new reject reason, no migration: `CATALOG_KEY_VERSION` stays 1. Entries a testnet catalog
+  already holds stay until 0069's expiry or a cleanup; new ones are refused.
+- Tests: `packages/bazaar` 72 to 112. A 32-row table refused on testnet and pubnet with the
+  header and listed with `listLocal`; 6 rows listed on both networks; `listLocal` still refusing
+  a bad scheme, userinfo and a backslash; 0053's canonical-form cases run with `listLocal`; 4 icon
+  rows for the new suffixes. `apps/facilitator`: a cataloger case per network and switch (header,
+  entries, rejection metric, the `catalog_rejected` detail); 0053's upstream-defaults case with
+  `listLocal`; a settle route case (pubnet localhost payment: 200, the settler's body, the
+  rejected header from the real cataloger); config cases for the switch. Test fixtures move from
+  `seller.example` to `seller.example.com`, since `.example` is now refused.
+- Mutants, each failing a case (GSD's run on the pubnet-only version, rerun for the switch): no
+  switch check, the switch ignored, no scheme check, https only, no host check, `url.host` for
+  `hostname`, no IPv4, single-label or suffix clause, suffixes without subdomains, no `onion`,
+  no `example`, no log detail. The IPv6 bracket clause is an equivalent mutant (a WHATWG IPv6
+  host has no dot, so the single-label clause catches it); kept for intent.
+- ADR 0008 (Decision, Rationale, Alternatives, Consequences), AD-19 in
+  `docs/architecture/m1-spine.md`, `conformance/README.md` (the Bazaar check needs the switch),
+  notes in 0023, 0041 and 0044.
 
 ## Design Decisions
 
 ### From Plan
 
-1. **Pubnet refuses loopback, private and IP resource URLs; testnet lists them** (product
-   owner). Listing quality, not SSRF: no buyer can reach such a host. CDP, PayAI and OpenX402
-   list none on any network (about 98,800 entries, measured 2026-10-26), and the MCP registry
-   refuses `localhost` remotes. Testnet keeps them for upstream's e2e suite and local sellers.
-2. **Payments are untouched** (product owner). The rule is in the pure validator, which runs
-   after `settle()` returns; the header is best-effort and the store write runs after the
-   response.
-3. **In `validate` step 5, on the canonical URL** (research). One place for header and store, the
-   reason the acceptance criterion names, and WHATWG has already normalized the host. Not in
-   `canonicalizeUrl`, which defines the network-independent key.
-4. **Reuse the icon host rule, refuse every IP literal** (research). One list to keep; no range
-   tables or `ipaddr.js`, and no `node:net` (the purity test forbids it). Public IPs are covered by
-   "IP resource URLs".
-5. **`invalid_resource_url`, no new reason** (research, Q5). `REJECT_REASONS` is closed and goes
+1. **Refused on every network, testnet included; `CATALOG_LIST_LOCAL` lists them** (decided by
+   Adam after the team meeting and a teammate's proposal). The meeting's goal: a payment to a
+   `localhost` resource settles, so people can test locally, but the entry is not in the Bazaar.
+   Sellers test on testnet, so a pubnet-only rule would list exactly those entries in our public
+   testnet catalog. CDP and PayAI list none on testnet either. A facilitator run locally and the
+   e2e gate, whose upstream Bazaar check expects `localhost` and `mcp://tool/<name>`, set the
+   switch; the config refuses it on pubnet. Rejected: pubnet only (the first version and GSD's),
+   and storing such entries but hiding them from `/discovery/resources`.
+2. **Payments are untouched.** The rule is in the pure validator, which runs after `settle()`
+   returns; the header is best-effort and the store write runs after the response.
+3. **In `validate` step 5, on the canonical URL** (GSD research). One place for header and store,
+   the reason the criterion names, and WHATWG has already normalized the host. Not in
+   `canonicalizeUrl`, which defines the key, nor as a read-side filter.
+4. **Reuse the icon host rule, refuse every IP literal** (GSD research). One list to keep; no
+   `ipaddr.js`, no `node:net` (the purity test forbids it). Public IPs fall under "IP resource
+   URLs", as on CDP.
+5. **`invalid_resource_url`, no new reason** (GSD research). `REJECT_REASONS` is closed and goes
    to the header and metrics; the log-only detail tells the cases apart.
-6. **Plain `http` with a public name stays listable on pubnet** (implementer's call from the
-   research's Q1; not decided by the product owner, to confirm in review). The decision is about
-   hosts; a seller behind a TLS proxy without `trust proxy` sends `http://` (0053 D3), and PayAI
-   lists 783 such mainnet entries. CDP parity (https only) can come with curation (0063).
-7. **`mcp:` URLs are refused on pubnet** (implementer's call from the research's Q2; to confirm in
-   review). `mcp://tool/<name>` names a tool, not a server a buyer can reach, the same reasoning
-   as the decision, and no public catalog lists one. `mcp://tool/x` is single-label and refused by
-   the host rule anyway; refusing the scheme adds `mcp://srv.example.com/x` and avoids WHATWG not
-   IPv4-parsing opaque hosts (`mcp://0x7f.0.0.1/x`). An MCP seller sets a real https URL through
-   `@x402/mcp`'s `config.resource.url`. Fallback if refused in review: the host rule on the
-   lowercased `mcp:` host only.
-8. **The special-use suffixes `test`, `example`, `alt` and `onion` join the host rule**
-   (implementer's call from the research's Q3; to confirm in review). RFC 6761, 9476 and 7686
-   reserve them; none is a public DNS name, and no live catalog entry uses one. It tightens icons
-   too, which ADR 0008's "no loopback or private hosts" already intends.
-9. **Testnet is the exception, not pubnet the rule: `!== testnet`** (implementer's call from the
-   research's Q4; to confirm in review). A network added later gets the strict rule. With today's
-   two networks the two forms are the same, so a third-network case pins the choice.
+6. **The switch is a validator option, not the network.** The validator stays pure (no env); the
+   facilitator reads `CATALOG_LIST_LOCAL` and passes it, as `CATALOG_ALLOW_HTTP` did before 0053.
+   It opens hosts and `mcp:` URLs only, not schemes or userinfo.
 
 ### Emerged
 
-10. **The function is named `isPublicResourceUrl`, not `isListableOnPubnet`:** it applies to every
-    network but testnet, and 0044 may reuse it for a client-side filter.
-11. **A settle route case with the real cataloger's header** (research marked it optional): it pins
-    the product owner's "payments settle normally" end to end at the route, 200 with the
-    settler's body and the rejected header.
-12. **The IPv6 bracket clause stays although its mutant survives:** WHATWG serializes IPv6 in hex,
-    so a bracketed host never has a dot and the single-label clause already refuses it.
+7. **Plain `http` with a public name stays listable** (GSD's call, kept). A seller behind a TLS
+   proxy without `trust proxy` sends `http://` (0053 decision 9), and PayAI lists 783 such
+   mainnet entries. CDP lists only https; parity can come with curation.
+8. **`mcp:` URLs are refused** (GSD's call, in line with the teammate's proposal; to confirm in
+   review). `mcp://tool/<name>` names a tool, not a server a buyer can reach, and no public
+   catalog lists one. An MCP seller sets a real https URL through `@x402/mcp`'s
+   `config.resource.url`, or a local run uses the switch.
+9. **The special-use suffixes `test`, `example`, `alt` and `onion` join the host rule** (GSD's
+   call; to confirm in review). RFC 6761, 9476 and 7686 reserve them; it tightens icons too.
+10. **The function is `isPublicResourceUrl`:** it applies to every network, and 0044 may reuse it
+    for a client-side filter.
+11. **Two implementations compared first.** A pubnet-only version written here and an independent
+    GSD research and implementation (blind to it) agreed on the place, the host rule and the
+    reason; GSD's had the route and cataloger tests and the AD-19 and notes updates, so it became
+    the base, with decision 1 on top.
+12. **The IPv6 bracket clause stays although its mutant survives.**

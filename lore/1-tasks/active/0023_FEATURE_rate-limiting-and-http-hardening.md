@@ -32,7 +32,8 @@ As a facilitator operator, I want per-route rate limits and basic HTTP hardening
 ## Context
 
 - From 0053: before the pubnet refusal goes, 0054 decides whether pubnet refuses loopback,
-  private and IP resource URLs in the catalog. Done: pubnet refuses them (0054, ADR 0008).
+  private and IP resource URLs in the catalog. Done: refused on every network unless
+  `CATALOG_LIST_LOCAL` (0054, ADR 0008).
 - Payer, recipient and asset limits are spend budgets (0024), not this limiter's job.
 - Numeric limits are set in config and recorded in this task when chosen.
 - Related tasks: 0017.

@@ -41,10 +41,10 @@ The RFP lists "Two end-to-end example integrations" among the expected deliverab
   after 0015).
 - Which facilitator and catalog the examples run against: ours (0009/0026, 0031/0032) or the
   public testnet ones.
-- A seller run on `localhost` puts a `localhost` resource URL into its 402. Since 0053 a testnet
-  catalog lists it as sent (ADR 0008: SSRF is checked by whoever fetches), so an example run
-  against a shared catalog leaves an entry other agents can't reach; point the README at that.
-  Pubnet refuses it (0054): the payment settles, the listing is dropped.
+- A seller run on `localhost` puts a `localhost` resource URL into its 402. Since 0054 our
+  catalog refuses it on every network: the payment settles, the listing is dropped, and the
+  header says `rejected`. An example that should show up in the catalog needs a public URL (a
+  tunnel), or a local facilitator with `CATALOG_LIST_LOCAL=true`; say so in the README.
 
 ## Acceptance Criteria
 
