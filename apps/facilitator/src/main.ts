@@ -55,7 +55,8 @@ export interface Started {
 export async function start(deps: AppDeps): Promise<Started> {
   const server = createApp(deps).listen(deps.config.port);
   await once(server, "listening");
-  // After listening, so `/health` answers while it runs; `/settle` answers 503 until it ends.
+  // After listening, so `/health` answers while it runs; `/settle` serves beside it (0019
+  // decision 27).
   deps.reconciliation?.start();
   const { port } = server.address() as AddressInfo;
   deps.logger.info("listening", {
@@ -323,14 +324,13 @@ export function buildSettlement(
           transaction: event.result.hash,
           status: event.result.status,
         });
-        // A store that fails here leaves the record to the next sweep, armed by the failure.
+        // A store that fails here leaves the record to the next sweep.
         reconciler.resolved(event.result).catch((error: unknown) => {
           logger.warn("settlement_resolve_failed", {
             network,
             transaction: event.result.hash,
             error,
           });
-          records.storeFailed();
         });
       }
     },
@@ -348,7 +348,7 @@ export function buildSettlement(
     budgetMs: config.settlement.settleBudgetMs,
     records,
   });
-  const reconciliation = scheduleReconciliation({ reconciler, records, logger, network });
+  const reconciliation = scheduleReconciliation({ reconciler, logger, network });
   return { settle, submitter, reconciliation };
 }
 
@@ -505,7 +505,7 @@ export async function main(
       pruner,
       /** The logger every part writes to: for tests. */
       logger,
-      /** Settles once `/settle` serves (the startup sweep ended): for tests. */
+      /** Settles once the first sweep has ended: for tests. */
       reconciled: deps.reconciliation?.reconciled ?? Promise.resolve(),
       // A second signal (SIGINT after SIGTERM) gets the first call's promise: running it again
       // would end the pools under requests the first is still waiting for.
