@@ -46,6 +46,7 @@ const CURRENT = 1_000;
 
 const config = parseConfig({
   FACILITATOR_SECRET: secret,
+  DATABASE_URL: "postgres://db.internal/x402",
   CLIENT_IP: "socket",
   CHANNELS: channel,
   RPC_URLS: "https://rpc-a.example,https://rpc-b.example",

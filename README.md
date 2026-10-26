@@ -33,7 +33,7 @@ package. Status: skeleton, nothing implemented yet.
 pnpm install
 pnpm build
 pnpm typecheck
-docker compose up -d  # PostgreSQL on 127.0.0.1:54320, or set TEST_DATABASE_URL
+docker compose up -d  # PostgreSQL on 127.0.0.1:15432, or set TEST_DATABASE_URL
 pnpm test
 pnpm lint
 pnpm contracts:test

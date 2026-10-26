@@ -99,6 +99,7 @@ function setup(
 ) {
   const config = parseConfig({
     FACILITATOR_SECRET: facilitator.secret(),
+    DATABASE_URL: db.urlFor(db.schema),
     CLIENT_IP: "socket",
     CHANNELS: channel,
     MAX_FEE_STROOPS: String(MAX_FEE),
@@ -180,9 +181,9 @@ describe("main()'s /settle wiring, with a hung RPC_URLS[0]", () => {
 
 describe("main()'s /settle wiring, with RPC_URLS[0] hung for every client (AD-3)", () => {
   const RPC_URLS = "https://rpc-a.example,https://rpc-b.example";
-  const HANG_MS = 600;
-  /** The shortest budget the config takes: one wait fits, two don't. */
-  const BUDGET_MS = 1_000;
+  const HANG_MS = 1_200;
+  /** One wait fits, with room for the store's writes; two don't. */
+  const BUDGET_MS = 2_000;
   /** Every call to RPC_URLS[0], upstream's and the shared client's, never answers. */
   const hung = new Proxy({} as SorobanRpc, { get: () => () => new Promise(() => {}) });
   const run = (env: Partial<Env>) =>
@@ -266,6 +267,7 @@ describe("main()'s composition (compose)", () => {
   function composed() {
     const config = parseConfig({
       FACILITATOR_SECRET: facilitator.secret(),
+      DATABASE_URL: db.urlFor(db.schema),
       CLIENT_IP: "socket",
       CHANNELS: channel,
       MAX_FEE_STROOPS: String(MAX_FEE),
