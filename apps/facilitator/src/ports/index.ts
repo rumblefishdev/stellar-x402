@@ -32,7 +32,7 @@ export type {
   SpendStore,
 } from "./spend-store.js";
 
-/** All state the facilitator keeps (AD-7); the composition root picks memory or real adapters. */
+/** All state the facilitator keeps (AD-7), in PostgreSQL through the adapters in `adapters/`. */
 export interface Stores {
   settlements: SettlementStore;
   catalog: CatalogStore;

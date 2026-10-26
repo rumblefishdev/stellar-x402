@@ -3,7 +3,7 @@
 - Status: accepted
 - Date: 2026-10-07, amended 2026-10-14 (task 0018: the checks around upstream verify) and
   2026-10-16 (task 0009: the one-payer-entry and credential checks; repeats answered from the
-  record)
+  record) and 2026-10-26 (task 0064: the tests run on PostgreSQL, with no in-memory fakes)
 
 ## Context
 
@@ -44,8 +44,8 @@ reimplement verify and settle.
   spec's balance-change check runs in the pool's `checkSimulation` hook. Upstream `settle()` is
   never called, and nothing else in the service calls `sendTransaction`.
 - **State only through ports the facilitator owns.** These are `SettlementStore`,
-  `CatalogStore`, `RateLimitStore` and `SpendStore`, each with an in-memory fake for tests. The
-  backing store is chosen by task 0013.
+  `CatalogStore`, `RateLimitStore` and `SpendStore`. The backing store is chosen by task 0013;
+  the tests run on it too (task 0064).
 - **Cataloging never blocks settle.** It starts only after a settlement succeeds, runs
   fire-and-forget, and its errors never reach the caller
   ([ADR 0008](0008-bazaar-catalog-integrity.md)).

@@ -99,7 +99,7 @@ function filter(items: DiscoveryResource[], query: URLSearchParams): DiscoveryRe
     (item) =>
       want("type", item.type) &&
       item.accepts.some((a) => want("payTo", a.payTo) && want("network", a.network)) &&
-      // Same rule as the memory catalog store: an own key with a value.
+      // Same rule as the facilitator's catalog store: an own key with a value.
       (!query.has("extensions") ||
         (item.extensions?.[query.get("extensions")!] !== undefined &&
           Object.hasOwn(item.extensions, query.get("extensions")!))),
