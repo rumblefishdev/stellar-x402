@@ -237,13 +237,11 @@ describe("POST /settle", () => {
   });
 });
 
-describe("POST /settle before reconciliation has finished (0019 decision 4)", () => {
-  it("answers 503 with Retry-After until the startup sweep ends, and starts and stops it with the server", async () => {
+describe("POST /settle beside reconciliation (0019 decision 27)", () => {
+  it("serves while the first sweep runs, and starts and stops it with the server", async () => {
     const settle = vi.fn<Settle>(async () => ({ response: success }));
-    let ready = false;
     const reconciliation = {
-      ready: () => ready,
-      reconciled: Promise.resolve(),
+      reconciled: new Promise<void>(() => {}),
       start: vi.fn(),
       close: vi.fn(),
     };
@@ -261,25 +259,17 @@ describe("POST /settle before reconciliation has finished (0019 decision 4)", ()
       settle,
       extensionResponses: () => undefined,
       supported: supportedResponse(config.network, Keypair.random().publicKey()),
+      metrics: memoryMetrics(),
       reconciliation,
     });
     try {
       expect(reconciliation.start).toHaveBeenCalledTimes(1);
-      const post = () =>
-        fetch(`http://127.0.0.1:${app.port}/settle`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(request),
-        });
-      const waiting = await post();
-      expect([waiting.status, waiting.headers.get("retry-after"), await waiting.json()]).toEqual([
-        503,
-        "5",
-        { error: "reconciling" },
-      ]);
-      expect(settle).not.toHaveBeenCalled();
-      ready = true;
-      expect((await post()).status).toBe(200);
+      const response = await fetch(`http://127.0.0.1:${app.port}/settle`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(request),
+      });
+      expect(response.status).toBe(200);
       expect(settle).toHaveBeenCalledTimes(1);
     } finally {
       await app.close();

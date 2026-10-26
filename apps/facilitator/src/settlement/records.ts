@@ -41,17 +41,10 @@ export function createRecords(deps: RecordsDeps) {
     metrics.increment("settlement_hook_failures_total", { hook });
   };
 
-  const storeFailureListeners = new Set<() => void>();
-  /** Tells the listeners a store write failed: reconciliation sweeps once it answers again. */
-  const storeFailed = () => {
-    for (const listener of storeFailureListeners) listener();
-  };
-  const onStoreFailure = (listener: () => void) => void storeFailureListeners.add(listener);
-
+  /** A store write failed: the record stays as it was, for the next sweep (0019 decision 27). */
   const recordFailed = (key: SettlementKey, error: unknown) => {
     logger.error("settlement_record_failed", { network, settlementKey: key, error });
     metrics.increment("settlement_record_failures_total");
-    storeFailed();
   };
 
   /** Runs a hook without letting it reach the caller (hooks.ts). */
@@ -129,8 +122,6 @@ export function createRecords(deps: RecordsDeps) {
   return {
     hookFailed,
     recordFailed,
-    storeFailed,
-    onStoreFailure,
     onFinal,
     onSuccess,
     advance,
