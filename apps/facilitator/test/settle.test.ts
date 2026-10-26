@@ -17,6 +17,7 @@ import {
   LedgerBoundError,
   NoChannelsError,
   QueueTimeoutError,
+  ShutdownError,
   RpcTimeoutError,
   RpcUnavailableError,
   SignedHookError,
@@ -551,6 +552,7 @@ describe("createSettler", () => {
     [new SignedHookError("x"), "settle_exact_stellar_record_write_failed"],
     [new QueueTimeoutError("x"), "settle_exact_stellar_no_channel_in_time"],
     [new NoChannelsError("x"), "settle_exact_stellar_no_channels"],
+    [new ShutdownError("x"), "settle_exact_stellar_shutting_down"],
     [new RpcTimeoutError("x"), "settle_exact_stellar_rpc_unavailable"],
     [new RpcUnavailableError("x"), "settle_exact_stellar_rpc_unavailable"],
     [new SourceAccountAuthError("x"), "invalid_exact_stellar_payload_unsupported_credential_type"],
@@ -571,6 +573,29 @@ describe("createSettler", () => {
     expect(metrics.value("settlement_submit_failures_total")).toBe(
       reason === SETTLE_REASONS.unexpected ? 1 : 0,
     );
+  });
+
+  it("drains a submission that runs on after its budget answer, with its record write (0025)", async () => {
+    let land!: () => void;
+    const landed = new Promise<void>((resolve) => (land = resolve));
+    const { settle, store } = setup(
+      async (opts) => {
+        await opts.onSigned?.(HASH, BOUNDS);
+        await landed;
+        return result("success");
+      },
+      { budgetMs: 50 },
+    );
+    expect((await settle(payload(), requirements)).response).toMatchObject({
+      errorReason: SETTLE_REASONS.pending,
+    });
+    let drained = false;
+    const draining = settle.drain().then(() => (drained = true));
+    await delay(20);
+    expect(drained).toBe(false);
+    land();
+    await draining;
+    expect(await store.get(key)).toMatchObject({ state: "success" });
   });
 
   it("warns and counts a fee refusal by /settle's own re-check, also a drift from /verify", async () => {

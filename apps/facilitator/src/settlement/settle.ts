@@ -15,6 +15,7 @@ import {
   QueueTimeoutError,
   RpcTimeoutError,
   RpcUnavailableError,
+  ShutdownError,
   SignedHookError,
   SimulationCheckError,
   SimulationError,
@@ -104,6 +105,11 @@ export const SETTLE_REASONS = {
    * closed the record: nothing was or will be sent for this payment. Sign a new payment.
    */
   interrupted: "settle_exact_stellar_interrupted",
+  /**
+   * The facilitator was stopping (a deploy) before anything was signed: nothing was or will be
+   * sent for this payment. Sign a new payment; it reaches the next process (0025).
+   */
+  shuttingDown: "settle_exact_stellar_shutting_down",
   /** Anything else (upstream's code). */
   unexpected: "unexpected_settle_error",
 } as const;
@@ -190,7 +196,13 @@ export type Settle = (
  * compare-and-set, so concurrent callers and a late completion can't both win. Every store and
  * hook call is bounded by the budget. Hooks never change the answer, and their errors are logged.
  */
-export function createSettler(deps: SettlerDeps): Settle {
+export function createSettler(deps: SettlerDeps): Settle & {
+  /**
+   * Waits for every submission under way to end and write its record, including those that run
+   * on after the budget answer (0025). Close the pool first, so nothing new is sent meanwhile.
+   */
+  drain(): Promise<void>;
+} {
   const {
     network,
     store,
@@ -202,6 +214,8 @@ export function createSettler(deps: SettlerDeps): Settle {
     now = Date.now,
     sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   } = deps;
+  /** Every submission under way, with its record write, for `drain()`. */
+  const submissions = new Set<Promise<unknown>>();
 
   const failure = (
     errorReason: string,
@@ -746,6 +760,9 @@ export function createSettler(deps: SettlerDeps): Settle {
     // The checks and the hook used up the budget: nothing is submitted.
     if (left() <= 0) return outOfBudget();
     const submission = submit(claim.record, verified, requirements, startedAt, call);
+    submissions.add(submission);
+    const forget = () => void submissions.delete(submission);
+    submission.then(forget, forget);
     const inTime = await within(submission, left());
     if (inTime) {
       const { record, won, origin, fallback } = inTime;
@@ -774,7 +791,7 @@ export function createSettler(deps: SettlerDeps): Settle {
 
   // Every answer by outcome (0027): `success`, or the `errorReason`. A thrown error is the
   // route's 500.
-  return async (payload, requirements, signal) => {
+  const settler: Settle = async (payload, requirements, signal) => {
     const settled = await settle(payload, requirements, signal);
     const { response } = settled;
     metrics.increment("settlement_outcomes_total", {
@@ -783,6 +800,9 @@ export function createSettler(deps: SettlerDeps): Settle {
     });
     return settled;
   };
+  return Object.assign(settler, {
+    drain: async () => void (await Promise.allSettled([...submissions])),
+  });
 }
 
 /**
@@ -833,6 +853,7 @@ export function reasonFor(error: unknown): string {
   if (error instanceof SignedHookError) return SETTLE_REASONS.recordWrite;
   if (error instanceof QueueTimeoutError) return SETTLE_REASONS.noChannelInTime;
   if (error instanceof NoChannelsError) return SETTLE_REASONS.noChannels;
+  if (error instanceof ShutdownError) return SETTLE_REASONS.shuttingDown;
   if (error instanceof RpcTimeoutError || error instanceof RpcUnavailableError)
     return SETTLE_REASONS.rpcUnavailable;
   if (error instanceof SourceAccountAuthError) return SETTLE_REASONS.unsupportedCredential;

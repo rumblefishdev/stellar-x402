@@ -34,9 +34,16 @@ export interface AppDeps {
    * 503; tests that leave it out settle as if they held it.
    */
   lease?: LeaseKeeper;
+  /** Whether the process is shutting down (0025); `start()` sets it. */
+  closing?: () => boolean;
+  /**
+   * The settlement drain (0025): closes the pool, refusing every call that sent nothing, then
+   * waits for each submission under way and its record write. Run by `start()`'s `close()`.
+   */
+  drain?: () => Promise<void>;
 }
 
-/** Seconds a client waits before it tries `/settle` again on a process without the lease. */
+/** Seconds a client waits before it tries `/settle` again on a process that can't settle now. */
 export const NO_LEASE_RETRY_AFTER_S = 5;
 
 /** The status as a body code, like `not_found`: 413 → `payload_too_large`. */
@@ -114,6 +121,7 @@ export function createApp({
   extensionResponses,
   supported,
   lease,
+  closing,
 }: AppDeps): Express {
   const app = express();
   app.disable("x-powered-by");
@@ -127,12 +135,13 @@ export function createApp({
       logger,
     });
   const json = express.json({ limit: config.http.bodyLimitBytes });
-  // First on `/settle`, so a process without the lease answers at once, with no store call and
-  // without reading the body (0025 decisions 1, 4).
+  // First on `/settle`, so a process that is stopping or doesn't hold the lease answers at once,
+  // with no store call and without reading the body (0025 decisions 1, 4, 8).
   const leased: RequestHandler = (_req, res, next) => {
-    if (lease && !lease.held()) {
+    const refusal = closing?.() ? "shutting_down" : lease && !lease.held() ? "no_lease" : undefined;
+    if (refusal) {
       res.setHeader("Retry-After", `${NO_LEASE_RETRY_AFTER_S}`);
-      res.status(503).json({ error: "no_lease" });
+      res.status(503).json({ error: refusal });
       return;
     }
     next();
