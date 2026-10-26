@@ -2,7 +2,7 @@
 id: "0054"
 title: "Decide whether pubnet refuses loopback, private and IP resource URLs"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0008"]
 related_tasks: ["0053", "0023", "0024", "0025", "0044"]
@@ -16,6 +16,11 @@ history:
     note: >
       Spawned from 0053 Future Work at Oskar's request in the PR #55 review, so that something on
       the way to pubnet points at it. Linked from 0023.
+  - date: "2026-10-26"
+    status: active
+    who: akot
+    note: >
+      Work starts.
 ---
 
 # Decide whether pubnet refuses loopback, private and IP resource URLs
