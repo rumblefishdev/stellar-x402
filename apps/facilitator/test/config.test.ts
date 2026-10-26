@@ -290,6 +290,24 @@ describe("parseConfig", () => {
     ).toBe("cf-connecting-ip");
   });
 
+  it("checks CLIENT_IP_HEADER at startup, so a typo never reaches the first request", () => {
+    for (const value of ["Socket", "SOCKET"]) {
+      expect(
+        parseConfig({ ...minimal, CLIENT_IP_HEADER: value }).http.clientIpHeader,
+      ).toBeUndefined();
+    }
+    for (const value of ["x-forwarded-for", "X-Forwarded-For"]) {
+      expect(problems({ ...minimal, CLIENT_IP_HEADER: value })).toEqual([
+        "CLIENT_IP_HEADER must not be X-Forwarded-For: a client can write any address there",
+      ]);
+    }
+    for (const value of ["cf connecting ip", "cf-connecting-ip:"]) {
+      expect(problems({ ...minimal, CLIENT_IP_HEADER: value })).toEqual([
+        "CLIENT_IP_HEADER must be socket or a header name",
+      ]);
+    }
+  });
+
   it("refuses a leftover TRUSTED_PROXY_HOPS", () => {
     // Left set, it would look like the client IP still came from X-Forwarded-For.
     expect(problems({ ...minimal, TRUSTED_PROXY_HOPS: "1" })).toEqual([

@@ -46,8 +46,9 @@ Every request counts, a malformed or oversized one too. `/supported` has no limi
   client would share the proxy's address and one budget. Use `socket` only with no proxy in front,
   as in local runs and tests.
 - **Behind Cloudflare set `CLIENT_IP_HEADER=cf-connecting-ip`.** Cloudflare sets it on every
-  request and refuses it from a client. `X-Forwarded-For` is never read: a client can put any
-  address in it. A request without the configured header, or with anything but one address in it,
+  request and refuses it from a client. `X-Forwarded-For` is never read, and refused as
+  `CLIENT_IP_HEADER`: a client can put any address in it. The setting is checked at startup:
+  `socket` in any case, or a header name. A request without the configured header, or with anything but one address in it,
   is a 500 and an error log line, since only the proxy should reach the service. `TRUSTED_PROXY_HOPS` is refused: this setting replaced
   it.
 - **Windows are aligned to the clock**, so a client can send up to twice its budget across a

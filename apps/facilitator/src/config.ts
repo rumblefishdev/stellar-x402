@@ -185,7 +185,16 @@ const envSchema = z
      * Required: forgotten behind a proxy, every client would share the proxy's address and one
      * budget. `X-Forwarded-For` is never read.
      */
-    CLIENT_IP_HEADER: z.string(),
+    CLIENT_IP_HEADER: z
+      .string()
+      .refine(
+        (value) => value.toLowerCase() === "socket" || /^[A-Za-z0-9-]+$/.test(value),
+        "must be socket or a header name",
+      )
+      .refine(
+        (value) => value.toLowerCase() !== "x-forwarded-for",
+        "must not be X-Forwarded-For: a client can write any address there",
+      ),
     /** Replaced by `CLIENT_IP_HEADER`; refused, so a leftover can't look like it still applies. */
     TRUSTED_PROXY_HOPS: z.string().optional(),
     RATE_LIMIT_WINDOW_MS: ms(1_000).default("60000"),
@@ -383,7 +392,8 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
     },
     http: {
       bodyLimitBytes: e.BODY_LIMIT_BYTES,
-      clientIpHeader: e.CLIENT_IP_HEADER === "socket" ? undefined : e.CLIENT_IP_HEADER,
+      clientIpHeader:
+        e.CLIENT_IP_HEADER.toLowerCase() === "socket" ? undefined : e.CLIENT_IP_HEADER,
       rateLimit: {
         windowMs: e.RATE_LIMIT_WINDOW_MS,
         verify: e.RATE_LIMIT_VERIFY,
