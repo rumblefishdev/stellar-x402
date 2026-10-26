@@ -2,7 +2,7 @@
 id: "0032"
 title: "List resources in /discovery/resources"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0008"]
 related_tasks: ["0012", "0031", "0017", "0028"]
@@ -60,6 +60,13 @@ history:
       and another extension skips the store, like `network`; the listings' pool cuts a statement
       off at 2 s; ADR 0012 counts the fourth pool; `limit`'s bounds cite spec v2 §8.1; the 0015
       note says `text[]` with a GIN index and a backfill.
+  - date: "2026-10-26"
+    status: completed
+    who: akot
+    note: >
+      PR #50 merged on 2026-10-26: 22 commits, 18 files. /discovery/resources serves the
+      upstream list types with the six filters on its own pool; future work points at 0015, 0019
+      and 0023.
 ---
 
 # List resources in `/discovery/resources`
