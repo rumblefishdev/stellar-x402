@@ -126,6 +126,43 @@ describe("cataloger", () => {
     expect(entries[1]?.mimeType).toBe("application/json");
   });
 
+  it.each([
+    ["stellar:pubnet", { status: "rejected", rejectedReason: "invalid_resource_url" }, 0],
+    ["stellar:testnet", { status: "processing" }, 1],
+  ] as const)(
+    "on %s, a localhost listing gets %j and %i entries (0054)",
+    async (network, header, listed) => {
+      const { cataloger, metrics, logger, list } = setup();
+      const local = record(
+        { info: { input: { type: "http", method: "GET" } } },
+        {
+          key: `${network}:GPAYER:1`,
+          network,
+          paymentRequirements: { ...requirements, network },
+          paymentPayload: {
+            x402Version: 2,
+            resource: { url: "http://localhost:4022/exact/stellar" },
+            extensions: { bazaar: { info: { input: { type: "http", method: "GET" } } } },
+          } as unknown as PaymentPayload,
+        },
+      );
+      expect(cataloger.extensionResponses(local)).toEqual({ bazaar: header });
+      await cataloger.onSuccess(local, "settle");
+      expect(await list()).toHaveLength(listed);
+      expect(
+        metrics.value("catalog_rejections_total", {
+          origin: "settle",
+          reason: "invalid_resource_url",
+        }),
+      ).toBe(1 - listed);
+      if (listed === 0)
+        expect(logger.info).toHaveBeenCalledWith(
+          "catalog_rejected",
+          expect.objectContaining({ reason: "invalid_resource_url", detail: expect.any(String) }),
+        );
+    },
+  );
+
   it("keeps a newer listing when a success from an earlier ledger resolves later", async () => {
     const { cataloger, metrics } = setup();
     await cataloger.onSuccess(record(valid), "settle");

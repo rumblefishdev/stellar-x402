@@ -258,7 +258,7 @@ describe("packages/bazaar", () => {
     });
   });
 
-  it('catalogs what upstream servers send by default: mimeType "", http, loopback, mcp://', () => {
+  it('catalogs upstream defaults on testnet: mimeType "", http, loopback, mcp://', () => {
     const local = entry(
       pay("http://localhost:4022/exact/stellar", { info: http }, { description: "", mimeType: "" }),
     );
@@ -279,7 +279,7 @@ describe("packages/bazaar", () => {
     ["https://intranet/a?x=1#f", "https://intranet/a"],
     ["http://printer.local:80/a", "http://printer.local/a"],
     ["https://metadata.google.internal/a", "https://metadata.google.internal/a"],
-  ])("keeps no host rules on resource URLs: %s", (url, canonical) => {
+  ])("keeps no host rules on testnet resource URLs: %s", (url, canonical) => {
     expect(entry(pay(url, { info: http })).key.resourceUrl).toBe(canonical);
   });
 
@@ -303,19 +303,84 @@ describe("packages/bazaar", () => {
     expect(entry(p).key.resourceUrl).toBe("mcp://tool/a");
   });
 
-  it("applies the same URL rules on pubnet: no network decides them", () => {
+  // 0054: pubnet lists only public `http(s)` hosts; testnet keeps the local ones.
+  it.each([
+    // Loopback names, in the spellings WHATWG folds into `localhost`.
+    ["http://localhost:4022/exact/stellar", http],
+    ["http://LOCALHOST/a", http],
+    ["http://foo.localhost/a", http],
+    ["http://ｌｏｃａｌｈｏｓｔ/a", http],
+    ["http://local%68ost/a", http],
+    // IPv4 spellings WHATWG turns into dotted quads.
+    ["http://127.0.0.1:8080/a", http],
+    ["http://127.1/a", http],
+    ["http://2130706433/a", http],
+    ["http://0x7f000001/a", http],
+    ["http://0177.0.0.1/a", http],
+    ["http://127.0.0.1./a", http],
+    ["http://0/a", http],
+    // IPv6, private, link-local and public IP literals.
+    ["https://[::1]/a", http],
+    ["https://[::ffff:127.0.0.1]/a", http],
+    ["https://10.0.0.1/a", http],
+    ["https://192.168.1.1/a", http],
+    ["https://169.254.169.254/a", http],
+    ["https://8.8.8.8/a", http],
+    ["https://[2606:4700:4700::1111]/a", http],
+    // Single-label names and private or special-use suffixes.
+    ["https://intranet/a", http],
+    ["http://printer.local/a", http],
+    ["https://metadata.google.internal/a", http],
+    ["https://router.home.arpa/a", http],
+    ["https://x.localdomain/a", http],
+    ["https://x.invalid/a", http],
+    ["https://x.test/a", http],
+    ["https://shop.example/a", http],
+    ["https://x.alt/a", http],
+    ["https://x.onion/a", http],
+    // An mcp listing: a tool name, an mcp: host and a loopback http URL.
+    ["mcp://tool/get_weather", mcp],
+    ["mcp://srv.example.com/x", mcp],
+    ["http://localhost:4022/mcp", mcp],
+  ])("refuses %s on pubnet as invalid_resource_url and lists it on testnet", (url, info) => {
     const pubnet = { ...req, network: "stellar:pubnet" } as PaymentRequirements;
-    for (const [url, info] of [
-      ["http://localhost:4022/exact/stellar", http],
-      ["mcp://tool/get_weather", mcp],
-    ] as const) {
-      const r = validate(pay(url, { info }, { mimeType: "" }), pubnet);
-      if (!r?.ok) throw new Error(JSON.stringify(r));
-      expect(normalize(r, pubnet).key).toMatchObject({
-        network: "stellar:pubnet",
-        resourceUrl: url,
-      });
-    }
+    const refused = validate(pay(url, { info }), pubnet)!;
+    expect(refused).toMatchObject({ ok: false, reason: "invalid_resource_url" });
+    expect(toExtensionResponses(refused)).toEqual({
+      bazaar: { status: "rejected", rejectedReason: "invalid_resource_url" },
+    });
+    expect(validate(pay(url, { info }), req)).toMatchObject({
+      ok: true,
+      resourceUrl: canonicalizeUrl(url, info.input.type as "http" | "mcp"),
+    });
+  });
+
+  it.each([
+    ["https://API.x.com:443/a?q=1", http, "https://api.x.com/a"],
+    // http stays listable on pubnet: a seller behind a TLS proxy sends it (0053 D3).
+    ["http://x.com/a", http, "http://x.com/a"],
+    ["https://x.com/mcp", mcp, "https://x.com/mcp"],
+    ["https://srv.example.com/a", http, "https://srv.example.com/a"],
+    // Names that resolve to loopback are the fetcher's to check (ADR 0008), not the catalog's.
+    ["https://127.0.0.1.nip.io/a", http, "https://127.0.0.1.nip.io/a"],
+    ["https://localtest.me/a", http, "https://localtest.me/a"],
+  ])("lists %s on pubnet", (url, info, canonical) => {
+    const pubnet = { ...req, network: "stellar:pubnet" } as PaymentRequirements;
+    const r = validate(pay(url, { info }, { mimeType: "" }), pubnet);
+    if (!r?.ok) throw new Error(JSON.stringify(r));
+    expect(normalize(r, pubnet).key).toMatchObject({
+      network: "stellar:pubnet",
+      resourceUrl: canonical,
+    });
+  });
+
+  it("refuses local hosts on any network but testnet, not only on pubnet", () => {
+    const other = { ...req, network: "stellar:futurenet" } as PaymentRequirements;
+    expect(validate(pay("http://localhost:4022/a", { info: http }), other)).toMatchObject({
+      ok: false,
+      reason: "invalid_resource_url",
+    });
+    expect(validate(pay("https://x.com/a", { info: http }), other)?.ok).toBe(true);
   });
 
   it("answers undefined, not a throw, for a type it doesn't know", () => {
@@ -332,6 +397,10 @@ describe("packages/bazaar", () => {
       "http://x.com/i.png",
       "https://localhost/i.png",
       "https://10.0.0.1/i.png",
+      "https://cdn.x.test/i.png",
+      "https://cdn.example/i.png",
+      "https://x.alt/i.png",
+      "https://x.onion/i.png",
     ])
       expect(
         entry(pay("https://x.com/a", { info: http }, { iconUrl })).resource,
