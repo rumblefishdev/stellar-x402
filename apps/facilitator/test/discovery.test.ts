@@ -8,6 +8,7 @@ import { memoryStores } from "../src/adapters/memory.js";
 import { parseConfig } from "../src/config.js";
 import { DISCOVERY_LIMIT, MAX_OFFSET, parseDiscoveryQuery } from "../src/http/discovery.js";
 import { supportedResponse } from "../src/http/supported.js";
+import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
 import { start, type Started } from "../src/main.js";
 import { memoryMetrics } from "../src/metrics.js";
