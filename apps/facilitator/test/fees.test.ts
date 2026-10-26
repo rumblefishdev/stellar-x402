@@ -6,6 +6,7 @@ import { atCurrentBid, feeSettings } from "../src/settlement/fees.js";
 
 const env = {
   FACILITATOR_SECRET: Keypair.random().secret(),
+  DATABASE_URL: "postgres://db.internal/x402",
   CLIENT_IP: "socket",
   CHANNELS: Keypair.random().publicKey(),
 };

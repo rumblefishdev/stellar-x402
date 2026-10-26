@@ -12,7 +12,6 @@ import { createEd25519Signer, getNetworkPassphrase } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/facilitator";
 import type pg from "pg";
 import { Agent, setGlobalDispatcher } from "undici";
-import { memoryStores } from "./adapters/memory.js";
 import { migrate } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
 import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
@@ -54,7 +53,6 @@ export async function start(deps: AppDeps): Promise<Started> {
   deps.logger.info("listening", {
     port,
     network: deps.config.network,
-    store: deps.config.store,
     channels: deps.config.channels.length,
   });
   return {
@@ -324,22 +322,20 @@ export function buildSettlement(
 /**
  * Every part `main()` serves, built from the config on the given stores: the cataloger, one RPC
  * and one fee configuration shared by `/verify`, `/settle` and the pool. `main()` passes the
- * PostgreSQL stores when `STORE=postgres`; tests pass their own `rpc`, `makeScheme` and pool
- * `sleep`.
+ * PostgreSQL stores; tests pass their own `rpc`, `makeScheme` and pool `sleep`.
  */
 export function compose(
   config: Config,
   opts: {
     logger: Logger;
-    /** The memory stores when absent. */
-    stores?: AppDeps["stores"];
+    stores: AppDeps["stores"];
     rpc?: SorobanRpc;
     seams?: UpstreamSeams;
     sleep?: (ms: number) => Promise<void>;
   },
 ): { deps: AppDeps; cataloger: Cataloger; metrics: Metrics; rpc: FallbackRpc } {
   const { logger } = opts;
-  const stores = opts.stores ?? memoryStores();
+  const { stores } = opts;
   // Cataloging plugs into `/settle` through `extensionResponses` and `onSuccess` (AD-8).
   const metrics = memoryMetrics();
   const cataloger = createCataloger({
@@ -413,25 +409,22 @@ export async function main(
     setGlobalDispatcher(
       new Agent({ headersTimeout: UPSTREAM_TIMEOUT_MS, bodyTimeout: UPSTREAM_TIMEOUT_MS }),
     );
-    // STORE=postgres needs a migrated schema (`pnpm migrate`); the service never migrates it.
-    if (config.store === "postgres") {
-      const url = config.databaseUrl;
-      if (url === undefined) throw new Error("STORE=postgres needs a DATABASE_URL");
-      // Reservations queue on the global scope's lock, a flood's hits on its key's row lock, and a
-      // burst of public listings on the pool itself; their own pools keep those off the others.
-      // A listing takes milliseconds (at most ~0.5 s measured at 1 000 000 entries), so the
-      // discovery pool cuts one off sooner: until 0023's rate limits, 3 slow ones hold it.
-      pools = {
-        main: createPool(url, poolErrorLogger(logger)),
-        reserve: createPool(url, poolErrorLogger(logger), 3),
-        rateLimits: createPool(url, poolErrorLogger(logger), 3),
-        discovery: createPool(url, poolErrorLogger(logger), 3, DISCOVERY_STATEMENT_TIMEOUT_MS),
-      };
-    }
+    // The stores need a migrated schema (`pnpm migrate`); the service never migrates it.
+    // Reservations queue on the global scope's lock, a flood's hits on its key's row lock, and a
+    // burst of public listings on the pool itself; their own pools keep those off the others.
+    // A listing takes milliseconds (at most ~0.5 s measured at 1 000 000 entries), so the
+    // discovery pool cuts one off sooner: until 0023's rate limits, 3 slow ones hold it.
+    const url = config.databaseUrl;
+    pools = {
+      main: createPool(url, poolErrorLogger(logger)),
+      reserve: createPool(url, poolErrorLogger(logger), 3),
+      rateLimits: createPool(url, poolErrorLogger(logger), 3),
+      discovery: createPool(url, poolErrorLogger(logger), 3, DISCOVERY_STATEMENT_TIMEOUT_MS),
+    };
     // Every RPC_URLS entry must serve NETWORK: another network's RPC reads every channel as
     // missing. Checked first, so a wrong URL is named instead of every channel.
     await checkRpcNetworks(config.rpcUrls, getNetworkPassphrase(config.network));
-    const stores = pools ? postgresStores(pools.main, pools) : memoryStores();
+    const stores = postgresStores(pools.main, pools);
     const { deps, cataloger, metrics, rpc } = compose(config, { logger, stores });
     // AD-12: the service starts only when no other key can move a channel. An RPC that doesn't
     // answer fails the check with its error. `compose()` only wires parts, so nothing has called
@@ -471,7 +464,7 @@ export async function main(
     let closing: Promise<void> | undefined;
     return {
       ...started,
-      /** The graph's stores, and with `STORE=postgres` its pools: for tests. */
+      /** The graph's stores and their pools: for tests. */
       stores,
       pools,
       /** For tests, which run a tick instead of waiting a minute. */

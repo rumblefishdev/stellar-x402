@@ -6,7 +6,7 @@ import { migrate } from "../src/adapters/postgres-schema.js";
 import type { Stores } from "../src/ports/index.js";
 
 /** The repo's `compose.yaml` database, used when `TEST_DATABASE_URL` is not set. */
-const COMPOSE_DATABASE_URL = "postgres://postgres:postgres@127.0.0.1:54320/postgres";
+const COMPOSE_DATABASE_URL = "postgres://postgres:postgres@127.0.0.1:15432/postgres";
 
 export interface TestDatabase {
   /** This file's schema, migrated in `beforeAll`. */

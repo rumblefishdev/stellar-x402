@@ -156,7 +156,7 @@ graph TD
 - **Prevents:** packages or handlers talking to a database directly, and rework when 0013 picks the store.
 - **Rule:**
   - All state goes through four interfaces defined in `apps/facilitator`: `SettlementStore`, `CatalogStore`, `RateLimitStore` and `SpendStore`.
-  - Concrete adapters live in `apps/facilitator/src/adapters/`, and there is an in-memory fake of each for tests.
+  - Concrete adapters live in `apps/facilitator/src/adapters/`; tests run them on PostgreSQL, a schema per test file (task 0064).
   - The backing store is one PostgreSQL database per network, in a container on the facilitator's server ([ADR 0012](../adr/0012-facilitator-state-store.md), task 0013). It must support:
     - the atomic claim (AD-6)
     - lookup by any of a settlement's hashes (AD-16)
@@ -358,10 +358,10 @@ graph TD
 | Amounts               | `bigint` in code (token base units, fees in stroops); decimal strings on the wire; `bigint` stroops in the store, other amounts as strings in `jsonb`                                                |
 | Identifiers           | networks as CAIP-2 strings from `packages/config`; transaction hashes as 64-character lowercase hex; settlement key as in AD-6                                                                       |
 | Config                | read and validated once at startup in `apps/facilitator` (zod); passed down through constructors. RPC URLs come from config, a fallback list is allowed, and public testnet RPC is acceptable for T1 |
-| Time and I/O in tests | `rpc`, `now` and `sleep` injected; store ports faked in memory                                                                                                                                       |
+| Time and I/O in tests | `rpc`, `now` and `sleep` injected; store ports on PostgreSQL                                                                                                                                         |
 | Logging and metrics   | structured, one event per line, carrying `network`, settlement key and the transaction hash where known; secrets and full XDR are never logged; pool `onEvent` forwarded to metrics                  |
 | HTTP hardening        | request body size limit; no CORS on `/verify` and `/settle`; client IP header set from config                                                                                                        |
-| Testing               | unit tests with fakes in each package; facilitator integration tests against in-memory stores and `fake-rpc`; testnet runs (AD-9 token matrix, AD-15 gate) record their transaction hashes           |
+| Testing               | unit tests with fakes in each package; facilitator integration tests against PostgreSQL stores and `fake-rpc`; testnet runs (AD-9 token matrix, AD-15 gate) record their transaction hashes          |
 | Test helpers          | a package shares its fakes through a `<package>/testing` subpath (e.g. `@stellar-x402/signer-pool/testing`); a lint rule keeps `src` from importing any of them                                      |
 
 ## Stack

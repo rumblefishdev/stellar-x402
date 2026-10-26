@@ -7,8 +7,8 @@ import {
 } from "../ports/index.js";
 
 /**
- * Rules every store adapter shares, so the memory and durable adapters can't drift: the
- * settlement lifecycle order (AD-16) and the catalog merge (AD-19). Pure functions, no I/O.
+ * Rules the store adapters apply: the settlement lifecycle order (AD-16) and the catalog merge
+ * (AD-19). Pure functions, no I/O.
  */
 
 const ORDER: Record<SettlementState, number> = {

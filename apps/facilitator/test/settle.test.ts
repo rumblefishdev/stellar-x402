@@ -209,6 +209,12 @@ const landing =
 const db = testDatabase();
 beforeEach(db.empty);
 
+/**
+ * A `/settle` budget for the cases where it runs out: the claim and the hash's write, each a few
+ * database round trips, fit in it on a loaded machine.
+ */
+const BUDGET_MS = 100;
+
 function setup(behaviour: Behaviour = landing(), overrides: Partial<SettlerDeps> = {}) {
   const order: string[] = [];
   const store = db.stores().settlements;
@@ -393,8 +399,7 @@ describe("createSettler", () => {
         await new Promise<void>((resolve) => (land = resolve));
         return result();
       },
-      // Room for the claim and the hash's write before the budget runs out.
-      { budgetMs: 200, settleTimeoutMs: 200 },
+      { budgetMs: BUDGET_MS, settleTimeoutMs: BUDGET_MS },
     );
     expect((await settle(payload(), requirements)).response).toMatchObject({
       errorReason: SETTLE_REASONS.pending,
@@ -423,12 +428,14 @@ describe("createSettler", () => {
     // 50 initial lookups, then about one read per 10 ms for 100 ms, not one per repeat.
     expect(get.mock.calls.length).toBeLessThan(50 + 20);
 
+    // A repeat whose client left stops long before its settle timeout.
+    const patient = setup(landing(), { settleTimeoutMs: 1_000, budgetMs: 10_000, pollMs: 10 });
     const gone = new AbortController();
     const started = Date.now();
-    const left = settle(payload(), requirements, gone.signal);
+    const left = patient.settle(payload(), requirements, gone.signal);
     setTimeout(() => gone.abort(), 15);
     await left;
-    expect(Date.now() - started).toBeLessThan(60);
+    expect(Date.now() - started).toBeLessThan(500);
   });
 
   it("answers settlement_pending to a repeat once the settle timeout runs out", async () => {
@@ -437,7 +444,7 @@ describe("createSettler", () => {
         await opts.onSigned?.(HASH);
         return new Promise(() => {});
       },
-      { settleTimeoutMs: 30, budgetMs: 50 },
+      { settleTimeoutMs: 30, budgetMs: BUDGET_MS },
     );
     expect((await settle(payload(), requirements)).response).toMatchObject({
       success: false,
@@ -874,7 +881,7 @@ describe("createSettler", () => {
           await new Promise<void>((resolve) => (land = resolve));
           return result();
         },
-        { budgetMs: 30 },
+        { budgetMs: BUDGET_MS },
       );
       const transition = vi.spyOn(store, "transition");
       expect((await settle(payload(), requirements)).response).toMatchObject({
@@ -981,11 +988,11 @@ describe("createSettler", () => {
 
     it("never says sign a new payment for an unsigned record it couldn't end", async () => {
       // The refusal couldn't be stored, so the record stays `claimed` with no hash.
-      const s = setup(landing(), { budgetMs: 50 });
+      const s = setup(landing(), { budgetMs: BUDGET_MS });
       s.hooks.beforeSubmit.mockResolvedValueOnce({ allow: false, errorReason: "over_budget" });
       vi.spyOn(s.store, "transition").mockRejectedValue(new Error("store down"));
       await s.settle(payload(), requirements);
-      await delay(60);
+      await delay(BUDGET_MS + 10);
       // The repeat can't end it either: the record may still be signed elsewhere.
       expect((await s.settle(payload(), requirements)).response).toMatchObject({
         success: false,
@@ -1004,8 +1011,7 @@ describe("createSettler", () => {
           await new Promise<void>((resolve) => (land = resolve));
           return result();
         },
-        // Room for the claim and the hash's write before the budget runs out.
-        { budgetMs: 200 },
+        { budgetMs: BUDGET_MS },
       );
       expect((await settle(payload(), requirements)).response).toMatchObject({
         errorReason: "settlement_pending",
@@ -1026,8 +1032,7 @@ describe("createSettler", () => {
           await opts.onSigned?.(HASH);
           return new Promise(() => {});
         },
-        // Room for the claim and the hash's write before the budget runs out.
-        { budgetMs: 200 },
+        { budgetMs: BUDGET_MS },
       );
       // The pool's success is recorded just as the budget's compare-and-set runs.
       const transition = store.transition.bind(store);
@@ -1044,7 +1049,7 @@ describe("createSettler", () => {
 
     it("ends the record and answers a timeout when the budget runs out before anything was signed; the client signs a new payment", async () => {
       const { settle, store, hooks, metrics } = setup(() => new Promise(() => {}), {
-        budgetMs: 30,
+        budgetMs: BUDGET_MS,
       });
       expect((await settle(payload(), requirements)).response).toMatchObject({
         success: false,
@@ -1077,7 +1082,7 @@ describe("createSettler", () => {
           );
           return new Promise(() => {});
         },
-        { budgetMs: 30 },
+        { budgetMs: BUDGET_MS },
       );
       expect((await settle(payload(), requirements)).response).toMatchObject({
         errorReason: SETTLE_REASONS.timeout,
@@ -1130,7 +1135,7 @@ describe("createSettler", () => {
           );
           return new Promise(() => {});
         },
-        { budgetMs: 30 },
+        { budgetMs: BUDGET_MS },
       );
       expect((await settle(payload(), requirements)).response).toMatchObject({
         errorReason: SETTLE_REASONS.pending,
@@ -1149,7 +1154,7 @@ describe("createSettler", () => {
             if (signs) await opts.onSigned?.(HASH);
             return new Promise(() => {});
           },
-          { budgetMs: 30 },
+          { budgetMs: BUDGET_MS },
         );
         vi.spyOn(store, "transition").mockRejectedValue(new Error("store down"));
         const { response } = await settle(payload(), requirements);
@@ -1170,7 +1175,7 @@ describe("createSettler", () => {
           "the budget's write",
           (s) => {
             s.hooks.beforeSubmit.mockImplementationOnce(async () => {
-              await delay(40);
+              await delay(BUDGET_MS + 10);
               return { allow: true };
             });
             vi.spyOn(s.store, "transition").mockImplementation(hung);
@@ -1179,13 +1184,13 @@ describe("createSettler", () => {
       ];
       for (const [name, hang] of cases) {
         await db.empty();
-        const s = setup(landing(), { budgetMs: 30 });
+        const s = setup(landing(), { budgetMs: BUDGET_MS });
         hang(s);
         const started = Date.now();
         const { response } = await s.settle(payload(), requirements);
         expect(response, name).toMatchObject({ errorReason: SETTLE_REASONS.timeout });
-        // The budget (30 ms), then at most the store's grace (20 ms): not a hang. The bound is
-        // loose for a loaded runner.
+        // The budget, then at most the store's grace: not a hang. The bound is loose for a loaded
+        // runner.
         expect(Date.now() - started, name).toBeLessThan(1_000);
         expect(s.submit, name).not.toHaveBeenCalled();
       }
@@ -1237,7 +1242,7 @@ describe("createSettler", () => {
     it("runs onFinal only after a beforeSubmit past the budget settles, so a late reservation is released", async () => {
       const order: string[] = [];
       let answer!: () => void;
-      const { settle, hooks } = setup(landing(), { budgetMs: 30 });
+      const { settle, hooks } = setup(landing(), { budgetMs: BUDGET_MS });
       hooks.beforeSubmit.mockImplementationOnce(
         () =>
           new Promise((resolve) => {
@@ -1269,13 +1274,13 @@ describe("createSettler", () => {
           );
           return new Promise(() => {});
         },
-        { budgetMs: 30 },
+        { budgetMs: BUDGET_MS },
       );
       // The hash is stored at once, but the store answers only after the budget.
       const addHash = store.addHash.bind(store);
       vi.spyOn(store, "addHash").mockImplementation(async (...args) => {
         const added = await addHash(...args);
-        await delay(60);
+        await delay(BUDGET_MS);
         return added;
       });
       expect((await settle(payload(), requirements)).response).toMatchObject({
@@ -1309,9 +1314,9 @@ describe("createSettler", () => {
     });
 
     it("submits nothing when the checks and beforeSubmit used up the budget", async () => {
-      const { settle, submit, store, hooks } = setup(landing(), { budgetMs: 30 });
+      const { settle, submit, store, hooks } = setup(landing(), { budgetMs: BUDGET_MS });
       hooks.beforeSubmit.mockImplementationOnce(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 40));
+        await new Promise((resolve) => setTimeout(resolve, BUDGET_MS + 10));
         return { allow: true };
       });
       expect((await settle(payload(), requirements)).response).toMatchObject({
@@ -1329,12 +1334,13 @@ describe("createSettler", () => {
           await signing;
           return landing()(opts);
         },
-        { settleTimeoutMs: 20, budgetMs: 2_000 },
+        { settleTimeoutMs: 100, budgetMs: 2_000 },
       );
       const first = settle(payload(), requirements);
       await delay(5);
       const repeat = settle(payload(), requirements);
-      setTimeout(sign, 60);
+      // Past the settle timeout from the repeat's start (5 + 100).
+      setTimeout(sign, 150);
       const answers = [(await repeat).response, (await first).response];
       expect(answers.filter((response) => response.success)).toHaveLength(1);
       expect(answers).toContainEqual(alreadySettled);
@@ -1342,16 +1348,16 @@ describe("createSettler", () => {
     });
 
     it("counts a repeat's settle timeout from the hash it first sees, not from its start", async () => {
-      // Signed at 60 ms, landed at 75 ms: past `settleTimeoutMs` from the repeat's start (5 + 20),
-      // within it from the hash (60 + 20).
+      // Signed at 150 ms, landed at 165 ms: past `settleTimeoutMs` from the repeat's start
+      // (5 + 100), within it from the hash (150 + 100), with room for the store's writes.
       const { settle, submit } = setup(
         async (opts) => {
-          await delay(60);
+          await delay(150);
           await opts.onSigned?.(HASH);
           await delay(15);
           return result();
         },
-        { settleTimeoutMs: 20, budgetMs: 2_000 },
+        { settleTimeoutMs: 100, budgetMs: 2_000 },
       );
       const first = settle(payload(), requirements);
       await delay(5);
@@ -1364,18 +1370,18 @@ describe("createSettler", () => {
 
     it("ends an unsigned record a repeat finds past the first call's budget, at once", async () => {
       // The refusal couldn't be stored, so the record stays `claimed` with no hash.
-      const { settle, store, hooks } = setup(landing(), { budgetMs: 50 });
+      const { settle, store, hooks } = setup(landing(), { budgetMs: BUDGET_MS });
       hooks.beforeSubmit.mockResolvedValueOnce({ allow: false, errorReason: "over_budget" });
       vi.spyOn(store, "transition").mockRejectedValueOnce(new Error("store down"));
       await settle(payload(), requirements);
       expect((await store.get(key))?.state).toBe("claimed");
-      await delay(60);
+      await delay(BUDGET_MS + 10);
       const started = Date.now();
       expect((await settle(payload(), requirements)).response).toMatchObject({
         errorReason: SETTLE_REASONS.timeout,
       });
-      // Anchored on the claim, not on the repeat's own start.
-      expect(Date.now() - started).toBeLessThan(40);
+      // Anchored on the claim, not on the repeat's own start: before its own budget ends.
+      expect(Date.now() - started).toBeLessThan(BUDGET_MS);
       expect(await store.get(key)).toMatchObject({
         state: "rejected",
         errorReason: SETTLE_REASONS.timeout,
@@ -1384,17 +1390,22 @@ describe("createSettler", () => {
     });
 
     describe("a repeat that lost the claim to a call that started after it", () => {
-      // The losing call's checks take 100 ms; the winner starts 50 ms after it and claims at
-      // once. Budget 150 ms: the loser's own ends at 150, the winner's at 200.
+      // The winner starts 150 ms after the losing call and claims at once; the loser's checks end
+      // only once that claim is stored. Budget 300 ms: the loser's own ends at 300, the winner's
+      // at 450.
       const race = (behaviour: Behaviour) => {
         let calls = 0;
-        const slowFirst: Check = async (...args) => {
-          if (calls++ === 0) await delay(100);
+        const afterWinnersClaim: Check = async (...args) => {
+          if (calls++ === 0)
+            await vi.waitFor(async () => expect(await ctx.store.get(key)).toBeDefined(), {
+              timeout: 5_000,
+              interval: 5,
+            });
           return passing(...args);
         };
-        const ctx = setup(behaviour, { budgetMs: 150, check: slowFirst });
+        const ctx = setup(behaviour, { budgetMs: 300, check: afterWinnersClaim });
         const loser = ctx.settle(payload(), requirements);
-        const winner = delay(50).then(() => ctx.settle(payload(), requirements));
+        const winner = delay(150).then(() => ctx.settle(payload(), requirements));
         return { ...ctx, loser, winner };
       };
 
@@ -1427,14 +1438,14 @@ describe("createSettler", () => {
       });
 
       it("lets the winner sign after the loser's budget, while its own still runs", async () => {
-        // The winner gets a channel at 170 ms: past the loser's budget, within its own.
-        const { loser, winner, store } = race(async (opts) => {
-          await delay(120);
+        // The winner gets a channel once the loser answered by its budget, within its own.
+        const run = race(async (opts) => {
+          await run.loser;
           return landing()(opts);
         });
-        expect((await loser).response).toMatchObject({ errorReason: SETTLE_REASONS.pending });
-        expect((await winner).response).toMatchObject({ success: true, transaction: HASH });
-        expect((await store.get(key))?.state).toBe("success");
+        expect((await run.loser).response).toMatchObject({ errorReason: SETTLE_REASONS.pending });
+        expect((await run.winner).response).toMatchObject({ success: true, transaction: HASH });
+        expect((await run.store.get(key))?.state).toBe("success");
       });
     });
 

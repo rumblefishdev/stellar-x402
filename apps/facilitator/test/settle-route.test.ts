@@ -1,7 +1,6 @@
 import { Keypair } from "@stellar/stellar-sdk";
 import type { PaymentRequirements } from "@x402/core/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryCatalogStore } from "../src/adapters/memory.js";
 import { createCataloger } from "../src/catalog/cataloger.js";
 import { parseConfig } from "../src/config.js";
 import { supportedResponse } from "../src/http/supported.js";
@@ -50,6 +49,7 @@ describe("POST /settle", () => {
   beforeAll(async () => {
     const env = {
       FACILITATOR_SECRET: Keypair.random().secret(),
+      DATABASE_URL: db.urlFor(db.schema),
       CLIENT_IP: "socket",
       CHANNELS: Keypair.random().publicKey(),
     };
@@ -207,7 +207,7 @@ describe("POST /settle", () => {
 
   it("settles a pubnet payment for a localhost resource, and only the listing is refused (0054)", async () => {
     const cataloger = createCataloger({
-      store: new MemoryCatalogStore(),
+      store: db.stores().catalog,
       metrics: memoryMetrics(),
       logger: jsonLogger("debug", () => undefined),
     });

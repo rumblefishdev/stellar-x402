@@ -133,12 +133,10 @@ const envSchema = z
         ),
     ),
 
-    /**
-     * Which store adapters the composition root builds; `postgres` needs `DATABASE_URL`. Memory
-     * loses settlements on restart, so it is testnet only.
-     */
-    STORE: oneOf(["memory", "postgres"]).default("memory"),
-    DATABASE_URL: databaseUrl.optional(),
+    /** The PostgreSQL every store lives in, migrated by `pnpm migrate`. */
+    DATABASE_URL: databaseUrl,
+    /** Every store is PostgreSQL now; refused, so a leftover can't look like it still applies. */
+    STORE: z.string().optional(),
 
     /** Fee ceiling for upstream verify and the pool alike (AD-10). */
     MAX_FEE_STROOPS: feeStroops.default("250000"),
@@ -264,8 +262,8 @@ const envSchema = z
     message: "is replaced by CLIENT_IP",
     path: ["TRUSTED_PROXY_HOPS"],
   })
-  .refine((env) => env.STORE !== "memory" || env.NETWORK === STELLAR_NETWORKS.testnet, {
-    message: "must be postgres outside testnet",
+  .refine((env) => env.STORE === undefined, {
+    message: "is no longer read: the stores are always PostgreSQL",
     path: ["STORE"],
   })
   // `/settle` spends on pubnet, so not before spend budgets and the channel lease. The task that
@@ -274,15 +272,6 @@ const envSchema = z
     message:
       "stellar:pubnet is refused until spend budgets (0024) and the channel lease (0025) land",
     path: ["NETWORK"],
-  })
-  .refine((env) => env.DATABASE_URL !== undefined || env.STORE !== "postgres", {
-    message: "is required when STORE=postgres",
-    path: ["DATABASE_URL"],
-  })
-  // A URL with the memory store would look durable and isn't.
-  .refine((env) => env.DATABASE_URL === undefined || env.STORE === "postgres", {
-    message: "is only used with STORE=postgres",
-    path: ["DATABASE_URL"],
   });
 
 /** `pnpm migrate` needs only the database. */
@@ -301,9 +290,8 @@ export interface Config {
   rpcUrls: string[];
   facilitatorSecret: string;
   channels: string[];
-  store: "memory" | "postgres";
-  /** Set when `store` is `postgres`. Never logged. */
-  databaseUrl?: string;
+  /** Never logged. */
+  databaseUrl: string;
   fees: {
     maxFeeStroops: bigint;
     inclusionFeeStroops?: bigint;
@@ -380,7 +368,6 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
     rpcUrls: e.RPC_URLS ?? [DEFAULT_TESTNET_RPC],
     facilitatorSecret: e.FACILITATOR_SECRET,
     channels: e.CHANNELS,
-    store: e.STORE,
     databaseUrl: e.DATABASE_URL,
     fees: {
       maxFeeStroops: e.MAX_FEE_STROOPS,
