@@ -2,7 +2,7 @@
 id: "0025"
 title: "Channel lease and graceful shutdown"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0006", "0011", "0012"]
 related_tasks: ["0012", "0009", "0019", "0022", "0014", "0013", "0039"]
@@ -15,6 +15,10 @@ history:
     status: backlog
     who: claude
     note: "Created by 0012 from M1 Story 2.4 (Payments lane)."
+  - date: "2026-10-26"
+    status: active
+    who: okarcz
+    note: "Work starts, on top of 0019 (PR #57); rebased onto develop once #57 merges."
 ---
 
 # Channel lease and graceful shutdown
