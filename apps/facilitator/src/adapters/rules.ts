@@ -44,8 +44,8 @@ export function assertLedger(ledger: number): void {
 const INT64_MAX = 2n ** 63n - 1n;
 
 /**
- * Rejects a stroop amount below zero or above the int64 maximum: the memory adapter would keep
- * it, and PostgreSQL would store a negative one or fail with an out-of-range error.
+ * Rejects a stroop amount below zero or above the int64 maximum: PostgreSQL would store a negative
+ * one or fail with an out-of-range error.
  */
 export function assertStroops(amount: bigint, name: string): void {
   if (typeof amount !== "bigint" || amount < 0n || amount > INT64_MAX)

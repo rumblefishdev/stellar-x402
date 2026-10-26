@@ -11,7 +11,7 @@ jobs:
     strategy:
       matrix:
         node: [22, 24]
-    # The PostgreSQL store suite runs under CI and fails without a reachable database.
+    # Every facilitator test runs on PostgreSQL and fails without a reachable database.
     services:
       postgres:
         image: postgres:18

@@ -304,7 +304,7 @@ export class PostgresSettlementStore implements SettlementStore {
     if (!isForward(expected, update.state)) return undefined;
     const values: unknown[] = [key, expected, update.state, update.updatedAt];
     const sets = ["state = $3", "updated_at = $4"];
-    // Like the memory adapter, a field given as `undefined` clears the column.
+    // A field given as `undefined` clears the column.
     for (const [field, column] of Object.entries(UPDATE_COLUMNS))
       if (field in update) {
         const value = update[field as keyof typeof UPDATE_COLUMNS];
