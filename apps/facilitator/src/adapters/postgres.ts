@@ -160,6 +160,8 @@ interface SettlementRow {
   error_reason: string | null;
   /** Absent on a database `0002_success_answered` hasn't reached (`SELECT s.*`). */
   success_answered_at?: string | null;
+  /** Absent on a database `0005_settlement_attempts` hasn't reached (`SELECT s.*`). */
+  version?: number;
   created_at: string;
   updated_at: string;
   hashes?: string[];
@@ -174,6 +176,7 @@ function toRecord(row: SettlementRow, hashes = row.hashes ?? []): SettlementReco
     fingerprint: row.fingerprint,
     state: row.state as SettlementState,
     hashes,
+    version: row.version ?? 0,
     paymentPayload: row.payment_payload,
     paymentRequirements: row.payment_requirements,
     createdAt: Number(row.created_at),
@@ -312,6 +315,7 @@ export class PostgresSettlementStore implements SettlementStore {
        ), upd AS (
          UPDATE settlements s
          SET state = CASE WHEN s.state = 'claimed' THEN 'signed' ELSE s.state END,
+             version = s.version + 1,
              updated_at = $3
          FROM ins WHERE s.key = ins.key
          RETURNING s.key
@@ -380,15 +384,16 @@ export class PostgresSettlementStore implements SettlementStore {
     key: SettlementKey,
     expected: SettlementState,
     update: SettlementUpdate,
+    expectedVersion?: number,
   ): Promise<SettlementRecord | undefined> {
     if (update.feeCharged !== undefined) assertStroops(update.feeCharged, "feeCharged");
     const { attempts } = update;
     if (attempts?.length)
       return inTransaction(this.pool, async (client) => {
         await client.query(MARK_ATTEMPTS, [key, update.updatedAt, attemptsJson(attempts)]);
-        return this.moveState(client, key, expected, update);
+        return this.moveState(client, key, expected, update, expectedVersion);
       });
-    return this.moveState(this.pool, key, expected, update);
+    return this.moveState(this.pool, key, expected, update, expectedVersion);
   }
 
   private async moveState(
@@ -396,6 +401,7 @@ export class PostgresSettlementStore implements SettlementStore {
     key: SettlementKey,
     expected: SettlementState,
     update: SettlementUpdate,
+    expectedVersion?: number,
   ): Promise<SettlementRecord | undefined> {
     if (!isForward(expected, update.state)) return undefined;
     const values: unknown[] = [key, expected, update.state, update.updatedAt];
@@ -407,8 +413,14 @@ export class PostgresSettlementStore implements SettlementStore {
         values.push(typeof value === "bigint" ? value.toString() : (value ?? null));
         sets.push(`${column} = $${values.length}`);
       }
+    // Re-checked on the row `addHash` committed, if it held the lock: its version is the new one.
+    let where = "key = $1 AND state = $2";
+    if (expectedVersion !== undefined) {
+      values.push(expectedVersion);
+      where += ` AND version = $${values.length}`;
+    }
     const { rows } = await db.query<SettlementRow>(
-      `UPDATE settlements SET ${sets.join(", ")} WHERE key = $1 AND state = $2 RETURNING *`,
+      `UPDATE settlements SET ${sets.join(", ")} WHERE ${where} RETURNING *`,
       values,
     );
     if (!rows[0]) return undefined;

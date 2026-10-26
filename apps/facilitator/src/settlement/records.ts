@@ -72,18 +72,29 @@ export function createRecords(deps: RecordsDeps) {
 
   /**
    * Moves a record forward from whatever state it is in now. `undefined` means another writer got
-   * there first, or the record is already final. `update.attempts` are written either way: they
-   * say what the network did, whoever finishes the record.
+   * there first, the record is already final, or, with `expectedVersion`, a hash was appended
+   * since the caller read it. `update.attempts` are written either way: they say what the network
+   * did, whoever finishes the record.
    */
-  const advance = async (key: SettlementKey, update: Omit<SettlementUpdate, "updatedAt">) => {
+  const advance = async (
+    key: SettlementKey,
+    update: Omit<SettlementUpdate, "updatedAt">,
+    expectedVersion?: number,
+  ) => {
     for (let tries = 0; tries < 3; tries++) {
       const current = await store.get(key);
-      if (!current || isFinalRecord(current)) {
+      const stale = expectedVersion !== undefined && current?.version !== expectedVersion;
+      if (!current || isFinalRecord(current) || stale) {
         if (current && update.attempts?.length)
           await store.markAttempts(key, update.attempts, now());
         return undefined;
       }
-      const moved = await store.transition(key, current.state, { ...update, updatedAt: now() });
+      const moved = await store.transition(
+        key,
+        current.state,
+        { ...update, updatedAt: now() },
+        expectedVersion,
+      );
       if (moved) return moved;
     }
     return undefined;
@@ -94,8 +105,9 @@ export function createRecords(deps: RecordsDeps) {
     key: SettlementKey,
     update: Omit<SettlementUpdate, "updatedAt">,
     origin: SettlementOrigin,
+    expectedVersion?: number,
   ) => {
-    const record = await advance(key, update);
+    const record = await advance(key, update, expectedVersion);
     if (record && isFinalRecord(record)) onFinal(record, origin);
     return { record: record ?? (await store.get(key)), won: record !== undefined, origin };
   };
