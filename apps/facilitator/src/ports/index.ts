@@ -15,6 +15,7 @@ export type { RateLimitHit, RateLimitStore } from "./rate-limit-store.js";
 export {
   FINAL_SETTLEMENT_STATES,
   HashConflictError,
+  LEASE_SKEW_MARGIN_MS,
   type AttemptBounds,
   type AttemptState,
   type AttemptUpdate,
