@@ -340,7 +340,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     expect(connections).toBeGreaterThanOrEqual(10);
   });
 
-  it("boots main() with STORE=postgres, reserves and limits on their own pools, and ends them", async () => {
+  it("boots main() with STORE=postgres, reserves and limits on their own pools, pruning on the main one, and ends them", async () => {
     await stores();
     const app = await main({
       STORE: "postgres",
@@ -355,17 +355,24 @@ describe.skipIf(!process.env.TEST_DATABASE_URL && !process.env.CI)("PostgreSQL s
     expect(pools).toBeDefined();
     try {
       const limits = [{ scope: "global" as const, maxStroops: 10n, windowMs: 1_000 }];
-      const counts = () => [
-        pools?.main.totalCount,
-        pools?.reserve.totalCount,
-        pools?.rateLimits.totalCount,
-      ];
-      await app.stores.spend.reserve({ id: "a", amount: 1n, limits, now: 0 });
-      expect(counts()).toEqual([0, 1, 0]);
-      await app.stores.rateLimits.hit("k", 60_000, 0);
-      expect(counts()).toEqual([0, 1, 1]);
-      expect((await app.stores.settlements.claim(settlement("1"))).claimed).toBe(true);
-      expect(counts()).toEqual([1, 1, 1]);
+      // Checkouts, not connections: a pool reuses an idle connection, so only a checkout shows
+      // which pool a call ran on once the pool has one.
+      const checkouts = { main: 0, reserve: 0, rateLimits: 0 };
+      const names = Object.keys(checkouts) as (keyof typeof checkouts)[];
+      for (const name of names) pools?.[name].on("acquire", () => checkouts[name]++);
+      const ranOn = async (call: () => Promise<unknown>) => {
+        const before = { ...checkouts };
+        await call();
+        return names.filter((name) => checkouts[name] > before[name]);
+      };
+      expect(
+        await ranOn(() => app.stores.spend.reserve({ id: "a", amount: 1n, limits, now: 0 })),
+      ).toEqual(["reserve"]);
+      expect(await ranOn(() => app.stores.rateLimits.hit("k", 60_000, 0))).toEqual(["rateLimits"]);
+      expect(await ranOn(() => app.stores.settlements.claim(settlement("1")))).toEqual(["main"]);
+      // A flood's pruning takes no connection from `hit` or `reserve` (decision 9).
+      expect(await ranOn(() => app.stores.rateLimits.prune(0, 10))).toEqual(["main"]);
+      expect(await ranOn(() => app.stores.spend.prune(0, 10))).toEqual(["main"]);
     } finally {
       await app.close();
     }
