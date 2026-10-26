@@ -1,12 +1,15 @@
 import { Keypair } from "@stellar/stellar-sdk";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { MemoryRateLimitStore, memoryStores } from "../src/adapters/memory.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseConfig } from "../src/config.js";
 import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
 import { start, type Started } from "../src/main.js";
 import { memoryMetrics } from "../src/metrics.js";
 import type { RateLimitStore, Stores } from "../src/ports/index.js";
+import { testDatabase } from "./database.js";
+
+const db = testDatabase();
+beforeEach(db.empty);
 
 let app: Started | undefined;
 afterEach(async () => {
@@ -19,7 +22,7 @@ afterEach(async () => {
  * are aligned to the clock, so a test's requests share one only if no boundary falls between them:
  * an hour's window makes that all but certain.
  */
-async function serve(env: Record<string, string> = {}, stores: Stores = memoryStores()) {
+async function serve(env: Record<string, string> = {}, stores: Stores = db.stores()) {
   const config = parseConfig({
     FACILITATOR_SECRET: Keypair.random().secret(),
     CLIENT_IP: "socket",
@@ -55,12 +58,12 @@ async function serve(env: Record<string, string> = {}, stores: Stores = memorySt
   return { url, lines, post };
 }
 
-/** A rate-limit store whose `hit` is a spy over the memory one. */
+/** A rate-limit store whose `hit` is a spy over the database one. */
 function spiedStores(): { stores: Stores; hit: ReturnType<typeof vi.fn<RateLimitStore["hit"]>> } {
-  const memory = new MemoryRateLimitStore();
-  const hit = vi.fn<RateLimitStore["hit"]>((...args) => memory.hit(...args));
-  const prune: RateLimitStore["prune"] = (...args) => memory.prune(...args);
-  return { stores: { ...memoryStores(), rateLimits: { hit, prune } }, hit };
+  const stores = db.stores();
+  const hit = vi.fn<RateLimitStore["hit"]>((...args) => stores.rateLimits.hit(...args));
+  const prune: RateLimitStore["prune"] = (...args) => stores.rateLimits.prune(...args);
+  return { stores: { ...stores, rateLimits: { hit, prune } }, hit };
 }
 
 describe("the rate limiter", () => {
@@ -150,7 +153,7 @@ describe("the rate limiter", () => {
       },
       prune: async () => 0,
     };
-    const { lines, post } = await serve({}, { ...memoryStores(), rateLimits: failing });
+    const { lines, post } = await serve({}, { ...db.stores(), rateLimits: failing });
     const response = await post("/settle");
     expect([response.status, await response.json()]).toEqual([500, { error: "internal_error" }]);
     expect(lines.join("")).toContain("http_error");
@@ -176,18 +179,18 @@ describe("the rate limiter", () => {
   });
 
   it("logs one rate_limited line for a burst of requests already in flight", async () => {
-    // A store that answers after 20 ms, as a database does, so every request is in flight at once.
-    const memory = new MemoryRateLimitStore();
+    // A store that answers 20 ms later, so every request is in flight at once.
+    const stores = db.stores();
     const slow: RateLimitStore = {
       hit: async (...args) => {
         await new Promise((resolve) => setTimeout(resolve, 20));
-        return memory.hit(...args);
+        return stores.rateLimits.hit(...args);
       },
-      prune: (...args) => memory.prune(...args),
+      prune: (...args) => stores.rateLimits.prune(...args),
     };
     const { lines, post } = await serve(
       { CLIENT_IP: "cloudflare" },
-      { ...memoryStores(), rateLimits: slow },
+      { ...stores, rateLimits: slow },
     );
     const burst = await Promise.all(
       Array.from({ length: 20 }, () => post("/verify", { "cf-connecting-ip": "203.0.113.7" })),

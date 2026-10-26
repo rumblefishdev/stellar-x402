@@ -1,12 +1,16 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { MemoryRateLimitStore, MemorySpendStore } from "../src/adapters/memory.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LogFields, Logger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
+import type { SpendStore } from "../src/ports/index.js";
 import { createPruner, type PrunerDeps } from "../src/pruner.js";
+import { testDatabase } from "./database.js";
 
 const DAY = 86_400_000;
 const NOW = 100 * DAY;
 const big = 10n ** 15n;
+
+const db = testDatabase();
+beforeEach(db.empty);
 
 function recordingLogger() {
   const events: { level: string; event: string; fields?: LogFields }[] = [];
@@ -23,8 +27,8 @@ function recordingLogger() {
 
 function deps(overrides: Partial<PrunerDeps> = {}): PrunerDeps {
   return {
-    spend: new MemorySpendStore(),
-    rateLimits: new MemoryRateLimitStore(),
+    spend: db.stores().spend,
+    rateLimits: db.stores().rateLimits,
     spendWindowMs: DAY,
     rateLimitWindowMs: 60_000,
     logger: recordingLogger().logger,
@@ -34,7 +38,7 @@ function deps(overrides: Partial<PrunerDeps> = {}): PrunerDeps {
   };
 }
 
-const reserveAt = (spend: MemorySpendStore, id: string, at: number, windowMs = DAY) =>
+const reserveAt = (spend: SpendStore, id: string, at: number, windowMs = DAY) =>
   spend.reserve({
     id,
     amount: 1n,
@@ -46,8 +50,7 @@ describe("pruner", () => {
   afterEach(() => vi.useRealTimers());
 
   it("prunes spend past the longer of two windows and 7 days, and rate limits past one window", async () => {
-    const spend = new MemorySpendStore();
-    const rateLimits = new MemoryRateLimitStore();
+    const { spend, rateLimits } = db.stores();
     await reserveAt(spend, "old", NOW - 7 * DAY - 1);
     await reserveAt(spend, "kept", NOW - 7 * DAY);
     await rateLimits.hit("ended", 60_000, NOW - 120_001);
@@ -62,7 +65,8 @@ describe("pruner", () => {
     expect((await rateLimits.hit("previous", 60_000, NOW - 60_000)).count).toBe(2);
 
     // A 5-day window keeps 10 days.
-    const long = new MemorySpendStore();
+    await db.empty();
+    const long = db.stores().spend;
     await reserveAt(long, "old", NOW - 10 * DAY - 1, 5 * DAY);
     await reserveAt(long, "kept", NOW - 10 * DAY, 5 * DAY);
     await createPruner(deps({ spend: long, spendWindowMs: 5 * DAY })).runOnce();
@@ -123,7 +127,7 @@ describe("pruner", () => {
   it("logs and counts a failed prune, and still prunes the other table", async () => {
     const { logger, events } = recordingLogger();
     const metrics = memoryMetrics();
-    const rateLimits = new MemoryRateLimitStore();
+    const { rateLimits } = db.stores();
     await rateLimits.hit("ended", 60_000, 0);
     const error = new Error("connection terminated");
     await createPruner(

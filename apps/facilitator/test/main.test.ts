@@ -13,17 +13,20 @@ import {
   nativeToScVal,
 } from "@stellar/stellar-sdk";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { memoryStores } from "../src/adapters/memory.js";
 import { ConfigError, parseConfig } from "../src/config.js";
 import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger, rpcEndpointName } from "../src/logger.js";
 import { main, start, type Started } from "../src/main.js";
 import { memoryMetrics } from "../src/metrics.js";
+import { testDatabase } from "./database.js";
 import { hardened, ledgerEntries, rpcStub } from "./rpc-stub.js";
 
+const db = testDatabase();
 const secret = Keypair.random().secret();
 const facilitator = Keypair.fromSecret(secret).publicKey();
 const env = {
+  STORE: "postgres",
+  DATABASE_URL: db.urlFor(db.schema),
   FACILITATOR_SECRET: secret,
   CLIENT_IP: "socket",
   CHANNELS: Keypair.random().publicKey(),
@@ -58,7 +61,7 @@ describe("facilitator boot", () => {
       config,
       logger,
       metrics: memoryMetrics(),
-      stores: memoryStores(),
+      stores: db.stores(),
       verify,
       settle,
       extensionResponses: () => undefined,
