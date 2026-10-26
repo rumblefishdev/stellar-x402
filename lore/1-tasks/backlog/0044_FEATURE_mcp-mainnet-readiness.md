@@ -52,6 +52,9 @@ is decided with the owner (options and a recommendation) before it is built.
   `checkUrl` then refuses them as `unsafe_url`. With `STELLAR_X402_ALLOW_INSECURE_LOCAL=1`, an
   agent pointed at a public catalog would call a `localhost` entry on its own machine. Filter or
   mark them in `list_resources`, and say in the README that the flag is for a local catalog only.
+  Since 0054 a pubnet catalog of ours lists only `http(s)` URLs with a public host, so this is
+  about testnet catalogs and other operators' ones; the rule (`isPublicResourceUrl` in
+  `packages/bazaar/src/url.ts`) could be exported for the filter.
 - **Threat model entry (from the 0053 review).** `docs/threat-model.md` plans "SSRF in Bazaar
   metadata" but has no catalog entry, and 0053 left the SSRF check on resource URLs to whoever
   fetches them. Write it with the catalog guard: the catalog request, then each listed URL.
