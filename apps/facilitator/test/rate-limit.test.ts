@@ -5,6 +5,7 @@ import { parseConfig } from "../src/config.js";
 import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
 import { start, type Started } from "../src/main.js";
+import { memoryMetrics } from "../src/metrics.js";
 import type { RateLimitStore, Stores } from "../src/ports/index.js";
 
 let app: Started | undefined;
@@ -34,6 +35,7 @@ async function serve(env: Record<string, string> = {}, stores: Stores = memorySt
   app = await start({
     config,
     logger: jsonLogger("debug", (line) => lines.push(line)),
+    metrics: memoryMetrics(),
     stores,
     verify: async () => ({ isValid: true }),
     settle: async () => ({
@@ -80,8 +82,8 @@ describe("the rate limiter", () => {
 
   it("limits /discovery/* with its own budget", async () => {
     const { url } = await serve();
-    expect((await fetch(`${url}/discovery/resources`)).status).toBe(501);
-    expect((await fetch(`${url}/discovery/resources`)).status).toBe(501);
+    expect((await fetch(`${url}/discovery/resources`)).status).toBe(200);
+    expect((await fetch(`${url}/discovery/resources`)).status).toBe(200);
     expect((await fetch(`${url}/discovery/resources`)).status).toBe(429);
     expect((await fetch(`${url}/discovery/search`)).status).toBe(429);
   });

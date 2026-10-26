@@ -816,6 +816,7 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
       const page = await store.list({ limit: 1, offset: 1 });
       expect(page).toMatchObject({ total: 3, items: [{ resource: "https://b.example" }] });
       expect(await store.list({ limit: 10, offset: 5 })).toEqual({ items: [], total: 3 });
+      expect(await store.list({ limit: 0, offset: 0 })).toEqual({ items: [], total: 3 });
     });
 
     it("filters on the stored fields after an update, and after a stale write", async () => {

@@ -18,6 +18,7 @@ import { ConfigError, parseConfig } from "../src/config.js";
 import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger, rpcEndpointName } from "../src/logger.js";
 import { main, start, type Started } from "../src/main.js";
+import { memoryMetrics } from "../src/metrics.js";
 import { hardened, ledgerEntries, rpcStub } from "./rpc-stub.js";
 
 const secret = Keypair.random().secret();
@@ -56,6 +57,7 @@ describe("facilitator boot", () => {
     app = await start({
       config,
       logger,
+      metrics: memoryMetrics(),
       stores: memoryStores(),
       verify,
       settle,
@@ -66,13 +68,12 @@ describe("facilitator boot", () => {
   });
   afterAll(() => app.close());
 
-  it("answers the stub route, with no CORS headers", async () => {
-    const response = await fetch(`${url}/discovery/resources`, {
+  it("answers an unknown route with a 404, with no CORS headers", async () => {
+    const response = await fetch(`${url}/unknown`, {
       headers: { origin: "https://other.example" },
     });
-    expect(response.status).toBe(501);
+    expect(response.status).toBe(404);
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
-    expect((await fetch(`${url}/unknown`)).status).toBe(404);
   });
 
   it("answers a client's bad body with a 4xx and doesn't log it as an error", async () => {
