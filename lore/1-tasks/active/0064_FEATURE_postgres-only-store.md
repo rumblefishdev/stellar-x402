@@ -2,7 +2,7 @@
 id: "0064"
 title: "Run tests, local runs and deploys on PostgreSQL only, and drop the memory store"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0012"]
 related_tasks: ["0022", "0023", "0050"]
@@ -15,6 +15,10 @@ history:
     status: backlog
     who: karolkow
     note: "Spawned from 0023's review: STORE=memory|postgres runs two implementations of one store."
+  - date: "2026-10-26"
+    status: active
+    who: karolkow
+    note: "Work starts."
 ---
 
 # Run tests, local runs and deploys on PostgreSQL only, and drop the memory store
