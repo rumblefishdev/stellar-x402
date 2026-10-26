@@ -32,6 +32,7 @@ import {
   scheduleReconciliation,
   type Reconciliation,
 } from "./settlement/reconcile.js";
+import { createLeaseKeeper, type LeaseKeeper } from "./settlement/lease.js";
 import { createRecords } from "./settlement/records.js";
 import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler, type Settle } from "./settlement/settle.js";
 import { failoverUpstream, type EndpointFailure } from "./settlement/upstream-failover.js";
@@ -55,8 +56,10 @@ export interface Started {
 export async function start(deps: AppDeps): Promise<Started> {
   const server = createApp(deps).listen(deps.config.port);
   await once(server, "listening");
-  // After listening, so `/health` answers while it runs; `/settle` serves beside it (0019
-  // decision 27).
+  // After listening, so `/health` answers meanwhile. Sweeps run with or without the lease (0019
+  // decision 37); `/settle` serves beside them (0019 decision 27) once the lease is held, and the
+  // keeper keeps trying when it isn't (0025 decision 1).
+  await deps.lease?.start();
   deps.reconciliation?.start();
   const { port } = server.address() as AddressInfo;
   deps.logger.info("listening", {
@@ -66,9 +69,13 @@ export async function start(deps: AppDeps): Promise<Started> {
   });
   return {
     port,
-    close: () => {
+    close: async () => {
       deps.reconciliation?.close();
-      return new Promise((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())));
+      // The lease stays until its TTL; releasing it after the drain comes with 0025's shutdown.
+      await Promise.all([
+        deps.lease?.close(),
+        new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve()))),
+      ]);
     },
   };
 }
@@ -302,7 +309,7 @@ export function buildSettlement(
     budgetMs: config.settlement.settleBudgetMs,
   });
   // The only sender of transactions in the service (AD-2). `main()` checks its channels before
-  // it starts; the lease comes with 0025.
+  // it starts, and `/settle` reaches it only while the process holds the lease (0025).
   const submitter = new SettlementSubmitter({
     rpc: deps.rpc,
     networkPassphrase: getNetworkPassphrase(config.network),
@@ -384,6 +391,14 @@ export function compose(
   // they share one ceiling and one bid (AD-10).
   const fees = feeSettings(config.fees, rpc);
   const checks = buildChecks(config, rpc, fees, logger, opts.seams);
+  // One lease per network's channel set (AD-17): only its holder settles.
+  const lease = createLeaseKeeper({
+    store: stores.settlements,
+    network: config.network,
+    ttlMs: config.settlement.leaseTtlMs,
+    logger,
+    metrics,
+  });
   const { settle, reconciliation } = buildSettlement(config, {
     rpc,
     fees,
@@ -410,6 +425,7 @@ export function compose(
       extensionResponses: cataloger.extensionResponses,
       supported: supportedResponse(config.network, checks.facilitator),
       reconciliation,
+      lease,
     },
     cataloger,
     metrics,

@@ -68,11 +68,29 @@ Every request counts, a malformed or oversized one too. `/supported` has no limi
   each hash's attempt state and bounds; hashes written before it fall back to the auth entry's
   expiry.
 
+## The channel lease
+
+Only one process at a time settles through a network's channel set, so two never sign with the
+same channel sequence numbers (AD-17, task 0025). The process that holds the lease, a row named
+`<network>:channels` in the settlement store, renews it every third of `LEASE_TTL_MS` (30 s by
+default).
+
+- A process without the lease starts anyway: `/health`, `/verify` and `/supported` answer, and
+  `/settle` answers `503 { "error": "no_lease" }` with `Retry-After: 5`. It tries to take the
+  lease every third of the TTL and never exits.
+- A renewal that fails, because the store errs or another process holds the lease, stops new
+  settlements at once; calls already under way run on. So does reaching the expiry the process
+  last wrote. Logged as `lease_lost` with its `reason`, and `lease_acquired` when it holds it again;
+  both counted in `lease_changes_total`.
+- A process that stops or dies keeps the lease until its TTL ends; another one then takes it.
+- With `STORE=memory` each process has its own lease, so it keeps nothing apart.
+
 ## `/settle` answers
 
-Every outcome is a 200 with an x402 `SettleResponse`. A 400 is a malformed request. A 500 is an
-error of ours, such as the store failing: repeat the same request. Never sign a new payment
-because of a 500, since the first one may still be settling.
+Every outcome is a 200 with an x402 `SettleResponse`. A 400 is a malformed request. A 503 comes
+from a process without the channel lease: nothing was read or settled, so repeat the same request
+after `Retry-After`. A 500 is an error of ours, such as the store failing: repeat the same request.
+Never sign a new payment because of a 500, since the first one may still be settling.
 
 `success: true` is answered once per payment: an earlier call got it, whoever made that call.
 Every later call with the same payment gets `settle_exact_stellar_already_settled`, so one payment
@@ -122,7 +140,7 @@ that asks the network about each of the record's hashes. A hash the network does
 `…_transaction_expired` only once its time or ledger bound has passed, so a repeat may get
 `settlement_pending` for up to that long. A record expires only if no hash was stored since the
 sweep read them: a rebuild in flight makes it wait for the next sweep. A sweep runs as the server
-starts and then 10 s after each one ends, beside `/settle`, which serves at once; a record the
+starts and then 10 s after each one ends, beside `/settle`, in every process, with or without the channel lease; a record the
 RPC or the store couldn't check is simply tried by the next sweep. A claim with no hash is closed
 as `…_interrupted` once its settle budget plus 5 s has passed.
 
