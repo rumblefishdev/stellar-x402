@@ -17,13 +17,10 @@ const minimal = {
   FACILITATOR_SECRET: SECRET,
   CHANNELS: `${CHANNEL_A}, ${CHANNEL_B}`,
   CLIENT_IP: "socket",
-};
-/** Pubnet needs the PostgreSQL store, and is refused until 0024 and 0025 land. */
-const pubnet = {
-  NETWORK: "stellar:pubnet",
-  STORE: "postgres",
   DATABASE_URL: "postgres://db.internal/x402",
 };
+/** Pubnet is refused until 0024 and 0025 land. */
+const pubnet = { NETWORK: "stellar:pubnet" };
 const PUBNET_REFUSED =
   "NETWORK stellar:pubnet is refused until spend budgets (0024) and the channel lease (0025) land";
 
@@ -46,7 +43,7 @@ describe("parseConfig", () => {
       rpcUrls: ["https://soroban-testnet.stellar.org"],
       facilitatorSecret: SECRET,
       channels: [CHANNEL_A, CHANNEL_B],
-      store: "memory",
+      databaseUrl: "postgres://db.internal/x402",
       fees: { maxFeeStroops: 250_000n, inclusionFeeStroops: undefined, escalation: undefined },
       settlement: {
         minValidityLedgers: 4,
@@ -81,7 +78,6 @@ describe("parseConfig", () => {
       RPC_URLS: "https://a.example, https://b.example",
       FACILITATOR_SECRET: SECRET,
       CHANNELS: CHANNEL_B,
-      STORE: "postgres",
       DATABASE_URL: "postgres://db.internal/x402",
       MAX_FEE_STROOPS: "300001",
       INCLUSION_FEE_STROOPS: "201",
@@ -112,7 +108,6 @@ describe("parseConfig", () => {
       rpcUrls: ["https://a.example", "https://b.example"],
       facilitatorSecret: SECRET,
       channels: [CHANNEL_B],
-      store: "postgres",
       databaseUrl: "postgres://db.internal/x402",
       fees: {
         maxFeeStroops: 300_001n,
@@ -147,6 +142,7 @@ describe("parseConfig", () => {
       FACILITATOR_SECRET: `${SECRET}\n`,
       CHANNELS: ` ${CHANNEL_A} `,
       CLIENT_IP: " socket ",
+      DATABASE_URL: " postgres://db.internal/x402 ",
       RPC_URLS: "",
       PORT: " ",
     });
@@ -160,6 +156,7 @@ describe("parseConfig", () => {
     expect(problems({})).toEqual([
       "FACILITATOR_SECRET is required",
       "CHANNELS is required",
+      "DATABASE_URL is required",
       "CLIENT_IP is required",
     ]);
   });
@@ -309,43 +306,22 @@ describe("parseConfig", () => {
     ).toEqual([PUBNET_REFUSED]);
   });
 
-  it("selects the PostgreSQL store with its URL", () => {
-    const url = "postgres://u:pw@db.internal:5432/x402";
-    const config = parseConfig({ ...minimal, STORE: "postgres", DATABASE_URL: url });
-    expect(config.store).toBe("postgres");
-    expect(config.databaseUrl).toBe(url);
+  it("requires a postgres:// DATABASE_URL, without echoing it", () => {
+    expect(problems({ ...minimal, DATABASE_URL: undefined })).toEqual(["DATABASE_URL is required"]);
+    expect(problems({ ...minimal, DATABASE_URL: "mysql://u:secret@db/x" })).toEqual([
+      "DATABASE_URL must be a postgres:// URL",
+    ]);
+    expect(() => parseConfig({ ...minimal, DATABASE_URL: "mysql://u:secret@db/x" })).toThrow(
+      expect.objectContaining({ message: expect.not.stringContaining("secret") }),
+    );
   });
 
-  it("requires a postgres:// DATABASE_URL for STORE=postgres, without echoing it", () => {
-    expect(problems({ ...minimal, STORE: "postgres" })).toEqual([
-      "DATABASE_URL is required when STORE=postgres",
-    ]);
-    const found = problems({
-      ...minimal,
-      STORE: "postgres",
-      DATABASE_URL: "mysql://u:secret@db/x",
-    });
-    expect(found).toEqual(["DATABASE_URL must be a postgres:// URL"]);
-    expect(() =>
-      parseConfig({ ...minimal, STORE: "postgres", DATABASE_URL: "mysql://u:secret@db/x" }),
-    ).toThrow(expect.objectContaining({ message: expect.not.stringContaining("secret") }));
-  });
-
-  it("allows the memory store on testnet only, and never with a DATABASE_URL", () => {
-    expect(parseConfig(minimal).store).toBe("memory");
-    const rpc = { RPC_URLS: "https://rpc.example" };
-    expect(problems({ ...minimal, ...rpc, NETWORK: "stellar:pubnet" })).toEqual([
-      "STORE must be postgres outside testnet",
-      PUBNET_REFUSED,
-    ]);
-    expect(problems({ ...minimal, ...rpc, ...pubnet, STORE: "memory" })).toEqual([
-      "STORE must be postgres outside testnet",
-      PUBNET_REFUSED,
-      "DATABASE_URL is only used with STORE=postgres",
-    ]);
-    expect(problems({ ...minimal, DATABASE_URL: "postgres://db.internal/x402" })).toEqual([
-      "DATABASE_URL is only used with STORE=postgres",
-    ]);
+  it("refuses a leftover STORE", () => {
+    // Left set, it would look like it still picked a store; every store is PostgreSQL now.
+    for (const STORE of ["postgres", "memory"])
+      expect(problems({ ...minimal, STORE })).toEqual([
+        "STORE is no longer read: the stores are always PostgreSQL",
+      ]);
   });
 
   it("refuses stellar:pubnet with nothing else wrong, until 0024 and 0025 land", () => {

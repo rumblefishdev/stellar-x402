@@ -99,6 +99,7 @@ function setup(
 ) {
   const config = parseConfig({
     FACILITATOR_SECRET: facilitator.secret(),
+    DATABASE_URL: db.urlFor(db.schema),
     CLIENT_IP: "socket",
     CHANNELS: channel,
     MAX_FEE_STROOPS: String(MAX_FEE),
@@ -266,6 +267,7 @@ describe("main()'s composition (compose)", () => {
   function composed() {
     const config = parseConfig({
       FACILITATOR_SECRET: facilitator.secret(),
+      DATABASE_URL: db.urlFor(db.schema),
       CLIENT_IP: "socket",
       CHANNELS: channel,
       MAX_FEE_STROOPS: String(MAX_FEE),

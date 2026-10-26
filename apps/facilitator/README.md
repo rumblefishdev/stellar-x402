@@ -11,7 +11,7 @@ discovery routes. Design: [the M1 spine](../../docs/architecture/m1-spine.md) (A
   and the wait for a channel included. It stays below the seller's own 90 s timeout.
 - `SETTLE_TIMEOUT_MS` (20 s, or the budget when that is shorter; at least 1 s, at most the
   budget): how long a repeat of a sent payment waits for it to turn final.
-- `NETWORK=stellar:pubnet` refuses to start, whatever the store: `/settle` would spend there
+- `NETWORK=stellar:pubnet` refuses to start: `/settle` would spend there
   with no spend budgets (0024) and no channel lease (0025) yet.
 
 ## Callers and rate limits
@@ -51,15 +51,16 @@ Every request counts, a malformed or oversized one too. `/supported` has no limi
   500 and an error log line: only `cloudflared` should reach the service.
 - **Windows are aligned to the clock**, so a client can send up to twice its budget across a
   window's end, and every blocked client is released at the same moment.
-- **The counters live in the store** (`rate_limits` with `STORE=postgres`). A store error is a 500,
+- **The counters live in the store** (`rate_limits`). A store error is a 500,
   logged. A client over its budget is answered from the process until its window ends, without a
   store write.
 
 ## The store
 
-- `STORE`: `memory` (the default, testnet only) or `postgres`. The memory store loses every
-  settlement record on a restart.
-- `DATABASE_URL`: a `postgres://` URL, required with `STORE=postgres` and refused without it.
+- Every store is PostgreSQL, tests included. A leftover `STORE` is refused at startup.
+- `DATABASE_URL`: a `postgres://` URL, required.
+- Local runs and tests: `docker compose up -d` at the repo root starts PostgreSQL on
+  `127.0.0.1:54320`. `pnpm dev` applies the migrations to `DATABASE_URL` before it starts.
 - `pnpm migrate` applies the pending migrations; the service never changes the schema. Run it
   before a release that adds one. `0002_success_answered`: on a database without it, a success is
   answered once per process instead of once per payment. `0003_catalog_type_seq`: without it, a
@@ -114,8 +115,8 @@ gets the same answer again, so a retry needs a new payment (a new nonce); only
   budget gets `…_timeout` instead of the spend reason.
 
 Until 0019 nothing finishes a `pending` record: every repeat of it gets `settlement_pending`.
-With `STORE=postgres` the record stays `pending` across restarts; with `STORE=memory` a restart
-drops it. Look the hash up on chain instead of repeating for long.
+The record stays `pending` across restarts. Look the hash up on chain instead of repeating for
+long.
 
 ## `/discovery/resources`
 
