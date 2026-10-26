@@ -3,7 +3,7 @@
 - Status: accepted
 - Date: 2026-10-19
 - Amended: 2026-10-20 (where the unseal backup lives, the restore drill, the fee float and
-  top-ups; [S-key-custody-decisions](../../lore/1-tasks/active/0047_RESEARCH_hetzner-key-custody/notes/S-key-custody-decisions.md#backup-and-top-ups-2026-10-20));
+  top-ups; [S-key-custody-decisions](../../lore/1-tasks/archive/0047_RESEARCH_hetzner-key-custody/notes/S-key-custody-decisions.md#backup-and-top-ups-2026-10-20));
   2026-10-21 (the AWS logging role and the other secrets, to match ADR 0011's Hetzner revision;
   a socket per network, OpenBao's own unit and limits, from the PR #24 review); 2026-10-22 (the
   OpenBao key's own account, the theft alarm, 1-hour tokens, the admin socket and the restore
@@ -20,7 +20,7 @@
   pool only as a `TransactionSigner`, so a remote signer can replace it.
 - The key can't move buyers' or sellers' tokens. A thief gets the fee account's float and the
   channels' reserves: about 130 XLM at launch (a 100 XLM float plus ~30 XLM of reserves)
-  ([R-key-leak-impact](../../lore/1-tasks/active/0047_RESEARCH_hetzner-key-custody/notes/R-key-leak-impact.md)).
+  ([R-key-leak-impact](../../lore/1-tasks/archive/0047_RESEARCH_hetzner-key-custody/notes/R-key-leak-impact.md)).
 - A spike signed Stellar transactions with OpenBao 2.7.1 Transit Ed25519 keys. One landed on testnet
   (`26a93987…`, ledger 5210493), at about 6 ms a signature locally.
 - The server also runs another company project's services.
@@ -80,7 +80,7 @@
   uses the admin socket.
 - **The backup set is kept in AWS Secrets Manager, apart from the snapshots.** A restore on a new
   server needs five items, all of which are lost with the server
-  ([R-unseal-key-backup](../../lore/1-tasks/active/0047_RESEARCH_hetzner-key-custody/notes/R-unseal-key-backup.md)):
+  ([R-unseal-key-backup](../../lore/1-tasks/archive/0047_RESEARCH_hetzner-key-custody/notes/R-unseal-key-backup.md)):
   1. the static seal key and its exact key ID (OpenBao refuses a key whose ID differs, and
      `-force` doesn't get round it), plus the previous pair for 14 days after a rotation;
   2. the recovery key, which regenerates a root token (it can't unseal or open a snapshot);
@@ -234,7 +234,7 @@
 
 - [M1 architecture spine](../architecture/m1-spine.md): AD-12
 - [ADR 0011](0011-facilitator-hosting.md): hosting, and the custody this ADR replaces
-- Task 0047 (`lore/1-tasks/active/0047_RESEARCH_hetzner-key-custody/`):
+- Task 0047 (`lore/1-tasks/archive/0047_RESEARCH_hetzner-key-custody/`):
   - `notes/S-key-custody-decisions.md`: every decision, question by question;
   - `notes/R-key-leak-impact.md`: what a leaked key costs;
   - `notes/R-unseal-key-backup.md`: what a restore needs, and where its backup lives;

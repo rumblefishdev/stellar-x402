@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 milestone: 1
 related_adr: ["0009"]
-related_tasks: ["0012", "0028", "0026", "0009", "0020"]
+related_tasks: ["0012", "0028", "0026", "0009", "0020", "0059"]
 tags: [conformance, e2e, priority-high, effort-small, platform]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -29,6 +29,9 @@ As a reviewer of the grant, I want e2e results with real settled transaction has
 
 - First run around day 12, final rerun at the end of T1.
 - Related tasks: 0028, 0026, 0009, 0020.
+- Run the gate of record while nothing else pays from the same testnet accounts (the MCP e2e suite uses them too): a concurrent run could hand the gate a valid transfer it did not make (0059 review).
+- The 0059 over-engineering review left ~15 minutes of cuts in `conformance/src/gate.ts` that change no behaviour; take them with this task's edits there.
+- The gate is pinned to upstream `10b2d06`. By 2026-10-22 upstream main was 63 commits ahead: the e2e harness unchanged, but the Stellar mechanism changed (client `exact` scheme, facilitator settle errors, typed simulation errors, x402-foundation/x402#3293, #2975). Decide whether to bump the pin before the run of record; a bump means a fresh gate run. 0059 (raw result file, signals, ledger check) should land first.
 - `/supported` (0020) must list `exact` on `stellar:testnet` with `extra.areFeesSponsored: true`: the canonical client throws without it (found in the 0028 recon).
 - From the 0028 review: the gate also needs `/supported` to list the facilitator key under a `stellar:` signer, because it fails any settlement whose fee another account paid.
 - From the 0028 review: the saved run holds the upstream commit, date, facilitator URL, its signers and each transaction, but no facilitator version; the facilitator has to expose one for this task's results.
@@ -38,6 +41,10 @@ As a reviewer of the grant, I want e2e results with real settled transaction has
   deletes them), and 0042's demo lists them. The suite's Bazaar check still waits for
   `/discovery/search` (0028). Nothing owns removing them yet: decide before the first run whether
   the gate uses a separate catalog, or the catalog gets a TTL or an admin delete (0053 review).
+- From the PR #50 review: once the Bazaar check runs, it reads one `?limit=1000` page and looks
+  for its resources there (upstream `e2e/extensions/bazaar.ts:290`), while our route clamps to 100
+  (spec v2 §8.1) and lists oldest first. With more than 100 entries in the catalog the check
+  misses its own; run it against a catalog under 100 entries.
 - From the 0028 review: the first criterion says "verify → settle" for each scenario, but the 9 `upfront` scenarios settle without a `/verify` (answered in 0028); reword it before starting.
 
 ## Implementation

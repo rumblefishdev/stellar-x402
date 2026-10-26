@@ -2,7 +2,7 @@
 id: "0020"
 title: "/supported and startup channel checks"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0005"]
 related_tasks: ["0012", "0017", "0009"]
@@ -19,6 +19,14 @@ history:
     status: active
     who: karolkow
     note: "Work starts."
+  - date: "2026-10-23"
+    status: completed
+    who: karolkow
+    note: >
+      PRs #54 (/supported), #51 (startup channel check) and #56 (master-key bypass options removed)
+      merged; all three acceptance criteria met. Testnet: a hardened channel starts and /supported
+      answers 200; a channel whose master key still signs stops startup. 0051 (PRs #52, #58) made an
+      RPC failure at startup an error instead of "missing" and added the RPC network check.
 ---
 
 # `/supported` and startup channel checks
@@ -49,9 +57,9 @@ As a resource server, and as the operator, I want `GET /supported` to describe e
 
 ## Acceptance Criteria
 
-- [ ] Given the running facilitator, when `GET /supported` is called, then it lists `exact` on the configured network (`stellar:testnet` in M1) with `extra.areFeesSponsored: true`, the `bazaar` extension, and the facilitator key's address as the only signer; channel addresses never appear, and `upto` is not listed
-- [ ] Given `FACILITATOR_SECRET` and `CHANNELS` (addresses only) in config, when the service starts, then it checks every channel with `checkChannel`: master key weight 0 and the facilitator key as the only signer; if any channel fails, the service refuses to start and names the channel
-- [ ] Given the deploy env examples, when they are updated, then `deploy/testnet.env.example` and `deploy/mainnet.env.example` use `FACILITATOR_SECRET` and `CHANNELS` instead of `FACILITATOR_SIGNER_SECRETS` and `FEE_BUMP_SIGNER_SECRET`; the facilitator key reaches the pool only as a `TransactionSigner`
+- [x] Given the running facilitator, when `GET /supported` is called, then it lists `exact` on the configured network (`stellar:testnet` in M1) with `extra.areFeesSponsored: true`, the `bazaar` extension, and the facilitator key's address as the only signer; channel addresses never appear, and `upto` is not listed
+- [x] Given `FACILITATOR_SECRET` and `CHANNELS` (addresses only) in config, when the service starts, then it checks every channel with `checkChannel`: master key weight 0 and the facilitator key as the only signer; if any channel fails, the service refuses to start and names the channel
+- [x] Given the deploy env examples, when they are updated, then `deploy/testnet.env.example` and `deploy/mainnet.env.example` use `FACILITATOR_SECRET` and `CHANNELS` instead of `FACILITATOR_SIGNER_SECRETS` and `FEE_BUMP_SIGNER_SECRET`; the facilitator key reaches the pool only as a `TransactionSigner`
 
 ## Decisions so far
 
@@ -105,3 +113,5 @@ PR #51, the bypass options in PR #56.
 
 - The `/verify` path's raw secret (0036, 0047).
 - The new signer layout that `checkChannel` will check (0048).
+- An alarm for a process that never starts: 0027 (its readiness alarm covers a `startup_failed` loop).
+- One batched account read at startup for a large pool: 0011.

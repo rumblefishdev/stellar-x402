@@ -9,7 +9,7 @@ tags: [facilitator, signer-pool, keys, priority-high, effort-small, payments]
 links:
   - ../../../docs/adr/0013-facilitator-key-custody.md
   - ../../../packages/signer-pool/src/types.ts
-  - ../active/0047_RESEARCH_hetzner-key-custody/spike/results.md
+  - ../archive/0047_RESEARCH_hetzner-key-custody/spike/results.md
 history:
   - date: "2026-10-09"
     status: backlog

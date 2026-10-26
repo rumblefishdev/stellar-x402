@@ -718,6 +718,120 @@ describe("FallbackRpc's shared active endpoint", () => {
       expect(switches).toEqual(["a->b", "b->c", "c->b"]);
     });
 
+    // `b` fails one fee-stats read, which wraps around to `a`; its ledger reads still answer.
+    const blip = (aLedger: number, intervalMs = 1_000) => {
+      const clock = { t: 0 };
+      const switches: string[] = [];
+      const failbacks: string[] = [];
+      const probeFailures: unknown[] = [];
+      const ep = (name: string, ledger: number, fees: () => Promise<unknown>) =>
+        ({
+          ...endpoint("ok"),
+          getLatestLedger: async () => ({ sequence: ledger }),
+          getFeeStats: fees,
+        }) as unknown as SorobanRpc;
+      const rpc = new FallbackRpc(
+        [
+          { name: "a", rpc: ep("a", aLedger, async () => "fees from a") },
+          { name: "b", rpc: ep("b", 100, () => Promise.reject(new Error("blip"))) },
+        ],
+        {
+          failback: { intervalMs },
+          now: () => clock.t,
+          onSwitch: (from, to, _e, by) => switches.push(`${from}->${to} by ${by}`),
+          onFailback: (from, to, lag) => failbacks.push(`${from}->${to} lag ${lag}`),
+          onProbeFailed: (name, failure) => probeFailures.push({ name, ...failure }),
+        },
+      );
+      rpc.markFailed(0, rpc.begin().token, new Error("timeout"), "verify");
+      return { rpc, clock, switches, failbacks, probeFailures };
+    };
+
+    it("keeps calls off a first endpoint that answers a wrapped-around read: it probes at once", async () => {
+      // `a` came back 50 ledgers behind; its answer to the read must not bring calls back.
+      const { rpc, switches, failbacks, probeFailures } = blip(50);
+      expect(await rpc.getFeeStats()).toBe("fees from a");
+      expect(rpc.active).toBe("b");
+      await vi.waitFor(() => expect(probeFailures).toEqual([{ name: "a", lagLedgers: 50 }]));
+      expect(rpc.active).toBe("b");
+      expect(switches).toEqual(["a->b by verify"]);
+      expect(failbacks).toEqual([]);
+    });
+
+    it("returns to a first endpoint that answers a wrapped-around read once its probe finds it caught up", async () => {
+      const { rpc, switches, failbacks, probeFailures } = blip(99);
+      expect(await rpc.getFeeStats()).toBe("fees from a");
+      await vi.waitFor(() => expect(failbacks).toEqual(["b->a lag 1"]));
+      expect(rpc.active).toBe("a");
+      expect(switches).toEqual(["a->b by verify"]);
+      expect(probeFailures).toEqual([]);
+    });
+
+    it("starts one probe per 5 s for reads that keep failing on the active endpoint", async () => {
+      const { rpc, clock, probeFailures } = blip(50, 60_000);
+      await rpc.getFeeStats();
+      await vi.waitFor(() => expect(probeFailures).toHaveLength(1));
+      clock.t = 4_999;
+      await rpc.getFeeStats();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(probeFailures).toHaveLength(1);
+      clock.t = 5_000;
+      await rpc.getFeeStats();
+      await vi.waitFor(() => expect(probeFailures).toHaveLength(2));
+      expect(rpc.active).toBe("b");
+    });
+
+    it("moves a read that fails on the last endpoint to the next fallback, though the first answers", async () => {
+      const switches: string[] = [];
+      const fees = (from: string) => async () => `fees from ${from}`;
+      const ep = (getFeeStats: () => Promise<unknown>) =>
+        ({ ...endpoint("ok"), getFeeStats }) as unknown as SorobanRpc;
+      const rpc = new FallbackRpc(
+        [
+          { name: "a", rpc: ep(fees("a")) },
+          { name: "b", rpc: ep(fees("b")) },
+          { name: "c", rpc: ep(() => Promise.reject(new Error("blip"))) },
+        ],
+        {
+          failback: { intervalMs: 60_000 },
+          now: () => 0,
+          onSwitch: (from, to, _e, by) => switches.push(`${from}->${to} by ${by}`),
+        },
+      );
+      const t1 = rpc.markFailed(0, rpc.begin().token, new Error("x"), "verify")!;
+      rpc.markFailed(1, t1, new Error("x"), "verify");
+      // `c` fails, and the read wraps around to `a` before it reaches `b`.
+      expect(await rpc.getFeeStats()).toBe("fees from a");
+      expect(rpc.active).toBe("b");
+      expect(switches).toEqual(["a->b by verify", "b->c by verify", "c->b by getFeeStats"]);
+    });
+
+    it("probes, not moves, when a read from the first fallback failed on every fallback", async () => {
+      // Adam's case on PR #62: calls on `b`, `b` and `c` down, `a` up. Moving to `c`, which
+      // failed in the same read, would bounce calls between `b` and `c` until the 60 s probe.
+      const switches: string[] = [];
+      const failbacks: string[] = [];
+      const rpc = new FallbackRpc(
+        [
+          { name: "a", rpc: endpoint("ok") },
+          { name: "b", rpc: endpoint("fail") },
+          { name: "c", rpc: endpoint("fail") },
+        ],
+        {
+          failback: { intervalMs: 60_000 },
+          now: () => 0,
+          onSwitch: (from, to, _e, by) => switches.push(`${from}->${to} by ${by}`),
+          onFailback: (from, to, lag) => failbacks.push(`${from}->${to} lag ${lag}`),
+        },
+      );
+      rpc.markFailed(0, rpc.begin().token, new Error("x"), "verify");
+      expect(await rpc.getFeeStats()).toBe("fees");
+      // `b` can't read its own ledger, so the probe returns calls to `a` (0045 decision 11).
+      await vi.waitFor(() => expect(failbacks).toEqual(["b->a lag 0"]));
+      expect(rpc.active).toBe("a");
+      expect(switches).toEqual(["a->b by verify"]);
+    });
+
     it("returns to a healthy first endpoint when the active one can't read its ledger", async () => {
       const { rpc, b, clock, failbacks } = withClock();
       b.mode = "fail";

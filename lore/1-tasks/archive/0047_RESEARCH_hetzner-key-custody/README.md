@@ -2,7 +2,7 @@
 id: "0047"
 title: "Choose how the facilitator keeps its signing key on Hetzner"
 type: RESEARCH
-status: active
+status: completed
 milestone: 1
 related_adr: ["0011", "0013"]
 related_tasks: ["0036", "0026", "0014", "0044", "0048"]
@@ -38,6 +38,12 @@ history:
       Taken over from okarcz for the remaining changes and the merge. ADR 0013 follows the PR #24
       review: a socket per network, OpenBao's own unit and limits, AppRole files in tmpfs, and the
       Storage Box named generically.
+  - date: "2026-10-26"
+    status: completed
+    who: stkrolikiewicz
+    note: >
+      PR #48 merged on 2026-10-22: 12 commits, 23 files. ADR 0013 keeps the key in OpenBao Transit
+      on the facilitator's server; the build moves to 0036, 0026, 0027 and 0048.
 ---
 
 # Choose how the facilitator keeps its signing key on Hetzner
@@ -51,7 +57,7 @@ compares. Record the choice in an ADR that supersedes ADR 0011's custody part.
 
 **Lane:** Payments
 
-## Status: Active
+## Status: Completed
 
 > **Decided on 2026-10-20** ([S-key-custody-decisions, B1–B20](notes/S-key-custody-decisions.md#backup-and-top-ups-2026-10-20)):
 > the unseal backup set (seal key and key ID, recovery key, Borg passphrase, seal config) goes into
@@ -182,7 +188,7 @@ compares. Record the choice in an ADR that supersedes ADR 0011's custody part.
 - **0026**: OpenBao's deployment, snapshots, the testnet key move and the runbook.
 - **0048**: re-check the thresholds and recovery design before mainnet.
 - **0027**: the theft, low-balance, OpenBao-down and audit-disk alarms.
-- **A hosting ADR** for the move to Hetzner: ADR 0011 still describes AWS apart from custody.
+- **A hosting ADR** for the move to Hetzner: done in 0039 (PR #24), ADR 0011 revised in place.
 - **0026**: the backup secret, the init flags, the CLI steps, the restore drill, the Friendbot
   script, the weekly review, and the mainnet top-up owner (TBD before mainnet).
 - **0027**: the Slack low-balance alarm at 25 XLM, and a CloudTrail alarm on reads of the backup

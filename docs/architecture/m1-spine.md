@@ -89,7 +89,7 @@ graph TD
   - **Upstream owns verification.** Auth signature and scope checks, `Address`/`AddressV2` credentials, simulation and the event checks all belong to `@x402/stellar` `ExactStellarScheme.verify()`. We never re-implement them.
   - **Construction.** `ExactStellarScheme` is constructed with the fee values from AD-10.
     - Upstream takes one RPC URL, so there is one scheme per `RPC_URLS` entry (at most 3), and upstream itself is not changed. They share one active URL with `FallbackRpc`, which owns it and serves the pool, the AD-22 ledger read and the fee-stats bid read, so one outage moves them all once (0045 decision 21). A verify call starts on `FallbackRpc`'s active URL and goes on to the next when it throws, answers `unexpected_verify_error` or gives no answer within 10 s. Only a throw or a timeout moves the shared URL; `unexpected_verify_error` is also what one odd payload can produce, so it tries the next URL for that call alone (decision 22). A call moves the active URL only if no other call has moved it since the call began (a switch counter), so a late answer never switches back.
-    - **Return to `RPC_URLS[0]`** (`FallbackRpc`'s). While calls are off it, a call that finds 60 s passed starts a probe beside itself, never inside it: `getLatestLedger` on `RPC_URLS[0]` and on the active URL, each within 10 s. Calls return to `RPC_URLS[0]` only if it answers and trails the active URL by at most 2 ledgers; otherwise the next probe is 60 s later. A client's payload never decides it: upstream refuses many payloads (a wrong amount, recipient, asset or operation) before any RPC call, so a dead RPC would "answer" them in a millisecond; a verify call never moves the URL on an answer. A failure doesn't bring it back either: a failure of the last URL moves calls to the next fallback, or, with none left, keeps them where they are and starts a probe at once (0045 decision 26). The 60 s count from the moment calls left `RPC_URLS[0]`; a switch between fallbacks doesn't restart them.
+    - **Return to `RPC_URLS[0]`** (`FallbackRpc`'s). While calls are off it, a call that finds 60 s passed starts a probe beside itself, never inside it: `getLatestLedger` on `RPC_URLS[0]` and on the active URL, each within 10 s. Calls return to `RPC_URLS[0]` only if it answers and trails the active URL by at most 2 ledgers; otherwise the next probe is 60 s later. A client's payload never decides it: upstream refuses many payloads (a wrong amount, recipient, asset or operation) before any RPC call, so a dead RPC would "answer" them in a millisecond; a verify call never moves the URL on an answer. A failure doesn't bring it back either: a failure of the last URL moves calls to the next fallback, or, with none left, keeps them where they are and starts a probe at once (0045 decision 26). Nor does a `FallbackRpc` read (pool, ledger or fee-stats) that fails on the active URL and wraps around to `RPC_URLS[0]`: it returns that answer and counts as that URL's failure, since an RPC that answers can still trail (0061). A probe started at once waits 5 s after the last one began, so a URL that keeps failing starts one per 5 s, not one per call. The 60 s count from the moment calls left `RPC_URLS[0]`; a switch between fallbacks doesn't restart them.
     - **Logs**, each with the network and `RPC_URLS[i]#<fingerprint>` names, never URLs: the shared client's `rpc_failover` (warn, `component: "rpc"`, with `by`, the method or caller that saw the failure, `from`, `to` and a URL-free `reason`), `rpc_failback` (info, with the lag) and `rpc_probe_failed` (warn); upstream's `rpc_exhausted` (warn, `component: "verify"`, every URL tried and why). The `verified` log names the URL that answered as `rpc`.
     - **A rejection is never failed over.** `/verify` is read-only and `/settle` checks again, so the reason is cost and one stable answer per payload, not safety. A lagging RPC can answer either way: it can reject a valid payment (a simulation that fails, `…_expiration_too_far`), and it can accept one the first URL would refuse (a nonce already used on chain, a balance spent since its ledger, a revoked SAC authorization). For `exact` the false accept costs little: `/settle` simulates again through `FallbackRpc`, and AD-6 refuses a replay. For `upto` (0015) `/verify`'s answer carries more weight, so it must not rely on it (threat model).
     - **Steering.** A client can't choose its own verdict by failing over, but it can push everyone's calls to a fallback: exhaust `RPC_URLS[0]`'s per-key quota until it answers 429 (upstream: `unexpected_verify_error`) and every call moves. Until a rate limit (0023), the probe bounds this: calls return once `RPC_URLS[0]` answers the probe, and no payload can keep them away (threat model).
@@ -157,7 +157,7 @@ graph TD
 - **Rule:**
   - All state goes through four interfaces defined in `apps/facilitator`: `SettlementStore`, `CatalogStore`, `RateLimitStore` and `SpendStore`.
   - Concrete adapters live in `apps/facilitator/src/adapters/`, and there is an in-memory fake of each for tests.
-  - The backing store is one RDS for PostgreSQL database ([ADR 0012](../adr/0012-facilitator-state-store.md), task 0013). It must support:
+  - The backing store is one PostgreSQL database per network, in a container on the facilitator's server ([ADR 0012](../adr/0012-facilitator-state-store.md), task 0013). It must support:
     - the atomic claim (AD-6)
     - lookup by any of a settlement's hashes (AD-16)
     - the channel lease (AD-17)
@@ -202,7 +202,7 @@ graph TD
 - **Prevents:** one caller exhausting the pool or our fee budget, and limits implemented differently per route.
 - **Rule:**
   - One middleware, with separate budgets for `/verify`, `/settle` and `/discovery/*`. Exceeding a budget returns HTTP 429.
-  - **Client IP.** It comes from the configured trusted-proxy hops only, never from a raw `X-Forwarded-For`.
+  - **Client IP.** It comes from the header the edge sets (`CF-Connecting-IP` behind Cloudflare Tunnel, ADR 0011), never from a raw `X-Forwarded-For`.
   - **API key.** An optional per-caller API key is accepted as an alternative limiter key. It is not required in T1.
   - **Storage.** Counters go through `RateLimitStore`.
   - **Payer, recipient and asset.** Limits on these are AD-18's job, not the IP limiter's.
@@ -212,7 +212,7 @@ graph TD
 - **Binds:** configuration, `TransactionSigner`, startup
 - **Prevents:** key sprawl, keys shared between networks, and channels another key can move.
 - **Rule:**
-  - **Key.** Each network has one facilitator key. It signs for the channels and pays fee bumps, and it reaches the pool only as a `TransactionSigner`, so a remote signer can replace it. It lives in OpenBao Transit ([ADR 0013](../adr/0013-facilitator-key-custody.md)).
+  - **Key.** Each network has one facilitator key. It signs for the channels and pays fee bumps, and it reaches the pool only as a `TransactionSigner`, so the OpenBao Transit signer can replace it ([ADR 0013](../adr/0013-facilitator-key-custody.md), task 0036).
   - **Config.** `FACILITATOR_SECRET`, or in `openbao` mode the Transit key, its version and the fee account's address (ADR 0013), plus `CHANNELS` (addresses, never secrets).
   - **Startup check.** The service refuses to start unless every channel has its master key weight at 0 and the facilitator key as its only signer (`checkChannel`).
   - **Separation.** Testnet and mainnet never share a key or a channel.
@@ -465,8 +465,8 @@ The rationale and rejected alternatives for these ADs are in ADRs:
 
 ## Deferred
 
-- **State store:** decided in [ADR 0012](../adr/0012-facilitator-state-store.md) (task 0013): one RDS for PostgreSQL database for all four ports and Tranche 2 search.
-- **Hosting, container setup, key custody, logger, metrics and alert backend:** decided in [ADR 0011](../adr/0011-facilitator-hosting.md) (task 0014): ECS on Fargate in AWS, the key in SSM under its own KMS key (in KMS on mainnet; replaced by OpenBao Transit on the Hetzner server in [ADR 0013](../adr/0013-facilitator-key-custody.md)), CloudWatch logs, EMF metrics and alarms to Slack. Constraints it meets:
+- **State store:** decided in [ADR 0012](../adr/0012-facilitator-state-store.md) (task 0013): one PostgreSQL database for all four ports and Tranche 2 search, run in a container on the Hetzner server (ADR 0011).
+- **Hosting, container setup, key custody, logger, metrics and alert backend:** decided in [ADR 0011](../adr/0011-facilitator-hosting.md) (tasks 0014 and 0039): the company Hetzner server with Docker Compose, the key in OpenBao Transit on the server (ADR 0013), CloudWatch logs, EMF metrics and alarms to Slack. Constraints it meets:
   - the process is long-lived, and scale-to-zero is not allowed
   - the lease and stop-before-start deploys from AD-17 apply
 - **Mainnet fee values** (`feeEscalation`, `maxFeeStroops`): task 0010. T1 uses interim testnet values.

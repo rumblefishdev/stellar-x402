@@ -2,8 +2,9 @@
 
 Testnet and mainnet run as separate deployments. They never share keys.
 
-- `testnet.env.example` and `mainnet.env.example`: environment variables for each deployment.
-  Copy to a `.env` file (git-ignored) and fill in.
+- `testnet.env.example` and `mainnet.env.example`: environment variables for each network.
+  Copy to a `.env` file (git-ignored) and fill in, for local runs only. The deployed networks get
+  their secrets from encrypted systemd credentials and sign through OpenBao (ADR 0011, ADR 0013).
 - `scripts/`: operational scripts (signer funding, testnet reset recovery, contract deploy).
   - `deploy-contract.sh <upto-proxy|test-token>`: builds and deploys a contract to testnet. The
     salt is the WASM hash, so a rerun deploys nothing, changed code gets a new ID, and after a
@@ -17,6 +18,7 @@ Testnet and mainnet run as separate deployments. They never share keys.
     `UPTO_PROXY_CONTRACT_ID` in `testnet.env.example` is the deployment from task 0035; whether
     the team shares one deployer key is decided with the public testnet deployment (0026).
 
-Hosting: ECS on Fargate in the company AWS account, one service per network, with
-stop-before-start deploys ([ADR 0011](../docs/adr/0011-facilitator-hosting.md)). Task 0026 builds
-the Dockerfile, the CDK stacks under `infra/` and the deploy workflow.
+Hosting: Docker Compose on the company Hetzner server, one facilitator and one PostgreSQL
+container per network, with stop-before-start deploys and the facilitator key in OpenBao Transit
+([ADR 0011](../docs/adr/0011-facilitator-hosting.md), ADR 0013). Task 0026 builds the Dockerfile,
+the compose file, the deploy script and the workflow.
