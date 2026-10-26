@@ -11,8 +11,8 @@ discovery routes. Design: [the M1 spine](../../docs/architecture/m1-spine.md) (A
   and the wait for a channel included. It stays below the seller's own 90 s timeout.
 - `SETTLE_TIMEOUT_MS` (20 s, or the budget when that is shorter; at least 1 s, at most the
   budget): how long a repeat of a sent payment waits for it to turn final.
-- `NETWORK=stellar:pubnet` refuses to start: `/settle` would spend there
-  with no spend budgets (0024) and no channel lease (0025) yet.
+- `NETWORK=stellar:pubnet` refuses to start: `/settle` would spend there with no spend budgets
+  (0024) yet.
 
 ## Callers and rate limits
 
@@ -82,8 +82,9 @@ default).
   settlements at once; calls already under way run on. So does reaching the expiry the process
   last wrote. Logged as `lease_lost` with its `reason`, and `lease_acquired` when it holds it again;
   both counted in `lease_changes_total`.
-- A process that dies keeps the lease until its TTL ends; another one then takes it. One that
-  stops cleanly gives it up after its drain, so the next one takes it at its next attempt.
+- A process that dies keeps the lease until its TTL ends; another one takes it 5 s later, a
+  margin for a holder whose clock lags. One that stops cleanly gives it up after its drain, so the
+  next one takes it at its next attempt.
 - With `STORE=memory` each process has its own lease, so it keeps nothing apart.
 
 ## Shutdown
