@@ -25,6 +25,11 @@ left it out: no key registry exists, and a raw caller-supplied key gives each ke
 which bypasses the limit. Pick this up when a caller needs a budget apart from its IP, such as
 sellers sharing one egress IP.
 
+Needed before the public testnet (0026): every seller on Cloudflare Workers reaches a facilitator
+behind Cloudflare with the same `CF-Connecting-IP`, `2a06:98c0:3600::103` (Cloudflare's HTTP
+request headers reference, cross-zone Worker subrequests), so they all share one budget. Sellers
+behind one cloud NAT share theirs the same way.
+
 ## Implementation
 
 - `API_KEYS` in the config: SHA-256 hashes of the issued keys, never the keys.

@@ -24,6 +24,7 @@ const secret = Keypair.random().secret();
 const facilitator = Keypair.fromSecret(secret).publicKey();
 const env = {
   FACILITATOR_SECRET: secret,
+  CLIENT_IP: "socket",
   CHANNELS: Keypair.random().publicKey(),
   BODY_LIMIT_BYTES: "1024",
 };
@@ -143,7 +144,7 @@ describe("startup with a bad config", () => {
     const error = await main(pubnet).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ConfigError);
     expect((error as ConfigError).problems).toEqual([
-      "NETWORK stellar:pubnet is refused until spend budgets (0024), rate limits (0023) and the channel lease (0025) land",
+      "NETWORK stellar:pubnet is refused until spend budgets (0024), the channel lease (0025) and store pruning (0050) land",
     ]);
   });
 });

@@ -77,7 +77,7 @@ guide, the two example integrations, the security review report, uptime targets,
 - **FR11:** Only one process at a time settles through a network's channel set (a lease), and
   shutdown waits until in-flight settlements are final or recorded as pending.
 - **FR12:** Rate limiting has separate budgets for `/verify`, `/settle` and `/discovery/*`, keyed
-  by client IP (from trusted proxy hops) or an optional API key, and returns HTTP 429 when a
+  by client IP (from the configured client IP header; the API key is task 0060), and returns HTTP 429 when a
   budget is exceeded. Caller authentication and rate limiting are documented.
 - **FR13:** Spend budgets (global, per payer, per `payTo`, per asset) and circuit breakers (per
   asset, per `payTo`) stop fee drain. Over budget, `/settle` returns `success: false` and submits
@@ -498,11 +498,11 @@ So that one caller can't exhaust the channel pool or the service.
 
 **Given** a request with a forged `X-Forwarded-For`  
 **When** the limiter keys it  
-**Then** the client IP comes only from the configured trusted proxy hops
+**Then** the client IP comes only from the configured client IP header
 
 **Given** a request with an API key  
 **When** the limiter keys it  
-**Then** the key is used instead of the IP  
+**Then** the key is used instead of the IP (task 0060)  
 **And** requests without a key still work, so the gate proxy can call keyless
 
 **Given** the HTTP layer  
