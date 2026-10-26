@@ -2,7 +2,7 @@
 id: "0039"
 title: "Move facilitator hosting to the company Hetzner server in ADR 0011"
 type: DOCS
-status: active
+status: completed
 milestone: 1
 related_adr: ["0011", "0012", "0013"]
 related_tasks: ["0014", "0009", "0013", "0019", "0020", "0023", "0025", "0026", "0027", "0036", "0038", "0047"]
@@ -45,6 +45,13 @@ history:
     note: >
       The public URL moves to Cloudflare Tunnel on sorobanscan.com (Slack with Marek and Marcin):
       cloudflared per network, the tunnel and DNS in soroban-infrastructure, no Caddy site block.
+  - date: "2026-10-26"
+    status: completed
+    who: stkrolikiewicz
+    note: >
+      PR #24 merged on 2026-10-23 after four review rounds (Oskar, Adam, Stan): 19 commits,
+      12 files. ADR 0011 hosts the facilitator on the Hetzner server behind a Cloudflare Tunnel,
+      46 design decisions. The build is 0026 and 0027, the tunnel 0062, the mainnet VM 0038.
 ---
 
 # Move facilitator hosting to the company Hetzner server in ADR 0011
@@ -212,3 +219,9 @@ From Oskar's round four (2026-10-23):
 46. **The tunnel token is in Terraform state too,** so the runbook covers rotating it and checking
     the connector count; port 7844 is open for UDP and TCP; Bot Fight Mode, Browser Integrity
     Check and "I'm Under Attack" stay off on the zone; 0062 is the tunnel's prerequisite.
+
+## Future Work
+
+- **0026, 0027**: build the deploy, backups and alarms ADR 0011 describes.
+- **0062**: the sorobanscan.com zone and the testnet tunnel, the tunnel's prerequisite.
+- **0038**: the Hetzner Cloud VM for mainnet (decisions 20 and 41).
