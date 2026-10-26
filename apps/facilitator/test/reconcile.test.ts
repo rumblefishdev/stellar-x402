@@ -356,6 +356,59 @@ describe("createReconciler", () => {
     });
   });
 
+  describe("writes that threw (decision 29)", () => {
+    it("runs the hooks of a final write that committed but threw, once", async () => {
+      const { store, hooks, reconciler } = setup({ [A]: landed("SUCCESS") });
+      const key = await signed(store, [A]);
+      const transition = store.transition.bind(store);
+      vi.spyOn(store, "transition").mockImplementationOnce(async (...args) => {
+        await transition(...args);
+        throw new Error("connection lost after commit");
+      });
+      expect(await reconciler.sweep()).toMatchObject({ errors: 1 });
+      expect((await store.get(key))?.state).toBe("success");
+      expect(hooks.onFinal).not.toHaveBeenCalled();
+      await reconciler.sweep();
+      await reconciler.sweep();
+      expect(hooks.onFinal).toHaveBeenCalledTimes(1);
+      expect(hooks.onFinal).toHaveBeenCalledWith(
+        expect.objectContaining({ key, state: "success" }),
+        "resolved",
+      );
+      expect(hooks.onSuccess).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves one that didn't commit to the writer that finishes it, so its hooks run once", async () => {
+      const { store, hooks, records, reconciler } = setup({ [A]: landed("SUCCESS") });
+      const key = await signed(store, [A]);
+      vi.spyOn(store, "transition").mockRejectedValueOnce(new Error("store down"));
+      expect(await reconciler.sweep()).toMatchObject({ errors: 1 });
+      expect(records.unconfirmed.has(key)).toBe(true);
+      expect(await reconciler.sweep()).toMatchObject({ success: 1 });
+      expect(records.unconfirmed.has(key)).toBe(false);
+      await reconciler.sweep();
+      expect(hooks.onFinal).toHaveBeenCalledTimes(1);
+    });
+
+    it("goes on with the sweep when one key can't be read", async () => {
+      const { store, records, reconciler, lines } = setup({ [B]: landed("SUCCESS") });
+      const bad = settlement("9").key;
+      records.unmarked.add(bad);
+      records.unconfirmed.add(bad);
+      const get = store.get.bind(store);
+      vi.spyOn(store, "get").mockImplementation(async (key) => {
+        if (key === bad) throw new Error("bad row");
+        return get(key);
+      });
+      const key = await signed(store, [B], undefined, "2");
+      expect(await reconciler.sweep()).toMatchObject({ success: 1 });
+      expect((await store.get(key))?.state).toBe("success");
+      expect(lines.filter((line) => line.includes('"settlement_reconcile_failed"'))).toHaveLength(
+        2,
+      );
+    });
+  });
+
   describe("the pool's resolved event", () => {
     it("finishes a pending record from the pool's result, with its attempts", async () => {
       const { store, hooks, reconciler } = setup();
