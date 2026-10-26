@@ -8,7 +8,7 @@ const started = main();
 
 // Node as PID 1 in a container ignores SIGTERM unless it has a handler. Registered before the
 // server listens, so a signal during startup closes it once it's up. Closing stops new
-// connections and lets open requests finish; the drain and the lease release come in 0025.
+// connections; the drain and the lease release follow (0025).
 const stop = () => void started.then((server) => server.close()).catch(() => {});
 process.once("SIGTERM", stop);
 process.once("SIGINT", stop);

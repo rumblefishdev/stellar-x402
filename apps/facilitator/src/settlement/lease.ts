@@ -8,7 +8,7 @@ import type { SettlementStore } from "../ports/index.js";
 export const leaseName = (network: StellarNetwork) => `${network}:channels`;
 
 export interface LeaseKeeperDeps {
-  store: Pick<SettlementStore, "acquireLease" | "renewLease">;
+  store: Pick<SettlementStore, "acquireLease" | "renewLease" | "releaseLease">;
   network: StellarNetwork;
   /** `LEASE_TTL_MS`; the keeper tries every third of it (0025 decision 2). */
   ttlMs: number;
@@ -29,6 +29,12 @@ export interface LeaseKeeper {
   runOnce(): Promise<void>;
   /** Stops the timer and waits for an attempt under way. The lease stays until its TTL. */
   close(): Promise<void>;
+  /**
+   * `close()`, then gives the lease up if this process holds it, so the next process takes it at
+   * its next attempt instead of after the TTL. Only after the drain (0025 decision 10). Never
+   * rejects: a failed release leaves the lease to its TTL.
+   */
+  release(): Promise<void>;
 }
 
 /**
@@ -100,14 +106,28 @@ export function createLeaseKeeper(deps: LeaseKeeperDeps): LeaseKeeper {
     timer.unref();
   };
 
+  const close = async () => {
+    closed = true;
+    clearTimeout(timer);
+    await running;
+  };
+
   return {
     held: () => expiresAt !== undefined && now() < expiresAt,
     start: attempt,
     runOnce,
-    async close() {
-      closed = true;
-      clearTimeout(timer);
-      await running;
+    close,
+    async release() {
+      await close();
+      if (expiresAt === undefined) return;
+      expiresAt = undefined;
+      try {
+        await store.releaseLease(name, holder);
+        logger.info("lease_released", { network, lease: name });
+      } catch (error) {
+        logger.warn("lease_release_failed", { network, lease: name, error });
+      }
+      changed(false);
     },
   };
 }

@@ -15,7 +15,7 @@ import {
 import { memoryMetrics } from "../src/metrics.js";
 import type { SettlementStore } from "../src/ports/index.js";
 import { feeSettings } from "../src/settlement/fees.js";
-import { SETTLE_REASONS } from "../src/settlement/settle.js";
+import { SETTLE_REASONS, keyOf } from "../src/settlement/settle.js";
 import { testDatabase } from "./database.js";
 import { transferPayload } from "./payment.js";
 import { settlement } from "./port-contracts.js";
@@ -130,7 +130,7 @@ function setup(
   );
   const store = db.stores().settlements;
   const lines: string[] = [];
-  const { settle, submitter } = buildSettlement(config, {
+  const { settle, submitter, drain } = buildSettlement(config, {
     rpc: shared,
     fees,
     checks,
@@ -147,7 +147,7 @@ function setup(
   /** The pool's `onEvent`, as it reports a submission it answered `pending` ending. */
   const emit = (event: SubmitterEvent) =>
     (submitter as unknown as { emit(event: SubmitterEvent): void }).emit(event);
-  return { settle, fake, upstreamLogger, store, lines, emit };
+  return { settle, fake, upstreamLogger, store, lines, emit, drain };
 }
 
 describe("main()'s /settle wiring, with a hung RPC_URLS[0]", () => {
@@ -358,6 +358,27 @@ describe("main()'s pool events (0019)", () => {
     await store.transition(s.key, "signed", { state: "pending", updatedAt: 0 });
     return s.key;
   }
+
+  it("refuses a call that has signed nothing when the drain starts, and closes its record (0025)", async () => {
+    const { settle, fake, store, drain } = setup();
+    // Holds the call in its channel's sequence read, before anything is signed.
+    fake.accountDelayMs = 200;
+    const pay = payload(fake.ledger + 30);
+    const settling = settle(pay, requirements);
+    await new Promise((r) => setTimeout(r, 50));
+    await drain();
+    expect((await settling).response).toMatchObject({
+      success: false,
+      errorReason: SETTLE_REASONS.shuttingDown,
+      transaction: "",
+    });
+    expect(fake.sent).toHaveLength(0);
+    expect(await store.get(keyOf(pay, "stellar:testnet")!)).toMatchObject({
+      state: "rejected",
+      errorReason: SETTLE_REASONS.shuttingDown,
+      hashes: [],
+    });
+  });
 
   it("finishes a pending record when the pool resolves its submission", async () => {
     const { store, emit } = setup();

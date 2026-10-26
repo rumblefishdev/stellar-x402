@@ -137,6 +137,33 @@ describe("lease keeper (0025)", () => {
     expect(events().at(-1)).toMatchObject({ event: "lease_lost", reason: "expired" });
   });
 
+  it("gives a held lease up on release, so another process takes it at once (decision 10)", async () => {
+    const store = new MemorySettlementStore();
+    const a = keeper(store);
+    const b = keeper(store);
+    await a.lease.runOnce();
+    await a.lease.release();
+    expect(a.lease.held()).toBe(false);
+    expect(a.events().at(-1)).toMatchObject({ event: "lease_released" });
+    b.clock.now = a.clock.now;
+    await b.lease.runOnce();
+    expect(b.lease.held()).toBe(true);
+  });
+
+  it("releases nothing it doesn't hold, and never rejects when the store fails", async () => {
+    const store = new MemorySettlementStore();
+    const releaseLease = vi.spyOn(store, "releaseLease");
+    const idle = keeper(store);
+    await idle.lease.release();
+    expect(releaseLease).not.toHaveBeenCalled();
+    const { lease, events } = keeper(store);
+    await lease.runOnce();
+    releaseLease.mockRejectedValueOnce(new Error("store down"));
+    await expect(lease.release()).resolves.toBeUndefined();
+    expect(events().at(-1)).toMatchObject({ event: "lease_release_failed" });
+    expect(lease.held()).toBe(false);
+  });
+
   it("tries at start and then every third of the TTL, until closed", async () => {
     vi.useFakeTimers();
     const store = new MemorySettlementStore();

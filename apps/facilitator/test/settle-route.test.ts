@@ -322,6 +322,7 @@ describe("POST /settle without the channel lease (0025)", () => {
       start: vi.fn(async () => {}),
       runOnce: vi.fn(),
       close: vi.fn(async () => {}),
+      release: vi.fn(async () => {}),
     };
     const rateLimits = memoryStores().rateLimits;
     const hit = vi.spyOn(rateLimits, "hit");
@@ -367,6 +368,83 @@ describe("POST /settle without the channel lease (0025)", () => {
     } finally {
       await app.close();
     }
+    // Nothing to drain here, so the server gives the lease up.
+    expect(lease.release).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("shutdown (0025)", () => {
+  async function started(opts: { drain?: () => Promise<void>; shutdownDeadlineMs?: number }) {
+    const settle = vi.fn<Settle>(async () => ({ response: success }));
+    const lease = {
+      held: () => true,
+      start: vi.fn(async () => {}),
+      runOnce: vi.fn(),
+      close: vi.fn(async () => {}),
+      release: vi.fn(async () => {}),
+    };
+    const env = {
+      FACILITATOR_SECRET: Keypair.random().secret(),
+      CHANNELS: Keypair.random().publicKey(),
+      CLIENT_IP: "socket",
+    };
+    const config = { ...parseConfig(env), port: 0 };
+    const lines: string[] = [];
+    const app = await start(
+      {
+        config,
+        logger: jsonLogger("info", (line) => lines.push(line)),
+        stores: memoryStores(),
+        verify: async () => ({ isValid: true }),
+        settle,
+        extensionResponses: () => undefined,
+        supported: supportedResponse(config.network, Keypair.random().publicKey()),
+        metrics: memoryMetrics(),
+        lease,
+        ...(opts.drain && { drain: opts.drain }),
+      },
+      { ...(opts.shutdownDeadlineMs !== undefined && opts) },
+    );
+    const url = `http://127.0.0.1:${app.port}`;
+    const events = () => lines.map((line) => (JSON.parse(line) as { event: string }).event);
+    return { app, settle, lease, url, events };
+  }
+
+  it("answers /settle 503 shutting_down while it drains, then closes and gives the lease up", async () => {
+    let drained!: () => void;
+    const drain = vi.fn(() => new Promise<void>((resolve) => (drained = resolve)));
+    const { app, settle, lease, url, events } = await started({ drain });
+    const closing = app.close();
+    expect(drain).toHaveBeenCalledTimes(1);
+    const refused = await fetch(`${url}/settle`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    expect([refused.status, refused.headers.get("retry-after"), await refused.json()]).toEqual([
+      503,
+      `${NO_LEASE_RETRY_AFTER_S}`,
+      { error: "shutting_down" },
+    ]);
+    expect(settle).not.toHaveBeenCalled();
+    // Still listening, and the lease still held, until the drain ends.
+    expect((await fetch(`${url}/supported`)).status).toBe(200);
+    expect(lease.release).not.toHaveBeenCalled();
+    drained();
+    await closing;
+    expect(lease.release).toHaveBeenCalledTimes(1);
+    expect(lease.close).not.toHaveBeenCalled();
+    expect(events()).toEqual(expect.arrayContaining(["shutdown_started", "shutdown_drained"]));
+    await expect(fetch(`${url}/supported`)).rejects.toThrow();
+  });
+
+  it("stops waiting at its deadline, cuts open connections and leaves the lease to its TTL", async () => {
+    const drain = vi.fn(() => new Promise<void>(() => {}));
+    const { app, lease, url, events } = await started({ drain, shutdownDeadlineMs: 50 });
+    await app.close();
+    expect(lease.release).not.toHaveBeenCalled();
     expect(lease.close).toHaveBeenCalledTimes(1);
+    expect(events()).toContain("shutdown_deadline");
+    await expect(fetch(`${url}/supported`)).rejects.toThrow();
   });
 });

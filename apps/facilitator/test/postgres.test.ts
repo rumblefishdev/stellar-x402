@@ -573,7 +573,7 @@ describe("PostgreSQL stores", () => {
     }
   });
 
-  it("lets only one of two main() processes on one database settle, and the other take over once its lease runs out (0025)", async () => {
+  it("lets only one of two main() processes on one database settle, and the other take over once the first stops (0025)", async () => {
     await stores();
     const env = {
       STORE: "postgres",
@@ -600,10 +600,10 @@ describe("PostgreSQL stores", () => {
     const second = await main(env);
     try {
       expect([await settleStatus(first.port), await settleStatus(second.port)]).toEqual([400, 503]);
-      // A holder that stops without releasing (release comes with the drain): the second takes
-      // the lease within its TTL and one attempt interval.
+      // The first stops cleanly and gives the lease up, so the second takes it at its next
+      // attempt, a third of the TTL, instead of after the TTL.
       await first.close();
-      const deadline = Date.now() + 3_000;
+      const deadline = Date.now() + 1_000;
       while ((await settleStatus(second.port)) === 503 && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }

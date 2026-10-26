@@ -52,9 +52,20 @@ export interface Started {
   close(): Promise<void>;
 }
 
+/**
+ * How long `close()` waits for the drain after SIGTERM (0025 decision 11): Docker kills the
+ * container at 180 s, which leaves 30 s for the cataloger, the pruner and the pools.
+ */
+export const SHUTDOWN_DEADLINE_MS = 150_000;
+
 /** Starts the HTTP server on the graph `deps`. Tests call it with their own config and stores. */
-export async function start(deps: AppDeps): Promise<Started> {
-  const server = createApp(deps).listen(deps.config.port);
+export async function start(
+  deps: AppDeps,
+  opts: { shutdownDeadlineMs?: number } = {},
+): Promise<Started> {
+  const { shutdownDeadlineMs = SHUTDOWN_DEADLINE_MS } = opts;
+  let closing = false;
+  const server = createApp({ ...deps, closing: () => closing }).listen(deps.config.port);
   await once(server, "listening");
   // After listening, so `/health` answers meanwhile. Sweeps run with or without the lease (0019
   // decision 37); `/settle` serves beside them (0019 decision 27) once the lease is held, and the
@@ -69,13 +80,49 @@ export async function start(deps: AppDeps): Promise<Started> {
   });
   return {
     port,
+    // The shutdown (0025): `/settle` answers 503 at once, the pool refuses every call that sent
+    // nothing, and calls already sent run on while the keeper keeps renewing the lease (decision
+    // 10). The server listens until they and their record writes are done, so a new `/settle`
+    // still gets its 503 rather than a refused connection; then it closes and the lease is given
+    // up, so the next process takes over within one attempt. Past the deadline the open
+    // connections are cut and the lease is left to its TTL, so a transaction still unresolved
+    // gets that long before another process sends on its channel (decision 11).
     close: async () => {
+      closing = true;
+      const begun = Date.now();
+      deps.logger.info("shutdown_started", { network: deps.config.network });
       deps.reconciliation?.close();
-      // The lease stays until its TTL; releasing it after the drain comes with 0025's shutdown.
-      await Promise.all([
-        deps.lease?.close(),
-        new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve()))),
-      ]);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<"deadline">((resolve) => {
+        timer = setTimeout(() => resolve("deadline"), shutdownDeadlineMs);
+        timer.unref();
+      });
+      const drained = (async () => {
+        await deps.drain?.();
+        await new Promise<void>((resolve, reject) =>
+          server.close((e) => (e ? reject(e) : resolve())),
+        );
+        return "drained" as const;
+      })();
+      // Past the deadline its late `server.close()` fails, as the server already closed.
+      drained.catch(() => {});
+      try {
+        if ((await Promise.race([drained, deadline])) === "drained") {
+          deps.logger.info("shutdown_drained", { ms: Date.now() - begun });
+          await deps.lease?.release();
+          return;
+        }
+        deps.logger.warn("shutdown_deadline", { ms: Date.now() - begun });
+        server.close();
+        server.closeAllConnections();
+        await deps.lease?.close();
+      } catch (error) {
+        // The server failed to close: the drain may not be done, so the lease waits out its TTL.
+        await deps.lease?.close();
+        throw error;
+      } finally {
+        clearTimeout(timer);
+      }
     },
   };
 }
@@ -295,7 +342,12 @@ export function buildSettlement(
     /** Tests pass the pool's `sleep`. */
     sleep?: (ms: number) => Promise<void>;
   },
-): { settle: Settle; submitter: SettlementSubmitter; reconciliation: Reconciliation } {
+): {
+  settle: Settle;
+  submitter: SettlementSubmitter;
+  reconciliation: Reconciliation;
+  drain: () => Promise<void>;
+} {
   const { logger, metrics } = deps;
   const network = config.network;
   const records = createRecords({ network, store: deps.store, hooks: deps.hooks, logger, metrics });
@@ -356,7 +408,12 @@ export function buildSettlement(
     records,
   });
   const reconciliation = scheduleReconciliation({ reconciler, logger, network });
-  return { settle, submitter, reconciliation };
+  // Closing the pool first refuses every call that sent nothing, so their records close too.
+  const drain = async () => {
+    await submitter.close();
+    await settle.drain();
+  };
+  return { settle, submitter, reconciliation, drain };
 }
 
 /**
@@ -399,7 +456,7 @@ export function compose(
     logger,
     metrics,
   });
-  const { settle, reconciliation } = buildSettlement(config, {
+  const { settle, reconciliation, drain } = buildSettlement(config, {
     rpc,
     fees,
     checks,
@@ -426,6 +483,7 @@ export function compose(
       supported: supportedResponse(config.network, checks.facilitator),
       reconciliation,
       lease,
+      drain,
     },
     cataloger,
     metrics,
