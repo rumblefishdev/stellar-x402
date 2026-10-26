@@ -28,10 +28,10 @@ import {
   type SubmitResult,
 } from "@stellar-x402/signer-pool";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
-import { describe, expect, it, vi } from "vitest";
-import { MemorySettlementStore } from "../src/adapters/memory.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
+import type { SettlementStore } from "../src/ports/index.js";
 import type { SettlementHooks } from "../src/settlement/hooks.js";
 import {
   SETTLE_REASONS,
@@ -46,6 +46,7 @@ import {
   payerNonce,
   type Check,
 } from "../src/settlement/verify.js";
+import { testDatabase } from "./database.js";
 
 // `attemptsOf` reads a private WeakMap that only the real submitter fills; these tests put the
 // attempts on the error instead. `settle-pool.test.ts` runs the real pool's.
@@ -205,9 +206,12 @@ const landing =
     return result(status, hash);
   };
 
+const db = testDatabase();
+beforeEach(db.empty);
+
 function setup(behaviour: Behaviour = landing(), overrides: Partial<SettlerDeps> = {}) {
   const order: string[] = [];
-  const store = new MemorySettlementStore();
+  const store = db.stores().settlements;
   const submit = vi.fn<Submitter["submit"]>(async (_call, opts = {}) => {
     order.push("submit");
     return behaviour(opts);
@@ -223,7 +227,8 @@ function setup(behaviour: Behaviour = landing(), overrides: Partial<SettlerDeps>
   const lines: string[] = [];
   const metrics = memoryMetrics();
   const settle = createSettler({
-    storeGraceMs: 20,
+    // A database call in a loaded test run can take tens of ms; less would read it as a failing store.
+    storeGraceMs: 200,
     network,
     check: passing,
     store,
@@ -290,7 +295,7 @@ describe("createSettler", () => {
   });
 
   it("submits once for concurrent calls with one settlement key, and answers success once, to whichever marks it", async () => {
-    // On memory the submitting call marks first; on PostgreSQL a repeat may (see `respond`).
+    // A repeat may mark the success before the submitting call does (see `respond`).
     const { settle, submit, hooks, metrics } = setup(async (opts) => {
       await delay(20);
       return landing()(opts);
@@ -305,8 +310,9 @@ describe("createSettler", () => {
     for (const answer of answers.filter(({ response }) => !response.success)) {
       expect(answer.response).toEqual(alreadySettled);
       expect(answer.record).toBeUndefined();
-      expect(answer.replay).toBe(true);
     }
+    // The four repeats, whichever call marked the success.
+    expect(answers.filter((answer) => answer.replay)).toHaveLength(4);
     expect(answers.filter((answer) => answer.afterResponse)).toHaveLength(1);
     expect(hooks.onFinal).toHaveBeenCalledTimes(1);
     expect(metrics.value("settlement_already_settled_total")).toBe(4);
@@ -387,7 +393,8 @@ describe("createSettler", () => {
         await new Promise<void>((resolve) => (land = resolve));
         return result();
       },
-      { budgetMs: 30, settleTimeoutMs: 30 },
+      // Room for the claim and the hash's write before the budget runs out.
+      { budgetMs: 200, settleTimeoutMs: 200 },
     );
     expect((await settle(payload(), requirements)).response).toMatchObject({
       errorReason: SETTLE_REASONS.pending,
@@ -581,6 +588,8 @@ describe("createSettler", () => {
       [new FeeLimitError("x"), "settle_exact_stellar_fee_exceeds_maximum"],
       [new LedgerBoundError("x"), "settle_exact_stellar_signature_expiration_too_soon"],
     ] as const) {
+      // Each case settles the same payment, so each starts on empty stores.
+      await db.empty();
       const { settle, lines, metrics } = setup(async () => {
         throw error;
       });
@@ -597,6 +606,7 @@ describe("createSettler", () => {
       ).toBe(1);
     }
     // Other refusals are not a drift between the two.
+    await db.empty();
     const { settle, lines } = setup(async () => {
       throw new SimulationError("x");
     });
@@ -938,7 +948,7 @@ describe("createSettler", () => {
 
   describe("a repeat while the store fails", () => {
     /** A first call that ends `pending` with the hash, then the store as `fail` sets it. */
-    async function pendingThen(fail: (store: MemorySettlementStore) => void) {
+    async function pendingThen(fail: (store: SettlementStore) => void) {
       const s = setup(landing("pending"), { settleTimeoutMs: 30, storeGraceMs: 20 });
       await s.settle(payload(), requirements);
       const get = s.store.get.bind(s.store);
@@ -994,7 +1004,8 @@ describe("createSettler", () => {
           await new Promise<void>((resolve) => (land = resolve));
           return result();
         },
-        { budgetMs: 30 },
+        // Room for the claim and the hash's write before the budget runs out.
+        { budgetMs: 200 },
       );
       expect((await settle(payload(), requirements)).response).toMatchObject({
         errorReason: "settlement_pending",
@@ -1015,7 +1026,8 @@ describe("createSettler", () => {
           await opts.onSigned?.(HASH);
           return new Promise(() => {});
         },
-        { budgetMs: 30 },
+        // Room for the claim and the hash's write before the budget runs out.
+        { budgetMs: 200 },
       );
       // The pool's success is recorded just as the budget's compare-and-set runs.
       const transition = store.transition.bind(store);
@@ -1131,6 +1143,7 @@ describe("createSettler", () => {
 
     it("answers from what the call knows when the store fails as the budget runs out", async () => {
       for (const signs of [false, true]) {
+        await db.empty();
         const { settle, store, lines } = setup(
           async (opts) => {
             if (signs) await opts.onSigned?.(HASH);
@@ -1165,6 +1178,7 @@ describe("createSettler", () => {
         ],
       ];
       for (const [name, hang] of cases) {
+        await db.empty();
         const s = setup(landing(), { budgetMs: 30 });
         hang(s);
         const started = Date.now();

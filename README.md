@@ -25,6 +25,7 @@ package. Status: skeleton, nothing implemented yet.
 
 - Node.js 22.13+ and pnpm 11 (`corepack enable`)
 - Rust stable with the `wasm32v1-none` target, and stellar-cli 25.2+ for contract builds
+- Docker, for the PostgreSQL the facilitator's tests run on (`compose.yaml`)
 
 ## Commands
 
@@ -32,6 +33,7 @@ package. Status: skeleton, nothing implemented yet.
 pnpm install
 pnpm build
 pnpm typecheck
+docker compose up -d  # PostgreSQL on 127.0.0.1:54320, or set TEST_DATABASE_URL
 pnpm test
 pnpm lint
 pnpm contracts:test
