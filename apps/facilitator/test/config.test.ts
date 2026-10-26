@@ -19,10 +19,9 @@ const minimal = {
   CLIENT_IP: "socket",
   DATABASE_URL: "postgres://db.internal/x402",
 };
-/** Pubnet is refused until 0024 and 0025 land. */
+/** Pubnet is refused until 0024 lands. */
 const pubnet = { NETWORK: "stellar:pubnet" };
-const PUBNET_REFUSED =
-  "NETWORK stellar:pubnet is refused until spend budgets (0024) and the channel lease (0025) land";
+const PUBNET_REFUSED = "NETWORK stellar:pubnet is refused until spend budgets (0024) land";
 
 function problems(env: Record<string, string | undefined>): string[] {
   try {
