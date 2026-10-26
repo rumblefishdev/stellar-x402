@@ -45,12 +45,13 @@ settlement.
     up to 253), so `mcp://127.0.0.1/x` passes and `mcp://[::1]/x`, `mcp://my_srv/x` and non-ASCII
     hosts don't. A host ending in a dot is refused on every scheme.
   - On every network, a listed resource URL must be `http(s)` with a public host (task 0054).
-    Refused as `invalid_resource_url`: IP literals (public ones too, in
-    every spelling WHATWG folds into one), loopback, private and special-use names (`localhost`,
-    `localdomain`, `local`, `internal`, `home.arpa`, `invalid`, `test`, `example`, `alt`,
-    `onion` and their subdomains), single-label names, and `mcp:` URLs. It is the `iconUrl` host
-    rule, run on the canonical URL. `http` with a public name stays listable. The payment settles
-    as usual: only the listing is dropped, and the seller sees `rejected` in the header.
+    Refused as `resource_not_public`, a reason of its own, since the URL is well formed and its
+    payment settles: IP literals (public ones too, in every spelling WHATWG folds into one),
+    loopback, private and special-use names (`localhost`, `localdomain`, `local`, `internal`,
+    `home.arpa`, `invalid`, `test`, `example`, `alt`, `onion` and their subdomains),
+    single-label names, and `mcp:` URLs. It is the `iconUrl` host rule, run on the canonical URL.
+    `http` with a public name stays listable. The payment settles as usual: only the listing is
+    dropped, and the seller sees `rejected` in the header.
   - `CATALOG_LIST_LOCAL=true`, allowed on testnet only, lists such URLs too: for a facilitator
     run locally and the e2e gate. It opens hosts and `mcp:` URLs, not schemes.
 - **Catalog key.**
@@ -103,8 +104,9 @@ settlement.
     0028 turns it on with `/discovery/search`). The switch is config, not the payload, so no client
     can turn it on, and the config refuses it on pubnet.
   - The rule sits in the pure validator, which both the header and the store write call, so the
-    two agree. The reason is the existing `invalid_resource_url`. A log-only detail tells it apart
-    from a malformed URL.
+    two agree. Its reason is `resource_not_public`, not `invalid_resource_url`: the URL is not
+    wrong and the payment went through, so a seller reading the header must not take it for a
+    failed request. A malformed URL is still `invalid_resource_url`, checked first.
   - Plain `http` with a public name is still listed: a seller behind a TLS proxy without
     `trust proxy` sends it (task 0053), and PayAI lists such entries.
 - **Validation before, storage after.** Reporting the validation result costs microseconds and
@@ -133,7 +135,8 @@ settlement.
 - Loopback, private and IP resource URLs are listed nowhere unless `CATALOG_LIST_LOCAL` is set
   (task 0054), so gate runs leave none in a catalog without the switch.
 - A seller testing a localhost route against our facilitator pays as usual and gets
-  `rejected` / `invalid_resource_url` in `EXTENSION-RESPONSES`; the buyer sees nothing of it.
+  `rejected` / `resource_not_public` in `EXTENSION-RESPONSES`, next to a successful settle
+  response; the buyer sees nothing of it.
 - An MCP seller must set a real https URL (`@x402/mcp`'s `config.resource.url`) to be listed: the
   default `mcp://tool/<name>` is refused.
 - The e2e gate's Bazaar check needs `CATALOG_LIST_LOCAL=true` once task 0028 turns it on.

@@ -56,8 +56,9 @@ no buyer can reach, or so that we say on purpose that it does.
 - [x] Decided and written into ADR 0008: pubnet refuses loopback, private and IP resource URLs,
       or lists them as sent, and why
 - [x] If refused: given a pubnet payment with such a resource URL, when it is validated, then it
-      is refused as `invalid_resource_url`. Testnet does not keep accepting it, by decision 1: it
-      refuses it too unless `CATALOG_LIST_LOCAL=true`
+      is refused, as `resource_not_public` (decision 5) rather than `invalid_resource_url`.
+      Testnet does not keep accepting it, by decision 1: it refuses it too unless
+      `CATALOG_LIST_LOCAL=true`
 
 ## Research
 
@@ -80,10 +81,11 @@ resource URL, on mainnet or testnet, and none lists an `mcp://` URL.
 
 - `packages/bazaar/src/validate.ts` step 5: after `canonicalizeUrl`, unless
   `options.listLocal`, a URL that fails `isPublicResourceUrl` is refused as
-  `invalid_resource_url` (log-only detail "not a public http(s) host"). `validate` takes a third
-  argument, `ValidateOptions { listLocal?: boolean }`, exported. Both the `EXTENSION-RESPONSES`
-  header and the store write call `validate`, so the seller sees `rejected` and no row is
-  written; the settle body and status don't change.
+  `resource_not_public` (log-only detail "not a public http(s) host"), a new value in
+  `REJECT_REASONS`; a malformed URL is still `invalid_resource_url`, checked first. `validate`
+  takes a third argument, `ValidateOptions { listLocal?: boolean }`, exported. Both the
+  `EXTENSION-RESPONSES` header and the store write call `validate`, so the seller sees `rejected`
+  and no row is written; the settle body and status don't change.
 - `packages/bazaar/src/url.ts`: `isPublicResourceUrl(canonical)` is `http(s)` and
   `!isForbiddenHost(hostname)`, the icon host rule, on the WHATWG-parsed canonical URL: every
   IPv4 spelling WHATWG folds into a dotted quad, bracketed IPv6, public IP literals, single-label
@@ -94,8 +96,8 @@ resource URL, on mainnet or testnet, and none lists an `mcp://` URL.
 - `apps/facilitator`: `CATALOG_LIST_LOCAL` (`true`/`false`, default `false`), refused outside
   testnet ("is only allowed on testnet"), into `Config.catalog.listLocal`, `compose()` and the
   cataloger's `listLocal`, which passes it to `validate`. README section "What gets listed".
-- No new reject reason, no migration: `CATALOG_KEY_VERSION` stays 1. Entries a testnet catalog
-  already holds stay until 0069's expiry or a cleanup; new ones are refused.
+- No migration: `CATALOG_KEY_VERSION` stays 1. Entries a testnet catalog already holds stay until
+  0069's expiry or a cleanup; new ones are refused.
 - Tests: `packages/bazaar` 72 to 112. A 32-row table refused on testnet and pubnet with the
   header and listed with `listLocal`; 6 rows listed on both networks; `listLocal` still refusing
   a bad scheme, userinfo and a backslash; 0053's canonical-form cases run with `listLocal`; 4 icon
@@ -133,8 +135,10 @@ resource URL, on mainnet or testnet, and none lists an `mcp://` URL.
 4. **Reuse the icon host rule, refuse every IP literal** (GSD research). One list to keep; no
    `ipaddr.js`, no `node:net` (the purity test forbids it). Public IPs fall under "IP resource
    URLs", as on CDP.
-5. **`invalid_resource_url`, no new reason** (GSD research). `REJECT_REASONS` is closed and goes
-   to the header and metrics; the log-only detail tells the cases apart.
+5. **A reason of its own, `resource_not_public`** (decided by Adam in the PR, replacing the GSD
+   research's `invalid_resource_url`). The seller reads `rejected` next to a successful settle;
+   `invalid_resource_url` would read as a broken request although the URL is fine and the payment
+   went through. The new value shows in the header and as a `catalog_rejections_total` label.
 6. **The switch is a validator option, not the network.** The validator stays pure (no env); the
    facilitator reads `CATALOG_LIST_LOCAL` and passes it, as `CATALOG_ALLOW_HTTP` did before 0053.
    It opens hosts and `mcp:` URLs only, not schemes or userinfo.
