@@ -95,6 +95,10 @@ As a facilitator operator, I want fee spending capped and failing assets or reci
   `STORE` one in `config.ts`, with tests in `config.test.ts` and `main.test.ts`. Whichever of the
   three lands last removes it; an earlier one narrows its message to what is still missing,
   together with the facilitator README.
+- From 0050 (Oskar's PR #61 review): **the pruner's `spendWindowMs` must be the longest budget
+  window.** `main()` passes `config.spend.windowMs` to `createPruner`, which keeps reservations
+  for `max(2 × window, 7 days)`; a budget summing a longer window would lose its oldest spend to
+  the pruner and under-count. If budgets get windows of their own, pass the longest of them.
 
 ## Acceptance Criteria
 
