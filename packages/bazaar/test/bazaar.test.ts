@@ -351,6 +351,10 @@ describe("packages/bazaar", () => {
     ["https://shop.example/a", http],
     ["https://x.alt/a", http],
     ["https://x.onion/a", http],
+    // Never delegated by ICANN (2018): internal names only, like `.internal`.
+    ["https://nas.home/a", http],
+    ["https://intranet.corp/a", http],
+    ["https://smtp.mail/a", http],
     // An mcp listing: a tool name, an mcp: host and a loopback http URL.
     ["mcp://tool/get_weather", mcp],
     ["mcp://srv.example.com/x", mcp],
@@ -381,6 +385,11 @@ describe("packages/bazaar", () => {
     // Names that resolve to loopback are the fetcher's to check (ADR 0008), not the catalog's.
     ["https://127.0.0.1.nip.io/a", http, "https://127.0.0.1.nip.io/a"],
     ["https://localtest.me/a", http, "https://localtest.me/a"],
+    // A refused suffix only as the last labels: `mail.` and `home.` up front are public names.
+    ["https://mail.x.com/a", http, "https://mail.x.com/a"],
+    ["https://home.x.com/a", http, "https://home.x.com/a"],
+    // `.lan` is a router default but not reserved: a public TLD could still take it.
+    ["https://nas.lan/a", http, "https://nas.lan/a"],
   ])("lists %s on testnet and pubnet", (url, info, canonical) => {
     for (const requirements of [req, pubnet]) {
       const r = validate(pay(url, { info }, { mimeType: "" }), requirements);
@@ -421,6 +430,7 @@ describe("packages/bazaar", () => {
       "https://cdn.example/i.png",
       "https://x.alt/i.png",
       "https://x.onion/i.png",
+      "https://nas.home/i.png",
     ])
       expect(
         entry(pay("https://x.com/a", { info: http }, { iconUrl })).resource,

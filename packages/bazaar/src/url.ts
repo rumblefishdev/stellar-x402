@@ -9,7 +9,8 @@ const PARAM_SEGMENT = /^:[A-Za-z_][A-Za-z0-9_]*$/;
 /**
  * Special-use and private names and their subdomains: RFC 6761 (`localhost`, `invalid`, `test`,
  * `example`), 6762 (`local`), 8375 (`home.arpa`), 9476 (`alt`), 7686 (`onion`), ICANN `.internal`,
- * and `localdomain`. None of them is a public DNS name.
+ * the TLDs ICANN will never delegate (2018: `home`, `corp`, `mail`), and `localdomain`. None of
+ * them is a public DNS name. `.lan` is left out: common in routers, but not reserved.
  */
 const PRIVATE_SUFFIXES = [
   "localhost",
@@ -22,6 +23,9 @@ const PRIVATE_SUFFIXES = [
   "example",
   "alt",
   "onion",
+  "home",
+  "corp",
+  "mail",
 ];
 
 /**
