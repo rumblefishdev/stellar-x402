@@ -192,6 +192,28 @@ describe("the rate limiter", () => {
     expect(limited).toHaveLength(1);
   });
 
+  it("logs the full address next to the /56 it counts for an IPv6 client", async () => {
+    const { lines, post } = await serve({ CLIENT_IP_HEADER: "cf-connecting-ip" });
+    for (let i = 0; i < 3; i++) await post("/verify", { "cf-connecting-ip": "2001:db8:0:1::7" });
+    const limited = lines.map((line) => JSON.parse(line)).filter((e) => e.event === "rate_limited");
+    expect(limited).toEqual([
+      expect.objectContaining({ ip: "2001:db8:0:1::7", client: "2001:db8::/56" }),
+    ]);
+  });
+
+  it("counts a body over the size limit like any other request", async () => {
+    const { url } = await serve({ BODY_LIMIT_BYTES: "1024" });
+    const big = () =>
+      fetch(`${url}/settle`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pad: "x".repeat(2_000) }),
+      });
+    expect((await big()).status).toBe(413);
+    expect((await big()).status).toBe(413);
+    expect((await big()).status).toBe(429);
+  });
+
   it("hands the store the route, the client and the configured window", async () => {
     const { stores, hit } = spiedStores();
     const { post } = await serve(

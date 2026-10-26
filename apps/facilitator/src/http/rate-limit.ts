@@ -64,7 +64,8 @@ export function rateLimit({
       const logged = (blocked.get(client) ?? 0) > now;
       for (const [key, end] of blocked) if (end <= now) blocked.delete(key);
       blocked.set(client, resetAt);
-      if (!logged) logger.warn("rate_limited", { route, client, limit, windowMs });
+      // `ip` is the address to block at the edge; `client` is what was counted (an IPv6 /56).
+      if (!logged) logger.warn("rate_limited", { route, ip, client, limit, windowMs });
     }
     res.setHeader("Retry-After", String(Math.max(1, Math.ceil((resetAt - now) / 1000))));
     res.status(429).json({ error: "too_many_requests" });
