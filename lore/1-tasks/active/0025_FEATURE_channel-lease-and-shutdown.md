@@ -114,9 +114,64 @@ As a facilitator operator, I want only one process at a time to settle through a
 
 ## Acceptance Criteria
 
-- [ ] Given a process starting, when it boots, then it takes an exclusive lease on its network's channel set through the store and keeps renewing it; without the lease it doesn't serve `/settle`
-- [ ] Given a second process for the same channel set, when it starts, then it can't take the lease and submits nothing
+- [x] Given a process starting, when it boots, then it takes an exclusive lease on its network's channel set through the store and keeps renewing it; without the lease it doesn't serve `/settle`
+- [x] Given a second process for the same channel set, when it starts, then it can't take the lease and submits nothing
 - [ ] Given a shutdown signal, when the process stops, then it refuses new `/settle` calls, waits until every in-flight submission is final or recorded as pending, then releases the lease
-- [ ] Given a process that dies without releasing, when the lease TTL passes, then a new process can take the lease
-- [ ] Given a process without the lease, when `/settle` is called, then it answers 503 at once, and the process keeps trying to take the lease without exiting (ADR 0011)
+- [x] Given a process that dies without releasing, when the lease TTL passes, then a new process can take the lease
+- [x] Given a process without the lease, when `/settle` is called, then it answers 503 at once, and the process keeps trying to take the lease without exiting (ADR 0011)
 - [ ] Given a shutdown signal with calls still waiting for a channel, when the process drains, then those calls are refused unsent and the drain finishes within the 180 s stop grace period (ADR 0011)
+
+## Implementation Notes
+
+- **Lease keeper** (`apps/facilitator/src/settlement/lease.ts`): `createLeaseKeeper` returns
+  `held()`, `start()`, `runOnce()` and `close()`. Each attempt renews a held lease or tries to
+  take a free one, then the next comes `LEASE_TTL_MS / 3` after it ends. The lease is
+  `<network>:channels`, the holder a new UUID for every process start. Logs `lease_acquired`,
+  `lease_lost` (`reason`: `taken`, `expired` or `store_failed`) and `lease_acquire_failed`; counts
+  `lease_changes_total{held}`.
+- **`/settle`** (`http/app.ts`): a first handler answers `503 { error: "no_lease" }` with
+  `Retry-After: 5` while `held()` is false, before the rate limit's store call and the body.
+- **Wiring** (`main.ts`): `compose()` builds the keeper on the settlement store. `start()` makes the
+  first attempt after the server listens and before the first sweep; `close()` stops it with the
+  server. The lease isn't released yet: that comes with the drain.
+- **Reconciliation** (`reconcile.ts`): `scheduleReconciliation` takes `held`, and a tick without the
+  lease skips its sweep.
+- **Tests:** `test/lease.test.ts` (11, memory store and a moved clock: one holder, renewal, a
+  second process kept out, takeover after a crash's TTL, a renewal that finds another holder or a
+  store error, a hung renewal, the timer and `close()`); a skipped sweep in `reconcile.test.ts`; the
+  503 in `settle-route.test.ts`; two `main()` processes on one PostgreSQL database in
+  `postgres.test.ts`, the second taking over once the first stops. Facilitator 535 → 549 with
+  PostgreSQL. Mutants caught: `held()` always true, no local expiry, store errors ignored, a TTL/2
+  interval.
+
+## Design Decisions
+
+### From Plan
+
+1. **A process without the lease serves and retries** (okarcz, 2026-10-26): HTTP listens at once,
+   `/health` answers, `/settle` answers 503, and a background loop keeps calling `acquireLease`.
+   It never blocks start or exits (ADR 0011).
+2. **The holder renews every `LEASE_TTL_MS / 3`** (okarcz, 2026-10-26): about 10 s with the
+   30 s default, so two renewals can fail or run slow before the lease runs out, and the interval
+   follows the setting.
+3. **A failed renewal stops new sends at once** (okarcz, 2026-10-26): a store error or `false`
+   from `renewLease` both count as "no lease". `/settle` answers 503, calls already sent run on,
+   and the loop keeps trying to take the lease again. Trusting the local expiry was rejected:
+   another process's clock decides when it takes over.
+4. **`/settle` reads an in-memory flag** (okarcz, 2026-10-26): a lease keeper owns the
+   acquire/renew loop and the flag, so the check costs no store call. The flag is at most one
+   renew interval stale; a lease lost between the check and the send is the fencing-token
+   question.
+
+### Emerged
+
+5. **`held()` also ends at the expiry the process last wrote** (claude, 2026-10-26): measured on
+   its own clock from the start of the call that wrote it. Without it, a renewal stuck in a hung
+   store call would keep the flag up after the lease ran out and another process took it.
+6. **A counter instead of a `lease_held` gauge** (claude, 2026-10-26): `Metrics` has counters only
+   until 0027, so `lease_changes_total{held}` counts the changes; 0027 can derive the state or add
+   a gauge.
+7. **The first attempt comes before the first sweep** (claude, 2026-10-26): `start()` awaits it, so
+   a process that takes the lease at once also sweeps at once instead of 10 s later. The server
+   already listens, so `/health` answers meanwhile. `reconciled` settles after a skipped first
+   sweep too, so tests of a process without the lease don't hang.
