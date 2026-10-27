@@ -1561,7 +1561,7 @@ describe("attempt states (0019 decision 7)", () => {
 describe("with reconciliation (0019)", () => {
   /** A settler and a reconciler sharing one store and one `records`, as `buildSettlement` builds. */
   function shared(behaviour: Behaviour, answer: rpc.Api.GetTransactionResponse) {
-    const store = new MemorySettlementStore();
+    const store = db.stores().settlements;
     const hooks = {
       onFinal: vi.fn<SettlementHooks["onFinal"]>(async () => {}),
       onSuccess: vi.fn<SettlementHooks["onSuccess"]>(async () => {}),

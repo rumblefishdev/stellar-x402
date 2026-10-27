@@ -72,7 +72,7 @@ describe("PostgreSQL stores", () => {
 
   settlementStoreContract(async () => (await stores()).settlements);
 
-  // What the memory store can't show (0019 decision 11): two settlers, as two instances during a
+  // Two settlers (0019 decision 11), as two instances during a
   // deploy overlap, sharing one PostgreSQL store.
   describe("two settlers on one store", () => {
     const HASH = "c".repeat(64);

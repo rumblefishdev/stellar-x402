@@ -13,8 +13,7 @@ import {
 import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import type { SubmitOptions, SubmitResult } from "@stellar-x402/signer-pool";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
-import { describe, expect, it, vi } from "vitest";
-import { MemorySettlementStore } from "../src/adapters/memory.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import type { SettlementHooks } from "../src/settlement/hooks.js";
@@ -27,6 +26,10 @@ import {
   type Submitter,
 } from "../src/settlement/settle.js";
 import { PAYER_AUTH_REASON, payerNonce, type Check } from "../src/settlement/verify.js";
+import { testDatabase } from "./database.js";
+
+const db = testDatabase();
+beforeEach(db.empty);
 
 // `attemptsOf` reads a private WeakMap that only the real submitter fills; these tests put the
 // attempts on the error instead. `settle-pool.test.ts` runs the real pool's.
@@ -160,7 +163,7 @@ const landing =
 
 function setup(behaviour: Behaviour = landing(), overrides: Partial<SettlerDeps> = {}) {
   const order: string[] = [];
-  const store = new MemorySettlementStore();
+  const store = db.stores().settlements;
   const submit = vi.fn<Submitter["submit"]>(async (_call, opts = {}) => {
     order.push("submit");
     return behaviour(opts);
@@ -211,7 +214,7 @@ const landedTx = {
 
 describe("REFUTE B: one process answers a success twice (finding 3 by another timing)", () => {
   it("B1: the success write hangs and then throws; meanwhile a sweep lands it and a repeat is answered success; then the fallback answers success too", async () => {
-    const store = new MemorySettlementStore();
+    const store = db.stores().settlements;
     const hooks = {
       onFinal: vi.fn<SettlementHooks["onFinal"]>(async () => {}),
       onSuccess: vi.fn<SettlementHooks["onSuccess"]>(async () => {}),
@@ -249,7 +252,7 @@ describe("REFUTE B: one process answers a success twice (finding 3 by another ti
   });
 
   it("B2: no sweep needed: the success write commits but its reply is lost for a while; a repeat marks and gets success; then the fallback answers success too", async () => {
-    const store = new MemorySettlementStore();
+    const store = db.stores().settlements;
     const hooks = {
       onFinal: vi.fn<SettlementHooks["onFinal"]>(async () => {}),
       onSuccess: vi.fn<SettlementHooks["onSuccess"]>(async () => {}),

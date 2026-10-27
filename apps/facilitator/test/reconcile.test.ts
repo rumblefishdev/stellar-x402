@@ -11,11 +11,10 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import type { PaymentPayload } from "@x402/core/types";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { MemorySettlementStore } from "../src/adapters/memory.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
-import type { AttemptBounds, SettlementKey } from "../src/ports/index.js";
+import type { AttemptBounds, SettlementKey, SettlementStore } from "../src/ports/index.js";
 import type { SettlementHooks } from "../src/settlement/hooks.js";
 import {
   SWEEP_INTERVAL_MS,
@@ -25,6 +24,10 @@ import {
 import { createRecords } from "../src/settlement/records.js";
 import { SETTLE_REASONS } from "../src/settlement/settle.js";
 import { settlement } from "./port-contracts.js";
+import { testDatabase } from "./database.js";
+
+const db = testDatabase();
+beforeEach(db.empty);
 
 // Reconciliation (task 0019): each decision's rule has a test here that fails without it.
 
@@ -94,7 +97,7 @@ const missing = (latestLedger: number, latestLedgerCloseTime = 0, oldestLedgerCl
   }) as unknown as rpc.Api.GetTransactionResponse;
 
 function setup(answers: Record<string, rpc.Api.GetTransactionResponse | Error> = {}) {
-  const store = new MemorySettlementStore();
+  const store = db.stores().settlements;
   const hooks = {
     onFinal: vi.fn<SettlementHooks["onFinal"]>(async () => {}),
     onSuccess: vi.fn<SettlementHooks["onSuccess"]>(async () => {}),
@@ -124,14 +127,14 @@ function setup(answers: Record<string, rpc.Api.GetTransactionResponse | Error> =
   return { store, hooks, lines, metrics, records, reconciler, getTransaction, advance };
 }
 
-async function claimed(store: MemorySettlementStore, nonce = "1", createdAt = NOW) {
+async function claimed(store: SettlementStore, nonce = "1", createdAt = NOW) {
   const s = { ...settlement(nonce), createdAt };
   await store.claim(s);
   return s.key;
 }
 
 async function signed(
-  store: MemorySettlementStore,
+  store: SettlementStore,
   hashes: string[],
   bounds: AttemptBounds = { maxTime: 2_000, maxLedger: 4_010 },
   nonce = "1",
@@ -489,13 +492,14 @@ describe("scheduleReconciliation (decision 27)", () => {
     };
     const t = setup(answers);
     const key = await signed(t.store, [A]);
-    const { schedule } = scheduled(t);
+    const { schedule, sweep } = scheduled(t);
     schedule.start();
     await schedule.reconciled;
     expect((await t.store.get(key))?.state).toBe("signed");
     // Not yet in a ledger at start: the next sweep, not a 5-minute one, finds it.
     answers[A] = landed("SUCCESS");
     await vi.advanceTimersByTimeAsync(SWEEP_INTERVAL_MS);
+    await sweep.mock.results.at(-1)?.value;
     expect((await t.store.get(key))?.state).toBe("success");
     schedule.close();
   });
@@ -542,14 +546,20 @@ describe("scheduleReconciliation (decision 27)", () => {
     // Past its bound, and the RPC's history starts after the record was made.
     const t = setup({ [A]: missing(4_010, 0, NOW / 1000 + 1) });
     await signed(t.store, [A]);
-    const { schedule } = scheduled(t);
+    const { schedule, sweep } = scheduled(t);
+    // The store's queries take real time: wait for the sweep a tick started.
+    const tick = async () => {
+      await vi.advanceTimersByTimeAsync(SWEEP_INTERVAL_MS);
+      await sweep.mock.results.at(-1)?.value;
+    };
     schedule.start();
     await schedule.reconciled;
     expect(t.getTransaction).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(10 * SWEEP_INTERVAL_MS);
+    for (let i = 0; i < 10; i++) await tick();
+    expect(sweep.mock.calls.length).toBeGreaterThan(1);
     expect(t.getTransaction).toHaveBeenCalledTimes(1);
     t.advance(5 * 60_000);
-    await vi.advanceTimersByTimeAsync(SWEEP_INTERVAL_MS);
+    await tick();
     expect(t.getTransaction).toHaveBeenCalledTimes(2);
     schedule.close();
   });
