@@ -2,7 +2,7 @@
 id: "0063"
 title: "Keep catalog listings from being overwritten or padded before pubnet"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0008"]
 related_tasks: ["0032", "0054", "0023", "0015", "0068", "0069", "0070"]
@@ -22,6 +22,11 @@ history:
     note: >
       Grilled after a testnet run of both attacks: listing content comes from the seller's own
       402, field limits on offers. Decisions recorded below; 0070 spawned.
+  - date: "2026-10-27"
+    status: active
+    who: karolkow
+    note: >
+      Work starts.
 ---
 
 # Keep catalog listings from being overwritten or padded before pubnet
