@@ -41,6 +41,10 @@ None of them pays restore rent; all refuse.
   the archived entries in `archivedSorobanEntries` instead, so read both.
 - `stellar contract restore` (`--id`, `--key-xdr`, `--wasm-hash`, `--source-account`) restores an
   entry from any account.
+- `invalidMessage`: upstream and r402 send one only for the fee refusal (`simulation-derived fee N
+  stroops exceeds ceiling M stroops`), out of about 36 and 38 refusals; the OpenZeppelin plugin
+  never sends one. The spec says it is text for people and operators, which clients MUST NOT
+  parse.
 - `@x402/core`'s resource server puts only `invalidReason` into the buyer's 402
   (`PaymentRequired.error`); `invalidMessage` reaches sellers' hooks, direct `/verify` callers and
   logs.
