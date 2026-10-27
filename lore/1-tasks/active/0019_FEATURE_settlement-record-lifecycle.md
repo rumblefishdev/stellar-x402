@@ -131,7 +131,7 @@ As a facilitator operator, I want settlement records that are written before sen
 - [x] Given a rebuild that produces a new hash, when it is signed, then the record keeps every hash and can be found by any of them
 - [x] Given a write that would move a record backwards, such as `pending` after `success`, when it arrives late, then the compare-and-set drops it; states only move `claimed → signed → pending → success | failed | rejected | expired`
 - [x] Given non-final records in the store, when the app starts, then reconciliation checks each one on chain by its hashes, from the first sweep at start and every 10 s after, beside `/settle`, and finalizes those the network has decided; one it couldn't check is tried again by the next sweep (decision 27, which replaced "before serving `/settle`"); a record that turns `success` this way fires the on-success hook
-- [x] Given a `claimed` record with no hashes past its settle budget plus a margin, when reconciliation runs (holding the lease once 0025 adds it), then it is closed as `rejected` with reason "interrupted before signing" and `onFinal` runs to release any spend reservation; nothing was sent, because 0016 sends only after `onSigned` succeeds (the reason is the code `settle_exact_stellar_interrupted`, decision 15; the lease comes with 0025)
+- [x] Given a `claimed` record with no hashes past its settle budget plus a margin, when reconciliation runs, then it is closed as `rejected` with reason "interrupted before signing" and `onFinal` runs to release any spend reservation; nothing was sent, because 0016 sends only after `onSigned` succeeds (the reason is the code `settle_exact_stellar_interrupted`, decision 15; reconciliation doesn't need the lease, decision 37)
 - [x] Given any handler or event listener, when it needs to change a record, then it calls the single settlement module, which owns every write to `SettlementStore`
 - [x] Given a signed hash, when the pool stores it, sends it and resolves it, then its attempt moves `stored → sent | unknown → landed | dead` with its time and ledger bounds, and reconciliation decides from the network, never from these states (decision 7)
 
@@ -222,11 +222,12 @@ As a facilitator operator, I want settlement records that are written before sen
    older than `createdAt + SETTLE_BUDGET_MS + margin`) was considered; `addHash` refusing a final
    record keeps money safe without it.
    *Replaced by decision 27 (2026-10-26):* every sweep closes a hashless claim only past its budget plus the margin, also the first after a start.
-3. **Reconciliation relies on compare-and-set now; the lease comes with 0025** (okarcz,
+3. **Replaced by decision 37.** ~~Reconciliation relies on compare-and-set now; the lease comes with 0025~~ (okarcz,
    2026-10-22). Every write is a CAS and decision 1 never ends a hash that can still land, so
    records stay correct without the lease. What the lease prevents, two processes using one
    channel's sequence numbers, is `/settle`'s problem; 0025 takes the lease at startup and runs
    reconciliation after it.
+   *Replaced by decision 37 (2026-10-27):* reconciliation doesn't wait for the lease.
 4. **`/settle` answers 503 until reconciliation has finished** (okarcz, 2026-10-22). The server
    listens at once so `/health` answers; if the store or the RPC is down at startup, the process
    retries with backoff and logs, without crashing.
@@ -408,6 +409,25 @@ As a facilitator operator, I want settlement records that are written before sen
     test C2). `finalWrite` removes the key when the write starts and puts it back if the write
     throws, or if it loses to another writer and the key was listed, so the sweep doesn't run the
     hooks beside a writer in this process. Considered: a separate set of writes in flight.
+
+### Emerged (PR #57 hosting review)
+
+36. **Reconciliation reports `listed` for the deploy** (okarcz, 2026-10-27, Stan's review).
+    With `ready` meaning the lease (decision 27), the deploy's wait no longer tested the new
+    image's reconciliation: an image whose `listNonFinal` always throws would pass and become
+    the good digest. `Reconciliation.listed()` turns true once a sweep has listed the records,
+    before it checks them, and stays true; `reconciled` can't serve, since it also settles after
+    a sweep that threw. `/health` reports it beside `ready` (0026), and the deploy waits for both
+    (ADR 0011). A sweep that starts failing later is 0027's alarm. Considered: folding it into
+    `ready`, which `/settle`'s 503 also reads.
+37. **Reconciliation doesn't depend on the lease** (okarcz, 2026-10-27, Stan's review; replaces
+    decision 3). It sweeps in every process from the moment the server listens. It sends nothing
+    and every write is a compare-and-set on the version (decision 26), so it needs no lease.
+    After a crash the new process finishes a payment that landed at once, instead of after the
+    dead process's lease expires (up to 30 s). Two live processes sweeping at once only repeat
+    chain lookups, and one of their writes loses. 0025 drops its `held()` check on sweeps when it
+    rebases. Considered: sweeping only while holding the lease, which avoids the duplicate
+    lookups in a rare deploy overlap.
 
 ## Future Work
 
