@@ -99,8 +99,8 @@ export function checkUrl(raw: string, allowInsecureLocal: boolean): URL {
  * A fetch to sellers: only public addresses, no redirects (a paid retry carries the signed payment,
  * which must not reach another host), a deadline, and a body size cap counted while
  * the body arrives. `deadline` is the caller's, `AbortSignal.timeout(timeoutMs)` made once when its
- * work starts: it covers every request made through this fetch, so a payment's unpaid request,
- * signing and paid retry together end within `timeoutMs`.
+ * work starts: it covers every request made through this fetch, so a request still running at
+ * `timeoutMs`, or started after it, is cut off. Work between requests (a payment's signing) is not.
  */
 export function guardedFetch(limits: SellerLimits, deadline: AbortSignal): typeof fetch {
   // Every name is checked where it is connected to. undici's own `maxResponseSize` is not used: it
