@@ -5,7 +5,7 @@ type: FEATURE
 status: completed
 milestone: 1
 related_adr: ["0006", "0011"]
-related_tasks: ["0012", "0009", "0016", "0014", "0013", "0039", "0025", "0026", "0027", "0070"]
+related_tasks: ["0012", "0009", "0016", "0014", "0013", "0039", "0025", "0026", "0027", "0073"]
 tags: [facilitator, settlement, priority-high, effort-medium, payments]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -37,7 +37,7 @@ history:
     note: >
       Applied Karol's (karolko9) PR #57 review: a record version guards expiry, one sweep loop
       replaces the scheduling and the 503 gate, and two outage leftovers are fixed (decisions
-      26-30). Point 7 spawned 0070.
+      26-30). Point 7 spawned 0073 (first numbered 0070).
   - date: "2026-10-27"
     status: completed
     who: okarcz
@@ -45,7 +45,7 @@ history:
       PR #57 rebase-merged into develop (edf972f). Karol's second review (fallback success decided
       by the store, hooks run once; decisions 32-35) and Stan's hosting review (`listed` for the
       deploy, reconciliation independent of the lease; decisions 36-37) applied. Facilitator 493
-      tests with PostgreSQL. All 7 ACs met; 0070 spawned for point 7.
+      tests with PostgreSQL. All 7 ACs met; 0073 spawned for point 7.
 ---
 
 # Settlement records survive restarts
@@ -403,7 +403,7 @@ As a facilitator operator, I want settlement records that are written before sen
     `src`; the store contract tests need it to show that exactly one of concurrent updates moved
     an attempt. Every other point-9 cleanup is done: the reconciler's options are constants, and
     the RPC history comment says testnet keeps 120960 ledgers (about 7 days).
-31. **Point 7 is a backlog task, 0070** (okarcz, 2026-10-26): `expired` and `…_interrupted`
+31. **Point 7 is a backlog task, 0073** (okarcz, 2026-10-26): `expired` and `…_interrupted`
     tell the payer to sign again while the auth entry they signed may stay valid for minutes.
 
 ### Emerged (PR #57 second review)
@@ -451,4 +451,4 @@ As a facilitator operator, I want settlement records that are written before sen
 
 ## Future Work
 
-- **0070**: answer "sign a new payment" only once the payer's auth entry can no longer land.
+- **0073**: answer "sign a new payment" only once the payer's auth entry can no longer land.

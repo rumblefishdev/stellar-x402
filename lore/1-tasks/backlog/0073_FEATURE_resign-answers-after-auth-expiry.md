@@ -1,5 +1,5 @@
 ---
-id: "0070"
+id: "0073"
 title: "Tell the payer to sign again only once their auth entry can't land"
 type: FEATURE
 status: backlog
@@ -15,6 +15,10 @@ history:
     note: >
       Spawned from 0019 (decision 31): point 7 of Karol's (karolko9) PR #57 review, left out of
       that PR.
+  - date: "2026-10-27"
+    status: backlog
+    who: okarcz
+    note: "Renumbered from 0070, which Karol's catalog badge task also took."
 ---
 
 # Tell the payer to sign again only once their auth entry can't land
