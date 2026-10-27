@@ -82,7 +82,9 @@ first in a spike ([R-spike-results](notes/R-spike-results.md)). In short:
   backfill that leaves rows; a transactional group whose lock another session holds; `VALIDATE`
   and an index build that outlast the pool's statement timeout; a run whose client went away
   while a step waits; a table rewrite in a group or a `sql` step, and a group of short
-  statements, failing at their bound while `reserve` answers. At the suite's scale AC1 allows no
+  statements, failing at their bound while `reserve` answers; a group altering the spend tables
+  in `reserve`'s order, applied without a retry under load (in the other order four runs of four
+  failed after 84–104 s, `reserve` stalling 0.6 s on each retry). At the suite's scale AC1 allows no
   failed `reserve`; the 1% budget holds at `MIGRATE_SCALE`. Mutants each failing a case: no
   invalid-index repair, no lock retry, no batch timeout retry, a group without its lock retry or
   with a 10 s lock timeout, a long step without its raised statement or client timeout, no

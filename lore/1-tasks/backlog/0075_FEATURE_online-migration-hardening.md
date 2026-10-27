@@ -69,7 +69,9 @@ Add `commit` and `release` loops to AC1's test load, and check that 0024's commi
 
 `runOnline` logs a step only once it succeeds: a 30-minute index build is silent in the deploy's
 journal until it ends, and a failed step reaches it as PostgreSQL's message alone. Log the start,
-and log or wrap the error with the migration, the step and its kind.
+and log or wrap the error with the migration, the step and its kind. `lock()` is silent too while
+it waits for another run, up to 30 minutes: log the wait when it starts and then every minute or
+so (PR #73 review), and drop ADR 0011's "until then" note.
 
 ### Step 5: A backfill's columns can't be ambiguous
 

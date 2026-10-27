@@ -423,13 +423,20 @@ One request or one stop must never outlast the layer in front of it:
   as a backfill or an index build on a big table, is an online migration and runs in the deploy
   too (task 0067):
   - the migration service's bounds are ADR 0012's;
-  - it logs each step and every 50 backfill batches, so a long deploy reads as busy in the
-    deploy unit's journal, and the deploy lock holds later deploys meanwhile;
-  - `x402-deploy@` has a `TimeoutStartSec` of 60 minutes, which caps the whole run: the wait for
-    another run's lock (30 minutes) and each long step (30 minutes) could otherwise hold later
-    deploys, a hotfix's included, under the `flock` far longer. systemd stops a run past it, the
-    deploy fails before the old facilitator stops, and the next deploy continues the migration
-    from its markers;
+  - it logs each step as it ends and every 50 backfill batches, and the deploy lock holds later
+    deploys meanwhile. A step's start and the wait for another run's lock reach the journal only
+    with task 0075, so until then a long index build, `VALIDATE` or that wait is quiet there:
+    read `pg_stat_activity` before stopping a run;
+  - `x402-deploy@` is a oneshot with a `TimeoutStartSec`, the cap on the whole run: cancelling the
+    CI job doesn't stop the unit, so without it a stuck run, waiting up to 30 minutes for another
+    run's lock and up to 30 more on each long step, would hold every later deploy, a hotfix's
+    included, under the `flock`. systemd stops a run past it, the deploy fails before the old
+    facilitator stops, and the next deploy continues the migration from its markers. 0026 sets
+    the cap from testnet's size, 60 minutes to start (AC1 took 4 min 43 s at 1 000 000
+    reservations), between two bounds:
+    - above the longest single step, since a stopped backfill walks its table again and a
+      stopped index build starts over, so a shorter cap never finishes them;
+    - no longer than a hotfix may wait;
   - a backfill writes about 1.2 GiB of WAL per 2 million rows (a million reservations with the
     four default scopes is twice that), which pgBackRest ships as each segment closes, and the
     table grows about a third: check the disk's headroom first;

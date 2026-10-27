@@ -402,6 +402,29 @@ describe("online migrations", () => {
     30_000,
   );
 
+  it("applies a group that alters reserve's tables in reserve's order, without a retry", async () => {
+    await onSchema("order", async (fresh, on) => {
+      await seeded(fresh, 200);
+      const load = reserving(on);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        const started = Date.now();
+        expect(
+          await run(fresh, [
+            { name: "0101_r", sql: "ALTER TABLE spend_reservations ADD COLUMN g int" },
+            { name: "0102_s", sql: "ALTER TABLE spend_scopes ADD COLUMN g int" },
+            { name: "0103_rs", sql: `ALTER TABLE ${T} ADD COLUMN g int` },
+          ]),
+        ).toEqual(["0101_r", "0102_s", "0103_rs"]);
+        // A retry waits out a lock timeout and a backoff of at least as long.
+        expect(Date.now() - started).toBeLessThan(2 * STEP_LOCK_TIMEOUT_MS);
+      } finally {
+        await load.stop();
+      }
+      expect(load.samples.filter((s) => s.error)).toEqual([]);
+    });
+  }, 30_000);
+
   it("runs VALIDATE and an index build past the pool's statement timeout", async () => {
     await onSchema("long", async (fresh, on) => {
       await seeded(fresh, 2_000);

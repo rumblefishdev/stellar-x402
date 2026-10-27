@@ -84,6 +84,12 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
       timeout;
     - consecutive transactional migrations run in one transaction, so a failed group leaves the
       schema as it was;
+    - a group locks `reserve`'s tables in `reserve`'s order: `spend_reservations`,
+      `spend_scopes`, `spend_reservation_scopes`, or each of them in an online `sql` step of its
+      own. In the other order, a `reserve` in flight holds the next table while it waits on the
+      group's: the group's lock wait runs out on every retry, each stalling `reserve` for 500 ms,
+      and the deploy fails after its 20 attempts, about 100 s (four runs out of four under the
+      suite's load, task 0067). The runner can't see which tables a group locks;
     - an online migration is a list of steps, each non-blocking or holding its lock for at
       most 1.5 s: a single catalog-only `ALTER`, a keyset backfill batch,
       `CREATE INDEX CONCURRENTLY`, `NOT VALID` then `VALIDATE`. A backfilled column's new rows

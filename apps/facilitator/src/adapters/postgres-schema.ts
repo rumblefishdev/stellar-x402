@@ -15,7 +15,9 @@ import type { Logger } from "../logger.js";
  * A migration whose transaction would hold write-blocking locks for 500 ms or more on the largest
  * database it meets is online (`OnlineMigration`, 0067); every other one is transactional. A
  * transaction that runs past `WRITE_LOCK_TRANSACTION_TIMEOUT_MS` fails the run instead of every
- * `reserve` queued behind it.
+ * `reserve` queued behind it. A group locks `reserve`'s tables in `reserve`'s order
+ * (`spend_reservations`, `spend_scopes`, `spend_reservation_scopes`): in any other, a `reserve` in
+ * flight and the group wait on each other until the group gives up, on every retry (ADR 0012).
  *
  * Every time is the app's clock, stored as `bigint` milliseconds; the SQL never reads the
  * database's clock.
