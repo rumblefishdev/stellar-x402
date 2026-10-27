@@ -66,13 +66,21 @@ What every future migration author relies on.
   session: `application_name = 'x402-migrate'`, `client_connection_check_interval = '5s'` (A4: a
   dead runner's backend otherwise keeps the lock and blocks the next deploy).
 - Consecutive transactional migrations share one transaction, as today; an online migration
-  splits the group.
+  splits the group. The group runs under the same lock contract as a `sql` step (500 ms, retried)
+  instead of today's 10 s `lock_timeout`: a group's `ALTER` waiting 10 s would queue `reserve`
+  past its own timeout, and a group is a transaction, so a retry repeats it whole (emerged).
+- `migrate`'s lock is two keys, `MIGRATE_LOCK` and the schema's hash, where the old runner took
+  one. A deploy runs one `migrate` at a time under its `flock`, so an old and a new runner never
+  overlap.
 - Applied names are the rows without `#`. `migrate` still resolves the names it applied.
 - Step kinds:
   - `sql(statement)`: one transaction with its marker; the lock retry wraps the transaction.
   - `index({ name, table, definition })`: checked schema-qualified (`to_regclass`,
     `pg_index.indisvalid` / `indisready`); an invalid leftover is dropped with
     `DROP INDEX CONCURRENTLY`, then `CREATE INDEX CONCURRENTLY`. Outside a transaction.
+  - `validate({ table, constraint })`: `VALIDATE CONSTRAINT` under invariant 6's long bound.
+    Runner-owned and re-entrant like `index`, since a `sql` step's 5 s bound and 500 ms lock
+    timeout don't fit a scan of millions of rows (emerged while building).
   - `backfill({ table, key, set, where, batch, pauseMs })`: invariant 7.
 - NOT NULL on PG 18 (`postgres:18` in compose and CI): `ADD CONSTRAINT c_nn NOT NULL c NOT VALID`,
   backfill, `VALIDATE CONSTRAINT c_nn` (A1). No CHECK → SET NOT NULL → DROP.
@@ -107,7 +115,7 @@ Passed through `migrate(…, migrations)`; no production migration. Target
 2. `sql`: `ALTER … ALTER COLUMN c SET DEFAULT 0`
 3. `sql`: `ALTER … ADD CONSTRAINT c_nn NOT NULL c NOT VALID`
 4. `backfill`: key `(scope, id)`, `SET c = <expr> WHERE c IS NULL`
-5. `sql`: `ALTER … VALIDATE CONSTRAINT c_nn`
+5. `validate`: `ALTER … VALIDATE CONSTRAINT c_nn`
 6. `index`: `CREATE INDEX CONCURRENTLY … (c)`
 
 ### D5. ADR text (AC3)

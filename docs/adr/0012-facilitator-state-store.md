@@ -5,7 +5,8 @@
   measures; hosting note; task 0039: PostgreSQL in a container on the Hetzner server) and
   2026-10-21 (task 0039: how backups leave the server, the migration service and its bounds) and
   2026-10-22 (task 0039: pgBackRest; migrations before the old facilitator stops) and 2026-10-26
-  (task 0032: a pool for listings; task 0064: no memory store, tests run on PostgreSQL)
+  (task 0032: a pool for listings; task 0064: no memory store, tests run on PostgreSQL) and
+  2026-10-27 (task 0067: online migrations)
 
 ## Context
 
@@ -69,16 +70,32 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
     passed what PostgreSQL refused (a NUL in a `/settle` body, 0009). Each test file takes its
     own schema in the repo's compose database or `TEST_DATABASE_URL` (task 0064).
 - **Schema.**
-  - Plain SQL migrations, applied by one command, under a transaction-level advisory lock with a
-    `lock_timeout`.
+  - Plain SQL migrations, applied by one command, under a session advisory lock per schema that
+    the runner polls for: a session blocked in `pg_advisory_lock` would hold a snapshot that
+    `CREATE INDEX CONCURRENTLY` waits for (task 0067).
   - Deploys run the migrations as a one-off service of the new image while the old facilitator
     still serves, before it stops (ADR 0011). A failed migration fails the deploy, and the old
     facilitator keeps serving.
-  - `migrate()` applies all pending migrations in one transaction, so a failed run leaves the
-    schema as it was. With expand/contract, that is what makes migrating before the stop, and a
-    deploy's automatic rollback, safe.
-  - The migration service has its own bounds, longer than the app pool's 10 s statement timeout
-    (0026). An index build on a big table runs outside the deploy (ADR 0011).
+  - A migration is transactional if, on the largest database it will meet, it finishes inside
+    the transactional bound (10 s) while holding write-blocking locks; otherwise it is online
+    (task 0067):
+    - consecutive transactional migrations run in one transaction, so a failed group leaves the
+      schema as it was;
+    - an online migration is a list of steps, each non-blocking or holding a lock for under a
+      second: a single catalog-only `ALTER`, a keyset backfill batch,
+      `CREATE INDEX CONCURRENTLY`, `NOT VALID` then `VALIDATE`. Each step commits with a
+      `name#<i>` marker in `schema_migrations`, so a failed or killed run leaves a valid expand
+      prefix that the next deploy finishes. The previous release works after every step, and a
+      migration that has started anywhere is never edited.
+    - With expand/contract, that is what makes migrating before the stop, and a deploy's
+      automatic rollback, safe.
+  - The migration service's bounds, by kind: a transactional group 10 s; an online `ALTER` waits
+    at most 500 ms for its lock, a quarter of `reserve`'s 2 s, retries `55P03` and `40P01`, and
+    runs at most 5 s; a backfill batch 5 s, 5 000 rows, 250 ms apart; an index build or
+    `VALIDATE` waits for locks without a timeout, since a `lock_timeout` aborts the build, and
+    runs at most 30 minutes. The runner's session sets `client_connection_check_interval`, so a
+    run whose client died releases its lock within seconds. Long steps run in the deploy
+    (ADR 0011).
   - Every change is expand/contract: new columns are nullable or have a default, and nothing is
     dropped or renamed in the same release, so a rollback to an earlier image runs against the
     newer schema.
@@ -168,10 +185,15 @@ moves back there.
     - spend reservations go after twice the window or 7 days, whichever is longer;
     - rate-limit windows go one window after they end;
     - deletes run in batches, 1 s per table each minute, and skip locked rows.
-  - A migration that rewrites these tables while they hold weeks of traffic needs an online
-    runner: batched backfill, `CREATE INDEX CONCURRENTLY`, lock retries. The one-transaction
-    runner hit the 10 s statement timeout at about 200 000 reservations (task 0050). Task 0067
-    builds it.
+  - A migration that rewrites these tables while they hold weeks of traffic is online. The
+    one-transaction runner hit the 10 s statement timeout at about 200 000 reservations
+    (task 0050); at 1 000 000 under a 10-minute bound it applied in 58 s while 56 of 60 `reserve`
+    calls failed on their lock timeout (task 0067).
+  - A backfill's WAL delays every `COMMIT` written after it, `reserve`'s included, and a
+    `reserve` waiting on the disk holds the global scope's row lock, so the others queue on it.
+    The pause between batches keeps that delay short; without the backfill the same load never
+    waited past 0.4 s (task 0067). Any `COMMIT` slower than `reserve`'s 2 s lock timeout, for any
+    reason, fails the reservations queued behind it.
   - Task 0026 measures the full settle path and `addHash` on the testnet database it creates;
     0022 had no instance to measure on.
 - **Task 0022 builds the adapters.** CI runs the contract suites against a PostgreSQL service
