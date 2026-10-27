@@ -10,6 +10,7 @@ import { start, type Started } from "../src/main.js";
 import { memoryMetrics } from "../src/metrics.js";
 import type { SettlementRecord } from "../src/ports/index.js";
 import type { SettlementHooks } from "../src/settlement/hooks.js";
+import type { Reconciliation } from "../src/settlement/reconcile.js";
 import type { Settle } from "../src/settlement/settle.js";
 import { testDatabase } from "./database.js";
 import { bazaarExtensions, depthOf } from "./payment.js";
@@ -277,7 +278,7 @@ describe("POST /settle beside reconciliation (0019 decision 27)", () => {
       reconciled: new Promise<void>(() => {}),
       listed: () => false,
       start: vi.fn(),
-      close: vi.fn(),
+      close: vi.fn(async () => {}),
     };
     const env = {
       FACILITATOR_SECRET: Keypair.random().secret(),
@@ -377,7 +378,11 @@ describe("POST /settle without the channel lease (0025)", () => {
 
 describe("shutdown (0025)", () => {
   const db = testDatabase();
-  async function started(opts: { drain?: () => Promise<void>; shutdownDeadlineMs?: number }) {
+  async function started(opts: {
+    drain?: () => Promise<void>;
+    reconciliation?: Reconciliation;
+    shutdownDeadlineMs?: number;
+  }) {
     const settle = vi.fn<Settle>(async () => ({ response: success }));
     const lease = {
       held: () => true,
@@ -406,6 +411,7 @@ describe("shutdown (0025)", () => {
         metrics: memoryMetrics(),
         lease,
         ...(opts.drain && { drain: opts.drain }),
+        ...(opts.reconciliation && { reconciliation: opts.reconciliation }),
       },
       { ...(opts.shutdownDeadlineMs !== undefined && opts) },
     );
@@ -440,6 +446,24 @@ describe("shutdown (0025)", () => {
     expect(lease.close).not.toHaveBeenCalled();
     expect(events()).toEqual(expect.arrayContaining(["shutdown_started", "shutdown_drained"]));
     await expect(fetch(`${url}/supported`)).rejects.toThrow();
+  });
+
+  it("drains a reconciliation sweep under way before it gives the lease up", async () => {
+    let swept!: () => void;
+    const reconciliation = {
+      reconciled: Promise.resolve(),
+      listed: () => true,
+      start: vi.fn(),
+      close: vi.fn(() => new Promise<void>((resolve) => (swept = resolve))),
+    };
+    const { app, lease } = await started({ drain: async () => {}, reconciliation });
+    const closing = app.close();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(reconciliation.close).toHaveBeenCalledTimes(1);
+    expect(lease.release).not.toHaveBeenCalled();
+    swept();
+    await closing;
+    expect(lease.release).toHaveBeenCalledTimes(1);
   });
 
   it("stops waiting at its deadline, cuts open connections and leaves the lease to its TTL", async () => {
