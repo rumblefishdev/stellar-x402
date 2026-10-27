@@ -3,7 +3,7 @@ import { x402Client, x402HTTPClient, type SchemeRegistration } from "@x402/core/
 import { wrapFetchWithPayment } from "@x402/fetch";
 import { z } from "zod";
 import { ToolError } from "./results.js";
-import { SellerFetchError, checkBody, checkUrl, guardedFetch, type SellerLimits } from "./guard.js";
+import { SellerFetchError, checkUrl, guardedFetch, type SellerLimits } from "./guard.js";
 import { countDaily, refundDaily, utcDay, type DailyEntry } from "./daily.js";
 
 /** The call_paid_http tool's input and output, as server.ts registers it. */
@@ -83,7 +83,10 @@ export async function callPaidHttp(
   log: (message: string) => void,
 ): Promise<PaidResponse> {
   const url = checkUrl(request.url, limits.allowInsecureLocal);
-  checkBody(request.method, request.body);
+  // A GET carries no body: fetch would throw, and the mistake is the agent's input, not the seller.
+  if (request.method === "GET" && request.body !== undefined) {
+    throw new ToolError("invalid_input", "A GET request cannot carry a body.");
+  }
 
   // One deadline for the call's requests, the unpaid one and the paid retry. Signing is not cut off:
   // a signature that comes after the deadline is never sent, and the amount goes back.
