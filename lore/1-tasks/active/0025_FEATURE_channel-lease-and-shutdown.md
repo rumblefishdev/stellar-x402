@@ -137,9 +137,9 @@ As a facilitator operator, I want only one process at a time to settle through a
 - **Wiring** (`main.ts`): `compose()` builds the keeper on the settlement store. `start()` makes the
   first attempt after the server listens and before the first sweep; `close()` stops it with the
   server. The lease isn't released yet: that comes with the drain.
-- **Reconciliation** (`reconcile.ts`): `scheduleReconciliation` takes `held`, and a tick without the
-  lease skips its sweep.
-- **Tests:** `test/lease.test.ts` (11, memory store and a moved clock: one holder, renewal, a
+- **Reconciliation** (`reconcile.ts`): `scheduleReconciliation` took `held`, and a tick without the
+  lease skipped its sweep. Removed in the rebase onto develop (decision 19).
+- **Tests:** `test/lease.test.ts` (11, on PostgreSQL since the rebase, with a moved clock: one holder, renewal, a
   second process kept out, takeover after a crash's TTL, a renewal that finds another holder or a
   store error, a hung renewal, the timer and `close()`); a skipped sweep in `reconcile.test.ts`; the
   503 in `settle-route.test.ts`; two `main()` processes on one PostgreSQL database in
@@ -227,7 +227,8 @@ As a facilitator operator, I want only one process at a time to settle through a
 6. **A counter instead of a `lease_held` gauge** (claude, 2026-10-26): `Metrics` has counters only
    until 0027, so `lease_changes_total{held}` counts the changes; 0027 can derive the state or add
    a gauge.
-7. **The first attempt comes before the first sweep** (claude, 2026-10-26): `start()` awaits it, so
+7. **The first attempt comes before the first sweep** (claude, 2026-10-26; the sweep part is
+   moot since decision 19, the order stays): `start()` awaits it, so
    a process that takes the lease at once also sweeps at once instead of 10 s later. The server
    already listens, so `/health` answers meanwhile. `reconciled` settles after a skipped first
    sweep too, so tests of a process without the lease don't hang.
@@ -241,6 +242,12 @@ As a facilitator operator, I want only one process at a time to settle through a
    only for a call prepared ahead.
 14. **No `/health` route yet** (claude, 2026-10-26): ADR 0011 names one, and the code has none; the
     shutdown tests use `GET /supported` to show the server still answers during the drain.
+19. **Sweeps don't wait for the lease** (okarcz, 2026-10-27, Stan's PR #57 review, 0019 decision
+    37): the rebase onto develop drops `held` from `scheduleReconciliation` and `buildSettlement`
+    and its skipped-sweep test. A process waiting for the lease, for example after a crash, then
+    finishes payments that landed at once; every sweep write is a compare-and-set on the version.
+    The same rebase moves the lease and shutdown tests to PostgreSQL (0064 dropped the memory
+    store), and the timer test waits for each renewal, since the queries take real time.
 
 ## Future Work
 
