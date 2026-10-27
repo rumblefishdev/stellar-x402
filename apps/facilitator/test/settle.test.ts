@@ -1603,7 +1603,7 @@ describe("with reconciliation (0019)", () => {
     expect((await settle(payload(), requirements)).response).toEqual(alreadySettled);
   });
 
-  it("answers a success once when a sweep stores it while the call reads back (decision 28)", async () => {
+  it("answers a success once when a sweep stores it while the call reads back (decision 32)", async () => {
     const landed = {
       status: rpc.Api.GetTransactionStatus.SUCCESS,
       ledger: 1001,
@@ -1624,11 +1624,12 @@ describe("with reconciliation (0019)", () => {
     });
     const first = settle(payload(), requirements);
     await vi.waitFor(() => expect(readBack).toBeDefined());
-    // Meanwhile a sweep stores the success, and a repeat asks for it.
+    // Meanwhile a sweep stores the success, and a repeat asks for it: the store's mark goes to
+    // the repeat, so the call that read back answers it as already answered.
     expect(await reconcilerOn().sweep()).toMatchObject({ success: 1 });
-    expect((await settle(payload(), requirements)).response).toEqual(alreadySettled);
+    expect((await settle(payload(), requirements)).response.success).toBe(true);
     readBack!();
-    expect((await first).response.success).toBe(true);
+    expect((await first).response).toEqual(alreadySettled);
   });
 
   it("finishes a payment whose process crashed between signing and sending", async () => {

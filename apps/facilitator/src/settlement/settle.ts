@@ -334,6 +334,9 @@ export function createSettler(deps: SettlerDeps): Settle {
     const settled = { key: record.key, ...extra };
     if (record.state !== "success") return { ...settled, response: answer(record) };
     if (signal?.aborted) return { ...settled, response: answer(record) };
+    // Answered already: a mark that fails now must not answer it again (0019 decision 33).
+    if (record.successAnsweredAt !== undefined)
+      return { ...settled, response: alreadySettled(record.payer, record.hashes.at(-1) ?? "") };
     const answeredAt = now();
     let first = !answeredHere.has(record.key);
     if (first) {
@@ -490,17 +493,22 @@ export function createSettler(deps: SettlerDeps): Settle {
       // A store failure while recording: the answer is the pool's result, or `pending` with the
       // hash of a send that may have reached the network. 0019 finishes the record.
       recordFailed(key, error);
+      // Read back first: a success the store holds, written by this write after all or by a
+      // sweep, is answered through `respond`, whose mark decides who gets it (0019 decision 32).
+      const stored = await store.get(key).catch((readError: unknown) => {
+        recordFailed(key, readError);
+        return undefined;
+      });
+      if (result?.status === "success" && stored?.state === "success")
+        return { record: stored, won: false, origin: call.origin };
       let fallback: Omit<Settled, "key"> | undefined;
       if (result?.status === "success" && answeredHere.has(key)) {
         // A repeat in this process is answering it from the store already.
         fallback = { response: alreadySettled(verified.payer, result.hash ?? "") };
       } else if (result) {
         // A success still carries the header (0031): the record as it would have been stored.
-        // Without a stored record there is no `markSuccessAnswered` and no `onSuccess`. The key
-        // goes into `answeredHere` now, before the read-back below: a sweep may store the success
-        // meanwhile, and a repeat must not answer it too (0019 decision 28). The caller takes it
-        // out if this answer isn't sent.
-        if (result.status === "success") answeredHere.add(key);
+        // Without a stored record there is no `markSuccessAnswered` and no `onSuccess`. The
+        // caller puts the key into `answeredHere` only when it sends this answer.
         const record: SettlementRecord | undefined =
           result.status === "success"
             ? {
@@ -519,15 +527,7 @@ export function createSettler(deps: SettlerDeps): Settle {
           response: failure(SETTLE_REASONS.pending, verified.payer, undefined, uncertain),
         };
       }
-      return {
-        record: await store.get(key).catch((readError: unknown) => {
-          recordFailed(key, readError);
-          return undefined;
-        }),
-        won: false,
-        origin: call.origin,
-        fallback,
-      };
+      return { record: stored, won: false, origin: call.origin, fallback };
     }
   };
 
@@ -751,10 +751,11 @@ export function createSettler(deps: SettlerDeps): Settle {
       const { record, won, origin, fallback } = inTime;
       if (fallback) {
         // Only a success this call sends is answered: a client that left marks nothing, as in
-        // `respond`, so a repeat still gets it.
-        if (fallback.record) {
-          if (signal?.aborted) answeredHere.delete(key);
-          else unmarked.add(key);
+        // `respond`, so a repeat still gets it. One that is sent keeps a repeat in this process
+        // from answering it too, until reconciliation marks it.
+        if (fallback.record && !signal?.aborted) {
+          answeredHere.add(key);
+          unmarked.add(key);
         }
         return { key, ...fallback };
       }
@@ -765,10 +766,8 @@ export function createSettler(deps: SettlerDeps): Settle {
       });
     }
     // A signed submission goes on; a late success is cataloged with the origin its record got.
-    void submission.then(({ record, won, origin, fallback }) => {
+    void submission.then(({ record, won, origin }) => {
       if (record?.state === "success" && won) onSuccess(record, origin);
-      // The budget answer replaced this success, so it was never sent: a repeat still gets it.
-      if (fallback?.record) answeredHere.delete(key);
     });
     return outOfBudget();
   };
