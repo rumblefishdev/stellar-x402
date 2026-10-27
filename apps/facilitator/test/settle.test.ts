@@ -1306,16 +1306,22 @@ describe("createSettler", () => {
           );
           return new Promise(() => {});
         },
-        { budgetMs: BUDGET_MS },
+        // Room for the claim on a loaded runner: past the budget before `onSigned`, the answer
+        // is a timeout with no hash. The hash's write is held past the budget below instead.
+        { budgetMs: 1_000 },
       );
-      // The hash is stored at once, but the store answers only after the budget.
+      // The hash is stored at once, but the store answers only after the budget answer.
+      let answered!: () => void;
+      const budgetAnswer = new Promise<void>((resolve) => (answered = resolve));
       const addHash = store.addHash.bind(store);
       vi.spyOn(store, "addHash").mockImplementation(async (...args) => {
         const added = await addHash(...args);
-        await delay(BUDGET_MS);
+        await budgetAnswer;
         return added;
       });
-      expect((await settle(payload(), requirements)).response).toMatchObject({
+      const { response } = await settle(payload(), requirements);
+      answered();
+      expect(response).toMatchObject({
         errorReason: SETTLE_REASONS.pending,
         transaction: HASH,
       });
