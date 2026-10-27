@@ -523,6 +523,50 @@ describe("scheduleReconciliation (decision 27)", () => {
     schedule.close();
   });
 
+  it("reports listed once a sweep lists the records, not after one that failed (decision 36)", async () => {
+    vi.useFakeTimers();
+    const t = setup();
+    const list = t.store.listNonFinal.bind(t.store);
+    let down = 1;
+    t.store.listNonFinal = async (n) => {
+      if (down-- > 0) throw new Error("store down");
+      return list(n);
+    };
+    const { schedule, sweep } = scheduled(t);
+    expect(schedule.listed()).toBe(false);
+    schedule.start();
+    await schedule.reconciled;
+    expect(schedule.listed()).toBe(false);
+    await vi.advanceTimersByTimeAsync(SWEEP_INTERVAL_MS);
+    await sweep.mock.results.at(-1)?.value;
+    expect(schedule.listed()).toBe(true);
+    // A later failure doesn't take it back.
+    t.store.listNonFinal = async () => {
+      throw new Error("store down");
+    };
+    await vi.advanceTimersByTimeAsync(SWEEP_INTERVAL_MS);
+    await sweep.mock.results.at(-1)?.value.catch(() => {});
+    expect(schedule.listed()).toBe(true);
+    schedule.close();
+  });
+
+  it("reports listed before the sweep's records are checked", async () => {
+    vi.useFakeTimers();
+    const t = setup();
+    await signed(t.store, [A]);
+    let release!: () => void;
+    t.getTransaction.mockImplementation(
+      () => new Promise((resolve) => (release = () => resolve(missing(1)))),
+    );
+    const { schedule } = scheduled(t);
+    schedule.start();
+    await vi.waitFor(() => expect(t.getTransaction).toHaveBeenCalled());
+    expect(schedule.listed()).toBe(true);
+    release();
+    await schedule.reconciled;
+    schedule.close();
+  });
+
   it("starts nothing once closed during a sweep", async () => {
     vi.useFakeTimers();
     const { store, schedule, sweep } = scheduled();
