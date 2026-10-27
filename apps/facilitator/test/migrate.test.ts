@@ -4,6 +4,7 @@ import { RESERVE_LOCK_TIMEOUT_MS, postgresStores } from "../src/adapters/postgre
 import {
   MIGRATE_LOCK,
   MIGRATIONS,
+  SQL_STEP_STATEMENT_TIMEOUT_MS,
   STEP_LOCK_TIMEOUT_MS,
   migrate,
   type MigrateOptions,
@@ -192,10 +193,12 @@ describe("online migrations", () => {
   const p99 = (values: number[]) =>
     [...values].sort((a, b) => a - b)[Math.floor(values.length * 0.99)] ?? 0;
 
-  it("keeps a step's lock wait well below reserve's", () => {
-    // A step waits at most its lock timeout and then holds the lock for milliseconds; `reserve`
-    // queued behind it must not reach its own timeout meanwhile.
-    expect(2 * STEP_LOCK_TIMEOUT_MS).toBeLessThanOrEqual(RESERVE_LOCK_TIMEOUT_MS);
+  it("keeps a step's lock wait and hold below reserve's lock timeout", () => {
+    // A `reserve` queued behind a `sql` step waits out the step's lock wait and its run, then its
+    // COMMIT; it must not reach its own timeout meanwhile.
+    expect(STEP_LOCK_TIMEOUT_MS + SQL_STEP_STATEMENT_TIMEOUT_MS).toBeLessThan(
+      RESERVE_LOCK_TIMEOUT_MS,
+    );
   });
 
   it(

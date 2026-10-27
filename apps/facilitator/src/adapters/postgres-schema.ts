@@ -171,7 +171,9 @@ export type OnlineStep =
    * (5 000), each in its own transaction, `pauseMs` (250) apart. `set` and `where` see the row as
    * `t`. `where` must match only rows still to fill (`t.c IS NULL`), so a pass repeated after an
    * interruption skips what is done; rows written meanwhile need a default, set in an earlier
-   * step (never in `ADD COLUMN`, which fills every row at once). Fails if a row still matches.
+   * step (never in `ADD COLUMN`, which fills every row at once). A default fits a constant; a
+   * value computed from the row needs a trigger an earlier step creates, or the rows the previous
+   * release writes keep the default. Fails if a row still matches.
    */
   | {
       kind: "backfill";
@@ -214,7 +216,11 @@ const BATCH_RETRYABLE: ReadonlySet<string> = new Set([...RETRYABLE, "57014"]);
 const LOCK_ATTEMPTS = 20;
 
 const GROUP_STATEMENT_TIMEOUT_MS = 10_000;
-const SQL_STEP_STATEMENT_TIMEOUT_MS = 5_000;
+/**
+ * A `sql` step holds ACCESS EXCLUSIVE while it runs, so a `reserve` queued behind it waits its
+ * lock wait and this; together they leave `reserve` 500 ms of its 2 s for the step's `COMMIT`.
+ */
+export const SQL_STEP_STATEMENT_TIMEOUT_MS = 1_000;
 const BATCH_STATEMENT_TIMEOUT_MS = 5_000;
 /** `VALIDATE`, index builds and a backfill's last check: they scan the table but block no writes. */
 const LONG_STATEMENT_TIMEOUT_MS = 30 * 60_000;
