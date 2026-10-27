@@ -1,15 +1,18 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { MemorySettlementStore } from "../src/adapters/memory.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
-import { LEASE_SKEW_MARGIN_MS } from "../src/ports/index.js";
+import { LEASE_SKEW_MARGIN_MS, type SettlementStore } from "../src/ports/index.js";
 import { createLeaseKeeper, leaseName, type LeaseKeeperDeps } from "../src/settlement/lease.js";
+import { testDatabase } from "./database.js";
 
 const network = "stellar:testnet" as const;
 const TTL = 30_000;
 
+const db = testDatabase();
+beforeEach(db.empty);
+
 /** A keeper on `store` with its own clock, which the test moves. */
-function keeper(store: MemorySettlementStore, overrides: Partial<LeaseKeeperDeps> = {}) {
+function keeper(store: SettlementStore, overrides: Partial<LeaseKeeperDeps> = {}) {
   const lines: string[] = [];
   const clock = { now: 1_000_000 };
   const metrics = memoryMetrics();
@@ -34,7 +37,7 @@ describe("lease keeper (0025)", () => {
   });
 
   it("gives the lease to the first process and keeps a second one out", async () => {
-    const store = new MemorySettlementStore();
+    const store = db.stores().settlements;
     const a = keeper(store);
     const b = keeper(store);
     await a.lease.runOnce();
@@ -49,7 +52,7 @@ describe("lease keeper (0025)", () => {
   });
 
   it("renews the held lease, so a second process stays out past the first TTL", async () => {
-    const store = new MemorySettlementStore();
+    const store = db.stores().settlements;
     const a = keeper(store);
     const b = keeper(store);
     await a.lease.runOnce();
@@ -62,7 +65,7 @@ describe("lease keeper (0025)", () => {
   });
 
   it("lets a new process take the lease once a crashed holder's TTL and the margin passed", async () => {
-    const store = new MemorySettlementStore();
+    const store = db.stores().settlements;
     const crashed = keeper(store);
     await crashed.lease.runOnce();
     const next = keeper(store);
@@ -75,7 +78,7 @@ describe("lease keeper (0025)", () => {
   });
 
   it("drops the lease at once when a renewal finds another holder", async () => {
-    const store = new MemorySettlementStore();
+    const store = db.stores().settlements;
     const a = keeper(store);
     await a.lease.runOnce();
     // A holder whose clock runs ahead takes over early (the skew margin is a later decision).
@@ -90,7 +93,7 @@ describe("lease keeper (0025)", () => {
   });
 
   it("drops the lease at once when the store fails a renewal, and takes it back later", async () => {
-    const store = new MemorySettlementStore();
+    const store = db.stores().settlements;
     const { lease, clock, events } = keeper(store);
     await lease.runOnce();
     const renew = vi.spyOn(store, "renewLease").mockRejectedValueOnce(new Error("store down"));
@@ -106,7 +109,7 @@ describe("lease keeper (0025)", () => {
   });
 
   it("logs a failed attempt to take the lease and keeps trying", async () => {
-    const store = new MemorySettlementStore();
+    const store = db.stores().settlements;
     vi.spyOn(store, "acquireLease").mockRejectedValueOnce(new Error("store down"));
     const { lease, events } = keeper(store);
     await lease.runOnce();
@@ -117,7 +120,7 @@ describe("lease keeper (0025)", () => {
   });
 
   it("ends held() at its own expiry while a renewal hangs", async () => {
-    const store = new MemorySettlementStore();
+    const store = db.stores().settlements;
     const { lease, clock } = keeper(store);
     await lease.runOnce();
     vi.spyOn(store, "renewLease").mockReturnValueOnce(new Promise(() => {}));
@@ -130,7 +133,7 @@ describe("lease keeper (0025)", () => {
   });
 
   it("logs a renewal past its own expiry as expired, not taken", async () => {
-    const store = new MemorySettlementStore();
+    const store = db.stores().settlements;
     const { lease, clock, events } = keeper(store);
     await lease.runOnce();
     clock.now += TTL + 1;
@@ -139,7 +142,7 @@ describe("lease keeper (0025)", () => {
   });
 
   it("gives a held lease up on release, so another process takes it at once (decision 10)", async () => {
-    const store = new MemorySettlementStore();
+    const store = db.stores().settlements;
     const a = keeper(store);
     const b = keeper(store);
     await a.lease.runOnce();
@@ -152,7 +155,7 @@ describe("lease keeper (0025)", () => {
   });
 
   it("releases nothing it doesn't hold, and never rejects when the store fails", async () => {
-    const store = new MemorySettlementStore();
+    const store = db.stores().settlements;
     const releaseLease = vi.spyOn(store, "releaseLease");
     const idle = keeper(store);
     await idle.lease.release();
@@ -167,17 +170,23 @@ describe("lease keeper (0025)", () => {
 
   it("tries at start and then every third of the TTL, until closed", async () => {
     vi.useFakeTimers();
-    const store = new MemorySettlementStore();
+    const store = db.stores().settlements;
     const acquire = vi.spyOn(store, "acquireLease");
     const renew = vi.spyOn(store, "renewLease");
     const { lease } = keeper(store, { now: Date.now });
     await lease.start();
     expect([acquire.mock.calls.length, renew.mock.calls.length]).toEqual([1, 0]);
-    await vi.advanceTimersByTimeAsync(TTL / 3 - 1);
+    // The store's queries take real time, and the next attempt is timed from the end of the last:
+    // wait for each renewal a tick started.
+    const tick = async (ms: number) => {
+      await vi.advanceTimersByTimeAsync(ms);
+      await renew.mock.results.at(-1)?.value;
+    };
+    await tick(TTL / 3 - 1);
     expect(renew).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1);
+    await tick(1);
     expect(renew).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(TTL);
+    for (let i = 0; i < 3; i++) await tick(TTL / 3);
     expect(renew).toHaveBeenCalledTimes(4);
     expect(lease.held()).toBe(true);
     await lease.close();
@@ -187,7 +196,7 @@ describe("lease keeper (0025)", () => {
 
   it("waits for an attempt under way when closed, and starts none after it", async () => {
     vi.useFakeTimers();
-    const store = new MemorySettlementStore();
+    const store = db.stores().settlements;
     const { lease } = keeper(store, { now: Date.now });
     await lease.start();
     let release!: () => void;

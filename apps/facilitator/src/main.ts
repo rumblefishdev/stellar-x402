@@ -32,7 +32,7 @@ import {
   scheduleReconciliation,
   type Reconciliation,
 } from "./settlement/reconcile.js";
-import { createLeaseKeeper, type LeaseKeeper } from "./settlement/lease.js";
+import { createLeaseKeeper } from "./settlement/lease.js";
 import { createRecords } from "./settlement/records.js";
 import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler, type Settle } from "./settlement/settle.js";
 import { failoverUpstream, type EndpointFailure } from "./settlement/upstream-failover.js";

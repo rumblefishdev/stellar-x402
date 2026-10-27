@@ -85,7 +85,6 @@ default).
 - A process that dies keeps the lease until its TTL ends; another one takes it 5 s later, a
   margin for a holder whose clock lags. One that stops cleanly gives it up after its drain, so the
   next one takes it at its next attempt.
-- With `STORE=memory` each process has its own lease, so it keeps nothing apart.
 
 ## Shutdown
 

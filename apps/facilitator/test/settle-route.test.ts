@@ -314,6 +314,7 @@ describe("POST /settle beside reconciliation (0019 decision 27)", () => {
 });
 
 describe("POST /settle without the channel lease (0025)", () => {
+  const db = testDatabase();
   it("answers 503 at once, settles again once the lease is held, and starts and stops it", async () => {
     const settle = vi.fn<Settle>(async () => ({ response: success }));
     let holds = false;
@@ -324,10 +325,11 @@ describe("POST /settle without the channel lease (0025)", () => {
       close: vi.fn(async () => {}),
       release: vi.fn(async () => {}),
     };
-    const rateLimits = memoryStores().rateLimits;
+    const rateLimits = db.stores().rateLimits;
     const hit = vi.spyOn(rateLimits, "hit");
     const env = {
       FACILITATOR_SECRET: Keypair.random().secret(),
+      DATABASE_URL: db.urlFor(db.schema),
       CHANNELS: Keypair.random().publicKey(),
       CLIENT_IP: "socket",
     };
@@ -335,7 +337,7 @@ describe("POST /settle without the channel lease (0025)", () => {
     const app = await start({
       config,
       logger: jsonLogger("error"),
-      stores: { ...memoryStores(), rateLimits },
+      stores: { ...db.stores(), rateLimits },
       verify: async () => ({ isValid: true }),
       settle,
       extensionResponses: () => undefined,
@@ -374,6 +376,7 @@ describe("POST /settle without the channel lease (0025)", () => {
 });
 
 describe("shutdown (0025)", () => {
+  const db = testDatabase();
   async function started(opts: { drain?: () => Promise<void>; shutdownDeadlineMs?: number }) {
     const settle = vi.fn<Settle>(async () => ({ response: success }));
     const lease = {
@@ -385,6 +388,7 @@ describe("shutdown (0025)", () => {
     };
     const env = {
       FACILITATOR_SECRET: Keypair.random().secret(),
+      DATABASE_URL: db.urlFor(db.schema),
       CHANNELS: Keypair.random().publicKey(),
       CLIENT_IP: "socket",
     };
@@ -394,7 +398,7 @@ describe("shutdown (0025)", () => {
       {
         config,
         logger: jsonLogger("info", (line) => lines.push(line)),
-        stores: memoryStores(),
+        stores: db.stores(),
         verify: async () => ({ isValid: true }),
         settle,
         extensionResponses: () => undefined,
