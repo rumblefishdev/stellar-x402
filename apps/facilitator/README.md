@@ -124,8 +124,7 @@ that asks the network about each of the record's hashes. A hash the network does
 sweep read them: a rebuild in flight makes it wait for the next sweep. A sweep runs as the server
 starts and then 10 s after each one ends, beside `/settle`, which serves at once; a record the
 RPC or the store couldn't check is simply tried by the next sweep. A claim with no hash is closed
-as `…_interrupted` once its settle budget plus 5 s has passed. With `STORE=memory` a restart drops
-every record.
+as `…_interrupted` once its settle budget plus 5 s has passed.
 
 The RPC keeps only a window of history (testnet's keeps 120960 ledgers, about 7 days; providers
 differ). A record claimed before the oldest ledger it keeps can't be told from one that never
