@@ -430,8 +430,10 @@ describe("createSettler", () => {
     const get = vi.spyOn(store, "get");
     const repeats = Array.from({ length: 50 }, () => settle(payload(), requirements));
     await Promise.all(repeats);
-    // 50 initial lookups, then about one read per 10 ms for 100 ms, not one per repeat.
-    expect(get.mock.calls.length).toBeLessThan(50 + 20);
+    // 50 initial lookups, then one shared read per 10 ms poll. Unshared, each repeat would read
+    // once per poll: about 50 more per 10 ms, some 500 over the 100 ms wait. The bound leaves a
+    // loaded runner room, as PostgreSQL spreads the initial lookups and so the polling window.
+    expect(get.mock.calls.length).toBeLessThan(50 + 100);
 
     // A repeat whose client left stops long before its settle timeout.
     const patient = setup(landing(), { settleTimeoutMs: 1_000, budgetMs: 10_000, pollMs: 10 });
