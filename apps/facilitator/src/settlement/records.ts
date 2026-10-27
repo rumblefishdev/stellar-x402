@@ -67,12 +67,14 @@ export function createRecords(deps: RecordsDeps) {
    * Moves a record forward from whatever state it is in now. `undefined` means another writer got
    * there first, the record is already final, or, with `expectedVersion`, a hash was appended
    * since the caller read it. `update.attempts` are written either way: they say what the network
-   * did, whoever finishes the record.
+   * did, whoever finishes the record. With `final`, each write goes through {@link finalWrite}; the
+   * reads don't, since a failed read wrote nothing (0019 decision 34).
    */
   const advance = async (
     key: SettlementKey,
     update: Omit<SettlementUpdate, "updatedAt">,
     expectedVersion?: number,
+    final = false,
   ) => {
     for (let tries = 0; tries < 3; tries++) {
       const current = await store.get(key);
@@ -82,12 +84,10 @@ export function createRecords(deps: RecordsDeps) {
           await store.markAttempts(key, update.attempts, now());
         return undefined;
       }
-      const moved = await store.transition(
-        key,
-        current.state,
-        { ...update, updatedAt: now() },
-        expectedVersion,
-      );
+      const from = current.state;
+      const write = () =>
+        store.transition(key, from, { ...update, updatedAt: now() }, expectedVersion);
+      const moved = final ? await finalWrite(key, write) : await write();
       if (moved) return moved;
     }
     return undefined;
@@ -97,15 +97,20 @@ export function createRecords(deps: RecordsDeps) {
    * Keys whose write to a final state threw: it may still have committed, and then nothing comes
    * back to the record, so its hooks would never run. Reconciliation reads each, runs the hooks of
    * one it finds final, and leaves one it doesn't to the usual path (0019 decision 29). A writer in
-   * this process that makes the record final takes the key out; a restart forgets it.
+   * this process takes the key out while its write runs, so the sweep doesn't run the hooks beside
+   * it, and keeps it out once the record is final (decision 35); a restart forgets it.
    */
   const unconfirmed = new Set<SettlementKey>();
 
-  /** Runs `write`, a write that may make the record final, keeping track of it for the hooks. */
+  /**
+   * Runs `write`, one store write that may make the record final, keeping track of it for the
+   * hooks. Only the write goes in here: a read that fails before it wrote nothing.
+   */
   const finalWrite = async (
     key: SettlementKey,
     write: () => Promise<SettlementRecord | undefined>,
   ) => {
+    const listed = unconfirmed.delete(key);
     let record: SettlementRecord | undefined;
     try {
       record = await write();
@@ -113,7 +118,8 @@ export function createRecords(deps: RecordsDeps) {
       unconfirmed.add(key);
       throw error;
     }
-    if (record && isFinalRecord(record)) unconfirmed.delete(key);
+    // Lost to another writer: an earlier write of ours may still be the one that committed.
+    if (!record && listed) unconfirmed.add(key);
     return record;
   };
 
@@ -124,7 +130,7 @@ export function createRecords(deps: RecordsDeps) {
     origin: SettlementOrigin,
     expectedVersion?: number,
   ) => {
-    const record = await finalWrite(key, () => advance(key, update, expectedVersion));
+    const record = await advance(key, update, expectedVersion, true);
     if (record && isFinalRecord(record)) onFinal(record, origin);
     return { record: record ?? (await store.get(key)), won: record !== undefined, origin };
   };
