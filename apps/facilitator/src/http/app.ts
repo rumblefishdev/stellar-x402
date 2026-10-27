@@ -30,8 +30,8 @@ export interface AppDeps {
   /** Settlement reconciliation (0019), started and stopped with the server. */
   reconciliation?: Reconciliation;
   /**
-   * The channel lease (0025), started and stopped with the server. Without it `/settle` answers
-   * 503; tests that leave it out settle as if they held it.
+   * The channel lease (0025), started and stopped with the server. While it isn't held,
+   * `/settle` answers 503; tests that pass no `lease` settle as if they held it.
    */
   lease?: LeaseKeeper;
   /** Whether the process is shutting down (0025); `start()` sets it. */
