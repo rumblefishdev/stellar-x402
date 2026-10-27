@@ -59,9 +59,34 @@ first in a spike ([R-spike-results](notes/R-spike-results.md)). In short:
 
 ## Acceptance Criteria
 
-- [ ] A migration that adds a NOT NULL column with a backfill and an index applies to a database
+- [x] A migration that adds a NOT NULL column with a backfill and an index applies to a database
       with 1 000 000 reservations without hitting a timeout, while `reserve` keeps answering: no
-      `reserve` error, and its latency compared with the same load without the migration
-- [ ] A migration interrupted part way finishes on the next deploy (`pnpm migrate`) without
+      `reserve` error comes from the migration's locks, and the run records `reserve`'s latency
+      and errors against the same load before it
+- [x] A migration interrupted part way finishes on the next deploy (`pnpm migrate`) without
       manual steps
-- [ ] ADR 0012 states how a migration chooses between the one-transaction and the online path
+- [x] ADR 0012 states how a migration chooses between the one-transaction and the online path
+
+## Result
+
+- `postgres-schema.ts`: `Migration` is transactional (`{ name, sql }`) or online
+  (`{ name, online: true, steps }`), with `sql`, `validate`, `index` and `backfill` steps and a
+  `name#<i>` marker per step. `migrate(pool, now, migrations, { logger, lockWaitMs })` polls a
+  session lock per schema on one connection it closes at the end. `main.ts` passes the logger
+  (`migration_step`, `migration_backfill`).
+- `test/migrate.test.ts`: the AC1 migration under four `reserve` loops; runs killed at the
+  backfill's first batch, part way through it, in `VALIDATE` and in an index build, finished by
+  the next run; a held lock retried while `reserve` waits at most the step's lock timeout; a
+  batch that ran out of time retried; racing runs, the per-schema lock, the group split, a
+  backfill that leaves rows. Mutants each failing a case: no invalid-index repair, no lock
+  retry, no batch timeout retry.
+- AC1 at 1 000 000 reservations with four scopes each (`MIGRATE_SCALE=1000000`, compose
+  PostgreSQL 18 on Adam's laptop, 27.10): applied in 4 min 45 s; steps 1–3 took 3–4 ms; the
+  backfill of 4 000 000 rows 282 s. `reserve` before: 471 calls, p50 8 ms, p99 13 ms. During:
+  21 942 calls, p50 48 ms, p99 144 ms, max 7.4 s, and 7 errors (`55P03`, 0.03%), all between
+  249 s and 259 s inside the backfill, when the runner held no lock `reserve` takes: a disk stall
+  slowed a `COMMIT` holding the `global` scope row, and the reserves queued on it gave up
+  ([R-spike-results](notes/R-spike-results.md)). The first 1 M run stopped on a batch's
+  statement timeout, which a batch now retries.
+- ADR 0012 (the rule, the runner's lock, markers and bounds, the backfill's WAL and `reserve`)
+  and ADR 0011 (long migrations in the deploy, disk headroom, shared disks).

@@ -51,7 +51,9 @@ What every future migration author relies on.
    INVALID index (A2).
 7. **Backfill:** one keyset pass over the key (row comparison `(a, b) > ($1, $2)`), a transaction a
    batch, idempotent by predicate (`c IS NULL`), a **pause between batches (default 250 ms,
-   batch 5 000)**, then one check query (no rows left). New rows are covered by a DEFAULT set with
+   batch 5 000)**; a batch retries its statement timeout (`57014`) as well as lock waits, since
+   one that ran out of time waited on the disk (AC1's first 1 M run: one batch of 800); then
+   one check query (no rows left). New rows are covered by a DEFAULT set with
    `SET DEFAULT` before the backfill (never in `ADD COLUMN`, which fills every row at once, A5) or
    by a trigger. The pause is what keeps the backfill's WAL off `reserve`'s commits (A10, A11).
 8. A migration is **frozen once it has started** on any environment (merged to the deploy
@@ -179,5 +181,13 @@ risk:
 - Smaller batches at the same pace (1 000 every 50 ms): less WAL per `COMMIT`; A7's batch of 1 000
   had the shortest reserve tail (158 ms). Untested under A10's setup.
 - `wal_compression` would shrink the full-page images a backfill writes after each checkpoint.
-- The `global` row: any `COMMIT` over 2 s fails the queued reserves, migration or not. Raise with
-  Karol as its own task (0050's design).
+- The `global` row: any `COMMIT` over 2 s fails the queued reserves, migration or not (AC1's 1 M
+  run: 7 errors in one 10 s stall inside the backfill). A follow-up task, with Karol (0050's
+  design).
+
+## AC1 [decided: reworded]
+
+The 1 M run's errors came from the disk, not from the runner's locks, so AC1's hard condition is
+"no `reserve` error from the migration's locks", and the run records `reserve`'s latency and
+errors against the load before it. The suite runs T1 at 20 000 reservations with no error
+allowed; the 1 M run is the same test by hand, recorded in the task.

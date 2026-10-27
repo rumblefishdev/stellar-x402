@@ -91,7 +91,8 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
       automatic rollback, safe.
   - The migration service's bounds, by kind: a transactional group 10 s; an online `ALTER` waits
     at most 500 ms for its lock, a quarter of `reserve`'s 2 s, retries `55P03` and `40P01`, and
-    runs at most 5 s; a backfill batch 5 s, 5 000 rows, 250 ms apart; an index build or
+    runs at most 5 s; a backfill batch 5 s, 5 000 rows, 250 ms apart, and it retries its
+    statement timeout too, since a batch that ran out of time waited on the disk; an index build or
     `VALIDATE` waits for locks without a timeout, since a `lock_timeout` aborts the build, and
     runs at most 30 minutes. The runner's session sets `client_connection_check_interval`, so a
     run whose client died releases its lock within seconds. Long steps run in the deploy
