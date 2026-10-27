@@ -31,6 +31,9 @@ waiting for a buyer who already knows it.
   rules out a separate registration process). RFP 07 also asks for seller-side helpers for
   discovery metadata.
 - `packages/sdk/src/seller.ts` is a placeholder today.
+- The helper can only name a reason the facilitator exposes. 0063 keeps every listing attempt with
+  its reason in `catalog_attempts`, so a per-resource status endpoint over it (resource, listed,
+  last outcome and reason) would give the seller the reason without a payment. Not designed yet.
 
 ## Implementation
 

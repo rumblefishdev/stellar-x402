@@ -96,6 +96,7 @@ description or price, and nobody can make `/discovery/resources` answer megabyte
 | 20 | A check that got no usable answer is not queued for a retry: the next payment tries again, and the seller helper (0075) tells the seller whether the listing appeared. The check runs right after the seller served a buyer, and the failures left (a route that needs other input, an over-budget host, a URL that isn't the seller's) don't pass with time | grilling | beyond it | spec silent | | |
 | 21 | No cap on new listings per `payTo` or overall, and a seller paying itself is allowed. Each new listing still needs a settled on-chain payment whose fee the facilitator pays, `/settle`'s per-IP limit (0023) and the per-host check budget (row 3) | grilling | beyond it | spec silent | | |
 | 22 | The settle response's `EXTENSION-RESPONSES` comes only from what is known without network or database: `rejected` when the payment's copy breaks a rule, `processing` otherwise. The seller-page check and the catalog write run after the response, because the seller's middleware holds the buyer's answer until `/settle` returns (`@x402/express` 2.28.0 `index.mjs:322-380`) | grilling | beyond it | x402 v2 §7.2.1; `bazaar.md:501` (`processing`: cataloged asynchronously) | | |
+| 23 | Every listing attempt, accepted or not, is a row in a `catalog_attempts` table: time, listing key, URL, `payTo`, payer, transaction, stage (the payment's copy or the seller-page check), outcome, reason, detail, the size of the field over a limit, a content hash; no content itself. The pruner deletes rows after 30 days (an assumption). A failed row write is a log line and a counter. The `catalog_rejected` log line gains the URL, `payTo`, payer and the field size. Written after the settle response (row 22) | grilling | beyond it | spec silent on storage (`bazaar.md:429`) | | |
 
 ## Not yet decided
 
@@ -105,7 +106,7 @@ description or price, and nobody can make `/discovery/resources` answer megabyte
 ## PR split
 
 After the guard's error type (#71) and move (#72): one PR for listings from the seller's page
-(field limits, HTTP check, ADR 0008), then one for MCP listings.
+(field limits, HTTP check, the attempts table, ADR 0008), then one for MCP listings.
 
 ## Out of scope
 
