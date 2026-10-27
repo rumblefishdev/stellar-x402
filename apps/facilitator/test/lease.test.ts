@@ -81,7 +81,7 @@ describe("lease keeper (0025)", () => {
     const store = db.stores().settlements;
     const a = keeper(store);
     await a.lease.runOnce();
-    // A holder whose clock runs ahead takes over early (the skew margin is a later decision).
+    // Another process took over after the first's TTL and margin, while the first was paused.
     const b = keeper(store);
     b.clock.now = a.clock.now + TTL + LEASE_SKEW_MARGIN_MS + 1;
     await b.lease.runOnce();
