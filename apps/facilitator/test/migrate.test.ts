@@ -418,6 +418,40 @@ describe("online migrations", () => {
     });
   }, 30_000);
 
+  it("retries a backfill batch that ran out of time", async () => {
+    await onSchema("slow", async (fresh, on) => {
+      await seeded(fresh, 100);
+      // The first call outlasts the batch's statement timeout; a sequence isn't rolled back, so
+      // the retried batch runs at once.
+      await on.query(
+        `CREATE SEQUENCE once;
+         CREATE FUNCTION slow_once() RETURNS bigint LANGUAGE plpgsql AS $$
+         BEGIN
+           IF nextval('once') = 1 THEN PERFORM pg_sleep(6); END IF;
+           RETURN 0;
+         END $$`,
+      );
+      const slow: OnlineMigration = {
+        name: "0100_scope_c",
+        online: true,
+        steps: [
+          steps()[0]!,
+          {
+            kind: "backfill",
+            table: T,
+            key: ["scope", "id"],
+            set: "c = amount + slow_once()",
+            where: "t.c IS NULL",
+            pauseMs: 0,
+          },
+        ],
+      };
+      expect(await run(fresh, [slow])).toEqual(["0100_scope_c"]);
+      const { rows } = await on.query(`SELECT count(*)::int AS n FROM ${T} WHERE c IS NULL`);
+      expect(rows[0].n).toBe(0);
+    });
+  }, 30_000);
+
   it("fails a backfill that leaves rows matching its condition", async () => {
     await onSchema("left", async (fresh, on) => {
       await seeded(fresh, 100);

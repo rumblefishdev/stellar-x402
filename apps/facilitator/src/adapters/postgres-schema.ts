@@ -203,7 +203,13 @@ const LOCK_POLL_MS = 250;
  */
 export const STEP_LOCK_TIMEOUT_MS = 500;
 /** `lock_timeout` and a deadlock: the statement did nothing, so trying again is safe. */
-const RETRYABLE = new Set(["55P03", "40P01"]);
+const RETRYABLE: ReadonlySet<string> = new Set(["55P03", "40P01"]);
+/**
+ * A batch also retries its statement timeout: a batch takes a fraction of a second, so one that
+ * ran out of time waited on the disk (0067), and it did nothing either. The pass repeats only the
+ * rows still to fill.
+ */
+const BATCH_RETRYABLE: ReadonlySet<string> = new Set([...RETRYABLE, "57014"]);
 const LOCK_ATTEMPTS = 20;
 
 const GROUP_STATEMENT_TIMEOUT_MS = 10_000;
@@ -409,10 +415,12 @@ async function backfill(
       SELECT (SELECT count(*) FROM u)::int AS updated, ${keys}
       FROM (SELECT ${keys} FROM b ORDER BY ${last} LIMIT 1) l`;
     let row: Record<string, unknown> | undefined;
-    retries += await retryingLocks(() =>
-      transaction(client, STEP_LOCK_TIMEOUT_MS, BATCH_STATEMENT_TIMEOUT_MS, async () => {
-        row = (await client.query(sql, cursor ?? [])).rows[0];
-      }),
+    retries += await retryingLocks(
+      () =>
+        transaction(client, STEP_LOCK_TIMEOUT_MS, BATCH_STATEMENT_TIMEOUT_MS, async () => {
+          row = (await client.query(sql, cursor ?? [])).rows[0];
+        }),
+      BATCH_RETRYABLE,
     );
     if (!row) break;
     batches++;
@@ -431,18 +439,20 @@ async function backfill(
 }
 
 /**
- * Retries `run` while it fails on a lock wait, backing off so the queue it let through drains.
- * Resolves the number of retries.
+ * Retries `run` while it fails on a lock wait (or another of `codes`), backing off so the queue it
+ * let through drains. Resolves the number of retries.
  */
-async function retryingLocks(run: () => Promise<void>): Promise<number> {
+async function retryingLocks(
+  run: () => Promise<void>,
+  codes: ReadonlySet<string> = RETRYABLE,
+): Promise<number> {
   for (let attempt = 1; ; attempt++) {
     try {
       await run();
       return attempt - 1;
     } catch (error) {
       const code = (error as { code?: unknown }).code;
-      if (typeof code !== "string" || !RETRYABLE.has(code) || attempt === LOCK_ATTEMPTS)
-        throw error;
+      if (typeof code !== "string" || !codes.has(code) || attempt === LOCK_ATTEMPTS) throw error;
       const backoff = Math.min(5_000, STEP_LOCK_TIMEOUT_MS * 2 ** Math.min(attempt, 4));
       await sleep(backoff * (0.5 + Math.random()));
     }
