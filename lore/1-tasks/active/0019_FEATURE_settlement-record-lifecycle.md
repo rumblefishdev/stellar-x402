@@ -360,7 +360,7 @@ As a facilitator operator, I want settlement records that are written before sen
     `reconcile_finished` is logged only for a sweep that changed or failed something. Considered:
     patching the scheduling (re-sweep while records are open, a rerun flag), and keeping the gate
     tied to the loop's first sweep.
-28. **A fallback success holds its key from the moment it is built** (okarcz, 2026-10-26,
+28. **Replaced by decision 32.** ~~A fallback success holds its key from the moment it is built~~ (okarcz, 2026-10-26,
     Karol's point 3). When the store fails to record a success, the key goes into `answeredHere`
     before the call reads the record back, so a sweep that stores the success meanwhile doesn't let
     a repeat answer it too; the key goes into `unmarked` once the answer is sent, and out of both
@@ -384,6 +384,30 @@ As a facilitator operator, I want settlement records that are written before sen
     the RPC history comment says testnet keeps 120960 ledgers (about 7 days).
 31. **Point 7 is a backlog task, 0070** (okarcz, 2026-10-26): `expired` and `…_interrupted`
     tell the payer to sign again while the auth entry they signed may stay valid for minutes.
+
+### Emerged (PR #57 second review)
+
+32. **The store decides a fallback success** (okarcz, 2026-10-27, Karol's blocker; replaces
+    decision 28). When the success write fails, the call reads the record back first. A success
+    the store holds (the write committed after all, or a sweep stored it) goes through `respond`,
+    whose mark gives it to one caller; the fallback from the pool's result is used only when the
+    read-back fails or shows no success, and its key goes into `answeredHere` and `unmarked` only
+    when that answer is sent. Decision 28 held the key from before the read-back, so a read-back
+    past the budget left the key held: upstream's one retry on `…_pending` got
+    `…_already_settled` and nobody was answered success. Left open: a read-back that returns just
+    before a sweep stores the success still answers the fallback, and a repeat can then answer it
+    too; closing that needs the store, which is what failed. No separate bound on the read-back:
+    the call's budget answer covers one that hangs.
+33. **A record already answered is answered `…_already_settled` without a mark** (okarcz,
+    2026-10-27, Karol). `respond` checks `successAnsweredAt` first, so a repeat whose mark fails on
+    a blip doesn't answer the success again (a gap since 0009).
+34. **Only a failed write makes a key unconfirmed** (okarcz, 2026-10-27, Karol's non-blocking
+    point). `advance` puts only its `transition` through `finalWrite`; a read that fails before it
+    wrote nothing, so the next sweep doesn't run the hooks again.
+35. **A writer takes its key out of `unconfirmed` while it writes** (okarcz, 2026-10-27, Karol's
+    test C2). `finalWrite` removes the key when the write starts and puts it back if the write
+    throws, or if it loses to another writer and the key was listed, so the sweep doesn't run the
+    hooks beside a writer in this process. Considered: a separate set of writes in flight.
 
 ## Future Work
 
