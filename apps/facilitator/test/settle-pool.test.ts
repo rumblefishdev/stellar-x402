@@ -13,6 +13,7 @@ import {
   type UpstreamSeams,
 } from "../src/main.js";
 import { memoryMetrics } from "../src/metrics.js";
+import type { SettlementStore } from "../src/ports/index.js";
 import { feeSettings } from "../src/settlement/fees.js";
 import { SETTLE_REASONS } from "../src/settlement/settle.js";
 import { testDatabase } from "./database.js";
@@ -350,7 +351,7 @@ describe("main()'s pool events (0019)", () => {
     },
   };
 
-  async function pendingRecord(store: MemorySettlementStore) {
+  async function pendingRecord(store: SettlementStore) {
     const s = settlement("1");
     await store.claim(s);
     await store.addHash(s.key, HASH, 0, { maxTime: 1 });

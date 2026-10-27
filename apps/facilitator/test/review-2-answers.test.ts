@@ -13,10 +13,10 @@ import {
 import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import type { SubmitOptions, SubmitResult } from "@stellar-x402/signer-pool";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
-import { describe, expect, it, vi } from "vitest";
-import { MemorySettlementStore } from "../src/adapters/memory.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
+import type { SettlementStore } from "../src/ports/index.js";
 import type { SettlementHooks } from "../src/settlement/hooks.js";
 import { createReconciler } from "../src/settlement/reconcile.js";
 import { createRecords } from "../src/settlement/records.js";
@@ -27,6 +27,10 @@ import {
   type Submitter,
 } from "../src/settlement/settle.js";
 import { PAYER_AUTH_REASON, payerNonce, type Check } from "../src/settlement/verify.js";
+import { testDatabase } from "./database.js";
+
+const db = testDatabase();
+beforeEach(db.empty);
 
 // `attemptsOf` reads a private WeakMap that only the real submitter fills; these tests put the
 // attempts on the error instead. `settle-pool.test.ts` runs the real pool's.
@@ -160,7 +164,7 @@ const landing =
 
 function setup(behaviour: Behaviour = landing(), overrides: Partial<SettlerDeps> = {}) {
   const order: string[] = [];
-  const store = new MemorySettlementStore();
+  const store = db.stores().settlements;
   const submit = vi.fn<Submitter["submit"]>(async (_call, opts = {}) => {
     order.push("submit");
     return behaviour(opts);
@@ -219,7 +223,7 @@ function process1(
   behaviour: Behaviour,
   answer: rpc.Api.GetTransactionResponse,
   overrides: Partial<SettlerDeps> = {},
-  store = new MemorySettlementStore(),
+  store = db.stores().settlements,
 ) {
   const hooks = {
     onFinal: vi.fn<SettlementHooks["onFinal"]>(async () => {}),
@@ -242,7 +246,7 @@ function process1(
 }
 
 /** The success write fails once (store blip) and the read-back after it waits for `release`. */
-function failSuccessWriteAndHoldReadBack(store: MemorySettlementStore) {
+function failSuccessWriteAndHoldReadBack(store: SettlementStore) {
   const transition = store.transition.bind(store);
   const get = store.get.bind(store);
   const state: { release?: () => void } = {};

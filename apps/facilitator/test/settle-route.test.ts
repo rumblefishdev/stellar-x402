@@ -270,6 +270,7 @@ describe("POST /settle", () => {
 });
 
 describe("POST /settle beside reconciliation (0019 decision 27)", () => {
+  const db = testDatabase();
   it("serves while the first sweep runs, and starts and stops it with the server", async () => {
     const settle = vi.fn<Settle>(async () => ({ response: success }));
     const reconciliation = {
@@ -279,6 +280,7 @@ describe("POST /settle beside reconciliation (0019 decision 27)", () => {
     };
     const env = {
       FACILITATOR_SECRET: Keypair.random().secret(),
+      DATABASE_URL: db.urlFor(db.schema),
       CHANNELS: Keypair.random().publicKey(),
       CLIENT_IP: "socket",
     };
@@ -286,7 +288,7 @@ describe("POST /settle beside reconciliation (0019 decision 27)", () => {
     const app = await start({
       config,
       logger: jsonLogger("error"),
-      stores: memoryStores(),
+      stores: db.stores(),
       verify: async () => ({ isValid: true }),
       settle,
       extensionResponses: () => undefined,
