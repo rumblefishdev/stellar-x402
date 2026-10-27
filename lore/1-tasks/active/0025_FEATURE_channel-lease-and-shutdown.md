@@ -36,8 +36,9 @@ As a facilitator operator, I want only one process at a time to settle through a
 - Related tasks: 0009, 0019, 0022.
 - From 0019: `scheduleReconciliation` starts right after the server listens and sweeps every 10 s
   beside `/settle` (0019 decision 27: no 503 for reconciliation, no startup mode). Its writes stay
-  correct without the lease (a record version guards expiry, decision 26), so starting it once
-  the lease is taken is optional; the 503 here is for the lease alone. 0019 decision 10 (clock
+  correct without the lease (a record version guards expiry, decision 26), so it doesn't wait
+  for the lease and sweeps in every process (0019 decision 37); the 503 here is for the lease
+  alone. 0019 decision 10 (clock
   skew on `unsignedUntil`) assumes one lease holder.
 - From 0019's code review: `Reconciliation.close()` stops the timer but doesn't wait for a sweep
   under way, and `main` ends the pools right after. That sweep's writes then fail and log

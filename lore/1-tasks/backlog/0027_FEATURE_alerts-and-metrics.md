@@ -126,6 +126,11 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     - `open` in `reconcile_finished` also counts a record another writer finished during the
       sweep (its compare-and-set lost), so an `open` alarm should allow for that, or 0027 adds a
       separate count.
+    - From Stan's review of PR #57 (0019 decision 36): the deploy checks reconciliation only once,
+      through `listed` on `/health`, so an alarm on sweeps that stop listing is the only net for
+      one that starts failing later. A sweep that changes nothing logs nothing, so add a counter
+      per sweep, e.g. `settlement_sweeps_total{outcome}` (`listed` or `failed`); a missing-data
+      rule can then tell "no sweeps ran" from "nothing to do".
 - From 0045 (via 0009): `/verify`'s upstream failover logs `rpc_failover` with `rpcEndpointName`
   names (`RPC_URLS[i]#<fingerprint>`). Add a `rpc_failovers_total{from,to}` counter, or an alarm on the log, since a lagging
   fallback answers valid payments with rejections (0045 decision 9). A return to the first URL
@@ -150,4 +155,5 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
 - [ ] Given the running facilitator, when it serves traffic, then pool `onEvent` events, per-route request counts and settle outcomes are exported as metrics
 - [ ] Given each alert condition: budget nearly used, breaker open, low facilitator balance (`checkFacilitatorBalance`), quarantined channel, pending settlements, when it occurs, then an alert fires on CloudWatch (ADR 0011); each alert has been triggered once on testnet or with a fake
 - [ ] Given a process that stays not ready to settle (no lease) longer than the alarm window, when the alarm evaluates, then it fires (ADR 0011)
+- [ ] Given a process whose sweeps don't list the records (or don't run) for longer than the alarm window, when the alarm evaluates, then it fires (ADR 0011, 0019 decision 36)
 - [ ] Given `docs/monitoring.md`, when this story is done, then it lists every metric and alert
