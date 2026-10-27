@@ -1,2 +1,2 @@
-export { SellerFetchError, checkUrl, guardedFetch, publicOnlyLookup } from "./guard.js";
+export { SellerFetchError, checkUrl, guardedFetch } from "./guard.js";
 export type { SellerLimits } from "./guard.js";
