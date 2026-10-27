@@ -310,7 +310,10 @@ describe("call_paid_http", () => {
     await reconnect({}, { scheme: slowScheme(1_000), timeoutMs: 300 });
     expect((await pay()).error.code).toBe("upstream_error");
     expect(seller.payments).toHaveLength(0);
-    // 10,000 of a 15,000 budget fits again: the late signature was never sent.
+    // 10,000 of a 15,000 budget fits again: the late signature was never sent. The check reconnects to
+    // the same daily record with the default deadline, since 300 ms is too short for a whole paid call
+    // on a slow CI runner.
+    await reconnect();
     expect((await pay()).payment).toBeDefined();
   });
 
