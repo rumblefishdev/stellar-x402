@@ -16,7 +16,8 @@
   deploy lock, `digest.good`, the units' timeouts, secret file owners, encryption at rest), and
   an Ansible playbook that provisions x402's parts of the server. Round four: Compose's exit
   code, a crash loop at startup, the tunnel token's owner, and the VM left open for mainnet.
-  2026-10-27: a long migration runs in the deploy as an online one (task 0067).
+  2026-10-27: a long migration runs in the deploy as an online one, under the deploy unit's
+  60-minute cap (task 0067).
 
 ## Context
 
@@ -424,6 +425,11 @@ One request or one stop must never outlast the layer in front of it:
   - the migration service's bounds are ADR 0012's;
   - it logs each step and every 50 backfill batches, so a long deploy reads as busy in the
     deploy unit's journal, and the deploy lock holds later deploys meanwhile;
+  - `x402-deploy@` has a `TimeoutStartSec` of 60 minutes, which caps the whole run: the wait for
+    another run's lock (30 minutes) and each long step (30 minutes) could otherwise hold later
+    deploys, a hotfix's included, under the `flock` far longer. systemd stops a run past it, the
+    deploy fails before the old facilitator stops, and the next deploy continues the migration
+    from its markers;
   - a backfill writes about 1.2 GiB of WAL per 2 million rows (a million reservations with the
     four default scopes is twice that), which pgBackRest ships as each segment closes, and the
     table grows about a third: check the disk's headroom first;

@@ -4,8 +4,9 @@ import { RESERVE_LOCK_TIMEOUT_MS, createPool, postgresStores } from "../src/adap
 import {
   MIGRATE_LOCK,
   MIGRATIONS,
-  SQL_STEP_STATEMENT_TIMEOUT_MS,
   STEP_LOCK_TIMEOUT_MS,
+  WRITE_LOCK_STATEMENT_TIMEOUT_MS,
+  WRITE_LOCK_TRANSACTION_TIMEOUT_MS,
   migrate,
   type MigrateOptions,
   type Migration,
@@ -211,11 +212,12 @@ describe("online migrations", () => {
     [...values].sort((a, b) => a - b)[Math.floor(values.length * 0.99)] ?? 0;
 
   it("keeps a step's lock wait and hold below reserve's lock timeout", () => {
-    // A `reserve` queued behind a `sql` step waits out the step's lock wait and its run, then its
-    // COMMIT; it must not reach its own timeout meanwhile.
-    expect(STEP_LOCK_TIMEOUT_MS + SQL_STEP_STATEMENT_TIMEOUT_MS).toBeLessThan(
+    // A `reserve` queued behind a group or a `sql` step waits out its lock waits and its run, then
+    // its COMMIT; it must not reach its own timeout meanwhile.
+    expect(STEP_LOCK_TIMEOUT_MS + WRITE_LOCK_STATEMENT_TIMEOUT_MS).toBeLessThan(
       RESERVE_LOCK_TIMEOUT_MS,
     );
+    expect(WRITE_LOCK_TRANSACTION_TIMEOUT_MS).toBeLessThan(RESERVE_LOCK_TIMEOUT_MS);
   });
 
   it(
@@ -247,9 +249,12 @@ describe("online migrations", () => {
           if (process.env.MIGRATE_SCALE) console.log(JSON.stringify(report(started, ended)));
           // AC1's budget: under 1% of the reserves during the migration fail, for any reason. A
           // disk stall can slow a COMMIT that holds the global scope row past reserve's lock
-          // timeout, migration or not; the locks' own bounds are held by the tests below.
+          // timeout, migration or not. The suite's scale writes too little WAL for that, so there
+          // a single failed reserve fails it.
+          const failed = during.filter((s) => s.error).length;
           expect(during.length).toBeGreaterThan(0);
-          expect(during.filter((s) => s.error).length).toBeLessThan(during.length * 0.01);
+          if (process.env.MIGRATE_SCALE) expect(failed).toBeLessThan(during.length * 0.01);
+          else expect(failed).toBe(0);
           // Waits behind a step are bounded by its lock timeout, not by how long it runs.
           expect(p99(during.map((s) => s.ms))).toBeLessThan(
             p99(before.map((s) => s.ms)) + STEP_LOCK_TIMEOUT_MS + 250,
@@ -341,6 +346,61 @@ describe("online migrations", () => {
       expect(await migrating).toEqual(["0101_g"]);
     });
   }, 30_000);
+
+  /** About 1 ms a row: `ADD COLUMN` with it as the default rewrites the table row by row. */
+  const rewrite = `ALTER TABLE ${T} ADD COLUMN g int DEFAULT slow_default()`;
+  it.each<[string, string, Migration[]]>([
+    [
+      "a transactional migration that rewrites the table",
+      "rewrite",
+      [{ name: "0101_g", sql: rewrite }],
+    ],
+    [
+      "an online step that rewrites the table",
+      "rewrite_online",
+      [{ name: "0101_g", online: true, steps: [{ kind: "sql", sql: rewrite }] }],
+    ],
+    [
+      "a transactional group of short statements",
+      "group_long",
+      [
+        { name: "0101_g", sql: `ALTER TABLE ${T} ADD COLUMN g int; SELECT pg_sleep(0.6)` },
+        { name: "0102_g", sql: "SELECT pg_sleep(0.6)" },
+        { name: "0103_g", sql: "SELECT pg_sleep(0.6)" },
+      ],
+    ],
+  ])(
+    "fails %s at its bound, while reserve keeps answering",
+    async (_, suffix, migrations) => {
+      await onSchema(suffix, async (fresh, on) => {
+        await seeded(fresh, 2_000);
+        await on.query(
+          `CREATE FUNCTION slow_default() RETURNS int LANGUAGE plpgsql VOLATILE AS $$
+         BEGIN PERFORM pg_sleep(0.001); RETURN 0; END $$`,
+        );
+        const load = reserving(on);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          const started = Date.now();
+          await expect(run(fresh, migrations)).rejects.toThrow(/timeout/);
+          expect(Date.now() - started).toBeLessThan(WRITE_LOCK_TRANSACTION_TIMEOUT_MS + 1_000);
+          await new Promise((resolve) => setTimeout(resolve, 200));
+        } finally {
+          await load.stop();
+        }
+        expect(load.samples.filter((s) => s.error)).toEqual([]);
+        expect(Math.max(...load.samples.map((s) => s.ms))).toBeLessThan(RESERVE_LOCK_TIMEOUT_MS);
+        const { rows } = await on.query(
+          `SELECT
+           (SELECT count(*) FROM pg_attribute
+            WHERE attrelid = to_regclass('${T}') AND attname = 'g')::int AS columns,
+           (SELECT count(*) FROM schema_migrations WHERE name LIKE '01%')::int AS markers`,
+        );
+        expect(rows[0]).toEqual({ columns: 0, markers: 0 });
+      });
+    },
+    30_000,
+  );
 
   it("runs VALIDATE and an index build past the pool's statement timeout", async () => {
     await onSchema("long", async (fresh, on) => {

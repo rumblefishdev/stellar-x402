@@ -101,9 +101,9 @@ names one without `t.` (`c = length(id)`) fails as ambiguous. Alias them (`k0`, 
 ## Notes
 
 - BMAD review of #73, 27.10: P6 (unmarked valid index), P7 (step logs), P8 (progress log), P10
-  (ambiguous key columns), P11 (this task's index AC) and W1 (lock attempts) moved here; W2 (a
-  migration's total cap, abort and hotfix procedure, the runbook's headroom check) belongs to
-  0038 and 0026.
+  (ambiguous key columns), P11 (this task's index AC) and W1 (lock attempts) moved here; W2's total
+  cap is ADR 0011's `TimeoutStartSec` on `x402-deploy@` (in 0026); its abort and hotfix
+  procedure and the runbook's headroom check belong to 0038 and 0026.
 - Review findings: PR #73 review, 27.10 (M2, m1, m2). m3 (`57014` is also `pg_cancel_backend`'s
   code), m4 (`to_regclass` read before `CREATE TABLE IF NOT EXISTS`) and m5 (test gaps) stayed
   out; pick them up here if cheap.

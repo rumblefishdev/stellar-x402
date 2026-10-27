@@ -13,8 +13,9 @@ import type { Logger } from "../logger.js";
  * reordered: add a new one.
  *
  * A migration whose transaction would hold write-blocking locks for 500 ms or more on the largest
- * database it meets is online (`OnlineMigration`, 0067); every other one is transactional. The
- * transaction's 10 s bound only stops a run gone wrong: `reserve` gives up on a lock after 2 s.
+ * database it meets is online (`OnlineMigration`, 0067); every other one is transactional. A
+ * transaction that runs past `WRITE_LOCK_TRANSACTION_TIMEOUT_MS` fails the run instead of every
+ * `reserve` queued behind it.
  *
  * Every time is the app's clock, stored as `bigint` milliseconds; the SQL never reads the
  * database's clock.
@@ -168,7 +169,9 @@ export type OnlineStep =
   | { kind: "index"; name: string; table: string; definition: string }
   /**
    * `UPDATE <table> t SET <set> WHERE <where>`, one keyset pass over `key` in batches of `batch`
-   * (5 000), each in its own transaction, `pauseMs` (250) apart. `set` and `where` see the row as
+   * (5 000), each in its own transaction, `pauseMs` (250) apart. `key`'s columns are NOT NULL and
+   * lead an index in that order, as a primary key's do: otherwise each batch scans the table, and
+   * the pass skips a row whose key is NULL, which then fails it. `set` and `where` see the row as
    * `t`. `where` must match only rows still to fill (`t.c IS NULL`), so a pass repeated after an
    * interruption skips what is done; rows written meanwhile need a default, set in an earlier
    * step (never in `ADD COLUMN`, which fills every row at once). A default fits a constant; a
@@ -215,12 +218,15 @@ const RETRYABLE: ReadonlySet<string> = new Set(["55P03", "40P01"]);
 const BATCH_RETRYABLE: ReadonlySet<string> = new Set([...RETRYABLE, "57014"]);
 const LOCK_ATTEMPTS = 20;
 
-const GROUP_STATEMENT_TIMEOUT_MS = 10_000;
 /**
- * A `sql` step holds ACCESS EXCLUSIVE while it runs, so a `reserve` queued behind it waits its
- * lock wait and this; together they leave `reserve` 500 ms of its 2 s for the step's `COMMIT`.
+ * A transactional group and a `sql` step hold ACCESS EXCLUSIVE until they commit, so a `reserve`
+ * queued behind one waits its length. Each statement gets a lock wait and this; the whole
+ * transaction, lock waits included, gets `WRITE_LOCK_TRANSACTION_TIMEOUT_MS`, after which
+ * PostgreSQL ends the session (`25P04`) and the run fails, unretried. Either way `reserve` keeps
+ * 500 ms of its 2 s.
  */
-export const SQL_STEP_STATEMENT_TIMEOUT_MS = 1_000;
+export const WRITE_LOCK_STATEMENT_TIMEOUT_MS = 1_000;
+export const WRITE_LOCK_TRANSACTION_TIMEOUT_MS = 1_500;
 const BATCH_STATEMENT_TIMEOUT_MS = 5_000;
 /** `VALIDATE`, index builds and a backfill's last check: they scan the table but block no writes. */
 const LONG_STATEMENT_TIMEOUT_MS = 30 * 60_000;
@@ -270,7 +276,7 @@ export async function migrate(
       const group: TransactionalMigration[] = [];
       for (let m = pending[i]; m && !isOnline(m); m = pending[++i]) group.push(m);
       await retryingLocks(() =>
-        transaction(client, STEP_LOCK_TIMEOUT_MS, GROUP_STATEMENT_TIMEOUT_MS, async () => {
+        writeLocking(client, async () => {
           await client.query(CREATE_SCHEMA_MIGRATIONS);
           for (const migration of group) {
             await client.query(migration.sql);
@@ -363,7 +369,7 @@ async function runStep(
   switch (step.kind) {
     case "sql":
       return retryingLocks(() =>
-        transaction(client, STEP_LOCK_TIMEOUT_MS, SQL_STEP_STATEMENT_TIMEOUT_MS, async () => {
+        writeLocking(client, async () => {
           await client.query(step.sql);
           await mark(client, marker, now);
         }),
@@ -475,17 +481,31 @@ async function transaction(
   lockTimeoutMs: number,
   statementTimeoutMs: number,
   run: () => Promise<void>,
+  transactionTimeoutMs = 0,
 ): Promise<void> {
   await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
   try {
     await client.query(`SET LOCAL lock_timeout = '${lockTimeoutMs}ms'`);
     await client.query(`SET LOCAL statement_timeout = '${statementTimeoutMs}ms'`);
+    // Counts from here, which is the transaction's start.
+    await client.query(`SET LOCAL transaction_timeout = '${transactionTimeoutMs}ms'`);
     await run();
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
   }
+}
+
+/** A transaction that takes ACCESS EXCLUSIVE: a transactional group or a `sql` step. */
+function writeLocking(client: pg.PoolClient, run: () => Promise<void>): Promise<void> {
+  return transaction(
+    client,
+    STEP_LOCK_TIMEOUT_MS,
+    WRITE_LOCK_STATEMENT_TIMEOUT_MS,
+    run,
+    WRITE_LOCK_TRANSACTION_TIMEOUT_MS,
+  );
 }
 
 /**

@@ -79,13 +79,13 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
   - A migration is transactional if, on the largest database it will meet, its group holds
     write-blocking locks for under 500 ms until it commits, so a `reserve` queued behind it stays
     well under its 2 s; otherwise it is online (task 0067):
-    - the group's 10 s statement bound only stops a run gone wrong: a group that holds
-      `spend_reservation_scopes` for 8 s fails every `reserve` queued on it, at its 2 s lock
+    - the runner holds the rule in code too: a group that runs past 1.5 s ends the run's
+      session and fails the deploy, instead of every `reserve` queued on it at its 2 s lock
       timeout;
     - consecutive transactional migrations run in one transaction, so a failed group leaves the
       schema as it was;
     - an online migration is a list of steps, each non-blocking or holding its lock for at
-      most 1 s: a single catalog-only `ALTER`, a keyset backfill batch,
+      most 1.5 s: a single catalog-only `ALTER`, a keyset backfill batch,
       `CREATE INDEX CONCURRENTLY`, `NOT VALID` then `VALIDATE`. A backfilled column's new rows
       take a default set in an earlier step when the value is a constant, or a trigger when it
       is computed from the row; otherwise rows the previous release writes keep the default. Each step commits with a
@@ -94,9 +94,10 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
       migration that has started anywhere is never edited.
     - With expand/contract, that is what makes migrating before the stop, and a deploy's
       automatic rollback, safe.
-  - The migration service's bounds, by kind: a transactional group 10 s; an online `ALTER` waits
-    at most 500 ms for its lock, a quarter of `reserve`'s 2 s, retries `55P03` and `40P01`, and
-    runs at most 1 s, which leaves a `reserve` queued behind it 500 ms for the step's `COMMIT`; a backfill batch 5 s, 5 000 rows, 250 ms apart, and it retries its
+  - The migration service's bounds, by kind: a transactional group and an online `ALTER` wait at
+    most 500 ms for each lock, a quarter of `reserve`'s 2 s, retry `55P03` and `40P01`, and run
+    at most 1 s a statement and 1.5 s in all, lock waits included (`transaction_timeout`), which
+    leaves a `reserve` queued behind them 500 ms; a backfill batch 5 s, 5 000 rows, 250 ms apart, and it retries its
     statement timeout too, since a batch that ran out of time waited on the disk; an index build or
     `VALIDATE` waits for locks without a timeout, since a `lock_timeout` aborts the build, and
     runs at most 30 minutes. The runner's session sets `client_connection_check_interval`, so a

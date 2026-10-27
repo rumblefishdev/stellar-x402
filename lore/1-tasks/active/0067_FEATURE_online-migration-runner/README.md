@@ -49,7 +49,8 @@ first in a spike ([R-spike-results](notes/R-spike-results.md)). In short:
   (`{ name, online: true, steps }`) with `sql`, `index` and `backfill` steps.
 - Each step commits with a `schema_migrations` marker `name#<i>`; the next `migrate` skips the
   done steps. The migration's own row is written after its last step.
-- ACCESS EXCLUSIVE steps wait at most 500 ms for their lock and retry `55P03` / `40P01`; index
+- ACCESS EXCLUSIVE steps and transactional groups wait at most 500 ms for each lock and retry
+  `55P03` / `40P01`, and end at 1.5 s (`transaction_timeout`); index
   builds and `VALIDATE` wait without a lock timeout under a 30 min bound.
 - Backfills: one keyset pass, a transaction a batch of 5 000, a 250 ms pause between batches.
 - The runner holds a per-schema session advisory lock taken by polling, on a session with
@@ -80,9 +81,12 @@ first in a spike ([R-spike-results](notes/R-spike-results.md)). In short:
   batch that ran out of time retried; racing runs, the per-schema lock, the group split, a
   backfill that leaves rows; a transactional group whose lock another session holds; `VALIDATE`
   and an index build that outlast the pool's statement timeout; a run whose client went away
-  while a step waits. Mutants each failing a case: no invalid-index repair, no lock retry, no
-  batch timeout retry, a group without its lock retry or with a 10 s lock timeout, a long step
-  without its raised statement or client timeout, no `client_connection_check_interval`.
+  while a step waits; a table rewrite in a group or a `sql` step, and a group of short
+  statements, failing at their bound while `reserve` answers. At the suite's scale AC1 allows no
+  failed `reserve`; the 1% budget holds at `MIGRATE_SCALE`. Mutants each failing a case: no
+  invalid-index repair, no lock retry, no batch timeout retry, a group without its lock retry or
+  with a 10 s lock timeout, a long step without its raised statement or client timeout, no
+  `client_connection_check_interval`, no `transaction_timeout`, 10 s statements.
 - AC1 at 1 000 000 reservations with four scopes each (`MIGRATE_SCALE=1000000`, compose
   PostgreSQL 18 on Adam's laptop, 27.10): applied in 4 min 45 s; steps 1–3 took 3–4 ms; the
   backfill of 4 000 000 rows 282 s. `reserve` before: 471 calls, p50 8 ms, p99 13 ms. During:
