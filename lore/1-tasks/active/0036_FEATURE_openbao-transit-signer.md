@@ -2,7 +2,7 @@
 id: "0036"
 title: "OpenBao Transit signer for the facilitator key"
 type: FEATURE
-status: backlog
+status: active
 related_adr: ["0011", "0013"]
 related_tasks: ["0014", "0026", "0047", "0048"]
 tags: [facilitator, signer-pool, keys, priority-high, effort-small, payments]
@@ -21,6 +21,11 @@ history:
     note: >
       Retargeted by 0047 (ADR 0013): an OpenBao Transit signer on both networks instead of AWS KMS on
       mainnet. Moved from Platform to Payments; first in 0047's build order.
+  - date: "2026-10-27"
+    status: active
+    who: karolkow
+    note: >
+      Work starts.
 ---
 
 # OpenBao Transit signer for the facilitator key
