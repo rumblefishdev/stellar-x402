@@ -239,9 +239,9 @@ export function createReconciler(deps: ReconcilerDeps) {
   /**
    * One pass over the network's non-final records, at most `CONCURRENCY` at a time. A store that
    * fails to list rejects the sweep; a record whose RPC or store call fails is counted in
-   * `errors` and stays as it is, for the next sweep.
+   * `errors` and stays as it is, for the next sweep. `onListed` runs once the records are listed.
    */
-  const sweep = async (): Promise<SweepReport> => {
+  const sweep = async (onListed?: () => void): Promise<SweepReport> => {
     const report: SweepReport = {
       rejected: 0,
       success: 0,
@@ -253,6 +253,7 @@ export function createReconciler(deps: ReconcilerDeps) {
     await runLostHooks();
     await retryMarks();
     const queue = await store.listNonFinal(network);
+    onListed?.();
     const worker = async () => {
       for (let record = queue.shift(); record; record = queue.shift()) {
         const checkedAt = historyGone.get(record.key);
@@ -319,6 +320,12 @@ export type Reconciler = ReturnType<typeof createReconciler>;
 export interface Reconciliation {
   /** Settles once the first sweep has ended, whether or not it failed: for tests. */
   readonly reconciled: Promise<void>;
+  /**
+   * True once a sweep has listed the network's non-final records, and from then on. The deploy
+   * waits for it beside `ready`: an image whose sweeps can't list never turns it true (decision
+   * 36).
+   */
+  listed(): boolean;
   /** Starts the sweeps; the server already listens, and `/settle` serves beside them. */
   start(): void;
   /** Stops the sweeps; one under way finishes on its own. */
@@ -341,13 +348,14 @@ export function scheduleReconciliation(opts: {
 }): Reconciliation {
   const { reconciler, logger, network } = opts;
   let closed = false;
+  let listed = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let reconciled!: () => void;
   const done = new Promise<void>((resolve) => (reconciled = resolve));
 
   const tick = async () => {
     try {
-      await reconciler.sweep();
+      await reconciler.sweep(() => (listed = true));
     } catch (error) {
       logger.warn("reconcile_failed", { network, error });
     }
@@ -359,6 +367,7 @@ export function scheduleReconciliation(opts: {
 
   return {
     reconciled: done,
+    listed: () => listed,
     start: () => void tick(),
     close() {
       closed = true;

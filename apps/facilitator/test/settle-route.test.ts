@@ -275,6 +275,7 @@ describe("POST /settle beside reconciliation (0019 decision 27)", () => {
     const settle = vi.fn<Settle>(async () => ({ response: success }));
     const reconciliation = {
       reconciled: new Promise<void>(() => {}),
+      listed: () => false,
       start: vi.fn(),
       close: vi.fn(),
     };
