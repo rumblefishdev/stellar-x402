@@ -15,8 +15,9 @@ history:
     status: backlog
     who: akot
     note: >
-      Spawned from the review of 0067 (PR #73): M2, m1 and m2. Nothing is at risk while
-      MIGRATIONS holds no online migration; this task closes before the first one lands.
+      Spawned from the review of 0067 (PR #73): M2, m1 and m2, then the BMAD review's patches
+      left out of #73. Nothing is at risk while MIGRATIONS holds no online migration; this task
+      closes before the first one lands.
 ---
 
 # Harden the online migration runner before its first real migration
@@ -64,17 +65,45 @@ EXISTS`) before the error goes up; the next run builds it again.
 Add `commit` and `release` loops to AC1's test load, and check that 0024's commit path retries
 `40P01`.
 
+### Step 4: A step says when it starts and why it failed
+
+`runOnline` logs a step only once it succeeds: a 30-minute index build is silent in the deploy's
+journal until it ends, and a failed step reaches it as PostgreSQL's message alone. Log the start,
+and log or wrap the error with the migration, the step and its kind.
+
+### Step 5: A backfill's columns can't be ambiguous
+
+The batch's CTE `b` carries the key columns under their own names, so a `set` or `where` that
+names one without `t.` (`c = length(id)`) fails as ambiguous. Alias them (`k0`, `k1`).
+
+### Step 6: The branches no test reaches
+
+- An index step that meets a valid index without its marker (a run stopped after the build):
+  an unconditional `CREATE INDEX CONCURRENTLY` passes the suite today.
+- The `migration_backfill` progress log every 50 batches.
+- A lock wait that runs out of its 20 attempts fails the run; cheap once `MigrateOptions` can set
+  the attempts.
+
 ## Acceptance Criteria
 
 - [ ] A run whose marked step was edited fails before running anything, naming the step; editing
       a step after the last marker applies the edited step
-- [ ] A failed index build leaves no index behind
-- [ ] AC1's test runs `commit` and `release` alongside `reserve` with no error from the
-      migration's locks
+- [ ] An index build that fails with an error leaves no index behind; one whose run was killed
+      leaves an INVALID index the next run rebuilds
+- [ ] AC1's test runs `commit` and `release` alongside `reserve`, and fewer than 1% of the calls
+      fail during the migration
 - [ ] ADR 0012 states which steps of a started migration may change
+- [ ] A step's start, and its failure with the migration and step named, reach the log
+- [ ] A backfill's `set` and `where` may name a key column without `t.`
+- [ ] Tests cover the valid-but-unmarked index, the backfill's progress log and running out of
+      lock attempts
 
 ## Notes
 
+- BMAD review of #73, 27.10: P6 (unmarked valid index), P7 (step logs), P8 (progress log), P10
+  (ambiguous key columns), P11 (this task's index AC) and W1 (lock attempts) moved here; W2 (a
+  migration's total cap, abort and hotfix procedure, the runbook's headroom check) belongs to
+  0038 and 0026.
 - Review findings: PR #73 review, 27.10 (M2, m1, m2). m3 (`57014` is also `pg_cancel_backend`'s
   code), m4 (`to_regclass` read before `CREATE TABLE IF NOT EXISTS`) and m5 (test gaps) stayed
   out; pick them up here if cheap.
