@@ -39,6 +39,6 @@ hostname in line.
 
 ## Acceptance Criteria
 
-- [ ] ADR 0011's Network and URL section names one hostname, one tunnel and its routing target
-- [ ] 0026 and 0027 quote `x402-facilitator.sorobanscan.com`
+- [x] ADR 0011's Network and URL section names one hostname, one tunnel and its routing target
+- [x] 0026 and 0027 quote `x402-facilitator.sorobanscan.com`
 - [ ] Docs PR to develop
