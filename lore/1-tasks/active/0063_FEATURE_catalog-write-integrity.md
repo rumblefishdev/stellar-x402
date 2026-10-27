@@ -77,7 +77,7 @@ description or price, and nobody can make `/discovery/resources` answer megabyte
 | 1 | A listing's content comes from the seller's own unpaid 402 (an MCP server's `PaymentRequired`), never from the payment. A successful settle carrying `extensions.bazaar` only triggers the check | grilling | changes it (the task listed a seller signature or first write wins) | spec silent; upstream issue #3005 open | | |
 | 2 | The check runs only when a settle's echoed content differs from the stored listing, or no listing exists, and at most once per minute per listing key: buyers echo the seller's 402, so an unchanged listing costs no request | grilling | beyond it | spec silent | | |
 | 3 | At most 30 checks per minute per host, plus a global budget; a check over budget is skipped with a log line, and the next payment tries again. Both numbers are assumptions | grilling | beyond it | spec silent | | |
-| 4 | The check uses the listing's method; a POST sends `{}`, a GET no query | grilling | beyond it | spec silent | | |
+| 4 | The check uses the listing's method and sends the listing's example input up to 16 KiB, as the MCP check does (row 5): `bazaar.info.input.queryParams` as the query, `body` as a POST body; without an example a POST sends `{}` and a GET no query. An unpaid request is answered with a 402 before the route runs, so the example's origin (the payment's echo) is not trusted with anything | grilling | changes it (the first round sent no parameters, so a route that needs one answered 400) | `bazaar.md` Input Types (`queryParams`, `body`) | | |
 | 5 | An `https` MCP listing is checked with an MCP client: `initialize`, then `tools/call` without payment, with the payment's example arguments up to 16 KiB, since the MCP SDK validates arguments before the tool's handler (`server/mcp.js:125`, SDK 1.30.1). Upstream's wrapper answers `PaymentRequired` before the tool runs (`@x402/mcp` `paymentWrapper.ts:276-284`). Own PR | grilling | beyond it | upstream `@x402/mcp` | | |
 | 6 | No usable answer (loopback or private host, `mcp://tool/…` without a server address, not a 402, no offer with the key's network and `payTo`, timeout): a new listing isn't created, an existing one stays as it was; a log line and a counter carry the reason | grilling | beyond it | RFC 8555 §10 (validate over the public internet only) | | |
 | 7 | Only the seller's offers with the listing key's network and `payTo` are stored, and a check replaces `accepts` instead of merging into the stored one | grilling | beyond it | spec silent | | |
@@ -92,15 +92,12 @@ description or price, and nobody can make `/discovery/resources` answer megabyte
 | 16 | `/settle` keeps accepting a payload whose `accepted` differs from `paymentRequirements`: no facilitator code reads `accepted`, and the signed transaction is checked against the requirements (`settle.ts:931`) | grilling | beyond it | upstream checks it in the resource server (`x402ResourceServer.ts:2127`) | | |
 | 17 | A listing enters only through a settled payment, the seller's own first paid call included; there is no registration endpoint. A seller helper that makes that call is 0075 | grilling | matches it | RFP 07 "automatic cataloging"; architecture §2 "not a separate registration process"; `bazaar.md` Facilitator Behavior | | |
 | 18 | An MCP check calls `tools/list` before the unpaid `tools/call`, so a missing tool is told apart from a server that is down | agent | beyond it | MCP spec `tools/list` | | |
+| 19 | Offers stay in the listing's `jsonb`, checked against the upstream `PaymentRequirements` schema in the one function that writes the catalog (`upsertCatalog`); no typed offers table, so a new spec field needs a library bump, not a migration | grilling | beyond it | spec silent on storage (`bazaar.md:429`); upstream `core/src/schemas/index.ts:160` | | |
+| 20 | A check that got no usable answer is not queued for a retry: the next payment tries again, and the seller helper (0075) tells the seller whether the listing appeared. The check runs right after the seller served a buyer, and the failures left (a route that needs other input, an over-budget host, a URL that isn't the seller's) don't pass with time | grilling | beyond it | spec silent | | |
+| 21 | No cap on new listings per `payTo` or overall, and a seller paying itself is allowed. Each new listing still needs a settled on-chain payment whose fee the facilitator pays, `/settle`'s per-IP limit (0023) and the per-host check budget (row 3) | grilling | beyond it | spec silent | | |
 
 ## Not yet decided
 
-- Whether a check that got no usable answer is retried from a queue, or waits for the next
-  payment.
-- Caps on new listings per `payTo` and overall; a seller paying itself stays allowed, since its
-  own first paid call is how it gets listed.
-- Whether offers are checked against the upstream `PaymentRequirements` schema inside `jsonb`, or
-  stored in a typed offers table.
 - The measured cause of the `500` answers under 20 concurrent `/discovery/resources` reads
   (hypothesis: the database pool); its own task once measured.
 
