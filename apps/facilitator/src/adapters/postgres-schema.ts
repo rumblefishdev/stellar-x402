@@ -12,8 +12,9 @@ import type { Logger } from "../logger.js";
  * later migration, once no running release uses it. An applied migration is never edited or
  * reordered: add a new one.
  *
- * A migration that wouldn't finish inside one transaction's bound on the largest database it meets
- * is online (`OnlineMigration`, 0067); every other one is transactional.
+ * A migration whose transaction would hold write-blocking locks for 500 ms or more on the largest
+ * database it meets is online (`OnlineMigration`, 0067); every other one is transactional. The
+ * transaction's 10 s bound only stops a run gone wrong: `reserve` gives up on a lock after 2 s.
  *
  * Every time is the app's clock, stored as `bigint` milliseconds; the SQL never reads the
  * database's clock.

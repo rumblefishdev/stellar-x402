@@ -76,9 +76,12 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
   - Deploys run the migrations as a one-off service of the new image while the old facilitator
     still serves, before it stops (ADR 0011). A failed migration fails the deploy, and the old
     facilitator keeps serving.
-  - A migration is transactional if, on the largest database it will meet, it finishes inside
-    the transactional bound (10 s) while holding write-blocking locks; otherwise it is online
-    (task 0067):
+  - A migration is transactional if, on the largest database it will meet, its group holds
+    write-blocking locks for under 500 ms, an online step's bound, until it commits; otherwise it
+    is online (task 0067):
+    - the group's 10 s statement bound only stops a run gone wrong: a group that holds
+      `spend_reservation_scopes` for 8 s fails every `reserve` queued on it, at its 2 s lock
+      timeout;
     - consecutive transactional migrations run in one transaction, so a failed group leaves the
       schema as it was;
     - an online migration is a list of steps, each non-blocking or holding a lock for under a
