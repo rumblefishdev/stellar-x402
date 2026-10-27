@@ -496,7 +496,7 @@ export class PostgresRateLimitStore implements RateLimitStore {
  * How long `reserve` waits on a lock. A reservation holds the global scope's lock for a few round
  * trips, so a longer wait means a queue; giving up returns the connection to `reservePool`.
  */
-const RESERVE_LOCK_TIMEOUT = "2s";
+export const RESERVE_LOCK_TIMEOUT_MS = 2_000;
 
 /**
  * Stroops reserved or spent in one scope after `$2`, as text; `reserve` and `used` share it. A
@@ -526,7 +526,7 @@ export class PostgresSpendStore implements SpendStore {
    * rows in sorted order so two reservations can't deadlock, then sum each limit's window in a
    * statement of its own, which sees every reservation committed before the locks were granted.
    * A wait on any
-   * lock longer than `RESERVE_LOCK_TIMEOUT` rejects with `55P03` and reserves nothing.
+   * lock longer than `RESERVE_LOCK_TIMEOUT_MS` rejects with `55P03` and reserves nothing.
    */
   async reserve({ id, amount, limits, now }: SpendReservation): Promise<ReserveResult> {
     assertStroops(amount, "amount");
@@ -534,7 +534,7 @@ export class PostgresSpendStore implements SpendStore {
     const scopes = [...new Set(limits.map((limit) => limit.scope))].sort();
     try {
       return await inTransaction<ReserveResult>(this.reservePool, async (client) => {
-        await client.query(`SET LOCAL lock_timeout = '${RESERVE_LOCK_TIMEOUT}'`);
+        await client.query(`SET LOCAL lock_timeout = '${RESERVE_LOCK_TIMEOUT_MS}ms'`);
         const fresh = await client.query(
           "INSERT INTO spend_reservations (id, amount, at) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING",
           [id, amount.toString(), now],
