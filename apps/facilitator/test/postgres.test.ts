@@ -576,7 +576,6 @@ describe("PostgreSQL stores", () => {
   it("lets only one of two main() processes on one database settle, and the other take over once the first stops (0025)", async () => {
     await stores();
     const env = {
-      STORE: "postgres",
       DATABASE_URL: urlFor(schema),
       FACILITATOR_SECRET: bootSecret,
       CLIENT_IP: "socket",
