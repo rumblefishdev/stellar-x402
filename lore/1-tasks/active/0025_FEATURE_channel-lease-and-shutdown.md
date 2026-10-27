@@ -19,6 +19,13 @@ history:
     status: active
     who: okarcz
     note: "Work starts, on top of 0019 (PR #57); rebased onto develop once #57 merges."
+  - date: "2026-10-27"
+    status: active
+    who: okarcz
+    note: >
+      Rebased onto develop after PR #57 merged (sweeps no longer wait for the lease, decision 19;
+      tests on PostgreSQL). Code review applied: the drain waits for a sweep under way, the
+      process exits after its deadline, an end-to-end drain test, README corrections.
 ---
 
 # Channel lease and graceful shutdown
@@ -127,7 +134,7 @@ As a facilitator operator, I want only one process at a time to settle through a
 ## Implementation Notes
 
 - **Lease keeper** (`apps/facilitator/src/settlement/lease.ts`): `createLeaseKeeper` returns
-  `held()`, `start()`, `runOnce()` and `close()`. Each attempt renews a held lease or tries to
+  `held()`, `start()`, `runOnce()`, `close()` and `release()`. Each attempt renews a held lease or tries to
   take a free one, then the next comes `LEASE_TTL_MS / 3` after it ends. The lease is
   `<network>:channels`, the holder a new UUID for every process start. Logs `lease_acquired`,
   `lease_lost` (`reason`: `taken`, `expired` or `store_failed`) and `lease_acquire_failed`; counts
@@ -135,14 +142,15 @@ As a facilitator operator, I want only one process at a time to settle through a
 - **`/settle`** (`http/app.ts`): a first handler answers `503 { error: "no_lease" }` with
   `Retry-After: 5` while `held()` is false, before the rate limit's store call and the body.
 - **Wiring** (`main.ts`): `compose()` builds the keeper on the settlement store. `start()` makes the
-  first attempt after the server listens and before the first sweep; `close()` stops it with the
-  server. The lease isn't released yet: that comes with the drain.
+  first attempt after the server listens and before the first sweep; the shutdown below stops it
+  and releases the lease.
 - **Reconciliation** (`reconcile.ts`): `scheduleReconciliation` took `held`, and a tick without the
-  lease skipped its sweep. Removed in the rebase onto develop (decision 19).
-- **Tests:** `test/lease.test.ts` (11, on PostgreSQL since the rebase, with a moved clock: one holder, renewal, a
-  second process kept out, takeover after a crash's TTL, a renewal that finds another holder or a
-  store error, a hung renewal, the timer and `close()`); a skipped sweep in `reconcile.test.ts`; the
-  503 in `settle-route.test.ts`; two `main()` processes on one PostgreSQL database in
+  lease skipped its sweep. Removed in the rebase onto develop (decision 19). `close()` returns once
+  a sweep under way has ended, so the drain waits for it (decision 20).
+- **Tests:** `test/lease.test.ts` (13 with the later `release()` and margin cases, on PostgreSQL
+  since the rebase, with a moved clock: one holder, renewal, a second process kept out, takeover
+  after a crash's TTL, a renewal that finds another holder or a store error, a hung renewal, the
+  timer and `close()`); the 503 in `settle-route.test.ts`; two `main()` processes on one PostgreSQL database in
   `postgres.test.ts`, the second taking over once the first stops. Facilitator 535 → 549 with
   PostgreSQL. Mutants caught: `held()` always true, no local expiry, store errors ignored, a TTL/2
   interval.
@@ -156,9 +164,10 @@ As a facilitator operator, I want only one process at a time to settle through a
   closes `rejected`, `onFinal` runs); the settler's `drain()` waits for every submission and its
   record write, those past the budget answer included; `buildSettlement`'s `drain` closes the pool
   first. The keeper's `release()` stops it and deletes the lease row. `start()`'s `close()`: sets
-  `closing` (`/settle` → `503 shutting_down`), stops the sweeps, drains, then closes the server and
-  releases; past `SHUTDOWN_DEADLINE_MS` (150 s) it closes the server, cuts open connections and
-  leaves the lease. Logs `shutdown_started`, `shutdown_drained`, `shutdown_deadline`,
+  `closing` (`/settle` → `503 shutting_down`), stops the sweeps and waits for one under way beside
+  the drain, then closes the server and releases; past `SHUTDOWN_DEADLINE_MS` (150 s) it closes the
+  server, cuts open connections and leaves the lease. `server.ts` exits once `close()` settles
+  (decision 21). Logs `shutdown_started`, `shutdown_drained`, `shutdown_deadline`,
   `lease_released`.
 - **Shutdown tests:** `packages/signer-pool/test/shutdown.test.ts` (5: a queued call, one prepared
   ahead, a read retry, a rebuild, a `submit()` after `close()`; the sent call runs on and
@@ -170,10 +179,23 @@ As a facilitator operator, I want only one process at a time to settle through a
   waiters kept, a read retry not stopped (the loop then spins until the worker runs out of
   memory), no release after the drain, a release at the deadline, no shutdown reason, a no-op
   settle drain, no `shutting_down` 503, the drain skipped.
-- **Skew margin and pubnet:** `LEASE_SKEW_MARGIN_MS` (5 s) in `ports/settlement-store.ts`; both
-  adapters take another holder's lease only once it expired more than that ago, and the contract
+- **Skew margin and pubnet:** `LEASE_SKEW_MARGIN_MS` (5 s) in `ports/settlement-store.ts`; the
+  PostgreSQL adapter (the only one since 0064) takes another holder's lease only once it expired more than that ago, and the contract
   tests and the crash takeover in `lease.test.ts` move by it. The pubnet refusal names 0024 alone
   (`config.ts`, `config.test.ts`, `main.test.ts`, README).
+- **Code review (2026-10-27):** decisions 20 and 21; an end-to-end drain test in
+  `settle-pool.test.ts` through `compose()` and `start()` (a payment answered `settlement_pending`
+  keeps `close()` open until it lands, and its record is `success` when the lease is released); a
+  sweep drained in `settle-route.test.ts`; `close()` waiting for a sweep in `reconcile.test.ts`.
+  README: no `/health` route yet, the deadline's real bound (about 25 s, not the TTL; 0071), the
+  503 and the 200 `…_shutting_down` told apart, that row's `transaction`. Facilitator 513 → 515
+  with PostgreSQL; mutants caught: no settle drain, no `drain` dependency, `drain` not awaited,
+  `close()` not waiting for the sweep, `start().close()` not waiting for it. The process exit has
+  no test, since it needs the 150 s deadline.
+- **Modified tests in the review round:** the shutdown refusal in `settle-pool.test.ts` waits for
+  the account read instead of a fixed 50 ms; the shared-read bound in `settle.test.ts` (from 0009)
+  is 150 instead of 70, since the tests' PostgreSQL spreads the initial lookups (CI read 73;
+  unshared reads come to about 550). Intentional.
 
 ## Design Decisions
 
@@ -206,6 +228,10 @@ As a facilitator operator, I want only one process at a time to settle through a
     before Docker's SIGKILL, the process force-closes open connections, ends the pools and exits
     without releasing, so a transaction still unresolved gets the TTL before another process sends
     on its channel. Releasing anyway was rejected.
+    *Corrected 2026-10-27 (code review):* the TTL runs from the last renewal, so another process
+    can send about 25 s after the deadline (TTL less up to a third, plus the 5 s margin), while a
+    transaction can stay valid for 60 s. The cost is `tx_bad_seq` and a rebuild, not a double
+    charge; 0071's fencing closes it.
 15. **The fencing token is a backlog task, 0071, due before pubnet** (okarcz, 2026-10-26): on one
     host with `held()`'s local expiry, the window left is a call already past the lease check when
     its process freezes past the TTL, and its cost is `tx_bad_seq`, not a double charge. The port
@@ -228,10 +254,9 @@ As a facilitator operator, I want only one process at a time to settle through a
    until 0027, so `lease_changes_total{held}` counts the changes; 0027 can derive the state or add
    a gauge.
 7. **The first attempt comes before the first sweep** (claude, 2026-10-26; the sweep part is
-   moot since decision 19, the order stays): `start()` awaits it, so
-   a process that takes the lease at once also sweeps at once instead of 10 s later. The server
-   already listens, so `/health` answers meanwhile. `reconciled` settles after a skipped first
-   sweep too, so tests of a process without the lease don't hang.
+   moot since decision 19, the order stays): `start()` awaits it, so a process that takes the
+   lease at once also sweeps at once instead of 10 s later. The server already listens, so
+   `/verify` and `/supported` answer meanwhile.
 12. **The server listens until the drain ends** (claude, 2026-10-26): the checkpoint closed it
    beside the drain, but a closed server refuses new connections, so a client would get a refused
    connection (a 502 through the tunnel) instead of decision 8's `503 shutting_down`. It closes
@@ -248,6 +273,14 @@ As a facilitator operator, I want only one process at a time to settle through a
     finishes payments that landed at once; every sweep write is a compare-and-set on the version.
     The same rebase moves the lease and shutdown tests to PostgreSQL (0064 dropped the memory
     store), and the timer test waits for each renewal, since the queries take real time.
+20. **The drain waits for a sweep under way** (claude, 2026-10-27, code review): the Context item
+    from 0019's code review. `Reconciliation.close()` returns once the running sweep ends, and
+    `start().close()` waits for it beside the settlement drain, so its writes don't reach the
+    pools `main()` ends next.
+21. **The process exits once `close()` settles** (claude, 2026-10-27, code review): past the
+    deadline, confirmations still under way kept it alive until Docker's SIGKILL, though decision
+    11 says it exits. `server.ts` calls `process.exit()` after `close()`, with code 1 if it
+    failed.
 
 ## Future Work
 
