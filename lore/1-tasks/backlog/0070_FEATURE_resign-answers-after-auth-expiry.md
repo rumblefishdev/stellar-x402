@@ -7,7 +7,7 @@ related_adr: ["0006"]
 related_tasks: ["0019", "0009"]
 tags: [facilitator, settlement, priority-medium, effort-medium, payments]
 links:
-  - ../active/0019_FEATURE_settlement-record-lifecycle.md
+  - ../archive/0019_FEATURE_settlement-record-lifecycle.md
 history:
   - date: "2026-10-26"
     status: backlog

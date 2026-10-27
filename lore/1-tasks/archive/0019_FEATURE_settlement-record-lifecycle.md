@@ -2,10 +2,10 @@
 id: "0019"
 title: "Settlement records survive restarts"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0006", "0011"]
-related_tasks: ["0012", "0009", "0016", "0014", "0013", "0039"]
+related_tasks: ["0012", "0009", "0016", "0014", "0013", "0039", "0025", "0026", "0027", "0070"]
 tags: [facilitator, settlement, priority-high, effort-medium, payments]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -38,6 +38,14 @@ history:
       Applied Karol's (karolko9) PR #57 review: a record version guards expiry, one sweep loop
       replaces the scheduling and the 503 gate, and two outage leftovers are fixed (decisions
       26-30). Point 7 spawned 0070.
+  - date: "2026-10-27"
+    status: completed
+    who: okarcz
+    note: >
+      PR #57 rebase-merged into develop (edf972f). Karol's second review (fallback success decided
+      by the store, hooks run once; decisions 32-35) and Stan's hosting review (`listed` for the
+      deploy, reconciliation independent of the lease; decisions 36-37) applied. Facilitator 493
+      tests with PostgreSQL. All 7 ACs met; 0070 spawned for point 7.
 ---
 
 # Settlement records survive restarts
@@ -185,6 +193,15 @@ As a facilitator operator, I want settlement records that are written before sen
   sweep, lost hooks twice, one bad key; the scheduler tests rewritten for the loop, the
   one-sweep-at-a-time test removed), `settle.test.ts` +1 (a success answered once while a sweep
   stores it). Each fix was checked against its mutant.
+- **PR #57 second review (2026-10-27, decisions 32-37):** Karol's 8 tests cherry-picked; the
+  submit catch reads the record back first and answers a stored success through `respond`, which
+  checks `successAnsweredAt`; `advance(…, final)` puts only the transition through `finalWrite`.
+  After the rebase onto develop (0064 dropped the memory store) every test runs on PostgreSQL
+  (`testDatabase()`). Stan's review: `Reconciliation.listed()` (`sweep(onListed)`); ADR 0011,
+  0025 and 0027 updated. Facilitator 453 → 493 with PostgreSQL.
+- **Modified tests in the second review round:** the decision-28 test became decision 32's (the
+  repeat gets the success, the first call `…_already_settled`); the schedule tests wait for the
+  sweep a tick started, since PostgreSQL queries take real time. Intentional.
 - **Modified tests in the review round:** the hashless-claim tests advance the clock past the
   budget (decision 27 dropped "close all at startup"); the history-gone test waits 5 minutes for
   its recheck; `settle.test.ts` expects `transition`'s fourth argument and no longer listens for
@@ -206,6 +223,9 @@ As a facilitator operator, I want settlement records that are written before sen
   answered twice (3), `pending` for up to 5 minutes after a restart (4), lost hooks after a write
   that committed and threw (5), a dropped store failure and one key stopping every sweep (6).
   Fixed by decisions 26-29.
+- **A CI-only flake after the PostgreSQL port:** "sends no hash whose write ended after the budget
+  answer" had a 100 ms budget, which the claim outlasted on a loaded runner. It now has a 1 s
+  budget and holds the hash's write until the budget answer is out (`db4e035`).
 - **Rebases onto develop:** `main.ts` (0020's channel check comment) and `app.ts` (0023's rate
   limiter on `/settle`) conflicted; the 503 test needed `CLIENT_IP` after 0023 made it required.
 
