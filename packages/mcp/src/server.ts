@@ -9,6 +9,7 @@ import {
   callPaidHttp,
   type PaymentConfig,
 } from "./pay.js";
+import { SellerFetchError } from "./guard.js";
 import { toolError, ToolError, toolResult } from "./results.js";
 import { GET_RESOURCE_INPUT, GET_RESOURCE_OUTPUT, previewPayment } from "./preview.js";
 
@@ -83,7 +84,7 @@ export function createServer(config: ServerConfig): McpServer {
       try {
         return toolResult({ ...(await previewPayment({ url, method, body }, sellerLimits)) });
       } catch (error) {
-        if (!(error instanceof ToolError)) throw error;
+        if (!(error instanceof ToolError || error instanceof SellerFetchError)) throw error;
         log(
           `get_resource ${error.code}: ${error.message}${error.detail ? ` (${error.detail})` : ""}`,
         );
@@ -116,7 +117,7 @@ export function createServer(config: ServerConfig): McpServer {
             ...(await callPaidHttp({ url, method, headers, body }, payment, sellerLimits, log)),
           });
         } catch (error) {
-          if (!(error instanceof ToolError)) throw error;
+          if (!(error instanceof ToolError || error instanceof SellerFetchError)) throw error;
           log(
             `call_paid_http ${error.code}: ${error.message}${error.detail ? ` (${error.detail})` : ""}`,
           );

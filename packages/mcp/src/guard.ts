@@ -2,14 +2,21 @@ import { lookup } from "node:dns";
 import { isIP, type LookupFunction } from "node:net";
 import ipaddr from "ipaddr.js";
 import { Agent, fetch as undiciFetch } from "undici";
-import { ToolError } from "./results.js";
 
-/** How this server talks to sellers, for a preview and a payment alike. */
+/** Why a seller request was refused or failed; `detail` (a library or seller error) is for logs only. */
+export class SellerFetchError extends Error {
+  constructor(
+    readonly code: "unsafe_url" | "upstream_error" | "response_too_large" | "invalid_input",
+    message: string,
+    readonly detail?: string,
+  ) {
+    super(message);
+  }
+}
+
+/** How requests to one seller are bounded. */
 export interface SellerLimits {
-  /**
-   * Give up on a tool call after this long, all its seller requests together, so a call ends before
-   * the MCP client stops waiting and the agent always gets an answer.
-   */
+  /** Give up after this long, all of one caller's requests to the seller together. */
   timeoutMs: number;
   /** Refuse a seller response body larger than this. */
   maxResponseBytes: number;
@@ -37,7 +44,7 @@ function isNotPublic(ip: string): boolean {
 /**
  * This machine: `localhost` and `*.localhost` (names reserved for loopback, RFC 6761) or a loopback
  * address. The only hosts `allowInsecureLocal` opens, so a test seller on this machine is reachable
- * while the buyer's network and plain http elsewhere stay closed.
+ * while private networks and plain http elsewhere stay closed.
  */
 function isLoopback(host: string): boolean {
   if (host === "localhost" || host.endsWith(".localhost")) return true;
@@ -45,7 +52,7 @@ function isLoopback(host: string): boolean {
 }
 
 /**
- * Resolves a name as the connection does and refuses it when any address is in the buyer's own
+ * Resolves a name as the connection does and refuses it when any address is in the caller's own
  * network. A public name can point there and still have a public certificate (an internal service
  * with a Let's Encrypt certificate), so https alone does not stop it. The address checked is the one
  * connected to, so DNS cannot answer differently in between.
@@ -54,7 +61,7 @@ export const publicOnlyLookup: LookupFunction = (hostname, options, callback) =>
   lookup(hostname, { ...options, all: true }, (error, addresses) => {
     if (error) return callback(error, "");
     if (addresses.some((a) => isNotPublic(a.address))) {
-      const refused = new ToolError(
+      const refused = new SellerFetchError(
         "unsafe_url",
         "The URL's host resolves to an address that is not public.",
       );
@@ -71,30 +78,32 @@ export const publicOnlyLookup: LookupFunction = (hostname, options, callback) =>
  * With `allowInsecureLocal`, http or https to this machine passes too.
  */
 export function checkUrl(raw: string, allowInsecureLocal: boolean): URL {
-  if (!URL.canParse(raw)) throw new ToolError("unsafe_url", "url is not a URL.");
+  if (!URL.canParse(raw)) throw new SellerFetchError("unsafe_url", "url is not a URL.");
   const url = new URL(raw);
   const host = url.hostname.replace(/^\[|\]$/g, "");
   const web = url.protocol === "http:" || url.protocol === "https:";
   if (allowInsecureLocal && web && isLoopback(host)) return url;
-  if (url.protocol !== "https:") throw new ToolError("unsafe_url", "Only https URLs are called.");
+  if (url.protocol !== "https:")
+    throw new SellerFetchError("unsafe_url", "Only https URLs are called.");
   const local = isIP(host) !== 0 && isNotPublic(host);
-  if (local) throw new ToolError("unsafe_url", "The URL points at an address that is not public.");
+  if (local)
+    throw new SellerFetchError("unsafe_url", "The URL points at an address that is not public.");
   return url;
 }
 
-/** A GET carries no body: fetch would throw, and the mistake is the agent's input, not the seller. */
+/** A GET carries no body: fetch would throw, and the mistake is the caller's input, not the seller. */
 export function checkBody(method: string, body: string | undefined): void {
   if (method === "GET" && body !== undefined) {
-    throw new ToolError("invalid_input", "A GET request cannot carry a body.");
+    throw new SellerFetchError("invalid_input", "A GET request cannot carry a body.");
   }
 }
 
 /**
- * The fetch the payment wrapper uses: only public addresses, no redirects (the paid retry carries the
- * signed payment, which must not reach another host), a deadline, and a body size cap counted while
- * the body arrives. `deadline` is the tool call's, `AbortSignal.timeout(timeoutMs)` made once when the
- * call starts: it covers every request made through this fetch, and a payment's signing too, so a
- * payment's unpaid request, signing and paid retry together end within `timeoutMs`.
+ * A fetch to sellers: only public addresses, no redirects (a paid retry carries the signed payment,
+ * which must not reach another host), a deadline, and a body size cap counted while
+ * the body arrives. `deadline` is the caller's, `AbortSignal.timeout(timeoutMs)` made once when its
+ * work starts: it covers every request made through this fetch, so a payment's unpaid request,
+ * signing and paid retry together end within `timeoutMs`.
  */
 export function guardedFetch(limits: SellerLimits, deadline: AbortSignal): typeof fetch {
   // Every name is checked where it is connected to. undici's own `maxResponseSize` is not used: it
@@ -107,7 +116,7 @@ export function guardedFetch(limits: SellerLimits, deadline: AbortSignal): typeo
   const dispatcher = new Agent({ connect: { lookup: guardedLookup } });
   return async (input, init) => {
     const request = new Request(input, init);
-    // Every request the payment wrapper makes passes here, so the guard holds whoever calls this.
+    // Every request made through this fetch passes here, so the guard holds whoever calls it.
     checkUrl(request.url, limits.allowInsecureLocal);
     let response;
     try {
@@ -121,30 +130,34 @@ export function guardedFetch(limits: SellerLimits, deadline: AbortSignal): typeo
       });
     } catch (error) {
       // A refusal from publicOnlyLookup comes back as the cause of undici's "fetch failed".
-      if (error instanceof Error && error.cause instanceof ToolError) throw error.cause;
-      throw new ToolError("upstream_error", "The request to the seller failed.", String(error));
+      if (error instanceof Error && error.cause instanceof SellerFetchError) throw error.cause;
+      throw new SellerFetchError(
+        "upstream_error",
+        "The request to the seller failed.",
+        String(error),
+      );
     }
     if (response.status >= 300 && response.status < 400) {
-      throw new ToolError(
+      throw new SellerFetchError(
         "unsafe_url",
         "The seller answered with a redirect, which is not followed.",
       );
     }
-    // Counted after decompression, as the body is read: the limit holds for what reaches the agent.
+    // Counted after decompression, as the body is read: the limit holds for what reaches the caller.
     const chunks: Uint8Array[] = [];
     let size = 0;
     try {
       for await (const chunk of response.body ?? []) {
         size += chunk.byteLength;
         if (size > limits.maxResponseBytes) {
-          throw new ToolError("response_too_large", "The seller's response is too large.");
+          throw new SellerFetchError("response_too_large", "The seller's response is too large.");
         }
         chunks.push(chunk);
       }
     } catch (error) {
-      if (error instanceof ToolError) throw error;
+      if (error instanceof SellerFetchError) throw error;
       // The deadline covers the body too: a seller that sends its headers and then stalls ends here.
-      throw new ToolError(
+      throw new SellerFetchError(
         "upstream_error",
         "The seller's response did not arrive in full.",
         String(error),

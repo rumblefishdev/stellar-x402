@@ -3,7 +3,7 @@ import { x402Client, x402HTTPClient, type SchemeRegistration } from "@x402/core/
 import { wrapFetchWithPayment } from "@x402/fetch";
 import { z } from "zod";
 import { ToolError } from "./results.js";
-import { checkBody, checkUrl, guardedFetch, type SellerLimits } from "./guard.js";
+import { SellerFetchError, checkBody, checkUrl, guardedFetch, type SellerLimits } from "./guard.js";
 import { countDaily, refundDaily, utcDay, type DailyEntry } from "./daily.js";
 
 /** The call_paid_http tool's input and output, as server.ts registers it. */
@@ -194,7 +194,7 @@ export async function callPaidHttp(
     if (paymentSent) {
       // The signed payment left this process; whether the seller settled it is unknown.
       const detail =
-        error instanceof ToolError
+        error instanceof ToolError || error instanceof SellerFetchError
           ? `${error.code}: ${error.detail ?? error.message}`
           : String(error);
       throw new ToolError(
@@ -203,7 +203,7 @@ export async function callPaidHttp(
         detail,
       );
     }
-    if (error instanceof ToolError) throw error;
+    if (error instanceof ToolError || error instanceof SellerFetchError) throw error;
     if (refusal) throw refusal;
     if (signingError) {
       // The payer's simulation fails in the asset contract: #10 is a balance too low, #13 a missing
