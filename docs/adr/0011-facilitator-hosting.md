@@ -428,7 +428,8 @@ One request or one stop must never outlast the layer in front of it:
     four default scopes is twice that), which pgBackRest ships as each segment closes, and the
     table grows about a third: check the disk's headroom first;
   - both networks' databases share the server's disks with the production ClickHouse, so an
-    online migration runs on testnet first and outside mainnet's busy hours. Mainnet's ceiling on
+    online migration runs on testnet first, outside mainnet's busy hours and away from 00:00 UTC,
+    when ClickHouse writes the most. Mainnet's ceiling on
     a migration's length goes to 0038.
 - **No TLS to the database.** The connection stays on the network's `internal` Docker network on
   one host, and anyone who could read it there could read the database files. PostgreSQL uses

@@ -87,6 +87,11 @@ first in a spike ([R-spike-results](notes/R-spike-results.md)). In short:
   249 s and 259 s inside the backfill, when the runner held no lock `reserve` takes: a disk stall
   slowed a `COMMIT` holding the `global` scope row, and the reserves queued on it gave up
   ([R-spike-results](notes/R-spike-results.md)). The first 1 M run stopped on a batch's
-  statement timeout, which a batch now retries.
+  statement timeout, which a batch now retries. Two more runs: 3 errors during the index build;
+  and, with `reserve` committing asynchronously (`synchronous_commit = off`), 3 errors from one
+  8 s stall of the whole database. That change bought nothing and cost AD-18 a crash's last
+  0.6 s of reservations, so it was reverted.
+- The production disk over 30 days: an average write
+  0.6 ms, the worst second 112 ms, against the laptop's 2–8 s stalls.
 - ADR 0012 (the rule, the runner's lock, markers and bounds, the backfill's WAL and `reserve`)
   and ADR 0011 (long migrations in the deploy, disk headroom, shared disks).

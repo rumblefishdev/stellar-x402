@@ -70,3 +70,22 @@ backfill removes the errors and shortens the tail, but doesn't bound it.
 This is a property of the spend design (0050) as much as of migrations: any `COMMIT` that takes
 over 2 s, for any reason (another tenant's writes on the shared disk, autovacuum), fails every
 `reserve` queued behind the `global` row.
+
+## The production disk
+
+The server's block-device statistics over 30 days (one sample a second per disk), read on 27.10;
+nothing was run or written on the server. Its two NVMe disks are in RAID 1, and ClickHouse,
+Docker and so our Postgres and its WAL share them (ADR 0011).
+
+- Write traffic about 8 MiB/s, the disks busy about 0.5% of the time, an average write
+  0.6–0.7 ms.
+- Of 2.5 million seconds, a second's average write took over 10 ms in about 0.27% of them, over
+  50 ms in about 195, never over 200 ms; the worst second averaged 112 ms.
+- The slow seconds are ClickHouse writing 400–500 MiB/s, most of them around 00:00 UTC every
+  day, the most on Monday at 00:00.
+
+The laptop stalled a `COMMIT` for 2–6 s; this disk's worst second is about 20× shorter. Not
+seen from here: a single request slower than its second's average, the cache flushes `fsync`
+sends, and the disk model (whether its write cache survives a power loss); a shell on the
+server would show them.
+

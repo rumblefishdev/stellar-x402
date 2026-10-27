@@ -176,14 +176,17 @@ risk:
 
 ## Open
 
-- The production disk: model and RAID, when ClickHouse writes, host metrics, `pg_test_fsync` on
-  the data volume. Decides whether 250 ms holds on production.
+- The production disk (R-spike-results): NVMe RAID 1, an average write 0.6 ms, the worst second
+  of 30 days 112 ms, slow seconds around 00:00 UTC. 250 ms should hold there; the disk model and
+  its flush latency are still unknown.
 - Smaller batches at the same pace (1 000 every 50 ms): less WAL per `COMMIT`; A7's batch of 1 000
   had the shortest reserve tail (158 ms). Untested under A10's setup.
 - `wal_compression` would shrink the full-page images a backfill writes after each checkpoint.
 - The `global` row: any `COMMIT` over 2 s fails the queued reserves, migration or not (AC1's 1 M
-  run: 7 errors in one 10 s stall inside the backfill). A follow-up task, with Karol (0050's
-  design).
+  runs: 3–7 errors, each run's in one stall). Tried and reverted: `synchronous_commit = off` in
+  `reserve` still lost 3 reserves, to an 8 s stall of the whole database, and would cost AD-18 a
+  crash's last 0.6 s of reservations. On the production disk (worst second 112 ms) this needs no
+  task of its own; 0024 already answers `55P03` as a retry.
 
 ## AC1 [decided: reworded]
 
