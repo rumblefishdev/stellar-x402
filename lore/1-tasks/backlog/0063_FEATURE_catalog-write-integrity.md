@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 milestone: 1
 related_adr: ["0008"]
-related_tasks: ["0032", "0054", "0023", "0015"]
+related_tasks: ["0032", "0054", "0023", "0015", "0068", "0069", "0070"]
 tags: [bazaar, discovery, security, priority-medium, effort-medium]
 links:
   - ../../../docs/adr/0008-bazaar-catalog-integrity.md
@@ -16,6 +16,12 @@ history:
     note: >
       Found in the PR #50 review: /discovery/resources makes the catalog public, and with it two
       gaps in how entries are written.
+  - date: "2026-10-27"
+    status: backlog
+    who: karolkow
+    note: >
+      Grilled after a testnet run of both attacks: listing content comes from the seller's own
+      402, field limits on offers. Decisions recorded below; 0070 spawned.
 ---
 
 # Keep catalog listings from being overwritten or padded before pubnet
@@ -47,13 +53,52 @@ description or price, and nobody can make `/discovery/resources` answer megabyte
 - Not here: loopback, private and IP resource URLs, refused on every network since 0054; rate
   limits (0023).
 
-## Options to decide
+- Measured on testnet (2026-10-26, develop `8a96736`, real settlements): an outsider's 1-stroop
+  settle to the seller's `payTo` and URL replaced the description and the 10000-stroop price with
+  its own (`processing` header, the facilitator paid the ~10,550-stroop fee); four more 1-unit
+  settles in self-deployed tokens grew `accepts` to 5; 100 entries with a ~63 KB `extra` made a
+  6.4 MB page, and 20 concurrent page reads raised `/supported` p95 from 6 to 68 ms.
+- Measured on the largest public x402 catalog (5,000 of 74,883 entries, 50 evenly spaced pages): per
+  listing key at most 4 offers; no `extra` over 1.9 KB; 2% of offers carry fields outside the
+  spec's seven, mostly x402 v1 names. 56 of 60 sampled sellers (one per host) answer an unpaid
+  request with a usable 402: 53 with an empty body, the rest only with the listing's example.
+- The spec says nothing on who may change a listing (`specs/extensions/bazaar.md`); upstream
+  issue x402-foundation/x402#3005 is open on it.
 
-- Changes to an entry only with the seller's signature (the `payTo` key).
-- The first write keeps the entry's text and prices; later writes refresh `lastUpdated` and add
-  new assets only. Simple, but a seller can't change a price or description.
-- For size: store only the spec's `PaymentRequirements` fields, cap `extra` and the length of
-  `accepts`.
+## Decisions so far
+
+| # | What is done | From | Vs the task | Who does the same (checked) | Code | Test |
+|---|---|---|---|---|---|---|
+| 1 | A listing's content comes from the seller's own unpaid 402 (an MCP server's `PaymentRequired`), never from the payment. A successful settle carrying `extensions.bazaar` only triggers the check | grilling | changes it (the task listed a seller signature or first write wins) | spec silent; upstream issue #3005 open | | |
+| 2 | The check runs on every such settle, at most once per minute per listing key, so a busy listing leaves the host budget to new ones | grilling | beyond it | spec silent | | |
+| 3 | At most 30 checks per minute per host, plus a global budget; a check over budget is skipped with a log line, and the next payment tries again. Both numbers are assumptions | grilling | beyond it | spec silent | | |
+| 4 | The check uses the listing's method; a POST sends `{}`, a GET no query | grilling | beyond it | spec silent | | |
+| 5 | An `https` MCP listing is checked with an MCP client: `initialize`, then `tools/call` without payment, with the payment's example arguments up to 16 KiB, since the MCP SDK validates arguments before the tool's handler (`server/mcp.js:125`, SDK 1.30.1). Upstream's wrapper answers `PaymentRequired` before the tool runs (`@x402/mcp` `paymentWrapper.ts:276-284`). Own PR | grilling | beyond it | upstream `@x402/mcp` | | |
+| 6 | No usable answer (loopback or private host, `mcp://tool/…` without a server address, not a 402, no offer with the key's network and `payTo`, timeout): a new listing isn't created, an existing one stays as it was; a log line and a counter carry the reason | grilling | beyond it | RFC 8555 §10 (validate over the public internet only) | | |
+| 7 | Only the seller's offers with the listing key's network and `payTo` are stored, and a check replaces `accepts` instead of merging into the stored one | grilling | beyond it | spec silent | | |
+| 8 | An offer keeps only the spec's seven fields; the count of dropped fields is logged | grilling | matches it | x402 v2 §5.1.2; upstream `core/src/schemas/index.ts:160` | | |
+| 9 | `extra` up to 2 KiB per offer, at most 4 offers per listing; the `bazaar` block keeps its 32 KiB. Over a limit the listing is refused as `too_large`, and the payment never is | grilling | matches it | spec silent | | |
+| 10 | Two checks of one key at once: the result of the one that started later is kept | agent | beyond it | — | | |
+| 11 | `lastUpdated` is the time of the last confirmation from the seller | agent | beyond it | x402 v2 §8.3 names the field only | | |
+| 12 | One counter by outcome: refreshed, not askable (with the reason), over budget, other `payTo`, too large | agent | beyond it | — | | |
+| 13 | The URL guard moves from `packages/mcp` to a shared package in a `[structure only]` PR; its `allowInsecureLocal` switch is off by default, refused on pubnet, and on only in tests and local gate runs | grilling | beyond it | RFC 8555 §10 | | |
+| 14 | ADR 0008's "the facilitator never fetches any seller-supplied URL" is replaced by these rules | agent | matches it | — | | |
+| 15 | No stored listings to migrate: the facilitator isn't deployed yet | grilling | beyond it | — | | |
+| 16 | `/settle` keeps accepting a payload whose `accepted` differs from `paymentRequirements`: no facilitator code reads `accepted`, and the signed transaction is checked against the requirements (`settle.ts:931`) | grilling | beyond it | upstream checks it in the resource server (`x402ResourceServer.ts:2127`) | | |
+
+## Not yet decided
+
+- How the work splits into PRs (the guard move first, then HTTP checks, then MCP).
+- Whether a payer settling to itself, or many new listings from one payer or `payTo`, should be
+  refused; not discussed yet.
+- The measured cause of the `500` answers under 20 concurrent `/discovery/resources` reads
+  (hypothesis: the database pool); its own task once measured.
+
+## Out of scope
+
+- A "verified" badge for sellers who prove their `payTo` with `stellar.toml`: 0070.
+- Listings whose seller stopped answering: 0069. The buyer's MCP refusing a price above the
+  listing: 0068. Pubnet host rules at validation: 0054.
 
 ## Acceptance Criteria
 
