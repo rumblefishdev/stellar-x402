@@ -16,7 +16,10 @@ import { GET_RESOURCE_INPUT, GET_RESOURCE_OUTPUT, previewPayment } from "./previ
 export interface ServerConfig {
   /** Base URL of a server with `GET /discovery/resources`: our facilitator, or a fake catalog. */
   discoveryUrl: string;
-  /** Give up on a tool call after this long, all its catalog or seller requests together. */
+  /**
+   * Give up on a tool call after this long, all its catalog or seller requests together, so a call
+   * ends before the MCP client stops waiting and the agent always gets an answer.
+   */
   timeoutMs: number;
   /** Refuse a seller response body larger than this. */
   maxResponseBytes: number;
