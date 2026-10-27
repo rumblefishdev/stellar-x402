@@ -27,7 +27,9 @@ history:
 `migrate()` applies every pending migration in one transaction on the main pool, under its 10 s
 `statement_timeout`. 0050 measured its `0004_spend_window` migration hitting that timeout at about
 200 000 reservations. Once the public testnet deployment (0026) holds weeks of traffic, the next
-change to these tables would fail the boot. Give `migrate()` a way to run such a migration online.
+change to these tables would fail the deploy, or stop `reserve` for a minute (the spike: 56 of 60
+reserves failed while a 10-minute bound let it apply). Give `migrate()` a way to run such a
+migration online.
 
 ## Context
 
@@ -40,17 +42,26 @@ change to these tables would fail the boot. Give `migrate()` a way to run such a
 
 ## Implementation
 
-- Let a migration opt out of the shared transaction (e.g. `{ transaction: false }`), so it can
-  use `CREATE INDEX CONCURRENTLY` and `NOT VALID` / `VALIDATE CONSTRAINT`.
-- Backfills run in batches, each in its own short transaction.
-- Run migrations on a connection without the pool's `statement_timeout`, keeping `lock_timeout`
-  short and retrying when it fires.
-- A migration that stops part way resumes on the next boot; record what makes each step safe to
-  re-run.
+The design is [S-online-runner-design](notes/S-online-runner-design.md) (plan v3), measured
+first in a spike ([R-spike-results](notes/R-spike-results.md)). In short:
+
+- A migration is transactional (`{ name, sql }`, as today) or online
+  (`{ name, online: true, steps }`) with `sql`, `index` and `backfill` steps.
+- Each step commits with a `schema_migrations` marker `name#<i>`; the next `migrate` skips the
+  done steps. The migration's own row is written after its last step.
+- ACCESS EXCLUSIVE steps wait at most 500 ms for their lock and retry `55P03` / `40P01`; index
+  builds and `VALIDATE` wait without a lock timeout under a 30 min bound.
+- Backfills: one keyset pass, a transaction a batch of 5 000, a 250 ms pause between batches.
+- The runner holds a per-schema session advisory lock taken by polling, on a session with
+  `client_connection_check_interval`.
+- Online migrations run in the deploy's `migrate-<network>` service (ADR 0011 changes).
+- Three PRs: the runner, its tests (T1–T5), the ADR amendments.
 
 ## Acceptance Criteria
 
 - [ ] A migration that adds a NOT NULL column with a backfill and an index applies to a database
-      with 1 000 000 reservations without hitting a timeout, while `reserve` keeps answering
-- [ ] A migration interrupted part way finishes on the next boot without manual steps
+      with 1 000 000 reservations without hitting a timeout, while `reserve` keeps answering: no
+      `reserve` error, and its latency compared with the same load without the migration
+- [ ] A migration interrupted part way finishes on the next deploy (`pnpm migrate`) without
+      manual steps
 - [ ] ADR 0012 states how a migration chooses between the one-transaction and the online path
