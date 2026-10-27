@@ -3,10 +3,14 @@ import { isIP, type LookupFunction } from "node:net";
 import ipaddr from "ipaddr.js";
 import { Agent, fetch as undiciFetch } from "undici";
 
-/** Why a seller request was refused or failed; `detail` (a library or seller error) is for logs only. */
+/**
+ * Why a seller request was refused or failed. `message` can reach the caller's own client as is (the
+ * buyer's MCP server shows it to the agent), so it holds nothing from the seller; `detail` (a library
+ * or seller error) is for logs only.
+ */
 export class SellerFetchError extends Error {
   constructor(
-    readonly code: "unsafe_url" | "upstream_error" | "response_too_large" | "invalid_input",
+    readonly code: "unsafe_url" | "upstream_error" | "response_too_large",
     message: string,
     readonly detail?: string,
   ) {
@@ -89,13 +93,6 @@ export function checkUrl(raw: string, allowInsecureLocal: boolean): URL {
   if (local)
     throw new SellerFetchError("unsafe_url", "The URL points at an address that is not public.");
   return url;
-}
-
-/** A GET carries no body: fetch would throw, and the mistake is the caller's input, not the seller. */
-export function checkBody(method: string, body: string | undefined): void {
-  if (method === "GET" && body !== undefined) {
-    throw new SellerFetchError("invalid_input", "A GET request cannot carry a body.");
-  }
 }
 
 /**
