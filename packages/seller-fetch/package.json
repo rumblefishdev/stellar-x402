@@ -1,0 +1,29 @@
+{
+  "name": "@stellar-x402/seller-fetch",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Requests to seller URLs: public addresses only, no redirects, a deadline and a size cap",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "ipaddr.js": "~2.5.0",
+    "undici": "~7.30.0"
+  }
+}

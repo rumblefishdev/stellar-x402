@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { HTTPFacilitatorClient } from "@x402/core/http";
 import { withBazaar } from "@x402/extensions/bazaar";
 import { z } from "zod";
+import { SellerFetchError } from "@stellar-x402/seller-fetch";
 import { deadline, LIST_RESOURCES_INPUT, LIST_RESOURCES_OUTPUT, PAGE, summary } from "./catalog.js";
 import {
   CALL_PAID_HTTP_INPUT,
@@ -9,7 +10,6 @@ import {
   callPaidHttp,
   type PaymentConfig,
 } from "./pay.js";
-import { SellerFetchError } from "./guard.js";
 import { toolError, ToolError, toolResult } from "./results.js";
 import { GET_RESOURCE_INPUT, GET_RESOURCE_OUTPUT, previewPayment } from "./preview.js";
 

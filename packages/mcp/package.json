@@ -26,11 +26,10 @@
     "@modelcontextprotocol/sdk": "^1.30.1",
     "@stellar-x402/bazaar": "workspace:*",
     "@stellar-x402/config": "workspace:*",
+    "@stellar-x402/seller-fetch": "workspace:*",
     "@x402/core": "~2.28.0",
     "@x402/extensions": "~2.28.0",
     "@x402/fetch": "~2.28.0",
-    "ipaddr.js": "~2.5.0",
-    "undici": "~7.30.0",
     "zod": "^3.25.76"
   }
 }

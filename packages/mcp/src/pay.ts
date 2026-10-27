@@ -2,8 +2,14 @@ import { LIMITS } from "@stellar-x402/bazaar";
 import { x402Client, x402HTTPClient, type SchemeRegistration } from "@x402/core/client";
 import { wrapFetchWithPayment } from "@x402/fetch";
 import { z } from "zod";
+import {
+  SellerFetchError,
+  checkBody,
+  checkUrl,
+  guardedFetch,
+  type SellerLimits,
+} from "@stellar-x402/seller-fetch";
 import { ToolError } from "./results.js";
-import { SellerFetchError, checkBody, checkUrl, guardedFetch, type SellerLimits } from "./guard.js";
 import { countDaily, refundDaily, utcDay, type DailyEntry } from "./daily.js";
 
 /** The call_paid_http tool's input and output, as server.ts registers it. */
