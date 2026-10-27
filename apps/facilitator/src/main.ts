@@ -67,7 +67,7 @@ export async function start(
   let closing = false;
   const server = createApp({ ...deps, closing: () => closing }).listen(deps.config.port);
   await once(server, "listening");
-  // After listening, so `/health` answers meanwhile. Sweeps run with or without the lease (0019
+  // After listening, so `/verify` and `/supported` answer meanwhile. Sweeps run with or without the lease (0019
   // decision 37); `/settle` serves beside them (0019 decision 27) once the lease is held, and the
   // keeper keeps trying when it isn't (0025 decision 1).
   await deps.lease?.start();
@@ -91,14 +91,16 @@ export async function start(
       closing = true;
       const begun = Date.now();
       deps.logger.info("shutdown_started", { network: deps.config.network });
-      deps.reconciliation?.close();
+      // No new sweep starts; one under way is drained like the submissions, so its writes don't
+      // reach the pools `main()` ends next.
+      const swept = deps.reconciliation?.close();
       let timer: ReturnType<typeof setTimeout> | undefined;
       const deadline = new Promise<"deadline">((resolve) => {
         timer = setTimeout(() => resolve("deadline"), shutdownDeadlineMs);
         timer.unref();
       });
       const drained = (async () => {
-        await deps.drain?.();
+        await Promise.all([deps.drain?.(), swept]);
         await new Promise<void>((resolve, reject) =>
           server.close((e) => (e ? reject(e) : resolve())),
         );

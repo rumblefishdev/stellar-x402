@@ -567,7 +567,7 @@ describe("scheduleReconciliation (decision 27)", () => {
     schedule.close();
   });
 
-  it("starts nothing once closed during a sweep", async () => {
+  it("waits on close() for a sweep under way, and starts none after it (0025)", async () => {
     vi.useFakeTimers();
     const { store, schedule, sweep } = scheduled();
     const list = store.listNonFinal.bind(store);
@@ -578,9 +578,12 @@ describe("scheduleReconciliation (decision 27)", () => {
     };
     schedule.start();
     await vi.advanceTimersByTimeAsync(0);
-    schedule.close();
+    let closed = false;
+    const closing = schedule.close().then(() => (closed = true));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(closed).toBe(false);
     release();
-    await schedule.reconciled;
+    await closing;
     await vi.advanceTimersByTimeAsync(10 * SWEEP_INTERVAL_MS);
     expect(sweep).toHaveBeenCalledTimes(1);
   });

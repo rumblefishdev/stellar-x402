@@ -8,8 +8,14 @@ const started = main();
 
 // Node as PID 1 in a container ignores SIGTERM unless it has a handler. Registered before the
 // server listens, so a signal during startup closes it once it's up. Closing stops new
-// connections; the drain and the lease release follow (0025).
-const stop = () => void started.then((server) => server.close()).catch(() => {});
+// connections; the drain and the lease release follow (0025). Then the process exits: past the
+// drain's deadline, confirmations still under way would otherwise keep it alive until Docker's
+// SIGKILL (decision 11).
+const stop = () =>
+  void started
+    .then((server) => server.close())
+    .catch(() => (process.exitCode = 1))
+    .finally(() => process.exit());
 process.once("SIGTERM", stop);
 process.once("SIGINT", stop);
 
