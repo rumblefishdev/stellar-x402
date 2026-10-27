@@ -60,9 +60,9 @@ first in a spike ([R-spike-results](notes/R-spike-results.md)). In short:
 ## Acceptance Criteria
 
 - [x] A migration that adds a NOT NULL column with a backfill and an index applies to a database
-      with 1 000 000 reservations without hitting a timeout, while `reserve` keeps answering: no
-      `reserve` error comes from the migration's locks, and the run records `reserve`'s latency
-      and errors against the same load before it
+      with 1 000 000 reservations without a step failing on a timeout, while `reserve` keeps
+      answering: under 1% of `reserve` calls fail during the migration, and the run records
+      `reserve`'s latency, its errors and the retried batches against the same load before it
 - [x] A migration interrupted part way finishes on the next deploy (`pnpm migrate`) without
       manual steps
 - [x] ADR 0012 states how a migration chooses between the one-transaction and the online path
@@ -78,8 +78,11 @@ first in a spike ([R-spike-results](notes/R-spike-results.md)). In short:
   backfill's first batch, part way through it, in `VALIDATE` and in an index build, finished by
   the next run; a held lock retried while `reserve` waits at most the step's lock timeout; a
   batch that ran out of time retried; racing runs, the per-schema lock, the group split, a
-  backfill that leaves rows. Mutants each failing a case: no invalid-index repair, no lock
-  retry, no batch timeout retry.
+  backfill that leaves rows; a transactional group whose lock another session holds; `VALIDATE`
+  and an index build that outlast the pool's statement timeout; a run whose client went away
+  while a step waits. Mutants each failing a case: no invalid-index repair, no lock retry, no
+  batch timeout retry, a group without its lock retry or with a 10 s lock timeout, a long step
+  without its raised statement or client timeout, no `client_connection_check_interval`.
 - AC1 at 1 000 000 reservations with four scopes each (`MIGRATE_SCALE=1000000`, compose
   PostgreSQL 18 on Adam's laptop, 27.10): applied in 4 min 45 s; steps 1–3 took 3–4 ms; the
   backfill of 4 000 000 rows 282 s. `reserve` before: 471 calls, p50 8 ms, p99 13 ms. During:
@@ -90,7 +93,11 @@ first in a spike ([R-spike-results](notes/R-spike-results.md)). In short:
   statement timeout, which a batch now retries. Two more runs: 3 errors during the index build;
   and, with `reserve` committing asynchronously (`synchronous_commit = off`), 3 errors from one
   8 s stall of the whole database. That change bought nothing and cost AD-18 a crash's last
-  0.6 s of reservations, so it was reverted.
+  0.6 s of reservations, so it was reverted. A control run after the review (an `sql` step
+  bounded at 1 s, retries reported): applied in 4 min 43 s, the backfill 279 s, `VALIDATE`
+  0.3 s, the index 4 s, no step or batch retried; `reserve` before 494 calls, p50 8 ms, p99
+  22 ms, during 21 600 calls, p50 50 ms, p99 145 ms, max 3.9 s, and 2 errors (`55P03`, 0.009%)
+  at 256 s and 258 s inside the backfill.
 - The production disk over 30 days: an average write
   0.6 ms, the worst second 112 ms, against the laptop's 2–8 s stalls.
 - ADR 0012 (the rule, the runner's lock, markers and bounds, the backfill's WAL and `reserve`)

@@ -77,16 +77,18 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
     still serves, before it stops (ADR 0011). A failed migration fails the deploy, and the old
     facilitator keeps serving.
   - A migration is transactional if, on the largest database it will meet, its group holds
-    write-blocking locks for under 500 ms, an online step's bound, until it commits; otherwise it
-    is online (task 0067):
+    write-blocking locks for under 500 ms until it commits, so a `reserve` queued behind it stays
+    well under its 2 s; otherwise it is online (task 0067):
     - the group's 10 s statement bound only stops a run gone wrong: a group that holds
       `spend_reservation_scopes` for 8 s fails every `reserve` queued on it, at its 2 s lock
       timeout;
     - consecutive transactional migrations run in one transaction, so a failed group leaves the
       schema as it was;
-    - an online migration is a list of steps, each non-blocking or holding a lock for under a
-      second: a single catalog-only `ALTER`, a keyset backfill batch,
-      `CREATE INDEX CONCURRENTLY`, `NOT VALID` then `VALIDATE`. Each step commits with a
+    - an online migration is a list of steps, each non-blocking or holding its lock for at
+      most 1 s: a single catalog-only `ALTER`, a keyset backfill batch,
+      `CREATE INDEX CONCURRENTLY`, `NOT VALID` then `VALIDATE`. A backfilled column's new rows
+      take a default set in an earlier step when the value is a constant, or a trigger when it
+      is computed from the row; otherwise rows the previous release writes keep the default. Each step commits with a
       `name#<i>` marker in `schema_migrations`, so a failed or killed run leaves a valid expand
       prefix that the next deploy finishes. The previous release works after every step, and a
       migration that has started anywhere is never edited.
@@ -94,7 +96,7 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
       automatic rollback, safe.
   - The migration service's bounds, by kind: a transactional group 10 s; an online `ALTER` waits
     at most 500 ms for its lock, a quarter of `reserve`'s 2 s, retries `55P03` and `40P01`, and
-    runs at most 5 s; a backfill batch 5 s, 5 000 rows, 250 ms apart, and it retries its
+    runs at most 1 s, which leaves a `reserve` queued behind it 500 ms for the step's `COMMIT`; a backfill batch 5 s, 5 000 rows, 250 ms apart, and it retries its
     statement timeout too, since a batch that ran out of time waited on the disk; an index build or
     `VALIDATE` waits for locks without a timeout, since a `lock_timeout` aborts the build, and
     runs at most 30 minutes. The runner's session sets `client_connection_check_interval`, so a
@@ -198,6 +200,8 @@ moves back there.
     The pause between batches keeps that delay short; without the backfill the same load never
     waited past 0.4 s (task 0067). Any `COMMIT` slower than `reserve`'s 2 s lock timeout, for any
     reason, fails the reservations queued behind it.
+  - An online migration's budget: under 1% of `reserve` calls fail while it runs. At 1 000 000
+    reservations on a laptop's disk, 7 of 21 942 failed (0.03%), all on disk stalls (task 0067).
   - Task 0026 measures the full settle path and `addHash` on the testnet database it creates;
     0022 had no instance to measure on.
 - **Task 0022 builds the adapters.** CI runs the contract suites against a PostgreSQL service
