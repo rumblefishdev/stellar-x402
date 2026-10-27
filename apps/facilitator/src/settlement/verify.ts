@@ -159,7 +159,7 @@ export function createChecker(deps: VerifierDeps): Check {
     if (upstream.invalidReason === UNEXPECTED_VERIFY_ERROR) {
       throw new Error(`upstream verify failed with ${UNEXPECTED_VERIFY_ERROR}`);
     }
-    if (!upstream.isValid) return { response: upstream };
+    if (!upstream.isValid) return { response: withArchivedEntries(upstream, payload) };
     // Upstream always names the payer of a valid payment; without one, nothing below can run.
     if (upstream.payer === undefined) throw new Error("upstream verify named no payer");
 
@@ -356,6 +356,53 @@ function isV0Envelope(payload: PaymentPayload): boolean {
     );
   } catch {
     return false;
+  }
+}
+
+/**
+ * Upstream's fee refusal, its message followed by the archived entries the payment's transaction
+ * restores (task 0066). Since Protocol 23 a transaction pays their restore rent, which can put the
+ * fee over the ceiling; anyone can restore them from their own account and pay again. The buyer's
+ * client puts its simulation's Soroban data in the transaction, so the entries come with the
+ * payment: they only describe the refusal, which stays upstream's. Any other answer, or a
+ * transaction that lists none, is returned as it is.
+ */
+function withArchivedEntries(response: VerifyResponse, payload: PaymentPayload): VerifyResponse {
+  if (response.invalidReason !== "invalid_exact_stellar_payload_fee_exceeds_maximum") {
+    return response;
+  }
+  const keys = archivedEntries(payload);
+  if (keys.length === 0) return response;
+  const entries = keys.length === 1 ? "1 archived entry" : `${keys.length} archived entries`;
+  const named = keys.slice(0, ARCHIVED_ENTRIES_NAMED);
+  if (keys.length > named.length) named.push(`and ${keys.length - named.length} more`);
+  return {
+    ...response,
+    invalidMessage: `${response.invalidMessage}; the transaction restores ${entries}: ${named.join(", ")}`,
+  };
+}
+
+/** Most archived entries a refusal names: the client chooses how many it lists. */
+const ARCHIVED_ENTRIES_NAMED = 4;
+
+/** The base64 `LedgerKey`s the payload's transaction lists as archived, if it decodes. */
+function archivedEntries(payload: PaymentPayload): string[] {
+  const transaction = (payload.payload as { transaction?: unknown } | undefined)?.transaction;
+  if (typeof transaction !== "string") return [];
+  try {
+    const envelope = xdr.TransactionEnvelope.fromXDR(transaction, "base64");
+    if (envelope.switch() !== xdr.EnvelopeType.envelopeTypeTx()) return [];
+    const ext = envelope.v1().tx().ext();
+    if (ext.switch() !== 1) return [];
+    const data = ext.sorobanData();
+    if (data.ext().switch() !== 1) return [];
+    const readWrite = data.resources().footprint().readWrite();
+    return (data.ext().value() as xdr.SorobanResourcesExtV0)
+      .archivedSorobanEntries()
+      .map((i) => readWrite[i]?.toXDR("base64"))
+      .filter((key) => key !== undefined);
+  } catch {
+    return [];
   }
 }
 

@@ -500,6 +500,7 @@ describe("createSettler", () => {
       response: {
         isValid: false,
         invalidReason: "invalid_exact_stellar_payload_wrong_amount",
+        invalidMessage: "the check's own words",
         payer,
       },
     });
@@ -507,6 +508,7 @@ describe("createSettler", () => {
     expect((await settle(payload(), requirements)).response).toMatchObject({
       success: false,
       errorReason: "invalid_exact_stellar_payload_wrong_amount",
+      errorMessage: "the check's own words",
       payer,
     });
     expect(submit).not.toHaveBeenCalled();
