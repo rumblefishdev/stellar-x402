@@ -10,6 +10,7 @@ import {
   buildRpc,
   buildSettlement,
   compose,
+  start,
   type UpstreamSeams,
 } from "../src/main.js";
 import { memoryMetrics } from "../src/metrics.js";
@@ -47,10 +48,13 @@ const requirements: PaymentRequirements = {
 class PaymentRpc extends FakeRpc {
   /** Delay before an account read answers, to hold a settlement before it signs. */
   accountDelayMs = 0;
+  /** Account reads begun: a test waits for one before acting on a held settlement. */
+  accountReads = 0;
 
   override async getLedgerEntries(
     ...keys: Parameters<FakeRpc["getLedgerEntries"]>
   ): Promise<rpc.Api.GetLedgerEntriesResponse> {
+    this.accountReads++;
     if (this.accountDelayMs) await new Promise((r) => setTimeout(r, this.accountDelayMs));
     return super.getLedgerEntries(...keys);
   }
@@ -327,6 +331,47 @@ describe("main()'s composition (compose)", () => {
     },
   );
 
+  it("waits on close() for a settlement answered pending until it lands, then releases the lease (0025)", async () => {
+    const { deps, fake } = composed({ SETTLE_BUDGET_MS: "1000", PORT: "0" });
+    // A ledger read takes a round trip, as on a real RPC: `FakeRpc` closes a ledger on every
+    // read, so without one the pool's wait for the status never yields to the budget's timer.
+    const getLatestLedger = fake.getLatestLedger.bind(fake);
+    fake.getLatestLedger = async () => {
+      await new Promise((r) => setTimeout(r, 20));
+      return getLatestLedger();
+    };
+    // The network includes the transaction, but no status read answers until `land()`.
+    let land!: () => void;
+    const landed = new Promise<void>((resolve) => (land = resolve));
+    const getTransaction = fake.getTransaction.bind(fake);
+    fake.getTransaction = async (hash) => {
+      await landed;
+      return getTransaction(hash);
+    };
+    const app = await start(deps);
+    const pay = payload(fake.ledger + 30);
+    const key = keyOf(pay, "stellar:testnet")!;
+    // The record's state when the lease is given up: the drain must have finished it by then.
+    const releaseLease = deps.lease!.release;
+    let stateAtRelease: string | undefined;
+    const release = vi.spyOn(deps.lease!, "release").mockImplementation(async () => {
+      stateAtRelease = (await deps.stores.settlements.get(key))?.state;
+      await releaseLease();
+    });
+    expect((await deps.settle(pay, requirements)).response).toMatchObject({
+      success: false,
+      errorReason: SETTLE_REASONS.pending,
+    });
+    let closed = false;
+    const closing = app.close().then(() => (closed = true));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(closed).toBe(false);
+    expect(release).not.toHaveBeenCalled();
+    land();
+    await closing;
+    expect(stateAtRelease).toBe("success");
+  });
+
   it("reads the fee-stats bid once for /verify, /settle and the pool (AD-10)", async () => {
     const { deps, fake } = composed();
     const p = payload(fake.ledger + 30);
@@ -365,7 +410,7 @@ describe("main()'s pool events (0019)", () => {
     fake.accountDelayMs = 200;
     const pay = payload(fake.ledger + 30);
     const settling = settle(pay, requirements);
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.waitFor(() => expect(fake.accountReads).toBeGreaterThan(0));
     await drain();
     expect((await settling).response).toMatchObject({
       success: false,
