@@ -5,7 +5,7 @@ type: FEATURE
 status: active
 milestone: 1
 related_adr: ["0012"]
-related_tasks: ["0022", "0026", "0050"]
+related_tasks: ["0022", "0026", "0050", "0071"]
 tags: [facilitator, persistence, deploy, priority-medium, effort-medium, platform]
 links:
   - ../../../docs/adr/0012-facilitator-state-store.md
