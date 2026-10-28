@@ -3,6 +3,7 @@ id: "0007"
 title: "Build the facilitator's settlement submitter on a channel-account pool"
 type: FEATURE
 status: completed
+milestone: 1
 related_adr: ["0003"]
 related_tasks: ["0006", "0003"]
 tags: [facilitator, signer-pool, throughput, upto, priority-medium, effort-large]

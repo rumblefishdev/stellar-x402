@@ -3,6 +3,7 @@ id: "0008"
 title: "Research a Stellar binding for the x402 batch-settlement scheme"
 type: RESEARCH
 status: backlog
+milestone: 1
 related_adr: []
 related_tasks: ["0006", "0007"]
 tags: [x402, batch-settlement, session, throughput, priority-low, effort-large, payments]

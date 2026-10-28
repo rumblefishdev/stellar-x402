@@ -5,9 +5,10 @@
   seller's own 90 s timeout), 2026-10-16 (task 0009: the checks are inside the budget; RPC
   endpoints are logged as `RPC_URLS[i]`) and 2026-10-20 (task 0009: `RPC_URLS[i]#<fingerprint>`
   and the fingerprint's limit; how far a repeat runs past the budget), 2026-10-21 (task 0009:
-  bare RPC hosts in error messages) and 2026-10-27 (task 0019: reconciliation runs in every
+  bare RPC hosts in error messages), 2026-10-27 (task 0019: reconciliation runs in every
   process, independent of the lease; `/health` reports `listed` beside `ready`, and the deploy
-  waits for both)
+  waits for both) and 2026-10-28 (task 0076: one hostname and one facilitator service for both
+  networks; the sections that run one process per network follow in task 0077)
 - Revised: 2026-10-13. ECS Fargate became the company Hetzner server (task 0039); the first
   version is in git history and task 0014. 2026-10-21: the key moved to OpenBao (ADR 0013), and
   deploys, reboots, backups, alarms and downtime were worked out in the PR #24 review.
@@ -18,6 +19,8 @@
   deploy lock, `digest.good`, the units' timeouts, secret file owners, encryption at rest), and
   an Ansible playbook that provisions x402's parts of the server. Round four: Compose's exit
   code, a crash loop at startup, the tunnel token's owner, and the VM left open for mainnet.
+  2026-10-27: a long migration runs in the deploy as an online one, under the deploy unit's
+  60-minute cap (task 0067).
 
 ## Context
 
@@ -249,10 +252,11 @@ One request or one stop must never outlast the layer in front of it:
     `startup_failed`, so the unit crash-loops until its start limit leaves it `failed`.
     `/health` then gives no data at all, so the readiness alarm treats missing data as
     breaching (0027), and the uptime alarm fires too.
-  - Migrating before the stop and that rollback are both safe because `migrate()` applies all
-    pending migrations in one transaction, so a failed run leaves the schema as it was, and
-    expand/contract keeps the older image working on a schema that did move forward. If
-    `lock_timeout` hits, the deploy fails before anything was stopped.
+  - Migrating before the stop and that rollback are both safe: a failed transactional migration
+    leaves the schema as it was, a failed online one leaves the steps it finished, which the next
+    deploy continues from (ADR 0012), and expand/contract keeps the older image working on a
+    schema that did move forward. If a lock wait runs out of retries, the deploy fails before
+    anything was stopped.
   - **`x402@<network>.service` owns the facilitator.** Its `ExecStartPre` decrypts the network's
     credentials (below) and, unless a deploy is running (a marker in `/run/x402/<network>/`,
     which a reboot clears), puts `digest.good` into `digest`, so a reboot during a deploy starts
@@ -313,18 +317,28 @@ One request or one stop must never outlast the layer in front of it:
 
 ### Network and URL
 
-- **Cloudflare is the DNS and the edge, through Cloudflare Tunnel.** The hostnames are
-  `x402-facilitator-testnet.sorobanscan.com` and `x402-facilitator.sorobanscan.com`, one label
-  under the zone, since the Free plan's certificate covers only one level of subdomain.
-  - Each network has its own tunnel. Its `cloudflared` opens outbound connections to Cloudflare
-    (port 7844, UDP for QUIC and TCP) and forwards its hostname to
-    `http://facilitator-<network>:<port>`; anything else gets 404. The server opens no port for
-    it.
+- **Cloudflare is the DNS and the edge, through Cloudflare Tunnel.** One hostname,
+  `x402-facilitator.sorobanscan.com`, and one facilitator service, `facilitator`, serve both
+  networks (decided with Marek at the 2026-10-26 daily; `soroban-infrastructure`'s
+  `cloudflare/x402.tf`, 12cec25, routes it). It is one label under the zone, since the Free
+  plan's certificate covers only one level of subdomain.
+  - The client names the network in the request (`network` in the payment requirements:
+    `stellar:testnet` or `stellar:pubnet`), and the facilitator settles through that network's
+    channel pool, key and RPC endpoints. There is no testnet/mainnet service split; a
+    staging/production split may come later. There is no staging host yet;
+    `x402-facilitator-staging.sorobanscan.com` can be added if one is needed.
+  - Only testnet is served for now. The parts of this ADR that run one process per network
+    (Platform and containers, the deploy workflow, keys and secrets, the store) are reworked in
+    task 0077, together with the code, which today serves one `NETWORK` per process.
+  - One tunnel, `x402`. Its `cloudflared` opens outbound connections to Cloudflare (port 7844,
+    UDP for QUIC and TCP) and forwards the hostname to `http://facilitator:4021`, the Compose
+    service; anything else gets 404. The server opens no port for it. The compose file keeps
+    `PORT` at 4021; changing it means changing `cloudflare/x402.tf` too.
   - HTTPS ends at Cloudflare, so Cloudflare sees the requests in plain text. They carry signed
     payments, never keys.
   - The tunnel, its routing and the DNS record are Terraform in the `soroban-infrastructure`
     repo's `cloudflare/`, beside the `sorobanscan.com` zone, so routing changes are reviewed
-    there. Task 0062 sets up the zone and the testnet tunnel, the tunnel's prerequisite.
+    there. Task 0062 sets up the zone and the tunnel, the facilitator's prerequisite.
   - The tunnel token lives only in Cloudflare and that repo's Terraform state. An operator
     fetches it (the dashboard, the API or `terraform output`) into an encrypted systemd
     credential (runbook), also when the server is restored elsewhere. Anyone with it can run a
@@ -427,10 +441,30 @@ One request or one stop must never outlast the layer in front of it:
 - **The migrations** run from the new image before the old facilitator stops, in the deploy unit
   (ADR 0012), so they add nothing to the deploy's downtime. Every migration is expand/contract, so
   the running image, and a rollback to an earlier one, work on the newer schema. A long one, such
-  as an index build on a big table,
-  runs outside the deploy as a planned step (`CREATE INDEX CONCURRENTLY`), so a deploy's
-  migrations stay short. The migration service gets its own bounds, longer than the app pool's
-  10 s statement timeout (0026).
+  as a backfill or an index build on a big table, is an online migration and runs in the deploy
+  too (task 0067):
+  - the migration service's bounds are ADR 0012's;
+  - it logs each step as it ends and every 50 backfill batches, and the deploy lock holds later
+    deploys meanwhile. A step's start and the wait for another run's lock reach the journal only
+    with task 0080, so until then a long index build, `VALIDATE` or that wait is quiet there:
+    read `pg_stat_activity` before stopping a run;
+  - `x402-deploy@` is a oneshot with a `TimeoutStartSec`, the cap on the whole run: cancelling the
+    CI job doesn't stop the unit, so without it a stuck run, waiting up to 30 minutes for another
+    run's lock and up to 30 more on each long step, would hold every later deploy, a hotfix's
+    included, under the `flock`. systemd stops a run past it, the deploy fails before the old
+    facilitator stops, and the next deploy continues the migration from its markers. 0026 sets
+    the cap from testnet's size, 60 minutes to start (AC1 took 4 min 43 s at 1 000 000
+    reservations), between two bounds:
+    - above the longest single step, since a stopped backfill walks its table again and a
+      stopped index build starts over, so a shorter cap never finishes them;
+    - no longer than a hotfix may wait;
+  - a backfill writes about 1.2 GiB of WAL per 2 million rows (a million reservations with the
+    four default scopes is twice that), which pgBackRest ships as each segment closes, and the
+    table grows about a third: check the disk's headroom first;
+  - both networks' databases share the server's disks with the production ClickHouse, so an
+    online migration runs on testnet first, outside mainnet's busy hours and away from 00:00 UTC,
+    when ClickHouse writes the most. Mainnet's ceiling on
+    a migration's length goes to 0038.
 - **No TLS to the database.** The connection stays on the network's `internal` Docker network on
   one host, and anyone who could read it there could read the database files. PostgreSQL uses
   `scram-sha-256` passwords, never `trust`. TLS comes back if the database ever leaves the host.

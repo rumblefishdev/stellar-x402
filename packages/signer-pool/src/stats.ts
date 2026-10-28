@@ -12,6 +12,7 @@ export type RefusalReason =
   | "queue-timeout"
   | "no-channels"
   | "on-signed"
+  | "shutdown"
   | "other";
 
 export type SubmitterEvent =
@@ -87,6 +88,7 @@ export class SubmitterStats {
     "queue-timeout": 0,
     "no-channels": 0,
     "on-signed": 0,
+    shutdown: 0,
     other: 0,
   };
   private sequenceResyncs = 0;

@@ -3,6 +3,7 @@ id: "0034"
 title: "Merge the Stellar upto scheme upstream: scheme_upto_stellar.md and the @x402/stellar classes"
 type: FEATURE
 status: blocked
+milestone: 2
 related_adr: ["0001"]
 related_tasks: ["0002", "0003", "0004", "0005", "0015"]
 tags: [upstream, upto, spec, priority-high, effort-large, payments]
@@ -46,6 +47,13 @@ history:
     note: >
       Waiting for the x402 Foundation maintainers to review the upstream upto spec PR. Nothing
       more to do on our side until they answer.
+  - date: "2026-10-28"
+    status: blocked
+    who: okarcz
+    note: >
+      Status note brought up to date: a maintainer started reviewing #3781 on 2026-10-20, and
+      Eras256 (#3098) asked on 2026-10-23 which PR to converge on, still unanswered. Still blocked
+      on the review; the reply to Eras256 is ours to send.
 ---
 
 # Merge the Stellar upto scheme upstream: scheme_upto_stellar.md and the @x402/stellar classes
@@ -60,8 +68,10 @@ once it is **merged**, not when it is proposed.
 
 ## Status: Blocked
 
-> Blocked since 2026-10-15: waiting for the x402 Foundation maintainers to review the upstream
-> spec PR. Nothing more to do on our side until they answer. The code PR also waits on 0015.
+> Blocked since 2026-10-15 on the maintainers' review of the upstream spec PR. A maintainer
+> (jeesunikim) started it on 2026-10-20. One thing is ours to do: Eras256, author of the
+> competing #3098, asked on 2026-10-23 which PR to converge on, and nobody has answered. The code
+> PR also waits on 0015.
 > Drafts are in [`drafts/`](drafts/).
 
 ## Context
@@ -299,7 +309,8 @@ Local work so far, steps 1 and 2 as drafts. Nothing is sent upstream.
 
 ## Open
 
-- **#3781:** answer maintainer review when it comes; ask through the Technical Steering Committee,
+- **#3781:** reply to Eras256's convergence comment of 2026-10-23; answer the maintainer review
+  started on 2026-10-20 when it lands; ask through the Technical Steering Committee,
   or SDF's board seat, if it stalls. Optionally post the four maintainer questions as a first
   comment and point #3098 and #3134 at #3781.
 - **Code PR:** the `upto` classes wait on 0015. The org fork of `x402-foundation/x402` (ADR 0001)

@@ -92,6 +92,22 @@ describe("packages/bazaar", () => {
     expect(reason(p)).toBe("ok");
   });
 
+  it("lists a schema as deep as real listings go (0083)", () => {
+    // A real listing's answer, three objects deep: 11 levels with upstream's output wrapper.
+    const answer = (inner: object) => ({ type: "object", properties: inner });
+    const schema = {
+      properties: {
+        output: {
+          properties: {
+            example: answer({ data: answer({ chain: answer({ avg_block_time_ms: {} }) }) }),
+          },
+        },
+      },
+    };
+    expect(reason(pay("https://x.com/a", { info: http, schema }))).toBe("ok");
+    expect(reason(pay("https://x.com/a", { info: http, schema: deep(32) }))).toBe("ok");
+  });
+
   it.each([
     ["no bazaar info", pay("https://x.com/a", { schema: {} }), "invalid_info"],
     ["no info.input", pay("https://x.com/a", { info: {} }), "invalid_info"],
@@ -158,7 +174,7 @@ describe("packages/bazaar", () => {
       pay("https://x.com/a", { info: http }, { description: "d".repeat(501) }),
       "too_large",
     ],
-    ["deep schema", pay("https://x.com/a", { info: http, schema: deep(11) }), "schema_too_complex"],
+    ["deep schema", pay("https://x.com/a", { info: http, schema: deep(33) }), "schema_too_complex"],
     [
       "external $ref",
       pay("https://x.com/a", { info: http, schema: { $ref: "https://e.com/s" } }),

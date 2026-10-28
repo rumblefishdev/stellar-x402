@@ -83,7 +83,7 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     migrations and the wait for `ready` (ADR 0011's Consequences). It fires after 7 failing
     minutes in a row; ADR 0011 gives the reasoning.
   - Check `/supported` once 0020 lands, `/health` before, at
-    `x402-facilitator-testnet.sorobanscan.com` (Cloudflare Tunnel, ADR 0011), so a Cloudflare
+    `x402-facilitator.sorobanscan.com` (Cloudflare Tunnel, ADR 0011), so a Cloudflare
     or tunnel outage counts as downtime.
   - The 99% figure counts a minute as up only when the check passes and the facilitator is ready
     to settle.

@@ -3,6 +3,7 @@ id: "0011"
 title: "Signer pool operations: resize the pool and detailed errors"
 type: FEATURE
 status: backlog
+milestone: 1
 related_adr: []
 related_tasks: ["0007", "0016"]
 tags: [signer-pool, operations, priority-low, effort-medium, payments]

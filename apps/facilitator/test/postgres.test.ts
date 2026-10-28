@@ -576,6 +576,45 @@ describe("PostgreSQL stores", () => {
     }
   });
 
+  it("lets only one of two main() processes on one database settle, and the other take over once the first stops (0025)", async () => {
+    await stores();
+    const env = {
+      DATABASE_URL: urlFor(schema),
+      FACILITATOR_SECRET: bootSecret,
+      CLIENT_IP: "socket",
+      CHANNELS: bootChannel,
+      RPC_URLS: rpc.url,
+      PORT: "0",
+      LOG_LEVEL: "error",
+      LEASE_TTL_MS: "1000",
+    };
+    // An empty body: 400 from a process that holds the lease, 503 before reading it from one that
+    // doesn't.
+    const settleStatus = async (port: number) =>
+      (
+        await fetch(`http://127.0.0.1:${port}/settle`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        })
+      ).status;
+    const first = await main(env);
+    const second = await main(env);
+    try {
+      expect([await settleStatus(first.port), await settleStatus(second.port)]).toEqual([400, 503]);
+      // The first stops cleanly and gives the lease up, so the second takes it at its next
+      // attempt, a third of the TTL, instead of after the TTL.
+      await first.close();
+      const deadline = Date.now() + 1_000;
+      while ((await settleStatus(second.port)) === 503 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(await settleStatus(second.port)).toBe(400);
+    } finally {
+      await Promise.all([first.close(), second.close()]);
+    }
+  });
+
   it("closes once when two signals call close()", async () => {
     const app = await main({
       DATABASE_URL: urlFor(schema),
