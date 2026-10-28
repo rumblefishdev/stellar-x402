@@ -24,6 +24,12 @@ history:
       Parked (W475 A). The short-authorization PR #42 was closed unmerged; the design depends on
       settlement delays we cannot know until our own facilitator runs (0009, 0026). Findings kept
       below for when it comes back.
+  - date: "2026-10-28"
+    status: backlog
+    who: okarcz
+    note: >
+      0009 is done; still parked on 0026, since the delays come from our facilitator running in
+      public.
 ---
 
 # Find the settlement on chain when a paid MCP call ends as payment_unknown
@@ -48,7 +54,7 @@ with the transaction hash, instead of leaving it unknown.
 
 Nothing is built. Today `call_paid_http` signs for what the seller asks (300 s cap) and answers
 `payment_unknown` when a sent payment's outcome cannot be read. Come back when our own facilitator
-settles payments (0009, 0026) and its delays, queueing included, can be measured: the right shape
+settles payments in public (0026; 0009 is done) and its delays, queueing included, can be measured: the right shape
 depends on them.
 
 What was learned, so it need not be measured again:
