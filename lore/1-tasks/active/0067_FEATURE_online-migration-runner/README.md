@@ -46,17 +46,23 @@ The design is [S-online-runner-design](notes/S-online-runner-design.md) (plan v3
 first in a spike ([R-spike-results](notes/R-spike-results.md)). In short:
 
 - A migration is transactional (`{ name, sql }`, as today) or online
-  (`{ name, online: true, steps }`) with `sql`, `index` and `backfill` steps.
+  (`{ name, online: true, steps }`) with `sql`, `validate`, `index` and `backfill` steps.
 - Each step commits with a `schema_migrations` marker `name#<i>`; the next `migrate` skips the
   done steps. The migration's own row is written after its last step.
 - ACCESS EXCLUSIVE steps and transactional groups wait at most 500 ms for each lock and retry
-  `55P03` / `40P01`, and end at 1.5 s (`transaction_timeout`); index
-  builds and `VALIDATE` wait without a lock timeout under a 30 min bound.
-- Backfills: one keyset pass, a transaction a batch of 5 000, a 250 ms pause between batches.
+  `55P03` / `40P01`, run 1 s a statement and end at 1.5 s (`transaction_timeout`), then wait as
+  long as they ran, so the `reserve` calls queued behind them drain. A group takes `reserve`'s
+  tables in `reserve`'s order. Index builds and `VALIDATE` wait without a lock timeout under a
+  30 min bound.
+- Backfills: one keyset pass, a transaction a batch of 5 000 bounded at 1 s, a 250 ms pause
+  between batches.
 - The runner holds a per-schema session advisory lock taken by polling, on a session with
   `client_connection_check_interval`.
 - Online migrations run in the deploy's `migrate-<network>` service (ADR 0011 changes).
-- Three PRs: the runner, its tests (T1–T5), the ADR amendments.
+- One PR (#73) instead of the design's three: the runner, its tests and the ADR amendments,
+  changed by three review rounds (the bounds above come from them; the design note keeps the
+  plan's first values).
+- `MIGRATIONS` holds no online migration until 0080 hardens the runner, and a test holds that.
 
 ## Acceptance Criteria
 
@@ -106,7 +112,12 @@ first in a spike ([R-spike-results](notes/R-spike-results.md)). In short:
   bounded at 1 s, retries reported): applied in 4 min 43 s, the backfill 279 s, `VALIDATE`
   0.3 s, the index 4 s, no step or batch retried; `reserve` before 494 calls, p50 8 ms, p99
   22 ms, during 21 600 calls, p50 50 ms, p99 145 ms, max 3.9 s, and 2 errors (`55P03`, 0.009%)
-  at 256 s and 258 s inside the backfill.
+  at 256 s and 258 s inside the backfill. After the reviews' last changes (a 1 s batch, the wait
+  after each write-locking step), 28.10: applied in 5 min 36 s, the backfill 333 s with one
+  batch retried, `VALIDATE` 0.4 s, the index 2.4 s; `reserve` before 187 calls, p50 21 ms, p99
+  43 ms (the laptop already loaded), during 17 542 calls, p50 66 ms, p99 184 ms, max 12.6 s, and
+  12 errors (`55P03`, 0.07%), all between 158 s and 187 s inside the backfill, when the runner
+  held no lock `reserve` takes, most likely a disk stall again.
 - The production disk over 30 days: an average write
   0.6 ms, the worst second 112 ms, against the laptop's 2–8 s stalls.
 - ADR 0012 (the rule, the runner's lock, markers and bounds, the backfill's WAL and `reserve`)

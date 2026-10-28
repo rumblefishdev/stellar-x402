@@ -21,6 +21,10 @@ history:
 
 # Online migration runner: design (plan v3)
 
+> The bounds below are the plan's. After PR #73's review the runner uses others: 500 ms a lock
+> wait, 1 s a statement, 1.5 s a write-locking transaction, a 1 s batch, and a wait after each
+> write-locking step; ADR 0012 holds the current ones.
+
 v2 was reviewed by GSD `gsd-plan-checker` (3 blockers, 4 high) and BMAD `bmad-architecture`
 (approve with changes) on 26.10; every blocker and high finding is folded in. v3 adds what the
 spike measured ([R-spike-results](R-spike-results.md)). Decisions Adam took are marked
