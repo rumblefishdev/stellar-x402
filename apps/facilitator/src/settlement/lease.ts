@@ -30,8 +30,9 @@ export interface LeaseKeeper {
   /** Stops the timer and waits for an attempt under way. The lease stays until its TTL. */
   close(): Promise<void>;
   /**
-   * `close()`, then gives the lease up if this process holds it, so the next process takes it at
-   * its next attempt instead of after the TTL. Only after the drain (0025 decision 10). Never
+   * `close()`, then gives the lease up if the store still names this process, so the next process
+   * takes it at its next attempt instead of after the TTL. Only after the drain (0025 decision 10).
+   * Also after a renewal that failed on a store error, which may have left the row ours. Never
    * rejects: a failed release leaves the lease to its TTL.
    */
   release(): Promise<void>;
@@ -119,15 +120,16 @@ export function createLeaseKeeper(deps: LeaseKeeperDeps): LeaseKeeper {
     close,
     async release() {
       await close();
-      if (expiresAt === undefined) return;
+      const had = expiresAt !== undefined;
       expiresAt = undefined;
+      // The delete names this holder, so it never touches another process's lease.
       try {
         await store.releaseLease(name, holder);
-        logger.info("lease_released", { network, lease: name });
+        if (had) logger.info("lease_released", { network, lease: name });
       } catch (error) {
         logger.warn("lease_release_failed", { network, lease: name, error });
       }
-      changed(false);
+      if (had) changed(false);
     },
   };
 }
