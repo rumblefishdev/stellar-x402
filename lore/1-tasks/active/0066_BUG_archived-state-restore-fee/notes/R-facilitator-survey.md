@@ -40,7 +40,8 @@ None of them pays restore rent; all refuse.
 - Stellar's state archival docs still describe `restorePreamble`; 0021's run on Protocol 23 saw
   the archived entries in `archivedSorobanEntries` instead, so read both.
 - `stellar contract restore` (`--id`, `--key-xdr`, `--wasm-hash`, `--source-account`) restores an
-  entry from any account.
+  entry from any account; in 28.1.0 `--key-xdr` is the data key as an `ScVal`, combined with
+  `--id`, not a whole `LedgerKey`.
 - `invalidMessage`: upstream and r402 send one only for the fee refusal (`simulation-derived fee N
   stroops exceeds ceiling M stroops`), out of about 36 and 38 refusals; the OpenZeppelin plugin
   never sends one. The spec says it is text for people and operators, which clients MUST NOT

@@ -52,8 +52,10 @@ simulation-derived fee 551887 stroops exceeds ceiling 250000 stroops; the transa
   payment is refused and the message names the entries; below it the facilitator pays, as for any
   rent.
 - `apps/facilitator/README.md`: the rows that say "try again later" for this code add that it can
-  mean archived state, which anyone restores from their own account (`stellar contract restore`)
-  before paying again. The exact flags are checked against the pinned stellar-cli when writing it.
+  mean archived state, which anyone restores from their own account before paying again. The
+  restore is shown with the SDK (`RestoreFootprint` over the message's keys, as 0021's
+  `token-matrix.ts` did): stellar-cli 28.1.0's `contract restore` takes a data entry's key as an
+  `ScVal` with `--id`, not a `LedgerKey`, so the message's keys don't go into it as they are.
 
 ## Tests
 

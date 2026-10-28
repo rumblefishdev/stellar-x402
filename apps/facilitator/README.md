@@ -98,7 +98,7 @@ unlocks one response.
 | `settle_exact_stellar_transaction_failed`            | the hash                | included in a ledger, but failed                                               | sign a new payment                                                                        |
 | `settle_exact_stellar_transaction_submission_failed` | the hash                | refused by the network before inclusion                                        | sign a new payment                                                                        |
 | `settle_exact_stellar_transaction_expired`           | the hash                | not included before its time or ledger bound                                   | sign a new payment                                                                        |
-| `invalid_exact_stellar_*`, `invalid_network`         | —                       | the `/verify` checks, rerun by `/settle`, refused the payment                  | fix the payment; for `invalid_exact_stellar_payload_fee_exceeds_maximum`, try again later |
+| `invalid_exact_stellar_*`, `invalid_network`         | —                       | the `/verify` checks, rerun by `/settle`, refused the payment                  | fix the payment; for `invalid_exact_stellar_payload_fee_exceeds_maximum`, see notes below |
 | `unexpected_settle_error`                            | an earlier hash, if any | an error of ours after the claim                                               | sign a new payment, and tell us                                                           |
 
 "An earlier hash, if any": a refusal after a `txBadSeq` rebuild carries the last stored hash.
@@ -113,7 +113,10 @@ gets the same answer again, so a retry needs a new payment (a new nonce); only
 - a refusal from the checks (`invalid_exact_stellar_*`, `invalid_network`) comes before the
   claim and records nothing: the same payment may be sent again, and may succeed later.
   `invalid_exact_stellar_payload_fee_exceeds_maximum` is our own fee estimate above our ceiling,
-  not a fault in the payment;
+  not a fault in the payment. A network fee spike passes; when the message names archived entries
+  (`the transaction restores N archived entries: <LedgerKey XDR>, …`), waiting doesn't help, and
+  the payment passes once anyone restores them from their own account
+  ([below](#restoring-archived-entries));
 - a spend refusal the store couldn't record leaves the payment claimed, so a repeat after the
   budget gets `…_timeout` instead of the spend reason.
 
@@ -135,6 +138,48 @@ block explorer or Horizon before acting on it.
 A success answered while the store was down is marked answered once the store is back. After a
 restart the process can't know it answered one, so a repeat may get that payment's success a
 second time, at most once; no money moves twice.
+
+### Restoring archived entries
+
+A payment that touches archived state (the token's instance or code, a non-SAC balance, a
+C-account's SAC balance) restores it and pays the restore rent, which the facilitator won't pay
+above its fee ceiling (task 0066). The refusal's message names the entries as base64 `LedgerKey`
+XDR, at most four (`and N more` after them); the list is the one the payment was built with.
+Any funded account can restore them, all in one transaction:
+
+```ts
+import {
+  BASE_FEE,
+  Keypair,
+  Networks,
+  Operation,
+  rpc,
+  SorobanDataBuilder,
+  TransactionBuilder,
+  xdr,
+} from "@stellar/stellar-sdk";
+
+const server = new rpc.Server("https://soroban-testnet.stellar.org");
+const source = Keypair.fromSecret(process.env.SECRET!); // pays the restore
+const keys = ["AAAABg…"].map((k) => xdr.LedgerKey.fromXDR(k, "base64")); // from the message
+
+const restore = new TransactionBuilder(await server.getAccount(source.publicKey()), {
+  fee: BASE_FEE,
+  networkPassphrase: Networks.TESTNET,
+})
+  .addOperation(Operation.restoreFootprint({}))
+  .setSorobanData(new SorobanDataBuilder().setReadWrite(keys).build())
+  .setTimeout(60)
+  .build();
+const prepared = await server.prepareTransaction(restore); // adds the restore rent to the fee
+prepared.sign(source);
+await server.pollTransaction((await server.sendTransaction(prepared)).hash);
+```
+
+Then sign a new payment: it is built from a new simulation, so it lists only the entries still
+archived, if any. stellar-cli restores an instance with
+`stellar contract restore --id <contract>` and code with `--wasm-hash <hash>`; a data entry takes
+its key as an `ScVal`, not the `LedgerKey`.
 
 ## `/discovery/resources`
 
