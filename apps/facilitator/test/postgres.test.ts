@@ -138,6 +138,7 @@ describe("PostgreSQL stores", () => {
           settleTimeoutMs,
           budgetMs: 5_000,
           pollMs: 5,
+          latestLedger: async () => 1_000,
         });
       return { a: settler(), b: settler(), submit, land, settlements };
     }
@@ -725,6 +726,7 @@ describe("PostgreSQL stores", () => {
           "0003_catalog_type_seq",
           "0004_spend_window",
           "0005_settlement_attempts",
+          "0006_settlement_reopened",
         ]);
         expect(await typeIndex(old), built).toBe(1);
       } finally {
@@ -746,7 +748,11 @@ describe("PostgreSQL stores", () => {
         `INSERT INTO spend_reservations (id, amount, at, state) VALUES ('a', 60, 5, 'committed');
          INSERT INTO spend_reservation_scopes (id, scope) VALUES ('a', 'global'), ('a', 'payer:P')`,
       );
-      expect(await migrate(old)).toEqual(["0004_spend_window", "0005_settlement_attempts"]);
+      expect(await migrate(old)).toEqual([
+        "0004_spend_window",
+        "0005_settlement_attempts",
+        "0006_settlement_reopened",
+      ]);
       const { rows } = await old.query(
         "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",
       );

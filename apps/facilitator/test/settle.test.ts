@@ -40,6 +40,7 @@ import {
   SETTLE_REASONS,
   createSettler,
   expectTransfer,
+  fingerprintOf,
   type SettlerDeps,
   type Submitter,
 } from "../src/settlement/settle.js";
@@ -271,6 +272,7 @@ function setup(behaviour: Behaviour = landing(), overrides: Partial<SettlerDeps>
     settleTimeoutMs: 2_000,
     budgetMs: 5_000,
     pollMs: 5,
+    latestLedger: async () => CURRENT,
     ...overrides,
   });
   return { settle, store, submit, hooks, order, lines, metrics };
@@ -583,12 +585,26 @@ describe("createSettler", () => {
     const { settle, store, hooks, metrics } = setup(async () => {
       throw error;
     });
+    // Nothing was sent, so the auth entry can still land: repeat it, don't sign again (0073).
+    // Written out, not read from `UNSENT_REASONS`, so a reason dropped from it fails here.
+    const unsent = [
+      "settle_exact_stellar_no_channel_in_time",
+      "settle_exact_stellar_no_channels",
+      "settle_exact_stellar_shutting_down",
+      "settle_exact_stellar_rpc_unavailable",
+    ].includes(reason);
     expect((await settle(payload(), requirements)).response).toEqual({
       success: false,
       errorReason: reason,
       payer,
       transaction: "",
       network,
+      ...(unsent && {
+        errorMessage:
+          `nothing was sent: repeat the same payment while the latest ledger is at most ` +
+          `${EXPIRATION - 2}; once the network is past ledger ${EXPIRATION}, sign a new payment instead`,
+        extra: { retryable: true, expirationLedger: EXPIRATION },
+      }),
     });
     expect(await store.get(key)).toMatchObject({ state: "rejected", errorReason: reason });
     expect(hooks.onFinal).toHaveBeenCalledTimes(1);
@@ -1137,9 +1153,11 @@ describe("createSettler", () => {
       expect(settled.record?.state).toBe("success");
     });
 
-    it("ends the record and answers a timeout when the budget runs out before anything was signed; the client signs a new payment", async () => {
+    it("ends the record and answers a timeout when the budget runs out before anything was signed; past the auth expiry the client signs a new payment", async () => {
+      let ledger = CURRENT;
       const { settle, store, hooks, metrics } = setup(() => new Promise(() => {}), {
         budgetMs: BUDGET_MS,
+        latestLedger: async () => ledger,
       });
       const settled = settle(payload(), requirements);
       await elapse(BUDGET_MS);
@@ -1147,15 +1165,19 @@ describe("createSettler", () => {
         success: false,
         errorReason: SETTLE_REASONS.timeout,
         transaction: "",
+        extra: { retryable: true, expirationLedger: EXPIRATION },
       });
       expect(await store.get(key)).toMatchObject({
         state: "rejected",
         errorReason: SETTLE_REASONS.timeout,
       });
       expect(hooks.onFinal).toHaveBeenCalledTimes(1);
-      // A retry gets the same answer: the record is final.
+      // Past the auth expiry a retry gets the same answer, now to sign again: the record stays final.
+      ledger = EXPIRATION - 1;
       expect((await settle(payload(), requirements)).response).toMatchObject({
         errorReason: SETTLE_REASONS.timeout,
+        errorMessage: expect.stringContaining("sign a new payment"),
+        extra: { retryable: false, expirationLedger: EXPIRATION },
       });
       expect(hooks.onFinal).toHaveBeenCalledTimes(1);
       expect(metrics.value("settlement_budget_exhausted_total", { signed: "false" })).toBe(1);
@@ -1624,6 +1646,321 @@ describe("createSettler", () => {
       // 12 ledgers left at an assumed 1 s each.
       expect(deadline - before).toBeGreaterThanOrEqual(12_000);
       expect(deadline - before).toBeLessThan(13_000);
+    });
+  });
+
+  describe("a repeat of a payment nothing was sent for (0073)", () => {
+    /** The pool finds no channel in time once, then lands. */
+    const noChannelThenLanding = (): Behaviour => {
+      let calls = 0;
+      return async (opts) => {
+        if (calls++ === 0) throw new QueueTimeoutError("x");
+        return landing()(opts);
+      };
+    };
+
+    it("reopens the record for the identical payload while its auth entry is valid, and settles it once", async () => {
+      const { settle, store, hooks, submit, lines, metrics } = setup(noChannelThenLanding());
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.noChannelInTime,
+        extra: { retryable: true, expirationLedger: EXPIRATION },
+      });
+
+      const settled = await settle(payload(), requirements);
+      expect(settled.response).toEqual({ success: true, transaction: HASH, network, payer });
+      expect(settled.replay).toBeUndefined();
+      expect(await store.get(key)).toMatchObject({
+        state: "success",
+        hashes: [HASH],
+        reopened: 1,
+      });
+      expect(submit).toHaveBeenCalledTimes(2);
+      expect(hooks.beforeSubmit.mock.calls.map(([context]) => context.reopened)).toEqual([0, 1]);
+      expect(hooks.onFinal).toHaveBeenCalledTimes(2);
+      expect(lines.map((line) => JSON.parse(line))).toContainEqual(
+        expect.objectContaining({
+          event: "settlement_reopened",
+          settlementKey: key,
+          errorReason: SETTLE_REASONS.noChannelInTime,
+          reopened: 1,
+        }),
+      );
+      expect(
+        metrics.value("settlement_reopened_total", { reason: SETTLE_REASONS.noChannelInTime }),
+      ).toBe(1);
+      // Settled: a third call is a repeat of a success, never another reopen.
+      expect((await settle(payload(), requirements)).response).toEqual(alreadySettled);
+      expect(submit).toHaveBeenCalledTimes(2);
+    });
+
+    it("reopens once when the identical payload comes back twice at the same time", async () => {
+      const { settle, store, submit, metrics } = setup(noChannelThenLanding());
+      await settle(payload(), requirements);
+      const answers = await Promise.all([
+        settle(payload(), requirements),
+        settle(payload(), requirements),
+      ]);
+      expect(
+        metrics.value("settlement_reopened_total", { reason: SETTLE_REASONS.noChannelInTime }),
+      ).toBe(1);
+      expect(submit).toHaveBeenCalledTimes(2);
+      expect(answers.filter(({ response }) => response.success)).toHaveLength(1);
+      expect(await store.get(key)).toMatchObject({ state: "success", reopened: 1 });
+    });
+
+    it("reopens with exactly two ledgers left, the pool's floor", async () => {
+      let ledger = CURRENT;
+      const { settle, store } = setup(noChannelThenLanding(), { latestLedger: async () => ledger });
+      ledger = EXPIRATION - 2;
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.noChannelInTime,
+        extra: { retryable: true, expirationLedger: EXPIRATION },
+      });
+      expect((await settle(payload(), requirements)).response.success).toBe(true);
+      expect(await store.get(key)).toMatchObject({ state: "success", reopened: 1 });
+    });
+
+    it("says to wait for the expiration ledger at one ledger left, and to sign again after it, without the checks or a reopen", async () => {
+      let ledger = CURRENT;
+      const check = vi.fn<Check>(passing);
+      const { settle, store, submit } = setup(noChannelThenLanding(), {
+        check,
+        latestLedger: async () => ledger,
+      });
+      await settle(payload(), requirements);
+      const answer = (errorMessage: string) => ({
+        success: false,
+        errorReason: SETTLE_REASONS.noChannelInTime,
+        errorMessage,
+        extra: { retryable: false, expirationLedger: EXPIRATION },
+        payer,
+        transaction: "",
+        network,
+      });
+      // Too late for the pool, which needs two ledgers left, but valid in the expiration ledger.
+      ledger = EXPIRATION - 1;
+      const settled = await settle(payload(), requirements);
+      expect(settled.response).toEqual(
+        answer(
+          `nothing was sent, and it is too late to settle here, but the auth entry may still ` +
+            `land in ledger ${EXPIRATION}: once that ledger has closed, sign a new payment`,
+        ),
+      );
+      expect(settled.replay).toBe(true);
+      ledger = EXPIRATION;
+      expect((await settle(payload(), requirements)).response).toEqual(
+        answer(
+          `nothing was sent, and the auth entry expired with ledger ${EXPIRATION}: sign a new payment`,
+        ),
+      );
+      expect(check).toHaveBeenCalledTimes(1);
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(await store.get(key)).toMatchObject({ state: "rejected", reopened: 0 });
+    });
+
+    it("answers the stored outcome, still retryable, when the latest ledger can't be read", async () => {
+      let down = false;
+      const { settle, store, submit } = setup(noChannelThenLanding(), {
+        latestLedger: async () => {
+          if (down) throw new Error("rpc down");
+          return CURRENT;
+        },
+      });
+      await settle(payload(), requirements);
+      down = true;
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.noChannelInTime,
+        errorMessage:
+          `nothing was sent: repeat the same payment; once the network is past ledger ` +
+          `${EXPIRATION}, sign a new payment instead`,
+        extra: { retryable: true, expirationLedger: EXPIRATION },
+      });
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(await store.get(key)).toMatchObject({ state: "rejected", reopened: 0 });
+    });
+
+    it("still refuses a different payload on the same nonce", async () => {
+      const { settle, store, submit } = setup(noChannelThenLanding());
+      await settle(payload(), requirements);
+      const other = { ...requirements, extra: { merchant: "another" } };
+      expect((await settle({ ...payload(), accepted: other }, other)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.nonceUsed,
+      });
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(await store.get(key)).toMatchObject({ state: "rejected", reopened: 0 });
+    });
+
+    it("answers the checks' refusal and leaves the record when the payment no longer passes them", async () => {
+      let failing = false;
+      const check = vi.fn<Check>(async (p, r) =>
+        failing
+          ? {
+              response: {
+                isValid: false,
+                invalidReason: "invalid_exact_stellar_payload_simulation_failed",
+                payer,
+              },
+            }
+          : passing(p, r),
+      );
+      const { settle, store, submit } = setup(noChannelThenLanding(), { check });
+      await settle(payload(), requirements);
+      failing = true;
+      const settled = await settle(payload(), requirements);
+      expect(settled.response).toMatchObject({
+        success: false,
+        errorReason: "invalid_exact_stellar_payload_simulation_failed",
+      });
+      expect(settled).toMatchObject({ key, replay: true });
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(await store.get(key)).toMatchObject({
+        state: "rejected",
+        errorReason: SETTLE_REASONS.noChannelInTime,
+        reopened: 0,
+      });
+    });
+
+    it("never reopens a record with a hash, and answers it as stored", async () => {
+      let calls = 0;
+      const { settle, store, submit } = setup(async (opts) => {
+        if (calls++ > 0) return result();
+        await opts.onSigned?.(HASH, BOUNDS);
+        throw Object.assign(new NoChannelsError("x"), { attempts: [{ hash: HASH, sent: "no" }] });
+      });
+      await settle(payload(), requirements);
+      expect(await store.get(key)).toMatchObject({
+        state: "rejected",
+        errorReason: SETTLE_REASONS.noChannels,
+        hashes: [HASH],
+      });
+      expect((await settle(payload(), requirements)).response).toEqual({
+        success: false,
+        errorReason: SETTLE_REASONS.noChannels,
+        payer,
+        transaction: HASH,
+        network,
+      });
+      expect(submit).toHaveBeenCalledTimes(1);
+    });
+
+    it("reopens a record reconciliation closed as interrupted, and settles it once", async () => {
+      const { settle, store, submit } = setup();
+      await store.claim({
+        key,
+        network,
+        payer,
+        nonce: "7",
+        fingerprint: fingerprintOf(payload(), requirements),
+        paymentPayload: payload(),
+        paymentRequirements: requirements,
+        createdAt: 0,
+      });
+      await store.transition(key, "claimed", {
+        state: "rejected",
+        errorReason: SETTLE_REASONS.interrupted,
+        updatedAt: 1,
+      });
+      expect((await settle(payload(), requirements)).response.success).toBe(true);
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(await store.get(key)).toMatchObject({ state: "success", reopened: 1 });
+    });
+
+    it("never stores the earlier claim's late hash on the reopened claim", async () => {
+      const OTHER = "b".repeat(64);
+      let sign!: () => void;
+      const signing = new Promise<void>((resolve) => (sign = resolve));
+      let late: unknown = "not called";
+      let calls = 0;
+      const { settle, store } = setup(
+        async (opts) => {
+          if (calls++ > 0) return landing("success", OTHER)(opts);
+          await signing;
+          late = await Promise.resolve(opts.onSigned!(HASH, BOUNDS)).then(
+            () => "stored",
+            (error: unknown) => error,
+          );
+          return new Promise(() => {});
+        },
+        { budgetMs: BUDGET_MS },
+      );
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.timeout,
+      });
+      expect((await settle(payload(), requirements)).response.success).toBe(true);
+      sign();
+      await vi.waitFor(() => expect(late).toBeInstanceOf(Error));
+      expect(await store.get(key)).toMatchObject({ state: "success", hashes: [OTHER] });
+    });
+
+    it("never stores a hash for the earlier claim when another process ended and reopened it", async () => {
+      // Across a lease handover: the first call is still within its own budget, so only the
+      // claim it passes to `addHash` stops its late hash.
+      const OTHER = "b".repeat(64);
+      let signFirst!: () => void;
+      const firstSigns = new Promise<void>((resolve) => (signFirst = resolve));
+      let land!: () => void;
+      const lands = new Promise<void>((resolve) => (land = resolve));
+      let late: unknown = "not called";
+      const first = setup(async (opts) => {
+        await firstSigns;
+        late = await Promise.resolve(opts.onSigned!(HASH, BOUNDS)).then(
+          () => "stored",
+          (error: unknown) => error,
+        );
+        return new Promise(() => {});
+      });
+      const other = setup(
+        async (opts) => {
+          await opts.onSigned?.(OTHER, BOUNDS);
+          await lands;
+          return result("success", OTHER);
+        },
+        { budgetMs: BUDGET_MS },
+      );
+      void first.settle(payload(), requirements);
+      await vi.waitFor(async () => expect(await other.store.get(key)).toBeDefined());
+      // The other process's repeat ends the claim by its own, shorter budget.
+      expect((await other.settle(payload(), requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.timeout,
+      });
+      const reopened = other.settle(payload(), requirements);
+      await vi.waitFor(async () =>
+        expect(await other.store.get(key)).toMatchObject({ state: "signed", hashes: [OTHER] }),
+      );
+      signFirst();
+      await vi.waitFor(() => expect(late).toBeInstanceOf(Error));
+      land();
+      await reopened;
+      // Its budget answer may come before the landing; the submission finishes the record.
+      await vi.waitFor(async () =>
+        expect(await other.store.get(key)).toMatchObject({ state: "success", hashes: [OTHER] }),
+      );
+    });
+
+    it("answers without retry details when the payload's auth entry can't be read", async () => {
+      const { settle } = setup(landing(), {
+        budgetMs: BUDGET_MS,
+        check: () => new Promise(() => {}),
+      });
+      const garbled = { ...payload(), payload: { transaction: "not a transaction" } };
+      expect((await settle(garbled, requirements)).response).toEqual({
+        success: false,
+        errorReason: SETTLE_REASONS.timeout,
+        payer: undefined,
+        transaction: "",
+        network,
+      });
+    });
+
+    it("never reopens a record a hook refused", async () => {
+      const { settle, store, hooks, submit } = setup();
+      hooks.beforeSubmit.mockResolvedValueOnce({ allow: false, errorReason: "spend_refused" });
+      await settle(payload(), requirements);
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        errorReason: "spend_refused",
+      });
+      expect(submit).not.toHaveBeenCalled();
+      expect(await store.get(key)).toMatchObject({ state: "rejected", reopened: 0 });
     });
   });
 });

@@ -181,12 +181,14 @@ export function createReconciler(deps: ReconcilerDeps) {
       // A call may still sign it, also another process's during a deploy (decisions 13, 27).
       if (now() <= record.createdAt + deps.budgetMs + MARGIN_MS) return "open";
       // Explicitly from `claimed`: atomic with `addHash`, so a hash stored meanwhile wins.
+      // Against the version this sweep read: a claim reopened since is a new one (0073).
       const ended = await records.finalWrite(record.key, () =>
-        store.transition(record.key, "claimed", {
-          state: "rejected",
-          errorReason: SETTLE_REASONS.interrupted,
-          updatedAt: now(),
-        }),
+        store.transition(
+          record.key,
+          "claimed",
+          { state: "rejected", errorReason: SETTLE_REASONS.interrupted, updatedAt: now() },
+          record.version,
+        ),
       );
       if (!ended) return "open";
       records.onFinal(ended, "resolved");
