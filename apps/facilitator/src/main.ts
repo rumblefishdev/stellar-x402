@@ -58,12 +58,19 @@ export interface Started {
  */
 export const SHUTDOWN_DEADLINE_MS = 150_000;
 
+/**
+ * How long requests still open after the drain may take before their connections are cut, within
+ * the deadline: a `/verify` on one RPC URL fits, and a stalled client no longer holds the process
+ * past it (0025 decision 23).
+ */
+export const SHUTDOWN_GRACE_MS = 15_000;
+
 /** Starts the HTTP server on the graph `deps`. Tests call it with their own config and stores. */
 export async function start(
   deps: AppDeps,
-  opts: { shutdownDeadlineMs?: number } = {},
+  opts: { shutdownDeadlineMs?: number; shutdownGraceMs?: number } = {},
 ): Promise<Started> {
-  const { shutdownDeadlineMs = SHUTDOWN_DEADLINE_MS } = opts;
+  const { shutdownDeadlineMs = SHUTDOWN_DEADLINE_MS, shutdownGraceMs = SHUTDOWN_GRACE_MS } = opts;
   let closing = false;
   const server = createApp({ ...deps, closing: () => closing }).listen(deps.config.port);
   await once(server, "listening");
@@ -82,11 +89,14 @@ export async function start(
     port,
     // The shutdown (0025): `/settle` answers 503 at once, the pool refuses every call that sent
     // nothing, and calls already sent run on while the keeper keeps renewing the lease (decision
-    // 10). The server listens until they and their record writes are done, so a new `/settle`
-    // still gets its 503 rather than a refused connection; then it closes and the lease is given
-    // up, so the next process takes over within one attempt. Past the deadline the open
-    // connections are cut and the lease is left to its TTL, so a transaction still unresolved
-    // gets that long before another process sends on its channel (decision 11).
+    // 10). Once they and their record writes are done nothing can send, so the lease is given up
+    // and the next process takes over within one attempt (decision 23). Until then the server
+    // listens, so a new `/settle` still gets its 503 rather than a refused connection. Then it
+    // closes: open requests get the grace, their connections are cut, and a sweep under way is
+    // waited for, as sweeps need no lease (0019 decision 37). Past the deadline the open
+    // connections are cut, and a drain still under way leaves the lease to its TTL, so a
+    // transaction still unresolved gets that long before another process sends on its channel
+    // (decision 11).
     close: async () => {
       closing = true;
       const begun = Date.now();
@@ -95,35 +105,50 @@ export async function start(
       // reach the pools `main()` ends next.
       const swept = deps.reconciliation?.close();
       let timer: ReturnType<typeof setTimeout> | undefined;
+      let grace: ReturnType<typeof setTimeout> | undefined;
       const deadline = new Promise<"deadline">((resolve) => {
         timer = setTimeout(() => resolve("deadline"), shutdownDeadlineMs);
         timer.unref();
       });
       const drained = (async () => {
-        await Promise.all([deps.drain?.(), swept]);
-        await new Promise<void>((resolve, reject) =>
-          server.close((e) => (e ? reject(e) : resolve())),
-        );
+        await deps.drain?.();
         return "drained" as const;
       })();
-      // Past the deadline its late `server.close()` fails, as the server already closed.
-      drained.catch(() => {});
+      let closed: Promise<void> | undefined;
       try {
         if ((await Promise.race([drained, deadline])) === "drained") {
           deps.logger.info("shutdown_drained", { ms: Date.now() - begun });
           await deps.lease?.release();
+          closed = new Promise<void>((resolve, reject) =>
+            server.close((e) => (e ? reject(e) : resolve())),
+          );
+          server.closeIdleConnections();
+          const graced = new Promise<void>((resolve) => {
+            grace = setTimeout(resolve, shutdownGraceMs);
+            grace.unref();
+          });
+          await Promise.race([closed, graced, deadline]);
+          server.closeAllConnections();
+          const done = Promise.all([closed, swept]).then(() => "closed" as const);
+          if ((await Promise.race([done, deadline])) === "closed") return;
+          // Only a sweep is still under way: its record writes may fail once the pools end.
+          deps.logger.warn("shutdown_deadline", { ms: Date.now() - begun, drained: true });
           return;
         }
-        deps.logger.warn("shutdown_deadline", { ms: Date.now() - begun });
+        deps.logger.warn("shutdown_deadline", { ms: Date.now() - begun, drained: false });
         server.close();
         server.closeAllConnections();
         await deps.lease?.close();
       } catch (error) {
-        // The server failed to close: the drain may not be done, so the lease waits out its TTL.
+        // The server failed to close; if the drain didn't end either, the lease waits out its TTL.
         await deps.lease?.close();
         throw error;
       } finally {
         clearTimeout(timer);
+        clearTimeout(grace);
+        // Past the deadline the drain may still fail, or the late `server.close()` may.
+        drained.catch(() => {});
+        closed?.catch(() => {});
       }
     },
   };
