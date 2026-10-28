@@ -21,6 +21,8 @@
  *                       hung first URL once, so it settles within the budget (0045)
  *   INCLUSION_FEE_STROOPS  passed to the facilitator (default: the fee-stats bid), to run the
  *                       hung-URL check in both bid modes
+ *   DATABASE_URL        required: the facilitator's PostgreSQL, migrated (`pnpm migrate`); the
+ *                       local one from `compose.yaml` is postgres://postgres:postgres@127.0.0.1:15432/postgres
  *
  *   cd apps/facilitator && npx tsx scripts/settle-smoke.ts
  *
@@ -89,6 +91,7 @@ const facilitatorServer = await main(
     CHANNELS: channelKeys.map((keypair) => keypair.publicKey()).join(","),
     PORT: "0",
     LOG_LEVEL: "warn",
+    DATABASE_URL: process.env.DATABASE_URL,
     RPC_URLS: process.env.RPC_URLS,
     INCLUSION_FEE_STROOPS: process.env.INCLUSION_FEE_STROOPS,
   },
