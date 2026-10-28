@@ -2,7 +2,7 @@
 id: "0077"
 title: "Run one facilitator service for both networks, the network chosen per request"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0011", "0012", "0013", "0004"]
 related_tasks: ["0076", "0026", "0027", "0036", "0038"]
@@ -23,6 +23,10 @@ history:
     status: backlog
     who: stkrolikiewicz
     note: "Decided: a database per network."
+  - date: "2026-10-28"
+    status: active
+    who: stkrolikiewicz
+    note: "Started: deploy safety without testnet-first promotion first, then the ADR 0011 rework."
 ---
 
 # Run one facilitator service for both networks, the network chosen per request
