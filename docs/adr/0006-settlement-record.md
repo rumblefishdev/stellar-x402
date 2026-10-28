@@ -5,8 +5,10 @@
   unsigned record ends it at the first call's budget), 2026-10-16 (task 0009: the store-outage
   rule; a success answered while the store can't mark it), 2026-10-20 (task 0009: a repeat's
   settle timeout counts from the hash it sees; a refusal the store can't record), 2026-10-22
-  (task 0019: attempt states, reconciliation sweeps, the outage leftovers) and 2026-10-26 (task
-  0019: the record version, sweeps every 10 s beside `/settle`)
+  (task 0019: attempt states, reconciliation sweeps, the outage leftovers), 2026-10-26 (task
+  0019: the record version, sweeps every 10 s beside `/settle`) and 2026-10-28 (task 0073: an
+  envelope's only bound is the payer's auth expiry, so `…_transaction_expired` comes only once
+  the payment can no longer land)
 
 ## Context
 

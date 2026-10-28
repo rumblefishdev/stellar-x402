@@ -38,8 +38,12 @@ The host must:
   scale-to-zero and no idle CPU throttling;
 - **stop the old process before the new one starts.** One process owns a channel set through a
   store lease, so deploys can't overlap (AD-17);
-- **give at least 90–120 s after SIGTERM.** The process drains in-flight submissions, and with the
-  pool's defaults (`timeoutSeconds` 60 + `confirmGraceSeconds` 30) a sent one can take ~90 s;
+- **give 180 s after SIGTERM** (`stop_grace_period`). The process drains in-flight submissions
+  for at most 150 s, leaving the rest for its store writes and the lease release. Since 0073 a
+  sent one can stay valid until the payer's auth expires (`MAX_VALIDITY_LEDGERS`: 66 ledgers by default, about 5.5 minutes; at most 120, about 10 minutes), plus
+  `confirmGraceSeconds` 30, so it can outlast the drain. One still open at 150 s is finished by
+  the next process's reconciliation, and until it lands or expires the next process's sends on
+  its channel may fail with `txBadSeq` and rebuild;
 - **keep the facilitator key out of the image, the logs and the facilitator's process** (AD-12);
 - **offer a durable store** for the PostgreSQL schema of ADR 0012.
 
@@ -204,7 +208,8 @@ One request or one stop must never outlast the layer in front of it:
   down), the record ends and the same payload can't be settled again: only the buyer can pay, by
   signing a new payment, and nothing makes them. Claiming such a record again by the same
   fingerprint would close it; it is not planned.
-- **The budget covers the wait for a channel.** The pool's own bounds (60 s + 30 s) start only
+- **The budget covers the wait for a channel.** The pool's own bounds (until the payer's auth expiry ledger, then 30 s; 60 s + 30 s
+  for a call without a ledger bound) start only
   once a channel is acquired, so the `/settle` handler passes the pool a deadline (0009).
 - **On SIGTERM the facilitator stops taking `/settle` itself** (503), refuses at once every call
   not yet signed and sent, lets only sent ones finish, and drains (0025). `cloudflared` has no
@@ -673,7 +678,7 @@ One request or one stop must never outlast the layer in front of it:
   worst it is about 5 minutes: a 180 s drain and up to 120 s for `ready` and `listed`. The uptime alarm waits 7 failing
   minutes for that reason.
 - **After a crash,** systemd restarts the container (`Restart=on-failure`). The new process
-  reconciles at once and waits up to 30 s for the lease before it settles new payments. Records keep each transaction's time bound, so a hash
+  reconciles at once and waits up to 30 s for the lease before it settles new payments. Records keep each transaction's ledger bound, so a hash
   that can't be found yet stays non-final until that bound passes (0019).
 - **The OpenBao signer (0036, ADR 0013) blocks the testnet deploy (0026).**
 - **ADR 0012's store moves from RDS to a container on the server.** Its schema, adapter rules and

@@ -343,7 +343,7 @@ graph TD
 - **Prevents:** paying the fee for a transaction whose authorization expires before it can land.
 - **Rule:**
   - A payload whose auth expiration ledger is less than `minValidityLedgers` ahead of the current ledger is rejected.
-  - The transaction never stays valid past the auth expiry. `signer-pool`'s `maxLedger` submit option (task 0016) sets the expiry ledger as the envelope's ledger bound, next to its time bound.
+  - The transaction never stays valid past the auth expiry. `signer-pool`'s `maxLedger` submit option (task 0016) sets the expiry ledger as the envelope's ledger bound. Since 0073 such an envelope carries no time bound: it can no longer land exactly when the auth can't, so `…_transaction_expired` is true when it is answered.
   - `signer-pool` keeps one spare ledger: it refuses, after simulation, a call that could land only in the ledger after the one simulated. So `minValidityLedgers` must be at least 2 plus the expected wait for a channel, or a payload `/verify` accepts can fail at `/settle` with `LedgerBoundError` after a simulation.
   - `minValidityLedgers` must also stay well below the client's signing window. Upstream's client signs its auth to expire ⌈`maxTimeoutSeconds` / ledger time⌉ ledgers after signing, with the ledger time from Horizon (5 s when Horizon doesn't answer): about 12 ledgers at the usual 60 s. Ledgers usually pass before `/verify`. So a minimum of 12 rejects nearly every payment; the default is 4: 2 for the pool plus about 2 of channel wait.
   - So a resource needs a `maxTimeoutSeconds` well above `minValidityLedgers × 5` seconds, 20 s at the default. Near that bound, most payments are rejected as too soon. When ⌈`maxTimeoutSeconds` / 5⌉ is at most the minimum, the reason says so.

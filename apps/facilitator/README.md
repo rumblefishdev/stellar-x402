@@ -124,9 +124,10 @@ exits:
 2. Every call that has signed nothing yet, whether waiting for a channel, prepared ahead or reading
    a sequence, ends at once with `settle_exact_stellar_shutting_down`, and its record closes
    `rejected`. Its client signs a new payment, which reaches the next process.
-3. Calls already sent run on until they are final or recorded `pending`, at most their time bound
-   plus 30 s, while the process keeps renewing the lease. No new reconciliation sweep starts,
-   and one under way is waited for.
+3. Calls already sent run on until they are final or recorded `pending`, at most their ledger
+   bound (the payer's auth expiry: 66 ledgers by default, about 5.5 minutes; at most 120, about 10 minutes) plus 30 s, while the process keeps renewing the lease.
+   Past the 150 s deadline the next process's reconciliation finishes them (0073). No new
+   reconciliation sweep starts, and one under way is waited for.
 4. Then nothing can send, so the lease is given up (`shutdown_drained`, `lease_released`) and the
    next process takes it at its next attempt. A sweep under way doesn't hold it up, as sweeps need
    no lease.
@@ -139,8 +140,9 @@ A second SIGTERM or Ctrl-C joins the drain under way. A failed shutdown is logge
 If the drain isn't done after 150 s, open connections are cut and the lease is left to run out
 (`shutdown_deadline`), and the process exits. The lease runs from its last renewal, so another
 process can send on the channels about 25 s later (the TTL less up to a third of it, plus the
-5 s margin), while a transaction can stay valid for up to 60 s. One still unresolved then may make
-the new process's first send on its channel fail with `txBadSeq` and rebuild; it can't be charged
+5 s margin), while a transaction can stay valid until its payer's auth expires (66 ledgers by default, about 5.5 minutes; at most 120, about 10 minutes,
+since 0073). Until it lands or expires, the new process's sends on its channel may fail with
+`txBadSeq` and rebuild; it can't be charged
 twice, and the new process's reconciliation finishes its record. Fencing closes that gap (0071).
 
 ## `/settle` answers
@@ -177,7 +179,7 @@ unlocks one response.
 | `settle_exact_stellar_refused`                       | —                       | the spend-limit check failed with an error of ours                                                 | sign a new payment, and tell us                                                           |
 | `settle_exact_stellar_transaction_failed`            | the hash                | included in a ledger, but failed                                                                   | sign a new payment                                                                        |
 | `settle_exact_stellar_transaction_submission_failed` | the hash                | refused by the network before inclusion                                                            | sign a new payment                                                                        |
-| `settle_exact_stellar_transaction_expired`           | the hash                | not included before its time or ledger bound                                                       | sign a new payment                                                                        |
+| `settle_exact_stellar_transaction_expired`           | the hash                | not included before its ledger bound, the payer's auth expiry                                      | sign a new payment                                                                        |
 | `invalid_exact_stellar_*`, `invalid_network`         | —                       | the `/verify` checks, rerun by `/settle`, refused the payment                                      | fix the payment; for `invalid_exact_stellar_payload_fee_exceeds_maximum`, try again later |
 | `unexpected_settle_error`                            | an earlier hash, if any | an error of ours after the claim                                                                   | sign a new payment, and tell us                                                           |
 
@@ -206,7 +208,7 @@ gets the same answer again, so a retry needs a new payment (a new nonce); only
 
 A `pending` record is finished by reconciliation (task 0019): the pool's late result, or a sweep
 that asks the network about each of the record's hashes. A hash the network doesn't know turns
-`…_transaction_expired` only once its time or ledger bound has passed, so a repeat may get
+`…_transaction_expired` only once its ledger bound, the payer's auth expiry, has passed, so a repeat may get
 `settlement_pending` for up to that long. A record expires only if no hash was stored since the
 sweep read them: a rebuild in flight makes it wait for the next sweep. A sweep runs as the server
 starts and then 10 s after each one ends, beside `/settle`, in every process, with or without the channel lease; a record the
