@@ -241,14 +241,18 @@ const payerBalanceKey = dataKey(
  * Soroban data whose read-write footprint is `readWrite`, of which the entries at `archived` are
  * archived: what a Protocol 23 simulation reports, and what the buyer's client puts in the payment.
  */
-function restoringData(readWrite: xdr.LedgerKey[], archived: number[]) {
+function restoringData(
+  readWrite: xdr.LedgerKey[],
+  archived: number[],
+  readOnly: xdr.LedgerKey[] = [],
+) {
   return new xdr.SorobanTransactionData({
     ext: new xdr.SorobanTransactionDataExt(
       1,
       new xdr.SorobanResourcesExtV0({ archivedSorobanEntries: archived }),
     ),
     resources: new xdr.SorobanResources({
-      footprint: new xdr.LedgerFootprint({ readOnly: [], readWrite }),
+      footprint: new xdr.LedgerFootprint({ readOnly, readWrite }),
       instructions: 0,
       diskReadBytes: 0,
       writeBytes: 0,
@@ -317,7 +321,7 @@ describe("a fee refusal for a payment that restores archived state (task 0066)",
       invalidReason: "invalid_exact_stellar_payload_fee_exceeds_maximum",
       invalidMessage:
         "simulation-derived fee 302000 stroops exceeds ceiling 250000 stroops; " +
-        "the transaction restores 2 archived entries: " +
+        "the payment's transaction lists 2 archived entries to restore: " +
         `${instanceKey.toXDR("base64")}, ${payerBalanceKey.toXDR("base64")}`,
     });
   });
@@ -330,11 +334,63 @@ describe("a fee refusal for a payment that restores archived state (task 0066)",
     );
     expect(answer.invalidMessage).toBe(
       "simulation-derived fee 302000 stroops exceeds ceiling 250000 stroops; " +
-        "the transaction restores 6 archived entries: " +
+        "the payment's transaction lists 6 archived entries to restore: " +
         `${keys
           .slice(0, 4)
           .map((key) => key.toXDR("base64"))
           .join(", ")}, and 2 more`,
+    );
+  });
+
+  it("names the read-write entries the indexes point to, not the read-only ones", async () => {
+    // A transfer's footprint: the token's code and instance read-only, the two balances written.
+    const codeKey = xdr.LedgerKey.contractCode(
+      new xdr.LedgerKeyContractCode({ hash: Buffer.alloc(32, 7) }),
+    );
+    const payToBalanceKey = dataKey(
+      xdr.ScVal.scvVec([xdr.ScVal.scvSymbol("Balance"), Address.fromString(payTo).toScVal()]),
+    );
+    const answer = await verifyAt(300_000)(
+      payload(restoringData([payerBalanceKey, payToBalanceKey], [0], [codeKey, instanceKey])),
+      requirements,
+    );
+    expect(answer.invalidMessage).toBe(
+      "simulation-derived fee 302000 stroops exceeds ceiling 250000 stroops; " +
+        `the payment's transaction lists 1 archived entry to restore: ${payerBalanceKey.toXDR("base64")}`,
+    );
+  });
+
+  it("names each entry once, and none an index outside the footprint points to", async () => {
+    const answer = await verifyAt(300_000)(
+      payload(restoringData([instanceKey, payerBalanceKey, instanceKey], [0, 0, 2, 1, 1, 9])),
+      requirements,
+    );
+    expect(answer.invalidMessage).toBe(
+      "simulation-derived fee 302000 stroops exceeds ceiling 250000 stroops; " +
+        "the payment's transaction lists 2 archived entries to restore: " +
+        `${instanceKey.toXDR("base64")}, ${payerBalanceKey.toXDR("base64")}`,
+    );
+  });
+
+  it("names no entry that doesn't archive, or whose key is too long to name", async () => {
+    const temporaryKey = xdr.LedgerKey.contractData(
+      new xdr.LedgerKeyContractData({
+        contract: Address.fromString(asset).toScAddress(),
+        key: xdr.ScVal.scvU32(1),
+        durability: xdr.ContractDataDurability.temporary(),
+      }),
+    );
+    const accountKey = xdr.LedgerKey.account(
+      new xdr.LedgerKeyAccount({ accountId: Keypair.fromPublicKey(payer).xdrAccountId() }),
+    );
+    const longKey = dataKey(xdr.ScVal.scvBytes(Buffer.alloc(400)));
+    const answer = await verifyAt(300_000)(
+      payload(restoringData([temporaryKey, accountKey, longKey, instanceKey], [0, 1, 2, 3])),
+      requirements,
+    );
+    expect(answer.invalidMessage).toBe(
+      "simulation-derived fee 302000 stroops exceeds ceiling 250000 stroops; " +
+        `the payment's transaction lists 1 archived entry to restore: ${instanceKey.toXDR("base64")}`,
     );
   });
 
@@ -367,7 +423,7 @@ describe("a fee refusal for a payment that restores archived state (task 0066)",
     const { response } = await check(payload(restoringData([instanceKey], [0])), requirements);
     expect(response.invalidMessage).toBe(
       "simulation-derived fee 302000 stroops exceeds ceiling 250000 stroops; " +
-        `the transaction restores 1 archived entry: ${instanceKey.toXDR("base64")}`,
+        `the payment's transaction lists 1 archived entry to restore: ${instanceKey.toXDR("base64")}`,
     );
   });
 });

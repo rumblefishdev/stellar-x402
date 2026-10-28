@@ -99,8 +99,10 @@ export type Verify = (
  * The `exact` verification `/verify` answers with and `/settle` (0009) runs again (AD-3): the
  * network and envelope checks, upstream `verify()`, then address credentials only, the channel
  * check (AD-5, with the facilitator's muxed address), the payer's one auth entry (AD-6), then the
- * validity check (AD-22). The first rejection is the answer. Errors are thrown, not answered: ours (the ledger read), upstream's, which it reports as
- * `unexpected_verify_error`, and an upstream call past `upstreamTimeoutMs`.
+ * validity check (AD-22). The first rejection is the answer; upstream's fee refusal also names the
+ * archived entries the payment's transaction lists (0066). Errors are thrown, not answered: ours
+ * (the ledger read), upstream's, which it reports as `unexpected_verify_error`, and an upstream
+ * call past `upstreamTimeoutMs`.
  */
 export function createVerifier(deps: VerifierDeps): Verify {
   const check = createChecker(deps);
@@ -361,11 +363,12 @@ function isV0Envelope(payload: PaymentPayload): boolean {
 
 /**
  * Upstream's fee refusal, its message followed by the archived entries the payment's transaction
- * restores (task 0066). Since Protocol 23 a transaction pays their restore rent, which can put the
+ * lists (task 0066). Since Protocol 23 a transaction pays their restore rent, which can put the
  * fee over the ceiling; anyone can restore them from their own account and pay again. The buyer's
  * client puts its simulation's Soroban data in the transaction, so the entries come with the
- * payment: they only describe the refusal, which stays upstream's. Any other answer, or a
- * transaction that lists none, is returned as it is.
+ * payment, unchecked: they only describe the refusal, which stays upstream's, and the message
+ * says they are the transaction's. Any other answer, or a transaction that lists none, is
+ * returned as it is.
  */
 function withArchivedEntries(response: VerifyResponse, payload: PaymentPayload): VerifyResponse {
   if (response.invalidReason !== "invalid_exact_stellar_payload_fee_exceeds_maximum") {
@@ -378,14 +381,21 @@ function withArchivedEntries(response: VerifyResponse, payload: PaymentPayload):
   if (keys.length > named.length) named.push(`and ${keys.length - named.length} more`);
   return {
     ...response,
-    invalidMessage: `${response.invalidMessage}; the transaction restores ${entries}: ${named.join(", ")}`,
+    invalidMessage: `${response.invalidMessage}; the payment's transaction lists ${entries} to restore: ${named.join(", ")}`,
   };
 }
 
 /** Most archived entries a refusal names: the client chooses how many it lists. */
 const ARCHIVED_ENTRIES_NAMED = 4;
+/** Longest key a refusal names, in base64: a token balance's is about 160, an allowance's 264. */
+const ARCHIVED_KEY_MAX_CHARS = 512;
 
-/** The base64 `LedgerKey`s the payload's transaction lists as archived, if it decodes. */
+/**
+ * The distinct base64 `LedgerKey`s the payload's transaction lists as archived, if it decodes:
+ * only persistent contract data and contract code, the entries that archive, and none longer than
+ * `ARCHIVED_KEY_MAX_CHARS`. Each footprint entry is encoded at most once, however often the
+ * client repeats its index.
+ */
 function archivedEntries(payload: PaymentPayload): string[] {
   const transaction = (payload.payload as { transaction?: unknown } | undefined)?.transaction;
   if (typeof transaction !== "string") return [];
@@ -397,13 +407,28 @@ function archivedEntries(payload: PaymentPayload): string[] {
     const data = ext.sorobanData();
     if (data.ext().switch() !== 1) return [];
     const readWrite = data.resources().footprint().readWrite();
-    return (data.ext().value() as xdr.SorobanResourcesExtV0)
-      .archivedSorobanEntries()
-      .map((i) => readWrite[i]?.toXDR("base64"))
-      .filter((key) => key !== undefined);
+    const keys = new Set<string>();
+    for (const i of new Set(
+      (data.ext().value() as xdr.SorobanResourcesExtV0).archivedSorobanEntries(),
+    )) {
+      const key = readWrite[i];
+      if (key === undefined || !archivable(key)) continue;
+      const encoded = key.toXDR("base64");
+      if (encoded.length <= ARCHIVED_KEY_MAX_CHARS) keys.add(encoded);
+    }
+    return [...keys];
   } catch {
     return [];
   }
+}
+
+/** Whether `key` is of an entry that archives: persistent contract data or contract code. */
+function archivable(key: xdr.LedgerKey): boolean {
+  if (key.switch() === xdr.LedgerEntryType.contractCode()) return true;
+  return (
+    key.switch() === xdr.LedgerEntryType.contractData() &&
+    key.contractData().durability() === xdr.ContractDataDurability.persistent()
+  );
 }
 
 /**
