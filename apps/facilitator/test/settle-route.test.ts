@@ -1,3 +1,5 @@
+import { once } from "node:events";
+import net from "node:net";
 import { Keypair } from "@stellar/stellar-sdk";
 import type { PaymentRequirements } from "@x402/core/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -376,12 +378,28 @@ describe("POST /settle without the channel lease (0025)", () => {
   });
 });
 
+/**
+ * A client that sent part of a request's headers and stalls: `closed` turns true once the server
+ * cuts its connection. Node stops timing out such a request once `server.close()` is called.
+ */
+async function stalled(url: string): Promise<{ readonly closed: boolean }> {
+  const { port } = new URL(url);
+  const socket = net.connect(Number(port), "127.0.0.1");
+  await once(socket, "connect");
+  socket.write("POST /settle HTTP/1.1\r\nHost: x\r\n");
+  const state = { closed: false };
+  socket.on("error", () => {});
+  socket.on("close", () => (state.closed = true));
+  return state;
+}
+
 describe("shutdown (0025)", () => {
   const db = testDatabase();
   async function started(opts: {
     drain?: () => Promise<void>;
     reconciliation?: Reconciliation;
     shutdownDeadlineMs?: number;
+    shutdownGraceMs?: number;
   }) {
     const settle = vi.fn<Settle>(async () => ({ response: success }));
     const lease = {
@@ -413,7 +431,12 @@ describe("shutdown (0025)", () => {
         ...(opts.drain && { drain: opts.drain }),
         ...(opts.reconciliation && { reconciliation: opts.reconciliation }),
       },
-      { ...(opts.shutdownDeadlineMs !== undefined && opts) },
+      {
+        ...(opts.shutdownDeadlineMs !== undefined && {
+          shutdownDeadlineMs: opts.shutdownDeadlineMs,
+        }),
+        ...(opts.shutdownGraceMs !== undefined && { shutdownGraceMs: opts.shutdownGraceMs }),
+      },
     );
     const url = `http://127.0.0.1:${app.port}`;
     const events = () => lines.map((line) => (JSON.parse(line) as { event: string }).event);
@@ -448,7 +471,7 @@ describe("shutdown (0025)", () => {
     await expect(fetch(`${url}/supported`)).rejects.toThrow();
   });
 
-  it("drains a reconciliation sweep under way before it gives the lease up", async () => {
+  it("gives the lease up once the drain ends, without waiting for a sweep under way, and closes after it (0025 decision 23)", async () => {
     let swept!: () => void;
     const reconciliation = {
       reconciled: Promise.resolve(),
@@ -457,19 +480,41 @@ describe("shutdown (0025)", () => {
       close: vi.fn(() => new Promise<void>((resolve) => (swept = resolve))),
     };
     const { app, lease } = await started({ drain: async () => {}, reconciliation });
-    const closing = app.close();
-    await new Promise((r) => setTimeout(r, 20));
+    let done = false;
+    const closing = app.close().then(() => (done = true));
+    await vi.waitFor(() => expect(lease.release).toHaveBeenCalledTimes(1));
     expect(reconciliation.close).toHaveBeenCalledTimes(1);
-    expect(lease.release).not.toHaveBeenCalled();
+    // Sweeps need no lease, but their writes must end before `main()` ends the pools.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(done).toBe(false);
     swept();
     await closing;
-    expect(lease.release).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives the lease up at once past a stalled client, and cuts its connection after the grace", async () => {
+    const { app, lease, url, events } = await started({
+      drain: async () => {},
+      shutdownGraceMs: 500,
+    });
+    const socket = await stalled(url);
+    const closing = app.close();
+    await vi.waitFor(() => expect(lease.release).toHaveBeenCalledTimes(1));
+    // The lease went while the stalled client still kept its socket.
+    expect(socket.closed).toBe(false);
+    await closing;
+    // The client sees the cut a moment after the server makes it.
+    await vi.waitFor(() => expect(socket.closed).toBe(true));
+    expect(lease.close).not.toHaveBeenCalled();
+    expect(events()).not.toContain("shutdown_deadline");
   });
 
   it("stops waiting at its deadline, cuts open connections and leaves the lease to its TTL", async () => {
     const drain = vi.fn(() => new Promise<void>(() => {}));
     const { app, lease, url, events } = await started({ drain, shutdownDeadlineMs: 50 });
+    const socket = await stalled(url);
     await app.close();
+    // Without `closeAllConnections()` the stalled client would keep its connection.
+    await vi.waitFor(() => expect(socket.closed).toBe(true));
     expect(lease.release).not.toHaveBeenCalled();
     expect(lease.close).toHaveBeenCalledTimes(1);
     expect(events()).toContain("shutdown_deadline");
