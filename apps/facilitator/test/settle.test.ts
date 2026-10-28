@@ -727,6 +727,30 @@ describe("createSettler", () => {
     expect((await store.get(key))?.state).toBe("rejected");
   });
 
+  it("sends nothing once the lease is lost after the request came in (0025 decision 22)", async () => {
+    let held = true;
+    let signed: unknown = "not called";
+    const { settle, store } = setup(
+      async (opts) => {
+        // E.g. a DB failover during the wait for a channel: the next renewal fails.
+        held = false;
+        // As the pool does: a hook that throws means this envelope is not sent.
+        signed = await Promise.resolve(opts.onSigned!(HASH, BOUNDS)).then(
+          () => "sent",
+          (error: unknown) => error,
+        );
+        throw Object.assign(new SignedHookError("x"), { attempts: [{ hash: HASH, sent: "no" }] });
+      },
+      { held: () => held },
+    );
+    expect((await settle(payload(), requirements)).response).toMatchObject({
+      errorReason: SETTLE_REASONS.recordWrite,
+    });
+    expect(signed).toBeInstanceOf(Error);
+    expect((signed as Error).message).toBe("the channel lease was lost");
+    expect(await store.get(key)).toMatchObject({ state: "rejected", hashes: [HASH] });
+  });
+
   it("answers pending with the hash of a send that may have reached the network, even when the store fails", async () => {
     const { settle, store } = setup(async (opts) => {
       await opts.onSigned?.(HASH, BOUNDS);

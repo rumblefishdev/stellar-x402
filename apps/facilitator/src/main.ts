@@ -343,6 +343,8 @@ export function buildSettlement(
     metrics: Metrics;
     /** Tests pass the pool's `sleep`. */
     sleep?: (ms: number) => Promise<void>;
+    /** The channel lease's `held()`, checked again before each send (0025). */
+    held?: () => boolean;
   },
 ): {
   settle: Settle;
@@ -408,6 +410,7 @@ export function buildSettlement(
     settleTimeoutMs: config.settlement.settleTimeoutMs,
     budgetMs: config.settlement.settleBudgetMs,
     records,
+    ...(deps.held && { held: deps.held }),
   });
   const reconciliation = scheduleReconciliation({ reconciler, logger, network });
   // Closing the pool first refuses every call that sent nothing, so their records close too.
@@ -472,6 +475,7 @@ export function compose(
     logger,
     metrics,
     ...(opts.sleep && { sleep: opts.sleep }),
+    held: lease.held,
   });
   return {
     deps: {

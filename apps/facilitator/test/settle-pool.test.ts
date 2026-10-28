@@ -275,7 +275,8 @@ describe("main()'s /settle wiring, with the real pool", () => {
 });
 
 describe("main()'s composition (compose)", () => {
-  function composed(env: Record<string, string> = {}) {
+  /** The graph `main()` serves; it takes the lease as `start()` does, unless `lease: false`. */
+  async function composed(env: Record<string, string> = {}, opts: { lease?: boolean } = {}) {
     const config = parseConfig({
       FACILITATOR_SECRET: facilitator.secret(),
       DATABASE_URL: db.urlFor(db.schema),
@@ -295,12 +296,20 @@ describe("main()'s composition (compose)", () => {
       seams: { makeScheme: () => ({ verify: async () => ({ isValid: true, payer }) }) },
       sleep: async () => {},
     });
+    if (opts.lease !== false) await deps.lease!.runOnce();
     return { deps, cataloger, metrics, fake };
   }
   const bazaar = { info: { input: { type: "http", method: "GET" } }, routeTemplate: "/users/:id" };
 
+  it("sends nothing from a process without the lease (0025 decision 22)", async () => {
+    const { deps, fake } = await composed({}, { lease: false });
+    const settled = await deps.settle(payload(fake.ledger + 30), requirements);
+    expect(settled.response).toMatchObject({ errorReason: SETTLE_REASONS.recordWrite });
+    expect(fake.sent).toHaveLength(0);
+  });
+
   it("gives a success the cataloger's header, and catalogs it after the response", async () => {
-    const { deps, cataloger, fake } = composed();
+    const { deps, cataloger, fake } = await composed();
     const settled = await deps.settle(payload(fake.ledger + 30, { bazaar }), requirements);
     expect(settled.response).toMatchObject({ success: true });
     expect(deps.extensionResponses(settled.record!)).toEqual({ bazaar: { status: "processing" } });
@@ -316,7 +325,7 @@ describe("main()'s composition (compose)", () => {
   ] as const)(
     "settles a localhost resource and lists it only with %j (0054)",
     async (env, header, listed) => {
-      const { deps, cataloger, fake } = composed(env);
+      const { deps, cataloger, fake } = await composed(env);
       const local = {
         ...payload(fake.ledger + 30, { bazaar }),
         resource: { url: "http://localhost:4022/users/42" },
@@ -332,7 +341,7 @@ describe("main()'s composition (compose)", () => {
   );
 
   it("waits on close() for a settlement answered pending until it lands, then releases the lease (0025)", async () => {
-    const { deps, fake } = composed({ SETTLE_BUDGET_MS: "1000", PORT: "0" });
+    const { deps, fake } = await composed({ SETTLE_BUDGET_MS: "1000", PORT: "0" });
     // A ledger read takes a round trip, as on a real RPC: `FakeRpc` closes a ledger on every
     // read, so without one the pool's wait for the status never yields to the budget's timer.
     const getLatestLedger = fake.getLatestLedger.bind(fake);
@@ -373,7 +382,7 @@ describe("main()'s composition (compose)", () => {
   });
 
   it("reads the fee-stats bid once for /verify, /settle and the pool (AD-10)", async () => {
-    const { deps, fake } = composed();
+    const { deps, fake } = await composed();
     const p = payload(fake.ledger + 30);
     expect(await deps.verify(p, requirements)).toMatchObject({ isValid: true });
     expect((await deps.settle(p, requirements)).response).toMatchObject({ success: true });
