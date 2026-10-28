@@ -29,6 +29,7 @@ function deps(overrides: Partial<PrunerDeps> = {}): PrunerDeps {
   return {
     spend: db.stores().spend,
     rateLimits: db.stores().rateLimits,
+    catalogAttempts: db.stores().catalogAttempts,
     spendWindowMs: DAY,
     rateLimitWindowMs: 60_000,
     logger: recordingLogger().logger,
@@ -71,6 +72,24 @@ describe("pruner", () => {
     await reserveAt(long, "kept", NOW - 10 * DAY, 5 * DAY);
     await createPruner(deps({ spend: long, spendWindowMs: 5 * DAY })).runOnce();
     expect(await long.used("global", 30 * DAY, NOW)).toBe(1n);
+  });
+
+  it("prunes listing attempts older than 30 days (0063 row 23)", async () => {
+    const { catalogAttempts } = db.stores();
+    const attempt = (at: number) =>
+      catalogAttempts.record({
+        at,
+        network: "stellar:testnet",
+        payTo: "GPAYTO",
+        payer: "GPAYER",
+        stage: "payment",
+        outcome: "unchanged",
+      });
+    await attempt(NOW - 30 * DAY - 1);
+    await attempt(NOW - 30 * DAY);
+    await createPruner(deps({ catalogAttempts })).runOnce();
+    const { rows } = await db.pool.query("SELECT at FROM catalog_attempts");
+    expect(rows).toEqual([{ at: String(NOW - 30 * DAY) }]);
   });
 
   it("prunes in batches until one comes back short, each table within its own time budget", async () => {
