@@ -1,6 +1,6 @@
 ---
 id: "0048"
-title: "Keep the hot key below the high threshold, with a cold recovery signer"
+title: "Before mainnet, decide again how far the hot key's power reaches"
 type: FEATURE
 status: backlog
 milestone: 1
@@ -23,9 +23,15 @@ history:
     note: >
       0047 (ADR 0013) declined the cold recovery key for now: keep only the hot key. Still a mainnet
       blocker; re-check this design before mainnet.
+  - date: "2026-10-28"
+    status: backlog
+    who: okarcz
+    note: >
+      Reframed as the pre-mainnet re-check: ADR 0013 declined the cold key, so the design
+      below is one of three options, not the plan. The criteria apply only if the re-check picks it.
 ---
 
-# Keep the hot key below the high threshold, with a cold recovery signer
+# Before mainnet, decide again how far the hot key's power reaches
 
 ## Summary
 
@@ -79,6 +85,11 @@ that can. This holds whichever custody option 0047 picks, and is a mainnet block
 
 ## Acceptance Criteria
 
+The re-check comes first: a cold recovery key, another way to keep the hot key below high, or
+the hot key's full power accepted, with the reason recorded in an ADR. The criteria below apply
+only to the cold-key option.
+
+- [ ] Before mainnet, one of the three options is chosen and recorded
 - [ ] Given a new channel, when setup runs, then its thresholds are low 1 / medium 1 / high 2 and the facilitator key (weight 1) can't change its signers or merge it, while a settlement still lands
 - [ ] Given the facilitator's own account, when it is hardened, then the hot key can sign fee bumps but not a Payment or a signer change
 - [ ] Given the cold recovery key, when the hot key is lost or rotated, then one batched, cold-signed transaction moves many channels to a new hot key, tested on testnet
