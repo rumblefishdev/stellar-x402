@@ -125,4 +125,28 @@ describe("guardedFetch", () => {
       seller.close();
     }
   });
+
+  it("ends a request its caller aborts, before the deadline: an MCP client closes its event stream", async () => {
+    const { fetch: realFetch } = await vi.importActual<typeof import("undici")>("undici");
+    undiciFetch.mockImplementation(realFetch);
+    // Sends its headers, then a stream that never ends.
+    const seller = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write(": open\n\n");
+    });
+    await new Promise<void>((done) => seller.listen(0, "127.0.0.1", done));
+    const url = `http://127.0.0.1:${(seller.address() as AddressInfo).port}/`;
+    const limits = { timeoutMs: 60_000, maxResponseBytes: 1_000, allowInsecureLocal: true };
+    const caller = new AbortController();
+    try {
+      const pending = guardedFetch(limits, AbortSignal.timeout(limits.timeoutMs))(url, {
+        signal: caller.signal,
+      });
+      setTimeout(() => caller.abort(), 50);
+      await expect(pending).rejects.toMatchObject({ code: "upstream_error" });
+    } finally {
+      seller.closeAllConnections();
+      seller.close();
+    }
+  });
 });
