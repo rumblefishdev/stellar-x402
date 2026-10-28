@@ -32,6 +32,11 @@ export interface VerifierDeps {
   channels: readonly string[];
   /** Least ledgers left before the payer's auth expires (AD-22). */
   minValidityLedgers: number;
+  /**
+   * Most ledgers left before the payer's auth expires (0073 decision 2): an envelope lives as
+   * long as its auth entry, so this bounds a channel's wait on one transaction.
+   */
+  maxValidityLedgers: number;
   /** Sequence of the latest closed ledger. */
   latestLedger: () => Promise<number>;
   /**
@@ -66,8 +71,9 @@ export const UNSUPPORTED_CREDENTIAL_REASON =
   "invalid_exact_stellar_payload_unsupported_credential_type";
 
 /**
- * The auth expires at or past the last ledger the pool can bound an envelope by: `/settle` passes
- * it as `maxLedger`, and the envelope's bound (`maxLedger + 1`) is a uint32.
+ * The auth expires more than `maxValidityLedgers` after the latest ledger (0073 decision 2), or
+ * at or past the last ledger the pool can bound an envelope by: `/settle` passes it as
+ * `maxLedger`, and the envelope's bound (`maxLedger + 1`) is a uint32.
  */
 export const EXPIRATION_TOO_FAR_REASON = "invalid_exact_stellar_signature_expiration_too_far";
 const MAX_EXPIRATION_LEDGER = 2 ** 32 - 2;
@@ -221,6 +227,26 @@ export function createChecker(deps: VerifierDeps): Check {
           upstream.payer,
           `auth expires at ledger ${expiration}, ${expiration - current} ledgers after ledger ` +
             `${current}; at least ${deps.minValidityLedgers} are required${hint}`,
+        ),
+      };
+    }
+    if (expiration - current > deps.maxValidityLedgers) {
+      const signed = signedLedgers(requirements.maxTimeoutSeconds);
+      // Without the 10% slack `MAX_VALIDITY_LEDGERS` leaves for clients that see faster ledgers.
+      const ceiling = Math.floor(
+        (deps.maxValidityLedgers * DEFAULT_ESTIMATED_LEDGER_SECONDS * 10) / 11,
+      );
+      const hint =
+        signed > deps.maxValidityLedgers
+          ? `; maxTimeoutSeconds ${requirements.maxTimeoutSeconds} is about ${signed} ledgers, ` +
+            `so it should be at most ${ceiling}`
+          : "";
+      return {
+        response: invalid(
+          EXPIRATION_TOO_FAR_REASON,
+          upstream.payer,
+          `auth expires at ledger ${expiration}, ${expiration - current} ledgers after ledger ` +
+            `${current}; at most ${deps.maxValidityLedgers} are allowed${hint}`,
         ),
       };
     }

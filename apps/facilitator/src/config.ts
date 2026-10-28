@@ -163,6 +163,13 @@ const envSchema = z
      */
     MIN_VALIDITY_LEDGERS: int(2).default("4"),
     /**
+     * Most ledgers left before the payer's auth expires (0073 decision 2). An envelope lives as
+     * long as its auth entry, so this bounds how long a channel can wait on one transaction, and
+     * how long a payload stays landable. 60 ledgers is about 5 minutes; the default adds 10%, as
+     * a client that sees faster ledgers signs a 300 s `maxTimeoutSeconds` for up to 63.
+     */
+    MAX_VALIDITY_LEDGERS: int(3).default("66"),
+    /**
      * How long a repeat `/settle` waits for a signed record to turn final (AD-6); at most the
      * budget. Unset means 20 s, or the budget when that is shorter. At least 1 s, so a seller's
      * retry can use it.
@@ -245,6 +252,10 @@ const envSchema = z
       path: ["MAX_FEE_STROOPS"],
     },
   )
+  .refine((env) => env.MAX_VALIDITY_LEDGERS > env.MIN_VALIDITY_LEDGERS, {
+    message: "must be above MIN_VALIDITY_LEDGERS",
+    path: ["MAX_VALIDITY_LEDGERS"],
+  })
   // A repeat waits at most what the call it repeats could take.
   .refine((env) => (env.SETTLE_TIMEOUT_MS ?? 0) <= env.SETTLE_BUDGET_MS, {
     message: "must be at most SETTLE_BUDGET_MS",
@@ -302,6 +313,7 @@ export interface Config {
   };
   settlement: {
     minValidityLedgers: number;
+    maxValidityLedgers: number;
     settleTimeoutMs: number;
     settleBudgetMs: number;
     leaseTtlMs: number;
@@ -414,6 +426,7 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
     },
     settlement: {
       minValidityLedgers: e.MIN_VALIDITY_LEDGERS,
+      maxValidityLedgers: e.MAX_VALIDITY_LEDGERS,
       settleTimeoutMs:
         e.SETTLE_TIMEOUT_MS ?? Math.min(DEFAULT_SETTLE_TIMEOUT_MS, e.SETTLE_BUDGET_MS),
       settleBudgetMs: e.SETTLE_BUDGET_MS,
