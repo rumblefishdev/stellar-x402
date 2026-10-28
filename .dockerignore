@@ -1,0 +1,11 @@
+# The facilitator's image build context (apps/facilitator/Dockerfile). Never secrets, and
+# nothing the build makes itself.
+**/.env*
+**/node_modules
+**/dist
+**/.turbo
+**/target
+.git
+.claude
+lore
+docs
