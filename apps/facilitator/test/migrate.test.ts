@@ -211,8 +211,8 @@ describe("online migrations", () => {
   const p99 = (values: number[]) =>
     [...values].sort((a, b) => a - b)[Math.floor(values.length * 0.99)] ?? 0;
 
-  it("holds no online migration until 0075 hardens the runner", () => {
-    // 0075 closes the runner's gaps before the first one lands; it removes this test.
+  it("holds no online migration until 0078 hardens the runner", () => {
+    // 0078 closes the runner's gaps before the first one lands; it removes this test.
     expect(MIGRATIONS.filter((m) => "online" in m).map((m) => m.name)).toEqual([]);
   });
 

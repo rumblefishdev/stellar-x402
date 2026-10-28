@@ -425,7 +425,7 @@ One request or one stop must never outlast the layer in front of it:
   - the migration service's bounds are ADR 0012's;
   - it logs each step as it ends and every 50 backfill batches, and the deploy lock holds later
     deploys meanwhile. A step's start and the wait for another run's lock reach the journal only
-    with task 0075, so until then a long index build, `VALIDATE` or that wait is quiet there:
+    with task 0078, so until then a long index build, `VALIDATE` or that wait is quiet there:
     read `pg_stat_activity` before stopping a run;
   - `x402-deploy@` is a oneshot with a `TimeoutStartSec`, the cap on the whole run: cancelling the
     CI job doesn't stop the unit, so without it a stuck run, waiting up to 30 minutes for another

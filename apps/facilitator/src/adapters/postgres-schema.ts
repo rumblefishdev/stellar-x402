@@ -19,7 +19,7 @@ import type { Logger } from "../logger.js";
  * (`spend_reservations`, `spend_scopes`, `spend_reservation_scopes`): in any other, a `reserve` in
  * flight and the group wait on each other until the group gives up, on every retry (ADR 0012).
  *
- * No migration here is online until 0075 hardens the runner; a test holds that.
+ * No migration here is online until 0078 hardens the runner; a test holds that.
  *
  * Every time is the app's clock, stored as `bigint` milliseconds; the SQL never reads the
  * database's clock.
