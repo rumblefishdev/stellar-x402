@@ -87,8 +87,8 @@ export type AttemptState = "stored" | "sent" | "unknown" | "landed" | "dead";
 
 /** The bounds of a signed transaction: past either one it can no longer land. */
 export interface AttemptBounds {
-  /** The time bound, in Unix seconds. */
-  maxTime: number;
+  /** The time bound, in Unix seconds; unset for an envelope bounded by `maxLedger` alone (0073). */
+  maxTime?: number;
   /** The last ledger it may land in (inclusive). */
   maxLedger?: number;
 }
