@@ -18,6 +18,12 @@ history:
     who: akot
     note: >
       Work starts.
+  - date: "2026-10-28"
+    status: active
+    who: akot
+    note: >
+      Option B built: the fee refusal names the archived entries; threat model and README
+      updated. 500 facilitator tests pass (+7 new).
 ---
 
 # Decide what /verify does when a payment must restore archived state
@@ -54,11 +60,45 @@ code stay upstream's; when the payment's own transaction lists archived entries
 
 ## Acceptance Criteria
 
-- [ ] Given a payment over the fee ceiling whose transaction lists archived entries, when
+- [x] Given a payment over the fee ceiling whose transaction lists archived entries, when
       `/verify` or `/settle` runs, then the answer keeps
       `invalid_exact_stellar_payload_fee_exceeds_maximum` and its message names the entries, and a
       test pins it
-- [ ] Given a payment over the ceiling with no archived entries, or another refusal, then the
+- [x] Given a payment over the ceiling with no archived entries, or another refusal, then the
       answer is upstream's unchanged
-- [ ] Given the choice, then the threat model's "Fee inflation by rent" records it and the
+- [x] Given the choice, then the threat model's "Fee inflation by rent" records it and the
       facilitator README says how to restore the entries
+
+## Implementation Notes
+
+- `apps/facilitator/src/settlement/verify.ts`: `withArchivedEntries` on `createChecker`'s refusal
+  branch, so `/verify` and `/settle` (`settleCheck`) share it. It reads `archivedSorobanEntries`
+  from the payment's transaction and names their read-write footprint keys, at most 4.
+- `apps/facilitator/test/fee-agreement.test.ts`: against the real `ExactStellarScheme`, a check
+  that `assembleTransaction` keeps the archived entries, the named entries on both routes, the cap
+  of 4, and upstream's answer for another refusal and for a fee refusal without archived entries.
+- `docs/threat-model.md`, "Fee inflation by rent"; `apps/facilitator/README.md`, "Restoring
+  archived entries".
+- Facilitator suite: 25 files, 500 tests passed; tsc and eslint clean.
+
+**Modified tests:** `settle.test.ts`'s "answers a failed check with its reason, without claiming"
+now also expects the check's `invalidMessage` as `errorMessage`; it held nothing on the message
+before.
+
+## Design Decisions
+
+### From Plan
+
+1. **Description only**: the verdict and the code stay upstream's; the entries come from the
+   client, so they change only the text.
+2. **No extra RPC call**: the entries are read from the payment's own transaction.
+
+### Emerged
+
+3. **Under the ceiling the facilitator pays restore rent**, as it pays any rent; the threat model
+   says so.
+4. **The README restores with the SDK, not stellar-cli**: stellar-cli 28.1.0's `contract restore`
+   takes a data entry's key as an `ScVal` with `--id`, not the message's `LedgerKey`. One
+   `RestoreFootprint` over the message's keys restores them all, as 0021's `token-matrix.ts` did.
+5. **After a restore, a new payment, not the same one**: the message lists the entries the payment
+   was built with, so a resent payment names them again while any is still archived.
