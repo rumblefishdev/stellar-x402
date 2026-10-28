@@ -44,8 +44,8 @@ simulation-derived fee 302000 stroops exceeds ceiling 250000 stroops; the paymen
    on the refusal branch, only for `…_fee_exceeds_maximum`. `/settle` re-checks through the same
    checker and passes `invalidMessage` on as `errorMessage`.
 4. **Bounded text.** At most 4 keys, then `and N more`. Keys as base64 `LedgerKey` XDR only, never
-   decoded values, each named once, only persistent contract data and code, and none over 512
-   characters (a token balance's key is about 160, an allowance's 264).
+   decoded values, each named once, only persistent contract data and code, and a key over 512
+   characters shown as its length (a token's instance key is 64, a balance's about 160).
 
 ## Docs
 

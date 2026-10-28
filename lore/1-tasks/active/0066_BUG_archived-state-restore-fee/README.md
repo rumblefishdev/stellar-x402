@@ -77,7 +77,8 @@ code stay upstream's; when the payment's own transaction lists archived entries
 - `apps/facilitator/src/settlement/verify.ts`: `withArchivedEntries` on `createChecker`'s refusal
   branch, so `/verify` and `/settle` (`settleCheck`) share it. It reads `archivedSorobanEntries`
   from the payment's transaction and names their read-write footprint keys: each once, only
-  persistent contract data and code, none over 512 base64 characters, at most 4.
+  persistent contract data and code, a key over 512 base64 characters shown by its length, at most
+  4.
 - `apps/facilitator/test/fee-agreement.test.ts`: against the real `ExactStellarScheme`, a check
   that `assembleTransaction` keeps the archived entries, the named entries on both routes, the cap
   of 4, a realistic footprint with read-only keys, repeated and out-of-range indexes, entries that
@@ -112,6 +113,7 @@ before.
    was built with, so a resent payment names them again while any is still archived.
 6. **The list is named as the transaction's, not checked** (code review): the buyer's client
    writes it, so the message says "the payment's transaction lists", the facilitator names only
-   persistent contract data and code, each once and at most 512 base64 characters, and the README
+   persistent contract data and code, each once, a key over 512 base64 characters by its length
+   (counted, so the count stays true), and the README
    says to check the entries before paying their rent. Each footprint key is encoded at most once,
    so a repeated index costs nothing.
