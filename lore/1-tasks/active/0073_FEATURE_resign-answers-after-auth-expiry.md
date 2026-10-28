@@ -2,7 +2,7 @@
 id: "0073"
 title: "Tell the payer to sign again only once their auth entry can't land"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0006"]
 related_tasks: ["0019", "0009"]
@@ -25,6 +25,10 @@ history:
     who: okarcz
     note: >
       Raised to high: until it is fixed, a payer told to sign again can pay twice.
+  - date: "2026-10-28"
+    status: active
+    who: okarcz
+    note: "Work started."
 ---
 
 # Tell the payer to sign again only once their auth entry can't land
