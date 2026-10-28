@@ -1,5 +1,5 @@
 import { CATALOG_KEY_VERSION } from "@stellar-x402/bazaar";
-import { Keypair, StrKey } from "@stellar/stellar-sdk";
+import { Keypair, Networks, StrKey, Transaction } from "@stellar/stellar-sdk";
 import type { PaymentRequirements } from "@x402/core/types";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -8,7 +8,16 @@ import { MIGRATIONS, migrate } from "../src/adapters/postgres-schema.js";
 import { NON_FINAL_STATES } from "../src/adapters/rules.js";
 import { main, migrateMain } from "../src/main.js";
 import { HashConflictError, type Stores } from "../src/ports/index.js";
-import { fingerprintOf, keyOf } from "../src/settlement/settle.js";
+import { jsonLogger } from "../src/logger.js";
+import { memoryMetrics } from "../src/metrics.js";
+import {
+  SETTLE_REASONS,
+  createSettler,
+  fingerprintOf,
+  keyOf,
+  type Submitter,
+} from "../src/settlement/settle.js";
+import type { Check } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
 import { transferPayload } from "./payment.js";
 import {
@@ -62,6 +71,110 @@ describe("PostgreSQL stores", () => {
   };
 
   settlementStoreContract(async () => (await stores()).settlements);
+
+  // Two settlers (0019 decision 11), as two instances during a
+  // deploy overlap, sharing one PostgreSQL store.
+  describe("two settlers on one store", () => {
+    const HASH = "c".repeat(64);
+    const requirements = {
+      scheme: "exact",
+      network: "stellar:testnet",
+      asset: StrKey.encodeContract(Buffer.alloc(32, 7)),
+      amount: "1000",
+      payTo: Keypair.random().publicKey(),
+      maxTimeoutSeconds: 60,
+      extra: {},
+    } satisfies PaymentRequirements;
+    const payer = Keypair.random().publicKey();
+    const paymentPayload = transferPayload(
+      { payer, payTo: requirements.payTo, requirements },
+      1_012,
+    );
+    const check: Check = async (p) => ({
+      response: { isValid: true, payer },
+      verified: {
+        transaction: new Transaction(
+          (p.payload as { transaction: string }).transaction,
+          Networks.TESTNET,
+        ),
+        payer,
+        nonce: "7",
+        expirationLedger: 1_012,
+        currentLedger: 1_000,
+      },
+    });
+
+    /** Two settlers on the store, with one pool that signs and lands once `land()` is called. */
+    async function twoSettlers(settleTimeoutMs = 2_000) {
+      const { settlements } = await stores();
+      let land!: () => void;
+      const landed = new Promise<void>((resolve) => (land = resolve));
+      const submit = vi.fn<Submitter["submit"]>(async (_call, opts = {}) => {
+        await opts.onSigned?.(HASH, { maxTime: 2_000_000_000, maxLedger: 1_012 });
+        await landed;
+        return {
+          status: "success",
+          hash: HASH,
+          channel: "GCHANNEL",
+          ledger: 1_001,
+          feeCharged: 41_000n,
+          attempts: [{ hash: HASH, sent: "yes" }],
+        };
+      });
+      const settler = () =>
+        createSettler({
+          network: "stellar:testnet",
+          check,
+          store: settlements,
+          submitter: { submit },
+          hooks: {
+            beforeSubmit: async () => ({ allow: true }),
+            onFinal: async () => {},
+            onSuccess: async () => {},
+          },
+          logger: jsonLogger("error"),
+          metrics: memoryMetrics(),
+          maxFeeStroops: 250_000n,
+          settleTimeoutMs,
+          budgetMs: 5_000,
+          pollMs: 5,
+        });
+      return { a: settler(), b: settler(), submit, land, settlements };
+    }
+
+    it("claims once: one submits, and one success is answered across both", async () => {
+      const { a, b, submit, land } = await twoSettlers();
+      const answers = Promise.all([
+        a(paymentPayload, requirements),
+        b(paymentPayload, requirements),
+      ]);
+      await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+      land();
+      const responses = (await answers).map((settled) => settled.response);
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(responses.filter((r) => r.success)).toHaveLength(1);
+      expect(responses.filter((r) => !r.success)).toEqual([
+        expect.objectContaining({ errorReason: SETTLE_REASONS.alreadySettled, transaction: HASH }),
+      ]);
+    });
+
+    it("answers a repeat on the other settler settlement_pending while the first runs, then once", async () => {
+      const { a, b, land, settlements } = await twoSettlers(50);
+      const first = a(paymentPayload, requirements);
+      const key = keyOf(paymentPayload, "stellar:testnet")!;
+      await vi.waitFor(async () => expect((await settlements.get(key))?.hashes).toEqual([HASH]));
+      expect((await b(paymentPayload, requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.pending,
+        transaction: HASH,
+      });
+      land();
+      expect((await first).response.success).toBe(true);
+      expect((await b(paymentPayload, requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.alreadySettled,
+      });
+      expect((await settlements.attempts(key)).map((attempt) => attempt.state)).toEqual(["landed"]);
+    });
+  });
   spendStoreContract(async () => (await stores()).spend);
   rateLimitStoreContract(async () => (await stores()).rateLimits);
   catalogStoreContract(async () => (await stores()).catalog);
@@ -344,7 +457,17 @@ describe("PostgreSQL stores", () => {
     const pools = app.pools;
     expect(pools).toBeDefined();
     try {
+      // The startup sweep reads the settlements on the main pool, and only there.
+      await app.reconciled;
+      const main = pools?.main.totalCount;
+      expect(main).toBeGreaterThan(0);
       const limits = [{ scope: "global" as const, maxStroops: 10n, windowMs: 1_000 }];
+      // Nothing but the main pool served the sweep.
+      expect([
+        pools?.reserve.totalCount,
+        pools?.rateLimits.totalCount,
+        pools?.discovery.totalCount,
+      ]).toEqual([0, 0, 0]);
       // Checkouts, not connections: a pool reuses an idle connection, so only a checkout shows
       // which pool a call ran on once the pool has one.
       const checkouts = { main: 0, reserve: 0, rateLimits: 0, discovery: 0 };
@@ -432,6 +555,7 @@ describe("PostgreSQL stores", () => {
       LOG_LEVEL: "error",
     });
     try {
+      await app.reconciled;
       const response = await fetch(`http://127.0.0.1:${app.port}/settle`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -446,6 +570,45 @@ describe("PostgreSQL stores", () => {
       expect((await settlements.get(key))?.successAnsweredAt).toEqual(expect.any(Number));
     } finally {
       await app.close();
+    }
+  });
+
+  it("lets only one of two main() processes on one database settle, and the other take over once the first stops (0025)", async () => {
+    await stores();
+    const env = {
+      DATABASE_URL: urlFor(schema),
+      FACILITATOR_SECRET: bootSecret,
+      CLIENT_IP: "socket",
+      CHANNELS: bootChannel,
+      RPC_URLS: rpc.url,
+      PORT: "0",
+      LOG_LEVEL: "error",
+      LEASE_TTL_MS: "1000",
+    };
+    // An empty body: 400 from a process that holds the lease, 503 before reading it from one that
+    // doesn't.
+    const settleStatus = async (port: number) =>
+      (
+        await fetch(`http://127.0.0.1:${port}/settle`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        })
+      ).status;
+    const first = await main(env);
+    const second = await main(env);
+    try {
+      expect([await settleStatus(first.port), await settleStatus(second.port)]).toEqual([400, 503]);
+      // The first stops cleanly and gives the lease up, so the second takes it at its next
+      // attempt, a third of the TTL, instead of after the TTL.
+      await first.close();
+      const deadline = Date.now() + 1_000;
+      while ((await settleStatus(second.port)) === 503 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(await settleStatus(second.port)).toBe(400);
+    } finally {
+      await Promise.all([first.close(), second.close()]);
     }
   });
 
@@ -558,7 +721,11 @@ describe("PostgreSQL stores", () => {
         if (built === "branch")
           await old.query("CREATE INDEX catalog_type_seq ON catalog (type, seq)");
         expect(await typeIndex(old), built).toBe(built === "branch" ? 1 : 0);
-        expect(await migrate(old), built).toEqual(["0003_catalog_type_seq", "0004_spend_window"]);
+        expect(await migrate(old), built).toEqual([
+          "0003_catalog_type_seq",
+          "0004_spend_window",
+          "0005_settlement_attempts",
+        ]);
         expect(await typeIndex(old), built).toBe(1);
       } finally {
         await old.end();
@@ -579,7 +746,7 @@ describe("PostgreSQL stores", () => {
         `INSERT INTO spend_reservations (id, amount, at, state) VALUES ('a', 60, 5, 'committed');
          INSERT INTO spend_reservation_scopes (id, scope) VALUES ('a', 'global'), ('a', 'payer:P')`,
       );
-      expect(await migrate(old)).toEqual(["0004_spend_window"]);
+      expect(await migrate(old)).toEqual(["0004_spend_window", "0005_settlement_attempts"]);
       const { rows } = await old.query(
         "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",
       );

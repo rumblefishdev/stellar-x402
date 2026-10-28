@@ -3,6 +3,7 @@ id: "0044"
 title: "Prepare the MCP server for mainnet: assets, networks, payee allowlist, key storage"
 type: FEATURE
 status: backlog
+milestone: 2
 related_adr: []
 related_tasks: ["0037", "0043"]
 tags: [mcp, payments, mainnet, security, priority-medium, effort-large]

@@ -4,7 +4,13 @@ export {
   type BalanceCheckOptions,
   type BalanceReport,
 } from "./balance.js";
-export { ChannelPool, NoChannelsError, QueueTimeoutError, type Channel } from "./channel-pool.js";
+export {
+  ChannelPool,
+  NoChannelsError,
+  QueueTimeoutError,
+  ShutdownError,
+  type Channel,
+} from "./channel-pool.js";
 export {
   FallbackRpc,
   RpcTimeoutError,
@@ -41,6 +47,7 @@ export {
   attemptsOf,
   type ContractCall,
   type FeeEscalation,
+  type SignedBounds,
   type SubmitOptions,
   type SubmitterOptions,
 } from "./submitter.js";

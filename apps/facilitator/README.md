@@ -11,8 +11,8 @@ discovery routes. Design: [the M1 spine](../../docs/architecture/m1-spine.md) (A
   and the wait for a channel included. It stays below the seller's own 90 s timeout.
 - `SETTLE_TIMEOUT_MS` (20 s, or the budget when that is shorter; at least 1 s, at most the
   budget): how long a repeat of a sent payment waits for it to turn final.
-- `NETWORK=stellar:pubnet` refuses to start: `/settle` would spend there
-  with no spend budgets (0024) and no channel lease (0025) yet.
+- `NETWORK=stellar:pubnet` refuses to start: `/settle` would spend there with no spend budgets
+  (0024) and no fencing token on the channel lease (0071) yet.
 
 ## Callers and rate limits
 
@@ -64,44 +64,100 @@ Every request counts, a malformed or oversized one too. `/supported` has no limi
 - `pnpm migrate` applies the pending migrations; the service never changes the schema. Run it
   before a release that adds one. `0002_success_answered`: on a database without it, a success is
   answered once per process instead of once per payment. `0003_catalog_type_seq`: without it, a
-  `/discovery/resources` `type` filter scans the whole catalog.
+  `/discovery/resources` `type` filter scans the whole catalog. `0005_settlement_attempts` adds
+  each hash's attempt state and bounds; hashes written before it fall back to the auth entry's
+  expiry.
 - An online migration (ADR 0012) commits step by step, so `pnpm migrate` after a stopped or
   failed run continues from the next step. It logs `migration_step` after each step and
   `migration_backfill` every 50 backfill batches. A backfill writes about 1.2 GiB of WAL per
   2 million rows and grows its table by about a third: check the disk's headroom first
   (ADR 0011).
 
+## The channel lease
+
+Only one process at a time settles through a network's channel set, so two never sign with the
+same channel sequence numbers (AD-17, task 0025). The process that holds the lease, a row named
+`<network>:channels` in the settlement store, renews it every third of `LEASE_TTL_MS` (30 s by
+default).
+
+- A process without the lease starts anyway: `/verify` and `/supported` answer, and
+  `/settle` answers `503 { "error": "no_lease" }` with `Retry-After: 5`. It tries to take the
+  lease every third of the TTL and never exits.
+- A renewal that fails, because the store errs or another process holds the lease, stops new
+  settlements at once; calls already sent run on. So does reaching the expiry the process last
+  wrote. A call let in before that sends nothing: the lease is checked again once its hash is
+  stored, and the call ends with `settle_exact_stellar_record_write_failed`. Logged as `lease_lost` with its `reason`, and `lease_acquired` when it holds it again;
+  both counted in `lease_changes_total`.
+- A process that dies keeps the lease until its TTL ends; another one takes it 5 s later, a
+  margin for a holder whose clock lags. One that stops cleanly gives it up after its drain, so the
+  next one takes it at its next attempt.
+
+## Shutdown
+
+On SIGTERM (a deploy: Docker sends it, then SIGKILL after 180 s) the process drains before it
+exits:
+
+1. `/settle` answers `503 { "error": "shutting_down" }` with `Retry-After: 5`; the server keeps
+   listening, so a client gets that answer instead of a refused connection.
+2. Every call that has signed nothing yet, whether waiting for a channel, prepared ahead or reading
+   a sequence, ends at once with `settle_exact_stellar_shutting_down`, and its record closes
+   `rejected`. Its client signs a new payment, which reaches the next process.
+3. Calls already sent run on until they are final or recorded `pending`, at most their time bound
+   plus 30 s, while the process keeps renewing the lease. No new reconciliation sweep starts,
+   and one under way is waited for.
+4. Then nothing can send, so the lease is given up (`shutdown_drained`, `lease_released`) and the
+   next process takes it at its next attempt. A sweep under way doesn't hold it up, as sweeps need
+   no lease.
+5. The server closes. Requests still open get 15 s, then their connections are cut, so a stalled
+   client can't hold the process; then it waits for a sweep under way and exits.
+
+A second SIGTERM or Ctrl-C joins the drain under way. A failed shutdown is logged as
+`shutdown_failed` and exits with code 1.
+
+If the drain isn't done after 150 s, open connections are cut and the lease is left to run out
+(`shutdown_deadline`), and the process exits. The lease runs from its last renewal, so another
+process can send on the channels about 25 s later (the TTL less up to a third of it, plus the
+5 s margin), while a transaction can stay valid for up to 60 s. One still unresolved then may make
+the new process's first send on its channel fail with `txBadSeq` and rebuild; it can't be charged
+twice, and the new process's reconciliation finishes its record. Fencing closes that gap (0071).
+
 ## `/settle` answers
 
-Every outcome is a 200 with an x402 `SettleResponse`. A 400 is a malformed request. A 500 is an
-error of ours, such as the store failing: repeat the same request. Never sign a new payment
-because of a 500, since the first one may still be settling.
+Every outcome is a 200 with an x402 `SettleResponse`. A 400 is a malformed request. A 503 comes
+from a process without the channel lease (`no_lease`) or one shutting down (`shutting_down`):
+nothing was read or settled, so repeat the same request after `Retry-After`. A call that a
+shutdown reaches after it started settling gets the 200 `settle_exact_stellar_shutting_down`
+below instead: its record is closed, so sign a new payment. A 500 is an error of ours, such as the
+store failing: repeat the same request. Never sign a new payment because of a 500, since the first
+one may still be settling.
 
 `success: true` is answered once per payment: an earlier call got it, whoever made that call.
 Every later call with the same payment gets `settle_exact_stellar_already_settled`, so one payment
 unlocks one response.
 
-| `errorReason`                                        | `transaction`           | Meaning                                                                        | What to do                                                                                |
-| ---------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
-| `settlement_pending`                                 | the hash, or empty      | sent, not final yet; empty: not signed yet, or the store couldn't say          | repeat the same request (see below), or look the hash up                                  |
-| `settle_exact_stellar_already_settled`               | the hash                | settled; an earlier call already got this payment's success                    | don't serve again for this payment                                                        |
-| `settle_exact_stellar_nonce_already_used`            | the stored hash, if any | this payer's nonce is already used by another payment, in whatever state       | refuse: the payment isn't for this request                                                |
-| `settle_exact_stellar_timeout`                       | —                       | the settle budget ran out before anything was signed; nothing was or will be   | sign a new payment                                                                        |
-| `settle_exact_stellar_rpc_unavailable`               | an earlier hash, if any | no RPC endpoint answered (refused, failed or timed out)                        | sign a new payment and try again later                                                    |
-| `settle_exact_stellar_no_channel_in_time`            | —                       | every channel was busy until the deadline                                      | sign a new payment and try again later                                                    |
-| `settle_exact_stellar_no_channels`                   | —                       | every channel is out of the pool                                               | sign a new payment and try again later                                                    |
-| `settle_exact_stellar_fee_exceeds_maximum`           | an earlier hash, if any | the network fee rose above the facilitator's ceiling                           | sign a new payment and try again later                                                    |
-| `settle_exact_stellar_signature_expiration_too_soon` | an earlier hash, if any | the auth expires before the pool could land it                                 | sign a new payment with a longer `maxTimeoutSeconds`                                      |
-| `settle_exact_stellar_simulation_failed`             | an earlier hash, if any | the settlement's simulation failed, e.g. the payer's balance                   | check the payer, then sign a new payment                                                  |
-| `settle_exact_stellar_unexpected_balance_changes`    | an earlier hash, if any | the transaction moves something other than the one payment                     | refuse: the payment is malformed                                                          |
-| `settle_exact_stellar_record_write_failed`           | an earlier hash, if any | a new envelope wasn't sent: its hash couldn't be stored, or the budget ran out | sign a new payment                                                                        |
-| a spend reason from the facilitator's limits         | —                       | the facilitator's spend limits refused it                                      | sign a new payment later; this one is ended                                               |
-| `settle_exact_stellar_refused`                       | —                       | the spend-limit check failed with an error of ours                             | sign a new payment, and tell us                                                           |
-| `settle_exact_stellar_transaction_failed`            | the hash                | included in a ledger, but failed                                               | sign a new payment                                                                        |
-| `settle_exact_stellar_transaction_submission_failed` | the hash                | refused by the network before inclusion                                        | sign a new payment                                                                        |
-| `settle_exact_stellar_transaction_expired`           | the hash                | not included before its time or ledger bound                                   | sign a new payment                                                                        |
-| `invalid_exact_stellar_*`, `invalid_network`         | —                       | the `/verify` checks, rerun by `/settle`, refused the payment                  | fix the payment; for `invalid_exact_stellar_payload_fee_exceeds_maximum`, try again later |
-| `unexpected_settle_error`                            | an earlier hash, if any | an error of ours after the claim                                               | sign a new payment, and tell us                                                           |
+| `errorReason`                                        | `transaction`           | Meaning                                                                                            | What to do                                                                                |
+| ---------------------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `settlement_pending`                                 | the hash, or empty      | sent, not final yet; empty: not signed yet, or the store couldn't say                              | repeat the same request (see below), or look the hash up                                  |
+| `settle_exact_stellar_already_settled`               | the hash                | settled; an earlier call already got this payment's success                                        | don't serve again for this payment                                                        |
+| `settle_exact_stellar_nonce_already_used`            | the stored hash, if any | this payer's nonce is already used by another payment, in whatever state                           | refuse: the payment isn't for this request                                                |
+| `settle_exact_stellar_timeout`                       | —                       | the settle budget ran out before anything was signed; nothing was or will be                       | sign a new payment                                                                        |
+| `settle_exact_stellar_interrupted`                   | —                       | the facilitator restarted before anything was signed; nothing was or will be                       | sign a new payment                                                                        |
+| `settle_exact_stellar_shutting_down`                 | an earlier hash, if any | the facilitator was stopping; nothing was applied, and nothing more will be sent                   | sign a new payment                                                                        |
+| `settle_exact_stellar_rpc_unavailable`               | an earlier hash, if any | no RPC endpoint answered (refused, failed or timed out)                                            | sign a new payment and try again later                                                    |
+| `settle_exact_stellar_no_channel_in_time`            | —                       | every channel was busy until the deadline                                                          | sign a new payment and try again later                                                    |
+| `settle_exact_stellar_no_channels`                   | —                       | every channel is out of the pool                                                                   | sign a new payment and try again later                                                    |
+| `settle_exact_stellar_fee_exceeds_maximum`           | an earlier hash, if any | the network fee rose above the facilitator's ceiling                                               | sign a new payment and try again later                                                    |
+| `settle_exact_stellar_signature_expiration_too_soon` | an earlier hash, if any | the auth expires before the pool could land it                                                     | sign a new payment with a longer `maxTimeoutSeconds`                                      |
+| `settle_exact_stellar_simulation_failed`             | an earlier hash, if any | the settlement's simulation failed, e.g. the payer's balance                                       | check the payer, then sign a new payment                                                  |
+| `settle_exact_stellar_unexpected_balance_changes`    | an earlier hash, if any | the transaction moves something other than the one payment                                         | refuse: the payment is malformed                                                          |
+| `settle_exact_stellar_record_write_failed`           | an earlier hash, if any | a new envelope wasn't sent: its hash couldn't be stored, the budget ran out, or the lease was lost | sign a new payment                                                                        |
+| a spend reason from the facilitator's limits         | —                       | the facilitator's spend limits refused it                                                          | sign a new payment later; this one is ended                                               |
+| `settle_exact_stellar_refused`                       | —                       | the spend-limit check failed with an error of ours                                                 | sign a new payment, and tell us                                                           |
+| `settle_exact_stellar_transaction_failed`            | the hash                | included in a ledger, but failed                                                                   | sign a new payment                                                                        |
+| `settle_exact_stellar_transaction_submission_failed` | the hash                | refused by the network before inclusion                                                            | sign a new payment                                                                        |
+| `settle_exact_stellar_transaction_expired`           | the hash                | not included before its time or ledger bound                                                       | sign a new payment                                                                        |
+| `invalid_exact_stellar_*`, `invalid_network`         | —                       | the `/verify` checks, rerun by `/settle`, refused the payment                                      | fix the payment; for `invalid_exact_stellar_payload_fee_exceeds_maximum`, try again later |
+| `unexpected_settle_error`                            | an earlier hash, if any | an error of ours after the claim                                                                   | sign a new payment, and tell us                                                           |
 
 "An earlier hash, if any": a refusal after a `txBadSeq` rebuild carries the last stored hash.
 `transaction` is the last stored hash; it may never have reached the network.
@@ -119,9 +175,24 @@ gets the same answer again, so a retry needs a new payment (a new nonce); only
 - a spend refusal the store couldn't record leaves the payment claimed, so a repeat after the
   budget gets `…_timeout` instead of the spend reason.
 
-Until 0019 nothing finishes a `pending` record: every repeat of it gets `settlement_pending`.
-The record stays `pending` across restarts. Look the hash up on chain instead of repeating for
-long.
+A `pending` record is finished by reconciliation (task 0019): the pool's late result, or a sweep
+that asks the network about each of the record's hashes. A hash the network doesn't know turns
+`…_transaction_expired` only once its time or ledger bound has passed, so a repeat may get
+`settlement_pending` for up to that long. A record expires only if no hash was stored since the
+sweep read them: a rebuild in flight makes it wait for the next sweep. A sweep runs as the server
+starts and then 10 s after each one ends, beside `/settle`, in every process, with or without the channel lease; a record the
+RPC or the store couldn't check is simply tried by the next sweep. A claim with no hash is closed
+as `…_interrupted` once its settle budget plus 5 s has passed.
+
+The RPC keeps only a window of history (testnet's keeps 120960 ledgers, about 7 days; providers
+differ). A record claimed before the oldest ledger it keeps can't be told from one that never
+landed, so it stays open, is logged once as `settlement_history_gone` (counted in
+`settlement_history_gone_total`) and is checked again every 5 minutes: check its hashes on a
+block explorer or Horizon before acting on it.
+
+A success answered while the store was down is marked answered once the store is back. After a
+restart the process can't know it answered one, so a repeat may get that payment's success a
+second time, at most once; no money moves twice.
 
 ## `/discovery/resources`
 

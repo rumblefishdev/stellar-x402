@@ -181,13 +181,24 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   credentials, and the passphrase is also kept beside ADR 0013's backup secret in AWS Secrets
   Manager. Decide how the database reaches the box: a second network for Postgres, or pgBackRest
   on the host. The restore drill adds `pgbackrest check` and `pgbackrest verify`.
-- From 0039: the public URL is `x402-facilitator-testnet.sorobanscan.com` through Cloudflare
-  Tunnel (ADR 0011). Prerequisites, set up by task 0062: the `sorobanscan.com` zone on
-  Cloudflare, and the testnet
-  tunnel with its routing (the hostname to `http://facilitator-testnet:<port>`, anything else
-  404) and DNS record, both Terraform in `soroban-infrastructure`'s `cloudflare/`
-  (stkrolikiewicz applies it for now). Bot Fight Mode, Browser Integrity Check and "I'm Under
-  Attack" stay off on the zone. Nothing goes into the ClickHouse project's repo.
+- From 0039: the public URL is `x402-facilitator.sorobanscan.com` through Cloudflare Tunnel
+  (ADR 0011; one hostname for both networks, task 0076). Prerequisites, set up by task 0062: the
+  `sorobanscan.com` zone on Cloudflare, and the tunnel `x402` with its routing (the hostname to
+  `http://facilitator:4021`, anything else 404) and DNS record, both Terraform in
+  `soroban-infrastructure`'s `cloudflare/` (stkrolikiewicz applies it for now). The Compose
+  service is `facilitator`, one for both networks, also where this task still says
+  `facilitator-testnet` (`--exit-code-from` included); task 0077 renames those and the other
+  per-network names. The compose file keeps `PORT` at 4021, and changing it means changing
+  `cloudflare/x402.tf` too.
+  Bot Fight Mode, Browser Integrity Check and "I'm Under Attack" stay off on the zone. Nothing
+  goes into the ClickHouse project's repo.
+  - **Before the first deploy:** Browser Integrity Check was `on` on 2026-10-28 (Cloudflare's
+    default; `cloudflare/zone.tf` doesn't set it). It answers clients whose headers don't look
+    like a browser with error 1010 at the edge, so the facilitator never sees the request. Turn
+    it off for `x402-facilitator.sorobanscan.com` with a configuration rule in
+    `soroban-infrastructure` (the rest of the zone keeps it for sorobanscan's site), checking which
+    token permission the ruleset needs. Bot Fight Mode couldn't be read (the token has no Bot
+    Management permission): check its toggle in the dashboard, Security → Bots.
 - From 0039: `GET /health` answers 200 and reports `ready` in its body.
 - From 0039, the runbook: running the playbook from a reviewed commit, deploy, rollback
   (automatic on a failed deploy; by hand, redeploy an earlier digest), long migrations outside

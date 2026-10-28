@@ -1,3 +1,5 @@
+import { once } from "node:events";
+import net from "node:net";
 import { Keypair } from "@stellar/stellar-sdk";
 import type { PaymentRequirements } from "@x402/core/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -5,11 +7,12 @@ import { createCataloger } from "../src/catalog/cataloger.js";
 import { parseConfig } from "../src/config.js";
 import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
-import { MAX_BODY_DEPTH } from "../src/http/app.js";
+import { MAX_BODY_DEPTH, NO_LEASE_RETRY_AFTER_S } from "../src/http/app.js";
 import { start, type Started } from "../src/main.js";
 import { memoryMetrics } from "../src/metrics.js";
 import type { SettlementRecord } from "../src/ports/index.js";
 import type { SettlementHooks } from "../src/settlement/hooks.js";
+import type { Reconciliation } from "../src/settlement/reconcile.js";
 import type { Settle } from "../src/settlement/settle.js";
 import { testDatabase } from "./database.js";
 import { bazaarExtensions, depthOf } from "./payment.js";
@@ -266,5 +269,255 @@ describe("POST /settle", () => {
     const response = await post(request);
     expect([response.status, await response.json()]).toEqual([500, { error: "internal_error" }]);
     expect(lines.join("")).toContain("http_error");
+  });
+});
+
+describe("POST /settle beside reconciliation (0019 decision 27)", () => {
+  const db = testDatabase();
+  it("serves while the first sweep runs, and starts and stops it with the server", async () => {
+    const settle = vi.fn<Settle>(async () => ({ response: success }));
+    const reconciliation = {
+      reconciled: new Promise<void>(() => {}),
+      listed: () => false,
+      start: vi.fn(),
+      close: vi.fn(async () => {}),
+    };
+    const env = {
+      FACILITATOR_SECRET: Keypair.random().secret(),
+      DATABASE_URL: db.urlFor(db.schema),
+      CHANNELS: Keypair.random().publicKey(),
+      CLIENT_IP: "socket",
+    };
+    const config = { ...parseConfig(env), port: 0 };
+    const app = await start({
+      config,
+      logger: jsonLogger("error"),
+      stores: db.stores(),
+      verify: async () => ({ isValid: true }),
+      settle,
+      extensionResponses: () => undefined,
+      supported: supportedResponse(config.network, Keypair.random().publicKey()),
+      metrics: memoryMetrics(),
+      reconciliation,
+    });
+    try {
+      expect(reconciliation.start).toHaveBeenCalledTimes(1);
+      const response = await fetch(`http://127.0.0.1:${app.port}/settle`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(request),
+      });
+      expect(response.status).toBe(200);
+      expect(settle).toHaveBeenCalledTimes(1);
+    } finally {
+      await app.close();
+    }
+    expect(reconciliation.close).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("POST /settle without the channel lease (0025)", () => {
+  const db = testDatabase();
+  it("answers 503 at once, settles again once the lease is held, and starts and stops it", async () => {
+    const settle = vi.fn<Settle>(async () => ({ response: success }));
+    let holds = false;
+    const lease = {
+      held: () => holds,
+      start: vi.fn(async () => {}),
+      runOnce: vi.fn(),
+      close: vi.fn(async () => {}),
+      release: vi.fn(async () => {}),
+    };
+    const rateLimits = db.stores().rateLimits;
+    const hit = vi.spyOn(rateLimits, "hit");
+    const env = {
+      FACILITATOR_SECRET: Keypair.random().secret(),
+      DATABASE_URL: db.urlFor(db.schema),
+      CHANNELS: Keypair.random().publicKey(),
+      CLIENT_IP: "socket",
+    };
+    const config = { ...parseConfig(env), port: 0 };
+    const app = await start({
+      config,
+      logger: jsonLogger("error"),
+      stores: { ...db.stores(), rateLimits },
+      verify: async () => ({ isValid: true }),
+      settle,
+      extensionResponses: () => undefined,
+      supported: supportedResponse(config.network, Keypair.random().publicKey()),
+      metrics: memoryMetrics(),
+      lease,
+    });
+    const post = (path: string) =>
+      fetch(`http://127.0.0.1:${app.port}${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(request),
+      });
+    try {
+      expect(lease.start).toHaveBeenCalledTimes(1);
+      const refused = await post("/settle");
+      expect([refused.status, refused.headers.get("retry-after"), await refused.json()]).toEqual([
+        503,
+        `${NO_LEASE_RETRY_AFTER_S}`,
+        { error: "no_lease" },
+      ]);
+      // No settle, and no store call for the rate limit either.
+      expect(settle).not.toHaveBeenCalled();
+      expect(hit).not.toHaveBeenCalled();
+      // `/verify` doesn't need the lease.
+      expect((await post("/verify")).status).toBe(200);
+      holds = true;
+      expect((await post("/settle")).status).toBe(200);
+      expect(settle).toHaveBeenCalledTimes(1);
+    } finally {
+      await app.close();
+    }
+    // Nothing to drain here, so the server gives the lease up.
+    expect(lease.release).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * A client that sent part of a request's headers and stalls: `closed` turns true once the server
+ * cuts its connection. Node stops timing out such a request once `server.close()` is called.
+ */
+async function stalled(url: string): Promise<{ readonly closed: boolean }> {
+  const { port } = new URL(url);
+  const socket = net.connect(Number(port), "127.0.0.1");
+  await once(socket, "connect");
+  socket.write("POST /settle HTTP/1.1\r\nHost: x\r\n");
+  const state = { closed: false };
+  socket.on("error", () => {});
+  socket.on("close", () => (state.closed = true));
+  return state;
+}
+
+describe("shutdown (0025)", () => {
+  const db = testDatabase();
+  async function started(opts: {
+    drain?: () => Promise<void>;
+    reconciliation?: Reconciliation;
+    shutdownDeadlineMs?: number;
+    shutdownGraceMs?: number;
+  }) {
+    const settle = vi.fn<Settle>(async () => ({ response: success }));
+    const lease = {
+      held: () => true,
+      start: vi.fn(async () => {}),
+      runOnce: vi.fn(),
+      close: vi.fn(async () => {}),
+      release: vi.fn(async () => {}),
+    };
+    const env = {
+      FACILITATOR_SECRET: Keypair.random().secret(),
+      DATABASE_URL: db.urlFor(db.schema),
+      CHANNELS: Keypair.random().publicKey(),
+      CLIENT_IP: "socket",
+    };
+    const config = { ...parseConfig(env), port: 0 };
+    const lines: string[] = [];
+    const app = await start(
+      {
+        config,
+        logger: jsonLogger("info", (line) => lines.push(line)),
+        stores: db.stores(),
+        verify: async () => ({ isValid: true }),
+        settle,
+        extensionResponses: () => undefined,
+        supported: supportedResponse(config.network, Keypair.random().publicKey()),
+        metrics: memoryMetrics(),
+        lease,
+        ...(opts.drain && { drain: opts.drain }),
+        ...(opts.reconciliation && { reconciliation: opts.reconciliation }),
+      },
+      {
+        ...(opts.shutdownDeadlineMs !== undefined && {
+          shutdownDeadlineMs: opts.shutdownDeadlineMs,
+        }),
+        ...(opts.shutdownGraceMs !== undefined && { shutdownGraceMs: opts.shutdownGraceMs }),
+      },
+    );
+    const url = `http://127.0.0.1:${app.port}`;
+    const events = () => lines.map((line) => (JSON.parse(line) as { event: string }).event);
+    return { app, settle, lease, url, events };
+  }
+
+  it("answers /settle 503 shutting_down while it drains, then closes and gives the lease up", async () => {
+    let drained!: () => void;
+    const drain = vi.fn(() => new Promise<void>((resolve) => (drained = resolve)));
+    const { app, settle, lease, url, events } = await started({ drain });
+    const closing = app.close();
+    expect(drain).toHaveBeenCalledTimes(1);
+    const refused = await fetch(`${url}/settle`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    expect([refused.status, refused.headers.get("retry-after"), await refused.json()]).toEqual([
+      503,
+      `${NO_LEASE_RETRY_AFTER_S}`,
+      { error: "shutting_down" },
+    ]);
+    expect(settle).not.toHaveBeenCalled();
+    // Still listening, and the lease still held, until the drain ends.
+    expect((await fetch(`${url}/supported`)).status).toBe(200);
+    expect(lease.release).not.toHaveBeenCalled();
+    drained();
+    await closing;
+    expect(lease.release).toHaveBeenCalledTimes(1);
+    expect(lease.close).not.toHaveBeenCalled();
+    expect(events()).toEqual(expect.arrayContaining(["shutdown_started", "shutdown_drained"]));
+    await expect(fetch(`${url}/supported`)).rejects.toThrow();
+  });
+
+  it("gives the lease up once the drain ends, without waiting for a sweep under way, and closes after it (0025 decision 23)", async () => {
+    let swept!: () => void;
+    const reconciliation = {
+      reconciled: Promise.resolve(),
+      listed: () => true,
+      start: vi.fn(),
+      close: vi.fn(() => new Promise<void>((resolve) => (swept = resolve))),
+    };
+    const { app, lease } = await started({ drain: async () => {}, reconciliation });
+    let done = false;
+    const closing = app.close().then(() => (done = true));
+    await vi.waitFor(() => expect(lease.release).toHaveBeenCalledTimes(1));
+    expect(reconciliation.close).toHaveBeenCalledTimes(1);
+    // Sweeps need no lease, but their writes must end before `main()` ends the pools.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(done).toBe(false);
+    swept();
+    await closing;
+  });
+
+  it("gives the lease up at once past a stalled client, and cuts its connection after the grace", async () => {
+    const { app, lease, url, events } = await started({
+      drain: async () => {},
+      shutdownGraceMs: 500,
+    });
+    const socket = await stalled(url);
+    const closing = app.close();
+    await vi.waitFor(() => expect(lease.release).toHaveBeenCalledTimes(1));
+    // The lease went while the stalled client still kept its socket.
+    expect(socket.closed).toBe(false);
+    await closing;
+    // The client sees the cut a moment after the server makes it.
+    await vi.waitFor(() => expect(socket.closed).toBe(true));
+    expect(lease.close).not.toHaveBeenCalled();
+    expect(events()).not.toContain("shutdown_deadline");
+  });
+
+  it("stops waiting at its deadline, cuts open connections and leaves the lease to its TTL", async () => {
+    const drain = vi.fn(() => new Promise<void>(() => {}));
+    const { app, lease, url, events } = await started({ drain, shutdownDeadlineMs: 50 });
+    const socket = await stalled(url);
+    await app.close();
+    // Without `closeAllConnections()` the stalled client would keep its connection.
+    await vi.waitFor(() => expect(socket.closed).toBe(true));
+    expect(lease.release).not.toHaveBeenCalled();
+    expect(lease.close).toHaveBeenCalledTimes(1);
+    expect(events()).toContain("shutdown_deadline");
+    await expect(fetch(`${url}/supported`)).rejects.toThrow();
   });
 });

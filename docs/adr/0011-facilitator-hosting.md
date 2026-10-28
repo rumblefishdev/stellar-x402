@@ -4,8 +4,11 @@
 - Date: 2026-10-09, amended 2026-10-15 (task 0009: the `/settle` budget is 30 s, below the
   seller's own 90 s timeout), 2026-10-16 (task 0009: the checks are inside the budget; RPC
   endpoints are logged as `RPC_URLS[i]`) and 2026-10-20 (task 0009: `RPC_URLS[i]#<fingerprint>`
-  and the fingerprint's limit; how far a repeat runs past the budget) and 2026-10-21 (task 0009:
-  bare RPC hosts in error messages)
+  and the fingerprint's limit; how far a repeat runs past the budget), 2026-10-21 (task 0009:
+  bare RPC hosts in error messages), 2026-10-27 (task 0019: reconciliation runs in every
+  process, independent of the lease; `/health` reports `listed` beside `ready`, and the deploy
+  waits for both) and 2026-10-28 (task 0076: one hostname and one facilitator service for both
+  networks; the sections that run one process per network follow in task 0077)
 - Revised: 2026-10-13. ECS Fargate became the company Hetzner server (task 0039); the first
   version is in git history and task 0014. 2026-10-21: the key moved to OpenBao (ADR 0013), and
   deploys, reboots, backups, alarms and downtime were worked out in the PR #24 review.
@@ -117,16 +120,23 @@ to Cloudflare on the Free plan.
   - The lease, not the ordering, guarantees one owner (AD-17). A process that finds the lease
     taken waits for it and never exits for lack of it.
 - **`GET /health` is liveness only.** It answers 200 while the HTTP server is up and checks nothing
-  else: not the lease, the RPC or the store. Its body reports `ready`. The container healthcheck
-  calls it every 10 s.
-- **Ready to settle** means the process holds the lease and has finished the AD-16 startup
-  reconciliation, which runs after the lease is taken.
-  - Until then, `/settle` answers 503 at once instead of hanging.
+  else: not the lease, the RPC or the store. Its body reports `ready` and `listed`. The container
+  healthcheck calls it every 10 s.
+- **Ready to settle** (`ready`) means the process holds the lease, every migration it knows is
+  applied (0026) and not every RPC endpoint is frozen (0049). Until then, `/settle` answers 503
+  at once instead of hanging.
   - A process without the lease keeps trying to take it.
   - A process whose lease renewal fails stops new submissions until it holds the lease again.
-- **The deploy's last step waits up to 120 s for `ready: true`.** Without it, the deploy rolls
-  back to the previous digest and fails the run (below). A "ready to settle" metric also has an
-  alarm (0027).
+- **AD-16 reconciliation doesn't depend on the lease** (0019 decisions 27 and 37). It starts once
+  the server listens and sweeps every 10 s beside `/settle`, in every process. It only reads the
+  chain, and every write is a compare-and-set on the record's version, so a process waiting for
+  the lease, for example after a crash, already finishes payments that landed.
+- **`listed`** turns true once a sweep has listed the non-final records and stays true (0019
+  decision 36). Listing is one query, so it comes fast even with a big backlog. An image whose
+  sweeps can't list never turns it true.
+- **The deploy's last step waits up to 120 s for `ready: true` and `listed: true`.** Without
+  them, the deploy rolls back to the previous digest and fails the run (below). A "ready to
+  settle" metric and a sweep counter also have alarms (0027).
 
 ### Timing
 
@@ -143,7 +153,7 @@ One request or one stop must never outlast the layer in front of it:
 | Node `keepAliveTimeout`           | 125 s              | above `cloudflared`'s idle keep-alive (90 s), or it sees 502s      |
 | Container healthcheck             | 10 s               | liveness only                                                      |
 | `LEASE_TTL_MS`                    | 30 s               | after a crash, a new process waits at most this long               |
-| Wait for `ready: true`            | 120 s              | past it, the deploy rolls back to the previous digest              |
+| Wait for `ready` and `listed`     | 120 s              | past it, the deploy rolls back to the previous digest              |
 | Unit `TimeoutStopSec`             | 200 s              | above `stop_grace_period`, so a reboot waits for the drain         |
 | Unit `TimeoutStartSec`            | 60 s               | covers `ExecStartPre` only: credentials and the digest, no pull    |
 | Postgres `stop_grace_period`      | 120 s              | a clean shutdown; the Compose default is 10 s                      |
@@ -229,11 +239,12 @@ One request or one stop must never outlast the layer in front of it:
     first deploy). It pulls the new image and runs the migration service from it while the old
     facilitator still serves (ADR 0012). A failed migration fails the deploy and leaves the old
     facilitator serving; nothing needs rolling back. Then it moves the new digest into `digest`,
-    restarts `x402@<network>` and waits up to 120 s for `ready: true`, read with `docker exec`
-    and the healthcheck's Node one-liner, so the check depends on neither the tunnel nor DNS.
-  - Only after `ready: true` does it write the digest to `digest.good` and remove images other
+    restarts `x402@<network>` and waits up to 120 s for `ready: true` and `listed: true`, read
+    with `docker exec` and the healthcheck's Node one-liner, so the check depends on neither the
+    tunnel nor DNS.
+  - Only after both does it write the digest to `digest.good` and remove images other
     than this one and the previous good one, since the disk is shared. If the restart fails or
-    `ready` doesn't come, it puts `digest.good` back into `digest`, restarts again and fails.
+    either doesn't come, it puts `digest.good` back into `digest`, restarts again and fails.
   - The first deploy has no `digest.good`, so it fails into the alarms. When `ready` fails
     because of a dependency, the previous image does no better: the deploy fails and the
     facilitator stays down. With the RPCs down it never even listens: since 0020, `main()`
@@ -306,18 +317,28 @@ One request or one stop must never outlast the layer in front of it:
 
 ### Network and URL
 
-- **Cloudflare is the DNS and the edge, through Cloudflare Tunnel.** The hostnames are
-  `x402-facilitator-testnet.sorobanscan.com` and `x402-facilitator.sorobanscan.com`, one label
-  under the zone, since the Free plan's certificate covers only one level of subdomain.
-  - Each network has its own tunnel. Its `cloudflared` opens outbound connections to Cloudflare
-    (port 7844, UDP for QUIC and TCP) and forwards its hostname to
-    `http://facilitator-<network>:<port>`; anything else gets 404. The server opens no port for
-    it.
+- **Cloudflare is the DNS and the edge, through Cloudflare Tunnel.** One hostname,
+  `x402-facilitator.sorobanscan.com`, and one facilitator service, `facilitator`, serve both
+  networks (decided with Marek at the 2026-10-26 daily; `soroban-infrastructure`'s
+  `cloudflare/x402.tf`, 12cec25, routes it). It is one label under the zone, since the Free
+  plan's certificate covers only one level of subdomain.
+  - The client names the network in the request (`network` in the payment requirements:
+    `stellar:testnet` or `stellar:pubnet`), and the facilitator settles through that network's
+    channel pool, key and RPC endpoints. There is no testnet/mainnet service split; a
+    staging/production split may come later. There is no staging host yet;
+    `x402-facilitator-staging.sorobanscan.com` can be added if one is needed.
+  - Only testnet is served for now. The parts of this ADR that run one process per network
+    (Platform and containers, the deploy workflow, keys and secrets, the store) are reworked in
+    task 0077, together with the code, which today serves one `NETWORK` per process.
+  - One tunnel, `x402`. Its `cloudflared` opens outbound connections to Cloudflare (port 7844,
+    UDP for QUIC and TCP) and forwards the hostname to `http://facilitator:4021`, the Compose
+    service; anything else gets 404. The server opens no port for it. The compose file keeps
+    `PORT` at 4021; changing it means changing `cloudflare/x402.tf` too.
   - HTTPS ends at Cloudflare, so Cloudflare sees the requests in plain text. They carry signed
     payments, never keys.
   - The tunnel, its routing and the DNS record are Terraform in the `soroban-infrastructure`
     repo's `cloudflare/`, beside the `sorobanscan.com` zone, so routing changes are reviewed
-    there. Task 0062 sets up the zone and the testnet tunnel, the tunnel's prerequisite.
+    there. Task 0062 sets up the zone and the tunnel, the facilitator's prerequisite.
   - The tunnel token lives only in Cloudflare and that repo's Terraform state. An operator
     fetches it (the dashboard, the API or `terraform output`) into an encrypted systemd
     credential (runbook), also when the server is restored elsewhere. Anyone with it can run a
@@ -486,6 +507,8 @@ One request or one stop must never outlast the layer in front of it:
   - the five AD-18 conditions; the low-balance one fires below 25 XLM of spendable balance
     (ADR 0013);
   - not ready to settle (the counterpart of the lease-blind `/health`);
+  - no sweep listing the records within the alarm window: since the deploy checks `listed` only
+    once, this is the net for sweeps that start failing later (0019 decision 36);
   - from ADR 0013: OpenBao sealed, down or failing to sign; theft (a transaction on the fee
     account or a channel that our submitter didn't send, or a signer or threshold change on them,
     read from Horizon off the server); and OpenBao's audit log disk at 80%;
@@ -605,12 +628,12 @@ One request or one stop must never outlast the layer in front of it:
   Restoring elsewhere is a runbook step (0026) and a mainnet risk (0038).
 - **Operations are ours:** Docker and OS updates, PostgreSQL upgrades, backups and restore drills,
   `cloudflared` upgrades, and keeping the playbook in step with the server.
-- **Deploy downtime is usually under a minute:** a quick drain when idle, a container start, and
-  reconciliation; the pull and the migrations run before the stop. At worst it is about 5
-  minutes: a 180 s drain and up to 120 s for `ready: true`. The uptime alarm waits 7 failing
+- **Deploy downtime is usually under a minute:** a quick drain when idle and a container start;
+  reconciliation runs beside `/settle`, and the pull and the migrations run before the stop. At
+  worst it is about 5 minutes: a 180 s drain and up to 120 s for `ready` and `listed`. The uptime alarm waits 7 failing
   minutes for that reason.
-- **After a crash,** systemd restarts the container (`Restart=on-failure`). The new process waits
-  up to 30 s for the lease and reconciles. Records keep each transaction's time bound, so a hash
+- **After a crash,** systemd restarts the container (`Restart=on-failure`). The new process
+  reconciles at once and waits up to 30 s for the lease before it settles new payments. Records keep each transaction's time bound, so a hash
   that can't be found yet stays non-final until that bound passes (0019).
 - **The OpenBao signer (0036, ADR 0013) blocks the testnet deploy (0026).**
 - **ADR 0012's store moves from RDS to a container on the server.** Its schema, adapter rules and
@@ -628,7 +651,7 @@ One request or one stop must never outlast the layer in front of it:
   - the OpenBao container (ADR 0013), the IAM Roles Anywhere logging role and its certificate,
     and the secret files;
   - the backups (pgBackRest to the Storage Box);
-  - `GET /health` with `ready`, the Node keep-alive setting, and the migration bounds;
+  - `GET /health` with `ready` and `listed`, the Node keep-alive setting, and the migration bounds;
   - the config reading secrets from files (`*_FILE`), since nothing reads them today;
   - the runbook: running the playbook, deploy, rollback, key rotation, certificate renewal,
     restore on another machine.

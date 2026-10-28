@@ -1,12 +1,14 @@
 import { STATUS_CODES } from "node:http";
 import { PaymentPayloadV2Schema, PaymentRequirementsV2Schema } from "@x402/core/schemas";
 import type { SupportedResponse, VerifyRequest } from "@x402/core/types";
-import express, { type ErrorRequestHandler, type Express } from "express";
+import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
 import type { Metrics } from "../metrics.js";
 import type { Stores } from "../ports/index.js";
 import type { SettlementHooks } from "../settlement/hooks.js";
+import type { LeaseKeeper } from "../settlement/lease.js";
+import type { Reconciliation } from "../settlement/reconcile.js";
 import type { Settle } from "../settlement/settle.js";
 import type { Verify, VerifyTrace } from "../settlement/verify.js";
 import { discoveryResources } from "./discovery.js";
@@ -25,7 +27,24 @@ export interface AppDeps {
   extensionResponses: SettlementHooks["extensionResponses"];
   /** The `GET /supported` answer, fixed for the life of the process. */
   supported: SupportedResponse;
+  /** Settlement reconciliation (0019), started and stopped with the server. */
+  reconciliation?: Reconciliation;
+  /**
+   * The channel lease (0025), started and stopped with the server. While it isn't held,
+   * `/settle` answers 503; tests that pass no `lease` settle as if they held it.
+   */
+  lease?: LeaseKeeper;
+  /** Whether the process is shutting down (0025); `start()` sets it. */
+  closing?: () => boolean;
+  /**
+   * The settlement drain (0025): closes the pool, refusing every call that sent nothing, then
+   * waits for each submission under way and its record write. Run by `start()`'s `close()`.
+   */
+  drain?: () => Promise<void>;
 }
+
+/** Seconds a client waits before it tries `/settle` again on a process that can't settle now. */
+export const NO_LEASE_RETRY_AFTER_S = 5;
 
 /** The status as a body code, like `not_found`: 413 → `payload_too_large`. */
 const code = (status: number) =>
@@ -101,6 +120,8 @@ export function createApp({
   settle,
   extensionResponses,
   supported,
+  lease,
+  closing,
 }: AppDeps): Express {
   const app = express();
   app.disable("x-powered-by");
@@ -114,6 +135,17 @@ export function createApp({
       logger,
     });
   const json = express.json({ limit: config.http.bodyLimitBytes });
+  // First on `/settle`, so a process that is stopping or doesn't hold the lease answers at once,
+  // with no store call and without reading the body (0025 decisions 1, 4, 8).
+  const leased: RequestHandler = (_req, res, next) => {
+    const refusal = closing?.() ? "shutting_down" : lease && !lease.held() ? "no_lease" : undefined;
+    if (refusal) {
+      res.setHeader("Retry-After", `${NO_LEASE_RETRY_AFTER_S}`);
+      res.status(503).json({ error: refusal });
+      return;
+    }
+    next();
+  };
 
   // A verify outcome, valid or not, is a 200 with an x402 body; a thrown error is a 500.
   app.post("/verify", limit("verify", config.http.rateLimit.verify), json, async (req, res) => {
@@ -138,48 +170,54 @@ export function createApp({
   });
   // Like `/verify`: any settle outcome is a 200 with an x402 body (AD-6). A thrown error, such as
   // upstream verify failing or the store down before the claim, is a 500.
-  app.post("/settle", limit("settle", config.http.rateLimit.settle), json, async (req, res) => {
-    const request = parsePaymentRequest(req.body);
-    if (!request) {
-      res.status(400).json({ error: code(400) });
-      return;
-    }
-    // A client that left before the answer: a repeat stops waiting, and no success is used up.
-    const left = new AbortController();
-    res.once("close", () => {
-      if (!res.writableEnded) left.abort();
-    });
-    const { response, record, afterResponse, key, replay } = await settle(
-      request.paymentPayload,
-      request.paymentRequirements,
-      left.signal,
-    );
-    // Every `success` answer carries the header (a success is answered once, AD-6); it never
-    // changes the body.
-    if (response.success && record) {
-      try {
-        const header = extensionResponses(record);
-        if (header) res.setHeader(EXTENSION_RESPONSES_HEADER, encodeExtensionResponses(header));
-      } catch (error) {
-        logger.error("extension_responses_failed", { settlementKey: record.key, error });
+  app.post(
+    "/settle",
+    leased,
+    limit("settle", config.http.rateLimit.settle),
+    json,
+    async (req, res) => {
+      const request = parsePaymentRequest(req.body);
+      if (!request) {
+        res.status(400).json({ error: code(400) });
+        return;
       }
-    }
-    logger.info("settled", {
-      network: response.network,
-      settlementKey: key,
-      replay: replay ?? false,
-      success: response.success,
-      errorReason: response.errorReason,
-      payer: response.payer,
-      transaction: response.transaction || undefined,
-    });
-    res.json(response);
-    // `onSuccess` after the response; a client that already left has closed it (0031).
-    if (afterResponse) {
-      if (res.closed) afterResponse();
-      else res.once("close", afterResponse);
-    }
-  });
+      // A client that left before the answer: a repeat stops waiting, and no success is used up.
+      const left = new AbortController();
+      res.once("close", () => {
+        if (!res.writableEnded) left.abort();
+      });
+      const { response, record, afterResponse, key, replay } = await settle(
+        request.paymentPayload,
+        request.paymentRequirements,
+        left.signal,
+      );
+      // Every `success` answer carries the header (a success is answered once, AD-6); it never
+      // changes the body.
+      if (response.success && record) {
+        try {
+          const header = extensionResponses(record);
+          if (header) res.setHeader(EXTENSION_RESPONSES_HEADER, encodeExtensionResponses(header));
+        } catch (error) {
+          logger.error("extension_responses_failed", { settlementKey: record.key, error });
+        }
+      }
+      logger.info("settled", {
+        network: response.network,
+        settlementKey: key,
+        replay: replay ?? false,
+        success: response.success,
+        errorReason: response.errorReason,
+        payer: response.payer,
+        transaction: response.transaction || undefined,
+      });
+      res.json(response);
+      // `onSuccess` after the response; a client that already left has closed it (0031).
+      if (afterResponse) {
+        if (res.closed) afterResponse();
+        else res.once("close", afterResponse);
+      }
+    },
+  );
   app.get("/supported", (_req, res) => {
     res.json(supported);
   });

@@ -9,7 +9,13 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import { readAccountEntry } from "./account.js";
-import { ChannelPool, NoChannelsError, QueueTimeoutError, type Channel } from "./channel-pool.js";
+import {
+  ChannelPool,
+  NoChannelsError,
+  QueueTimeoutError,
+  ShutdownError,
+  type Channel,
+} from "./channel-pool.js";
 import { feeStatsInclusionFee } from "./fees.js";
 import { LedgerClock } from "./ledger-clock.js";
 import {
@@ -97,6 +103,14 @@ export interface ContractCall {
   auth: xdr.SorobanAuthorizationEntry[];
 }
 
+/** The bounds of a signed envelope: past either one it can no longer land. */
+export interface SignedBounds {
+  /** The time bound, in Unix seconds: the envelope's `maxTime`. */
+  maxTime: number;
+  /** The last ledger it may land in (inclusive), when the call set `maxLedger`. */
+  maxLedger?: number;
+}
+
 export interface SubmitOptions {
   /**
    * Inspects the simulation before anything is signed; throw to abort. Schemes put their
@@ -117,9 +131,9 @@ export interface SubmitOptions {
    * with. After a `txBadSeq` the first envelope was sent before the rebuild's hook runs; a hook that
    * timed out may still finish its write after the channel has reused the sequence. An attempt
    * cannot land once its time bound or ledger bound has passed, so the caller can resolve each
-   * stored hash with `getTransaction` and the bounds.
+   * stored hash with `getTransaction` and the bounds, which `bounds` carries.
    */
-  onSigned?: (hash: string) => void | Promise<void>;
+  onSigned?: (hash: string, bounds: SignedBounds) => void | Promise<void>;
   /**
    * Called once the network accepts the transaction (`PENDING`), before it is final. Must not
    * throw (errors are ignored).
@@ -271,6 +285,13 @@ export class SettlementSubmitter {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly onEvent?: (event: SubmitterEvent) => void;
   private readonly statsCollector = new SubmitterStats();
+  /** Set by `close()`: no new envelope is signed for the hook or sent from then on. */
+  private closing = false;
+  private stopWaiting!: () => void;
+  /** Settles when `close()` starts, ending every wait for a channel, a ledger or a read retry. */
+  private readonly closed = new Promise<void>((resolve) => (this.stopWaiting = resolve));
+  /** Every `submit()` under way, so `close()` can wait for them. */
+  private readonly inFlight = new Set<Promise<SubmitResult>>();
 
   constructor(opts: SubmitterOptions) {
     this.rpc = opts.rpc;
@@ -302,7 +323,35 @@ export class SettlementSubmitter {
   }
 
   /** Waits for a free channel, then builds, simulates, signs, sends and confirms `call`. */
-  async submit(call: ContractCall, opts: SubmitOptions = {}): Promise<SubmitResult> {
+  submit(call: ContractCall, opts: SubmitOptions = {}): Promise<SubmitResult> {
+    if (this.closing) {
+      const error = new ShutdownError("the submitter is closed");
+      this.refused(undefined, error);
+      return Promise.reject(error);
+    }
+    const submission = this.submitNow(call, opts);
+    this.inFlight.add(submission);
+    const forget = () => void this.inFlight.delete(submission);
+    submission.then(forget, forget);
+    return submission;
+  }
+
+  /**
+   * Stops the submitter for a shutdown (0025): every call that has given nothing to `onSigned`
+   * and sent nothing fails with {@link ShutdownError}, whether it waits for a channel, waits
+   * behind the channel's pending transaction, retries a sequence read or is about to sign, and so
+   * does every later `submit()`. Calls past `onSigned` run on. Resolves once every `submit()` under
+   * way has returned: by its time bound plus `confirmGraceSeconds` at the latest. A confirmation
+   * still running after a `pending` result is not waited for.
+   */
+  async close(): Promise<void> {
+    this.closing = true;
+    this.stopWaiting();
+    this.pool.close();
+    await Promise.allSettled([...this.inFlight]);
+  }
+
+  private async submitNow(call: ContractCall, opts: SubmitOptions): Promise<SubmitResult> {
     const { maxLedger } = opts;
     // A NaN would silently turn the guard off; the envelope's bound (maxLedger + 1) is a uint32.
     if (
@@ -428,7 +477,10 @@ export class SettlementSubmitter {
       // final, or until its holder reports it `pending` (or the caller's deadline) at the latest.
       prepared = await this.prepare(channel.address, previous.sequence, call, opts);
       const waitUntil = Math.min(previous.dueAt, opts.deadline ?? Infinity);
-      if (!(await this.settlesBy(previous.final, waitUntil)))
+      const settled = await this.settlesBy(previous.final, waitUntil, true);
+      // The envelope prepared ahead was never given to `onSigned`.
+      if (this.closing) throw new ShutdownError("the submitter closed while the call waited");
+      if (!settled)
         throw new QueueTimeoutError("the channel's previous transaction is not final yet");
       hold.previousSettled = true;
       const used = channel.sequence === previous.sequence && !this.expiresSoon(prepared);
@@ -454,14 +506,24 @@ export class SettlementSubmitter {
     }
   }
 
-  /** Whether `p` settles before `deadlineMs`, waiting on the ledger clock so the wait is bounded. */
-  private async settlesBy(p: Promise<unknown>, deadlineMs: number): Promise<boolean> {
+  /**
+   * Whether `p` settles before `deadlineMs`, waiting on the ledger clock so the wait is bounded.
+   * With `untilClose`, `close()` ends the wait too: only a call that sent nothing waits that way,
+   * never a confirmation, which runs on through a shutdown.
+   */
+  private async settlesBy(
+    p: Promise<unknown>,
+    deadlineMs: number,
+    untilClose = false,
+  ): Promise<boolean> {
     let settled = false;
     const tracked = p.then(() => (settled = true));
+    const stopped = () => untilClose && this.closing;
     await Promise.race([
       tracked,
+      ...(untilClose ? [this.closed] : []),
       (async () => {
-        while (!settled && this.now() < deadlineMs)
+        while (!settled && !stopped() && this.now() < deadlineMs)
           await this.clock.next(this.clock.current, deadlineMs);
       })(),
     ]);
@@ -498,8 +560,9 @@ export class SettlementSubmitter {
         }
         throw error;
       }
+      if (this.closing) throw new ShutdownError("the submitter closed while a read was retried");
       this.emit({ type: "read-retry", channel: channel.address, message });
-      await this.clock.following(giveUpAt);
+      await Promise.race([this.clock.following(giveUpAt), this.closed]);
     }
   }
 
@@ -612,6 +675,10 @@ export class SettlementSubmitter {
     opts: SubmitOptions,
     hold: Hold,
   ): Promise<Outcome> {
+    // The last point where nothing of this envelope is stored or sent; a `txBadSeq` rebuild comes
+    // here too, so a closing submitter sends no new envelope.
+    if (this.closing)
+      throw new ShutdownError("the submitter closed before the envelope was signed");
     const { bump, hash, txSequence, maxTime, maxLedger } = prepared;
     const base = { channel: channel.address };
     const tried: Attempt = { hash, sent: "no" };
@@ -701,7 +768,7 @@ export class SettlementSubmitter {
    * `getLatestLedger` poll.
    */
   private async awaitSigned(
-    onSigned: (hash: string) => void | Promise<void>,
+    onSigned: (hash: string, bounds: SignedBounds) => void | Promise<void>,
     hash: string,
     maxTime: number,
     maxLedger: number | undefined,
@@ -728,7 +795,8 @@ export class SettlementSubmitter {
       }, this.pollIntervalMs);
     });
     try {
-      const written = Promise.resolve().then(() => onSigned(hash)); // a synchronous throw too
+      const bounds: SignedBounds = { maxTime, ...(maxLedger !== undefined && { maxLedger }) };
+      const written = Promise.resolve().then(() => onSigned(hash, bounds)); // a synchronous throw too
       const outcome = await Promise.race([written, timedOut, pastLedger]).catch(
         (error: unknown) => {
           throw new SignedHookError(
@@ -827,6 +895,7 @@ function refusalReason(error: unknown): RefusalReason {
   if (error instanceof LedgerBoundError) return "ledger-bound";
   if (error instanceof SignedHookError) return "on-signed";
   if (error instanceof NoChannelsError) return "no-channels";
+  if (error instanceof ShutdownError) return "shutdown";
   return "other";
 }
 

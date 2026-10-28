@@ -2,7 +2,7 @@
 id: "0066"
 title: "Decide what /verify does when a payment must restore archived state"
 type: BUG
-status: backlog
+status: active
 milestone: 1
 related_adr: []
 related_tasks: ["0021", "0007"]
@@ -13,6 +13,11 @@ history:
     status: backlog
     who: okarcz
     note: "Spawned from 0021's testnet run."
+  - date: "2026-10-27"
+    status: active
+    who: akot
+    note: >
+      Work starts.
 ---
 
 # Decide what /verify does when a payment must restore archived state
