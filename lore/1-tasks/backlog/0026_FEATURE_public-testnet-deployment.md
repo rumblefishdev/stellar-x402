@@ -191,6 +191,13 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   `cloudflare/x402.tf` too.
   Bot Fight Mode, Browser Integrity Check and "I'm Under Attack" stay off on the zone. Nothing
   goes into the ClickHouse project's repo.
+  - **Before the first deploy:** Browser Integrity Check was `on` on 2026-10-28 (Cloudflare's
+    default; `cloudflare/zone.tf` doesn't set it). It answers clients whose headers don't look
+    like a browser with error 1010 at the edge, so the facilitator never sees the request. Turn
+    it off for `x402-facilitator.sorobanscan.com` with a configuration rule in
+    `soroban-infrastructure` (the rest of the zone keeps it for sorobanscan's site), checking which
+    token permission the ruleset needs. Bot Fight Mode couldn't be read (the token has no Bot
+    Management permission): check its toggle in the dashboard, Security → Bots.
 - From 0039: `GET /health` answers 200 and reports `ready` in its body.
 - From 0039, the runbook: running the playbook from a reviewed commit, deploy, rollback
   (automatic on a failed deploy; by hand, redeploy an earlier digest), long migrations outside
