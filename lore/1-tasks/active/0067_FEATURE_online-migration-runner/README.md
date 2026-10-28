@@ -84,11 +84,14 @@ first in a spike ([R-spike-results](notes/R-spike-results.md)). In short:
   while a step waits; a table rewrite in a group or a `sql` step, and a group of short
   statements, failing at their bound while `reserve` answers; a group altering the spend tables
   in `reserve`'s order, applied without a retry under load (in the other order four runs of four
-  failed after 84–104 s, `reserve` stalling 0.6 s on each retry). At the suite's scale AC1 allows no
+  failed after 84–104 s, `reserve` stalling 0.6 s on each retry); three back-to-back 0.9 s steps
+  under eight `reserve` loops, and a batch sleeping on the scope rows every `reserve` locks,
+  without a failed `reserve`; `MIGRATIONS` holding no online migration until 0075. At the suite's scale AC1 allows no
   failed `reserve`; the 1% budget holds at `MIGRATE_SCALE`. Mutants each failing a case: no
   invalid-index repair, no lock retry, no batch timeout retry, a group without its lock retry or
   with a 10 s lock timeout, a long step without its raised statement or client timeout, no
-  `client_connection_check_interval`, no `transaction_timeout`, 10 s statements.
+  `client_connection_check_interval`, no `transaction_timeout`, 10 s statements, no wait after a
+  write-locking step, a 5 s batch.
 - AC1 at 1 000 000 reservations with four scopes each (`MIGRATE_SCALE=1000000`, compose
   PostgreSQL 18 on Adam's laptop, 27.10): applied in 4 min 45 s; steps 1–3 took 3–4 ms; the
   backfill of 4 000 000 rows 282 s. `reserve` before: 471 calls, p50 8 ms, p99 13 ms. During:

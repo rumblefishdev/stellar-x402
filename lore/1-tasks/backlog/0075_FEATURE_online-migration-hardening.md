@@ -43,7 +43,7 @@ migration is added to `MIGRATIONS`.
   one enforces itself, until the next deploy drops and rebuilds it.
 - AC1's test (`test/migrate.test.ts`) runs four `reserve` loops only. `commit`, `release` and
   `prune` write the `spend_reservation_scopes` rows a backfill batch locks: they wait out a batch,
-  up to its 5 s bound, and a batch at a scope's boundary can deadlock with a `commit`. The batch
+  up to its 1 s bound, and a batch at a scope's boundary can deadlock with a `commit`. The batch
   usually loses (its 500 ms `lock_timeout` is below `deadlock_timeout`), but a `commit` that waited
   more than 0.5 s first is the victim. Not reproduced; from reading the locks.
 
@@ -78,6 +78,12 @@ so (PR #73 review), and drop ADR 0011's "until then" note.
 The batch's CTE `b` carries the key columns under their own names, so a `set` or `where` that
 names one without `t.` (`c = length(id)`) fails as ambiguous. Alias them (`k0`, `k1`).
 
+The cursor goes through JavaScript between batches: node-pg reads a `timestamptz` key as a `Date`,
+cut to milliseconds, so a pass over one starts each batch where the last began and never ends
+(PR #73 review: 2,650 batches in 8 s). Today's keys are `text` and `bigint`. Keep the cursor in
+the key's text form (`::text`, cast back in the comparison), and fail a batch that doesn't move
+the cursor forward.
+
 ### Step 6: The branches no test reaches
 
 - An index step that meets a valid index without its marker (a run stopped after the build):
@@ -97,6 +103,8 @@ names one without `t.` (`c = length(id)`) fails as ambiguous. Alias them (`k0`, 
 - [ ] ADR 0012 states which steps of a started migration may change
 - [ ] A step's start, and its failure with the migration and step named, reach the log
 - [ ] A backfill's `set` and `where` may name a key column without `t.`
+- [ ] A backfill keyed on a `timestamptz` column finishes, and one whose cursor stops moving fails
+- [ ] `migrate.test.ts`'s "holds no online migration until 0075" test is removed
 - [ ] Tests cover the valid-but-unmarked index, the backfill's progress log and running out of
       lock attempts
 

@@ -19,6 +19,8 @@ import type { Logger } from "../logger.js";
  * (`spend_reservations`, `spend_scopes`, `spend_reservation_scopes`): in any other, a `reserve` in
  * flight and the group wait on each other until the group gives up, on every retry (ADR 0012).
  *
+ * No migration here is online until 0075 hardens the runner; a test holds that.
+ *
  * Every time is the app's clock, stored as `bigint` milliseconds; the SQL never reads the
  * database's clock.
  */
@@ -221,15 +223,14 @@ const BATCH_RETRYABLE: ReadonlySet<string> = new Set([...RETRYABLE, "57014"]);
 const LOCK_ATTEMPTS = 20;
 
 /**
- * A transactional group and a `sql` step hold ACCESS EXCLUSIVE until they commit, so a `reserve`
- * queued behind one waits its length. Each statement gets a lock wait and this; the whole
- * transaction, lock waits included, gets `WRITE_LOCK_TRANSACTION_TIMEOUT_MS`, after which
- * PostgreSQL ends the session (`25P04`) and the run fails, unretried. Either way `reserve` keeps
- * 500 ms of its 2 s.
+ * A transactional group and a `sql` step hold ACCESS EXCLUSIVE until they commit, and a backfill
+ * batch holds the rows it updates, so a `reserve` queued behind one waits its length. Each
+ * statement gets a lock wait and this; a group's or a `sql` step's whole transaction, lock waits
+ * included, gets `WRITE_LOCK_TRANSACTION_TIMEOUT_MS`, after which PostgreSQL ends the session
+ * (`25P04`) and the run fails, unretried. Either way `reserve` keeps 500 ms of its 2 s.
  */
 export const WRITE_LOCK_STATEMENT_TIMEOUT_MS = 1_000;
 export const WRITE_LOCK_TRANSACTION_TIMEOUT_MS = 1_500;
-const BATCH_STATEMENT_TIMEOUT_MS = 5_000;
 /** `VALIDATE`, index builds and a backfill's last check: they scan the table but block no writes. */
 const LONG_STATEMENT_TIMEOUT_MS = 30 * 60_000;
 
@@ -432,7 +433,7 @@ async function backfill(
     let row: Record<string, unknown> | undefined;
     retries += await retryingLocks(
       () =>
-        transaction(client, STEP_LOCK_TIMEOUT_MS, BATCH_STATEMENT_TIMEOUT_MS, async () => {
+        transaction(client, STEP_LOCK_TIMEOUT_MS, WRITE_LOCK_STATEMENT_TIMEOUT_MS, async () => {
           row = (await client.query(sql, cursor ?? [])).rows[0];
         }),
       BATCH_RETRYABLE,
@@ -499,15 +500,22 @@ async function transaction(
   }
 }
 
-/** A transaction that takes ACCESS EXCLUSIVE: a transactional group or a `sql` step. */
-function writeLocking(client: pg.PoolClient, run: () => Promise<void>): Promise<void> {
-  return transaction(
+/**
+ * A transaction that takes ACCESS EXCLUSIVE: a transactional group or a `sql` step. A `reserve`
+ * queued behind it holds the shared scope rows meanwhile (`global`), so the reserves behind those
+ * queue too. It then waits as long as it ran before the next one locks, so they drain first:
+ * without the wait, back-to-back steps add up in that queue past `reserve`'s 2 s (0067).
+ */
+async function writeLocking(client: pg.PoolClient, run: () => Promise<void>): Promise<void> {
+  const started = Date.now();
+  await transaction(
     client,
     STEP_LOCK_TIMEOUT_MS,
     WRITE_LOCK_STATEMENT_TIMEOUT_MS,
     run,
     WRITE_LOCK_TRANSACTION_TIMEOUT_MS,
   );
+  await sleep(Date.now() - started);
 }
 
 /**

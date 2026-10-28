@@ -87,7 +87,7 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
     - a group locks `reserve`'s tables in `reserve`'s order: `spend_reservations`,
       `spend_scopes`, `spend_reservation_scopes`, or each of them in an online `sql` step of its
       own. In the other order, a `reserve` in flight holds the next table while it waits on the
-      group's: the group's lock wait runs out on every retry, each stalling `reserve` for 500 ms,
+      group's: the group's lock wait runs out on every retry, each stalling `reserve` for about 0.6 s,
       and the deploy fails after its 20 attempts, about 100 s (four runs out of four under the
       suite's load, task 0067). The runner can't see which tables a group locks;
     - an online migration is a list of steps, each non-blocking or holding its lock for at
@@ -103,8 +103,11 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
   - The migration service's bounds, by kind: a transactional group and an online `ALTER` wait at
     most 500 ms for each lock, a quarter of `reserve`'s 2 s, retry `55P03` and `40P01`, and run
     at most 1 s a statement and 1.5 s in all, lock waits included (`transaction_timeout`), which
-    leaves a `reserve` queued behind them 500 ms; a backfill batch 5 s, 5 000 rows, 250 ms apart, and it retries its
-    statement timeout too, since a batch that ran out of time waited on the disk; an index build or
+    leaves a `reserve` queued behind them 500 ms. The runner then waits as long as one ran before
+    the next locks: the reserves queued behind it hold the `global` scope row, so back to back,
+    three steps of 0.9 s failed reserves (task 0067). A backfill batch, 5 000 rows 250 ms apart,
+    runs at most 1 s too, since a `reserve` may lock the rows it updates, and it retries its
+    statement timeout, since a batch that ran out of time waited on the disk; an index build or
     `VALIDATE` waits for locks without a timeout, since a `lock_timeout` aborts the build, and
     runs at most 30 minutes. The runner's session sets `client_connection_check_interval`, so a
     run whose client died releases its lock within seconds. Long steps run in the deploy

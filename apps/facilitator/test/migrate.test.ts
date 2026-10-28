@@ -182,8 +182,8 @@ describe("online migrations", () => {
     { scope: "asset:C1", maxStroops: 10n ** 15n, windowMs: 86_400_000 },
   ];
 
-  /** Four loops calling the release before the migration's `reserve`, until `stop`. */
-  const reserving = (on: pg.Pool) => {
+  /** `loops` loops calling the release before the migration's `reserve`, until `stop`. */
+  const reserving = (on: pg.Pool, loops = 4) => {
     const { spend } = postgresStores(on);
     const samples: { at: number; ms: number; error?: unknown }[] = [];
     let stopped = false;
@@ -199,17 +199,22 @@ describe("online migrations", () => {
         }
       }
     };
-    const loops = Promise.all([loop(), loop(), loop(), loop()]);
+    const running = Promise.all(Array.from({ length: loops }, loop));
     return {
       samples,
       stop: async () => {
         stopped = true;
-        await loops;
+        await running;
       },
     };
   };
   const p99 = (values: number[]) =>
     [...values].sort((a, b) => a - b)[Math.floor(values.length * 0.99)] ?? 0;
+
+  it("holds no online migration until 0075 hardens the runner", () => {
+    // 0075 closes the runner's gaps before the first one lands; it removes this test.
+    expect(MIGRATIONS.filter((m) => "online" in m).map((m) => m.name)).toEqual([]);
+  });
 
   it("keeps a step's lock wait and hold below reserve's lock timeout", () => {
     // A `reserve` queued behind a group or a `sql` step waits out its lock waits and its run, then
@@ -418,6 +423,66 @@ describe("online migrations", () => {
         ).toEqual(["0101_r", "0102_s", "0103_rs"]);
         // A retry waits out a lock timeout and a backoff of at least as long.
         expect(Date.now() - started).toBeLessThan(2 * STEP_LOCK_TIMEOUT_MS);
+      } finally {
+        await load.stop();
+      }
+      expect(load.samples.filter((s) => s.error)).toEqual([]);
+    });
+  }, 30_000);
+
+  it("lets the reserves queued behind a step drain before the next one locks", async () => {
+    await onSchema("drain", async (fresh, on) => {
+      await seeded(fresh, 100);
+      // Each step holds ACCESS EXCLUSIVE for 0.9 s, within its bounds; back to back, the reserves
+      // queued on the `global` row behind the one waiting on the table wait out all three.
+      const held = (i: number): OnlineStep => ({
+        kind: "sql",
+        sql: `ALTER TABLE ${T} ADD COLUMN g${i} int; SELECT pg_sleep(0.9)`,
+      });
+      const load = reserving(on, 8);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        const migration = { name: "0101_g", online: true as const, steps: [1, 2, 3].map(held) };
+        expect(await run(fresh, [migration])).toEqual(["0101_g"]);
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      } finally {
+        await load.stop();
+      }
+      expect(load.samples.filter((s) => s.error)).toEqual([]);
+    });
+  }, 30_000);
+
+  it("ends a backfill batch that holds rows reserve locks within reserve's lock timeout", async () => {
+    await onSchema("batch_rows", async (fresh, on) => {
+      // The batch updates the four scope rows every reserve locks, then sleeps on the second.
+      await on.query(
+        `CREATE SEQUENCE once;
+         CREATE FUNCTION slow_second() RETURNS bigint LANGUAGE plpgsql AS $$
+         BEGIN
+           IF nextval('once') = 2 THEN PERFORM pg_sleep(3); END IF;
+           RETURN 0;
+         END $$`,
+      );
+      const load = reserving(on);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        const scopes: OnlineMigration = {
+          name: "0101_scopes_c",
+          online: true,
+          steps: [
+            { kind: "sql", sql: "ALTER TABLE spend_scopes ADD COLUMN c bigint" },
+            {
+              kind: "backfill",
+              table: "spend_scopes",
+              key: ["scope"],
+              set: "c = slow_second()",
+              where: "t.c IS NULL",
+              pauseMs: 0,
+            },
+          ],
+        };
+        expect(await run(fresh, [scopes])).toEqual(["0101_scopes_c"]);
+        await new Promise((resolve) => setTimeout(resolve, 200));
       } finally {
         await load.stop();
       }
@@ -659,7 +724,7 @@ describe("online migrations", () => {
         `CREATE SEQUENCE once;
          CREATE FUNCTION slow_once() RETURNS bigint LANGUAGE plpgsql AS $$
          BEGIN
-           IF nextval('once') = 1 THEN PERFORM pg_sleep(6); END IF;
+           IF nextval('once') = 1 THEN PERFORM pg_sleep(2); END IF;
            RETURN 0;
          END $$`,
       );
