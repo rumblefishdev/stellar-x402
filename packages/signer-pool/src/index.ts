@@ -41,6 +41,7 @@ export {
   attemptsOf,
   type ContractCall,
   type FeeEscalation,
+  type SignedBounds,
   type SubmitOptions,
   type SubmitterOptions,
 } from "./submitter.js";

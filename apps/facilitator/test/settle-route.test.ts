@@ -268,3 +268,47 @@ describe("POST /settle", () => {
     expect(lines.join("")).toContain("http_error");
   });
 });
+
+describe("POST /settle beside reconciliation (0019 decision 27)", () => {
+  const db = testDatabase();
+  it("serves while the first sweep runs, and starts and stops it with the server", async () => {
+    const settle = vi.fn<Settle>(async () => ({ response: success }));
+    const reconciliation = {
+      reconciled: new Promise<void>(() => {}),
+      listed: () => false,
+      start: vi.fn(),
+      close: vi.fn(),
+    };
+    const env = {
+      FACILITATOR_SECRET: Keypair.random().secret(),
+      DATABASE_URL: db.urlFor(db.schema),
+      CHANNELS: Keypair.random().publicKey(),
+      CLIENT_IP: "socket",
+    };
+    const config = { ...parseConfig(env), port: 0 };
+    const app = await start({
+      config,
+      logger: jsonLogger("error"),
+      stores: db.stores(),
+      verify: async () => ({ isValid: true }),
+      settle,
+      extensionResponses: () => undefined,
+      supported: supportedResponse(config.network, Keypair.random().publicKey()),
+      metrics: memoryMetrics(),
+      reconciliation,
+    });
+    try {
+      expect(reconciliation.start).toHaveBeenCalledTimes(1);
+      const response = await fetch(`http://127.0.0.1:${app.port}/settle`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(request),
+      });
+      expect(response.status).toBe(200);
+      expect(settle).toHaveBeenCalledTimes(1);
+    } finally {
+      await app.close();
+    }
+    expect(reconciliation.close).toHaveBeenCalledTimes(1);
+  });
+});

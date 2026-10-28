@@ -28,6 +28,7 @@ function record(bazaar: unknown, overrides: Partial<SettlementRecord> = {}): Set
     fingerprint: "f",
     state: "success",
     hashes: ["tx1"],
+    version: 1,
     ledger: 100,
     paymentPayload: {
       x402Version: 2,

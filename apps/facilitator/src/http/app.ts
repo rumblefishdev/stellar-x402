@@ -7,6 +7,7 @@ import type { Logger } from "../logger.js";
 import type { Metrics } from "../metrics.js";
 import type { Stores } from "../ports/index.js";
 import type { SettlementHooks } from "../settlement/hooks.js";
+import type { Reconciliation } from "../settlement/reconcile.js";
 import type { Settle } from "../settlement/settle.js";
 import type { Verify, VerifyTrace } from "../settlement/verify.js";
 import { discoveryResources } from "./discovery.js";
@@ -25,6 +26,8 @@ export interface AppDeps {
   extensionResponses: SettlementHooks["extensionResponses"];
   /** The `GET /supported` answer, fixed for the life of the process. */
   supported: SupportedResponse;
+  /** Settlement reconciliation (0019), started and stopped with the server. */
+  reconciliation?: Reconciliation;
 }
 
 /** The status as a body code, like `not_found`: 413 → `payload_too_large`. */

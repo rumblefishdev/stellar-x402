@@ -68,7 +68,7 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       const results = await Promise.all(Array.from({ length: 10 }, () => store.claim(s)));
       expect(results.filter((r) => r.claimed)).toHaveLength(1);
       // The whole record, so a payload or requirement that doesn't round-trip fails.
-      const record = { ...s, state: "claimed", hashes: [], updatedAt: 1_000 };
+      const record = { ...s, state: "claimed", hashes: [], version: 0, updatedAt: 1_000 };
       expect(results.find((r) => r.claimed)).toEqual({ claimed: true, record });
       expect(results.find((r) => !r.claimed)).toEqual({ claimed: false, existing: record });
       expect(await store.get(s.key)).toEqual(record);
@@ -79,10 +79,41 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       await store.claim(s);
       await store.addHash(s.key, "h1", 2_000);
       const update = { state: "pending", channel: "GCHANNEL", updatedAt: 3_000 } as const;
-      const pending = { ...s, ...update, hashes: ["h1"] };
+      const pending = { ...s, ...update, hashes: ["h1"], version: 1 };
       expect(await store.transition(s.key, "signed", update)).toEqual(pending);
       expect(await store.findByHash("h1")).toEqual(pending);
       expect(await store.listNonFinal("stellar:testnet")).toEqual([pending]);
+    });
+
+    it("bumps the version with each new hash, and fails a transition that expects an older one", async () => {
+      const { key } = settlement("1");
+      await store.claim(settlement("1"));
+      await store.addHash(key, "h1", 2_000);
+      await store.addHash(key, "h1", 2_500);
+      expect((await store.get(key))?.version).toBe(1);
+      await store.addHash(key, "h2", 3_000);
+      expect((await store.get(key))?.version).toBe(2);
+      const expired = { state: "expired", updatedAt: 4_000 } as const;
+      // A hash appended since version 1 was read: the write fails, and the record stays open.
+      expect(await store.transition(key, "signed", expired, 1)).toBeUndefined();
+      expect((await store.get(key))?.state).toBe("signed");
+      expect(await store.transition(key, "signed", expired, 2)).toMatchObject({
+        state: "expired",
+        version: 2,
+      });
+    });
+
+    it("lets exactly one of addHash and a versioned transition win when they race", async () => {
+      for (let i = 0; i < 10; i++) {
+        const s = settlement(String(i));
+        await store.claim(s);
+        await store.addHash(s.key, `a${i}`, 2_000);
+        const [added, ended] = await Promise.all([
+          store.addHash(s.key, `b${i}`, 3_000),
+          store.transition(s.key, "signed", { state: "expired", updatedAt: 3_000 }, 1),
+        ]);
+        expect(added !== (ended !== undefined)).toBe(true);
+      }
     });
 
     it("keeps every hash, finds the record by any of them, and moves claimed to signed", async () => {
@@ -394,6 +425,131 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
         ["1", "pending", ["h1", "h2"]],
         ["2", "signed", ["h3"]],
       ]);
+    });
+
+    describe("attempts (0019 decision 7)", () => {
+      const { key } = settlement("1");
+      beforeEach(async () => {
+        await store.claim(settlement("1"));
+      });
+
+      it("stores each hash as a stored attempt with its bounds, oldest first", async () => {
+        await store.addHash(key, "h1", 2_000, { maxTime: 1_700_000_060, maxLedger: 5_000_123 });
+        await store.addHash(key, "h2", 3_000, { maxTime: 1_700_000_090 });
+        await store.addHash(key, "h3", 4_000);
+        // A repeat changes nothing, its bounds included.
+        await store.addHash(key, "h1", 5_000, { maxTime: 1 });
+        expect(await store.attempts(key)).toEqual([
+          {
+            hash: "h1",
+            state: "stored",
+            maxTime: 1_700_000_060,
+            maxLedger: 5_000_123,
+            updatedAt: 2_000,
+          },
+          { hash: "h2", state: "stored", maxTime: 1_700_000_090, updatedAt: 3_000 },
+          { hash: "h3", state: "stored", updatedAt: 4_000 },
+        ]);
+        expect(await store.attempts(settlement("2").key)).toEqual([]);
+      });
+
+      it("moves attempts only forward, each on its own", async () => {
+        await store.addHash(key, "h1", 2_000);
+        await store.addHash(key, "h2", 2_000);
+        expect(await store.markAttempts(key, [{ hash: "h1", state: "sent" }], 3_000)).toBe(1);
+        // sent and unknown rank alike, so neither replaces the other; nothing moves back.
+        expect(
+          await store.markAttempts(
+            key,
+            [
+              { hash: "h1", state: "unknown" },
+              { hash: "h1", state: "stored" },
+            ],
+            4_000,
+          ),
+        ).toBe(0);
+        expect(
+          await store.markAttempts(
+            key,
+            [
+              { hash: "h1", state: "dead", channel: "GCHANNEL", errorCode: "txBadSeq" },
+              { hash: "h2", state: "landed", channel: "GCHANNEL" },
+            ],
+            5_000,
+          ),
+        ).toBe(2);
+        // landed and dead are final.
+        expect(
+          await store.markAttempts(
+            key,
+            [
+              { hash: "h1", state: "landed" },
+              { hash: "h2", state: "dead" },
+            ],
+            6_000,
+          ),
+        ).toBe(0);
+        expect(await store.attempts(key)).toEqual([
+          {
+            hash: "h1",
+            state: "dead",
+            channel: "GCHANNEL",
+            errorCode: "txBadSeq",
+            updatedAt: 5_000,
+          },
+          { hash: "h2", state: "landed", channel: "GCHANNEL", updatedAt: 5_000 },
+        ]);
+      });
+
+      it("never moves another record's attempt", async () => {
+        const k2 = settlement("2").key;
+        await store.claim(settlement("2"));
+        await store.addHash(k2, "h9", 2_000);
+        expect(await store.markAttempts(key, [{ hash: "h9", state: "dead" }], 3_000)).toBe(0);
+        expect((await store.attempts(k2))[0]?.state).toBe("stored");
+      });
+
+      it("lets exactly one of concurrent updates of an attempt win", async () => {
+        await store.addHash(key, "h1", 2_000);
+        const moved = await Promise.all(
+          (["sent", "unknown", "sent", "unknown"] as const).map((state) =>
+            store.markAttempts(key, [{ hash: "h1", state }], 3_000),
+          ),
+        );
+        expect(moved.reduce((a, b) => a + b)).toBe(1);
+      });
+
+      it("writes a transition's attempts with it, also when the state doesn't move", async () => {
+        await store.addHash(key, "h1", 2_000);
+        await store.addHash(key, "h2", 2_000);
+        const moved = await store.transition(key, "signed", {
+          state: "success",
+          ledger: 7,
+          updatedAt: 3_000,
+          attempts: [
+            { hash: "h1", state: "dead", errorCode: "txBadSeq" },
+            { hash: "h2", state: "landed" },
+          ],
+        });
+        // The record carries no attempts: they are read with `attempts`.
+        expect(moved).toMatchObject({ state: "success", hashes: ["h1", "h2"] });
+        expect(moved).not.toHaveProperty("attempts");
+        expect((await store.attempts(key)).map((a) => a.state)).toEqual(["dead", "landed"]);
+
+        const k2 = settlement("2").key;
+        await store.claim(settlement("2"));
+        await store.addHash(k2, "h3", 2_000);
+        // A lost compare-and-set still records what the network said about the attempt.
+        expect(
+          await store.transition(k2, "pending", {
+            state: "expired",
+            updatedAt: 3_000,
+            attempts: [{ hash: "h3", state: "dead" }],
+          }),
+        ).toBeUndefined();
+        expect(await store.get(k2)).toMatchObject({ state: "signed" });
+        expect((await store.attempts(k2))[0]?.state).toBe("dead");
+      });
     });
 
     describe("channel lease", () => {

@@ -64,7 +64,9 @@ Every request counts, a malformed or oversized one too. `/supported` has no limi
 - `pnpm migrate` applies the pending migrations; the service never changes the schema. Run it
   before a release that adds one. `0002_success_answered`: on a database without it, a success is
   answered once per process instead of once per payment. `0003_catalog_type_seq`: without it, a
-  `/discovery/resources` `type` filter scans the whole catalog.
+  `/discovery/resources` `type` filter scans the whole catalog. `0005_settlement_attempts` adds
+  each hash's attempt state and bounds; hashes written before it fall back to the auth entry's
+  expiry.
 
 ## `/settle` answers
 
@@ -82,6 +84,7 @@ unlocks one response.
 | `settle_exact_stellar_already_settled`               | the hash                | settled; an earlier call already got this payment's success                    | don't serve again for this payment                                                        |
 | `settle_exact_stellar_nonce_already_used`            | the stored hash, if any | this payer's nonce is already used by another payment, in whatever state       | refuse: the payment isn't for this request                                                |
 | `settle_exact_stellar_timeout`                       | —                       | the settle budget ran out before anything was signed; nothing was or will be   | sign a new payment                                                                        |
+| `settle_exact_stellar_interrupted`                   | —                       | the facilitator restarted before anything was signed; nothing was or will be   | sign a new payment                                                                        |
 | `settle_exact_stellar_rpc_unavailable`               | an earlier hash, if any | no RPC endpoint answered (refused, failed or timed out)                        | sign a new payment and try again later                                                    |
 | `settle_exact_stellar_no_channel_in_time`            | —                       | every channel was busy until the deadline                                      | sign a new payment and try again later                                                    |
 | `settle_exact_stellar_no_channels`                   | —                       | every channel is out of the pool                                               | sign a new payment and try again later                                                    |
@@ -114,9 +117,24 @@ gets the same answer again, so a retry needs a new payment (a new nonce); only
 - a spend refusal the store couldn't record leaves the payment claimed, so a repeat after the
   budget gets `…_timeout` instead of the spend reason.
 
-Until 0019 nothing finishes a `pending` record: every repeat of it gets `settlement_pending`.
-The record stays `pending` across restarts. Look the hash up on chain instead of repeating for
-long.
+A `pending` record is finished by reconciliation (task 0019): the pool's late result, or a sweep
+that asks the network about each of the record's hashes. A hash the network doesn't know turns
+`…_transaction_expired` only once its time or ledger bound has passed, so a repeat may get
+`settlement_pending` for up to that long. A record expires only if no hash was stored since the
+sweep read them: a rebuild in flight makes it wait for the next sweep. A sweep runs as the server
+starts and then 10 s after each one ends, beside `/settle`, which serves at once; a record the
+RPC or the store couldn't check is simply tried by the next sweep. A claim with no hash is closed
+as `…_interrupted` once its settle budget plus 5 s has passed.
+
+The RPC keeps only a window of history (testnet's keeps 120960 ledgers, about 7 days; providers
+differ). A record claimed before the oldest ledger it keeps can't be told from one that never
+landed, so it stays open, is logged once as `settlement_history_gone` (counted in
+`settlement_history_gone_total`) and is checked again every 5 minutes: check its hashes on a
+block explorer or Horizon before acting on it.
+
+A success answered while the store was down is marked answered once the store is back. After a
+restart the process can't know it answered one, so a repeat may get that payment's success a
+second time, at most once; no money moves twice.
 
 ## `/discovery/resources`
 
