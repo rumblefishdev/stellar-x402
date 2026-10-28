@@ -372,7 +372,7 @@ describe("a fee refusal for a payment that restores archived state (task 0066)",
     );
   });
 
-  it("names no entry that doesn't archive, or whose key is too long to name", async () => {
+  it("names no entry that doesn't archive, and a key too long to name by its length", async () => {
     const temporaryKey = xdr.LedgerKey.contractData(
       new xdr.LedgerKeyContractData({
         contract: Address.fromString(asset).toScAddress(),
@@ -390,7 +390,8 @@ describe("a fee refusal for a payment that restores archived state (task 0066)",
     );
     expect(answer.invalidMessage).toBe(
       "simulation-derived fee 302000 stroops exceeds ceiling 250000 stroops; " +
-        `the payment's transaction lists 1 archived entry to restore: ${instanceKey.toXDR("base64")}`,
+        "the payment's transaction lists 2 archived entries to restore: " +
+        `a key of ${longKey.toXDR("base64").length} characters, ${instanceKey.toXDR("base64")}`,
     );
   });
 

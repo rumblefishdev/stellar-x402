@@ -146,7 +146,7 @@ describe("createVerifier", () => {
     expect(latestLedger).not.toHaveBeenCalled();
   });
 
-  it("returns upstream's rejection as is, without the checks of its own (a fee refusal may name archived entries, task 0066)", async () => {
+  it("returns upstream's rejection as is, without the checks of its own", async () => {
     const answer = { isValid: false, invalidReason: "invalid_exact_stellar_payload_wrong_amount" };
     const { verify, latestLedger } = setup(answer);
     await expect(verify(payload({ from: channel }), requirements)).resolves.toBe(answer);

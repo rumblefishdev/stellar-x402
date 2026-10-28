@@ -387,14 +387,17 @@ function withArchivedEntries(response: VerifyResponse, payload: PaymentPayload):
 
 /** Most archived entries a refusal names: the client chooses how many it lists. */
 const ARCHIVED_ENTRIES_NAMED = 4;
-/** Longest key a refusal names, in base64: a token balance's is about 160, an allowance's 264. */
+/**
+ * Longest key a refusal names, in base64: a token's instance key is 64 and a balance's about 160.
+ * A longer one is counted and shown by its length, so a client can't make the message long.
+ */
 const ARCHIVED_KEY_MAX_CHARS = 512;
 
 /**
- * The distinct base64 `LedgerKey`s the payload's transaction lists as archived, if it decodes:
- * only persistent contract data and contract code, the entries that archive, and none longer than
- * `ARCHIVED_KEY_MAX_CHARS`. Each footprint entry is encoded at most once, however often the
- * client repeats its index.
+ * The distinct entries the payload's transaction lists as archived, if it decodes, as their base64
+ * `LedgerKey`s: only persistent contract data and contract code, the entries that archive, and a
+ * key longer than `ARCHIVED_KEY_MAX_CHARS` as its length. Each footprint entry is encoded at most
+ * once, however often the client repeats its index.
  */
 function archivedEntries(payload: PaymentPayload): string[] {
   const transaction = (payload.payload as { transaction?: unknown } | undefined)?.transaction;
@@ -407,16 +410,21 @@ function archivedEntries(payload: PaymentPayload): string[] {
     const data = ext.sorobanData();
     if (data.ext().switch() !== 1) return [];
     const readWrite = data.resources().footprint().readWrite();
-    const keys = new Set<string>();
+    const keys = new Map<string, string>();
     for (const i of new Set(
       (data.ext().value() as xdr.SorobanResourcesExtV0).archivedSorobanEntries(),
     )) {
       const key = readWrite[i];
       if (key === undefined || !archivable(key)) continue;
       const encoded = key.toXDR("base64");
-      if (encoded.length <= ARCHIVED_KEY_MAX_CHARS) keys.add(encoded);
+      keys.set(
+        encoded,
+        encoded.length <= ARCHIVED_KEY_MAX_CHARS
+          ? encoded
+          : `a key of ${encoded.length} characters`,
+      );
     }
-    return [...keys];
+    return [...keys.values()];
   } catch {
     return [];
   }
