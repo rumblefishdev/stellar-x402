@@ -204,11 +204,15 @@ One request or one stop must never outlast the layer in front of it:
   payment may be sent again; a valid payment can still get it when the first URLs hang and the
   last one answers late. These worst cases need hung RPC URLs, not slow ones.
 
-- **Known cost of "nothing sent → `rejected`".** The resource is usually served before `/settle`.
-  After a failure before anything was signed (no channel, the budget, the simulation, the RPCs
-  down), the record ends and the same payload can't be settled again: only the buyer can pay, by
-  signing a new payment, and nothing makes them. Claiming such a record again by the same
-  fingerprint would close it; it is not planned.
+- **"Nothing sent → `rejected`" reopens.** The resource is usually served before `/settle`.
+  After a failure before anything was signed (no channel, the budget, the RPCs down, a restart
+  or a deploy), the record ends, but the payer's auth entry can still land. Since task 0073 the
+  identical payload reopens the record while that auth entry is valid, so whoever holds the
+  payment (the seller's resource server, or the client) repeats it as it is and it settles once;
+  the answer says so with `extra.retryable`. A refusal by the simulation, the fee or a spend
+  limit still ends the payment: those need a new one (0073 decision 20 leaves their wording to a
+  backlog task). During the deploy that brings this in, the previous release still answers these
+  reasons as "sign a new payment", without `extra`, until it stops.
 - **The budget covers the wait for a channel.** The pool's own bounds (until the payer's auth expiry ledger, then 30 s; 60 s + 30 s
   for a call without a ledger bound) start only
   once a channel is acquired, so the `/settle` handler passes the pool a deadline (0009).
