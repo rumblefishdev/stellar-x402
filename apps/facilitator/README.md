@@ -11,6 +11,12 @@ discovery routes. Design: [the M1 spine](../../docs/architecture/m1-spine.md) (A
   and the wait for a channel included. It stays below the seller's own 90 s timeout.
 - `SETTLE_TIMEOUT_MS` (20 s, or the budget when that is shorter; at least 1 s, at most the
   budget): how long a repeat of a sent payment waits for it to turn final.
+- `MAX_VALIDITY_LEDGERS` (66 by default, above `MIN_VALIDITY_LEDGERS`): the furthest a payer's
+  auth may expire after the latest ledger. `/verify` and `/settle` refuse a later one with
+  `invalid_exact_stellar_signature_expiration_too_far`, whatever the resource's
+  `maxTimeoutSeconds` allows. 66 is 60 ledgers, about 5 minutes, plus 10% for clients that see
+  faster ledgers: **ask for a `maxTimeoutSeconds` of at most 300**. The cap bounds how long one
+  payment can hold a channel (0073).
 - `NETWORK=stellar:pubnet` refuses to start: `/settle` would spend there with no spend budgets
   (0024) and no fencing token on the channel lease (0071) yet.
 

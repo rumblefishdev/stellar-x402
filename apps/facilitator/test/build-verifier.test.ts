@@ -236,6 +236,21 @@ describe("buildVerifier (the /verify wiring in main)", () => {
     });
   });
 
+  it("caps the auth expiry at MAX_VALIDITY_LEDGERS (default 66) in /verify and /settle's check", async () => {
+    const { verify, check } = setup();
+    const ok = payload(undefined, CURRENT + 66);
+    const far = payload(undefined, CURRENT + 67);
+    await expect(verify(ok, requirements)).resolves.toEqual({ isValid: true, payer });
+    for (const answer of [
+      await verify(far, requirements),
+      (await check(far, requirements)).response,
+    ])
+      expect(answer).toMatchObject({
+        isValid: false,
+        invalidReason: "invalid_exact_stellar_signature_expiration_too_far",
+      });
+  });
+
   it("answers from the second RPC URL when the first throws, and moves the shared client there", async () => {
     const {
       verify,

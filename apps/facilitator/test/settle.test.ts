@@ -686,6 +686,7 @@ describe("createSettler", () => {
       facilitator: Keypair.random().publicKey(),
       channels: [Keypair.random().publicKey()],
       minValidityLedgers: 2,
+      maxValidityLedgers: 66,
       latestLedger: async () => CURRENT,
     });
     const { settle, submit } = setup(landing(), { check });

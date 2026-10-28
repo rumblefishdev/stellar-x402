@@ -53,6 +53,7 @@ describe("parseConfig", () => {
       fees: { maxFeeStroops: 250_000n, inclusionFeeStroops: undefined, escalation: undefined },
       settlement: {
         minValidityLedgers: 4,
+        maxValidityLedgers: 66,
         settleTimeoutMs: 20_000,
         settleBudgetMs: 30_000,
         leaseTtlMs: 30_000,
@@ -91,6 +92,7 @@ describe("parseConfig", () => {
       FEE_ESCALATION_FACTOR: "1.5",
       FEE_ESCALATION_MAX_STROOPS: "1002",
       MIN_VALIDITY_LEDGERS: "13",
+      MAX_VALIDITY_LEDGERS: "70",
       SETTLE_TIMEOUT_MS: "31000",
       SETTLE_BUDGET_MS: "60000",
       LEASE_TTL_MS: "32000",
@@ -124,6 +126,7 @@ describe("parseConfig", () => {
       },
       settlement: {
         minValidityLedgers: 13,
+        maxValidityLedgers: 70,
         settleTimeoutMs: 31_000,
         settleBudgetMs: 60_000,
         leaseTtlMs: 32_000,
@@ -246,6 +249,10 @@ describe("parseConfig", () => {
     expect(problems({ ...minimal, MIN_VALIDITY_LEDGERS: "1" })).toEqual([
       "MIN_VALIDITY_LEDGERS must be at least 2",
     ]);
+    // A cap at or below the floor would refuse every payment.
+    expect(
+      problems({ ...minimal, MIN_VALIDITY_LEDGERS: "10", MAX_VALIDITY_LEDGERS: "10" }),
+    ).toEqual(["MAX_VALIDITY_LEDGERS must be above MIN_VALIDITY_LEDGERS"]);
   });
 
   it("keeps twice the inclusion bid below the fee ceiling, as the fee bump pays it twice", () => {

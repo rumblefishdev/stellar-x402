@@ -23,6 +23,7 @@ import {
   createVerifier,
   signedLedgers,
   type UpstreamVerifier,
+  type VerifierDeps,
 } from "../src/settlement/verify.js";
 
 const network = STELLAR_NETWORKS.testnet;
@@ -34,6 +35,7 @@ const otherChannel = Keypair.random().publicKey();
 const facilitator = Keypair.random().publicKey();
 const CURRENT = 1_000;
 const MIN_VALIDITY = 12;
+const MAX_VALIDITY = 66;
 
 const requirements: PaymentRequirements = {
   scheme: "exact",
@@ -107,7 +109,10 @@ function payload(shape: Shape = {}): PaymentPayload {
   };
 }
 
-function setup(upstreamResponse: VerifyResponse = { isValid: true, payer }) {
+function setup(
+  upstreamResponse: VerifyResponse = { isValid: true, payer },
+  deps: Partial<VerifierDeps> = {},
+) {
   const upstream = { verify: vi.fn<UpstreamVerifier["verify"]>(async () => upstreamResponse) };
   const latestLedger = vi.fn(async () => CURRENT);
   const verify = createVerifier({
@@ -116,7 +121,9 @@ function setup(upstreamResponse: VerifyResponse = { isValid: true, payer }) {
     facilitator,
     channels: [channel, otherChannel],
     minValidityLedgers: MIN_VALIDITY,
+    maxValidityLedgers: MAX_VALIDITY,
     latestLedger,
+    ...deps,
   });
   return { verify, upstream, latestLedger };
 }
@@ -196,6 +203,7 @@ describe("createVerifier", () => {
       facilitator,
       channels: [channel],
       minValidityLedgers: MIN_VALIDITY,
+      maxValidityLedgers: MAX_VALIDITY,
       latestLedger: async () => CURRENT,
       upstreamTimeoutMs: 20,
     });
@@ -371,6 +379,7 @@ describe("createVerifier", () => {
         facilitator,
         channels: [channel],
         minValidityLedgers: MIN_VALIDITY,
+        maxValidityLedgers: MAX_VALIDITY,
         latestLedger: async () => CURRENT,
       });
       const { verified } = await check(payload(), requirements);
@@ -397,9 +406,50 @@ describe("createVerifier", () => {
       },
     );
 
+    it.each(["address", "addressV2"])(
+      "accepts auth exactly maxValidityLedgers ahead and rejects one ledger more, with %s credentials",
+      async (credentialType) => {
+        const { verify } = setup();
+        const at = (expiration: number) =>
+          verify(payload({ auth: [authEntry(payer, expiration, credentialType)] }), requirements);
+        await expect(at(CURRENT + MAX_VALIDITY)).resolves.toEqual({ isValid: true, payer });
+        await expect(at(CURRENT + MAX_VALIDITY + 1)).resolves.toEqual(
+          rejected(EXPIRATION_TOO_FAR_REASON),
+        );
+      },
+    );
+
+    it("caps the auth expiry whatever the resource's maxTimeoutSeconds allows (0073 decision 2)", async () => {
+      // Seven days, as a caller writing its own requirements could ask for.
+      const week = 7 * 24 * 3600;
+      const { verify, upstream } = setup();
+      const answer = await verify(payload({ auth: [authEntry(payer, CURRENT + week / 5)] }), {
+        ...requirements,
+        maxTimeoutSeconds: week,
+      });
+      expect(upstream.verify).toHaveBeenCalledOnce();
+      expect(answer).toEqual(rejected(EXPIRATION_TOO_FAR_REASON));
+      expect(answer.invalidMessage).toBe(
+        "auth expires at ledger 121960, 120960 ledgers after ledger 1000; at most 66 are allowed" +
+          "; maxTimeoutSeconds 604800 is about 120960 ledgers, so it should be at most 300",
+      );
+    });
+
+    it("gives no maxTimeoutSeconds hint when the resource asked for little and the client signed more", async () => {
+      const { verify } = setup();
+      const answer = await verify(payload({ auth: [authEntry(payer, CURRENT + 67)] }), {
+        ...requirements,
+        maxTimeoutSeconds: 300,
+      });
+      expect(answer.invalidMessage).toBe(
+        "auth expires at ledger 1067, 67 ledgers after ledger 1000; at most 66 are allowed",
+      );
+    });
+
     it("rejects auth that expires past the last ledger the pool can bound an envelope by", async () => {
       // A huge maxTimeoutSeconds signs to 0xFFFFFFFF, which `submit()`'s `maxLedger` refuses.
-      const { verify } = setup();
+      // The cap is raised here so the uint32 bound is the one that answers.
+      const { verify } = setup(undefined, { maxValidityLedgers: 2 ** 32 });
       const at = (expiration: number) =>
         verify(payload({ auth: [authEntry(payer, expiration)] }), requirements);
       await expect(at(2 ** 32 - 2)).resolves.toEqual({ isValid: true, payer });
