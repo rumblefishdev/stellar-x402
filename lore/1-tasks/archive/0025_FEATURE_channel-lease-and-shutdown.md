@@ -2,10 +2,10 @@
 id: "0025"
 title: "Channel lease and graceful shutdown"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0006", "0011", "0012"]
-related_tasks: ["0012", "0009", "0019", "0022", "0014", "0013", "0039"]
+related_tasks: ["0012", "0009", "0019", "0022", "0014", "0013", "0039", "0071", "0072", "0024"]
 tags: [facilitator, signer-pool, operations, priority-high, effort-small, payments]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -26,6 +26,15 @@ history:
       Rebased onto develop after PR #57 merged (sweeps no longer wait for the lease, decision 19;
       tests on PostgreSQL). Code review applied: the drain waits for a sweep under way, the
       process exits after its deadline, an end-to-end drain test, README corrections.
+  - date: "2026-10-28"
+    status: completed
+    who: okarcz
+    note: >
+      PR #70 rebase-merged into develop (9d94077) after Adam's approval. His review applied:
+      the lease checked again after addHash, released right after the drain, pubnet refused
+      until 0024 and 0071, release always deletes its row, a second signal joins the drain,
+      shutdown_failed logged (decisions 22-30). Facilitator tests 519, all green. Follow-ups:
+      0071 (fencing token), 0072 (startup schema check).
 ---
 
 # Channel lease and graceful shutdown
@@ -196,6 +205,17 @@ As a facilitator operator, I want only one process at a time to settle through a
   the account read instead of a fixed 50 ms; the shared-read bound in `settle.test.ts` (from 0009)
   is 150 instead of 70, since the tests' PostgreSQL spreads the initial lookups (CI read 73;
   unshared reads come to about 550). Intentional.
+
+## Issues Encountered
+
+- **Timers starved by a fast fake RPC**: the end-to-end drain test hung until `FakeRpc`'s ledger
+  reads were delayed 20 ms; with instant reads the pool's wait never let a timer run. Test-only.
+- **Timing on a loaded runner**: the shared-read bound test failed on CI and got more room
+  (8e086b4). On PR #70's last push, node 22 failed once in `settle-pool.test.ts` ("refuses a call
+  that has signed nothing when the drain starts": `record_write_failed` instead of
+  `shutting_down`); it passed on rerun and 5/5 locally. A candidate for 0074.
+- **Rebase onto develop**: 0019's decision 37 took `held()` off the sweeps, so the rebase dropped
+  that wiring and its test, and the memory-store tests moved to PostgreSQL (0064).
 
 ## Design Decisions
 
