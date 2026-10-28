@@ -5,7 +5,7 @@ type: DOCS
 status: active
 milestone: 1
 related_adr: ["0011"]
-related_tasks: ["0062", "0026", "0027", "0038"]
+related_tasks: ["0062", "0026", "0027", "0038", "0077"]
 tags: [facilitator, deploy, cloudflare, docs, priority-medium, effort-small, platform]
 links:
   - ../../../docs/adr/0011-facilitator-hosting.md
@@ -47,10 +47,10 @@ hostname in line.
 
 ### Emerged
 
-1. **`facilitator` is a network alias, not the service name** (Oskar's review of #75): the
-   service stays `facilitator-testnet`, with the alias on `x402-testnet-edge`. Renaming the
-   service would clash with a separate mainnet facilitator in the same `x402` Compose project;
-   aliases are per network, so this fits either mainnet shape from 0038.
-2. **Mainnet behind the hostname stays open until 0038:** the rest of ADR 0011 (one process per
-   network, no shared facilitator) holds until then, and a separate mainnet process needs its
-   own route, not a second `cloudflared` on the `x402` tunnel.
+1. **One facilitator service, `facilitator`, for both networks** (Stan, after Oskar's review of
+   #75): the client names the network in the request, so there is no testnet/mainnet service
+   split. A network alias on a per-network service and "mainnet open until 0038" were tried in
+   9147f8e and reverted.
+2. **This PR records the decision; 0077 does the rework:** the rest of ADR 0011 (about 150–200
+   lines), ADR 0012, 0013, 0004, the spine, 0026 and the code assume one process per network.
+   ADR 0011's Network and URL says so, and 0026 says to build the service as `facilitator`.
