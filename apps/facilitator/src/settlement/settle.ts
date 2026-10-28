@@ -154,6 +154,12 @@ export interface SettlerDeps {
   settleTimeoutMs: number;
   /** How long one `/settle` call may take, the wait for a channel included (ADR 0011). */
   budgetMs: number;
+  /**
+   * Whether this process still holds the channel lease (0025). Checked again once a hash is
+   * stored, so a call let in before the lease was lost sends nothing on channels another
+   * process may own. Always held when unset.
+   */
+  held?: () => boolean;
   /** Estimated ledger close time, to turn the auth expiry into a deadline. */
   ledgerMs?: number;
   /** The record writes and hooks to share, e.g. with reconciliation; its own by default. */
@@ -428,6 +434,9 @@ export function createSettler(deps: SettlerDeps): Settle & {
             // Durable before the first send (AD-16); a final or missing record stops the send.
             if (!(await store.addHash(key, hash, now(), bounds)))
               throw new Error("the settlement record is final or missing");
+            // The lease may have gone since the request came in, after a long body upload or
+            // wait for a channel (0025 decision 22): another process may send on this channel.
+            if (deps.held && !deps.held()) throw new Error("the channel lease was lost");
             // The budget answer may have gone out while the store wrote: it named the hash it
             // could read, so this one isn't sent.
             if (call.budgetOver) throw new Error("the settle budget ran out");
