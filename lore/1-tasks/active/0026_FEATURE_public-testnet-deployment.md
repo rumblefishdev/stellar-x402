@@ -2,7 +2,7 @@
 id: "0026"
 title: "Public testnet deployment"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0011", "0012", "0013"]
 related_tasks: ["0012", "0014", "0022", "0017", "0020", "0013", "0039", "0036", "0047"]
@@ -51,6 +51,10 @@ history:
     status: backlog
     who: stkrolikiewicz
     note: "PR #24 round four: Compose exit codes and a start limit, the tunnel token for nonroot, 7844 over UDP and TCP, the zone settings that stay off, token rotation in the runbook; 0062 named as the tunnel's prerequisite."
+  - date: "2026-10-28"
+    status: active
+    who: stkrolikiewicz
+    note: "Started with reading secrets from files (`*_FILE`); the server parts follow #79's names, and signing waits for 0036."
 ---
 
 # Public testnet deployment
