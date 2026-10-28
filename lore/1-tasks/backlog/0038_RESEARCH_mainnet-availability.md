@@ -4,7 +4,7 @@ title: "Decide the mainnet availability setup on the Hetzner server"
 type: RESEARCH
 status: backlog
 related_adr: ["0011"]
-related_tasks: ["0014", "0025", "0026", "0027", "0039"]
+related_tasks: ["0014", "0025", "0026", "0027", "0039", "0077"]
 tags: [facilitator, mainnet, availability, deploy, priority-low, effort-medium, platform]
 links:
   - ../../../docs/adr/0011-facilitator-hosting.md
@@ -33,16 +33,21 @@ history:
     status: backlog
     who: stkrolikiewicz
     note: "PR #24 round four: the Hetzner Cloud VM is a mainnet question here again, as Oskar's condition for the shared server; the rejection is only proposed (0039 decision 41)."
+  - date: "2026-10-28"
+    status: backlog
+    who: stkrolikiewicz
+    note: "0077: one facilitator for both networks in a production environment. Deploy safety once mainnet joins (staging or stricter rules), the memory limit and the shared uptime check are questions here; the mainnet tunnel and the digest check in a mainnet deploy.sh are gone."
 ---
 
 # Decide the mainnet availability setup on the Hetzner server
 
 ## Summary
 
-ADR 0011 (revised in 0039) runs one facilitator container per network on one physical server,
-shared with ClickHouse. A deploy or a crash is a short outage, and a hardware fault takes the
-service down until the server is repaired or the service is restored elsewhere. Before the mainnet
-launch, this task decides how much of that to remove.
+ADR 0011 (revised in 0039 and 0077) runs one facilitator for both networks, in one `production`
+environment, on one physical server shared with ClickHouse. A deploy or a crash is a short outage,
+and a hardware fault takes the service down until the server is repaired or the service is
+restored elsewhere. Before mainnet joins that facilitator, this task decides how much of that to
+remove, and how deploys stay safe once every one of them reaches mainnet.
 
 ## Context
 
@@ -61,15 +66,23 @@ launch, this task decides how much of that to remove.
   whole zone) has one. Decide whether mainnet needs it, weighed against the one server, which
   is the larger risk.
 - **The ECS Fargate variant** in the first version of ADR 0011 remains the managed alternative.
+- **From 0077, deploys once mainnet is in production:** production deploys straight from
+  `deploy/production` with no promotion step, and every deploy will reach mainnet. A bug that
+  passes `ready` and `listed` but breaks settlement goes straight to mainnet, and the automatic
+  rollback doesn't see it. Decide:
+  - a staging environment ahead of production (its own hostname,
+    `x402-facilitator-staging.sorobanscan.com`, a second set of containers and a second testnet
+    channel set), with production taking only a digest that ran there, as testnet → mainnet did
+    until 0077; or
+  - stricter rules on production deploys: `v*` tags and a ruleset that protects them, required
+    reviewers, "Prevent self-review", and whether admins may bypass them (GitHub lets them by
+    default);
+  - either way, named reviewers and who may edit the environments, and a deploy user per
+    environment if a second one comes.
+- **From 0077, other mainnet questions:** the facilitator's memory limit (512 MiB) with two
+  channel pools; and, from Oskar's review of #75, one uptime check, the 99% figure, the zone's
+  rate limit and its analytics cover both networks at once.
 - **From 0039 (PR #24 review), to settle before mainnet:**
-  - a ruleset that protects `v*` tags, since the workflow at the tag runs with the mainnet key;
-  - a mainnet `deploy.sh` that itself refuses a digest without a successful `testnet`
-    deployment (the workflow checks it today, ADR 0011);
-  - named reviewers for mainnet deploys, and who may edit the environments;
-  - whether admins may bypass the `mainnet` environment's reviewers (ADR 0011). GitHub lets them
-    by default, so until then they can;
-  - a deploy user per network;
-  - the mainnet tunnel (`x402-facilitator.sorobanscan.com`) in `soroban-infrastructure`;
   - a Hetzner Cloud VM of our own instead of the shared server: ADR 0011's Alternatives list
     what it would remove and what it costs (about €12–20 a month on testnet). Testnet accepts the
     shared server knowingly; mainnet decides here, weighing the risk rows most (root reaching
