@@ -5,9 +5,10 @@
   seller's own 90 s timeout), 2026-10-16 (task 0009: the checks are inside the budget; RPC
   endpoints are logged as `RPC_URLS[i]`) and 2026-10-20 (task 0009: `RPC_URLS[i]#<fingerprint>`
   and the fingerprint's limit; how far a repeat runs past the budget), 2026-10-21 (task 0009:
-  bare RPC hosts in error messages) and 2026-10-27 (task 0019: reconciliation runs in every
+  bare RPC hosts in error messages), 2026-10-27 (task 0019: reconciliation runs in every
   process, independent of the lease; `/health` reports `listed` beside `ready`, and the deploy
-  waits for both)
+  waits for both) and 2026-10-28 (task 0076: one hostname and one facilitator service for both
+  networks; the sections that run one process per network follow in task 0077)
 - Revised: 2026-10-13. ECS Fargate became the company Hetzner server (task 0039); the first
   version is in git history and task 0014. 2026-10-21: the key moved to OpenBao (ADR 0013), and
   deploys, reboots, backups, alarms and downtime were worked out in the PR #24 review.
@@ -313,18 +314,28 @@ One request or one stop must never outlast the layer in front of it:
 
 ### Network and URL
 
-- **Cloudflare is the DNS and the edge, through Cloudflare Tunnel.** The hostnames are
-  `x402-facilitator-testnet.sorobanscan.com` and `x402-facilitator.sorobanscan.com`, one label
-  under the zone, since the Free plan's certificate covers only one level of subdomain.
-  - Each network has its own tunnel. Its `cloudflared` opens outbound connections to Cloudflare
-    (port 7844, UDP for QUIC and TCP) and forwards its hostname to
-    `http://facilitator-<network>:<port>`; anything else gets 404. The server opens no port for
-    it.
+- **Cloudflare is the DNS and the edge, through Cloudflare Tunnel.** One hostname,
+  `x402-facilitator.sorobanscan.com`, and one facilitator service, `facilitator`, serve both
+  networks (decided with Marek at the 2026-10-26 daily; `soroban-infrastructure`'s
+  `cloudflare/x402.tf`, 12cec25, routes it). It is one label under the zone, since the Free
+  plan's certificate covers only one level of subdomain.
+  - The client names the network in the request (`network` in the payment requirements:
+    `stellar:testnet` or `stellar:pubnet`), and the facilitator settles through that network's
+    channel pool, key and RPC endpoints. There is no testnet/mainnet service split; a
+    staging/production split may come later. There is no staging host yet;
+    `x402-facilitator-staging.sorobanscan.com` can be added if one is needed.
+  - Only testnet is served for now. The parts of this ADR that run one process per network
+    (Platform and containers, the deploy workflow, keys and secrets, the store) are reworked in
+    task 0077, together with the code, which today serves one `NETWORK` per process.
+  - One tunnel, `x402`. Its `cloudflared` opens outbound connections to Cloudflare (port 7844,
+    UDP for QUIC and TCP) and forwards the hostname to `http://facilitator:4021`, the Compose
+    service; anything else gets 404. The server opens no port for it. The compose file keeps
+    `PORT` at 4021; changing it means changing `cloudflare/x402.tf` too.
   - HTTPS ends at Cloudflare, so Cloudflare sees the requests in plain text. They carry signed
     payments, never keys.
   - The tunnel, its routing and the DNS record are Terraform in the `soroban-infrastructure`
     repo's `cloudflare/`, beside the `sorobanscan.com` zone, so routing changes are reviewed
-    there. Task 0062 sets up the zone and the testnet tunnel, the tunnel's prerequisite.
+    there. Task 0062 sets up the zone and the tunnel, the facilitator's prerequisite.
   - The tunnel token lives only in Cloudflare and that repo's Terraform state. An operator
     fetches it (the dashboard, the API or `terraform output`) into an encrypted systemd
     credential (runbook), also when the server is restored elsewhere. Anyone with it can run a
