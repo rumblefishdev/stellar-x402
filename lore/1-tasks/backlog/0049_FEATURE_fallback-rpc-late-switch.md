@@ -1,12 +1,12 @@
 ---
 id: "0049"
-title: "Fix FallbackRpc's switching: late answers, frozen endpoints, return to the first URL, URL-free logs"
+title: "Finish FallbackRpc's switching: frozen endpoints, transport-only errors, URL-free fromUrls names, the Attempt.sent split"
 type: FEATURE
 status: backlog
 milestone: 1
 related_adr: []
 related_tasks: ["0045", "0007", "0016"]
-tags: [signer-pool, rpc, payments, priority-low, effort-medium]
+tags: [signer-pool, rpc, payments, priority-medium, effort-medium]
 links:
   - ../../../docs/architecture/m1-spine.md
 history:
@@ -43,13 +43,25 @@ history:
       verify shares, with the switch counter, the return to the first endpoint and the switch logs.
       Left here: frozen endpoints, transport-only RpcUnavailableError, fromUrls names, and the
       Attempt.sent split.
+  - date: "2026-10-28"
+    status: backlog
+    who: okarcz
+    note: >
+      Renamed to what 0045 left: frozen endpoints, transport-only RpcUnavailableError, fromUrls
+      names and the Attempt.sent split. The late answer and the return to the first URL are done.
+      Raised to medium: a frozen endpoint stalls /settle and no alarm says why.
 ---
 
-# Fix `FallbackRpc`'s switching: late answers, frozen endpoints, return to the first URL, URL-free logs
+# Finish `FallbackRpc`'s switching: frozen endpoints, transport-only errors, URL-free `fromUrls` names, the `Attempt.sent` split
 
 ## Summary
 
-`FallbackRpc.call` (`packages/signer-pool/src/fallback-rpc.ts`) moves the active endpoint
+**Left to do:** leave a frozen endpoint, wrap only transport failures in `RpcUnavailableError`,
+name `fromUrls`' endpoints without their URL, and split `Attempt.sent`. 0045 fixed the late
+answer and the return to the first URL; the two paragraphs below describe the problem as it was
+before 0045.
+
+`FallbackRpc.call` (`packages/signer-pool/src/fallback-rpc.ts`) moved the active endpoint
 whenever the endpoint that answered isn't the current one: `if (idx !== this.current)`. A call
 that began on the old endpoint, before another call switched away from it, can answer late and
 switch back. During a brownout that flaps the pool's and the ledger reads' traffic back to the

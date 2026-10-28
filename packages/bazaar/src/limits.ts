@@ -6,7 +6,9 @@ export const LIMITS = {
   /** Serialized `extensions.bazaar`, in bytes. */
   extensionBytes: 32 * 1024,
   descriptionChars: 500,
-  schemaDepth: 10,
+  // Upstream's output wrapper takes 4 levels and each nested object 2. Real listings go to 25
+  // (92,900 measured, 2026-10-28); 10 refused two thirds of them (0083).
+  schemaDepth: 32,
   schemaNodes: 1_000,
   schemaPatternChars: 256,
   routeTemplateChars: 256,

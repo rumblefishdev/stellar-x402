@@ -3,6 +3,7 @@ id: "0036"
 title: "OpenBao Transit signer for the facilitator key"
 type: FEATURE
 status: active
+milestone: 1
 related_adr: ["0011", "0013"]
 related_tasks: ["0014", "0026", "0047", "0048"]
 tags: [facilitator, signer-pool, keys, priority-high, effort-small, payments]

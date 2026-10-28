@@ -144,7 +144,7 @@ settlement.
     per buyer, and an `mcp://tool/<name>` URL names a tool, not a server. In a public catalog
     such entries are noise, and they publish internal host names.
   - No public catalog lists one. Measured 2026-10-26 across about 98,800 entries: CDP, PayAI and
-    OpenX402 list none on mainnet or testnet, and no `mcp://` URL either. CDP asks sellers for "a
+    a public Stellar catalog list none on mainnet or testnet, and no `mcp://` URL either. CDP asks sellers for "a
     public HTTPS URL". The MCP registry refuses `localhost`, `127.0.0.1` and `*.localhost`
     remotes.
   - Testnet refuses them too (team decision, 2026-10-26): sellers test against `localhost` on

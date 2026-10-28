@@ -41,7 +41,7 @@ function isPrefix(prefix: string[], path: string[]): boolean {
 /**
  * Whether a seller-supplied JSON Schema fits our caps. The schema is treated as data: it is
  * walked with an explicit stack (so a deeply nested payload can't overflow ours) and never
- * compiled. Fails on depth over 10, more than 1,000 nodes, a `$ref`/`$id` that isn't a local
+ * compiled. Fails on depth over 32, more than 1,000 nodes, a `$ref`/`$id` that isn't a local
  * pointer, a `$ref` that points at one of its own ancestors, or a `pattern` over 256 characters.
  * Keyword rules apply to keywords only: not to property names, nor inside `enum`, `default` etc.
  */

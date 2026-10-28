@@ -122,6 +122,14 @@ export class HashConflictError extends Error {
   }
 }
 
+/**
+ * How long past a lease's `expiresAt` another holder must wait to take it (0025 decision 16).
+ * `expiresAt` comes from the holder's clock and is compared with the acquirer's, so a holder whose
+ * clock lags by less than this still renews before anyone takes over. One value for every process
+ * on a store, so it is not a setting.
+ */
+export const LEASE_SKEW_MARGIN_MS = 5_000;
+
 /** An exclusive, renewable lease on one network's channel set (AD-17). */
 export interface ChannelLease {
   /** What is leased, e.g. `stellar:testnet:channels`. */
@@ -195,8 +203,9 @@ export interface SettlementStore {
   listNonFinal(network: StellarNetwork): Promise<SettlementRecord[]>;
 
   /**
-   * Takes the lease if it is free, expired or already held by `holder`, and sets its expiry to
-   * `now + ttlMs`. Resolves the lease, or `undefined` if another holder has it.
+   * Takes the lease if it is free, already held by `holder`, or another holder's that expired more
+   * than {@link LEASE_SKEW_MARGIN_MS} before `now`, and sets its expiry to `now + ttlMs`. Resolves
+   * the lease, or `undefined` if another holder has it.
    */
   acquireLease(
     name: string,

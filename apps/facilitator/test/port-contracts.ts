@@ -7,6 +7,7 @@ import {
   HashConflictError,
   type CatalogAttempt,
   type CatalogAttemptStore,
+  LEASE_SKEW_MARGIN_MS,
   type CatalogEntry,
   type CatalogStore,
   type NewSettlement,
@@ -557,15 +558,17 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
     describe("channel lease", () => {
       const NAME = "stellar:testnet:channels";
 
-      it("gives the lease to one holder until it expires", async () => {
+      it("gives the lease to one holder until the skew margin past its expiry", async () => {
         expect(await store.acquireLease(NAME, "a", 1_000, 0)).toEqual({
           name: NAME,
           holder: "a",
           expiresAt: 1_000,
         });
         expect(await store.acquireLease(NAME, "b", 1_000, 500)).toBeUndefined();
-        expect(await store.acquireLease(NAME, "b", 1_000, 1_000)).toBeUndefined();
-        expect(await store.acquireLease(NAME, "b", 1_000, 1_001)).toMatchObject({ holder: "b" });
+        // Expired, but the holder's clock may lag the acquirer's (0025 decision 16).
+        const free = 1_000 + LEASE_SKEW_MARGIN_MS;
+        expect(await store.acquireLease(NAME, "b", 1_000, free)).toBeUndefined();
+        expect(await store.acquireLease(NAME, "b", 1_000, free + 1)).toMatchObject({ holder: "b" });
       });
 
       it("lets the holder take it again and renew it while it is valid", async () => {
@@ -594,7 +597,9 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       it("gives an expired, contested lease to exactly one holder", async () => {
         await store.acquireLease(NAME, "a", 1_000, 0);
         const leases = await Promise.all(
-          Array.from({ length: 10 }, (_, i) => store.acquireLease(NAME, `h${i}`, 1_000, 1_001)),
+          Array.from({ length: 10 }, (_, i) =>
+            store.acquireLease(NAME, `h${i}`, 1_000, 1_001 + LEASE_SKEW_MARGIN_MS),
+          ),
         );
         expect(leases.filter((lease) => lease !== undefined)).toHaveLength(1);
       });

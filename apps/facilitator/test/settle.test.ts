@@ -17,6 +17,7 @@ import {
   LedgerBoundError,
   NoChannelsError,
   QueueTimeoutError,
+  ShutdownError,
   RpcTimeoutError,
   RpcUnavailableError,
   SignedHookError,
@@ -429,8 +430,10 @@ describe("createSettler", () => {
     const get = vi.spyOn(store, "get");
     const repeats = Array.from({ length: 50 }, () => settle(payload(), requirements));
     await Promise.all(repeats);
-    // 50 initial lookups, then about one read per 10 ms for 100 ms, not one per repeat.
-    expect(get.mock.calls.length).toBeLessThan(50 + 20);
+    // 50 initial lookups, then one shared read per 10 ms poll. Unshared, each repeat would read
+    // once per poll: about 50 more per 10 ms, some 500 over the 100 ms wait. The bound leaves a
+    // loaded runner room, as PostgreSQL spreads the initial lookups and so the polling window.
+    expect(get.mock.calls.length).toBeLessThan(50 + 100);
 
     // A repeat whose client left stops long before its settle timeout.
     const patient = setup(landing(), { settleTimeoutMs: 1_000, budgetMs: 10_000, pollMs: 10 });
@@ -551,6 +554,7 @@ describe("createSettler", () => {
     [new SignedHookError("x"), "settle_exact_stellar_record_write_failed"],
     [new QueueTimeoutError("x"), "settle_exact_stellar_no_channel_in_time"],
     [new NoChannelsError("x"), "settle_exact_stellar_no_channels"],
+    [new ShutdownError("x"), "settle_exact_stellar_shutting_down"],
     [new RpcTimeoutError("x"), "settle_exact_stellar_rpc_unavailable"],
     [new RpcUnavailableError("x"), "settle_exact_stellar_rpc_unavailable"],
     [new SourceAccountAuthError("x"), "invalid_exact_stellar_payload_unsupported_credential_type"],
@@ -571,6 +575,29 @@ describe("createSettler", () => {
     expect(metrics.value("settlement_submit_failures_total")).toBe(
       reason === SETTLE_REASONS.unexpected ? 1 : 0,
     );
+  });
+
+  it("drains a submission that runs on after its budget answer, with its record write (0025)", async () => {
+    let land!: () => void;
+    const landed = new Promise<void>((resolve) => (land = resolve));
+    const { settle, store } = setup(
+      async (opts) => {
+        await opts.onSigned?.(HASH, BOUNDS);
+        await landed;
+        return result("success");
+      },
+      { budgetMs: 50 },
+    );
+    expect((await settle(payload(), requirements)).response).toMatchObject({
+      errorReason: SETTLE_REASONS.pending,
+    });
+    let drained = false;
+    const draining = settle.drain().then(() => (drained = true));
+    await delay(20);
+    expect(drained).toBe(false);
+    land();
+    await draining;
+    expect(await store.get(key)).toMatchObject({ state: "success" });
   });
 
   it("warns and counts a fee refusal by /settle's own re-check, also a drift from /verify", async () => {
@@ -698,6 +725,30 @@ describe("createSettler", () => {
       errorReason: SETTLE_REASONS.simulation,
     });
     expect((await store.get(key))?.state).toBe("rejected");
+  });
+
+  it("sends nothing once the lease is lost after the request came in (0025 decision 22)", async () => {
+    let held = true;
+    let signed: unknown = "not called";
+    const { settle, store } = setup(
+      async (opts) => {
+        // E.g. a DB failover during the wait for a channel: the next renewal fails.
+        held = false;
+        // As the pool does: a hook that throws means this envelope is not sent.
+        signed = await Promise.resolve(opts.onSigned!(HASH, BOUNDS)).then(
+          () => "sent",
+          (error: unknown) => error,
+        );
+        throw Object.assign(new SignedHookError("x"), { attempts: [{ hash: HASH, sent: "no" }] });
+      },
+      { held: () => held },
+    );
+    expect((await settle(payload(), requirements)).response).toMatchObject({
+      errorReason: SETTLE_REASONS.recordWrite,
+    });
+    expect(signed).toBeInstanceOf(Error);
+    expect((signed as Error).message).toBe("the channel lease was lost");
+    expect(await store.get(key)).toMatchObject({ state: "rejected", hashes: [HASH] });
   });
 
   it("answers pending with the hash of a send that may have reached the network, even when the store fails", async () => {

@@ -10,12 +10,13 @@ import {
   buildRpc,
   buildSettlement,
   compose,
+  start,
   type UpstreamSeams,
 } from "../src/main.js";
 import { memoryMetrics } from "../src/metrics.js";
 import type { SettlementStore } from "../src/ports/index.js";
 import { feeSettings } from "../src/settlement/fees.js";
-import { SETTLE_REASONS } from "../src/settlement/settle.js";
+import { SETTLE_REASONS, keyOf } from "../src/settlement/settle.js";
 import { testDatabase } from "./database.js";
 import { transferPayload } from "./payment.js";
 import { settlement } from "./port-contracts.js";
@@ -48,10 +49,13 @@ const requirements: PaymentRequirements = {
 class PaymentRpc extends FakeRpc {
   /** Delay before an account read answers, to hold a settlement before it signs. */
   accountDelayMs = 0;
+  /** Account reads begun: a test waits for one before acting on a held settlement. */
+  accountReads = 0;
 
   override async getLedgerEntries(
     ...keys: Parameters<FakeRpc["getLedgerEntries"]>
   ): Promise<rpc.Api.GetLedgerEntriesResponse> {
+    this.accountReads++;
     if (this.accountDelayMs) await new Promise((r) => setTimeout(r, this.accountDelayMs));
     return super.getLedgerEntries(...keys);
   }
@@ -131,7 +135,7 @@ function setup(
   );
   const store = db.stores().settlements;
   const lines: string[] = [];
-  const { settle, submitter } = buildSettlement(config, {
+  const { settle, submitter, drain } = buildSettlement(config, {
     rpc: shared,
     fees,
     checks,
@@ -148,7 +152,7 @@ function setup(
   /** The pool's `onEvent`, as it reports a submission it answered `pending` ending. */
   const emit = (event: SubmitterEvent) =>
     (submitter as unknown as { emit(event: SubmitterEvent): void }).emit(event);
-  return { settle, fake, upstreamLogger, store, lines, emit };
+  return { settle, fake, upstreamLogger, store, lines, emit, drain };
 }
 
 describe("main()'s /settle wiring, with a hung RPC_URLS[0]", () => {
@@ -272,7 +276,8 @@ describe("main()'s /settle wiring, with the real pool", () => {
 });
 
 describe("main()'s composition (compose)", () => {
-  function composed(env: Record<string, string> = {}) {
+  /** The graph `main()` serves; it takes the lease as `start()` does, unless `lease: false`. */
+  async function composed(env: Record<string, string> = {}, opts: { lease?: boolean } = {}) {
     const config = parseConfig({
       FACILITATOR_SECRET: facilitator.secret(),
       DATABASE_URL: db.urlFor(db.schema),
@@ -292,9 +297,17 @@ describe("main()'s composition (compose)", () => {
       seams: { makeScheme: () => ({ verify: async () => ({ isValid: true, payer }) }) },
       sleep: async () => {},
     });
+    if (opts.lease !== false) await deps.lease!.runOnce();
     return { deps, cataloger, metrics, fake };
   }
   const bazaar = { info: { input: { type: "http", method: "GET" } }, routeTemplate: "/users/:id" };
+
+  it("sends nothing from a process without the lease (0025 decision 22)", async () => {
+    const { deps, fake } = await composed({}, { lease: false });
+    const settled = await deps.settle(payload(fake.ledger + 30), requirements);
+    expect(settled.response).toMatchObject({ errorReason: SETTLE_REASONS.recordWrite });
+    expect(fake.sent).toHaveLength(0);
+  });
 
   it.each([
     [{}, { status: "rejected", rejectedReason: "resource_not_public" }, 0],
@@ -309,7 +322,7 @@ describe("main()'s composition (compose)", () => {
         extensions: { bazaar },
       }));
       try {
-        const { deps, cataloger, fake } = composed(env);
+        const { deps, cataloger, fake } = await composed(env);
         const local = {
           ...payload(fake.ledger + 30, { bazaar }),
           resource: { url: `${seller.url}/users/42` },
@@ -330,8 +343,49 @@ describe("main()'s composition (compose)", () => {
     },
   );
 
+  it("waits on close() for a settlement answered pending until it lands, then releases the lease (0025)", async () => {
+    const { deps, fake } = await composed({ SETTLE_BUDGET_MS: "1000", PORT: "0" });
+    // A ledger read takes a round trip, as on a real RPC: `FakeRpc` closes a ledger on every
+    // read, so without one the pool's wait for the status never yields to the budget's timer.
+    const getLatestLedger = fake.getLatestLedger.bind(fake);
+    fake.getLatestLedger = async () => {
+      await new Promise((r) => setTimeout(r, 20));
+      return getLatestLedger();
+    };
+    // The network includes the transaction, but no status read answers until `land()`.
+    let land!: () => void;
+    const landed = new Promise<void>((resolve) => (land = resolve));
+    const getTransaction = fake.getTransaction.bind(fake);
+    fake.getTransaction = async (hash) => {
+      await landed;
+      return getTransaction(hash);
+    };
+    const app = await start(deps);
+    const pay = payload(fake.ledger + 30);
+    const key = keyOf(pay, "stellar:testnet")!;
+    // The record's state when the lease is given up: the drain must have finished it by then.
+    const releaseLease = deps.lease!.release;
+    let stateAtRelease: string | undefined;
+    const release = vi.spyOn(deps.lease!, "release").mockImplementation(async () => {
+      stateAtRelease = (await deps.stores.settlements.get(key))?.state;
+      await releaseLease();
+    });
+    expect((await deps.settle(pay, requirements)).response).toMatchObject({
+      success: false,
+      errorReason: SETTLE_REASONS.pending,
+    });
+    let closed = false;
+    const closing = app.close().then(() => (closed = true));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(closed).toBe(false);
+    expect(release).not.toHaveBeenCalled();
+    land();
+    await closing;
+    expect(stateAtRelease).toBe("success");
+  });
+
   it("reads the fee-stats bid once for /verify, /settle and the pool (AD-10)", async () => {
-    const { deps, fake } = composed();
+    const { deps, fake } = await composed();
     const p = payload(fake.ledger + 30);
     expect(await deps.verify(p, requirements)).toMatchObject({ isValid: true });
     expect((await deps.settle(p, requirements)).response).toMatchObject({ success: true });
@@ -361,6 +415,27 @@ describe("main()'s pool events (0019)", () => {
     await store.transition(s.key, "signed", { state: "pending", updatedAt: 0 });
     return s.key;
   }
+
+  it("refuses a call that has signed nothing when the drain starts, and closes its record (0025)", async () => {
+    const { settle, fake, store, drain } = setup();
+    // Holds the call in its channel's sequence read, before anything is signed.
+    fake.accountDelayMs = 200;
+    const pay = payload(fake.ledger + 30);
+    const settling = settle(pay, requirements);
+    await vi.waitFor(() => expect(fake.accountReads).toBeGreaterThan(0));
+    await drain();
+    expect((await settling).response).toMatchObject({
+      success: false,
+      errorReason: SETTLE_REASONS.shuttingDown,
+      transaction: "",
+    });
+    expect(fake.sent).toHaveLength(0);
+    expect(await store.get(keyOf(pay, "stellar:testnet")!)).toMatchObject({
+      state: "rejected",
+      errorReason: SETTLE_REASONS.shuttingDown,
+      hashes: [],
+    });
+  });
 
   it("finishes a pending record when the pool resolves its submission", async () => {
     const { store, emit } = setup();

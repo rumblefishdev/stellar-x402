@@ -28,6 +28,11 @@ export class NoChannelsError extends Error {
   override readonly name = "NoChannelsError";
 }
 
+/** The submitter is closing (`close()`); this call sent nothing. */
+export class ShutdownError extends Error {
+  override readonly name = "ShutdownError";
+}
+
 interface Waiter {
   resolve: (channel: Channel) => void;
   reject: (error: Error) => void;
@@ -42,6 +47,7 @@ export class ChannelPool {
   private readonly free: Channel[];
   private readonly waiters: Waiter[] = [];
   private readonly all: Channel[];
+  private closed = false;
 
   constructor(addresses: readonly string[]) {
     if (addresses.length === 0) throw new Error("ChannelPool needs at least one channel");
@@ -69,6 +75,7 @@ export class ChannelPool {
    * a {@link QueueTimeoutError}.
    */
   acquire(onWait?: () => Promise<unknown>): Promise<Channel> {
+    if (this.closed) return Promise.reject(new ShutdownError("the channel pool is closed"));
     const channel = this.free.shift();
     if (channel) return Promise.resolve(channel);
     if (this.all.length === 0) return Promise.reject(new NoChannelsError("no channels left"));
@@ -106,6 +113,16 @@ export class ChannelPool {
     const next = this.waiters.shift();
     if (!next) throw new Error("no waiter to hand the channel to");
     next.resolve(channel);
+  }
+
+  /**
+   * Refuses every waiter and every later `acquire()` with {@link ShutdownError}. Held channels
+   * stay with their holders, which may still release or hand them over.
+   */
+  close(): void {
+    this.closed = true;
+    for (const w of this.waiters.splice(0))
+      w.reject(new ShutdownError("the channel pool is closed"));
   }
 
   release(channel: Channel): void {
