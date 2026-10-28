@@ -5,7 +5,7 @@ type: FEATURE
 status: active
 milestone: 1
 related_adr: ["0012"]
-related_tasks: ["0022", "0026", "0050", "0078"]
+related_tasks: ["0022", "0026", "0050", "0080"]
 tags: [facilitator, persistence, deploy, priority-medium, effort-medium, platform]
 links:
   - ../../../docs/adr/0012-facilitator-state-store.md
@@ -86,7 +86,7 @@ first in a spike ([R-spike-results](notes/R-spike-results.md)). In short:
   in `reserve`'s order, applied without a retry under load (in the other order four runs of four
   failed after 84–104 s, `reserve` stalling 0.6 s on each retry); three back-to-back 0.9 s steps
   under eight `reserve` loops, and a batch sleeping on the scope rows every `reserve` locks,
-  without a failed `reserve`; `MIGRATIONS` holding no online migration until 0078. At the suite's scale AC1 allows no
+  without a failed `reserve`; `MIGRATIONS` holding no online migration until 0080. At the suite's scale AC1 allows no
   failed `reserve`; the 1% budget holds at `MIGRATE_SCALE`. Mutants each failing a case: no
   invalid-index repair, no lock retry, no batch timeout retry, a group without its lock retry or
   with a 10 s lock timeout, a long step without its raised statement or client timeout, no

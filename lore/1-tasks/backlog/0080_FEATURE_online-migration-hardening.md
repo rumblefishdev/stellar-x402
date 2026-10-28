@@ -1,5 +1,5 @@
 ---
-id: "0078"
+id: "0080"
 title: "Harden the online migration runner before its first real migration"
 type: FEATURE
 status: backlog
@@ -104,7 +104,7 @@ the cursor forward.
 - [ ] A step's start, and its failure with the migration and step named, reach the log
 - [ ] A backfill's `set` and `where` may name a key column without `t.`
 - [ ] A backfill keyed on a `timestamptz` column finishes, and one whose cursor stops moving fails
-- [ ] `migrate.test.ts`'s "holds no online migration until 0078" test is removed
+- [ ] `migrate.test.ts`'s "holds no online migration until 0080" test is removed
 - [ ] Tests cover the valid-but-unmarked index, the backfill's progress log and running out of
       lock attempts
 
