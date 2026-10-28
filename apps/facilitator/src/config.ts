@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { StrKey } from "@stellar/stellar-sdk";
 import { FEE_STATS_MIN_STROOPS } from "@stellar-x402/signer-pool";
 import { STELLAR_NETWORKS } from "@stellar-x402/config";
@@ -5,8 +6,9 @@ import { z } from "zod";
 
 /**
  * Facilitator configuration, read and validated once at startup from the environment (AD-12,
- * spine "Config" convention). Only `src/main.ts` reads `process.env`; everything else gets the
- * parsed {@link Config} through constructors.
+ * spine "Config" convention), and from the files it names for secrets ({@link FILE_SETTINGS}).
+ * Only `src/main.ts` reads `process.env`; everything else gets the parsed {@link Config} through
+ * constructors.
  *
  * Numeric defaults are interim testnet values; mainnet fee values come from task 0010.
  */
@@ -329,6 +331,36 @@ export class ConfigError extends Error {
   }
 }
 
+/**
+ * Settings a deploy passes as a file, `<NAME>_FILE`: a Compose `file:` secret, so the value never
+ * sits in `environment:`, which `docker inspect` shows (ADR 0011). Local runs set them plainly.
+ */
+const FILE_SETTINGS = ["DATABASE_URL", "RPC_URLS"] as const;
+
+/** `env` with each {@link FILE_SETTINGS} entry read from its `_FILE`, where one is set. */
+function readFileSettings(
+  env: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  const read = { ...env };
+  const problems: string[] = [];
+  for (const name of FILE_SETTINGS) {
+    const path = env[`${name}_FILE`]?.trim();
+    if (!path) continue;
+    // Refused, so a leftover plain value can't look like the one in use.
+    if (env[name]?.trim()) {
+      problems.push(`${name} and ${name}_FILE must not both be set`);
+      continue;
+    }
+    try {
+      read[name] = readFileSync(path, "utf8");
+    } catch (error) {
+      problems.push(`${name}_FILE can't be read (${(error as NodeJS.ErrnoException).code})`);
+    }
+  }
+  if (problems.length > 0) throw new ConfigError(problems);
+  return read;
+}
+
 /** Parses `env` with `schema`, or throws a {@link ConfigError} naming each bad setting. */
 function parseEnv<S extends z.ZodTypeAny>(
   schema: S,
@@ -337,7 +369,7 @@ function parseEnv<S extends z.ZodTypeAny>(
   // Values are trimmed (a secret read from a file keeps its newline); blank means "unset", as in
   // the deploy env examples.
   const present = Object.fromEntries(
-    Object.entries(env)
+    Object.entries(readFileSettings(env))
       .map(([name, value]) => [name, value?.trim()] as const)
       .filter(([, value]) => value !== undefined && value !== ""),
   );
@@ -405,7 +437,7 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
   };
 }
 
-/** The config of `pnpm migrate`: only `DATABASE_URL`, which it requires. */
+/** The config of `pnpm migrate`: only `DATABASE_URL` (or its `_FILE`), which it requires. */
 export function parseMigrateConfig(env: Record<string, string | undefined>): {
   databaseUrl: string;
 } {

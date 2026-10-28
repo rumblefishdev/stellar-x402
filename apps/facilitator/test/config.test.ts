@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Keypair } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
 import {
@@ -403,5 +406,56 @@ describe("parseMigrateConfig", () => {
     expect(problems({ ...minimal, RPC_URLS: urls(MAX_RPC_URLS + 1) })).toEqual([
       `RPC_URLS must list at most ${MAX_RPC_URLS} URLs`,
     ]);
+  });
+});
+
+describe("settings read from files", () => {
+  const dir = mkdtempSync(join(tmpdir(), "x402-config-"));
+  const file = (name: string, value: string) => {
+    const path = join(dir, name);
+    writeFileSync(path, value);
+    return path;
+  };
+  const withoutDatabaseUrl = { ...minimal, DATABASE_URL: undefined };
+
+  it("reads DATABASE_URL_FILE and RPC_URLS_FILE, trimming the file's newline", () => {
+    const config = parseConfig({
+      ...withoutDatabaseUrl,
+      DATABASE_URL_FILE: file("database-url", "postgres://db.internal/x402\n"),
+      RPC_URLS_FILE: file("rpc-urls", "https://rpc-0.example, https://rpc-1.example\n"),
+    });
+    expect(config.databaseUrl).toBe("postgres://db.internal/x402");
+    expect(config.rpcUrls).toEqual(["https://rpc-0.example", "https://rpc-1.example"]);
+    expect(
+      parseMigrateConfig({ DATABASE_URL_FILE: file("migrate-url", "postgres://db/x402\n") }),
+    ).toEqual({ databaseUrl: "postgres://db/x402" });
+  });
+
+  it("falls back to the plain values when no _FILE is set", () => {
+    expect(parseConfig({ ...minimal, DATABASE_URL_FILE: " " }).databaseUrl).toBe(
+      "postgres://db.internal/x402",
+    );
+  });
+
+  it("refuses a value set both ways", () => {
+    expect(
+      problems({ ...minimal, DATABASE_URL_FILE: file("both", "postgres://db.internal/x402") }),
+    ).toEqual(["DATABASE_URL and DATABASE_URL_FILE must not both be set"]);
+  });
+
+  it("names a file it can't read, without echoing its path", () => {
+    const path = join(dir, "missing-secret");
+    const found = problems({ ...withoutDatabaseUrl, DATABASE_URL_FILE: path });
+    expect(found).toEqual(["DATABASE_URL_FILE can't be read (ENOENT)"]);
+    expect(found.join(" ")).not.toContain("missing-secret");
+  });
+
+  it("checks a file's value as the plain one, without echoing it", () => {
+    const found = problems({
+      ...withoutDatabaseUrl,
+      DATABASE_URL_FILE: file("mysql-url", "mysql://u:secret@db/x"),
+    });
+    expect(found).toEqual(["DATABASE_URL must be a postgres:// URL"]);
+    expect(found.join(" ")).not.toContain("secret");
   });
 });
