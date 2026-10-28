@@ -15,7 +15,7 @@ import type {
 } from "../ports/index.js";
 import type { SettlementHooks, SettlementOrigin } from "../settlement/hooks.js";
 import { CHECKS_PER_MINUTE, overBudget, type ChecksPerMinute } from "./budget.js";
-import { askSeller } from "./seller-check.js";
+import { askMcpSeller, askSeller } from "./seller-check.js";
 
 export type BazaarApi = Pick<typeof bazaarLib, "validate" | "normalize" | "toExtensionResponses">;
 
@@ -204,10 +204,14 @@ export function createCataloger({
       // Built from the verified requirements, whose network is the record's.
       const key = echoed.key as CatalogKey;
       const tried = { ...attempt, key, contentHash: contentHash(echoed.resource) };
-      // MCP listings are checked with an MCP client (0063 row 5), not over plain HTTP.
-      if (echoed.resource.type === "mcp") {
-        const mcp = { stage: "seller", outcome: "not_askable", reason: "mcp" } as const;
-        return await finish({ ...tried, ...mcp }, record, origin);
+      // Upstream's default `mcp://tool/<name>` names the tool, not a server to ask (row 6).
+      if (result.resourceUrl.startsWith("mcp:")) {
+        const toolUrl = {
+          stage: "seller",
+          outcome: "not_askable",
+          reason: "mcp_tool_url",
+        } as const;
+        return await finish({ ...tried, ...toolUrl }, record, origin);
       }
 
       stage = "compare";
@@ -217,12 +221,7 @@ export function createCataloger({
       }
 
       stage = "budget";
-      const input = result.discovered.discoveryInfo.input as {
-        queryParams?: unknown;
-        body?: unknown;
-      };
-      const request = bazaarLib.sellerRequest(result.resourceUrl, { ...input, method: key.method });
-      const host = new URL(request.url).hostname;
+      const host = new URL(result.resourceUrl).hostname;
       const budget = await overBudget(rateLimits, key, host, checksPerMinute, attempt.at);
       if (budget) {
         const skipped = { stage: "payment", outcome: "over_budget", reason: budget } as const;
@@ -231,7 +230,15 @@ export function createCataloger({
 
       stage = "ask";
       const checkedAt = now();
-      const answer = await askSeller(request, sellerLimits);
+      // An MCP listing is checked with an MCP client (row 5), an HTTP one with one request.
+      const input = result.discovered.discoveryInfo.input;
+      const answer =
+        input.type === "mcp"
+          ? await askMcpSeller(result.resourceUrl, bazaarLib.toolCall(input), sellerLimits)
+          : await askSeller(
+              bazaarLib.sellerRequest(result.resourceUrl, { ...input, method: key.method }),
+              sellerLimits,
+            );
       if (!answer.ok) {
         const { reason, detail } = answer;
         const failed = { stage: "seller", outcome: "not_askable", reason, detail } as const;

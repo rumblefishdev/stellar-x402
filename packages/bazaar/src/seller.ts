@@ -37,6 +37,20 @@ export function sellerRequest(
   return { ...request, body: JSON.stringify(example(input.body) ?? {}) };
 }
 
+/**
+ * The unpaid call that asks an MCP seller for its listing (0063 row 5): the listing's tool with its
+ * example arguments, since the MCP SDK checks the arguments against the tool's schema before the
+ * tool's handler, where upstream's payment wrapper answers with the 402 terms.
+ */
+export function toolCall(input: { toolName: string; example?: unknown }): {
+  name: string;
+  arguments: Record<string, unknown>;
+} {
+  const args = example(input.example);
+  const isObject = typeof args === "object" && args !== null && !Array.isArray(args);
+  return { name: input.toolName, arguments: isObject ? (args as Record<string, unknown>) : {} };
+}
+
 export type SellerListing =
   | { ok: true; entry: NormalizedEntry; droppedFields: number; routeTemplateIgnored: boolean }
   | {

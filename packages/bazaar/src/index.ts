@@ -17,4 +17,10 @@ export {
 } from "./validate.js";
 export { normalize, type NormalizedEntry } from "./normalize.js";
 export { sellerOffers, type OffersResult } from "./offers.js";
-export { listingFromSeller, sameListing, sellerRequest, type SellerListing } from "./seller.js";
+export {
+  listingFromSeller,
+  sameListing,
+  sellerRequest,
+  toolCall,
+  type SellerListing,
+} from "./seller.js";

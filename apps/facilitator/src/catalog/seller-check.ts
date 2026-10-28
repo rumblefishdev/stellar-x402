@@ -1,14 +1,17 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { SellerFetchError, guardedFetch, type SellerLimits } from "@stellar-x402/seller-fetch";
 import { decodePaymentRequiredHeader } from "@x402/core/http";
 import { PaymentRequiredV2Schema } from "@x402/core/schemas";
 import type { PaymentRequired } from "@x402/core/types";
+import { x402Client, x402MCPClient } from "@x402/mcp";
 
 /** Why a seller gave no usable answer; `detail` is for logs and the attempt's row only. */
 export type SellerAnswer =
   | { ok: true; paymentRequired: PaymentRequired }
   | {
       ok: false;
-      reason: SellerFetchError["code"] | "not_402" | "unreadable_402";
+      reason: SellerFetchError["code"] | "not_402" | "unreadable_402" | "no_tool" | "mcp_error";
       detail?: string;
     };
 
@@ -47,4 +50,45 @@ export async function askSeller(
   const parsed = PaymentRequiredV2Schema.safeParse(paymentRequired);
   if (!parsed.success) return { ok: false, reason: "unreadable_402", detail: parsed.error.message };
   return { ok: true, paymentRequired };
+}
+
+/**
+ * Asks an MCP seller for its listing (0063 rows 5, 18): `initialize`, `tools/list`, then the tool
+ * called without payment, read as upstream's MCP client reads a price
+ * (`getToolPaymentRequirements`). A tool the server doesn't list is told apart from a server that
+ * doesn't answer. Every request goes through the seller-fetch guard, one deadline for them all.
+ */
+export async function askMcpSeller(
+  url: string,
+  call: { name: string; arguments: Record<string, unknown> },
+  limits: SellerLimits,
+): Promise<SellerAnswer> {
+  const mcp = new Client({ name: "stellar-x402-facilitator", version: "0.0.0" });
+  const fetch = guardedFetch(limits, AbortSignal.timeout(limits.timeoutMs));
+  try {
+    await mcp.connect(new StreamableHTTPClientTransport(new URL(url), { fetch }));
+    let listed = false;
+    let cursor: string | undefined;
+    do {
+      const page = await mcp.listTools({ cursor });
+      listed = page.tools.some((tool) => tool.name === call.name);
+      cursor = page.nextCursor;
+    } while (!listed && cursor);
+    if (!listed) return { ok: false, reason: "no_tool", detail: call.name };
+    // The payment client is never used: the call carries no payment.
+    const terms = await new x402MCPClient(mcp, new x402Client()).getToolPaymentRequirements(
+      call.name,
+      call.arguments,
+    );
+    if (!terms) return { ok: false, reason: "not_402", detail: "the tool asked for no payment" };
+    return { ok: true, paymentRequired: terms };
+  } catch (error) {
+    if (error instanceof SellerFetchError) {
+      return { ok: false, reason: error.code, detail: error.detail ?? error.message };
+    }
+    // Not an MCP server, or one that answered the call with a protocol error.
+    return { ok: false, reason: "mcp_error", detail: String(error) };
+  } finally {
+    await mcp.close();
+  }
 }
