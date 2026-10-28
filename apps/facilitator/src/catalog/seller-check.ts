@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { ListToolsResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { SellerFetchError, guardedFetch, type SellerLimits } from "@stellar-x402/seller-fetch";
 import { decodePaymentRequiredHeader } from "@x402/core/http";
 import { PaymentRequiredV2Schema } from "@x402/core/schemas";
@@ -70,7 +71,13 @@ export async function askMcpSeller(
     let listed = false;
     let cursor: string | undefined;
     do {
-      const page = await mcp.listTools({ cursor });
+      // A plain `tools/list`, not the SDK's `listTools()`: that one keeps each tool's output
+      // schema and checks a 402 error result against it, though the 402 terms never match it
+      // (SDK 1.30.1 `client/index.js:493`, 29 of 126 MCP listings measured on 2026-10-28).
+      const page = await mcp.request(
+        { method: "tools/list", params: { cursor } },
+        ListToolsResultSchema,
+      );
       listed = page.tools.some((tool) => tool.name === call.name);
       cursor = page.nextCursor;
     } while (!listed && cursor);

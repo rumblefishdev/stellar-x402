@@ -26,11 +26,17 @@ const read = async (req: IncomingMessage) => {
  * An MCP seller on this machine for the cataloger's check (0063 rows 5, 18): one tool, `weather`,
  * that takes a `city`. Unpaid, it answers as upstream's payment wrapper does (`@x402/mcp` 2.28.0
  * `createPaymentRequiredResult`): an error result whose `structuredContent` and first text are the
- * 402 terms; `free` answers as a free tool. `tools` lists other names instead of `weather`.
+ * 402 terms; `free` answers as a free tool. `tools` lists other names instead of `weather`;
+ * `outputSchema` gives the tool one the terms don't match; `textOnly` leaves out
+ * `structuredContent`, as some sellers do.
  */
 export async function startMcpSeller(
   answer: () => PaymentRequired | "free",
-  tools: string[] = ["weather"],
+  {
+    tools = ["weather"],
+    outputSchema = false,
+    textOnly = false,
+  }: { tools?: string[]; outputSchema?: boolean; textOnly?: boolean } = {},
 ): Promise<McpSeller> {
   const streams = new Set<IncomingMessage>();
   const seller: McpSeller = {
@@ -49,12 +55,21 @@ export async function startMcpSeller(
         // the check does not need; GET still opens the server's event stream.
         const mcp = new McpServer({ name: "seller", version: "0.0.0" });
         for (const name of tools) {
-          mcp.registerTool(name, { inputSchema: { city: z.string() } }, async () => {
+          const schemas = outputSchema
+            ? { inputSchema: { city: z.string() }, outputSchema: { celsius: z.number() } }
+            : { inputSchema: { city: z.string() } };
+          mcp.registerTool(name, schemas, async () => {
             const terms = answer();
-            if (terms === "free") return { content: [{ type: "text", text: "12 C" }] };
+            if (terms === "free")
+              return {
+                content: [{ type: "text", text: "12 C" }],
+                structuredContent: { celsius: 12 },
+              };
+            const text = { content: [{ type: "text" as const, text: JSON.stringify(terms) }] };
+            if (textOnly) return { ...text, isError: true };
             return {
               structuredContent: terms as unknown as Record<string, unknown>,
-              content: [{ type: "text", text: JSON.stringify(terms) }],
+              ...text,
               isError: true,
             };
           });

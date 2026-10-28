@@ -547,7 +547,7 @@ describe("cataloger, an MCP listing (0063 rows 5, 18)", () => {
   });
 
   it("tells a tool the server doesn't list apart from a server that is down (row 18)", async () => {
-    mcp = await startMcpSeller(() => terms, ["forecast"]);
+    mcp = await startMcpSeller(() => terms, { tools: ["forecast"] });
     const { cataloger, list, counted, clock } = setup();
     await cataloger.onSuccess(paid(), "settle");
     expect(counted("seller", "not_askable", "no_tool")).toBe(1);
@@ -559,6 +559,17 @@ describe("cataloger, an MCP listing (0063 rows 5, 18)", () => {
     await cataloger.onSuccess(paid(), "settle");
     expect(counted("seller", "not_askable", "upstream_error")).toBe(1);
     expect(await list()).toEqual([]);
+  });
+
+  it.each([
+    ["only as text, without structuredContent", { textOnly: true }],
+    ["in structuredContent the tool's output schema doesn't describe", { outputSchema: true }],
+  ])("reads the 402 terms a seller sends %s", async (_name, options) => {
+    mcp = await startMcpSeller(() => terms, options);
+    const { cataloger, list, counted } = setup();
+    await cataloger.onSuccess(paid(), "settle");
+    expect(counted("seller", "refreshed", "inserted")).toBe(1);
+    expect(await list()).toHaveLength(1);
   });
 
   it("creates nothing when the tool runs without asking for a payment (row 6)", async () => {
