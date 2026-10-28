@@ -250,6 +250,18 @@ describe("createReconciler", () => {
       expect((await store.attempts(key))[0]?.state).toBe("dead");
     });
 
+    it("keeps a hash bounded by its ledger alone open past 60 s, until that ledger passes (0073)", async () => {
+      // No time bound since 0073: a close time long past signing doesn't expire it.
+      const answers = { [A]: missing(4_009, NOW / 1000 + 300) };
+      const { store, reconciler, advance } = setup(answers);
+      const key = await signed(store, [A], { maxLedger: 4_010 });
+      advance(BUDGET_MS + 5_001);
+      expect(await reconciler.sweep()).toMatchObject({ open: 1, expired: 0 });
+      expect((await store.get(key))?.state).toBe("signed");
+      answers[A] = missing(4_010, NOW / 1000 + 305);
+      expect(await reconciler.sweep()).toMatchObject({ expired: 1 });
+    });
+
     it("expires a hash once the close time passes its time bound", async () => {
       const { store, reconciler } = setup({ [A]: missing(100, 2_001) });
       const key = await signed(store, [A]);
