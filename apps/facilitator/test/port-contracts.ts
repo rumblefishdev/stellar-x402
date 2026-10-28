@@ -69,7 +69,14 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       const results = await Promise.all(Array.from({ length: 10 }, () => store.claim(s)));
       expect(results.filter((r) => r.claimed)).toHaveLength(1);
       // The whole record, so a payload or requirement that doesn't round-trip fails.
-      const record = { ...s, state: "claimed", hashes: [], version: 0, updatedAt: 1_000 };
+      const record = {
+        ...s,
+        state: "claimed",
+        hashes: [],
+        version: 0,
+        reopened: 0,
+        updatedAt: 1_000,
+      };
       expect(results.find((r) => r.claimed)).toEqual({ claimed: true, record });
       expect(results.find((r) => !r.claimed)).toEqual({ claimed: false, existing: record });
       expect(await store.get(s.key)).toEqual(record);
@@ -80,7 +87,7 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       await store.claim(s);
       await store.addHash(s.key, "h1", 2_000);
       const update = { state: "pending", channel: "GCHANNEL", updatedAt: 3_000 } as const;
-      const pending = { ...s, ...update, hashes: ["h1"], version: 1 };
+      const pending = { ...s, ...update, hashes: ["h1"], version: 1, reopened: 0 };
       expect(await store.transition(s.key, "signed", update)).toEqual(pending);
       expect(await store.findByHash("h1")).toEqual(pending);
       expect(await store.listNonFinal("stellar:testnet")).toEqual([pending]);
@@ -362,6 +369,86 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
         undefined,
       );
       expect((await store.get(key))?.state).toBe("rejected");
+    });
+
+    describe("reopen (0073)", () => {
+      const UNSENT = ["unsent_a", "unsent_b"];
+      const rejected = async (nonce: string, errorReason = "unsent_b", hash?: string) => {
+        const s = settlement(nonce);
+        await store.claim(s);
+        if (hash) await store.addHash(s.key, hash, 1_500);
+        await store.transition(s.key, hash ? "signed" : "claimed", {
+          state: "rejected",
+          errorReason,
+          updatedAt: 2_000,
+        });
+        return s;
+      };
+
+      it("moves a rejected record nothing was sent for back to claimed, counting the reopen", async () => {
+        const s = await rejected("1");
+        const reopened = await store.reopen(s.key, s.fingerprint, UNSENT, 5_000);
+        // A repeat counts the new claim's budget from createdAt, so it is the reopen's time.
+        const record = {
+          ...s,
+          state: "claimed",
+          hashes: [],
+          // A writer that read the earlier claim and passes its version fails.
+          version: 1,
+          reopened: 1,
+          createdAt: 5_000,
+          updatedAt: 5_000,
+        };
+        expect(reopened).toEqual(record);
+        expect(await store.get(s.key)).toEqual(record);
+        await store.transition(s.key, "claimed", {
+          state: "rejected",
+          errorReason: "unsent_a",
+          updatedAt: 6_000,
+        });
+        expect((await store.reopen(s.key, s.fingerprint, UNSENT, 7_000))?.reopened).toBe(2);
+      });
+
+      it("refuses another fingerprint, another reason, a record with a hash, or one not rejected", async () => {
+        const s = await rejected("1");
+        expect(await store.reopen(s.key, "fp-other", UNSENT, 5_000)).toBeUndefined();
+        const refused = await rejected("2", "settle_exact_stellar_refused");
+        expect(await store.reopen(refused.key, refused.fingerprint, UNSENT, 5_000)).toBeUndefined();
+        const sent = await rejected("3", "unsent_a", "h3");
+        expect(await store.reopen(sent.key, sent.fingerprint, UNSENT, 5_000)).toBeUndefined();
+        const open = settlement("4");
+        await store.claim(open);
+        expect(await store.reopen(open.key, open.fingerprint, UNSENT, 5_000)).toBeUndefined();
+        expect(await store.reopen(settlement("5").key, "fp-5", UNSENT, 5_000)).toBeUndefined();
+        for (const [record, state] of [
+          [s, "rejected"],
+          [refused, "rejected"],
+          [sent, "rejected"],
+          [open, "claimed"],
+        ] as const)
+          expect(await store.get(record.key)).toMatchObject({ state, reopened: 0 });
+      });
+
+      it("fails a writer that read the earlier claim: a versioned close, or a hash for that claim", async () => {
+        const s = await rejected("1");
+        const before = (await store.get(s.key))!;
+        await store.reopen(s.key, s.fingerprint, UNSENT, 5_000);
+        const close = { state: "rejected", errorReason: "unsent_a", updatedAt: 6_000 } as const;
+        expect(await store.transition(s.key, "claimed", close, before.version)).toBeUndefined();
+        expect(await store.addHash(s.key, "h1", 6_000, undefined, before.reopened)).toBe(false);
+        expect(await store.get(s.key)).toMatchObject({ state: "claimed", hashes: [] });
+        expect(await store.addHash(s.key, "h1", 6_000, undefined, 1)).toBe(true);
+        expect(await store.get(s.key)).toMatchObject({ state: "signed", hashes: ["h1"] });
+      });
+
+      it("lets exactly one of several concurrent reopens win", async () => {
+        const s = await rejected("1");
+        const results = await Promise.all(
+          Array.from({ length: 10 }, () => store.reopen(s.key, s.fingerprint, UNSENT, 5_000)),
+        );
+        expect(results.filter(Boolean)).toHaveLength(1);
+        expect((await store.get(s.key))?.reopened).toBe(1);
+      });
     });
 
     it("keeps a fee at the int64 maximum exactly", async () => {

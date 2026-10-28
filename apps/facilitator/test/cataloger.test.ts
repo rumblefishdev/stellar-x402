@@ -29,6 +29,7 @@ function record(bazaar: unknown, overrides: Partial<SettlementRecord> = {}): Set
     state: "success",
     hashes: ["tx1"],
     version: 1,
+    reopened: 0,
     ledger: 100,
     paymentPayload: {
       x402Version: 2,

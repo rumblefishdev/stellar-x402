@@ -191,6 +191,7 @@ function setup(behaviour: Behaviour = landing(), overrides: Partial<SettlerDeps>
     settleTimeoutMs: 2_000,
     budgetMs: 5_000,
     pollMs: 5,
+    latestLedger: async () => CURRENT,
     ...overrides,
   });
   return { settle, store, submit, hooks, order, lines, metrics };

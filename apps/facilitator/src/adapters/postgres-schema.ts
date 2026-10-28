@@ -154,6 +154,13 @@ ALTER TABLE settlement_hashes
   ADD COLUMN updated_at bigint;
 `,
   },
+  {
+    // 0073: how many times a record nothing was sent for was reopened by the identical payload
+    // (decisions 5, 14). Defaulted, so the release before it keeps working; it never reopens, so
+    // it never needs to write it.
+    name: "0006_settlement_reopened",
+    sql: "ALTER TABLE settlements ADD COLUMN reopened integer NOT NULL DEFAULT 0;",
+  },
 ];
 
 /** Runs in one transaction with the transactional migrations next to it, as before 0067. */

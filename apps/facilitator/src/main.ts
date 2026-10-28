@@ -444,6 +444,7 @@ export function buildSettlement(
     maxFeeStroops: config.fees.maxFeeStroops,
     settleTimeoutMs: config.settlement.settleTimeoutMs,
     budgetMs: config.settlement.settleBudgetMs,
+    latestLedger: deps.checks.latestLedger,
     records,
     ...(deps.held && { held: deps.held }),
   });
