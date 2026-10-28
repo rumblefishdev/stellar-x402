@@ -104,10 +104,10 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
 ## Acceptance Criteria
 
 - [x] Given an auth entry that expires more than 66 ledgers ahead (decision 6), when `/verify` or `/settle` checks it, then it is refused with `…_signature_expiration_too_far`, whatever `maxTimeoutSeconds` says
-- [ ] Given a sent transaction, when its envelope is built, then it can land until the auth entry's expiration ledger and no earlier bound ends it; reconciliation answers `…_transaction_expired` only once that ledger has passed
+- [x] Given a sent transaction, when its envelope is built, then it can land until the auth entry's expiration ledger and no earlier bound ends it; reconciliation answers `…_transaction_expired` only once that ledger has passed
 - [ ] Given a payment closed with nothing sent, when the identical payload comes back while its auth entry is valid, then it is settled once; after the expiration ledger the answer is "sign a new payment"; a different payload on the same nonce is still refused
-- [ ] Given a transaction sent just before SIGTERM with a 5-minute envelope, when the 180 s grace ends before it is final, then the next process takes the lease and its reconciliation ends the record with the transaction's real outcome (test)
-- [ ] Given the decided rule, when the task ends, then the decision and the options considered are recorded in this task (decisions 1-10 so far, S-sign-again-rule)
+- [x] Given a transaction sent just before SIGTERM with a 5-minute envelope, when the 180 s grace ends before it is final, then the next process takes the lease and its reconciliation ends the record with the transaction's real outcome (test)
+- [ ] Given the decided rule, when the task ends, then the decision and the options considered are recorded in this task (decisions 1-12 so far, S-sign-again-rule)
 
 ## Design Decisions
 
@@ -158,6 +158,14 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
 10. **`MAX_VALIDITY_LEDGERS` is at most 120** (okarcz, 2026-10-28, PR 1 review D3): about 10
     minutes, so a typo can't reopen days-long signatures and the drain re-check in PR 2 has a
     known worst case. Chosen over a bound tied to the drain and over none.
+11. **The time bound is dropped, not pushed past the ledger bound** (okarcz, 2026-10-28, PR 2):
+    with `maxLedger` set the envelope has `maxTime` 0, and every place the pool read `maxTime`
+    goes by ledgers. So `expired` always means "can't land", however slow the ledgers. Chosen
+    over a time bound of ledgers left × 10 s, a one-line change that would end the envelope
+    early only if ledgers averaged over 10 s.
+12. **The drain test covers both outcomes across a deploy** (okarcz, 2026-10-28, PR 2): the
+    transaction never lands (the next process ends it `expired` after the ledger bound), and it
+    lands while no process holds the lease (`success`).
 21. **Only the payer's auth entry, no other address's** (okarcz, 2026-10-29, PR 1 review 2, Adam's
     blocker): the expiry checks read the earliest address-credential entry, so an extra signed
     entry from another account, valid for 60 ledgers, let the payer's own entry pass the cap while
@@ -208,3 +216,54 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
   "4.8 s" hint test (now the 4 s case), "counts the earliest expiring auth entry" (now refused
   by decision 21). Docs: README settings and `…_too_far` row, AD-6, AD-22, the threat model's
   auth-expiry section, `config.ts`.
+
+### PR 2: the envelope lives as long as its auth entry
+
+- `submitter.ts`: with `maxLedger` set, `prepare()` builds the envelope with `maxTime` 0 (no time
+  bound) and leaves `Prepared.maxTime` unset. `pastBounds`, `confirm()`, `expiresSoon()`,
+  `awaitSigned()` and the TRY_AGAIN_LATER resend use the time bound only when there is one.
+  `SignedBounds.maxTime` and the store's `AttemptBounds.maxTime` are optional; the store already
+  writes null and reconciliation already skips a missing one. Calls without `maxLedger` keep
+  `timeoutSeconds`.
+- `dueAt`, when `submit()` answers `pending` while the confirmation runs on, is the ledgers left
+  × 6 s (`LEDGER_SECONDS_ESTIMATE`, from 0043's 5.0–5.8 s) plus `confirmGraceSeconds`, counted
+  once per envelope from the newer of the clock and the simulation's ledger. The same estimate
+  ends a resend's wait and the `onSigned` ledger watcher, and a resend loop past it stops and
+  confirms by hash (review).
+- Tests (signer-pool 151 → 154): no time bound on a ledger-bounded envelope and its `onSigned`
+  bounds; a stalled transaction confirmed for 150 s and `expired` only past its ledger bound,
+  with the channel back; one that lands at about 2 minutes ends `success`; calls without a
+  ledger bound keep their time bound. Mutants: the 60 s bound put back (4 tests fail), the ledger
+  check dropped from `confirm()` (the test never ends).
+- Review tests: a stalled `submit()` answers `pending` at about 60 × 6 + 30 s on a real ledger
+  sequence with an unpolled clock; a resend after TRY_AGAIN_LATER with the RPC down still
+  answers `pending`; a prepared-ahead ledger-bounded envelope is used, not rebuilt; reconciliation
+  keeps a ledger-only record open past 60 s until its ledger passes (signer-pool 154 → 157,
+  facilitator 527 → 528). Mutants: counting from the clock fails; the deadline removed hangs.
+- `test/drain-takeover.test.ts` (facilitator 525 → 527): process 1 sends and is answered
+  `pending`, its drain ends at a 300 ms deadline without releasing the lease, then its RPC hangs
+  as after SIGKILL. Process 2 can't take the lease until the TTL and skew margin pass, then takes
+  it, and its reconciliation ends the record `expired` or `success`.
+- Docs: spine AD-22, the facilitator README (drain step 3, the `…_transaction_expired` row and
+  repeats), ADR 0006, ADR 0011 (stop grace, pool bounds, crash recovery).
+
+#### Issues encountered
+
+- **The drain test needs its own file.** In `settle-pool.test.ts` every settlement uses one
+  payer and nonce, so an earlier test's call still running after its own end wrote onto this
+  test's record after `beforeEach` emptied the tables (the record ended `rejected`). A file of
+  its own gets its own schema.
+- **`FakeRpc` closes a ledger on every read.** The pool's polls passed 60 ledgers within the
+  300 ms drain, so the transaction expired before the deadline. The test freezes ledgers while
+  process 1 runs.
+- **The record was still `signed`, not `pending`, when the drain ended**, so the test accepts
+  either open state.
+- **Code review (four reviewers), all 7 fixes applied** (okarcz picked each): the resend wait and
+  `onSigned` watcher had no deadline once the time bound was gone, so an RPC outage after a
+  TRY_AGAIN_LATER held `submit()` and its channel indefinitely; `dueAt` counted from a clock that
+  reads 0 on a fresh submitter (a year instead of about 6.5 minutes); three tests; stale 60 s
+  texts in the README, ADR 0011, ADR 0006 (now a dated amendment), `main.ts` and `settle.ts`;
+  the drain test closes process 2 and its second case is renamed; a 5 s timeout on the pool test.
+- **A test whose `submit()` answered `pending` hung after its assertion**: with the pool's no-op
+  `sleep` and a ledger that never moves, the background confirmation never yields. The tests let
+  ledgers close again after the answer.
