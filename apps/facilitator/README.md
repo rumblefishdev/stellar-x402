@@ -171,10 +171,12 @@ gets the same answer again, so a retry needs a new payment (a new nonce); only
 - a refusal from the checks (`invalid_exact_stellar_*`, `invalid_network`) comes before the
   claim and records nothing: the same payment may be sent again, and may succeed later.
   `invalid_exact_stellar_payload_fee_exceeds_maximum` is our own fee estimate above our ceiling,
-  not a fault in the payment. A network fee spike passes; when the message names archived entries
-  (`the transaction restores N archived entries: <LedgerKey XDR>, …`), waiting doesn't help, and
-  the payment passes once anyone restores them from their own account
-  ([below](#restoring-archived-entries));
+  not a fault in the payment. The inclusion bid adds at most 20,000 stroops of it (fee stats are
+  capped at 10,000 and the estimate counts the bid twice), so rent is what usually puts it there,
+  and waiting seldom helps. When the message names archived entries
+  (`the payment's transaction lists N archived entries to restore: <LedgerKey XDR>, …`), restore
+  them and sign a new payment ([below](#restoring-archived-entries)); one that names none may still
+  touch archived state its transaction doesn't list;
 - a spend refusal the store couldn't record leaves the payment claimed, so a repeat after the
   budget gets `…_timeout` instead of the spend reason.
 
@@ -202,8 +204,11 @@ second time, at most once; no money moves twice.
 A payment that touches archived state (the token's instance or code, a non-SAC balance, a
 C-account's SAC balance) restores it and pays the restore rent, which the facilitator won't pay
 above its fee ceiling (task 0066). The refusal's message names the entries as base64 `LedgerKey`
-XDR, at most four (`and N more` after them); the list is the one the payment was built with.
-Any funded account can restore them, all in one transaction:
+XDR, at most four (`and N more` after them). The list is the one the payment was built with, as
+the buyer's client put it in the transaction: the facilitator names only persistent contract data
+and code from it, but doesn't check that they are archived or that they are the token's, the
+payer's or the recipient's. Check that before paying their rent. Any funded account can restore
+them, all in one transaction:
 
 ```ts
 import {
@@ -231,11 +236,16 @@ const restore = new TransactionBuilder(await server.getAccount(source.publicKey(
   .build();
 const prepared = await server.prepareTransaction(restore); // adds the restore rent to the fee
 prepared.sign(source);
-await server.pollTransaction((await server.sendTransaction(prepared)).hash);
+const sent = await server.sendTransaction(prepared);
+if (sent.status !== "PENDING") throw new Error(`restore not accepted: ${sent.status}`);
+const result = await server.pollTransaction(sent.hash);
+if (result.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
+  throw new Error(`restore ${sent.hash}: ${result.status}`);
+}
 ```
 
-Then sign a new payment: it is built from a new simulation, so it lists only the entries still
-archived, if any. stellar-cli restores an instance with
+Then sign a new payment, not the same one again: its auth may have expired, and a new one is
+built from a new simulation, so it lists only the entries still archived, if any. stellar-cli restores an instance with
 `stellar contract restore --id <contract>` and code with `--wasm-hash <hash>`; a data entry takes
 its key as an `ScVal`, not the `LedgerKey`.
 

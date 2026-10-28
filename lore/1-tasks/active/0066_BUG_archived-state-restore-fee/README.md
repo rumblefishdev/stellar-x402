@@ -23,7 +23,9 @@ history:
     who: akot
     note: >
       Option B built: the fee refusal names the archived entries; threat model and README
-      updated. 500 facilitator tests pass (+7 new).
+      updated. 10 new facilitator tests. The max code review's fixes: indexes and keys
+      deduplicated, only archivable keys of bounded length named, the message says the list is
+      the transaction's, and the README checks the restore's result.
 ---
 
 # Decide what /verify does when a payment must restore archived state
@@ -48,8 +50,9 @@ transfer events and auth, so the payment is not known to be valid either.
 ## Decision
 
 Option B: keep refusing, and say why. The facilitator does not pay restore rent above its
-ceiling, and the reason code stays the one the x402 Stellar spec requires. Upstream, r402 and the
-OpenZeppelin plugin all refuse too, and the x402 SVM spec forbids the fee payer from paying rent
+ceiling, and the reason code stays the one the x402 Stellar spec requires. Upstream and r402
+refuse too; the OpenZeppelin plugin refuses only with a ceiling configured, and then on the
+client's bid. The x402 SVM spec forbids the fee payer from paying rent
 ([R-facilitator-survey](notes/R-facilitator-survey.md)). Rejected: paying the restore rent (a new
 way to drain the facilitator) and raising or splitting the cap (every payment's worst case grows).
 
@@ -73,13 +76,18 @@ code stay upstream's; when the payment's own transaction lists archived entries
 
 - `apps/facilitator/src/settlement/verify.ts`: `withArchivedEntries` on `createChecker`'s refusal
   branch, so `/verify` and `/settle` (`settleCheck`) share it. It reads `archivedSorobanEntries`
-  from the payment's transaction and names their read-write footprint keys, at most 4.
+  from the payment's transaction and names their read-write footprint keys: each once, only
+  persistent contract data and code, none over 512 base64 characters, at most 4.
 - `apps/facilitator/test/fee-agreement.test.ts`: against the real `ExactStellarScheme`, a check
   that `assembleTransaction` keeps the archived entries, the named entries on both routes, the cap
-  of 4, and upstream's answer for another refusal and for a fee refusal without archived entries.
+  of 4, a realistic footprint with read-only keys, repeated and out-of-range indexes, entries that
+  don't archive and an over-long key, and upstream's answer for another refusal and for a fee
+  refusal without archived entries.
 - `docs/threat-model.md`, "Fee inflation by rent"; `apps/facilitator/README.md`, "Restoring
   archived entries".
-- Facilitator suite: 25 files, 500 tests passed; tsc and eslint clean.
+- Facilitator suite after merging develop: 551 tests, all passing but 0025's "gives the lease up
+  at once past a stalled client", which fails on local Node 26 on develop too (CI runs Node 22);
+  tsc and eslint clean.
 
 **Modified tests:** `settle.test.ts`'s "answers a failed check with its reason, without claiming"
 now also expects the check's `invalidMessage` as `errorMessage`; it held nothing on the message
@@ -102,3 +110,8 @@ before.
    `RestoreFootprint` over the message's keys restores them all, as 0021's `token-matrix.ts` did.
 5. **After a restore, a new payment, not the same one**: the message lists the entries the payment
    was built with, so a resent payment names them again while any is still archived.
+6. **The list is named as the transaction's, not checked** (code review): the buyer's client
+   writes it, so the message says "the payment's transaction lists", the facilitator names only
+   persistent contract data and code, each once and at most 512 base64 characters, and the README
+   says to check the entries before paying their rent. Each footprint key is encoded at most once,
+   so a repeated index costs nothing.

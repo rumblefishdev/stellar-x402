@@ -20,7 +20,8 @@ history:
 
 # How other x402 facilitators handle restore rent
 
-None of them pays restore rent; all refuse.
+None of them sponsors restore rent on purpose. Upstream and r402 refuse; the OpenZeppelin plugin
+refuses only with a ceiling configured, and then on the client's bid.
 
 | Who | Behaviour |
 | --- | --- |
@@ -47,5 +48,5 @@ None of them pays restore rent; all refuse.
   never sends one. The spec says it is text for people and operators, which clients MUST NOT
   parse.
 - `@x402/core`'s resource server puts only `invalidReason` into the buyer's 402
-  (`PaymentRequired.error`); `invalidMessage` reaches sellers' hooks, direct `/verify` callers and
-  logs.
+  (`PaymentRequired.error`); `invalidMessage` reaches sellers' hooks and direct `/verify` callers.
+  Our facilitator's `verified` and `settled` logs record the reason, not the message.

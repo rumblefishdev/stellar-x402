@@ -24,7 +24,7 @@ sends no message at all ([R-facilitator-survey](R-facilitator-survey.md)). We ke
 add one thing: when the payment's own transaction lists archived entries, the message says so.
 
 ```
-simulation-derived fee 551887 stroops exceeds ceiling 250000 stroops; the transaction restores 1 archived entry: <key XDR>
+simulation-derived fee 302000 stroops exceeds ceiling 250000 stroops; the payment's transaction lists 1 archived entry to restore: <key XDR>
 ```
 
 ## Decisions
@@ -44,7 +44,8 @@ simulation-derived fee 551887 stroops exceeds ceiling 250000 stroops; the transa
    on the refusal branch, only for `…_fee_exceeds_maximum`. `/settle` re-checks through the same
    checker and passes `invalidMessage` on as `errorMessage`.
 4. **Bounded text.** At most 4 keys, then `and N more`. Keys as base64 `LedgerKey` XDR only, never
-   decoded values.
+   decoded values, each named once, only persistent contract data and code, and none over 512
+   characters (a token balance's key is about 160, an allowance's 264).
 
 ## Docs
 
