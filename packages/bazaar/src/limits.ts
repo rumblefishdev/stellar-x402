@@ -13,6 +13,15 @@ export const LIMITS = {
   toolNameChars: 128,
   urlChars: 2048,
   mimeTypeChars: 127,
+  /**
+   * One offer's serialized `extra`, in bytes, the paid one included: twice the largest measured in
+   * the largest public catalog (1,846 B over 5,000 entries, 0063).
+   */
+  offerExtraBytes: 4 * 1024,
+  /** Offers kept per listing: twice the most measured per listing key there (4, 0063). */
+  offers: 8,
+  /** The listing's example query or body sent to the seller with its check, in bytes (0063). */
+  exampleInputBytes: 16 * 1024,
 } as const;
 
 /**

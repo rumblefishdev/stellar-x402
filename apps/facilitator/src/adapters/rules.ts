@@ -1,15 +1,13 @@
-import type { PaymentRequirements } from "@x402/core/types";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import {
   FINAL_SETTLEMENT_STATES,
   type AttemptState,
-  type CatalogEntry,
   type SettlementState,
 } from "../ports/index.js";
 
 /**
- * Rules the store adapters apply: the settlement lifecycle order (AD-16) and the catalog merge
- * (AD-19). Pure functions, no I/O.
+ * Rules the store adapters apply: the settlement lifecycle order (AD-16) and the catalog's
+ * checks (AD-19). Pure functions, no I/O.
  */
 
 const ORDER: Record<SettlementState, number> = {
@@ -54,9 +52,10 @@ export const attemptRankSql = (column: string): string =>
     .map(([state, rank]) => `WHEN '${state}' THEN ${rank}`)
     .join(" ")} END`;
 
-export function assertLedger(ledger: number): void {
-  if (!Number.isSafeInteger(ledger) || ledger < 0)
-    throw new RangeError("catalog entry ledger must be a non-negative integer");
+/** `name` is a catalog entry's `ledger` or `checkedAt`. */
+export function assertCount(value: number, name: string): void {
+  if (!Number.isSafeInteger(value) || value < 0)
+    throw new RangeError(`catalog entry ${name} must be a non-negative integer`);
 }
 
 /** The largest PostgreSQL `bigint`, the column every stroop amount is stored in. */
@@ -83,31 +82,4 @@ export const windowEnd = (now: number, windowMs: number): number =>
 export function extensionKeys({ extensions }: DiscoveryResource): string[] {
   if (typeof extensions !== "object" || extensions === null || Array.isArray(extensions)) return [];
   return Object.keys(extensions).filter((key) => extensions[key] !== undefined);
-}
-
-const requirementKey = (r: PaymentRequirements) => `${r.scheme}|${r.network}|${r.asset}`;
-
-/**
- * Merges `entry` into the `stored` one of the same key. `accepts` merge by
- * `scheme + network + asset`. A write from an earlier ledger (`stale`) keeps `stored`'s fields and
- * only adds the requirements it lacks; otherwise `entry`'s fields win and its requirements replace
- * matching ones. The result shares objects with its inputs; the caller copies it if it must.
- * Callers run `assertLedger(entry.ledger)` first: a `NaN` ledger would compare as not stale.
- */
-export function mergeCatalogEntry(
-  stored: CatalogEntry | undefined,
-  entry: CatalogEntry,
-): { merged: CatalogEntry; stale: boolean } {
-  const stale = stored !== undefined && entry.ledger < stored.ledger;
-  const accepts = new Map<string, PaymentRequirements>();
-  for (const requirement of stored?.resource.accepts ?? [])
-    accepts.set(requirementKey(requirement), requirement);
-  for (const requirement of entry.resource.accepts)
-    if (!stale || !accepts.has(requirementKey(requirement)))
-      accepts.set(requirementKey(requirement), requirement);
-  const latest = stale ? stored : entry;
-  return {
-    merged: { ...latest, resource: { ...latest.resource, accepts: [...accepts.values()] } },
-    stale,
-  };
 }

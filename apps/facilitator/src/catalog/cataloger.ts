@@ -1,27 +1,45 @@
+import { createHash } from "node:crypto";
 import * as bazaarLib from "@stellar-x402/bazaar";
+import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import type { Logger } from "../logger.js";
 import type { Metrics } from "../metrics.js";
 import type {
+  CatalogAttempt,
+  CatalogAttemptStore,
   CatalogEntry,
   CatalogKey,
   CatalogStore,
+  RateLimitStore,
   SettlementRecord,
   UpsertOutcome,
 } from "../ports/index.js";
 import type { SettlementHooks, SettlementOrigin } from "../settlement/hooks.js";
+import { CHECKS_PER_MINUTE, overBudget, type ChecksPerMinute } from "./budget.js";
+import { askSeller } from "./seller-check.js";
 
 export type BazaarApi = Pick<typeof bazaarLib, "validate" | "normalize" | "toExtensionResponses">;
 
 export interface CatalogerDeps {
   store: CatalogStore;
+  attempts: CatalogAttemptStore;
+  /** Where the seller-check budgets are counted. */
+  rateLimits: Pick<RateLimitStore, "hit">;
   logger: Logger;
   metrics: Metrics;
   /** Injectable for fault-injection tests; the real package otherwise. */
   bazaar?: BazaarApi;
   /** A slower write counts as failed, so a hung store can't pile up writes or block `drain()`. */
   upsertTimeoutMs?: number;
-  /** Development only: list local, private and IP resource URLs too (`CATALOG_LIST_LOCAL`). */
+  /**
+   * Development only (`CATALOG_LIST_LOCAL`): list local, private and IP resource URLs too, and ask
+   * a seller on this machine over http.
+   */
   listLocal?: boolean;
+  /** A seller slower than this to answer the check gave no usable answer. */
+  sellerTimeoutMs?: number;
+  checksPerMinute?: ChecksPerMinute;
+  /** The app clock, ms. */
+  now?: () => number;
 }
 
 export type Cataloger = Pick<SettlementHooks, "extensionResponses" | "onSuccess"> & {
@@ -30,20 +48,46 @@ export type Cataloger = Pick<SettlementHooks, "extensionResponses" | "onSuccess"
 };
 
 /**
- * Cataloging after a successful settlement (AD-8, AD-19), plugged in through `SettlementHooks`.
- * The header is computed synchronously before the settle response; the catalog write runs after
- * it. Neither ever throws into `/settle`, fetches a seller URL or compiles a seller schema.
+ * The largest seller response read by a check. Measured sellers answer an unpaid request with an
+ * empty body or the listing's example (0063), which sits in the 32 KiB `bazaar` block.
+ */
+const SELLER_RESPONSE_BYTES = 64 * 1024;
+/** A library error lists every issue; the attempt's row keeps its start. */
+const DETAIL_CHARS = 1_000;
+
+const contentHash = (resource: Omit<DiscoveryResource, "lastUpdated">) =>
+  createHash("sha256")
+    .update(JSON.stringify({ ...resource, lastUpdated: undefined }))
+    .digest("hex");
+
+/**
+ * Cataloging after a successful settlement (AD-8, AD-19, 0063), plugged in through
+ * `SettlementHooks`. The header comes from the payment's copy alone, synchronously, before the
+ * settle response. After it, a listing is written only from the seller's own unpaid 402: the copy
+ * just decides whether to ask, when it differs from the stored listing and a budget allows.
+ * Every attempt is a row in `attempts`. Nothing here ever throws into `/settle` or compiles a
+ * seller schema.
  */
 export function createCataloger({
   store,
+  attempts,
+  rateLimits,
   logger,
   metrics,
   bazaar = bazaarLib,
   upsertTimeoutMs = 10_000,
   listLocal = false,
+  sellerTimeoutMs = 10_000,
+  checksPerMinute = CHECKS_PER_MINUTE,
+  now = Date.now,
 }: CatalogerDeps): Cataloger {
   const inFlight = new Set<Promise<void>>();
   const options = { listLocal };
+  const sellerLimits = {
+    timeoutMs: sellerTimeoutMs,
+    maxResponseBytes: SELLER_RESPONSE_BYTES,
+    allowInsecureLocal: listLocal,
+  };
 
   const context = (record: SettlementRecord, origin: SettlementOrigin) => ({
     network: record.network,
@@ -82,10 +126,59 @@ export function createCataloger({
     }
   }
 
+  /** Counts, logs and records how an attempt ended. A failed record write is logged, not thrown. */
+  async function finish(
+    attempt: CatalogAttempt,
+    record: SettlementRecord,
+    origin: SettlementOrigin,
+  ): Promise<void> {
+    const { stage, outcome, reason = "" } = attempt;
+    report(() => {
+      metrics.increment("catalog_attempts_total", { origin, stage, outcome, reason });
+      const fields = {
+        ...context(record, origin),
+        stage,
+        outcome,
+        reason: attempt.reason,
+        detail: attempt.detail,
+        url: attempt.url,
+        payTo: attempt.payTo,
+        payer: attempt.payer,
+        bytes: attempt.fieldBytes,
+      };
+      if (outcome === "over_budget")
+        logger.info("catalog_check_skipped", { ...fields, budget: reason });
+      else if (outcome === "unchanged") logger.debug("catalog_unchanged", fields);
+      else if (outcome !== "refreshed" && outcome !== "stale" && outcome !== "upsert_failed")
+        logger.info("catalog_rejected", fields);
+    });
+    try {
+      await attempts.record({
+        ...attempt,
+        url: attempt.url?.slice(0, bazaarLib.LIMITS.urlChars),
+        detail: attempt.detail?.slice(0, DETAIL_CHARS),
+      });
+    } catch (error) {
+      report(() => {
+        logger.error("catalog_attempt_write_failed", { ...context(record, origin), error });
+        metrics.increment("catalog_attempt_write_failures_total", { origin });
+      });
+    }
+  }
+
   async function catalog(record: SettlementRecord, origin: SettlementOrigin): Promise<void> {
     if (record.state !== "success") return internalError("not_success", record, origin);
-    // The success transition sets it (0019); without it writes can't be ordered.
+    // The success transition sets it (0019); the entry still carries it.
     if (record.ledger === undefined) return internalError("no_ledger", record, origin);
+    const paidUrl = (record.paymentPayload.resource as { url?: unknown } | undefined)?.url;
+    const attempt = {
+      at: now(),
+      network: record.network,
+      payTo: record.paymentRequirements.payTo,
+      payer: record.payer,
+      transaction: record.hashes.at(-1),
+      url: typeof paidUrl === "string" ? paidUrl : undefined,
+    };
     let stage = "validate";
     try {
       // Validated again rather than cached: pure, so header and catalog agree, and a late
@@ -96,24 +189,81 @@ export function createCataloger({
         // A library failure, not a bad listing.
         if (result.reason === "internal_error")
           return internalError(stage, record, origin, result.detail);
-        logger.info("catalog_rejected", {
-          ...context(record, origin),
-          reason: result.reason,
-          detail: result.detail,
-        });
-        metrics.increment("catalog_rejections_total", { origin, reason: result.reason });
-        return;
+        const { reason, detail, bytes: fieldBytes } = result;
+        const rejected = {
+          stage: "payment",
+          outcome: "rejected",
+          reason,
+          detail,
+          fieldBytes,
+        } as const;
+        return await finish({ ...attempt, ...rejected }, record, origin);
       }
       stage = "normalize";
-      const { key, keyVersion, resource } = bazaar.normalize(result, record.paymentRequirements);
-      const entry: CatalogEntry = {
-        // Built from the verified requirements, whose network is the record's.
-        key: key as CatalogKey,
-        keyVersion,
-        ledger: record.ledger,
-        // When the record turned `success`, so a repeated call writes the same state.
-        resource: { ...resource, lastUpdated: new Date(record.updatedAt).toISOString() },
+      const echoed = bazaar.normalize(result, record.paymentRequirements);
+      // Built from the verified requirements, whose network is the record's.
+      const key = echoed.key as CatalogKey;
+      const tried = { ...attempt, key, contentHash: contentHash(echoed.resource) };
+      // MCP listings are checked with an MCP client (0063 row 5), not over plain HTTP.
+      if (echoed.resource.type === "mcp") {
+        const mcp = { stage: "seller", outcome: "not_askable", reason: "mcp" } as const;
+        return await finish({ ...tried, ...mcp }, record, origin);
+      }
+
+      stage = "compare";
+      const stored = await store.get(key);
+      if (stored && bazaarLib.sameListing(stored, echoed.resource)) {
+        return await finish({ ...tried, stage: "payment", outcome: "unchanged" }, record, origin);
+      }
+
+      stage = "budget";
+      const input = result.discovered.discoveryInfo.input as {
+        queryParams?: unknown;
+        body?: unknown;
       };
+      const request = bazaarLib.sellerRequest(result.resourceUrl, { ...input, method: key.method });
+      const host = new URL(request.url).hostname;
+      const budget = await overBudget(rateLimits, key, host, checksPerMinute, attempt.at);
+      if (budget) {
+        const skipped = { stage: "payment", outcome: "over_budget", reason: budget } as const;
+        return await finish({ ...tried, ...skipped }, record, origin);
+      }
+
+      stage = "ask";
+      const checkedAt = now();
+      const answer = await askSeller(request, sellerLimits);
+      if (!answer.ok) {
+        const { reason, detail } = answer;
+        const failed = { stage: "seller", outcome: "not_askable", reason, detail } as const;
+        return await finish({ ...tried, ...failed }, record, origin);
+      }
+
+      stage = "seller";
+      const listing = bazaarLib.listingFromSeller(
+        answer.paymentRequired,
+        { url: result.resourceUrl, network: key.network, payTo: key.payTo },
+        options,
+      );
+      if (!listing.ok) {
+        const { reason, detail, bytes: fieldBytes } = listing;
+        const refused = { ...tried, stage: "seller", detail, fieldBytes } as const;
+        // These two are outcomes of their own, and a 402 without a listing is no usable answer.
+        if (reason === "other_pay_to" || reason === "too_large")
+          return await finish({ ...refused, outcome: reason }, record, origin);
+        if (reason === "no_listing")
+          return await finish({ ...refused, outcome: "not_askable", reason }, record, origin);
+        return await finish({ ...refused, outcome: "rejected", reason }, record, origin);
+      }
+      const entry: CatalogEntry = {
+        key: listing.entry.key as CatalogKey,
+        keyVersion: listing.entry.keyVersion,
+        ledger: record.ledger,
+        checkedAt,
+        // The time of the seller's answer (0063): when the listing was last confirmed.
+        resource: { ...listing.entry.resource, lastUpdated: new Date(now()).toISOString() },
+      };
+      const written = { ...tried, key: entry.key, contentHash: contentHash(entry.resource) };
+
       stage = "upsert";
       let outcome: UpsertOutcome;
       try {
@@ -123,7 +273,11 @@ export function createCataloger({
           logger.error("catalog_upsert_failed", { ...context(record, origin), error });
           metrics.increment("catalog_upsert_failures_total", { origin });
         });
-        return;
+        return await finish(
+          { ...written, stage: "seller", outcome: "upsert_failed" },
+          record,
+          origin,
+        );
       }
       stage = "report";
       logger.info("catalog_upserted", {
@@ -133,11 +287,19 @@ export function createCataloger({
         resourceUrl: entry.key.resourceUrl,
         keyVersion: entry.keyVersion,
         outcome,
-        routeTemplateIgnored: result.routeTemplateIgnored,
+        droppedFields: listing.droppedFields,
+        routeTemplateIgnored: listing.routeTemplateIgnored,
       });
-      metrics.increment("catalog_upserts_total", { origin, outcome });
-      if (result.routeTemplateIgnored && outcome !== "stale")
+      if (listing.routeTemplateIgnored && outcome !== "stale")
         metrics.increment("catalog_route_template_ignored_total", { origin });
+      if (outcome === "stale")
+        await finish({ ...written, stage: "seller", outcome: "stale" }, record, origin);
+      else
+        await finish(
+          { ...written, stage: "seller", outcome: "refreshed", reason: outcome },
+          record,
+          origin,
+        );
     } catch (error) {
       internalError(stage, record, origin, error);
     }

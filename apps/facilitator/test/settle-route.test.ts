@@ -208,6 +208,8 @@ describe("POST /settle", () => {
   it("settles a pubnet payment for a localhost resource, and only the listing is refused (0054)", async () => {
     const cataloger = createCataloger({
       store: db.stores().catalog,
+      attempts: db.stores().catalogAttempts,
+      rateLimits: db.stores().rateLimits,
       metrics: memoryMetrics(),
       logger: jsonLogger("debug", () => undefined),
     });

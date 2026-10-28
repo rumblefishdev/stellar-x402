@@ -2,7 +2,8 @@
 
 - Status: accepted
 - Date: 2026-10-07, amended 2026-10-20 (task 0032: the `scheme` filter), 2026-10-22 (task 0053:
-  resource URLs and empty fields) and 2026-10-26 (task 0054: resource hosts)
+  resource URLs and empty fields), 2026-10-26 (task 0054: resource hosts) and 2026-10-28 (task
+  0063: listings from the seller's own 402, entry limits)
 
 ## Context
 
@@ -26,7 +27,28 @@ settlement.
     carries `extensions.bazaar`.
   - Late successes count: a `resolved` event that finalizes a pending settlement as `success`
     triggers cataloging too.
-  - Nothing else is indexed.
+  - Nothing else is indexed, and there is no registration endpoint: a seller is listed after its
+    first paid call, its own included (task 0063).
+- **Who may change a listing (task 0063).**
+  - A listing's content comes from the seller's own unpaid 402, never from the payment. A
+    settlement's copy (the buyer's echo of that 402) only decides whether to ask the seller.
+  - The seller is asked when the copy differs from the stored listing, or none exists, at most
+    once a minute per listing key, 30 times a minute per host and 300 times a minute in all.
+    Over a budget the check is skipped; the next payment tries again. There is no retry queue.
+  - The request uses the listing's method and its example input up to 16 KiB: `queryParams` as
+    the query, `body` as a JSON body (`{}` without one).
+  - Only the seller's offers to the key's network and `payTo` are stored, and they replace the
+    stored ones. A seller that answers with none of them, no listing, not a 402, or not within
+    10 s, changes nothing: a new listing isn't created, an existing one stays.
+  - Of two checks of one key, the result of the one that started later is kept. `lastUpdated`
+    is the time of the seller's answer.
+  - An `mcp` listing is not checked yet, so it is not listed (task 0063's MCP check).
+- **Entry limits (task 0063).**
+  - An offer keeps the spec's seven fields (the upstream `PaymentRequirements` schema); its
+    `extra` takes up to 4 KiB. A listing keeps up to 8 offers. The `bazaar` block keeps its
+    32 KiB.
+  - Over a limit the whole listing is refused as `too_large`, the paid requirement's `extra`
+    included; the payment never is.
 - **Validation.**
   - Types come from `@x402/extensions` (bazaar). `packages/bazaar` holds only a pure validator
     and normalizer.
@@ -38,7 +60,10 @@ settlement.
 - **SSRF safety.**
   - `iconUrl` must be absolute https, with no IP literals and no loopback, private or special-use
     hosts.
-  - The facilitator never fetches any seller-supplied URL in Tranche 1.
+  - The facilitator calls a seller URL only for the listing check above, through the
+    `packages/seller-fetch` guard: https only, the address checked where it connects (no
+    loopback, private or special-use address), no redirects, a 10 s deadline and a 64 KiB body
+    cap. `CATALOG_LIST_LOCAL` also opens http to this machine.
   - Resource URLs carry a scheme allowlist by listing type (task 0053): an `http` listing takes
     `https` and `http`, an `mcp` listing also `mcp` (`@x402/mcp`'s `mcp://tool/<name>`). An `mcp:`
     host must be a DNS-style name (letters, digits, hyphens; labels up to 63 characters, the host
@@ -64,9 +89,14 @@ settlement.
     that both name a tool `mcp://tool/<name>` share one. Both are accepted for Tranche 1.
   - Upserts are idempotent and update `lastUpdated`.
 - **Settle response.**
-  - Only the pure, synchronous validation runs before the settle response.
+  - Only the pure, synchronous validation of the payment's copy runs before the settle response.
   - It sets a best-effort `EXTENSION-RESPONSES` header (`processing` or `rejected`).
-  - The store write runs after the response, fire-and-forget. Its errors are logged and counted.
+  - The seller check and the store write run after the response, fire-and-forget. Their errors
+    are logged and counted.
+- **Listing attempts (task 0063).** Every attempt, accepted or not, is a row in
+  `catalog_attempts`: who paid, the key and URL, where it ended (the payment's copy or the
+  seller's 402), the outcome and reason, the size of a field over a limit and a content hash, no
+  content. Rows are pruned after 30 days.
   - The header never changes the response body or status.
 - **`GET /discovery/resources`.**
   - It uses the upstream discovery list types.
@@ -80,7 +110,21 @@ settlement.
   which is the catalog's trust anchor; curation and ranking come in Tranche 2.
 - **Upstream types keep us interoperable** with the x402 discovery ecosystem, and avoid a
   parallel schema.
-- **Never fetching seller URLs removes SSRF** as a class in Tranche 1, not just in `iconUrl`.
+- **Only the seller speaks for its listing** (task 0063). Before it, anyone who paid 1 stroop to
+  a seller's `payTo` replaced that seller's description and price (measured on testnet), and a
+  buyer that picks by `payTo` could be sent elsewhere. The spec says nothing on who may change a
+  listing (x402-foundation/x402#3005 is open). A seller signature or "first write wins" needs a
+  key or locks a seller out of its own listing; the seller's own 402 is what every buyer already
+  trusts before it pays.
+- **Asking only on a difference keeps the cost to new and changed listings.** Buyers echo the
+  seller's 402, so an unchanged listing costs no request; the budgets bound what a flood of
+  paid copies can make the facilitator send.
+- **The check runs after the settle response** because the seller's middleware holds the
+  buyer's answer until `/settle` returns (`@x402/express` 2.28.0). Payment latency comes first.
+- **A whole listing is refused over a limit**, not trimmed: the spec's soft drop covers only
+  `serviceName`, `tags` and `iconUrl`, and a listing missing an offer misleads a buyer. The limits
+  are twice the largest measured in the largest public catalog (5,000 entries: `extra` at most
+  1,846 B, at most 4 offers per listing key).
 - **SSRF is checked where a URL is fetched.** A rule on the URL text can't stop a public name that
   resolves to `127.0.0.1` (OWASP: check the resolved address at connection time), which is what
   `packages/mcp` does before every call. On resource URLs the host rules only refused what
@@ -121,8 +165,17 @@ settlement.
   Rejected.
 - **Catalog inside the settle request.** The catalog would always be consistent, but a Bazaar bug
   could fail or delay payments. Rejected.
-- **Fetch and check seller URLs (health, icons).** SSRF exposure and outbound traffic we don't
-  need yet. Deferred.
+- **Fetch and check seller URLs for health or icons.** Outbound traffic we don't need yet.
+  Deferred; the listing check fetches only the resource itself, unpaid.
+- **Let the payment's copy write the listing** (before task 0063). Lets any payer rewrite another
+  seller's listing. Rejected.
+- **A seller signature, or the first write wins.** A key for every seller, or a seller locked out
+  of its own listing. Rejected.
+- **Merge offers into the stored ones.** Grows `accepts` by one entry per asset anyone pays in.
+  Rejected: the seller's answer replaces them.
+- **Wait for the seller check inside `/settle`.** The buyer would wait for it. Rejected.
+- **A retry queue for failed checks, and caps on new listings per `payTo`.** The next payment
+  retries, and every listing still costs a settled payment. Not needed yet.
 - **Refuse such resource URLs on pubnet only, list them on testnet** (task 0054). No config, and
   the e2e gate lists as is, but local tests would fill our public testnet catalog. Rejected.
 - **Store such entries and hide them from `/discovery/resources`.** Rows nobody reads, counted by
@@ -132,9 +185,12 @@ settlement.
 
 - Anyone who settles a real payment, even a tiny one, can create a listing. That is accepted for
   Tranche 1, and quality is handled by curation and ranking later.
-- The same holds for an existing listing: a newer settlement to the same `payTo` and resource
-  URL replaces its text and same-asset price, whoever paid. Accepted on testnet; task 0063
-  decides it before pubnet.
+- An existing listing changes only when the seller's own 402 says so (task 0063). A seller that
+  doesn't answer the unpaid request with a usable 402 within 10 s is not listed.
+- A plain-`http` resource URL is no longer listed outside `CATALOG_LIST_LOCAL`: the check calls
+  https only. None of 10,126 entries in the largest public catalog uses one (2026-10-28).
+- An `mcp` listing waits for the MCP check, and an `mcp://tool/<name>` one can't be checked at
+  all, so the e2e gate's MCP listing is not listed even with `CATALOG_LIST_LOCAL` (task 0029).
 - Loopback, private and IP resource URLs are listed nowhere unless `CATALOG_LIST_LOCAL` is set
   (task 0054), so gate runs leave none in a catalog without the switch. The rule applies to
   writes from this version on. Entries written before it stay, and can't be refreshed: a new
@@ -147,8 +203,9 @@ settlement.
   default `mcp://tool/<name>` is refused.
 - The e2e gate's Bazaar check, once `/discovery/search` exists, needs a facilitator with
   `CATALOG_LIST_LOCAL=true` (task 0029).
-- A name that resolves to loopback (`localtest.me`, `*.nip.io`) is still listed. The
-  catalog never resolves names; a client that calls the URL checks the address.
+- A name that resolves to loopback (`localtest.me`, `*.nip.io`) passes validation, but the check
+  refuses its address, so it is not listed, with `CATALOG_LIST_LOCAL` too: that switch opens
+  `localhost` names and loopback addresses written in the URL, not names that resolve there.
 - A client that calls catalog URLs must check the address it connects to.
 - The store (task 0013) must enforce the catalog key and support the `resources` filters.
 - The e2e gate routes carry the `bazaar` extension, so a gate run also exercises cataloging:

@@ -49,6 +49,7 @@ const catalogEntry = () => ({
   },
   keyVersion: CATALOG_KEY_VERSION,
   ledger: 1,
+  checkedAt: 1,
   resource: {
     resource: "https://seller.example.com/data",
     type: "http",

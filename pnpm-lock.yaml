@@ -50,6 +50,9 @@ importers:
       '@stellar-x402/mcp':
         specifier: workspace:*
         version: link:../../packages/mcp
+      '@stellar-x402/seller-fetch':
+        specifier: workspace:*
+        version: link:../../packages/seller-fetch
       '@stellar-x402/signer-pool':
         specifier: workspace:*
         version: link:../../packages/signer-pool

@@ -888,8 +888,10 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
       lastUpdated: "2026-10-08T00:00:00.000Z",
       ...overrides,
     });
-    const upsert = (entry: Omit<CatalogEntry, "keyVersion" | "ledger" | "checkedAt">, checkedAt = 1) =>
-      store.upsert({ keyVersion: CATALOG_KEY_VERSION, ledger: 1, checkedAt, ...entry });
+    const upsert = (
+      entry: Omit<CatalogEntry, "keyVersion" | "ledger" | "checkedAt">,
+      checkedAt = 1,
+    ) => store.upsert({ keyVersion: CATALOG_KEY_VERSION, ledger: 1, checkedAt, ...entry });
     const key = (url: string, payTo = PAY_TO, network: StellarNetwork = "stellar:testnet") => ({
       network,
       payTo,
@@ -1065,7 +1067,12 @@ export function catalogAttemptStoreContract(make: Make<CatalogAttemptStore>) {
       for (const at of [1, 2, 3, 10]) await attempts.record(attempt(at));
       await attempts.record(
         attempt(11, {
-          key: { network: "stellar:testnet", payTo: PAY_TO, method: "GET", resourceUrl: "https://x.example/a" },
+          key: {
+            network: "stellar:testnet",
+            payTo: PAY_TO,
+            method: "GET",
+            resourceUrl: "https://x.example/a",
+          },
           url: "https://x.example/a?q=1",
           transaction: "tx",
           reason: "too_large",

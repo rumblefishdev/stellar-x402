@@ -1,7 +1,3 @@
-import { once } from "node:events";
-import { createServer, type IncomingMessage, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
-import { encodePaymentRequiredHeader } from "@x402/core/http";
 import type { PaymentPayload, PaymentRequired, PaymentRequirements } from "@x402/core/types";
 import { safeBase64Decode } from "@x402/core/utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,6 +7,7 @@ import type { Logger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import type { SettlementRecord } from "../src/ports/index.js";
 import { testDatabase } from "./database.js";
+import { startSeller, type Seller } from "./seller.js";
 
 const requirements = {
   scheme: "exact",
@@ -25,55 +22,6 @@ const requirements = {
 const valid = { info: { input: { type: "http", method: "GET" } }, routeTemplate: "/users/:id" };
 const DESCRIPTION = "Users by id";
 
-interface SellerRequest {
-  method: string;
-  url: string;
-  body: string;
-}
-
-/**
- * A seller on this machine: answers every request with `reply`, a 402 carrying `paymentRequired`
- * by default, and keeps what it was asked. Tests set `reply` to answer otherwise.
- */
-async function startSeller() {
-  const requests: SellerRequest[] = [];
-  const read = async (req: IncomingMessage) => {
-    let body = "";
-    for await (const chunk of req) body += String(chunk);
-    return body;
-  };
-  const seller = {
-    requests,
-    url: "",
-    paymentRequired: (url: string): PaymentRequired => ({
-      x402Version: 2,
-      resource: { url, description: DESCRIPTION },
-      accepts: [requirements],
-      extensions: { bazaar: valid },
-    }),
-    reply: async (_request: SellerRequest): Promise<{ status: number; body?: PaymentRequired }> => ({
-      status: 402,
-    }),
-    server: undefined as unknown as Server,
-  };
-  seller.server = createServer((req, res) => {
-    void (async () => {
-      const request = { method: req.method!, url: req.url!, body: await read(req) };
-      requests.push(request);
-      const { status, body } = await seller.reply(request);
-      const required = body ?? seller.paymentRequired(`${seller.url}${req.url}`);
-      const headers =
-        status === 402 ? { "payment-required": encodePaymentRequiredHeader(required) } : {};
-      res.writeHead(status, headers).end();
-    })();
-  });
-  seller.server.listen(0, "127.0.0.1");
-  await once(seller.server, "listening");
-  seller.url = `http://127.0.0.1:${(seller.server.address() as AddressInfo).port}`;
-  return seller;
-}
-
-type Seller = Awaited<ReturnType<typeof startSeller>>;
 let seller: Seller;
 
 function record(
@@ -107,7 +55,12 @@ function record(
 const db = testDatabase();
 beforeEach(async () => {
   await db.empty();
-  seller = await startSeller();
+  seller = await startSeller((url) => ({
+    x402Version: 2,
+    resource: { url, description: DESCRIPTION },
+    accepts: [requirements],
+    extensions: { bazaar: valid },
+  }));
 });
 afterEach(() => {
   seller.server.close();
@@ -181,8 +134,10 @@ describe("cataloger", () => {
   });
 
   it("keeps the seller's text and price when another payer's copy says otherwise (row 1)", async () => {
-    const { cataloger, list } = setup();
+    const { cataloger, list, clock } = setup();
     await cataloger.onSuccess(record(valid), "settle");
+    // A minute later, so the per-key limit lets the check run.
+    clock.now += MINUTE;
     const outsider = record(
       valid,
       {
@@ -242,7 +197,9 @@ describe("cataloger", () => {
   it("sends the listing's example input: a GET's query, a POST's body (row 4)", async () => {
     const { cataloger } = setup();
     const get = { info: { input: { type: "http", method: "GET", queryParams: { city: "Waw" } } } };
-    const post = { info: { input: { type: "http", method: "POST", bodyType: "json", body: { n: 1 } } } };
+    const post = {
+      info: { input: { type: "http", method: "POST", bodyType: "json", body: { n: 1 } } },
+    };
     const bare = { info: { input: { type: "http", method: "POST", bodyType: "json", body: {} } } };
     seller.paymentRequired = (url) => ({
       x402Version: 2,
@@ -283,7 +240,10 @@ describe("cataloger", () => {
 
   it("does not ask a private address, an mcp listing, or a seller past the timeout (row 6)", async () => {
     const { cataloger, list, counted } = setup({ sellerTimeoutMs: 100 });
-    await cataloger.onSuccess(record({ info: valid.info }, {}, { url: "http://10.255.255.1/x" }), "settle");
+    await cataloger.onSuccess(
+      record({ info: valid.info }, {}, { url: "http://10.255.255.1/x" }),
+      "settle",
+    );
     expect(counted("seller", "not_askable", "unsafe_url")).toBe(1);
 
     const tool = { info: { input: { type: "mcp", toolName: "weather", inputSchema: {} } } };

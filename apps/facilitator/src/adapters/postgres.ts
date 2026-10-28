@@ -1,4 +1,5 @@
 import type { StellarNetwork } from "@stellar-x402/config";
+import { PaymentRequirementsV2Schema } from "@x402/core/schemas";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import pg from "pg";
 import {
@@ -6,7 +7,10 @@ import {
   type AttemptBounds,
   type AttemptState,
   type AttemptUpdate,
+  type CatalogAttempt,
+  type CatalogAttemptStore,
   type CatalogEntry,
+  type CatalogKey,
   type CatalogPage,
   type CatalogQuery,
   type CatalogStore,
@@ -30,18 +34,17 @@ import {
 } from "../ports/index.js";
 import {
   NON_FINAL_STATES,
-  assertLedger,
+  assertCount,
   assertStroops,
   attemptRankSql,
   extensionKeys,
   isFinal,
   isForward,
-  mergeCatalogEntry,
   windowEnd,
 } from "./rules.js";
 
 /**
- * PostgreSQL adapters of the four ports (AD-7, ADR 0012), on the schema in `postgres-schema.ts`.
+ * PostgreSQL adapters of the ports (AD-7, ADR 0012), on the schema in `postgres-schema.ts`.
  * They share one pool, except `reserve`, the rate limiter's `hit` and the catalog's `list`, which
  * can each run on their own; concurrent calls run on separate connections.
  *
@@ -70,6 +73,7 @@ export function postgresStores(
   return {
     settlements: new PostgresSettlementStore(pool),
     catalog: new PostgresCatalogStore(pool, pools.discovery ?? pool),
+    catalogAttempts: new PostgresCatalogAttemptStore(pool),
     rateLimits: new PostgresRateLimitStore(pools.rateLimits ?? pool, pool),
     spend: new PostgresSpendStore(pool, pools.reserve ?? pool),
   };
@@ -491,48 +495,51 @@ export class PostgresCatalogStore implements CatalogStore {
     private readonly listPool: pg.Pool = pool,
   ) {}
 
-  /** Inserts, or locks the stored entry and applies the shared merge to it, in one transaction. */
+  async get(key: CatalogKey): Promise<DiscoveryResource | undefined> {
+    const { rows } = await this.pool.query<{ resource: DiscoveryResource }>(
+      `SELECT resource FROM catalog WHERE ${CATALOG_KEY_WHERE}`,
+      [key.network, key.payTo, key.method, key.resourceUrl],
+    );
+    return rows[0]?.resource;
+  }
+
+  /**
+   * Inserts, or replaces the stored entry unless a check that started later wrote it. A
+   * concurrent insert of the key makes the insert wait for its commit, and the update re-reads
+   * the row it then finds, so of concurrent writes the latest `checkedAt` stays.
+   */
   async upsert(entry: CatalogEntry): Promise<UpsertOutcome> {
-    assertLedger(entry.ledger);
+    assertCount(entry.ledger, "ledger");
+    assertCount(entry.checkedAt, "checkedAt");
+    // The one function that writes the catalog: no offer outside the upstream schema is stored.
+    for (const offer of entry.resource.accepts) PaymentRequirementsV2Schema.parse(offer);
     const { network, payTo, method, resourceUrl } = entry.key;
-    const key = [network, payTo, method, resourceUrl];
-    return inTransaction(this.pool, async (client) => {
-      const fresh = mergeCatalogEntry(undefined, entry).merged;
-      const inserted = await client.query(
-        `INSERT INTO catalog (network, pay_to, method, resource_url, key_version, ledger, resource,
-           type, extension_keys)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         ON CONFLICT (network, pay_to, method, resource_url) DO NOTHING
-         RETURNING seq`,
-        [...key, fresh.keyVersion, fresh.ledger, ...resourceColumns(fresh.resource)],
-      );
-      if (inserted.rowCount === 1) return "inserted";
-      // The conflict waited for any concurrent insert to commit, so this statement sees the row.
-      const { rows } = await client.query<{
-        key_version: number;
-        ledger: string;
-        resource: DiscoveryResource;
-      }>(
-        `SELECT key_version, ledger, resource FROM catalog WHERE ${CATALOG_KEY_WHERE} FOR UPDATE`,
-        key,
-      );
-      const row = rows[0]!;
-      const stored: CatalogEntry = {
-        key: entry.key,
-        keyVersion: row.key_version,
-        ledger: Number(row.ledger),
-        resource: row.resource,
-      };
-      const { merged, stale } = mergeCatalogEntry(stored, entry);
-      // `seq` is untouched, so the entry keeps its place in the listing.
-      await client.query(
-        `UPDATE catalog SET key_version = $5, ledger = $6, resource = $7, type = $8,
-           extension_keys = $9
-         WHERE ${CATALOG_KEY_WHERE}`,
-        [...key, merged.keyVersion, merged.ledger, ...resourceColumns(merged.resource)],
-      );
-      return stale ? "stale" : "updated";
-    });
+    const values = [
+      network,
+      payTo,
+      method,
+      resourceUrl,
+      entry.keyVersion,
+      entry.ledger,
+      entry.checkedAt,
+      ...resourceColumns(entry.resource),
+    ];
+    const inserted = await this.pool.query(
+      `INSERT INTO catalog (network, pay_to, method, resource_url, key_version, ledger, checked_at,
+         resource, type, extension_keys)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       ON CONFLICT (network, pay_to, method, resource_url) DO NOTHING`,
+      values,
+    );
+    if (inserted.rowCount === 1) return "inserted";
+    // `seq` is untouched, so the entry keeps its place in the listing.
+    const updated = await this.pool.query(
+      `UPDATE catalog SET key_version = $5, ledger = $6, checked_at = $7, resource = $8, type = $9,
+         extension_keys = $10
+       WHERE ${CATALOG_KEY_WHERE} AND coalesce(checked_at, 0) <= $7`,
+      values,
+    );
+    return updated.rowCount === 1 ? "updated" : "stale";
   }
 
   /**
@@ -560,6 +567,43 @@ export class PostgresCatalogStore implements CatalogStore {
     );
     const page = rows[0]!;
     return { items: page.items, total: Number(page.total) };
+  }
+}
+
+export class PostgresCatalogAttemptStore implements CatalogAttemptStore {
+  constructor(private readonly pool: pg.Pool) {}
+
+  async record(attempt: CatalogAttempt): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO catalog_attempts (at, network, pay_to, method, resource_url, url, payer,
+         transaction, stage, outcome, reason, detail, field_bytes, content_hash)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+      [
+        attempt.at,
+        attempt.network,
+        attempt.payTo,
+        attempt.key?.method ?? null,
+        attempt.key?.resourceUrl ?? null,
+        attempt.url ?? null,
+        attempt.payer,
+        attempt.transaction ?? null,
+        attempt.stage,
+        attempt.outcome,
+        attempt.reason ?? null,
+        attempt.detail ?? null,
+        attempt.fieldBytes ?? null,
+        attempt.contentHash ?? null,
+      ],
+    );
+  }
+
+  async prune(before: number, limit: number): Promise<number> {
+    const { rowCount } = await this.pool.query(
+      `DELETE FROM catalog_attempts WHERE id IN (
+         SELECT id FROM catalog_attempts WHERE at < $1 LIMIT $2 FOR UPDATE SKIP LOCKED)`,
+      [before, limit],
+    );
+    return rowCount ?? 0;
   }
 }
 

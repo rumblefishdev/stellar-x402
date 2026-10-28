@@ -19,6 +19,7 @@ import { SETTLE_REASONS } from "../src/settlement/settle.js";
 import { testDatabase } from "./database.js";
 import { transferPayload } from "./payment.js";
 import { settlement } from "./port-contracts.js";
+import { startSeller } from "./seller.js";
 
 /**
  * `main()`'s `/settle` wiring with the real pool on `FakeRpc`: `/settle`'s checks, the pool's fee
@@ -295,35 +296,37 @@ describe("main()'s composition (compose)", () => {
   }
   const bazaar = { info: { input: { type: "http", method: "GET" } }, routeTemplate: "/users/:id" };
 
-  it("gives a success the cataloger's header, and catalogs it after the response", async () => {
-    const { deps, cataloger, fake } = composed();
-    const settled = await deps.settle(payload(fake.ledger + 30, { bazaar }), requirements);
-    expect(settled.response).toMatchObject({ success: true });
-    expect(deps.extensionResponses(settled.record!)).toEqual({ bazaar: { status: "processing" } });
-    settled.afterResponse!();
-    await cataloger.drain();
-    const { items } = await deps.stores.catalog.list({ limit: 10, offset: 0 });
-    expect(items).toHaveLength(1);
-  });
-
   it.each([
     [{}, { status: "rejected", rejectedReason: "resource_not_public" }, 0],
     [{ CATALOG_LIST_LOCAL: "true" }, { status: "processing" }, 1],
   ] as const)(
-    "settles a localhost resource and lists it only with %j (0054)",
+    "settles a local resource and lists it from the seller's 402 only with %j (0054, 0063)",
     async (env, header, listed) => {
-      const { deps, cataloger, fake } = composed(env);
-      const local = {
-        ...payload(fake.ledger + 30, { bazaar }),
-        resource: { url: "http://localhost:4022/users/42" },
-      } as PaymentPayload;
-      const settled = await deps.settle(local, requirements);
-      expect(settled.response).toMatchObject({ success: true });
-      expect(deps.extensionResponses(settled.record!)).toEqual({ bazaar: header });
-      settled.afterResponse!();
-      await cataloger.drain();
-      const { items } = await deps.stores.catalog.list({ limit: 10, offset: 0 });
-      expect(items).toHaveLength(listed);
+      const seller = await startSeller((url) => ({
+        x402Version: 2,
+        resource: { url },
+        accepts: [requirements],
+        extensions: { bazaar },
+      }));
+      try {
+        const { deps, cataloger, fake } = composed(env);
+        const local = {
+          ...payload(fake.ledger + 30, { bazaar }),
+          resource: { url: `${seller.url}/users/42` },
+        } as PaymentPayload;
+        const settled = await deps.settle(local, requirements);
+        expect(settled.response).toMatchObject({ success: true });
+        expect(deps.extensionResponses(settled.record!)).toEqual({ bazaar: header });
+        // The header came before any request to the seller.
+        expect(seller.requests).toEqual([]);
+        settled.afterResponse!();
+        await cataloger.drain();
+        const { items } = await deps.stores.catalog.list({ limit: 10, offset: 0 });
+        expect(items).toHaveLength(listed);
+        expect(seller.requests).toHaveLength(listed);
+      } finally {
+        seller.server.close();
+      }
     },
   );
 

@@ -144,6 +144,33 @@ ALTER TABLE settlement_hashes
   ADD COLUMN updated_at bigint;
 `,
   },
+  {
+    // 0063: a listing comes from the seller's own 402, so writes are ordered by when the check
+    // that read it started; nullable, so the release before it keeps working, and a null reads as
+    // 0. Every listing attempt is a row, pruned after 30 days; the pruner deletes by `at`.
+    name: "0006_catalog_seller_check",
+    sql: `
+ALTER TABLE catalog ADD COLUMN checked_at bigint;
+CREATE TABLE catalog_attempts (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  at bigint NOT NULL,
+  network text NOT NULL,
+  pay_to text NOT NULL,
+  method text,
+  resource_url text,
+  url text,
+  payer text NOT NULL,
+  transaction text,
+  stage text NOT NULL CHECK (stage IN ('payment', 'seller')),
+  outcome text NOT NULL,
+  reason text,
+  detail text,
+  field_bytes integer,
+  content_hash text
+);
+CREATE INDEX catalog_attempts_at ON catalog_attempts (at);
+`,
+  },
 ];
 
 /** Serializes concurrent `migrate` runs, e.g. two tasks of one deploy; held until commit. */

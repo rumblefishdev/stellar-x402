@@ -59,8 +59,9 @@ export type ResourceType = "http" | "mcp";
  * Resource URL schemes per listing type. `http:` and loopback hosts are what upstream servers send
  * by default (e2e suite, local sellers); `mcp:` is `@x402/mcp`'s `mcp://tool/<name>`, a name rather
  * than an address, so only an `mcp` listing may use it. `canonicalizeUrl` puts no host rules on
- * `http(s)`: the facilitator never fetches a resource URL (ADR 0008), and a client that does checks
- * the address it resolves (`packages/seller-fetch` guard), which no check on the URL text can match. The
+ * `http(s)`: whoever calls a resource URL, the facilitator's listing check (ADR 0008) or a buyer,
+ * checks the address it resolves (`packages/seller-fetch` guard), which no check on the URL text
+ * can match. The
  * validator also requires a public host (`isPublicResourceUrl`), for listing quality, unless
  * `listLocal` is set.
  * An `mcp:` host must be a DNS-style name (`MCP_HOST`), for one canonical form.
