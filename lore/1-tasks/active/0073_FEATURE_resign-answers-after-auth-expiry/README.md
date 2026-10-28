@@ -78,10 +78,9 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
 
 ## Implementation
 
-- **Cap** (decision 2): `/verify`, and `/settle`'s re-check, refuse an auth entry whose
-  `signatureExpirationLedger` is more than 60 ledgers ahead, with
-  `invalid_exact_stellar_signature_expiration_too_far` and a message naming the cap. A config
-  value with 60 as its default.
+- **Cap** (decisions 2, 6): `/verify`, and `/settle`'s re-check, refuse an auth entry whose
+  `signatureExpirationLedger` is more than `MAX_VALIDITY_LEDGERS` (default 66) ahead, with
+  `invalid_exact_stellar_signature_expiration_too_far` and a message naming the cap.
 - **Envelope** (decision 1): when the call sets `maxLedger`, the envelope's time bound no longer
   ends it early: drop it, or set it past the ledger bound. The confirm wait follows the ledger
   bound, so a transaction that never shows up holds its channel up to the cap, not 60 s.
@@ -103,7 +102,7 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
 
 ## Acceptance Criteria
 
-- [ ] Given an auth entry that expires more than 60 ledgers ahead, when `/verify` or `/settle` checks it, then it is refused with `…_signature_expiration_too_far`, whatever `maxTimeoutSeconds` says
+- [x] Given an auth entry that expires more than 66 ledgers ahead (decision 6), when `/verify` or `/settle` checks it, then it is refused with `…_signature_expiration_too_far`, whatever `maxTimeoutSeconds` says
 - [ ] Given a sent transaction, when its envelope is built, then it can land until the auth entry's expiration ledger and no earlier bound ends it; reconciliation answers `…_transaction_expired` only once that ledger has passed
 - [ ] Given a payment closed with nothing sent, when the identical payload comes back while its auth entry is valid, then it is settled once; after the expiration ledger the answer is "sign a new payment"; a different payload on the same nonce is still refused
 - [ ] Given a transaction sent just before SIGTERM with a 5-minute envelope, when the 180 s grace ends before it is final, then the next process takes the lease and its reconciliation ends the record with the transaction's real outcome (test)
@@ -134,3 +133,27 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
    abandoned payment holds no budget: in an outage, 200 open records would hold 200 USDC for up
    to 5 minutes. Cost: AD-16's forward-only states get one written exception. Chosen over a
    non-final `unsent` state closed by a sweep after the expiry.
+6. **The cap is 66 ledgers by default, 60 plus 10%** (okarcz, 2026-10-28): upstream's client
+   signs `ceil(maxTimeoutSeconds / ledger time)` with the ledger time it reads from Horizon, so a
+   300 s resource gets up to 63 ledgers when ledgers run at 4.8 s. A strict 60 would refuse an
+   honest seller at the documented limit. Chosen over a strict 60 and over a cap on
+   `maxTimeoutSeconds` itself.
+7. **Build order: cap, envelope, reopen, drain test, as stacked PRs** (okarcz, 2026-10-28): the
+   envelope must never ship before the cap, or a deploy between the two opens the 7-day attack.
+   Each PR is safe on its own. The limit is documented in the README, not published in
+   `/supported`.
+
+## Implementation Notes
+
+### PR 1: the cap
+
+- `MAX_VALIDITY_LEDGERS` in `config.ts` (default 66, must be above `MIN_VALIDITY_LEDGERS`),
+  `maxValidityLedgers` in `VerifierDeps`, wired by `buildChecks()` into `/verify` and
+  `settleCheck()` alike.
+- `verify.ts`: refused after the too-soon check, before the uint32 one, with
+  `EXPIRATION_TOO_FAR_REASON`. The message names the ledgers and the cap, plus a
+  `maxTimeoutSeconds` hint when the resource asked for more than the cap.
+- Tests: the boundary for both credential types, a 7-day request, no hint for a short request
+  signed long, the uint32 test with the cap raised, `/verify` and `/settle`'s check through
+  `buildVerifier`, the config default and its floor. Two mutants caught (cap off by one, cap off).
+- Docs: the facilitator README's settings (ask for `maxTimeoutSeconds` ≤ 300), spine AD-22.
