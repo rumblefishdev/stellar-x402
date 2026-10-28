@@ -134,6 +134,28 @@ describe("cataloger", () => {
     expect(counted("seller", "refreshed", "inserted")).toBe(1);
   });
 
+  it("trims a seller's tags and service name as a payment's copy is, and still lists (row 1)", async () => {
+    // 47 of 400 live sellers sent such fields; upstream's schema refuses the whole 402 for them,
+    // while the Bazaar spec keeps the listing (`bazaar.md:380-391`).
+    const { cataloger, list } = setup();
+    seller.paymentRequired = (url) => ({
+      x402Version: 2,
+      resource: {
+        url,
+        description: DESCRIPTION,
+        serviceName: "Minifetch: Search, Scrape, Extract & SEO Audit",
+        tags: ["web", "news", "search", "headlines", "latest", "press"],
+      } as PaymentRequired["resource"],
+      accepts: [requirements],
+      extensions: { bazaar: valid },
+    });
+    await cataloger.onSuccess(record(valid), "settle");
+    const [entry] = await list();
+    expect(entry).toMatchObject({ description: DESCRIPTION, accepts: [requirements] });
+    expect(entry?.serviceName).toBeUndefined();
+    expect(entry?.tags).toEqual(["web", "news", "search", "headlines", "latest"]);
+  });
+
   it("keeps the seller's text and price when another payer's copy says otherwise (row 1)", async () => {
     const { cataloger, list, clock } = setup();
     await cataloger.onSuccess(record(valid), "settle");
