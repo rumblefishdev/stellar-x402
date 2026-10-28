@@ -3,8 +3,9 @@ id: "0015"
 title: "Wire upto settlement into the facilitator's /settle (post-T1)"
 type: FEATURE
 status: backlog
+milestone: 2
 related_adr: ["0003", "0005", "0006"]
-related_tasks: ["0009", "0004", "0005", "0012", "0035"]
+related_tasks: ["0009", "0004", "0005", "0012", "0035", "0019", "0024", "0025", "0034"]
 tags: [facilitator, signer-pool, upto, settlement, priority-medium, effort-medium, payments]
 links:
   - ../../../docs/architecture/m1-spine.md
@@ -30,6 +31,13 @@ history:
     note: >
       Added the stacked-rent measures from 0035 (330,032 stroops measured on testnet): a separate,
       higher upto fee ceiling and a keeper for the accepted tokens' instances.
+  - date: "2026-10-28"
+    status: backlog
+    who: okarcz
+    note: >
+      Moved to milestone 2 and waits on 0034: work starts only once the x402 Foundation
+      accepts the Stellar upto spec. Context fixed: the record, budgets and lease come from 0019,
+      0024 and 0025, not 0009.
 ---
 
 # Wire upto settlement into the facilitator's /settle (post-T1)
@@ -42,8 +50,19 @@ after T1.
 
 ## Context
 
-- 0009 builds `/settle` for `exact` on the pool, including the settlement record, budgets and
-  lease. `upto` reuses all of it (AD-2, AD-6, AD-16, AD-18).
+- **Waits on 0034** (okarcz, 2026-10-28): start only once the x402 Foundation accepts the
+  Stellar `upto` spec (#3781). Until then the design can still change, so nothing is built here.
+  After that, this task is the source of 0034's upstream facilitator class.
+- 0009 built `/settle` for `exact` on the pool. The rest of the path that `upto` reuses (AD-2,
+  AD-6, AD-16, AD-18) comes from three other tasks:
+  - **0019** (done): the settlement record, its attempt states and the startup and periodic
+    reconciliation of records that aren't final. An `upto` attempt goes through the same
+    records.
+  - **0024** (backlog): the spend budgets and breakers. `upto`'s higher fee ceiling (below)
+    counts against them, and pubnet stays refused until 0024 lands.
+  - **0025** (PR #70): the channel lease and the shutdown drain. `upto` settles only while the
+    process holds the lease, and an unsent `upto` call is refused on shutdown like an `exact`
+    one.
 - The `upto` client classes and `scheme_upto_stellar.md` go upstream later (ADR 0001); until
   then we depend on a local build.
 
