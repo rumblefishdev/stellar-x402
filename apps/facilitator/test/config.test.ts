@@ -253,6 +253,10 @@ describe("parseConfig", () => {
     expect(
       problems({ ...minimal, MIN_VALIDITY_LEDGERS: "10", MAX_VALIDITY_LEDGERS: "10" }),
     ).toEqual(["MAX_VALIDITY_LEDGERS must be above MIN_VALIDITY_LEDGERS"]);
+    // About 10 minutes at most, so a typo can't reopen days-long signatures.
+    expect(problems({ ...minimal, MAX_VALIDITY_LEDGERS: "121" })).toEqual([
+      "MAX_VALIDITY_LEDGERS must be between 3 and 120",
+    ]);
   });
 
   it("keeps twice the inclusion bid below the fee ceiling, as the fee bump pays it twice", () => {

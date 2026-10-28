@@ -163,12 +163,14 @@ const envSchema = z
      */
     MIN_VALIDITY_LEDGERS: int(2).default("4"),
     /**
-     * Most ledgers left before the payer's auth expires (0073 decision 2). An envelope lives as
-     * long as its auth entry, so this bounds how long a channel can wait on one transaction, and
-     * how long a payload stays landable. 60 ledgers is about 5 minutes; the default adds 10%, as
-     * a client that sees faster ledgers signs a 300 s `maxTimeoutSeconds` for up to 63.
+     * Most ledgers left before the payer's auth expires (0073 decisions 2, 6). An envelope lives
+     * as long as its auth entry, so this bounds how long a channel can wait on one transaction,
+     * and how long a payload stays landable. 60 ledgers is about 5 minutes; the default adds 10%,
+     * as a client that sees faster ledgers signs a 300 s `maxTimeoutSeconds` for up to 63. The
+     * refusal's advice to sellers assumes that 10%. At most 120, about 10 minutes, so a typo
+     * can't reopen days-long signatures (review D3).
      */
-    MAX_VALIDITY_LEDGERS: int(3).default("66"),
+    MAX_VALIDITY_LEDGERS: int(3, 120).default("66"),
     /**
      * How long a repeat `/settle` waits for a signed record to turn final (AD-6); at most the
      * budget. Unset means 20 s, or the budget when that is shorter. At least 1 s, so a seller's

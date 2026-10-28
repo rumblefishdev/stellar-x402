@@ -39,10 +39,11 @@ history:
     status: active
     who: okarcz
     note: >
-      Rule decided (decisions 1-5): a 5-minute cap on the auth entry's life at /verify, the
-      envelope lives as long as the auth entry, an unsent payment may be retried as is until its
-      auth entry expires (its closed record reopens), and a test shows a deploy's 180 s grace with a 5-minute envelope still
-      ends every transaction through reconciliation.
+      Rule decided (decisions 1-5; 6-10 came with the build): a cap of about 5 minutes on the
+      auth entry's life at /verify, the envelope lives as long as the auth entry, an unsent
+      payment may be retried as is until its auth entry expires (its closed record reopens), and
+      a test shows a deploy's 180 s grace with a 5-minute envelope still ends every transaction
+      through reconciliation.
 ---
 
 # Tell the payer to sign again only once their auth entry can't land
@@ -106,7 +107,7 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
 - [ ] Given a sent transaction, when its envelope is built, then it can land until the auth entry's expiration ledger and no earlier bound ends it; reconciliation answers `…_transaction_expired` only once that ledger has passed
 - [ ] Given a payment closed with nothing sent, when the identical payload comes back while its auth entry is valid, then it is settled once; after the expiration ledger the answer is "sign a new payment"; a different payload on the same nonce is still refused
 - [ ] Given a transaction sent just before SIGTERM with a 5-minute envelope, when the 180 s grace ends before it is final, then the next process takes the lease and its reconciliation ends the record with the transaction's real outcome (test)
-- [x] Given the decided rule, when the task ends, then the decision and the options considered are recorded in this task (decisions 1-4, S-sign-again-rule)
+- [ ] Given the decided rule, when the task ends, then the decision and the options considered are recorded in this task (decisions 1-10 so far, S-sign-again-rule)
 
 ## Design Decisions
 
@@ -116,7 +117,7 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
    "can no longer land", as the x402 family rule puts it. The 60 s time bound made `expired`
    unsafe for up to `maxTimeoutSeconds` minus 60 s. Chosen over keeping 60 s with a pending
    record, a cap alone, and accepting the risk.
-2. **A 5-minute cap (60 ledgers) on the auth entry's life** (okarcz, 2026-10-28): without it,
+2. **A cap of about 5 minutes on the auth entry's life** (66 ledgers by default, decision 6) (okarcz, 2026-10-28): without it,
    decision 1 lets a caller who writes both payload and requirements sign for days, and every
    dropped transaction would hold its channel that long. 300 s fits the main mainnet seller
    (0043). No facilitator found caps this; client-side clamps of 300 s exist.
@@ -142,6 +143,17 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
    envelope must never ship before the cap, or a deploy between the two opens the 7-day attack.
    Each PR is safe on its own. The limit is documented in the README, not published in
    `/supported`.
+8. **The refusal advises a `maxTimeoutSeconds` whenever the resource asked more than the advised
+   limit** (okarcz, 2026-10-28, PR 1 review D1): 300 s at the default, worked out from the cap
+   without its 10%. Before, the hint showed only above 330 s, so a 301–330 s resource refused on
+   a fast-ledger day got none.
+9. **A lagging RPC is an accepted risk** (okarcz, 2026-10-28, PR 1 review D2): the cap compares
+   with our RPC's latest ledger, so one 4 or more ledgers behind the client's Horizon can refuse
+   an honest 300 s payment. Rare (about 20 s behind); recorded in AD-22. Chosen over a wider
+   default (72) and a separate lag margin.
+10. **`MAX_VALIDITY_LEDGERS` is at most 120** (okarcz, 2026-10-28, PR 1 review D3): about 10
+    minutes, so a typo can't reopen days-long signatures and the drain re-check in PR 2 has a
+    known worst case. Chosen over a bound tied to the drain and over none.
 
 ## Implementation Notes
 
@@ -157,3 +169,6 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
   signed long, the uint32 test with the cap raised, `/verify` and `/settle`'s check through
   `buildVerifier`, the config default and its floor. Two mutants caught (cap off by one, cap off).
 - Docs: the facilitator README's settings (ask for `maxTimeoutSeconds` ≤ 300), spine AD-22.
+- Review (four reviewers): 3 decisions (8-10), 3 fixes (the README says `…_too_far` needs new
+  requirements; these records; the smoke script's header), 1 deferred: `token-matrix.ts` and
+  `verify-smoke.ts` don't pass `DATABASE_URL` either, broken since 0064.

@@ -237,7 +237,7 @@ export function createChecker(deps: VerifierDeps): Check {
         (deps.maxValidityLedgers * DEFAULT_ESTIMATED_LEDGER_SECONDS * 10) / 11,
       );
       const hint =
-        signed > deps.maxValidityLedgers
+        requirements.maxTimeoutSeconds > ceiling
           ? `; maxTimeoutSeconds ${requirements.maxTimeoutSeconds} is about ${signed} ledgers, ` +
             `so it should be at most ${ceiling}`
           : "";
