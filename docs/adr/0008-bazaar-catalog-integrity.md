@@ -46,7 +46,8 @@ settlement.
     then the listing's tool called without payment with its example arguments up to 16 KiB (`{}`
     without one), read as `@x402/mcp`'s `getToolPaymentRequirements` reads a price. A tool the
     server doesn't list (`no_tool`), a server that doesn't answer, and a tool that runs without
-    asking for a payment (`not_402`) change nothing, as above.
+    asking for a payment (`not_402`) change nothing, as above. Its responses may take up to
+    256 KiB each: a tool list carries every tool's schemas (largest measured 122,729 B).
 - **Entry limits (task 0063).**
   - An offer keeps the spec's seven fields (the upstream `PaymentRequirements` schema); its
     `extra` takes up to 4 KiB. A listing keeps up to 8 offers. The `bazaar` block keeps its

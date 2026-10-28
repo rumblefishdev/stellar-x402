@@ -52,6 +52,11 @@ export type Cataloger = Pick<SettlementHooks, "extensionResponses" | "onSuccess"
  * empty body or the listing's example (0063), which sits in the 32 KiB `bazaar` block.
  */
 const SELLER_RESPONSE_BYTES = 64 * 1024;
+/**
+ * The largest MCP seller response read by a check: twice the largest `tools/list` measured
+ * (122,729 B, 35 tools, 2026-10-28), since the tool's schemas come with it.
+ */
+const MCP_RESPONSE_BYTES = 256 * 1024;
 /** A library error lists every issue; the attempt's row keeps its start. */
 const DETAIL_CHARS = 1_000;
 
@@ -234,7 +239,10 @@ export function createCataloger({
       const input = result.discovered.discoveryInfo.input;
       const answer =
         input.type === "mcp"
-          ? await askMcpSeller(result.resourceUrl, bazaarLib.toolCall(input), sellerLimits)
+          ? await askMcpSeller(result.resourceUrl, bazaarLib.toolCall(input), {
+              ...sellerLimits,
+              maxResponseBytes: MCP_RESPONSE_BYTES,
+            })
           : await askSeller(
               bazaarLib.sellerRequest(result.resourceUrl, { ...input, method: key.method }),
               sellerLimits,

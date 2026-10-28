@@ -572,6 +572,15 @@ describe("cataloger, an MCP listing (0063 rows 5, 18)", () => {
     expect(await list()).toHaveLength(1);
   });
 
+  it("reads a tool list larger than an HTTP seller's answer may be", async () => {
+    // About 120 KB, as the largest measured: 35 tools with long descriptions and schemas.
+    const tools = Array.from({ length: 35 }, (_, i) => (i === 0 ? "weather" : `tool_${i}`));
+    mcp = await startMcpSeller(() => terms, { tools, description: "x".repeat(3_400) });
+    const { cataloger, counted } = setup();
+    await cataloger.onSuccess(paid(), "settle");
+    expect(counted("seller", "refreshed", "inserted")).toBe(1);
+  });
+
   it("creates nothing when the tool runs without asking for a payment (row 6)", async () => {
     mcp = await startMcpSeller(() => "free");
     const { cataloger, list, counted } = setup();

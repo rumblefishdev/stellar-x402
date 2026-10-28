@@ -28,7 +28,7 @@ const read = async (req: IncomingMessage) => {
  * `createPaymentRequiredResult`): an error result whose `structuredContent` and first text are the
  * 402 terms; `free` answers as a free tool. `tools` lists other names instead of `weather`;
  * `outputSchema` gives the tool one the terms don't match; `textOnly` leaves out
- * `structuredContent`, as some sellers do.
+ * `structuredContent`, as some sellers do; `description` is each tool's.
  */
 export async function startMcpSeller(
   answer: () => PaymentRequired | "free",
@@ -36,7 +36,8 @@ export async function startMcpSeller(
     tools = ["weather"],
     outputSchema = false,
     textOnly = false,
-  }: { tools?: string[]; outputSchema?: boolean; textOnly?: boolean } = {},
+    description = "",
+  }: { tools?: string[]; outputSchema?: boolean; textOnly?: boolean; description?: string } = {},
 ): Promise<McpSeller> {
   const streams = new Set<IncomingMessage>();
   const seller: McpSeller = {
@@ -56,8 +57,12 @@ export async function startMcpSeller(
         const mcp = new McpServer({ name: "seller", version: "0.0.0" });
         for (const name of tools) {
           const schemas = outputSchema
-            ? { inputSchema: { city: z.string() }, outputSchema: { celsius: z.number() } }
-            : { inputSchema: { city: z.string() } };
+            ? {
+                description,
+                inputSchema: { city: z.string() },
+                outputSchema: { celsius: z.number() },
+              }
+            : { description, inputSchema: { city: z.string() } };
           mcp.registerTool(name, schemas, async () => {
             const terms = answer();
             if (terms === "free")
