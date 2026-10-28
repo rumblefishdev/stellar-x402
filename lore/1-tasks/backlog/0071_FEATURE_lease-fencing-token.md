@@ -37,6 +37,10 @@ every send follows `addHash`, so it sends nothing new.
   same statement as `addHash`. `transition` stays unfenced, so a stale holder can still record
   what it already sent; what it doesn't, the new holder's reconciliation resolves through the
   stored hashes.
+- Since 0025 decision 24 the config refuses `NETWORK=stellar:pubnet` until this task and 0024
+  land: whichever lands last lifts the rule, the other narrows its message (0009's rule).
+- 0025 decision 22 checks `held()` again right after `addHash`, so the window this task closes is
+  that one write, or a process frozen past the TTL.
 - 0025 decision 16 added a 5 s skew margin to `acquireLease`, which makes an early takeover rarer
   but doesn't stop a stale holder.
 
