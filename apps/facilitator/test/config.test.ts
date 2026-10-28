@@ -19,9 +19,10 @@ const minimal = {
   CLIENT_IP: "socket",
   DATABASE_URL: "postgres://db.internal/x402",
 };
-/** Pubnet is refused until 0024 lands. */
+/** Pubnet is refused until 0024 and 0071 land. */
 const pubnet = { NETWORK: "stellar:pubnet" };
-const PUBNET_REFUSED = "NETWORK stellar:pubnet is refused until spend budgets (0024) land";
+const PUBNET_REFUSED =
+  "NETWORK stellar:pubnet is refused until spend budgets (0024) and the lease fencing token (0071) land";
 
 function problems(env: Record<string, string | undefined>): string[] {
   try {
@@ -341,8 +342,8 @@ describe("parseConfig", () => {
       ]);
   });
 
-  it("refuses stellar:pubnet with nothing else wrong, until 0024 and 0025 land", () => {
-    // `/settle` would spend there with allow-all spend hooks and no lease.
+  it("refuses stellar:pubnet with nothing else wrong, until 0024 and 0071 land", () => {
+    // `/settle` would spend there with allow-all spend hooks and an unfenced lease.
     expect(problems({ ...minimal, ...pubnet, RPC_URLS: "https://rpc.example" })).toEqual([
       PUBNET_REFUSED,
     ]);
