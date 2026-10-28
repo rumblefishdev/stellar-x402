@@ -236,12 +236,41 @@ As a facilitator operator, I want only one process at a time to settle through a
     host with `held()`'s local expiry, the window left is a call already past the lease check when
     its process freezes past the TTL, and its cost is `tx_bad_seq`, not a double charge. The port
     change and its migration get their own review.
+    *Corrected 2026-10-28 (Adam's PR #70 review):* the window was wider: a call checked the lease
+    only on arrival, so one let in before a DB failover could send minutes later, after the lease
+    was lost, with no frozen process. Decision 22 narrows it to one `addHash`.
 16. **An acquirer takes over only 5 s after `expires_at`** (okarcz, 2026-10-26): a skew margin
     against a holder whose clock lags, for the day the facilitator runs on two hosts. A clean
     release deletes the row, so only a crash's handover waits the extra 5 s.
 17. **0025 leaves the pubnet refusal** (okarcz, 2026-10-26): the lease and the drain landed, as
     0009's rule expects, so the message names spend budgets (0024) alone. PR #66 (0054) had
     already taken its decision off the path; the fencing window goes with 0071.
+    *Replaced by decision 24.*
+22. **The lease is checked again once a hash is stored** (okarcz, 2026-10-28, Adam's PR #70
+    review M1): `createSettler` takes `held`, and `onSigned` throws right after `addHash` when it
+    is false, like the budget check, so the pool doesn't send that envelope. A call let in before
+    the lease was lost (body upload, the wait for a channel) then sends nothing on channels another
+    process may own; what is left is one `addHash`, which 0071 fences.
+23. **The lease is released once the drain ends, before the server closes** (okarcz, 2026-10-28,
+    Adam's review M2): after `submitter.close()` and `settle.drain()` nothing can send, and sweeps
+    need no lease (decision 19). Then, under the deadline: `server.close()`,
+    `closeIdleConnections()`, a grace for open requests, `closeAllConnections()`, and the wait for
+    a sweep under way. One stalled client used to keep `server.close()` open to the deadline, so
+    the lease ran out instead of being released: about 3 minutes without `/settle`. Replaces the
+    order in decision 10 and emerged decision 12 (still listening during the drain stays).
+24. **Pubnet stays refused until spend budgets (0024) and the lease fencing token (0071) land**
+    (okarcz, 2026-10-28, Adam's review M3): naming 0024 alone would have let whoever closes 0024
+    open pubnet without fencing, against decision 15. 0009's rule stays: whichever lands last
+    lifts it, the other narrows the message. Config, tests, README and the 0024 note updated.
+25. **`release()` always deletes its own row** (okarcz, 2026-10-28, Adam's review): a renewal that
+    failed on a store error clears the flag, but the row may still be ours, so the next process
+    used to wait TTL + 5 s after a clean shutdown. The delete names the holder, so it is safe; only
+    the `lease_released` log and the metric still need the flag.
+26. **A second SIGTERM or SIGINT joins the drain** (okarcz, 2026-10-28, Adam's review):
+    `process.on` instead of `once`, as `main()`'s `close` is memoized. With `once`, a repeated
+    signal fell to Node's default and killed the process mid-drain, without the release.
+27. **A failed shutdown is logged** (okarcz, 2026-10-28, Adam's review): `shutdown_failed` with
+    the error, URLs redacted, then exit code 1.
 18. **The startup schema check is its own backlog task, 0072** (okarcz, 2026-10-26): it concerns
     migrations, not the lease.
 
@@ -281,6 +310,30 @@ As a facilitator operator, I want only one process at a time to settle through a
     deadline, confirmations still under way kept it alive until Docker's SIGKILL, though decision
     11 says it exits. `server.ts` calls `process.exit()` after `close()`, with code 1 if it
     failed.
+
+28. **The grace after the drain is 15 s, `SHUTDOWN_GRACE_MS`** (claude, 2026-10-28): decision 23
+    left it open. A `/verify` on one RPC URL takes up to its 10 s timeout plus slack; one walking
+    several URLs past 15 s is cut. A test seam `shutdownGraceMs` sits beside `shutdownDeadlineMs`.
+    Past the deadline with only a sweep left, `close()` logs `shutdown_deadline` with
+    `drained: true` and returns; the deadline log of an unfinished drain has `drained: false`.
+29. **A call that finds the lease lost answers `settle_exact_stellar_record_write_failed`**
+    (claude, 2026-10-28): the hook's throw is a `SignedHookError` like the other `onSigned`
+    refusals, so the answer is that row ("a new envelope wasn't sent"), its README text extended
+    with the lost lease. A code of its own was not added: the client's next step, a new payment,
+    is the same. The hash stays on the rejected record, never sent.
+30. **`shutdown_failed` goes through a fresh `jsonLogger("error")`, not bare `console.error`**
+    (claude, 2026-10-28): it redacts every URL like `startup_failed` in the same file, and it
+    doesn't depend on `main()`'s logger. A failed start reached by a signal sets exit code 1
+    without a `shutdown_failed` line; `startup_failed` already covers it.
+
+**Modified tests (2026-10-28):** the route test "drains a reconciliation sweep under way before it
+gives the lease up" now expects the release before the sweep ends, and `close()` to wait for it
+(decision 23). The lease test "releases nothing it doesn't hold" became "deletes only its own row
+when it holds nothing" (decision 25). The deadline test now opens a stalled socket and checks it
+is cut, so removing `closeAllConnections()` fails it. New: lease lost before `onSigned`
+(`settle.test.ts`), release past a stalled client and cut after the grace
+(`settle-route.test.ts`), release after a failed renewal (`lease.test.ts`). `server.ts` (decisions
+26, 27) has no test, as before.
 
 ## Future Work
 
