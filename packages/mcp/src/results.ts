@@ -32,7 +32,7 @@ export class ToolError extends Error {
 
 /**
  * The tool error a failure stands for: a seller-fetch refusal keeps its code, message and detail.
- * Anything else is a bug, so it is not one.
+ * Any other error is a bug and is rethrown.
  */
 export function asToolError(error: unknown): ToolError | undefined {
   if (error instanceof ToolError) return error;
