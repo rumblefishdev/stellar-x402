@@ -3,7 +3,7 @@ import { decodePaymentRequiredHeader } from "@x402/core/http";
 import { PaymentRequiredV2Schema } from "@x402/core/schemas";
 import type { PaymentRequired } from "@x402/core/types";
 import { z } from "zod";
-import { checkUrl, guardedFetch, type SellerLimits } from "./guard.js";
+import { checkUrl, guardedFetch, type SellerLimits } from "@stellar-x402/seller-fetch";
 import { ToolError } from "./results.js";
 
 /** The get_resource tool's input and output, as server.ts registers it. */
