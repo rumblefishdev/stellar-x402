@@ -52,13 +52,13 @@ import {
  * `/settle` sends them from its own re-check, and the pool's guard gives the second.
  */
 export const SETTLE_REASONS = {
-  /** Sent, not final by the time bound (the RPC stopped answering) or the settle budget. */
+  /** Sent, not final by its bound (the RPC stopped answering) or the settle budget. */
   pending: "settlement_pending",
   /** Included in a ledger but failed (upstream's code). */
   failed: "settle_exact_stellar_transaction_failed",
   /** Refused by the network before inclusion, e.g. `txBadSeq` twice (upstream's code). */
   rejected: "settle_exact_stellar_transaction_submission_failed",
-  /** Not included before its time bound or ledger bound. */
+  /** Not included before its ledger bound, the payer's auth expiry: it can no longer land. */
   expired: "settle_exact_stellar_transaction_expired",
   /** The settlement's own simulation failed. */
   simulation: "settle_exact_stellar_simulation_failed",

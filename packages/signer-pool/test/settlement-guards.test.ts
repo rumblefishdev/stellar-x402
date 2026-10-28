@@ -144,7 +144,8 @@ describe("onSigned", () => {
     const maxLedger = fake.ledger + 10;
     const given: unknown[] = [];
     await submitter.submit(call(), { maxLedger, onSigned: (_, bounds) => void given.push(bounds) });
-    expect(given).toEqual([{ maxTime: Number(inner(fake).timeBounds?.maxTime), maxLedger }]);
+    // A ledger-bounded envelope has no time bound (0073 decision 1).
+    expect(given).toEqual([{ maxLedger }]);
 
     // Without a ledger bound only the time bound is given.
     given.length = 0;
@@ -332,6 +333,87 @@ describe("maxLedger", () => {
     expect(res.status).toBe("success");
     // A ledger bound's maxLedger is exclusive.
     expect(inner(fake).ledgerBounds).toEqual({ minLedger: 0, maxLedger: maxLedger + 1 });
+    // No time bound may end it before its authorization expires (0073 decision 1).
+    expect(Number(inner(fake).timeBounds?.maxTime)).toBe(0);
+  });
+
+  it(
+    "confirms a ledger-bounded envelope past 60 s and calls it expired only after its ledger bound (0073)",
+    { timeout: 5_000 },
+    async () => {
+      // 5 s ledgers: 30 ledgers is 150 s, well past the 60 s a time bound would allow.
+      const { fake, submitter } = setup();
+      fake.stalled = true;
+      const start = { time: fake.closeTime };
+      const maxLedger = fake.ledger + 30;
+      const res = await submitter.submit(call(), { maxLedger });
+      expect(res.status).toBe("expired");
+      expect(fake.ledger).toBeGreaterThanOrEqual(maxLedger);
+      expect(fake.closeTime - start.time).toBeGreaterThan(60);
+      // The channel is back once it can no longer land.
+      expect(submitter.stats()).toMatchObject({ busy: 0 });
+    },
+  );
+
+  it("answers success for a ledger-bounded envelope that lands after 60 s (0073)", async () => {
+    const { fake, submitter } = setup();
+    fake.stalled = true;
+    const start = fake.closeTime;
+    const close = fake.getLatestLedger.bind(fake);
+    Object.assign(fake, {
+      getLatestLedger: async () => {
+        if (fake.closeTime - start >= 120) fake.stalled = false; // lands at about 2 minutes
+        return close();
+      },
+    });
+    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 60 });
+    expect(res.status).toBe("success");
+    expect(fake.closeTime - start).toBeGreaterThan(60);
+  });
+
+  it("answers pending at about ledgers left × 6 s plus grace, counted from the simulation's ledger (0073)", async () => {
+    // A real network's ledger sequence, and a clock that never polled: counting from it would
+    // put the answer months ahead. No ledger closes, as time passes, so nothing confirms.
+    const { fake, submitter } = setup();
+    fake.ledger = 5_434_800;
+    fake.stalled = true;
+    const start = fake.closeTime;
+    const close = fake.getLatestLedger.bind(fake);
+    fake.getLatestLedger = async () => {
+      fake.closeTime += fake.ledgerSeconds;
+      return { sequence: fake.ledger } as rpc.Api.GetLatestLedgerResponse;
+    };
+    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 60 });
+    expect(res.status).toBe("pending");
+    const waited = fake.closeTime - start;
+    // Ledgers close again, so the confirmation that runs on can end (expired).
+    fake.getLatestLedger = close;
+    expect(waited).toBeGreaterThanOrEqual(60 * 6 + 30);
+    expect(waited).toBeLessThan(60 * 6 + 30 + 30);
+  }, 5_000);
+
+  it("ends a resend's wait for a ledger-bounded envelope when the RPC stops answering (0073)", async () => {
+    // TRY_AGAIN_LATER, then no ledger read ever answers: the wait for the next ledger has no
+    // time bound to end it, so it ends at about when the ledger bound would pass.
+    const { fake, submitter } = setup();
+    fake.sendScript.push("TRY_AGAIN_LATER");
+    const start = fake.closeTime;
+    const close = fake.getLatestLedger.bind(fake);
+    fake.getLatestLedger = async () => {
+      fake.closeTime += fake.ledgerSeconds;
+      throw new Error("rpc down");
+    };
+    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 20 });
+    const waited = fake.closeTime - start;
+    // The RPC answers again, so the confirmation that runs on can end.
+    fake.getLatestLedger = close;
+    expect(res.status).toBe("pending");
+    expect(waited).toBeLessThan(20 * 6 + 30 + 30);
+  }, 5_000);
+
+  it("keeps the time bound for a call without a ledger bound", async () => {
+    const { fake, submitter } = setup();
+    await submitter.submit(call());
     expect(Number(inner(fake).timeBounds?.maxTime)).toBeGreaterThan(0);
   });
 
