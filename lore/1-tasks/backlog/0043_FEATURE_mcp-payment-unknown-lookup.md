@@ -3,6 +3,7 @@ id: "0043"
 title: "Find the settlement on chain when a paid MCP call ends as payment_unknown"
 type: FEATURE
 status: backlog
+milestone: 2
 related_adr: []
 related_tasks: ["0037"]
 tags: [mcp, payments, priority-low, effort-medium]

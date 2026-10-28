@@ -3,6 +3,7 @@ id: "0073"
 title: "Tell the payer to sign again only once their auth entry can't land"
 type: FEATURE
 status: backlog
+milestone: 1
 related_adr: ["0006"]
 related_tasks: ["0019", "0009"]
 tags: [facilitator, settlement, priority-high, effort-medium, payments]

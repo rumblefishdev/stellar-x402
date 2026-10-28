@@ -3,6 +3,7 @@ id: "0010"
 title: "Measure inclusion-fee bids against inclusion delay on mainnet"
 type: RESEARCH
 status: backlog
+milestone: 1
 related_adr: []
 related_tasks: ["0007", "0006"]
 tags: [fees, mainnet, throughput, priority-medium, effort-small, payments]
