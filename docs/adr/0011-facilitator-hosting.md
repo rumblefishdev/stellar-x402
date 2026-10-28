@@ -314,15 +314,22 @@ One request or one stop must never outlast the layer in front of it:
 ### Network and URL
 
 - **Cloudflare is the DNS and the edge, through Cloudflare Tunnel.** One hostname,
-  `x402-facilitator.sorobanscan.com`, serves both networks (the 2026-10-26 daily). It is one
-  label under the zone, since the Free plan's certificate covers only one level of subdomain.
-  - Only testnet is behind it for now. Mainnet most likely joins the same process
-    (multi-network), which 0038 settles. There is no staging host;
+  `x402-facilitator.sorobanscan.com`, serves both networks (decided with Marek at the 2026-10-26
+  daily; `soroban-infrastructure`'s `cloudflare/x402.tf`, 12cec25, routes it). It is one label
+  under the zone, since the Free plan's certificate covers only one level of subdomain.
+  - Only testnet is behind it for now. Whether mainnet joins the same process (multi-network)
+    is open until 0038; until then the rest of this ADR holds: one process per network, and
+    testnet and mainnet never share a facilitator. A separate mainnet process needs its own route
+    (a second hostname or a path rule), not a second `cloudflared` on the `x402` tunnel, since
+    Cloudflare spreads requests across a tunnel's connectors. There is no staging host;
     `x402-facilitator-staging.sorobanscan.com` can be added if one is needed.
   - One tunnel, `x402`. Its `cloudflared` opens outbound connections to Cloudflare (port 7844,
-    UDP for QUIC and TCP) and forwards the hostname to `http://facilitator:4021`, the
-    facilitator's Compose service on the edge network; anything else gets 404. The server
-    opens no port for it.
+    UDP for QUIC and TCP) and forwards the hostname to `http://facilitator:4021`; anything else
+    gets 404. The server opens no port for it.
+  - `facilitator` is a network alias: `facilitator-testnet` keeps its service name and gets the
+    alias on `x402-testnet-edge`, so the route names no network. Aliases are per network, so
+    this holds whichever shape 0038 picks for mainnet. The compose file keeps `PORT` at 4021;
+    changing it means changing `cloudflare/x402.tf` too.
   - HTTPS ends at Cloudflare, so Cloudflare sees the requests in plain text. They carry signed
     payments, never keys.
   - The tunnel, its routing and the DNS record are Terraform in the `soroban-infrastructure`

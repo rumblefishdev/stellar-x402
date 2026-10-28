@@ -42,3 +42,15 @@ hostname in line.
 - [x] ADR 0011's Network and URL section names one hostname, one tunnel and its routing target
 - [x] 0026 and 0027 quote `x402-facilitator.sorobanscan.com`
 - [ ] Docs PR to develop
+
+## Design Decisions
+
+### Emerged
+
+1. **`facilitator` is a network alias, not the service name** (Oskar's review of #75): the
+   service stays `facilitator-testnet`, with the alias on `x402-testnet-edge`. Renaming the
+   service would clash with a separate mainnet facilitator in the same `x402` Compose project;
+   aliases are per network, so this fits either mainnet shape from 0038.
+2. **Mainnet behind the hostname stays open until 0038:** the rest of ADR 0011 (one process per
+   network, no shared facilitator) holds until then, and a separate mainnet process needs its
+   own route, not a second `cloudflared` on the `x402` tunnel.

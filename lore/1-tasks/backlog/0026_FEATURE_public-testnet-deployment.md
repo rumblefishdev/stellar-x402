@@ -183,10 +183,12 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 - From 0039: the public URL is `x402-facilitator.sorobanscan.com` through Cloudflare Tunnel
   (ADR 0011; one hostname for both networks, task 0076). Prerequisites, set up by task 0062: the
   `sorobanscan.com` zone on Cloudflare, and the tunnel `x402` with its routing (the hostname to
-  `http://facilitator:4021`, so the facilitator's Compose service is `facilitator`, anything
-  else 404) and DNS record, both Terraform in `soroban-infrastructure`'s `cloudflare/`
-  (stkrolikiewicz applies it for now). Bot Fight Mode, Browser Integrity Check and "I'm Under
-  Attack" stay off on the zone. Nothing goes into the ClickHouse project's repo.
+  `http://facilitator:4021`, anything else 404) and DNS record, both Terraform in
+  `soroban-infrastructure`'s `cloudflare/` (stkrolikiewicz applies it for now). The service stays
+  `facilitator-testnet` and gets the network alias `facilitator` on `x402-testnet-edge`; the
+  compose file keeps `PORT` at 4021, and changing it means changing `cloudflare/x402.tf` too.
+  Bot Fight Mode, Browser Integrity Check and "I'm Under Attack" stay off on the zone. Nothing
+  goes into the ClickHouse project's repo.
 - From 0039: `GET /health` answers 200 and reports `ready` in its body.
 - From 0039, the runbook: running the playbook from a reviewed commit, deploy, rollback
   (automatic on a failed deploy; by hand, redeploy an earlier digest), long migrations outside
