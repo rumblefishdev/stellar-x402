@@ -435,6 +435,19 @@ describe("createVerifier", () => {
       );
     });
 
+    it("gives the hint just above the advised limit, where faster ledgers sign past the cap", async () => {
+      // 320 s at 4.8 s ledgers is 67 ledgers; at 5 s it would be 64.
+      const { verify } = setup();
+      const answer = await verify(payload({ auth: [authEntry(payer, CURRENT + 67)] }), {
+        ...requirements,
+        maxTimeoutSeconds: 320,
+      });
+      expect(answer.invalidMessage).toBe(
+        "auth expires at ledger 1067, 67 ledgers after ledger 1000; at most 66 are allowed" +
+          "; maxTimeoutSeconds 320 is about 64 ledgers, so it should be at most 300",
+      );
+    });
+
     it("gives no maxTimeoutSeconds hint when the resource asked for little and the client signed more", async () => {
       const { verify } = setup();
       const answer = await verify(payload({ auth: [authEntry(payer, CURRENT + 67)] }), {

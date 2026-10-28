@@ -15,7 +15,7 @@ history:
   - date: "2026-10-28"
     status: mature
     who: okarcz
-    note: "Decided: options 5 + 2 for group B, option 1 for group A; 0025's drain fallback kept, with a test (0073 decisions 1-4)."
+    note: "Decided: options 5 + 2 for group B, option 1 for group A; 0025's drain fallback kept, with a test (0073 decisions 1-5; the cap is 66 ledgers by decision 6)."
 ---
 
 # When a settle answer may say "sign a new payment"
@@ -60,7 +60,7 @@ payer**, so the facilitator can't do it alone.
 
 ## Decided (okarcz, 2026-10-28)
 
-Group B: options 5 and 2, a 5-minute cap and an envelope that lives as long as the auth entry. Group A: option 1, retry the same payment until the auth entry expires. The deploy keeps its 180 s grace, and a test shows that 0025's fallback ends every transaction. See 0073's decisions 1-4.
+Group B: options 5 and 2, a cap of about 5 minutes (66 ledgers by default, decision 6) and an envelope that lives as long as the auth entry. Group A: option 1, retry the same payment until the auth entry expires. The deploy keeps its 180 s grace, and a test shows that 0025's fallback ends every transaction. See 0073's decisions 1-7.
 
 ## Leaning before the decision
 

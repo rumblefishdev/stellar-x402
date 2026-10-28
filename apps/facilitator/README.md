@@ -11,7 +11,7 @@ discovery routes. Design: [the M1 spine](../../docs/architecture/m1-spine.md) (A
   and the wait for a channel included. It stays below the seller's own 90 s timeout.
 - `SETTLE_TIMEOUT_MS` (20 s, or the budget when that is shorter; at least 1 s, at most the
   budget): how long a repeat of a sent payment waits for it to turn final.
-- `MAX_VALIDITY_LEDGERS` (66 by default, above `MIN_VALIDITY_LEDGERS`): the furthest a payer's
+- `MAX_VALIDITY_LEDGERS` (66 by default, above `MIN_VALIDITY_LEDGERS`, at most 120): the furthest a payer's
   auth may expire after the latest ledger. `/verify` and `/settle` refuse a later one with
   `invalid_exact_stellar_signature_expiration_too_far`, whatever the resource's
   `maxTimeoutSeconds` allows. 66 is 60 ledgers, about 5 minutes, plus 10% for clients that see
@@ -190,7 +190,9 @@ gets the same answer again, so a retry needs a new payment (a new nonce); only
 - a refusal from the checks (`invalid_exact_stellar_*`, `invalid_network`) comes before the
   claim and records nothing: the same payment may be sent again, and may succeed later.
   `invalid_exact_stellar_payload_fee_exceeds_maximum` is our own fee estimate above our ceiling,
-  not a fault in the payment;
+  not a fault in the payment, and `invalid_exact_stellar_signature_expiration_too_far` is the
+  resource's `maxTimeoutSeconds`: signing again against the same requirements fails again, so
+  the resource must ask for at most 300 s;
 - a spend refusal the store couldn't record leaves the payment claimed, so a repeat after the
   budget gets `…_timeout` instead of the spend reason.
 

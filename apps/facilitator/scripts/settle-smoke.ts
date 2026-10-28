@@ -8,7 +8,8 @@
  * 4. Two concurrent calls for one new payment submit one transaction; one gets the success.
  * 5. `/verify` of the settled payment fails: its nonce is used on chain.
  *
- * Env (each optional; a missing key is a fresh friendbot-funded one, printed by address only):
+ * Env (each optional but DATABASE_URL; a missing key is a fresh friendbot-funded one, printed by
+ * address only):
  *   FACILITATOR_SECRET  pays the fees and creates 2 channels (1.5 XLM each)
  *   CLIENT_SECRET       pays AMOUNT of ASSET per payment
  *   PAY_TO              receives (a funded account)
