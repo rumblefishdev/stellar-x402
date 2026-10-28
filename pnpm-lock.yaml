@@ -65,9 +65,6 @@ importers:
       '@x402/extensions':
         specifier: ~2.28.0
         version: 2.28.0(typescript@6.0.3)
-      '@x402/mcp':
-        specifier: ~2.28.0
-        version: 2.28.0
       '@x402/stellar':
         specifier: ~2.28.0
         version: 2.28.0

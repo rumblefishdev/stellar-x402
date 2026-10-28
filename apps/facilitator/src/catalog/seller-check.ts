@@ -1,11 +1,10 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { ListToolsResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import { CallToolResultSchema, ListToolsResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { SellerFetchError, guardedFetch, type SellerLimits } from "@stellar-x402/seller-fetch";
 import { decodePaymentRequiredHeader } from "@x402/core/http";
 import { PaymentRequiredV2Schema } from "@x402/core/schemas";
 import type { PaymentRequired } from "@x402/core/types";
-import { x402Client, x402MCPClient } from "@x402/mcp";
 
 /** Why a seller gave no usable answer; `detail` is for logs and the attempt's row only. */
 export type SellerAnswer =
@@ -55,9 +54,9 @@ export async function askSeller(
 
 /**
  * Asks an MCP seller for its listing (0063 rows 5, 18): `initialize`, `tools/list`, then the tool
- * called without payment, read as upstream's MCP client reads a price
- * (`getToolPaymentRequirements`). A tool the server doesn't list is told apart from a server that
- * doesn't answer. Every request goes through the seller-fetch guard, one deadline for them all.
+ * called without payment, its terms checked as an HTTP seller's are. A tool the server doesn't
+ * list is told apart from a server that doesn't answer. Every request goes through the
+ * seller-fetch guard, one deadline for them all.
  */
 export async function askMcpSeller(
   url: string,
@@ -82,13 +81,29 @@ export async function askMcpSeller(
       cursor = page.nextCursor;
     } while (!listed && cursor);
     if (!listed) return { ok: false, reason: "no_tool", detail: call.name };
-    // The payment client is never used: the call carries no payment.
-    const terms = await new x402MCPClient(mcp, new x402Client()).getToolPaymentRequirements(
-      call.name,
-      call.arguments,
-    );
-    if (!terms) return { ok: false, reason: "not_402", detail: "the tool asked for no payment" };
-    return { ok: true, paymentRequired: terms };
+    // The terms as upstream's payment wrapper sends them (`@x402/mcp` 2.28.0
+    // `createPaymentRequiredResult`): an error result carrying them in `structuredContent`, or as
+    // JSON in its first text (9 of 20 live sellers). Read here, not with upstream's MCP client,
+    // whose schema reads terms with too many tags as no 402 at all.
+    const result = await mcp.request({ method: "tools/call", params: call }, CallToolResultSchema);
+    const [first] = result.content;
+    let terms: unknown = result.structuredContent;
+    if (terms === undefined && first?.type === "text") {
+      try {
+        terms = JSON.parse(first.text);
+      } catch {
+        // Plain text, such as the SDK's own "Input validation error": no terms in it.
+        terms = undefined;
+      }
+    }
+    if (!result.isError || typeof terms !== "object" || terms === null) {
+      const text = first?.type === "text" ? first.text.slice(0, 200) : "";
+      return { ok: false, reason: "not_402", detail: `the tool answered without terms: ${text}` };
+    }
+    const paymentRequired = terms as PaymentRequired;
+    const detail = shapeError(paymentRequired);
+    if (detail) return { ok: false, reason: "unreadable_402", detail };
+    return { ok: true, paymentRequired };
   } catch (error) {
     if (error instanceof SellerFetchError) {
       return { ok: false, reason: error.code, detail: error.detail ?? error.message };

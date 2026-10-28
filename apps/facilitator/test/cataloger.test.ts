@@ -594,6 +594,15 @@ describe("cataloger, an MCP listing (0063 rows 5, 18)", () => {
     expect(await list()).toHaveLength(1);
   });
 
+  it("reads 402 terms whose tags are over the spec's limit, trimming them", async () => {
+    // One of 34 live MCP sellers; upstream's MCP client reads such terms as no 402 at all.
+    const tags = ["a", "b", "c", "d", "e", "f"];
+    mcp = await startMcpSeller(() => ({ ...terms, resource: { ...terms.resource, tags } }));
+    const { cataloger, list } = setup();
+    await cataloger.onSuccess(paid(), "settle");
+    expect((await list())[0]?.tags).toEqual(["a", "b", "c", "d", "e"]);
+  });
+
   it("reads a tool list larger than an HTTP seller's answer may be", async () => {
     // About 120 KB, as the largest measured: 35 tools with long descriptions and schemas.
     const tools = Array.from({ length: 35 }, (_, i) => (i === 0 ? "weather" : `tool_${i}`));
