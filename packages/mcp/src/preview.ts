@@ -3,7 +3,7 @@ import { decodePaymentRequiredHeader } from "@x402/core/http";
 import { PaymentRequiredV2Schema } from "@x402/core/schemas";
 import type { PaymentRequired } from "@x402/core/types";
 import { z } from "zod";
-import { checkBody, checkUrl, guardedFetch, type SellerLimits } from "./guard.js";
+import { checkUrl, guardedFetch, type SellerLimits } from "./guard.js";
 import { ToolError } from "./results.js";
 
 /** The get_resource tool's input and output, as server.ts registers it. */
@@ -35,7 +35,10 @@ export async function previewPayment(
   limits: SellerLimits,
 ): Promise<{ status: number; paymentRequired: PaymentRequired | null }> {
   const url = checkUrl(request.url, limits.allowInsecureLocal);
-  checkBody(request.method, request.body);
+  // A GET carries no body: fetch would throw, and the mistake is the agent's input, not the seller.
+  if (request.method === "GET" && request.body !== undefined) {
+    throw new ToolError("invalid_input", "A GET request cannot carry a body.");
+  }
   // A price can depend on the body (e.g. how many results are asked for), so the body is sent too.
   const headers = request.body === undefined ? undefined : { "content-type": "application/json" };
   const response = await guardedFetch(limits, AbortSignal.timeout(limits.timeoutMs))(url, {

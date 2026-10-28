@@ -9,13 +9,17 @@ import {
   callPaidHttp,
   type PaymentConfig,
 } from "./pay.js";
+import { SellerFetchError } from "./guard.js";
 import { toolError, ToolError, toolResult } from "./results.js";
 import { GET_RESOURCE_INPUT, GET_RESOURCE_OUTPUT, previewPayment } from "./preview.js";
 
 export interface ServerConfig {
   /** Base URL of a server with `GET /discovery/resources`: our facilitator, or a fake catalog. */
   discoveryUrl: string;
-  /** Give up on a tool call after this long, all its catalog or seller requests together. */
+  /**
+   * Give up on a tool call after this long, all its catalog or seller requests together, so a call
+   * ends before the MCP client stops waiting and the agent always gets an answer.
+   */
   timeoutMs: number;
   /** Refuse a seller response body larger than this. */
   maxResponseBytes: number;
@@ -83,7 +87,7 @@ export function createServer(config: ServerConfig): McpServer {
       try {
         return toolResult({ ...(await previewPayment({ url, method, body }, sellerLimits)) });
       } catch (error) {
-        if (!(error instanceof ToolError)) throw error;
+        if (!(error instanceof ToolError || error instanceof SellerFetchError)) throw error;
         log(
           `get_resource ${error.code}: ${error.message}${error.detail ? ` (${error.detail})` : ""}`,
         );
@@ -116,7 +120,7 @@ export function createServer(config: ServerConfig): McpServer {
             ...(await callPaidHttp({ url, method, headers, body }, payment, sellerLimits, log)),
           });
         } catch (error) {
-          if (!(error instanceof ToolError)) throw error;
+          if (!(error instanceof ToolError || error instanceof SellerFetchError)) throw error;
           log(
             `call_paid_http ${error.code}: ${error.message}${error.detail ? ` (${error.detail})` : ""}`,
           );
