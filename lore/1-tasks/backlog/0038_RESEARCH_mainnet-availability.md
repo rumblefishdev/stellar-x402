@@ -80,8 +80,10 @@ remove, and how deploys stay safe once every one of them reaches mainnet.
   - either way, named reviewers and who may edit the environments, and a deploy user per
     environment if a second one comes.
 - **From 0077, other mainnet questions:** the facilitator's memory limit (512 MiB) with two
-  channel pools; and, from Oskar's review of #75, one uptime check, the 99% figure, the zone's
-  rate limit and its analytics cover both networks at once.
+  channel pools; from Oskar's review of #75, one uptime check, the 99% figure, the zone's rate
+  limit and its analytics cover both networks at once; and, from his review of #79, one process
+  couples them: the watchdog's 10 s restart, a crash and every deploy cut both networks'
+  submissions in flight, and rotating one network's key stops both.
 - **From 0039 (PR #24 review), to settle before mainnet:**
   - a Hetzner Cloud VM of our own instead of the shared server: ADR 0011's Alternatives list
     what it would remove and what it costs (about €12–20 a month on testnet). Testnet accepts the

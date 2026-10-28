@@ -59,6 +59,10 @@ history:
     status: active
     who: stkrolikiewicz
     note: "Started with reading secrets from files (`*_FILE`); the server parts follow #79's names, and signing waits for 0036."
+  - date: "2026-10-28"
+    status: active
+    who: stkrolikiewicz
+    note: "Oskar's review of #79: x402-db-testnet@production, wanted rather than required by x402@production, secret files named per network, and only migrate-testnet beside the facilitator holding testnet's database password."
 ---
 
 # Public testnet deployment
@@ -71,8 +75,8 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 
 ## Context
 
-- Needs [ADR 0011](../../../docs/adr/0011-facilitator-hosting.md) as revised in 0039, the 0022
-  adapters and the OpenBao signer (0036).
+- Needs [ADR 0011](../../../docs/adr/0011-facilitator-hosting.md) as revised in 0039 and 0077,
+  the 0022 adapters and the OpenBao signer (0036).
 - Related tasks: 0014, 0022, 0017, 0039, 0036, 0047.
 
 ## Implementation
@@ -103,7 +107,8 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     reachable only from the facilitator and the migration service.
   - Networks `x402-production-edge` (`cloudflared` and the facilitator) and
     `x402-production-db` (`internal: true`, the facilitator, each network's Postgres and
-    migration service), both part of the production compose project.
+    migration service), both part of the production compose project. Only the facilitator and
+    `migrate-testnet` hold testnet's database password.
   - `cloudflared`: Cloudflare's tunnel connector pinned by digest, memory limit 128 MiB, under
     its own unit `x402-tunnel@production.service`, enabled at boot and untouched by deploys, so
     it keeps forwarding while the facilitator drains; `x402@production` runs after it. The unit
@@ -160,8 +165,9 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     and puts `digest.good` into `digest` unless the deploy's marker is there, then runs Compose
     in the foreground for the facilitator only (`--no-deps --exit-code-from facilitator`, since a
     plain `up` exits 0), without pulling or migrating, with `Restart=on-failure`, `RestartSec`
-    5 s, a start limit of 5 in 300 s and `TimeoutStartSec` 60 s; `ExecStop` stops it. It requires
-    and runs after `x402-db@production-testnet.service`, which runs testnet's Postgres, decrypts
+    5 s, a start limit of 5 in 300 s and `TimeoutStartSec` 60 s; `ExecStop` stops it. It wants
+    and runs after `x402-db-testnet@production.service` (`Wants=`, not `Requires=`, so a
+    database's restart never restarts the facilitator), which runs testnet's Postgres, decrypts
     its own credentials and has `TimeoutStopSec` 150 s, and it wants and runs after
     `x402-openbao.service`. All our units run Compose the same way, are `PartOf=docker.service`
     and run after it, the facilitator's with `TimeoutStopSec` 200 s, and they are enabled at
@@ -179,12 +185,14 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     off the ClickHouse site's allowlist. Ask that project to tell us when it rotates its CA;
   - the database password and any keyed RPC URL are encrypted systemd credentials
     (`systemd-creds`), decrypted to `/run/x402/production/` and mounted as Compose `file:` secrets,
-    never `environment:`. Each file is mode 0400, owned by the user that reads it: the database
-    URL, `RPC_URLS` and the AppRole files by `node` (uid 1000), the Postgres password by
-    `postgres` (uid 999), and the tunnel token by `nonroot` (uid 65532). Each unit decrypts
+    never `environment:`. The files are named per network, so mainnet adds its own and renames
+    none (ADR 0011): `database-url.testnet`, `rpc-urls.testnet`, `approle-role-id.testnet` and
+    `approle-secret-id.testnet` by `node` (uid 1000), `postgres-password.testnet` by `postgres`
+    (uid 999), and `tunnel-token` by `nonroot` (uid 65532), each mode 0400. Each unit decrypts
     the files its container reads;
   - the config reads `DATABASE_URL_FILE`, `RPC_URLS_FILE` and the OpenBao AppRole files when
-    they are set, and the plain variables otherwise, for local runs;
+    they are set, and the plain variables otherwise, for local runs; the deploy points them at
+    testnet's files;
   - no TLS to `postgres-testnet` on the internal network; `scram-sha-256` passwords.
 - From 0039: backups of `postgres-testnet` go off the server with pgBackRest. Postgres hands each
   WAL segment to it (`archive_command`, `archive-async`, `archive_timeout` 60 s), and a timer
@@ -325,7 +333,7 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 
 ## Acceptance Criteria
 
-- [ ] Given the Hetzner server and Docker Compose of ADR 0011 (revised in 0039), when a deploy runs, then a container image built from the repo is deployed to it as the ADR describes, and the service answers `/supported` at a public HTTPS URL
+- [ ] Given the Hetzner server and Docker Compose of ADR 0011 (revised in 0039 and 0077), when a deploy runs, then a container image built from the repo is deployed to it as the ADR describes, and the service answers `/supported` at a public HTTPS URL
 - [ ] Given a running instance, when a new version is deployed, then the old process stops before the new one starts; the process is long-lived and never scaled to zero
 - [ ] Given the facilitator key, when the service is deployed, then it signs through the testnet OpenBao Transit key, the raw key never reaches the facilitator's process, the image or the logs, and it is a testnet-only key (ADR 0013)
 - [ ] Given `DATABASE_URL_FILE` or `RPC_URLS_FILE`, when the service starts, then it reads the value from that file, and with neither set it falls back to `DATABASE_URL` and `RPC_URLS`

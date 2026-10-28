@@ -27,6 +27,10 @@ history:
     status: active
     who: stkrolikiewicz
     note: "Started: deploy safety without testnet-first promotion first, then the ADR 0011 rework."
+  - date: "2026-10-28"
+    status: active
+    who: stkrolikiewicz
+    note: "Oskar's review of #79: Wants= instead of Requires= on the database units, x402-db-<network>@<environment>, secret files named per network, the database network's cost, ready per network left to PR C, one process's costs in 0038, and status notes in ADR 0012 and 0013."
 ---
 
 # Run one facilitator service for both networks, the network chosen per request
@@ -107,19 +111,31 @@ code assume one process per network. This task reworks both.
    staging environment would then need no rename of a running production: its units, paths,
    volumes and backups.
 2. **A Postgres container per network** (PR A): `postgres-<network>` under
-   `x402-db@<environment>-<network>` (today `x402-db@production-testnet`), as ADR 0012 has it.
+   `x402-db-<network>@<environment>` (today `x402-db-testnet@production`), as ADR 0012 has it.
    One container with both databases would save about 1 GiB and a backup setup, but a Postgres
-   crash or upgrade would take both networks down.
+   crash or upgrade would take both networks down. The facilitator's unit only wants the
+   database units (`Wants=`, not `Requires=`), or one database's restart would restart the
+   facilitator for both networks (Oskar's review of #79).
 3. **One internal database network per environment,** `x402-production-db`, instead of one per
    network: the one facilitator reaches both databases anyway, and each migration service gets
-   only its own network's password.
+   only its own network's password. The cost: once mainnet joins, every migration service
+   reaches every Postgres, and only the password keeps `migrate-mainnet` out of testnet's
+   database.
 4. **OpenBao is its own Compose project,** `x402-openbao`, and the facilitator mounts its
    per-network sockets as external volumes.
 5. **0026's deploy waits for `listed` too,** as ADR 0011 has since 0019 (`05dcfae`); 0026 still
    said `ready` only.
 6. **0038 takes the mainnet questions 0077 opens** (deploy safety, the memory limit, one uptime
-   check for both networks) and drops the mainnet tunnel and the digest check in a mainnet
-   `deploy.sh`.
+   check for both networks, what one process costs a network's restarts and key rotations) and
+   drops the mainnet tunnel and the digest check in a mainnet `deploy.sh`.
+7. **The network is in the database unit's template name,** `x402-db-testnet@production`, not
+   its instance (`x402-db@production-testnet`), so `%i` is the environment as in every other unit
+   and no unit parses it; a template per network (Oskar's review of #79).
+8. **Secret files are named per network now** (`database-url.testnet`, `rpc-urls.testnet`,
+   `postgres-password.testnet`, the AppRole files), so mainnet's files sit beside testnet's in
+   `/run/x402/production/` and nothing is renamed (Oskar's review of #79).
+9. **`ready` is today's one network's lease;** what readiness means with a lease per network is
+   decided with the code in PR C (Oskar's review of #79).
 
 ## Acceptance Criteria
 

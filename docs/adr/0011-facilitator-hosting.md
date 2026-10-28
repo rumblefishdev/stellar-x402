@@ -8,7 +8,7 @@
   bare RPC hosts in error messages), 2026-10-27 (task 0019: reconciliation runs in every
   process, independent of the lease; `/health` reports `listed` beside `ready`, and the deploy
   waits for both) and 2026-10-28 (task 0076: one hostname and one facilitator service for both
-  networks; the sections that run one process per network follow in task 0077)
+  networks)
 - Revised: 2026-10-13. ECS Fargate became the company Hetzner server (task 0039); the first
   version is in git history and task 0014. 2026-10-21: the key moved to OpenBao (ADR 0013), and
   deploys, reboots, backups, alarms and downtime were worked out in the PR #24 review.
@@ -98,8 +98,11 @@ a whole zone, to Cloudflare on the Free plan.
   - `x402-<environment>-edge`: `cloudflared` and the facilitator only. Both reach the internet
     through it: `cloudflared` to Cloudflare, the facilitator to its RPC URLs;
   - `x402-<environment>-db`: `internal: true`, the facilitator, the Postgres containers and the
-    migration services only, with no route out. A migration service gets only its own
-    network's database password.
+    migration services only, with no route out. Only the facilitator and a network's migration
+    service hold that network's database password. Once mainnet joins, every migration service
+    reaches every Postgres, and only the password keeps `migrate-mainnet` out of testnet's
+    database; a network per database would close that, at one more network per database
+    (0077 decision 3).
   - The facilitator never joins the ClickHouse project's `app` network, so it can't reach
     ClickHouse. OpenBao is reached over unix sockets (ADR 0013), not a network.
 - **systemd restarts a facilitator that crashes, not Docker.** Its unit runs Compose in the
@@ -135,7 +138,9 @@ a whole zone, to Cloudflare on the Free plan.
   healthcheck calls it every 10 s.
 - **Ready to settle** (`ready`) means the process holds the lease, every migration it knows is
   applied (0026) and not every RPC endpoint is frozen (0049). Until then, `/settle` answers 503
-  at once instead of hanging.
+  at once instead of hanging. A store per network gives a lease per network: today, with one
+  network, `ready` is its lease, and what readiness means with two (what the deploy, `/health`,
+  the watchdog and 0027's "ready to settle" alarm wait for) is decided with the code in 0077.
   - A process without the lease keeps trying to take it.
   - A process whose lease renewal fails stops new submissions until it holds the lease again.
 - **AD-16 reconciliation doesn't depend on the lease** (0019 decisions 27 and 37). It starts once
@@ -153,22 +158,22 @@ a whole zone, to Cloudflare on the Free plan.
 
 One request or one stop must never outlast the layer in front of it:
 
-| Setting                           | Value              | Why                                                                |
-| --------------------------------- | ------------------ | ------------------------------------------------------------------ |
-| Seller's facilitator client       | 90 s               | `@x402/core`'s `HTTPFacilitatorClient`; started before the request |
-| `/settle` response budget         | 30 s, at most 80 s | well below the seller's 90 s, so our answer reaches it             |
-| `/settle` checks                  | see below          | inside the budget: past it, `…_timeout` and nothing is claimed     |
-| Repeat wait (`SETTLE_TIMEOUT_MS`) | 20 s, ≤ the budget | and never past the repeat's own budget                             |
-| `stop_grace_period`               | 180 s              | sent submissions (≤ 90 s) plus a 90 s margin                       |
-| Cloudflare's response limit       | 100 s              | above the 80 s cap; past it Cloudflare answers 524                 |
-| Node `keepAliveTimeout`           | 125 s              | above `cloudflared`'s idle keep-alive (90 s), or it sees 502s      |
-| Container healthcheck             | 10 s               | liveness only                                                      |
-| `LEASE_TTL_MS`                    | 30 s               | after a crash, a new process waits at most this long               |
-| Wait for `ready` and `listed`     | 120 s              | past it, the deploy rolls back to the previous digest              |
-| Unit `TimeoutStopSec`             | 200 s              | above `stop_grace_period`, so a reboot waits for the drain         |
-| Unit `TimeoutStartSec`            | 60 s               | covers `ExecStartPre` only: credentials and the digest, no pull    |
-| Postgres `stop_grace_period`      | 120 s              | a clean shutdown; the Compose default is 10 s                      |
-| `x402-db@` `TimeoutStopSec`       | 150 s              | above Postgres's 120 s, so a reboot doesn't kill it                |
+| Setting                               | Value              | Why                                                                |
+| ------------------------------------- | ------------------ | ------------------------------------------------------------------ |
+| Seller's facilitator client           | 90 s               | `@x402/core`'s `HTTPFacilitatorClient`; started before the request |
+| `/settle` response budget             | 30 s, at most 80 s | well below the seller's 90 s, so our answer reaches it             |
+| `/settle` checks                      | see below          | inside the budget: past it, `…_timeout` and nothing is claimed     |
+| Repeat wait (`SETTLE_TIMEOUT_MS`)     | 20 s, ≤ the budget | and never past the repeat's own budget                             |
+| `stop_grace_period`                   | 180 s              | sent submissions (≤ 90 s) plus a 90 s margin                       |
+| Cloudflare's response limit           | 100 s              | above the 80 s cap; past it Cloudflare answers 524                 |
+| Node `keepAliveTimeout`               | 125 s              | above `cloudflared`'s idle keep-alive (90 s), or it sees 502s      |
+| Container healthcheck                 | 10 s               | liveness only                                                      |
+| `LEASE_TTL_MS`                        | 30 s               | after a crash, a new process waits at most this long               |
+| Wait for `ready` and `listed`         | 120 s              | past it, the deploy rolls back to the previous digest              |
+| Unit `TimeoutStopSec`                 | 200 s              | above `stop_grace_period`, so a reboot waits for the drain         |
+| Unit `TimeoutStartSec`                | 60 s               | covers `ExecStartPre` only: credentials and the digest, no pull    |
+| Postgres `stop_grace_period`          | 120 s              | a clean shutdown; the Compose default is 10 s                      |
+| `x402-db-<network>@` `TimeoutStopSec` | 150 s              | above Postgres's 120 s, so a reboot doesn't kill it                |
 
 - **Past the budget,** `/settle` answers `settlement_pending` with the hash if one was signed,
   and nothing new is signed after it. If nothing was signed, the record ends and the answer is
@@ -280,11 +285,15 @@ One request or one stop must never outlast the layer in front of it:
   - **`x402-tunnel@<environment>.service` owns `cloudflared`.** It decrypts the tunnel token
     itself, as OpenBao's unit does, and is enabled at boot. `x402@` runs after it, so at a reboot
     the tunnel stops last and answers reach the clients while the facilitator drains.
-  - **`x402-db@<environment>-<network>.service` owns that network's Postgres** (today
-    `x402-db@production-testnet`). It decrypts its own credentials with the same script, since it
-    starts first at boot, and its `TimeoutStopSec` of 150 s is above Postgres's 120 s grace. The
-    facilitator's unit requires every one of them and runs after them, so at a reboot the
-    facilitator drains while the databases are still up. All are enabled at boot.
+  - **`x402-db-<network>@<environment>.service` owns that network's Postgres** (today
+    `x402-db-testnet@production`: the network is in the template's name, a template per network,
+    so `%i` is the environment as in every other unit). It decrypts its own credentials with the
+    same script, since it starts first at boot, and its `TimeoutStopSec` of 150 s is above
+    Postgres's 120 s grace. The facilitator's unit wants every one of them and runs after them
+    (`Wants=` and `After=`, not `Requires=`), so at a reboot the facilitator drains while the
+    databases are still up, and stopping, upgrading or failing to start one network's database
+    never stops or restarts the facilitator: only that network stops settling, once the code
+    serves both (0077). All are enabled at boot.
   - **Every unit that runs a container is `PartOf=docker.service`, runs after it, and runs
     Compose the same way** (`--exit-code-from`, `Restart=on-failure`, the start limit). A
     Docker restart, such as a `docker-ce` upgrade, first stops them through their own
@@ -390,11 +399,15 @@ One request or one stop must never outlast the layer in front of it:
     credentials".
 - **`FACILITATOR_SECRET` stays for local development and tests.** Deployed networks use the OpenBao
   signer instead.
-- **Other secrets are encrypted systemd credentials,** as in ADR 0013: a database password per
-  network, an RPC URL that carries an API key, and the tunnel token.
+- **Other secrets are encrypted systemd credentials,** as in ADR 0013: per network a database
+  password and `RPC_URLS`, which may carry an API key, and per environment the tunnel token.
+  - The files are named per network from the first deploy, so mainnet adds files and renames
+    none: `database-url.<network>` and `rpc-urls.<network>` for the facilitator,
+    `postgres-password.<network>` for each Postgres, `approle-role-id.<network>` and
+    `approle-secret-id.<network>` for the signer (ADR 0013), and one `tunnel-token`.
   - `systemd-creds` keeps them encrypted on disk with the host key. Each unit decrypts the files
     its container reads, with one shared script, to `/run/x402/<environment>/` (tmpfs, mode
-    0700): `x402@` the facilitator's (a database URL per network), each `x402-db@` its
+    0700): `x402@` the facilitator's (a database URL per network), each `x402-db-<network>@` its
     Postgres's password, `x402-tunnel@` the tunnel token, and the deploy unit what the
     migrations need. Compose mounts them as `file:`
     secrets, so they are plain only in memory. Outside swarm those are bind mounts that keep
@@ -408,7 +421,8 @@ One request or one stop must never outlast the layer in front of it:
     find them.
     At boot the unit writes them again before it starts anything.
   - The app reads them from files (`DATABASE_URL_FILE`, `RPC_URLS_FILE` and the AppRole files),
-    a config change in 0026.
+    a config change in 0026, which points them at testnet's; with both networks, 0077 gives each
+    network its own.
   - They never go into the image, the repo or the logs, and never into `environment:`, which
     `docker inspect` shows in plain text.
 - **Rotating the key is an on-chain change.** AD-12 makes the facilitator key the only signer of
@@ -664,7 +678,7 @@ One request or one stop must never outlast the layer in front of it:
 - **0026 builds:**
   - the Dockerfile, the compose files, the deploy script, and the Ansible playbook that puts
     them, the units and the deploy user on the server;
-  - the systemd units: `x402@production`, `x402-db@production-testnet`,
+  - the systemd units: `x402@production`, `x402-db-testnet@production`,
     `x402-deploy@production`, `x402-tunnel@production`, `x402-openbao`, the restart timer and
     the backup timer;
   - the `cloudflared` container, with the tunnel token fetched from Cloudflare into a systemd
@@ -695,7 +709,10 @@ One request or one stop must never outlast the layer in front of it:
   - once every production deploy reaches mainnet: a staging environment ahead of it or
     stricter deploy rules (above), and the facilitator's memory limit with two channel pools;
   - one uptime check, the 99% figure, the zone's rate limit and its analytics then cover both
-    networks at once.
+    networks at once;
+  - what one process costs once both networks run in it: the watchdog's 10 s restart of a hung
+    facilitator, a crash and every deploy cut both networks' submissions in flight, and rotating
+    one network's key (Keys, secrets and access: "stop the service") stops both.
 - **Slack is not a pager.** On mainnet, the alerts that cost money (breaker open, low balance,
   pending settlements) also need a phone or SMS route.
 
