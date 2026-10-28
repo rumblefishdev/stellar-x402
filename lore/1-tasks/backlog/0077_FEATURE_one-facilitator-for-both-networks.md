@@ -19,6 +19,10 @@ history:
       networks, with the client naming the network in the request, not a service per network.
       0076 records the decision; this task reworks the docs and the code that assume one
       process per network.
+  - date: "2026-10-28"
+    status: backlog
+    who: stkrolikiewicz
+    note: "Decided: a database per network."
 ---
 
 # Run one facilitator service for both networks, the network chosen per request
@@ -56,7 +60,8 @@ code assume one process per network. This task reworks both.
 - **`docs/architecture/m1-spine.md`:** :102 (a process serves one network; `/verify` dispatches by
   network instead of rejecting another), :160 (a database per network), :393 (the diagram). AD-12's
   one key per network stays.
-- **ADR 0012:** one database per network or one database with the network in each record.
+- **ADR 0012:** keeps a database per network (decided 2026-10-28, below); it changes only where
+  it says one container per facilitator.
 - **ADR 0013:** the facilitator can no longer be kept from the other network's OpenBao socket,
   since one process holds both. Record the trade-off.
 - **ADR 0004** (:37): reject a payment for another network becomes dispatch by network.
@@ -74,7 +79,16 @@ code assume one process per network. This task reworks both.
   deploy for both networks?
 - One process holding both networks' signing access: accepted for M1, or a reason to keep mainnet
   apart?
-- One database or one per network?
+- Two Postgres containers, as ADR 0012 has today, or one container with both databases? One
+  saves about 1 GiB of the limits and a backup setup; two keep a Postgres crash or upgrade from
+  taking down both networks, which counts against mainnet's 99%.
+
+## Decided
+
+- **A database per network** (Stan, 2026-10-28). The process opens one store per network, beside
+  that network's pool, key and RPC endpoints, so the schema stays as it is: none of the 8 tables
+  in `apps/facilitator/src/adapters/postgres-schema.ts` records a network. A testnet reset wipes
+  only testnet's database, and backups, restores and migrations stay per network.
 
 ## Acceptance Criteria
 
