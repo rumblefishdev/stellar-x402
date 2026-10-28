@@ -1,0 +1,133 @@
+---
+id: "0080"
+title: "Harden the online migration runner before its first real migration"
+type: FEATURE
+status: backlog
+milestone: 1
+related_adr: ["0012"]
+related_tasks: ["0024", "0026", "0067"]
+tags: [facilitator, persistence, deploy, priority-medium, effort-medium, platform]
+links:
+  - ../../../docs/adr/0012-facilitator-state-store.md
+  - ../active/0067_FEATURE_online-migration-runner/README.md
+history:
+  - date: "2026-10-27"
+    status: backlog
+    who: akot
+    note: >
+      Spawned from the review of 0067 (PR #73): M2, m1 and m2, then the BMAD review's patches
+      left out of #73. Nothing is at risk while MIGRATIONS holds no online migration; this task
+      closes before the first one lands.
+---
+
+# Harden the online migration runner before its first real migration
+
+## Summary
+
+0067's runner applies online migrations step by step, but `MIGRATIONS` holds none yet. Three
+gaps from its review matter only once one does: markers that can't tell an edited step from the
+one that ran, an INVALID index a failed build leaves for every write to maintain, and a load in
+AC1's test without the writes that touch the rows a backfill locks. Close them before an online
+migration is added to `MIGRATIONS`.
+
+## Context
+
+- `apps/facilitator/src/adapters/postgres-schema.ts`: a step's marker is `name#<i>`, its index,
+  and nothing checks that the steps behind the markers are the ones that ran.
+  - A migration `[A, B, C]` stopped after B, then edited to `[A, X, B, C]`: the next run skips X,
+    which never ran, and runs B a second time.
+  - A step that fails every time (a wrong `set`, a backfill that leaves rows) fails every deploy
+    at that step, and ADR 0012 forbids the edit that would fix it.
+- `CREATE INDEX CONCURRENTLY` that runs out of its 30 minutes, or fails in its last phase, leaves
+  an INVALID index with `indisready = true`: every write to the table maintains it, and a UNIQUE
+  one enforces itself, until the next deploy drops and rebuilds it.
+- AC1's test (`test/migrate.test.ts`) runs four `reserve` loops only. `commit`, `release` and
+  `prune` write the `spend_reservation_scopes` rows a backfill batch locks: they wait out a batch,
+  up to its 1 s bound, and a batch at a scope's boundary can deadlock with a `commit`. The batch
+  usually loses (its 500 ms `lock_timeout` is below `deadlock_timeout`), but a `commit` that waited
+  more than 0.5 s first is the victim. Not reproduced; from reading the locks.
+
+## Implementation Plan
+
+### Step 1: A marker records its step
+
+Store a hash of each step's definition with its marker. A run whose marked step's hash differs
+from the code stops before any step. Steps after the last marker may change: ADR 0012 says so,
+replacing "a migration that has started anywhere is never edited".
+
+### Step 2: A failed index build drops what it left
+
+When `CREATE INDEX CONCURRENTLY` fails, drop the index it left (`DROP INDEX CONCURRENTLY IF
+EXISTS`) before the error goes up; the next run builds it again.
+
+### Step 3: AC1's load writes what the app writes
+
+Add `commit` and `release` loops to AC1's test load, and check that 0024's commit path retries
+`40P01`. Then run AC1 at 1 000 000 (`MIGRATE_SCALE`) on the runner's final bounds and record it in
+this task's result: #73's last run at 1 M had `reserve` loops only (PR #73 review).
+
+### Step 4: A step says when it starts and why it failed
+
+`runOnline` logs a step only once it succeeds: a 30-minute index build is silent in the deploy's
+journal until it ends, and a failed step reaches it as PostgreSQL's message alone. Log the start,
+and log or wrap the error with the migration, the step and its kind. `lock()` is silent too while
+it waits for another run, up to 30 minutes: log the wait when it starts and then every minute or
+so (PR #73 review), and drop ADR 0011's "until then" note.
+
+### Step 5: A backfill's columns can't be ambiguous
+
+The batch's CTE `b` carries the key columns under their own names, so a `set` or `where` that
+names one without `t.` (`c = length(id)`) fails as ambiguous. Alias them (`k0`, `k1`).
+
+The cursor goes through JavaScript between batches: node-pg reads a `timestamptz` key as a `Date`,
+cut to milliseconds, so a pass over one starts each batch where the last began and never ends
+(PR #73 review: 2,650 batches in 8 s). Today's keys are `text` and `bigint`. Keep the cursor in
+the key's text form (`::text`, cast back in the comparison), and fail a batch that doesn't move
+the cursor forward.
+
+### Step 6: The branches no test reaches
+
+- An index step that meets a valid index without its marker (a run stopped after the build):
+  an unconditional `CREATE INDEX CONCURRENTLY` passes the suite today.
+- The `migration_backfill` progress log every 50 batches.
+- A lock wait that runs out of its 20 attempts fails the run; cheap once `MigrateOptions` can set
+  the attempts.
+
+### Step 7: A rehearsal on testnet
+
+Everything so far ran on a laptop's compose PostgreSQL. Once 0026 runs testnet, and before the
+first online migration lands in `MIGRATIONS`, rehearse one there: grow testnet's database to the
+size the first real migration will meet, run an AC1-like migration through the real
+`x402-deploy@testnet` while `reserve` takes load, and measure `reserve`'s errors, the WAL
+pgBackRest ships, the disk and ClickHouse beside it. Stop one run with `systemctl stop` part way,
+and check the next deploy finishes it from its markers. Check the backfill's length against the
+unit's `TimeoutStartSec`: a cap below the longest step never finishes it.
+
+## Acceptance Criteria
+
+- [ ] A run whose marked step was edited fails before running anything, naming the step; editing
+      a step after the last marker applies the edited step
+- [ ] An index build that fails with an error leaves no index behind; one whose run was killed
+      leaves an INVALID index the next run rebuilds
+- [ ] AC1's test runs `commit` and `release` alongside `reserve`, and fewer than 1% of the calls
+      fail during the migration; a run at 1 000 000 on the final bounds is recorded
+- [ ] A rehearsal on testnet (after 0026) applies an online migration through `x402-deploy@`
+      under load within the 1% budget, a run stopped part way is finished by the next deploy, and
+      the WAL, disk and backfill length against `TimeoutStartSec` are recorded
+- [ ] ADR 0012 states which steps of a started migration may change
+- [ ] A step's start, and its failure with the migration and step named, reach the log
+- [ ] A backfill's `set` and `where` may name a key column without `t.`
+- [ ] A backfill keyed on a `timestamptz` column finishes, and one whose cursor stops moving fails
+- [ ] `migrate.test.ts`'s "holds no online migration until 0080" test is removed
+- [ ] Tests cover the valid-but-unmarked index, the backfill's progress log and running out of
+      lock attempts
+
+## Notes
+
+- BMAD review of #73, 27.10: P6 (unmarked valid index), P7 (step logs), P8 (progress log), P10
+  (ambiguous key columns), P11 (this task's index AC) and W1 (lock attempts) moved here; W2's total
+  cap is ADR 0011's `TimeoutStartSec` on `x402-deploy@` (in 0026); its abort and hotfix
+  procedure and the runbook's headroom check belong to 0038 and 0026.
+- Review findings: PR #73 review, 27.10 (M2, m1, m2). m3 (`57014` is also `pg_cancel_backend`'s
+  code), m4 (`to_regclass` read before `CREATE TABLE IF NOT EXISTS`) and m5 (test gaps) stayed
+  out; pick them up here if cheap.

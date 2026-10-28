@@ -328,8 +328,8 @@ export interface Reconciliation {
   listed(): boolean;
   /** Starts the sweeps; the server already listens, and `/settle` serves beside them. */
   start(): void;
-  /** Stops the sweeps; one under way finishes on its own. */
-  close(): void;
+  /** Stops the sweeps, and settles once a sweep under way has ended: the drain waits for it. */
+  close(): Promise<void>;
 }
 
 /** Between the end of one sweep and the start of the next (decision 27). */
@@ -350,10 +350,12 @@ export function scheduleReconciliation(opts: {
   let closed = false;
   let listed = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let sweeping: Promise<void> | undefined;
   let reconciled!: () => void;
   const done = new Promise<void>((resolve) => (reconciled = resolve));
 
-  const tick = async () => {
+  const tick = () => (sweeping = sweepOnce().finally(() => (sweeping = undefined)));
+  const sweepOnce = async () => {
     try {
       await reconciler.sweep(() => (listed = true));
     } catch (error) {
@@ -369,9 +371,10 @@ export function scheduleReconciliation(opts: {
     reconciled: done,
     listed: () => listed,
     start: () => void tick(),
-    close() {
+    async close() {
       closed = true;
       clearTimeout(timer);
+      await sweeping;
     },
   };
 }

@@ -12,7 +12,7 @@ import { createEd25519Signer, getNetworkPassphrase } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/facilitator";
 import type pg from "pg";
 import { Agent, setGlobalDispatcher } from "undici";
-import { migrate } from "./adapters/postgres-schema.js";
+import { MIGRATIONS, migrate } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
 import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
 import { parseConfig, parseMigrateConfig } from "./config.js";
@@ -32,6 +32,7 @@ import {
   scheduleReconciliation,
   type Reconciliation,
 } from "./settlement/reconcile.js";
+import { createLeaseKeeper } from "./settlement/lease.js";
 import { createRecords } from "./settlement/records.js";
 import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler, type Settle } from "./settlement/settle.js";
 import { failoverUpstream, type EndpointFailure } from "./settlement/upstream-failover.js";
@@ -51,12 +52,32 @@ export interface Started {
   close(): Promise<void>;
 }
 
+/**
+ * How long `close()` waits for the drain after SIGTERM (0025 decision 11): Docker kills the
+ * container at 180 s, which leaves 30 s for the cataloger, the pruner and the pools.
+ */
+export const SHUTDOWN_DEADLINE_MS = 150_000;
+
+/**
+ * How long requests still open after the drain may take before their connections are cut, within
+ * the deadline: a `/verify` on one RPC URL fits, and a stalled client no longer holds the process
+ * past it (0025 decision 23).
+ */
+export const SHUTDOWN_GRACE_MS = 15_000;
+
 /** Starts the HTTP server on the graph `deps`. Tests call it with their own config and stores. */
-export async function start(deps: AppDeps): Promise<Started> {
-  const server = createApp(deps).listen(deps.config.port);
+export async function start(
+  deps: AppDeps,
+  opts: { shutdownDeadlineMs?: number; shutdownGraceMs?: number } = {},
+): Promise<Started> {
+  const { shutdownDeadlineMs = SHUTDOWN_DEADLINE_MS, shutdownGraceMs = SHUTDOWN_GRACE_MS } = opts;
+  let closing = false;
+  const server = createApp({ ...deps, closing: () => closing }).listen(deps.config.port);
   await once(server, "listening");
-  // After listening, so `/health` answers while it runs; `/settle` serves beside it (0019
-  // decision 27).
+  // After listening, so `/verify` and `/supported` answer meanwhile. Sweeps run with or without the lease (0019
+  // decision 37); `/settle` serves beside them (0019 decision 27) once the lease is held, and the
+  // keeper keeps trying when it isn't (0025 decision 1).
+  await deps.lease?.start();
   deps.reconciliation?.start();
   const { port } = server.address() as AddressInfo;
   deps.logger.info("listening", {
@@ -66,9 +87,69 @@ export async function start(deps: AppDeps): Promise<Started> {
   });
   return {
     port,
-    close: () => {
-      deps.reconciliation?.close();
-      return new Promise((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())));
+    // The shutdown (0025): `/settle` answers 503 at once, the pool refuses every call that sent
+    // nothing, and calls already sent run on while the keeper keeps renewing the lease (decision
+    // 10). Once they and their record writes are done nothing can send, so the lease is given up
+    // and the next process takes over within one attempt (decision 23). Until then the server
+    // listens, so a new `/settle` still gets its 503 rather than a refused connection. Then it
+    // closes: open requests get the grace, their connections are cut, and a sweep under way is
+    // waited for, as sweeps need no lease (0019 decision 37). Past the deadline the open
+    // connections are cut, and a drain still under way leaves the lease to its TTL, so a
+    // transaction still unresolved gets that long before another process sends on its channel
+    // (decision 11).
+    close: async () => {
+      closing = true;
+      const begun = Date.now();
+      deps.logger.info("shutdown_started", { network: deps.config.network });
+      // No new sweep starts; one under way is drained like the submissions, so its writes don't
+      // reach the pools `main()` ends next.
+      const swept = deps.reconciliation?.close();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let grace: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<"deadline">((resolve) => {
+        timer = setTimeout(() => resolve("deadline"), shutdownDeadlineMs);
+        timer.unref();
+      });
+      const drained = (async () => {
+        await deps.drain?.();
+        return "drained" as const;
+      })();
+      let closed: Promise<void> | undefined;
+      try {
+        if ((await Promise.race([drained, deadline])) === "drained") {
+          deps.logger.info("shutdown_drained", { ms: Date.now() - begun });
+          await deps.lease?.release();
+          closed = new Promise<void>((resolve, reject) =>
+            server.close((e) => (e ? reject(e) : resolve())),
+          );
+          server.closeIdleConnections();
+          const graced = new Promise<void>((resolve) => {
+            grace = setTimeout(resolve, shutdownGraceMs);
+            grace.unref();
+          });
+          await Promise.race([closed, graced, deadline]);
+          server.closeAllConnections();
+          const done = Promise.all([closed, swept]).then(() => "closed" as const);
+          if ((await Promise.race([done, deadline])) === "closed") return;
+          // Only a sweep is still under way: its record writes may fail once the pools end.
+          deps.logger.warn("shutdown_deadline", { ms: Date.now() - begun, drained: true });
+          return;
+        }
+        deps.logger.warn("shutdown_deadline", { ms: Date.now() - begun, drained: false });
+        server.close();
+        server.closeAllConnections();
+        await deps.lease?.close();
+      } catch (error) {
+        // The server failed to close; if the drain didn't end either, the lease waits out its TTL.
+        await deps.lease?.close();
+        throw error;
+      } finally {
+        clearTimeout(timer);
+        clearTimeout(grace);
+        // Past the deadline the drain may still fail, or the late `server.close()` may.
+        drained.catch(() => {});
+        closed?.catch(() => {});
+      }
     },
   };
 }
@@ -287,8 +368,15 @@ export function buildSettlement(
     metrics: Metrics;
     /** Tests pass the pool's `sleep`. */
     sleep?: (ms: number) => Promise<void>;
+    /** The channel lease's `held()`, checked again before each send (0025). */
+    held?: () => boolean;
   },
-): { settle: Settle; submitter: SettlementSubmitter; reconciliation: Reconciliation } {
+): {
+  settle: Settle;
+  submitter: SettlementSubmitter;
+  reconciliation: Reconciliation;
+  drain: () => Promise<void>;
+} {
   const { logger, metrics } = deps;
   const network = config.network;
   const records = createRecords({ network, store: deps.store, hooks: deps.hooks, logger, metrics });
@@ -302,7 +390,7 @@ export function buildSettlement(
     budgetMs: config.settlement.settleBudgetMs,
   });
   // The only sender of transactions in the service (AD-2). `main()` checks its channels before
-  // it starts; the lease comes with 0025.
+  // it starts, and `/settle` reaches it only while the process holds the lease (0025).
   const submitter = new SettlementSubmitter({
     rpc: deps.rpc,
     networkPassphrase: getNetworkPassphrase(config.network),
@@ -347,9 +435,15 @@ export function buildSettlement(
     settleTimeoutMs: config.settlement.settleTimeoutMs,
     budgetMs: config.settlement.settleBudgetMs,
     records,
+    ...(deps.held && { held: deps.held }),
   });
   const reconciliation = scheduleReconciliation({ reconciler, logger, network });
-  return { settle, submitter, reconciliation };
+  // Closing the pool first refuses every call that sent nothing, so their records close too.
+  const drain = async () => {
+    await submitter.close();
+    await settle.drain();
+  };
+  return { settle, submitter, reconciliation, drain };
 }
 
 /**
@@ -384,7 +478,15 @@ export function compose(
   // they share one ceiling and one bid (AD-10).
   const fees = feeSettings(config.fees, rpc);
   const checks = buildChecks(config, rpc, fees, logger, opts.seams);
-  const { settle, reconciliation } = buildSettlement(config, {
+  // One lease per network's channel set (AD-17): only its holder settles.
+  const lease = createLeaseKeeper({
+    store: stores.settlements,
+    network: config.network,
+    ttlMs: config.settlement.leaseTtlMs,
+    logger,
+    metrics,
+  });
+  const { settle, reconciliation, drain } = buildSettlement(config, {
     rpc,
     fees,
     checks,
@@ -398,6 +500,7 @@ export function compose(
     logger,
     metrics,
     ...(opts.sleep && { sleep: opts.sleep }),
+    held: lease.held,
   });
   return {
     deps: {
@@ -410,6 +513,8 @@ export function compose(
       extensionResponses: cataloger.extensionResponses,
       supported: supportedResponse(config.network, checks.facilitator),
       reconciliation,
+      lease,
+      drain,
     },
     cataloger,
     metrics,
@@ -534,7 +639,7 @@ export async function migrateMain(env: Record<string, string | undefined> = proc
   const logger = jsonLogger("info");
   const pool = createPool(databaseUrl, poolErrorLogger(logger));
   try {
-    const applied = await migrate(pool);
+    const applied = await migrate(pool, Date.now(), MIGRATIONS, { logger });
     logger.info("migrated", { applied });
   } finally {
     await pool.end();

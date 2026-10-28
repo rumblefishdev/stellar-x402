@@ -94,7 +94,9 @@ As a facilitator operator, I want fee spending capped and failing assets or reci
   budgets (0024) and the channel lease (0025) land (rate limits, 0023, and store pruning, 0050,
   already have): the rule after the `STORE` one in `config.ts`, with tests in `config.test.ts`
   and `main.test.ts`. Whichever of the two lands last removes it; the other narrows its message
-  to what is still missing, together with the facilitator README.
+  to what is still missing, together with the facilitator README. *Since 0025 (PR #70, Adam's
+  review):* the lease landed, and its fencing token (0071) took its place, so the rule now waits
+  for budgets (0024) and fencing (0071).
 - From 0050 (Oskar's PR #61 review): **the pruner's `spendWindowMs` must be the longest budget
   window.** `main()` passes `config.spend.windowMs` to `createPruner`, which keeps reservations
   for `max(2 × window, 7 days)`; a budget summing a longer window would lose its oldest spend to

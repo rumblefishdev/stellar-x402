@@ -2,10 +2,11 @@
 id: "0073"
 title: "Tell the payer to sign again only once their auth entry can't land"
 type: FEATURE
-status: backlog
+status: active
+milestone: 1
 related_adr: ["0006"]
 related_tasks: ["0019", "0009"]
-tags: [facilitator, settlement, priority-medium, effort-medium, payments]
+tags: [facilitator, settlement, priority-high, effort-medium, payments]
 links:
   - ../archive/0019_FEATURE_settlement-record-lifecycle.md
 history:
@@ -19,6 +20,15 @@ history:
     status: backlog
     who: okarcz
     note: "Renumbered from 0070, which Karol's catalog badge task also took."
+  - date: "2026-10-28"
+    status: backlog
+    who: okarcz
+    note: >
+      Raised to high: until it is fixed, a payer told to sign again can pay twice.
+  - date: "2026-10-28"
+    status: active
+    who: okarcz
+    note: "Work started."
 ---
 
 # Tell the payer to sign again only once their auth entry can't land
