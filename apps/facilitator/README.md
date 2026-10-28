@@ -67,6 +67,11 @@ Every request counts, a malformed or oversized one too. `/supported` has no limi
   `/discovery/resources` `type` filter scans the whole catalog. `0005_settlement_attempts` adds
   each hash's attempt state and bounds; hashes written before it fall back to the auth entry's
   expiry.
+- An online migration (ADR 0012) commits step by step, so `pnpm migrate` after a stopped or
+  failed run continues from the next step. It logs `migration_step` after each step and
+  `migration_backfill` every 50 backfill batches. A backfill writes about 1.2 GiB of WAL per
+  2 million rows and grows its table by about a third: check the disk's headroom first
+  (ADR 0011).
 
 ## The channel lease
 

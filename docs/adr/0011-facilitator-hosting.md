@@ -19,6 +19,8 @@
   deploy lock, `digest.good`, the units' timeouts, secret file owners, encryption at rest), and
   an Ansible playbook that provisions x402's parts of the server. Round four: Compose's exit
   code, a crash loop at startup, the tunnel token's owner, and the VM left open for mainnet.
+  2026-10-27: a long migration runs in the deploy as an online one, under the deploy unit's
+  60-minute cap (task 0067).
 
 ## Context
 
@@ -250,10 +252,11 @@ One request or one stop must never outlast the layer in front of it:
     `startup_failed`, so the unit crash-loops until its start limit leaves it `failed`.
     `/health` then gives no data at all, so the readiness alarm treats missing data as
     breaching (0027), and the uptime alarm fires too.
-  - Migrating before the stop and that rollback are both safe because `migrate()` applies all
-    pending migrations in one transaction, so a failed run leaves the schema as it was, and
-    expand/contract keeps the older image working on a schema that did move forward. If
-    `lock_timeout` hits, the deploy fails before anything was stopped.
+  - Migrating before the stop and that rollback are both safe: a failed transactional migration
+    leaves the schema as it was, a failed online one leaves the steps it finished, which the next
+    deploy continues from (ADR 0012), and expand/contract keeps the older image working on a
+    schema that did move forward. If a lock wait runs out of retries, the deploy fails before
+    anything was stopped.
   - **`x402@<network>.service` owns the facilitator.** Its `ExecStartPre` decrypts the network's
     credentials (below) and, unless a deploy is running (a marker in `/run/x402/<network>/`,
     which a reboot clears), puts `digest.good` into `digest`, so a reboot during a deploy starts
@@ -438,10 +441,30 @@ One request or one stop must never outlast the layer in front of it:
 - **The migrations** run from the new image before the old facilitator stops, in the deploy unit
   (ADR 0012), so they add nothing to the deploy's downtime. Every migration is expand/contract, so
   the running image, and a rollback to an earlier one, work on the newer schema. A long one, such
-  as an index build on a big table,
-  runs outside the deploy as a planned step (`CREATE INDEX CONCURRENTLY`), so a deploy's
-  migrations stay short. The migration service gets its own bounds, longer than the app pool's
-  10 s statement timeout (0026).
+  as a backfill or an index build on a big table, is an online migration and runs in the deploy
+  too (task 0067):
+  - the migration service's bounds are ADR 0012's;
+  - it logs each step as it ends and every 50 backfill batches, and the deploy lock holds later
+    deploys meanwhile. A step's start and the wait for another run's lock reach the journal only
+    with task 0080, so until then a long index build, `VALIDATE` or that wait is quiet there:
+    read `pg_stat_activity` before stopping a run;
+  - `x402-deploy@` is a oneshot with a `TimeoutStartSec`, the cap on the whole run: cancelling the
+    CI job doesn't stop the unit, so without it a stuck run, waiting up to 30 minutes for another
+    run's lock and up to 30 more on each long step, would hold every later deploy, a hotfix's
+    included, under the `flock`. systemd stops a run past it, the deploy fails before the old
+    facilitator stops, and the next deploy continues the migration from its markers. 0026 sets
+    the cap from testnet's size, 60 minutes to start (AC1 took 4 min 43 s at 1 000 000
+    reservations), between two bounds:
+    - above the longest single step, since a stopped backfill walks its table again and a
+      stopped index build starts over, so a shorter cap never finishes them;
+    - no longer than a hotfix may wait;
+  - a backfill writes about 1.2 GiB of WAL per 2 million rows (a million reservations with the
+    four default scopes is twice that), which pgBackRest ships as each segment closes, and the
+    table grows about a third: check the disk's headroom first;
+  - both networks' databases share the server's disks with the production ClickHouse, so an
+    online migration runs on testnet first, outside mainnet's busy hours and away from 00:00 UTC,
+    when ClickHouse writes the most. Mainnet's ceiling on
+    a migration's length goes to 0038.
 - **No TLS to the database.** The connection stays on the network's `internal` Docker network on
   one host, and anyone who could read it there could read the database files. PostgreSQL uses
   `scram-sha-256` passwords, never `trust`. TLS comes back if the database ever leaves the host.

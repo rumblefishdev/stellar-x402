@@ -136,7 +136,8 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     (`deploy/testnet` only; `v*` tags, required reviewers, "Prevent self-review");
   - `deploy/testnet` is a protected branch: a pull request from `develop` with an approving
     review, and no bypass, admins included;
-  - `x402-deploy@testnet.service` (a oneshot, as root) sets a marker in `/run/x402/testnet/`,
+  - `x402-deploy@testnet.service` (a oneshot, as root, `TimeoutStartSec` 60 min, the cap on a
+    long migration from ADR 0011) sets a marker in `/run/x402/testnet/`,
     decrypts the credentials with `x402@testnet`'s script (the migration needs the database
     password), pulls the new image and runs `migrate-testnet` from it while the old facilitator
     still serves; a failed migration fails the deploy and the old one keeps serving. Then it moves

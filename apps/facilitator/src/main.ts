@@ -12,7 +12,7 @@ import { createEd25519Signer, getNetworkPassphrase } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/facilitator";
 import type pg from "pg";
 import { Agent, setGlobalDispatcher } from "undici";
-import { migrate } from "./adapters/postgres-schema.js";
+import { MIGRATIONS, migrate } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
 import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
 import { parseConfig, parseMigrateConfig } from "./config.js";
@@ -639,7 +639,7 @@ export async function migrateMain(env: Record<string, string | undefined> = proc
   const logger = jsonLogger("info");
   const pool = createPool(databaseUrl, poolErrorLogger(logger));
   try {
-    const applied = await migrate(pool);
+    const applied = await migrate(pool, Date.now(), MIGRATIONS, { logger });
     logger.info("migrated", { applied });
   } finally {
     await pool.end();
