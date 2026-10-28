@@ -154,12 +154,35 @@ describe("lease keeper (0025)", () => {
     expect(b.lease.held()).toBe(true);
   });
 
-  it("releases nothing it doesn't hold, and never rejects when the store fails", async () => {
+  it("gives the lease up after a renewal failed on a store error, which may have left it ours", async () => {
     const store = db.stores().settlements;
-    const releaseLease = vi.spyOn(store, "releaseLease");
+    const a = keeper(store);
+    const b = keeper(store);
+    await a.lease.runOnce();
+    vi.spyOn(store, "renewLease").mockRejectedValueOnce(new Error("store down"));
+    a.clock.now += TTL / 3;
+    await a.lease.runOnce();
+    expect(a.lease.held()).toBe(false);
+    await a.lease.release();
+    // A second process takes it at once, not after the TTL and the margin.
+    b.clock.now = a.clock.now;
+    await b.lease.runOnce();
+    expect(b.lease.held()).toBe(true);
+  });
+
+  it("deletes only its own row when it holds nothing, and never rejects when the store fails", async () => {
+    const store = db.stores().settlements;
+    const holder = keeper(store);
+    await holder.lease.runOnce();
     const idle = keeper(store);
     await idle.lease.release();
-    expect(releaseLease).not.toHaveBeenCalled();
+    // The other process keeps its lease, and an idle release logs nothing.
+    holder.clock.now += TTL / 3;
+    await holder.lease.runOnce();
+    expect(holder.lease.held()).toBe(true);
+    expect(idle.events()).toEqual([]);
+    await holder.lease.release();
+    const releaseLease = vi.spyOn(store, "releaseLease");
     const { lease, events } = keeper(store);
     await lease.runOnce();
     releaseLease.mockRejectedValueOnce(new Error("store down"));
