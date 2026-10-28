@@ -10,14 +10,23 @@ const started = main();
 // server listens, so a signal during startup closes it once it's up. Closing stops new
 // connections; the drain and the lease release follow (0025). Then the process exits: past the
 // drain's deadline, confirmations still under way would otherwise keep it alive until Docker's
-// SIGKILL (decision 11).
+// SIGKILL (decision 11). `close()` is memoized, so a second signal joins the drain under way
+// instead of falling to Node's default and killing the process before the lease is released.
 const stop = () =>
   void started
-    .then((server) => server.close())
-    .catch(() => (process.exitCode = 1))
+    .then(
+      (server) =>
+        server.close().catch((error: unknown) => {
+          // A fresh logger, as for `startup_failed`: it redacts every URL, an RPC URL included.
+          jsonLogger("error").error("shutdown_failed", { error });
+          process.exitCode = 1;
+        }),
+      // A failed start is logged below.
+      () => (process.exitCode = 1),
+    )
     .finally(() => process.exit());
-process.once("SIGTERM", stop);
-process.once("SIGINT", stop);
+process.on("SIGTERM", stop);
+process.on("SIGINT", stop);
 
 started.catch((error: unknown) => {
   // A ConfigError names each bad setting and never echoes a value. `main()` logged any other
