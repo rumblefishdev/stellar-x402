@@ -160,7 +160,8 @@ Every outcome is a 200 with an x402 `SettleResponse`. A 400 is a malformed reque
 from a process without the channel lease (`no_lease`) or one shutting down (`shutting_down`):
 nothing was read or settled, so repeat the same request after `Retry-After`. A call that a
 shutdown reaches after it started settling gets the 200 `settle_exact_stellar_shutting_down`
-below instead: its record is closed, so sign a new payment. A 500 is an error of ours, such as the
+below instead: with no `transaction`, nothing was sent, so repeat the same payment, which the
+next process settles (see "Nothing sent" below). A 500 is an error of ours, such as the
 store failing: repeat the same request. Never sign a new payment because of a 500, since the first
 one may still be settling.
 
@@ -173,12 +174,12 @@ unlocks one response.
 | `settlement_pending`                                 | the hash, or empty      | sent, not final yet; empty: not signed yet, or the store couldn't say                              | repeat the same request (see below), or look the hash up                                  |
 | `settle_exact_stellar_already_settled`               | the hash                | settled; an earlier call already got this payment's success                                        | don't serve again for this payment                                                        |
 | `settle_exact_stellar_nonce_already_used`            | the stored hash, if any | this payer's nonce is already used by another payment, in whatever state                           | refuse: the payment isn't for this request                                                |
-| `settle_exact_stellar_timeout`                       | —                       | the settle budget ran out before anything was signed; nothing was or will be                       | sign a new payment                                                                        |
-| `settle_exact_stellar_interrupted`                   | —                       | the facilitator restarted before anything was signed; nothing was or will be                       | sign a new payment                                                                        |
-| `settle_exact_stellar_shutting_down`                 | an earlier hash, if any | the facilitator was stopping; nothing was applied, and nothing more will be sent                   | sign a new payment                                                                        |
-| `settle_exact_stellar_rpc_unavailable`               | an earlier hash, if any | no RPC endpoint answered (refused, failed or timed out)                                            | sign a new payment and try again later                                                    |
-| `settle_exact_stellar_no_channel_in_time`            | —                       | every channel was busy until the deadline                                                          | sign a new payment and try again later                                                    |
-| `settle_exact_stellar_no_channels`                   | —                       | every channel is out of the pool                                                                   | sign a new payment and try again later                                                    |
+| `settle_exact_stellar_timeout`                       | —                       | the settle budget ran out before anything was signed; nothing was or will be                       | repeat the same payment while `extra.retryable` (see below)                               |
+| `settle_exact_stellar_interrupted`                   | —                       | the facilitator restarted before anything was signed; nothing was or will be                       | repeat the same payment while `extra.retryable` (see below)                               |
+| `settle_exact_stellar_shutting_down`                 | an earlier hash, if any | the facilitator was stopping; nothing was applied, and nothing more will be sent                   | repeat the same payment while `extra.retryable` (see below)                               |
+| `settle_exact_stellar_rpc_unavailable`               | an earlier hash, if any | no RPC endpoint answered (refused, failed or timed out)                                            | repeat the same payment while `extra.retryable` (see below)                               |
+| `settle_exact_stellar_no_channel_in_time`            | —                       | every channel was busy until the deadline                                                          | repeat the same payment while `extra.retryable` (see below)                               |
+| `settle_exact_stellar_no_channels`                   | —                       | every channel is out of the pool                                                                   | repeat the same payment while `extra.retryable` (see below)                               |
 | `settle_exact_stellar_fee_exceeds_maximum`           | an earlier hash, if any | the network fee rose above the facilitator's ceiling                                               | sign a new payment and try again later                                                    |
 | `settle_exact_stellar_signature_expiration_too_soon` | an earlier hash, if any | the auth expires before the pool could land it                                                     | sign a new payment with a longer `maxTimeoutSeconds`                                      |
 | `settle_exact_stellar_simulation_failed`             | an earlier hash, if any | the settlement's simulation failed, e.g. the payer's balance                                       | check the payer, then sign a new payment                                                  |
@@ -195,12 +196,10 @@ unlocks one response.
 "An earlier hash, if any": a refusal after a `txBadSeq` rebuild carries the last stored hash.
 `transaction` is the last stored hash; it may never have reached the network.
 
-A failure with no `transaction`, other than `settlement_pending`, sent nothing. The same payment
-gets the same answer again, so a retry needs a new payment (a new nonce); only
-`settlement_pending` is worth repeating as is. Three exceptions:
+A failure with no `transaction` sent nothing. `settlement_pending` and the "nothing sent" answers
+below are worth repeating as they are. Any other failure gets the same answer again, so a retry
+needs a new payment (a new nonce), except for:
 
-- a `…_timeout` the budget gave before the payment was claimed, during the checks, recorded
-  nothing: the same payment may be sent again as it is, or a new one signed;
 - a refusal from the checks (`invalid_exact_stellar_*`, `invalid_network`) comes before the
   claim and records nothing: the same payment may be sent again, and may succeed later.
   `invalid_exact_stellar_payload_fee_exceeds_maximum` is our own fee estimate above our ceiling,
@@ -214,6 +213,32 @@ gets the same answer again, so a retry needs a new payment (a new nonce); only
   one whose message names none of these, when our RPC is 3 or more ledgers behind the client's;
 - a spend refusal the store couldn't record leaves the payment claimed, so a repeat after the
   budget gets `…_timeout` instead of the spend reason.
+
+**Nothing sent** (task 0073). `…_timeout`, `…_interrupted`, `…_shutting_down`,
+`…_rpc_unavailable`, `…_no_channel_in_time` and `…_no_channels` with no `transaction` mean nothing
+was sent, but the payer's signed auth entry can still land until its expiration ledger, by
+whoever holds the payment. Signing a new payment then could charge the payer twice, so these
+answers carry `extra`:
+
+- `retryable: true` and `expirationLedger`: repeat the same payment, as it is, while the latest
+  ledger is at most `expirationLedger - 2` (the pool needs 2 ledgers left). The facilitator runs
+  the `/verify` checks again and reopens the record, so the payment settles once; a different
+  payment on the same nonce still gets `…_nonce_already_used`. A payment that no longer passes
+  the checks (a balance spent meanwhile) gets their refusal, and the record stays as it was. A
+  `…_timeout` given during the checks, before anything was claimed, is repeated the same way.
+- `retryable: true` when the facilitator couldn't read the latest ledger: repeating the same
+  payment is always safe, but stop once the network is past `expirationLedger`, then sign a new
+  payment.
+- `retryable: false` with 1 ledger left: too late for the facilitator, but the auth entry is
+  valid in its expiration ledger, so whoever holds the payment may still land it. Wait until
+  that ledger has closed, then sign a new payment.
+- `retryable: false` once the expiration ledger has closed: sign a new payment.
+
+The same answer with a `transaction` (an earlier hash) is never reopened: sign a new payment.
+Each reopen is logged as `settlement_reopened` with the earlier reason and counted in
+`settlement_reopened_total` by that `reason`; the record's `reopened` column counts them. While a
+deploy replaces a release from before task 0073, the old process answers these reasons without
+`extra`, as "sign a new payment".
 
 A `pending` record is finished by reconciliation (task 0019): the pool's late result, or a sweep
 that asks the network about each of the record's hashes. A hash the network doesn't know turns

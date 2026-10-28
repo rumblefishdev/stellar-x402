@@ -5,7 +5,7 @@ type: FEATURE
 status: active
 milestone: 1
 related_adr: ["0007"]
-related_tasks: ["0012", "0017", "0009"]
+related_tasks: ["0073", "0012", "0017", "0009"]
 tags: [facilitator, security, fees, priority-high, effort-medium, platform]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -79,6 +79,12 @@ As a facilitator operator, I want fee spending capped and failing assets or reci
     first call's budget ends (0009 decision 46). Across instances (0022) a repeat judges that by
     its own clock, so it may end the record, and run `onFinal`, before the first call's
     `beforeSubmit` reserves. Then the late reserve must be refused, not counted forever.
+  - **A reopened record claims again** (0073 decisions 5, 16). A record closed with nothing
+    sent (`…_timeout`, `…_interrupted`, …) goes back to `claimed` when the identical payload
+    returns while its auth entry is valid, and `beforeSubmit` runs again. The earlier claim's
+    `onFinal` is not awaited, so it may release after the new claim reserves. Key a reservation
+    by the settlement key and the record's `reopened` count (in `BeforeSubmitContext` and on the
+    record), not by the key alone; "refuse a reserve after its release" then holds per claim.
   - Refusal reasons are an `errorReason` sellers see; the README lists "a spend reason" as a
     refusal that ends the payment (sign a new one later).
 - From 0009 (Adam's sixth PR #41 review), **to verify on a Soroban host first**, not a decision:

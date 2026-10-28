@@ -8,7 +8,9 @@
   (task 0019: attempt states, reconciliation sweeps, the outage leftovers), 2026-10-26 (task
   0019: the record version, sweeps every 10 s beside `/settle`) and 2026-10-28 (task 0073: an
   envelope's only bound is the payer's auth expiry, so `…_transaction_expired` comes only once
-  the payment can no longer land under our hash; a fee bump someone else wraps it in is 0087)
+  the payment can no longer land under our hash, a fee bump someone else wraps it in being 0087;
+  a record closed with nothing sent reopens for the identical payload while its auth entry is
+  valid)
 
 ## Context
 
@@ -55,6 +57,20 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
     may still be signed. Both waits also end with the repeat's own budget. A repeat that lost the
     claim began before the first call, so its budget can end first: then it answers
     `settlement_pending` with no hash and leaves the record to the first call.
+  - A record closed `rejected` with nothing sent (no hash, and `…_timeout`, `…_interrupted`,
+    `…_shutting_down`, `…_rpc_unavailable`, `…_no_channel_in_time` or `…_no_channels`) reopens
+    for a repeat with the same fingerprint while the payer's auth entry has at least 2 ledgers
+    left (task 0073). The repeat runs the checks again, then `reopen` moves the record back to
+    `claimed` by compare-and-set, counts it in `reopened` and sets `createdAt` to its own start,
+    so a later repeat counts the new claim's budget; the payment then settles as a first one
+    would. While a repeat can still reopen it, those answers carry `extra.retryable: true` and
+    `extra.expirationLedger`: repeat the same payment rather than sign a new one, which could
+    land beside the old one. Then `retryable` is `false` and the record stays final; with 1
+    ledger left the answer says to wait until the expiration ledger has closed, since the auth
+    entry is valid in it, and only then sign again. An unreadable ledger keeps `retryable: true`.
+    `reopen` adds one to `version`, and the writers of the earlier claim (a repeat ending it by
+    its budget, the sweep's `interrupted` close, the first call's late hash) pass the version or
+    `reopened` count they read, so none of them writes onto the new claim.
   - `success: true` is answered once per record, by compare-and-set on `successAnsweredAt`. Later
     calls get `settle_exact_stellar_already_settled` with the hash. `settlement_pending` doesn't
     count, and a call whose client left before the mark marks nothing.
@@ -92,6 +108,8 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
 - **One owner of the lifecycle.** A single settlement module in `apps/facilitator` writes every
   record change.
   - States only move forward: `claimed → signed → pending → success | failed | rejected | expired`.
+    One written exception: `rejected → claimed` for a record nothing was sent for, reopened by
+    the identical payload (task 0073).
   - Each write is a compare-and-set.
   - A record keeps every hash it was signed with, and can be found by any of them.
   - Each hash keeps its attempt state (`stored → sent | unknown → landed | dead`) and its time

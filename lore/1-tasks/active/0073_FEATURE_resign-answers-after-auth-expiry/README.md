@@ -105,9 +105,9 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
 
 - [x] Given an auth entry that expires more than 66 ledgers ahead (decision 6), when `/verify` or `/settle` checks it, then it is refused with `…_signature_expiration_too_far`, whatever `maxTimeoutSeconds` says
 - [x] Given a sent transaction, when its envelope is built, then it can land until the auth entry's expiration ledger and no earlier bound ends it; reconciliation answers `…_transaction_expired` only once that ledger has passed
-- [ ] Given a payment closed with nothing sent, when the identical payload comes back while its auth entry is valid, then it is settled once; after the expiration ledger the answer is "sign a new payment"; a different payload on the same nonce is still refused
+- [x] Given a payment closed with nothing sent, when the identical payload comes back while its auth entry is valid, then it is settled once; after the expiration ledger the answer is "sign a new payment"; a different payload on the same nonce is still refused
 - [x] Given a transaction sent just before SIGTERM with a 5-minute envelope, when the 180 s grace ends before it is final, then the next process takes the lease and its reconciliation ends the record with the transaction's real outcome (test)
-- [ ] Given the decided rule, when the task ends, then the decision and the options considered are recorded in this task (decisions 1-12 so far, S-sign-again-rule)
+- [ ] Given the decided rule, when the task ends, then the decision and the options considered are recorded in this task (decisions 1-20 so far, S-sign-again-rule)
 
 ## Design Decisions
 
@@ -171,6 +171,48 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
 12. **The drain test covers both outcomes across a deploy** (okarcz, 2026-10-28, PR 2): the
     transaction never lands (the next process ends it `expired` after the ledger bound), and it
     lands while no process holds the lease (`success`).
+13. **A reopen runs the full `/settle` check first** (okarcz, 2026-10-28, PR 3): a record that is
+    `rejected`, has no hash, has an unsent reason and the same fingerprint skips `replay()`, runs
+    the check a first payment runs (simulation, fee, expiry against the latest ledger), then
+    `store.reopen()` moves it to `claimed` in one compare-and-set. The happy path is unchanged;
+    the cost is one simulation on a rare path. Chosen over an expiry-only check (a payment that
+    went bad since would reopen and fail later in the pool) and a stored expiry column.
+14. **A reopen count on the record, plus a log line** (okarcz, 2026-10-28, PR 3): a `reopened`
+    column counts the reopens, and `settlement_reopened` logs the earlier `errorReason`. Chosen
+    over a log line only and a history table.
+15. **The same reason, marked retryable** (okarcz, 2026-10-28, PR 3): an unsent record keeps its
+    reason; while its auth entry is valid the answer adds `extra.retryable: true` and the
+    expiration ledger, with "retry the same payment until ledger N"; after it, "sign a new
+    payment". Chosen over a new `…_submission_retryable` reason and a message-only change.
+16. **The spend release race is left to 0024** (okarcz, 2026-10-28, PR 3): an earlier rejection's
+    late `onFinal` release could delete a reopened call's reservation if both use the settlement
+    key as its id. Nothing reserves yet, so 0024 gets the constraint (an id per claim, e.g. key
+    plus the reopen count) and PR 3 passes the count to the hooks. Chosen over changing the hook
+    contract now and accepting the race.
+17. **One ledger left: wait, then sign again** (okarcz, 2026-10-28, PR 3 review D1): the auth
+    entry is valid in its expiration ledger, so at one ledger left our pool can't use it but the
+    holder can still land it. Three answers: 2 or more left, `retryable: true` (it reopens); 1
+    left, `retryable: false` with "may still land in ledger N: once it has closed, sign a new
+    payment"; none left, "sign a new payment". The message names the last ledger a repeat can
+    still reopen. Chosen over `retryable: true` until the expiry and accepting a ~5 s window.
+18. **An unreadable ledger stays retryable, and the client stops at the expiry** (okarcz,
+    2026-10-28, PR 3 review D2): repeating the same payment is always safe, so the answer keeps
+    `retryable: true`, and the message and README tell the client to stop once the network is
+    past `expirationLedger`, then sign a new payment. Chosen over estimating the ledger from the
+    clock (a wrong estimate could say "sign again" too early) and over `settlement_pending`.
+19. **A generation guard on the reopened claim** (okarcz, 2026-10-28, PR 3 review D3): `reopen()`
+    adds one to `version`; the repeat's `endUnsigned` and the sweep's `interrupted` close pass
+    the version they read; and a call's `addHash` stores only on the claim it made (its
+    `reopened` count). So a waiting repeat, a sweep or, across a lease handover, the first call
+    can't write onto the new claim. Chosen over guarding only the closes and over documenting
+    the risk.
+20. **Other answers that end a payment are out of this task's scope** (okarcz, 2026-10-28, PR 3
+    review D4): refusals after the claim (simulation, fee, spend, `…_record_write_failed`,
+    `unexpected_settle_error`), the re-check's refusal on a reopen, and an unsent reason with an
+    earlier hash still say "sign a new payment" while the old auth entry may land. The task's
+    Context lists the six "nothing sent" answers; the rest go to a backlog task that adds
+    `expirationLedger` and "sign again after ledger N" to every answer that ended a payment
+    that didn't land. Chosen over extending PR 3 and over accepting the risk.
 21. **Only the payer's auth entry, no other address's** (okarcz, 2026-10-29, PR 1 review 2, Adam's
     blocker): the expiry checks read the earliest address-credential entry, so an extra signed
     entry from another account, valid for 60 ledgers, let the payer's own entry pass the cap while
@@ -283,3 +325,67 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
 - **A test whose `submit()` answered `pending` hung after its assertion**: with the pool's no-op
   `sleep` and a ledger that never moves, the background confirmation never yields. The tests let
   ledgers close again after the answer.
+
+### PR 3: an unsent payment reopens for the identical payload
+
+- Store: migration `0006_settlement_reopened` (`reopened integer NOT NULL DEFAULT 0`), the
+  record's `reopened`, and `SettlementStore.reopen(key, fingerprint, reasons, now)`: one `UPDATE`
+  that moves `rejected → claimed` only for the same fingerprint, an unsent reason and no hash,
+  clears `errorReason`, adds one to `reopened` and sets `createdAt` to the reopening call's start.
+  The new `createdAt` matters: a concurrent repeat counts the first call's budget from it, and
+  reconciliation closes a hashless claim `interrupted` by it, so the old time would end the new
+  claim at once. AD-16's exception is written in the port, ADR 0006 and the spine.
+- `settle.ts`: `UNSENT_REASONS` (the six reasons). A read record that `reopenable()` skips
+  `replay()`: past the auth expiry (fewer than 2 ledgers left, or the ledger unreadable) it
+  answers the stored outcome; otherwise it runs the check, and a refusal is answered as is with
+  the record left alone. A passing check calls `reopen()`; one that loses falls back to
+  `claim()`, which conflicts and replays the winner. `settlement_reopened` log line and
+  `settlement_reopened_total`. `beforeSubmit` gets `reopened`.
+- Answers: the outer `settler` adds `extra.retryable` and `extra.expirationLedger` to every
+  unsent answer with no `transaction`, with the message "repeat the same payment, until ledger N"
+  or "sign a new payment". `retryable` is also `true` when the latest ledger can't be read in
+  1 s (`LEDGER_READ_MS`): repeating the same payload is always safe. `SettlerDeps.latestLedger`,
+  wired from the checks' RPC read.
+- Tests (facilitator 528 → 539): the store's reopen, its refusals (fingerprint, reason, hash,
+  state, missing) and ten concurrent reopens; `/settle` reopens and settles once (hook sees
+  `reopened` 0 then 1, then `already_settled`), two concurrent retries reopen once, past the
+  expiry no check and no reopen, an unreadable ledger stays retryable, another payload on the
+  nonce is `nonce_already_used`, a failing re-check leaves the record, a record with a hash or a
+  hook refusal never reopens. Changed: the six reasons' mapping test now expects `extra`; the
+  budget test's retry is now past the expiry (it reopened before). Mutants caught: no expiry
+  pre-check, `createdAt` kept, the hash condition dropped, reopen off, an unreadable ledger not
+  retryable. One survived and is equivalent: dropping `state = 'rejected'`, since only a rejected
+  record carries an unsent reason.
+- Docs: the facilitator README (the six rows and "Nothing sent"), ADR 0006, ADR 0011 (replaces
+  "it is not planned"), the spine's AD-16, and 0024's reservation id per claim (decision 16).
+
+#### PR 3 review
+
+- Four reviewers: 4 decisions (17-20), 7 patches, 3 rejected (`created_at` overwritten, the
+  reopen's compare-and-set not checking the expiry, `claim()` named in the spec where the code
+  has `reopen()`). Report: the local review file for PR 3.
+- Decision 17: `withRetry` gives three answers by ledgers left: 2 or more, `retryable: true`
+  with "while the latest ledger is at most E-2"; 1, `retryable: false` with "may still land in
+  ledger E: once it has closed, sign a new payment"; none, "sign a new payment".
+- Decision 18: an unreadable ledger keeps `retryable: true`, and the message and README say to
+  stop once the network is past `expirationLedger`.
+- Decision 19: `reopen()` adds one to `version`; `endUnsigned` takes the version its caller read
+  (a repeat passes the version of the record it first read, the call its claim's), the sweep's
+  `interrupted` close passes the version it listed, and `addHash` takes the call's claim (its
+  `reopened` count; the row lock re-checks it). A repeat whose close finds a claim reopened since
+  answers `settlement_pending`, "not signed yet".
+- Decision 20: backlog task 0082 (every answer that ended a payment that didn't land names the
+  ledger after which signing again is safe).
+- Patches: one ledger read per call, shared by the reopen and the answer (`validOnce`); the
+  `onFinal` doc (once per claim, key by `reopened`); README (the exceptions' lead, the
+  `…_shutting_down` sentence, the four "nothing sent" cases, the deploy window); a pre-reopen
+  budget answer keeps `key` and `replay`; `settlement_reopened_total` by `reason`; ADR 0006 and
+  0011.
+- Tests (facilitator 539 → 545): the mapping test's reasons written out; a reopen of a record
+  closed `interrupted`; exactly 2 ledgers left answers `retryable: true` and reopens; 1 and 0
+  left; the earlier claim's late hash refused after a reopen, in one process and across two
+  settlers on one store (the first call still within its budget); an unreadable auth entry
+  answers without `extra`; the store's versioned close and claim-bound `addHash` after a
+  reopen. Mutants caught: `>=` to `>` and `<` to `<=` at the floor, no version bump, `addHash`
+  without the claim (store and settle), the repeat closing by its latest read, `interrupted` or
+  `noChannels` dropped from `UNSENT_REASONS`, the one-ledger answer off.
