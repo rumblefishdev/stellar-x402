@@ -63,7 +63,8 @@ EXISTS`) before the error goes up; the next run builds it again.
 ### Step 3: AC1's load writes what the app writes
 
 Add `commit` and `release` loops to AC1's test load, and check that 0024's commit path retries
-`40P01`.
+`40P01`. Then run AC1 at 1 000 000 (`MIGRATE_SCALE`) on the runner's final bounds and record it in
+this task's result: #73's last run at 1 M had `reserve` loops only (PR #73 review).
 
 ### Step 4: A step says when it starts and why it failed
 
@@ -92,6 +93,16 @@ the cursor forward.
 - A lock wait that runs out of its 20 attempts fails the run; cheap once `MigrateOptions` can set
   the attempts.
 
+### Step 7: A rehearsal on testnet
+
+Everything so far ran on a laptop's compose PostgreSQL. Once 0026 runs testnet, and before the
+first online migration lands in `MIGRATIONS`, rehearse one there: grow testnet's database to the
+size the first real migration will meet, run an AC1-like migration through the real
+`x402-deploy@testnet` while `reserve` takes load, and measure `reserve`'s errors, the WAL
+pgBackRest ships, the disk and ClickHouse beside it. Stop one run with `systemctl stop` part way,
+and check the next deploy finishes it from its markers. Check the backfill's length against the
+unit's `TimeoutStartSec`: a cap below the longest step never finishes it.
+
 ## Acceptance Criteria
 
 - [ ] A run whose marked step was edited fails before running anything, naming the step; editing
@@ -99,7 +110,10 @@ the cursor forward.
 - [ ] An index build that fails with an error leaves no index behind; one whose run was killed
       leaves an INVALID index the next run rebuilds
 - [ ] AC1's test runs `commit` and `release` alongside `reserve`, and fewer than 1% of the calls
-      fail during the migration
+      fail during the migration; a run at 1 000 000 on the final bounds is recorded
+- [ ] A rehearsal on testnet (after 0026) applies an online migration through `x402-deploy@`
+      under load within the 1% budget, a run stopped part way is finished by the next deploy, and
+      the WAL, disk and backfill length against `TimeoutStartSec` are recorded
 - [ ] ADR 0012 states which steps of a started migration may change
 - [ ] A step's start, and its failure with the migration and step named, reach the log
 - [ ] A backfill's `set` and `where` may name a key column without `t.`

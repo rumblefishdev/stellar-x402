@@ -102,7 +102,8 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
       automatic rollback, safe.
   - The migration service's bounds, by kind: a transactional group and an online `ALTER` wait at
     most 500 ms for each lock, a quarter of `reserve`'s 2 s, retry `55P03` and `40P01`, and run
-    at most 1 s a statement and 1.5 s in all, lock waits included (`transaction_timeout`), which
+    at most 1 s a statement and 1.5 s in all, lock waits included (`transaction_timeout`, so
+    PostgreSQL 17 or later; the migrations fail on an older one), which
     leaves a `reserve` queued behind them 500 ms. The runner then waits as long as one ran before
     the next locks: the reserves queued behind it hold the `global` scope row, so back to back,
     three steps of 0.9 s failed reserves (task 0067). A backfill batch, 5 000 rows 250 ms apart,
