@@ -165,10 +165,12 @@ const envSchema = z
     /**
      * Most ledgers left before the payer's auth expires (0073 decisions 2, 6). An envelope lives
      * as long as its auth entry, so this bounds how long a channel can wait on one transaction,
-     * and how long a payload stays landable. 60 ledgers is about 5 minutes; the default adds 10%,
-     * as a client that sees faster ledgers signs a 300 s `maxTimeoutSeconds` for up to 63. The
-     * refusal's advice to sellers assumes that 10%. At most 120, about 10 minutes, so a typo
-     * can't reopen days-long signatures (review D3).
+     * and how long a payload stays landable. Upstream's client signs ⌈maxTimeoutSeconds / t⌉
+     * ledgers, with `t` the Horizon average rounded up to whole seconds: 300 s is 60 ledgers at
+     * 5 s, 50 at 6 s and 75 at 4 s. Upstream's own check allows 2 more, so at 5 s at most 62 reach
+     * this one; the rest of 66 is spare. A resource may ask for this less a tenth, at 5 s a
+     * ledger: 300 s at 66 (decision 22). At most 120, about 10 minutes, so a typo can't reopen
+     * days-long signatures (review D3).
      */
     MAX_VALIDITY_LEDGERS: int(3, 120).default("66"),
     /**
