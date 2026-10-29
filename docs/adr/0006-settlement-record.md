@@ -68,9 +68,13 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
     land beside the old one. Then `retryable` is `false` and the record stays final; with 1
     ledger left the answer says to wait until the expiration ledger has closed, since the auth
     entry is valid in it, and only then sign again. An unreadable ledger keeps `retryable: true`.
-    `reopen` adds one to `version`, and the writers of the earlier claim (a repeat ending it by
-    its budget, the sweep's `interrupted` close, the first call's late hash) pass the version or
-    `reopened` count they read, so none of them writes onto the new claim.
+    `reopen` adds one to `version`, and the writers of the earlier claim pass the version or
+    `reopened` count they read, which the store matches in the same statement: a repeat ending
+    it by its budget and the sweep's `interrupted` close pass the version; the first call's late
+    hash, its `finish` and `advance` after `submit()` and its hook refusal's close pass its claim.
+    So none of them writes onto the new claim (0073 decision 24). A record claimed before 0073
+    has `reopened` -1 and never reopens, as its release answered "sign a new payment" (decision
+    25).
   - `success: true` is answered once per record, by compare-and-set on `successAnsweredAt`. Later
     calls get `settle_exact_stellar_already_settled` with the hash. `settlement_pending` doesn't
     count, and a call whose client left before the mark marks nothing.

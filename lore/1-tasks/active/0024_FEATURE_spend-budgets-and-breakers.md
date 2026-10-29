@@ -85,6 +85,10 @@ As a facilitator operator, I want fee spending capped and failing assets or reci
     `onFinal` is not awaited, so it may release after the new claim reserves. Key a reservation
     by the settlement key and the record's `reopened` count (in `BeforeSubmitContext` and on the
     record), not by the key alone; "refuse a reserve after its release" then holds per claim.
+    `onFinal` isn't exactly once per claim (0073 decision 26): a claim's final write whose answer
+    was lost may never get its call if a later claim finishes first, and across processes a
+    claim's call can repeat. So a release must be idempotent, and a reservation `onFinal` never
+    released needs its own expiry.
   - Refusal reasons are an `errorReason` sellers see; the README lists "a spend reason" as a
     refusal that ends the payment (sign a new one later).
 - From 0009 (Adam's sixth PR #41 review), **to verify on a Soroban host first**, not a decision:

@@ -205,7 +205,8 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
     the version they read; and a call's `addHash` stores only on the claim it made (its
     `reopened` count). So a waiting repeat, a sweep or, across a lease handover, the first call
     can't write onto the new claim. Chosen over guarding only the closes and over documenting
-    the risk.
+    the risk. (Amended 2026-10-29, PR 3 review: the first call's other writes weren't guarded
+    until decision 24.)
 20. **Other answers that end a payment are out of this task's scope** (okarcz, 2026-10-28, PR 3
     review D4): refusals after the claim (simulation, fee, spend, `…_record_write_failed`,
     `unexpected_settle_error`), the re-check's refusal on a reopen, and an unsent reason with an
@@ -234,6 +235,29 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
 23. **The same replay after `invalid_…_fee_exceeds_maximum` goes to 0086** (okarcz, 2026-10-29,
     PR 1 review 2): on develop already, and decision 22 can't close it, since a fee isn't in the
     requirements. Chosen over fixing it in this PR with stored refusals.
+24. **Every write of a call is guarded by its claim, in the store's statement** (okarcz,
+    2026-10-29, PR 3 review, the blocker Stan and Adam found): the first call's `finish` and
+    `advance` after `submit()` and its hook refusal's close moved whatever record they found, so
+    after a reopen the first call's late `SignedHookError` ended the new claim `rejected` while
+    its transaction could land (a double payment), and ran `onFinal` on it. `transition` takes
+    the claim's `reopened` count and matches it in the same `UPDATE`; `advance` and `finish` take
+    a guard (`version`, `claim`), and every write of a call passes its claim. Chosen over a read
+    before each write (Stan's alternative: a reopen between the read and the write still lets it
+    land).
+25. **Records claimed before 0073 never reopen** (okarcz, 2026-10-29, PR 3 review, Adam's
+    deploy window): the release before 0073 answered "sign a new payment", so reopening its
+    records after the deploy let the old payment land beside a new one. The migration's default
+    is -1, which the rows already there and the old release's inserts during the deploy get;
+    `claim()` writes 0. `reopen()` and the `retryable` answer need `reopened` ≥ 0, so such a
+    record answers as that release did. Chosen over accepting the window in writing.
+26. **`onFinal` isn't promised once per claim** (okarcz, 2026-10-29, PR 3 review): `unconfirmed`
+    is keyed by key alone, so a claim's lost final write may never get its hook once a later
+    claim finishes, and across processes a claim's hook can repeat. `hooks.ts` says so, and
+    0024 gets "idempotent release, and an expiry for a reservation never released". Chosen over
+    keying `unconfirmed` by key and claim (one process only; 0024 needs idempotency anyway).
+27. **#89 keeps migration 0006; ours is `0007_settlement_reopened`, #92's `0008_lease_token`**
+    (okarcz, 2026-10-29, PR 3 review): #89 is one PR and likely merges first; ours is applied
+    nowhere shared, so renaming it is free. Chosen over #89 renumbering and over leaving it open.
 
 ## Implementation Notes
 
@@ -328,7 +352,32 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
 
 ### PR 3: an unsent payment reopens for the identical payload
 
-- Store: migration `0006_settlement_reopened` (`reopened integer NOT NULL DEFAULT 0`), the
+- **PR 3 review (Stan, Adam; #86), on the branch rebased onto the fixed #85:** decisions 24-27,
+  decision 19 amended. Code: `transition(…, expectedVersion?, claim?)` matches `reopened` in the
+  `UPDATE`; `records.ts` `WriteGuard` (`version`, `claim`) on `advance` and `finish`; the call's
+  writes in `settle.ts` pass `{ claim: claimed.reopened }`, the hook refusal its claim;
+  migration `0007_settlement_reopened` defaults to -1, `claim()` writes 0, `reopen()` and
+  `reopenable()` need ≥ 0, a replay of a -1 record carries `claimedBefore0073` and no `retryable`;
+  `validity()` reads the payer's own entry (`payerExpiration`, `transferFrom`). Docs: README
+  (the shutdown step, the deploy and rollback paragraph, the migration list), ADR 0011 (the
+  budget's `…_timeout`, the deploy window and rollback), ADR 0006 (every writer named),
+  `hooks.ts`, 0024's constraint.
+- PR 3 review tests (facilitator 549 → 558): the fake pool's late signing rejects `submit()`
+  with `SignedHookError` as the real one does; the earlier claim's late refusal leaves a
+  reopened claim alone, signed and not yet signed (a repeat with its own budget); a record
+  claimed before 0073 (-1) doesn't reopen, isn't re-checked and has no `retryable`; an older
+  release's insert gets -1 on PostgreSQL; `transition` with an earlier claim fails (contract).
+  Adam's six: `main.ts`'s `latestLedger` wiring (`settle-pool.test.ts`, its own nonce, 0084's
+  leak), the sweep's versioned `interrupted` close, `endUnsigned`'s version and the "not signed
+  yet" answer after it, the 1 s ledger read bound, `extra` on a `…_timeout` before the claim.
+  Changed: the old-schema read test inserts its row as that release did (`claim()` now writes
+  `reopened`); a `transition` assertion gets the claim; the one-ledger-left test's name and
+  comment (Adam's nit). Mutants caught: no claim on the call's writes (3 tests), the claim
+  ignored by `transition`, the marker off in `reopenable()`, in `reopen()`'s SQL and on the
+  answer, each of the six lines Adam named.
+
+- Store: migration `0006_settlement_reopened` (`reopened integer NOT NULL DEFAULT 0`; since the
+  review `0007_…` with `DEFAULT -1`, decisions 25 and 27), the
   record's `reopened`, and `SettlementStore.reopen(key, fingerprint, reasons, now)`: one `UPDATE`
   that moves `rejected → claimed` only for the same fingerprint, an unsent reason and no hash,
   clears `errorReason`, adds one to `reopened` and sets `createdAt` to the reopening call's start.
