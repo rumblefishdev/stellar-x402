@@ -72,8 +72,8 @@ const contentHash = (resource: Omit<DiscoveryResource, "lastUpdated">) =>
  * `SettlementHooks`. The header comes from the payment's copy alone, synchronously, before the
  * settle response. After it, a listing is written only from the seller's own unpaid 402: the copy
  * just decides whether to ask, when it differs from the stored listing and a budget allows.
- * Every attempt is a row in `attempts`. Nothing here ever throws into `/settle` or compiles a
- * seller schema.
+ * Every attempt to change a listing is a row in `attempts`. Nothing here ever throws into
+ * `/settle` or compiles a seller schema.
  */
 export function createCataloger({
   store,
@@ -133,7 +133,10 @@ export function createCataloger({
     }
   }
 
-  /** Counts, logs and records how an attempt ended. A failed record write is logged, not thrown. */
+  /**
+   * Counts, logs and records how an attempt ended; an unchanged copy is counted only. A failed
+   * record write is logged, not thrown.
+   */
   async function finish(
     attempt: CatalogAttempt,
     record: SettlementRecord,
@@ -164,6 +167,8 @@ export function createCataloger({
       )
         logger.info("catalog_rejected", fields);
     });
+    // A copy equal to the stored listing tried to change nothing: counted, not a row.
+    if (outcome === "unchanged") return;
     try {
       await attempts.record({
         ...attempt,

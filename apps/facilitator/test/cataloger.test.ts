@@ -192,9 +192,9 @@ describe("cataloger", () => {
     clock.now += MINUTE;
     await cataloger.onSuccess(changed, "settle");
     expect(seller.requests).toHaveLength(2);
+    // An unchanged copy is counted only: it tried to change nothing.
     expect(await attempts()).toEqual([
       { stage: "seller", outcome: "refreshed", reason: "inserted" },
-      { stage: "payment", outcome: "unchanged", reason: null },
       { stage: "payment", outcome: "over_budget", reason: "key" },
       { stage: "seller", outcome: "refreshed", reason: "updated" },
     ]);
@@ -326,14 +326,13 @@ describe("cataloger", () => {
     const { rows } = await db.pool.query<{ outcome: string; copy: unknown; answer: unknown }>(
       `SELECT outcome, copy, answer FROM catalog_attempts ORDER BY id`,
     );
+    // The second copy equals the stored listing: no row.
     expect(rows).toMatchObject([
       {
         outcome: "refreshed",
         copy: { description: "Pwned" },
         answer: { resource: { description: DESCRIPTION } },
       },
-      // The copy equals the stored listing: nothing to compare, nothing kept.
-      { outcome: "unchanged", copy: null, answer: null },
     ]);
   });
 

@@ -82,9 +82,13 @@ export function listingFromSeller(
   if (!result) return { ok: false, reason: "no_listing" };
   if (!result.ok) return result;
   const { key, keyVersion, resource } = normalize(result, first!);
+  const listed = { ...resource, accepts: offers.offers };
+  const bytes = serializedBytes(listed);
+  if (bytes === undefined || bytes > LIMITS.listingBytes)
+    return { ok: false, reason: "too_large", detail: "listing", bytes };
   return {
     ok: true,
-    entry: { key, keyVersion, resource: { ...resource, accepts: offers.offers } },
+    entry: { key, keyVersion, resource: listed },
     droppedFields: offers.droppedFields,
     routeTemplateIgnored: result.routeTemplateIgnored,
   };

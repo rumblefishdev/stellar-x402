@@ -178,6 +178,19 @@ describe("a listing from the seller's 402 (0063 row 1)", () => {
       listingFromSeller(answer({ accepts: [{ ...offer, payTo: "GOTHER" }] }), { url, ...key }),
     ).toMatchObject({ ok: false, reason: "other_pay_to" });
   });
+
+  it("refuses a listing over 16 KiB as a whole, though each field is within its limit", () => {
+    const withExample = (size: number) =>
+      answer({
+        extensions: {
+          bazaar: { info: { ...bazaar.info, output: { type: "json", example: "x".repeat(size) } } },
+        },
+      });
+    expect(listingFromSeller(withExample(1024), { url, ...key })).toMatchObject({ ok: true });
+    const result = listingFromSeller(withExample(LIMITS.listingBytes), { url, ...key });
+    expect(result).toMatchObject({ ok: false, reason: "too_large", detail: "listing" });
+    expect(result.ok === false && result.bytes).toBeGreaterThan(LIMITS.listingBytes);
+  });
 });
 
 describe("whether a payment's copy matches the stored listing (0063 row 2)", () => {
