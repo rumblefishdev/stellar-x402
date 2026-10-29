@@ -1,7 +1,7 @@
 # Threat model
 
-Not written yet, except for the `upto` contract, `/verify` RPC failover and facilitator key
-sections below. Planned sections: assets (fee budget, catalog integrity), fee griefing via failed
+Not written yet, except for the `upto` contract, `/verify` RPC failover, auth-entry expiry and
+facilitator key sections below. Planned sections: assets (fee budget, catalog integrity), fee griefing via failed
 transactions, auth-entry validation, SSRF in Bazaar metadata, API key abuse.
 
 ## `upto` contract
@@ -268,6 +268,36 @@ Scope: upstream verify's failover across `RPC_URLS` (spine AD-3, task 0045).
 - **Residual risk:** A seller that serves on `/verify`'s answer alone, without `/settle`, can serve
   a payment that never settles. For `upto` (0015) `/verify` carries more weight, so its rules must
   not rely on a single RPC's view.
+
+## Auth-entry expiry
+
+Scope: the `exact` payer's auth entry and how long it stays landable (spine AD-6, AD-22, task 0073).
+
+### Threats
+
+#### An extra auth entry hides the payer's expiry
+
+- **Attack:** A seller adds a second signed auth entry from an account it controls, valid for 60
+  ledgers, next to the payer's entry signed for days. Upstream accepts it, and an expiry check
+  that reads the earliest entry sees 60, so the payer's signature stays landable for days, and a
+  "sign a new payment" answer given once the extra entry expires invites a second payment.
+- **Mitigation:** `/verify` and `/settle` refuse any address-credential entry that isn't the
+  payer's (`…_payer_auth_entries`, 0073 decision 21), so every expiry the facilitator reads is
+  the payer's.
+- **Residual risk:** None known.
+
+#### A refused payment settles after its payer signed again
+
+- **Attack:** A payment P1 is refused before the claim, which records nothing. The seller has its
+  payer sign P2, which settles. P1 is then sent again, by a seller retrying with backoff or by
+  anyone holding it, once the reason it was refused no longer holds, and settles too.
+- **Mitigation:** A resource asking for more than the cap fits is refused on its
+  `maxTimeoutSeconds`, which doesn't change over time, so the same request stays refused (0073
+  decision 22).
+- **Residual risk:** A sender who edits `maxTimeoutSeconds` gets P1 through; it holds P1, so it
+  could submit it on chain without us anyway. A 300 s payment signed at 4 s ledgers is refused by
+  the ledger gap and can pass later. `invalid_exact_stellar_payload_fee_exceeds_maximum` has the
+  same path once fees drop (0085).
 
 ## Facilitator key
 
