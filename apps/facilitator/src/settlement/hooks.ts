@@ -58,10 +58,12 @@ export interface SettlementHooks {
   /**
    * Runs once each time a record turns final, in any final state, after `beforeSubmit` allowed it
    * or didn't answer within the budget: settles or releases the spend reservation, which may then
-   * not exist, and feeds the breakers (AD-18). A reopened record (0073) turns final again, so it
-   * runs once per claim: key what it settles by `record.key` and `record.reopened`. Its errors never
-   * reach the caller and never change the settle outcome; `/settle` doesn't wait for it. The
-   * settlement module logs and counts them.
+   * not exist, and feeds the breakers (AD-18). A reopened record (0073) turns final again, so key
+   * what it settles by `record.key` and `record.reopened`. Not exactly once per claim: a claim's
+   * final write whose answer was lost may never get its call when a later claim of the record
+   * finishes first, and across processes a claim's call can repeat, so it must be idempotent
+   * (0073 decision 26, a constraint of 0024). Its errors never reach the caller and never change
+   * the settle outcome; `/settle` doesn't wait for it. The settlement module logs and counts them.
    */
   onFinal(record: SettlementRecord, origin: SettlementOrigin): Promise<void>;
   /**

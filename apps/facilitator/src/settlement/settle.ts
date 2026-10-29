@@ -40,7 +40,7 @@ import {
 import {
   PAYER_AUTH_REASON,
   UNSUPPORTED_CREDENTIAL_REASON,
-  authExpiration,
+  payerExpiration,
   payerNonce,
   type Check,
   type Verified,
@@ -201,6 +201,11 @@ export interface Settled {
   key?: SettlementKey;
   /** Answered from an existing record, not by the call that claimed it. */
   replay?: boolean;
+  /**
+   * Answered from a record claimed before 0073 (`reopened` -1), which never reopens: its answer
+   * stays "sign a new payment", with no `extra.retryable` (0073 decision 25).
+   */
+  claimedBefore0073?: boolean;
   /** The record behind a `success` answer, for the `EXTENSION-RESPONSES` header (AD-8). */
   record?: SettlementRecord;
   /**
@@ -316,22 +321,24 @@ export function createSettler(deps: SettlerDeps): Settle & {
   };
 
   /**
-   * How many ledgers the payload's auth entry has left, with its expiration ledger: `left` is
-   * unset when the latest ledger couldn't be read in time. `undefined` for a payload whose auth
-   * entries can't be read.
+   * How many ledgers the payer's auth entry has left, with its expiration ledger: `left` is unset
+   * when the latest ledger couldn't be read in time. `undefined` for a payload without exactly one
+   * readable payer entry. The payer's, not the earliest: a record stored before 0073 decision 21
+   * may carry another address's entry that expires sooner.
    */
   const validity = async (payload: PaymentPayload): Promise<Validity | undefined> => {
-    let expiration: number;
+    let expiration: number | undefined;
     try {
-      expiration = authExpiration(
-        new Transaction(
-          (payload.payload as { transaction: string }).transaction,
-          getNetworkPassphrase(network),
-        ),
+      const transaction = new Transaction(
+        (payload.payload as { transaction: string }).transaction,
+        getNetworkPassphrase(network),
       );
+      const payer = transferFrom(transaction);
+      expiration = payer === undefined ? undefined : payerExpiration(transaction, payer);
     } catch {
       return undefined;
     }
+    if (expiration === undefined) return undefined;
     try {
       return {
         expiration,
@@ -355,7 +362,12 @@ export function createSettler(deps: SettlerDeps): Settle & {
     validOnce: () => Promise<Validity | undefined>,
   ): Promise<Settled> => {
     const { response } = settled;
-    if (response.success || response.transaction || !UNSENT.has(response.errorReason ?? ""))
+    if (
+      response.success ||
+      response.transaction ||
+      settled.claimedBefore0073 ||
+      !UNSENT.has(response.errorReason ?? "")
+    )
       return settled;
     const valid = await validOnce();
     if (!valid) return settled;
@@ -504,6 +516,9 @@ export function createSettler(deps: SettlerDeps): Settle & {
     fallback?: Omit<Settled, "key">;
   }> => {
     const { key } = claimed;
+    // Every write of this call lands only on its own claim: once the budget closed the record and
+    // a repeat reopened it, a late result of this call is the earlier claim's (0073 decision 24).
+    const own = { claim: claimed.reopened };
     const operation = verified.transaction.operations[0] as Operation.InvokeHostFunction;
     const contractCall = { func: operation.func, auth: operation.auth ?? [] };
     // Stop waiting for a channel at the budget, or once the auth has (about) expired.
@@ -571,7 +586,8 @@ export function createSettler(deps: SettlerDeps): Settle & {
           });
           metrics.increment("settlement_uncertain_total");
           return {
-            record: (await advance(key, { state: "pending", attempts })) ?? (await store.get(key)),
+            record:
+              (await advance(key, { state: "pending", attempts }, own)) ?? (await store.get(key)),
             won: false,
             origin: call.origin,
           };
@@ -582,7 +598,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
         }
         // The answer is the same fixed reason, and the client needs a new payment.
         flagDrift(key, errorReason, "pool");
-        return await finish(key, { state: "rejected", errorReason, attempts }, call.origin);
+        return await finish(key, { state: "rejected", errorReason, attempts }, call.origin, own);
       }
       const fields = {
         channel: result.channel,
@@ -592,11 +608,12 @@ export function createSettler(deps: SettlerDeps): Settle & {
       };
       switch (result.status) {
         case "success":
-          return await finish(key, { state: "success", ...fields }, call.origin);
+          return await finish(key, { state: "success", ...fields }, call.origin, own);
         case "pending":
           // The pool keeps confirming; its `resolved` event finishes the record (0019).
           return {
-            record: (await advance(key, { state: "pending", ...fields })) ?? (await store.get(key)),
+            record:
+              (await advance(key, { state: "pending", ...fields }, own)) ?? (await store.get(key)),
             won: false,
             origin: call.origin,
           };
@@ -605,6 +622,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
             key,
             { state: result.status, errorReason: SETTLE_REASONS[result.status], ...fields },
             call.origin,
+            own,
           );
       }
     } catch (error) {
@@ -750,7 +768,8 @@ export function createSettler(deps: SettlerDeps): Settle & {
       }
       record = ended;
     }
-    return respond(record, signal, { replay: true });
+    const settled = await respond(record, signal, { replay: true });
+    return record.reopened < 0 ? { ...settled, claimedBefore0073: true } : settled;
   };
 
   const settle = async (
@@ -894,7 +913,11 @@ export function createSettler(deps: SettlerDeps): Settle & {
       // stays `claimed` with no hash, and a repeat after the budget ends it with `…_timeout`.
       try {
         await bounded(
-          advance(key, { state: "rejected", errorReason: verdictOfHook.errorReason }),
+          advance(
+            key,
+            { state: "rejected", errorReason: verdictOfHook.errorReason },
+            { claim: claim.record.reopened },
+          ),
           Math.max(left(), storeGraceMs),
         );
       } catch (error) {
@@ -982,8 +1005,18 @@ const LEDGER_READ_MS = 1_000;
  * Whether a repeat with `fingerprint` may reopen `record` (0073 decision 13): the same payment,
  * closed `rejected` with one of {@link UNSENT_REASONS} and no hash, so nothing was ever sent.
  */
+/** The `from` of the payload's `transfer` call; throws on a payload that isn't one. */
+function transferFrom(transaction: Transaction): string | undefined {
+  const operation = transaction.operations[0];
+  if (operation?.type !== "invokeHostFunction") return undefined;
+  const from: unknown = scValToNative(operation.func.invokeContract().args()[0]!);
+  return typeof from === "string" ? from : undefined;
+}
+
+/** A record claimed before 0073 (`reopened` -1) never reopens (0073 decision 25). */
 function reopenable(record: SettlementRecord, fingerprint: string): boolean {
   return (
+    record.reopened >= 0 &&
     record.state === "rejected" &&
     record.fingerprint === fingerprint &&
     record.hashes.length === 0 &&
@@ -1050,10 +1083,8 @@ export function keyOf(payload: PaymentPayload, network: StellarNetwork): Settlem
       (payload.payload as { transaction: string }).transaction,
       getNetworkPassphrase(network),
     );
-    const operation = transaction.operations[0];
-    if (operation?.type !== "invokeHostFunction") return undefined;
-    const from: unknown = scValToNative(operation.func.invokeContract().args()[0]!);
-    if (typeof from !== "string") return undefined;
+    const from = transferFrom(transaction);
+    if (from === undefined) return undefined;
     const nonce = payerNonce({ transaction, payer: from });
     return nonce === undefined ? undefined : `${network}:${from}:${nonce}`;
   } catch {

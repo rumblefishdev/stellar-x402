@@ -685,8 +685,38 @@ describe("PostgreSQL stores", () => {
     }
   });
 
+  it("never reopens a record a release before 0073 inserted after the migration (0073 decision 25)", async () => {
+    // During the deploy the old release still runs on the migrated schema: its inserts leave
+    // `reopened` out, so they get the column's default and stay closed for good.
+    const { settlements } = await stores();
+    const s = settlement("1");
+    await pool.query(
+      `INSERT INTO settlements (key, network, payer, nonce, fingerprint, state, payment_payload,
+         payment_requirements, created_at, updated_at, error_reason)
+       VALUES ($1, $2, $3, $4, $5, 'rejected', $6, $7, $8, $8, 'unsent')`,
+      [
+        s.key,
+        s.network,
+        s.payer,
+        s.nonce,
+        s.fingerprint,
+        JSON.stringify(s.paymentPayload),
+        JSON.stringify(s.paymentRequirements),
+        s.createdAt,
+      ],
+    );
+    expect(await settlements.get(s.key)).toMatchObject({ state: "rejected", reopened: -1 });
+    expect(await settlements.reopen(s.key, s.fingerprint, ["unsent"], 5_000)).toBeUndefined();
+    // This release's own claims start at 0, and reopen.
+    const t = settlement("2");
+    await settlements.claim(t);
+    expect((await settlements.get(t.key))?.reopened).toBe(0);
+  });
+
   it("reads records on a database `0002_success_answered` hasn't reached", async () => {
-    // A release started before `pnpm migrate`: `SELECT s.*` has no `success_answered_at`.
+    // A release started before `pnpm migrate`: `SELECT s.*` has no `success_answered_at`. The
+    // record is written as that schema's release wrote it: this one's `claim()` sets `reopened`,
+    // which needs `0007_settlement_reopened`.
     const fresh = `${schema}_0001`;
     await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
     await pool.query(`CREATE SCHEMA ${fresh}`);
@@ -695,8 +725,25 @@ describe("PostgreSQL stores", () => {
       expect(await migrate(old, 0, MIGRATIONS.slice(0, 1))).toEqual(["0001_init"]);
       const { settlements } = postgresStores(old);
       const s = settlement("1");
-      await settlements.claim(s);
-      expect(await settlements.get(s.key)).not.toHaveProperty("successAnsweredAt");
+      await old.query(
+        `INSERT INTO settlements (key, network, payer, nonce, fingerprint, state, payment_payload,
+           payment_requirements, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, 'claimed', $6, $7, $8, $8)`,
+        [
+          s.key,
+          s.network,
+          s.payer,
+          s.nonce,
+          s.fingerprint,
+          JSON.stringify(s.paymentPayload),
+          JSON.stringify(s.paymentRequirements),
+          s.createdAt,
+        ],
+      );
+      const record = await settlements.get(s.key);
+      expect(record).not.toHaveProperty("successAnsweredAt");
+      // Without the column nothing reopens, as for a record claimed before 0073.
+      expect(record?.reopened).toBe(-1);
     } finally {
       await old.end();
       await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
@@ -726,7 +773,7 @@ describe("PostgreSQL stores", () => {
           "0003_catalog_type_seq",
           "0004_spend_window",
           "0005_settlement_attempts",
-          "0006_settlement_reopened",
+          "0007_settlement_reopened",
         ]);
         expect(await typeIndex(old), built).toBe(1);
       } finally {
@@ -751,7 +798,7 @@ describe("PostgreSQL stores", () => {
       expect(await migrate(old)).toEqual([
         "0004_spend_window",
         "0005_settlement_attempts",
-        "0006_settlement_reopened",
+        "0007_settlement_reopened",
       ]);
       const { rows } = await old.query(
         "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",

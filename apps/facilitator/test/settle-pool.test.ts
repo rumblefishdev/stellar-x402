@@ -87,8 +87,12 @@ class PaymentRpc extends FakeRpc {
 }
 
 /** A `transfer` from the payer, with its one auth entry valid to `expiration`. */
-function payload(expiration: number, extensions?: Record<string, unknown>): PaymentPayload {
-  return transferPayload({ payer, payTo, requirements }, expiration, extensions);
+function payload(
+  expiration: number,
+  extensions?: Record<string, unknown>,
+  nonce?: string,
+): PaymentPayload {
+  return transferPayload({ payer, payTo, requirements }, expiration, extensions, nonce);
 }
 
 /**
@@ -431,6 +435,30 @@ describe("main()'s pool events (0019)", () => {
       state: "rejected",
       errorReason: SETTLE_REASONS.shuttingDown,
       hashes: [],
+    });
+  });
+
+  it("reads the answer's ledger from the checks' RPC: one ledger left says to wait, not repeat (0073)", async () => {
+    // The retry answer asks the same shared client the checks read; at one ledger left the pool
+    // can't use the auth entry, so `retryable` is false while the entry may still land.
+    const { settle, fake, drain } = setup();
+    fake.accountDelayMs = 200;
+    const expiration = fake.ledger + 30;
+    // A nonce of its own: a call an earlier test left running writes onto nonce 7's record (0084).
+    const pay = payload(expiration, undefined, "8");
+    const settling = settle(pay, requirements);
+    await vi.waitFor(() => expect(fake.accountReads).toBeGreaterThan(0));
+    await drain();
+    expect((await settling).response).toMatchObject({
+      errorReason: SETTLE_REASONS.shuttingDown,
+      extra: { retryable: true, expirationLedger: expiration },
+    });
+    // The next read closes a ledger: it answers `expiration - 1`.
+    fake.ledger = expiration - 2;
+    expect((await settle(pay, requirements)).response).toMatchObject({
+      errorReason: SETTLE_REASONS.shuttingDown,
+      errorMessage: expect.stringContaining(`may still land in ledger ${expiration}`),
+      extra: { retryable: false, expirationLedger: expiration },
     });
   });
 

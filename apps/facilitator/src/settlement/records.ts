@@ -21,6 +21,15 @@ export interface RecordsDeps {
   now?: () => number;
 }
 
+/**
+ * What a write must still find: the `version` its writer read (no hash appended since), and the
+ * `reopened` count of its writer's `claim` (not reopened since, 0073 decision 24).
+ */
+export interface WriteGuard {
+  version?: number;
+  claim?: number;
+}
+
 export const isFinalRecord = (record: SettlementRecord) =>
   FINAL_SETTLEMENT_STATES.includes(record.state);
 
@@ -65,20 +74,24 @@ export function createRecords(deps: RecordsDeps) {
 
   /**
    * Moves a record forward from whatever state it is in now. `undefined` means another writer got
-   * there first, the record is already final, or, with `expectedVersion`, a hash was appended
-   * since the caller read it. `update.attempts` are written either way: they say what the network
+   * there first, the record is already final, or the guard failed: with `version`, a hash was
+   * appended since the caller read it; with `claim`, the record was reopened since the caller's
+   * claim (0073 decision 24). `update.attempts` are written either way: they say what the network
    * did, whoever finishes the record. With `final`, each write goes through {@link finalWrite}; the
    * reads don't, since a failed read wrote nothing (0019 decision 34).
    */
   const advance = async (
     key: SettlementKey,
     update: Omit<SettlementUpdate, "updatedAt">,
-    expectedVersion?: number,
+    guard: WriteGuard = {},
     final = false,
   ) => {
+    const { version, claim } = guard;
     for (let tries = 0; tries < 3; tries++) {
       const current = await store.get(key);
-      const stale = expectedVersion !== undefined && current?.version !== expectedVersion;
+      const stale =
+        (version !== undefined && current?.version !== version) ||
+        (claim !== undefined && current?.reopened !== claim);
       if (!current || isFinalRecord(current) || stale) {
         if (current && update.attempts?.length)
           await store.markAttempts(key, update.attempts, now());
@@ -86,7 +99,7 @@ export function createRecords(deps: RecordsDeps) {
       }
       const from = current.state;
       const write = () =>
-        store.transition(key, from, { ...update, updatedAt: now() }, expectedVersion);
+        store.transition(key, from, { ...update, updatedAt: now() }, version, claim);
       const moved = final ? await finalWrite(key, write) : await write();
       if (moved) return moved;
     }
@@ -128,9 +141,9 @@ export function createRecords(deps: RecordsDeps) {
     key: SettlementKey,
     update: Omit<SettlementUpdate, "updatedAt">,
     origin: SettlementOrigin,
-    expectedVersion?: number,
+    guard: WriteGuard = {},
   ) => {
-    const record = await advance(key, update, expectedVersion, true);
+    const record = await advance(key, update, guard, true);
     if (record && isFinalRecord(record)) onFinal(record, origin);
     return { record: record ?? (await store.get(key)), won: record !== undefined, origin };
   };

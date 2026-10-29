@@ -230,7 +230,7 @@ export function createReconciler(deps: ReconcilerDeps) {
         record.key,
         { state: "expired", errorReason: SETTLE_REASONS.expired, attempts: dead },
         "resolved",
-        record.version,
+        { version: record.version },
       );
       return won ? "expired" : "open";
     }

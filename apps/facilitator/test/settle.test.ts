@@ -989,6 +989,7 @@ describe("createSettler", () => {
           "signed",
           expect.objectContaining({ state: "success" }),
           undefined,
+          0,
         ),
       );
       // The record turns `success` later (0019, or a write whose client timed out).
@@ -1153,7 +1154,7 @@ describe("createSettler", () => {
       expect(settled.record?.state).toBe("success");
     });
 
-    it("ends the record and answers a timeout when the budget runs out before anything was signed; past the auth expiry the client signs a new payment", async () => {
+    it("ends the record and answers a timeout when the budget runs out before anything was signed; with one ledger left the client waits for it, then signs a new payment", async () => {
       let ledger = CURRENT;
       const { settle, store, hooks, metrics } = setup(() => new Promise(() => {}), {
         budgetMs: BUDGET_MS,
@@ -1172,7 +1173,8 @@ describe("createSettler", () => {
         errorReason: SETTLE_REASONS.timeout,
       });
       expect(hooks.onFinal).toHaveBeenCalledTimes(1);
-      // Past the auth expiry a retry gets the same answer, now to sign again: the record stays final.
+      // With one ledger left, too few for the pool, a retry gets the same answer, now not
+      // retryable: wait for ledger EXPIRATION to close, then sign again. The record stays final.
       ledger = EXPIRATION - 1;
       expect((await settle(payload(), requirements)).response).toMatchObject({
         errorReason: SETTLE_REASONS.timeout,
@@ -1650,6 +1652,29 @@ describe("createSettler", () => {
   });
 
   describe("a repeat of a payment nothing was sent for (0073)", () => {
+    /** What the first call's late `onSigned` got: an error once a reopen took the record. */
+    let late: unknown;
+    beforeEach(() => {
+      late = "not called";
+    });
+    /**
+     * The first call's pool signing late, as the real pool does it: `onSigned`, and on its refusal
+     * `submit()` rejects with `SignedHookError`, which reaches the call's own `finish`.
+     */
+    const lateSign = async (opts: SubmitOptions): Promise<SubmitResult> => {
+      try {
+        await opts.onSigned!(HASH, BOUNDS);
+      } catch (error) {
+        late = error;
+        throw Object.assign(new SignedHookError(`onSigned failed, so ${HASH} was not sent`), {
+          cause: error,
+          attempts: [{ hash: HASH, sent: "no" }],
+        });
+      }
+      late = "stored";
+      return new Promise<never>(() => {});
+    };
+
     /** The pool finds no channel in time once, then lands. */
     const noChannelThenLanding = (): Behaviour => {
       let calls = 0;
@@ -1706,6 +1731,27 @@ describe("createSettler", () => {
       expect(submit).toHaveBeenCalledTimes(2);
       expect(answers.filter(({ response }) => response.success)).toHaveLength(1);
       expect(await store.get(key)).toMatchObject({ state: "success", reopened: 1 });
+    });
+
+    it("never reopens a record claimed before 0073, and answers it as that release did (0073 decision 25)", async () => {
+      // The release before 0073 answered "sign a new payment": a reopen now would let the old
+      // payment land next to the new one. Its rows carry the migration's default, -1.
+      const check = vi.fn<Check>(passing);
+      const { settle, store, submit } = setup(noChannelThenLanding(), { check });
+      const first = await settle(payload(), requirements);
+      expect(first.response.extra).toMatchObject({ retryable: true });
+      await db.pool.query("UPDATE settlements SET reopened = -1 WHERE key = $1", [key]);
+      const answer = await settle(payload(), requirements);
+      expect(answer.replay).toBe(true);
+      expect(answer.response).toMatchObject({
+        success: false,
+        errorReason: SETTLE_REASONS.noChannelInTime,
+      });
+      expect(answer.response).not.toHaveProperty("extra.retryable");
+      expect(submit).toHaveBeenCalledTimes(1);
+      // Not even the checks a reopen runs first: it is answered from the record.
+      expect(check).toHaveBeenCalledTimes(1);
+      expect(await store.get(key)).toMatchObject({ state: "rejected", reopened: -1 });
     });
 
     it("reopens with exactly two ledgers left, the pool's floor", async () => {
@@ -1779,6 +1825,43 @@ describe("createSettler", () => {
       expect(await store.get(key)).toMatchObject({ state: "rejected", reopened: 0 });
     });
 
+    it("marks a timeout the budget gave during the checks retryable, and records nothing", async () => {
+      // Before the claim: nothing was sent and nothing stored, so the same payment may come back.
+      const { settle, store, submit } = setup(landing(), {
+        budgetMs: BUDGET_MS,
+        check: () => new Promise(() => {}),
+      });
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        success: false,
+        errorReason: SETTLE_REASONS.timeout,
+        transaction: "",
+        errorMessage:
+          `nothing was sent: repeat the same payment while the latest ledger is at most ` +
+          `${EXPIRATION - 2}; once the network is past ledger ${EXPIRATION}, sign a new payment instead`,
+        extra: { retryable: true, expirationLedger: EXPIRATION },
+      });
+      expect(submit).not.toHaveBeenCalled();
+      expect(await store.get(key)).toBeUndefined();
+    });
+
+    it("answers within about a second, still retryable, when the latest ledger read never answers", async () => {
+      // The answer's ledger read is bounded by 1 s of its own: a hung RPC can't hold the answer.
+      const { settle } = setup(noChannelThenLanding(), {
+        latestLedger: () => new Promise<number>(() => {}),
+      });
+      const started = Date.now();
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.noChannelInTime,
+        errorMessage:
+          `nothing was sent: repeat the same payment; once the network is past ledger ` +
+          `${EXPIRATION}, sign a new payment instead`,
+        extra: { retryable: true, expirationLedger: EXPIRATION },
+      });
+      const took = Date.now() - started;
+      expect(took).toBeGreaterThanOrEqual(900);
+      expect(took).toBeLessThan(2_500);
+    }, 4_000);
+
     it("still refuses a different payload on the same nonce", async () => {
       const { settle, store, submit } = setup(noChannelThenLanding());
       await settle(payload(), requirements);
@@ -1843,6 +1926,46 @@ describe("createSettler", () => {
       expect(submit).toHaveBeenCalledTimes(1);
     });
 
+    it("never lets a waiting repeat end a claim reopened since it read the earlier one (0073 decision 19)", async () => {
+      // The repeat reads the first claim and waits out its budget. Meanwhile that claim ends and
+      // another call reopens the record: still `claimed` with no hash, but a new claim. The
+      // repeat's `endUnsigned` passes the version it read, so it can't end the new claim, and it
+      // answers that nothing is signed yet instead of "sign a new payment".
+      const { settle, store } = setup(landing(), { budgetMs: BUDGET_MS });
+      const fingerprint = fingerprintOf(payload(), requirements);
+      await store.claim({
+        key,
+        network,
+        payer,
+        nonce: "7",
+        fingerprint,
+        paymentPayload: payload(),
+        paymentRequirements: requirements,
+        createdAt: Date.now(),
+      });
+      const get = store.get.bind(store);
+      let reads = 0;
+      vi.spyOn(store, "get").mockImplementation(async (k) => {
+        // After the repeat's first read: the earlier claim ends and another call reopens it.
+        if (reads++ === 1) {
+          await store.transition(key, "claimed", {
+            state: "rejected",
+            errorReason: SETTLE_REASONS.noChannelInTime,
+            updatedAt: Date.now(),
+          });
+          await store.reopen(key, fingerprint, [SETTLE_REASONS.noChannelInTime], Date.now());
+        }
+        return get(k);
+      });
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        success: false,
+        errorReason: SETTLE_REASONS.pending,
+        errorMessage: "not signed yet: repeat the same payment",
+        transaction: "",
+      });
+      expect(await get(key)).toMatchObject({ state: "claimed", reopened: 1, hashes: [] });
+    });
+
     it("reopens a record reconciliation closed as interrupted, and settles it once", async () => {
       const { settle, store, submit } = setup();
       await store.claim({
@@ -1869,17 +1992,12 @@ describe("createSettler", () => {
       const OTHER = "b".repeat(64);
       let sign!: () => void;
       const signing = new Promise<void>((resolve) => (sign = resolve));
-      let late: unknown = "not called";
       let calls = 0;
       const { settle, store } = setup(
         async (opts) => {
           if (calls++ > 0) return landing("success", OTHER)(opts);
           await signing;
-          late = await Promise.resolve(opts.onSigned!(HASH, BOUNDS)).then(
-            () => "stored",
-            (error: unknown) => error,
-          );
-          return new Promise(() => {});
+          return lateSign(opts);
         },
         { budgetMs: BUDGET_MS },
       );
@@ -1892,6 +2010,91 @@ describe("createSettler", () => {
       expect(await store.get(key)).toMatchObject({ state: "success", hashes: [OTHER] });
     });
 
+    it("never ends the reopened claim from the earlier claim's late refusal (0073 decision 24)", async () => {
+      // The first call's pool signs after a repeat reopened the record and signed, but before the
+      // repeat is final. The refused hash rejects its `submit()` as the real pool does, and its
+      // `finish` must not end the repeat's claim: that transaction can still land. The repeat has
+      // a budget of its own, long enough that only the earlier claim could end its record.
+      const OTHER = "b".repeat(64);
+      let sign!: () => void;
+      const signing = new Promise<void>((resolve) => (sign = resolve));
+      let land!: () => void;
+      const lands = new Promise<void>((resolve) => (land = resolve));
+      const first = setup(
+        async (opts) => {
+          await signing;
+          return lateSign(opts);
+        },
+        { budgetMs: BUDGET_MS },
+      );
+      const repeat = setup(
+        async (opts) => {
+          await opts.onSigned?.(OTHER, BOUNDS);
+          await lands;
+          return result("success", OTHER);
+        },
+        { budgetMs: 5_000 },
+      );
+      expect((await first.settle(payload(), requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.timeout,
+      });
+      const answer = repeat.settle(payload(), requirements);
+      await vi.waitFor(async () =>
+        expect(await repeat.store.get(key)).toMatchObject({ state: "signed", hashes: [OTHER] }),
+      );
+      const finals = vi.mocked(first.hooks.onFinal).mock.calls.length;
+      sign();
+      await vi.waitFor(() => expect(late).toBeInstanceOf(Error));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(await repeat.store.get(key)).toMatchObject({
+        state: "signed",
+        reopened: 1,
+        hashes: [OTHER],
+      });
+      // Its `onFinal` never ran on the repeat's record either.
+      expect(vi.mocked(first.hooks.onFinal).mock.calls.length).toBe(finals);
+      land();
+      expect((await answer).response.success).toBe(true);
+    });
+
+    it("never ends a reopened claim that hasn't signed yet from the earlier claim's late refusal", async () => {
+      let sign!: () => void;
+      const signing = new Promise<void>((resolve) => (sign = resolve));
+      let proceed!: () => void;
+      const proceeds = new Promise<void>((resolve) => (proceed = resolve));
+      const first = setup(
+        async (opts) => {
+          await signing;
+          return lateSign(opts);
+        },
+        { budgetMs: BUDGET_MS },
+      );
+      const repeat = setup(
+        async (opts) => {
+          await proceeds;
+          return landing("success")(opts);
+        },
+        { budgetMs: 5_000 },
+      );
+      expect((await first.settle(payload(), requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.timeout,
+      });
+      const answer = repeat.settle(payload(), requirements);
+      await vi.waitFor(async () =>
+        expect(await repeat.store.get(key)).toMatchObject({ state: "claimed", reopened: 1 }),
+      );
+      sign();
+      await vi.waitFor(() => expect(late).toBeInstanceOf(Error));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(await repeat.store.get(key)).toMatchObject({
+        state: "claimed",
+        reopened: 1,
+        hashes: [],
+      });
+      proceed();
+      expect((await answer).response.success).toBe(true);
+    });
+
     it("never stores a hash for the earlier claim when another process ended and reopened it", async () => {
       // Across a lease handover: the first call is still within its own budget, so only the
       // claim it passes to `addHash` stops its late hash.
@@ -1900,14 +2103,9 @@ describe("createSettler", () => {
       const firstSigns = new Promise<void>((resolve) => (signFirst = resolve));
       let land!: () => void;
       const lands = new Promise<void>((resolve) => (land = resolve));
-      let late: unknown = "not called";
       const first = setup(async (opts) => {
         await firstSigns;
-        late = await Promise.resolve(opts.onSigned!(HASH, BOUNDS)).then(
-          () => "stored",
-          (error: unknown) => error,
-        );
-        return new Promise(() => {});
+        return lateSign(opts);
       });
       const other = setup(
         async (opts) => {

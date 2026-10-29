@@ -49,7 +49,8 @@ export interface SettlementRecord {
   version: number;
   /**
    * How many times {@link SettlementStore.reopen} moved the record back to `claimed` (0073
-   * decision 14); 0 for a record claimed once.
+   * decision 14); 0 for a record claimed once. -1 for a record claimed before 0073, which never
+   * reopens: its release answered "sign a new payment" (0073 decision 25).
    */
   reopened: number;
   /** Milliseconds since the epoch; a reopen sets it to the reopening call's start. */
@@ -201,18 +202,21 @@ export interface SettlementStore {
    * never moves on (AD-16). Rejects a `feeCharged` that isn't a non-negative int64.
    * `update.attempts` are applied as {@link markAttempts} would, in the same transaction, also
    * when the state doesn't move. With `expectedVersion`, the record must also still have that
-   * `version`: no hash was appended since the caller read it.
+   * `version`: no hash was appended since the caller read it. With `claim`, it must still have
+   * that `reopened` count: a write of an earlier claim never lands on a reopened one (0073
+   * decision 24).
    */
   transition(
     key: SettlementKey,
     expected: SettlementState,
     update: SettlementUpdate,
     expectedVersion?: number,
+    claim?: number,
   ): Promise<SettlementRecord | undefined>;
   /**
    * Compare-and-set, the one backward move (0073 decision 5): moves the record from `rejected`
-   * back to `claimed` while it has the same `fingerprint`, one of `reasons` as its `errorReason`
-   * and no hash, so nothing was ever sent for it. Clears `errorReason`, adds one to `reopened` and
+   * back to `claimed` while it has the same `fingerprint`, one of `reasons` as its `errorReason`,
+   * no hash, so nothing was ever sent for it, and was claimed since 0073 (`reopened` not -1). Clears `errorReason`, adds one to `reopened` and
    * to `version`, and sets `createdAt` and `updatedAt` to `now`, so a repeat counts the new
    * claim's budget from it, and a writer that read the earlier claim and passes its version or
    * `reopened` count fails (0073 decision 19).

@@ -158,8 +158,11 @@ ALTER TABLE settlement_hashes
     // 0073: how many times a record nothing was sent for was reopened by the identical payload
     // (decisions 5, 14). Defaulted, so the release before it keeps working; it never reopens, so
     // it never needs to write it.
-    name: "0006_settlement_reopened",
-    sql: "ALTER TABLE settlements ADD COLUMN reopened integer NOT NULL DEFAULT 0;",
+    // -1 for the rows already there and for the ones a release before 0073 still inserts during
+    // the deploy: their answer was "sign a new payment", so they never reopen. `claim()` writes 0
+    // (0073 decision 25). After #89's `0006_catalog_seller_check` (decision 27).
+    name: "0007_settlement_reopened",
+    sql: "ALTER TABLE settlements ADD COLUMN reopened integer NOT NULL DEFAULT -1;",
   },
 ];
 
