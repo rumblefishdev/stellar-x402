@@ -261,6 +261,22 @@ export function createCataloger({
           return await finish({ ...refused, outcome: "not_askable", reason }, record, origin);
         return await finish({ ...refused, outcome: "rejected", reason }, record, origin);
       }
+      // The answer speaks for the listing asked about only: on a host or MCP server several sellers
+      // share, one route's 402 could otherwise name another's method, route or tool and replace it.
+      const answered = listing.entry.key as CatalogKey;
+      if (
+        answered.network !== key.network ||
+        answered.payTo !== key.payTo ||
+        answered.method !== key.method ||
+        answered.resourceUrl !== key.resourceUrl
+      ) {
+        const detail = `asked ${key.method} ${key.resourceUrl}, answered ${answered.method} ${answered.resourceUrl}`;
+        return await finish(
+          { ...tried, stage: "seller", outcome: "other_key", detail },
+          record,
+          origin,
+        );
+      }
       const entry: CatalogEntry = {
         key: listing.entry.key as CatalogKey,
         keyVersion: listing.entry.keyVersion,

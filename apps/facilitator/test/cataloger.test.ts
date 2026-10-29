@@ -316,6 +316,20 @@ describe("cataloger", () => {
     expect((await list())[0]?.accepts).toEqual([other]);
   });
 
+  it("refuses an answer that describes another listing than the one asked about", async () => {
+    // The GET route's 402 claims to be another route of the host, a POST one.
+    seller.paymentRequired = (url) => ({
+      x402Version: 2,
+      resource: { url, description: "Pwned" },
+      accepts: [requirements],
+      extensions: { bazaar: { info: { input: { type: "http", method: "POST" } } } },
+    });
+    const { cataloger, list, counted } = setup();
+    await cataloger.onSuccess(record(valid), "settle");
+    expect(counted("seller", "other_key")).toBe(1);
+    expect(await list()).toEqual([]);
+  });
+
   it("keeps an offer's seven fields and logs how many were dropped (row 8)", async () => {
     const { cataloger, list, logger } = setup();
     seller.paymentRequired = (url) => ({
