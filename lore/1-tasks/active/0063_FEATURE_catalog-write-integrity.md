@@ -110,6 +110,8 @@ description or price, and nobody can make `/discovery/resources` answer megabyte
 | 34 | An MCP check ends a stateful seller's session with the transport's `DELETE` before closing; a failed `DELETE` is logged and the answer stands | review | beyond it | MCP Streamable HTTP session termination; SDK 1.30.1 `terminateSession` | | |
 | 35 | `packages/seller-fetch` gets its own error codes naming the cause (`not_https`, `not_public`, `redirect`, `too_large`, `timeout`, `network`) and plain messages; the MCP's `asToolError` translates them to its tool errors, the facilitator stores them as reasons. A separate PR after 0063's: 0085 | grilling | beyond it | spec silent | | |
 | 36 | A check's row keeps the seller's 402 as answered up to the fetch limits (64 KiB HTTP, 256 KiB MCP), also when the listing is then refused as too large: what a seller sent stays readable; the per-host budget (row 3) and the 30-day pruning bound the space | grilling | beyond it | spec silent | | |
+| 37 | A whole listing, serialized, takes at most 16 KiB; over it the listing is refused as `too_large` with detail `listing`, and the payment never is. A page of 100 stays under 1.6 MB, where the field limits alone let an MCP listing reach about 67 KiB. In the largest public catalog 5 of 95,733 listings are larger, all HTTP | grilling | beyond it (row 9's field limits stay) | spec silent | | |
+| 38 | Only a payment whose copy is new or differs from the stored listing is an attempt and a `catalog_attempts` row, a refused copy and a skipped check included; a copy equal to the listing only increments the counter | grilling | changes row 23 | spec silent | | |
 
 ## Not yet decided
 
