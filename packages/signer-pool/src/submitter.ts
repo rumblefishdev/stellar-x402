@@ -53,17 +53,23 @@ export interface SubmitterOptions {
    * one that also paid a TTL extension.
    */
   maxFeeStroops?: number;
-  /** Time bound of each transaction, in seconds from build. */
+  /**
+   * Time bound of a transaction submitted without `maxLedger`, in seconds from build. One with
+   * `maxLedger` has no time bound (0073).
+   */
   timeoutSeconds?: number;
   /**
    * How long past the time bound to wait for a final answer, in seconds, before reporting
-   * `pending` (default 30). Only an RPC that stops answering gets this far.
+   * `pending` (default 30). For a ledger-bounded transaction the wait runs past the ledger bound's
+   * estimated time instead, at 6 s a ledger: about 66 × 6 + 30 = 426 s at 66 ledgers. Only an RPC
+   * that stops answering, or a transaction that never shows up, gets this far.
    */
   confirmGraceSeconds?: number;
   /**
    * Longest wait for a caller's `onSigned`, in milliseconds (default 5,000). The wait also ends at
-   * the envelope's time bound and ledger bound, whichever comes first. A store that hangs rather
-   * than fails then holds a channel for this long, not for the whole time bound.
+   * the envelope's time bound, or at its ledger bound if that closes before the bound's estimated
+   * time. A store that hangs rather than fails then holds a channel for this long, not for the
+   * whole bound.
    */
   onSignedTimeoutMs?: number;
   /**
@@ -353,7 +359,8 @@ export class SettlementSubmitter {
    * and sent nothing fails with {@link ShutdownError}, whether it waits for a channel, waits
    * behind the channel's pending transaction, retries a sequence read or is about to sign, and so
    * does every later `submit()`. Calls past `onSigned` run on. Resolves once every `submit()` under
-   * way has returned: by its time bound plus `confirmGraceSeconds` at the latest. A confirmation
+   * way has returned: by its time bound, or its ledger bound's estimated time at 6 s a ledger, plus
+   * `confirmGraceSeconds` at the latest (about 426 s at 66 ledgers, 750 s at 120). A confirmation
    * still running after a `pending` result is not waited for.
    */
   async close(): Promise<void> {
@@ -781,8 +788,11 @@ export class SettlementSubmitter {
         if (uncertain) break;
         return { ...base, status: "expired", hash };
       }
-      // A ledger bound alone, its estimated time gone with no ledger seen past it: the RPC isn't
-      // answering. Stop resending and confirm by hash; `submit()` answers `pending` at `dueAt`.
+      // A ledger bound alone, its estimated time (6 s a ledger) gone with no ledger seen past it:
+      // the RPC isn't answering, or ledgers run slower than the estimate. Stop resending either
+      // way, so a down RPC can't keep the loop going; an envelope the network never took then ends
+      // `expired` at its ledger bound, with ledgers left (0073 decision 11). Confirm by hash;
+      // `submit()` answers `pending` at `dueAt`.
       if (maxTime === undefined && Math.floor(this.now() / 1000) > boundAt) break;
     }
     if (accepted) callSafely(opts.onSent, hash);
