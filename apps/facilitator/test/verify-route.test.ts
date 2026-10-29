@@ -114,6 +114,25 @@ describe("POST /verify", () => {
     });
   });
 
+  it("logs a fee refusal's message, which names archived entries, and no other refusal's", async () => {
+    const invalidMessage =
+      "simulation-derived fee 551787 stroops exceeds ceiling 250000 stroops; the payment's transaction lists 1 archived entry to restore: AAAABg==";
+    verify.mockResolvedValueOnce({
+      isValid: false,
+      invalidReason: "invalid_exact_stellar_payload_fee_exceeds_maximum",
+      invalidMessage,
+    });
+    verify.mockResolvedValueOnce({
+      isValid: false,
+      invalidReason: "invalid_exact_stellar_payload_simulation_failed",
+      invalidMessage: "simulation failed",
+    });
+    await post(request);
+    await post(request);
+    const verified = lines.map((line) => JSON.parse(line)).filter((l) => l.event === "verified");
+    expect(verified.map((l) => l.message)).toEqual([invalidMessage, undefined]);
+  });
+
   it.each([
     ["an empty object", {}],
     ["an array", [request]],

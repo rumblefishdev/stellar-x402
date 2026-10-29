@@ -371,9 +371,7 @@ function isV0Envelope(payload: PaymentPayload): boolean {
  * returned as it is.
  */
 function withArchivedEntries(response: VerifyResponse, payload: PaymentPayload): VerifyResponse {
-  if (response.invalidReason !== "invalid_exact_stellar_payload_fee_exceeds_maximum") {
-    return response;
-  }
+  if (response.invalidReason !== FEE_EXCEEDS_MAXIMUM) return response;
   const keys = archivedEntries(payload);
   if (keys.length === 0) return response;
   const entries = keys.length === 1 ? "1 archived entry" : `${keys.length} archived entries`;
@@ -384,6 +382,9 @@ function withArchivedEntries(response: VerifyResponse, payload: PaymentPayload):
     invalidMessage: `${response.invalidMessage}; the payment's transaction lists ${entries} to restore: ${named.join(", ")}`,
   };
 }
+
+/** Upstream's fee refusal, the one whose message names archived entries (task 0066). */
+export const FEE_EXCEEDS_MAXIMUM = "invalid_exact_stellar_payload_fee_exceeds_maximum";
 
 /** Most archived entries a refusal names: the client chooses how many it lists. */
 const ARCHIVED_ENTRIES_NAMED = 4;
