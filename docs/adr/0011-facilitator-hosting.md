@@ -8,7 +8,7 @@
   bare RPC hosts in error messages), 2026-10-27 (task 0019: reconciliation runs in every
   process, independent of the lease; `/health` reports `listed` beside `ready`, and the deploy
   waits for both) and 2026-10-28 (task 0076: one hostname and one facilitator service for both
-  networks; the sections that run one process per network follow in task 0077)
+  networks)
 - Revised: 2026-10-13. ECS Fargate became the company Hetzner server (task 0039); the first
   version is in git history and task 0014. 2026-10-21: the key moved to OpenBao (ADR 0013), and
   deploys, reboots, backups, alarms and downtime were worked out in the PR #24 review.
@@ -21,13 +21,16 @@
   code, a crash loop at startup, the tunnel token's owner, and the VM left open for mainnet.
   2026-10-27: a long migration runs in the deploy as an online one, under the deploy unit's
   60-minute cap (task 0067).
+  2026-10-28: one facilitator for both networks in one `production` environment, with a database
+  per network (task 0077); the per-network layout before it is in git history.
 
 ## Context
 
-`apps/facilitator` is the only deployable service (AD-1): one Node 22 process per network that
-holds the channel pool, `/verify`, `/settle`, `/supported` and `/discovery/resources`. The Tranche 1
-gate needs it at a public HTTPS testnet URL (AD-15, ADR 0009); mainnet follows in a later tranche
-with a 99% uptime target.
+`apps/facilitator` is the only deployable service (AD-1): one Node 22 process that serves every
+network it is configured for, with a channel pool per network, and holds `/verify`, `/settle`,
+`/supported` and `/discovery/resources`. The code still serves one network per process (`NETWORK`)
+until 0077 changes it. The Tranche 1 gate needs it at a public HTTPS testnet URL (AD-15,
+ADR 0009); mainnet follows in a later tranche, in the same process, with a 99% uptime target.
 
 The host must:
 
@@ -47,51 +50,61 @@ The company already runs a Hetzner dedicated server for its production ClickHous
 - Docker Compose, and Caddy already terminates HTTPS for ClickHouse's mutual-TLS endpoint, in the
   same compose project as ClickHouse.
 
-Our containers are limited to 1.625 GiB of RAM per network, 1.875 GiB on testnet with OpenBao
-and 3.5 GiB with both networks; on testnet they need about 2 GB of disk, WAL included. The company
-bought `sorobanscan.com` for sorobanscan and the Stellar Prices API and moves it, as a whole zone,
-to Cloudflare on the Free plan.
+Our containers are limited to 1.875 GiB of RAM with OpenBao while production serves testnet, and
+2.875 GiB once mainnet's database joins; on testnet they need about 2 GB of disk, WAL included.
+The company bought `sorobanscan.com` for sorobanscan and the Stellar Prices API and moves it, as
+a whole zone, to Cloudflare on the Free plan.
 
 ## Decision
 
 ### Platform and containers
 
-- **Docker Compose on the company Hetzner server,** for testnet and mainnet. The project is
-  `x402`, separate from ClickHouse's `app` project, owned by its own Linux user.
-  - It lives in `/srv/x402`, outside the ClickHouse project's directory, which that project's
-    deploy overwrites.
-  - Each network has its own directory, `/srv/x402/<network>/`, with its compose file, deploy
-    script, `digest` file and encrypted credentials. OpenBao, shared by both networks, has
-    `/srv/x402/openbao/`.
+- **Docker Compose on the company Hetzner server, in one environment, `production`,** which
+  serves testnet now and mainnet later, in one facilitator. A staging environment may come later
+  (0038); nothing below needs renaming for it.
+  - Our files live in `/srv/x402`, outside the ClickHouse project's directory, which that
+    project's deploy overwrites, and are owned by our own Linux user, `x402`.
+  - Each environment has its own directory, `/srv/x402/<environment>/` (today
+    `/srv/x402/production/`), with its compose file, deploy script, `digest` file and encrypted
+    credentials, and is its own Compose project, `x402-<environment>`, separate from ClickHouse's
+    `app` project. OpenBao has `/srv/x402/openbao/` and its own project, `x402-openbao`.
   - Nothing else is there apart from the data volumes.
-- **Per network, three long-running containers and a one-off one:**
-  - `facilitator-<network>`, memory limit 512 MiB and one CPU;
-  - `cloudflared-<network>`, Cloudflare's tunnel connector pinned by digest, memory limit
-    128 MiB. It has a unit of its own (below), so a deploy never restarts it and it keeps
-    forwarding while the facilitator drains;
-  - `postgres-<network>`, PostgreSQL 18 pinned by digest, memory limit 1 GiB, data on a volume
-    on the server's RAID. It has a unit of its own (below), so a facilitator deploy never
-    restarts it;
-  - `migrate-<network>`, a one-off service of the facilitator image that runs the migrations,
-    with its healthcheck disabled and a 512 MiB limit, left out of the totals since it runs only
-    during a deploy. It is in the `migrate` profile, so `docker compose up` never starts it.
+- **Per environment, a facilitator, a tunnel connector, and a database and a migration service
+  per network:**
+  - `facilitator`, memory limit 512 MiB and one CPU while it serves testnet; mainnet's channel
+    pool may need more (0038);
+  - `cloudflared`, Cloudflare's tunnel connector pinned by digest, memory limit 128 MiB. It has a
+    unit of its own (below), so a deploy never restarts it and it keeps forwarding while the
+    facilitator drains;
+  - `postgres-<network>` (today `postgres-testnet`), PostgreSQL 18 pinned by digest, memory limit
+    1 GiB, data on a volume on the server's RAID. It has a unit of its own (below), so a
+    facilitator deploy never restarts it;
+  - `migrate-<network>`, a one-off service of the facilitator image that runs that network's
+    migrations, with its healthcheck disabled and a 512 MiB limit, left out of the totals since
+    it runs only during a deploy. It is in the `migrate` profile, so `docker compose up` never
+    starts it.
 - **One OpenBao container for both networks** (ADR 0013), pinned by digest, memory limit 256 MiB
   and half a CPU.
-  - Each network gets its own listener socket in its own volume, mounted only into that
-    network's facilitator, so neither facilitator can reach the other network's socket.
-- **The limits add up to 1.625 GiB per network:** 1.875 GiB on testnet with OpenBao, 3.5 GiB
-  with both networks. They are ceilings; testnet uses less.
-- **Testnet and mainnet never share a facilitator,** a database, a key or a channel set (AD-12).
-  OpenBao is the one shared container.
-- **No container publishes a port on the host,** and each network gets two Docker networks of
-  its own, both part of our compose project:
-  - `x402-<network>-edge`: that network's `cloudflared` and facilitator only. Both reach the
-    internet through it: `cloudflared` to Cloudflare, the facilitator to its RPC URLs;
-  - `x402-<network>-db`: `internal: true`, the facilitator, its Postgres and the migration
-    service only, with no route out.
-  - No facilitator joins the ClickHouse project's `app` network, so neither reaches ClickHouse or
-    the other network's facilitator. OpenBao is reached over a unix socket per network
-    (ADR 0013), not a network.
+  - Each network keeps its own listener socket in its own volume, and its own key and policy.
+    The facilitator mounts the socket of every network it serves, as external volumes from
+    OpenBao's project, so one process can sign for both networks. ADR 0013's reasons for a
+    socket per facilitator are revisited in 0077.
+- **The limits add up to 1.625 GiB for production with testnet's database,** 1.875 GiB with
+  OpenBao; mainnet's database adds 1 GiB. They are ceilings; testnet uses less.
+- **Testnet and mainnet share the facilitator process and OpenBao,** never a database, a key or a
+  channel set (AD-12).
+- **No container publishes a port on the host,** and each environment gets two Docker networks
+  of its own, both part of its compose project:
+  - `x402-<environment>-edge`: `cloudflared` and the facilitator only. Both reach the internet
+    through it: `cloudflared` to Cloudflare, the facilitator to its RPC URLs;
+  - `x402-<environment>-db`: `internal: true`, the facilitator, the Postgres containers and the
+    migration services only, with no route out. Only the facilitator and a network's migration
+    service hold that network's database password. Once mainnet joins, every migration service
+    reaches every Postgres, and only the password keeps `migrate-mainnet` out of testnet's
+    database; a network per database would close that, at one more network per database
+    (0077 decision 3).
+  - The facilitator never joins the ClickHouse project's `app` network, so it can't reach
+    ClickHouse. OpenBao is reached over unix sockets (ADR 0013), not a network.
 - **systemd restarts a facilitator that crashes, not Docker.** Its unit runs Compose in the
   foreground with `--exit-code-from <service>`, since a plain `docker compose up` exits 0
   whatever the container's code, and with `Restart=on-failure`, so the unit ends with the
@@ -99,12 +112,13 @@ to Cloudflare on the Free plan.
   300 s (`StartLimitBurst`, `StartLimitIntervalSec`) stops a crash loop in `failed`, which the
   alarms see. The containers have no restart policy, so nothing starts at boot except
   through the units (below). Neither acts on `unhealthy`, so a hung one needs a watcher:
-  - a systemd timer on the host runs every 30 s and restarts the `facilitator-<network>`
+  - a systemd timer on the host runs every 30 s and restarts the environment's `facilitator`
     container when it is `unhealthy`, with a 10 s stop timeout, since a hung process can't drain
-    anyway. It finds the container by its Compose service label and skips one-off containers;
-  - it acts only while the network's unit (`x402@<network>.service`, below) is `active`. While a
-    deploy, a reboot or an operator stops or starts the unit, it skips the pass, so it never
-    restarts a facilitator that is draining;
+    anyway. It finds the container by its Compose project and service labels and skips one-off
+    containers;
+  - it acts only while the environment's unit (`x402@<environment>.service`, below) is
+    `active`. While a deploy, a reboot or an operator stops or starts the unit, it skips the
+    pass, so it never restarts a facilitator that is draining;
   - it runs on the host, so no container gets the Docker socket.
 - **The healthcheck is set on the facilitator service in the compose file,** not in the image. It
   is a Node one-liner (`node:22-slim` has no curl): it calls `/health` with a 5 s timeout, after
@@ -113,7 +127,7 @@ to Cloudflare on the Free plan.
 
 ### Deploys, liveness and readiness
 
-- **Stop-before-start:** a deploy restarts the network's facilitator unit, which stops the old
+- **Stop-before-start:** a deploy restarts the environment's facilitator unit, which stops the old
   container and only then starts the new one. Postgres keeps running, and the migrations have
   already run (Store).
   - Docker sends SIGTERM and waits `stop_grace_period` before SIGKILL.
@@ -124,7 +138,9 @@ to Cloudflare on the Free plan.
   healthcheck calls it every 10 s.
 - **Ready to settle** (`ready`) means the process holds the lease, every migration it knows is
   applied (0026) and not every RPC endpoint is frozen (0049). Until then, `/settle` answers 503
-  at once instead of hanging.
+  at once instead of hanging. A store per network gives a lease per network: today, with one
+  network, `ready` is its lease, and what readiness means with two (what the deploy, `/health`,
+  the watchdog and 0027's "ready to settle" alarm wait for) is decided with the code in 0077.
   - A process without the lease keeps trying to take it.
   - A process whose lease renewal fails stops new submissions until it holds the lease again.
 - **AD-16 reconciliation doesn't depend on the lease** (0019 decisions 27 and 37). It starts once
@@ -142,22 +158,22 @@ to Cloudflare on the Free plan.
 
 One request or one stop must never outlast the layer in front of it:
 
-| Setting                           | Value              | Why                                                                |
-| --------------------------------- | ------------------ | ------------------------------------------------------------------ |
-| Seller's facilitator client       | 90 s               | `@x402/core`'s `HTTPFacilitatorClient`; started before the request |
-| `/settle` response budget         | 30 s, at most 80 s | well below the seller's 90 s, so our answer reaches it             |
-| `/settle` checks                  | see below          | inside the budget: past it, `…_timeout` and nothing is claimed     |
-| Repeat wait (`SETTLE_TIMEOUT_MS`) | 20 s, ≤ the budget | and never past the repeat's own budget                             |
-| `stop_grace_period`               | 180 s              | sent submissions (≤ 90 s) plus a 90 s margin                       |
-| Cloudflare's response limit       | 100 s              | above the 80 s cap; past it Cloudflare answers 524                 |
-| Node `keepAliveTimeout`           | 125 s              | above `cloudflared`'s idle keep-alive (90 s), or it sees 502s      |
-| Container healthcheck             | 10 s               | liveness only                                                      |
-| `LEASE_TTL_MS`                    | 30 s               | after a crash, a new process waits at most this long               |
-| Wait for `ready` and `listed`     | 120 s              | past it, the deploy rolls back to the previous digest              |
-| Unit `TimeoutStopSec`             | 200 s              | above `stop_grace_period`, so a reboot waits for the drain         |
-| Unit `TimeoutStartSec`            | 60 s               | covers `ExecStartPre` only: credentials and the digest, no pull    |
-| Postgres `stop_grace_period`      | 120 s              | a clean shutdown; the Compose default is 10 s                      |
-| `x402-db@` `TimeoutStopSec`       | 150 s              | above Postgres's 120 s, so a reboot doesn't kill it                |
+| Setting                               | Value              | Why                                                                |
+| ------------------------------------- | ------------------ | ------------------------------------------------------------------ |
+| Seller's facilitator client           | 90 s               | `@x402/core`'s `HTTPFacilitatorClient`; started before the request |
+| `/settle` response budget             | 30 s, at most 80 s | well below the seller's 90 s, so our answer reaches it             |
+| `/settle` checks                      | see below          | inside the budget: past it, `…_timeout` and nothing is claimed     |
+| Repeat wait (`SETTLE_TIMEOUT_MS`)     | 20 s, ≤ the budget | and never past the repeat's own budget                             |
+| `stop_grace_period`                   | 180 s              | sent submissions (≤ 90 s) plus a 90 s margin                       |
+| Cloudflare's response limit           | 100 s              | above the 80 s cap; past it Cloudflare answers 524                 |
+| Node `keepAliveTimeout`               | 125 s              | above `cloudflared`'s idle keep-alive (90 s), or it sees 502s      |
+| Container healthcheck                 | 10 s               | liveness only                                                      |
+| `LEASE_TTL_MS`                        | 30 s               | after a crash, a new process waits at most this long               |
+| Wait for `ready` and `listed`         | 120 s              | past it, the deploy rolls back to the previous digest              |
+| Unit `TimeoutStopSec`                 | 200 s              | above `stop_grace_period`, so a reboot waits for the drain         |
+| Unit `TimeoutStartSec`                | 60 s               | covers `ExecStartPre` only: credentials and the digest, no pull    |
+| Postgres `stop_grace_period`          | 120 s              | a clean shutdown; the Compose default is 10 s                      |
+| `x402-db-<network>@` `TimeoutStopSec` | 150 s              | above Postgres's 120 s, so a reboot doesn't kill it                |
 
 - **Past the budget,** `/settle` answers `settlement_pending` with the hash if one was signed,
   and nothing new is signed after it. If nothing was signed, the record ends and the answer is
@@ -208,40 +224,41 @@ One request or one stop must never outlast the layer in front of it:
 - **Images go to GitHub Container Registry,** tagged with the git SHA. The workflow skips the
   build when the SHA is already there. The image is public, so the server needs no registry
   credential.
-- **Mainnet is promoted by digest.** A successful testnet deploy records its digest and SHA as a
-  GitHub Deployment in the `testnet` environment. The mainnet workflow takes a digest, never a
-  SHA or a tag, and refuses one without a successful `testnet` deployment: a rebase merge into
-  `deploy/testnet` gives new SHAs, and a tag can point at a commit whose image never ran on
-  testnet.
+- **Production deploys the image built from `deploy/production`, with no promotion step.** A
+  successful deploy records its digest and SHA as a GitHub Deployment in the `production`
+  environment, for rollback and the record. With mainnet in the same process, every deploy will
+  reach mainnet, so before it joins, 0038 decides between a staging environment ahead of
+  production, whose recorded digest production would take (testnet → mainnet promotion, as this
+  ADR had it until 2026-10-28), and stricter rules on production deploys.
 - **GitHub Actions deploys over SSH:**
   - GitHub-hosted runners reach the server's SSH port, which the server's setup already opens to
     the internet, with key-only logins and fail2ban. There is no allowlist, since GitHub's address
     ranges change, and the workflow pins the server's host key in `known_hosts`. A self-hosted
     runner on the server would run workflow code next to ClickHouse and is rejected; a tunnel is
     a mainnet option (0038).
-  - It logs in as a deploy user with one key per network, and each key's `authorized_keys` entry
-    fixes its network: `command="/srv/x402/testnet/deploy.sh",restrict` for the testnet key,
-    `/srv/x402/mainnet/deploy.sh` for the mainnet key. The script reads only an image digest from
-    `SSH_ORIGINAL_COMMAND` and refuses anything but `sha256:` and 64 hex digits.
-  - The deploy user isn't in the `docker` group. It may write the networks' `digest.next` files
-    and run one command through `sudo`, `systemctl start x402-deploy@<network>`. Both networks
-    share the user, so it can write either network's file: the forced command is what keeps each
-    key to its network. A user per network is a mainnet option (0038).
-  - **The deploy itself is a unit, `x402-deploy@<network>.service`** (a oneshot, as root), so a
+  - It logs in as a deploy user with one key per environment, and each key's `authorized_keys`
+    entry fixes its environment: `command="/srv/x402/production/deploy.sh",restrict`. The script
+    reads only an image digest from `SSH_ORIGINAL_COMMAND` and refuses anything but `sha256:` and
+    64 hex digits.
+  - The deploy user isn't in the `docker` group. It may write the environment's `digest.next`
+    and run one command through `sudo`, `systemctl start x402-deploy@<environment>`. A second
+    environment would share the user, the forced command keeping each key to its environment; a
+    user per environment is a question for then (0038).
+  - **The deploy itself is a unit, `x402-deploy@<environment>.service`** (a oneshot, as root), so a
     cancelled job or a dropped runner can't cut it between stopping the old facilitator and
     starting the new one. `deploy.sh` checks the digest, then, holding a `flock` on `digest.next`,
     writes it and starts the unit. `systemctl start` waits for the unit, so the job still gets
     the result, and a second deploy waits for the lock instead of joining the running job with
     another digest. The unit takes no lock of its own, which would deadlock, and a deploy by
     hand goes through `deploy.sh` too (runbook).
-  - The deploy unit decrypts the network's credentials with the script `x402@`'s `ExecStartPre`
-    uses, since the migration needs the database password before `x402@` has ever run (the
-    first deploy). It pulls the new image and runs the migration service from it while the old
-    facilitator still serves (ADR 0012). A failed migration fails the deploy and leaves the old
-    facilitator serving; nothing needs rolling back. Then it moves the new digest into `digest`,
-    restarts `x402@<network>` and waits up to 120 s for `ready: true` and `listed: true`, read
-    with `docker exec` and the healthcheck's Node one-liner, so the check depends on neither the
-    tunnel nor DNS.
+  - The deploy unit decrypts the environment's credentials with the script `x402@`'s
+    `ExecStartPre` uses, since the migrations need the database passwords before `x402@` has ever
+    run (the first deploy). It pulls the new image and runs each network's migration service from
+    it while the old facilitator still serves (ADR 0012). A failed migration fails the deploy and
+    leaves the old facilitator serving; nothing needs rolling back. Then it moves the new digest
+    into `digest`, restarts `x402@<environment>` and waits up to 120 s for `ready: true` and
+    `listed: true`, read with `docker exec` and the healthcheck's Node one-liner, so the check
+    depends on neither the tunnel nor DNS.
   - Only after both does it write the digest to `digest.good` and remove images other
     than this one and the previous good one, since the disk is shared. If the restart fails or
     either doesn't come, it puts `digest.good` back into `digest`, restarts again and fails.
@@ -257,59 +274,60 @@ One request or one stop must never outlast the layer in front of it:
     deploy continues from (ADR 0012), and expand/contract keeps the older image working on a
     schema that did move forward. If a lock wait runs out of retries, the deploy fails before
     anything was stopped.
-  - **`x402@<network>.service` owns the facilitator.** Its `ExecStartPre` decrypts the network's
-    credentials (below) and, unless a deploy is running (a marker in `/run/x402/<network>/`,
-    which a reboot clears), puts `digest.good` into `digest`, so a reboot during a deploy starts
-    the last image that was ready. It neither pulls nor migrates: `ExecStart` runs Compose in
-    the foreground for the facilitator only (`--no-deps`), from the image the deploy pulled, with
-    `Restart=on-failure`, and `ExecStop` stops it, which gives it its `stop_grace_period`. It
-    wants and runs after `x402-openbao.service`, though it starts without OpenBao (ADR 0013).
-  - **`x402-tunnel@<network>.service` owns `cloudflared`.** It decrypts the tunnel token itself,
-    as OpenBao's unit does, and is enabled at boot. `x402@` runs after it, so at a reboot the
-    tunnel stops last and answers reach the clients while the facilitator drains.
-  - **`x402-db@<network>.service` owns Postgres.** It decrypts its own credentials with the same
-    script, since it starts first at boot, and its `TimeoutStopSec` of 150 s is above Postgres's
-    120 s grace. The facilitator's unit requires it and runs after it, so at a reboot the
-    facilitator drains while the database is still up. Both are enabled at boot.
+  - **`x402@<environment>.service` owns the facilitator.** Its `ExecStartPre` decrypts the
+    environment's credentials (below) and, unless a deploy is running (a marker in
+    `/run/x402/<environment>/`, which a reboot clears), puts `digest.good` into `digest`, so a
+    reboot during a deploy starts the last image that was ready. It neither pulls nor migrates:
+    `ExecStart` runs Compose in the foreground for the facilitator only (`--no-deps`), from the
+    image the deploy pulled, with `Restart=on-failure`, and `ExecStop` stops it, which gives it
+    its `stop_grace_period`. It wants and runs after `x402-openbao.service`, though it starts
+    without OpenBao (ADR 0013).
+  - **`x402-tunnel@<environment>.service` owns `cloudflared`.** It decrypts the tunnel token
+    itself, as OpenBao's unit does, and is enabled at boot. `x402@` runs after it, so at a reboot
+    the tunnel stops last and answers reach the clients while the facilitator drains.
+  - **`x402-db-<network>@<environment>.service` owns that network's Postgres** (today
+    `x402-db-testnet@production`: the network is in the template's name, a template per network,
+    so `%i` is the environment as in every other unit). It decrypts its own credentials with the
+    same script, since it starts first at boot, and its `TimeoutStopSec` of 150 s is above
+    Postgres's 120 s grace. The facilitator's unit wants every one of them and runs after them
+    (`Wants=` and `After=`, not `Requires=`), so at a reboot the facilitator drains while the
+    databases are still up, and stopping, upgrading or failing to start one network's database
+    never stops or restarts the facilitator: only that network stops settling, once the code
+    serves both (0077). All are enabled at boot.
   - **Every unit that runs a container is `PartOf=docker.service`, runs after it, and runs
     Compose the same way** (`--exit-code-from`, `Restart=on-failure`, the start limit). A
     Docker restart, such as a `docker-ce` upgrade, first stops them through their own
     `ExecStop`, so the facilitator drains with its full grace instead of `dockerd`'s 15 s, and
     starts them again afterwards.
-  - Testnet deploys on a push to `deploy/testnet` unless only `lore/**`, `docs/**` or Markdown
-    files changed, or by hand. A deploy is a pull request from `develop` to `deploy/testnet`.
-    `develop` stays open for direct pushes such as lore status changes.
-  - Mainnet deploys by hand from a `v*` tag, through the `mainnet` environment with required
-    reviewers, with the digest testnet recorded (above).
-  - The SSH key is an environment secret, one per network, and each environment carries the
-    rules the OIDC trust policy used to:
-    - `testnet`: deployment branches limited to `deploy/testnet`, which is protected: a pull
-      request with an approving review, and no bypass, admins included. The workflow runs as it
-      is on that branch, so a change to it is reviewed too;
-    - `mainnet`: deployment tags limited to `v*`, required reviewers, and "Prevent self-review",
-      so the person who starts a deploy can't approve it. Whether admins may bypass the
-      reviewers is decided with 0038.
+  - Production deploys on a push to `deploy/production` unless only `lore/**`, `docs/**` or
+    Markdown files changed, or by hand. A deploy is a pull request from `develop` to
+    `deploy/production`. `develop` stays open for direct pushes such as lore status changes.
+  - The SSH key is a secret of the `production` GitHub environment, which carries the rules the
+    OIDC trust policy used to: deployment branches limited to `deploy/production`, which is
+    protected: a pull request with an approving review, and no bypass, admins included. The
+    workflow runs as it is on that branch, so a change to it is reviewed too.
     - A job outside those rules never gets the key.
+    - Before mainnet joins, 0038 weighs the rules the `mainnet` environment was to have: `v*`
+      tags, required reviewers, and "Prevent self-review", so the person who starts a deploy
+      can't approve it.
     - All four of us are repo admins, and an admin can switch the protection off. It stops
       unreviewed and accidental changes, not a deliberate admin, whose change stays in the
       repo's audit log.
-  - One deploy runs at a time per network: a `concurrency` group with `cancel-in-progress: false`,
-    so a newer push waits instead of cancelling a deploy in progress.
+  - One deploy runs at a time per environment: a `concurrency` group with
+    `cancel-in-progress: false`, so a newer push waits instead of cancelling a deploy in progress.
   - Every action is pinned to a commit SHA, and the workflow sets `permissions: {}` and grants
     only what each job needs.
-  - Before mainnet (0038): a ruleset that protects `v*` tags, since the workflow at the tag runs
-    with the mainnet key; a mainnet `deploy.sh` that itself refuses a digest without a testnet
-    deployment, since today only the workflow checks it; named reviewers; and who may edit the
-    environments.
+  - Before mainnet joins (0038): the deploy rules above or a staging environment, named
+    reviewers, and who may edit the environments.
 - **Rollback** redeploys an earlier digest through the same workflow; a failed deploy rolls back
   by itself (above).
 - **An Ansible playbook in `deploy/ansible/` provisions the server's x402 parts:** the `x402`
-  user, `/srv/x402/<network>/`, the systemd units and timers, the compose files, `deploy.sh`,
-  the deploy user's one `sudo` rule and its `authorized_keys` forced command, `cloudflared`,
-  and the pgBackRest and CloudWatch agent config. An admin runs it from a reviewed commit, as
-  the explorer's own playbook is run. It touches only x402's parts, never the server's base
-  setup (firewall, `daemon.json`, users), which the ClickHouse project owns. Whoever runs the
-  playbook, and from which commit, is the real boundary between the networks.
+  user, `/srv/x402/<environment>/`, the systemd units and timers, the compose files,
+  `deploy.sh`, the deploy user's one `sudo` rule and its `authorized_keys` forced command,
+  `cloudflared`, and the pgBackRest and CloudWatch agent config. An admin runs it from a reviewed
+  commit, as the explorer's own playbook is run. It touches only x402's parts, never the server's
+  base setup (firewall, `daemon.json`, users), which the ClickHouse project owns. Whoever runs
+  the playbook, and from which commit, is the real boundary around production.
 - **Per-merge deploys stay a digest over SSH** (above), and CI never runs the playbook. Ansible
   needs a full shell and, through `become`, effectively root on the production ClickHouse
   server, which `sudo` rules can't narrow; the forced command lets the CI key pass only a
@@ -324,12 +342,11 @@ One request or one stop must never outlast the layer in front of it:
   plan's certificate covers only one level of subdomain.
   - The client names the network in the request (`network` in the payment requirements:
     `stellar:testnet` or `stellar:pubnet`), and the facilitator settles through that network's
-    channel pool, key and RPC endpoints. There is no testnet/mainnet service split; a
-    staging/production split may come later. There is no staging host yet;
-    `x402-facilitator-staging.sorobanscan.com` can be added if one is needed.
-  - Only testnet is served for now. The parts of this ADR that run one process per network
-    (Platform and containers, the deploy workflow, keys and secrets, the store) are reworked in
-    task 0077, together with the code, which today serves one `NETWORK` per process.
+    channel pool, key and RPC endpoints. There is no testnet/mainnet service split. The hostname
+    is the `production` environment's; a staging environment would get
+    `x402-facilitator-staging.sorobanscan.com`.
+  - Only testnet is served for now; mainnet joins the same process later (0038). The code still
+    serves one `NETWORK` per process until 0077 changes it.
   - One tunnel, `x402`. Its `cloudflared` opens outbound connections to Cloudflare (port 7844,
     UDP for QUIC and TCP) and forwards the hostname to `http://facilitator:4021`, the Compose
     service; anything else gets 404. The server opens no port for it. The compose file keeps
@@ -375,18 +392,24 @@ One request or one stop must never outlast the layer in front of it:
     It can't sign or read secrets, the OpenBao backup secret included.
   - There is one logging role for both networks, and only the CloudWatch agent on the host holds
     its credentials: no container and not `dockerd`. Either network's logs can be written with
-    it; nothing can be signed or read. Per-network separation is for signing, and OpenBao
-    provides it (ADR 0013).
+    it; nothing can be signed or read. Per-network separation is for signing: each network has
+    its own key and policy in OpenBao (ADR 0013), though one facilitator process holds both
+    networks' sockets.
   - It is the only AWS credential on the server; ADR 0013 names it as the exception to "no AWS
     credentials".
 - **`FACILITATOR_SECRET` stays for local development and tests.** Deployed networks use the OpenBao
   signer instead.
-- **Other secrets are encrypted systemd credentials,** as in ADR 0013: the database password, an
-  RPC URL that carries an API key, and the tunnel token.
+- **Other secrets are encrypted systemd credentials,** as in ADR 0013: per network a database
+  password and `RPC_URLS`, which may carry an API key, and per environment the tunnel token.
+  - The files are named per network from the first deploy, so mainnet adds files and renames
+    none: `database-url.<network>` and `rpc-urls.<network>` for the facilitator,
+    `postgres-password.<network>` for each Postgres, `approle-role-id.<network>` and
+    `approle-secret-id.<network>` for the signer (ADR 0013), and one `tunnel-token`.
   - `systemd-creds` keeps them encrypted on disk with the host key. Each unit decrypts the files
-    its container reads, with one shared script, to `/run/x402/<network>/` (tmpfs, mode
-    0700): `x402@` the facilitator's, `x402-db@` Postgres's password, `x402-tunnel@` the tunnel
-    token, and the deploy unit what the migration needs. Compose mounts them as `file:`
+    its container reads, with one shared script, to `/run/x402/<environment>/` (tmpfs, mode
+    0700): `x402@` the facilitator's (a database URL per network), each `x402-db-<network>@` its
+    Postgres's password, `x402-tunnel@` the tunnel token, and the deploy unit what the
+    migrations need. Compose mounts them as `file:`
     secrets, so they are plain only in memory. Outside swarm those are bind mounts that keep
     the host's owner and mode, so each file is written mode 0400 for the user of the container
     that reads it: `node` (uid 1000) for the facilitator's, `postgres` (uid 999) for
@@ -398,7 +421,8 @@ One request or one stop must never outlast the layer in front of it:
     find them.
     At boot the unit writes them again before it starts anything.
   - The app reads them from files (`DATABASE_URL_FILE`, `RPC_URLS_FILE` and the AppRole files),
-    a config change in 0026.
+    a config change in 0026, which points them at testnet's; with both networks, 0077 gives each
+    network its own.
   - They never go into the image, the repo or the logs, and never into `environment:`, which
     `docker inspect` shows in plain text.
 - **Rotating the key is an on-chain change.** AD-12 makes the facilitator key the only signer of
@@ -414,8 +438,11 @@ One request or one stop must never outlast the layer in front of it:
 
 ### Store
 
-- **PostgreSQL in a container per network, on the same server.** It holds the schema and adapter
-  rules of [ADR 0012](0012-facilitator-state-store.md).
+- **PostgreSQL in a container per network, on the same server,** though one facilitator uses
+  both (decided 2026-10-28, 0077). It holds the schema and adapter rules of
+  [ADR 0012](0012-facilitator-state-store.md), which has no network column, so the facilitator
+  opens one store per network beside that network's pool. A testnet reset wipes only testnet's
+  database, and backups, restores and migrations stay per network.
 - **Sizing:** about 2–4 KB per payment. That is under 1 GB on testnet and about 1 GB a month on
   mainnet at 10,000 payments a day. `pg_wal` stays small, since each segment leaves as it closes
   (below) and Postgres recycles it.
@@ -465,7 +492,7 @@ One request or one stop must never outlast the layer in front of it:
     online migration runs on testnet first, outside mainnet's busy hours and away from 00:00 UTC,
     when ClickHouse writes the most. Mainnet's ceiling on
     a migration's length goes to 0038.
-- **No TLS to the database.** The connection stays on the network's `internal` Docker network on
+- **No TLS to the database.** The connection stays on the environment's `internal` Docker network on
   one host, and anyone who could read it there could read the database files. PostgreSQL uses
   `scram-sha-256` passwords, never `trust`. TLS comes back if the database ever leaves the host.
 - **ClickHouse is not the store.** It is an analytics database: no enforced unique keys, no
@@ -532,7 +559,7 @@ One request or one stop must never outlast the layer in front of it:
 ## Rationale
 
 - **The capacity is already paid for.** The server has a lot of free RAM and disk, and our
-  containers are limited to 1.875 GiB on testnet and 3.5 GiB with both networks. Running there
+  containers are limited to 1.875 GiB today and 2.875 GiB with mainnet's database. Running there
   costs about €0 more, against about $60–70 a month on testnet and $150 on mainnet for ECS
   Fargate.
 - **It meets both hard rules.** Compose stops the old container first, and the grace period has no
@@ -600,6 +627,16 @@ One request or one stop must never outlast the layer in front of it:
   proxy behind it. It keeps the Caddy coupling, and needs an origin lock (Authenticated Origin
   Pulls in our site block), since the server's address is already public under ClickHouse's own
   name.
+- **A facilitator per network,** each with its own directory, units, tunnel, hostname and deploy
+  key, with mainnet promoted by a digest that ran on testnet. This was this ADR until
+  2026-10-28. Replaced at the 2026-10-26 daily: one hostname and one service, the client naming
+  the network in the request (tasks 0076, 0077).
+- **A staging environment ahead of production now.** Not yet: while production serves only
+  testnet, a deploy that breaks it costs testnet. It costs a second set of containers, a second
+  testnet channel set and its own hostname, and 0038 weighs it before mainnet joins.
+- **One database for both networks,** with the network in each record. Rejected: every table,
+  key and query would need the network, and a testnet reset or restore would touch mainnet's
+  records.
 - **ClickHouse as the store.** Rejected; see Store.
 - **Key custody** (AWS KMS, a key file, OpenBao and others): compared in ADR 0013 (task 0047).
 - **Grafana Cloud Free for metrics and alerts.** $0, but a second vendor whose alert rules sit
@@ -641,13 +678,14 @@ One request or one stop must never outlast the layer in front of it:
 - **0026 builds:**
   - the Dockerfile, the compose files, the deploy script, and the Ansible playbook that puts
     them, the units and the deploy user on the server;
-  - the systemd units: `x402@<network>`, `x402-db@<network>`, `x402-deploy@<network>`,
-    `x402-tunnel@<network>`, `x402-openbao`, the restart timer and the backup timer;
+  - the systemd units: `x402@production`, `x402-db-testnet@production`,
+    `x402-deploy@production`, `x402-tunnel@production`, `x402-openbao`, the restart timer and
+    the backup timer;
   - the `cloudflared` container, with the tunnel token fetched from Cloudflare into a systemd
     credential. The tunnel, its routing and the DNS record come from
     `soroban-infrastructure`, after the `sorobanscan.com` zone is on Cloudflare;
   - the deploy user, its one `sudo` rule, the SSH forced command, the workflow with the pinned
-    host key, and the `deploy/testnet` branch with its protection;
+    host key, and the `deploy/production` branch with its protection;
   - the OpenBao container (ADR 0013), the IAM Roles Anywhere logging role and its certificate,
     and the secret files;
   - the backups (pgBackRest to the Storage Box);
@@ -667,7 +705,14 @@ One request or one stop must never outlast the layer in front of it:
   - two facilitator containers with separate channel sets on this server, which give deploys
     without downtime but no protection from hardware faults;
   - a second machine or a standby;
-  - edge rate limiting, and whether mainnet needs a paid Cloudflare plan for its uptime SLA.
+  - edge rate limiting, and whether mainnet needs a paid Cloudflare plan for its uptime SLA;
+  - once every production deploy reaches mainnet: a staging environment ahead of it or
+    stricter deploy rules (above), and the facilitator's memory limit with two channel pools;
+  - one uptime check, the 99% figure, the zone's rate limit and its analytics then cover both
+    networks at once;
+  - what one process costs once both networks run in it: the watchdog's 10 s restart of a hung
+    facilitator, a crash and every deploy cut both networks' submissions in flight, and rotating
+    one network's key (Keys, secrets and access: "stop the service") stops both.
 - **Slack is not a pager.** On mainnet, the alerts that cost money (breaker open, low balance,
   pending settlements) also need a phone or SMS route.
 

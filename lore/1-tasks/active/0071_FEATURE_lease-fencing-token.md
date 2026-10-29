@@ -2,7 +2,7 @@
 id: "0071"
 title: "Fence the channel lease, so a stale holder sends nothing new"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0006", "0011", "0012"]
 related_tasks: ["0025", "0022", "0013", "0024"]
@@ -14,6 +14,10 @@ history:
     status: backlog
     who: okarcz
     note: "Spawned from 0025 (decision 15): due before pubnet."
+  - date: "2026-10-29"
+    status: active
+    who: okarcz
+    note: "Work started."
 ---
 
 # Fence the channel lease, so a stale holder sends nothing new
