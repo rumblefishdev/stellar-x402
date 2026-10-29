@@ -40,7 +40,12 @@ can still land.
   - a "nothing sent" reason that carries an earlier hash (a `txBadSeq` rebuild), which never
     reopens;
   - `…_lease_lost` with the hash the call stored just before it found the lease lost (0071
-    decision 15): that envelope was never sent, but the record has a hash, so it doesn't reopen.
+    decision 15): that envelope was never sent, but the record has a hash, so it doesn't reopen;
+  - a reopen at exactly 2 ledgers left (0073's PR 3 review): the ledger can close while the pool
+    simulates, and it then refuses with `LedgerBoundError`, answered
+    `…_signature_expiration_too_soon` ("sign a new payment") while the payer's auth entry can
+    still land in its expiration ledger. A first payment at 2 left has the same window, but
+    0073's `retryable` answer aims repeats at it.
 - Some of these can't land with the same payload anyway (a balance that is gone stays gone until
   it isn't); the answer still can't promise that.
 
