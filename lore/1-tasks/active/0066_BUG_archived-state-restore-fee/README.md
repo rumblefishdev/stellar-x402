@@ -84,9 +84,15 @@ code stay upstream's; when the payment's own transaction lists archived entries
   of 4, a realistic footprint with read-only keys, repeated and out-of-range indexes, entries that
   don't archive and an over-long key, and upstream's answer for another refusal and for a fee
   refusal without archived entries.
-- `docs/threat-model.md`, "Fee inflation by rent"; `apps/facilitator/README.md`, "Restoring
-  archived entries".
-- Facilitator suite after merging develop: 551 tests, all passing but 0025's "gives the lease up
+- `apps/facilitator/src/http/app.ts`: the `verified` and `settled` logs carry the message of a
+  `…_fee_exceeds_maximum` refusal as `message`; `verify-route.test.ts` and `settle-route.test.ts`
+  pin it, and that no other refusal's message is logged.
+- `docs/threat-model.md`, "Fee inflation by rent"; `docs/adr/0007-fee-abuse-containment.md`, one
+  line on restore rent; `apps/facilitator/README.md`, "Restoring archived entries".
+- Not covered: `/settle` can still refuse after the check with
+  `settle_exact_stellar_fee_exceeds_maximum` when the pool's rebuild re-simulates and finds an
+  entry archived since `/verify`; that message doesn't name the entries. The window is narrow.
+- Facilitator suite after the PR review: 553 tests, all passing but 0025's "gives the lease up
   at once past a stalled client", which fails on local Node 26 on develop too (CI runs Node 22);
   tsc and eslint clean.
 
@@ -107,13 +113,18 @@ before.
 3. **Under the ceiling the facilitator pays restore rent**, as it pays any rent; the threat model
    says so.
 4. **The README restores with the SDK, not stellar-cli**: stellar-cli 28.1.0's `contract restore`
-   takes a data entry's key as an `ScVal` with `--id`, not the message's `LedgerKey`. One
-   `RestoreFootprint` over the message's keys restores them all, as 0021's `token-matrix.ts` did.
+   takes a data entry's key as an `ScVal` with `--id` and `--key-xdr`, not the message's
+   `LedgerKey`, one entry per call. One `RestoreFootprint` over the message's keys restores them
+   all, as 0021's `token-matrix.ts` did; the README shows how to get stellar-cli's arguments from
+   a key.
 5. **After a restore, a new payment, not the same one**: the message lists the entries the payment
    was built with, so a resent payment names them again while any is still archived.
 6. **The list is named as the transaction's, not checked** (code review): the buyer's client
    writes it, so the message says "the payment's transaction lists", the facilitator names only
    persistent contract data and code, each once, a key over 512 base64 characters by its length
-   (counted, so the count stays true), and the README
-   says to check the entries before paying their rent. Each footprint key is encoded at most once,
-   so a repeated index costs nothing.
+   (counted, so the count stays true), and the README says how to check the entries before paying
+   their rent: whose they are from the key, archived from `getLedgerEntries`. Each footprint key
+   is encoded at most once, so a repeated index costs nothing.
+7. **The message is logged on a fee refusal** (PR review): `@x402/core` puts only the reason into
+   the buyer's 402, so the `verified` and `settled` logs carry it for the operator, only for
+   `…_fee_exceeds_maximum`; it is bounded (four keys of at most 512 characters).

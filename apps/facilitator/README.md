@@ -169,14 +169,16 @@ gets the same answer again, so a retry needs a new payment (a new nonce); only
 - a `…_timeout` the budget gave before the payment was claimed, during the checks, recorded
   nothing: the same payment may be sent again as it is, or a new one signed;
 - a refusal from the checks (`invalid_exact_stellar_*`, `invalid_network`) comes before the
-  claim and records nothing: the same payment may be sent again, and may succeed later.
+  claim and records nothing: the same payment may be sent again, and may succeed later, except
+  when its message names archived entries.
   `invalid_exact_stellar_payload_fee_exceeds_maximum` is our own fee estimate above our ceiling,
   not a fault in the payment. With the bid from fee stats (no `INCLUSION_FEE_STROOPS`), the bid
-  adds at most 20,000 stroops of it (fee stats are capped at 10,000 and the estimate counts the bid
-  twice), so rent is what usually puts it there, and waiting seldom helps. When the message names archived entries
+  adds at most 20,000 stroops of it (fee stats are capped at 10,000 and the estimate counts the
+  bid twice), so rent is what usually puts it there, and waiting seldom helps. When the message
+  names archived entries
   (`the payment's transaction lists N archived entries to restore: <LedgerKey XDR>, …`), restore
-  them and sign a new payment ([below](#restoring-archived-entries)); one that names none may still
-  touch archived state its transaction doesn't list;
+  them and sign a new payment ([below](#restoring-archived-entries)); one that names none may
+  still touch archived state its transaction doesn't list;
 - a spend refusal the store couldn't record leaves the payment claimed, so a repeat after the
   budget gets `…_timeout` instead of the spend reason.
 
@@ -205,11 +207,21 @@ A payment that touches archived state (the token's instance or code, a non-SAC b
 C-account's SAC balance) restores it and pays the restore rent, which the facilitator won't pay
 above its fee ceiling (task 0066). The refusal's message names the entries as base64 `LedgerKey`
 XDR, at most four (`and N more` after them); a key over 512 characters is shown as
-`a key of N characters`, and the payment's own simulation gives it. The list is the one the payment was built with, as
-the buyer's client put it in the transaction: the facilitator names only persistent contract data
-and code from it, but doesn't check that they are archived or that they are the token's, the
-payer's or the recipient's. Check that before paying their rent. Any funded account can restore
-them, all in one transaction:
+`a key of N characters`, and the payment's own simulation gives it. The list is the one the
+payment was built with, as the buyer's client put it in the transaction: the facilitator names
+only persistent contract data and code from it, but doesn't check that they are archived or that
+they are the token's. Check both before paying their rent, since otherwise you pay for entries
+the buyer chose:
+
+- whose: the key says it. For a data entry,
+  `Address.fromScAddress(key.contractData().contract()).toString()` must be the token's contract
+  (`asset` in the requirements), which holds its instance and its balances; for a code entry,
+  `key.contractCode().hash()` must be the Wasm hash the token's instance names.
+- archived: `server.getLedgerEntries(...keys)` returns each entry with its `liveUntilLedgerSeq`;
+  one below the latest ledger (`server.getLatestLedger()`), or 0, is no longer live.
+
+Any funded account can restore them, all in one transaction. The snippet is for testnet; on
+pubnet use `Networks.PUBLIC` and a mainnet RPC URL:
 
 ```ts
 import {
@@ -246,9 +258,13 @@ if (result.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
 ```
 
 Then sign a new payment, not the same one again: its auth may have expired, and a new one is
-built from a new simulation, so it lists only the entries still archived, if any. stellar-cli restores an instance with
-`stellar contract restore --id <contract>` and code with `--wasm-hash <hash>`; a data entry takes
-its key as an `ScVal`, not the `LedgerKey`.
+built from a new simulation, so it lists only the entries still archived, if any.
+
+stellar-cli restores one entry per call, and takes the parts of a key rather than the
+`LedgerKey`: an instance with `stellar contract restore --id <contract>`, code with
+`--wasm-hash <hash>` (`key.contractCode().hash().toString("hex")`), and a data entry with
+`--id <contract> --key-xdr <ScVal>` (`key.contractData().key().toXDR("base64")`), where
+`key = xdr.LedgerKey.fromXDR(k, "base64")` for a key `k` from the message.
 
 ## `/discovery/resources`
 
