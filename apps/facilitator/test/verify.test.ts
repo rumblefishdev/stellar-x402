@@ -365,11 +365,32 @@ describe("createVerifier", () => {
         "no auth entry for the payer",
         () => [authEntry(Keypair.random().publicKey(), CURRENT + MIN_VALIDITY)],
       ],
+      [
+        "another address's entry next to the payer's",
+        () => [
+          authEntry(payer, CURRENT + MIN_VALIDITY),
+          authEntry(Keypair.random().publicKey(), CURRENT + MIN_VALIDITY),
+        ],
+      ],
     ])("rejects %s, which /settle couldn't settle", async (_, auth) => {
       const { verify } = setup();
-      await expect(verify(payload({ auth: auth() }), requirements)).resolves.toEqual(
-        rejected(PAYER_AUTH_REASON),
+      const answer = await verify(payload({ auth: auth() }), requirements);
+      expect(answer).toEqual(rejected(PAYER_AUTH_REASON));
+      expect(answer.invalidMessage).toBe(
+        "the payload must carry exactly one auth entry: the payer's",
       );
+    });
+
+    it("rejects a short-lived extra entry that would let the payer's outlast the cap (0073 decision 21)", async () => {
+      // The expiry checks read the earliest entry: the extra one's 60 would pass the cap, while the
+      // payer's stays landable for days. Upstream accepts an extra signed entry.
+      const { verify } = setup();
+      const auth = [
+        authEntry(payer, CURRENT + 120_960),
+        authEntry(Keypair.random().publicKey(), CURRENT + 60),
+      ];
+      const answer = await verify(payload({ auth }), { ...requirements, maxTimeoutSeconds: 300 });
+      expect(answer).toEqual(rejected(PAYER_AUTH_REASON));
     });
 
     it("hands /settle the payer's nonce, its auth expiry and the ledger it read", async () => {
@@ -419,7 +440,7 @@ describe("createVerifier", () => {
       },
     );
 
-    it("caps the auth expiry whatever the resource's maxTimeoutSeconds allows (0073 decision 2)", async () => {
+    it("refuses a resource asking for more than the cap fits, whatever the ledger (0073 decision 22)", async () => {
       // Seven days, as a caller writing its own requirements could ask for.
       const week = 7 * 24 * 3600;
       const { verify, upstream } = setup();
@@ -430,32 +451,43 @@ describe("createVerifier", () => {
       expect(upstream.verify).toHaveBeenCalledOnce();
       expect(answer).toEqual(rejected(EXPIRATION_TOO_FAR_REASON));
       expect(answer.invalidMessage).toBe(
-        "auth expires at ledger 121960, 120960 ledgers after ledger 1000; at most 66 are allowed" +
-          "; maxTimeoutSeconds 604800 is about 120960 ledgers, so it should be at most 300",
+        "maxTimeoutSeconds 604800 is about 120960 ledgers; at most 300 is allowed, assuming " +
+          "about 5 s a ledger",
       );
     });
 
-    it("gives the hint just above the advised limit, where faster ledgers sign past the cap", async () => {
-      // 320 s at 4.8 s ledgers is 67 ledgers; at 5 s it would be 64.
+    it("accepts a maxTimeoutSeconds of exactly 300 at the default cap and refuses 301", async () => {
       const { verify } = setup();
-      const answer = await verify(payload({ auth: [authEntry(payer, CURRENT + 67)] }), {
-        ...requirements,
-        maxTimeoutSeconds: 320,
-      });
-      expect(answer.invalidMessage).toBe(
-        "auth expires at ledger 1067, 67 ledgers after ledger 1000; at most 66 are allowed" +
-          "; maxTimeoutSeconds 320 is about 64 ledgers, so it should be at most 300",
-      );
+      const at = (maxTimeoutSeconds: number) =>
+        verify(payload({ auth: [authEntry(payer, CURRENT + 60)] }), {
+          ...requirements,
+          maxTimeoutSeconds,
+        });
+      await expect(at(300)).resolves.toEqual({ isValid: true, payer });
+      await expect(at(301)).resolves.toEqual(rejected(EXPIRATION_TOO_FAR_REASON));
     });
 
-    it("gives no maxTimeoutSeconds hint when the resource asked for little and the client signed more", async () => {
+    it("still refuses the same payment once its expiry comes within the cap", async () => {
+      // An hour's resource: refused now, the same request stays refused after 55 minutes, when
+      // the gap alone would let it through after its payer may have signed again.
+      const { verify, latestLedger } = setup();
+      const hour = payload({ auth: [authEntry(payer, CURRENT + 720)] });
+      const hourly = { ...requirements, maxTimeoutSeconds: 3600 };
+      await expect(verify(hour, hourly)).resolves.toEqual(rejected(EXPIRATION_TOO_FAR_REASON));
+      latestLedger.mockResolvedValue(CURRENT + 660);
+      await expect(verify(hour, hourly)).resolves.toEqual(rejected(EXPIRATION_TOO_FAR_REASON));
+    });
+
+    it("refuses by the gap a 300 s payment signed at 4 s ledgers, with no maxTimeoutSeconds advice", async () => {
+      // Upstream's client rounds the ledger time up to whole seconds: at 4 s, 300 s is 75 ledgers.
       const { verify } = setup();
-      const answer = await verify(payload({ auth: [authEntry(payer, CURRENT + 67)] }), {
+      const answer = await verify(payload({ auth: [authEntry(payer, CURRENT + 75)] }), {
         ...requirements,
         maxTimeoutSeconds: 300,
       });
+      expect(answer).toEqual(rejected(EXPIRATION_TOO_FAR_REASON));
       expect(answer.invalidMessage).toBe(
-        "auth expires at ledger 1067, 67 ledgers after ledger 1000; at most 66 are allowed",
+        "auth expires at ledger 1075, 75 ledgers after ledger 1000; at most 66 are allowed",
       );
     });
 
@@ -467,19 +499,6 @@ describe("createVerifier", () => {
         verify(payload({ auth: [authEntry(payer, expiration)] }), requirements);
       await expect(at(2 ** 32 - 2)).resolves.toEqual({ isValid: true, payer });
       await expect(at(2 ** 32 - 1)).resolves.toEqual(rejected(EXPIRATION_TOO_FAR_REASON));
-    });
-
-    it("counts the earliest expiring auth entry", async () => {
-      const { verify } = setup();
-      const auth = [
-        authEntry(payer, CURRENT + 100),
-        authEntry(Keypair.random().publicKey(), CURRENT + 5),
-      ];
-      const answer = await verify(payload({ auth }), { ...requirements, maxTimeoutSeconds: 300 });
-      expect(answer).toEqual(rejected("invalid_exact_stellar_signature_expiration_too_soon"));
-      expect(answer.invalidMessage).toBe(
-        "auth expires at ledger 1005, 5 ledgers after ledger 1000; at least 12 are required",
-      );
     });
 
     it("says when the resource's maxTimeoutSeconds signs for about minValidityLedgers or fewer", async () => {
