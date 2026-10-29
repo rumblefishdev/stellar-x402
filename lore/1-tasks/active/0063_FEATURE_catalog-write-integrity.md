@@ -108,6 +108,7 @@ description or price, and nobody can make `/discovery/resources` answer megabyte
 | 32 | A listing on plain `http` is not listed: the check calls `https` only, since the seller's answer sets the listed price. ADR 0008 says so; none of 92,774 real listings uses `http` | review | beyond it | spec silent | | |
 | 33 | A seller's answer speaks only for the listing asked about: when the key rebuilt from it (network, `payTo`, method or tool, URL with its template) differs from the asked key, it is refused as `other_key` and the stored listing stays. Real hosts shared by several sellers: 144 of 4,930 HTTP host-network pairs (up to 38 sellers), 1 of 43 MCP server-network pairs | review | beyond it | spec silent | | |
 | 34 | An MCP check ends a stateful seller's session with the transport's `DELETE` before closing; a failed `DELETE` is logged and the answer stands | review | beyond it | MCP Streamable HTTP session termination; SDK 1.30.1 `terminateSession` | | |
+| 35 | `packages/seller-fetch` gets its own error codes naming the cause (`not_https`, `not_public`, `redirect`, `too_large`, `timeout`, `network`) and plain messages; the MCP's `asToolError` translates them to its tool errors, the facilitator stores them as reasons. A separate PR after 0063's: 0085 | grilling | beyond it | spec silent | | |
 
 ## Not yet decided
 
