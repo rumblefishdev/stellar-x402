@@ -689,6 +689,14 @@ describe("cataloger, an MCP listing (0063 rows 5, 18)", () => {
     expect(await list()).toEqual([]);
   });
 
+  it("ends a stateful seller's session once the check is done", async () => {
+    mcp = await startMcpSeller(() => terms, { session: "s-1" });
+    const { cataloger, counted } = setup();
+    await cataloger.onSuccess(paid(), "settle");
+    expect(counted("seller", "refreshed", "inserted")).toBe(1);
+    expect(mcp.ended).toEqual(["s-1"]);
+  });
+
   it("closes the seller's event stream once the check is done", async () => {
     mcp = await startMcpSeller(() => terms);
     const { cataloger } = setup();

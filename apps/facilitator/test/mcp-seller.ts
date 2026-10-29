@@ -13,6 +13,8 @@ export interface McpSeller {
   url: string;
   /** Event streams (`GET`) still open. */
   openStreams: () => number;
+  /** Session ids the client ended with a `DELETE`, when the seller hands out sessions. */
+  ended: string[];
   server: Server;
 }
 
@@ -37,15 +39,32 @@ export async function startMcpSeller(
     outputSchema = false,
     textOnly = false,
     description = "",
-  }: { tools?: string[]; outputSchema?: boolean; textOnly?: boolean; description?: string } = {},
+    session,
+  }: {
+    tools?: string[];
+    outputSchema?: boolean;
+    textOnly?: boolean;
+    description?: string;
+    session?: string;
+  } = {},
 ): Promise<McpSeller> {
   const streams = new Set<IncomingMessage>();
   const seller: McpSeller = {
     messages: [],
     url: "",
     openStreams: () => streams.size,
+    ended: [],
     server: createServer((req, res) => {
       void (async () => {
+        // A stateful seller's session id, on every answer; the client ends it with a DELETE.
+        if (session) {
+          if (req.method === "DELETE") {
+            seller.ended.push(String(req.headers["mcp-session-id"]));
+            res.writeHead(200).end();
+            return;
+          }
+          res.setHeader("mcp-session-id", session);
+        }
         const body = req.method === "POST" ? JSON.parse(await read(req)) : undefined;
         for (const message of [body ?? []].flat()) seller.messages.push(message);
         if (req.method === "GET") {

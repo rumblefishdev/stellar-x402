@@ -69,8 +69,9 @@ export async function askMcpSeller(
   // The SDK waits for an answer up to its own 60 s after the request is sent; the deadline ends
   // that wait too, for a server that accepts a call and never sends its result.
   const options = { signal: deadline };
+  const transport = new StreamableHTTPClientTransport(new URL(url), { fetch });
   try {
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(url), { fetch }), options);
+    await mcp.connect(transport, options);
     let listed = false;
     let cursor: string | undefined;
     do {
@@ -124,6 +125,12 @@ export async function askMcpSeller(
     // Not an MCP server, or one that answered the call with a protocol error.
     return { ok: false, reason: "mcp_error", detail: String(error) };
   } finally {
+    // `close()` only aborts the client's requests; a stateful server's session ends with the
+    // DELETE this sends (none without a session id). A failed one leaves the session to the
+    // server's own cleanup, so it is logged and the answer stands.
+    await transport.terminateSession().catch((error: unknown) => {
+      console.warn("mcp_session_end_failed", url, String(error));
+    });
     await mcp.close();
   }
 }
