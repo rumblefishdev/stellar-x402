@@ -103,6 +103,13 @@ export class PostgresCatalogStore implements CatalogStore {
   }
 }
 
+/**
+ * A NUL inside a payer's or seller's text is valid JSON, but neither `text` nor `jsonb` stores it,
+ * so the attempt's insert would fail: it is kept as U+FFFD instead.
+ */
+const withoutNul = (_key: string, value: unknown) =>
+  typeof value === "string" ? value.replaceAll("\u0000", "\uFFFD") : value;
+
 export class PostgresCatalogAttemptStore implements CatalogAttemptStore {
   constructor(private readonly pool: pg.Pool) {}
 
@@ -126,9 +133,9 @@ export class PostgresCatalogAttemptStore implements CatalogAttemptStore {
         attempt.detail ?? null,
         attempt.fieldBytes ?? null,
         attempt.contentHash ?? null,
-        attempt.copy === undefined ? null : JSON.stringify(attempt.copy),
-        attempt.answer === undefined ? null : JSON.stringify(attempt.answer),
-      ],
+        attempt.copy === undefined ? null : JSON.stringify(attempt.copy, withoutNul),
+        attempt.answer === undefined ? null : JSON.stringify(attempt.answer, withoutNul),
+      ].map((value) => (typeof value === "string" ? value.replaceAll("\u0000", "\uFFFD") : value)),
     );
   }
 
