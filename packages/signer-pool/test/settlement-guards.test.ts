@@ -261,6 +261,28 @@ describe("onSigned", () => {
     }
   });
 
+  it("stops watching the ledger at the bound's estimated time when ledgers are slow (0073)", async () => {
+    // 8 s ledgers: the estimated time of the bound passes with ledgers left. The watcher stops
+    // polling there, so the hook's own timeout answers, and the ledger reads stop.
+    const { fake, submitter } = setup({ pollIntervalMs: 1, onSignedTimeoutMs: 300 });
+    const maxLedger = fake.ledger + 20;
+    let reads = 0;
+    const close = fake.getLatestLedger.bind(fake);
+    fake.getLatestLedger = async () => {
+      reads++;
+      fake.closeTime += 3;
+      return close();
+    };
+    const error = await submitter
+      .submit(call(), { maxLedger, onSigned: () => new Promise<void>(() => {}) })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SignedHookError);
+    expect((error as SignedHookError).message).toMatch(/did not finish in 300 ms/);
+    expect(fake.ledger).toBeLessThan(maxLedger);
+    expect(reads).toBeLessThan(30);
+    expect(fake.sent).toHaveLength(0);
+  }, 5_000);
+
   it("gives up on a hook that never settles after onSignedTimeoutMs, 5 s by default", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
@@ -504,6 +526,45 @@ describe("maxLedger", () => {
     expect(sentAt.length).toBeGreaterThan(1);
     expect(sentAt.every((l) => l < maxLedger)).toBe(true);
   });
+
+  it("stops resending at the ledger bound's estimated time when ledgers are slow (0073 decision 11)", async () => {
+    // 8 s ledgers against the 6 s estimate: the resends stop with ledgers still left, and the
+    // envelope the network never took ends at its ledger bound.
+    const { fake, submitter } = setup();
+    const maxLedger = fake.ledger + 20;
+    fake.sendScript = Array(40).fill("TRY_AGAIN_LATER");
+    const close = fake.getLatestLedger.bind(fake);
+    fake.getLatestLedger = async () => {
+      fake.closeTime += 3;
+      return close();
+    };
+    const sentAt: number[] = [];
+    const send = fake.sendTransaction.bind(fake);
+    fake.sendTransaction = (tx) => {
+      sentAt.push(fake.ledger);
+      return send(tx);
+    };
+    const res = await submitter.submit(call(), { maxLedger });
+    expect(res.status).toBe("pending");
+    expect(Math.max(...sentAt)).toBeLessThan(maxLedger - 1);
+    expect(res.attempts).toEqual([{ hash: res.hash, sent: "no" }]);
+  }, 5_000);
+
+  it("stops resending when the RPC stops answering after TRY_AGAIN_LATER (0073)", async () => {
+    // No ledger read answers, so no ledger ever passes the bound: only the estimated time ends
+    // the resends, and without it the loop would send on as fast as it can.
+    const { fake, submitter } = setup();
+    fake.sendScript = Array(1000).fill("TRY_AGAIN_LATER");
+    const close = fake.getLatestLedger.bind(fake);
+    fake.getLatestLedger = async () => {
+      fake.closeTime += fake.ledgerSeconds;
+      throw new Error("rpc down");
+    };
+    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 20 });
+    fake.getLatestLedger = close;
+    expect(res.status).toBe("pending");
+    expect(fake.sendScript.length).toBeGreaterThan(1000 - 25);
+  }, 5_000);
 
   it("marks an attempt whose sends all threw as unknown", async () => {
     const { fake, submitter } = setup({ timeoutSeconds: 600 });
