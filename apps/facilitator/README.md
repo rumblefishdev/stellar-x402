@@ -193,7 +193,7 @@ gets the same answer again, so a retry needs a new payment (a new nonce); only
 - a refusal from the checks (`invalid_exact_stellar_*`, `invalid_network`) comes before the
   claim and records nothing: the same payment may be sent again, and may succeed later.
   `invalid_exact_stellar_payload_fee_exceeds_maximum` is our own fee estimate above our ceiling,
-  not a fault in the payment (0085: it can settle after its payer signed again, so ask for a new
+  not a fault in the payment (0086: it can settle after its payer signed again, so ask for a new
   signature only once it can't land). `invalid_exact_stellar_signature_expiration_too_far` comes
   from our three checks: the resource's `maxTimeoutSeconds` above 300 s at the default cap ("at
   most 300 is allowed", which stays refused, so the resource must ask for less), the auth's own

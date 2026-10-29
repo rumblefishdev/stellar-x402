@@ -176,7 +176,7 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
     ledgers (75) is refused by the gap and can pass later. Chosen over storing the refusal under
     the payment's key (`/verify` writing records, about a day of work and its own review) and
     over accepting the risk in writing.
-23. **The same replay after `invalid_…_fee_exceeds_maximum` goes to 0085** (okarcz, 2026-10-29,
+23. **The same replay after `invalid_…_fee_exceeds_maximum` goes to 0086** (okarcz, 2026-10-29,
     PR 1 review 2): on develop already, and decision 22 can't close it, since a fee isn't in the
     requirements. Chosen over fixing it in this PR with stored refusals.
 
