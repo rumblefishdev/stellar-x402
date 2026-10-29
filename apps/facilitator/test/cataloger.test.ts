@@ -510,4 +510,15 @@ describe("cataloger", () => {
     ).toBe(1);
     expect(internal.logger.info).not.toHaveBeenCalled();
   });
+
+  it("records an attempt that failed inside the facilitator, with the step it failed at (row 23)", async () => {
+    const { cataloger, store, attempts, counted, logger } = setup();
+    vi.spyOn(store, "get").mockRejectedValue(new Error("down"));
+    await cataloger.onSuccess(record(valid), "settle");
+    expect(await attempts()).toEqual([
+      { stage: "payment", outcome: "internal_error", reason: "compare" },
+    ]);
+    expect(counted("payment", "internal_error", "compare")).toBe(1);
+    expect(logger.info).not.toHaveBeenCalledWith("catalog_rejected", expect.anything());
+  });
 });
