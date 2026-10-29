@@ -21,7 +21,7 @@ import { createApp, type AppDeps } from "./http/app.js";
 import { supportedResponse } from "./http/supported.js";
 import { captureConsoleError, jsonLogger, rpcEndpointName, type Logger } from "./logger.js";
 import { memoryMetrics, type Metrics } from "./metrics.js";
-import type { SettlementStore } from "./ports/index.js";
+import type { LeaseFence, SettlementStore } from "./ports/index.js";
 import { createPruner } from "./pruner.js";
 import { checkChannels } from "./settlement/channel-check.js";
 import { checkRpcNetworks } from "./settlement/network-check.js";
@@ -378,8 +378,8 @@ export function buildSettlement(
     metrics: Metrics;
     /** Tests pass the pool's `sleep`. */
     sleep?: (ms: number) => Promise<void>;
-    /** The channel lease's `held()`, checked again before each send (0025). */
-    held?: () => boolean;
+    /** The channel lease this process holds, with its token, checked before each send (0025, 0071). */
+    lease: () => LeaseFence | undefined;
   },
 ): {
   settle: Settle;
@@ -446,7 +446,7 @@ export function buildSettlement(
     budgetMs: config.settlement.settleBudgetMs,
     latestLedger: deps.checks.latestLedger,
     records,
-    ...(deps.held && { held: deps.held }),
+    lease: deps.lease,
   });
   const reconciliation = scheduleReconciliation({ reconciler, logger, network });
   // Closing the pool first refuses every call that sent nothing, so their records close too.
@@ -511,7 +511,7 @@ export function compose(
     logger,
     metrics,
     ...(opts.sleep && { sleep: opts.sleep }),
-    held: lease.held,
+    lease: lease.current,
   });
   return {
     deps: {

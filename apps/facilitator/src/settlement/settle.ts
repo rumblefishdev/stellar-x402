@@ -29,7 +29,13 @@ import type { PaymentPayload, PaymentRequirements, SettleResponse } from "@x402/
 import { getNetworkPassphrase } from "@x402/stellar";
 import type { Logger } from "../logger.js";
 import type { Metrics } from "../metrics.js";
-import type { SettlementKey, SettlementRecord, SettlementStore } from "../ports/index.js";
+import {
+  LeaseFencedError,
+  type LeaseFence,
+  type SettlementKey,
+  type SettlementRecord,
+  type SettlementStore,
+} from "../ports/index.js";
 import type { BeforeSubmitResult, SettlementHooks, SettlementOrigin } from "./hooks.js";
 import {
   attemptUpdates,
@@ -111,6 +117,12 @@ export const SETTLE_REASONS = {
    * sent for this payment ({@link UNSENT_REASONS}); a retry reaches the next process (0025).
    */
   shuttingDown: "settle_exact_stellar_shutting_down",
+  /**
+   * This process lost the channel lease before the hash was sent: another process took it, or
+   * none holds it (0071). Nothing was sent for this payment ({@link UNSENT_REASONS}); a retry
+   * reaches the process that holds it.
+   */
+  leaseLost: "settle_exact_stellar_lease_lost",
   /** Anything else (upstream's code). */
   unexpected: "unexpected_settle_error",
 } as const;
@@ -129,6 +141,7 @@ export const UNSENT_REASONS: readonly string[] = [
   SETTLE_REASONS.shuttingDown,
   SETTLE_REASONS.noChannelInTime,
   SETTLE_REASONS.noChannels,
+  SETTLE_REASONS.leaseLost,
 ];
 const UNSENT = new Set(UNSENT_REASONS);
 
@@ -173,11 +186,12 @@ export interface SettlerDeps {
   /** How long one `/settle` call may take, the wait for a channel included (ADR 0011). */
   budgetMs: number;
   /**
-   * Whether this process still holds the channel lease (0025). Checked again once a hash is
-   * stored, so a call let in before the lease was lost sends nothing on channels another
-   * process may own. Always held when unset.
+   * The channel lease this process holds now, with its token, or `undefined` (0025, 0071).
+   * `addHash` stores a hash only under the lease's current token, so a call let in before the
+   * lease was lost, or one whose process froze past its TTL, sends nothing on channels another
+   * process may own. Read again once the hash is stored (0025 decision 22).
    */
-  held?: () => boolean;
+  lease: () => LeaseFence | undefined;
   /**
    * The network's latest ledger, to tell whether an unsent payment's auth entry can still land
    * (0073 decision 15). Read only on those answers and before a reopen.
@@ -540,13 +554,32 @@ export function createSettler(deps: SettlerDeps): Settle & {
             // a rebuild's would land under another.
             if (call.budgetOver) throw new Error("the settle budget ran out");
             call.signing = hash;
-            // Durable before the first send (AD-16); a final or missing record stops the send.
-            // Only on this call's own claim: once reopened, the record is another call's (0073).
-            if (!(await store.addHash(key, hash, now(), bounds, claimed.reopened)))
-              throw new Error("the settlement record is final or missing");
             // The lease may have gone since the request came in, after a long body upload or
             // wait for a channel (0025 decision 22): another process may send on this channel.
-            if (deps.held && !deps.held()) throw new Error("the channel lease was lost");
+            const lease = deps.lease();
+            if (!lease) throw new LeaseLostError();
+            // Durable before the first send (AD-16); a final or missing record stops the send.
+            // Only on this call's own claim: once reopened, the record is another call's (0073).
+            // Only under the lease's current token: a takeover since refuses it (0071).
+            let added: boolean;
+            try {
+              added = await store.addHash(key, hash, lease, now(), bounds, claimed.reopened);
+            } catch (error) {
+              if (error instanceof LeaseFencedError) {
+                logger.warn("settlement_lease_fenced", {
+                  network,
+                  settlementKey: key,
+                  lease: lease.name,
+                  transaction: hash,
+                });
+                metrics.increment("settlement_lease_fenced_total");
+              }
+              throw error;
+            }
+            if (!added) throw new Error("the settlement record is final or missing");
+            // The stored expiry may have passed while the store wrote, or the lease lapsed and was
+            // acquired again: a new token fences this call too (decision 1).
+            if (deps.lease()?.token !== lease.token) throw new LeaseLostError();
             // The budget answer may have gone out while the store wrote: it named the hash it
             // could read, so this one isn't sent.
             if (call.budgetOver) throw new Error("the settle budget ran out");
@@ -1057,13 +1090,24 @@ async function within<T>(promise: Promise<T>, ms: number): Promise<T | undefined
   }
 }
 
+/** `onSigned` found this process no longer holds the channel lease, so the hash isn't sent. */
+export class LeaseLostError extends Error {
+  override readonly name = "LeaseLostError";
+  constructor() {
+    super("the channel lease was lost");
+  }
+}
+
 /** The fixed `errorReason` for each error `submit()` throws (AD-6). */
 export function reasonFor(error: unknown): string {
   if (error instanceof SimulationCheckError) return SETTLE_REASONS.balanceChanges;
   if (error instanceof SimulationError) return SETTLE_REASONS.simulation;
   if (error instanceof FeeLimitError) return SETTLE_REASONS.fee;
   if (error instanceof LedgerBoundError) return SETTLE_REASONS.ledgerBound;
-  if (error instanceof SignedHookError) return SETTLE_REASONS.recordWrite;
+  if (error instanceof SignedHookError)
+    return error.cause instanceof LeaseLostError || error.cause instanceof LeaseFencedError
+      ? SETTLE_REASONS.leaseLost
+      : SETTLE_REASONS.recordWrite;
   if (error instanceof QueueTimeoutError) return SETTLE_REASONS.noChannelInTime;
   if (error instanceof NoChannelsError) return SETTLE_REASONS.noChannels;
   if (error instanceof ShutdownError) return SETTLE_REASONS.shuttingDown;

@@ -326,6 +326,7 @@ describe("POST /settle without the channel lease (0025)", () => {
     let holds = false;
     const lease = {
       held: () => holds,
+      current: () => (holds ? { name: "test:channels", token: "t" } : undefined),
       start: vi.fn(async () => {}),
       runOnce: vi.fn(),
       close: vi.fn(async () => {}),
@@ -414,6 +415,7 @@ describe("shutdown (0025)", () => {
     const settle = vi.fn<Settle>(async () => ({ response: success }));
     const lease = {
       held: () => true,
+      current: () => ({ name: "test:channels", token: "t" }),
       start: vi.fn(async () => {}),
       runOnce: vi.fn(),
       close: vi.fn(async () => {}),

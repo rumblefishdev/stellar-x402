@@ -6,6 +6,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   HashConflictError,
   LEASE_SKEW_MARGIN_MS,
+  LeaseFencedError,
+  type LeaseFence,
   type CatalogEntry,
   type CatalogStore,
   type NewSettlement,
@@ -57,11 +59,27 @@ export function settlement(
   };
 }
 
+/** The lease `holdLease` takes, apart from any network's channel lease. */
+export const TEST_LEASE_NAME = "test:channels";
+
+/**
+ * Takes a lease for the `addHash` calls of tests that aren't about the lease: every hash is stored
+ * under a lease's current token (0071). Every call is a new acquire, so it draws a new token and
+ * the one an earlier call returned no longer stores anything.
+ */
+export async function holdLease(store: Pick<SettlementStore, "acquireLease">): Promise<LeaseFence> {
+  const lease = await store.acquireLease(TEST_LEASE_NAME, "test", 1e12, 0);
+  if (!lease) throw new Error(`${TEST_LEASE_NAME} is held by another holder`);
+  return { name: lease.name, token: lease.token };
+}
+
 export function settlementStoreContract(make: Make<SettlementStore>) {
   describe("SettlementStore contract", () => {
     let store: SettlementStore;
+    let LEASE: LeaseFence;
     beforeEach(async () => {
       store = await make();
+      LEASE = await holdLease(store);
     });
 
     it("claims a key once, also under concurrent claims", async () => {
@@ -85,7 +103,7 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
     it("returns the whole record from transition, findByHash and listNonFinal", async () => {
       const s = settlement("1");
       await store.claim(s);
-      await store.addHash(s.key, "h1", 2_000);
+      await store.addHash(s.key, "h1", LEASE, 2_000);
       const update = { state: "pending", channel: "GCHANNEL", updatedAt: 3_000 } as const;
       const pending = { ...s, ...update, hashes: ["h1"], version: 1, reopened: 0 };
       expect(await store.transition(s.key, "signed", update)).toEqual(pending);
@@ -96,10 +114,10 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
     it("bumps the version with each new hash, and fails a transition that expects an older one", async () => {
       const { key } = settlement("1");
       await store.claim(settlement("1"));
-      await store.addHash(key, "h1", 2_000);
-      await store.addHash(key, "h1", 2_500);
+      await store.addHash(key, "h1", LEASE, 2_000);
+      await store.addHash(key, "h1", LEASE, 2_500);
       expect((await store.get(key))?.version).toBe(1);
-      await store.addHash(key, "h2", 3_000);
+      await store.addHash(key, "h2", LEASE, 3_000);
       expect((await store.get(key))?.version).toBe(2);
       const expired = { state: "expired", updatedAt: 4_000 } as const;
       // A hash appended since version 1 was read: the write fails, and the record stays open.
@@ -115,9 +133,9 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       for (let i = 0; i < 10; i++) {
         const s = settlement(String(i));
         await store.claim(s);
-        await store.addHash(s.key, `a${i}`, 2_000);
+        await store.addHash(s.key, `a${i}`, LEASE, 2_000);
         const [added, ended] = await Promise.all([
-          store.addHash(s.key, `b${i}`, 3_000),
+          store.addHash(s.key, `b${i}`, LEASE, 3_000),
           store.transition(s.key, "signed", { state: "expired", updatedAt: 3_000 }, 1),
         ]);
         expect(added !== (ended !== undefined)).toBe(true);
@@ -127,9 +145,9 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
     it("keeps every hash, finds the record by any of them, and moves claimed to signed", async () => {
       const { key } = settlement("1");
       await store.claim(settlement("1"));
-      expect(await store.addHash(key, "h1", 2_000)).toBe(true);
-      expect(await store.addHash(key, "h2", 3_000)).toBe(true);
-      expect(await store.addHash(key, "h2", 4_000)).toBe(true);
+      expect(await store.addHash(key, "h1", LEASE, 2_000)).toBe(true);
+      expect(await store.addHash(key, "h2", LEASE, 3_000)).toBe(true);
+      expect(await store.addHash(key, "h2", LEASE, 4_000)).toBe(true);
       // The repeat changed nothing, its time included.
       expect(await store.get(key)).toMatchObject({
         state: "signed",
@@ -146,8 +164,8 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       const k2 = settlement("2").key;
       await store.claim(settlement("1"));
       await store.claim(settlement("2"));
-      expect(await store.addHash(k1, "h1", 2_000)).toBe(true);
-      const conflict = store.addHash(k2, "h1", 3_000);
+      expect(await store.addHash(k1, "h1", LEASE, 2_000)).toBe(true);
+      const conflict = store.addHash(k2, "h1", LEASE, 3_000);
       await expect(conflict).rejects.toBeInstanceOf(HashConflictError);
       await expect(conflict).rejects.toMatchObject({ name: "HashConflictError", hash: "h1" });
       expect(await store.get(k2)).toMatchObject({ state: "claimed", hashes: [], updatedAt: 1_000 });
@@ -157,7 +175,7 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
         updatedAt: 2_000,
       });
       expect((await store.findByHash("h1"))?.key).toBe(k1);
-      expect(await store.addHash(k1, "h1", 4_000)).toBe(true);
+      expect(await store.addHash(k1, "h1", LEASE, 4_000)).toBe(true);
       expect((await store.get(k1))?.hashes).toEqual(["h1"]);
     });
 
@@ -167,8 +185,8 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       await store.claim(settlement("1"));
       await store.claim(settlement("2"));
       const results = await Promise.allSettled([
-        store.addHash(k1, "h1", 2_000),
-        store.addHash(k2, "h1", 2_000),
+        store.addHash(k1, "h1", LEASE, 2_000),
+        store.addHash(k2, "h1", LEASE, 2_000),
       ]);
       expect(results.filter((r) => r.status === "fulfilled")).toEqual([
         { status: "fulfilled", value: true },
@@ -184,20 +202,20 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
     it("refuses a hash for a missing or final record", async () => {
       const k1 = settlement("1").key;
       const k2 = settlement("2").key;
-      expect(await store.addHash(k1, "h1", 2_000)).toBe(false);
+      expect(await store.addHash(k1, "h1", LEASE, 2_000)).toBe(false);
       await store.claim(settlement("1"));
       await store.claim(settlement("2"));
-      await store.addHash(k1, "h1", 2_000);
+      await store.addHash(k1, "h1", LEASE, 2_000);
       await store.transition(k1, "signed", { state: "success", ledger: 1, updatedAt: 3_000 });
       // A final record refuses before the hash is looked up: its own hash, or another record's.
-      expect(await store.addHash(k1, "h1", 4_000)).toBe(false);
-      await store.addHash(k2, "h2", 2_000);
+      expect(await store.addHash(k1, "h1", LEASE, 4_000)).toBe(false);
+      await store.addHash(k2, "h2", LEASE, 2_000);
       await store.transition(k2, "signed", {
         state: "rejected",
         errorReason: "x",
         updatedAt: 3_000,
       });
-      expect(await store.addHash(k2, "h1", 4_000)).toBe(false);
+      expect(await store.addHash(k2, "h1", LEASE, 4_000)).toBe(false);
     });
 
     it("lets exactly one of addHash and a final transition from claimed win, in either order", async () => {
@@ -208,7 +226,7 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
         const { key } = settlement(nonce);
         await store.claim(settlement(nonce));
         // A hash per nonce: another key's `h1` would conflict, not race.
-        const add = () => store.addHash(key, `h${nonce}`, 2_000);
+        const add = () => store.addHash(key, `h${nonce}`, LEASE, 2_000);
         const end = () =>
           store.transition(key, "claimed", {
             state: "rejected",
@@ -245,9 +263,9 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       // Each state reached the way `/settle` reaches it.
       const reach: Record<string, (key: SettlementKey) => Promise<unknown>> = {
         claimed: async () => {},
-        signed: (key) => store.addHash(key, `h-${key}`, 2_000),
+        signed: (key) => store.addHash(key, `h-${key}`, LEASE, 2_000),
         pending: async (key) => {
-          await store.addHash(key, `h-${key}`, 2_000);
+          await store.addHash(key, `h-${key}`, LEASE, 2_000);
           await store.transition(key, "signed", { state: "pending", updatedAt: 2_000 });
         },
         failed: async (key) => {
@@ -280,7 +298,7 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       const at = Date.UTC(2026, 9, 20);
       const s = { ...settlement("1"), createdAt: at };
       await store.claim(s);
-      await store.addHash(s.key, "h1", at + 1);
+      await store.addHash(s.key, "h1", LEASE, at + 1);
       await store.transition(s.key, "signed", { state: "success", updatedAt: at + 2 });
       expect(await store.markSuccessAnswered(s.key, at + 3)).toBe(true);
       expect(await store.get(s.key)).toMatchObject({
@@ -293,7 +311,7 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
     it("applies a transition only from the expected state, and only forward", async () => {
       const { key } = settlement("1");
       await store.claim(settlement("1"));
-      await store.addHash(key, "h1", 2_000);
+      await store.addHash(key, "h1", LEASE, 2_000);
       expect(await store.transition(key, "claimed", { state: "pending", updatedAt: 3_000 })).toBe(
         undefined,
       );
@@ -346,7 +364,7 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
     it("lets exactly one of several concurrent transitions from a state win", async () => {
       const { key } = settlement("1");
       await store.claim(settlement("1"));
-      await store.addHash(key, "h1", 2_000);
+      await store.addHash(key, "h1", LEASE, 2_000);
       const results = await Promise.all(
         ["GA", "GB", "GC"].map((channel) =>
           store.transition(key, "signed", { state: "pending", channel, updatedAt: 3_000 }),
@@ -376,7 +394,7 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       const rejected = async (nonce: string, errorReason = "unsent_b", hash?: string) => {
         const s = settlement(nonce);
         await store.claim(s);
-        if (hash) await store.addHash(s.key, hash, 1_500);
+        if (hash) await store.addHash(s.key, hash, LEASE, 1_500);
         await store.transition(s.key, hash ? "signed" : "claimed", {
           state: "rejected",
           errorReason,
@@ -435,7 +453,9 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
         await store.reopen(s.key, s.fingerprint, UNSENT, 5_000);
         const close = { state: "rejected", errorReason: "unsent_a", updatedAt: 6_000 } as const;
         expect(await store.transition(s.key, "claimed", close, before.version)).toBeUndefined();
-        expect(await store.addHash(s.key, "h1", 6_000, undefined, before.reopened)).toBe(false);
+        expect(await store.addHash(s.key, "h1", LEASE, 6_000, undefined, before.reopened)).toBe(
+          false,
+        );
         // Any write of the earlier claim's call, versioned or not (0073 decision 24).
         expect(
           await store.transition(s.key, "claimed", close, undefined, before.reopened),
@@ -449,7 +469,7 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
           await store.transition(s.key, "claimed", refusal, undefined, before.reopened),
         ).toBeUndefined();
         expect(await store.get(s.key)).toMatchObject({ state: "claimed", hashes: [] });
-        expect(await store.addHash(s.key, "h1", 6_000, undefined, 1)).toBe(true);
+        expect(await store.addHash(s.key, "h1", LEASE, 6_000, undefined, 1)).toBe(true);
         expect(await store.get(s.key)).toMatchObject({ state: "signed", hashes: ["h1"] });
         const pending = { state: "pending", updatedAt: 7_000 } as const;
         expect(await store.transition(s.key, "signed", pending, undefined, 1)).toMatchObject({
@@ -516,12 +536,12 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       const k2 = settlement("2").key;
       await store.claim(settlement("1"));
       await store.claim(settlement("2"));
-      await store.addHash(k1, "h1", 2_000);
+      await store.addHash(k1, "h1", LEASE, 2_000);
       await store.transition(k1, "signed", { state: "pending", updatedAt: 3_000 });
       // A rebuilt transaction (a fee bump) adds a hash while the record is pending.
-      expect(await store.addHash(k1, "h2", 4_000)).toBe(true);
+      expect(await store.addHash(k1, "h2", LEASE, 4_000)).toBe(true);
       expect(await store.get(k1)).toMatchObject({ state: "pending", hashes: ["h1", "h2"] });
-      await store.addHash(k2, "h3", 2_000);
+      await store.addHash(k2, "h3", LEASE, 2_000);
       const open = (await store.listNonFinal("stellar:testnet")).sort((a, b) =>
         a.nonce.localeCompare(b.nonce),
       );
@@ -538,11 +558,14 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       });
 
       it("stores each hash as a stored attempt with its bounds, oldest first", async () => {
-        await store.addHash(key, "h1", 2_000, { maxTime: 1_700_000_060, maxLedger: 5_000_123 });
-        await store.addHash(key, "h2", 3_000, { maxTime: 1_700_000_090 });
-        await store.addHash(key, "h3", 4_000);
+        await store.addHash(key, "h1", LEASE, 2_000, {
+          maxTime: 1_700_000_060,
+          maxLedger: 5_000_123,
+        });
+        await store.addHash(key, "h2", LEASE, 3_000, { maxTime: 1_700_000_090 });
+        await store.addHash(key, "h3", LEASE, 4_000);
         // A repeat changes nothing, its bounds included.
-        await store.addHash(key, "h1", 5_000, { maxTime: 1 });
+        await store.addHash(key, "h1", LEASE, 5_000, { maxTime: 1 });
         expect(await store.attempts(key)).toEqual([
           {
             hash: "h1",
@@ -558,8 +581,8 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       });
 
       it("moves attempts only forward, each on its own", async () => {
-        await store.addHash(key, "h1", 2_000);
-        await store.addHash(key, "h2", 2_000);
+        await store.addHash(key, "h1", LEASE, 2_000);
+        await store.addHash(key, "h2", LEASE, 2_000);
         expect(await store.markAttempts(key, [{ hash: "h1", state: "sent" }], 3_000)).toBe(1);
         // sent and unknown rank alike, so neither replaces the other; nothing moves back.
         expect(
@@ -608,13 +631,13 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       it("never moves another record's attempt", async () => {
         const k2 = settlement("2").key;
         await store.claim(settlement("2"));
-        await store.addHash(k2, "h9", 2_000);
+        await store.addHash(k2, "h9", LEASE, 2_000);
         expect(await store.markAttempts(key, [{ hash: "h9", state: "dead" }], 3_000)).toBe(0);
         expect((await store.attempts(k2))[0]?.state).toBe("stored");
       });
 
       it("lets exactly one of concurrent updates of an attempt win", async () => {
-        await store.addHash(key, "h1", 2_000);
+        await store.addHash(key, "h1", LEASE, 2_000);
         const moved = await Promise.all(
           (["sent", "unknown", "sent", "unknown"] as const).map((state) =>
             store.markAttempts(key, [{ hash: "h1", state }], 3_000),
@@ -624,8 +647,8 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       });
 
       it("writes a transition's attempts with it, also when the state doesn't move", async () => {
-        await store.addHash(key, "h1", 2_000);
-        await store.addHash(key, "h2", 2_000);
+        await store.addHash(key, "h1", LEASE, 2_000);
+        await store.addHash(key, "h2", LEASE, 2_000);
         const moved = await store.transition(key, "signed", {
           state: "success",
           ledger: 7,
@@ -642,7 +665,7 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
 
         const k2 = settlement("2").key;
         await store.claim(settlement("2"));
-        await store.addHash(k2, "h3", 2_000);
+        await store.addHash(k2, "h3", LEASE, 2_000);
         // A lost compare-and-set still records what the network said about the attempt.
         expect(
           await store.transition(k2, "pending", {
@@ -664,6 +687,7 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
           name: NAME,
           holder: "a",
           expiresAt: 1_000,
+          token: expect.any(String),
         });
         expect(await store.acquireLease(NAME, "b", 1_000, 500)).toBeUndefined();
         // Expired, but the holder's clock may lag the acquirer's (0025 decision 16).
@@ -711,6 +735,93 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
         expect(await store.acquireLease(NAME, "b", 1_000, 100)).toBeUndefined();
         await store.releaseLease(NAME, "a");
         expect(await store.acquireLease(NAME, "b", 1_000, 100)).toMatchObject({ holder: "b" });
+      });
+
+      it("draws a new token on every acquire, its own holder's too, and keeps it on a renewal (0071)", async () => {
+        const first = await store.acquireLease(NAME, "a", 1_000, 0);
+        expect(await store.renewLease(NAME, "a", 1_000, 500)).toBe(true);
+        // The keeper takes it again only after it lapsed, but any acquire draws a new token.
+        const again = await store.acquireLease(NAME, "a", 1_000, 2_000);
+        const taken = await store.acquireLease(NAME, "b", 1_000, 3_001 + LEASE_SKEW_MARGIN_MS);
+        await store.releaseLease(NAME, "b");
+        // A release deletes the row, and a new one never repeats an earlier token.
+        const fresh = await store.acquireLease(NAME, "a", 1_000, 10_000);
+        const tokens = [first, again, taken, fresh].map((lease) => lease?.token);
+        expect(new Set(tokens).size).toBe(4);
+        expect(tokens.every((token) => typeof token === "string")).toBe(true);
+      });
+    });
+
+    describe("lease fencing (0071)", () => {
+      const NAME = "stellar:testnet:channels";
+
+      it("stores a hash under the lease's current token", async () => {
+        const lease = (await store.acquireLease(NAME, "a", 1_000, 0))!;
+        const s = settlement("1");
+        await store.claim(s);
+        expect(await store.addHash(s.key, "h1", lease, 2_000)).toBe(true);
+        expect(await store.get(s.key)).toMatchObject({ state: "signed", hashes: ["h1"] });
+      });
+
+      it("refuses a hash under a token another acquire replaced, and changes nothing", async () => {
+        const stale = (await store.acquireLease(NAME, "a", 1_000, 0))!;
+        await store.acquireLease(NAME, "b", 1_000, 1_001 + LEASE_SKEW_MARGIN_MS);
+        const s = settlement("1");
+        await store.claim(s);
+        await expect(store.addHash(s.key, "h1", stale, 2_000)).rejects.toBeInstanceOf(
+          LeaseFencedError,
+        );
+        expect(await store.get(s.key)).toMatchObject({ state: "claimed", hashes: [], version: 0 });
+        expect(await store.findByHash("h1")).toBeUndefined();
+      });
+
+      it("refuses a hash under its own holder's earlier token, once it acquired again", async () => {
+        const before = (await store.acquireLease(NAME, "a", 1_000, 0))!;
+        const after = (await store.acquireLease(NAME, "a", 1_000, 2_000))!;
+        const s = settlement("1");
+        await store.claim(s);
+        await expect(store.addHash(s.key, "h1", before, 2_500)).rejects.toBeInstanceOf(
+          LeaseFencedError,
+        );
+        expect(await store.addHash(s.key, "h1", after, 2_500)).toBe(true);
+      });
+
+      it("refuses a hash once the lease was released, or under another lease's name", async () => {
+        const lease = (await store.acquireLease(NAME, "a", 1_000, 0))!;
+        const s = settlement("1");
+        await store.claim(s);
+        const other = { name: "stellar:pubnet:channels", token: lease.token };
+        await expect(store.addHash(s.key, "h1", other, 2_000)).rejects.toBeInstanceOf(
+          LeaseFencedError,
+        );
+        await store.releaseLease(NAME, "a");
+        await expect(store.addHash(s.key, "h1", lease, 2_000)).rejects.toBeInstanceOf(
+          LeaseFencedError,
+        );
+        expect(await store.get(s.key)).toMatchObject({ state: "claimed", hashes: [] });
+      });
+
+      it("refuses a stale token before anything else, a hash already on the record too", async () => {
+        const stale = (await store.acquireLease(NAME, "a", 1_000, 0))!;
+        const s = settlement("1");
+        await store.claim(s);
+        // A resend of the same envelope calls `onSigned` again with the stored hash.
+        await store.addHash(s.key, "h1", stale, 2_000);
+        await store.acquireLease(NAME, "b", 1_000, 1_001 + LEASE_SKEW_MARGIN_MS);
+        await expect(store.addHash(s.key, "h1", stale, 3_000)).rejects.toBeInstanceOf(
+          LeaseFencedError,
+        );
+      });
+
+      it("still finishes a record a stale holder sent for: transition isn't fenced", async () => {
+        const stale = (await store.acquireLease(NAME, "a", 1_000, 0))!;
+        const s = settlement("1");
+        await store.claim(s);
+        await store.addHash(s.key, "h1", stale, 2_000);
+        await store.acquireLease(NAME, "b", 1_000, 1_001 + LEASE_SKEW_MARGIN_MS);
+        expect(
+          await store.transition(s.key, "signed", { state: "success", updatedAt: 9_000 }),
+        ).toMatchObject({ state: "success", hashes: ["h1"] });
       });
     });
   });

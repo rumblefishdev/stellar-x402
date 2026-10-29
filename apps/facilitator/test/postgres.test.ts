@@ -7,7 +7,12 @@ import { postgresStores } from "../src/adapters/postgres.js";
 import { MIGRATIONS, migrate } from "../src/adapters/postgres-schema.js";
 import { NON_FINAL_STATES } from "../src/adapters/rules.js";
 import { main, migrateMain } from "../src/main.js";
-import { HashConflictError, type Stores } from "../src/ports/index.js";
+import {
+  HashConflictError,
+  LEASE_SKEW_MARGIN_MS,
+  LeaseFencedError,
+  type Stores,
+} from "../src/ports/index.js";
 import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import {
@@ -24,6 +29,7 @@ import {
   catalogStoreContract,
   rateLimitStoreContract,
   settlement,
+  holdLease,
   settlementStoreContract,
   spendStoreContract,
 } from "./port-contracts.js";
@@ -107,6 +113,8 @@ describe("PostgreSQL stores", () => {
     /** Two settlers on the store, with one pool that signs and lands once `land()` is called. */
     async function twoSettlers(settleTimeoutMs = 2_000) {
       const { settlements } = await stores();
+      // One lease for both: this is about the claim, not about which of them may send.
+      const fence = await holdLease(settlements);
       let land!: () => void;
       const landed = new Promise<void>((resolve) => (land = resolve));
       const submit = vi.fn<Submitter["submit"]>(async (_call, opts = {}) => {
@@ -139,6 +147,7 @@ describe("PostgreSQL stores", () => {
           budgetMs: 5_000,
           pollMs: 5,
           latestLedger: async () => 1_000,
+          lease: () => fence,
         });
       return { a: settler(), b: settler(), submit, land, settlements };
     }
@@ -210,6 +219,81 @@ describe("PostgreSQL stores", () => {
     }
   };
 
+  // 0071: the lease row's `FOR SHARE` orders a takeover against the hash's write.
+  it("makes a takeover wait until a hash under the old token is stored", async () => {
+    const { settlements } = await stores();
+    const NAME = "stellar:testnet:channels";
+    const lease = (await settlements.acquireLease(NAME, "a", 1_000, 0))!;
+    const s = settlement("1");
+    await settlements.claim(s);
+    const order: string[] = [];
+    await holding(async (client) => {
+      // Holds the record, so addHash waits there, its lease row already locked.
+      await client.query("SELECT 1 FROM settlements WHERE key = $1 FOR UPDATE", [s.key]);
+      const adding = settlements.addHash(s.key, "h1", lease, 3_000).then((added) => {
+        order.push("added");
+        return added;
+      });
+      await lockWaiter(client);
+      const taking = settlements
+        .acquireLease(NAME, "b", 1_000, 1_001 + LEASE_SKEW_MARGIN_MS)
+        .then((taken) => {
+          order.push("taken");
+          return taken;
+        });
+      // The takeover waits on addHash's lock on the lease row, not on this transaction.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(order).toEqual([]);
+      await client.query("COMMIT");
+      expect(await adding).toBe(true);
+      expect((await taking)?.token).not.toBe(lease.token);
+    });
+    expect(order).toEqual(["added", "taken"]);
+    expect(await settlements.get(s.key)).toMatchObject({ state: "signed", hashes: ["h1"] });
+  });
+
+  it("lets a renewal through while addHash holds the lease row (0071 decision 16)", async () => {
+    const { settlements } = await stores();
+    const NAME = "stellar:testnet:channels";
+    const lease = (await settlements.acquireLease(NAME, "a", 1_000, 0))!;
+    const s = settlement("1");
+    await settlements.claim(s);
+    await holding(async (client) => {
+      // Holds the record, so addHash waits there with the lease row locked.
+      await client.query("SELECT 1 FROM settlements WHERE key = $1 FOR UPDATE", [s.key]);
+      const adding = settlements.addHash(s.key, "h1", lease, 3_000);
+      await lockWaiter(client);
+      // A renewal changes only `expires_at`, so `FOR KEY SHARE` doesn't hold it up.
+      const renewed = await Promise.race([
+        settlements.renewLease(NAME, "a", 1_000, 500),
+        new Promise((resolve) => setTimeout(() => resolve("waited"), 2_000)),
+      ]);
+      expect(renewed).toBe(true);
+      await client.query("COMMIT");
+      expect(await adding).toBe(true);
+    });
+  });
+
+  it("refuses a hash when a takeover commits while addHash waits on the lease row", async () => {
+    const { settlements } = await stores();
+    const NAME = "stellar:testnet:channels";
+    const lease = (await settlements.acquireLease(NAME, "a", 1_000, 0))!;
+    const s = settlement("1");
+    await settlements.claim(s);
+    await holding(async (client) => {
+      // A takeover as its UPDATE runs, holding the lease row.
+      await client.query(
+        "UPDATE leases SET holder = 'b', token = gen_random_uuid() WHERE name = $1",
+        [NAME],
+      );
+      const adding = settlements.addHash(s.key, "h1", lease, 3_000);
+      await lockWaiter(client);
+      await client.query("COMMIT");
+      await expect(adding).rejects.toBeInstanceOf(LeaseFencedError);
+    });
+    expect(await settlements.get(s.key)).toMatchObject({ state: "claimed", hashes: [] });
+  });
+
   it("rejects a hash another record's insert commits while addHash waits on it", async () => {
     const { settlements } = await stores();
     const [s1, s2] = [settlement("1"), settlement("2")];
@@ -217,7 +301,7 @@ describe("PostgreSQL stores", () => {
     await settlements.claim(s2);
     await holding(async (client) => {
       await client.query("INSERT INTO settlement_hashes (hash, key) VALUES ('h1', $1)", [s1.key]);
-      const adding = settlements.addHash(s2.key, "h1", 3_000);
+      const adding = settlements.addHash(s2.key, "h1", await holdLease(settlements), 3_000);
       await lockWaiter(client);
       await client.query("COMMIT");
       await expect(adding).rejects.toBeInstanceOf(HashConflictError);
@@ -234,7 +318,7 @@ describe("PostgreSQL stores", () => {
         "UPDATE settlements SET state = 'pending', updated_at = 2500 WHERE key = $1",
         [key],
       );
-      const adding = settlements.addHash(key, "h1", 3_000);
+      const adding = settlements.addHash(key, "h1", await holdLease(settlements), 3_000);
       await lockWaiter(client);
       await client.query("COMMIT");
       expect(await adding).toBe(true);
@@ -251,7 +335,7 @@ describe("PostgreSQL stores", () => {
     const { settlements } = await stores();
     const { key } = settlement("1");
     await settlements.claim(settlement("1"));
-    await settlements.addHash(key, "h1", 2_000);
+    await settlements.addHash(key, "h1", await holdLease(settlements), 2_000);
     await settlements.transition(key, "signed", { state: "pending", updatedAt: 2_500 });
     await holding(async (client) => {
       await client.query("SELECT 1 FROM settlements WHERE key = $1 FOR UPDATE", [key]);
@@ -544,7 +628,7 @@ describe("PostgreSQL stores", () => {
       paymentRequirements: requirements,
       createdAt: now,
     });
-    await settlements.addHash(key, "h1", now);
+    await settlements.addHash(key, "h1", await holdLease(settlements), now);
     await settlements.transition(key, "signed", { state: "success", updatedAt: now });
     const app = await main({
       DATABASE_URL: urlFor(schema),
@@ -774,6 +858,7 @@ describe("PostgreSQL stores", () => {
           "0004_spend_window",
           "0005_settlement_attempts",
           "0007_settlement_reopened",
+          "0008_lease_token",
         ]);
         expect(await typeIndex(old), built).toBe(1);
       } finally {
@@ -799,6 +884,7 @@ describe("PostgreSQL stores", () => {
         "0004_spend_window",
         "0005_settlement_attempts",
         "0007_settlement_reopened",
+        "0008_lease_token",
       ]);
       const { rows } = await old.query(
         "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",

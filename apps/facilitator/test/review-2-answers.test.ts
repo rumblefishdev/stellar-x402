@@ -16,7 +16,7 @@ import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
-import type { SettlementStore } from "../src/ports/index.js";
+import type { LeaseFence, SettlementStore } from "../src/ports/index.js";
 import type { SettlementHooks } from "../src/settlement/hooks.js";
 import { createReconciler } from "../src/settlement/reconcile.js";
 import { createRecords } from "../src/settlement/records.js";
@@ -28,9 +28,15 @@ import {
 } from "../src/settlement/settle.js";
 import { PAYER_AUTH_REASON, payerNonce, type Check } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
+import { holdLease } from "./port-contracts.js";
 
 const db = testDatabase();
 beforeEach(db.empty);
+/** The lease `/settle` sends under, taken again for every test (0071). */
+let fence: LeaseFence | undefined;
+beforeEach(async () => {
+  fence = await holdLease(db.stores().settlements);
+});
 
 // `attemptsOf` reads a private WeakMap that only the real submitter fills; these tests put the
 // attempts on the error instead. `settle-pool.test.ts` runs the real pool's.
@@ -193,6 +199,7 @@ function setup(behaviour: Behaviour = landing(), overrides: Partial<SettlerDeps>
     budgetMs: 5_000,
     pollMs: 5,
     latestLedger: async () => CURRENT,
+    lease: () => fence,
     ...overrides,
   });
   return { settle, store, submit, hooks, order, lines, metrics };

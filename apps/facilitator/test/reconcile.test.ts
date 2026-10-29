@@ -23,7 +23,7 @@ import {
 } from "../src/settlement/reconcile.js";
 import { createRecords } from "../src/settlement/records.js";
 import { SETTLE_REASONS } from "../src/settlement/settle.js";
-import { settlement } from "./port-contracts.js";
+import { holdLease, settlement } from "./port-contracts.js";
 import { testDatabase } from "./database.js";
 
 const db = testDatabase();
@@ -140,7 +140,7 @@ async function signed(
   nonce = "1",
 ) {
   const key = await claimed(store, nonce);
-  for (const hash of hashes) await store.addHash(key, hash, NOW, bounds);
+  for (const hash of hashes) await store.addHash(key, hash, await holdLease(store), NOW, bounds);
   return key;
 }
 
@@ -179,7 +179,7 @@ describe("createReconciler", () => {
       store.listNonFinal = async (n) => {
         const listed = await list(n);
         // The call signs between the listing and the close.
-        await store.addHash(key, A, NOW, { maxTime: 2_000 });
+        await store.addHash(key, A, await holdLease(store), NOW, { maxTime: 2_000 });
         return listed;
       };
       await reconciler.sweep();
@@ -297,7 +297,10 @@ describe("createReconciler", () => {
       const answers = { [A]: missing(4_010), [B]: missing(4_010) };
       const { store, reconciler } = setup(answers);
       const key = await signed(store, [A]);
-      await store.addHash(key, B, NOW, { maxTime: 9_999, maxLedger: 4_020 });
+      await store.addHash(key, B, await holdLease(store), NOW, {
+        maxTime: 9_999,
+        maxLedger: 4_020,
+      });
       expect(await reconciler.sweep()).toMatchObject({ open: 1 });
       expect((await store.get(key))?.state).toBe("signed");
       expect((await store.attempts(key)).map((a) => a.state)).toEqual(["dead", "stored"]);
@@ -336,7 +339,7 @@ describe("createReconciler", () => {
       advance(BUDGET_MS + 60_000);
       // The call's `txBadSeq` rebuild is stored while the sweep waits for the RPC.
       getTransaction.mockImplementationOnce(async () => {
-        await store.addHash(key, B, NOW, { maxTime: NOW / 1000 + 60 });
+        await store.addHash(key, B, await holdLease(store), NOW, { maxTime: NOW / 1000 + 60 });
         return answers[A]!;
       });
       expect(await reconciler.sweep()).toMatchObject({ open: 1, expired: 0 });
@@ -359,7 +362,7 @@ describe("createReconciler", () => {
       const { store, reconciler } = setup(answers);
       const s = { ...settlement("1"), paymentPayload: payloadWithAuth(), createdAt: NOW };
       await store.claim(s);
-      await store.addHash(s.key, A, NOW);
+      await store.addHash(s.key, A, await holdLease(store), NOW);
       await reconciler.sweep();
       expect((await store.get(s.key))?.state).toBe("signed");
       answers[A] = missing(AUTH_EXPIRY);
