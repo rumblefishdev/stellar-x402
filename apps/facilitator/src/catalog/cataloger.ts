@@ -14,7 +14,7 @@ import type {
   UpsertOutcome,
 } from "../ports/index.js";
 import type { SettlementHooks, SettlementOrigin } from "../settlement/hooks.js";
-import { CHECKS_PER_MINUTE, overBudget, type ChecksPerMinute } from "./budget.js";
+import { CHECKS_PER_HOST, overBudget } from "./budget.js";
 import { askSeller } from "./seller-check.js";
 
 export type BazaarApi = Pick<typeof bazaarLib, "validate" | "normalize" | "toExtensionResponses">;
@@ -37,7 +37,7 @@ export interface CatalogerDeps {
   listLocal?: boolean;
   /** A seller slower than this to answer the check gave no usable answer. */
   sellerTimeoutMs?: number;
-  checksPerMinute?: ChecksPerMinute;
+  checksPerHost?: number;
   /** The app clock, ms. */
   now?: () => number;
 }
@@ -80,7 +80,7 @@ export function createCataloger({
   upsertTimeoutMs = 10_000,
   listLocal = false,
   sellerTimeoutMs = 10_000,
-  checksPerMinute = CHECKS_PER_MINUTE,
+  checksPerHost = CHECKS_PER_HOST,
   now = Date.now,
 }: CatalogerDeps): Cataloger {
   const inFlight = new Set<Promise<void>>();
@@ -230,7 +230,7 @@ export function createCataloger({
       };
       const request = bazaarLib.sellerRequest(result.resourceUrl, { ...input, method: key.method });
       const host = new URL(request.url).hostname;
-      const budget = await overBudget(rateLimits, key, host, checksPerMinute, attempt.at);
+      const budget = await overBudget(rateLimits, key, host, checksPerHost, attempt.at);
       if (budget) {
         const skipped = { stage: "payment", outcome: "over_budget", reason: budget } as const;
         return await finish({ ...tried, ...skipped }, record, origin);
