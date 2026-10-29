@@ -1,0 +1,48 @@
+#!/bin/sh
+# The deploy, run by x402-deploy@<environment>.service, which deploy.sh starts after writing
+# digest.next under its lock (ADR 0011). It migrates from the new image while the old facilitator
+# still serves, then restarts x402@<environment> on it and waits up to 120 s for `ready` and
+# `listed`. A failed migration changes nothing; a failed start goes back to digest.good.
+#   x402-deploy <environment>
+set -eu
+env=$1
+repo=ghcr.io/rumblefishdev/x402-facilitator
+cd "/srv/x402/$env"
+
+# x402@ keeps `digest` as it is while this is here; the unit removes it, and a reboot clears it.
+/usr/local/libexec/x402/x402-creds "$env" database-url.testnet:1000
+touch "/run/x402/$env/deploying"
+
+new=$(cat digest.next)
+good=$(cat digest.good 2>/dev/null || true)
+docker pull --quiet "$repo@$new"
+FACILITATOR_IMAGE="$repo@$new" docker compose run --rm migrate-testnet
+
+# The healthcheck's one-liner, reading the body.
+probe="fetch('http://127.0.0.1:4021/health',{signal:AbortSignal.timeout(5000)}).then((r)=>r.json()).then((b)=>process.exit(b.ready&&b.listed?0:1),()=>process.exit(1))"
+started() {
+  systemctl restart "x402@$env" || return 1
+  deadline=$(($(date +%s) + 120))
+  until /usr/local/libexec/x402/x402-compose "$env" exec -T facilitator node -e "$probe"; do
+    [ "$(date +%s)" -lt "$deadline" ] || return 1
+    sleep 2
+  done
+}
+
+printf '%s\n' "$new" > digest.tmp && mv digest.tmp digest
+if started; then
+  printf '%s\n' "$new" > digest.good.tmp && mv digest.good.tmp digest.good
+  # The disk is shared: keep this image and the previous good one.
+  docker image ls --digests --format '{{.Digest}}' "$repo" | while read -r digest; do
+    case $digest in "$new" | "$good") ;; *) docker image rm "$repo@$digest" > /dev/null || true ;; esac
+  done
+  echo "deployed $new"
+  exit 0
+fi
+
+echo "$new isn't ready and listed after 120 s; back to ${good:-nothing, the first deploy}" >&2
+if [ -n "$good" ]; then
+  printf '%s\n' "$good" > digest.tmp && mv digest.tmp digest
+  systemctl restart "x402@$env" || true
+fi
+exit 1

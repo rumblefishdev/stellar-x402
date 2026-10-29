@@ -1,0 +1,25 @@
+# The Cloudflare Tunnel connector of an environment (ADR 0011): x402-tunnel@production. Deploys
+# never restart it, so it keeps forwarding while the facilitator drains, and at a reboot it stops
+# after the facilitator. The server allows outbound 7844 over UDP and TCP.
+[Unit]
+Description=x402 tunnel connector (%i)
+Documentation=https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/adr/0011-facilitator-hosting.md
+PartOf=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+WorkingDirectory=/srv/x402/%i
+# Compose reads the whole file; this unit never starts the facilitator.
+Environment=FACILITATOR_IMAGE=unused
+ExecStartPre=/usr/local/libexec/x402/x402-creds %i tunnel-token:65532
+ExecStart=/usr/bin/docker compose up --no-deps --exit-code-from cloudflared cloudflared
+ExecStop=/usr/bin/docker compose stop cloudflared
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target
