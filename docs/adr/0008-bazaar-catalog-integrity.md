@@ -33,10 +33,16 @@ settlement.
   - A listing's content comes from the seller's own unpaid 402, never from the payment. A
     settlement's copy (the buyer's echo of that 402) only decides whether to ask the seller.
   - The seller is asked when the copy differs from the stored listing, or none exists, at most
-    once a minute per listing key, 30 times a minute per host and 300 times a minute in all.
-    Over a budget the check is skipped; the next payment tries again. There is no retry queue.
+    once a minute per listing key and 30 times a minute per host. No budget spans hosts, so one
+    payer filling it holds back only the hosts it pays for; `/settle`'s per-IP limit (task 0023)
+    and the settled payment each check needs bound the rest. Over a budget the check is
+    skipped; the next payment tries again. There is no retry queue.
   - The request uses the listing's method and its example input up to 16 KiB: `queryParams` as
-    the query, `body` as a JSON body (`{}` without one).
+    the query, `body` as a JSON body (`{}` without one). Nothing proves before the request that
+    the URL is an x402 seller, so a payer can have the facilitator send an unpaid request of any
+    method to any public `https` URL, 30 a minute per host. It carries no credentials, so it can
+    do only what the payer could do directly; what it adds is the facilitator's address as the
+    sender. Real listings use `GET` and `POST` only (92,774 of 92,774 measured).
   - Only the seller's offers to the key's network and `payTo` are stored, and they replace the
     stored ones. A seller that answers with none of them, no listing, not a 402, or not within
     10 s, changes nothing: a new listing isn't created, an existing one stays.
@@ -83,8 +89,8 @@ settlement.
     `home.arpa`, `invalid`, `test`, `example`, `alt`, `onion`, the TLDs ICANN will never
     delegate, `home`, `corp` and `mail`, and their subdomains),
     single-label names, and `mcp:` URLs. It is the `iconUrl` host rule, run on the canonical URL.
-    `http` with a public name stays listable. The payment settles as usual: only the listing is
-    dropped, and the seller sees `rejected` in the header.
+    The payment settles as usual: only the listing is dropped, and the seller sees `rejected` in
+    the header.
   - `CATALOG_LIST_LOCAL=true`, allowed on testnet only, lists such URLs too: for a facilitator
     run locally and the e2e gate. It opens hosts and `mcp:` URLs, not schemes.
 - **Catalog key.**
@@ -160,8 +166,9 @@ settlement.
     two agree. Its reason is `resource_not_public`, not `invalid_resource_url`: the URL is not
     wrong and the payment went through, so a seller reading the header must not take it for a
     failed request. A malformed URL is still `invalid_resource_url`, checked first.
-  - Plain `http` with a public name is still listed: a seller behind a TLS proxy without
-    `trust proxy` sends it (task 0053), and PayAI lists such entries.
+  - Plain `http` with a public name passes the copy's validation, but the seller check calls
+    `https` only (task 0063), so it is not listed: the seller's answer sets the listed price, and
+    over `http` anyone on the path could change it. None of 92,774 real listings uses `http`.
 - **Validation before, storage after.** Reporting the validation result costs microseconds and
   can't fail a payment. Waiting for the store write could.
 

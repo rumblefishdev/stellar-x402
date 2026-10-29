@@ -199,10 +199,10 @@ describe("cataloger", () => {
     ]);
   });
 
-  it("checks at most so many listings a minute per host and in all (row 3)", async () => {
+  it("checks at most so many listings a minute per host, and no fewer on another host (row 3)", async () => {
     // No template, so each path is a listing of its own.
     const at = (path: string) => record({ info: valid.info }, {}, { url: `${seller.url}/${path}` });
-    const perHost = setup({ checksPerMinute: { host: 2, all: 100 } });
+    const perHost = setup({ checksPerHost: 2 });
     for (const path of ["a", "b", "c"]) await perHost.cataloger.onSuccess(at(path), "settle");
     expect(seller.requests).toHaveLength(2);
     expect(perHost.counted("payment", "over_budget", "host")).toBe(1);
@@ -211,10 +211,14 @@ describe("cataloger", () => {
       expect.objectContaining({ budget: "host" }),
     );
 
-    // The next minute's windows, so the per-host count above doesn't apply.
-    const all = setup({ checksPerMinute: { host: 100, all: 1 }, now: () => START + MINUTE });
-    for (const path of ["d", "e"]) await all.cataloger.onSuccess(at(path), "settle");
-    expect(all.counted("payment", "over_budget", "all")).toBe(1);
+    // A busy host leaves another host's checks alone: there is no budget over all hosts.
+    const other = record(
+      { info: valid.info },
+      {},
+      { url: `${seller.url.replace("127.0.0.1", "localhost")}/d` },
+    );
+    await perHost.cataloger.onSuccess(other, "settle");
+    expect(seller.requests).toHaveLength(3);
   });
 
   it("sends the listing's example input: a GET's query, a POST's body (row 4)", async () => {
