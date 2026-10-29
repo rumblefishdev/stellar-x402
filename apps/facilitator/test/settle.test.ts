@@ -1265,13 +1265,15 @@ describe("createSettler", () => {
         await db.empty();
         const s = setup(landing(), { budgetMs: BUDGET_MS });
         hang(s);
-        const started = Date.now();
-        const settled = s.settle(payload(), requirements);
+        let answered = false;
+        const settled = s.settle(payload(), requirements).finally(() => {
+          answered = true;
+        });
         // The budget, then at most the store's grace: not a hang.
         await elapse(BUDGET_MS + STORE_GRACE_MS);
+        expect(answered, name).toBe(true);
         const { response } = await settled;
         expect(response, name).toMatchObject({ errorReason: SETTLE_REASONS.timeout });
-        expect(Date.now() - started, name).toBeLessThan(1_000);
         expect(s.submit, name).not.toHaveBeenCalled();
       }
     });
@@ -1476,12 +1478,16 @@ describe("createSettler", () => {
       await settle(payload(), requirements);
       expect((await store.get(key))?.state).toBe("claimed");
       await elapse(BUDGET_MS + 10);
-      const started = Date.now();
-      expect((await settle(payload(), requirements)).response).toMatchObject({
+      let answered = false;
+      const repeat = settle(payload(), requirements).finally(() => {
+        answered = true;
+      });
+      // Anchored on the claim, not on the repeat's own start: it answers with the clock still.
+      await storeIdle();
+      expect(answered).toBe(true);
+      expect((await repeat).response).toMatchObject({
         errorReason: SETTLE_REASONS.timeout,
       });
-      // Anchored on the claim, not on the repeat's own start: before its own budget ends.
-      expect(Date.now() - started).toBeLessThan(BUDGET_MS);
       expect(await store.get(key)).toMatchObject({
         state: "rejected",
         errorReason: SETTLE_REASONS.timeout,
