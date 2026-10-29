@@ -52,9 +52,17 @@ history:
     who: stkrolikiewicz
     note: "PR #24 round four: Compose exit codes and a start limit, the tunnel token for nonroot, 7844 over UDP and TCP, the zone settings that stay off, token rotation in the runbook; 0062 named as the tunnel's prerequisite."
   - date: "2026-10-28"
+    status: backlog
+    who: stkrolikiewicz
+    note: "0077: one facilitator for both networks in a production environment (x402@production, deploy/production, no promotion step), a database per network; the deploy waits for listed too."
+  - date: "2026-10-28"
     status: active
     who: stkrolikiewicz
     note: "Started with reading secrets from files (`*_FILE`); the server parts follow #79's names, and signing waits for 0036."
+  - date: "2026-10-28"
+    status: active
+    who: stkrolikiewicz
+    note: "Oskar's review of #79: x402-db-testnet@production, wanted rather than required by x402@production, secret files named per network, and only migrate-testnet beside the facilitator holding testnet's database password."
 ---
 
 # Public testnet deployment
@@ -67,20 +75,22 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 
 ## Context
 
-- Needs [ADR 0011](../../../docs/adr/0011-facilitator-hosting.md) as revised in 0039, the 0022
-  adapters and the OpenBao signer (0036).
+- Needs [ADR 0011](../../../docs/adr/0011-facilitator-hosting.md) as revised in 0039 and 0077,
+  the 0022 adapters and the OpenBao signer (0036).
 - Related tasks: 0014, 0022, 0017, 0039, 0036, 0047.
 
 ## Implementation
 
 - Dockerfile, image build and the deploy trigger from ADR 0011.
 - Secrets and stores configured on the platform; runbook updated.
-- From 0039 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md), revised): Docker Compose on the company Hetzner server
-  (x86_64), project `x402`, owned by its own Linux user, apart from ClickHouse's
-  `app` project, in `/srv/x402` (the ClickHouse project's deploy overwrites its own directory).
-  - `/srv/x402/testnet/` holds the compose file, `deploy.sh`, `digest` and the encrypted
+- From 0039 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md), revised; one facilitator
+  for both networks in a `production` environment since 0077): Docker Compose on the company
+  Hetzner server (x86_64), project `x402-production`, owned by its own Linux user `x402`, apart
+  from ClickHouse's `app` project, in `/srv/x402` (the ClickHouse project's deploy overwrites its
+  own directory). Production serves testnet for now.
+  - `/srv/x402/production/` holds the compose file, `deploy.sh`, `digest` and the encrypted
     credentials; the Ansible playbook puts the first two there from a reviewed commit (below).
-  - `facilitator-testnet`: memory limit 512 MiB, one CPU, no restart policy (systemd restarts it),
+  - `facilitator`: memory limit 512 MiB, one CPU, no restart policy (systemd restarts it),
     `stop_grace_period` 180 s, healthcheck on `/health` every 10 s set in the compose service,
     not the image (a Node one-liner, 5 s timeout, 30 s `start_period`, 3 failures), no published
     port.
@@ -88,76 +98,81 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     limit 512 MiB, with its healthcheck disabled,
     run only by `docker compose run --rm`, with its own statement and query timeouts instead of
     the app pool's 10 s and 15 s (`migrateMain` uses `createPool` today).
-  - A systemd timer on the host restarts the `facilitator-testnet` container when it is
-    `unhealthy`, every 30 s, with a 10 s stop timeout: found by its Compose service label,
-    skipping one-off containers, and only while `x402@testnet.service` is `active`.
+  - A systemd timer on the host restarts the `facilitator` container when it is `unhealthy`,
+    every 30 s, with a 10 s stop timeout: found by its Compose project and service labels,
+    skipping one-off containers, and only while `x402@production.service` is `active`.
   - `postgres-testnet`: PostgreSQL 18 pinned by digest, memory limit 1 GiB, `stop_grace_period`
     120 s, a set `shm_size`, data on a volume mounted at `/var/lib/postgresql` (the 18 image
     moved `PGDATA` to `/var/lib/postgresql/18/docker` and refuses the old `…/data` mount),
     reachable only from the facilitator and the migration service.
-  - Networks `x402-testnet-edge` (`cloudflared-testnet` and the facilitator) and
-    `x402-testnet-db` (`internal: true`, the facilitator, Postgres and the migration service),
-    both part of our compose project.
-  - `cloudflared-testnet`: Cloudflare's tunnel connector pinned by digest, memory limit 128 MiB,
-    under its own unit `x402-tunnel@testnet.service`, enabled at boot and untouched by deploys,
-    so it keeps forwarding while the facilitator drains; `x402@testnet` runs after it. The unit
+  - Networks `x402-production-edge` (`cloudflared` and the facilitator) and
+    `x402-production-db` (`internal: true`, the facilitator, each network's Postgres and
+    migration service), both part of the production compose project. Only the facilitator and
+    `migrate-testnet` hold testnet's database password.
+  - `cloudflared`: Cloudflare's tunnel connector pinned by digest, memory limit 128 MiB, under
+    its own unit `x402-tunnel@production.service`, enabled at boot and untouched by deploys, so
+    it keeps forwarding while the facilitator drains; `x402@production` runs after it. The unit
     decrypts the tunnel token, an encrypted systemd credential, and `cloudflared` reads it from a
     file (`--token-file`; check that the pinned version has it), never from `environment:`. The
     token file is mode 0400 for `nonroot` (uid 65532; check it on the pinned digest). The
     server must allow outbound connections on port 7844, UDP and TCP.
-  - OpenBao (ADR 0013): one container for both networks in `/srv/x402/openbao/`, pinned by
-    digest, memory limit 256 MiB and half a CPU, a listener socket per network in its own volume,
-    its own unit `x402-openbao.service` for the unseal credential. Its snapshots and restore
-    drill follow ADR 0013 (task 0047).
+  - OpenBao (ADR 0013): one container for both networks in `/srv/x402/openbao/`, its own project
+    `x402-openbao`, pinned by digest, memory limit 256 MiB and half a CPU, a listener socket per
+    network in its own volume, mounted into the facilitator as an external volume, its own unit
+    `x402-openbao.service` for the unseal credential. Its snapshots and restore drill follow
+    ADR 0013 (task 0047).
   - Node `keepAliveTimeout` 125 s, above `cloudflared`'s 90 s idle keep-alive, with
     `headersTimeout` above it; the client IP from `CF-Connecting-IP` (0023).
 - From 0039, the image: `pnpm deploy --prod` with `injectWorkspacePackages: true`;
   `"files": ["dist"]` in `apps/facilitator/package.json` and a `.dockerignore` that excludes
   `.env*`; `node:22-slim` pinned by digest, `linux/amd64`, user `node`, read-only root filesystem.
   Images go to GHCR, tagged with the git SHA; the workflow skips the build when the SHA exists.
-  A successful testnet deploy records its digest and SHA as a GitHub Deployment in the `testnet`
-  environment, which mainnet later promotes from (ADR 0011).
+  A successful deploy records its digest and SHA as a GitHub Deployment in the `production`
+  environment, for rollback and the record; there is no promotion step (ADR 0011, 0038).
 - From 0039, provisioning (ADR 0011): an Ansible playbook in `deploy/ansible/`, run by an admin
   from a reviewed commit, sets up x402's parts of the server: the `x402` user,
-  `/srv/x402/<network>/`, the units and timers, the compose files, `deploy.sh`, the deploy
+  `/srv/x402/production/`, the units and timers, the compose files, `deploy.sh`, the deploy
   user's `sudo` rule and forced command, `cloudflared`, and the pgBackRest and CloudWatch agent
   config. It never touches the server's base setup (firewall, `daemon.json`, users), and CI
   never runs it.
 - From 0039, the deploy:
   - GitHub Actions connects over SSH to the server's existing SSH port, with the server's host
-    key pinned in the workflow's `known_hosts`, as a deploy user with one key per network; each
-    key's `authorized_keys` entry fixes its network
-    (`command="/srv/x402/testnet/deploy.sh",restrict`), and the script accepts only an image
+    key pinned in the workflow's `known_hosts`, as a deploy user with one key per environment;
+    the production key's `authorized_keys` entry fixes its environment
+    (`command="/srv/x402/production/deploy.sh",restrict`), and the script accepts only an image
     digest (`sha256:` and 64 hex digits);
   - the deploy user isn't in the `docker` group: it may write only `digest.next` and run
-    `sudo systemctl start x402-deploy@testnet`, its one `sudo` rule. `deploy.sh` holds a `flock`
-    on `digest.next` while it writes it and starts the unit, which takes no lock of its own;
-  - the `testnet` and `mainnet` environments carry the protection rules from ADR 0011
-    (`deploy/testnet` only; `v*` tags, required reviewers, "Prevent self-review");
-  - `deploy/testnet` is a protected branch: a pull request from `develop` with an approving
+    `sudo systemctl start x402-deploy@production`, its one `sudo` rule. `deploy.sh` holds a
+    `flock` on `digest.next` while it writes it and starts the unit, which takes no lock of its
+    own;
+  - the `production` environment carries the protection rules from ADR 0011
+    (`deploy/production` only);
+  - `deploy/production` is a protected branch: a pull request from `develop` with an approving
     review, and no bypass, admins included;
-  - `x402-deploy@testnet.service` (a oneshot, as root, `TimeoutStartSec` 60 min, the cap on a
-    long migration from ADR 0011) sets a marker in `/run/x402/testnet/`,
-    decrypts the credentials with `x402@testnet`'s script (the migration needs the database
-    password), pulls the new image and runs `migrate-testnet` from it while the old facilitator
-    still serves; a failed migration fails the deploy and the old one keeps serving. Then it moves
-    `digest.next` into `digest`, restarts `x402@testnet` and waits up to 120 s for `ready: true`
-    (`docker exec` with the healthcheck's one-liner); on `ready` it writes `digest.good` and
-    prunes all but the current and previous good images, and otherwise it puts `digest.good`
-    back, restarts again and fails. The first deploy has no `digest.good` and fails into the
-    alarms. `systemctl start` waits for it, so the job gets the result, and a dropped SSH session
-    doesn't cut it;
-  - `x402@testnet.service` decrypts the credentials to `/run/x402/testnet/` (tmpfs, 0700) and
-    puts `digest.good` into `digest` unless the deploy's marker is there, then runs Compose in
-    the foreground for the facilitator only (`--no-deps --exit-code-from facilitator-testnet`,
-    since a plain `up` exits 0), without pulling or migrating, with `Restart=on-failure`,
-    `RestartSec` 5 s, a start limit of 5 in 300 s and `TimeoutStartSec` 60 s; `ExecStop` stops
-    it. It requires and runs
-    after `x402-db@testnet.service`, which runs Postgres, decrypts its own credentials and has
-    `TimeoutStopSec` 150 s, and it wants and runs after `x402-openbao.service`. All our units run
-    Compose the same way, are `PartOf=docker.service` and run after it, the facilitator's with
-    `TimeoutStopSec` 200 s, and they are enabled at boot;
-  - it runs on a push to `deploy/testnet` unless only `lore/**`, `docs/**` or Markdown changed,
+  - `x402-deploy@production.service` (a oneshot, as root, `TimeoutStartSec` 60 min, the cap on a
+    long migration from ADR 0011) sets a marker in `/run/x402/production/`, decrypts the
+    credentials with `x402@production`'s script (the migrations need the database passwords),
+    pulls the new image and runs each network's migration service (`migrate-testnet` today) from
+    it while the old facilitator still serves;
+    a failed migration fails the deploy and the old one keeps serving. Then it moves
+    `digest.next` into `digest`, restarts `x402@production` and waits up to 120 s for
+    `ready: true` and `listed: true` (`docker exec` with the healthcheck's one-liner); on both it
+    writes `digest.good` and prunes all but the current and previous good images, and otherwise
+    it puts `digest.good` back, restarts again and fails. The first deploy has no `digest.good`
+    and fails into the alarms. `systemctl start` waits for it, so the job gets the result, and a
+    dropped SSH session doesn't cut it;
+  - `x402@production.service` decrypts the credentials to `/run/x402/production/` (tmpfs, 0700)
+    and puts `digest.good` into `digest` unless the deploy's marker is there, then runs Compose
+    in the foreground for the facilitator only (`--no-deps --exit-code-from facilitator`, since a
+    plain `up` exits 0), without pulling or migrating, with `Restart=on-failure`, `RestartSec`
+    5 s, a start limit of 5 in 300 s and `TimeoutStartSec` 60 s; `ExecStop` stops it. It wants
+    and runs after `x402-db-testnet@production.service` (`Wants=`, not `Requires=`, so a
+    database's restart never restarts the facilitator), which runs testnet's Postgres, decrypts
+    its own credentials and has `TimeoutStopSec` 150 s, and it wants and runs after
+    `x402-openbao.service`. All our units run Compose the same way, are `PartOf=docker.service`
+    and run after it, the facilitator's with `TimeoutStopSec` 200 s, and they are enabled at
+    boot;
+  - it runs on a push to `deploy/production` unless only `lore/**`, `docs/**` or Markdown changed,
     and by hand, in a `concurrency` group with `cancel-in-progress: false`;
   - actions are pinned by commit SHA, with minimal token permissions, and the SSH key is an
     environment secret.
@@ -169,13 +184,15 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     that project's script, valid for a year, its CN accepted by the role's trust policy and kept
     off the ClickHouse site's allowlist. Ask that project to tell us when it rotates its CA;
   - the database password and any keyed RPC URL are encrypted systemd credentials
-    (`systemd-creds`), decrypted to `/run/x402/testnet/` and mounted as Compose `file:` secrets,
-    never `environment:`. Each file is mode 0400, owned by the user that reads it: the database
-    URL, `RPC_URLS` and the AppRole files by `node` (uid 1000), the Postgres password by
-    `postgres` (uid 999), and the tunnel token by `nonroot` (uid 65532). Each unit decrypts
+    (`systemd-creds`), decrypted to `/run/x402/production/` and mounted as Compose `file:` secrets,
+    never `environment:`. The files are named per network, so mainnet adds its own and renames
+    none (ADR 0011): `database-url.testnet`, `rpc-urls.testnet`, `approle-role-id.testnet` and
+    `approle-secret-id.testnet` by `node` (uid 1000), `postgres-password.testnet` by `postgres`
+    (uid 999), and `tunnel-token` by `nonroot` (uid 65532), each mode 0400. Each unit decrypts
     the files its container reads;
   - the config reads `DATABASE_URL_FILE`, `RPC_URLS_FILE` and the OpenBao AppRole files when
-    they are set, and the plain variables otherwise, for local runs;
+    they are set, and the plain variables otherwise, for local runs; the deploy points them at
+    testnet's files;
   - no TLS to `postgres-testnet` on the internal network; `scram-sha-256` passwords.
 - From 0039: backups of `postgres-testnet` go off the server with pgBackRest. Postgres hands each
   WAL segment to it (`archive_command`, `archive-async`, `archive_timeout` 60 s), and a timer
@@ -190,10 +207,8 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   `sorobanscan.com` zone on Cloudflare, and the tunnel `x402` with its routing (the hostname to
   `http://facilitator:4021`, anything else 404) and DNS record, both Terraform in
   `soroban-infrastructure`'s `cloudflare/` (stkrolikiewicz applies it for now). The Compose
-  service is `facilitator`, one for both networks, also where this task still says
-  `facilitator-testnet` (`--exit-code-from` included); task 0077 renames those and the other
-  per-network names. The compose file keeps `PORT` at 4021, and changing it means changing
-  `cloudflare/x402.tf` too.
+  service is `facilitator`, one for both networks. The compose file keeps `PORT` at 4021, and
+  changing it means changing `cloudflare/x402.tf` too.
   Bot Fight Mode, Browser Integrity Check and "I'm Under Attack" stay off on the zone. Nothing
   goes into the ClickHouse project's repo.
   - **Before the first deploy:** Browser Integrity Check was `on` on 2026-10-28 (Cloudflare's
@@ -203,7 +218,8 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     `soroban-infrastructure` (the rest of the zone keeps it for sorobanscan's site), checking which
     token permission the ruleset needs. Bot Fight Mode couldn't be read (the token has no Bot
     Management permission): check its toggle in the dashboard, Security → Bots.
-- From 0039: `GET /health` answers 200 and reports `ready` in its body.
+- From 0039: `GET /health` answers 200 and reports `ready` and `listed` in its body (`listed`
+  since 0019, `05dcfae`: a sweep has listed the non-final records).
 - From 0039, the runbook: running the playbook from a reviewed commit, deploy, rollback
   (automatic on a failed deploy; by hand, redeploy an earlier digest), long migrations outside
   the deploy, reboots, fetching the tunnel token from Cloudflare (dashboard, API or
@@ -250,11 +266,12 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 > this task still follows ADR 0011 until a hosting ADR replaces it.
 
 - **Containers:** OpenBao (the official image, pinned by digest) under its own unit,
-  `x402-openbao.service`, and each network's facilitator under that network's unit (ADR 0013),
-  each unit passing in its own credentials. None gets the Docker socket. Swap and core dumps off
-  for OpenBao.
-- **Link:** a socket per network, each in its own volume mounted only into that network's
-  facilitator, plus the admin socket (root-only, in no container); no TCP listener.
+  `x402-openbao.service`, and the facilitator under `x402@production` (ADR 0011, 0077), each
+  unit passing in its own credentials. None gets the Docker socket. Swap and core dumps off for
+  OpenBao.
+- **Link:** a socket per network, each in its own volume, mounted into the one facilitator
+  (ADR 0013 is updated in 0077), plus the admin socket (root-only, in no container); no TCP
+  listener.
 - **Keys:** one Transit key per network, generated inside OpenBao, `type=ed25519`,
   `exportable=false`, `allow_plaintext_backup=false`. One policy per network allowing only
   `transit/sign/<key>`, and one AppRole per network: `token_ttl` and `token_max_ttl` 1 h, a secret
@@ -316,7 +333,7 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 
 ## Acceptance Criteria
 
-- [ ] Given the Hetzner server and Docker Compose of ADR 0011 (revised in 0039), when a deploy runs, then a container image built from the repo is deployed to it as the ADR describes, and the service answers `/supported` at a public HTTPS URL
+- [ ] Given the Hetzner server and Docker Compose of ADR 0011 (revised in 0039 and 0077), when a deploy runs, then a container image built from the repo is deployed to it as the ADR describes, and the service answers `/supported` at a public HTTPS URL
 - [ ] Given a running instance, when a new version is deployed, then the old process stops before the new one starts; the process is long-lived and never scaled to zero
 - [ ] Given the facilitator key, when the service is deployed, then it signs through the testnet OpenBao Transit key, the raw key never reaches the facilitator's process, the image or the logs, and it is a testnet-only key (ADR 0013)
 - [ ] Given `DATABASE_URL_FILE` or `RPC_URLS_FILE`, when the service starts, then it reads the value from that file, and with neither set it falls back to `DATABASE_URL` and `RPC_URLS`

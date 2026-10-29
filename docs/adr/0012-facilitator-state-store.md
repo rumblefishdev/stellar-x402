@@ -1,6 +1,8 @@
 # ADR 0012: Keep all facilitator state in one PostgreSQL database
 
-- Status: accepted
+- Status: accepted; "one facilitator container per network" revised by
+  [ADR 0011](0011-facilitator-hosting.md) for task 0077: one facilitator for both networks, still
+  with a database per network. The rest follows in 0077's PR B.
 - Date: 2026-10-12, amended 2026-10-20 (task 0022: pools for `reserve` and the rate limiter; 0026
   measures; hosting note; task 0039: PostgreSQL in a container on the Hetzner server) and
   2026-10-21 (task 0039: how backups leave the server, the migration service and its bounds) and

@@ -96,8 +96,8 @@ describe("guardedFetch", () => {
   });
 
   it("passes on a refusal from the lookup with its own code", async () => {
-    const { ToolError } = await import("../src/results.js");
-    const refused = new ToolError("unsafe_url", "refused");
+    const { SellerFetchError } = await import("../src/guard.js");
+    const refused = new SellerFetchError("unsafe_url", "refused");
     undiciFetch.mockRejectedValue(new TypeError("fetch failed", { cause: refused }));
     const limits = { timeoutMs: 1_000, maxResponseBytes: 1_000, allowInsecureLocal: false };
     await expect(

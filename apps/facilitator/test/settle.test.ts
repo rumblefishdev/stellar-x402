@@ -29,7 +29,7 @@ import {
   type SubmitResult,
 } from "@stellar-x402/signer-pool";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import type { SettlementStore } from "../src/ports/index.js";
@@ -219,6 +219,27 @@ beforeEach(db.empty);
  * database round trips, fit in it on a loaded machine.
  */
 const BUDGET_MS = 100;
+/** A database call in a loaded test run can take tens of ms; less would read it as a failing store. */
+const STORE_GRACE_MS = 200;
+
+/** Resolves once no query of the test database's pool runs or waits for a connection. */
+async function storeIdle() {
+  do {
+    await new Promise((resolve) => setImmediate(resolve));
+  } while (db.pool.totalCount > db.pool.idleCount || db.pool.waitingCount > 0);
+}
+
+/**
+ * Moves the fake clock `ms` on, a millisecond at a time, each once the store has answered: a slow
+ * database then never runs a budget out before the step a test names.
+ */
+async function elapse(ms: number) {
+  for (let tick = 0; tick < ms; tick++) {
+    await storeIdle();
+    await vi.advanceTimersByTimeAsync(1);
+  }
+  await storeIdle();
+}
 
 function setup(behaviour: Behaviour = landing(), overrides: Partial<SettlerDeps> = {}) {
   const order: string[] = [];
@@ -238,8 +259,7 @@ function setup(behaviour: Behaviour = landing(), overrides: Partial<SettlerDeps>
   const lines: string[] = [];
   const metrics = memoryMetrics();
   const settle = createSettler({
-    // A database call in a loaded test run can take tens of ms; less would read it as a failing store.
-    storeGraceMs: 200,
+    storeGraceMs: STORE_GRACE_MS,
     network,
     check: passing,
     store,
@@ -1061,6 +1081,16 @@ describe("createSettler", () => {
   });
 
   describe("settle budget (ADR 0011)", () => {
+    // The budget and the store's grace run on a fake clock, which `elapse` moves.
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    });
+    // A test's late writes end before the next test empties the tables.
+    afterEach(async () => {
+      await storeIdle();
+      vi.useRealTimers();
+    });
+
     it("answers settlement_pending with the hash once the budget runs out after signing, and catalogs a late success", async () => {
       let land!: () => void;
       const { settle, store, hooks } = setup(
@@ -1071,16 +1101,17 @@ describe("createSettler", () => {
         },
         { budgetMs: BUDGET_MS },
       );
-      expect((await settle(payload(), requirements)).response).toMatchObject({
+      const settled = settle(payload(), requirements);
+      await elapse(BUDGET_MS);
+      expect((await settled).response).toMatchObject({
         errorReason: "settlement_pending",
         transaction: HASH,
       });
       land();
-      await vi.waitFor(async () => expect((await store.get(key))?.state).toBe("success"));
+      await storeIdle();
+      expect((await store.get(key))?.state).toBe("success");
       // One origin for the one transition: both hooks say `resolved`.
-      await vi.waitFor(() =>
-        expect(hooks.onSuccess).toHaveBeenCalledWith(expect.anything(), "resolved"),
-      );
+      expect(hooks.onSuccess).toHaveBeenCalledWith(expect.anything(), "resolved");
       expect(hooks.onFinal).toHaveBeenCalledExactlyOnceWith(expect.anything(), "resolved");
     });
 
@@ -1100,7 +1131,9 @@ describe("createSettler", () => {
         }
         return transition(k, expected, update);
       });
-      const settled = await settle(payload(), requirements);
+      const settling = settle(payload(), requirements);
+      await elapse(BUDGET_MS);
+      const settled = await settling;
       expect(settled.response).toMatchObject({ success: true, transaction: HASH });
       expect(settled.record?.state).toBe("success");
     });
@@ -1109,7 +1142,9 @@ describe("createSettler", () => {
       const { settle, store, hooks, metrics } = setup(() => new Promise(() => {}), {
         budgetMs: BUDGET_MS,
       });
-      expect((await settle(payload(), requirements)).response).toMatchObject({
+      const settled = settle(payload(), requirements);
+      await elapse(BUDGET_MS);
+      expect((await settled).response).toMatchObject({
         success: false,
         errorReason: SETTLE_REASONS.timeout,
         transaction: "",
@@ -1142,12 +1177,15 @@ describe("createSettler", () => {
         },
         { budgetMs: BUDGET_MS },
       );
-      expect((await settle(payload(), requirements)).response).toMatchObject({
+      const settled = settle(payload(), requirements);
+      await elapse(BUDGET_MS);
+      expect((await settled).response).toMatchObject({
         errorReason: SETTLE_REASONS.timeout,
       });
       sign();
+      await storeIdle();
       // The pool sends only after `onSigned` resolves; it rejects, so nothing is sent.
-      await vi.waitFor(() => expect(signed).toBeInstanceOf(Error));
+      expect(signed).toBeInstanceOf(Error);
       expect(await store.get(key)).toMatchObject({ state: "rejected", hashes: [] });
     });
 
@@ -1167,7 +1205,8 @@ describe("createSettler", () => {
         { budgetMs: 5_000 },
       );
       const settled = settle(payload(), requirements);
-      await vi.waitFor(async () => expect((await store.get(key))?.state).toBe("claimed"));
+      await storeIdle();
+      expect((await store.get(key))?.state).toBe("claimed");
       // E.g. a repeat past the budget on another instance (`endUnsigned`).
       await store.transition(key, "claimed", {
         state: "rejected",
@@ -1175,8 +1214,9 @@ describe("createSettler", () => {
         updatedAt: Date.now(),
       });
       sign();
-      await vi.waitFor(() => expect(signed).toBeInstanceOf(Error));
-      void settled;
+      await storeIdle();
+      expect(signed).toBeInstanceOf(Error);
+      await settled;
     });
 
     it("refuses to send a hash whose slow addHash ends after the budget answer (0009 decision 35)", async () => {
@@ -1198,12 +1238,14 @@ describe("createSettler", () => {
         await delay(60);
         return added;
       };
-      expect((await settle(payload(), requirements)).response).toMatchObject({
+      const settled = settle(payload(), requirements);
+      await elapse(60);
+      expect((await settled).response).toMatchObject({
         errorReason: SETTLE_REASONS.pending,
         transaction: HASH,
       });
       // The answer named this hash, but the order (write, then the budget flag) keeps it unsent.
-      await vi.waitFor(() => expect(signed).toBeInstanceOf(Error));
+      expect(signed).toBeInstanceOf(Error);
     });
 
     it("refuses a rebuild's new hash once the budget answer named the first", async () => {
@@ -1222,12 +1264,15 @@ describe("createSettler", () => {
         },
         { budgetMs: BUDGET_MS },
       );
-      expect((await settle(payload(), requirements)).response).toMatchObject({
+      const settled = settle(payload(), requirements);
+      await elapse(BUDGET_MS);
+      expect((await settled).response).toMatchObject({
         errorReason: SETTLE_REASONS.pending,
         transaction: HASH,
       });
       rebuild();
-      await vi.waitFor(() => expect(second).toBeInstanceOf(Error));
+      await storeIdle();
+      expect(second).toBeInstanceOf(Error);
       expect((await store.get(key))?.hashes).toEqual([HASH]);
     });
 
@@ -1242,7 +1287,9 @@ describe("createSettler", () => {
           { budgetMs: BUDGET_MS },
         );
         vi.spyOn(store, "transition").mockRejectedValue(new Error("store down"));
-        const { response } = await settle(payload(), requirements);
+        const settled = settle(payload(), requirements);
+        await elapse(BUDGET_MS);
+        const { response } = await settled;
         expect(response).toMatchObject(
           signs
             ? { errorReason: SETTLE_REASONS.pending, transaction: HASH }
@@ -1271,12 +1318,15 @@ describe("createSettler", () => {
         await db.empty();
         const s = setup(landing(), { budgetMs: BUDGET_MS });
         hang(s);
-        const started = Date.now();
-        const { response } = await s.settle(payload(), requirements);
+        let answered = false;
+        const settled = s.settle(payload(), requirements).finally(() => {
+          answered = true;
+        });
+        // The budget, then at most the store's grace: not a hang.
+        await elapse(BUDGET_MS + STORE_GRACE_MS);
+        expect(answered, name).toBe(true);
+        const { response } = await settled;
         expect(response, name).toMatchObject({ errorReason: SETTLE_REASONS.timeout });
-        // The budget, then at most the store's grace: not a hang. The bound is loose for a loaded
-        // runner.
-        expect(Date.now() - started, name).toBeLessThan(1_000);
         expect(s.submit, name).not.toHaveBeenCalled();
       }
     });
@@ -1285,7 +1335,9 @@ describe("createSettler", () => {
       // E.g. upstream verify failing over across every RPC URL, then the ledger read.
       const slow: Check = () => new Promise(() => {});
       const { settle, store, submit } = setup(landing(), { budgetMs: 30, check: slow });
-      expect((await settle(payload(), requirements)).response).toMatchObject({
+      const settled = settle(payload(), requirements);
+      await elapse(30);
+      expect((await settled).response).toMatchObject({
         success: false,
         errorReason: SETTLE_REASONS.timeout,
       });
@@ -1320,7 +1372,9 @@ describe("createSettler", () => {
         await delay(5);
         return claim(settlement);
       });
-      await expect(settle(payload(), requirements)).resolves.toBeDefined();
+      const settled = settle(payload(), requirements);
+      await elapse(5);
+      await expect(settled).resolves.toBeDefined();
       expect(await store.get(key)).toBeDefined();
     });
 
@@ -1340,13 +1394,16 @@ describe("createSettler", () => {
       hooks.onFinal.mockImplementation(async () => {
         order.push("onFinal");
       });
-      expect((await settle(payload(), requirements)).response).toMatchObject({
+      const settled = settle(payload(), requirements);
+      await elapse(BUDGET_MS);
+      expect((await settled).response).toMatchObject({
         errorReason: SETTLE_REASONS.timeout,
       });
-      await delay(10);
+      await elapse(10);
       expect(hooks.onFinal).not.toHaveBeenCalled();
       answer();
-      await vi.waitFor(() => expect(order).toEqual(["reserved", "onFinal"]));
+      await storeIdle();
+      expect(order).toEqual(["reserved", "onFinal"]);
     });
 
     it("sends no hash whose write ended after the budget answer named another", async () => {
@@ -1359,9 +1416,7 @@ describe("createSettler", () => {
           );
           return new Promise(() => {});
         },
-        // Room for the claim on a loaded runner: past the budget before `onSigned`, the answer
-        // is a timeout with no hash. The hash's write is held past the budget below instead.
-        { budgetMs: 1_000 },
+        { budgetMs: BUDGET_MS },
       );
       // The hash is stored at once, but the store answers only after the budget answer.
       let answered!: () => void;
@@ -1372,13 +1427,16 @@ describe("createSettler", () => {
         await budgetAnswer;
         return added;
       });
-      const { response } = await settle(payload(), requirements);
+      const settled = settle(payload(), requirements);
+      await elapse(BUDGET_MS);
+      const { response } = await settled;
       answered();
       expect(response).toMatchObject({
         errorReason: SETTLE_REASONS.pending,
         transaction: HASH,
       });
-      await vi.waitFor(() => expect(signed).toBeInstanceOf(Error));
+      await storeIdle();
+      expect(signed).toBeInstanceOf(Error);
     });
 
     it("ends a repeat's wait by its own budget, after a slow lookup", async () => {
@@ -1410,7 +1468,9 @@ describe("createSettler", () => {
         await new Promise((resolve) => setTimeout(resolve, BUDGET_MS + 10));
         return { allow: true };
       });
-      expect((await settle(payload(), requirements)).response).toMatchObject({
+      const settled = settle(payload(), requirements);
+      await elapse(BUDGET_MS + 10);
+      expect((await settled).response).toMatchObject({
         errorReason: SETTLE_REASONS.timeout,
       });
       expect(submit).not.toHaveBeenCalled();
@@ -1428,10 +1488,12 @@ describe("createSettler", () => {
         { settleTimeoutMs: 100, budgetMs: 2_000 },
       );
       const first = settle(payload(), requirements);
-      await delay(5);
+      await elapse(5);
       const repeat = settle(payload(), requirements);
       // Past the settle timeout from the repeat's start (5 + 100).
       setTimeout(sign, 150);
+      // Both answer by 160: the repeat's next read after the landing.
+      await elapse(200);
       const answers = [(await repeat).response, (await first).response];
       expect(answers.filter((response) => response.success)).toHaveLength(1);
       expect(answers).toContainEqual(alreadySettled);
@@ -1451,8 +1513,10 @@ describe("createSettler", () => {
         { settleTimeoutMs: 100, budgetMs: 2_000 },
       );
       const first = settle(payload(), requirements);
-      await delay(5);
+      await elapse(5);
       const repeat = settle(payload(), requirements);
+      // Both answer by 170: the repeat's next read after the landing.
+      await elapse(200);
       const answers = [(await repeat).response, (await first).response];
       expect(answers.filter((response) => response.success)).toHaveLength(1);
       expect(answers).toContainEqual(alreadySettled);
@@ -1466,13 +1530,17 @@ describe("createSettler", () => {
       vi.spyOn(store, "transition").mockRejectedValueOnce(new Error("store down"));
       await settle(payload(), requirements);
       expect((await store.get(key))?.state).toBe("claimed");
-      await delay(BUDGET_MS + 10);
-      const started = Date.now();
-      expect((await settle(payload(), requirements)).response).toMatchObject({
+      await elapse(BUDGET_MS + 10);
+      let answered = false;
+      const repeat = settle(payload(), requirements).finally(() => {
+        answered = true;
+      });
+      // Anchored on the claim, not on the repeat's own start: it answers with the clock still.
+      await storeIdle();
+      expect(answered).toBe(true);
+      expect((await repeat).response).toMatchObject({
         errorReason: SETTLE_REASONS.timeout,
       });
-      // Anchored on the claim, not on the repeat's own start: before its own budget ends.
-      expect(Date.now() - started).toBeLessThan(BUDGET_MS);
       expect(await store.get(key)).toMatchObject({
         state: "rejected",
         errorReason: SETTLE_REASONS.timeout,
@@ -1485,16 +1553,21 @@ describe("createSettler", () => {
       // only once that claim is stored. Budget 300 ms: the loser's own ends at 300, the winner's
       // at 450.
       const race = (behaviour: Behaviour) => {
+        let winnerClaimed!: () => void;
+        const winnersClaim = new Promise<void>((resolve) => (winnerClaimed = resolve));
         let calls = 0;
         const afterWinnersClaim: Check = async (...args) => {
-          if (calls++ === 0)
-            await vi.waitFor(async () => expect(await ctx.store.get(key)).toBeDefined(), {
-              timeout: 5_000,
-              interval: 5,
-            });
+          if (calls++ === 0) await winnersClaim;
           return passing(...args);
         };
         const ctx = setup(behaviour, { budgetMs: 300, check: afterWinnersClaim });
+        // The loser waits in its checks, so the first claim is the winner's.
+        const claim = ctx.store.claim.bind(ctx.store);
+        vi.spyOn(ctx.store, "claim").mockImplementationOnce(async (settlement) => {
+          const claimed = await claim(settlement);
+          winnerClaimed();
+          return claimed;
+        });
         const loser = ctx.settle(payload(), requirements);
         const winner = delay(150).then(() => ctx.settle(payload(), requirements));
         return { ...ctx, loser, winner };
@@ -1516,6 +1589,7 @@ describe("createSettler", () => {
         hooks.onFinal.mockImplementation(async () => {
           order.push("onFinal");
         });
+        await elapse(300);
         // By its own budget, before the winner's ends, and with no hash.
         expect((await loser).response).toMatchObject({
           errorReason: SETTLE_REASONS.pending,
@@ -1523,9 +1597,11 @@ describe("createSettler", () => {
           transaction: "",
         });
         expect(hooks.onFinal).not.toHaveBeenCalled();
+        await elapse(150);
         expect((await winner).response).toMatchObject({ errorReason: SETTLE_REASONS.timeout });
         reserve();
-        await vi.waitFor(() => expect(order).toEqual(["reserved", "onFinal"]));
+        await storeIdle();
+        expect(order).toEqual(["reserved", "onFinal"]);
       });
 
       it("lets the winner sign after the loser's budget, while its own still runs", async () => {
@@ -1534,6 +1610,7 @@ describe("createSettler", () => {
           await run.loser;
           return landing()(opts);
         });
+        await elapse(300);
         expect((await run.loser).response).toMatchObject({ errorReason: SETTLE_REASONS.pending });
         expect((await run.winner).response).toMatchObject({ success: true, transaction: HASH });
         expect((await run.store.get(key))?.state).toBe("success");

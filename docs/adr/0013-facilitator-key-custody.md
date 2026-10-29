@@ -1,6 +1,8 @@
 # ADR 0013: Keep the facilitator key in OpenBao Transit on the facilitator's own server
 
-- Status: accepted
+- Status: accepted; socket mounting revised by [ADR 0011](0011-facilitator-hosting.md) for task
+  0077: one facilitator mounts every network's socket. The reasons for a socket per facilitator
+  are weighed in 0077's PR B.
 - Date: 2026-10-19
 - Amended: 2026-10-20 (where the unseal backup lives, the restore drill, the fee float and
   top-ups; [S-key-custody-decisions](../../lore/1-tasks/archive/0047_RESEARCH_hetzner-key-custody/notes/S-key-custody-decisions.md#backup-and-top-ups-2026-10-20));
