@@ -48,6 +48,9 @@ services:
     image: ${FACILITATOR_IMAGE:?set from digest by x402-compose}
     profiles: [migrate]
     command: [node, dist/migrate.js]
+    # Node as PID 1 ignores SIGTERM without a listener; under an init it exits on the stop that
+    # Compose forwards.
+    init: true
     read_only: true
     mem_limit: 512m
     environment:

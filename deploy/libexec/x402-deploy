@@ -3,20 +3,39 @@
 # digest.next under its lock (ADR 0011). It migrates from the new image while the old facilitator
 # still serves, then restarts x402@<environment> on it and waits up to 120 s for `ready` and
 # `listed`. A failed migration changes nothing; a failed start goes back to digest.good.
-#   x402-deploy <environment>
+#   x402-deploy <environment>           the unit's ExecStart
+#   x402-deploy <environment> stopped   its ExecStopPost, after any end
 set -eu
 env=$1
 repo=ghcr.io/rumblefishdev/x402-facilitator
+# Named, so a stop can reach it: the container lives in dockerd's cgroup, not the unit's.
+migrate=x402-$env-migrate-testnet
 cd "/srv/x402/$env"
 
-# x402@ keeps `digest` as it is while this is here; the unit removes it, and a reboot clears it.
+if [ "${2:-}" = stopped ]; then
+  rm -f "/run/x402/$env/deploying"
+  docker stop "$migrate" > /dev/null 2>&1 || true
+  # Stopped by the cap or by hand after `digest` moved: the restart job outlives the script, so
+  # end on the last good image, written before the restart since x402-compose reads `digest` at
+  # ExecStart. After a success or the script's own rollback, digest is good and nothing happens.
+  if [ "${SERVICE_RESULT:-}" != success ] && [ -s digest.good ] && ! cmp -s digest digest.good; then
+    echo "the deploy ended with ${SERVICE_RESULT:-no result}; back to digest.good" >&2
+    cp digest.good digest.tmp && mv digest.tmp digest
+    systemctl restart --no-block "x402@$env"
+  fi
+  exit 0
+fi
+
+# x402@ keeps `digest` as it is while this is here; ExecStopPost removes it, and a reboot clears it.
 /usr/local/libexec/x402/x402-creds "$env" database-url.testnet:1000
 touch "/run/x402/$env/deploying"
 
 new=$(cat digest.next)
 good=$(cat digest.good 2>/dev/null || true)
 docker pull --quiet "$repo@$new"
-FACILITATOR_IMAGE="$repo@$new" docker compose run --rm migrate-testnet
+# A migration already running under this name (a run by hand, runbook) fails this one here,
+# before anything stops, instead of waiting for its lock.
+FACILITATOR_IMAGE="$repo@$new" docker compose run --rm --name "$migrate" migrate-testnet
 
 # The healthcheck's one-liner, reading the body.
 probe="fetch('http://127.0.0.1:4021/health',{signal:AbortSignal.timeout(5000)}).then((r)=>r.json()).then((b)=>process.exit(b.ready&&b.listed?0:1),()=>process.exit(1))"
