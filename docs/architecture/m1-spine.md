@@ -260,7 +260,7 @@ graph TD
   - records stuck pending forever after a restart
 - **Rule:**
   - **One owner.** A single settlement module in `apps/facilitator` owns every write to `SettlementStore`. Handlers and event listeners call it; they never write to the store themselves.
-  - **States.** They only move forward: `claimed → signed → pending → success | failed | rejected | expired`. Each write is a compare-and-set, so a write that would move a record backwards is dropped. One written exception (task 0073): a record closed `rejected` with nothing sent (no hash, one of the six "nothing sent" reasons) moves back to `claimed` when the identical payload returns while the payer's auth entry is valid. `reopen` does it by compare-and-set, counts it in `reopened`, and restarts the record's budget from the reopening call.
+  - **States.** They only move forward: `claimed → signed → pending → success | failed | rejected | expired`. Each write is a compare-and-set, so a write that would move a record backwards is dropped. One written exception (task 0073): a record closed `rejected` with nothing sent (no hash, one of the seven "nothing sent" reasons) moves back to `claimed` when the identical payload returns while the payer's auth entry is valid. `reopen` does it by compare-and-set, counts it in `reopened`, and restarts the record's budget from the reopening call.
   - **Hashes.** A record keeps every hash it was signed with, because a rebuild produces a new one. It can be found by any of them.
   - **Durable write.** The hash is stored durably before the first send. This requires `signer-pool` to await an async `onSigned` and to abort the send if it rejects; that change to the library is a T1 prerequisite.
   - **Attempts.** Each hash keeps its own state, `stored → sent | unknown → landed | dead`, and its time and ledger bounds. `stored` and `sent` are hints that can lag the network; only `landed` and `dead` are its answers.
@@ -272,6 +272,7 @@ graph TD
 - **Prevents:** two processes using one channel's sequence numbers, for example during a rolling deploy.
 - **Rule:**
   - **Lease.** At startup a process takes an exclusive lease on its network's channel set through the store and keeps renewing it. Without the lease it doesn't serve `/settle`.
+  - **Fencing.** Every acquire draws a new token; a hash is stored, and so sent, only under the lease's current token (task 0071). A holder that lost the lease while frozen sends nothing new, except one envelope already stored and checked when it froze.
   - **Deploys.** They stop the old process before the new one takes the lease.
   - **Shutdown.** The process stops accepting `/settle`, waits until every in-flight submission is final or recorded as pending, then releases the lease.
 

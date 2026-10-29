@@ -10,7 +10,7 @@
   envelope's only bound is the payer's auth expiry, so `…_transaction_expired` comes only once
   the payment can no longer land under our hash, a fee bump someone else wraps it in being 0087;
   a record closed with nothing sent reopens for the identical payload while its auth entry is
-  valid)
+  valid) and 2026-10-29 (task 0071: the lease's fencing token)
 
 ## Context
 
@@ -58,7 +58,8 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
     claim began before the first call, so its budget can end first: then it answers
     `settlement_pending` with no hash and leaves the record to the first call.
   - A record closed `rejected` with nothing sent (no hash, and `…_timeout`, `…_interrupted`,
-    `…_shutting_down`, `…_rpc_unavailable`, `…_no_channel_in_time` or `…_no_channels`) reopens
+    `…_shutting_down`, `…_rpc_unavailable`, `…_no_channel_in_time`, `…_no_channels` or
+    `…_lease_lost`) reopens
     for a repeat with the same fingerprint while the payer's auth entry has at least 2 ledgers
     left (task 0073). The repeat runs the checks again, then `reopen` moves the record back to
     `claimed` by compare-and-set, counts it in `reopened` and sets `createdAt` to its own start,
@@ -135,6 +136,18 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
   and doesn't serve `/settle` without it.
   - Deploys stop the old process before the new one starts.
   - Shutdown drains in-flight submissions to final or recorded-pending, then releases the lease.
+  - Every acquire draws a new fencing token (`gen_random_uuid()`), its own holder's re-acquire
+    too; a renewal keeps it (task 0071). `addHash` takes the lease's name and the caller's token
+    and stores the hash only while the token is the lease's current one, with the lease row
+    locked `FOR KEY SHARE` in the same statement. `token` is unique, so a takeover's update takes
+    the row's `FOR UPDATE` lock and either waits for the hash or is re-read and refuses it, while
+    a renewal, which changes only `expires_at`, never waits on a hash's write. A refused call sent
+    nothing and ends `rejected` with `settle_exact_stellar_lease_lost`, which reopens like the
+    other "nothing sent" reasons; a call that finds the lease lost or acquired again right after
+    its hash was stored answers it with that hash, and doesn't reopen. One envelope can still go
+    out after a takeover: one stored and checked just before its process froze. `transition` stays unfenced: a stale
+    holder still records what it had sent, and the new holder's reconciliation finishes what it
+    can't.
 - **Minimum validity.** Payloads whose auth expiration ledger is less than `minValidityLedgers`
   ahead are rejected. The transaction's ledger bound never goes past the auth expiry, through a
   new `maxLedger` submit option (task 0016).
@@ -160,6 +173,11 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
   outcomes, and multi-hash lookup covers rebuilt transactions.
 - **The lease turns the pool's in-memory sequence tracking into a single-owner rule** that the
   store enforces, not a deployment convention.
+- **The token fences the one write before a send.** A process frozen past its TTL (a VM pause, a
+  long GC) wakes still past its lease check. Only `addHash` comes before money moves, so checking
+  the token there, in the store, stops its next send whatever its clock says. Equality is enough,
+  since the store reads the lease row itself; a random token can't repeat after a release deletes
+  the row, as a counter kept in the row would (task 0071).
 
 ## Alternatives considered
 
