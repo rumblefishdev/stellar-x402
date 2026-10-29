@@ -192,6 +192,8 @@ export function createCataloger({
       url: typeof paidUrl === "string" ? paidUrl : undefined,
     };
     let stage = "validate";
+    // What the attempt knew so far (key, copy, answer), for a row if a later step throws.
+    let known: CatalogAttempt = { ...attempt, stage: "payment", outcome: "internal_error" };
     try {
       // Validated again rather than cached: pure, so header and catalog agree, and a late
       // `resolved` success never computed a header.
@@ -199,8 +201,11 @@ export function createCataloger({
       if (!result) return;
       if (!result.ok) {
         // A library failure, not a bad listing.
-        if (result.reason === "internal_error")
-          return internalError(stage, record, origin, result.detail);
+        if (result.reason === "internal_error") {
+          internalError(stage, record, origin, result.detail);
+          const failed = { stage: "payment", outcome: "internal_error", reason: stage } as const;
+          return await finish({ ...attempt, ...failed, detail: result.detail }, record, origin);
+        }
         const { reason, detail, bytes: fieldBytes } = result;
         const rejected = {
           stage: "payment",
@@ -216,6 +221,7 @@ export function createCataloger({
       // Built from the verified requirements, whose network is the record's.
       const key = echoed.key as CatalogKey;
       const tried = { ...attempt, key, contentHash: contentHash(echoed.resource) };
+      known = { ...known, ...tried };
       // Upstream's default `mcp://tool/<name>` names the tool, not a server to ask (row 6).
       if (result.resourceUrl.startsWith("mcp:")) {
         const toolUrl = {
@@ -234,6 +240,7 @@ export function createCataloger({
 
       // From here the copy differs from the stored listing: kept to compare with the answer.
       const compared = { ...tried, copy: echoed.resource };
+      known = { ...known, ...compared };
 
       stage = "budget";
       const host = new URL(result.resourceUrl).hostname;
@@ -264,6 +271,8 @@ export function createCataloger({
       }
 
       const asked = { ...compared, answer: answer.paymentRequired };
+
+      known = { ...known, ...asked };
 
       stage = "seller";
       const listing = bazaarLib.listingFromSeller(
@@ -352,7 +361,7 @@ export function createCataloger({
         reason: stage,
         detail: String(error),
       } as const;
-      await finish({ ...attempt, ...failed }, record, origin);
+      await finish({ ...known, ...failed }, record, origin);
     }
   }
 

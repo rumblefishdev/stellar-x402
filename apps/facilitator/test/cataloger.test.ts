@@ -1,5 +1,6 @@
 import type { PaymentPayload, PaymentRequired, PaymentRequirements } from "@x402/core/types";
 import { safeBase64Decode } from "@x402/core/utils";
+import * as bazaarLib from "@stellar-x402/bazaar";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCataloger, type CatalogerDeps } from "../src/catalog/cataloger.js";
 import { encodeExtensionResponses } from "../src/http/extension-responses.js";
@@ -547,6 +548,39 @@ describe("cataloger", () => {
       }),
     ).toBe(1);
     expect(internal.logger.info).not.toHaveBeenCalled();
+  });
+
+  it("records an attempt the validator failed on, and one whose text Postgres can't store (row 30)", async () => {
+    const broken = setup({
+      bazaar: {
+        ...bazaarLib,
+        validate: () => ({ ok: false, reason: "internal_error", detail: "boom" }),
+      },
+    });
+    await broken.cataloger.onSuccess(record(valid), "settle");
+    // A NUL inside the example passes validation; neither jsonb nor text holds it.
+    const input = { ...valid.info.input, queryParams: { q: "a\u0000b" } };
+    const { cataloger } = setup({ now: () => START + MINUTE });
+    await cataloger.onSuccess(record({ ...valid, info: { input } }), "settle");
+    const { rows } = await db.pool.query<{ stage: string; outcome: string; reason: string }>(
+      `SELECT stage, outcome, reason FROM catalog_attempts ORDER BY id`,
+    );
+    expect(rows).toEqual([
+      { stage: "payment", outcome: "internal_error", reason: "validate" },
+      expect.objectContaining({ stage: "seller" }),
+    ]);
+  });
+
+  it("keeps the key and the copy on an attempt that failed after they were known", async () => {
+    const hit = () => Promise.reject(new Error("rate-limit store down"));
+    const { cataloger } = setup({ rateLimits: { hit } });
+    await cataloger.onSuccess(record(valid, {}, { description: "Pwned" }), "settle");
+    const { rows } = await db.pool.query<{ reason: string; method: string; copy: unknown }>(
+      `SELECT reason, method, copy FROM catalog_attempts ORDER BY id`,
+    );
+    expect(rows).toMatchObject([
+      { reason: "budget", method: "GET", copy: { description: "Pwned" } },
+    ]);
   });
 
   it("records an attempt that failed inside the facilitator, with the step it failed at (row 23)", async () => {
