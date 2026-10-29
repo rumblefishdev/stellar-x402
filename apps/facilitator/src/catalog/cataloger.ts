@@ -59,6 +59,8 @@ const SELLER_RESPONSE_BYTES = 64 * 1024;
 const MCP_RESPONSE_BYTES = 256 * 1024;
 /** A library error lists every issue; the attempt's row keeps its start. */
 const DETAIL_CHARS = 1_000;
+/** The steps of `catalog` taken once the seller is asked: a failure there is the seller stage's. */
+const SELLER_STEPS = ["ask", "seller", "upsert", "report"];
 
 const contentHash = (resource: Omit<DiscoveryResource, "lastUpdated">) =>
   createHash("sha256")
@@ -154,7 +156,12 @@ export function createCataloger({
       if (outcome === "over_budget")
         logger.info("catalog_check_skipped", { ...fields, budget: reason });
       else if (outcome === "unchanged") logger.debug("catalog_unchanged", fields);
-      else if (outcome !== "refreshed" && outcome !== "stale" && outcome !== "upsert_failed")
+      else if (
+        outcome !== "refreshed" &&
+        outcome !== "stale" &&
+        outcome !== "upsert_failed" &&
+        outcome !== "internal_error"
+      )
         logger.info("catalog_rejected", fields);
     });
     try {
@@ -317,6 +324,14 @@ export function createCataloger({
         );
     } catch (error) {
       internalError(stage, record, origin, error);
+      // Still an attempt (row 23), named by the step it failed at.
+      const failed = {
+        stage: SELLER_STEPS.includes(stage) ? "seller" : "payment",
+        outcome: "internal_error",
+        reason: stage,
+        detail: String(error),
+      } as const;
+      await finish({ ...attempt, ...failed }, record, origin);
     }
   }
 

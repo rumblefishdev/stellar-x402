@@ -74,7 +74,8 @@ export type CatalogAttemptStage = "payment" | "seller";
  * How a listing attempt ended. On the payment's copy: `rejected` (it broke a rule), `unchanged`
  * (it matches the stored listing, so the seller isn't asked) or `over_budget`. On the seller's
  * 402: `not_askable` (no usable answer), `other_pay_to`, `too_large`, `rejected` (the seller's own
- * listing broke a rule), `refreshed`, `stale` (a later check had written) or `upsert_failed`.
+ * listing broke a rule), `refreshed`, `stale` (a later check had written) or `upsert_failed`. At
+ * either stage, `internal_error`: the facilitator itself failed, its reason the step it failed at.
  */
 export type CatalogAttemptOutcome =
   | "rejected"
@@ -85,7 +86,8 @@ export type CatalogAttemptOutcome =
   | "too_large"
   | "refreshed"
   | "stale"
-  | "upsert_failed";
+  | "upsert_failed"
+  | "internal_error";
 
 /**
  * One listing attempt, accepted or not (0063), kept for later analysis: who paid, what was tried,
