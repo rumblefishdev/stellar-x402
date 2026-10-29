@@ -112,13 +112,25 @@ description or price, and nobody can make `/discovery/resources` answer megabyte
   1.85 s, max 5.3 s); an oversized `extra` in the paid offer makes the header say `too_large` at
   once; one `catalog_attempts_total` counter replaces the rejection and upsert counters; writes
   are ordered by a new `checked_at` column and `ledger` stays.
+- Whether the `description` limit of 500 characters and the schema `pattern` limit of 256 (both
+  from 0030) stay: 140 of 92,790 real descriptions are longer (the longest 4,982), the spec sets
+  no limit, and in the run over 400 real HTTP hosts they refused 4 and 1 listings.
 - The measured cause of the `500` answers under 20 concurrent `/discovery/resources` reads
   (hypothesis: the database pool); its own task once measured.
 
 ## PR split
 
-After the guard's error type (#71) and move (#72): one PR for listings from the seller's page
-(field limits, HTTP check, the attempts table, ADR 0008), then one for MCP listings.
+| PR | What | State |
+|---|---|---|
+| #71 | the guard's error type | merged |
+| #72 | the guard moves to `packages/seller-fetch` | merged |
+| #88 | the MCP turns a guard refusal into a tool error in one place (row 27) | open |
+| #89 | listings from the seller's page: field limits, HTTP check, the attempts table, ADR 0008 | open |
+| #90 | MCP listings, stacked on #89 | open |
+| next | drop the unused `@stellar-x402/mcp` dependency from `apps/facilitator/package.json` | after #90 |
+| maybe | other `description` and schema `pattern` limits, if the decision below changes them | open |
+
+The schema depth limit (row 25) went in as task 0083 (#87).
 
 ## Out of scope
 
