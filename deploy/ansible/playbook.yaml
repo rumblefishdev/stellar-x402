@@ -1,0 +1,127 @@
+# x402's parts of the company Hetzner server (ADR 0011): the `x402` user and
+# /srv/x402/production, the compose file and deploy.sh, the systemd units and their scripts, and
+# CI's deploy user with its forced command and one sudo rule. Never the server's base setup
+# (firewall, Docker's daemon.json, sshd, the admins), which the explorer's playbook owns. An admin
+# runs it from a reviewed commit; CI never does:
+#   cd deploy/ansible
+#   ansible-playbook -i inventory.ini playbook.yaml --check --diff
+#   ansible-playbook -i inventory.ini playbook.yaml
+#
+# It enables the units and starts none: they need their encrypted credentials first (runbook). A
+# changed unit or compose file takes effect at that unit's next restart, so a run never restarts
+# the facilitator.
+- name: x402 on the server
+  hosts: x402
+  become: true
+  vars:
+    x402_environment: production
+    repo_deploy: "{{ playbook_dir }}/.."
+    # The public half of the environment's deploy key, whose private half is the GitHub
+    # environment's secret (runbook).
+    deploy_key: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/files/deploy-' ~ x402_environment ~ '.pub') }}"
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+
+  tasks:
+    - name: The x402 user, owner of /srv/x402; nobody logs in as it
+      ansible.builtin.user:
+        name: x402
+        system: true
+        shell: /usr/sbin/nologin
+        home: /srv/x402
+        create_home: false
+
+    # A shell for its forced command, no password, not in the docker group. Not `deploy`, the
+    # explorer's admin user.
+    - name: The deploy user, x402-deploy
+      ansible.builtin.user:
+        name: x402-deploy
+        system: true
+        shell: /bin/sh
+        home: /var/lib/x402-deploy
+
+    - name: Directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.owner }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: /srv/x402, owner: x402, mode: "0755" }
+        - { path: "/srv/x402/{{ x402_environment }}", owner: x402, mode: "0755" }
+        # Encrypted with the host key (systemd-creds), decrypted by the units only.
+        - { path: "/srv/x402/{{ x402_environment }}/creds", owner: root, mode: "0700" }
+        - { path: /usr/local/libexec/x402, owner: root, mode: "0755" }
+        - { path: /var/lib/x402-deploy/.ssh, owner: x402-deploy, mode: "0700" }
+
+    - name: The compose file and deploy.sh
+      ansible.builtin.copy:
+        src: "{{ repo_deploy }}/{{ x402_environment }}/{{ item.name }}"
+        dest: "/srv/x402/{{ x402_environment }}/{{ item.name }}"
+        owner: x402
+        group: x402
+        mode: "{{ item.mode }}"
+      loop:
+        - { name: compose.yaml, mode: "0644" }
+        - { name: deploy.sh, mode: "0755" }
+
+    # The only file the deploy user writes; the deploy unit reads it as root.
+    - name: digest.next
+      ansible.builtin.file:
+        path: "/srv/x402/{{ x402_environment }}/digest.next"
+        state: touch
+        owner: x402-deploy
+        group: x402-deploy
+        mode: "0644"
+        modification_time: preserve
+        access_time: preserve
+
+    - name: The units' scripts
+      ansible.builtin.copy:
+        src: "{{ repo_deploy }}/libexec/"
+        dest: /usr/local/libexec/x402/
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: The units
+      ansible.builtin.copy:
+        src: "{{ repo_deploy }}/systemd/"
+        dest: /etc/systemd/system/
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload systemd
+
+    - name: The deploy user's one sudo rule
+      ansible.builtin.copy:
+        content: "x402-deploy ALL=(root) NOPASSWD: /usr/bin/systemctl start x402-deploy@{{ x402_environment }}\n"
+        dest: /etc/sudoers.d/x402-deploy
+        owner: root
+        group: root
+        mode: "0440"
+        validate: visudo -cf %s
+
+    - name: The deploy key, held to deploy.sh
+      ansible.builtin.copy:
+        content: "command=\"/srv/x402/{{ x402_environment }}/deploy.sh\",restrict {{ deploy_key }}\n"
+        dest: /var/lib/x402-deploy/.ssh/authorized_keys
+        owner: x402-deploy
+        group: x402-deploy
+        mode: "0600"
+
+    - name: Reload systemd before enabling
+      ansible.builtin.meta: flush_handlers
+
+    - name: The units, enabled at boot
+      ansible.builtin.systemd_service:
+        name: "{{ item }}@{{ x402_environment }}.service"
+        enabled: true
+      loop:
+        - x402-db-testnet
+        - x402-tunnel
+        - x402

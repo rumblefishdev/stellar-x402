@@ -1,0 +1,11 @@
+# Copy to inventory.ini (git-ignored) and fill in. The admin user and SSH port are the explorer's
+# (soroban-block-explorer's infra-hetzner/ansible): this playbook adds nothing to sshd.
+
+[x402]
+ch-prod-01 ansible_host=REPLACE_WITH_SERVER_IP
+
+[x402:vars]
+ansible_user=deploy
+ansible_python_interpreter=/usr/bin/python3
+# Refuse a changed host key: a reinstalled box is added to known_hosts on purpose.
+ansible_ssh_common_args=-o StrictHostKeyChecking=yes
