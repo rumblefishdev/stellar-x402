@@ -620,6 +620,16 @@ describe("cataloger, an MCP listing (0063 rows 5, 18)", () => {
     expect(await list()).toEqual([]);
   });
 
+  it("ends a check whose tool never answers at the seller deadline (row 6)", async () => {
+    mcp = await startMcpSeller(() => "never");
+    const { cataloger, list, counted } = setup({ sellerTimeoutMs: 300 });
+    const started = performance.now();
+    await cataloger.onSuccess(paid(), "settle");
+    expect(performance.now() - started).toBeLessThan(5_000);
+    expect(counted("seller", "not_askable", "upstream_error")).toBe(1);
+    expect(await list()).toEqual([]);
+  });
+
   it("closes the seller's event stream once the check is done", async () => {
     mcp = await startMcpSeller(() => terms);
     const { cataloger } = setup();

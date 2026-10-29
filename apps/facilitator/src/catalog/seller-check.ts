@@ -64,9 +64,13 @@ export async function askMcpSeller(
   limits: SellerLimits,
 ): Promise<SellerAnswer> {
   const mcp = new Client({ name: "stellar-x402-facilitator", version: "0.0.0" });
-  const fetch = guardedFetch(limits, AbortSignal.timeout(limits.timeoutMs));
+  const deadline = AbortSignal.timeout(limits.timeoutMs);
+  const fetch = guardedFetch(limits, deadline);
+  // The SDK waits for an answer up to its own 60 s after the request is sent; the deadline ends
+  // that wait too, for a server that accepts a call and never sends its result.
+  const options = { signal: deadline };
   try {
-    await mcp.connect(new StreamableHTTPClientTransport(new URL(url), { fetch }));
+    await mcp.connect(new StreamableHTTPClientTransport(new URL(url), { fetch }), options);
     let listed = false;
     let cursor: string | undefined;
     do {
@@ -76,6 +80,7 @@ export async function askMcpSeller(
       const page = await mcp.request(
         { method: "tools/list", params: { cursor } },
         ListToolsResultSchema,
+        options,
       );
       listed = page.tools.some((tool) => tool.name === call.name);
       cursor = page.nextCursor;
@@ -85,7 +90,11 @@ export async function askMcpSeller(
     // `createPaymentRequiredResult`): an error result carrying them in `structuredContent`, or as
     // JSON in its first text (9 of 20 live sellers). Read here, not with upstream's MCP client,
     // whose schema reads terms with too many tags as no 402 at all.
-    const result = await mcp.request({ method: "tools/call", params: call }, CallToolResultSchema);
+    const result = await mcp.request(
+      { method: "tools/call", params: call },
+      CallToolResultSchema,
+      options,
+    );
     const [first] = result.content;
     let terms: unknown = result.structuredContent;
     if (terms === undefined && first?.type === "text") {
@@ -107,6 +116,10 @@ export async function askMcpSeller(
   } catch (error) {
     if (error instanceof SellerFetchError) {
       return { ok: false, reason: error.code, detail: error.detail ?? error.message };
+    }
+    if (deadline.aborted) {
+      const detail = `no answer within ${limits.timeoutMs} ms`;
+      return { ok: false, reason: "upstream_error", detail };
     }
     // Not an MCP server, or one that answered the call with a protocol error.
     return { ok: false, reason: "mcp_error", detail: String(error) };

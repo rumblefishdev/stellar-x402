@@ -26,12 +26,12 @@ const read = async (req: IncomingMessage) => {
  * An MCP seller on this machine for the cataloger's check (0063 rows 5, 18): one tool, `weather`,
  * that takes a `city`. Unpaid, it answers as upstream's payment wrapper does (`@x402/mcp` 2.28.0
  * `createPaymentRequiredResult`): an error result whose `structuredContent` and first text are the
- * 402 terms; `free` answers as a free tool. `tools` lists other names instead of `weather`;
+ * 402 terms; `free` answers as a free tool; `never` accepts the call and never sends its result. `tools` lists other names instead of `weather`;
  * `outputSchema` gives the tool one the terms don't match; `textOnly` leaves out
  * `structuredContent`, as some sellers do; `description` is each tool's.
  */
 export async function startMcpSeller(
-  answer: () => PaymentRequired | "free",
+  answer: () => PaymentRequired | "free" | "never",
   {
     tools = ["weather"],
     outputSchema = false,
@@ -51,6 +51,11 @@ export async function startMcpSeller(
         if (req.method === "GET") {
           streams.add(req);
           req.on("close", () => streams.delete(req));
+        }
+        // Accepted, with the result promised on the event stream, where it never comes.
+        if (body?.method === "tools/call" && answer() === "never") {
+          res.writeHead(202).end();
+          return;
         }
         // A server and a transport per request: the SDK's stateful mode keeps a session, which
         // the check does not need; GET still opens the server's event stream.
