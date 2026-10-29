@@ -102,6 +102,8 @@ description or price, and nobody can make `/discovery/resources` answer megabyte
 | 26 | Before the last PR, a run over real catalog listings (one per HTTP host, every MCP server) goes into the PR as evidence: a table of outcomes, each refusal explained. The script stays outside the repo | grilling | beyond it | — | | |
 | 27 | The MCP turns a guard refusal into its own tool error in one function (`asToolError`), so `packages/seller-fetch` carries no MCP type and no catch block can miss the guard's errors | grilling | beyond it | — | | |
 | 28 | 0075 is a seller guide (declare the extension, pay once, check `GET /discovery/resources?payTo=`), not a helper that pays: the settle header can only say `processing` (row 22), so the catalog is where a seller sees the outcome | grilling | changes rows 17 and 20 | `bazaar.md:501` | | |
+| 29 | An MCP check ends at the seller deadline (10 s) even after the call was accepted: the SDK's own 60 s wait for a result is cut by the same deadline, and the outcome is `upstream_error` as for an HTTP seller | review | beyond it | MCP SDK 1.30.1 `RequestOptions.signal` | | |
+| 30 | An attempt that fails inside the facilitator (a database error, a thrown bug) is a `catalog_attempts` row too, outcome `internal_error`, its reason the step it failed at; the log line and counter stay | review | beyond it | no peer stores rejected attempts | | |
 
 ## Not yet decided
 
