@@ -351,11 +351,16 @@ function readFileSettings(
       problems.push(`${name} and ${name}_FILE must not both be set`);
       continue;
     }
+    let value: string;
     try {
-      read[name] = readFileSync(path, "utf8");
+      value = readFileSync(path, "utf8");
     } catch (error) {
       problems.push(`${name}_FILE can't be read (${(error as NodeJS.ErrnoException).code})`);
+      continue;
     }
+    // Refused, not read as unset: an empty RPC_URLS would quietly start on testnet's public RPC.
+    if (!value.trim()) problems.push(`${name}_FILE is empty`);
+    read[name] = value;
   }
   if (problems.length > 0) throw new ConfigError(problems);
   return read;
