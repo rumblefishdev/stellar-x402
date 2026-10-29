@@ -185,6 +185,30 @@ describe("createReconciler", () => {
       await reconciler.sweep();
       expect(await store.get(key)).toMatchObject({ state: "signed", hashes: [A] });
     });
+
+    it("never closes a claim reopened after the sweep read the earlier one (0073 decision 19)", async () => {
+      // The sweep reads the old claim; before its close, a repeat's budget ends it and another
+      // repeat reopens it. The reopened claim is still `claimed` with no hash, but it is a new
+      // claim whose call may still sign: only the version the sweep read tells them apart.
+      const { store, reconciler, advance } = setup();
+      const key = await claimed(store);
+      advance(BUDGET_MS + 5_001);
+      const reason = SETTLE_REASONS.noChannelInTime;
+      const list = store.listNonFinal.bind(store);
+      store.listNonFinal = async (n) => {
+        const listed = await list(n);
+        await store.transition(key, "claimed", {
+          state: "rejected",
+          errorReason: reason,
+          updatedAt: NOW,
+        });
+        const { fingerprint } = settlement("1");
+        expect(await store.reopen(key, fingerprint, [reason], NOW)).toBeDefined();
+        return listed;
+      };
+      expect(await reconciler.sweep()).toMatchObject({ rejected: 0 });
+      expect(await store.get(key)).toMatchObject({ state: "claimed", reopened: 1, hashes: [] });
+    });
   });
 
   describe("signed records", () => {

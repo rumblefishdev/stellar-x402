@@ -18,20 +18,21 @@ export interface Transfer {
 }
 
 /**
- * A testnet `transfer` of `requirements.amount` from the payer, with its one auth entry (nonce 7)
- * valid to `expiration`, unsigned.
+ * A testnet `transfer` of `requirements.amount` from the payer, with its one auth entry (`nonce`, 7
+ * by default) valid to `expiration`, unsigned.
  */
 export function transferPayload(
   { payer, payTo, requirements }: Transfer,
   expiration: number,
   extensions?: Record<string, unknown>,
+  nonce = "7",
 ): PaymentPayload {
   const asset = requirements.asset;
   const auth = new xdr.SorobanAuthorizationEntry({
     credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(
       new xdr.SorobanAddressCredentials({
         address: new Address(payer).toScAddress(),
-        nonce: xdr.Int64.fromString("7"),
+        nonce: xdr.Int64.fromString(nonce),
         signatureExpirationLedger: expiration,
         signature: xdr.ScVal.scvVoid(),
       }),

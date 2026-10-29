@@ -436,9 +436,17 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
         const close = { state: "rejected", errorReason: "unsent_a", updatedAt: 6_000 } as const;
         expect(await store.transition(s.key, "claimed", close, before.version)).toBeUndefined();
         expect(await store.addHash(s.key, "h1", 6_000, undefined, before.reopened)).toBe(false);
+        // Any write of the earlier claim's call, versioned or not (0073 decision 24).
+        expect(
+          await store.transition(s.key, "claimed", close, undefined, before.reopened),
+        ).toBeUndefined();
         expect(await store.get(s.key)).toMatchObject({ state: "claimed", hashes: [] });
         expect(await store.addHash(s.key, "h1", 6_000, undefined, 1)).toBe(true);
         expect(await store.get(s.key)).toMatchObject({ state: "signed", hashes: ["h1"] });
+        const pending = { state: "pending", updatedAt: 7_000 } as const;
+        expect(await store.transition(s.key, "signed", pending, undefined, 1)).toMatchObject({
+          state: "pending",
+        });
       });
 
       it("lets exactly one of several concurrent reopens win", async () => {

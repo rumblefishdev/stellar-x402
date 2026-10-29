@@ -371,6 +371,20 @@ export function payerNonce({
   return nonces.length === 1 ? nonces[0] : undefined;
 }
 
+/** The payer's one auth entry's `signatureExpirationLedger`, or `undefined` without exactly one. */
+export function payerExpiration(transaction: Transaction, payer: string): number | undefined {
+  const expirations: number[] = [];
+  for (const operation of transaction.operations) {
+    if (operation.type !== "invokeHostFunction") continue;
+    for (const entry of operation.auth ?? []) {
+      const credentials = getAddressCredentials(entry.credentials());
+      if (credentials && addressOf(credentials.address()) === payer)
+        expirations.push(credentials.signatureExpirationLedger());
+    }
+  }
+  return expirations.length === 1 ? expirations[0] : undefined;
+}
+
 /** Whether the payload carries an address-credential auth entry of anyone but `payer`. */
 function hasOtherAddressAuth(transaction: Transaction, payer: string): boolean {
   return transaction.operations.some(
