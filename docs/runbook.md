@@ -160,14 +160,23 @@ facilitator serves, then restarts `x402@production` on the new image and waits u
 ## Long migrations
 
 An online migration (a backfill, an index build) runs in the deploy, under the deploy unit's
-60-minute cap; past it the deploy fails before the old facilitator stops, and the next deploy
-continues from the steps it finished (ADR 0012).
+60-minute cap, which covers the restart after it too. A deploy stopped by the cap or by hand
+stops its migration container and ends with the facilitator on `digest.good`; the next deploy
+continues from the steps the migration finished (ADR 0012), and nothing in the schema needs
+undoing.
 
-- **Disk first.** A backfill writes about 1.2 GiB of WAL per 2 million rows, which pgBackRest
-  ships as each segment closes, and the table grows about a third. Check the headroom with
-  `df -h /var/lib/docker`.
+- **Disk first.** A backfill writes about 1.2 GiB of WAL per 2 million rows, and the table grows
+  about a third. Until pgBackRest is here, the WAL stays in `pg_wal` until checkpoints recycle
+  it; with it, each segment leaves as it closes. Compare the database volume's free space with
+  the table's size (`pg_total_relation_size`, in the query below):
+
+  ```sh
+  df -h "$(sudo docker volume inspect -f '{{.Mountpoint}}' x402-production_postgres-testnet)"
+  ```
+
 - **Testnet first,** outside mainnet's busy hours and away from 00:00 UTC, when the production
-  ClickHouse on the same disks writes the most.
+  ClickHouse on the same disks writes the most. Once mainnet joins, one deploy migrates every
+  network, so "testnet first" means running it by hand on testnet (below) before the deploy.
 - **Progress:** each step logs as it ends and every 50 backfill batches. An index build, a
   `VALIDATE` or a wait for another run's lock is quiet until task 0080, so read what it does
   before stopping it:
@@ -175,20 +184,31 @@ continues from the steps it finished (ADR 0012).
   ```sh
   cd /srv/x402/production
   sudo FACILITATOR_IMAGE=unused docker compose exec postgres-testnet psql -U postgres -d x402 -c \
-    "select pid, state, wait_event, now() - query_start as running, left(query, 80)
+    "select pid, application_name, state, wait_event_type, wait_event,
+            now() - query_start as running, left(query, 80)
        from pg_stat_activity where datname = 'x402' and pid <> pg_backend_pid()"
   ```
 
+  The runner's sessions are named `x402-migrate`. An index build's progress is in
+  `pg_stat_progress_create_index`; a run waiting for another's lock is an idle session polling
+  `pg_try_advisory_lock`, with no wait event.
+
+- **Stopping a run:** `sudo systemctl stop x402-deploy@production`. The lock on `digest.next` is
+  released with it.
 - **Longer than the cap:** run it ahead of the deploy, from the new image, in a unit of its own
   so a dropped SSH session doesn't stop it; the deploy then finds it applied.
 
   ```sh
   sudo /usr/local/libexec/x402/x402-creds production database-url.testnet:1000
-  sudo systemd-run --unit=x402-migrate --working-directory=/srv/x402/production \
+  sudo systemd-run --unit=x402-migrate --collect --working-directory=/srv/x402/production \
     --setenv=FACILITATOR_IMAGE=ghcr.io/rumblefishdev/x402-facilitator@sha256:… \
-    docker compose run --rm migrate-testnet
+    docker compose run --rm --name x402-production-migrate-testnet migrate-testnet
   journalctl -fu x402-migrate
   ```
+
+  Deploy once `systemctl is-active x402-migrate` says `inactive`; a deploy meanwhile fails on the
+  container's name before anything stops. To stop it, `sudo systemctl stop x402-migrate`, then
+  `sudo docker stop x402-production-migrate-testnet` in case the container outlived the unit.
 
 ## Reboots and Docker upgrades
 
