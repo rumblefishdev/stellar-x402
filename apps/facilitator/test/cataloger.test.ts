@@ -641,6 +641,18 @@ describe("cataloger, an MCP listing (0063 rows 5, 18)", () => {
     expect(counted("seller", "refreshed", "inserted")).toBe(1);
   });
 
+  it("refuses a tool's terms that name another tool of the server", async () => {
+    // A server several sellers share: the asked tool's 402 claims another tool's listing.
+    const forecast = { ...tool, info: { input: { ...tool.info.input, toolName: "forecast" } } };
+    mcp = await startMcpSeller(() => ({ ...terms, extensions: { bazaar: forecast } }), {
+      tools: ["weather", "forecast"],
+    });
+    const { cataloger, list, counted } = setup();
+    await cataloger.onSuccess(paid(), "settle");
+    expect(counted("seller", "other_key")).toBe(1);
+    expect(await list()).toEqual([]);
+  });
+
   it("creates nothing when the tool runs without asking for a payment (row 6)", async () => {
     mcp = await startMcpSeller(() => "free");
     const { cataloger, list, counted } = setup();
