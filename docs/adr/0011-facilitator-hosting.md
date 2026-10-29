@@ -43,7 +43,8 @@ The host must:
   sent one can stay valid until the payer's auth expires (`MAX_VALIDITY_LEDGERS`: 66 ledgers by default, about 5.5 minutes; at most 120, about 10 minutes), plus
   `confirmGraceSeconds` 30, so it can outlast the drain. One still open at 150 s is finished by
   the next process's reconciliation, and until it lands or expires the next process's sends on
-  its channel may fail with `txBadSeq` and rebuild;
+  its channel may fail with `txBadSeq` and rebuild, for minutes rather than about 60 s. Accepted
+  for testnet; before pubnet the next process leaves such a channel out (0090);
 - **keep the facilitator key out of the image, the logs and the facilitator's process** (AD-12);
 - **offer a durable store** for the PostgreSQL schema of ADR 0012.
 
@@ -170,7 +171,7 @@ One request or one stop must never outlast the layer in front of it:
 | `/settle` response budget             | 30 s, at most 80 s | well below the seller's 90 s, so our answer reaches it             |
 | `/settle` checks                      | see below          | inside the budget: past it, `…_timeout` and nothing is claimed     |
 | Repeat wait (`SETTLE_TIMEOUT_MS`)     | 20 s, ≤ the budget | and never past the repeat's own budget                             |
-| `stop_grace_period`                   | 180 s              | sent submissions (≤ 90 s) plus a 90 s margin                       |
+| `stop_grace_period`                   | 180 s              | the 150 s drain plus 30 s for the store and the lease (0073)       |
 | Cloudflare's response limit           | 100 s              | above the 80 s cap; past it Cloudflare answers 524                 |
 | Node `keepAliveTimeout`               | 125 s              | above `cloudflared`'s idle keep-alive (90 s), or it sees 502s      |
 | Container healthcheck                 | 10 s               | liveness only                                                      |
@@ -571,7 +572,8 @@ One request or one stop must never outlast the layer in front of it:
   costs about €0 more, against about $60–70 a month on testnet and $150 on mainnet for ECS
   Fargate.
 - **It meets both hard rules.** Compose stops the old container first, and the grace period has no
-  platform cap, so 180 s covers the drain with room to spare.
+  platform cap, so 180 s covers the 150 s drain. A submission still open then is finished by the
+  next process (0073).
 - **The alerting design carries over:** the same logger, the same EMF metrics, CloudWatch alarms
   and Slack.
 - **Docker is already on the server,** and the company already runs sorobanscan's API behind

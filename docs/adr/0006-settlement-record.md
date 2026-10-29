@@ -8,7 +8,7 @@
   (task 0019: attempt states, reconciliation sweeps, the outage leftovers), 2026-10-26 (task
   0019: the record version, sweeps every 10 s beside `/settle`) and 2026-10-28 (task 0073: an
   envelope's only bound is the payer's auth expiry, so `…_transaction_expired` comes only once
-  the payment can no longer land)
+  the payment can no longer land under our hash; a fee bump someone else wraps it in is 0087)
 
 ## Context
 

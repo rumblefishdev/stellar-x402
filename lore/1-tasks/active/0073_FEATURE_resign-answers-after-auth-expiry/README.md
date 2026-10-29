@@ -158,11 +158,16 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
 10. **`MAX_VALIDITY_LEDGERS` is at most 120** (okarcz, 2026-10-28, PR 1 review D3): about 10
     minutes, so a typo can't reopen days-long signatures and the drain re-check in PR 2 has a
     known worst case. Chosen over a bound tied to the drain and over none.
-11. **The time bound is dropped, not pushed past the ledger bound** (okarcz, 2026-10-28, PR 2):
-    with `maxLedger` set the envelope has `maxTime` 0, and every place the pool read `maxTime`
-    goes by ledgers. So `expired` always means "can't land", however slow the ledgers. Chosen
-    over a time bound of ledgers left × 10 s, a one-line change that would end the envelope
-    early only if ledgers averaged over 10 s.
+11. **The time bound is dropped, not pushed past the ledger bound** (okarcz, 2026-10-28, PR 2;
+    amended 2026-10-29, PR 2 review): with `maxLedger` set the envelope has `maxTime` 0, and
+    `expired` is decided by the ledger bound alone, so it always means "can't land", however
+    slow the ledgers. The pool's waits still end at the bound's estimated time, 6 s a ledger:
+    `submit()`'s `pending` answer, a queued call's wait, the `onSigned` watcher and the
+    TRY_AGAIN_LATER resends. So on slower ledgers an envelope the network kept refusing stops
+    being resent with ledgers left and ends `expired` at its bound: a true answer, a payment
+    that lost its last chances. The stop also keeps a down RPC from holding the loop. Chosen over
+    a time bound of ledgers left × 10 s, and in review over resending until the ledger bound
+    (its own interval and an "RPC down" check: a new mechanism).
 12. **The drain test covers both outcomes across a deploy** (okarcz, 2026-10-28, PR 2): the
     transaction never lands (the next process ends it `expired` after the ledger bound), and it
     lands while no process holds the lease (`success`).
@@ -264,6 +269,17 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
   reads 0 on a fresh submitter (a year instead of about 6.5 minutes); three tests; stale 60 s
   texts in the README, ADR 0011, ADR 0006 (now a dated amendment), `main.ts` and `settle.ts`;
   the drain test closes process 2 and its second case is renamed; a 5 s timeout on the pool test.
+- **PR 2 review (Adam, Stan; #85), on the rebased branch:** decision 11 amended; docs: the drain
+  figures at 6 s a ledger (426 s by default, 750 s at 120) in the README's drain step, ADR 0011's
+  grace row and hosting reasons and the submitter's option docs; the `…_transaction_expired` row
+  and the reconciliation text for a record signed before 0073; spine AD-22 and ADR 0006 scope
+  "true when answered" to our outer hash; a `CHANNELS` note on held channels; ADR 0011 and the
+  README accept the post-deploy `txBadSeq` for testnet. Tests (signer-pool 157 → 160): resends
+  stop at the estimated time on 8 s ledgers, and when the RPC stops answering; the `onSigned`
+  watcher stops at it. Mutants: the `break` removed (both resend tests fail), the watcher's
+  deadline removed (the run hangs). Backlog: 0087 (confirm by the inner hash, high), 0088
+  (`NOT_FOUND` at the bound ledger), 0089 (held-channel metric and alert), 0090 (skip a channel
+  left open by the last process, before pubnet).
 - **A test whose `submit()` answered `pending` hung after its assertion**: with the pool's no-op
   `sleep` and a ledger that never moves, the background confirmation never yields. The tests let
   ledgers close again after the answer.
