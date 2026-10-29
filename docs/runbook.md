@@ -69,7 +69,7 @@ Write one without the value reaching the disk, the shell history or the screen:
 
 ```sh
 read -rs value   # paste, Enter
-printf %s "$value" | sudo systemd-creds encrypt --name=NAME - /srv/x402/production/creds/NAME.cred
+printf %s "$value" | sudo systemd-creds encrypt --with-key=host --name=NAME - /srv/x402/production/creds/NAME.cred
 unset value
 ```
 
@@ -78,10 +78,10 @@ unset value
 
   ```sh
   pw=$(openssl rand -hex 24)
-  printf %s "$pw" | sudo systemd-creds encrypt --name=postgres-password.testnet - \
+  printf %s "$pw" | sudo systemd-creds encrypt --with-key=host --name=postgres-password.testnet - \
     /srv/x402/production/creds/postgres-password.testnet.cred
   printf 'postgres://postgres:%s@postgres-testnet:5432/x402' "$pw" |
-    sudo systemd-creds encrypt --name=database-url.testnet - \
+    sudo systemd-creds encrypt --with-key=host --name=database-url.testnet - \
       /srv/x402/production/creds/database-url.testnet.cred
   unset pw
   ```
@@ -92,7 +92,7 @@ unset value
   ```sh
   d=$(date +%F)
   read -rs value   # the comma-separated URLs
-  printf %s "$value" | sudo systemd-creds encrypt --name=rpc-urls.testnet - \
+  printf %s "$value" | sudo systemd-creds encrypt --with-key=host --name=rpc-urls.testnet - \
     "/srv/x402/production/creds/rpc-urls.testnet.$d.cred"
   unset value
   sudo ln -sfn "rpc-urls.testnet.$d.cred" /srv/x402/production/creds/rpc-urls.testnet.cred
@@ -113,6 +113,9 @@ unset value
 - The `production` environment: deployment branches limited to `deploy/production`, the
   variables `DEPLOY_HOST` and `DEPLOY_PORT`. `deploy/production` is protected: a pull request
   with an approving review, no bypass.
+- The repo's Actions settings: default workflow permissions read-only, and "Allow GitHub Actions
+  to create and approve pull requests" off, so no workflow can approve its own way onto
+  `deploy/production` (both were the other way on 2026-10-29).
 - The playbook, then the credentials, then
   `sudo systemctl start x402-db-testnet@production x402-tunnel@production`.
 - Outbound 7844 over UDP and TCP allowed on the server (`cloudflared`).
@@ -127,7 +130,7 @@ facilitator stays down.
 ## Deploy
 
 A pull request from `develop` to `deploy/production`, approved and merged; the workflow
-**Deploy production** builds the commit's image (once per commit) and sends its digest. By hand:
+**Deploy production** builds the commit's image and sends the digest its build reports. By hand:
 **Run workflow** on `deploy/production`. On the server, through the same lock:
 
 ```sh
@@ -171,7 +174,7 @@ undoing.
   the table's size (`pg_total_relation_size`, in the query below):
 
   ```sh
-  df -h "$(sudo docker volume inspect -f '{{.Mountpoint}}' x402-production_postgres-testnet)"
+  df -h "$(sudo docker volume inspect -f '{{.Mountpoint}}' x402-production-postgres-testnet)"
   ```
 
 - **Testnet first,** outside mainnet's busy hours and away from 00:00 UTC, when the production
@@ -223,8 +226,9 @@ Afterwards: `systemctl list-units 'x402*'` and the `/supported` check above.
 
 Every 30 s, while `x402@production` is active, it stops an `unhealthy` facilitator with a 10 s
 timeout and restarts the unit; it leaves a deploy, a reboot or a drain alone. Its restarts are in
-`journalctl -u x402-watchdog@production`. Five failed starts in 300 s leave `x402@production`
-`failed`; after fixing the cause: `sudo systemctl reset-failed x402@production` and start it.
+`journalctl -u x402-watchdog@production`. Five starts in 300 s, a crash loop's, leave
+`x402@production` `failed`; the deploy and the watchdog reset that count before their own
+restarts. After fixing the cause: `sudo systemctl reset-failed x402@production` and start it.
 
 ## The tunnel token
 
@@ -240,7 +244,7 @@ api=https://api.cloudflare.com/client/v4/accounts/ACCOUNT_ID/cfd_tunnel
 tunnel=$(curl -s -H "Authorization: Bearer $CF_API_TOKEN" "$api?name=x402&is_deleted=false" |
   jq -r '.result[0].id')
 curl -s -H "Authorization: Bearer $CF_API_TOKEN" "$api/$tunnel/token" | jq -j .result |
-  ssh SERVER 'sudo systemd-creds encrypt --name=tunnel-token - /srv/x402/production/creds/tunnel-token.cred'
+  ssh SERVER 'sudo systemd-creds encrypt --with-key=host --name=tunnel-token - /srv/x402/production/creds/tunnel-token.cred'
 ssh SERVER sudo systemctl restart x402-tunnel@production
 ```
 
