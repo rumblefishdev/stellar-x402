@@ -101,8 +101,10 @@ settlement.
     are logged and counted.
 - **Listing attempts (task 0063).** Every attempt, accepted or not, is a row in
   `catalog_attempts`: who paid, the key and URL, where it ended (the payment's copy or the
-  seller's 402), the outcome and reason, the size of a field over a limit and a content hash, no
-  content. Rows are pruned after 30 days.
+  seller's 402), the outcome and reason, the size of a field over a limit and a content hash.
+  Once the copy differs from the stored listing, the row also keeps the copy and the seller's
+  402 as answered, so what a payer sent can be compared with what the seller says; a copy equal
+  to the listing keeps none. Rows are pruned after 30 days.
   - The header never changes the response body or status.
 - **`GET /discovery/resources`.**
   - It uses the upstream discovery list types.

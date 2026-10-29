@@ -316,6 +316,24 @@ describe("cataloger", () => {
     expect((await list())[0]?.accepts).toEqual([other]);
   });
 
+  it("keeps what the payment sent and what the seller answered, once they are compared", async () => {
+    const { cataloger } = setup();
+    await cataloger.onSuccess(record(valid, {}, { description: "Pwned" }), "settle");
+    await cataloger.onSuccess(record(valid), "settle");
+    const { rows } = await db.pool.query<{ outcome: string; copy: unknown; answer: unknown }>(
+      `SELECT outcome, copy, answer FROM catalog_attempts ORDER BY id`,
+    );
+    expect(rows).toMatchObject([
+      {
+        outcome: "refreshed",
+        copy: { description: "Pwned" },
+        answer: { resource: { description: DESCRIPTION } },
+      },
+      // The copy equals the stored listing: nothing to compare, nothing kept.
+      { outcome: "unchanged", copy: null, answer: null },
+    ]);
+  });
+
   it("refuses an answer that describes another listing than the one asked about", async () => {
     // The GET route's 402 claims to be another route of the host, a POST one.
     seller.paymentRequired = (url) => ({

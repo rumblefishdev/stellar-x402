@@ -115,6 +115,10 @@ export interface CatalogAttempt {
   fieldBytes?: number;
   /** SHA-256 of the listing content tried, hex. */
   contentHash?: string;
+  /** The payment's copy of the listing, kept once it differs from the stored one. */
+  copy?: unknown;
+  /** The seller's 402 terms as it answered the check. */
+  answer?: unknown;
 }
 
 /** The record of listing attempts (0063). */

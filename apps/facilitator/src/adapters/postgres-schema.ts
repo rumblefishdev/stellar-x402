@@ -176,7 +176,9 @@ CREATE TABLE catalog_attempts (
   reason text,
   detail text,
   field_bytes integer,
-  content_hash text
+  content_hash text,
+  copy jsonb,
+  answer jsonb
 );
 CREATE INDEX catalog_attempts_at ON catalog_attempts (at);
 `,
