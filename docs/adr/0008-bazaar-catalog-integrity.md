@@ -93,7 +93,8 @@ settlement.
     query or fragment (its WHATWG origin is `"null"`).
   - `http` and `https` copies of one resource are two keys, and two MCP servers of one `payTo`
     that both name a tool `mcp://tool/<name>` share one. Both are accepted for Tranche 1.
-  - Upserts are idempotent and update `lastUpdated`.
+  - Only a seller's answer writes a listing, and it sets `lastUpdated`; a payment whose copy
+    equals the listing writes nothing, so `lastUpdated` is when the seller last confirmed it.
 - **Settle response.**
   - Only the pure, synchronous validation of the payment's copy runs before the settle response.
   - It sets a best-effort `EXTENSION-RESPONSES` header (`processing` or `rejected`).
