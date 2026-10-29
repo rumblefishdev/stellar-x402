@@ -2,7 +2,7 @@
 id: "0083"
 title: "Raise the Bazaar schema depth limit so ordinary listings pass"
 type: BUG
-status: active
+status: completed
 related_adr: ["0008"]
 related_tasks: ["0030", "0063"]
 tags: [bazaar, discovery, priority-high, effort-small]
@@ -13,6 +13,13 @@ history:
     who: karolkow
     note: >
       Found while measuring 0063 on real listings: the depth limit from 0030 refuses most of them.
+  - date: "2026-10-29"
+    status: completed
+    who: karolkow
+    note: >
+      PR #87 merged: `LIMITS.schemaDepth` is 32. A test lists a real three-objects-deep answer and a
+      schema 32 levels deep, and refuses 33 as `schema_too_complex`. ADR 0008 names no depth, so it
+      is unchanged. No follow-up tasks.
 ---
 
 # Raise the Bazaar schema depth limit so ordinary listings pass
@@ -34,6 +41,6 @@ response three objects deep is refused as `schema_too_complex`.
 
 ## Acceptance Criteria
 
-- [ ] A schema 25 levels deep (the deepest real one) is listed; one deeper than 32 is refused as
+- [x] A schema 25 levels deep (the deepest real one) is listed; one deeper than 32 is refused as
       `schema_too_complex`
-- [ ] ADR 0008's limits, if they name the depth, say 32
+- [x] ADR 0008's limits, if they name the depth, say 32 (it names none)
