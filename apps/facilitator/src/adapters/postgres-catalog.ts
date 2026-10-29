@@ -109,8 +109,8 @@ export class PostgresCatalogAttemptStore implements CatalogAttemptStore {
   async record(attempt: CatalogAttempt): Promise<void> {
     await this.pool.query(
       `INSERT INTO catalog_attempts (at, network, pay_to, method, resource_url, url, payer,
-         transaction, stage, outcome, reason, detail, field_bytes, content_hash)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+         transaction, stage, outcome, reason, detail, field_bytes, content_hash, copy, answer)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
       [
         attempt.at,
         attempt.network,
@@ -126,6 +126,8 @@ export class PostgresCatalogAttemptStore implements CatalogAttemptStore {
         attempt.detail ?? null,
         attempt.fieldBytes ?? null,
         attempt.contentHash ?? null,
+        attempt.copy === undefined ? null : JSON.stringify(attempt.copy),
+        attempt.answer === undefined ? null : JSON.stringify(attempt.answer),
       ],
     );
   }

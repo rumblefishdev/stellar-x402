@@ -232,12 +232,15 @@ export function createCataloger({
         return await finish({ ...tried, stage: "payment", outcome: "unchanged" }, record, origin);
       }
 
+      // From here the copy differs from the stored listing: kept to compare with the answer.
+      const compared = { ...tried, copy: echoed.resource };
+
       stage = "budget";
       const host = new URL(result.resourceUrl).hostname;
       const budget = await overBudget(rateLimits, key, host, checksPerHost, attempt.at);
       if (budget) {
         const skipped = { stage: "payment", outcome: "over_budget", reason: budget } as const;
-        return await finish({ ...tried, ...skipped }, record, origin);
+        return await finish({ ...compared, ...skipped }, record, origin);
       }
 
       stage = "ask";
@@ -257,8 +260,10 @@ export function createCataloger({
       if (!answer.ok) {
         const { reason, detail } = answer;
         const failed = { stage: "seller", outcome: "not_askable", reason, detail } as const;
-        return await finish({ ...tried, ...failed }, record, origin);
+        return await finish({ ...compared, ...failed }, record, origin);
       }
+
+      const asked = { ...compared, answer: answer.paymentRequired };
 
       stage = "seller";
       const listing = bazaarLib.listingFromSeller(
@@ -268,7 +273,7 @@ export function createCataloger({
       );
       if (!listing.ok) {
         const { reason, detail, bytes: fieldBytes } = listing;
-        const refused = { ...tried, stage: "seller", detail, fieldBytes } as const;
+        const refused = { ...asked, stage: "seller", detail, fieldBytes } as const;
         // These two are outcomes of their own, and a 402 without a listing is no usable answer.
         if (reason === "other_pay_to" || reason === "too_large")
           return await finish({ ...refused, outcome: reason }, record, origin);
@@ -287,7 +292,7 @@ export function createCataloger({
       ) {
         const detail = `asked ${key.method} ${key.resourceUrl}, answered ${answered.method} ${answered.resourceUrl}`;
         return await finish(
-          { ...tried, stage: "seller", outcome: "other_key", detail },
+          { ...asked, stage: "seller", outcome: "other_key", detail },
           record,
           origin,
         );
@@ -300,7 +305,7 @@ export function createCataloger({
         // The time of the seller's answer (0063): when the listing was last confirmed.
         resource: { ...listing.entry.resource, lastUpdated: new Date(now()).toISOString() },
       };
-      const written = { ...tried, key: entry.key, contentHash: contentHash(entry.resource) };
+      const written = { ...asked, key: entry.key, contentHash: contentHash(entry.resource) };
 
       stage = "upsert";
       let outcome: UpsertOutcome;
