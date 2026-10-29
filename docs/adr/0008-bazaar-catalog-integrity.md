@@ -52,7 +52,8 @@ settlement.
 - **Entry limits (task 0063).**
   - An offer keeps the spec's seven fields (the upstream `PaymentRequirements` schema); its
     `extra` takes up to 4 KiB. A listing keeps up to 8 offers. The `bazaar` block keeps its
-    32 KiB.
+    32 KiB. A whole listing, serialized, takes up to 16 KiB, so a page of 100 stays under 1.6 MB
+    (5 of 95,733 listings in the largest public catalog are larger).
   - Over a limit the whole listing is refused as `too_large`, the paid requirement's `extra`
     included; the payment never is.
 - **Validation.**
@@ -100,12 +101,13 @@ settlement.
   - It sets a best-effort `EXTENSION-RESPONSES` header (`processing` or `rejected`).
   - The seller check and the store write run after the response, fire-and-forget. Their errors
     are logged and counted.
-- **Listing attempts (task 0063).** Every attempt, accepted or not, is a row in
-  `catalog_attempts`: who paid, the key and URL, where it ended (the payment's copy or the
-  seller's 402), the outcome and reason, the size of a field over a limit and a content hash.
-  Once the copy differs from the stored listing, the row also keeps the copy and the seller's
-  402 as answered, so what a payer sent can be compared with what the seller says; a copy equal
-  to the listing keeps none. Rows are pruned after 30 days.
+- **Listing attempts (task 0063).** Every payment whose copy is new or differs from the stored
+  listing is an attempt to change it and a row in `catalog_attempts`, accepted or not; a copy
+  equal to the listing is only counted. The row keeps who paid, the key and URL, where it ended
+  (the payment's copy or the seller's 402), the outcome and reason, the size of a field over a
+  limit and a content hash. Once the copy is compared with the stored listing, the row also
+  keeps the copy and the seller's 402 as answered, so what a payer sent can be compared with
+  what the seller says. Rows are pruned after 30 days.
   - The header never changes the response body or status.
 - **`GET /discovery/resources`.**
   - It uses the upstream discovery list types.
