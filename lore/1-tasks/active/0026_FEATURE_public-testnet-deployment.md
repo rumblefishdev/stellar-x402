@@ -126,7 +126,8 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 - From 0039, the image: `pnpm deploy --prod` with `injectWorkspacePackages: true`;
   `"files": ["dist"]` in `apps/facilitator/package.json` and a `.dockerignore` that excludes
   `.env*`; `node:22-slim` pinned by digest, `linux/amd64`, user `node`, read-only root filesystem.
-  Images go to GHCR, tagged with the git SHA; the workflow skips the build when the SHA exists.
+  Images go to GHCR, tagged with the git SHA; the workflow builds on every deploy, only from
+  `deploy/production`, and deploys the digest its build reports, never one read back from a tag.
   A successful deploy records its digest and SHA as a GitHub Deployment in the `production`
   environment, for rollback and the record; there is no promotion step (ADR 0011, 0038).
 - From 0039, provisioning (ADR 0011): an Ansible playbook in `deploy/ansible/`, run by an admin
