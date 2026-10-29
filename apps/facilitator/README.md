@@ -83,7 +83,9 @@ Every request counts, a malformed or oversized one too. `/supported` has no limi
   answered once per process instead of once per payment. `0003_catalog_type_seq`: without it, a
   `/discovery/resources` `type` filter scans the whole catalog. `0005_settlement_attempts` adds
   each hash's attempt state and bounds; hashes written before it fall back to the auth entry's
-  expiry.
+  expiry. `0007_settlement_reopened` adds the reopen count: rows already there, and rows an older
+  release writes during the deploy, get -1 and never reopen. This release can't claim a payment
+  on a database without it.
 - An online migration (ADR 0012) commits step by step, so `pnpm migrate` after a stopped or
   failed run continues from the next step. It logs `migration_step` after each step and
   `migration_backfill` every 50 backfill batches. A backfill writes about 1.2 GiB of WAL per
@@ -128,7 +130,8 @@ exits:
    listening, so a client gets that answer instead of a refused connection.
 2. Every call that has signed nothing yet, whether waiting for a channel, prepared ahead or reading
    a sequence, ends at once with `settle_exact_stellar_shutting_down`, and its record closes
-   `rejected`. Its client signs a new payment, which reaches the next process.
+   `rejected`. Its client repeats the same payment while `extra.retryable` says so ("Nothing
+   sent", below), and the repeat reaches the next process.
 3. Calls already sent run on until they are final or recorded `pending`, at most their ledger
    bound (the payer's auth expiry) at the pool's estimate of 6 s a ledger, plus 30 s: about
    66 × 6 + 30 = 426 s by default, 750 s at a cap of 120. The process keeps renewing the lease
@@ -238,7 +241,10 @@ The same answer with a `transaction` (an earlier hash) is never reopened: sign a
 Each reopen is logged as `settlement_reopened` with the earlier reason and counted in
 `settlement_reopened_total` by that `reason`; the record's `reopened` column counts them. While a
 deploy replaces a release from before task 0073, the old process answers these reasons without
-`extra`, as "sign a new payment".
+`extra`, as "sign a new payment". That answer holds: a record it claimed, before or during the
+deploy, has `reopened` -1 and never reopens, and this release answers it the same way, without
+`extra`. A rollback to a release before 0073 takes the "repeat it" promise back: it answers a
+repeat from the record, as "sign a new payment", and doesn't reopen it.
 
 A `pending` record is finished by reconciliation (task 0019): the pool's late result, or a sweep
 that asks the network about each of the record's hashes. A hash the network doesn't know turns

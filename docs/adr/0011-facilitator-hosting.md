@@ -184,7 +184,8 @@ One request or one stop must never outlast the layer in front of it:
 
 - **Past the budget,** `/settle` answers `settlement_pending` with the hash if one was signed,
   and nothing new is signed after it. If nothing was signed, the record ends and the answer is
-  `settle_exact_stellar_timeout`: the client signs a new payment. 30 s fits 97 % of the
+  `settle_exact_stellar_timeout`: the client repeats the same payment while `extra.retryable`
+  says so, and signs a new one only after (0073). 30 s fits 97 % of the
   settlements measured in task 0043. Every store and hook call is bounded by what is left of it,
   plus the store's 1 s grace for each of the last store calls: a repeat's last poll read, its end
   of the record and its success mark, so up to the poll interval plus 3 s past the budget (3.46 s
@@ -212,7 +213,12 @@ One request or one stop must never outlast the layer in front of it:
   the answer says so with `extra.retryable`. A refusal by the simulation, the fee or a spend
   limit still ends the payment: those need a new one (0073 decision 20 leaves their wording to a
   backlog task). During the deploy that brings this in, the previous release still answers these
-  reasons as "sign a new payment", without `extra`, until it stops.
+  reasons as "sign a new payment", without `extra`, until it stops. That answer stays true: rows
+  from before `0007_settlement_reopened`, and rows that release inserts after the migration ran,
+  get `reopened` -1 and never reopen, so a payer who did sign again can't have the old payment
+  land beside it through `/settle` (0073 decision 25). A rollback to a release before 0073 runs on
+  the newer schema (its inserts get -1 too) but takes the promise back: it answers a repeat from
+  the record, as "sign a new payment", without reopening it.
 - **The budget covers the wait for a channel.** The pool's own bounds (until the payer's auth expiry ledger, then 30 s; 60 s + 30 s
   for a call without a ledger bound) start only
   once a channel is acquired, so the `/settle` handler passes the pool a deadline (0009).
