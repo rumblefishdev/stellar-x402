@@ -1,5 +1,5 @@
 ---
-id: "0085"
+id: "0086"
 title: "Keep a payment refused for its fee from settling after its payer signed again"
 type: BUG
 status: backlog

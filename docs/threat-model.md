@@ -297,7 +297,7 @@ Scope: the `exact` payer's auth entry and how long it stays landable (spine AD-6
 - **Residual risk:** A sender who edits `maxTimeoutSeconds` gets P1 through; it holds P1, so it
   could submit it on chain without us anyway. A 300 s payment signed at 4 s ledgers is refused by
   the ledger gap and can pass later. `invalid_exact_stellar_payload_fee_exceeds_maximum` has the
-  same path once fees drop (0085).
+  same path once fees drop (0086).
 
 ## Facilitator key
 
