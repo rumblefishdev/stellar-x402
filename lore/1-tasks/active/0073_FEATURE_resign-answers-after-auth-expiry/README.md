@@ -134,26 +134,51 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
    abandoned payment holds no budget: in an outage, 200 open records would hold 200 USDC for up
    to 5 minutes. Cost: AD-16's forward-only states get one written exception. Chosen over a
    non-final `unsent` state closed by a sweep after the expiry.
-6. **The cap is 66 ledgers by default, 60 plus 10%** (okarcz, 2026-10-28): upstream's client
-   signs `ceil(maxTimeoutSeconds / ledger time)` with the ledger time it reads from Horizon, so a
-   300 s resource gets up to 63 ledgers when ledgers run at 4.8 s. A strict 60 would refuse an
-   honest seller at the documented limit. Chosen over a strict 60 and over a cap on
-   `maxTimeoutSeconds` itself.
+6. **The cap is 66 ledgers by default** (okarcz, 2026-10-28; reasons amended 2026-10-29, PR 1
+   review 2): upstream's client signs `ceil(maxTimeoutSeconds / t)` ledgers, with `t` the Horizon
+   average rounded up to whole seconds (`Math.ceil`), so a 300 s resource signs 60 ledgers at
+   5 s, 50 at 6 s and 75 at 4 s, never 63 as first written. Upstream's own check allows 2 more
+   than that, so at 5 s at most 62 reach the cap; the rest is spare, and the cap only bites from
+   about 330 s, or on a day of 4 s ledgers. Chosen over a strict 60 and over a lower 62.
 7. **Build order: cap, envelope, reopen, drain test, as stacked PRs** (okarcz, 2026-10-28): the
    envelope must never ship before the cap, or a deploy between the two opens the 7-day attack.
    Each PR is safe on its own. The limit is documented in the README, not published in
    `/supported`.
 8. **The refusal advises a `maxTimeoutSeconds` whenever the resource asked more than the advised
-   limit** (okarcz, 2026-10-28, PR 1 review D1): 300 s at the default, worked out from the cap
-   without its 10%. Before, the hint showed only above 330 s, so a 301–330 s resource refused on
-   a fast-ledger day got none.
-9. **A lagging RPC is an accepted risk** (okarcz, 2026-10-28, PR 1 review D2): the cap compares
-   with our RPC's latest ledger, so one 4 or more ledgers behind the client's Horizon can refuse
-   an honest 300 s payment. Rare (about 20 s behind); recorded in AD-22. Chosen over a wider
-   default (72) and a separate lag margin.
+   limit** (okarcz, 2026-10-28, PR 1 review D1; amended 2026-10-29, PR 1 review 2): 300 s at the
+   default, the cap less a tenth at 5 s a ledger. Since decision 22 that limit is a refusal of
+   its own, so the advice is its message, which states the 5 s it assumes; the gap's refusal no
+   longer gives a hint.
+9. **A lagging RPC is an accepted risk** (okarcz, 2026-10-28, PR 1 review D2; amended
+   2026-10-29, PR 1 review 2): both checks compare with our RPC's latest ledger. Upstream's own
+   expiry check refuses first, at 3 or more ledgers behind the client's RPC and for any
+   `maxTimeoutSeconds`, so the risk is its `+2` tolerance, not the cap, which would need 7 behind
+   at 5 s. Rare (about 15 s behind); recorded in AD-22. Chosen over a wider default (72) and a
+   separate lag margin.
 10. **`MAX_VALIDITY_LEDGERS` is at most 120** (okarcz, 2026-10-28, PR 1 review D3): about 10
     minutes, so a typo can't reopen days-long signatures and the drain re-check in PR 2 has a
     known worst case. Chosen over a bound tied to the drain and over none.
+21. **Only the payer's auth entry, no other address's** (okarcz, 2026-10-29, PR 1 review 2, Adam's
+    blocker): the expiry checks read the earliest address-credential entry, so an extra signed
+    entry from another account, valid for 60 ledgers, let the payer's own entry pass the cap while
+    it stayed landable for days, and #86's answers would then say "sign a new payment" too early.
+    Upstream accepts such an entry. The payload is now refused with
+    `…_payer_auth_entries` ("exactly one auth entry: the payer's"), so the earliest expiry is the
+    payer's everywhere. Chosen over reading the payer's expiry for the cap and the answers while
+    keeping the earliest for `maxLedger` (two expiries across three PRs), and over a new reason
+    code.
+22. **A resource asking for more than the cap fits is refused on its `maxTimeoutSeconds`**
+    (okarcz, 2026-10-29, PR 1 review 2): the gap the cap measures shrinks as ledgers close, so a
+    payment P1 refused with `…_too_far` would pass a few ledgers later as it is, after the seller
+    may have had its payer sign P2: both land. The requirements don't change over time, so a
+    retry as it is stays refused. A sender who edits `maxTimeoutSeconds` gets through, but holds
+    P1 and could submit it on chain without us anyway. Left open: a 300 s payment signed at 4 s
+    ledgers (75) is refused by the gap and can pass later. Chosen over storing the refusal under
+    the payment's key (`/verify` writing records, about a day of work and its own review) and
+    over accepting the risk in writing.
+23. **The same replay after `invalid_…_fee_exceeds_maximum` goes to 0085** (okarcz, 2026-10-29,
+    PR 1 review 2): on develop already, and decision 22 can't close it, since a fee isn't in the
+    requirements. Chosen over fixing it in this PR with stored refusals.
 
 ## Implementation Notes
 
@@ -164,7 +189,8 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
   `settleCheck()` alike.
 - `verify.ts`: refused after the too-soon check, before the uint32 one, with
   `EXPIRATION_TOO_FAR_REASON`. The message names the ledgers and the cap, plus a
-  `maxTimeoutSeconds` hint when the resource asked for more than the cap.
+  `maxTimeoutSeconds` hint when the resource asked for more than the advised ceiling (300 s at
+  66), not the cap (replaced by decision 22's refusal in review 2).
 - Tests: the boundary for both credential types, a 7-day request, no hint for a short request
   signed long, the uint32 test with the cap raised, `/verify` and `/settle`'s check through
   `buildVerifier`, the config default and its floor. Two mutants caught (cap off by one, cap off).
@@ -172,3 +198,13 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
 - Review (four reviewers): 3 decisions (8-10), 3 fixes (the README says `…_too_far` needs new
   requirements; these records; the smoke script's header), 1 deferred: `token-matrix.ts` and
   `verify-smoke.ts` don't pass `DATABASE_URL` either, broken since 0064.
+- Review 2 (Adam, Stan; PR #80): decisions 21-23, and decisions 6, 8, 9 amended. `verify.ts`: a
+  payer-only check after `payerNonce` (`hasOtherAddressAuth`, `payerNonce` and `keyOf()`
+  unchanged), the `maxTimeoutSeconds` ceiling refused before the gap, the gap's hint dropped.
+  Tests: an extra address's entry (short-lived one included) through `/verify` and `/settle`'s
+  check; 300 accepted and 301 refused; the same hourly payment refused again 660 ledgers later;
+  a 300 s payment signed at 4 s; `MAX_VALIDITY_LEDGERS=80` in both and the ceiling (363 s);
+  `/settle` accepting +66. Changed: the 7-day test (now refused on `maxTimeoutSeconds`), the
+  "4.8 s" hint test (now the 4 s case), "counts the earliest expiring auth entry" (now refused
+  by decision 21). Docs: README settings and `…_too_far` row, AD-6, AD-22, the threat model's
+  auth-expiry section, `config.ts`.

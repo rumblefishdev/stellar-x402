@@ -14,9 +14,12 @@ discovery routes. Design: [the M1 spine](../../docs/architecture/m1-spine.md) (A
 - `MAX_VALIDITY_LEDGERS` (66 by default, above `MIN_VALIDITY_LEDGERS`, at most 120): the furthest a payer's
   auth may expire after the latest ledger. `/verify` and `/settle` refuse a later one with
   `invalid_exact_stellar_signature_expiration_too_far`, whatever the resource's
-  `maxTimeoutSeconds` allows. 66 is 60 ledgers, about 5 minutes, plus 10% for clients that see
-  faster ledgers: **ask for a `maxTimeoutSeconds` of at most 300**. The cap bounds how long one
-  payment can hold a channel (0073).
+  `maxTimeoutSeconds` allows. A 300 s resource signs 60 ledgers at 5 s a ledger, and upstream's
+  check allows 2 more; the rest of 66 is spare. They also refuse a resource whose
+  `maxTimeoutSeconds` is above the cap less a tenth at 5 s a ledger, whatever the ledger, so a
+  refused payment stays refused when it comes back: **ask for a `maxTimeoutSeconds` of at most
+  300** (at the default). On a day of 4 s ledgers a client signs 300 s for 75 ledgers, which the
+  cap refuses. The cap bounds how long one payment can hold a channel (0073).
 - `NETWORK=stellar:pubnet` refuses to start: `/settle` would spend there with no spend budgets
   (0024) and no fencing token on the channel lease (0071) yet.
 
@@ -190,9 +193,14 @@ gets the same answer again, so a retry needs a new payment (a new nonce); only
 - a refusal from the checks (`invalid_exact_stellar_*`, `invalid_network`) comes before the
   claim and records nothing: the same payment may be sent again, and may succeed later.
   `invalid_exact_stellar_payload_fee_exceeds_maximum` is our own fee estimate above our ceiling,
-  not a fault in the payment, and `invalid_exact_stellar_signature_expiration_too_far` is the
-  resource's `maxTimeoutSeconds`: signing again against the same requirements fails again, so
-  the resource must ask for at most 300 s;
+  not a fault in the payment (0085: it can settle after its payer signed again, so ask for a new
+  signature only once it can't land). `invalid_exact_stellar_signature_expiration_too_far` comes
+  from our three checks: the resource's `maxTimeoutSeconds` above 300 s at the default cap ("at
+  most 300 is allowed", which stays refused, so the resource must ask for less), the auth's own
+  expiry past the cap ("at most 66 are allowed": the client saw ledgers faster than 5 s; the
+  refused payment may pass later too, so ask for a new signature only once it can't land), or
+  past the last ledger the pool can bound. Upstream's own expiry check answers with it too, for
+  one whose message names none of these, when our RPC is 3 or more ledgers behind the client's;
 - a spend refusal the store couldn't record leaves the payment claimed, so a repeat after the
   budget gets `…_timeout` instead of the spend reason.
 
