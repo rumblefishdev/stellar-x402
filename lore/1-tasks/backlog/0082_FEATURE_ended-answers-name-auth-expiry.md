@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 milestone: 1
 related_adr: ["0006"]
-related_tasks: ["0073", "0024"]
+related_tasks: ["0073", "0024", "0071"]
 tags: [facilitator, exact, payments, priority-medium, effort-small]
 links: []
 history:
@@ -38,7 +38,9 @@ can still land.
     `…_refused`, `unexpected_settle_error`;
   - the `/verify` checks' refusal on a reopen (0073 decision 13), e.g. a fee spike;
   - a "nothing sent" reason that carries an earlier hash (a `txBadSeq` rebuild), which never
-    reopens.
+    reopens;
+  - `…_lease_lost` with the hash the call stored just before it found the lease lost (0071
+    decision 15): that envelope was never sent, but the record has a hash, so it doesn't reopen.
 - Some of these can't land with the same payload anyway (a balance that is gone stays gone until
   it isn't); the answer still can't promise that.
 
