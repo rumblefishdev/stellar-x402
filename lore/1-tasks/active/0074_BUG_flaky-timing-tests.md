@@ -32,6 +32,11 @@ production code.
 - `apps/facilitator/test/settle.test.ts`, block "settle budget (ADR 0011)": four different tests
   failed with `Unexpected verification error: AxiosError: fetch failed` (develop runs 40338244923,
   40347628827; PR #71 run 40492496389). Cause being measured.
+- Still on real time after #76, which moved only the "settle budget (ADR 0011)" block to a fake
+  clock: "answers settlement_pending to a repeat once the settle timeout runs out" (outside that
+  block) answered `settle_exact_stellar_timeout` instead of `settlement_pending` on PR #85's
+  rerun (run 40911669720, job 123608719389): its 100 ms budget ran out before the hash was
+  written.
 
 ## Acceptance Criteria
 
