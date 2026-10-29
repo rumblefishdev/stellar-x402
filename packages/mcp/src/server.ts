@@ -2,7 +2,6 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { HTTPFacilitatorClient } from "@x402/core/http";
 import { withBazaar } from "@x402/extensions/bazaar";
 import { z } from "zod";
-import { SellerFetchError } from "@stellar-x402/seller-fetch";
 import { deadline, LIST_RESOURCES_INPUT, LIST_RESOURCES_OUTPUT, PAGE, summary } from "./catalog.js";
 import {
   CALL_PAID_HTTP_INPUT,
@@ -10,7 +9,7 @@ import {
   callPaidHttp,
   type PaymentConfig,
 } from "./pay.js";
-import { toolError, ToolError, toolResult } from "./results.js";
+import { asToolError, toolError, toolResult } from "./results.js";
 import { GET_RESOURCE_INPUT, GET_RESOURCE_OUTPUT, previewPayment } from "./preview.js";
 
 export interface ServerConfig {
@@ -87,11 +86,12 @@ export function createServer(config: ServerConfig): McpServer {
       try {
         return toolResult({ ...(await previewPayment({ url, method, body }, sellerLimits)) });
       } catch (error) {
-        if (!(error instanceof ToolError || error instanceof SellerFetchError)) throw error;
+        const failure = asToolError(error);
+        if (!failure) throw error;
         log(
-          `get_resource ${error.code}: ${error.message}${error.detail ? ` (${error.detail})` : ""}`,
+          `get_resource ${failure.code}: ${failure.message}${failure.detail ? ` (${failure.detail})` : ""}`,
         );
-        return toolError(error.code, error.message);
+        return toolError(failure.code, failure.message);
       }
     },
   );
@@ -120,11 +120,12 @@ export function createServer(config: ServerConfig): McpServer {
             ...(await callPaidHttp({ url, method, headers, body }, payment, sellerLimits, log)),
           });
         } catch (error) {
-          if (!(error instanceof ToolError || error instanceof SellerFetchError)) throw error;
+          const failure = asToolError(error);
+          if (!failure) throw error;
           log(
-            `call_paid_http ${error.code}: ${error.message}${error.detail ? ` (${error.detail})` : ""}`,
+            `call_paid_http ${failure.code}: ${failure.message}${failure.detail ? ` (${failure.detail})` : ""}`,
           );
-          return toolError(error.code, error.message);
+          return toolError(failure.code, failure.message);
         }
       },
     );
