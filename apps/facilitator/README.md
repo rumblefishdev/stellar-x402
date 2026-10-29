@@ -92,6 +92,16 @@ default).
   margin for a holder whose clock lags. One that stops cleanly gives it up after its drain, so the
   next one takes it at its next attempt.
 
+## `/health`
+
+- `GET /health` is liveness: 200 while the server is up, whatever the lease or the store. The
+  container healthcheck calls it (ADR 0011).
+- Its body is `{ "ready": …, "listed": … }`. `ready`: the process holds the lease and isn't
+  shutting down, so `/settle` serves. `listed`: a sweep has listed the open settlement records
+  (0019). A deploy waits for both and rolls back without them.
+- The process starts only on a schema with every migration it knows applied, and names the
+  missing ones otherwise; a schema ahead of the code passes, so a rollback starts.
+
 ## Shutdown
 
 On SIGTERM (a deploy: Docker sends it, then SIGKILL after 180 s) the process drains before it

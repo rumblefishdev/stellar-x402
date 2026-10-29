@@ -12,7 +12,7 @@ import { createEd25519Signer, getNetworkPassphrase } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/facilitator";
 import type pg from "pg";
 import { Agent, setGlobalDispatcher } from "undici";
-import { MIGRATIONS, migrate } from "./adapters/postgres-schema.js";
+import { MIGRATIONS, migrate, pendingMigrations } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
 import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
 import { parseConfig, parseMigrateConfig } from "./config.js";
@@ -65,6 +65,13 @@ export const SHUTDOWN_DEADLINE_MS = 150_000;
  */
 export const SHUTDOWN_GRACE_MS = 15_000;
 
+/**
+ * How long an idle connection stays open: above `cloudflared`'s 90 s idle keep-alive, so the
+ * server never closes a connection the tunnel is about to reuse, which it would answer with a 502
+ * (ADR 0011). The header wait sits above it.
+ */
+export const KEEP_ALIVE_TIMEOUT_MS = 125_000;
+
 /** Starts the HTTP server on the graph `deps`. Tests call it with their own config and stores. */
 export async function start(
   deps: AppDeps,
@@ -73,6 +80,8 @@ export async function start(
   const { shutdownDeadlineMs = SHUTDOWN_DEADLINE_MS, shutdownGraceMs = SHUTDOWN_GRACE_MS } = opts;
   let closing = false;
   const server = createApp({ ...deps, closing: () => closing }).listen(deps.config.port);
+  server.keepAliveTimeout = KEEP_ALIVE_TIMEOUT_MS;
+  server.headersTimeout = KEEP_ALIVE_TIMEOUT_MS + 1_000;
   await once(server, "listening");
   // After listening, so `/verify` and `/supported` answer meanwhile. Sweeps run with or without the lease (0019
   // decision 37); `/settle` serves beside them (0019 decision 27) once the lease is held, and the
@@ -560,6 +569,10 @@ export async function main(
       rateLimits: createPool(url, poolErrorLogger(logger), 3),
       discovery: createPool(url, poolErrorLogger(logger), 3, DISCOVERY_STATEMENT_TIMEOUT_MS),
     };
+    // Every migration this code knows, applied by the deploy before it starts (ADR 0011). A schema
+    // ahead of the code passes, so a rollback to an earlier image starts.
+    const pending = await pendingMigrations(pools.main);
+    if (pending.length > 0) throw new Error(`the schema lacks migrations: ${pending.join(", ")}`);
     // Every RPC_URLS entry must serve NETWORK: another network's RPC reads every channel as
     // missing. Checked first, so a wrong URL is named instead of every channel.
     await checkRpcNetworks(config.rpcUrls, getNetworkPassphrase(config.network));

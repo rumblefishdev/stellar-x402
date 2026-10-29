@@ -120,6 +120,7 @@ export function createApp({
   settle,
   extensionResponses,
   supported,
+  reconciliation,
   lease,
   closing,
 }: AppDeps): Express {
@@ -220,6 +221,16 @@ export function createApp({
   );
   app.get("/supported", (_req, res) => {
     res.json(supported);
+  });
+  // Liveness for the container healthcheck: 200 while the server is up, whatever the lease or the
+  // store (ADR 0011). The deploy waits for `ready`, the lease held outside a shutdown, as `/settle`
+  // needs (`main()` starts only on a migrated schema; 0049 adds the frozen RPCs), and `listed`, a
+  // sweep having listed the open records (0019 decision 36). Tests without them count as both.
+  app.get("/health", (_req, res) => {
+    res.json({
+      ready: !closing?.() && (lease?.held() ?? true),
+      listed: reconciliation?.listed() ?? true,
+    });
   });
   app.use("/discovery", limit("discovery", config.http.rateLimit.discovery));
   app.get(

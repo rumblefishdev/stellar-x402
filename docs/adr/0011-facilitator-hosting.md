@@ -136,9 +136,11 @@ a whole zone, to Cloudflare on the Free plan.
 - **`GET /health` is liveness only.** It answers 200 while the HTTP server is up and checks nothing
   else: not the lease, the RPC or the store. Its body reports `ready` and `listed`. The container
   healthcheck calls it every 10 s.
-- **Ready to settle** (`ready`) means the process holds the lease, every migration it knows is
-  applied (0026) and not every RPC endpoint is frozen (0049). Until then, `/settle` answers 503
-  at once instead of hanging. A store per network gives a lease per network: today, with one
+- **Ready to settle** (`ready`) means the process holds the lease outside a shutdown and not
+  every RPC endpoint is frozen (0049). Until then, `/settle` answers 503 at once instead of
+  hanging. The schema isn't part of it: a process starts only once every migration it knows is
+  applied (0026), and a schema behind the code stops the start, as a wrong RPC or channel does,
+  so a deploy that hasn't migrated gets no `ready` and rolls back. A store per network gives a lease per network: today, with one
   network, `ready` is its lease, and what readiness means with two (what the deploy, `/health`,
   the watchdog and 0027's "ready to settle" alarm wait for) is decided with the code in 0077.
   - A process without the lease keeps trying to take it.

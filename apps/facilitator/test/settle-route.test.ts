@@ -309,6 +309,9 @@ describe("POST /settle beside reconciliation (0019 decision 27)", () => {
       });
       expect(response.status).toBe(200);
       expect(settle).toHaveBeenCalledTimes(1);
+      // Ready, with no lease to hold here, though the first sweep hasn't listed the records yet.
+      const health = await fetch(`http://127.0.0.1:${app.port}/health`);
+      expect([health.status, await health.json()]).toEqual([200, { ready: true, listed: false }]);
     } finally {
       await app.close();
     }
@@ -367,7 +370,14 @@ describe("POST /settle without the channel lease (0025)", () => {
       expect(hit).not.toHaveBeenCalled();
       // `/verify` doesn't need the lease.
       expect((await post("/verify")).status).toBe(200);
+      // Alive but not ready: the deploy waits on this.
+      const health = async () => {
+        const response = await fetch(`http://127.0.0.1:${app.port}/health`);
+        return [response.status, await response.json()];
+      };
+      expect(await health()).toEqual([200, { ready: false, listed: true }]);
       holds = true;
+      expect(await health()).toEqual([200, { ready: true, listed: true }]);
       expect((await post("/settle")).status).toBe(200);
       expect(settle).toHaveBeenCalledTimes(1);
     } finally {

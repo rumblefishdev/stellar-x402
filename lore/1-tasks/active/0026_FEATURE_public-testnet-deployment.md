@@ -235,8 +235,8 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   `pnpm --filter @stellar-x402/facilitator migrate` after `pnpm build`; the root has no `migrate`
   script.
 - From 0022: at startup the facilitator checks that the database is reachable and every migration
-  it knows is applied (a database ahead of the code passes, see below). Until then it isn't ready
-  and `/settle` answers 503.
+  it knows is applied (a database ahead of the code passes, see below). A schema behind the code
+  stops the start (#82), so `ready` leaves the schema out.
 - Option from 0022's third review, to verify rather than a decision (a better approach may exist):
   - Separate database roles: a migrator that owns the schema, and an app role with DML only.
     `pnpm migrate` would then read its own URL variable.

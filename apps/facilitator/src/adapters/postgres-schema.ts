@@ -337,6 +337,23 @@ async function lock(client: pg.PoolClient, waitMs: number): Promise<void> {
   }
 }
 
+/**
+ * The names of `migrations` the schema hasn't applied, in order: `[]` when it is current, or ahead
+ * of the code, as after a rollback to an earlier image (0026).
+ */
+export async function pendingMigrations(
+  pool: pg.Pool,
+  migrations: readonly Migration[] = MIGRATIONS,
+): Promise<string[]> {
+  const client = await pool.connect();
+  try {
+    const done = await markers(client);
+    return migrations.map((migration) => migration.name).filter((name) => !done.has(name));
+  } finally {
+    client.release();
+  }
+}
+
 /** Every row of `schema_migrations`: applied migrations, and `name#<i>` for done online steps. */
 async function markers(client: pg.PoolClient): Promise<Set<string>> {
   const { rows } = await client.query<{ present: boolean }>(
