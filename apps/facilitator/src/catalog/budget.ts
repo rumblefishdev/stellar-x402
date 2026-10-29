@@ -11,7 +11,8 @@ export const CHECKS_PER_HOST = 30;
  * minute per listing key, so a busy listing leaves the host's budget to new ones, then
  * `checksPerHost` a minute to its host. No budget spans hosts: one busy host never holds back
  * another's checks. Counted in the shared rate-limit store, so every facilitator process keeps the
- * same budget; a check the host budget refuses still uses its key's minute.
+ * same budget. A check the host budget refuses still uses its key's minute; both windows end
+ * together, so a later payment that minute would meet the full host budget anyway.
  */
 export async function overBudget(
   rateLimits: Pick<RateLimitStore, "hit">,
