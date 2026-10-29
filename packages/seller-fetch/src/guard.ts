@@ -101,6 +101,7 @@ export function checkUrl(raw: string, allowInsecureLocal: boolean): URL {
  * the body arrives. `deadline` is the caller's, `AbortSignal.timeout(timeoutMs)` made once when its
  * work starts: it covers every request made through this fetch, so a request still running at
  * `timeoutMs`, or started after it, is cut off. Work between requests (a payment's signing) is not.
+ * A request's own `signal` ends it earlier: an MCP client closing its event stream.
  */
 export function guardedFetch(limits: SellerLimits, deadline: AbortSignal): typeof fetch {
   // Every name is checked where it is connected to. undici's own `maxResponseSize` is not used: it
@@ -122,7 +123,7 @@ export function guardedFetch(limits: SellerLimits, deadline: AbortSignal): typeo
         headers: [...request.headers],
         body: request.body ? await request.arrayBuffer() : undefined,
         redirect: "manual",
-        signal: deadline,
+        signal: AbortSignal.any([deadline, request.signal]),
         dispatcher,
       });
     } catch (error) {

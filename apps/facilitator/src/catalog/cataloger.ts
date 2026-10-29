@@ -15,7 +15,7 @@ import type {
 } from "../ports/index.js";
 import type { SettlementHooks, SettlementOrigin } from "../settlement/hooks.js";
 import { CHECKS_PER_HOST, overBudget } from "./budget.js";
-import { askSeller } from "./seller-check.js";
+import { askMcpSeller, askSeller } from "./seller-check.js";
 
 export type BazaarApi = Pick<typeof bazaarLib, "validate" | "normalize" | "toExtensionResponses">;
 
@@ -52,6 +52,11 @@ export type Cataloger = Pick<SettlementHooks, "extensionResponses" | "onSuccess"
  * empty body or the listing's example (0063), which sits in the 32 KiB `bazaar` block.
  */
 const SELLER_RESPONSE_BYTES = 64 * 1024;
+/**
+ * The largest MCP seller response read by a check: twice the largest `tools/list` measured
+ * (122,729 B, 35 tools, 2026-10-28), since the tool's schemas come with it.
+ */
+const MCP_RESPONSE_BYTES = 256 * 1024;
 /** A library error lists every issue; the attempt's row keeps its start. */
 const DETAIL_CHARS = 1_000;
 /** The steps of `catalog` taken once the seller is asked: a failure there is the seller stage's. */
@@ -222,10 +227,14 @@ export function createCataloger({
       const key = echoed.key as CatalogKey;
       const tried = { ...attempt, key, contentHash: contentHash(echoed.resource) };
       known = { ...known, ...tried };
-      // MCP listings are checked with an MCP client (0063 row 5), not over plain HTTP.
-      if (echoed.resource.type === "mcp") {
-        const mcp = { stage: "seller", outcome: "not_askable", reason: "mcp" } as const;
-        return await finish({ ...tried, ...mcp }, record, origin);
+      // Upstream's default `mcp://tool/<name>` names the tool, not a server to ask (row 6).
+      if (result.resourceUrl.startsWith("mcp:")) {
+        const toolUrl = {
+          stage: "seller",
+          outcome: "not_askable",
+          reason: "mcp_tool_url",
+        } as const;
+        return await finish({ ...tried, ...toolUrl }, record, origin);
       }
 
       stage = "compare";
@@ -239,12 +248,7 @@ export function createCataloger({
       known = { ...known, ...compared };
 
       stage = "budget";
-      const input = result.discovered.discoveryInfo.input as {
-        queryParams?: unknown;
-        body?: unknown;
-      };
-      const request = bazaarLib.sellerRequest(result.resourceUrl, { ...input, method: key.method });
-      const host = new URL(request.url).hostname;
+      const host = new URL(result.resourceUrl).hostname;
       const budget = await overBudget(rateLimits, key, host, checksPerHost, attempt.at);
       if (budget) {
         const skipped = { stage: "payment", outcome: "over_budget", reason: budget } as const;
@@ -253,7 +257,18 @@ export function createCataloger({
 
       stage = "ask";
       const checkedAt = now();
-      const answer = await askSeller(request, sellerLimits);
+      // An MCP listing is checked with an MCP client (row 5), an HTTP one with one request.
+      const input = result.discovered.discoveryInfo.input;
+      const answer =
+        input.type === "mcp"
+          ? await askMcpSeller(result.resourceUrl, bazaarLib.toolCall(input), {
+              ...sellerLimits,
+              maxResponseBytes: MCP_RESPONSE_BYTES,
+            })
+          : await askSeller(
+              bazaarLib.sellerRequest(result.resourceUrl, { ...input, method: key.method }),
+              sellerLimits,
+            );
       if (!answer.ok) {
         const { reason, detail } = answer;
         const failed = { stage: "seller", outcome: "not_askable", reason, detail } as const;

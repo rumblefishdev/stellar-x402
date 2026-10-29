@@ -8,6 +8,7 @@ import type { Logger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import type { SettlementRecord } from "../src/ports/index.js";
 import { testDatabase } from "./database.js";
+import { startMcpSeller, type McpSeller } from "./mcp-seller.js";
 import { startSeller, type Seller } from "./seller.js";
 
 const requirements = {
@@ -273,9 +274,10 @@ describe("cataloger", () => {
     );
     expect(counted("seller", "not_askable", "unsafe_url")).toBe(1);
 
+    // Upstream's default resource URL names the tool, not the server that has it.
     const tool = { info: { input: { type: "mcp", toolName: "weather", inputSchema: {} } } };
     await cataloger.onSuccess(record(tool, {}, { url: "mcp://tool/weather" }), "settle");
-    expect(counted("seller", "not_askable", "mcp")).toBe(1);
+    expect(counted("seller", "not_askable", "mcp_tool_url")).toBe(1);
 
     seller.reply = () => new Promise(() => {});
     await cataloger.onSuccess(record(valid), "settle");
@@ -589,5 +591,149 @@ describe("cataloger", () => {
     ]);
     expect(counted("payment", "internal_error", "compare")).toBe(1);
     expect(logger.info).not.toHaveBeenCalledWith("catalog_rejected", expect.anything());
+  });
+});
+
+describe("cataloger, an MCP listing (0063 rows 5, 18)", () => {
+  const tool = {
+    info: {
+      input: {
+        type: "mcp",
+        toolName: "weather",
+        inputSchema: {
+          type: "object",
+          properties: { city: { type: "string" } },
+          required: ["city"],
+        },
+        example: { city: "Waw" },
+      },
+    },
+  };
+  // Upstream's wrapper names the tool in `resource.url` (`mcp://tool/<name>`) unless told otherwise.
+  const terms: PaymentRequired = {
+    x402Version: 2,
+    resource: { url: "mcp://tool/weather", description: "Weather by city" },
+    accepts: [requirements],
+    extensions: { bazaar: tool },
+  };
+  let mcp: McpSeller;
+  afterEach(() => {
+    mcp.server.closeAllConnections();
+    mcp.server.close();
+  });
+  const paid = (overrides: Partial<SettlementRecord> = {}, resource: object = {}) =>
+    record(tool, overrides, { url: mcp.url, description: "Weather by city", ...resource });
+  const methods = () => mcp.messages.map((message) => message.method);
+
+  it("lists the tool from its unpaid tools/call answer, sent with the example arguments (row 5)", async () => {
+    mcp = await startMcpSeller(() => terms);
+    const { cataloger, list, counted } = setup();
+    await cataloger.onSuccess(paid({}, { description: "Pwned" }), "settle");
+    const [entry] = await list();
+    expect(entry).toMatchObject({
+      resource: mcp.url,
+      type: "mcp",
+      description: "Weather by city",
+      accepts: [requirements],
+    });
+    expect(methods()).toEqual([
+      "initialize",
+      "notifications/initialized",
+      "tools/list",
+      "tools/call",
+    ]);
+    const call = mcp.messages.at(-1)?.params;
+    expect(call).toMatchObject({ name: "weather", arguments: { city: "Waw" } });
+    expect(JSON.stringify(call)).not.toContain("x402/payment");
+    expect(counted("seller", "refreshed", "inserted")).toBe(1);
+  });
+
+  it("tells a tool the server doesn't list apart from a server that is down (row 18)", async () => {
+    mcp = await startMcpSeller(() => terms, { tools: ["forecast"] });
+    const { cataloger, list, counted, clock } = setup();
+    await cataloger.onSuccess(paid(), "settle");
+    expect(counted("seller", "not_askable", "no_tool")).toBe(1);
+    expect(methods()).not.toContain("tools/call");
+
+    mcp.server.closeAllConnections();
+    mcp.server.close();
+    clock.now += MINUTE;
+    await cataloger.onSuccess(paid(), "settle");
+    expect(counted("seller", "not_askable", "upstream_error")).toBe(1);
+    expect(await list()).toEqual([]);
+  });
+
+  it.each([
+    ["only as text, without structuredContent", { textOnly: true }],
+    ["in structuredContent the tool's output schema doesn't describe", { outputSchema: true }],
+  ])("reads the 402 terms a seller sends %s", async (_name, options) => {
+    mcp = await startMcpSeller(() => terms, options);
+    const { cataloger, list, counted } = setup();
+    await cataloger.onSuccess(paid(), "settle");
+    expect(counted("seller", "refreshed", "inserted")).toBe(1);
+    expect(await list()).toHaveLength(1);
+  });
+
+  it("reads 402 terms whose tags are over the spec's limit, trimming them", async () => {
+    // One of 34 live MCP sellers; upstream's MCP client reads such terms as no 402 at all.
+    const tags = ["a", "b", "c", "d", "e", "f"];
+    mcp = await startMcpSeller(() => ({ ...terms, resource: { ...terms.resource, tags } }));
+    const { cataloger, list } = setup();
+    await cataloger.onSuccess(paid(), "settle");
+    expect((await list())[0]?.tags).toEqual(["a", "b", "c", "d", "e"]);
+  });
+
+  it("reads a tool list larger than an HTTP seller's answer may be", async () => {
+    // About 120 KB, as the largest measured: 35 tools with long descriptions and schemas.
+    const tools = Array.from({ length: 35 }, (_, i) => (i === 0 ? "weather" : `tool_${i}`));
+    mcp = await startMcpSeller(() => terms, { tools, description: "x".repeat(3_400) });
+    const { cataloger, counted } = setup();
+    await cataloger.onSuccess(paid(), "settle");
+    expect(counted("seller", "refreshed", "inserted")).toBe(1);
+  });
+
+  it("refuses a tool's terms that name another tool of the server", async () => {
+    // A server several sellers share: the asked tool's 402 claims another tool's listing.
+    const forecast = { ...tool, info: { input: { ...tool.info.input, toolName: "forecast" } } };
+    mcp = await startMcpSeller(() => ({ ...terms, extensions: { bazaar: forecast } }), {
+      tools: ["weather", "forecast"],
+    });
+    const { cataloger, list, counted } = setup();
+    await cataloger.onSuccess(paid(), "settle");
+    expect(counted("seller", "other_key")).toBe(1);
+    expect(await list()).toEqual([]);
+  });
+
+  it("creates nothing when the tool runs without asking for a payment (row 6)", async () => {
+    mcp = await startMcpSeller(() => "free");
+    const { cataloger, list, counted } = setup();
+    await cataloger.onSuccess(paid(), "settle");
+    expect(counted("seller", "not_askable", "not_402")).toBe(1);
+    expect(await list()).toEqual([]);
+  });
+
+  it("ends a check whose tool never answers at the seller deadline (row 6)", async () => {
+    mcp = await startMcpSeller(() => "never");
+    const { cataloger, list, counted } = setup({ sellerTimeoutMs: 300 });
+    const started = performance.now();
+    await cataloger.onSuccess(paid(), "settle");
+    expect(performance.now() - started).toBeLessThan(5_000);
+    expect(counted("seller", "not_askable", "upstream_error")).toBe(1);
+    expect(await list()).toEqual([]);
+  });
+
+  it("ends a stateful seller's session once the check is done", async () => {
+    mcp = await startMcpSeller(() => terms, { session: "s-1" });
+    const { cataloger, counted } = setup();
+    await cataloger.onSuccess(paid(), "settle");
+    expect(counted("seller", "refreshed", "inserted")).toBe(1);
+    expect(mcp.ended).toEqual(["s-1"]);
+  });
+
+  it("closes the seller's event stream once the check is done", async () => {
+    mcp = await startMcpSeller(() => terms);
+    const { cataloger } = setup();
+    await cataloger.onSuccess(paid(), "settle");
+    await vi.waitFor(() => expect(mcp.openStreams()).toBe(0), { timeout: 1_000 });
   });
 });

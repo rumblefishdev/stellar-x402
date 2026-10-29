@@ -48,7 +48,13 @@ settlement.
     10 s, changes nothing: a new listing isn't created, an existing one stays.
   - Of two checks of one key, the result of the one that started later is kept. `lastUpdated`
     is the time of the seller's answer.
-  - An `mcp` listing is not checked yet, so it is not listed (task 0063's MCP check).
+  - An `mcp` listing on a server URL is checked with an MCP client: `initialize`, `tools/list`,
+    then the listing's tool called without payment with its example arguments up to 16 KiB (`{}`
+    without one). Its terms are read from the error result's `structuredContent` or first text,
+    as `@x402/mcp`'s payment wrapper sends them, and checked as an HTTP seller's are. A tool the
+    server doesn't list (`no_tool`), a server that doesn't answer, and a tool that runs without
+    asking for a payment (`not_402`) change nothing, as above. Its responses may take up to
+    256 KiB each: a tool list carries every tool's schemas (largest measured 122,729 B).
 - **Entry limits (task 0063).**
   - An offer keeps the spec's seven fields (the upstream `PaymentRequirements` schema); its
     `extra` takes up to 4 KiB. A listing keeps up to 8 offers. The `bazaar` block keeps its
@@ -70,7 +76,8 @@ settlement.
   - The facilitator calls a seller URL only for the listing check above, through the
     `packages/seller-fetch` guard: https only, the address checked where it connects (no
     loopback, private or special-use address), no redirects, a 10 s deadline and a 64 KiB body
-    cap. `CATALOG_LIST_LOCAL` also opens http to this machine.
+    cap (256 KiB for an MCP server, above). `CATALOG_LIST_LOCAL` also opens http to this
+    machine.
   - Resource URLs carry a scheme allowlist by listing type (task 0053): an `http` listing takes
     `https` and `http`, an `mcp` listing also `mcp` (`@x402/mcp`'s `mcp://tool/<name>`). An `mcp:`
     host must be a DNS-style name (letters, digits, hyphens; labels up to 63 characters, the host
@@ -201,8 +208,10 @@ settlement.
   doesn't answer the unpaid request with a usable 402 within 10 s is not listed.
 - A plain-`http` resource URL is no longer listed outside `CATALOG_LIST_LOCAL`: the check calls
   https only. None of 10,126 entries in the largest public catalog uses one (2026-10-28).
-- An `mcp` listing waits for the MCP check, and an `mcp://tool/<name>` one can't be checked at
-  all, so the e2e gate's MCP listing is not listed even with `CATALOG_LIST_LOCAL` (task 0029).
+- An `mcp://tool/<name>` listing can't be checked (`mcp_tool_url`), so the e2e gate's MCP
+  listing is not listed even with `CATALOG_LIST_LOCAL` (task 0029).
+- A tool that is free after all runs once for the check, with the listing's example arguments.
+  A paid tool doesn't: upstream's payment wrapper answers before the tool's handler.
 - Loopback, private and IP resource URLs are listed nowhere unless `CATALOG_LIST_LOCAL` is set
   (task 0054), so gate runs leave none in a catalog without the switch. The rule applies to
   writes from this version on. Entries written before it stay, and can't be refreshed: a new

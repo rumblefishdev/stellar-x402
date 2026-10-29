@@ -1,3 +1,6 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { CallToolResultSchema, ListToolsResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { SellerFetchError, guardedFetch, type SellerLimits } from "@stellar-x402/seller-fetch";
 import { decodePaymentRequiredHeader } from "@x402/core/http";
 import { PaymentRequiredV2Schema } from "@x402/core/schemas";
@@ -8,7 +11,7 @@ export type SellerAnswer =
   | { ok: true; paymentRequired: PaymentRequired }
   | {
       ok: false;
-      reason: SellerFetchError["code"] | "not_402" | "unreadable_402";
+      reason: SellerFetchError["code"] | "not_402" | "unreadable_402" | "no_tool" | "mcp_error";
       detail?: string;
     };
 
@@ -47,6 +50,89 @@ export async function askSeller(
   const detail = shapeError(paymentRequired);
   if (detail) return { ok: false, reason: "unreadable_402", detail };
   return { ok: true, paymentRequired };
+}
+
+/**
+ * Asks an MCP seller for its listing (0063 rows 5, 18): `initialize`, `tools/list`, then the tool
+ * called without payment, its terms checked as an HTTP seller's are. A tool the server doesn't
+ * list is told apart from a server that doesn't answer. Every request goes through the
+ * seller-fetch guard, one deadline for them all.
+ */
+export async function askMcpSeller(
+  url: string,
+  call: { name: string; arguments: Record<string, unknown> },
+  limits: SellerLimits,
+): Promise<SellerAnswer> {
+  const mcp = new Client({ name: "stellar-x402-facilitator", version: "0.0.0" });
+  const deadline = AbortSignal.timeout(limits.timeoutMs);
+  const fetch = guardedFetch(limits, deadline);
+  // The SDK waits for an answer up to its own 60 s after the request is sent; the deadline ends
+  // that wait too, for a server that accepts a call and never sends its result.
+  const options = { signal: deadline };
+  const transport = new StreamableHTTPClientTransport(new URL(url), { fetch });
+  try {
+    await mcp.connect(transport, options);
+    let listed = false;
+    let cursor: string | undefined;
+    do {
+      // A plain `tools/list`, not the SDK's `listTools()`: that one keeps each tool's output
+      // schema and checks a 402 error result against it, though the 402 terms never match it
+      // (SDK 1.30.1 `client/index.js:493`, 29 of 126 MCP listings measured on 2026-10-28).
+      const page = await mcp.request(
+        { method: "tools/list", params: { cursor } },
+        ListToolsResultSchema,
+        options,
+      );
+      listed = page.tools.some((tool) => tool.name === call.name);
+      cursor = page.nextCursor;
+    } while (!listed && cursor);
+    if (!listed) return { ok: false, reason: "no_tool", detail: call.name };
+    // The terms as upstream's payment wrapper sends them (`@x402/mcp` 2.28.0
+    // `createPaymentRequiredResult`): an error result carrying them in `structuredContent`, or as
+    // JSON in its first text (9 of 20 live sellers). Read here, not with upstream's MCP client,
+    // whose schema reads terms with too many tags as no 402 at all.
+    const result = await mcp.request(
+      { method: "tools/call", params: call },
+      CallToolResultSchema,
+      options,
+    );
+    const [first] = result.content;
+    let terms: unknown = result.structuredContent;
+    if (terms === undefined && first?.type === "text") {
+      try {
+        terms = JSON.parse(first.text);
+      } catch {
+        // Plain text, such as the SDK's own "Input validation error": no terms in it.
+        terms = undefined;
+      }
+    }
+    if (!result.isError || typeof terms !== "object" || terms === null) {
+      const text = first?.type === "text" ? first.text.slice(0, 200) : "";
+      return { ok: false, reason: "not_402", detail: `the tool answered without terms: ${text}` };
+    }
+    const paymentRequired = terms as PaymentRequired;
+    const detail = shapeError(paymentRequired);
+    if (detail) return { ok: false, reason: "unreadable_402", detail };
+    return { ok: true, paymentRequired };
+  } catch (error) {
+    if (error instanceof SellerFetchError) {
+      return { ok: false, reason: error.code, detail: error.detail ?? error.message };
+    }
+    if (deadline.aborted) {
+      const detail = `no answer within ${limits.timeoutMs} ms`;
+      return { ok: false, reason: "upstream_error", detail };
+    }
+    // Not an MCP server, or one that answered the call with a protocol error.
+    return { ok: false, reason: "mcp_error", detail: String(error) };
+  } finally {
+    // `close()` only aborts the client's requests; a stateful server's session ends with the
+    // DELETE this sends (none without a session id). A failed one leaves the session to the
+    // server's own cleanup, so it is logged and the answer stands.
+    await transport.terminateSession().catch((error: unknown) => {
+      console.warn("mcp_session_end_failed", url, String(error));
+    });
+    await mcp.close();
+  }
 }
 
 /**
