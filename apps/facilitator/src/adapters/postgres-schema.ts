@@ -163,6 +163,16 @@ ALTER TABLE settlement_hashes
     name: "0007_settlement_reopened",
     sql: "ALTER TABLE settlements ADD COLUMN reopened integer NOT NULL DEFAULT -1;",
   },
+  {
+    // 0071: the lease's fencing token, new on every acquire (decisions 1, 2). The default fills
+    // the row a running release holds and every row it inserts. A release before it takes over
+    // without changing the token, so until every process runs this one, a takeover by an older
+    // process doesn't fence the newer one's earlier calls (decision 11). Unique, so an update
+    // that changes it takes the row's `FOR UPDATE` lock and waits for `addHash`'s `FOR KEY SHARE`,
+    // while a renewal, which changes only `expires_at`, doesn't (decision 16).
+    name: "0008_lease_token",
+    sql: "ALTER TABLE leases ADD COLUMN token uuid NOT NULL UNIQUE DEFAULT gen_random_uuid();",
+  },
 ];
 
 /** Runs in one transaction with the transactional migrations next to it, as before 0067. */

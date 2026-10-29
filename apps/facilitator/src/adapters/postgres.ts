@@ -2,11 +2,13 @@ import type { StellarNetwork } from "@stellar-x402/config";
 import pg from "pg";
 import {
   HashConflictError,
+  LeaseFencedError,
   LEASE_SKEW_MARGIN_MS,
   type AttemptBounds,
   type AttemptState,
   type AttemptUpdate,
   type ChannelLease,
+  type LeaseFence,
   type ClaimResult,
   type NewSettlement,
   type RateLimitHit,
@@ -287,24 +289,34 @@ export class PostgresSettlementStore implements SettlementStore {
   }
 
   /**
-   * One statement locks the record, adds the hash while the record is non-final, and moves
-   * `claimed` to `signed`; it also returns the hash's owner as its snapshot sees it.
+   * One statement locks the lease row while it still carries the caller's token, then the record,
+   * adds the hash while the record is non-final, and moves `claimed` to `signed`; it also returns
+   * the hash's owner as its snapshot sees it. The lease's `FOR KEY SHARE` makes a takeover, which
+   * changes the unique `token`, or a release wait until this commits, and one that committed
+   * first is re-read, so its new token refuses the hash. A renewal changes only `expires_at`, so
+   * it never waits on this (0071 decisions 7, 16).
    */
   async addHash(
     key: SettlementKey,
     hash: string,
+    lease: LeaseFence,
     updatedAt: number,
     bounds?: AttemptBounds,
     claim?: number,
   ): Promise<boolean> {
     const { rows } = await this.pool.query<{
+      fenced: boolean;
       state: string | null;
       added: boolean;
       owner: string | null;
     }>(
-      `WITH rec AS (
+      `WITH fence AS (
+         SELECT name FROM leases WHERE name = $7 AND token = $8::uuid FOR KEY SHARE
+       ), rec AS (
          SELECT key, state FROM settlements
-         WHERE key = $1 AND ($6::integer IS NULL OR reopened = $6) FOR UPDATE
+         WHERE key = $1 AND ($6::integer IS NULL OR reopened = $6)
+           AND EXISTS (SELECT 1 FROM fence)
+         FOR UPDATE
        ), ins AS (
          INSERT INTO settlement_hashes (hash, key, state, max_time, max_ledger, updated_at)
          SELECT $2, key, 'stored', $4::bigint, $5::bigint, $3 FROM rec
@@ -319,12 +331,24 @@ export class PostgresSettlementStore implements SettlementStore {
          FROM ins WHERE s.key = ins.key
          RETURNING s.key
        )
-       SELECT (SELECT state FROM rec) AS state,
+       SELECT NOT EXISTS (SELECT 1 FROM fence) AS fenced,
+              (SELECT state FROM rec) AS state,
               EXISTS (SELECT 1 FROM upd) AS added,
               (SELECT key FROM settlement_hashes WHERE hash = $2) AS owner`,
-      [key, hash, updatedAt, bounds?.maxTime ?? null, bounds?.maxLedger ?? null, claim ?? null],
+      [
+        key,
+        hash,
+        updatedAt,
+        bounds?.maxTime ?? null,
+        bounds?.maxLedger ?? null,
+        claim ?? null,
+        lease.name,
+        lease.token,
+      ],
     );
-    const { state, added, owner } = rows[0]!;
+    const { fenced, state, added, owner } = rows[0]!;
+    // 0. Another process took the lease, or nobody holds it.
+    if (fenced) throw new LeaseFencedError(lease.name);
     // 1. A missing or final record, or one reopened since the caller's claim.
     if (state === null || isFinal(state as SettlementState)) return false;
     // 4. Appended.
@@ -477,16 +501,30 @@ export class PostgresSettlementStore implements SettlementStore {
     ttlMs: number,
     now: number,
   ): Promise<ChannelLease | undefined> {
-    const { rows } = await this.pool.query<{ name: string; holder: string; expires_at: string }>(
+    const { rows } = await this.pool.query<{
+      name: string;
+      holder: string;
+      expires_at: string;
+      token: string;
+    }>(
+      // An insert takes the column's default token; a takeover or a re-acquire draws a new one.
       `INSERT INTO leases (name, holder, expires_at) VALUES ($1, $2, $3)
-       ON CONFLICT (name) DO UPDATE SET holder = EXCLUDED.holder, expires_at = EXCLUDED.expires_at
+       ON CONFLICT (name) DO UPDATE
+         SET holder = EXCLUDED.holder, expires_at = EXCLUDED.expires_at, token = gen_random_uuid()
        WHERE leases.holder = EXCLUDED.holder OR leases.expires_at < $4
-       RETURNING name, holder, expires_at`,
+       RETURNING name, holder, expires_at, token`,
       // Another holder's lease is taken only once it expired more than the margin ago.
       [name, holder, now + ttlMs, now - LEASE_SKEW_MARGIN_MS],
     );
     const row = rows[0];
-    return row && { name: row.name, holder: row.holder, expiresAt: Number(row.expires_at) };
+    return (
+      row && {
+        name: row.name,
+        holder: row.holder,
+        expiresAt: Number(row.expires_at),
+        token: row.token,
+      }
+    );
   }
 
   async renewLease(name: string, holder: string, ttlMs: number, now: number): Promise<boolean> {
