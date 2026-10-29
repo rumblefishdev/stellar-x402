@@ -1,15 +1,14 @@
 # ADR 0013: Keep the facilitator key in OpenBao Transit on the facilitator's own server
 
-- Status: accepted; socket mounting revised by [ADR 0011](0011-facilitator-hosting.md) for task
-  0077: one facilitator mounts every network's socket. The reasons for a socket per facilitator
-  are weighed in 0077's PR B.
+- Status: accepted
 - Date: 2026-10-19
 - Amended: 2026-10-20 (where the unseal backup lives, the restore drill, the fee float and
   top-ups; [S-key-custody-decisions](../../lore/1-tasks/archive/0047_RESEARCH_hetzner-key-custody/notes/S-key-custody-decisions.md#backup-and-top-ups-2026-10-20));
   2026-10-21 (the AWS logging role and the other secrets, to match ADR 0011's Hetzner revision;
   a socket per network, OpenBao's own unit and limits, from the PR #24 review); 2026-10-22 (the
   OpenBao key's own account, the theft alarm, 1-hour tokens, the admin socket and the restore
-  path, from the PR #48 review)
+  path, from the PR #48 review); 2026-10-29 (task 0077: one facilitator holds every network's
+  socket, and what a socket per network still buys)
 - Supersedes: the key custody part of [ADR 0011](0011-facilitator-hosting.md) ("Keys, secrets and
   access": the SSM parameter for `FACILITATOR_SECRET` and the mainnet KMS key)
 
@@ -33,14 +32,20 @@
 
 - **OpenBao's Transit engine holds the key.** It is generated inside OpenBao, `type=ed25519`,
   `exportable=false`, `allow_plaintext_backup=false`. The raw key never exists outside OpenBao.
-- **OpenBao runs in its own container** on the facilitator's server, beside the facilitators'
-  containers, under Docker Compose, pinned by digest, with a 256 MiB memory limit and half a CPU.
+- **OpenBao runs in its own container** on the facilitator's server, beside the facilitator's
+  container, under Docker Compose, pinned by digest, with a 256 MiB memory limit and half a CPU.
   Its own systemd unit (`x402-openbao.service`, ADR 0011) starts it and passes in the unseal
   credential. No container gets the Docker socket.
 - **One OpenBao per server.** Testnet and mainnet each get their own Transit key, policy, AppRole
-  and socket, so a break-in on one network's facilitator gets only that network's token and can't
-  reach the other network's socket. It still shares the process, so a flood from one network
-  slows the other's signing; that is accepted at these stakes (Rationale).
+  and socket. It still shares the process, so a flood from one network slows the other's
+  signing; that is accepted at these stakes (Rationale).
+- **One facilitator holds every network's socket** (task 0077, ADR 0011): it serves both
+  networks, so it mounts both sockets and gets both AppRoles. A break-in on the facilitator signs
+  for both networks; before 0077, a facilitator per network kept a testnet break-in away from
+  mainnet's key. The separate keys, policies, AppRoles and sockets stay: a leaked token or secret
+  ID still signs for one network only, the audit log still shows which network signed, a
+  rotation or revocation still touches one network, and a later split into a process per network
+  needs no change in OpenBao.
 - **The same setup on testnet and mainnet,** so testnet runs exactly what mainnet will.
 - **OpenBao does Transit signing only.** Other secrets, the database password and `RPC_URLS` (one
   credential file per version, ADR 0011), stay systemd credentials, so OpenBao is needed for
@@ -56,13 +61,12 @@
   OpenBao key's own account. The first signature is checked against that address, so the
   facilitator starts without OpenBao.
 - **A unix socket per network only.** OpenBao has one listener per network, each on a socket in
-  its own volume, mounted only into that network's facilitator, plus an admin socket on the host
-  that only root reaches and no container mounts. It opens no TCP port, so nothing on the network
-  can reach it.
-- **AppRole login.** The role ID and secret ID come in as Compose `file:` secrets, decrypted by
-  the network's unit to a tmpfs (ADR 0011), never as environment variables. The token lives
-  1 hour (`token_ttl` and `token_max_ttl`), so a renewal can't stretch it; the signer logs in again
-  before it expires instead of renewing it. The secret ID doesn't expire. The policy allows only
+  its own volume, mounted into the facilitator, plus an admin socket on the host that only root
+  reaches and no container mounts. It opens no TCP port, so nothing on the network can reach it.
+- **AppRole login.** Each network's role ID and secret ID come in as Compose `file:` secrets,
+  decrypted by the facilitator's unit to a tmpfs (ADR 0011), never as environment variables. The
+  token lives 1 hour (`token_ttl` and `token_max_ttl`), so a renewal can't stretch it; the signer
+  logs in again before it expires instead of renewing it. The secret ID doesn't expire. The policy allows only
   `transit/sign/<network key>`. A leaked token stops working within the hour; a leaked secret ID,
   or code running in the facilitator's container, signs until the secret ID is destroyed by hand
   (runbook).
@@ -181,6 +185,10 @@
   back.
 - **One mechanism on both networks** means testnet rehearses mainnet, unlike ADR 0011's SSM/KMS
   split.
+- **One facilitator for both networks is accepted at these stakes too** (0077). A break-in on it
+  reaches mainnet's float and reserves, as a break-in on a mainnet-only facilitator would. What is
+  new is that testnet's code paths and switches run in the process that holds mainnet's key.
+  0038 weighs a staging environment before mainnet joins.
 - **OpenBao over Vault:** the same API (the spike passed on both), MPL-2.0 rather than BSL, and its
   HSM and static seals are open source.
 
@@ -198,6 +206,10 @@
 - **A cold recovery signer (0048 as written):** limits the hot key to fees and allows recovery
   after a loss, but needs a cold key held offline. Declined for now.
 - **A hardware HSM:** not offered by Hetzner for dedicated servers.
+- **A facilitator per network, each mounting only its own socket:** this ADR until 2026-10-29.
+  Replaced by ADR 0011's one facilitator for both networks (tasks 0076, 0077).
+- **One socket and one AppRole for both networks:** one listener and one credential pair fewer,
+  but a leaked secret ID would sign for both networks and a rotation would touch both. Rejected.
 - **For the backup set:** a password manager vault held by two people, a paper copy in a safe,
   one holder only, or a Shamir split of the seal key. Rejected for the AWS account the other
   projects already run: one holder is a single point of failure, and a split is over-built at

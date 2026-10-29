@@ -87,8 +87,8 @@ a whole zone, to Cloudflare on the Free plan.
   and half a CPU.
   - Each network keeps its own listener socket in its own volume, and its own key and policy.
     The facilitator mounts the socket of every network it serves, as external volumes from
-    OpenBao's project, so one process can sign for both networks. ADR 0013's reasons for a
-    socket per facilitator are revisited in 0077.
+    OpenBao's project, so one process can sign for both networks. ADR 0013 weighs what that
+    costs.
 - **The limits add up to 1.625 GiB for production with testnet's database,** 1.875 GiB with
   OpenBao; mainnet's database adds 1 GiB. They are ceilings; testnet uses less.
 - **Testnet and mainnet share the facilitator process and OpenBao,** never a database, a key or a
@@ -442,8 +442,8 @@ One request or one stop must never outlast the layer in front of it:
 
 - **PostgreSQL in a container per network, on the same server,** though one facilitator uses
   both (decided 2026-10-28, 0077). It holds the schema and adapter rules of
-  [ADR 0012](0012-facilitator-state-store.md), which has no network column, so the facilitator
-  opens one store per network beside that network's pool. A testnet reset wipes only testnet's
+  [ADR 0012](0012-facilitator-state-store.md), whose lease, rate-limit and spend tables have no
+  network column, so the facilitator opens one store per network beside that network's pool. A testnet reset wipes only testnet's
   database, and backups, restores and migrations stay per network.
 - **Sizing:** about 2–4 KB per payment. That is under 1 GB on testnet and about 1 GB a month on
   mainnet at 10,000 payments a day. `pg_wal` stays small, since each segment leaves as it closes

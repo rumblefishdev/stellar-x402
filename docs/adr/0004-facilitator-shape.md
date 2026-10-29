@@ -3,7 +3,8 @@
 - Status: accepted
 - Date: 2026-10-07, amended 2026-10-14 (task 0018: the checks around upstream verify) and
   2026-10-16 (task 0009: the one-payer-entry and credential checks; repeats answered from the
-  record) and 2026-10-26 (task 0064: the tests run on PostgreSQL, with no in-memory fakes)
+  record) and 2026-10-26 (task 0064: the tests run on PostgreSQL, with no in-memory fakes) and
+  2026-10-29 (task 0077: one service for both networks, the network picked per request)
 
 ## Context
 
@@ -24,6 +25,8 @@ reimplement verify and settle.
 - **A modular monolith with ports and adapters.**
   - `apps/facilitator` is the only deployable service and the only composition root. It owns
     HTTP, environment and secrets, store adapters, rate limiting and wiring.
+  - One process serves every network it is configured for, testnet and later mainnet, each with
+    its own channel pool, key, RPC endpoints and store (task 0077).
   - `packages/*` are libraries that take their dependencies through constructors. They never
     read `process.env` and never open a store or socket themselves.
   - `packages/config` is the leaf of the dependency graph.
@@ -33,9 +36,9 @@ reimplement verify and settle.
   one auth entry for the payer, a minimum remaining validity
   ([ADR 0006](0006-settlement-record.md)), and a refusal of source-account auth entries, which
   upstream refuses too, because the pool makes the facilitator the operation source. Before
-  upstream, we also
-  reject a payment for another network and a V0 envelope, and bound upstream's call with a
-  deadline; an error inside upstream is a 500, not a verdict (spine AD-3).
+  upstream, we also pick the payment's network from its requirements, reject a network we don't
+  serve and a V0 envelope, and bound upstream's call with a deadline; an error inside upstream is
+  a 500, not a verdict (spine AD-3).
 - **We settle.** For a new payment, `/settle` calls upstream `verify()` again (the spec requires
   settle to verify independently), then submits through `SettlementSubmitter` in
   `packages/signer-pool`. A repeat of a known payment is answered from its record without the
@@ -78,7 +81,8 @@ reimplement verify and settle.
   come for free.
 - `apps/facilitator` holds all I/O policy, which keeps the libraries easy to test.
 - Upstream `ExactStellarScheme` must be constructed with our fee values
-  ([ADR 0007](0007-fee-abuse-containment.md)), so verify and settle apply the same ceiling.
+  ([ADR 0007](0007-fee-abuse-containment.md)), so verify and settle apply the same ceiling; one
+  per network, with that network's RPC endpoints and fee values.
 
 ## References
 
