@@ -92,7 +92,8 @@ every send follows `addHash`, so it sends nothing new.
    gets an answer now. Chosen over leaving it to the new holder's sweep (`…_interrupted` after
    the budget plus 5 s).
 6. **Stacked on #86** (okarcz, 2026-10-29): the reason joins #86's `UNSENT_REASONS` and its
-   reopen, and the migration is `0007` after #86's `0006`. Chosen over waiting for #86 and over
+   reopen, and the migration is `0007` after #86's `0006` (`0008` after #86's `0007` since 0073
+   decision 27, #89 keeping `0006`). Chosen over waiting for #86 and over
    branching from develop and resolving the conflicts later.
 7. **The lease row is locked in `addHash`'s statement** (proposed, okarcz confirmed at the
    implementation checkpoint): under Read Committed a plain read sees the token as of the
@@ -137,7 +138,7 @@ every send follows `addHash`, so it sends nothing new.
 
 ## Implementation Notes
 
-- Migration `0007_lease_token`: `token uuid NOT NULL DEFAULT gen_random_uuid()` on `leases`.
+- Migration `0007_lease_token` (renamed `0008_lease_token` when rebased onto #86's review fixes): `token uuid NOT NULL DEFAULT gen_random_uuid()` on `leases`.
 - Port: `ChannelLease.token`, `LeaseFence` (`name`, `token`), `LeaseFencedError`, `addHash(key,
   hash, lease, updatedAt, bounds?, claim?)` with the fence as rule 0.
 - Postgres: `acquireLease`'s takeover branch sets `token = gen_random_uuid()` and returns it.
