@@ -7,9 +7,9 @@
 #   ansible-playbook -i inventory.ini playbook.yaml --check --diff
 #   ansible-playbook -i inventory.ini playbook.yaml
 #
-# It enables the units and starts none: they need their encrypted credentials first (runbook). A
-# changed unit or compose file takes effect at that unit's next restart, so a run never restarts
-# the facilitator.
+# It enables the units and starts none but the watchdog's timer: they need their encrypted
+# credentials first (runbook). A changed unit or compose file takes effect at that unit's next
+# restart, so a run never restarts the facilitator.
 - name: x402 on the server
   hosts: x402
   become: true
@@ -125,3 +125,10 @@
         - x402-db-testnet
         - x402-tunnel
         - x402
+
+    # Started too: it acts only while x402@ is active, so before the first deploy it does nothing.
+    - name: The watchdog's timer, enabled and started
+      ansible.builtin.systemd_service:
+        name: "x402-watchdog@{{ x402_environment }}.timer"
+        enabled: true
+        state: started

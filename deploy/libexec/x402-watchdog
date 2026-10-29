@@ -1,0 +1,20 @@
+#!/bin/sh
+# Restarts an environment's facilitator when its healthcheck says `unhealthy` (ADR 0011): Docker
+# and systemd act only on an exit, so a hung process would stay up. Run every 30 s by
+# x402-watchdog@<environment>.timer, on the host, so no container gets the Docker socket.
+#   x402-watchdog <environment>
+set -eu
+# Only while the unit is up, never while a deploy, a reboot or an operator stops or starts it, so
+# a draining facilitator is left alone.
+systemctl is-active --quiet "x402@$1" || exit 0
+id=$(docker ps --quiet --filter health=unhealthy \
+  --filter "label=com.docker.compose.project=x402-$1" \
+  --filter label=com.docker.compose.service=facilitator \
+  --filter label=com.docker.compose.oneoff=False)
+[ -n "$id" ] || exit 0
+echo "the facilitator is unhealthy, restarting x402@$1"
+# A 10 s stop, not the 180 s grace: a hung process can't drain. Then the unit starts it, not
+# `docker restart`: Compose's `up --exit-code-from` would stop the restarted container and end
+# with the old process's code, and a 0 isn't restarted.
+docker stop --time 10 "$id" > /dev/null
+systemctl restart "x402@$1"
