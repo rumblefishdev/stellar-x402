@@ -97,7 +97,10 @@ networks:
     internal: true
 
 volumes:
+  # Made by the playbook and never by Compose, so `compose down -v` can't remove the only copy.
   postgres-testnet:
+    external: true
+    name: x402-production-postgres-testnet
 
 # Bind mounts outside swarm: each file keeps the owner and mode `x402-creds` gives it.
 secrets:

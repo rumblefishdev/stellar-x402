@@ -17,4 +17,6 @@ echo "the facilitator is unhealthy, restarting x402@$1"
 # `docker restart`: Compose's `up --exit-code-from` would stop the restarted container and end
 # with the old process's code, and a 0 isn't restarted.
 docker stop --time 10 "$id" > /dev/null
+# StartLimitBurst counts every start; this one isn't a crash loop.
+systemctl reset-failed "x402@$1" || true
 systemctl restart "x402@$1"

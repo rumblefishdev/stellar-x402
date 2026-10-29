@@ -9,11 +9,9 @@ After=docker.service x402-db-testnet@%i.service
 
 [Service]
 Type=oneshot
-# A stopped migration container left behind by a crash; a running one stays and fails the deploy.
-ExecStartPre=-/usr/bin/docker rm x402-%i-migrate-testnet
 ExecStart=/usr/local/libexec/x402/x402-deploy %i
-# After any end: removes the marker, stops the migration, and unless the deploy succeeded, puts
-# the facilitator back on digest.good.
+# After any end: removes the marker, stops this deploy's migration, and unless the deploy
+# succeeded, puts the facilitator back on digest.good.
 ExecStopPost=/usr/local/libexec/x402/x402-deploy %i stopped
 # The cap on a long migration (ADR 0011, 0067), and on the restart after it: a stop by the cap or
 # by hand ends on the last good image, and the next deploy continues the migration from its

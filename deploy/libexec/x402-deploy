@@ -8,39 +8,58 @@
 set -eu
 env=$1
 repo=ghcr.io/rumblefishdev/x402-facilitator
+run=/run/x402/$env
 # Named, so a stop can reach it: the container lives in dockerd's cgroup, not the unit's.
 migrate=x402-$env-migrate-testnet
 cd "/srv/x402/$env"
 
+# StartLimitBurst counts every start, these included, so a deploy, a rollback and a crash or two
+# within 300 s would leave x402@ refused; the count is for crash loops, not for these.
+restart() {
+  systemctl reset-failed "x402@$env" || true
+  systemctl restart "$@" "x402@$env"
+}
+
 if [ "${2:-}" = stopped ]; then
-  rm -f "/run/x402/$env/deploying"
-  docker stop "$migrate" > /dev/null 2>&1 || true
+  rm -f "$run/deploying"
+  # Only this deploy's migration: a run by hand under the same name failed it, and goes on.
+  if [ -e "$run/migrating" ]; then
+    docker stop "$migrate" > /dev/null 2>&1 || true
+    rm -f "$run/migrating"
+  fi
   # Stopped by the cap or by hand after `digest` moved: the restart job outlives the script, so
   # end on the last good image, written before the restart since x402-compose reads `digest` at
   # ExecStart. After a success or the script's own rollback, digest is good and nothing happens.
   if [ "${SERVICE_RESULT:-}" != success ] && [ -s digest.good ] && ! cmp -s digest digest.good; then
     echo "the deploy ended with ${SERVICE_RESULT:-no result}; back to digest.good" >&2
     cp digest.good digest.tmp && mv digest.tmp digest
-    systemctl restart --no-block "x402@$env"
+    restart --no-block
   fi
   exit 0
 fi
 
 # x402@ keeps `digest` as it is while this is here; ExecStopPost removes it, and a reboot clears it.
 /usr/local/libexec/x402/x402-creds "$env" database-url.testnet:1000
-touch "/run/x402/$env/deploying"
+touch "$run/deploying"
 
 new=$(cat digest.next)
 good=$(cat digest.good 2>/dev/null || true)
 docker pull --quiet "$repo@$new"
-# A migration already running under this name (a run by hand, runbook) fails this one here,
-# before anything stops, instead of waiting for its lock.
+# A stopped container left by a crash goes; a running one is a migration by hand (runbook), which
+# fails this deploy here, before anything stops, instead of it waiting for that run's lock.
+docker rm "$migrate" > /dev/null 2>&1 || true
+if docker container inspect "$migrate" > /dev/null 2>&1; then
+  echo "$migrate is running; deploy once it ends" >&2
+  exit 1
+fi
+touch "$run/migrating"
 FACILITATOR_IMAGE="$repo@$new" docker compose run --rm --name "$migrate" migrate-testnet
+rm -f "$run/migrating"
 
 # The healthcheck's one-liner, reading the body.
 probe="fetch('http://127.0.0.1:4021/health',{signal:AbortSignal.timeout(5000)}).then((r)=>r.json()).then((b)=>process.exit(b.ready&&b.listed?0:1),()=>process.exit(1))"
 started() {
-  systemctl restart "x402@$env" || return 1
+  restart || return 1
   deadline=$(($(date +%s) + 120))
   until /usr/local/libexec/x402/x402-compose "$env" exec -T facilitator node -e "$probe"; do
     [ "$(date +%s)" -lt "$deadline" ] || return 1
@@ -62,6 +81,6 @@ fi
 echo "$new isn't ready and listed after 120 s; back to ${good:-nothing, the first deploy}" >&2
 if [ -n "$good" ]; then
   printf '%s\n' "$good" > digest.tmp && mv digest.tmp digest
-  systemctl restart "x402@$env" || true
+  restart || echo "x402@$env didn't start on $good" >&2
 fi
 exit 1

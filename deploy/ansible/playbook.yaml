@@ -114,6 +114,14 @@
         group: x402-deploy
         mode: "0600"
 
+    # External in the compose file, so `compose down -v` can't remove it.
+    - name: Testnet's database volume
+      ansible.builtin.shell: >-
+        docker volume inspect x402-{{ x402_environment }}-postgres-testnet > /dev/null 2>&1
+        || docker volume create x402-{{ x402_environment }}-postgres-testnet
+      register: volume
+      changed_when: volume.stdout != ""
+
     - name: Reload systemd before enabling
       ansible.builtin.meta: flush_handlers
 

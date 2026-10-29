@@ -4,7 +4,7 @@
 # Takes only an image digest from SSH_ORIGINAL_COMMAND, writes it to digest.next and starts
 # x402-deploy@<environment>, holding a lock on digest.next until the deploy ends, so a second
 # deploy waits instead of changing the digest under the first. A deploy by hand runs it too:
-#   sudo -u deploy SSH_ORIGINAL_COMMAND=sha256:… /srv/x402/production/deploy.sh
+#   sudo -u x402-deploy env SSH_ORIGINAL_COMMAND=sha256:… /srv/x402/production/deploy.sh
 set -eu
 digest=${SSH_ORIGINAL_COMMAND:-}
 case $digest in
