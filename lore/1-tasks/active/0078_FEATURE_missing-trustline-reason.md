@@ -59,7 +59,7 @@ failed. Today the payment fails with upstream's generic `invalid_exact_stellar_p
   `invalid_exact_stellar_payto_trustline_missing`. Put the account and the asset in
   `invalidMessage`, and list both reasons in the README's verify answers.
 - Keep upstream's reason for every other simulation failure.
-- Out of scope: the buyer-side SDK step that asks the user to add a trustline. SDK helpers are M2.
+- Out of scope: the buyer-side step that tells the user to add a trustline (0092).
 
 ## Acceptance Criteria
 
@@ -106,14 +106,30 @@ failed. Today the payment fails with upstream's generic `invalid_exact_stellar_p
 
 9. **`message` asset name from the SAC's `METADATA`, or its contract address**: the instance read
    already returns `CODE:ISSUER`, so naming the asset costs no call.
-10. **Upstream's client waits for 0092** (okarcz, 2026-10-30, from code review): the panel
-    response's "actionable error" holds for upstream's client only once the SDK step in 0092 is
-    done. Until then it holds for a client with its own payload and a trustline removed after
-    signing.
+10. **Upstream's client waits for 0092, now in M1** (okarcz, 2026-10-30, from code review; amended
+    the same day, Adam's review of #94): the panel response's "actionable error" holds for
+    upstream's client only once 0092 is done. Until then it holds for a client with its own
+    payload and a trustline removed after signing. 0092 moved from M2: `@x402/stellar` 2.29.0
+    throws `TrustlineMissingError`, so it is a version bump plus that error, and `packages/mcp` joins
+    it, since `pay.ts` answers a seller's missing trustline with `insufficient_funds`. The bump
+    stays in 0092.
 11. **A `/settle` budget that runs out during the lookup stays a timeout** (code review): decision
     3 holds in `/verify`, but `settle.ts` bounds the whole check, so a hung lookup in the budget's
     last 3 s answers `…_timeout`. Nothing is claimed and the same payment may be sent again;
     avoiding it needs a new parameter on `Check`.
+12. **A lookup needs the payer's one auth entry** (okarcz, 2026-10-30, Adam's review of #94): a
+    forged payload is free and reached `simulation_failed` and `#13`, so it cost 3 RPC calls where
+    it had cost 1, on the shared client. `payerNonce` in the condition leaves 1 for no entry and 2
+    for a junk one. Chosen over docs alone and over leaving the docs for later.
+13. **The two reasons' message is logged in this PR** (okarcz, 2026-10-30, Adam's review of #94):
+    only `invalidMessage` names the account and the asset, and an operator had neither. Adam
+    proposed widening #83's log condition once it's in; #83 is still open, so this PR adds it, on
+    `verified` and `settled`, and whichever merges second joins the two conditions. Chosen over
+    waiting for #83 and over a backlog task.
+14. **The message names its ledger** (okarcz, 2026-10-30, Adam's review of #94): a lagging RPC can
+    answer this too, so "as of ledger N" comes from the simulation. Taken with it:
+    `trustline_lookup_failed` carries `network`, and a captured `#13` fixture catches a change in the
+    event's shape, which the hand-built events wouldn't.
 
 ## Implementation Notes
 
@@ -140,11 +156,22 @@ failed. Today the payment fails with upstream's generic `invalid_exact_stellar_p
 - Unsigned simulations of USDC's SAC: `Error(Contract, #13)` with "trustline entry is missing for
   account", G-address; an unfunded `payTo` the same; a low balance `#10`.
 
+- Adam's review of #94: all four confirmed points stand; 0092 moved (decision 10). `/verify`'s
+  trigger now runs through the real scheme in `fee-agreement.test.ts`, on a simulation captured
+  from testnet (`test/fixtures/trustline-missing.json`); `trustline.test.ts` reads the same fixture.
+- Not covered: `/settle` gives these reasons only from its check before the claim. A trustline
+  removed after that answers `settle_exact_stellar_simulation_failed` from the pool, whose message
+  doesn't name the account. The window is the time between the check and the pool's simulation.
+- 10 more mutants caught: no guard, upstream's code renamed and no `payer` (both through
+  `fee-agreement.test.ts`), no ledger, no `network`, each log with no message and with every message
+  (4), a wrong event topic.
+
 ## Issues Encountered
 
 - **Upstream's client refuses first.** `ExactStellarScheme.createPaymentPayload` simulates before it
   signs, and throws `Stellar simulation failed with error message: HostError: Error(Contract, #13)`
   for both cases, so its users never reach `/verify`. The testnet run signed with the trustline in
   place and removed it afterwards. The answers serve a client with its own payload and a trustline
-  removed after signing; the panel response's "actionable error" for upstream's client needs the
-  SDK step that's M2 (0092).
+  removed after signing; the panel response's "actionable error" for upstream's client needs
+  0092, in M1 since Adam's review. The raw `HostError` holds for our `~2.28.0` pin; 2.29.0 throws
+  `TrustlineMissingError`.

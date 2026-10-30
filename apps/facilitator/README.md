@@ -187,14 +187,18 @@ one cause upstream drops:
 | `invalid_exact_stellar_payto_trustline_missing` | `payTo` holds no trustline to the classic asset, or the account is unfunded | the seller funds the account and adds it            |
 | `invalid_exact_stellar_payer_trustline_missing` | the payer holds no trustline to the classic asset                           | the payer makes sure the account exists and adds it |
 
-`invalidMessage` names the account and the asset. The token must be a Stellar Asset Contract: any
+`invalidMessage` names the account, the asset and the ledger the simulation saw, and the `verified`
+and `settled` logs carry it as `message`. The token must be a Stellar Asset Contract: any
 contract can emit the same error, and only a SAC's means a trustline. A SAC stops at its first
 failure, the payer's side first, so the payer's message adds that `payTo` wasn't checked: a seller
 missing one too shows up on the next try. Once the trustline is there, the same payment may be
-sent again until its auth expires. `/settle` gives the same two reasons.
+sent again until its auth expires. `/settle`'s check before the claim gives the same two reasons; a
+trustline removed after it answers `settle_exact_stellar_simulation_failed` from the pool.
 
 Every other failure keeps upstream's reason. So does a lookup that fails or takes over 3 s, logged
-as `trustline_lookup_failed`, and a muxed `payTo`, because the error names its G-address.
+as `trustline_lookup_failed`, a muxed `payTo`, because the error names its G-address, and a payload
+without exactly one auth entry of the payer's, which gets no lookup: it is free to send, and the
+lookup costs RPC calls.
 
 Upstream's client simulates before it signs, so its users get the same `Error(Contract, #13)` from
 the client and never reach `/verify`. These answers are for a client that builds its own payload,
