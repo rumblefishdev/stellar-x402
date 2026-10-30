@@ -17,6 +17,7 @@ import {
   RpcUnavailableError,
   ShutdownError,
   SignedHookError,
+  SigningError,
   SimulationCheckError,
   SimulationError,
   SourceAccountAuthError,
@@ -71,6 +72,13 @@ export const SETTLE_REASONS = {
   ledgerBound: "settle_exact_stellar_signature_expiration_too_soon",
   /** The signed hash could not be stored, so nothing was sent. */
   recordWrite: "settle_exact_stellar_record_write_failed",
+  /**
+   * The facilitator key's signer (OpenBao, 0036) failed on the transaction (upstream's code).
+   * Nothing was sent ({@link UNSENT_REASONS}).
+   */
+  transactionSigning: "settle_exact_stellar_transaction_signing_failed",
+  /** The signer failed on the fee bump (upstream's code). Nothing was sent ({@link UNSENT_REASONS}). */
+  feeBumpSigning: "settle_exact_stellar_fee_bump_signing_failed",
   /** No channel was free before the deadline. Nothing was sent ({@link UNSENT_REASONS}). */
   noChannelInTime: "settle_exact_stellar_no_channel_in_time",
   /** Every channel is out of the pool. Nothing was sent ({@link UNSENT_REASONS}). */
@@ -129,6 +137,8 @@ export const UNSENT_REASONS: readonly string[] = [
   SETTLE_REASONS.shuttingDown,
   SETTLE_REASONS.noChannelInTime,
   SETTLE_REASONS.noChannels,
+  SETTLE_REASONS.transactionSigning,
+  SETTLE_REASONS.feeBumpSigning,
 ];
 const UNSENT = new Set(UNSENT_REASONS);
 
@@ -1064,6 +1074,10 @@ export function reasonFor(error: unknown): string {
   if (error instanceof FeeLimitError) return SETTLE_REASONS.fee;
   if (error instanceof LedgerBoundError) return SETTLE_REASONS.ledgerBound;
   if (error instanceof SignedHookError) return SETTLE_REASONS.recordWrite;
+  if (error instanceof SigningError)
+    return error.stage === "transaction"
+      ? SETTLE_REASONS.transactionSigning
+      : SETTLE_REASONS.feeBumpSigning;
   if (error instanceof QueueTimeoutError) return SETTLE_REASONS.noChannelInTime;
   if (error instanceof NoChannelsError) return SETTLE_REASONS.noChannels;
   if (error instanceof ShutdownError) return SETTLE_REASONS.shuttingDown;

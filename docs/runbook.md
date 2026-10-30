@@ -122,7 +122,10 @@ unset value
   `sudo systemctl start x402-db-testnet@production x402-tunnel@production`.
 - Outbound 7844 over UDP and TCP allowed on the server (`cloudflared`).
 - Cloudflare: Browser Integrity Check off for the hostname, Bot Fight Mode off (0026).
-- The signer and funded channels (0036).
+- The signer and funded channels (0036): the OpenBao key's account funded by a wallet, then
+  `FUNDER_SECRET=… NETWORK=testnet npx tsx scripts/create-channels.ts <G…> <n>` in
+  `packages/signer-pool`, its output as `CHANNELS_TESTNET` and the key's address as
+  `FACILITATOR_ADDRESS_TESTNET` in `/srv/x402/production/.env`.
 - After the first image is pushed: the GHCR package `x402-facilitator` made public, so the server
   pulls without a login.
 

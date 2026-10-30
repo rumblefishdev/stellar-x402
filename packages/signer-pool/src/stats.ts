@@ -12,6 +12,7 @@ export type RefusalReason =
   | "queue-timeout"
   | "no-channels"
   | "on-signed"
+  | "signing"
   | "shutdown"
   | "other";
 
@@ -88,6 +89,7 @@ export class SubmitterStats {
     "queue-timeout": 0,
     "no-channels": 0,
     "on-signed": 0,
+    signing: 0,
     shutdown: 0,
     other: 0,
   };

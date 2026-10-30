@@ -110,13 +110,40 @@ const envSchema = z
       )
       .optional(),
 
+    /**
+     * Where the facilitator key signs (0036): `secret`, in memory from `FACILITATOR_SECRET`, for
+     * local runs and tests; `openbao`, in OpenBao's Transit engine over its unix socket, with no
+     * secret seed in this process (ADR 0013).
+     */
+    SIGNER: oneOf(["secret", "openbao"]).default("secret"),
     /** The facilitator key: signs for the channels and pays fee bumps. Never logged. */
     FACILITATOR_SECRET: z
       .string()
       .refine(
         (value) => StrKey.isValidEd25519SecretSeed(value),
         "must be a Stellar secret key (S…)",
-      ),
+      )
+      .optional(),
+    /**
+     * The OpenBao key's own account, the fee account and the channels' signer (ADR 0013). Startup
+     * doesn't ask OpenBao, so every signature is checked against it instead.
+     */
+    FACILITATOR_ADDRESS: z
+      .string()
+      .refine(
+        (value) => StrKey.isValidEd25519PublicKey(value),
+        "must be a Stellar account address (G…)",
+      )
+      .optional(),
+    /** OpenBao's listener socket for this network; it opens no TCP port (ADR 0013). */
+    OPENBAO_SOCKET: z.string().optional(),
+    /** The Transit key's name. */
+    OPENBAO_KEY: z.string().optional(),
+    /** Pinned, so a rotated Transit key can't sign in place of the one on chain. */
+    OPENBAO_KEY_VERSION: int(1).optional(),
+    /** The AppRole login; never logged. A deploy passes both as files (`_FILE`). */
+    OPENBAO_ROLE_ID: z.string().optional(),
+    OPENBAO_SECRET_ID: z.string().optional(),
     /** Comma-separated channel account addresses (never secrets). */
     CHANNELS: list.pipe(
       z
@@ -283,6 +310,42 @@ const envSchema = z
     message: "is no longer read: the stores are always PostgreSQL",
     path: ["STORE"],
   })
+  .superRefine((env, ctx) => {
+    const openbao = env.SIGNER === "openbao";
+    for (const name of OPENBAO_SETTINGS) {
+      const set = env[name] !== undefined;
+      if (openbao && !set)
+        ctx.addIssue({
+          code: "custom",
+          path: [name],
+          message: "is required when SIGNER is openbao",
+        });
+      // Refused, so a leftover can't look like it applies.
+      if (!openbao && set)
+        ctx.addIssue({
+          code: "custom",
+          path: [name],
+          message: "is only read when SIGNER is openbao",
+        });
+    }
+    if (openbao && env.FACILITATOR_SECRET !== undefined)
+      ctx.addIssue({
+        code: "custom",
+        path: ["FACILITATOR_SECRET"],
+        message: "must not be set when SIGNER is openbao",
+      });
+    if (!openbao && env.FACILITATOR_SECRET === undefined)
+      ctx.addIssue({
+        code: "custom",
+        path: ["FACILITATOR_SECRET"],
+        message: "is required when SIGNER is secret",
+      });
+  })
+  // The same custody on both networks, so testnet rehearses mainnet (ADR 0013).
+  .refine((env) => env.SIGNER === "openbao" || env.NETWORK !== STELLAR_NETWORKS.pubnet, {
+    message: "secret is refused on pubnet: the key lives in OpenBao (ADR 0013)",
+    path: ["SIGNER"],
+  })
   // `/settle` spends on pubnet, so not before spend budgets (0024) and the lease's fencing token
   // (0071). Whichever lands last lifts this; the other narrows the message to what is still
   // missing (0009 decision 49).
@@ -291,6 +354,16 @@ const envSchema = z
       "stellar:pubnet is refused until spend budgets (0024) and the lease fencing token (0071) land",
     path: ["NETWORK"],
   });
+
+/** The settings of `SIGNER=openbao`: each one required there, and refused otherwise. */
+const OPENBAO_SETTINGS = [
+  "FACILITATOR_ADDRESS",
+  "OPENBAO_SOCKET",
+  "OPENBAO_KEY",
+  "OPENBAO_KEY_VERSION",
+  "OPENBAO_ROLE_ID",
+  "OPENBAO_SECRET_ID",
+] as const;
 
 /** `pnpm migrate` needs only the database. */
 const migrateEnvSchema = z.object({ DATABASE_URL: databaseUrl });
@@ -306,7 +379,18 @@ export interface Config {
   port: number;
   logLevel: "debug" | "info" | "warn" | "error";
   rpcUrls: string[];
-  facilitatorSecret: string;
+  /** How the facilitator key signs (0036); the secret and the AppRole are never logged. */
+  signer:
+    | { mode: "secret"; secret: string }
+    | {
+        mode: "openbao";
+        address: string;
+        socketPath: string;
+        key: string;
+        keyVersion: number;
+        roleId: string;
+        secretId: string;
+      };
   channels: string[];
   /** Never logged. */
   databaseUrl: string;
@@ -351,7 +435,7 @@ export class ConfigError extends Error {
  * Settings a deploy passes as a file, `<NAME>_FILE`: a Compose `file:` secret, so the value never
  * sits in `environment:`, which `docker inspect` shows (ADR 0011). Local runs set them plainly.
  */
-const FILE_SETTINGS = ["DATABASE_URL", "RPC_URLS"] as const;
+const FILE_SETTINGS = ["DATABASE_URL", "RPC_URLS", "OPENBAO_ROLE_ID", "OPENBAO_SECRET_ID"] as const;
 
 /** `env` with each {@link FILE_SETTINGS} entry read from its `_FILE`, where one is set. */
 function readFileSettings(
@@ -420,7 +504,19 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
     port: e.PORT,
     logLevel: e.LOG_LEVEL,
     rpcUrls: e.RPC_URLS ?? [DEFAULT_TESTNET_RPC],
-    facilitatorSecret: e.FACILITATOR_SECRET,
+    // Present as each mode needs them: the schema refused anything else.
+    signer:
+      e.SIGNER === "openbao"
+        ? {
+            mode: "openbao",
+            address: e.FACILITATOR_ADDRESS!,
+            socketPath: e.OPENBAO_SOCKET!,
+            key: e.OPENBAO_KEY!,
+            keyVersion: e.OPENBAO_KEY_VERSION!,
+            roleId: e.OPENBAO_ROLE_ID!,
+            secretId: e.OPENBAO_SECRET_ID!,
+          }
+        : { mode: "secret", secret: e.FACILITATOR_SECRET! },
     channels: e.CHANNELS,
     databaseUrl: e.DATABASE_URL,
     fees: {

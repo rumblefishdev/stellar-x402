@@ -24,6 +24,8 @@ const minimal = {
 };
 /** Pubnet is refused until 0024 and 0071 land. */
 const pubnet = { NETWORK: "stellar:pubnet" };
+/** `minimal` signs with a secret, which pubnet refuses too (0036). */
+const SECRET_ON_PUBNET = "SIGNER secret is refused on pubnet: the key lives in OpenBao (ADR 0013)";
 const PUBNET_REFUSED =
   "NETWORK stellar:pubnet is refused until spend budgets (0024) and the lease fencing token (0071) land";
 
@@ -47,7 +49,7 @@ describe("parseConfig", () => {
       port: 4021,
       logLevel: "info",
       rpcUrls: ["https://soroban-testnet.stellar.org"],
-      facilitatorSecret: SECRET,
+      signer: { mode: "secret", secret: SECRET },
       channels: [CHANNEL_A, CHANNEL_B],
       databaseUrl: "postgres://db.internal/x402",
       fees: { maxFeeStroops: 250_000n, inclusionFeeStroops: undefined, escalation: undefined },
@@ -116,7 +118,7 @@ describe("parseConfig", () => {
       port: 8080,
       logLevel: "debug",
       rpcUrls: ["https://a.example", "https://b.example"],
-      facilitatorSecret: SECRET,
+      signer: { mode: "secret", secret: SECRET },
       channels: [CHANNEL_B],
       databaseUrl: "postgres://db.internal/x402",
       fees: {
@@ -158,15 +160,15 @@ describe("parseConfig", () => {
       RPC_URLS: "",
       PORT: " ",
     });
-    expect(config.facilitatorSecret).toBe(SECRET);
+    expect(config.signer).toEqual({ mode: "secret", secret: SECRET });
     expect(config.channels).toEqual([CHANNEL_A]);
     expect(config.http.clientIp).toBe("socket");
     expect(config.port).toBe(4021);
   });
 
   it("names missing required values", () => {
+    // FACILITATOR_SECRET depends on SIGNER, which is checked once these are present.
     expect(problems({})).toEqual([
-      "FACILITATOR_SECRET is required",
       "CHANNELS is required",
       "DATABASE_URL is required",
       "CLIENT_IP is required",
@@ -323,7 +325,7 @@ describe("parseConfig", () => {
         RPC_URLS: "https://rpc.example",
         CATALOG_ALLOW_HTTP: "true",
       }),
-    ).toEqual([PUBNET_REFUSED]);
+    ).toEqual([SECRET_ON_PUBNET, PUBNET_REFUSED]);
   });
 
   it("lists local resource URLs on testnet only, and only when asked (0054)", () => {
@@ -338,7 +340,7 @@ describe("parseConfig", () => {
         RPC_URLS: "https://rpc.example",
         CATALOG_LIST_LOCAL: "true",
       }),
-    ).toEqual(["CATALOG_LIST_LOCAL is only allowed on testnet", PUBNET_REFUSED]);
+    ).toEqual(["CATALOG_LIST_LOCAL is only allowed on testnet", SECRET_ON_PUBNET, PUBNET_REFUSED]);
   });
 
   it("requires a postgres:// DATABASE_URL, without echoing it", () => {
@@ -362,6 +364,7 @@ describe("parseConfig", () => {
   it("refuses stellar:pubnet with nothing else wrong, until 0024 and 0071 land", () => {
     // `/settle` would spend there with allow-all spend hooks and an unfenced lease.
     expect(problems({ ...minimal, ...pubnet, RPC_URLS: "https://rpc.example" })).toEqual([
+      SECRET_ON_PUBNET,
       PUBNET_REFUSED,
     ]);
   });
@@ -378,13 +381,15 @@ describe("parseConfig", () => {
     ]);
     expect(
       problems({ ...minimal, ...pubnet, RPC_URLS: "https://a.example,http://rpc:8000" }),
-    ).toEqual(["RPC_URLS must be https outside testnet", PUBNET_REFUSED]);
+    ).toEqual(["RPC_URLS must be https outside testnet", SECRET_ON_PUBNET, PUBNET_REFUSED]);
     expect(problems({ ...minimal, ...pubnet, RPC_URLS: "," })).toEqual([
       "RPC_URLS must list at least one URL",
+      SECRET_ON_PUBNET,
       PUBNET_REFUSED,
     ]);
     expect(problems({ ...minimal, ...pubnet })).toEqual([
       "RPC_URLS is required outside testnet",
+      SECRET_ON_PUBNET,
       PUBNET_REFUSED,
     ]);
   });
@@ -501,5 +506,92 @@ describe("settings read from files", () => {
     });
     expect(found).toEqual(["DATABASE_URL must be a postgres:// URL"]);
     expect(found.join(" ")).not.toContain("secret");
+  });
+});
+
+describe("the signer (0036)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "x402-signer-"));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  const file = (name: string, value: string) => {
+    const path = join(dir, name);
+    writeFileSync(path, value);
+    return path;
+  };
+  const ADDRESS = keypair(4).publicKey();
+  const openbao = {
+    ...minimal,
+    FACILITATOR_SECRET: undefined,
+    SIGNER: "openbao",
+    FACILITATOR_ADDRESS: ADDRESS,
+    OPENBAO_SOCKET: "/run/openbao/testnet.sock",
+    OPENBAO_KEY: "stellar-testnet",
+    OPENBAO_KEY_VERSION: "1",
+    OPENBAO_ROLE_ID: "role",
+    OPENBAO_SECRET_ID: "secret-id",
+  };
+
+  it("signs with FACILITATOR_SECRET by default", () => {
+    expect(parseConfig(minimal).signer).toEqual({ mode: "secret", secret: SECRET });
+  });
+
+  it("reads the OpenBao settings, the AppRole's from files, and no secret seed", () => {
+    const config = parseConfig({
+      ...openbao,
+      OPENBAO_ROLE_ID: undefined,
+      OPENBAO_SECRET_ID: undefined,
+      OPENBAO_ROLE_ID_FILE: file("approle-role-id", "role\n"),
+      OPENBAO_SECRET_ID_FILE: file("approle-secret-id", "secret-id\n"),
+    });
+    expect(config.signer).toEqual({
+      mode: "openbao",
+      address: ADDRESS,
+      socketPath: "/run/openbao/testnet.sock",
+      key: "stellar-testnet",
+      keyVersion: 1,
+      roleId: "role",
+      secretId: "secret-id",
+    });
+  });
+
+  it("refuses FACILITATOR_SECRET beside SIGNER=openbao (decision 5)", () => {
+    expect(problems({ ...openbao, FACILITATOR_SECRET: SECRET })).toEqual([
+      "FACILITATOR_SECRET must not be set when SIGNER is openbao",
+    ]);
+  });
+
+  it("names each missing OpenBao setting", () => {
+    expect(problems({ ...minimal, FACILITATOR_SECRET: undefined, SIGNER: "openbao" })).toEqual([
+      "FACILITATOR_ADDRESS is required when SIGNER is openbao",
+      "OPENBAO_SOCKET is required when SIGNER is openbao",
+      "OPENBAO_KEY is required when SIGNER is openbao",
+      "OPENBAO_KEY_VERSION is required when SIGNER is openbao",
+      "OPENBAO_ROLE_ID is required when SIGNER is openbao",
+      "OPENBAO_SECRET_ID is required when SIGNER is openbao",
+    ]);
+  });
+
+  it("refuses an OpenBao setting with SIGNER=secret, so it can't look like it applies", () => {
+    expect(problems({ ...minimal, OPENBAO_SOCKET: "/run/openbao/testnet.sock" })).toEqual([
+      "OPENBAO_SOCKET is only read when SIGNER is openbao",
+    ]);
+  });
+
+  it("requires FACILITATOR_SECRET with SIGNER=secret", () => {
+    expect(problems({ ...minimal, FACILITATOR_SECRET: undefined })).toEqual([
+      "FACILITATOR_SECRET is required when SIGNER is secret",
+    ]);
+  });
+
+  it("refuses SIGNER=secret on pubnet (decision 6)", () => {
+    expect(problems({ ...minimal, ...pubnet, RPC_URLS: "https://rpc.example" })).toContain(
+      "SIGNER secret is refused on pubnet: the key lives in OpenBao (ADR 0013)",
+    );
+  });
+
+  it.each([
+    ["FACILITATOR_ADDRESS", "S-not-an-address", "must be a Stellar account address (G…)"],
+    ["OPENBAO_KEY_VERSION", "0", "must be at least 1"],
+  ])("checks %s", (name, value, message) => {
+    expect(problems({ ...openbao, [name]: value })).toEqual([`${name} ${message}`]);
   });
 });

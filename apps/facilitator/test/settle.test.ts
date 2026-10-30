@@ -21,6 +21,7 @@ import {
   RpcTimeoutError,
   RpcUnavailableError,
   SignedHookError,
+  SigningError,
   SimulationCheckError,
   SimulationError,
   SourceAccountAuthError,
@@ -574,6 +575,8 @@ describe("createSettler", () => {
     [new FeeLimitError("x"), "settle_exact_stellar_fee_exceeds_maximum"],
     [new LedgerBoundError("x"), "settle_exact_stellar_signature_expiration_too_soon"],
     [new SignedHookError("x"), "settle_exact_stellar_record_write_failed"],
+    [new SigningError("transaction", "x"), "settle_exact_stellar_transaction_signing_failed"],
+    [new SigningError("fee-bump", "x"), "settle_exact_stellar_fee_bump_signing_failed"],
     [new QueueTimeoutError("x"), "settle_exact_stellar_no_channel_in_time"],
     [new NoChannelsError("x"), "settle_exact_stellar_no_channels"],
     [new ShutdownError("x"), "settle_exact_stellar_shutting_down"],
@@ -588,6 +591,8 @@ describe("createSettler", () => {
     // Nothing was sent, so the auth entry can still land: repeat it, don't sign again (0073).
     // Written out, not read from `UNSENT_REASONS`, so a reason dropped from it fails here.
     const unsent = [
+      "settle_exact_stellar_transaction_signing_failed",
+      "settle_exact_stellar_fee_bump_signing_failed",
       "settle_exact_stellar_no_channel_in_time",
       "settle_exact_stellar_no_channels",
       "settle_exact_stellar_shutting_down",
@@ -1715,6 +1720,27 @@ describe("createSettler", () => {
       ).toBe(1);
       // Settled: a third call is a repeat of a success, never another reopen.
       expect((await settle(payload(), requirements)).response).toEqual(alreadySettled);
+      expect(submit).toHaveBeenCalledTimes(2);
+    });
+
+    it("settles the identical payload once the signer is back, after it failed to sign (0036)", async () => {
+      let calls = 0;
+      const { settle, store, submit } = setup(async (opts) => {
+        if (calls++ === 0) throw new SigningError("transaction", "OpenBao is sealed");
+        return landing()(opts);
+      });
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.transactionSigning,
+        extra: { retryable: true, expirationLedger: EXPIRATION },
+      });
+
+      expect((await settle(payload(), requirements)).response).toEqual({
+        success: true,
+        transaction: HASH,
+        network,
+        payer,
+      });
+      expect(await store.get(key)).toMatchObject({ state: "success", reopened: 1 });
       expect(submit).toHaveBeenCalledTimes(2);
     });
 

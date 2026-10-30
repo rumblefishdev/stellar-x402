@@ -183,6 +183,8 @@ unlocks one response.
 | `settle_exact_stellar_rpc_unavailable`               | an earlier hash, if any | no RPC endpoint answered (refused, failed or timed out)                                            | repeat the same payment while `extra.retryable` (see below)                               |
 | `settle_exact_stellar_no_channel_in_time`            | —                       | every channel was busy until the deadline                                                          | repeat the same payment while `extra.retryable` (see below)                               |
 | `settle_exact_stellar_no_channels`                   | —                       | every channel is out of the pool                                                                   | repeat the same payment while `extra.retryable` (see below)                               |
+| `settle_exact_stellar_transaction_signing_failed`    | an earlier hash, if any | the facilitator's key couldn't sign the transaction (OpenBao down, sealed or refusing)             | repeat the same payment while `extra.retryable` (see below)                               |
+| `settle_exact_stellar_fee_bump_signing_failed`       | an earlier hash, if any | the facilitator's key couldn't sign the fee bump                                                   | repeat the same payment while `extra.retryable` (see below)                               |
 | `settle_exact_stellar_fee_exceeds_maximum`           | an earlier hash, if any | the network fee rose above the facilitator's ceiling                                               | sign a new payment and try again later                                                    |
 | `settle_exact_stellar_signature_expiration_too_soon` | an earlier hash, if any | the auth expires before the pool could land it                                                     | sign a new payment with a longer `maxTimeoutSeconds`                                      |
 | `settle_exact_stellar_simulation_failed`             | an earlier hash, if any | the settlement's simulation failed, e.g. the payer's balance                                       | check the payer, then sign a new payment                                                  |
@@ -218,7 +220,8 @@ needs a new payment (a new nonce), except for:
   budget gets `…_timeout` instead of the spend reason.
 
 **Nothing sent** (task 0073). `…_timeout`, `…_interrupted`, `…_shutting_down`,
-`…_rpc_unavailable`, `…_no_channel_in_time` and `…_no_channels` with no `transaction` mean nothing
+`…_rpc_unavailable`, `…_no_channel_in_time`, `…_no_channels` and the two `…_signing_failed`
+(task 0036) with no `transaction` mean nothing
 was sent, but the payer's signed auth entry can still land until its expiration ledger, by
 whoever holds the payment. Signing a new payment then could charge the payer twice, so these
 answers carry `extra`:

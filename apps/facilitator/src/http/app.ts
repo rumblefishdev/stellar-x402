@@ -2,6 +2,7 @@ import { STATUS_CODES } from "node:http";
 import { PaymentPayloadV2Schema, PaymentRequirementsV2Schema } from "@x402/core/schemas";
 import type { SupportedResponse, VerifyRequest } from "@x402/core/types";
 import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
+import type { SignerState } from "../adapters/openbao-signer.js";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
 import type { Metrics } from "../metrics.js";
@@ -41,6 +42,8 @@ export interface AppDeps {
    * waits for each submission under way and its record write. Run by `start()`'s `close()`.
    */
   drain?: () => Promise<void>;
+  /** The facilitator key's signer as `/health` reports it (0036); tests may leave it out. */
+  signerState?: () => SignerState;
 }
 
 /** Seconds a client waits before it tries `/settle` again on a process that can't settle now. */
@@ -123,6 +126,7 @@ export function createApp({
   reconciliation,
   lease,
   closing,
+  signerState,
 }: AppDeps): Express {
   const app = express();
   app.disable("x-powered-by");
@@ -229,6 +233,8 @@ export function createApp({
   app.get("/health", (_req, res) => {
     res.json({
       ready: !closing?.() && (lease?.held() ?? true),
+      // Not part of `ready`: the service runs and verifies without OpenBao (0036 decision 4).
+      ...(signerState && { signer: signerState() }),
       listed: reconciliation?.listed() ?? true,
     });
   });
