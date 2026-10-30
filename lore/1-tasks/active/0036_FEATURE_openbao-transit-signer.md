@@ -59,15 +59,21 @@ the facilitator. It is built and tested against a local OpenBao in Docker, befor
 | 1 | The signer is built now, on OpenBao Transit as ADR 0013 has it. OpenBao hides the key from a read-only leak but can't limit what the key signs: on these accounts one signature can pay out the float or change the signers. Limiting that on chain stays 0048's re-check before mainnet | grilling | matches it | upstream's example facilitator keeps the seed in the environment | | |
 | 2 | 0036 adds the signer's variables and AppRole secrets to `deploy/production/compose.yaml`, in the signer's PR, for 0026's owner to review; the channels for the OpenBao key and the move to it stay in 0026 | grilling | beyond it | — | | |
 | 3 | One process holds every network's signer, each with its own socket, AppRole, policy and Transit key (0077, PR #93); 0036 configures one network now in that shape | grilling | matches it | — | | |
+| 4 | A few seconds after start, the signer signs a fixed 32-byte value (the hash of a constant text, which no transaction has) and checks it against the configured address; `/health` gains a `signer` field (ok, failed, not checked yet), updated by every signature after that. `ready` doesn't change, so the facilitator still starts and answers `/verify` without OpenBao | grilling | changes it (the task had no OpenBao call after start) | — | | |
+| 5 | In `openbao` mode, a set `FACILITATOR_SECRET` stops the start with the reason named | grilling | changes it (the task had it ignored) | — | | |
+| 6 | `secret` mode is refused on pubnet | grilling | beyond it | ADR 0013: one mechanism on both networks | | |
+| 7 | The signer talks to OpenBao with `undici`, already a dependency, over the unix socket; no OpenBao client library (none supports a unix socket and `transit/sign`) | grilling | matches it | OpenBao lists only a Go client | | |
+| 8 | Unit tests run against a fake server on a unix socket; tests against a real OpenBao in Docker run when an environment variable is set, in CI on Linux, since a container's socket doesn't reach a macOS host | grilling | matches it | — | | |
 
 ## Not yet decided
 
-- How the signer replaces an expired or revoked token: logging in again on a `403` and signing
-  once more, or a timer before the hour ends.
-- Whether the facilitator tracks the signer's state (a startup signature of a fixed hash, the
-  last signature's outcome) and shows it in `/health`.
-- How a transaction that isn't a settlement (channel setup, rotation) gets signed by the Transit
-  key: a small command in 0036 or a task of its own. AC 1 needs channels whose signer is that key.
+- How the signer replaces an expired or revoked token (split into smaller questions).
+- What `/settle` answers when a signature fails.
+- How long the signer waits for OpenBao (measured first).
+- Whether every signature is checked against the address, or only the first.
+- Whether channels are created by a separate funding account, with the OpenBao key only added
+  as their signer, so setup needs no Transit signature.
+- Whether today's transaction shape (three signatures per settlement) is needed at all.
 
 ## PR split
 
