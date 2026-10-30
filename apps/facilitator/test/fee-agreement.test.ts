@@ -3,6 +3,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
   Account,
+  Address,
   Keypair,
   Networks,
   Operation,
@@ -26,7 +27,9 @@ import { parseConfig } from "../src/config.js";
 import { rpcEndpointName } from "../src/logger.js";
 import { buildRpc, buildVerifier } from "../src/main.js";
 import { feeSettings } from "../src/settlement/fees.js";
+import { PAYTO_TRUSTLINE_REASON } from "../src/settlement/trustline.js";
 import type { VerifyTrace } from "../src/settlement/verify.js";
+import realTrustlineMissing from "./fixtures/trustline-missing.json" with { type: "json" };
 
 const MAX_FEE = 250_000;
 const BID = 1_000;
@@ -39,6 +42,8 @@ const payTo = Keypair.random().publicKey();
 /** The resource fee every simulation reports, upstream's and the pool's alike. */
 let resourceFee = 0;
 let latestLedger = 100;
+/** Set: the RPC answers as testnet does for a missing trustline (a captured simulation). */
+let trustlineMissing = false;
 
 function simulation() {
   return {
@@ -63,10 +68,17 @@ beforeAll(async () => {
     req.on("end", () => {
       const { id, method } = JSON.parse(body) as { id: number; method: string };
       res.setHeader("content-type", "application/json");
+      const { events, error, instance, latestLedger: ledger } = realTrustlineMissing;
+      const answers: Record<string, unknown> = {
+        simulateTransaction: trustlineMissing
+          ? { id: "1", latestLedger: ledger, events, error }
+          : simulation(),
+        getLedgerEntries: { latestLedger: ledger, entries: [instance] },
+      };
       res.end(
         JSON.stringify(
-          method === "simulateTransaction"
-            ? { jsonrpc: "2.0", id, result: simulation() }
+          method in answers
+            ? { jsonrpc: "2.0", id, result: answers[method] }
             : { jsonrpc: "2.0", id, error: { code: -32601, message: `no ${method}` } },
         ),
       );
@@ -186,6 +198,85 @@ describe("the fee ceiling at /verify and in the pool (AD-10)", () => {
     resourceFee = fee;
     expect(await verifyRefuses()).toBe(refused);
     expect(await poolRefuses()).toBe(refused);
+  });
+});
+
+describe("real upstream refusing a payment with no trustline (0078)", () => {
+  it("keeps the code and the payer the lookup starts from", async () => {
+    // The fixture's account has no USDC trustline: it stands for `payTo` here, as the event names
+    // whichever account the SAC stopped at, and the payer's signed entry is all the guard needs.
+    const { asset: usdc, account, latestLedger: ledger } = realTrustlineMissing;
+    const entry = new xdr.SorobanAuthorizationEntry({
+      credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(
+        new xdr.SorobanAddressCredentials({
+          address: new Address(payer).toScAddress(),
+          nonce: xdr.Int64.fromString("1"),
+          signatureExpirationLedger: ledger + 20,
+          signature: xdr.ScVal.scvVoid(),
+        }),
+      ),
+      rootInvocation: new xdr.SorobanAuthorizedInvocation({
+        function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
+          new xdr.InvokeContractArgs({
+            contractAddress: new Address(usdc).toScAddress(),
+            functionName: "transfer",
+            args: [],
+          }),
+        ),
+        subInvocations: [],
+      }),
+    });
+    const transaction = new TransactionBuilder(new Account(payer, "1"), {
+      fee: "100",
+      networkPassphrase: Networks.TESTNET,
+    })
+      .addOperation(
+        Operation.invokeContractFunction({
+          contract: usdc,
+          function: "transfer",
+          args: [
+            nativeToScVal(payer, { type: "address" }),
+            nativeToScVal(account, { type: "address" }),
+            nativeToScVal(1000n, { type: "i128" }),
+          ],
+          auth: [entry],
+        }),
+      )
+      .setTimeout(60)
+      .build();
+    const usdcRequirements = { ...requirements, asset: usdc, payTo: account };
+    const config = parseConfig({
+      FACILITATOR_SECRET: facilitator.secret(),
+      DATABASE_URL: "postgres://db.internal/x402",
+      CLIENT_IP: "socket",
+      CHANNELS: channel,
+      RPC_URLS: rpcUrl,
+      MAX_FEE_STROOPS: String(MAX_FEE),
+      INCLUSION_FEE_STROOPS: String(BID),
+    });
+    const logger = { warn: vi.fn(), info: vi.fn() };
+    const shared = buildRpc(config, logger);
+    const verify = buildVerifier(config, shared, feeSettings(config.fees, shared), logger);
+    trustlineMissing = true;
+    try {
+      await expect(
+        verify(
+          {
+            x402Version: 2,
+            accepted: usdcRequirements,
+            payload: { transaction: transaction.toXDR() },
+          },
+          usdcRequirements,
+        ),
+      ).resolves.toMatchObject({
+        isValid: false,
+        invalidReason: PAYTO_TRUSTLINE_REASON,
+        invalidMessage: expect.stringContaining(`${account} has no USDC:G`),
+        payer,
+      });
+    } finally {
+      trustlineMissing = false;
+    }
   });
 });
 

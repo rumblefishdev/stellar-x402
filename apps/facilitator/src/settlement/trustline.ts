@@ -8,6 +8,12 @@ export const PAYER_TRUSTLINE_REASON = "invalid_exact_stellar_payer_trustline_mis
 /** The seller's `payTo` holds no trustline to the payment's classic asset, or doesn't exist. */
 export const PAYTO_TRUSTLINE_REASON = "invalid_exact_stellar_payto_trustline_missing";
 
+/** The refusals whose `invalidMessage` is logged: only it names the account and the asset. */
+export const TRUSTLINE_REASONS: ReadonlySet<string | undefined> = new Set([
+  PAYER_TRUSTLINE_REASON,
+  PAYTO_TRUSTLINE_REASON,
+]);
+
 /** The Stellar Asset Contract's `TrustlineMissingError`. */
 const TRUSTLINE_MISSING_CODE = 13;
 /** How long the whole lookup may take. It only names the cause of a refusal already decided. */
@@ -40,6 +46,7 @@ export type FindMissingTrustline = (
  */
 export function createTrustlineLookup(
   deps: Pick<SorobanRpc, "simulateTransaction" | "getLedgerEntries">,
+  network: string,
   logger: Pick<Logger, "warn">,
   timeoutMs = LOOKUP_TIMEOUT_MS,
 ): FindMissingTrustline {
@@ -47,7 +54,7 @@ export function createTrustlineLookup(
     try {
       return await withTimeout(lookup(deps, payment), timeoutMs, "trustline lookup");
     } catch (error) {
-      logger.warn("trustline_lookup_failed", { error });
+      logger.warn("trustline_lookup_failed", { network, error });
       return undefined;
     }
   };
@@ -64,7 +71,9 @@ async function lookup(
   // Any contract can emit this error and text; only a SAC's means a trustline.
   const assetName = await stellarAssetName(deps, asset);
   if (assetName === undefined) return undefined;
-  const missing = `${account} has no ${assetName} trustline: the account must exist and hold one`;
+  // A lagging RPC can answer this too, so the message says which ledger it is true of.
+  const ledger = simulation.latestLedger;
+  const missing = `${account} has no ${assetName} trustline as of ledger ${ledger}: the account must exist and hold one`;
   return account === payer
     ? { invalidReason: PAYER_TRUSTLINE_REASON, invalidMessage: `${missing}; payTo wasn't checked` }
     : { invalidReason: PAYTO_TRUSTLINE_REASON, invalidMessage: missing };

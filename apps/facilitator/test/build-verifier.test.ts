@@ -597,7 +597,7 @@ describe("buildVerifier (the /verify wiring in main)", () => {
     const refused = {
       isValid: false,
       invalidReason: PAYTO_TRUSTLINE_REASON,
-      invalidMessage: `${payTo} has no ${name} trustline: the account must exist and hold one`,
+      invalidMessage: `${payTo} has no ${name} trustline as of ledger ${CURRENT}: the account must exist and hold one`,
       payer,
     };
     await expect(verify(payload(), requirements)).resolves.toEqual(refused);

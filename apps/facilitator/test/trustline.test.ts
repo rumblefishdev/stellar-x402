@@ -8,6 +8,7 @@ import {
   StrKey,
   TransactionBuilder,
   nativeToScVal,
+  rpc,
   xdr,
 } from "@stellar/stellar-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -16,6 +17,7 @@ import {
   PAYTO_TRUSTLINE_REASON,
   createTrustlineLookup,
 } from "../src/settlement/trustline.js";
+import realTrustlineMissing from "./fixtures/trustline-missing.json" with { type: "json" };
 
 const assetBytes = Buffer.alloc(32, 7);
 const asset = StrKey.encodeContract(assetBytes);
@@ -123,6 +125,7 @@ function setup(simulation: unknown, entries: unknown = instance(true), timeoutMs
   const warn = vi.fn();
   const find = createTrustlineLookup(
     { simulateTransaction, getLedgerEntries } as never,
+    "stellar:testnet",
     { warn },
     timeoutMs,
   );
@@ -138,7 +141,7 @@ describe("createTrustlineLookup", () => {
     const { find, simulateTransaction } = setup(failed(errorEvent(payTo)));
     await expect(find(payment)).resolves.toEqual({
       invalidReason: PAYTO_TRUSTLINE_REASON,
-      invalidMessage: `${payTo} has no ${NAME} trustline: the account must exist and hold one`,
+      invalidMessage: `${payTo} has no ${NAME} trustline as of ledger 1: the account must exist and hold one`,
     });
     expect(simulateTransaction).toHaveBeenCalledWith(transaction);
   });
@@ -147,7 +150,29 @@ describe("createTrustlineLookup", () => {
     const { find } = setup(failed(errorEvent(payer)));
     await expect(find(payment)).resolves.toEqual({
       invalidReason: PAYER_TRUSTLINE_REASON,
-      invalidMessage: `${payer} has no ${NAME} trustline: the account must exist and hold one; payTo wasn't checked`,
+      invalidMessage: `${payer} has no ${NAME} trustline as of ledger 1: the account must exist and hold one; payTo wasn't checked`,
+    });
+  });
+
+  it("reads the event and the instance a real SAC answers with", async () => {
+    // Captured on testnet: a hand-built event wouldn't notice the real one changing shape.
+    const { events, latestLedger, error, instance: entry } = realTrustlineMissing;
+    const simulated = rpc.parseRawSimulation({ id: "1", latestLedger, events, error });
+    const real = createTrustlineLookup(
+      {
+        simulateTransaction: async () => simulated,
+        getLedgerEntries: async () => ({
+          latestLedger,
+          entries: [{ val: xdr.LedgerEntryData.fromXDR(entry.xdr, "base64") }],
+        }),
+      } as never,
+      "stellar:testnet",
+      { warn: vi.fn() },
+    );
+    const { account, asset: usdc } = realTrustlineMissing;
+    await expect(real({ ...payment, asset: usdc, payer: account })).resolves.toMatchObject({
+      invalidReason: PAYER_TRUSTLINE_REASON,
+      invalidMessage: expect.stringContaining(`${account} has no USDC:G`),
     });
   });
 
@@ -190,7 +215,7 @@ describe("createTrustlineLookup", () => {
   it("names the asset by its contract when the SAC has no name", async () => {
     const { find } = setup(failed(errorEvent(payTo)), instance(true, false));
     await expect(find(payment)).resolves.toMatchObject({
-      invalidMessage: expect.stringContaining(`has no ${asset} trustline`),
+      invalidMessage: expect.stringContaining(`has no ${asset} trustline as of ledger 1`),
     });
   });
 
@@ -236,6 +261,7 @@ describe("createTrustlineLookup", () => {
     failing.simulateTransaction.mockRejectedValue(new Error("rpc down"));
     await expect(failing.find(payment)).resolves.toBeUndefined();
     expect(failing.warn).toHaveBeenCalledWith("trustline_lookup_failed", {
+      network: "stellar:testnet",
       error: expect.any(Error),
     });
 

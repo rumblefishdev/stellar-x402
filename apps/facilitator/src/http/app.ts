@@ -10,6 +10,7 @@ import type { SettlementHooks } from "../settlement/hooks.js";
 import type { LeaseKeeper } from "../settlement/lease.js";
 import type { Reconciliation } from "../settlement/reconcile.js";
 import type { Settle } from "../settlement/settle.js";
+import { TRUSTLINE_REASONS } from "../settlement/trustline.js";
 import type { Verify, VerifyTrace } from "../settlement/verify.js";
 import { discoveryResources } from "./discovery.js";
 import { EXTENSION_RESPONSES_HEADER, encodeExtensionResponses } from "./extension-responses.js";
@@ -166,6 +167,7 @@ export function createApp({
       payer: response.payer,
       // Which RPC URL answered: a lagging fallback rejects valid payments (AD-3).
       rpc: trace.rpc,
+      message: TRUSTLINE_REASONS.has(response.invalidReason) ? response.invalidMessage : undefined,
     });
     res.json(response);
   });
@@ -208,6 +210,7 @@ export function createApp({
         replay: replay ?? false,
         success: response.success,
         errorReason: response.errorReason,
+        message: TRUSTLINE_REASONS.has(response.errorReason) ? response.errorMessage : undefined,
         payer: response.payer,
         transaction: response.transaction || undefined,
       });
