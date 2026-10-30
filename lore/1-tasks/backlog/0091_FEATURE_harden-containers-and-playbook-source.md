@@ -30,8 +30,9 @@ installs what root runs on the shared server, comes from `develop`, which has no
 - The runbook runs the playbook from `origin/develop` and calls that commit the boundary around
   production. Anyone with write access can push to `develop` without a review. Protecting it isn't
   free: lore status changes go straight to it.
-- `deploy/production` is protected already (a pull request with an approving review, no bypass),
-  so CI's way to the server is reviewed and the admin's isn't.
+- `deploy/production` doesn't exist yet. The runbook creates it before the first deploy, protected
+  by a pull request with an approving review and no bypass, so CI's way to the server is reviewed
+  and the admin's isn't.
 
 ## Implementation
 
