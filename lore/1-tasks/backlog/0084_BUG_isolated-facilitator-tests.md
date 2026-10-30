@@ -35,6 +35,14 @@ Each test should own its record and its time, so it gives the same result on any
   "refuses a call that has signed nothing when the drain starts" (`settle-pool.test.ts:416`) gets
   `record_write_failed` instead of `shutting_down`. Not reachable in production: nothing deletes a
   record under a running call, and each payment has its own key.
+  - **Measured 2026-10-30:** this leak is the cause. With a busy loop on each of 16 cores, the whole
+    `settle-pool.test.ts` failed 6 of 6 runs; idle it passed 6 of 6. The drain test on its own nonce,
+    or the leaking test skipped, passed 6 of 6 under load. (The tests have moved: the leaking test
+    is now at `settle-pool.test.ts:325`.)
+  - **This one leak's fix (0074, agreed, not applied):** end "ends a call at SETTLE_BUDGET_MS" with
+    `await drain()`, which passed 8 of 8 under load. It stops this test only, so this task's own
+    payment per test (options A, B) is still needed: any other test that ends before its call
+    leaks the same way.
 - **Two clocks.** The settle budget runs on the real clock and the store is real PostgreSQL, so on
   a slow runner the budget ends at another step than the test names. 0074's PR #76 moves the
   `settle budget (ADR 0011)` block to fake timers advanced 1 ms at a time once the pool is idle
