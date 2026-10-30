@@ -476,6 +476,8 @@ export function compose(
   const metrics = memoryMetrics();
   const cataloger = createCataloger({
     store: stores.catalog,
+    attempts: stores.catalogAttempts,
+    rateLimits: stores.rateLimits,
     logger,
     metrics,
     listLocal: config.catalog.listLocal,
@@ -594,6 +596,7 @@ export async function main(
     const pruner = createPruner({
       spend: stores.spend,
       rateLimits: stores.rateLimits,
+      catalogAttempts: stores.catalogAttempts,
       spendWindowMs: config.spend.windowMs,
       rateLimitWindowMs: config.http.rateLimit.windowMs,
       logger,

@@ -1,14 +1,17 @@
+import { PaymentRequirementsV2Schema } from "@x402/core/schemas";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import type pg from "pg";
 import type {
+  CatalogAttempt,
+  CatalogAttemptStore,
   CatalogEntry,
+  CatalogKey,
   CatalogPage,
   CatalogQuery,
   CatalogStore,
   UpsertOutcome,
 } from "../ports/index.js";
-import { inTransaction } from "./postgres.js";
-import { assertLedger, extensionKeys, mergeCatalogEntry } from "./rules.js";
+import { assertCount, extensionKeys } from "./rules.js";
 
 /** `resource` and the filter columns copied from it, which every write keeps in step. */
 const resourceColumns = (resource: DiscoveryResource) => [
@@ -25,48 +28,51 @@ export class PostgresCatalogStore implements CatalogStore {
     private readonly listPool: pg.Pool = pool,
   ) {}
 
-  /** Inserts, or locks the stored entry and applies the shared merge to it, in one transaction. */
+  async get(key: CatalogKey): Promise<DiscoveryResource | undefined> {
+    const { rows } = await this.pool.query<{ resource: DiscoveryResource }>(
+      `SELECT resource FROM catalog WHERE ${CATALOG_KEY_WHERE}`,
+      [key.network, key.payTo, key.method, key.resourceUrl],
+    );
+    return rows[0]?.resource;
+  }
+
+  /**
+   * Inserts, or replaces the stored entry unless a check that started later wrote it. A
+   * concurrent insert of the key makes the insert wait for its commit, and the update re-reads
+   * the row it then finds, so of concurrent writes the latest `checkedAt` stays.
+   */
   async upsert(entry: CatalogEntry): Promise<UpsertOutcome> {
-    assertLedger(entry.ledger);
+    assertCount(entry.ledger, "ledger");
+    assertCount(entry.checkedAt, "checkedAt");
+    // The one function that writes the catalog: no offer outside the upstream schema is stored.
+    for (const offer of entry.resource.accepts) PaymentRequirementsV2Schema.parse(offer);
     const { network, payTo, method, resourceUrl } = entry.key;
-    const key = [network, payTo, method, resourceUrl];
-    return inTransaction(this.pool, async (client) => {
-      const fresh = mergeCatalogEntry(undefined, entry).merged;
-      const inserted = await client.query(
-        `INSERT INTO catalog (network, pay_to, method, resource_url, key_version, ledger, resource,
-           type, extension_keys)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         ON CONFLICT (network, pay_to, method, resource_url) DO NOTHING
-         RETURNING seq`,
-        [...key, fresh.keyVersion, fresh.ledger, ...resourceColumns(fresh.resource)],
-      );
-      if (inserted.rowCount === 1) return "inserted";
-      // The conflict waited for any concurrent insert to commit, so this statement sees the row.
-      const { rows } = await client.query<{
-        key_version: number;
-        ledger: string;
-        resource: DiscoveryResource;
-      }>(
-        `SELECT key_version, ledger, resource FROM catalog WHERE ${CATALOG_KEY_WHERE} FOR UPDATE`,
-        key,
-      );
-      const row = rows[0]!;
-      const stored: CatalogEntry = {
-        key: entry.key,
-        keyVersion: row.key_version,
-        ledger: Number(row.ledger),
-        resource: row.resource,
-      };
-      const { merged, stale } = mergeCatalogEntry(stored, entry);
-      // `seq` is untouched, so the entry keeps its place in the listing.
-      await client.query(
-        `UPDATE catalog SET key_version = $5, ledger = $6, resource = $7, type = $8,
-           extension_keys = $9
-         WHERE ${CATALOG_KEY_WHERE}`,
-        [...key, merged.keyVersion, merged.ledger, ...resourceColumns(merged.resource)],
-      );
-      return stale ? "stale" : "updated";
-    });
+    const values = [
+      network,
+      payTo,
+      method,
+      resourceUrl,
+      entry.keyVersion,
+      entry.ledger,
+      entry.checkedAt,
+      ...resourceColumns(entry.resource),
+    ];
+    const inserted = await this.pool.query(
+      `INSERT INTO catalog (network, pay_to, method, resource_url, key_version, ledger, checked_at,
+         resource, type, extension_keys)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       ON CONFLICT (network, pay_to, method, resource_url) DO NOTHING`,
+      values,
+    );
+    if (inserted.rowCount === 1) return "inserted";
+    // `seq` is untouched, so the entry keeps its place in the listing.
+    const updated = await this.pool.query(
+      `UPDATE catalog SET key_version = $5, ledger = $6, checked_at = $7, resource = $8, type = $9,
+         extension_keys = $10
+       WHERE ${CATALOG_KEY_WHERE} AND coalesce(checked_at, 0) <= $7`,
+      values,
+    );
+    return updated.rowCount === 1 ? "updated" : "stale";
   }
 
   /**
@@ -94,5 +100,51 @@ export class PostgresCatalogStore implements CatalogStore {
     );
     const page = rows[0]!;
     return { items: page.items, total: Number(page.total) };
+  }
+}
+
+/**
+ * A NUL inside a payer's or seller's text is valid JSON, but neither `text` nor `jsonb` stores it,
+ * so the attempt's insert would fail: it is kept as U+FFFD instead.
+ */
+const withoutNul = (_key: string, value: unknown) =>
+  typeof value === "string" ? value.replaceAll("\u0000", "\uFFFD") : value;
+
+export class PostgresCatalogAttemptStore implements CatalogAttemptStore {
+  constructor(private readonly pool: pg.Pool) {}
+
+  async record(attempt: CatalogAttempt): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO catalog_attempts (at, network, pay_to, method, resource_url, url, payer,
+         transaction, stage, outcome, reason, detail, field_bytes, content_hash, copy, answer)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+      [
+        attempt.at,
+        attempt.network,
+        attempt.payTo,
+        attempt.key?.method ?? null,
+        attempt.key?.resourceUrl ?? null,
+        attempt.url ?? null,
+        attempt.payer,
+        attempt.transaction ?? null,
+        attempt.stage,
+        attempt.outcome,
+        attempt.reason ?? null,
+        attempt.detail ?? null,
+        attempt.fieldBytes ?? null,
+        attempt.contentHash ?? null,
+        attempt.copy === undefined ? null : JSON.stringify(attempt.copy, withoutNul),
+        attempt.answer === undefined ? null : JSON.stringify(attempt.answer, withoutNul),
+      ].map((value) => (typeof value === "string" ? value.replaceAll("\u0000", "\uFFFD") : value)),
+    );
+  }
+
+  async prune(before: number, limit: number): Promise<number> {
+    const { rowCount } = await this.pool.query(
+      `DELETE FROM catalog_attempts WHERE id IN (
+         SELECT id FROM catalog_attempts WHERE at < $1 LIMIT $2 FOR UPDATE SKIP LOCKED)`,
+      [before, limit],
+    );
+    return rowCount ?? 0;
   }
 }

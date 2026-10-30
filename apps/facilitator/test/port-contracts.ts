@@ -5,6 +5,8 @@ import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   HashConflictError,
+  type CatalogAttempt,
+  type CatalogAttemptStore,
   LEASE_SKEW_MARGIN_MS,
   type CatalogEntry,
   type CatalogStore,
@@ -891,8 +893,10 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
       lastUpdated: "2026-10-08T00:00:00.000Z",
       ...overrides,
     });
-    const upsert = (entry: Omit<CatalogEntry, "keyVersion" | "ledger">, ledger = 1) =>
-      store.upsert({ keyVersion: CATALOG_KEY_VERSION, ledger, ...entry });
+    const upsert = (
+      entry: Omit<CatalogEntry, "keyVersion" | "ledger" | "checkedAt">,
+      checkedAt = 1,
+    ) => store.upsert({ keyVersion: CATALOG_KEY_VERSION, ledger: 1, checkedAt, ...entry });
     const key = (url: string, payTo = PAY_TO, network: StellarNetwork = "stellar:testnet") => ({
       network,
       payTo,
@@ -900,70 +904,61 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
       resourceUrl: url,
     });
 
-    it("upserts by key, merging accepts by scheme, network and asset", async () => {
+    it("replaces the stored entry by key, its accepts included (0063 row 7)", async () => {
       const url = "https://seller.example.com/data";
       await upsert({ key: key(url), resource: resource(url, { description: "old" }) });
-      await upsert({
-        key: key(url),
-        resource: resource(url, {
-          description: "new",
-          accepts: [requirements({ asset: "COTHER" })],
-          lastUpdated: "2026-10-09T00:00:00.000Z",
-        }),
-      });
-      await upsert({
-        key: key(url),
-        resource: resource(url, { description: "new", accepts: [requirements({ amount: "200" })] }),
-      });
+      await upsert(
+        {
+          key: key(url),
+          resource: resource(url, {
+            description: "new",
+            accepts: [requirements({ asset: "COTHER" })],
+            lastUpdated: "2026-10-09T00:00:00.000Z",
+          }),
+        },
+        2,
+      );
       const page = await store.list({ limit: 10, offset: 0 });
       expect(page.total).toBe(1);
-      expect(page.items[0]).toMatchObject({ description: "new" });
-      expect(page.items[0]?.accepts.map((a) => [a.asset, a.amount])).toEqual([
-        ["CASSET", "200"],
-        ["COTHER", "100"],
-      ]);
+      expect(page.items[0]).toMatchObject({
+        description: "new",
+        lastUpdated: "2026-10-09T00:00:00.000Z",
+      });
+      expect(page.items[0]?.accepts.map((a) => a.asset)).toEqual(["COTHER"]);
+      expect(await store.get(key(url))).toEqual(page.items[0]);
+      expect(await store.get(key("https://seller.example.com/none"))).toBeUndefined();
     });
 
-    it("reports the outcome; a write from an earlier ledger only adds what is missing", async () => {
+    it("keeps the entry of the check that started later; an earlier one is stale (row 10)", async () => {
       const url = "https://seller.example.com/data";
-      const at = (ledger: number, description: string, asset = "CASSET") =>
-        upsert(
-          {
-            key: key(url),
-            resource: resource(url, {
-              description,
-              accepts: [requirements({ asset, amount: String(ledger) })],
-            }),
-          },
-          ledger,
-        );
+      const at = (checkedAt: number, description: string) =>
+        upsert({ key: key(url), resource: resource(url, { description }) }, checkedAt);
       expect(await at(10, "new")).toBe("inserted");
-      expect(await at(10, "same ledger")).toBe("updated");
-      expect(await at(9, "old", "COTHER")).toBe("stale");
-      expect(await at(9, "old")).toBe("stale");
-      const [item] = (await store.list({ limit: 10, offset: 0 })).items;
-      expect(item?.description).toBe("same ledger");
-      expect(item?.accepts.map((a) => [a.asset, a.amount])).toEqual([
-        ["CASSET", "10"],
-        ["COTHER", "9"],
-      ]);
+      expect(await at(10, "same start")).toBe("updated");
+      expect(await at(9, "older")).toBe("stale");
+      expect((await store.get(key(url)))?.description).toBe("same start");
       await expect(at(Number.NaN, "bad")).rejects.toThrow();
     });
 
-    it("merges concurrent upserts of one key without losing a requirement", async () => {
+    it("keeps the latest of concurrent upserts of one key", async () => {
       const url = "https://seller.example.com/data";
-      const assets = Array.from({ length: 10 }, (_, i) => `C${i}`);
       await Promise.all(
-        assets.map((asset) =>
-          upsert({
-            key: key(url),
-            resource: resource(url, { accepts: [requirements({ asset })] }),
-          }),
+        Array.from({ length: 10 }, (_, i) =>
+          upsert({ key: key(url), resource: resource(url, { description: `d${i}` }) }, i),
         ),
       );
       const page = await store.list({ limit: 10, offset: 0 });
       expect(page.total).toBe(1);
-      expect(page.items[0]?.accepts.map((a) => a.asset).sort()).toEqual(assets.sort());
+      expect(page.items[0]?.description).toBe("d9");
+    });
+
+    it("refuses an offer that is not an upstream payment requirement (row 19)", async () => {
+      const url = "https://seller.example.com/data";
+      const bad = { ...requirements(), amount: 100 } as unknown as PaymentRequirements;
+      await expect(
+        upsert({ key: key(url), resource: resource(url, { accepts: [bad] }) }),
+      ).rejects.toThrow();
+      expect(await store.get(key(url))).toBeUndefined();
     });
 
     it("filters, pages and keeps a stable order", async () => {
@@ -1018,11 +1013,11 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
 
     it("filters on the stored fields after an update, and after a stale write", async () => {
       const url = "https://seller.example.com/data";
-      const at = (ledger: number, overrides: Partial<DiscoveryResource>) =>
-        upsert({ key: key(url), resource: resource(url, overrides) }, ledger);
+      const at = (checkedAt: number, overrides: Partial<DiscoveryResource>) =>
+        upsert({ key: key(url), resource: resource(url, overrides) }, checkedAt);
       await at(10, { type: "http", extensions: { bazaar: {} } });
       await at(10, { type: "mcp" });
-      // A write from an earlier ledger keeps the stored fields, and with them the filters.
+      // A check that started earlier keeps the stored fields, and with them the filters.
       expect(await at(9, { type: "http", extensions: { bazaar: {} } })).toBe("stale");
       const total = async (query: Omit<Parameters<CatalogStore["list"]>[0], "limit" | "offset">) =>
         (await store.list({ ...query, limit: 10, offset: 0 })).total;
@@ -1052,6 +1047,48 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
         items: [],
         total: 0,
       });
+    });
+  });
+}
+
+export function catalogAttemptStoreContract(make: Make<CatalogAttemptStore>) {
+  describe("CatalogAttemptStore contract (0063 row 23)", () => {
+    let attempts: CatalogAttemptStore;
+    beforeEach(async () => {
+      attempts = await make();
+    });
+
+    const attempt = (at: number, overrides: Partial<CatalogAttempt> = {}): CatalogAttempt => ({
+      at,
+      network: "stellar:testnet",
+      payTo: PAY_TO,
+      payer: PAYER,
+      stage: "payment",
+      outcome: "rejected",
+      ...overrides,
+    });
+
+    it("prunes attempts before a time in batches, keeping later ones", async () => {
+      for (const at of [1, 2, 3, 10]) await attempts.record(attempt(at));
+      await attempts.record(
+        attempt(11, {
+          key: {
+            network: "stellar:testnet",
+            payTo: PAY_TO,
+            method: "GET",
+            resourceUrl: "https://x.example/a",
+          },
+          url: "https://x.example/a?q=1",
+          transaction: "tx",
+          reason: "too_large",
+          detail: "accepts.extra",
+          fieldBytes: 5_000,
+          contentHash: "ab".repeat(32),
+        }),
+      );
+      expect(await attempts.prune(5, 2)).toBe(2);
+      expect(await attempts.prune(5, 2)).toBe(1);
+      expect(await attempts.prune(5, 2)).toBe(0);
     });
   });
 }

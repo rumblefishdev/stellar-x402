@@ -1,6 +1,6 @@
 import type { Logger } from "./logger.js";
 import type { Metrics } from "./metrics.js";
-import type { RateLimitStore, SpendStore } from "./ports/index.js";
+import type { CatalogAttemptStore, RateLimitStore, SpendStore } from "./ports/index.js";
 
 const DAY_MS = 86_400_000;
 const INTERVAL_MS = 60_000;
@@ -17,9 +17,13 @@ const BUDGET_MS = 1_000;
  */
 export const spendHorizonMs = (windowMs: number) => Math.max(2 * windowMs, 7 * DAY_MS);
 
+/** How long listing attempts are kept for analysis (0063, an assumption). */
+const CATALOG_ATTEMPTS_HORIZON_MS = 30 * DAY_MS;
+
 export interface PrunerDeps {
   spend: Pick<SpendStore, "prune">;
   rateLimits: Pick<RateLimitStore, "prune">;
+  catalogAttempts: Pick<CatalogAttemptStore, "prune">;
   /** The longest window any spend budget sums. */
   spendWindowMs: number;
   rateLimitWindowMs: number;
@@ -43,7 +47,8 @@ export interface Pruner {
 }
 
 /**
- * Deletes spend reservations and rate-limit windows no budget or limit counts any more (0050).
+ * Deletes spend reservations and rate-limit windows no budget or limit counts any more (0050), and
+ * listing attempts past their 30 days (0063).
  * Every process runs one: the deletes skip rows another holds, so pruners never wait on each
  * other or on a request, and a pruner that stops costs disk, not latency. A failure is logged
  * and counted, and the next tick tries again.
@@ -64,6 +69,11 @@ export function createPruner(deps: PrunerDeps): Pruner {
     },
     // A window that ended a window ago: a hit from a clock that lags by less still finds it.
     { table: "rate_limits", store: deps.rateLimits, horizonMs: deps.rateLimitWindowMs },
+    {
+      table: "catalog_attempts",
+      store: deps.catalogAttempts,
+      horizonMs: CATALOG_ATTEMPTS_HORIZON_MS,
+    },
   ];
 
   const pruneTable = async ({ table, store, horizonMs }: (typeof tables)[number]) => {

@@ -309,7 +309,7 @@ graph TD
     - Types come from `@x402/extensions` (bazaar). `packages/bazaar` holds only a pure validator and normalizer.
     - The validator accepts both `http` and `mcp` input types.
     - Required fields that are malformed reject the listing. Optional fields that are malformed (`serviceName`, `tags`, `iconUrl`) are dropped.
-  - **`iconUrl`.** It must be absolute https, with no IP literals and no loopback, private or special-use hosts. The facilitator never fetches any seller-supplied URL in T1.
+  - **`iconUrl`.** It must be absolute https, with no IP literals and no loopback, private or special-use hosts. The facilitator calls a seller URL only to read a listing from the seller's own 402, through the `packages/seller-fetch` guard ([ADR 0008](../adr/0008-bazaar-catalog-integrity.md), task 0063).
   - **Resource URLs.** A scheme allowlist by listing type (`http`: `https`, `http`; `mcp`: also `mcp`) and a DNS-style name for an `mcp:` host; SSRF is checked by whoever fetches them (task 0053, ADR 0008). On every network, only `http(s)` with a public host is listed: IP literals, loopback, private, special-use and single-label hosts and `mcp:` URLs are refused as `resource_not_public`, and the payment settles as usual (task 0054). `CATALOG_LIST_LOCAL=true`, testnet only, lists them for local runs and the e2e gate. An empty `description` or `mimeType` counts as absent.
   - **Catalog key.** It is `network + payTo + method + normalized resource URL` (with `routeTemplate` applied).
   - **Upserts.** They are idempotent and update `lastUpdated`.

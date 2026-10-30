@@ -31,10 +31,10 @@ import {
   isForward,
   windowEnd,
 } from "./rules.js";
-import { PostgresCatalogStore } from "./postgres-catalog.js";
+import { PostgresCatalogAttemptStore, PostgresCatalogStore } from "./postgres-catalog.js";
 
 /**
- * PostgreSQL adapters of the four ports (AD-7, ADR 0012), on the schema in `postgres-schema.ts`.
+ * PostgreSQL adapters of the ports (AD-7, ADR 0012), on the schema in `postgres-schema.ts`.
  * They share one pool, except `reserve`, the rate limiter's `hit` and the catalog's `list`, which
  * can each run on their own; concurrent calls run on separate connections.
  *
@@ -63,6 +63,7 @@ export function postgresStores(
   return {
     settlements: new PostgresSettlementStore(pool),
     catalog: new PostgresCatalogStore(pool, pools.discovery ?? pool),
+    catalogAttempts: new PostgresCatalogAttemptStore(pool),
     rateLimits: new PostgresRateLimitStore(pools.rateLimits ?? pool, pool),
     spend: new PostgresSpendStore(pool, pools.reserve ?? pool),
   };

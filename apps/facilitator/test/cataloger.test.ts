@@ -1,24 +1,35 @@
-import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
+import type { PaymentPayload, PaymentRequired, PaymentRequirements } from "@x402/core/types";
 import { safeBase64Decode } from "@x402/core/utils";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as bazaarLib from "@stellar-x402/bazaar";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCataloger, type CatalogerDeps } from "../src/catalog/cataloger.js";
 import { encodeExtensionResponses } from "../src/http/extension-responses.js";
 import type { Logger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import type { SettlementRecord } from "../src/ports/index.js";
 import { testDatabase } from "./database.js";
+import { startSeller, type Seller } from "./seller.js";
 
 const requirements = {
   scheme: "exact",
   network: "stellar:testnet",
   asset: "CASSET",
-  amount: "100",
+  amount: "10000",
   payTo: "GPAYTO",
   maxTimeoutSeconds: 60,
   extra: {},
 } as PaymentRequirements;
 
-function record(bazaar: unknown, overrides: Partial<SettlementRecord> = {}): SettlementRecord {
+const valid = { info: { input: { type: "http", method: "GET" } }, routeTemplate: "/users/:id" };
+const DESCRIPTION = "Users by id";
+
+let seller: Seller;
+
+function record(
+  bazaar: unknown,
+  overrides: Partial<SettlementRecord> = {},
+  resource: object = {},
+): SettlementRecord {
   const extensions = bazaar === undefined ? {} : { bazaar, "sign-in-with-x": { token: "secret" } };
   return {
     key: "stellar:testnet:GPAYER:1",
@@ -32,7 +43,7 @@ function record(bazaar: unknown, overrides: Partial<SettlementRecord> = {}): Set
     ledger: 100,
     paymentPayload: {
       x402Version: 2,
-      resource: { url: "https://seller.example.com/users/42" },
+      resource: { url: `${seller.url}/users/42`, description: DESCRIPTION, ...resource },
       extensions,
     } as unknown as PaymentPayload,
     paymentRequirements: requirements,
@@ -42,22 +53,54 @@ function record(bazaar: unknown, overrides: Partial<SettlementRecord> = {}): Set
   };
 }
 
-const valid = { info: { input: { type: "http", method: "GET" } }, routeTemplate: "/users/:id" };
-
 const db = testDatabase();
-beforeEach(db.empty);
+beforeEach(async () => {
+  await db.empty();
+  seller = await startSeller((url) => ({
+    x402Version: 2,
+    resource: { url, description: DESCRIPTION },
+    accepts: [requirements],
+    extensions: { bazaar: valid },
+  }));
+});
+afterEach(() => {
+  seller.server.close();
+});
+
+/** The app clock, one minute after another as tests move it. */
+const MINUTE = 60_000;
+const START = Date.parse("2026-10-28T10:00:00Z");
 
 function setup(deps: Partial<CatalogerDeps> = {}) {
-  const store = db.stores().catalog;
+  const stores = db.stores();
+  const store = stores.catalog;
   const metrics = memoryMetrics();
   const logger: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-  const cataloger = createCataloger({ store, metrics, logger, ...deps });
+  const clock = { now: START };
+  const cataloger = createCataloger({
+    store,
+    attempts: stores.catalogAttempts,
+    rateLimits: stores.rateLimits,
+    metrics,
+    logger,
+    listLocal: true,
+    now: () => clock.now,
+    ...deps,
+  });
   const list = async () => (await store.list({ limit: 10, offset: 0 })).items;
-  return { store, metrics, logger, cataloger, list };
+  const attempts = async () =>
+    (
+      await db.pool.query<Record<string, unknown>>(
+        `SELECT stage, outcome, reason FROM catalog_attempts ORDER BY id`,
+      )
+    ).rows;
+  const counted = (stage: string, outcome: string, reason = "", origin = "settle") =>
+    metrics.value("catalog_attempts_total", { origin, stage, outcome, reason });
+  return { store, metrics, logger, cataloger, list, attempts, counted, clock };
 }
 
 describe("cataloger", () => {
-  it("answers the header synchronously: processing, rejected or none", () => {
+  it("answers the header synchronously, without asking the seller (0063 row 22)", () => {
     const { cataloger } = setup();
     expect(cataloger.extensionResponses(record(valid))).toEqual({
       bazaar: { status: "processing" },
@@ -67,6 +110,7 @@ describe("cataloger", () => {
     });
     expect(cataloger.extensionResponses(record(undefined))).toBeUndefined();
     expect(cataloger.extensionResponses(record(valid, { state: "pending" }))).toBeUndefined();
+    expect(seller.requests).toEqual([]);
   });
 
   it("encodes the header as base64 JSON that upstream decodes", () => {
@@ -74,60 +118,353 @@ describe("cataloger", () => {
     expect(JSON.parse(safeBase64Decode(encodeExtensionResponses(value)))).toEqual(value);
   });
 
-  it("catalogs a success once per key, with the bazaar block only and the record's time", async () => {
-    const { cataloger, metrics, list } = setup();
-    await cataloger.onSuccess(record(valid), "settle");
+  it("lists what the seller's 402 says, with the bazaar block only and the answer's time", async () => {
+    const { cataloger, list, counted, clock } = setup();
+    clock.now = START + 1_234;
     await cataloger.onSuccess(record(valid), "settle");
     const [entry] = await list();
     expect(entry).toMatchObject({
-      resource: "https://seller.example.com/users/:",
-      lastUpdated: "2026-10-09T10:00:00.000Z",
+      resource: `${seller.url}/users/:`,
+      description: DESCRIPTION,
+      lastUpdated: new Date(START + 1_234).toISOString(),
       accepts: [requirements],
     });
     expect(Object.keys(entry?.extensions ?? {})).toEqual(["bazaar"]);
-    expect(metrics.value("catalog_upserts_total", { origin: "settle", outcome: "inserted" })).toBe(
-      1,
+    expect(seller.requests).toEqual([{ method: "GET", url: "/users/42", body: "" }]);
+    expect(counted("seller", "refreshed", "inserted")).toBe(1);
+  });
+
+  it("trims a seller's tags and service name as a payment's copy is, and still lists (row 1)", async () => {
+    // 47 of 400 live sellers sent such fields; upstream's schema refuses the whole 402 for them,
+    // while the Bazaar spec keeps the listing (`bazaar.md:380-391`).
+    const { cataloger, list } = setup();
+    seller.paymentRequired = (url) => ({
+      x402Version: 2,
+      resource: {
+        url,
+        description: DESCRIPTION,
+        serviceName: "Minifetch: Search, Scrape, Extract & SEO Audit",
+        tags: ["web", "news", "search", "headlines", "latest", "press"],
+      } as PaymentRequired["resource"],
+      accepts: [requirements],
+      extensions: { bazaar: valid },
+    });
+    await cataloger.onSuccess(record(valid), "settle");
+    const [entry] = await list();
+    expect(entry).toMatchObject({ description: DESCRIPTION, accepts: [requirements] });
+    expect(entry?.serviceName).toBeUndefined();
+    expect(entry?.tags).toEqual(["web", "news", "search", "headlines", "latest"]);
+  });
+
+  it("keeps the seller's text and price when another payer's copy says otherwise (row 1)", async () => {
+    const { cataloger, list, clock } = setup();
+    await cataloger.onSuccess(record(valid), "settle");
+    // A minute later, so the per-key limit lets the check run.
+    clock.now += MINUTE;
+    const outsider = record(
+      valid,
+      {
+        key: "stellar:testnet:GOUTSIDER:1",
+        payer: "GOUTSIDER",
+        paymentRequirements: { ...requirements, amount: "1" },
+      },
+      { description: "Pwned" },
     );
-    expect(metrics.value("catalog_upserts_total", { origin: "settle", outcome: "updated" })).toBe(
-      1,
+    await cataloger.onSuccess(outsider, "settle");
+    const [entry] = await list();
+    expect(entry).toMatchObject({ description: DESCRIPTION, accepts: [requirements] });
+    expect(seller.requests).toHaveLength(2);
+  });
+
+  it("asks the seller only when the copy differs, at most once a minute per key (row 2)", async () => {
+    const { cataloger, attempts, counted, clock } = setup();
+    await cataloger.onSuccess(record(valid), "settle");
+    await cataloger.onSuccess(record(valid), "settle");
+    expect(seller.requests).toHaveLength(1);
+    expect(counted("payment", "unchanged")).toBe(1);
+
+    const changed = record(valid, {}, { description: "Changed" });
+    await cataloger.onSuccess(changed, "settle");
+    expect(seller.requests).toHaveLength(1);
+    expect(counted("payment", "over_budget", "key")).toBe(1);
+
+    clock.now += MINUTE;
+    await cataloger.onSuccess(changed, "settle");
+    expect(seller.requests).toHaveLength(2);
+    // An unchanged copy is counted only: it tried to change nothing.
+    expect(await attempts()).toEqual([
+      { stage: "seller", outcome: "refreshed", reason: "inserted" },
+      { stage: "payment", outcome: "over_budget", reason: "key" },
+      { stage: "seller", outcome: "refreshed", reason: "updated" },
+    ]);
+  });
+
+  it("checks at most so many listings a minute per host, and no fewer on another host (row 3)", async () => {
+    // No template, so each path is a listing of its own.
+    const at = (path: string) => record({ info: valid.info }, {}, { url: `${seller.url}/${path}` });
+    const perHost = setup({ checksPerHost: 2 });
+    for (const path of ["a", "b", "c"]) await perHost.cataloger.onSuccess(at(path), "settle");
+    expect(seller.requests).toHaveLength(2);
+    expect(perHost.counted("payment", "over_budget", "host")).toBe(1);
+    expect(perHost.logger.info).toHaveBeenCalledWith(
+      "catalog_check_skipped",
+      expect.objectContaining({ budget: "host" }),
+    );
+
+    // A busy host leaves another host's checks alone: there is no budget over all hosts.
+    const other = record(
+      { info: valid.info },
+      {},
+      { url: `${seller.url.replace("127.0.0.1", "localhost")}/d` },
+    );
+    await perHost.cataloger.onSuccess(other, "settle");
+    expect(seller.requests).toHaveLength(3);
+  });
+
+  it("sends the listing's example input: a GET's query, a POST's body (row 4)", async () => {
+    const { cataloger } = setup();
+    const get = { info: { input: { type: "http", method: "GET", queryParams: { city: "Waw" } } } };
+    const post = {
+      info: { input: { type: "http", method: "POST", bodyType: "json", body: { n: 1 } } },
+    };
+    const bare = { info: { input: { type: "http", method: "POST", bodyType: "json", body: {} } } };
+    seller.paymentRequired = (url) => ({
+      x402Version: 2,
+      resource: { url },
+      accepts: [requirements],
+      extensions: { bazaar: url.endsWith("/get") ? get : url.endsWith("/post") ? post : bare },
+    });
+    await cataloger.onSuccess(record(get, {}, { url: `${seller.url}/get` }), "settle");
+    await cataloger.onSuccess(record(post, {}, { url: `${seller.url}/post` }), "settle");
+    await cataloger.onSuccess(record(bare, {}, { url: `${seller.url}/bare` }), "settle");
+    expect(seller.requests).toEqual([
+      { method: "GET", url: "/get?city=Waw", body: "" },
+      { method: "POST", url: "/post", body: '{"n":1}' },
+      { method: "POST", url: "/bare", body: "{}" },
+    ]);
+  });
+
+  it.each([
+    ["not a 402", { status: 200 }, "not_402"],
+    ["a 402 without terms", { status: 402, body: {} as PaymentRequired }, "unreadable_402"],
+  ] as const)(
+    "creates nothing and changes nothing when the seller answers %s (row 6)",
+    async (_name, answer, reason) => {
+      const { cataloger, list, counted, logger, clock } = setup();
+      await cataloger.onSuccess(record(valid), "settle");
+      const before = await list();
+      seller.reply = async () => answer;
+      clock.now += MINUTE;
+      await cataloger.onSuccess(record(valid, {}, { description: "Changed" }), "settle");
+      expect(await list()).toEqual(before);
+      expect(counted("seller", "not_askable", reason)).toBe(1);
+      expect(logger.info).toHaveBeenCalledWith(
+        "catalog_rejected",
+        expect.objectContaining({ stage: "seller", reason, payTo: "GPAYTO", payer: "GPAYER" }),
+      );
+    },
+  );
+
+  it("does not ask a private address, an mcp listing, or a seller past the timeout (row 6)", async () => {
+    const { cataloger, list, counted } = setup({ sellerTimeoutMs: 100 });
+    await cataloger.onSuccess(
+      record({ info: valid.info }, {}, { url: "http://10.255.255.1/x" }),
+      "settle",
+    );
+    expect(counted("seller", "not_askable", "unsafe_url")).toBe(1);
+
+    const tool = { info: { input: { type: "mcp", toolName: "weather", inputSchema: {} } } };
+    await cataloger.onSuccess(record(tool, {}, { url: "mcp://tool/weather" }), "settle");
+    expect(counted("seller", "not_askable", "mcp")).toBe(1);
+
+    seller.reply = () => new Promise(() => {});
+    await cataloger.onSuccess(record(valid), "settle");
+    expect(counted("seller", "not_askable", "upstream_error")).toBe(1);
+    expect(await list()).toEqual([]);
+  });
+
+  it("stores only the offers to the key's payTo, replacing the stored ones (row 7)", async () => {
+    const { cataloger, list, counted, clock } = setup();
+    const other = { ...requirements, asset: "COTHER" };
+    seller.paymentRequired = (url) => ({
+      x402Version: 2,
+      resource: { url, description: DESCRIPTION },
+      accepts: [requirements, other, { ...requirements, payTo: "GELSEWHERE" }],
+      extensions: { bazaar: valid },
+    });
+    await cataloger.onSuccess(record(valid), "settle");
+    expect((await list())[0]?.accepts).toEqual([requirements, other]);
+
+    seller.paymentRequired = (url) => ({
+      x402Version: 2,
+      resource: { url, description: "Now one asset" },
+      accepts: [other],
+      extensions: { bazaar: valid },
+    });
+    clock.now += MINUTE;
+    await cataloger.onSuccess(record(valid, {}, { description: "Now one asset" }), "settle");
+    expect((await list())[0]?.accepts).toEqual([other]);
+
+    seller.paymentRequired = (url) => ({
+      x402Version: 2,
+      resource: { url },
+      accepts: [{ ...requirements, payTo: "GELSEWHERE" }],
+      extensions: { bazaar: valid },
+    });
+    clock.now += MINUTE;
+    await cataloger.onSuccess(record(valid, {}, { description: "Other payTo" }), "settle");
+    expect(counted("seller", "other_pay_to")).toBe(1);
+    expect((await list())[0]?.accepts).toEqual([other]);
+  });
+
+  it("keeps what the payment sent and what the seller answered, once they are compared", async () => {
+    const { cataloger } = setup();
+    await cataloger.onSuccess(record(valid, {}, { description: "Pwned" }), "settle");
+    await cataloger.onSuccess(record(valid), "settle");
+    const { rows } = await db.pool.query<{ outcome: string; copy: unknown; answer: unknown }>(
+      `SELECT outcome, copy, answer FROM catalog_attempts ORDER BY id`,
+    );
+    // The second copy equals the stored listing: no row.
+    expect(rows).toMatchObject([
+      {
+        outcome: "refreshed",
+        copy: { description: "Pwned" },
+        answer: { resource: { description: DESCRIPTION } },
+      },
+    ]);
+  });
+
+  it("refuses an answer that describes another listing than the one asked about", async () => {
+    // The GET route's 402 claims to be another route of the host, a POST one.
+    seller.paymentRequired = (url) => ({
+      x402Version: 2,
+      resource: { url, description: "Pwned" },
+      accepts: [requirements],
+      extensions: { bazaar: { info: { input: { type: "http", method: "POST" } } } },
+    });
+    const { cataloger, list, counted } = setup();
+    await cataloger.onSuccess(record(valid), "settle");
+    expect(counted("seller", "other_key")).toBe(1);
+    expect(await list()).toEqual([]);
+  });
+
+  it("keeps an offer's seven fields and logs how many were dropped (row 8)", async () => {
+    const { cataloger, list, logger } = setup();
+    seller.paymentRequired = (url) => ({
+      x402Version: 2,
+      resource: { url, description: DESCRIPTION },
+      accepts: [{ ...requirements, resource: url, description: "v1" } as PaymentRequirements],
+      extensions: { bazaar: valid },
+    });
+    await cataloger.onSuccess(record(valid), "settle");
+    expect((await list())[0]?.accepts).toEqual([requirements]);
+    expect(logger.info).toHaveBeenCalledWith(
+      "catalog_upserted",
+      expect.objectContaining({ droppedFields: 2 }),
     );
   });
 
-  it("catalogs what upstream 2.28 servers send by default with listLocal (0053, 0054)", async () => {
-    const { cataloger, list } = setup({ listLocal: true });
-    // `@x402/core` sends `mimeType` and `description` as `|| ""`; `@x402/mcp` names a tool
-    // `mcp://tool/<name>` with `application/json`.
-    const http = record(
-      { info: { input: { type: "http", method: "GET" } } },
-      {
-        paymentPayload: {
-          x402Version: 2,
-          resource: { url: "http://localhost:4022/exact/stellar", description: "", mimeType: "" },
-          extensions: { bazaar: { info: { input: { type: "http", method: "GET" } } } },
-        } as unknown as PaymentPayload,
-      },
-    );
-    const tool = { info: { input: { type: "mcp", toolName: "exact_stellar", inputSchema: {} } } };
-    const mcp = record(tool, {
-      key: "stellar:testnet:GPAYER:2",
-      paymentPayload: {
-        x402Version: 2,
-        resource: { url: "mcp://tool/exact_stellar", mimeType: "application/json" },
-        extensions: { bazaar: tool },
-      } as unknown as PaymentPayload,
+  it("refuses a seller listing over a limit as too_large, naming the field (row 9)", async () => {
+    const { cataloger, list, counted, logger } = setup();
+    seller.paymentRequired = (url) => ({
+      x402Version: 2,
+      resource: { url, description: DESCRIPTION },
+      accepts: [{ ...requirements, extra: { pad: "x".repeat(5_000) } }],
+      extensions: { bazaar: valid },
     });
-    expect(cataloger.extensionResponses(http)).toEqual({ bazaar: { status: "processing" } });
-    expect(cataloger.extensionResponses(mcp)).toEqual({ bazaar: { status: "processing" } });
-    await cataloger.onSuccess(http, "settle");
-    await cataloger.onSuccess(mcp, "settle");
-    const entries = await list();
-    expect(entries.map((entry) => entry.resource)).toEqual([
-      "http://localhost:4022/exact/stellar",
-      "mcp://tool/exact_stellar",
+    expect(setup().cataloger.extensionResponses(record(valid))).toEqual({
+      bazaar: { status: "processing" },
+    });
+    await cataloger.onSuccess(record(valid), "settle");
+    expect(await list()).toEqual([]);
+    expect(counted("seller", "too_large")).toBe(1);
+    expect(logger.info).toHaveBeenCalledWith(
+      "catalog_rejected",
+      expect.objectContaining({ detail: "accepts.extra", bytes: 5_010 }),
+    );
+    const { rows } = await db.pool.query(`SELECT field_bytes FROM catalog_attempts`);
+    expect(rows).toEqual([{ field_bytes: 5_010 }]);
+  });
+
+  it("keeps the result of the check that started later, whichever answers first (row 10)", async () => {
+    // The two checks fall in two minutes' windows, so the per-key limit lets both run.
+    const { cataloger, list, clock } = setup();
+    clock.now = START + MINUTE - 1;
+    let releaseFirst!: () => void;
+    const firstHeld = new Promise<void>((resolve) => (releaseFirst = resolve));
+    let calls = 0;
+    seller.reply = async (request) => {
+      calls += 1;
+      const description = calls === 1 ? "older" : "newer";
+      if (calls === 1) await firstHeld;
+      const body = seller.paymentRequired(`${seller.url}${request.url}`);
+      return { status: 402, body: { ...body, resource: { ...body.resource, description } } };
+    };
+    const first = cataloger.onSuccess(record(valid, {}, { description: "older" }), "settle");
+    await vi.waitFor(() => expect(calls).toBe(1));
+    clock.now = START + MINUTE + 1;
+    await cataloger.onSuccess(record(valid, {}, { description: "newer" }), "settle");
+    releaseFirst();
+    await first;
+    expect((await list())[0]?.description).toBe("newer");
+  });
+
+  it("keeps a row per attempt with its key, payer and transaction (row 23)", async () => {
+    const { cataloger } = setup();
+    await cataloger.onSuccess(record({ info: {} }), "settle");
+    await cataloger.onSuccess(record(valid), "settle");
+    const { rows } = await db.pool.query(
+      `SELECT at, network, pay_to, method, resource_url, url, payer, transaction, stage, outcome,
+              reason, detail, field_bytes, content_hash
+       FROM catalog_attempts ORDER BY id`,
+    );
+    expect(rows).toEqual([
+      {
+        at: String(START),
+        network: "stellar:testnet",
+        pay_to: "GPAYTO",
+        method: null,
+        resource_url: null,
+        url: `${seller.url}/users/42`,
+        payer: "GPAYER",
+        transaction: "tx1",
+        stage: "payment",
+        outcome: "rejected",
+        reason: "invalid_info",
+        detail: expect.any(String),
+        field_bytes: null,
+        content_hash: null,
+      },
+      {
+        at: String(START),
+        network: "stellar:testnet",
+        pay_to: "GPAYTO",
+        method: "GET",
+        resource_url: `${seller.url}/users/:`,
+        url: `${seller.url}/users/42`,
+        payer: "GPAYER",
+        transaction: "tx1",
+        stage: "seller",
+        outcome: "refreshed",
+        reason: "inserted",
+        detail: null,
+        field_bytes: null,
+        content_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+      },
     ]);
-    expect(entries[0]).not.toHaveProperty("mimeType");
-    expect(entries[0]).not.toHaveProperty("description");
-    expect(entries[1]?.mimeType).toBe("application/json");
+  });
+
+  it("logs and counts an attempt row it could not write, and still lists (row 23)", async () => {
+    const stores = db.stores();
+    vi.spyOn(stores.catalogAttempts, "record").mockRejectedValue(new Error("down"));
+    const { cataloger, list, metrics, logger } = setup({ attempts: stores.catalogAttempts });
+    await cataloger.onSuccess(record(valid), "settle");
+    expect(await list()).toHaveLength(1);
+    expect(metrics.value("catalog_attempt_write_failures_total", { origin: "settle" })).toBe(1);
+    expect(logger.error).toHaveBeenCalledWith(
+      "catalog_attempt_write_failed",
+      expect.objectContaining({ error: expect.any(Error) }),
+    );
   });
 
   it.each([
@@ -135,56 +472,38 @@ describe("cataloger", () => {
     ["stellar:testnet", false, { status: "rejected", rejectedReason: "resource_not_public" }, 0],
     ["stellar:testnet", true, { status: "processing" }, 1],
   ] as const)(
-    "on %s with listLocal %s, a localhost listing gets %j and %i entries (0054)",
+    "on %s with listLocal %s, a local listing gets %j and %i entries (0054)",
     async (network, listLocal, header, listed) => {
-      const { cataloger, metrics, logger, list } = setup({ listLocal });
-      const local = record(
-        { info: { input: { type: "http", method: "GET" } } },
-        {
-          key: `${network}:GPAYER:1`,
-          network,
-          paymentRequirements: { ...requirements, network },
-          paymentPayload: {
-            x402Version: 2,
-            resource: { url: "http://localhost:4022/exact/stellar" },
-            extensions: { bazaar: { info: { input: { type: "http", method: "GET" } } } },
-          } as unknown as PaymentPayload,
-        },
-      );
+      const { cataloger, logger, list, counted } = setup({ listLocal });
+      const local = record(valid, {
+        key: `${network}:GPAYER:1`,
+        network,
+        paymentRequirements: { ...requirements, network },
+      });
+      seller.paymentRequired = (url) => ({
+        x402Version: 2,
+        resource: { url },
+        accepts: [{ ...requirements, network }],
+        extensions: { bazaar: valid },
+      });
       expect(cataloger.extensionResponses(local)).toEqual({ bazaar: header });
       await cataloger.onSuccess(local, "settle");
       expect(await list()).toHaveLength(listed);
-      expect(
-        metrics.value("catalog_rejections_total", {
-          origin: "settle",
-          reason: "resource_not_public",
-        }),
-      ).toBe(1 - listed);
+      expect(counted("payment", "rejected", "resource_not_public")).toBe(1 - listed);
+      expect(seller.requests).toHaveLength(listed);
       if (listed === 0)
         expect(logger.info).toHaveBeenCalledWith(
           "catalog_rejected",
-          expect.objectContaining({ reason: "resource_not_public", detail: expect.any(String) }),
+          expect.objectContaining({
+            reason: "resource_not_public",
+            detail: expect.any(String),
+            url: `${seller.url}/users/42`,
+            payTo: "GPAYTO",
+            payer: "GPAYER",
+          }),
         );
     },
   );
-
-  it("keeps a newer listing when a success from an earlier ledger resolves later", async () => {
-    const { cataloger, metrics } = setup();
-    await cataloger.onSuccess(record(valid), "settle");
-    await cataloger.onSuccess(record(valid, { ledger: 99, updatedAt: Date.now() }), "resolved");
-    expect(metrics.value("catalog_upserts_total", { origin: "resolved", outcome: "stale" })).toBe(
-      1,
-    );
-  });
-
-  it("writes nothing for a rejected listing, and counts it", async () => {
-    const { cataloger, metrics, list } = setup();
-    await cataloger.onSuccess(record({ info: {} }), "settle");
-    expect(await list()).toEqual([]);
-    expect(
-      metrics.value("catalog_rejections_total", { origin: "settle", reason: "invalid_info" }),
-    ).toBe(1);
-  });
 
   it("never rejects: a failing or hung store, or a failing library, is logged and counted", async () => {
     const failing = setup();
@@ -192,7 +511,7 @@ describe("cataloger", () => {
     await expect(failing.cataloger.onSuccess(record(valid), "settle")).resolves.toBeUndefined();
     expect(failing.metrics.value("catalog_upsert_failures_total", { origin: "settle" })).toBe(1);
 
-    const hung = setup({ upsertTimeoutMs: 5 });
+    const hung = setup({ upsertTimeoutMs: 5, now: () => START + MINUTE });
     vi.spyOn(hung.store, "upsert").mockReturnValue(new Promise(() => {}));
     await hung.cataloger.onSuccess(record(valid), "resolved");
     await hung.cataloger.drain();
@@ -226,5 +545,49 @@ describe("cataloger", () => {
       }),
     ).toBe(1);
     expect(internal.logger.info).not.toHaveBeenCalled();
+  });
+
+  it("records an attempt the validator failed on, and one whose text Postgres can't store (row 30)", async () => {
+    const broken = setup({
+      bazaar: {
+        ...bazaarLib,
+        validate: () => ({ ok: false, reason: "internal_error", detail: "boom" }),
+      },
+    });
+    await broken.cataloger.onSuccess(record(valid), "settle");
+    // A NUL inside the example passes validation; neither jsonb nor text holds it.
+    const input = { ...valid.info.input, queryParams: { q: "a\u0000b" } };
+    const { cataloger } = setup({ now: () => START + MINUTE });
+    await cataloger.onSuccess(record({ ...valid, info: { input } }), "settle");
+    const { rows } = await db.pool.query<{ stage: string; outcome: string; reason: string }>(
+      `SELECT stage, outcome, reason FROM catalog_attempts ORDER BY id`,
+    );
+    expect(rows).toEqual([
+      { stage: "payment", outcome: "internal_error", reason: "validate" },
+      expect.objectContaining({ stage: "seller" }),
+    ]);
+  });
+
+  it("keeps the key and the copy on an attempt that failed after they were known", async () => {
+    const hit = () => Promise.reject(new Error("rate-limit store down"));
+    const { cataloger } = setup({ rateLimits: { hit } });
+    await cataloger.onSuccess(record(valid, {}, { description: "Pwned" }), "settle");
+    const { rows } = await db.pool.query<{ reason: string; method: string; copy: unknown }>(
+      `SELECT reason, method, copy FROM catalog_attempts ORDER BY id`,
+    );
+    expect(rows).toMatchObject([
+      { reason: "budget", method: "GET", copy: { description: "Pwned" } },
+    ]);
+  });
+
+  it("records an attempt that failed inside the facilitator, with the step it failed at (row 23)", async () => {
+    const { cataloger, store, attempts, counted, logger } = setup();
+    vi.spyOn(store, "get").mockRejectedValue(new Error("down"));
+    await cataloger.onSuccess(record(valid), "settle");
+    expect(await attempts()).toEqual([
+      { stage: "payment", outcome: "internal_error", reason: "compare" },
+    ]);
+    expect(counted("payment", "internal_error", "compare")).toBe(1);
+    expect(logger.info).not.toHaveBeenCalledWith("catalog_rejected", expect.anything());
   });
 });

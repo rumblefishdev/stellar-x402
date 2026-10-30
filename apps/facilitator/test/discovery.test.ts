@@ -129,6 +129,7 @@ async function seed(stores: Stores) {
     await stores.catalog.upsert({
       keyVersion: CATALOG_KEY_VERSION,
       ledger: 1,
+      checkedAt: 1,
       key: { network, payTo, method: "GET", resourceUrl },
       resource: {
         resource: resourceUrl,
