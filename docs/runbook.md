@@ -161,6 +161,11 @@ facilitator serves, then restarts `x402@production` on the new image and waits u
   The older image's migrations are already applied, and every migration is expand/contract, so
   it runs on the newer schema.
 
+  `gh workflow run` and **Run workflow** need GitHub to know the workflow. It knows the ones on the
+  default branch, `main`, which doesn't have this one; whether a run from a push to
+  `deploy/production` is enough hasn't been tried. If GitHub refuses, deploy the digest on the
+  server instead (Deploy, above).
+
 ## Long migrations
 
 An online migration (a backfill, an index build) runs in the deploy, under the deploy unit's
@@ -262,6 +267,25 @@ To rotate it: give the tunnel a new secret, 32 random bytes in base64 (a `PATCH`
 time), fetch the new token into the credential as above, restart the unit, then clean up the old
 connections (`DELETE $api/$tunnel/connections`): ours reconnects with the new token, a connector
 with the old one can't. Check the connections again.
+
+## The deploy key and the host key
+
+Both are pinned in the repo, so a change to either is a pull request, and it reaches
+`deploy/production` only together with everything else waiting on `develop`. Until it does,
+deploy by hand on the server (Deploy, above).
+
+- **A new host key,** after a reinstall: CI refuses the server, as it should. Read the new
+  `/etc/ssh/ssh_host_ed25519_key.pub` on the server itself, through Hetzner's console or a session
+  you trust, never from a scan; pin it in `HOST_KEY` by pull request, and record its fingerprint in
+  task 0026's history.
+- **A leaked or lost deploy key:**
+  1. On a leak, cut the old key off at once; workflow deploys stop until step 3:
+     `sudo sh -c ': > /var/lib/x402-deploy/.ssh/authorized_keys'`.
+  2. Make a new pair as in "Before the first deploy": the private half into `DEPLOY_SSH_KEY`, the
+     public half into `deploy/ansible/files/deploy-production.pub` by pull request.
+  3. Once that is on `develop`, run the playbook before the next deploy: it writes the new key into
+     `authorized_keys`, which then holds only that one. Record its fingerprint in task 0026's
+     history.
 
 ## Not here yet
 
