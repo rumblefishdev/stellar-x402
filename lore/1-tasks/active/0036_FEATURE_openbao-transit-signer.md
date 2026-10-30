@@ -75,7 +75,6 @@ the facilitator. It is built and tested against a local OpenBao in Docker, befor
 
 - Whether channels are created by a separate funding account, with the OpenBao key only added
   as their signer, so setup needs no Transit signature.
-- Whether today's transaction shape (three signatures per settlement) is needed at all.
 
 ## PR split
 
@@ -86,6 +85,8 @@ the facilitator. It is built and tested against a local OpenBao in Docker, befor
 ## Out of scope
 
 - The on-chain limit of the hot key's power (thresholds, a cold key): 0048.
+- The fee account as the caller of every settlement, which keeps that limit out of reach: 0093.
+  The shape stays two facilitator signatures per settlement, both through this signer.
 - The OpenBao container, its unseal, backups and the move of testnet to the key: 0026.
 
 ## Implementation
