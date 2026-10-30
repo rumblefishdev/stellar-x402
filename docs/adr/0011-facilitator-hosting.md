@@ -422,9 +422,9 @@ One request or one stop must never outlast the layer in front of it:
   - They stay there until a reboot, so the unit's restart after a crash and the watchdog still
     find them.
     At boot the unit writes them again before it starts anything.
-  - The app reads them from files (`DATABASE_URL_FILE`, `RPC_URLS_FILE` and the AppRole files),
-    a config change in 0026, which points them at testnet's; with both networks, 0077 gives each
-    network its own.
+  - The app reads them from files: `DATABASE_URL_FILE` and `RPC_URLS_FILE` (0026), which point
+    at testnet's; with both networks, 0077 gives each network its own. The AppRole files come
+    with the OpenBao signer (0036).
   - They never go into the image, the repo or the logs, and never into `environment:`, which
     `docker inspect` shows in plain text.
 - **Rotating the key is an on-chain change.** AD-12 makes the facilitator key the only signer of
@@ -692,7 +692,7 @@ One request or one stop must never outlast the layer in front of it:
     and the secret files;
   - the backups (pgBackRest to the Storage Box);
   - `GET /health` with `ready` and `listed`, the Node keep-alive setting, and the migration bounds;
-  - the config reading secrets from files (`*_FILE`), since nothing reads them today;
+  - the config reading `DATABASE_URL` and `RPC_URLS` from files (`*_FILE`);
   - the runbook: running the playbook, deploy, rollback, key rotation, certificate renewal,
     restore on another machine.
 - **0027 builds:** log shipping through the CloudWatch agent, the EMF adapter, the alarms above,

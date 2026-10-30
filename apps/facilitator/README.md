@@ -59,6 +59,9 @@ Every request counts, a malformed or oversized one too. `/supported` has no limi
 
 - Every store is PostgreSQL, tests included. A leftover `STORE` is refused at startup.
 - `DATABASE_URL`: a `postgres://` URL, required.
+- A deploy passes `DATABASE_URL` and `RPC_URLS` as files instead: `DATABASE_URL_FILE` and
+  `RPC_URLS_FILE` name Compose `file:` secrets, so the values never show in `docker inspect`
+  (ADR 0011). Setting a value both ways refuses to start.
 - Local runs and tests: `docker compose up -d` at the repo root starts PostgreSQL on
   `127.0.0.1:15432`. `pnpm dev` applies the migrations to `DATABASE_URL` before it starts.
 - `pnpm migrate` applies the pending migrations; the service never changes the schema. Run it
