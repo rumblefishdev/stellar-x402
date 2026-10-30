@@ -13,6 +13,7 @@ import {
 import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/core/types";
 import { describe, expect, it, vi } from "vitest";
+import type { FindMissingTrustline, MissingTrustline } from "../src/settlement/trustline.js";
 import {
   CHANNEL_ACCOUNT_REASON,
   EXPIRATION_TOO_FAR_REASON,
@@ -112,9 +113,11 @@ function payload(shape: Shape = {}): PaymentPayload {
 function setup(
   upstreamResponse: VerifyResponse = { isValid: true, payer },
   deps: Partial<VerifierDeps> = {},
+  missing?: MissingTrustline,
 ) {
   const upstream = { verify: vi.fn<UpstreamVerifier["verify"]>(async () => upstreamResponse) };
   const latestLedger = vi.fn(async () => CURRENT);
+  const missingTrustline = vi.fn<FindMissingTrustline>(async () => missing);
   const verify = createVerifier({
     network,
     upstream,
@@ -123,9 +126,10 @@ function setup(
     minValidityLedgers: MIN_VALIDITY,
     maxValidityLedgers: MAX_VALIDITY,
     latestLedger,
+    missingTrustline,
     ...deps,
   });
-  return { verify, upstream, latestLedger };
+  return { verify, upstream, latestLedger, missingTrustline };
 }
 
 const rejected = (invalidReason: string) =>
@@ -158,6 +162,48 @@ describe("createVerifier", () => {
     const { verify, latestLedger } = setup(answer);
     await expect(verify(payload({ from: channel }), requirements)).resolves.toBe(answer);
     expect(latestLedger).not.toHaveBeenCalled();
+  });
+
+  describe("after upstream's simulation_failed", () => {
+    const failed = {
+      isValid: false,
+      invalidReason: "invalid_exact_stellar_payload_simulation_failed",
+      payer,
+    };
+
+    it("answers the missing trustline it found, for the payload's transaction", async () => {
+      const missing = { invalidReason: "a_trustline_reason", invalidMessage: "G… has none" };
+      const { verify, missingTrustline } = setup(failed, {}, missing);
+      const p = payload();
+      await expect(verify(p, requirements)).resolves.toEqual({
+        isValid: false,
+        invalidReason: "a_trustline_reason",
+        invalidMessage: "G… has none",
+        payer,
+      });
+      const [payment] = missingTrustline.mock.calls[0]!;
+      expect(payment).toMatchObject({ asset, payer, payTo });
+      expect(payment.transaction.toXDR()).toBe((p.payload as { transaction: string }).transaction);
+    });
+
+    it("keeps upstream's answer when no trustline is missing", async () => {
+      const { verify, missingTrustline } = setup(failed);
+      await expect(verify(payload(), requirements)).resolves.toBe(failed);
+      expect(missingTrustline).toHaveBeenCalledOnce();
+    });
+
+    it("looks only after simulation_failed, and only with a payer to compare", async () => {
+      const wrongAmount = {
+        ...failed,
+        invalidReason: "invalid_exact_stellar_payload_wrong_amount",
+      };
+      const other = setup(wrongAmount);
+      await other.verify(payload(), requirements);
+      expect(other.missingTrustline).not.toHaveBeenCalled();
+      const noPayer = setup({ ...failed, payer: undefined });
+      await noPayer.verify(payload(), requirements);
+      expect(noPayer.missingTrustline).not.toHaveBeenCalled();
+    });
   });
 
   it("passes upstream's payer on only when it is a string", async () => {
@@ -205,6 +251,7 @@ describe("createVerifier", () => {
       minValidityLedgers: MIN_VALIDITY,
       maxValidityLedgers: MAX_VALIDITY,
       latestLedger: async () => CURRENT,
+      missingTrustline: async () => undefined,
       upstreamTimeoutMs: 20,
     });
     await expect(verify(payload(), requirements)).rejects.toThrow(UpstreamTimeoutError);
@@ -402,6 +449,7 @@ describe("createVerifier", () => {
         minValidityLedgers: MIN_VALIDITY,
         maxValidityLedgers: MAX_VALIDITY,
         latestLedger: async () => CURRENT,
+        missingTrustline: async () => undefined,
       });
       const { verified } = await check(payload(), requirements);
       expect(verified).toMatchObject({

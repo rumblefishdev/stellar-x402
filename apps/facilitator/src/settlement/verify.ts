@@ -6,6 +6,7 @@ import {
   getNetworkPassphrase,
 } from "@x402/stellar";
 import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/core/types";
+import type { FindMissingTrustline } from "./trustline.js";
 
 /** Upstream `ExactStellarScheme` as `/verify` uses it: only `verify()`, never `settle()` (AD-3). */
 export interface UpstreamVerifier {
@@ -39,6 +40,8 @@ export interface VerifierDeps {
   maxValidityLedgers: number;
   /** Sequence of the latest closed ledger. */
   latestLedger: () => Promise<number>;
+  /** Looks for a missing trustline behind upstream's `simulation_failed`. */
+  missingTrustline: FindMissingTrustline;
   /**
    * How long the whole upstream call may take, in milliseconds, across every RPC URL it tries and
    * the bid read before them; 10,000 by default. Upstream's RPC and Horizon clients have no timeout
@@ -82,6 +85,8 @@ const MAX_EXPIRATION_LEDGER = 2 ** 32 - 2;
 
 /** Upstream's code for an exception inside its `verify()`. */
 export const UNEXPECTED_VERIFY_ERROR = "unexpected_verify_error";
+/** Upstream's code for a failed simulation, the only cause it keeps of what the RPC said. */
+const SIMULATION_FAILED_REASON = "invalid_exact_stellar_payload_simulation_failed";
 
 export class UpstreamTimeoutError extends Error {
   override readonly name = "UpstreamTimeoutError";
@@ -171,6 +176,22 @@ export function createChecker(deps: VerifierDeps): Check {
     // It says nothing about the payment, so it is our error: a 500, logged as one.
     if (upstream.invalidReason === UNEXPECTED_VERIFY_ERROR) {
       throw new Error(`upstream verify failed with ${UNEXPECTED_VERIFY_ERROR}`);
+    }
+    if (upstream.invalidReason === SIMULATION_FAILED_REASON && upstream.payer !== undefined) {
+      const missing = await deps.missingTrustline({
+        transaction: new Transaction(
+          (payload.payload as { transaction: string }).transaction,
+          getNetworkPassphrase(deps.network),
+        ),
+        asset: requirements.asset,
+        payer: upstream.payer,
+        payTo: requirements.payTo,
+      });
+      if (missing) {
+        return {
+          response: invalid(missing.invalidReason, upstream.payer, missing.invalidMessage),
+        };
+      }
     }
     if (!upstream.isValid) return { response: upstream };
     // Upstream always names the payer of a valid payment; without one, nothing below can run.

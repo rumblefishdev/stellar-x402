@@ -752,6 +752,7 @@ describe("createSettler", () => {
       minValidityLedgers: 2,
       maxValidityLedgers: 66,
       latestLedger: async () => CURRENT,
+      missingTrustline: async () => undefined,
     });
     const { settle, submit } = setup(landing(), { check });
     const { response } = await settle(payload(), requirements);
