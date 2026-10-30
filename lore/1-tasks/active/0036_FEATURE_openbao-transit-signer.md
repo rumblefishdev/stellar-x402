@@ -70,17 +70,18 @@ the facilitator. It is built and tested against a local OpenBao in Docker, befor
 | 12 | Every signature is checked against the configured address, through `Transaction.addSignature`, which verifies it; a mismatch ends the settlement before anything is sent | grilling | changes it (the task checked the first signature) | stellar-sdk `transaction_base.js:127-149` | | |
 | 13 | One request to OpenBao waits at most 1 s: the slowest measured signature was 286 ms (5 × 2,000 signatures from 20 clients at half a CPU), a settlement's two at most 124 ms (5 × 1,000) | grilling | beyond it | — | | |
 | 14 | OpenBao keeps its half-CPU limit: it adds a stall of about 50 ms to at least 1% of settlements (pair p99 44–49 ms in 5 × 1,000), small against a ledger of about 5 s | grilling | beyond it | — | | |
+| 15 | The OpenBao key's fee account and its channels are created and funded by an ordinary wallet outside the project, the same one that tops up the fee float; the OpenBao key is only written into each channel as its sole signer, which the channel's own fresh key signs. The OpenBao key signs nothing but settlements, so no tool signs other transactions through it. `buildCreateChannelsTx` takes the funding account apart from the signer it adds | grilling | changes it (the task's AC 1 assumed channels signed for by the Transit key) | channels funded by a separate account: one peer's provisioning; none adds a facilitator key as signer | | |
 
 ## Not yet decided
 
-- Whether channels are created by a separate funding account, with the OpenBao key only added
-  as their signer, so setup needs no Transit signature.
+Nothing: the grilling's frontier is empty (2026-10-30).
 
 ## PR split
 
 | PR | What | State |
 |---|---|---|
-| — | the Transit signer, its config and its tests | not started |
+| A | `buildCreateChannelsTx` with a funding account apart from the signer it adds, and a script that creates a fee account and channels for a given key (row 15) | not started |
+| B | the Transit signer, its config, `/health`'s `signer`, the settle reasons, the compose variables and the tests (rows 2–14), stacked on A for AC 1 | not started |
 
 ## Out of scope
 
