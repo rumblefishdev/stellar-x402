@@ -14,8 +14,13 @@ import type { SorobanRpc } from "./types.js";
 export const CHANNEL_STARTING_BALANCE = "1.5";
 
 export interface CreateChannelsOptions {
-  /** The facilitator account: funds the channels, becomes their signer, is the tx source. */
-  facilitator: Account;
+  /**
+   * Funds the channels and is the tx source. It may be any account: an ordinary wallet funds the
+   * channels of a key held in OpenBao, which then signs nothing here (0036).
+   */
+  funder: Account;
+  /** The facilitator key's address: each channel's only signer. */
+  signer: string;
   /** Fresh keys for the new channels. Their secrets are not needed after this transaction. */
   channels: readonly Keypair[];
   networkPassphrase: string;
@@ -26,20 +31,20 @@ export interface CreateChannelsOptions {
 
 /**
  * Most channels one {@link buildCreateChannelsTx} transaction can create: it needs the
- * facilitator's signature plus one per channel, and a transaction holds at most 20 signatures.
+ * funder's signature plus one per channel, and a transaction holds at most 20 signatures.
  */
 export const MAX_CHANNELS_PER_TX = 19;
 
 /**
- * Builds one classic transaction that creates the channels and makes the facilitator a signer
- * on each (2 operations per channel). It must be signed by the facilitator and by every channel
- * key, because each channel's `setOptions` uses it as source.
+ * Builds one classic transaction that creates the channels and makes the facilitator key a signer
+ * on each (2 operations per channel). It must be signed by the funder and by every channel key,
+ * because each channel's `setOptions` uses it as source; the facilitator key doesn't sign.
  */
 export function buildCreateChannelsTx(opts: CreateChannelsOptions): Transaction {
-  const { facilitator, channels } = opts;
+  const { funder, signer, channels } = opts;
   if (channels.length === 0 || channels.length > MAX_CHANNELS_PER_TX)
     throw new Error(`create between 1 and ${MAX_CHANNELS_PER_TX} channels per transaction`);
-  const builder = new TransactionBuilder(facilitator, {
+  const builder = new TransactionBuilder(funder, {
     fee: String(opts.fee ?? 100),
     networkPassphrase: opts.networkPassphrase,
   }).setTimeout(120);
@@ -53,7 +58,7 @@ export function buildCreateChannelsTx(opts: CreateChannelsOptions): Transaction 
     builder.addOperation(
       Operation.setOptions({
         source: ch.publicKey(),
-        signer: { ed25519PublicKey: facilitator.accountId(), weight: 1 },
+        signer: { ed25519PublicKey: signer, weight: 1 },
         // Only the facilitator key can sign for the channel, so its secret can be thrown away.
         masterWeight: 0,
       }),

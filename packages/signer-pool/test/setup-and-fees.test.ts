@@ -15,7 +15,8 @@ describe("buildCreateChannelsTx", () => {
     const fac = Keypair.random();
     const chans = [Keypair.random(), Keypair.random()];
     const tx = buildCreateChannelsTx({
-      facilitator: new Account(fac.publicKey(), "10"),
+      funder: new Account(fac.publicKey(), "10"),
+      signer: fac.publicKey(),
       channels: chans,
       networkPassphrase: PASSPHRASE,
     });
@@ -35,11 +36,39 @@ describe("buildCreateChannelsTx", () => {
     });
   });
 
-  it("limits a transaction to 19 channels (20 signatures with the facilitator's)", () => {
-    const fac = new Account(Keypair.random().publicKey(), "1");
+  it("lets another account fund the channels, so the facilitator key signs nothing", () => {
+    const funder = Keypair.random();
+    const fac = Keypair.random();
+    const chans = [Keypair.random()];
+    const tx = buildCreateChannelsTx({
+      funder: new Account(funder.publicKey(), "10"),
+      signer: fac.publicKey(),
+      channels: chans,
+      networkPassphrase: PASSPHRASE,
+    });
+    expect(tx.source).toBe(funder.publicKey());
+    expect(tx.operations[0]).toMatchObject({
+      type: "createAccount",
+      destination: chans[0]!.publicKey(),
+    });
+    expect(tx.operations[1]).toMatchObject({
+      type: "setOptions",
+      source: chans[0]!.publicKey(),
+      masterWeight: 0,
+      signer: { ed25519PublicKey: fac.publicKey(), weight: 1 },
+    });
+  });
+
+  it("limits a transaction to 19 channels (20 signatures with the funder's)", () => {
+    const funder = Keypair.random().publicKey();
     const many = Array.from({ length: MAX_CHANNELS_PER_TX + 1 }, () => Keypair.random());
     expect(() =>
-      buildCreateChannelsTx({ facilitator: fac, channels: many, networkPassphrase: PASSPHRASE }),
+      buildCreateChannelsTx({
+        funder: new Account(funder, "1"),
+        signer: funder,
+        channels: many,
+        networkPassphrase: PASSPHRASE,
+      }),
     ).toThrow();
   });
 });
