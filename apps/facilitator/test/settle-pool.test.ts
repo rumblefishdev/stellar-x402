@@ -213,6 +213,40 @@ describe("main()'s /settle wiring, under a stale lease token (0071)", () => {
     const record = await store.get(keyOf(pay, "stellar:testnet")!);
     expect(record).toMatchObject({ state: "rejected", hashes: [] });
   });
+
+  it("answers the sent hash a txBadSeq refused when the rebuild is fenced, and doesn't reopen", async () => {
+    const { settle, fake, store } = setup();
+    await settle(payload(fake.ledger + 30), requirements);
+    // Another sender used the channel, so the next envelope is refused with txBadSeq.
+    fake.sequences.set(channel, 5000n);
+    // The takeover comes between the refused send and its rebuild.
+    const send = fake.sendTransaction.bind(fake);
+    vi.spyOn(fake, "sendTransaction").mockImplementation(async (tx) => {
+      const sent = await send(tx);
+      fence = { name: fence!.name, token: "00000000-0000-4000-8000-000000000071" };
+      return sent;
+    });
+    const pay = payload(fake.ledger + 30, undefined, "8");
+    const { response } = await settle(pay, requirements);
+    expect(fake.sent).toHaveLength(2);
+    const refused = fake.sent[1]!.hash().toString("hex");
+    expect(response).toMatchObject({
+      success: false,
+      errorReason: SETTLE_REASONS.leaseLost,
+      transaction: refused,
+    });
+    expect(response).not.toHaveProperty("extra");
+    expect(await store.get(keyOf(pay, "stellar:testnet")!)).toMatchObject({
+      state: "rejected",
+      hashes: [refused],
+    });
+    const repeat = await settle(pay, requirements);
+    expect(repeat.response).toMatchObject({
+      errorReason: SETTLE_REASONS.leaseLost,
+      transaction: refused,
+    });
+    expect(fake.sent).toHaveLength(2);
+  });
 });
 
 describe("main()'s /settle wiring, with RPC_URLS[0] hung for every client (AD-3)", () => {
