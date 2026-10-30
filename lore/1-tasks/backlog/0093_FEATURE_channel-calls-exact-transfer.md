@@ -43,6 +43,13 @@ hot key's weight.
 - Measured on testnet: our settlement `355082892c83…` (2026-10-23) has the fee account
   `GBCSI5…` as fee-bump payer and as operation source, the channel `GDNC65…` as transaction source.
   The public x402.org facilitator's `1bc53d50a888…` (2026-10-15) leaves the operation source unset.
+- Measured on testnet (2026-10-30, a throwaway fee account F with key K, one channel, a native-XLM
+  `transfer` fee-bumped by F): with F's thresholds at 0, both shapes land (no operation source
+  `7b2e53e8…`, F as operation source `178e55b2…`). After F's thresholds are raised to low 1 /
+  medium 2 / high 2 (`fcf0e02a…`), the shape with no operation source still lands (`b5a096a2…`,
+  10,493 stroops), F as operation source is refused at submit with `opBadAuth` and no fee charged,
+  and a 10 XLM Payment out of F is refused the same way. The shape with no operation source is 36
+  bytes and 79 stroops smaller.
 - Upstream's `ExactStellarScheme` copies the client's operation with no source of its own, and its
   verify refuses a facilitator operation source in the payload
   (`@x402/stellar` 2.28.0 `exact/facilitator/index.mjs:176,300`).
