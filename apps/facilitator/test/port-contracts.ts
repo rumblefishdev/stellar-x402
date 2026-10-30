@@ -440,6 +440,14 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
         expect(
           await store.transition(s.key, "claimed", close, undefined, before.reopened),
         ).toBeUndefined();
+        // A late refusal carries attempts, which the store writes in a transaction of their own.
+        const refusal = {
+          ...close,
+          attempts: [{ hash: "h0", state: "dead" as const, errorCode: "txBadSeq" }],
+        };
+        expect(
+          await store.transition(s.key, "claimed", refusal, undefined, before.reopened),
+        ).toBeUndefined();
         expect(await store.get(s.key)).toMatchObject({ state: "claimed", hashes: [] });
         expect(await store.addHash(s.key, "h1", 6_000, undefined, 1)).toBe(true);
         expect(await store.get(s.key)).toMatchObject({ state: "signed", hashes: ["h1"] });
