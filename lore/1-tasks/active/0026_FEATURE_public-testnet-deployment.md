@@ -125,8 +125,9 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     reachable only from the facilitator and the migration service.
   - Networks `x402-production-edge` (`cloudflared` and the facilitator) and
     `x402-production-db` (`internal: true`, the facilitator, each network's Postgres and
-    migration service), both part of the production compose project. Only the facilitator and
-    `migrate-testnet` hold testnet's database password.
+    migration service), both part of the production compose project, on fixed subnets
+    (`172.31.200.0/28` and `172.31.200.16/28`) since the server's Docker address pool is taken.
+    Only the facilitator and `migrate-testnet` hold testnet's database password.
   - `cloudflared`: Cloudflare's tunnel connector pinned by digest, memory limit 128 MiB, under
     its own unit `x402-tunnel@production.service`, enabled at boot and untouched by deploys, so
     it keeps forwarding while the facilitator drains; `x402@production` runs after it. The unit
@@ -290,7 +291,8 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   OpenBao.
 - **Link:** a socket per network, each in its own volume, mounted into the one facilitator
   (ADR 0013 is updated in 0077), plus the admin socket (root-only, in no container); no TCP
-  listener.
+  listener. OpenBao's compose service uses `network_mode: none`: it needs no network, and on the
+  server Docker's address pool has none to give, which fails a default network at start.
 - **Keys:** one Transit key per network, generated inside OpenBao, `type=ed25519`,
   `exportable=false`, `allow_plaintext_backup=false`. One policy per network allowing only
   `transit/sign/<key>`, and one AppRole per network: `token_ttl` and `token_max_ttl` 1 h, a secret

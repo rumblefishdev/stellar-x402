@@ -110,6 +110,10 @@ a whole zone, to Cloudflare on the Free plan.
     (0077 decision 3).
   - The facilitator never joins the ClickHouse project's `app` network, so it can't reach
     ClickHouse. OpenBao is reached over unix sockets (ADR 0013), not a network.
+  - Each network has a fixed /28 from `172.31.200.0/24`, set in the compose file, since the
+    server's Docker address pool is taken whole by that `app` network. A second pool in
+    `daemon.json` would also work, but it changes Docker for every project on the server, for the
+    sake of two networks.
 - **systemd restarts a facilitator that crashes, not Docker.** Its unit runs Compose in the
   foreground with `--exit-code-from <service>`, since a plain `docker compose up` exits 0
   whatever the container's code, and with `Restart=on-failure`, so the unit ends with the
