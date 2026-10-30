@@ -2,7 +2,7 @@
 id: "0078"
 title: "Name a missing trustline in /verify's answer instead of a generic simulation failure"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: []
 related_tasks: ["0018", "0021", "0066", "0092"]
@@ -19,6 +19,14 @@ history:
     status: active
     who: okarcz
     note: "Work started."
+  - date: "2026-10-30"
+    status: completed
+    who: okarcz
+    note: >
+      PR #94 merged: a payment with no trustline to a classic asset gets a reason of its own, and a
+      message naming the account, the asset and the ledger, after a second simulation of a payload
+      with the payer's entry. Facilitator 640, signer-pool 160; 32 mutants caught. Decisions 1-14.
+      Upstream's client waits for 0092, moved to M1 with packages/mcp; no new follow-ups.
 ---
 
 # Name a missing trustline in /verify's answer instead of a generic simulation failure
