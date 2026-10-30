@@ -35,6 +35,7 @@ import {
 import { createLeaseKeeper } from "./settlement/lease.js";
 import { createRecords } from "./settlement/records.js";
 import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler, type Settle } from "./settlement/settle.js";
+import { createTrustlineLookup } from "./settlement/trustline.js";
 import { failoverUpstream, type EndpointFailure } from "./settlement/upstream-failover.js";
 import {
   UNEXPECTED_VERIFY_ERROR,
@@ -319,7 +320,10 @@ export function buildUpstream(
  */
 export function buildChecks(
   config: Config,
-  rpc: Pick<FallbackRpc, "getLatestLedger" | "begin" | "markFailed">,
+  rpc: Pick<
+    FallbackRpc,
+    "getLatestLedger" | "begin" | "markFailed" | "simulateTransaction" | "getLedgerEntries"
+  >,
   fees: FeeSettings,
   logger: Pick<Logger, "warn" | "info">,
   seams?: UpstreamSeams,
@@ -335,6 +339,7 @@ export function buildChecks(
     minValidityLedgers: config.settlement.minValidityLedgers,
     maxValidityLedgers: config.settlement.maxValidityLedgers,
     latestLedger: async () => (await rpc.getLatestLedger()).sequence,
+    missingTrustline: createTrustlineLookup(rpc, logger),
   };
 }
 
@@ -344,7 +349,7 @@ export function buildChecks(
  */
 export function buildVerifier(
   config: Config,
-  rpc: Pick<FallbackRpc, "getLatestLedger" | "begin" | "markFailed">,
+  rpc: Parameters<typeof buildChecks>[1],
   fees: FeeSettings,
   logger: Pick<Logger, "warn" | "info">,
   seams?: UpstreamSeams,

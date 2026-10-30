@@ -159,6 +159,7 @@ function setup(
             ? Promise.resolve(stats)
             : new Promise<FeeStats>((resolve) => setTimeout(() => resolve(stats), feeStatsMs)),
         getLatestLedger: async () => ({ sequence: await latestLedger(url) }),
+        simulateTransaction: () => Promise.reject(new Error("no simulation here")),
       }) as unknown as SorobanRpc,
   );
   const schemes: { signer: string; options: SchemeOptions }[] = [];
@@ -512,6 +513,21 @@ describe("buildVerifier (the /verify wiring in main)", () => {
   it("throws when upstream reports unexpected_verify_error on every RPC URL", async () => {
     const { verify } = setup({ isValid: false, invalidReason: "unexpected_verify_error", payer });
     await expect(verify(payload(), requirements)).rejects.toThrow("unexpected_verify_error");
+  });
+
+  it("looks for a missing trustline after simulation_failed, in /verify and /settle's check", async () => {
+    const failed = {
+      isValid: false,
+      invalidReason: "invalid_exact_stellar_payload_simulation_failed",
+      payer,
+    };
+    const { verify, check, logger } = setup(failed);
+    // The stub's RPC can't simulate: reaching it proves the wiring, and upstream's answer stands.
+    await expect(verify(payload(), requirements)).resolves.toEqual(failed);
+    expect(logger.warn).toHaveBeenCalledWith("trustline_lookup_failed", expect.anything());
+    logger.warn.mockClear();
+    await expect(check(payload(), requirements)).resolves.toEqual({ response: failed });
+    expect(logger.warn).toHaveBeenCalledWith("trustline_lookup_failed", expect.anything());
   });
 
   it("rechecks /settle's auth expiry at the pool's floor of 2, not MIN_VALIDITY_LEDGERS", async () => {
