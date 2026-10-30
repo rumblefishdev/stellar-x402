@@ -65,12 +65,14 @@ the facilitator. It is built and tested against a local OpenBao in Docker, befor
 | 7 | The signer talks to OpenBao with `undici`, already a dependency, over the unix socket; no OpenBao client library (none supports a unix socket and `transit/sign`) | grilling | matches it | OpenBao lists only a Go client | | |
 | 8 | Unit tests run against a fake server on a unix socket; tests against a real OpenBao in Docker run when an environment variable is set, in CI on Linux, since a container's socket doesn't reach a macOS host | grilling | matches it | — | | |
 | 9 | A failed signature ends the settlement with upstream's reason: `settle_exact_stellar_transaction_signing_failed` for the transaction, `settle_exact_stellar_fee_bump_signing_failed` for the fee bump; nothing is sent, and a counter of signer failures by cause feeds the alarm (0027) | grilling | changes it (the task named no reason) | upstream `@x402/stellar` 2.28.0 `exact/facilitator/index.mjs:185,208` | | |
+| 10 | Before each signature, a token with less than 5 minutes left is replaced by logging in again first; the old token keeps working until its own hour ends (a second login doesn't revoke the first, measured on OpenBao 2.7.2), so no signature waits on an expired token. Concurrent signatures share one login; no timer runs in the background, and a `403` isn't retried | grilling | matches it (the task said log in again before expiry) | the AWS SDK refreshes credentials 5 minutes before expiry (`EXPIRATION_MS = 300_000`) | | |
+| 11 | A login that fails (wrong secret ID, OpenBao sealed or unreachable) ends that settlement with the signing reason (row 9), logged and counted, and `/health`'s `signer` shows it; the next settlement tries to log in again. No retry loop and no other key | grilling | matches it | ADR 0013: fail closed, no fallback key | | |
+| 12 | Every signature is checked against the configured address, through `Transaction.addSignature`, which verifies it; a mismatch ends the settlement before anything is sent | grilling | changes it (the task checked the first signature) | stellar-sdk `transaction_base.js:127-149` | | |
+| 13 | One request to OpenBao waits at most 1 s: the slowest measured signature was 286 ms (5 × 2,000 signatures from 20 clients at half a CPU), a settlement's two at most 124 ms (5 × 1,000) | grilling | beyond it | — | | |
+| 14 | OpenBao keeps its half-CPU limit: it adds a stall of about 50 ms to at least 1% of settlements (pair p99 44–49 ms in 5 × 1,000), small against a ledger of about 5 s | grilling | beyond it | — | | |
 
 ## Not yet decided
 
-- How the signer replaces an expired or revoked token (split into smaller questions).
-- How long the signer waits for OpenBao (measured first).
-- Whether every signature is checked against the address, or only the first.
 - Whether channels are created by a separate funding account, with the OpenBao key only added
   as their signer, so setup needs no Transit signature.
 - Whether today's transaction shape (three signatures per settlement) is needed at all.
