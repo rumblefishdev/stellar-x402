@@ -63,6 +63,20 @@ history:
     status: active
     who: stkrolikiewicz
     note: "Oskar's review of #79: x402-db-testnet@production, wanted rather than required by x402@production, secret files named per network, and only migrate-testnet beside the facilitator holding testnet's database password."
+  - date: "2026-10-30"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      Keys and settings before the first deploy (#96). The deploy key's public half is
+      deploy/ansible/files/deploy-production.pub, SHA256:DDjhArrC+m/iaBZ3WUSYc/GdswEia1yc1CxK+/dZoFw;
+      its private half exists only as the production environment's DEPLOY_SSH_KEY. HOST_KEY pins
+      ch-prod-01's ed25519 key, SHA256:xHEsZRyqxld+80uqEtAGBv98/3DqjpoEuG9WPbnSPzI, read from
+      /etc/ssh/ssh_host_ed25519_key.pub on the server over SSH checked against the admin's
+      known_hosts. The production environment deploys only from deploy/production, needs one
+      approval from any of six reviewers (stkrolikiewicz, karolko9, karczuRF, adamkoot, kowalski,
+      mmisiorek) and never the person who started the deploy, has no admin bypass, and holds
+      DEPLOY_HOST as a secret. The repo's default workflow permissions are read-only, and Actions
+      can't create or approve pull requests.
 ---
 
 # Public testnet deployment

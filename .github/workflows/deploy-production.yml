@@ -6,7 +6,7 @@
 # The `production` environment holds the rules (deploy/production only) and:
 #   secrets.DEPLOY_SSH_KEY  the deploy key's private half (its public half is
 #                           deploy/ansible/files/deploy-production.pub)
-#   vars.DEPLOY_HOST        the server's address
+#   secrets.DEPLOY_HOST     the server's address, a secret so this public repo's logs mask it
 #   vars.DEPLOY_PORT        its SSH port, 22 unless set
 name: Deploy production
 
@@ -80,13 +80,13 @@ jobs:
     env:
       DIGEST: ${{ inputs.digest || needs.image.outputs.digest }}
       # The server's ed25519 host key, pinned so that a change is a reviewed commit. Taken from the
-      # server's own /etc/ssh/ssh_host_ed25519_key.pub, not from a scan; empty until then.
-      HOST_KEY: ""
+      # server's own /etc/ssh/ssh_host_ed25519_key.pub, not from a scan (ch-prod-01, 2026-10-30).
+      HOST_KEY: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFm1JaGGXGsZ2ENb7Je8nZJAbG9RSsteQG0ake/UuFOB"
     steps:
       - name: Deploy over SSH
         env:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          HOST: ${{ vars.DEPLOY_HOST }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
           PORT: ${{ vars.DEPLOY_PORT || '22' }}
         run: |
           case $DIGEST in
