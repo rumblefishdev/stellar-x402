@@ -64,11 +64,11 @@ the facilitator. It is built and tested against a local OpenBao in Docker, befor
 | 6 | `secret` mode is refused on pubnet | grilling | beyond it | ADR 0013: one mechanism on both networks | | |
 | 7 | The signer talks to OpenBao with `undici`, already a dependency, over the unix socket; no OpenBao client library (none supports a unix socket and `transit/sign`) | grilling | matches it | OpenBao lists only a Go client | | |
 | 8 | Unit tests run against a fake server on a unix socket; tests against a real OpenBao in Docker run when an environment variable is set, in CI on Linux, since a container's socket doesn't reach a macOS host | grilling | matches it | — | | |
+| 9 | A failed signature ends the settlement with upstream's reason: `settle_exact_stellar_transaction_signing_failed` for the transaction, `settle_exact_stellar_fee_bump_signing_failed` for the fee bump; nothing is sent, and a counter of signer failures by cause feeds the alarm (0027) | grilling | changes it (the task named no reason) | upstream `@x402/stellar` 2.28.0 `exact/facilitator/index.mjs:185,208` | | |
 
 ## Not yet decided
 
 - How the signer replaces an expired or revoked token (split into smaller questions).
-- What `/settle` answers when a signature fails.
 - How long the signer waits for OpenBao (measured first).
 - Whether every signature is checked against the address, or only the first.
 - Whether channels are created by a separate funding account, with the OpenBao key only added
