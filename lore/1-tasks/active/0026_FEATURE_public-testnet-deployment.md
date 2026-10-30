@@ -77,6 +77,10 @@ history:
       mmisiorek) and never the person who started the deploy, has no admin bypass, and holds
       DEPLOY_HOST as a secret. The repo's default workflow permissions are read-only, and Actions
       can't create or approve pull requests.
+  - date: "2026-10-30"
+    status: active
+    who: stkrolikiewicz
+    note: "The production environment's reviewers are the x402 team only: stkrolikiewicz, karolko9, karczuRF and adamkoot; kowalski and mmisiorek came off the list."
 ---
 
 # Public testnet deployment
