@@ -186,7 +186,7 @@ export const DISCOVERY_STATEMENT_TIMEOUT_MS = 2_000;
 /**
  * The deadline of the whole upstream call (AD-3): `timeoutMs` (10 s) for each of `urls` RPC URLs,
  * plus, with fee-stats bids, the bid read before them, which `FallbackRpc` bounds at 10 s per URL,
- * plus 1 s of slack. The AD-22 ledger read after it is not included.
+ * plus 1 s of slack. The AD-22 ledger read and the trustline lookup after it are not included.
  */
 export function upstreamDeadlineMs(
   urls: number,
