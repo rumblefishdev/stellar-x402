@@ -176,6 +176,27 @@ its record. Fencing (0071) stops the old process from sending anything new after
 not what it had already sent. Accepted for testnet; before pubnet the new process leaves such a
 channel out until its record ends (0090).
 
+## `/verify` answers
+
+`/verify` passes on upstream's `invalid_exact_stellar_*` reasons, plus the checks of its own. After
+upstream's `invalid_exact_stellar_payload_simulation_failed` it simulates once more, to name the
+one cause upstream drops:
+
+| `invalidReason`                                 | meaning                                                                     | what to do                               |
+| ----------------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------- |
+| `invalid_exact_stellar_payto_trustline_missing` | `payTo` holds no trustline to the classic asset, or the account is unfunded | the seller funds the account and adds it |
+| `invalid_exact_stellar_payer_trustline_missing` | the payer holds no trustline to the classic asset                           | the payer adds it                        |
+
+`invalidMessage` names the account and the asset. The token must be a Stellar Asset Contract: any
+contract can emit the same error, and only a SAC's means a trustline. A SAC stops at its first
+failure, the payer's side first, so the payer's message adds that `payTo` wasn't checked: a seller
+missing one too shows up on the next try. Every other failure keeps upstream's reason, and so does
+a lookup that fails or takes over 3 s, logged as `trustline_lookup_failed`.
+
+Upstream's client simulates before it signs, so its users get the same `Error(Contract, #13)` from
+the client and never reach `/verify`. These answers are for a client that builds its own payload,
+and for a trustline removed after signing.
+
 ## `/settle` answers
 
 Every outcome is a 200 with an x402 `SettleResponse`. A 400 is a malformed request. A 503 comes
