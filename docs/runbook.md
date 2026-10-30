@@ -110,8 +110,9 @@ unset value
   `shred -u deploy-production`.
 - The host key: the server's `/etc/ssh/ssh_host_ed25519_key.pub`, read on the server, into
   `HOST_KEY` in `.github/workflows/deploy-production.yml` by pull request.
-- The `production` environment: deployment branches limited to `deploy/production`, the
-  variables `DEPLOY_HOST` and `DEPLOY_PORT`. `deploy/production` is protected: a pull request
+- The `production` environment: deployment branches limited to `deploy/production`, required
+  reviewers with "Prevent self-review" on, since a dispatched `digest` skips the pull request, and
+  the variables `DEPLOY_HOST` and `DEPLOY_PORT`. `deploy/production` is protected: a pull request
   with an approving review, no bypass.
 - The repo's Actions settings: default workflow permissions read-only, and "Allow GitHub Actions
   to create and approve pull requests" off, so no workflow can approve its own way onto
