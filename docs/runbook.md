@@ -112,8 +112,9 @@ unset value
   `HOST_KEY` in `.github/workflows/deploy-production.yml` by pull request.
 - The `production` environment: deployment branches limited to `deploy/production`, required
   reviewers with "Prevent self-review" on, since a dispatched `digest` skips the pull request, and
-  the variables `DEPLOY_HOST` and `DEPLOY_PORT`. `deploy/production` is protected: a pull request
-  with an approving review, no bypass.
+  the secret `DEPLOY_HOST` (a variable would print the server's address in every run's public
+  log) and the variable `DEPLOY_PORT`. `deploy/production` is protected: a pull request with an
+  approving review, no bypass.
 - The repo's Actions settings: default workflow permissions read-only, and "Allow GitHub Actions
   to create and approve pull requests" off, so no workflow can approve its own way onto
   `deploy/production` (both were the other way on 2026-10-29).

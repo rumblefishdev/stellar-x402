@@ -6,7 +6,7 @@
 # The `production` environment holds the rules (deploy/production only) and:
 #   secrets.DEPLOY_SSH_KEY  the deploy key's private half (its public half is
 #                           deploy/ansible/files/deploy-production.pub)
-#   vars.DEPLOY_HOST        the server's address
+#   secrets.DEPLOY_HOST     the server's address, a secret so this public repo's logs mask it
 #   vars.DEPLOY_PORT        its SSH port, 22 unless set
 name: Deploy production
 
@@ -86,7 +86,7 @@ jobs:
       - name: Deploy over SSH
         env:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          HOST: ${{ vars.DEPLOY_HOST }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
           PORT: ${{ vars.DEPLOY_PORT || '22' }}
         run: |
           case $DIGEST in
