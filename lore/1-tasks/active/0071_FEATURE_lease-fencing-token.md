@@ -50,11 +50,11 @@ every send follows `addHash`, so it sends nothing new.
 
 ## Implementation
 
-- A `token` column on `leases`, raised on every acquire by a new holder (a migration).
+- A `token` column on `leases`, new on every acquire (a migration; decision 1).
 - `acquireLease` returns the token; the keeper keeps it, and `onSigned` passes it to `addHash`.
 - `addHash` refuses when the lease's current token isn't the caller's, in the same statement; the
   pool then sends nothing (as for a final record today).
-- Contract tests on both adapters, and a test with two processes where the first freezes past
+- Contract tests on the adapter, and a test with two processes where the first freezes past
   the TTL with a call between its lease check and `onSigned`.
 
 ## Acceptance Criteria
@@ -104,9 +104,11 @@ every send follows `addHash`, so it sends nothing new.
    forgetting it. Tests take a lease (`holdLease`) for `addHash` calls not about the lease.
 9. **`addHash` throws `LeaseFencedError`** (proposed, confirmed), as it throws
    `HashConflictError`; `false` keeps meaning "final or missing". The fence comes before every
-   other rule, a hash already on the record (a resend) included.
+   other rule, a hash already on the record included.
 10. **`settlement_lease_fenced` log line and `settlement_lease_fenced_total`** (proposed,
-    confirmed): a takeover of a frozen process shows on the day it happens.
+    confirmed): a call the store refused shows on the day it happens. A frozen process's own
+    expiry usually stops the call first, with no such line (Adam's review of #92), so
+    `settlement_outcomes_total` is what counts every `…_lease_lost`.
 15. **A lease found lost right after the hash was stored still answers `…_lease_lost`** (okarcz,
     2026-10-29, review D1): the envelope wasn't sent, but the record has the hash, so it doesn't
     reopen and the answer carries the hash and no `extra`: sign a new payment, as for the other
@@ -134,7 +136,10 @@ every send follows `addHash`, so it sends nothing new.
 13. **`reasonFor` reads the `SignedHookError`'s `cause`** (claude): the pool wraps what `onSigned`
     threw, so `LeaseLostError` or `LeaseFencedError` as the cause maps to `…_lease_lost`; any
     other cause stays `…_record_write_failed`.
-14. **The pubnet refusal names only 0024 now** (0025 decision 24, 0009's rule).
+14. **The pubnet refusal names 0024 and 0090** (0025 decision 24, 0009's rule; Adam's review of
+    #92, replacing "only 0024"): the README and 0090 say it is needed before pubnet, and naming
+    0024 alone would let whoever closes 0024 open pubnet without it. Whichever lands last lifts
+    the rule.
 
 ## Implementation Notes
 
@@ -183,3 +188,17 @@ every send follows `addHash`, so it sends nothing new.
   a store failure there leaves it to the sweep, which closes it `…_interrupted`.
 - Docs: the facilitator README (the lease section, the `…_lease_lost` row, "Nothing sent", the
   deploy gap, pubnet), ADR 0006 (amended 2026-10-29), ADR 0011, ADR 0012, spine AD-17.
+
+### Adam's review of #92
+
+- Decisions 1, 2, 15 and 16 confirmed; decision 14 replaced (pubnet names 0090 too).
+- `…_lease_lost` with a `transaction` can also carry a hash that was sent and refused with
+  `txBadSeq`, when the rebuild is fenced: text corrected, pinned through the real pool.
+- An envelope stored before a freeze goes out once per call in flight and resends until its bound
+  (the default cap's about 6.5 minutes, under one hash), since the send loop has no lease check.
+- `settlement_lease_fenced` shows only a call the store refused (decision 10).
+- Tests: another `onSigned` failure stays `…_record_write_failed` (a table row and `/settle`);
+  `call.signing` moved below the lease check, so a budget answer can't name a hash the call
+  never tried to store.
+- Still to do: the testnet smoke once the stack lands; the last run was before the migration's
+  rename.

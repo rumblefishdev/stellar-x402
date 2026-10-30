@@ -144,8 +144,11 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
     a renewal, which changes only `expires_at`, never waits on a hash's write. A refused call sent
     nothing and ends `rejected` with `settle_exact_stellar_lease_lost`, which reopens like the
     other "nothing sent" reasons; a call that finds the lease lost or acquired again right after
-    its hash was stored answers it with that hash, and doesn't reopen. One envelope can still go
-    out after a takeover: one stored and checked just before its process froze. `transition` stays unfenced: a stale
+    its hash was stored answers it with that hash, and doesn't reopen, and so does a rebuild
+    refused after an earlier envelope was sent and refused with `txBadSeq`, with the hash of that
+    earlier envelope. An envelope stored and checked before its process froze can still go out
+    after a takeover, one per call in flight, and the send loop has no lease check, so it resends
+    until its bound; every resend has the same hash, so it lands at most once. `transition` stays unfenced: a stale
     holder still records what it had sent, and the new holder's reconciliation finishes what it
     can't.
 - **Minimum validity.** Payloads whose auth expiration ledger is less than `minValidityLedgers`

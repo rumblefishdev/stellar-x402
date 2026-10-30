@@ -272,7 +272,7 @@ graph TD
 - **Prevents:** two processes using one channel's sequence numbers, for example during a rolling deploy.
 - **Rule:**
   - **Lease.** At startup a process takes an exclusive lease on its network's channel set through the store and keeps renewing it. Without the lease it doesn't serve `/settle`.
-  - **Fencing.** Every acquire draws a new token; a hash is stored, and so sent, only under the lease's current token (task 0071). A holder that lost the lease while frozen sends nothing new, except one envelope already stored and checked when it froze.
+  - **Fencing.** Every acquire draws a new token; a hash is stored, and so sent, only under the lease's current token (task 0071). A holder that lost the lease while frozen sends nothing new, except an envelope already stored and checked when it froze, one per call in flight: the send loop has no lease check, so it resends that envelope until its bound, under one hash.
   - **Deploys.** They stop the old process before the new one takes the lease.
   - **Shutdown.** The process stops accepting `/settle`, waits until every in-flight submission is final or recorded as pending, then releases the lease.
 

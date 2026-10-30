@@ -155,7 +155,9 @@ a whole zone, to Cloudflare on the Free plan.
   - A process without the lease keeps trying to take it.
   - A process whose lease renewal fails stops new submissions until it holds the lease again.
   - A process that froze past its TTL while another took the lease sends nothing new once it
-    wakes: the store refuses its hash under the replaced fencing token (task 0071).
+    wakes: the store refuses its hash under the replaced fencing token (task 0071). The
+    exception is an envelope stored and checked before the freeze: it can still go out, and
+    resend until its bound, under its one hash.
 - **AD-16 reconciliation doesn't depend on the lease** (0019 decisions 27 and 37). It starts once
   the server listens and sweeps every 10 s beside `/settle`, in every process. It only reads the
   chain, and every write is a compare-and-set on the record's version, so a process waiting for
