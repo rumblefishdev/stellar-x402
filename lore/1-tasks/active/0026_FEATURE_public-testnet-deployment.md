@@ -125,8 +125,9 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     reachable only from the facilitator and the migration service.
   - Networks `x402-production-edge` (`cloudflared` and the facilitator) and
     `x402-production-db` (`internal: true`, the facilitator, each network's Postgres and
-    migration service), both part of the production compose project. Only the facilitator and
-    `migrate-testnet` hold testnet's database password.
+    migration service), both part of the production compose project, on fixed subnets
+    (`172.31.200.0/28` and `172.31.200.16/28`) since the server's Docker address pool is taken.
+    Only the facilitator and `migrate-testnet` hold testnet's database password.
   - `cloudflared`: Cloudflare's tunnel connector pinned by digest, memory limit 128 MiB, under
     its own unit `x402-tunnel@production.service`, enabled at boot and untouched by deploys, so
     it keeps forwarding while the facilitator drains; `x402@production` runs after it. The unit
