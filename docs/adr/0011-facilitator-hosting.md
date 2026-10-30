@@ -218,7 +218,10 @@ One request or one stop must never outlast the layer in front of it:
   get `reopened` -1 and never reopen, so a payer who did sign again can't have the old payment
   land beside it through `/settle` (0073 decision 25). A rollback to a release before 0073 runs on
   the newer schema (its inserts get -1 too) but takes the promise back: it answers a repeat from
-  the record, as "sign a new payment", without reopening it.
+  the record, as "sign a new payment", without reopening it. Deploying this release again after
+  that is an accepted gap: a record it claimed keeps `reopened` 0 through the rollback, so such a
+  payment reopens, and it can land beside a newly signed one if both deploys fit inside the auth's
+  life (0073 decision 28).
 - **The budget covers the wait for a channel.** The pool's own bounds (until the payer's auth expiry ledger, then 30 s; 60 s + 30 s
   for a call without a ledger bound) start only
   once a channel is acquired, so the `/settle` handler passes the pool a deadline (0009).
