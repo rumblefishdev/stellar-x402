@@ -279,8 +279,9 @@ deploy by hand on the server (Deploy, above).
   you trust, never from a scan; pin it in `HOST_KEY` by pull request, and record its fingerprint in
   task 0026's history.
 - **A leaked or lost deploy key:**
-  1. On a leak, cut the old key off at once; workflow deploys stop until step 3:
-     `sudo sh -c ': > /var/lib/x402-deploy/.ssh/authorized_keys'`.
+  1. On a leak, cut the old key off at once; workflow deploys stop until step 3. It is
+     `x402-deploy`'s file, not the one of `deploy`, the admin user, in `/home/deploy`:
+     `sudo truncate -s 0 /var/lib/x402-deploy/.ssh/authorized_keys`.
   2. Make a new pair as in "Before the first deploy": the private half into `DEPLOY_SSH_KEY`, the
      public half into `deploy/ansible/files/deploy-production.pub` by pull request.
   3. Once that is on `develop`, run the playbook before the next deploy: it writes the new key into
