@@ -22,11 +22,26 @@ services:
       CLIENT_IP: cloudflare
       DATABASE_URL_FILE: /run/secrets/database-url.testnet
       RPC_URLS_FILE: /run/secrets/rpc-urls.testnet
-      # The signer (OpenBao Transit, its AppRole files and sockets) and CHANNELS come with 0036,
-      # which moves testnet's channels to the OpenBao key.
+      # The facilitator key signs in OpenBao Transit over testnet's socket, with no secret seed
+      # here (ADR 0013, 0036). The OpenBao key's account and its channels are public and known
+      # once 0026 creates them: set them in this directory's .env. Unset, the facilitator refuses
+      # to start and names them; the other services don't read them.
+      SIGNER: openbao
+      FACILITATOR_ADDRESS: ${FACILITATOR_ADDRESS_TESTNET:-}
+      CHANNELS: ${CHANNELS_TESTNET:-}
+      OPENBAO_SOCKET: /run/openbao/testnet/bao.sock
+      OPENBAO_KEY: stellar-testnet
+      OPENBAO_KEY_VERSION: "1"
+      OPENBAO_ROLE_ID_FILE: /run/secrets/approle-role-id.testnet
+      OPENBAO_SECRET_ID_FILE: /run/secrets/approle-secret-id.testnet
     secrets:
       - database-url.testnet
       - rpc-urls.testnet
+      - approle-role-id.testnet
+      - approle-secret-id.testnet
+    volumes:
+      # Testnet's listener socket only; mainnet's is its own volume (ADR 0013).
+      - openbao-testnet:/run/openbao/testnet
     networks:
       - edge
       - db
@@ -112,6 +127,10 @@ volumes:
   postgres-testnet:
     external: true
     name: x402-production-postgres-testnet
+  # OpenBao's own Compose project makes it and puts testnet's socket in it (0077 decision 4).
+  openbao-testnet:
+    external: true
+    name: x402-openbao-testnet
 
 # Bind mounts outside swarm: each file keeps the owner and mode `x402-creds` gives it.
 secrets:
@@ -119,6 +138,10 @@ secrets:
     file: ${SECRETS_DIR:-/run/x402/production}/database-url.testnet
   rpc-urls.testnet:
     file: ${SECRETS_DIR:-/run/x402/production}/rpc-urls.testnet
+  approle-role-id.testnet:
+    file: ${SECRETS_DIR:-/run/x402/production}/approle-role-id.testnet
+  approle-secret-id.testnet:
+    file: ${SECRETS_DIR:-/run/x402/production}/approle-secret-id.testnet
   postgres-password.testnet:
     file: ${SECRETS_DIR:-/run/x402/production}/postgres-password.testnet
   tunnel-token:
