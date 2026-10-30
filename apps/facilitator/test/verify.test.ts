@@ -192,6 +192,14 @@ describe("createVerifier", () => {
       expect(missingTrustline).toHaveBeenCalledOnce();
     });
 
+    it("doesn't look for a payload without exactly one entry of the payer's", async () => {
+      const { verify, missingTrustline } = setup(failed);
+      for (const auth of [[], [authEntry(payTo, CURRENT + MIN_VALIDITY)]]) {
+        await expect(verify(payload({ auth }), requirements)).resolves.toBe(failed);
+      }
+      expect(missingTrustline).not.toHaveBeenCalled();
+    });
+
     it("looks only after simulation_failed, and only with a payer to compare", async () => {
       const wrongAmount = {
         ...failed,

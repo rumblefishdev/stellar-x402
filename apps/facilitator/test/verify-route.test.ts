@@ -7,6 +7,7 @@ import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import { start, type Started } from "../src/main.js";
+import { PAYTO_TRUSTLINE_REASON } from "../src/settlement/trustline.js";
 import type { Verify } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
 import { bazaarExtensions, depthOf } from "./payment.js";
@@ -98,6 +99,23 @@ describe("POST /verify", () => {
     await post(request);
     const verified = lines.map((line) => JSON.parse(line)).find((l) => l.event === "verified");
     expect(verified).toMatchObject({ isValid: false, rpc: "RPC_URLS[1]" });
+  });
+
+  it("logs a missing trustline's message, and no other refusal's", async () => {
+    verify.mockResolvedValueOnce({
+      isValid: false,
+      invalidReason: PAYTO_TRUSTLINE_REASON,
+      invalidMessage: "G… has no USDC trustline",
+    });
+    await post(request);
+    verify.mockResolvedValueOnce({
+      isValid: false,
+      invalidReason: "invalid_exact_stellar_payload_simulation_failed",
+      invalidMessage: "not for the log",
+    });
+    await post(request);
+    const verified = lines.map((line) => JSON.parse(line)).filter((l) => l.event === "verified");
+    expect(verified.map((line) => line.message)).toEqual(["G… has no USDC trustline", undefined]);
   });
 
   it("logs our own reason next to upstream's", async () => {

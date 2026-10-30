@@ -339,7 +339,7 @@ export function buildChecks(
     minValidityLedgers: config.settlement.minValidityLedgers,
     maxValidityLedgers: config.settlement.maxValidityLedgers,
     latestLedger: async () => (await rpc.getLatestLedger()).sequence,
-    missingTrustline: createTrustlineLookup(rpc, logger),
+    missingTrustline: createTrustlineLookup(rpc, config.network, logger),
   };
 }
 

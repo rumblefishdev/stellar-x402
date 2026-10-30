@@ -180,15 +180,20 @@ export function createChecker(deps: VerifierDeps): Check {
       throw new Error(`upstream verify failed with ${UNEXPECTED_VERIFY_ERROR}`);
     }
     if (upstream.invalidReason === SIMULATION_FAILED_REASON && upstream.payer !== undefined) {
-      const missing = await deps.missingTrustline({
-        transaction: new Transaction(
-          (payload.payload as { transaction: string }).transaction,
-          getNetworkPassphrase(deps.network),
-        ),
-        asset: requirements.asset,
-        payer: upstream.payer,
-        payTo: requirements.payTo,
-      });
+      const transaction = new Transaction(
+        (payload.payload as { transaction: string }).transaction,
+        getNetworkPassphrase(deps.network),
+      );
+      // A payload without the payer's entry is free to send, so it buys no more RPC calls.
+      const missing =
+        payerNonce({ transaction, payer: upstream.payer }) === undefined
+          ? undefined
+          : await deps.missingTrustline({
+              transaction,
+              asset: requirements.asset,
+              payer: upstream.payer,
+              payTo: requirements.payTo,
+            });
       if (missing) {
         return {
           response: invalid(missing.invalidReason, upstream.payer, missing.invalidMessage),
