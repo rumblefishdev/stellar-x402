@@ -45,7 +45,8 @@ export interface VerifierDeps {
   /**
    * How long the whole upstream call may take, in milliseconds, across every RPC URL it tries and
    * the bid read before them; 10,000 by default. Upstream's RPC and Horizon clients have no timeout
-   * of their own. The AD-22 ledger read comes after it, with `FallbackRpc`'s own timeout.
+   * of their own. The AD-22 ledger read comes after it, with `FallbackRpc`'s own timeout, and so
+   * does the trustline lookup, with a limit of its own.
    */
   upstreamTimeoutMs?: number;
 }
@@ -110,7 +111,8 @@ export type Verify = (
 
 /**
  * The `exact` verification `/verify` answers with and `/settle` (0009) runs again (AD-3): the
- * network and envelope checks, upstream `verify()`, then address credentials only, the channel
+ * network and envelope checks, upstream `verify()`, whose failed simulation gets a look for a
+ * missing trustline (0078), then address credentials only, the channel
  * check (AD-5, with the facilitator's muxed address), the payer's one auth entry (AD-6), then the
  * validity check (AD-22). The first rejection is the answer. Errors are thrown, not answered: ours (the ledger read), upstream's, which it reports as
  * `unexpected_verify_error`, and an upstream call past `upstreamTimeoutMs`.

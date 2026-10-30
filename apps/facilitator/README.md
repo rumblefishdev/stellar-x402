@@ -182,16 +182,19 @@ channel out until its record ends (0090).
 upstream's `invalid_exact_stellar_payload_simulation_failed` it simulates once more, to name the
 one cause upstream drops:
 
-| `invalidReason`                                 | meaning                                                                     | what to do                               |
-| ----------------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------- |
-| `invalid_exact_stellar_payto_trustline_missing` | `payTo` holds no trustline to the classic asset, or the account is unfunded | the seller funds the account and adds it |
-| `invalid_exact_stellar_payer_trustline_missing` | the payer holds no trustline to the classic asset                           | the payer adds it                        |
+| `invalidReason`                                 | meaning                                                                     | what to do                                          |
+| ----------------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------- |
+| `invalid_exact_stellar_payto_trustline_missing` | `payTo` holds no trustline to the classic asset, or the account is unfunded | the seller funds the account and adds it            |
+| `invalid_exact_stellar_payer_trustline_missing` | the payer holds no trustline to the classic asset                           | the payer makes sure the account exists and adds it |
 
 `invalidMessage` names the account and the asset. The token must be a Stellar Asset Contract: any
 contract can emit the same error, and only a SAC's means a trustline. A SAC stops at its first
 failure, the payer's side first, so the payer's message adds that `payTo` wasn't checked: a seller
-missing one too shows up on the next try. Every other failure keeps upstream's reason, and so does
-a lookup that fails or takes over 3 s, logged as `trustline_lookup_failed`.
+missing one too shows up on the next try. Once the trustline is there, the same payment may be
+sent again until its auth expires. `/settle` gives the same two reasons.
+
+Every other failure keeps upstream's reason. So does a lookup that fails or takes over 3 s, logged
+as `trustline_lookup_failed`, and a muxed `payTo`, because the error names its G-address.
 
 Upstream's client simulates before it signs, so its users get the same `Error(Contract, #13)` from
 the client and never reach `/verify`. These answers are for a client that builds its own payload,
@@ -234,7 +237,7 @@ unlocks one response.
 | `settle_exact_stellar_transaction_failed`            | the hash                | included in a ledger, but failed                                                                | sign a new payment                                                                        |
 | `settle_exact_stellar_transaction_submission_failed` | the hash                | refused by the network before inclusion                                                         | sign a new payment                                                                        |
 | `settle_exact_stellar_transaction_expired`           | the hash                | not included before its ledger bound, the payer's auth expiry; before 0073, its 60 s time bound | sign a new payment                                                                        |
-| `invalid_exact_stellar_*`, `invalid_network`         | —                       | the `/verify` checks, rerun by `/settle`, refused the payment                                   | fix the payment; for `invalid_exact_stellar_payload_fee_exceeds_maximum`, try again later |
+| `invalid_exact_stellar_*`, `invalid_network`         | —                       | the `/verify` checks, rerun by `/settle`, refused the payment                                   | fix the problem; for `invalid_exact_stellar_payload_fee_exceeds_maximum`, try again later |
 | `unexpected_settle_error`                            | an earlier hash, if any | an error of ours after the claim                                                                | sign a new payment, and tell us                                                           |
 
 "An earlier hash, if any": a refusal after a `txBadSeq` rebuild carries the last stored hash.

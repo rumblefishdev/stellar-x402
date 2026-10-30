@@ -5,7 +5,7 @@ type: FEATURE
 status: active
 milestone: 1
 related_adr: []
-related_tasks: ["0018", "0021", "0066"]
+related_tasks: ["0018", "0021", "0066", "0092"]
 tags: [facilitator, exact, payments, priority-medium, effort-small]
 links: []
 history:
@@ -106,18 +106,30 @@ failed. Today the payment fails with upstream's generic `invalid_exact_stellar_p
 
 9. **`message` asset name from the SAC's `METADATA`, or its contract address**: the instance read
    already returns `CODE:ISSUER`, so naming the asset costs no call.
+10. **Upstream's client waits for 0092** (okarcz, 2026-10-30, from code review): the panel
+    response's "actionable error" holds for upstream's client only once the SDK step in 0092 is
+    done. Until then it holds for a client with its own payload and a trustline removed after
+    signing.
+11. **A `/settle` budget that runs out during the lookup stays a timeout** (code review): decision
+    3 holds in `/verify`, but `settle.ts` bounds the whole check, so a hung lookup in the budget's
+    last 3 s answers `…_timeout`. Nothing is claimed and the same payment may be sent again;
+    avoiding it needs a new parameter on `Check`.
 
 ## Implementation Notes
 
 - `src/settlement/trustline.ts`: `createTrustlineLookup()`, the two reasons, the event decoding and
   the SAC check. `verify.ts` calls it just before answering upstream's refusal, when the payer is
   known; `/settle` gets it through the same checks. `buildChecks()` wires it.
-- Tests: `test/trustline.test.ts` (new, 11), three in `verify.test.ts`, one in
-  `build-verifier.test.ts` through `/verify` and `/settle`'s check. Changed fixtures only:
+- Tests: `test/trustline.test.ts` (new, 14), three in `verify.test.ts`, two in
+  `build-verifier.test.ts` through `/verify` and `/settle`'s check, one with the real lookup. `settle.test.ts`'s
+  failed check now carries a message. Changed fixtures only:
   `missingTrustline` added to the `createChecker` calls in `verify.test.ts` and `settle.test.ts`,
   and `simulateTransaction` to the fake RPC in `build-verifier.test.ts`.
 - 12 mutants caught: no SAC check, any contract error, any contract, any account, reasons swapped,
   no `payTo` note, any executable, no limit, no log, every refusal, never looking, no wiring.
+- Code review (four reviewers): 7 fixes applied, 10 points rejected, decisions 10 and 11. 10 more
+  mutants caught: a wrong instance key (2), each event guard (5), a 30 s default, `/settle` dropping
+  the message, a muxed `payTo` matched.
 - Testnet, 2026-10-30, throwaway accounts and asset, signed payloads through `buildVerifier`:
   - both trustlines: `isValid: true`;
   - `payTo`'s removed after signing: `invalid_exact_stellar_payto_trustline_missing`, "G… has no
@@ -135,4 +147,4 @@ failed. Today the payment fails with upstream's generic `invalid_exact_stellar_p
   for both cases, so its users never reach `/verify`. The testnet run signed with the trustline in
   place and removed it afterwards. The answers serve a client with its own payload and a trustline
   removed after signing; the panel response's "actionable error" for upstream's client needs the
-  SDK step that's M2.
+  SDK step that's M2 (0092).
