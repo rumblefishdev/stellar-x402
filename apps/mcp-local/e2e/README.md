@@ -13,7 +13,7 @@ independent review of what the first set left out.
 ## Run
 
 ```sh
-pnpm e2e:testnet      # from the repo root: builds the CLI and the example seller, then runs
+pnpm mcp:e2e   # from the repo root: builds the CLI and the example seller, then runs
 ```
 
 It needs `.env.e2e-testnet` at the repo root (git-ignored), or the file named by `E2E_ENV_FILE`:
