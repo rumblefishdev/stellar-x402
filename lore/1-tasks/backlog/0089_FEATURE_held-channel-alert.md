@@ -6,7 +6,7 @@ status: backlog
 milestone: 1
 related_adr: ["0011"]
 related_tasks: ["0073", "0027"]
-tags: [facilitator, signer-pool, observability, priority-medium, effort-small]
+tags: [facilitator, signer-pool, observability, before-pubnet, priority-medium, effort-small]
 links: []
 history:
   - date: "2026-10-29"
