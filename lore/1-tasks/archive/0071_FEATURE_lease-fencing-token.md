@@ -2,7 +2,7 @@
 id: "0071"
 title: "Fence the channel lease, so a stale holder sends nothing new"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0006", "0011", "0012"]
 related_tasks: ["0025", "0022", "0013", "0024"]
@@ -18,6 +18,13 @@ history:
     status: active
     who: okarcz
     note: "Work started."
+  - date: "2026-10-30"
+    status: completed
+    who: okarcz
+    note: >
+      PR #92 merged: a token per acquire on the lease, checked in `addHash`'s statement, and
+      `…_lease_lost` for a fenced call. Facilitator 616, signer-pool 160; testnet smoke 5/5.
+      Pubnet stays refused until 0024 and 0090 land. No follow-up tasks.
 ---
 
 # Fence the channel lease, so a stale holder sends nothing new
@@ -200,5 +207,15 @@ every send follows `addHash`, so it sends nothing new.
 - Tests: another `onSigned` failure stays `…_record_write_failed` (a table row and `/settle`);
   `call.signing` moved below the lease check, so a budget answer can't name a hash the call
   never tried to store.
-- Still to do: the testnet smoke once the stack lands; the last run was before the migration's
-  rename.
+- Testnet smoke after the stack landed: 5/5 at 9b02933, on a fresh database with every migration
+  applied from scratch, through `0008_lease_token`. It covers the normal path through the fence,
+  not a takeover: that stays on the two-process tests.
+
+### Rebase onto develop
+
+- 0074 had moved the settle budget tests onto a fake clock, so `call.signing`'s test, written on
+  real time, hung with no text conflict. It now calls `elapse(BUDGET_MS)`, folded into its commit;
+  moving `call.signing` back above the lease check still fails it. Facilitator 616, signer-pool 160.
+- CI failed once on an unhandled `HashConflictError` from `postgres.test.ts`'s "rejects a hash
+  another record's insert commits while addHash waits on it": the test attaches `.rejects` after
+  `COMMIT`, so a fast rejection is unhandled. It dates from 0022, isn't this task's, and is unfixed.
