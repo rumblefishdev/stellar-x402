@@ -219,7 +219,7 @@ describe("PostgreSQL stores", () => {
     }
   };
 
-  // 0071: the lease row's `FOR SHARE` orders a takeover against the hash's write.
+  // 0071: the lease row's `FOR KEY SHARE` orders a takeover against the hash's write.
   it("makes a takeover wait until a hash under the old token is stored", async () => {
     const { settlements } = await stores();
     const NAME = "stellar:testnet:channels";

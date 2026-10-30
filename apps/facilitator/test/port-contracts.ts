@@ -805,7 +805,7 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
         const stale = (await store.acquireLease(NAME, "a", 1_000, 0))!;
         const s = settlement("1");
         await store.claim(s);
-        // A resend of the same envelope calls `onSigned` again with the stored hash.
+        // The fence comes first, so a hash already on the record gets no "already stored" answer.
         await store.addHash(s.key, "h1", stale, 2_000);
         await store.acquireLease(NAME, "b", 1_000, 1_001 + LEASE_SKEW_MARGIN_MS);
         await expect(store.addHash(s.key, "h1", stale, 3_000)).rejects.toBeInstanceOf(

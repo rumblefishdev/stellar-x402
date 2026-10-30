@@ -26,7 +26,7 @@ discovery routes. Design: [the M1 spine](../../docs/architecture/m1-spine.md) (A
   every new `/settle` wait for a channel until its budget ends. No metric shows a held channel
   yet (0089).
 - `NETWORK=stellar:pubnet` refuses to start: `/settle` would spend there with no spend budgets
-  (0024) yet.
+  (0024) yet, and a deploy could reuse a channel left open (0090).
 
 ## Callers and rate limits
 
@@ -111,11 +111,15 @@ default).
 - Every acquire gives the lease a new token, a renewal keeps it, and a hash is stored only under
   the lease's current token (task 0071). So a process that froze past its TTL (a VM pause, a long
   GC) while another took over stores nothing and sends nothing once it wakes: its call ends with
-  `settle_exact_stellar_lease_lost`, logged as `settlement_lease_fenced` and counted in
-  `settlement_lease_fenced_total`. What it had already sent still finishes, by itself or by the
-  new holder's reconciliation. One envelope can still go out after a takeover: a process that
-  freezes after its hash is stored and checked, just before the send. At worst the new holder
-  gets a `txBadSeq` on that channel and rebuilds, and reconciliation finishes the record.
+  `settle_exact_stellar_lease_lost`. The process's own expiry usually stops the call first, with
+  no line for that call; `settlement_lease_fenced` and `settlement_lease_fenced_total` show only
+  a call the store refused. `settlement_outcomes_total` counts every `…_lease_lost`. What it had
+  already sent still finishes, by itself or by the new holder's reconciliation. An envelope stored
+  and checked before the freeze can still go out after a takeover, one per call in flight, and
+  the send loop has no lease check: it resends that envelope until its bound, at most the
+  `MAX_VALIDITY_LEDGERS` cap (about 6.5 minutes by default). Every resend has the same hash, so
+  it lands at most once. At worst the new holder gets a `txBadSeq` on that channel and rebuilds,
+  and reconciliation finishes the record.
 - A renewal never waits on a hash being stored; a takeover or a release does, for that one write
   (the lease row is locked `FOR KEY SHARE`, and `token` is unique).
 - While a deploy replaces a release from before task 0071, a takeover by the old process keeps
@@ -263,8 +267,9 @@ reopens, and this release answers it the same way, without `extra`. A rollback t
 before 0073 takes the "repeat it" promise back: it answers a repeat from the record, as "sign a
 new payment", and doesn't reopen it.
 
-`…_lease_lost` with a `transaction` means the lease was found lost right after that hash was
-stored: the envelope was never sent, but the record has a hash, so it doesn't reopen. Sign a new
+`…_lease_lost` with a `transaction` means the record has that hash, so it doesn't reopen. Either
+the lease was found lost right after the hash was stored, and that envelope was never sent, or an
+envelope was sent and refused with `txBadSeq` and the lease went before its rebuild. Sign a new
 payment, as for the other reasons above with a `transaction` (task 0082 covers when that is
 safe).
 
