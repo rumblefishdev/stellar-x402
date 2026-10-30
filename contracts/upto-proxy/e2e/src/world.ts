@@ -163,7 +163,8 @@ async function ensureChannels(facilitator: Keypair, known: string[], count: numb
   for (let i = 0; i < fresh.length; i += MAX_CHANNELS_PER_TX) {
     const batch = fresh.slice(i, i + MAX_CHANNELS_PER_TX);
     const tx = buildCreateChannelsTx({
-      facilitator: await server.getAccount(facilitator.publicKey()),
+      funder: await server.getAccount(facilitator.publicKey()),
+      signer: facilitator.publicKey(),
       channels: batch,
       networkPassphrase: PASSPHRASE,
       fee: 1000,

@@ -74,7 +74,8 @@ const channelKeys = [Keypair.random(), Keypair.random()];
 const facilitatorEntry = await readAccountEntry(server, facilitator.publicKey());
 if (!facilitatorEntry) throw new Error("the facilitator account does not exist");
 const setup = buildCreateChannelsTx({
-  facilitator: new Account(facilitator.publicKey(), facilitatorEntry.seqNum().toString()),
+  funder: new Account(facilitator.publicKey(), facilitatorEntry.seqNum().toString()),
+  signer: facilitator.publicKey(),
   channels: channelKeys,
   networkPassphrase: Networks.TESTNET,
   fee: 1000,
