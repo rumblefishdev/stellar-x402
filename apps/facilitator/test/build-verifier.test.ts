@@ -29,6 +29,7 @@ import {
 } from "../src/main.js";
 import { rpcEndpointName } from "../src/logger.js";
 import { feeSettings, type FeeSettings } from "../src/settlement/fees.js";
+import { PAYTO_TRUSTLINE_REASON } from "../src/settlement/trustline.js";
 import {
   CHANNEL_ACCOUNT_REASON,
   MUXED_FACILITATOR_REASON,
@@ -128,6 +129,8 @@ interface SetupOptions {
   config?: Config;
   /** The latest ledger per RPC URL, for the AD-22 read and the probe. */
   latestLedger?: (url: string) => Promise<number>;
+  /** The stub RPC's answers, over the ones `setup` gives. */
+  rpc?: Partial<SorobanRpc>;
 }
 
 /** `answer` may depend on the scheme's RPC URL and get the call's arguments. */
@@ -160,6 +163,7 @@ function setup(
             : new Promise<FeeStats>((resolve) => setTimeout(() => resolve(stats), feeStatsMs)),
         getLatestLedger: async () => ({ sequence: await latestLedger(url) }),
         simulateTransaction: () => Promise.reject(new Error("no simulation here")),
+        ...opts.rpc,
       }) as unknown as SorobanRpc,
   );
   const schemes: { signer: string; options: SchemeOptions }[] = [];
@@ -528,6 +532,77 @@ describe("buildVerifier (the /verify wiring in main)", () => {
     logger.warn.mockClear();
     await expect(check(payload(), requirements)).resolves.toEqual({ response: failed });
     expect(logger.warn).toHaveBeenCalledWith("trustline_lookup_failed", expect.anything());
+  });
+
+  it("answers a missing trustline through the real lookup, in /verify and /settle's check", async () => {
+    const issuer = Keypair.random().publicKey();
+    const name = `USDC:${issuer}`;
+    const trustlineMissing = new xdr.DiagnosticEvent({
+      inSuccessfulContractCall: false,
+      event: new xdr.ContractEvent({
+        ext: new xdr.ExtensionPoint(0),
+        contractId: StrKey.decodeContract(asset) as never,
+        type: xdr.ContractEventType.diagnostic(),
+        body: new xdr.ContractEventBody(
+          0,
+          new xdr.ContractEventV0({
+            topics: [xdr.ScVal.scvSymbol("error"), xdr.ScVal.scvError(xdr.ScError.sceContract(13))],
+            data: xdr.ScVal.scvVec([nativeToScVal("text"), new Address(payTo).toScVal()]),
+          }),
+        ),
+      }),
+    });
+    const instance = xdr.ScVal.scvContractInstance(
+      new xdr.ScContractInstance({
+        executable: xdr.ContractExecutable.contractExecutableStellarAsset(),
+        storage: [
+          new xdr.ScMapEntry({
+            key: xdr.ScVal.scvSymbol("METADATA"),
+            val: nativeToScVal({ name }),
+          }),
+        ],
+      }),
+    );
+    const contractData = new xdr.ContractDataEntry({
+      ext: new xdr.ExtensionPoint(0),
+      contract: new Address(asset).toScAddress(),
+      key: xdr.ScVal.scvLedgerKeyContractInstance(),
+      durability: xdr.ContractDataDurability.persistent(),
+      val: instance,
+    });
+    const { verify, check, logger } = setup(
+      {
+        isValid: false,
+        invalidReason: "invalid_exact_stellar_payload_simulation_failed",
+        payer,
+      },
+      {
+        rpc: {
+          simulateTransaction: async () =>
+            ({
+              id: "1",
+              latestLedger: CURRENT,
+              events: [trustlineMissing],
+              _parsed: true,
+              error: "HostError: Error(Contract, #13)",
+            }) as never,
+          getLedgerEntries: async () =>
+            ({
+              latestLedger: CURRENT,
+              entries: [{ val: xdr.LedgerEntryData.contractData(contractData) }],
+            }) as never,
+        },
+      },
+    );
+    const refused = {
+      isValid: false,
+      invalidReason: PAYTO_TRUSTLINE_REASON,
+      invalidMessage: `${payTo} has no ${name} trustline: the account must exist and hold one`,
+      payer,
+    };
+    await expect(verify(payload(), requirements)).resolves.toEqual(refused);
+    await expect(check(payload(), requirements)).resolves.toEqual({ response: refused });
+    expect(logger.warn).not.toHaveBeenCalledWith("trustline_lookup_failed", expect.anything());
   });
 
   it("rechecks /settle's auth expiry at the pool's floor of 2, not MIN_VALIDITY_LEDGERS", async () => {
