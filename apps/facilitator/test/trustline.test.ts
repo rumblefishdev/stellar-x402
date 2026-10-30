@@ -2,6 +2,7 @@ import {
   Account,
   Address,
   Keypair,
+  MuxedAccount,
   Networks,
   Operation,
   StrKey,
@@ -9,7 +10,7 @@ import {
   nativeToScVal,
   xdr,
 } from "@stellar/stellar-sdk";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   PAYER_TRUSTLINE_REASON,
   PAYTO_TRUSTLINE_REASON,
@@ -33,26 +34,45 @@ const transaction = new TransactionBuilder(new Account(payer, "1"), {
   .build();
 const payment = { transaction, asset, payer, payTo };
 
-/** A contract's error event, as the SAC emits it on testnet (`#13`, text, account). */
-function errorEvent(account: string, { code = 13, contract = assetBytes } = {}) {
+const instanceKey = xdr.LedgerKey.contractData(
+  new xdr.LedgerKeyContractData({
+    contract: new Address(asset).toScAddress(),
+    key: xdr.ScVal.scvLedgerKeyContractInstance(),
+    durability: xdr.ContractDataDurability.persistent(),
+  }),
+).toXDR("base64");
+
+function diagnosticEvent(
+  topics: xdr.ScVal[],
+  data: xdr.ScVal,
+  contract: Buffer | null = assetBytes,
+) {
   return new xdr.DiagnosticEvent({
     inSuccessfulContractCall: false,
     event: new xdr.ContractEvent({
       ext: new xdr.ExtensionPoint(0),
       contractId: contract as never,
       type: xdr.ContractEventType.diagnostic(),
-      body: new xdr.ContractEventBody(
-        0,
-        new xdr.ContractEventV0({
-          topics: [xdr.ScVal.scvSymbol("error"), xdr.ScVal.scvError(xdr.ScError.sceContract(code))],
-          data: xdr.ScVal.scvVec([
-            nativeToScVal("trustline entry is missing for account"),
-            new Address(account).toScVal(),
-          ]),
-        }),
-      ),
+      body: new xdr.ContractEventBody(0, new xdr.ContractEventV0({ topics, data })),
     }),
   });
+}
+
+const errorTopics = (error: xdr.ScError) => [
+  xdr.ScVal.scvSymbol("error"),
+  xdr.ScVal.scvError(error),
+];
+
+/** A contract's error event, as the SAC emits it on testnet (`#13`, text, account). */
+function errorEvent(account: string, { code = 13, contract = assetBytes } = {}) {
+  return diagnosticEvent(
+    errorTopics(xdr.ScError.sceContract(code)),
+    xdr.ScVal.scvVec([
+      nativeToScVal("trustline entry is missing for account"),
+      new Address(account).toScVal(),
+    ]),
+    contract,
+  );
 }
 
 const failed = (...events: xdr.DiagnosticEvent[]) => ({
@@ -96,7 +116,10 @@ function instance(sac: boolean, metadata = true) {
 
 function setup(simulation: unknown, entries: unknown = instance(true), timeoutMs?: number) {
   const simulateTransaction = vi.fn(async () => simulation);
-  const getLedgerEntries = vi.fn(async () => entries);
+  // Like an RPC, it finds nothing under any other key.
+  const getLedgerEntries = vi.fn(async (key: xdr.LedgerKey) =>
+    key.toXDR("base64") === instanceKey ? entries : { latestLedger: 1, entries: [] },
+  );
   const warn = vi.fn();
   const find = createTrustlineLookup(
     { simulateTransaction, getLedgerEntries } as never,
@@ -107,6 +130,10 @@ function setup(simulation: unknown, entries: unknown = instance(true), timeoutMs
 }
 
 describe("createTrustlineLookup", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("names payTo, the asset and what the seller must do", async () => {
     const { find, simulateTransaction } = setup(failed(errorEvent(payTo)));
     await expect(find(payment)).resolves.toEqual({
@@ -128,6 +155,25 @@ describe("createTrustlineLookup", () => {
     const other = errorEvent(payTo, { code: 10 });
     const { find } = setup(failed(other, errorEvent(payTo)));
     await expect(find(payment)).resolves.toMatchObject({ invalidReason: PAYTO_TRUSTLINE_REASON });
+  });
+
+  it("skips the events that aren't the error, and a #13 that names no account", async () => {
+    const text = nativeToScVal("text");
+    const trustlineMissing = errorTopics(xdr.ScError.sceContract(13));
+    const others = [
+      diagnosticEvent(trustlineMissing, text, null),
+      diagnosticEvent([xdr.ScVal.scvSymbol("fn_call")], text),
+      diagnosticEvent([xdr.ScVal.scvSymbol("fn_call"), xdr.ScVal.scvSymbol("transfer")], text),
+      diagnosticEvent(
+        errorTopics(xdr.ScError.sceAuth(xdr.ScErrorCode.scecInvalidInput())),
+        xdr.ScVal.scvVec([text, new Address(payTo).toScVal()]),
+      ),
+      diagnosticEvent(trustlineMissing, text),
+      diagnosticEvent(trustlineMissing, xdr.ScVal.scvVec([text, text])),
+    ];
+    const { find, warn } = setup(failed(...others, errorEvent(payTo)));
+    await expect(find(payment)).resolves.toMatchObject({ invalidReason: PAYTO_TRUSTLINE_REASON });
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it("keeps quiet for a token that emits the same error but isn't a SAC", async () => {
@@ -165,6 +211,13 @@ describe("createTrustlineLookup", () => {
     expect(getLedgerEntries).not.toHaveBeenCalled();
   });
 
+  it("keeps quiet for a muxed payTo: the error names its G-address", async () => {
+    const muxed = new MuxedAccount(new Account(payTo, "0"), "1").accountId();
+    const { find, getLedgerEntries } = setup(failed(errorEvent(payTo)));
+    await expect(find({ ...payment, payTo: muxed })).resolves.toBeUndefined();
+    expect(getLedgerEntries).not.toHaveBeenCalled();
+  });
+
   it("keeps quiet when the second simulation succeeds", async () => {
     const { find, getLedgerEntries } = setup({
       id: "1",
@@ -197,5 +250,17 @@ describe("createTrustlineLookup", () => {
     hung.simulateTransaction.mockReturnValue(new Promise(() => {}));
     await expect(hung.find(payment)).resolves.toBeUndefined();
     expect(hung.warn).toHaveBeenCalledOnce();
+  });
+
+  it("gives up after 3 s by default", async () => {
+    vi.useFakeTimers();
+    const hung = setup(failed());
+    hung.simulateTransaction.mockReturnValue(new Promise(() => {}));
+    const answered = vi.fn();
+    void hung.find(payment).then(answered);
+    await vi.advanceTimersByTimeAsync(2_999);
+    expect(answered).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(answered).toHaveBeenCalledWith(undefined);
   });
 });
