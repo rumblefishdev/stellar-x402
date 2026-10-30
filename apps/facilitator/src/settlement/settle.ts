@@ -72,9 +72,12 @@ export const SETTLE_REASONS = {
   ledgerBound: "settle_exact_stellar_signature_expiration_too_soon",
   /** The signed hash could not be stored, so nothing was sent. */
   recordWrite: "settle_exact_stellar_record_write_failed",
-  /** The facilitator key's signer (OpenBao, 0036) failed on the transaction (upstream's code). */
+  /**
+   * The facilitator key's signer (OpenBao, 0036) failed on the transaction (upstream's code).
+   * Nothing was sent ({@link UNSENT_REASONS}).
+   */
   transactionSigning: "settle_exact_stellar_transaction_signing_failed",
-  /** The facilitator key's signer failed on the fee bump (upstream's code). */
+  /** The signer failed on the fee bump (upstream's code). Nothing was sent ({@link UNSENT_REASONS}). */
   feeBumpSigning: "settle_exact_stellar_fee_bump_signing_failed",
   /** No channel was free before the deadline. Nothing was sent ({@link UNSENT_REASONS}). */
   noChannelInTime: "settle_exact_stellar_no_channel_in_time",
@@ -134,6 +137,8 @@ export const UNSENT_REASONS: readonly string[] = [
   SETTLE_REASONS.shuttingDown,
   SETTLE_REASONS.noChannelInTime,
   SETTLE_REASONS.noChannels,
+  SETTLE_REASONS.transactionSigning,
+  SETTLE_REASONS.feeBumpSigning,
 ];
 const UNSENT = new Set(UNSENT_REASONS);
 

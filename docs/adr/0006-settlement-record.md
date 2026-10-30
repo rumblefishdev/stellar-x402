@@ -58,7 +58,8 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
     claim began before the first call, so its budget can end first: then it answers
     `settlement_pending` with no hash and leaves the record to the first call.
   - A record closed `rejected` with nothing sent (no hash, and `…_timeout`, `…_interrupted`,
-    `…_shutting_down`, `…_rpc_unavailable`, `…_no_channel_in_time` or `…_no_channels`) reopens
+    `…_shutting_down`, `…_rpc_unavailable`, `…_no_channel_in_time`, `…_no_channels`, or since
+    task 0036 `…_transaction_signing_failed` or `…_fee_bump_signing_failed`) reopens
     for a repeat with the same fingerprint while the payer's auth entry has at least 2 ledgers
     left (task 0073). The repeat runs the checks again, then `reopen` moves the record back to
     `claimed` by compare-and-set, counts it in `reopened` and sets `createdAt` to its own start,
