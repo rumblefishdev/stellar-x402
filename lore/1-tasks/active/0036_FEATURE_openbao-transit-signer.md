@@ -57,11 +57,11 @@ the facilitator. It is built and tested against a local OpenBao in Docker, befor
 | # | What is done | From | Vs the task | Who does the same (checked) | Code | Test |
 |---|---|---|---|---|---|---|
 | 1 | The signer is built now, on OpenBao Transit as ADR 0013 has it. OpenBao hides the key from a read-only leak but can't limit what the key signs: on these accounts one signature can pay out the float or change the signers. Limiting that on chain stays 0048's re-check before mainnet | grilling | matches it | upstream's example facilitator keeps the seed in the environment | | |
+| 2 | 0036 adds the signer's variables and AppRole secrets to `deploy/production/compose.yaml`, in the signer's PR, for 0026's owner to review; the channels for the OpenBao key and the move to it stay in 0026 | grilling | beyond it | — | | |
+| 3 | One process holds every network's signer, each with its own socket, AppRole, policy and Transit key (0077, PR #93); 0036 configures one network now in that shape | grilling | matches it | — | | |
 
 ## Not yet decided
 
-- Whether 0036 also adds the signer's variables to `deploy/production/compose.yaml`, or 0026 does;
-  the channels for the OpenBao key and the move to it stay in 0026.
 - How the signer replaces an expired or revoked token: logging in again on a `403` and signing
   once more, or a timer before the hour ends.
 - Whether the facilitator tracks the signer's state (a startup signature of a fixed hash, the
