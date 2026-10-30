@@ -52,6 +52,34 @@ the facilitator. It is built and tested against a local OpenBao in Docker, befor
 - ADR 0013's choices this task builds: a unix socket, AppRole with a 1-hour token the signer
   replaces by logging in again, a sign-only policy per network, fail closed.
 
+## Decisions so far
+
+| # | What is done | From | Vs the task | Who does the same (checked) | Code | Test |
+|---|---|---|---|---|---|---|
+| 1 | The signer is built now, on OpenBao Transit as ADR 0013 has it. OpenBao hides the key from a read-only leak but can't limit what the key signs: on these accounts one signature can pay out the float or change the signers. Limiting that on chain stays 0048's re-check before mainnet | grilling | matches it | upstream's example facilitator keeps the seed in the environment | | |
+
+## Not yet decided
+
+- Whether 0036 also adds the signer's variables to `deploy/production/compose.yaml`, or 0026 does;
+  the channels for the OpenBao key and the move to it stay in 0026.
+- How the signer replaces an expired or revoked token: logging in again on a `403` and signing
+  once more, or a timer before the hour ends.
+- Whether the facilitator tracks the signer's state (a startup signature of a fixed hash, the
+  last signature's outcome) and shows it in `/health`.
+- How a transaction that isn't a settlement (channel setup, rotation) gets signed by the Transit
+  key: a small command in 0036 or a task of its own. AC 1 needs channels whose signer is that key.
+
+## PR split
+
+| PR | What | State |
+|---|---|---|
+| — | the Transit signer, its config and its tests | not started |
+
+## Out of scope
+
+- The on-chain limit of the hot key's power (thresholds, a cold key): 0048.
+- The OpenBao container, its unseal, backups and the move of testnet to the key: 0026.
+
 ## Implementation
 
 - **A Transit `TransactionSigner`** in `apps/facilitator/src/adapters/`, chosen by config:
