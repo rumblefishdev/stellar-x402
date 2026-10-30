@@ -90,7 +90,9 @@ services:
 
 # Subnets set here, not drawn from Docker's pool: on the server the pool (172.30.0.0/16 in
 # daemon.json) is taken whole by another project's network. These sit outside it and outside
-# docker0's 172.17.0.0/16; 14 addresses each leave room for mainnet's services.
+# docker0's 172.17.0.0/16; each /28 leaves 13 addresses for containers after Docker's gateway
+# (.1, .17), room for mainnet's services. A network added here needs one too, or it fails the
+# same way, and only on the server: a /28 from 172.31.200.0/24, the next free 172.31.200.32/28.
 networks:
   edge:
     name: x402-production-edge

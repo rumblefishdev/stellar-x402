@@ -291,7 +291,8 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   OpenBao.
 - **Link:** a socket per network, each in its own volume, mounted into the one facilitator
   (ADR 0013 is updated in 0077), plus the admin socket (root-only, in no container); no TCP
-  listener.
+  listener. OpenBao's compose service uses `network_mode: none`: it needs no network, and on the
+  server Docker's address pool has none to give, which fails a default network at start.
 - **Keys:** one Transit key per network, generated inside OpenBao, `type=ed25519`,
   `exportable=false`, `allow_plaintext_backup=false`. One policy per network allowing only
   `transit/sign/<key>`, and one AppRole per network: `token_ttl` and `token_max_ttl` 1 h, a secret
