@@ -149,7 +149,10 @@ What each party must trust:
 - **Attack:** Payments that create ledger entries (a recipient's first balance in a token, a
   client's first allowance entry, a nonce entry with a long TTL) or extend an entry's TTL (a token
   instance whose TTL runs low, or the proxy's own instance and code) pay rent on top of the normal
-  fee.
+  fee. A payment that touches an archived entry (the token's instance or code, a non-SAC balance,
+  a C-account's SAC balance) restores it and pays its restore rent in the same fee: 0021's testnet
+  run measured resource fees of 342,189 and 551,787 stroops with archived entries, against 14,278
+  for live USDC.
   The payer picks `allowance_expiration_ledger`, and the facilitator pays temporary rent on the
   nonce entry and the token's allowance entry until then: in the unit test
   `a_far_allowance_expiration_costs_the_facilitator_rent`, the furthest expiry the network allows
@@ -166,6 +169,10 @@ What each party must trust:
   expiry more than 17,280 ledgers (about a day) ahead, so even a facilitator that skips the check
   pays at most about 25,000 stroops of it (ADR 0010, D11). The proxy's own extension
   is capped at 720 ledgers per settlement, about 149,000 stroops on testnet (ADR 0010, D10).
+  For `exact`, restore rent is rent too: over the ceiling the payment is refused, and when its
+  transaction lists the archived entries the refusal's message names them, so anyone can restore
+  them from their own account and pay again (task 0066); under the ceiling the facilitator pays it.
+  The list comes from the buyer's transaction and is not checked against the chain.
 - **Residual risk:** Rent depends on the entry's size and the length of the extension, so there
   is no fixed bound. When the token extends its own instance in the same settlement as the
   proxy's extension, the total goes over the default ceiling, and a valid payment is refused

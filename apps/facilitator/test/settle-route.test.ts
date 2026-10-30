@@ -180,6 +180,29 @@ describe("POST /settle", () => {
     expect(settle).not.toHaveBeenCalled();
   });
 
+  it("logs a fee refusal's message, which names archived entries, and no other failure's", async () => {
+    const refusal = (errorReason: string, errorMessage: string) =>
+      ({
+        success: false,
+        errorReason,
+        errorMessage,
+        transaction: "",
+        network: "stellar:testnet",
+      }) as const;
+    const errorMessage =
+      "simulation-derived fee 551787 stroops exceeds ceiling 250000 stroops; the payment's transaction lists 1 archived entry to restore: AAAABg==";
+    settle.mockResolvedValueOnce({
+      response: refusal("invalid_exact_stellar_payload_fee_exceeds_maximum", errorMessage),
+    });
+    settle.mockResolvedValueOnce({
+      response: refusal("invalid_exact_stellar_payload_simulation_failed", "simulation failed"),
+    });
+    await post(request);
+    await post(request);
+    const settled = lines.map((line) => JSON.parse(line)).filter((l) => l.event === "settled");
+    expect(settled.map((l) => l.message)).toEqual([errorMessage, undefined]);
+  });
+
   it("sends no header when there are no extension responses or the answer is a failure", async () => {
     settle.mockResolvedValueOnce({ response: success, record });
     extensionResponses.mockReturnValueOnce(undefined);

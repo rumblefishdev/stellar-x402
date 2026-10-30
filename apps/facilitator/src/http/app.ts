@@ -10,7 +10,7 @@ import type { SettlementHooks } from "../settlement/hooks.js";
 import type { LeaseKeeper } from "../settlement/lease.js";
 import type { Reconciliation } from "../settlement/reconcile.js";
 import type { Settle } from "../settlement/settle.js";
-import type { Verify, VerifyTrace } from "../settlement/verify.js";
+import { FEE_EXCEEDS_MAXIMUM, type Verify, type VerifyTrace } from "../settlement/verify.js";
 import { discoveryResources } from "./discovery.js";
 import { EXTENSION_RESPONSES_HEADER, encodeExtensionResponses } from "./extension-responses.js";
 import { rateLimit } from "./rate-limit.js";
@@ -163,6 +163,8 @@ export function createApp({
       invalidReason: response.invalidReason,
       // Our own code next to upstream's, e.g. for a channel account.
       reason: response.extra?.reason,
+      // A fee refusal's message names the archived entries to restore (0066); it is bounded.
+      message: response.invalidReason === FEE_EXCEEDS_MAXIMUM ? response.invalidMessage : undefined,
       payer: response.payer,
       // Which RPC URL answered: a lagging fallback rejects valid payments (AD-3).
       rpc: trace.rpc,
@@ -208,6 +210,8 @@ export function createApp({
         replay: replay ?? false,
         success: response.success,
         errorReason: response.errorReason,
+        // As in `verified`: the check's fee refusal and its archived entries (0066).
+        message: response.errorReason === FEE_EXCEEDS_MAXIMUM ? response.errorMessage : undefined,
         payer: response.payer,
         transaction: response.transaction || undefined,
       });
