@@ -53,10 +53,25 @@ production code.
     alone passed 8 of 8 and with only the leaking test 6 of 6, probably because the leftover call's
     3 s then ends after the drain test (not measured). With the drain test on its own nonce, or the
     leaking test skipped, 6 of 6 passed under load. So the call itself answers correctly.
-  - **Fix (agreed, not applied):** end "ends a call at SETTLE_BUDGET_MS" with `await drain()`, so its
-    call is over before the next test. A one-line test change, no production code. Tried: 8 of 8
-    passed under load. 0084's wider work stays separate. Before it closes this item, run the 50
-    looped runs the acceptance criteria ask for.
+  - **Fix:** "ends a call at SETTLE_BUDGET_MS" ends with `await drain()`, so its call is over before
+    the next test. 0084's wider work stays separate.
+- More failures on `develop` (7 of its last 14 runs, 2026-10-30), each fixed in the test:
+  - `settle.test.ts`, "leaves a success from the pool's result…" and "answers settlement_pending
+    to a repeat…": a real 100 ms budget ran out before the hash was written. The first call now
+    runs on #76's fake clock (`onFakeClock`).
+  - `settle.test.ts`, "never stores the earlier claim's late hash…": the repeat shared the first
+    call's 100 ms budget, and now has a settler of its own.
+  - `settle.test.ts`, "stores the hash with its bounds, marks it sent…": a 5 ms sleep raced a
+    fire-and-forget write; it now waits for the state.
+  - `review-2-twice.test.ts` B3: a 20 ms store grace dropped the first success mark.
+  - `postgres.test.ts`: "rejects a hash another record's insert commits…" attached `.rejects`
+    after `COMMIT`; "makes a takeover wait…" compared the arrival order of two connections, which
+    says nothing about the database's. The check before `COMMIT` proves the wait.
+  - `packages/mcp/test/pay.test.ts`, "gives the whole call one deadline…": 150 ms of slack missed
+    by 54 ms, and an uncut call took only 1.2 s. Scaled up: a 2 s deadline, 1.2 s answers, 300 ms
+    of slack, still below the 2.4 s of an uncut call.
+  - Not reproduced or explained: "waits on close() for a settlement answered pending…" (once in 5
+    full runs under load) and the failure of run 41079206183 (no annotation).
 
 ## Acceptance Criteria
 

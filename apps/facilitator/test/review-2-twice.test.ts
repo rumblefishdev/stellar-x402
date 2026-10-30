@@ -287,7 +287,8 @@ describe("REFUTE B: one process answers a success twice (finding 3 by another ti
   });
 
   it("B3 (pre-existing since 0009): a repeat reads a record already marked answered, its own mark fails on a blip, and it answers success again", async () => {
-    const { settle, store } = setup(landing());
+    // A grace long enough for a slow database: the first mark has to land for this case.
+    const { settle, store } = setup(landing(), { storeGraceMs: 5_000 });
     expect((await settle(payload(), requirements)).response.success).toBe(true);
     expect((await store.get(key))?.successAnsweredAt).toEqual(expect.any(Number));
     vi.spyOn(store, "markSuccessAnswered").mockRejectedValueOnce(new Error("connection reset"));

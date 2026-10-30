@@ -296,13 +296,14 @@ describe("call_paid_http", () => {
   });
 
   it("gives the whole call one deadline, so a paid retry that would end past it is cut short", async () => {
-    await reconnect({}, { timeoutMs: 1_000 });
+    await reconnect({}, { timeoutMs: 2_000 });
     // Each answer alone fits in the deadline; the unpaid one and the paid retry together do not. The
-    // 400 ms left after the first answer leave room on a slow CI runner to sign, count and send.
-    seller.delayMs = 600;
+    // 800 ms left after the first answer leave room on a slow CI runner to sign, count and send.
+    seller.delayMs = 1_200;
     const started = performance.now();
     expect((await pay()).error.code).toBe("payment_unknown");
-    expect(performance.now() - started).toBeLessThan(1_000 + 150);
+    // Below the 2.4 s a call that wasn't cut short takes, so the slack can't hide one.
+    expect(performance.now() - started).toBeLessThan(2_000 + 300);
     expect(seller.payments).toHaveLength(1);
   });
 
