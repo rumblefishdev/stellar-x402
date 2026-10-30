@@ -1,5 +1,8 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Keypair } from "@stellar/stellar-sdk";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import {
   type Config,
   ConfigError,
@@ -19,14 +22,17 @@ const minimal = {
   CLIENT_IP: "socket",
   DATABASE_URL: "postgres://db.internal/x402",
 };
-/** Pubnet is refused until 0024 and 0071 land. */
+/** Pubnet is refused until 0024 and 0090 land. */
 const pubnet = { NETWORK: "stellar:pubnet" };
 const PUBNET_REFUSED =
-  "NETWORK stellar:pubnet is refused until spend budgets (0024) and the lease fencing token (0071) land";
+  "NETWORK stellar:pubnet is refused until spend budgets (0024) and task 0090 land";
 
-function problems(env: Record<string, string | undefined>): string[] {
+function problems(
+  env: Record<string, string | undefined>,
+  parse: (env: Record<string, string | undefined>) => unknown = parseConfig,
+): string[] {
   try {
-    parseConfig(env);
+    parse(env);
   } catch (error) {
     expect(error).toBeInstanceOf(ConfigError);
     return (error as ConfigError).problems;
@@ -47,6 +53,7 @@ describe("parseConfig", () => {
       fees: { maxFeeStroops: 250_000n, inclusionFeeStroops: undefined, escalation: undefined },
       settlement: {
         minValidityLedgers: 4,
+        maxValidityLedgers: 66,
         settleTimeoutMs: 20_000,
         settleBudgetMs: 30_000,
         leaseTtlMs: 30_000,
@@ -85,6 +92,7 @@ describe("parseConfig", () => {
       FEE_ESCALATION_FACTOR: "1.5",
       FEE_ESCALATION_MAX_STROOPS: "1002",
       MIN_VALIDITY_LEDGERS: "13",
+      MAX_VALIDITY_LEDGERS: "70",
       SETTLE_TIMEOUT_MS: "31000",
       SETTLE_BUDGET_MS: "60000",
       LEASE_TTL_MS: "32000",
@@ -118,6 +126,7 @@ describe("parseConfig", () => {
       },
       settlement: {
         minValidityLedgers: 13,
+        maxValidityLedgers: 70,
         settleTimeoutMs: 31_000,
         settleBudgetMs: 60_000,
         leaseTtlMs: 32_000,
@@ -240,6 +249,14 @@ describe("parseConfig", () => {
     expect(problems({ ...minimal, MIN_VALIDITY_LEDGERS: "1" })).toEqual([
       "MIN_VALIDITY_LEDGERS must be at least 2",
     ]);
+    // A cap at or below the floor would refuse every payment.
+    expect(
+      problems({ ...minimal, MIN_VALIDITY_LEDGERS: "10", MAX_VALIDITY_LEDGERS: "10" }),
+    ).toEqual(["MAX_VALIDITY_LEDGERS must be above MIN_VALIDITY_LEDGERS"]);
+    // About 10 minutes at most, so a typo can't reopen days-long signatures.
+    expect(problems({ ...minimal, MAX_VALIDITY_LEDGERS: "121" })).toEqual([
+      "MAX_VALIDITY_LEDGERS must be between 3 and 120",
+    ]);
   });
 
   it("keeps twice the inclusion bid below the fee ceiling, as the fee bump pays it twice", () => {
@@ -342,8 +359,8 @@ describe("parseConfig", () => {
       ]);
   });
 
-  it("refuses stellar:pubnet with nothing else wrong, until 0024 and 0071 land", () => {
-    // `/settle` would spend there with allow-all spend hooks and an unfenced lease.
+  it("refuses stellar:pubnet with nothing else wrong, until 0024 and 0090 land", () => {
+    // `/settle` would spend there with allow-all spend hooks.
     expect(problems({ ...minimal, ...pubnet, RPC_URLS: "https://rpc.example" })).toEqual([
       PUBNET_REFUSED,
     ]);
@@ -403,5 +420,86 @@ describe("parseMigrateConfig", () => {
     expect(problems({ ...minimal, RPC_URLS: urls(MAX_RPC_URLS + 1) })).toEqual([
       `RPC_URLS must list at most ${MAX_RPC_URLS} URLs`,
     ]);
+  });
+});
+
+describe("settings read from files", () => {
+  const dir = mkdtempSync(join(tmpdir(), "x402-config-"));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  const file = (name: string, value: string) => {
+    const path = join(dir, name);
+    writeFileSync(path, value);
+    return path;
+  };
+  const withoutDatabaseUrl = { ...minimal, DATABASE_URL: undefined };
+  const NAMES = ["DATABASE_URL", "RPC_URLS"] as const;
+  const plain = { DATABASE_URL: "postgres://db.internal/x402", RPC_URLS: "https://rpc-0.example" };
+
+  it("reads DATABASE_URL_FILE and RPC_URLS_FILE, trimming the file's newline", () => {
+    const config = parseConfig({
+      ...withoutDatabaseUrl,
+      DATABASE_URL_FILE: file("database-url", "postgres://db.internal/x402\n"),
+      RPC_URLS_FILE: file("rpc-urls", "https://rpc-0.example, https://rpc-1.example\n"),
+    });
+    expect(config.databaseUrl).toBe("postgres://db.internal/x402");
+    expect(config.rpcUrls).toEqual(["https://rpc-0.example", "https://rpc-1.example"]);
+    expect(
+      parseMigrateConfig({ DATABASE_URL_FILE: file("migrate-url", "postgres://db/x402\n") }),
+    ).toEqual({ databaseUrl: "postgres://db/x402" });
+  });
+
+  it("falls back to the plain values when no _FILE is set", () => {
+    const config = parseConfig({ ...minimal, ...plain, DATABASE_URL_FILE: " ", RPC_URLS_FILE: "" });
+    expect(config.databaseUrl).toBe(plain.DATABASE_URL);
+    expect(config.rpcUrls).toEqual([plain.RPC_URLS]);
+  });
+
+  it("reads the file beside a blank plain value, as the deploy env examples ship them", () => {
+    const config = parseConfig({
+      ...minimal,
+      DATABASE_URL: " ",
+      DATABASE_URL_FILE: file("blank-database-url", `${plain.DATABASE_URL}\n`),
+      RPC_URLS: "",
+      RPC_URLS_FILE: file("blank-rpc-urls", `${plain.RPC_URLS}\n`),
+    });
+    expect(config.databaseUrl).toBe(plain.DATABASE_URL);
+    expect(config.rpcUrls).toEqual([plain.RPC_URLS]);
+  });
+
+  it.each(NAMES)("refuses %s set both ways", (name) => {
+    expect(
+      problems({ ...minimal, ...plain, [`${name}_FILE`]: file(`both-${name}`, plain[name]) }),
+    ).toEqual([`${name} and ${name}_FILE must not both be set`]);
+  });
+
+  it.each(NAMES)("refuses an empty %s_FILE rather than read it as unset", (name) => {
+    expect(
+      problems({ ...minimal, [name]: undefined, [`${name}_FILE`]: file(`empty-${name}`, "\n") }),
+    ).toEqual([`${name}_FILE is empty`]);
+  });
+
+  it.each(NAMES)("names a %s_FILE it can't read, without echoing its path", (name) => {
+    const found = problems({
+      ...minimal,
+      [name]: undefined,
+      [`${name}_FILE`]: join(dir, "missing-secret"),
+    });
+    expect(found).toEqual([`${name}_FILE can't be read (ENOENT)`]);
+    expect(found.join(" ")).not.toContain("missing-secret");
+  });
+
+  it("refuses a bad DATABASE_URL_FILE for pnpm migrate too", () => {
+    expect(
+      problems({ DATABASE_URL_FILE: file("empty-migrate-url", "") }, parseMigrateConfig),
+    ).toEqual(["DATABASE_URL_FILE is empty"]);
+  });
+
+  it("checks a file's value as the plain one, without echoing it", () => {
+    const found = problems({
+      ...withoutDatabaseUrl,
+      DATABASE_URL_FILE: file("mysql-url", "mysql://u:secret@db/x"),
+    });
+    expect(found).toEqual(["DATABASE_URL must be a postgres:// URL"]);
+    expect(found.join(" ")).not.toContain("secret");
   });
 });

@@ -1,0 +1,29 @@
+# The facilitator of an environment (ADR 0011): x402@production. It neither pulls nor migrates;
+# the deploy does both, then restarts this unit.
+[Unit]
+Description=x402 facilitator (%i)
+Documentation=https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/adr/0011-facilitator-hosting.md
+PartOf=docker.service
+# Wants, not Requires: stopping or restarting a database never stops the facilitator, and at a
+# reboot it drains while the databases and the tunnel are still up.
+Wants=x402-db-testnet@%i.service x402-openbao.service
+After=docker.service x402-tunnel@%i.service x402-db-testnet@%i.service x402-openbao.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+WorkingDirectory=/srv/x402/%i
+ExecStartPre=/usr/local/libexec/x402/x402-creds %i database-url.testnet:1000 rpc-urls.testnet:1000
+# The last image that was ready, unless a deploy is starting this one.
+ExecStartPre=/bin/sh -c '[ -e /run/x402/%i/deploying ] || cp digest.good digest'
+# --exit-code-from: a plain `up` exits 0 whatever the container's code.
+ExecStart=/usr/local/libexec/x402/x402-compose %i up --no-deps --pull never --exit-code-from facilitator facilitator
+ExecStop=/usr/local/libexec/x402/x402-compose %i stop facilitator
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=60
+# Above the 180 s stop_grace_period, so a reboot waits for the drain.
+TimeoutStopSec=200
+
+[Install]
+WantedBy=multi-user.target

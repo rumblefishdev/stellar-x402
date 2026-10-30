@@ -21,7 +21,7 @@ import { createApp, type AppDeps } from "./http/app.js";
 import { supportedResponse } from "./http/supported.js";
 import { captureConsoleError, jsonLogger, rpcEndpointName, type Logger } from "./logger.js";
 import { memoryMetrics, type Metrics } from "./metrics.js";
-import type { SettlementStore } from "./ports/index.js";
+import type { LeaseFence, SettlementStore } from "./ports/index.js";
 import { createPruner } from "./pruner.js";
 import { checkChannels } from "./settlement/channel-check.js";
 import { checkRpcNetworks } from "./settlement/network-check.js";
@@ -103,9 +103,9 @@ export async function start(
     // listens, so a new `/settle` still gets its 503 rather than a refused connection. Then it
     // closes: open requests get the grace, their connections are cut, and a sweep under way is
     // waited for, as sweeps need no lease (0019 decision 37). Past the deadline the open
-    // connections are cut, and a drain still under way leaves the lease to its TTL, so a
-    // transaction still unresolved gets that long before another process sends on its channel
-    // (decision 11).
+    // connections are cut, and a drain still under way leaves the lease to its TTL (decision 11).
+    // A transaction still unresolved can stay valid past that, until its payer's auth expires
+    // (0073): the next process's sends on its channel may then fail with `txBadSeq` and rebuild.
     close: async () => {
       closing = true;
       const begun = Date.now();
@@ -333,6 +333,7 @@ export function buildChecks(
     facilitator: facilitator.address,
     channels: config.channels,
     minValidityLedgers: config.settlement.minValidityLedgers,
+    maxValidityLedgers: config.settlement.maxValidityLedgers,
     latestLedger: async () => (await rpc.getLatestLedger()).sequence,
   };
 }
@@ -377,8 +378,8 @@ export function buildSettlement(
     metrics: Metrics;
     /** Tests pass the pool's `sleep`. */
     sleep?: (ms: number) => Promise<void>;
-    /** The channel lease's `held()`, checked again before each send (0025). */
-    held?: () => boolean;
+    /** The channel lease this process holds, with its token, checked before each send (0025, 0071). */
+    lease: () => LeaseFence | undefined;
   },
 ): {
   settle: Settle;
@@ -443,8 +444,9 @@ export function buildSettlement(
     maxFeeStroops: config.fees.maxFeeStroops,
     settleTimeoutMs: config.settlement.settleTimeoutMs,
     budgetMs: config.settlement.settleBudgetMs,
+    latestLedger: deps.checks.latestLedger,
     records,
-    ...(deps.held && { held: deps.held }),
+    lease: deps.lease,
   });
   const reconciliation = scheduleReconciliation({ reconciler, logger, network });
   // Closing the pool first refuses every call that sent nothing, so their records close too.
@@ -509,7 +511,7 @@ export function compose(
     logger,
     metrics,
     ...(opts.sleep && { sleep: opts.sleep }),
-    held: lease.held,
+    lease: lease.current,
   });
   return {
     deps: {

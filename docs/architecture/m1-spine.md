@@ -132,7 +132,7 @@ graph TD
   - one payment being replayed to unlock another merchant's resource
   - one payment unlocking the same resource more than once
 - **Rule:**
-  - **Key.** The settlement key is `network:payer:nonce`. The nonce is the int64 nonce of the payer's auth entry, held as a decimal string. A payload must carry exactly one payer auth entry, otherwise the `/verify` checks reject it, at `/verify` and `/settle` alike (upstream de-duplicates signers and doesn't count entries).
+  - **Key.** The settlement key is `network:payer:nonce`. The nonce is the int64 nonce of the payer's auth entry, held as a decimal string. A payload must carry exactly one payer auth entry and no other address's, otherwise the `/verify` checks reject it, at `/verify` and `/settle` alike (upstream de-duplicates signers and doesn't count entries; another address's entry would stand in for the payer's expiry, task 0073 decision 21).
   - **Fingerprint.** Each record stores a fingerprint: a hash of the canonical payload plus `paymentRequirements`.
   - **Known key first.** `/settle` reads the key from the payload and looks it up before any check. A known key is a repeat; only a new key is checked and claimed.
   - **Claim.** After verification and before `submit()`, `/settle` claims the key with an atomic insert-if-absent. Only the caller that wins the claim submits.
@@ -260,7 +260,7 @@ graph TD
   - records stuck pending forever after a restart
 - **Rule:**
   - **One owner.** A single settlement module in `apps/facilitator` owns every write to `SettlementStore`. Handlers and event listeners call it; they never write to the store themselves.
-  - **States.** They only move forward: `claimed → signed → pending → success | failed | rejected | expired`. Each write is a compare-and-set, so a write that would move a record backwards is dropped.
+  - **States.** They only move forward: `claimed → signed → pending → success | failed | rejected | expired`. Each write is a compare-and-set, so a write that would move a record backwards is dropped. One written exception (task 0073): a record closed `rejected` with nothing sent (no hash, one of the seven "nothing sent" reasons) moves back to `claimed` when the identical payload returns while the payer's auth entry is valid. `reopen` does it by compare-and-set, counts it in `reopened`, and restarts the record's budget from the reopening call.
   - **Hashes.** A record keeps every hash it was signed with, because a rebuild produces a new one. It can be found by any of them.
   - **Durable write.** The hash is stored durably before the first send. This requires `signer-pool` to await an async `onSigned` and to abort the send if it rejects; that change to the library is a T1 prerequisite.
   - **Attempts.** Each hash keeps its own state, `stored → sent | unknown → landed | dead`, and its time and ledger bounds. `stored` and `sent` are hints that can lag the network; only `landed` and `dead` are its answers.
@@ -272,6 +272,7 @@ graph TD
 - **Prevents:** two processes using one channel's sequence numbers, for example during a rolling deploy.
 - **Rule:**
   - **Lease.** At startup a process takes an exclusive lease on the channel set of each network it serves, through that network's store, and keeps renewing it. Without a network's lease it doesn't serve `/settle` for that network.
+  - **Fencing.** Every acquire draws a new token; a hash is stored, and so sent, only under the lease's current token (task 0071). A holder that lost the lease while frozen sends nothing new, except an envelope already stored and checked when it froze, one per call in flight: the send loop has no lease check, so it resends that envelope until its bound, under one hash.
   - **Deploys.** They stop the old process before the new one takes the leases.
   - **Shutdown.** The process stops accepting `/settle`, waits until every in-flight submission is final or recorded as pending, then releases its leases.
 
@@ -343,11 +344,12 @@ graph TD
 - **Prevents:** paying the fee for a transaction whose authorization expires before it can land.
 - **Rule:**
   - A payload whose auth expiration ledger is less than `minValidityLedgers` ahead of the current ledger is rejected.
-  - The transaction never stays valid past the auth expiry. `signer-pool`'s `maxLedger` submit option (task 0016) sets the expiry ledger as the envelope's ledger bound, next to its time bound.
+  - The transaction never stays valid past the auth expiry. `signer-pool`'s `maxLedger` submit option (task 0016) sets the expiry ledger as the envelope's ledger bound. Since 0073 such an envelope carries no time bound: it can no longer land exactly when the auth can't, so `…_transaction_expired` is true when it is answered, for our own outer hash. Only the fee source signs a fee bump, so someone else can wrap the inner transaction in their own and land it under another hash; confirming by the inner hash is 0087.
   - `signer-pool` keeps one spare ledger: it refuses, after simulation, a call that could land only in the ledger after the one simulated. So `minValidityLedgers` must be at least 2 plus the expected wait for a channel, or a payload `/verify` accepts can fail at `/settle` with `LedgerBoundError` after a simulation.
   - `minValidityLedgers` must also stay well below the client's signing window. Upstream's client signs its auth to expire ⌈`maxTimeoutSeconds` / ledger time⌉ ledgers after signing, with the ledger time from Horizon (5 s when Horizon doesn't answer): about 12 ledgers at the usual 60 s. Ledgers usually pass before `/verify`. So a minimum of 12 rejects nearly every payment; the default is 4: 2 for the pool plus about 2 of channel wait.
   - So a resource needs a `maxTimeoutSeconds` well above `minValidityLedgers × 5` seconds, 20 s at the default. Near that bound, most payments are rejected as too soon. When ⌈`maxTimeoutSeconds` / 5⌉ is at most the minimum, the reason says so.
   - `/settle` rechecks the expiry at the pool's floor of 2 ledgers, not at `minValidityLedgers`: a payload `/verify` accepted has used part of its margin by then, and the pool refuses only below 2.
+  - A payload whose auth expires more than `maxValidityLedgers` ahead is rejected too (`…_signature_expiration_too_far`), in `/verify` and `/settle`, whatever `maxTimeoutSeconds` allows (task 0073). The default is 66: a 300 s resource signs 60 ledgers at 5 s (upstream's client rounds the ledger time up to whole seconds), upstream's own check allows 2 more, and the rest is spare. A resource whose `maxTimeoutSeconds` is above the cap less a tenth at 5 s a ledger (300 s at 66) is refused with the same reason whatever the ledger, so a refused payment doesn't pass later, after its payer may have signed again (0073 decision 22); the ledger gap shrinks, the requirements don't. A lagging RPC is upstream's risk: its expiry check refuses an honest payment once our RPC is 3 or more ledgers behind the client's, an accepted risk (0073 decision 9). The cap is at most 120 ledgers. Whoever calls `/settle` writes the requirements, so without the cap a caller could sign for days, and a transaction that never shows up on chain would hold its channel until the auth expiry once the envelope lives as long as it.
 
 ## Consistency Conventions
 

@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 milestone: 1
 related_adr: ["0006"]
-related_tasks: ["0073", "0024"]
+related_tasks: ["0073", "0024", "0071"]
 tags: [facilitator, exact, payments, priority-medium, effort-small]
 links: []
 history:
@@ -38,7 +38,17 @@ can still land.
     `…_refused`, `unexpected_settle_error`;
   - the `/verify` checks' refusal on a reopen (0073 decision 13), e.g. a fee spike;
   - a "nothing sent" reason that carries an earlier hash (a `txBadSeq` rebuild), which never
-    reopens.
+    reopens;
+  - `…_lease_lost` with the hash the call stored just before it found the lease lost (0071
+    decision 15): that envelope was never sent, but the record has a hash, so it doesn't reopen.
+    One renewal that fails on a store error is enough: it drops the lease in memory, so every
+    `addHash` in flight stores its hash and fails the check after it. A freeze with no takeover
+    ends the same way, since the fence compares the token and not `expires_at`;
+  - a reopen at exactly 2 ledgers left (0073's PR 3 review): the ledger can close while the pool
+    simulates, and it then refuses with `LedgerBoundError`, answered
+    `…_signature_expiration_too_soon` ("sign a new payment") while the payer's auth entry can
+    still land in its expiration ledger. A first payment at 2 left has the same window, but
+    0073's `retryable` answer aims repeats at it.
 - Some of these can't land with the same payload anyway (a balance that is gone stays gone until
   it isn't); the answer still can't promise that.
 
@@ -50,6 +60,10 @@ can still land.
 - Decide whether `transaction_failed`, `submission_failed` and `transaction_expired` need it:
   a failed or refused envelope's auth entry can still land in another one before its expiry;
   `expired` comes only after it.
+- Decide whether the `…_lease_lost` records above can reopen. 0082's message makes these answers
+  safe, but they still can't: `attemptUpdates` writes "never sent" and "refused" alike as `dead`,
+  so a reopen needs an attempt state that tells them apart. For the freeze alone, the fence could
+  also refuse an expired lease.
 - Update the facilitator README's "What to do" column and ADR 0006.
 
 ## Acceptance Criteria

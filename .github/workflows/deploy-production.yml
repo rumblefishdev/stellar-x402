@@ -1,0 +1,122 @@
+# Builds the facilitator's image and deploys it to the production environment (ADR 0011): on a
+# push to deploy/production, and by hand, where an earlier digest is a rollback. The image goes to
+# GHCR tagged with the commit; the deploy sends its digest over SSH to the deploy key's forced
+# command (deploy/production/deploy.sh), which waits for the server's deploy unit.
+#
+# The `production` environment holds the rules (deploy/production only) and:
+#   secrets.DEPLOY_SSH_KEY  the deploy key's private half (its public half is
+#                           deploy/ansible/files/deploy-production.pub)
+#   secrets.DEPLOY_HOST     the server's address, a secret so this public repo's logs mask it
+#   vars.DEPLOY_PORT        its SSH port, 22 unless set
+name: Deploy production
+
+on:
+  push:
+    branches: [deploy/production]
+    paths-ignore: ["lore/**", "docs/**", "**/*.md"]
+  workflow_dispatch:
+    inputs:
+      digest:
+        description: "An image digest to deploy instead of this commit's image, for a rollback (sha256:…)"
+        required: false
+        default: ""
+
+permissions: {}
+
+# One deploy at a time: a newer push waits instead of cancelling one in progress.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/rumblefishdev/x402-facilitator
+
+jobs:
+  # Built on every deploy of deploy/production, and the digest is this build's own: a tag can be
+  # overwritten by any workflow that may write packages, so the deploy never reads one back.
+  image:
+    if: ${{ github.ref == 'refs/heads/deploy/production' && !inputs.digest }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/facilitator/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+  deploy:
+    needs: image
+    # After the image job, or without it for a rollback's digest.
+    if: ${{ !cancelled() && (needs.image.result == 'success' || (needs.image.result == 'skipped' && inputs.digest != '')) }}
+    runs-on: ubuntu-24.04
+    # Above the deploy unit's 60 min cap on a long migration.
+    timeout-minutes: 75
+    environment:
+      name: production
+      url: https://x402-facilitator.sorobanscan.com/supported
+    permissions:
+      deployments: write
+    env:
+      DIGEST: ${{ inputs.digest || needs.image.outputs.digest }}
+      # The server's ed25519 host key, pinned so that a change is a reviewed commit. Taken from the
+      # server's own /etc/ssh/ssh_host_ed25519_key.pub, not from a scan (ch-prod-01, 2026-10-30).
+      HOST_KEY: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFm1JaGGXGsZ2ENb7Je8nZJAbG9RSsteQG0ake/UuFOB"
+    steps:
+      - name: Deploy over SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          PORT: ${{ vars.DEPLOY_PORT || '22' }}
+        run: |
+          case $DIGEST in
+            sha256:*) ;;
+            *) echo "::error::not an image digest (sha256:…)"; exit 1 ;;
+          esac
+          if [ -z "$HOST_KEY" ]; then
+            echo "::error::pin the server's host key in HOST_KEY first"
+            exit 1
+          fi
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          printf 'x402-server %s\n' "$HOST_KEY" > ~/.ssh/known_hosts
+          # deploy.sh reads only the digest and waits for the deploy unit, so this ends with its
+          # result; keep-alives hold the session through a long migration.
+          ssh -i ~/.ssh/deploy -p "$PORT" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o ServerAliveInterval=60 \
+            -o HostKeyAlias=x402-server -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "x402-deploy@$HOST" "$DIGEST"
+
+      # The environment's deployment records the commit; its status adds the digest, which a
+      # rollback by hand passes back as `digest`.
+      - name: Record the digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          id=$(gh api "repos/$GITHUB_REPOSITORY/deployments?environment=production&sha=$GITHUB_SHA&per_page=1" --jq '.[0].id')
+          gh api "repos/$GITHUB_REPOSITORY/deployments/$id/statuses" -f state=success \
+            -f description="$DIGEST" \
+            -f environment_url=https://x402-facilitator.sorobanscan.com/supported > /dev/null
+          echo "Deployed \`$DIGEST\` from \`$GITHUB_SHA\`." >> "$GITHUB_STEP_SUMMARY"

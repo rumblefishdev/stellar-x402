@@ -29,7 +29,13 @@ import type { PaymentPayload, PaymentRequirements, SettleResponse } from "@x402/
 import { getNetworkPassphrase } from "@x402/stellar";
 import type { Logger } from "../logger.js";
 import type { Metrics } from "../metrics.js";
-import type { SettlementKey, SettlementRecord, SettlementStore } from "../ports/index.js";
+import {
+  LeaseFencedError,
+  type LeaseFence,
+  type SettlementKey,
+  type SettlementRecord,
+  type SettlementStore,
+} from "../ports/index.js";
 import type { BeforeSubmitResult, SettlementHooks, SettlementOrigin } from "./hooks.js";
 import {
   attemptUpdates,
@@ -40,6 +46,7 @@ import {
 import {
   PAYER_AUTH_REASON,
   UNSUPPORTED_CREDENTIAL_REASON,
+  payerExpiration,
   payerNonce,
   type Check,
   type Verified,
@@ -52,13 +59,13 @@ import {
  * `/settle` sends them from its own re-check, and the pool's guard gives the second.
  */
 export const SETTLE_REASONS = {
-  /** Sent, not final by the time bound (the RPC stopped answering) or the settle budget. */
+  /** Sent, not final by its bound (the RPC stopped answering) or the settle budget. */
   pending: "settlement_pending",
   /** Included in a ledger but failed (upstream's code). */
   failed: "settle_exact_stellar_transaction_failed",
   /** Refused by the network before inclusion, e.g. `txBadSeq` twice (upstream's code). */
   rejected: "settle_exact_stellar_transaction_submission_failed",
-  /** Not included before its time bound or ledger bound. */
+  /** Not included before its ledger bound, the payer's auth expiry: it can no longer land. */
   expired: "settle_exact_stellar_transaction_expired",
   /** The settlement's own simulation failed. */
   simulation: "settle_exact_stellar_simulation_failed",
@@ -70,9 +77,9 @@ export const SETTLE_REASONS = {
   ledgerBound: "settle_exact_stellar_signature_expiration_too_soon",
   /** The signed hash could not be stored, so nothing was sent. */
   recordWrite: "settle_exact_stellar_record_write_failed",
-  /** No channel was free before the deadline. */
+  /** No channel was free before the deadline. Nothing was sent ({@link UNSENT_REASONS}). */
   noChannelInTime: "settle_exact_stellar_no_channel_in_time",
-  /** Every channel is out of the pool. */
+  /** Every channel is out of the pool. Nothing was sent ({@link UNSENT_REASONS}). */
   noChannels: "settle_exact_stellar_no_channels",
   /** The before-submit hook threw. A refusal carries the hook's own reason. */
   refused: "settle_exact_stellar_refused",
@@ -90,29 +97,54 @@ export const SETTLE_REASONS = {
   alreadySettled: "settle_exact_stellar_already_settled",
   /**
    * The settle budget ran out before anything was signed: nothing was or will be sent for this
-   * payment. Sign a new payment.
+   * payment ({@link UNSENT_REASONS}).
    */
   timeout: "settle_exact_stellar_timeout",
   /**
    * No RPC endpoint answered before anything was signed (every one refused, failed or timed
-   * out). Not a bug: sign a new payment and try again later.
+   * out). Not a bug: try again later ({@link UNSENT_REASONS}).
    */
   rpcUnavailable: "settle_exact_stellar_rpc_unavailable",
   /** An auth entry with source-account credentials would authorize as the facilitator (AD-5). */
   unsupportedCredential: UNSUPPORTED_CREDENTIAL_REASON,
   /**
    * The facilitator stopped before anything was signed (a crash or a restart), and reconciliation
-   * closed the record: nothing was or will be sent for this payment. Sign a new payment.
+   * closed the record: nothing was or will be sent for this payment ({@link UNSENT_REASONS}).
    */
   interrupted: "settle_exact_stellar_interrupted",
   /**
    * The facilitator was stopping (a deploy) before anything was signed: nothing was or will be
-   * sent for this payment. Sign a new payment; it reaches the next process (0025).
+   * sent for this payment ({@link UNSENT_REASONS}); a retry reaches the next process (0025).
    */
   shuttingDown: "settle_exact_stellar_shutting_down",
+  /**
+   * This process lost the channel lease before it sent this envelope: another process took it,
+   * or none holds it (0071). Nothing is on its way for this payment ({@link UNSENT_REASONS}); a
+   * retry reaches the process that holds it. With a `transaction` the record has that hash, so it
+   * doesn't reopen: an envelope never sent, or one a `txBadSeq` refused before the rebuild.
+   */
+  leaseLost: "settle_exact_stellar_lease_lost",
   /** Anything else (upstream's code). */
   unexpected: "unexpected_settle_error",
 } as const;
+
+/**
+ * Reasons a record ends with when nothing was sent for it (0073 decisions 3, 5, 15). The payer's
+ * auth entry can still land until its expiration ledger, by whoever holds the payload, so the
+ * answer never says "sign a new payment" while it is valid: it carries `extra.retryable` and
+ * `extra.expirationLedger`, and the identical payload reopens the record and settles it once.
+ * Past that ledger, `retryable` is `false`: sign a new payment.
+ */
+export const UNSENT_REASONS: readonly string[] = [
+  SETTLE_REASONS.timeout,
+  SETTLE_REASONS.rpcUnavailable,
+  SETTLE_REASONS.interrupted,
+  SETTLE_REASONS.shuttingDown,
+  SETTLE_REASONS.noChannelInTime,
+  SETTLE_REASONS.noChannels,
+  SETTLE_REASONS.leaseLost,
+];
+const UNSENT = new Set(UNSENT_REASONS);
 
 /**
  * The validity minimum `/settle` rechecks with (AD-22): the pool's own floor. `signer-pool` keeps
@@ -155,11 +187,17 @@ export interface SettlerDeps {
   /** How long one `/settle` call may take, the wait for a channel included (ADR 0011). */
   budgetMs: number;
   /**
-   * Whether this process still holds the channel lease (0025). Checked again once a hash is
-   * stored, so a call let in before the lease was lost sends nothing on channels another
-   * process may own. Always held when unset.
+   * The channel lease this process holds now, with its token, or `undefined` (0025, 0071).
+   * `addHash` stores a hash only under the lease's current token, so a call let in before the
+   * lease was lost, or one whose process froze past its TTL, sends nothing on channels another
+   * process may own. Read again once the hash is stored (0025 decision 22).
    */
-  held?: () => boolean;
+  lease: () => LeaseFence | undefined;
+  /**
+   * The network's latest ledger, to tell whether an unsent payment's auth entry can still land
+   * (0073 decision 15). Read only on those answers and before a reopen.
+   */
+  latestLedger: () => Promise<number>;
   /** Estimated ledger close time, to turn the auth expiry into a deadline. */
   ledgerMs?: number;
   /** The record writes and hooks to share, e.g. with reconciliation; its own by default. */
@@ -178,6 +216,11 @@ export interface Settled {
   key?: SettlementKey;
   /** Answered from an existing record, not by the call that claimed it. */
   replay?: boolean;
+  /**
+   * Answered from a record claimed before 0073 (`reopened` -1), which never reopens: its answer
+   * stays "sign a new payment", with no `extra.retryable` (0073 decision 25).
+   */
+  claimedBefore0073?: boolean;
   /** The record behind a `success` answer, for the `EXTENSION-RESPONSES` header (AD-8). */
   record?: SettlementRecord;
   /**
@@ -198,8 +241,9 @@ export type Settle = (
  * `/settle` for `exact` (AD-2, AD-3, AD-6): rerun the `/verify` checks, claim
  * `network:payer:nonce`, run `beforeSubmit`, and submit the client's `{func, auth}` through the
  * pool, bounded by the auth expiry. A repeat call gets the stored outcome, but only with the same
- * fingerprint, and a success is answered once. Every record write is a forward-only
- * compare-and-set, so concurrent callers and a late completion can't both win. Every store and
+ * fingerprint, and a success is answered once; a repeat of a payment nothing was sent for reopens
+ * it while its auth entry is valid (0073). Every record write is a compare-and-set, forward-only
+ * but for that reopen, so concurrent callers and a late completion can't both win. Every store and
  * hook call is bounded by the budget. Hooks never change the answer, and their errors are logged.
  */
 export function createSettler(deps: SettlerDeps): Settle & {
@@ -292,23 +336,100 @@ export function createSettler(deps: SettlerDeps): Settle & {
   };
 
   /**
+   * How many ledgers the payer's auth entry has left, with its expiration ledger: `left` is unset
+   * when the latest ledger couldn't be read in time. `undefined` for a payload without exactly one
+   * readable payer entry. The payer's, not the earliest: a record stored before 0073 decision 21
+   * may carry another address's entry that expires sooner.
+   */
+  const validity = async (payload: PaymentPayload): Promise<Validity | undefined> => {
+    let expiration: number | undefined;
+    try {
+      const transaction = new Transaction(
+        (payload.payload as { transaction: string }).transaction,
+        getNetworkPassphrase(network),
+      );
+      const payer = transferFrom(transaction);
+      expiration = payer === undefined ? undefined : payerExpiration(transaction, payer);
+    } catch {
+      return undefined;
+    }
+    if (expiration === undefined) return undefined;
+    try {
+      return {
+        expiration,
+        left: expiration - (await bounded(deps.latestLedger(), LEDGER_READ_MS)),
+      };
+    } catch (error) {
+      logger.warn("latest_ledger_failed", { network, error });
+      return { expiration };
+    }
+  };
+
+  /**
+   * An answer that nothing was sent (0073 decisions 15, 17, 18) with `extra.retryable`: `true`
+   * while a repeat can still reopen it (the pool needs 2 ledgers left), or when the ledger couldn't
+   * be read, since repeating the same payload is always safe. Then `false`, but "sign a new
+   * payment" only once the expiration ledger has closed: the auth entry is valid in that ledger,
+   * so until then whoever holds the payload may still land it.
+   */
+  const withRetry = async (
+    settled: Settled,
+    validOnce: () => Promise<Validity | undefined>,
+  ): Promise<Settled> => {
+    const { response } = settled;
+    if (
+      response.success ||
+      response.transaction ||
+      settled.claimedBefore0073 ||
+      !UNSENT.has(response.errorReason ?? "")
+    )
+      return settled;
+    const valid = await validOnce();
+    if (!valid) return settled;
+    const { expiration, left } = valid;
+    const retryable = left === undefined || left >= SETTLE_MIN_VALIDITY_LEDGERS;
+    const then = `once the network is past ledger ${expiration}, sign a new payment instead`;
+    const errorMessage =
+      left === undefined
+        ? `nothing was sent: repeat the same payment; ${then}`
+        : retryable
+          ? `nothing was sent: repeat the same payment while the latest ledger is at most ` +
+            `${expiration - SETTLE_MIN_VALIDITY_LEDGERS}; ${then}`
+          : left > 0
+            ? `nothing was sent, and it is too late to settle here, but the auth entry may still ` +
+              `land in ledger ${expiration}: once that ledger has closed, sign a new payment`
+            : `nothing was sent, and the auth entry expired with ledger ${expiration}: sign a new ` +
+              `payment`;
+    return {
+      ...settled,
+      response: {
+        ...response,
+        errorMessage,
+        extra: { ...response.extra, retryable, expirationLedger: expiration },
+      },
+    };
+  };
+
+  /**
    * Ends a record nothing was signed for: `claimed → rejected` with `…_timeout`, by
    * compare-and-set (ADR 0011, 0009 decision 11). `addHash` then refuses it, so nothing is signed
    * and sent after the answer; `onFinal` runs for the writer that ended it, once `after` (a
    * `beforeSubmit` still running) has settled, so a late reservation is released too. A record
-   * with a hash stays open. Never throws: the record as stored, or `undefined` if the store didn't
+   * with a hash stays open, and so does a claim made after `version` was read: a reopen changes
+   * it (0073 decision 19). Never throws: the record as stored, or `undefined` if the store didn't
    * answer within `storeGraceMs`, when nothing is known about it.
    */
-  const endUnsigned = async (key: SettlementKey, after?: Promise<unknown>) => {
+  const endUnsigned = async (key: SettlementKey, version: number, after?: Promise<unknown>) => {
     try {
       return await bounded(
         (async () => {
           const ended = await finalWrite(key, () =>
-            store.transition(key, "claimed", {
-              state: "rejected",
-              errorReason: SETTLE_REASONS.timeout,
-              updatedAt: now(),
-            }),
+            store.transition(
+              key,
+              "claimed",
+              { state: "rejected", errorReason: SETTLE_REASONS.timeout, updatedAt: now() },
+              version,
+            ),
           );
           if (ended && after) {
             const run = () => onFinal(ended, "settle");
@@ -410,6 +531,9 @@ export function createSettler(deps: SettlerDeps): Settle & {
     fallback?: Omit<Settled, "key">;
   }> => {
     const { key } = claimed;
+    // Every write of this call lands only on its own claim: once the budget closed the record and
+    // a repeat reopened it, a late result of this call is the earlier claim's (0073 decision 24).
+    const own = { claim: claimed.reopened };
     const operation = verified.transaction.operations[0] as Operation.InvokeHostFunction;
     const contractCall = { func: operation.func, auth: operation.auth ?? [] };
     // Stop waiting for a channel at the budget, or once the auth has (about) expired.
@@ -430,13 +554,33 @@ export function createSettler(deps: SettlerDeps): Settle & {
             // After the budget answer nothing new is signed: the answer named the last hash, and
             // a rebuild's would land under another.
             if (call.budgetOver) throw new Error("the settle budget ran out");
-            call.signing = hash;
-            // Durable before the first send (AD-16); a final or missing record stops the send.
-            if (!(await store.addHash(key, hash, now(), bounds)))
-              throw new Error("the settlement record is final or missing");
             // The lease may have gone since the request came in, after a long body upload or
             // wait for a channel (0025 decision 22): another process may send on this channel.
-            if (deps.held && !deps.held()) throw new Error("the channel lease was lost");
+            const lease = deps.lease();
+            if (!lease) throw new LeaseLostError();
+            call.signing = hash;
+            // Durable before the first send (AD-16); a final or missing record stops the send.
+            // Only on this call's own claim: once reopened, the record is another call's (0073).
+            // Only under the lease's current token: a takeover since refuses it (0071).
+            let added: boolean;
+            try {
+              added = await store.addHash(key, hash, lease, now(), bounds, claimed.reopened);
+            } catch (error) {
+              if (error instanceof LeaseFencedError) {
+                logger.warn("settlement_lease_fenced", {
+                  network,
+                  settlementKey: key,
+                  lease: lease.name,
+                  transaction: hash,
+                });
+                metrics.increment("settlement_lease_fenced_total");
+              }
+              throw error;
+            }
+            if (!added) throw new Error("the settlement record is final or missing");
+            // The stored expiry may have passed while the store wrote, or the lease lapsed and was
+            // acquired again: a new token fences this call too (decision 1).
+            if (deps.lease()?.token !== lease.token) throw new LeaseLostError();
             // The budget answer may have gone out while the store wrote: it named the hash it
             // could read, so this one isn't sent.
             if (call.budgetOver) throw new Error("the settle budget ran out");
@@ -476,7 +620,8 @@ export function createSettler(deps: SettlerDeps): Settle & {
           });
           metrics.increment("settlement_uncertain_total");
           return {
-            record: (await advance(key, { state: "pending", attempts })) ?? (await store.get(key)),
+            record:
+              (await advance(key, { state: "pending", attempts }, own)) ?? (await store.get(key)),
             won: false,
             origin: call.origin,
           };
@@ -487,7 +632,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
         }
         // The answer is the same fixed reason, and the client needs a new payment.
         flagDrift(key, errorReason, "pool");
-        return await finish(key, { state: "rejected", errorReason, attempts }, call.origin);
+        return await finish(key, { state: "rejected", errorReason, attempts }, call.origin, own);
       }
       const fields = {
         channel: result.channel,
@@ -497,11 +642,12 @@ export function createSettler(deps: SettlerDeps): Settle & {
       };
       switch (result.status) {
         case "success":
-          return await finish(key, { state: "success", ...fields }, call.origin);
+          return await finish(key, { state: "success", ...fields }, call.origin, own);
         case "pending":
           // The pool keeps confirming; its `resolved` event finishes the record (0019).
           return {
-            record: (await advance(key, { state: "pending", ...fields })) ?? (await store.get(key)),
+            record:
+              (await advance(key, { state: "pending", ...fields }, own)) ?? (await store.get(key)),
             won: false,
             origin: call.origin,
           };
@@ -510,6 +656,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
             key,
             { state: result.status, errorReason: SETTLE_REASONS[result.status], ...fields },
             call.origin,
+            own,
           );
       }
     } catch (error) {
@@ -636,25 +783,35 @@ export function createSettler(deps: SettlerDeps): Settle & {
           ),
         };
       }
-      const ended = await endUnsigned(key);
+      // Against the claim this repeat first read: one reopened since is another call's.
+      const ended = await endUnsigned(key, existing.version);
       // The store didn't answer: the record may still be signed, so never "sign a new payment".
-      if (!ended) {
+      // A claim reopened since is still being settled.
+      if (!ended || (!isFinal(ended) && ended.hashes.length === 0)) {
         return {
           key,
           replay: true,
           response: failure(
             SETTLE_REASONS.pending,
             record.payer,
-            "the settlement record could not be read: repeat the same payment",
+            ended
+              ? "not signed yet: repeat the same payment"
+              : "the settlement record could not be read: repeat the same payment",
           ),
         };
       }
       record = ended;
     }
-    return respond(record, signal, { replay: true });
+    const settled = await respond(record, signal, { replay: true });
+    return record.reopened < 0 ? { ...settled, claimedBefore0073: true } : settled;
   };
 
-  const settle: Settle = async (payload, requirements, signal) => {
+  const settle = async (
+    payload: PaymentPayload,
+    requirements: PaymentRequirements,
+    signal: AbortSignal | undefined,
+    validOnce: () => Promise<Validity | undefined>,
+  ): Promise<Settled> => {
     const startedAt = now();
     const left = () => deps.budgetMs - (now() - startedAt);
     const fingerprint = fingerprintOf(payload, requirements);
@@ -664,11 +821,24 @@ export function createSettler(deps: SettlerDeps): Settle & {
     // Before the claim, a store that fails or doesn't answer within the budget is a 500.
     const known = requirements.network === network ? keyOf(payload, network) : undefined;
     const existing = known && (await bounded(store.get(known), left()));
-    if (existing) return replay(existing, fingerprint, signal, startedAt);
+    // The identical payment, closed with nothing sent: it reopens if its auth entry can still land
+    // and it passes the checks again, as a first payment would (0073 decisions 5, 13).
+    const reopening = existing && reopenable(existing, fingerprint) ? existing : undefined;
+    if (existing && !reopening) return replay(existing, fingerprint, signal, startedAt);
+    if (reopening) {
+      const valid = await validOnce();
+      if (valid?.left === undefined || valid.left < SETTLE_MIN_VALIDITY_LEDGERS)
+        return respond(reopening, signal, { replay: true });
+    }
+    // A record this call would reopen is left as it is until the reopen.
+    const untouched = reopening && { key: reopening.key, replay: true };
 
     // Nothing is claimed yet, so a budget that runs out here records nothing: the same payment
     // may be sent again as it is.
-    const unclaimed = () => ({ response: failure(SETTLE_REASONS.timeout, undefined) });
+    const unclaimed = () => ({
+      ...untouched,
+      response: failure(SETTLE_REASONS.timeout, undefined),
+    });
     let checked: Awaited<ReturnType<Check>>;
     try {
       checked = await bounded(deps.check(payload, requirements), left());
@@ -680,6 +850,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
     if (!verified) {
       flagDrift(undefined, verdict.invalidReason, "check");
       return {
+        ...untouched,
         response: failure(
           verdict.invalidReason ?? SETTLE_REASONS.unexpected,
           verdict.payer,
@@ -692,19 +863,37 @@ export function createSettler(deps: SettlerDeps): Settle & {
     if (left() <= 0) return unclaimed();
     // At least the store's grace: a claim cut off by a 0 ms bound may still land. A claim past
     // it is a 500, and the client's repeat finds the record.
-    const claim = await bounded(
-      store.claim({
-        key,
+    const reopened =
+      reopening &&
+      (await bounded(
+        store.reopen(key, fingerprint, UNSENT_REASONS, startedAt),
+        Math.max(left(), storeGraceMs),
+      ));
+    if (reopened) {
+      logger.info("settlement_reopened", {
         network,
-        payer,
-        nonce,
-        fingerprint,
-        paymentPayload: payload,
-        paymentRequirements: requirements,
-        createdAt: startedAt,
-      }),
-      Math.max(left(), storeGraceMs),
-    );
+        settlementKey: key,
+        errorReason: reopening.errorReason,
+        reopened: reopened.reopened,
+      });
+      metrics.increment("settlement_reopened_total", { reason: reopening.errorReason ?? "" });
+    }
+    // A reopen that lost (another call reopened it first, or the record moved on) is a repeat.
+    const claim = reopened
+      ? { claimed: true as const, record: reopened }
+      : await bounded(
+          store.claim({
+            key,
+            network,
+            payer,
+            nonce,
+            fingerprint,
+            paymentPayload: payload,
+            paymentRequirements: requirements,
+            createdAt: startedAt,
+          }),
+          Math.max(left(), storeGraceMs),
+        );
     if (!claim.claimed) return replay(claim.existing, fingerprint, signal, startedAt);
 
     const call: Call = { budgetOver: false, origin: "settle" };
@@ -716,7 +905,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
     const outOfBudget = async (hook?: Promise<unknown>): Promise<Settled> => {
       call.budgetOver = true;
       call.origin = "resolved";
-      const record = await endUnsigned(key, hook);
+      const record = await endUnsigned(key, claim.record.version, hook);
       const signed = record ? record.hashes.length > 0 : call.signing !== undefined;
       metrics.increment("settlement_budget_exhausted_total", { signed: String(signed) });
       if (record) return respond(record, signal);
@@ -744,6 +933,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
         maxFeeStroops: deps.maxFeeStroops,
         paymentPayload: payload,
         paymentRequirements: requirements,
+        reopened: claim.record.reopened,
         now: now(),
       });
       verdictOfHook = await bounded(hook, left());
@@ -757,7 +947,11 @@ export function createSettler(deps: SettlerDeps): Settle & {
       // stays `claimed` with no hash, and a repeat after the budget ends it with `…_timeout`.
       try {
         await bounded(
-          advance(key, { state: "rejected", errorReason: verdictOfHook.errorReason }),
+          advance(
+            key,
+            { state: "rejected", errorReason: verdictOfHook.errorReason },
+            { claim: claim.record.reopened },
+          ),
           Math.max(left(), storeGraceMs),
         );
       } catch (error) {
@@ -801,7 +995,13 @@ export function createSettler(deps: SettlerDeps): Settle & {
   // Every answer by outcome (0027): `success`, or the `errorReason`. A thrown error is the
   // route's 500.
   const settler: Settle = async (payload, requirements, signal) => {
-    const settled = await settle(payload, requirements, signal);
+    // One ledger read per call, shared by the reopen and the answer, so both decide alike.
+    let valid: Promise<Validity | undefined> | undefined;
+    const validOnce = () => (valid ??= validity(payload));
+    const settled = await withRetry(
+      await settle(payload, requirements, signal, validOnce),
+      validOnce,
+    );
     const { response } = settled;
     metrics.increment("settlement_outcomes_total", {
       reason: response.success ? "success" : (response.errorReason ?? SETTLE_REASONS.unexpected),
@@ -819,6 +1019,44 @@ export function createSettler(deps: SettlerDeps): Settle & {
  * The longest budget (80 s) plus this stays below the load balancer's 120 s (ADR 0011).
  */
 const STORE_GRACE_MS = 1_000;
+
+/**
+ * The payload's auth expiration ledger, and how many ledgers it has left: unset when the latest
+ * ledger couldn't be read in time.
+ */
+interface Validity {
+  expiration: number;
+  left?: number;
+}
+
+/**
+ * How long reading the latest ledger may take for an unsent answer or a reopen. The longest
+ * budget (80 s) plus the store's grace and this stays below the load balancer's 120 s.
+ */
+const LEDGER_READ_MS = 1_000;
+
+/**
+ * Whether a repeat with `fingerprint` may reopen `record` (0073 decision 13): the same payment,
+ * closed `rejected` with one of {@link UNSENT_REASONS} and no hash, so nothing was ever sent.
+ */
+/** The `from` of the payload's `transfer` call; throws on a payload that isn't one. */
+function transferFrom(transaction: Transaction): string | undefined {
+  const operation = transaction.operations[0];
+  if (operation?.type !== "invokeHostFunction") return undefined;
+  const from: unknown = scValToNative(operation.func.invokeContract().args()[0]!);
+  return typeof from === "string" ? from : undefined;
+}
+
+/** A record claimed before 0073 (`reopened` -1) never reopens (0073 decision 25). */
+function reopenable(record: SettlementRecord, fingerprint: string): boolean {
+  return (
+    record.reopened >= 0 &&
+    record.state === "rejected" &&
+    record.fingerprint === fingerprint &&
+    record.hashes.length === 0 &&
+    UNSENT.has(record.errorReason ?? "")
+  );
+}
 
 class OutOfTimeError extends Error {
   override readonly name = "OutOfTimeError";
@@ -853,13 +1091,24 @@ async function within<T>(promise: Promise<T>, ms: number): Promise<T | undefined
   }
 }
 
+/** `onSigned` found this process no longer holds the channel lease, so the hash isn't sent. */
+export class LeaseLostError extends Error {
+  override readonly name = "LeaseLostError";
+  constructor() {
+    super("the channel lease was lost");
+  }
+}
+
 /** The fixed `errorReason` for each error `submit()` throws (AD-6). */
 export function reasonFor(error: unknown): string {
   if (error instanceof SimulationCheckError) return SETTLE_REASONS.balanceChanges;
   if (error instanceof SimulationError) return SETTLE_REASONS.simulation;
   if (error instanceof FeeLimitError) return SETTLE_REASONS.fee;
   if (error instanceof LedgerBoundError) return SETTLE_REASONS.ledgerBound;
-  if (error instanceof SignedHookError) return SETTLE_REASONS.recordWrite;
+  if (error instanceof SignedHookError)
+    return error.cause instanceof LeaseLostError || error.cause instanceof LeaseFencedError
+      ? SETTLE_REASONS.leaseLost
+      : SETTLE_REASONS.recordWrite;
   if (error instanceof QueueTimeoutError) return SETTLE_REASONS.noChannelInTime;
   if (error instanceof NoChannelsError) return SETTLE_REASONS.noChannels;
   if (error instanceof ShutdownError) return SETTLE_REASONS.shuttingDown;
@@ -879,10 +1128,8 @@ export function keyOf(payload: PaymentPayload, network: StellarNetwork): Settlem
       (payload.payload as { transaction: string }).transaction,
       getNetworkPassphrase(network),
     );
-    const operation = transaction.operations[0];
-    if (operation?.type !== "invokeHostFunction") return undefined;
-    const from: unknown = scValToNative(operation.func.invokeContract().args()[0]!);
-    if (typeof from !== "string") return undefined;
+    const from = transferFrom(transaction);
+    if (from === undefined) return undefined;
     const nonce = payerNonce({ transaction, payer: from });
     return nonce === undefined ? undefined : `${network}:${from}:${nonce}`;
   } catch {

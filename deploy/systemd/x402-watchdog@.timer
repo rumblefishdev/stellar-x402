@@ -1,0 +1,12 @@
+# Restarts an unhealthy facilitator, every 30 s (ADR 0011): x402-watchdog@production.timer.
+[Unit]
+Description=x402 facilitator watchdog (%i), every 30 s
+Documentation=https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/adr/0011-facilitator-hosting.md
+
+[Timer]
+OnActiveSec=30s
+OnUnitActiveSec=30s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

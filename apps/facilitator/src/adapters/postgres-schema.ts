@@ -154,6 +154,25 @@ ALTER TABLE settlement_hashes
   ADD COLUMN updated_at bigint;
 `,
   },
+  {
+    // 0073: how many times a record nothing was sent for was reopened by the identical payload
+    // (decisions 5, 14). -1 for the rows already there and for the ones a release before 0073
+    // still inserts during the deploy, which leaves the column out: their answer was "sign a new
+    // payment", so they never reopen. `claim()` writes 0 (decision 25). After #89's
+    // `0006_catalog_seller_check` (decision 27).
+    name: "0007_settlement_reopened",
+    sql: "ALTER TABLE settlements ADD COLUMN reopened integer NOT NULL DEFAULT -1;",
+  },
+  {
+    // 0071: the lease's fencing token, new on every acquire (decisions 1, 2). The default fills
+    // the row a running release holds and every row it inserts. A release before it takes over
+    // without changing the token, so until every process runs this one, a takeover by an older
+    // process doesn't fence the newer one's earlier calls (decision 11). Unique, so an update
+    // that changes it takes the row's `FOR UPDATE` lock and waits for `addHash`'s `FOR KEY SHARE`,
+    // while a renewal, which changes only `expires_at`, doesn't (decision 16).
+    name: "0008_lease_token",
+    sql: "ALTER TABLE leases ADD COLUMN token uuid NOT NULL UNIQUE DEFAULT gen_random_uuid();",
+  },
 ];
 
 /** Runs in one transaction with the transactional migrations next to it, as before 0067. */

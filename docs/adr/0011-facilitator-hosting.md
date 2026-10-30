@@ -38,8 +38,13 @@ The host must:
   scale-to-zero and no idle CPU throttling;
 - **stop the old process before the new one starts.** One process owns a channel set through a
   store lease, so deploys can't overlap (AD-17);
-- **give at least 90–120 s after SIGTERM.** The process drains in-flight submissions, and with the
-  pool's defaults (`timeoutSeconds` 60 + `confirmGraceSeconds` 30) a sent one can take ~90 s;
+- **give 180 s after SIGTERM** (`stop_grace_period`). The process drains in-flight submissions
+  for at most 150 s, leaving the rest for its store writes and the lease release. Since 0073 a
+  sent one can stay valid until the payer's auth expires (`MAX_VALIDITY_LEDGERS`: 66 ledgers by default, about 5.5 minutes; at most 120, about 10 minutes). The pool waits for it until that bound's estimated time at 6 s a ledger plus
+  `confirmGraceSeconds` 30, about 426 s by default and 750 s at 120, so it can outlast the drain. One still open at 150 s is finished by
+  the next process's reconciliation, and until it lands or expires the next process's sends on
+  its channel may fail with `txBadSeq` and rebuild, for minutes rather than about 60 s. Accepted
+  for testnet; before pubnet the next process leaves such a channel out (0090);
 - **keep the facilitator key out of the image, the logs and the facilitator's process** (AD-12);
 - **offer a durable store** for the PostgreSQL schema of ADR 0012.
 
@@ -105,6 +110,10 @@ a whole zone, to Cloudflare on the Free plan.
     (0077 decision 3).
   - The facilitator never joins the ClickHouse project's `app` network, so it can't reach
     ClickHouse. OpenBao is reached over unix sockets (ADR 0013), not a network.
+  - Each network has a fixed /28 from `172.31.200.0/24`, set in the compose file, since the
+    server's Docker address pool is taken whole by that `app` network. A second pool in
+    `daemon.json` would also work, but it changes Docker for every project on the server, for the
+    sake of two networks.
 - **systemd restarts a facilitator that crashes, not Docker.** Its unit runs Compose in the
   foreground with `--exit-code-from <service>`, since a plain `docker compose up` exits 0
   whatever the container's code, and with `Restart=on-failure`, so the unit ends with the
@@ -145,6 +154,10 @@ a whole zone, to Cloudflare on the Free plan.
   the watchdog and 0027's "ready to settle" alarm wait for) is decided with the code in 0077.
   - A process without the lease keeps trying to take it.
   - A process whose lease renewal fails stops new submissions until it holds the lease again.
+  - A process that froze past its TTL while another took the lease sends nothing new once it
+    wakes: the store refuses its hash under the replaced fencing token (task 0071). The
+    exception is an envelope stored and checked before the freeze: it can still go out, and
+    resend until its bound, under its one hash.
 - **AD-16 reconciliation doesn't depend on the lease** (0019 decisions 27 and 37). It starts once
   the server listens and sweeps every 10 s beside `/settle`, in every process. It only reads the
   chain, and every write is a compare-and-set on the record's version, so a process waiting for
@@ -166,7 +179,7 @@ One request or one stop must never outlast the layer in front of it:
 | `/settle` response budget             | 30 s, at most 80 s | well below the seller's 90 s, so our answer reaches it             |
 | `/settle` checks                      | see below          | inside the budget: past it, `…_timeout` and nothing is claimed     |
 | Repeat wait (`SETTLE_TIMEOUT_MS`)     | 20 s, ≤ the budget | and never past the repeat's own budget                             |
-| `stop_grace_period`                   | 180 s              | sent submissions (≤ 90 s) plus a 90 s margin                       |
+| `stop_grace_period`                   | 180 s              | the 150 s drain plus 30 s for the store and the lease (0073)       |
 | Cloudflare's response limit           | 100 s              | above the 80 s cap; past it Cloudflare answers 524                 |
 | Node `keepAliveTimeout`               | 125 s              | above `cloudflared`'s idle keep-alive (90 s), or it sees 502s      |
 | Container healthcheck                 | 10 s               | liveness only                                                      |
@@ -179,7 +192,8 @@ One request or one stop must never outlast the layer in front of it:
 
 - **Past the budget,** `/settle` answers `settlement_pending` with the hash if one was signed,
   and nothing new is signed after it. If nothing was signed, the record ends and the answer is
-  `settle_exact_stellar_timeout`: the client signs a new payment. 30 s fits 97 % of the
+  `settle_exact_stellar_timeout`: the client repeats the same payment while `extra.retryable`
+  says so, and signs a new one only after (0073). 30 s fits 97 % of the
   settlements measured in task 0043. Every store and hook call is bounded by what is left of it,
   plus the store's 1 s grace for each of the last store calls: a repeat's last poll read, its end
   of the record and its success mark, so up to the poll interval plus 3 s past the budget (3.46 s
@@ -199,12 +213,25 @@ One request or one stop must never outlast the layer in front of it:
   payment may be sent again; a valid payment can still get it when the first URLs hang and the
   last one answers late. These worst cases need hung RPC URLs, not slow ones.
 
-- **Known cost of "nothing sent → `rejected`".** The resource is usually served before `/settle`.
-  After a failure before anything was signed (no channel, the budget, the simulation, the RPCs
-  down), the record ends and the same payload can't be settled again: only the buyer can pay, by
-  signing a new payment, and nothing makes them. Claiming such a record again by the same
-  fingerprint would close it; it is not planned.
-- **The budget covers the wait for a channel.** The pool's own bounds (60 s + 30 s) start only
+- **"Nothing sent → `rejected`" reopens.** The resource is usually served before `/settle`.
+  After a failure before anything was signed (no channel, the budget, the RPCs down, a restart,
+  a deploy or a lost lease), the record ends, but the payer's auth entry can still land. Since task 0073 the
+  identical payload reopens the record while that auth entry is valid, so whoever holds the
+  payment (the seller's resource server, or the client) repeats it as it is and it settles once;
+  the answer says so with `extra.retryable`. A refusal by the simulation, the fee or a spend
+  limit still ends the payment: those need a new one (0073 decision 20 leaves their wording to a
+  backlog task). During the deploy that brings this in, the previous release still answers these
+  reasons as "sign a new payment", without `extra`, until it stops. That answer stays true: rows
+  from before `0007_settlement_reopened`, and rows that release inserts after the migration ran,
+  get `reopened` -1 and never reopen, so a payer who did sign again can't have the old payment
+  land beside it through `/settle` (0073 decision 25). A rollback to a release before 0073 runs on
+  the newer schema (its inserts get -1 too) but takes the promise back: it answers a repeat from
+  the record, as "sign a new payment", without reopening it. Deploying this release again after
+  that is an accepted gap: a record it claimed keeps `reopened` 0 through the rollback, so such a
+  payment reopens, and it can land beside a newly signed one if both deploys fit inside the auth's
+  life (0073 decision 28).
+- **The budget covers the wait for a channel.** The pool's own bounds (until the payer's auth expiry ledger, then 30 s; 60 s + 30 s
+  for a call without a ledger bound) start only
   once a channel is acquired, so the `/settle` handler passes the pool a deadline (0009).
 - **On SIGTERM the facilitator stops taking `/settle` itself** (503), refuses at once every call
   not yet signed and sent, lets only sent ones finish, and drains (0025). `cloudflared` has no
@@ -223,9 +250,10 @@ One request or one stop must never outlast the layer in front of it:
   - the runtime stage is `node:22-slim` pinned by digest, `linux/amd64`, runs as `node`, with a
     read-only root filesystem and `CMD ["node", "dist/server.js"]`. Node is PID 1 and handles
     SIGTERM itself (`src/server.ts`).
-- **Images go to GitHub Container Registry,** tagged with the git SHA. The workflow skips the
-  build when the SHA is already there. The image is public, so the server needs no registry
-  credential.
+- **Images go to GitHub Container Registry,** tagged with the git SHA. The workflow builds on
+  every deploy, only from `deploy/production`, and deploys the digest its own build reports: a
+  tag can be overwritten by any workflow that may write packages, so it is never read back. The
+  image is public, so the server needs no registry credential.
 - **Production deploys the image built from `deploy/production`, with no promotion step.** A
   successful deploy records its digest and SHA as a GitHub Deployment in the `production`
   environment, for rollback and the record. With mainnet in the same process, every deploy will
@@ -422,9 +450,9 @@ One request or one stop must never outlast the layer in front of it:
   - They stay there until a reboot, so the unit's restart after a crash and the watchdog still
     find them.
     At boot the unit writes them again before it starts anything.
-  - The app reads them from files (`DATABASE_URL_FILE`, `RPC_URLS_FILE` and the AppRole files),
-    a config change in 0026, which points them at testnet's; with both networks, 0077 gives each
-    network its own.
+  - The app reads them from files: `DATABASE_URL_FILE` and `RPC_URLS_FILE` (0026), which point
+    at testnet's; with both networks, 0077 gives each network its own. The AppRole files come
+    with the OpenBao signer (0036).
   - They never go into the image, the repo or the logs, and never into `environment:`, which
     `docker inspect` shows in plain text.
 - **Rotating the key is an on-chain change.** AD-12 makes the facilitator key the only signer of
@@ -565,7 +593,8 @@ One request or one stop must never outlast the layer in front of it:
   costs about €0 more, against about $60–70 a month on testnet and $150 on mainnet for ECS
   Fargate.
 - **It meets both hard rules.** Compose stops the old container first, and the grace period has no
-  platform cap, so 180 s covers the drain with room to spare.
+  platform cap, so 180 s covers the 150 s drain. A submission still open then is finished by the
+  next process (0073).
 - **The alerting design carries over:** the same logger, the same EMF metrics, CloudWatch alarms
   and Slack.
 - **Docker is already on the server,** and the company already runs sorobanscan's API behind
@@ -672,7 +701,7 @@ One request or one stop must never outlast the layer in front of it:
   worst it is about 5 minutes: a 180 s drain and up to 120 s for `ready` and `listed`. The uptime alarm waits 7 failing
   minutes for that reason.
 - **After a crash,** systemd restarts the container (`Restart=on-failure`). The new process
-  reconciles at once and waits up to 30 s for the lease before it settles new payments. Records keep each transaction's time bound, so a hash
+  reconciles at once and waits up to 30 s for the lease before it settles new payments. Records keep each transaction's ledger bound, so a hash
   that can't be found yet stays non-final until that bound passes (0019).
 - **The OpenBao signer (0036, ADR 0013) blocks the testnet deploy (0026).**
 - **ADR 0012's store moves from RDS to a container on the server.** Its schema, adapter rules and
@@ -692,7 +721,7 @@ One request or one stop must never outlast the layer in front of it:
     and the secret files;
   - the backups (pgBackRest to the Storage Box);
   - `GET /health` with `ready` and `listed`, the Node keep-alive setting, and the migration bounds;
-  - the config reading secrets from files (`*_FILE`), since nothing reads them today;
+  - the config reading `DATABASE_URL` and `RPC_URLS` from files (`*_FILE`);
   - the runbook: running the playbook, deploy, rollback, key rotation, certificate renewal,
     restore on another machine.
 - **0027 builds:** log shipping through the CloudWatch agent, the EMF adapter, the alarms above,

@@ -1,0 +1,21 @@
+#!/bin/sh
+# Decrypts the credentials a unit's container reads (ADR 0011): each
+# /srv/x402/<environment>/creds/<name>.cred to /run/x402/<environment>/<name>, a tmpfs, mode 0400
+# and owned by the container's user, since Compose's `file:` secrets keep the host's owner and mode.
+#   x402-creds <environment> <name>:<uid>...
+# A versioned credential (`rpc-urls.testnet.<date>.cred`) is encrypted with `--name=<name>`, and
+# `<name>.cred` is a symlink to the active version (runbook).
+set -eu
+src=/srv/x402/$1/creds
+dst=/run/x402/$1
+shift
+umask 077
+install -d -m 0700 "$dst"
+for credential; do
+  name=${credential%:*}
+  uid=${credential##*:}
+  systemd-creds decrypt --name="$name" "$src/$name.cred" "$dst/.$name"
+  chown "$uid:$uid" "$dst/.$name"
+  chmod 0400 "$dst/.$name"
+  mv -f "$dst/.$name" "$dst/$name"
+done

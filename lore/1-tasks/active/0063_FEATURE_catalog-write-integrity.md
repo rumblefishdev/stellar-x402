@@ -109,16 +109,18 @@ description or price, and nobody can make `/discovery/resources` answer megabyte
 | 33 | A seller's answer speaks only for the listing asked about: when the key rebuilt from it (network, `payTo`, method or tool, URL with its template) differs from the asked key, it is refused as `other_key` and the stored listing stays. Real hosts shared by several sellers: 144 of 4,930 HTTP host-network pairs (up to 38 sellers), 1 of 43 MCP server-network pairs | review | beyond it | spec silent | | |
 | 34 | An MCP check ends a stateful seller's session with the transport's `DELETE` before closing; a failed `DELETE` is logged and the answer stands | review | beyond it | MCP Streamable HTTP session termination; SDK 1.30.1 `terminateSession` | | |
 | 35 | `packages/seller-fetch` gets its own error codes naming the cause (`not_https`, `not_public`, `redirect`, `too_large`, `timeout`, `network`) and plain messages; the MCP's `asToolError` translates them to its tool errors, the facilitator stores them as reasons. A separate PR after 0063's: 0085 | grilling | beyond it | spec silent | | |
+| 36 | A check's row keeps the seller's 402 as answered up to the fetch limits (64 KiB HTTP, 256 KiB MCP), also when the listing is then refused as too large: what a seller sent stays readable; the per-host budget (row 3) and the 30-day pruning bound the space | grilling | beyond it | spec silent | | |
+| 37 | A whole listing, serialized, takes at most 16 KiB; over it the listing is refused as `too_large` with detail `listing`, and the payment never is. A page of 100 stays under 1.6 MB, where the field limits alone let an MCP listing reach about 67 KiB. In the largest public catalog 5 of 95,733 listings are larger, all HTTP | grilling | beyond it (row 9's field limits stay) | spec silent | | |
+| 38 | Only a payment whose copy is new or differs from the stored listing is an attempt and a `catalog_attempts` row, a refused copy and a skipped check included; a copy equal to the listing only increments the counter | grilling | changes row 23 | spec silent | | |
 
 ## Not yet decided
 
-- Choices made while coding, open for the owner's veto: a global budget of 300 checks a minute
-  (an assumption, like 30 per host); an example input over 16 KiB is left out and the check runs
-  without it; the listing URL is the one asked, not `resource.url` from the answer; an unchanged
-  copy doesn't refresh `lastUpdated`; a seller answer up to 64 KiB within 10 s (measured p95
-  1.85 s, max 5.3 s); an oversized `extra` in the paid offer makes the header say `too_large` at
-  once; one `catalog_attempts_total` counter replaces the rejection and upsert counters; writes
-  are ordered by a new `checked_at` column and `ledger` stays.
+- Choices made while coding, open for the owner's veto: an example input over 16 KiB is left out and
+  the check runs without it; the listing URL is the one asked, not `resource.url` from the answer;
+  an unchanged copy doesn't refresh `lastUpdated`; a seller answer up to 64 KiB within 10 s
+  (measured p95 1.85 s, max 5.3 s); an oversized `extra` in the paid offer makes the header say
+  `too_large` at once; one `catalog_attempts_total` counter replaces the rejection and upsert
+  counters; writes are ordered by a new `checked_at` column and `ledger` stays.
 - Whether the `description` limit of 500 characters and the schema `pattern` limit of 256 (both
   from 0030) stay: 140 of 92,790 real descriptions are longer (the longest 4,982), the spec sets
   no limit, and in the run over 400 real HTTP hosts they refused 4 and 1 listings.

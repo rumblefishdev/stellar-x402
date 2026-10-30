@@ -63,6 +63,39 @@ history:
     status: active
     who: stkrolikiewicz
     note: "Oskar's review of #79: x402-db-testnet@production, wanted rather than required by x402@production, secret files named per network, and only migrate-testnet beside the facilitator holding testnet's database password."
+  - date: "2026-10-30"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      Keys and settings before the first deploy (#96). The deploy key's public half is
+      deploy/ansible/files/deploy-production.pub, SHA256:DDjhArrC+m/iaBZ3WUSYc/GdswEia1yc1CxK+/dZoFw;
+      its private half exists only as the production environment's DEPLOY_SSH_KEY. HOST_KEY pins
+      ch-prod-01's ed25519 key, SHA256:xHEsZRyqxld+80uqEtAGBv98/3DqjpoEuG9WPbnSPzI, read from
+      /etc/ssh/ssh_host_ed25519_key.pub on the server over SSH checked against the admin's
+      known_hosts. The production environment deploys only from deploy/production, needs one
+      approval from any of six reviewers (stkrolikiewicz, karolko9, karczuRF, adamkoot, kowalski,
+      mmisiorek) and never the person who started the deploy, has no admin bypass, and holds
+      DEPLOY_HOST as a secret. The repo's default workflow permissions are read-only, and Actions
+      can't create or approve pull requests.
+  - date: "2026-10-30"
+    status: active
+    who: stkrolikiewicz
+    note: "The production environment's reviewers are the x402 team only: stkrolikiewicz, karolko9, karczuRF and adamkoot; kowalski and mmisiorek came off the list."
+  - date: "2026-10-30"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      ch-prod-01 is set up up to the facilitator. deploy/production exists, protected by a ruleset
+      (a pull request with one approval, no deletion or force push, no bypass). The playbook ran
+      from develop, last at bb0660c, whose check run changed only compose.yaml. The four credentials are
+      encrypted with the host key: the database password and URL, the RPC URLs (version
+      2026-10-30: SDF's and gateway.fm's testnet RPC) and the tunnel token.
+      x402-db-testnet@production and x402-tunnel@production run on the fixed subnets of #98, after
+      the first start failed on Docker's empty address pool. cloudflared passed UDP and TCP 7844
+      and uses QUIC; Browser Integrity Check is off for the hostname (soroban-infrastructure#2).
+      The public URL answers 502: the tunnel is up and the facilitator isn't. Before the first
+      deploy: the signer and channels (0036 and OpenBao on the server), then the GHCR package
+      made public after the first image.
 ---
 
 # Public testnet deployment
@@ -107,8 +140,9 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     reachable only from the facilitator and the migration service.
   - Networks `x402-production-edge` (`cloudflared` and the facilitator) and
     `x402-production-db` (`internal: true`, the facilitator, each network's Postgres and
-    migration service), both part of the production compose project. Only the facilitator and
-    `migrate-testnet` hold testnet's database password.
+    migration service), both part of the production compose project, on fixed subnets
+    (`172.31.200.0/28` and `172.31.200.16/28`) since the server's Docker address pool is taken.
+    Only the facilitator and `migrate-testnet` hold testnet's database password.
   - `cloudflared`: Cloudflare's tunnel connector pinned by digest, memory limit 128 MiB, under
     its own unit `x402-tunnel@production.service`, enabled at boot and untouched by deploys, so
     it keeps forwarding while the facilitator drains; `x402@production` runs after it. The unit
@@ -126,7 +160,8 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 - From 0039, the image: `pnpm deploy --prod` with `injectWorkspacePackages: true`;
   `"files": ["dist"]` in `apps/facilitator/package.json` and a `.dockerignore` that excludes
   `.env*`; `node:22-slim` pinned by digest, `linux/amd64`, user `node`, read-only root filesystem.
-  Images go to GHCR, tagged with the git SHA; the workflow skips the build when the SHA exists.
+  Images go to GHCR, tagged with the git SHA; the workflow builds on every deploy, only from
+  `deploy/production`, and deploys the digest its build reports, never one read back from a tag.
   A successful deploy records its digest and SHA as a GitHub Deployment in the `production`
   environment, for rollback and the record; there is no promotion step (ADR 0011, 0038).
 - From 0039, provisioning (ADR 0011): an Ansible playbook in `deploy/ansible/`, run by an admin
@@ -217,7 +252,9 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     it off for `x402-facilitator.sorobanscan.com` with a configuration rule in
     `soroban-infrastructure` (the rest of the zone keeps it for sorobanscan's site), checking which
     token permission the ruleset needs. Bot Fight Mode couldn't be read (the token has no Bot
-    Management permission): check its toggle in the dashboard, Security → Bots.
+    Management permission): check its toggle in the dashboard, Security → Bots. Done: Bot Fight
+    Mode is off (2026-10-29), and the rule is applied (soroban-infrastructure#2, 2026-10-30); a
+    request with no `User-Agent` reaches the tunnel instead of answering 1010.
 - From 0039: `GET /health` answers 200 and reports `ready` and `listed` in its body (`listed`
   since 0019, `05dcfae`: a sweep has listed the non-final records).
 - From 0039, the runbook: running the playbook from a reviewed commit, deploy, rollback
@@ -271,7 +308,8 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   OpenBao.
 - **Link:** a socket per network, each in its own volume, mounted into the one facilitator
   (ADR 0013 is updated in 0077), plus the admin socket (root-only, in no container); no TCP
-  listener.
+  listener. OpenBao's compose service uses `network_mode: none`: it needs no network, and on the
+  server Docker's address pool has none to give, which fails a default network at start.
 - **Keys:** one Transit key per network, generated inside OpenBao, `type=ed25519`,
   `exportable=false`, `allow_plaintext_backup=false`. One policy per network allowing only
   `transit/sign/<key>`, and one AppRole per network: `token_ttl` and `token_max_ttl` 1 h, a secret
@@ -336,6 +374,6 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 - [ ] Given the Hetzner server and Docker Compose of ADR 0011 (revised in 0039 and 0077), when a deploy runs, then a container image built from the repo is deployed to it as the ADR describes, and the service answers `/supported` at a public HTTPS URL
 - [ ] Given a running instance, when a new version is deployed, then the old process stops before the new one starts; the process is long-lived and never scaled to zero
 - [ ] Given the facilitator key, when the service is deployed, then it signs through the testnet OpenBao Transit key, the raw key never reaches the facilitator's process, the image or the logs, and it is a testnet-only key (ADR 0013)
-- [ ] Given `DATABASE_URL_FILE` or `RPC_URLS_FILE`, when the service starts, then it reads the value from that file, and with neither set it falls back to `DATABASE_URL` and `RPC_URLS`
+- [x] Given `DATABASE_URL_FILE` or `RPC_URLS_FILE`, when the service starts, then it reads the value from that file, and with neither set it falls back to `DATABASE_URL` and `RPC_URLS`
 - [ ] Given the durable stores from 0022, when the service runs, then it uses them, and `docs/runbook.md` has the deploy and rollback steps
 - [ ] Given the deployed facilitator, when it settles, then it signs through OpenBao Transit over the unix socket, no secret seed is on the server outside OpenBao, the backup secret exists in AWS, and a restore drill from it has passed

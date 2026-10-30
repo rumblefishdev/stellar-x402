@@ -52,6 +52,44 @@ the facilitator. It is built and tested against a local OpenBao in Docker, befor
 - ADR 0013's choices this task builds: a unix socket, AppRole with a 1-hour token the signer
   replaces by logging in again, a sign-only policy per network, fail closed.
 
+## Decisions so far
+
+| # | What is done | From | Vs the task | Who does the same (checked) | Code | Test |
+|---|---|---|---|---|---|---|
+| 1 | The signer is built now, on OpenBao Transit as ADR 0013 has it. OpenBao hides the key from a read-only leak but can't limit what the key signs: on these accounts one signature can pay out the float or change the signers. Limiting that on chain stays 0048's re-check before mainnet | grilling | matches it | upstream's example facilitator keeps the seed in the environment | | |
+| 2 | 0036 adds the signer's variables and AppRole secrets to `deploy/production/compose.yaml`, in the signer's PR, for 0026's owner to review; the channels for the OpenBao key and the move to it stay in 0026 | grilling | beyond it | — | | |
+| 3 | One process holds every network's signer, each with its own socket, AppRole, policy and Transit key (0077, PR #93); 0036 configures one network now in that shape | grilling | matches it | — | | |
+| 4 | A few seconds after start, the signer signs a fixed 32-byte value (the hash of a constant text, which no transaction has) and checks it against the configured address; `/health` gains a `signer` field (ok, failed, not checked yet), updated by every signature after that. `ready` doesn't change, so the facilitator still starts and answers `/verify` without OpenBao | grilling | changes it (the task had no OpenBao call after start) | — | | |
+| 5 | In `openbao` mode, a set `FACILITATOR_SECRET` stops the start with the reason named | grilling | changes it (the task had it ignored) | — | | |
+| 6 | `secret` mode is refused on pubnet | grilling | beyond it | ADR 0013: one mechanism on both networks | | |
+| 7 | The signer talks to OpenBao with `undici`, already a dependency, over the unix socket; no OpenBao client library (none supports a unix socket and `transit/sign`) | grilling | matches it | OpenBao lists only a Go client | | |
+| 8 | Unit tests run against a fake server on a unix socket; tests against a real OpenBao in Docker run when an environment variable is set, in CI on Linux, since a container's socket doesn't reach a macOS host | grilling | matches it | — | | |
+| 9 | A failed signature ends the settlement with upstream's reason: `settle_exact_stellar_transaction_signing_failed` for the transaction, `settle_exact_stellar_fee_bump_signing_failed` for the fee bump; nothing is sent, and a counter of signer failures by cause feeds the alarm (0027) | grilling | changes it (the task named no reason) | upstream `@x402/stellar` 2.28.0 `exact/facilitator/index.mjs:185,208` | | |
+| 10 | Before each signature, a token with less than 5 minutes left is replaced by logging in again first; the old token keeps working until its own hour ends (a second login doesn't revoke the first, measured on OpenBao 2.7.2), so no signature waits on an expired token. Concurrent signatures share one login; no timer runs in the background, and a `403` isn't retried | grilling | matches it (the task said log in again before expiry) | the AWS SDK refreshes credentials 5 minutes before expiry (`EXPIRATION_MS = 300_000`) | | |
+| 11 | A login that fails (wrong secret ID, OpenBao sealed or unreachable) ends that settlement with the signing reason (row 9), logged and counted, and `/health`'s `signer` shows it; the next settlement tries to log in again. No retry loop and no other key | grilling | matches it | ADR 0013: fail closed, no fallback key | | |
+| 12 | Every signature is checked against the configured address, through `Transaction.addSignature`, which verifies it; a mismatch ends the settlement before anything is sent | grilling | changes it (the task checked the first signature) | stellar-sdk `transaction_base.js:127-149` | | |
+| 13 | One request to OpenBao waits at most 1 s: the slowest measured signature was 286 ms (5 × 2,000 signatures from 20 clients at half a CPU), a settlement's two at most 124 ms (5 × 1,000) | grilling | beyond it | — | | |
+| 14 | OpenBao keeps its half-CPU limit: it adds a stall of about 50 ms to at least 1% of settlements (pair p99 44–49 ms in 5 × 1,000), small against a ledger of about 5 s | grilling | beyond it | — | | |
+| 15 | The OpenBao key's fee account and its channels are created and funded by an ordinary wallet outside the project, the same one that tops up the fee float; the OpenBao key is only written into each channel as its sole signer, which the channel's own fresh key signs. The OpenBao key signs nothing but settlements, so no tool signs other transactions through it. `buildCreateChannelsTx` takes the funding account apart from the signer it adds | grilling | changes it (the task's AC 1 assumed channels signed for by the Transit key) | channels funded by a separate account: one peer's provisioning; none adds a facilitator key as signer | | |
+
+## Not yet decided
+
+Nothing: the grilling's frontier is empty (2026-10-30).
+
+## PR split
+
+| PR | What | State |
+|---|---|---|
+| A | `buildCreateChannelsTx` with a funding account apart from the signer it adds, and a script that creates a fee account and channels for a given key (row 15) | #100, open |
+| B | the Transit signer, its config, `/health`'s `signer`, the settle reasons, the compose variables and the tests (rows 2–14), stacked on A for AC 1 | not started |
+
+## Out of scope
+
+- The on-chain limit of the hot key's power (thresholds, a cold key): 0048.
+- The fee account as the caller of every settlement, which keeps that limit out of reach: 0093.
+  The shape stays two facilitator signatures per settlement, both through this signer.
+- The OpenBao container, its unseal, backups and the move of testnet to the key: 0026.
+
 ## Implementation
 
 - **A Transit `TransactionSigner`** in `apps/facilitator/src/adapters/`, chosen by config:

@@ -230,8 +230,9 @@ moves back there.
     0022 had no instance to measure on.
 - **Task 0022 builds the adapters.** CI runs the contract suites against a PostgreSQL service
   container.
-- **Two contract questions remain for the team:**
-  - a fencing token on `ChannelLease`, so a stale holder's writes are rejected (task 0025);
+- **Two contract questions were left for the team, both since decided:**
+  - a fencing token on `ChannelLease`, so a stale holder's writes are rejected: built by task
+    0071, checked by `addHash` only (ADR 0006);
   - `addHash` with a hash another settlement already has. Keying hashes by hash makes "reject" the
     natural answer (task 0022).
 - **Rate limiting.** Task 0023 puts in-process counters in front of the database ones, so abuse
