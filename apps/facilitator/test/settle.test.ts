@@ -582,12 +582,38 @@ describe("createSettler", () => {
     expect(hooks.onFinal).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps …_record_write_failed when addHash fails for a reason other than the lease", async () => {
+    let sent = false;
+    const { settle, store } = setup(async (opts) => {
+      const signed = await Promise.resolve(opts.onSigned!(HASH, BOUNDS)).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      if (signed === undefined) {
+        sent = true;
+        return result("success");
+      }
+      throw Object.assign(new SignedHookError("onSigned failed", { cause: signed }), {
+        attempts: [{ hash: HASH, sent: "no" }],
+      });
+    });
+    vi.spyOn(store, "addHash").mockRejectedValue(new Error("store down"));
+    const { response } = await settle(payload(), requirements);
+    expect(sent).toBe(false);
+    expect(response).toMatchObject({ errorReason: SETTLE_REASONS.recordWrite });
+    expect(response).not.toHaveProperty("extra");
+  });
+
   it.each([
     [new SimulationError("x"), "settle_exact_stellar_simulation_failed"],
     [new SimulationCheckError("x"), "settle_exact_stellar_unexpected_balance_changes"],
     [new FeeLimitError("x"), "settle_exact_stellar_fee_exceeds_maximum"],
     [new LedgerBoundError("x"), "settle_exact_stellar_signature_expiration_too_soon"],
     [new SignedHookError("x"), "settle_exact_stellar_record_write_failed"],
+    [
+      new SignedHookError("x", { cause: new Error("store down") }),
+      "settle_exact_stellar_record_write_failed",
+    ],
     [new SignedHookError("x", { cause: new LeaseLostError() }), "settle_exact_stellar_lease_lost"],
     [
       new SignedHookError("x", { cause: new LeaseFencedError("stellar:testnet:channels") }),
@@ -1460,6 +1486,21 @@ describe("createSettler", () => {
       await storeIdle();
       expect(second).toBeInstanceOf(Error);
       expect((await store.get(key))?.hashes).toEqual([HASH]);
+    });
+
+    it("names no hash in a budget answer when the lease stopped the call before its write", async () => {
+      const { settle, store } = setup(
+        async (opts) => {
+          await Promise.resolve(opts.onSigned?.(HASH, BOUNDS)).catch(() => {});
+          return new Promise(() => {});
+        },
+        { budgetMs: BUDGET_MS, lease: () => undefined },
+      );
+      vi.spyOn(store, "transition").mockRejectedValue(new Error("store down"));
+      const settled = settle(payload(), requirements);
+      await elapse(BUDGET_MS);
+      const { response } = await settled;
+      expect(response).toMatchObject({ errorReason: SETTLE_REASONS.timeout, transaction: "" });
     });
 
     it("answers from what the call knows when the store fails as the budget runs out", async () => {

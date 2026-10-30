@@ -118,9 +118,10 @@ export const SETTLE_REASONS = {
    */
   shuttingDown: "settle_exact_stellar_shutting_down",
   /**
-   * This process lost the channel lease before the hash was sent: another process took it, or
-   * none holds it (0071). Nothing was sent for this payment ({@link UNSENT_REASONS}); a retry
-   * reaches the process that holds it.
+   * This process lost the channel lease before it sent this envelope: another process took it,
+   * or none holds it (0071). Nothing is on its way for this payment ({@link UNSENT_REASONS}); a
+   * retry reaches the process that holds it. With a `transaction` the record has that hash, so it
+   * doesn't reopen: an envelope never sent, or one a `txBadSeq` refused before the rebuild.
    */
   leaseLost: "settle_exact_stellar_lease_lost",
   /** Anything else (upstream's code). */
@@ -553,11 +554,11 @@ export function createSettler(deps: SettlerDeps): Settle & {
             // After the budget answer nothing new is signed: the answer named the last hash, and
             // a rebuild's would land under another.
             if (call.budgetOver) throw new Error("the settle budget ran out");
-            call.signing = hash;
             // The lease may have gone since the request came in, after a long body upload or
             // wait for a channel (0025 decision 22): another process may send on this channel.
             const lease = deps.lease();
             if (!lease) throw new LeaseLostError();
+            call.signing = hash;
             // Durable before the first send (AD-16); a final or missing record stops the send.
             // Only on this call's own claim: once reopened, the record is another call's (0073).
             // Only under the lease's current token: a takeover since refuses it (0071).
