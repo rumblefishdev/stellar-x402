@@ -2,7 +2,7 @@
 id: "0078"
 title: "Name a missing trustline in /verify's answer instead of a generic simulation failure"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: []
 related_tasks: ["0018", "0021", "0066"]
@@ -15,6 +15,10 @@ history:
     note: >
       Spawned from the Milestone 1 status check: the panel review response (§5, "Trustline
       onboarding") promises an actionable error for a missing trustline, and no task covered it.
+  - date: "2026-10-30"
+    status: active
+    who: okarcz
+    note: "Work started."
 ---
 
 # Name a missing trustline in /verify's answer instead of a generic simulation failure
