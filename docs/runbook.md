@@ -146,14 +146,13 @@ facilitator serves, then restarts `x402@production` on the new image and waits u
 
 - **Automatic:** a new image that isn't `ready` and `listed` in 120 s is replaced by
   `digest.good`, and the deploy fails.
-- **By hand:** deploy an earlier digest. Each deployment's status carries its digest, and every
-  commit's image is tagged with its SHA:
+- **By hand:** deploy an earlier digest. Each deployment's status carries it; a tag doesn't, since
+  any workflow that may write packages can overwrite one:
 
   ```sh
   gh api 'repos/rumblefishdev/stellar-x402/deployments?environment=production&per_page=10' \
     --jq '.[] | "\(.id) \(.sha[:7]) \(.created_at)"'
   gh api repos/rumblefishdev/stellar-x402/deployments/ID/statuses --jq '.[].description' | grep sha256
-  docker buildx imagetools inspect ghcr.io/rumblefishdev/x402-facilitator:SHA   # or by commit
   gh workflow run deploy-production.yml --ref deploy/production -f digest=sha256:…
   ```
 
