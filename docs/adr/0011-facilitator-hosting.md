@@ -223,9 +223,10 @@ One request or one stop must never outlast the layer in front of it:
   - the runtime stage is `node:22-slim` pinned by digest, `linux/amd64`, runs as `node`, with a
     read-only root filesystem and `CMD ["node", "dist/server.js"]`. Node is PID 1 and handles
     SIGTERM itself (`src/server.ts`).
-- **Images go to GitHub Container Registry,** tagged with the git SHA. The workflow skips the
-  build when the SHA is already there. The image is public, so the server needs no registry
-  credential.
+- **Images go to GitHub Container Registry,** tagged with the git SHA. The workflow builds on
+  every deploy, only from `deploy/production`, and deploys the digest its own build reports: a
+  tag can be overwritten by any workflow that may write packages, so it is never read back. The
+  image is public, so the server needs no registry credential.
 - **Production deploys the image built from `deploy/production`, with no promotion step.** A
   successful deploy records its digest and SHA as a GitHub Deployment in the `production`
   environment, for rollback and the record. With mainnet in the same process, every deploy will
