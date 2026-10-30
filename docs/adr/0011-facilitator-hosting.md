@@ -40,8 +40,8 @@ The host must:
   store lease, so deploys can't overlap (AD-17);
 - **give 180 s after SIGTERM** (`stop_grace_period`). The process drains in-flight submissions
   for at most 150 s, leaving the rest for its store writes and the lease release. Since 0073 a
-  sent one can stay valid until the payer's auth expires (`MAX_VALIDITY_LEDGERS`: 66 ledgers by default, about 5.5 minutes; at most 120, about 10 minutes), plus
-  `confirmGraceSeconds` 30, so it can outlast the drain. One still open at 150 s is finished by
+  sent one can stay valid until the payer's auth expires (`MAX_VALIDITY_LEDGERS`: 66 ledgers by default, about 5.5 minutes; at most 120, about 10 minutes). The pool waits for it until that bound's estimated time at 6 s a ledger plus
+  `confirmGraceSeconds` 30, about 426 s by default and 750 s at 120, so it can outlast the drain. One still open at 150 s is finished by
   the next process's reconciliation, and until it lands or expires the next process's sends on
   its channel may fail with `txBadSeq` and rebuild, for minutes rather than about 60 s. Accepted
   for testnet; before pubnet the next process leaves such a channel out (0090);
