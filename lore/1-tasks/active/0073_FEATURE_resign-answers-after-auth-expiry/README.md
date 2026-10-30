@@ -258,6 +258,11 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
 27. **#89 keeps migration 0006; ours is `0007_settlement_reopened`, #92's `0008_lease_token`**
     (okarcz, 2026-10-29, PR 3 review): #89 is one PR and likely merges first; ours is applied
     nowhere shared, so renaming it is free. Chosen over #89 renumbering and over leaving it open.
+28. **A redeploy after a rollback is an accepted gap** (okarcz, 2026-10-30, PR 3 review 2, Stan's
+    suggestion): a record this release claimed keeps `reopened` 0 through a rollback, so a payment
+    the earlier release answered "sign a new payment" reopens once this release is back, and both
+    can land. It needs both deploys inside the auth's life and a retry of the old payload. Chosen
+    over a new mechanism in the fix round (Adam's stop rule on #80) and over a backlog task.
 
 ## Implementation Notes
 
