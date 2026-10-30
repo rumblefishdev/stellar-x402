@@ -53,8 +53,12 @@
   rotated Transit key can't then sign in place of the key that is on chain.
 - **The signer's address is the fee account's, from config.** The pool pays fee bumps from it and
   uses it as the operation source and the channels' signer, so the fee account is always the
-  OpenBao key's own account. The first signature is checked against that address, so the
-  facilitator starts without OpenBao.
+  OpenBao key's own account. Every signature is checked against that address, and one signature
+  of a fixed value after start reports the check in `/health`'s `signer` without holding up the
+  start, so the facilitator starts without OpenBao (0036).
+- **The OpenBao key signs settlements only.** An ordinary wallet funds the fee account and creates
+  the channels, writing the OpenBao key in as each channel's only signer; the channels' own fresh
+  keys sign that, so no tool signs other transactions through OpenBao (0036).
 - **A unix socket per network only.** OpenBao has one listener per network, each on a socket in
   its own volume, mounted only into that network's facilitator, plus an admin socket on the host
   that only root reaches and no container mounts. It opens no TCP port, so nothing on the network
@@ -62,7 +66,7 @@
 - **AppRole login.** The role ID and secret ID come in as Compose `file:` secrets, decrypted by
   the network's unit to a tmpfs (ADR 0011), never as environment variables. The token lives
   1 hour (`token_ttl` and `token_max_ttl`), so a renewal can't stretch it; the signer logs in again
-  before it expires instead of renewing it. The secret ID doesn't expire. The policy allows only
+  once less than 5 minutes are left instead of renewing it, and the old token works meanwhile. The secret ID doesn't expire. The policy allows only
   `transit/sign/<network key>`. A leaked token stops working within the hour; a leaked secret ID,
   or code running in the facilitator's container, signs until the secret ID is destroyed by hand
   (runbook).
