@@ -80,7 +80,7 @@ Nothing: the grilling's frontier is empty (2026-10-30).
 
 | PR | What | State |
 |---|---|---|
-| A | `buildCreateChannelsTx` with a funding account apart from the signer it adds, and a script that creates a fee account and channels for a given key (row 15) | not started |
+| A | `buildCreateChannelsTx` with a funding account apart from the signer it adds, and a script that creates a fee account and channels for a given key (row 15) | #100, open |
 | B | the Transit signer, its config, `/health`'s `signer`, the settle reasons, the compose variables and the tests (rows 2–14), stacked on A for AC 1 | not started |
 
 ## Out of scope
