@@ -37,6 +37,11 @@ production code.
   block) answered `settle_exact_stellar_timeout` instead of `settlement_pending` on PR #85's
   rerun (run 40911669720, job 123608719389): its 100 ms budget ran out before the hash was
   written.
+- `apps/facilitator/test/settle-pool.test.ts`, "refuses a call that has signed nothing when the
+  drain starts, and closes its record (0025)": answers `settle_exact_stellar_record_write_failed`
+  where it expects `settle_exact_stellar_shutting_down` (PR #96, run 41052291836). It failed in
+  3 of the 8 latest failed CI runs, and about half of local runs on the 0073 stack's base and on
+  #92 (Adam, 5 of 10 each). Not established yet: a flake, or a real drain ordering bug.
 
 ## Acceptance Criteria
 
