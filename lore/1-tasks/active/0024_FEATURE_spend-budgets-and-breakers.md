@@ -2,7 +2,7 @@
 id: "0024"
 title: "Spend budgets and circuit breakers"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0007"]
 related_tasks: ["0012", "0017", "0009"]
@@ -15,6 +15,10 @@ history:
     status: backlog
     who: claude
     note: "Created by 0012 from M1 Story 2.3 (Platform lane)."
+  - date: "2026-10-30"
+    status: active
+    who: akot
+    note: "Work started."
 ---
 
 # Spend budgets and circuit breakers
