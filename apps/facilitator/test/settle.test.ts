@@ -2045,7 +2045,7 @@ describe("createSettler", () => {
       const finals = vi.mocked(first.hooks.onFinal).mock.calls.length;
       sign();
       await vi.waitFor(() => expect(late).toBeInstanceOf(Error));
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await first.settle.drain();
       expect(await repeat.store.get(key)).toMatchObject({
         state: "signed",
         reopened: 1,
@@ -2085,7 +2085,7 @@ describe("createSettler", () => {
       );
       sign();
       await vi.waitFor(() => expect(late).toBeInstanceOf(Error));
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await first.settle.drain();
       expect(await repeat.store.get(key)).toMatchObject({
         state: "claimed",
         reopened: 1,
