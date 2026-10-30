@@ -80,8 +80,8 @@ jobs:
     env:
       DIGEST: ${{ inputs.digest || needs.image.outputs.digest }}
       # The server's ed25519 host key, pinned so that a change is a reviewed commit. Taken from the
-      # server's own /etc/ssh/ssh_host_ed25519_key.pub, not from a scan; empty until then.
-      HOST_KEY: ""
+      # server's own /etc/ssh/ssh_host_ed25519_key.pub, not from a scan (ch-prod-01, 2026-10-30).
+      HOST_KEY: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFm1JaGGXGsZ2ENb7Je8nZJAbG9RSsteQG0ake/UuFOB"
     steps:
       - name: Deploy over SSH
         env:
