@@ -41,6 +41,7 @@ export {
   LedgerBoundError,
   SettlementSubmitter,
   SignedHookError,
+  SigningError,
   SimulationCheckError,
   SimulationError,
   SourceAccountAuthError,

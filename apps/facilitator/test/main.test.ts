@@ -146,6 +146,8 @@ describe("startup with a bad config", () => {
     const error = await main(pubnet).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ConfigError);
     expect((error as ConfigError).problems).toEqual([
+      // `env` signs with a secret key, which pubnet refuses as well (0036).
+      "SIGNER secret is refused on pubnet: the key lives in OpenBao (ADR 0013)",
       "NETWORK stellar:pubnet is refused until spend budgets (0024) and the lease fencing token (0071) land",
     ]);
   });
@@ -249,8 +251,39 @@ describe("main()", () => {
       const response = await fetch(`http://127.0.0.1:${app.port}/health`);
       expect([response.status, await response.json()]).toEqual([
         200,
-        { ready: true, listed: true },
+        // A secret key in memory has nothing to check (0036).
+        { ready: true, listed: true, signer: "ok" },
       ]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("starts and serves with OpenBao down, and reports the failed check on /health (0036)", async () => {
+    const app = await main({
+      ...env,
+      FACILITATOR_SECRET: undefined,
+      SIGNER: "openbao",
+      FACILITATOR_ADDRESS: facilitator,
+      OPENBAO_SOCKET: "/nonexistent/openbao.sock",
+      OPENBAO_KEY: "stellar-testnet",
+      OPENBAO_KEY_VERSION: "1",
+      OPENBAO_ROLE_ID: "role",
+      OPENBAO_SECRET_ID: "secret-id",
+      RPC_URLS: rpc.url,
+      PORT: "0",
+      LOG_LEVEL: "error",
+    });
+    try {
+      const base = `http://127.0.0.1:${app.port}`;
+      const supported = (await (await fetch(`${base}/supported`)).json()) as {
+        signers: Record<string, string[]>;
+      };
+      expect(supported.signers).toEqual({ "stellar:*": [facilitator] });
+      await vi.waitFor(async () => {
+        const health = (await (await fetch(`${base}/health`)).json()) as { signer: string };
+        expect(health.signer).toBe("failed");
+      });
     } finally {
       await app.close();
     }

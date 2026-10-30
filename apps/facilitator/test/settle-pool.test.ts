@@ -9,6 +9,7 @@ import {
   buildChecks,
   buildRpc,
   buildSettlement,
+  buildSigner,
   compose,
   start,
   type UpstreamSeams,
@@ -150,6 +151,7 @@ function setup(
     },
     logger: jsonLogger("warn", (line) => lines.push(line)),
     metrics: memoryMetrics(),
+    signer: buildSigner(config, upstreamLogger, memoryMetrics()),
     sleep: async () => {},
   });
   /** The pool's `onEvent`, as it reports a submission it answered `pending` ending. */

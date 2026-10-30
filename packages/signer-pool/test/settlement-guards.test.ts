@@ -4,6 +4,7 @@ import {
   LedgerBoundError,
   SettlementSubmitter,
   SignedHookError,
+  SigningError,
   SourceAccountAuthError,
   attemptsOf,
   keypairSigner,
@@ -620,5 +621,26 @@ describe("maxLedger", () => {
     await expect(submitter.submit(call(), { maxLedger })).rejects.toBeInstanceOf(RangeError);
     expect(fake.calls.simulateTransaction).toBeUndefined();
     expect(submitter.stats()).toMatchObject({ busy: 0 });
+  });
+});
+
+describe("a signer that fails", () => {
+  // A remote signer (OpenBao, 0036) may be sealed or unreachable: the call is refused with the
+  // envelope it failed on, nothing is sent, and the channel goes back to the pool.
+  it.each([
+    [1, "transaction"],
+    [2, "fee-bump"],
+  ] as const)("names signature %i as the %s stage", async (failing, stage) => {
+    const { fake, submitter, signer } = setup();
+    const sign = signer.signTransaction.bind(signer);
+    signer.signTransaction = async (xdr, o) => {
+      if (signer.signs + 1 === failing) throw new Error("OpenBao is sealed");
+      return sign(xdr, o);
+    };
+    const error = await submitter.submit(call()).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SigningError);
+    expect(error).toMatchObject({ stage, message: "OpenBao is sealed" });
+    expect(fake.sent).toHaveLength(0);
+    expect(submitter.stats()).toMatchObject({ busy: 0, refused: { signing: 1 } });
   });
 });
