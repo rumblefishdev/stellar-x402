@@ -253,7 +253,11 @@ Scope: upstream verify's failover across `RPC_URLS` (spine AD-3, task 0045).
   verdict can't be chosen this way: a rejection is never failed over.
 - **Residual risk:** Until the rate limit (0023), anyone can spend `RPC_URLS[0]`'s quota, and
   traffic stays on the fallback while they do. Each probe interval then costs one probe, not a
-  user request.
+  user request. The trustline lookup (0078) adds to that: it runs on the shared client after
+  upstream's `simulation_failed`, so a client can trigger it, and with `RPC_URLS[0]` at its quota
+  its failed read moves every caller sooner. A payload needs the payer's one auth entry to reach
+  it, so one without costs upstream's 1 call; one with a junk entry costs 2, and only a real `#13`
+  costs the 3rd.
 
 #### Lagging RPC answers
 

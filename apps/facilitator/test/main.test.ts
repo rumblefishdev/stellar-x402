@@ -146,7 +146,7 @@ describe("startup with a bad config", () => {
     const error = await main(pubnet).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ConfigError);
     expect((error as ConfigError).problems).toEqual([
-      "NETWORK stellar:pubnet is refused until spend budgets (0024) and the lease fencing token (0071) land",
+      "NETWORK stellar:pubnet is refused until spend budgets (0024) and task 0090 land",
     ]);
   });
 });

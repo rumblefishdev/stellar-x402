@@ -154,6 +154,10 @@ a whole zone, to Cloudflare on the Free plan.
   the watchdog and 0027's "ready to settle" alarm wait for) is decided with the code in 0077.
   - A process without the lease keeps trying to take it.
   - A process whose lease renewal fails stops new submissions until it holds the lease again.
+  - A process that froze past its TTL while another took the lease sends nothing new once it
+    wakes: the store refuses its hash under the replaced fencing token (task 0071). The
+    exception is an envelope stored and checked before the freeze: it can still go out, and
+    resend until its bound, under its one hash.
 - **AD-16 reconciliation doesn't depend on the lease** (0019 decisions 27 and 37). It starts once
   the server listens and sweeps every 10 s beside `/settle`, in every process. It only reads the
   chain, and every write is a compare-and-set on the record's version, so a process waiting for
@@ -205,13 +209,14 @@ One request or one stop must never outlast the layer in front of it:
   | 0045, 3 URLs (its cap), fee-stats | 61 s             | 30 s         | 91 s                   |
 
   Upstream verify after 0045 is 10 s per URL, twice that with a fee-stats bid (the read before
-  the URLs), plus 1 s. Past the budget the answer is `…_timeout` before the claim, so the same
+  the URLs), plus 1 s. A failed simulation of a payload with the payer's auth entry adds the
+  trustline lookup, at most 3 s, on the shared client (0078). Past the budget the answer is `…_timeout` before the claim, so the same
   payment may be sent again; a valid payment can still get it when the first URLs hang and the
   last one answers late. These worst cases need hung RPC URLs, not slow ones.
 
 - **"Nothing sent → `rejected`" reopens.** The resource is usually served before `/settle`.
-  After a failure before anything was signed (no channel, the budget, the RPCs down, a restart
-  or a deploy), the record ends, but the payer's auth entry can still land. Since task 0073 the
+  After a failure before anything was signed (no channel, the budget, the RPCs down, a restart,
+  a deploy or a lost lease), the record ends, but the payer's auth entry can still land. Since task 0073 the
   identical payload reopens the record while that auth entry is valid, so whoever holds the
   payment (the seller's resource server, or the client) repeats it as it is and it settles once;
   the answer says so with `extra.retryable`. A refusal by the simulation, the fee or a spend

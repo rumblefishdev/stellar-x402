@@ -132,6 +132,18 @@ export class HashConflictError extends Error {
 }
 
 /**
+ * `addHash` was given a lease token that is no longer the lease's current one (0071): another
+ * process took the lease since this one acquired it, or nobody holds it. Nothing changed, and
+ * the hash must not be sent.
+ */
+export class LeaseFencedError extends Error {
+  override readonly name = "LeaseFencedError";
+  constructor(readonly lease: string) {
+    super(`the lease ${lease} has a newer holder or none, so this process may not send`);
+  }
+}
+
+/**
  * How long past a lease's `expiresAt` another holder must wait to take it (0025 decision 16).
  * `expiresAt` comes from the holder's clock and is compared with the acquirer's, so a holder whose
  * clock lags by less than this still renews before anyone takes over. One value for every process
@@ -147,7 +159,12 @@ export interface ChannelLease {
   holder: string;
   /** Milliseconds since the epoch. */
   expiresAt: number;
+  /** New on every acquire, kept by a renewal (0071 decisions 1, 2). */
+  token: string;
 }
+
+/** The lease a call claims to send under: its name and the token of the acquire that took it. */
+export type LeaseFence = Pick<ChannelLease, "name" | "token">;
 
 /**
  * Settlement records and the channel lease (AD-6, AD-7, AD-16, AD-17). Only the settlement
@@ -163,6 +180,9 @@ export interface SettlementStore {
    * Appends a signed hash, durably, before it is first sent, moves `claimed` to `signed` and adds
    * one to the record's `version`.
    * In order of precedence:
+   * 0. a `lease` whose token is no longer the lease's current one, or a lease nobody holds,
+   *    rejects with `LeaseFencedError`, and nothing changes (0071). The lease row is locked in
+   *    the same statement, so a takeover either waits for the hash to be stored or is seen;
    * 1. a missing or final record, or with `claim` one reopened since that claim (its `reopened`
    *    differs, 0073 decision 19), resolves `false`;
    * 2. a hash already on this record resolves `true`, a no-op;
@@ -176,6 +196,7 @@ export interface SettlementStore {
   addHash(
     key: SettlementKey,
     hash: string,
+    lease: LeaseFence,
     updatedAt: number,
     bounds?: AttemptBounds,
     claim?: number,
@@ -234,8 +255,10 @@ export interface SettlementStore {
 
   /**
    * Takes the lease if it is free, already held by `holder`, or another holder's that expired more
-   * than {@link LEASE_SKEW_MARGIN_MS} before `now`, and sets its expiry to `now + ttlMs`. Resolves
-   * the lease, or `undefined` if another holder has it.
+   * than {@link LEASE_SKEW_MARGIN_MS} before `now`, and sets its expiry to `now + ttlMs`. Every
+   * acquire gives the lease a new `token`, also one by its own holder (0071 decision 1), so a call
+   * that carries an earlier token is refused by `addHash`. Resolves the lease, or `undefined` if
+   * another holder has it.
    */
   acquireLease(
     name: string,
@@ -244,8 +267,8 @@ export interface SettlementStore {
     now: number,
   ): Promise<ChannelLease | undefined>;
   /**
-   * Extends a lease `holder` still holds. Resolves `false` if it was lost, including once
-   * `now > expiresAt`: an expired lease must be acquired again.
+   * Extends a lease `holder` still holds, keeping its token. Resolves `false` if it was lost,
+   * including once `now > expiresAt`: an expired lease must be acquired again.
    */
   renewLease(name: string, holder: string, ttlMs: number, now: number): Promise<boolean>;
   /** Releases the lease if `holder` holds it. */
