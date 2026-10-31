@@ -148,7 +148,7 @@ describe("startup with a bad config", () => {
     expect((error as ConfigError).problems).toEqual([
       // `env` signs with a secret key, which pubnet refuses as well (0036).
       "SIGNER secret is refused on pubnet: the key lives in OpenBao (ADR 0013)",
-      "NETWORK stellar:pubnet is refused until spend budgets (0024) and the lease fencing token (0071) land",
+      "NETWORK stellar:pubnet is refused until spend budgets (0024) and task 0090 land",
     ]);
   });
 });

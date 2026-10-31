@@ -81,6 +81,21 @@ history:
     status: active
     who: stkrolikiewicz
     note: "The production environment's reviewers are the x402 team only: stkrolikiewicz, karolko9, karczuRF and adamkoot; kowalski and mmisiorek came off the list."
+  - date: "2026-10-30"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      ch-prod-01 is set up up to the facilitator. deploy/production exists, protected by a ruleset
+      (a pull request with one approval, no deletion or force push, no bypass). The playbook ran
+      from develop, last at bb0660c, whose check run changed only compose.yaml. The four credentials are
+      encrypted with the host key: the database password and URL, the RPC URLs (version
+      2026-10-30: SDF's and gateway.fm's testnet RPC) and the tunnel token.
+      x402-db-testnet@production and x402-tunnel@production run on the fixed subnets of #98, after
+      the first start failed on Docker's empty address pool. cloudflared passed UDP and TCP 7844
+      and uses QUIC; Browser Integrity Check is off for the hostname (soroban-infrastructure#2).
+      The public URL answers 502: the tunnel is up and the facilitator isn't. Before the first
+      deploy: the signer and channels (0036 and OpenBao on the server), then the GHCR package
+      made public after the first image.
 ---
 
 # Public testnet deployment
@@ -237,7 +252,9 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     it off for `x402-facilitator.sorobanscan.com` with a configuration rule in
     `soroban-infrastructure` (the rest of the zone keeps it for sorobanscan's site), checking which
     token permission the ruleset needs. Bot Fight Mode couldn't be read (the token has no Bot
-    Management permission): check its toggle in the dashboard, Security → Bots.
+    Management permission): check its toggle in the dashboard, Security → Bots. Done: Bot Fight
+    Mode is off (2026-10-29), and the rule is applied (soroban-infrastructure#2, 2026-10-30); a
+    request with no `User-Agent` reaches the tunnel instead of answering 1010.
 - From 0039: `GET /health` answers 200 and reports `ready` and `listed` in its body (`listed`
   since 0019, `05dcfae`: a sweep has listed the non-final records).
 - From 0039, the runbook: running the playbook from a reviewed commit, deploy, rollback

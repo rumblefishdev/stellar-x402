@@ -41,7 +41,22 @@ production code.
   drain starts, and closes its record (0025)": answers `settle_exact_stellar_record_write_failed`
   where it expects `settle_exact_stellar_shutting_down` (PR #96, run 41052291836). It failed in
   3 of the 8 latest failed CI runs, and about half of local runs on the 0073 stack's base and on
-  #92 (Adam, 5 of 10 each). Not established yet: a flake, or a real drain ordering bug.
+  #92 (Adam, 5 of 10 each).
+  - **Cause (measured 2026-10-30): a test leak, not a drain ordering bug.** "ends a call at
+    SETTLE_BUDGET_MS" answers after 1.2 s while its 3 s account read goes on. All these tests share
+    nonce `"7"`, so the leftover call's late `finish` lands in the record the drain test created
+    after `db.empty`, as 0084 describes. The leftover call's claim matches because the record is
+    new, which only a test can cause: production never deletes a record, and a reopen raises
+    `reopened`, which every write of a call checks (0073 decision 24).
+  - **Evidence:** the whole of `settle-pool.test.ts` with a busy loop on each of 16 cores: unchanged,
+    6 of 6 failed (the same `record_write_failed`); no load, 6 of 6 passed. Under load, the drain test
+    alone passed 8 of 8 and with only the leaking test 6 of 6, probably because the leftover call's
+    3 s then ends after the drain test (not measured). With the drain test on its own nonce, or the
+    leaking test skipped, 6 of 6 passed under load. So the call itself answers correctly.
+  - **Fix (agreed, not applied):** end "ends a call at SETTLE_BUDGET_MS" with `await drain()`, so its
+    call is over before the next test. A one-line test change, no production code. Tried: 8 of 8
+    passed under load. 0084's wider work stays separate. Before it closes this item, run the 50
+    looped runs the acceptance criteria ask for.
 
 ## Acceptance Criteria
 

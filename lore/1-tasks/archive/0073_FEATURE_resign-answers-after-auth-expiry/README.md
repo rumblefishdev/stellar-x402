@@ -2,7 +2,7 @@
 id: "0073"
 title: "Tell the payer to sign again only once their auth entry can't land"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0006"]
 related_tasks: ["0019", "0009"]
@@ -44,6 +44,14 @@ history:
       payment may be retried as is until its auth entry expires (its closed record reopens), and
       a test shows a deploy's 180 s grace with a 5-minute envelope still ends every transaction
       through reconciliation.
+  - date: "2026-10-30"
+    status: completed
+    who: okarcz
+    note: >
+      PRs #80, #85 and #86 merged: a 66-ledger cap on the auth's life, an envelope that lives until
+      the auth expires, and an unsent payment that reopens on the identical payload. Decisions 1-28,
+      facilitator 593 and signer-pool 160 at #86's tip, testnet smoke 5/5 after the stack landed.
+      Follow-ups already in the backlog: 0082, 0086-0090.
 ---
 
 # Tell the payer to sign again only once their auth entry can't land
@@ -107,7 +115,7 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
 - [x] Given a sent transaction, when its envelope is built, then it can land until the auth entry's expiration ledger and no earlier bound ends it; reconciliation answers `…_transaction_expired` only once that ledger has passed
 - [x] Given a payment closed with nothing sent, when the identical payload comes back while its auth entry is valid, then it is settled once; after the expiration ledger the answer is "sign a new payment"; a different payload on the same nonce is still refused
 - [x] Given a transaction sent just before SIGTERM with a 5-minute envelope, when the 180 s grace ends before it is final, then the next process takes the lease and its reconciliation ends the record with the transaction's real outcome (test)
-- [ ] Given the decided rule, when the task ends, then the decision and the options considered are recorded in this task (decisions 1-20 so far, S-sign-again-rule)
+- [x] Given the decided rule, when the task ends, then the decision and the options considered are recorded in this task (decisions 1-20 so far, S-sign-again-rule)
 
 ## Design Decisions
 
@@ -443,3 +451,12 @@ would pay twice. Decide when such an answer is safe, and change it if needed.
   reopen. Mutants caught: `>=` to `>` and `<` to `<=` at the floor, no version bump, `addHash`
   without the claim (store and settle), the repeat closing by its latest read, `interrupted` or
   `noChannels` dropped from `UNSENT_REASONS`, the one-ledger answer off.
+
+#### PR 3 review 2
+
+- Stan's recheck, 5 non-blocking comments, all taken: decision 28; the pool's wait at the 6 s
+  estimate in ADR 0011; 0089 tagged `before-pubnet`; a contract test with `attempts` under the
+  earlier claim, which reaches `transition`'s transaction (removing `claim` there fails it); and
+  `drain()` for the 50 ms sleeps in the two late-refusal tests, one of which the sleep let pass
+  with the guard removed and a late write. Facilitator 593 and signer-pool 160 at #86's tip.
+- Testnet smoke after the stack landed: 5/5, recorded in 0071.
