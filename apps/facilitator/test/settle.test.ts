@@ -2365,18 +2365,20 @@ describe("createSettler", () => {
         await firstSigns;
         return lateSign(opts);
       });
+      const ending = setup(landing(), { budgetMs: BUDGET_MS });
+      // A budget of its own: the reopened call must sign, whatever the database's speed.
       const other = setup(
         async (opts) => {
           await opts.onSigned?.(OTHER, BOUNDS);
           await lands;
           return result("success", OTHER);
         },
-        { budgetMs: BUDGET_MS },
+        { budgetMs: 5_000 },
       );
       void first.settle(payload(), requirements);
       await vi.waitFor(async () => expect(await other.store.get(key)).toBeDefined());
       // The other process's repeat ends the claim by its own, shorter budget.
-      expect((await other.settle(payload(), requirements)).response).toMatchObject({
+      expect((await ending.settle(payload(), requirements)).response).toMatchObject({
         errorReason: SETTLE_REASONS.timeout,
       });
       const reopened = other.settle(payload(), requirements);
@@ -2387,7 +2389,6 @@ describe("createSettler", () => {
       await vi.waitFor(() => expect(late).toBeInstanceOf(Error));
       land();
       await reopened;
-      // Its budget answer may come before the landing; the submission finishes the record.
       await vi.waitFor(async () =>
         expect(await other.store.get(key)).toMatchObject({ state: "success", hashes: [OTHER] }),
       );
