@@ -1,5 +1,3 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { createServer, type IncomingMessage, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -13,87 +11,23 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openBaoSigner, SignerError } from "../src/adapters/openbao-signer.js";
 import { memoryMetrics } from "../src/metrics.js";
-
-// A fake OpenBao on a unix socket, answering the two calls the signer makes (0036): an AppRole
-// login, and a Transit signature of the input with `key`, as OpenBao's ed25519 keys sign.
+import { fakeOpenBao, type FakeOpenBao } from "./fake-openbao.js";
 
 const KEY = Keypair.fromRawEd25519Seed(Buffer.alloc(32, 1));
 const OTHER = Keypair.fromRawEd25519Seed(Buffer.alloc(32, 2));
 const HOUR_S = 3_600;
 
-interface Fake {
-  socketPath: string;
-  logins: number;
-  signs: { token: string | undefined; input: Buffer; keyVersion: unknown }[];
-  /** What signs: the configured key, or another one. */
-  key: Keypair;
-  /** Seconds a token lives, as `lease_duration`. */
-  leaseSeconds: number;
-  /** A status for every request, e.g. 503 when sealed. */
-  status?: number;
-  /** A status for logins only. */
-  loginStatus?: number;
-  /** Never answers. */
-  hang?: boolean;
-}
-
-const servers: Server[] = [];
-const dirs: string[] = [];
+const fakes: FakeOpenBao[] = [];
 afterEach(() => {
-  for (const server of servers.splice(0)) server.close();
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  for (const fake of fakes.splice(0)) fake.close();
 });
-
-async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
-  let text = "";
-  for await (const chunk of req) text += chunk;
-  return JSON.parse(text) as Record<string, unknown>;
-}
-
-async function fakeOpenBao(): Promise<Fake> {
-  const dir = mkdtempSync(join(tmpdir(), "bao-"));
-  dirs.push(dir);
-  const fake: Fake = {
-    socketPath: join(dir, "bao.sock"),
-    logins: 0,
-    signs: [],
-    key: KEY,
-    leaseSeconds: HOUR_S,
-  };
-  const server = createServer(async (req, res) => {
-    if (fake.hang) return;
-    const json = await body(req);
-    const answer = (status: number, payload: unknown) => {
-      res.writeHead(status, { "content-type": "application/json" });
-      res.end(JSON.stringify(payload));
-    };
-    if (fake.status) return answer(fake.status, { errors: ["Vault is sealed"] });
-    if (req.url === "/v1/auth/approle/login") {
-      if (fake.loginStatus)
-        return answer(fake.loginStatus, { errors: ["invalid role or secret ID"] });
-      fake.logins++;
-      return answer(200, {
-        auth: { client_token: `s.token-${fake.logins}`, lease_duration: fake.leaseSeconds },
-      });
-    }
-    if (req.url === "/v1/transit/sign/stellar-testnet") {
-      const input = Buffer.from(json.input as string, "base64");
-      fake.signs.push({
-        token: req.headers["x-vault-token"] as string | undefined,
-        input,
-        keyVersion: json.key_version,
-      });
-      const signature = fake.key.sign(input).toString("base64");
-      return answer(200, { data: { key_version: 1, signature: `vault:v1:${signature}` } });
-    }
-    answer(404, { errors: ["no handler"] });
-  });
-  servers.push(server);
-  await new Promise<void>((resolve) => server.listen(fake.socketPath, resolve));
+async function started(): Promise<FakeOpenBao> {
+  const fake = await fakeOpenBao(KEY);
+  fakes.push(fake);
   return fake;
 }
 
-function setup(fake: Fake, clock = { now: 0 }, checkRetryMs?: number) {
+function setup(fake: FakeOpenBao, clock = { now: 0 }, checkRetryMs?: number) {
   const metrics = memoryMetrics();
   const logs: { event: string; fields?: Record<string, unknown> }[] = [];
   const log = (event: string, fields?: Record<string, unknown>) => logs.push({ event, fields });
@@ -138,7 +72,7 @@ const failure = (promise: Promise<unknown>) =>
 
 describe("openBaoSigner", () => {
   it("signs the transaction's hash with the pinned key version and adds the signature", async () => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer } = setup(fake);
     const tx = transaction();
     const signed = await sign(signer, tx);
@@ -151,7 +85,7 @@ describe("openBaoSigner", () => {
   });
 
   it("refuses a signature by another key, on every signature (decision 12)", async () => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer, metrics } = setup(fake);
     await sign(signer);
     fake.key = OTHER;
@@ -166,7 +100,7 @@ describe("openBaoSigner", () => {
   });
 
   it("keeps a token until less than 5 minutes are left, then logs in first (decision 10)", async () => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer, clock } = setup(fake);
     await sign(signer);
     clock.now = (HOUR_S - 5 * 60) * 1000 - 1;
@@ -180,7 +114,7 @@ describe("openBaoSigner", () => {
   });
 
   it("fails a signature when a new login fails, although the old token still lasts (decision 11)", async () => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer, clock, metrics } = setup(fake);
     await sign(signer);
     clock.now = (HOUR_S - 60) * 1000;
@@ -193,14 +127,14 @@ describe("openBaoSigner", () => {
   });
 
   it("shares one login between signatures that need it at once", async () => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer } = setup(fake);
     await Promise.all([sign(signer), sign(signer), sign(signer)]);
     expect(fake.logins).toBe(1);
   });
 
   it("fails a signature when the login is refused, and the next one logs in again (decision 11)", async () => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer, metrics } = setup(fake);
     fake.loginStatus = 400;
     expect(await failure(sign(signer))).toMatchObject({ reason: "refused" });
@@ -218,27 +152,27 @@ describe("openBaoSigner", () => {
     [403, "denied"],
     [500, "error"],
   ])("names an answer %i as %s", async (status, reason) => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer } = setup(fake);
     fake.status = status;
     expect(await failure(sign(signer))).toMatchObject({ reason });
   });
 
   it("gives up on an OpenBao that doesn't answer within 1 s (decision 13)", async () => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer } = setup(fake);
     fake.hang = true;
     expect(await failure(sign(signer))).toMatchObject({ reason: "timeout" });
   });
 
   it("names a missing socket as unreachable", async () => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer } = setup({ ...fake, socketPath: join(tmpdir(), "no-such-openbao.sock") });
     expect(await failure(sign(signer))).toMatchObject({ reason: "unreachable" });
   });
 
   it("checks the key by signing a fixed value, and reports it in state() (decision 4)", async () => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer, logs } = setup(fake);
     expect(signer.state()).toBe("unchecked");
     await signer.check();
@@ -257,7 +191,7 @@ describe("openBaoSigner", () => {
   });
 
   it("checks again while the check fails, and stops once it passes (decision 4)", async () => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer } = setup(fake, undefined, 5);
     fake.status = 503;
     await signer.check();
@@ -270,11 +204,11 @@ describe("openBaoSigner", () => {
   });
 
   it.each([
-    ["a refused login", (fake: Fake) => (fake.loginStatus = 400), "refused"],
-    ["a denied signature", (fake: Fake) => (fake.status = 403), "denied"],
-    ["another key's signature", (fake: Fake) => (fake.key = OTHER), "address_mismatch"],
+    ["a refused login", (fake: FakeOpenBao) => (fake.loginStatus = 400), "refused"],
+    ["a denied signature", (fake: FakeOpenBao) => (fake.status = 403), "denied"],
+    ["another key's signature", (fake: FakeOpenBao) => (fake.key = OTHER), "address_mismatch"],
   ])("doesn't check again after %s, which time won't fix", async (_name, broken, reason) => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer, metrics } = setup(fake, undefined, 5);
     broken(fake);
     await signer.check();
@@ -284,7 +218,7 @@ describe("openBaoSigner", () => {
   });
 
   it("stops checking again on close", async () => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer, metrics } = setup(fake, undefined, 5);
     fake.status = 503;
     await signer.check();

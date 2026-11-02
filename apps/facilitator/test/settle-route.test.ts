@@ -17,6 +17,7 @@ import type { Reconciliation } from "../src/settlement/reconcile.js";
 import type { Settle } from "../src/settlement/settle.js";
 import { testDatabase } from "./database.js";
 import { bazaarExtensions, depthOf } from "./payment.js";
+import { signerEnv } from "./fake-openbao.js";
 
 const requirements: PaymentRequirements = {
   scheme: "exact",
@@ -52,7 +53,7 @@ describe("POST /settle", () => {
 
   beforeAll(async () => {
     const env = {
-      FACILITATOR_SECRET: Keypair.random().secret(),
+      ...signerEnv(Keypair.random().publicKey()),
       DATABASE_URL: db.urlFor(db.schema),
       CLIENT_IP: "socket",
       CHANNELS: Keypair.random().publicKey(),
@@ -329,7 +330,7 @@ describe("POST /settle beside reconciliation (0019 decision 27)", () => {
       close: vi.fn(async () => {}),
     };
     const env = {
-      FACILITATOR_SECRET: Keypair.random().secret(),
+      ...signerEnv(Keypair.random().publicKey()),
       DATABASE_URL: db.urlFor(db.schema),
       CHANNELS: Keypair.random().publicKey(),
       CLIENT_IP: "socket",
@@ -381,7 +382,7 @@ describe("POST /settle without the channel lease (0025)", () => {
     const rateLimits = db.stores().rateLimits;
     const hit = vi.spyOn(rateLimits, "hit");
     const env = {
-      FACILITATOR_SECRET: Keypair.random().secret(),
+      ...signerEnv(Keypair.random().publicKey()),
       DATABASE_URL: db.urlFor(db.schema),
       CHANNELS: Keypair.random().publicKey(),
       CLIENT_IP: "socket",
@@ -470,7 +471,7 @@ describe("shutdown (0025)", () => {
       release: vi.fn(async () => {}),
     };
     const env = {
-      FACILITATOR_SECRET: Keypair.random().secret(),
+      ...signerEnv(Keypair.random().publicKey()),
       DATABASE_URL: db.urlFor(db.schema),
       CHANNELS: Keypair.random().publicKey(),
       CLIENT_IP: "socket",

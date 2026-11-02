@@ -21,13 +21,14 @@ import { main, start, type Started } from "../src/main.js";
 import { memoryMetrics } from "../src/metrics.js";
 import { testDatabase } from "./database.js";
 import { hardened, ledgerEntries, rpcStub } from "./rpc-stub.js";
+import { fakeOpenBao, signerEnv } from "./fake-openbao.js";
 
 const db = testDatabase();
-const secret = Keypair.random().secret();
-const facilitator = Keypair.fromSecret(secret).publicKey();
+const key = Keypair.random();
+const facilitator = key.publicKey();
 const env = {
   DATABASE_URL: db.urlFor(db.schema),
-  FACILITATOR_SECRET: secret,
+  ...signerEnv(facilitator),
   CLIENT_IP: "socket",
   CHANNELS: Keypair.random().publicKey(),
   BODY_LIMIT_BYTES: "1024",
@@ -99,27 +100,27 @@ describe("facilitator boot", () => {
     expect(lines.join("")).not.toContain("http_error");
   });
 
-  it("logs one JSON event per line and never the secret", () => {
+  it("logs one JSON event per line and never the AppRole secret", () => {
     expect(lines.length).toBeGreaterThan(0);
     for (const line of lines) expect(line.indexOf("\n")).toBe(line.length - 1);
     expect(lines.map((line) => JSON.parse(line))).toContainEqual(
       expect.objectContaining({ level: "info", event: "listening", network: "stellar:testnet" }),
     );
-    expect(lines.join("")).not.toContain(secret);
+    expect(lines.join("")).not.toContain("secret-id");
   });
 });
 
 describe("startup with a bad config", () => {
   it("exits with 1 and names each bad value without printing it", () => {
-    const bad = `${secret.slice(0, -1)}${secret.endsWith("A") ? "B" : "A"}`;
+    const bad = Keypair.random().secret();
     const result = spawnSync(process.execPath, ["--import", "tsx", "src/server.ts"], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),
-      env: { FACILITATOR_SECRET: bad },
+      env: { FACILITATOR_ADDRESS: bad },
       encoding: "utf8",
     });
     const output = result.stdout + result.stderr;
     expect(result.status, output).toBe(1);
-    expect(output).toContain("FACILITATOR_SECRET must be a Stellar secret key");
+    expect(output).toContain("FACILITATOR_ADDRESS must be a Stellar account address");
     expect(output).toContain("CHANNELS is required");
     expect(output).not.toContain(bad);
   }, 20_000);
@@ -146,8 +147,6 @@ describe("startup with a bad config", () => {
     const error = await main(pubnet).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ConfigError);
     expect((error as ConfigError).problems).toEqual([
-      // `env` signs with a secret key, which pubnet refuses as well (0036).
-      "SIGNER secret is refused on pubnet: the key lives in OpenBao (ADR 0013)",
       "NETWORK stellar:pubnet is refused until spend budgets (0024) and task 0090 land",
     ]);
   });
@@ -245,31 +244,32 @@ describe("main()", () => {
   });
 
   it("reports ready and listed on /health once it holds the lease and a sweep has listed", async () => {
-    const app = await main({ ...env, RPC_URLS: rpc.url, PORT: "0", LOG_LEVEL: "error" });
+    const openbao = await fakeOpenBao(key);
+    const app = await main({
+      ...env,
+      ...signerEnv(facilitator, openbao.socketPath),
+      RPC_URLS: rpc.url,
+      PORT: "0",
+      LOG_LEVEL: "error",
+    });
     try {
       await app.reconciled;
-      const response = await fetch(`http://127.0.0.1:${app.port}/health`);
-      expect([response.status, await response.json()]).toEqual([
-        200,
-        // A secret key in memory has nothing to check (0036).
-        { ready: true, listed: true, signer: "ok" },
-      ]);
+      await vi.waitFor(async () => {
+        const response = await fetch(`http://127.0.0.1:${app.port}/health`);
+        expect([response.status, await response.json()]).toEqual([
+          200,
+          { ready: true, listed: true, signer: "ok" },
+        ]);
+      });
     } finally {
       await app.close();
+      openbao.close();
     }
   });
 
   it("starts and serves with OpenBao down, and reports the failed check on /health (0036)", async () => {
     const app = await main({
       ...env,
-      FACILITATOR_SECRET: undefined,
-      SIGNER: "openbao",
-      FACILITATOR_ADDRESS: facilitator,
-      OPENBAO_SOCKET: "/nonexistent/openbao.sock",
-      OPENBAO_KEY: "stellar-testnet",
-      OPENBAO_KEY_VERSION: "1",
-      OPENBAO_ROLE_ID: "role",
-      OPENBAO_SECRET_ID: "secret-id",
       RPC_URLS: rpc.url,
       PORT: "0",
       LOG_LEVEL: "error",

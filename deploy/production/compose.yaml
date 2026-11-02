@@ -26,7 +26,6 @@ services:
       # here (ADR 0013, 0036). The OpenBao key's account and its channels are public and known
       # once 0026 creates them: set them in this directory's .env. Unset, the facilitator refuses
       # to start and names them; the other services don't read them.
-      SIGNER: openbao
       FACILITATOR_ADDRESS: ${FACILITATOR_ADDRESS_TESTNET:-}
       CHANNELS: ${CHANNELS_TESTNET:-}
       OPENBAO_SOCKET: /run/openbao/testnet/bao.sock
