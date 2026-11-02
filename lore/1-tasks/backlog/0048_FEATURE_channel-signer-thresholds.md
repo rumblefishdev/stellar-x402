@@ -3,7 +3,7 @@ id: "0048"
 title: "Before mainnet, decide again how far the hot key's power reaches"
 type: FEATURE
 status: backlog
-milestone: 1
+milestone: 2
 related_adr: ["0003", "0005", "0011"]
 related_tasks: ["0047", "0007", "0016", "0020", "0026", "0027"]
 tags: [signer-pool, keys, security, mainnet, priority-high, effort-medium, payments]
@@ -29,6 +29,10 @@ history:
     note: >
       Reframed as the pre-mainnet re-check: ADR 0013 declined the cold key, so the design
       below is one of three options, not the plan. The criteria apply only if the re-check picks it.
+  - date: "2026-11-02"
+    status: backlog
+    who: okarcz
+    note: "Moved to M2: a re-check before mainnet, which comes after 0036 and 0026, and mainnet is outside T1's scope."
 ---
 
 # Before mainnet, decide again how far the hot key's power reaches
