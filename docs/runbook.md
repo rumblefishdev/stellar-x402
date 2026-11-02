@@ -68,8 +68,6 @@ Encrypted systemd credentials in `/srv/x402/production/creds/` (OpenBao's in
 | `rpc-urls.testnet`          | facilitator                    | `x402@`             |
 | `postgres-password.testnet` | `postgres-testnet`             | `x402-db-testnet@`  |
 | `tunnel-token`              | `cloudflared`                  | `x402-tunnel@`      |
-| `approle-role-id.testnet`   | facilitator (0036)             | `x402@`             |
-| `approle-secret-id.testnet` | facilitator (0036)             | `x402@`             |
 | `seal-key`                  | `openbao`                      | `x402-openbao`      |
 
 Write one without the value reaching the disk, the shell history or the screen:
