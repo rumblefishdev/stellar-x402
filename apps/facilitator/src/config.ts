@@ -129,9 +129,14 @@ const envSchema = z
     /** The AppRole login; never logged. A deploy passes both as files (`_FILE`). */
     OPENBAO_ROLE_ID: z.string(),
     OPENBAO_SECRET_ID: z.string(),
-    /** Read to refuse them: a leftover seed must not look like it signs (0036). */
-    FACILITATOR_SECRET: z.string().optional(),
-    SIGNER: z.string().optional(),
+    /** Refused on the field: zod skips a refine on the object while a required setting is missing. */
+    FACILITATOR_SECRET: z
+      .string()
+      .optional()
+      .refine(
+        (value) => value === undefined,
+        "is no longer read: the key signs in OpenBao (ADR 0013)",
+      ),
     /** Comma-separated channel account addresses (never secrets). */
     CHANNELS: list.pipe(
       z
@@ -297,14 +302,6 @@ const envSchema = z
   .refine((env) => env.STORE === undefined, {
     message: "is no longer read: the stores are always PostgreSQL",
     path: ["STORE"],
-  })
-  .refine((env) => env.FACILITATOR_SECRET === undefined, {
-    message: "is no longer read: the key signs in OpenBao (ADR 0013)",
-    path: ["FACILITATOR_SECRET"],
-  })
-  .refine((env) => env.SIGNER === undefined, {
-    message: "is no longer read: the key signs in OpenBao (ADR 0013)",
-    path: ["SIGNER"],
   })
   // `/settle` spends on pubnet, so not before spend budgets (0024) and leaving a channel with an
   // open hash out after a deploy (0090). Whichever lands last lifts this, the other narrows its

@@ -15,8 +15,6 @@ export interface FakeOpenBao {
   signs: { token: string | undefined; input: Buffer; keyVersion: unknown }[];
   /** What signs: the configured key, or another one. */
   key: Keypair;
-  /** Seconds a token lives, as `lease_duration`. */
-  leaseSeconds: number;
   /** A status for every request, e.g. 503 when sealed. */
   status?: number;
   /** A status for logins only. */
@@ -39,7 +37,6 @@ export async function fakeOpenBao(key: Keypair): Promise<FakeOpenBao> {
     logins: 0,
     signs: [],
     key,
-    leaseSeconds: 3_600,
     close() {
       server.close();
       rmSync(dir, { recursive: true, force: true });
@@ -58,7 +55,7 @@ export async function fakeOpenBao(key: Keypair): Promise<FakeOpenBao> {
         return answer(fake.loginStatus, { errors: ["invalid role or secret ID"] });
       fake.logins++;
       return answer(200, {
-        auth: { client_token: `s.token-${fake.logins}`, lease_duration: fake.leaseSeconds },
+        auth: { client_token: `s.token-${fake.logins}`, lease_duration: 3_600 },
       });
     }
     if (req.url === "/v1/transit/sign/stellar-testnet") {
@@ -73,8 +70,6 @@ export async function fakeOpenBao(key: Keypair): Promise<FakeOpenBao> {
     }
     answer(404, { errors: ["no handler"] });
   });
-  // A leftover server never holds a test run or a script open.
-  server.unref();
   await new Promise<void>((resolve) => server.listen(fake.socketPath, resolve));
   return fake;
 }

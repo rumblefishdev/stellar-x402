@@ -539,14 +539,23 @@ describe("the signer (0036)", () => {
     expect(config.signer).toEqual(SIGNER);
   });
 
-  it.each(["FACILITATOR_SECRET", "SIGNER"])(
-    "refuses a leftover %s, so it can't look like it signs",
-    (name) => {
-      expect(problems({ ...minimal, [name]: "leftover" })).toEqual([
-        `${name} is no longer read: the key signs in OpenBao (ADR 0013)`,
-      ]);
-    },
-  );
+  const leftover = "FACILITATOR_SECRET is no longer read: the key signs in OpenBao (ADR 0013)";
+
+  it("refuses a leftover FACILITATOR_SECRET, so it can't look like it signs", () => {
+    expect(problems({ ...minimal, FACILITATOR_SECRET: "S-leftover" })).toEqual([leftover]);
+  });
+
+  it("names a leftover FACILITATOR_SECRET in an old environment with no OpenBao settings", () => {
+    const found = problems({
+      FACILITATOR_SECRET: "S-leftover",
+      CHANNELS: CHANNEL_A,
+      CLIENT_IP: "socket",
+      DATABASE_URL: "postgres://db.internal/x402",
+    });
+    expect(found).toContain(leftover);
+    expect(found).toContain("FACILITATOR_ADDRESS is required");
+    expect(found.join(" ")).not.toContain("S-leftover");
+  });
 
   it.each([
     ["FACILITATOR_ADDRESS", "S-not-an-address", "must be a Stellar account address (G…)"],

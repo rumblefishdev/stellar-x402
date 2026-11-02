@@ -11,23 +11,23 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openBaoSigner, SignerError } from "../src/adapters/openbao-signer.js";
 import { memoryMetrics } from "../src/metrics.js";
-import { fakeOpenBao as startFake, type FakeOpenBao as Fake } from "./fake-openbao.js";
+import { fakeOpenBao, type FakeOpenBao } from "./fake-openbao.js";
 
 const KEY = Keypair.fromRawEd25519Seed(Buffer.alloc(32, 1));
 const OTHER = Keypair.fromRawEd25519Seed(Buffer.alloc(32, 2));
 const HOUR_S = 3_600;
 
-const fakes: Fake[] = [];
+const fakes: FakeOpenBao[] = [];
 afterEach(() => {
   for (const fake of fakes.splice(0)) fake.close();
 });
-async function fakeOpenBao(): Promise<Fake> {
-  const fake = await startFake(KEY);
+async function started(): Promise<FakeOpenBao> {
+  const fake = await fakeOpenBao(KEY);
   fakes.push(fake);
   return fake;
 }
 
-function setup(fake: Fake, clock = { now: 0 }, checkRetryMs?: number) {
+function setup(fake: FakeOpenBao, clock = { now: 0 }, checkRetryMs?: number) {
   const metrics = memoryMetrics();
   const logs: { event: string; fields?: Record<string, unknown> }[] = [];
   const log = (event: string, fields?: Record<string, unknown>) => logs.push({ event, fields });
@@ -72,7 +72,7 @@ const failure = (promise: Promise<unknown>) =>
 
 describe("openBaoSigner", () => {
   it("signs the transaction's hash with the pinned key version and adds the signature", async () => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer } = setup(fake);
     const tx = transaction();
     const signed = await sign(signer, tx);
@@ -85,7 +85,7 @@ describe("openBaoSigner", () => {
   });
 
   it("refuses a signature by another key, on every signature (decision 12)", async () => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer, metrics } = setup(fake);
     await sign(signer);
     fake.key = OTHER;
@@ -100,7 +100,7 @@ describe("openBaoSigner", () => {
   });
 
   it("keeps a token until less than 5 minutes are left, then logs in first (decision 10)", async () => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer, clock } = setup(fake);
     await sign(signer);
     clock.now = (HOUR_S - 5 * 60) * 1000 - 1;
@@ -114,7 +114,7 @@ describe("openBaoSigner", () => {
   });
 
   it("fails a signature when a new login fails, although the old token still lasts (decision 11)", async () => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer, clock, metrics } = setup(fake);
     await sign(signer);
     clock.now = (HOUR_S - 60) * 1000;
@@ -127,14 +127,14 @@ describe("openBaoSigner", () => {
   });
 
   it("shares one login between signatures that need it at once", async () => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer } = setup(fake);
     await Promise.all([sign(signer), sign(signer), sign(signer)]);
     expect(fake.logins).toBe(1);
   });
 
   it("fails a signature when the login is refused, and the next one logs in again (decision 11)", async () => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer, metrics } = setup(fake);
     fake.loginStatus = 400;
     expect(await failure(sign(signer))).toMatchObject({ reason: "refused" });
@@ -152,27 +152,27 @@ describe("openBaoSigner", () => {
     [403, "denied"],
     [500, "error"],
   ])("names an answer %i as %s", async (status, reason) => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer } = setup(fake);
     fake.status = status;
     expect(await failure(sign(signer))).toMatchObject({ reason });
   });
 
   it("gives up on an OpenBao that doesn't answer within 1 s (decision 13)", async () => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer } = setup(fake);
     fake.hang = true;
     expect(await failure(sign(signer))).toMatchObject({ reason: "timeout" });
   });
 
   it("names a missing socket as unreachable", async () => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer } = setup({ ...fake, socketPath: join(tmpdir(), "no-such-openbao.sock") });
     expect(await failure(sign(signer))).toMatchObject({ reason: "unreachable" });
   });
 
   it("checks the key by signing a fixed value, and reports it in state() (decision 4)", async () => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer, logs } = setup(fake);
     expect(signer.state()).toBe("unchecked");
     await signer.check();
@@ -191,7 +191,7 @@ describe("openBaoSigner", () => {
   });
 
   it("checks again while the check fails, and stops once it passes (decision 4)", async () => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer } = setup(fake, undefined, 5);
     fake.status = 503;
     await signer.check();
@@ -204,7 +204,7 @@ describe("openBaoSigner", () => {
   });
 
   it("stops checking again on close", async () => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer, metrics } = setup(fake, undefined, 5);
     fake.status = 503;
     await signer.check();

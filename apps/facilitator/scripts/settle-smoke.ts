@@ -241,4 +241,5 @@ try {
   if (!Object.values(checks).every(Boolean)) process.exitCode = 1;
 } finally {
   await facilitatorServer.close();
+  openbao.close();
 }
