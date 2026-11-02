@@ -2,8 +2,8 @@
 id: "0008"
 title: "Research a Stellar binding for the x402 batch-settlement scheme"
 type: RESEARCH
-status: active
-milestone: 1
+status: backlog
+milestone: 2
 related_adr: []
 related_tasks: ["0006", "0007"]
 tags: [x402, batch-settlement, session, throughput, priority-low, effort-large, payments]
@@ -23,6 +23,10 @@ history:
     status: active
     who: okarcz
     note: "Started. Research task, so moved to the directory format."
+  - date: "2026-11-02"
+    status: backlog
+    who: okarcz
+    note: "Back to the backlog and moved to M2: outside T1's scope and not an RFP deliverable."
 ---
 
 # Research a Stellar binding for the x402 batch-settlement scheme
