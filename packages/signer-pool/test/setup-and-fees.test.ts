@@ -51,6 +51,8 @@ describe("buildCreateChannelsTx", () => {
       type: "createAccount",
       destination: chans[0]!.publicKey(),
     });
+    // No operation names the facilitator key as its source, so nothing needs its signature.
+    expect(tx.operations[0]!.source).toBeUndefined();
     expect(tx.operations[1]).toMatchObject({
       type: "setOptions",
       source: chans[0]!.publicKey(),
