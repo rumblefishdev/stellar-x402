@@ -48,9 +48,10 @@ Each test should own its record and its time, so it gives the same result on any
   `settle budget (ADR 0011)` block to fake timers advanced 1 ms at a time once the pool is idle
   (`storeIdle`, `elapse`), and waits for late writes in an `afterEach`. Under the fake `Date`, its
   "not a hang" check `Date.now() - started < 1000` no longer measures anything.
-- **macOS only.** "gives the lease up at once past a stalled client" (`settle-route.test.ts:494`):
-  `stalled()` returns right after `socket.write`, before the server accepts the connection, and
-  `server.close()` resets it. Waiting for the server's `connection` event makes it pass.
+- "gives the lease up at once past a stalled client": fixed in #109, which makes `stalled()` wait
+  for a request to the server. (Node counts the connection as idle until it has read the bytes.)
+- **Measured 2026-11-02 (0074):** with #101 and #109 in, a busy loop on each of 10 cores, 14 of 200
+  runs of the facilitator's flaky files failed, on 10 different tests.
 - Other tests that fail now and then and may share the first cause (not measured):
   "answers settlement_pending to a repeat…" and "attempt states… marks it sent" in
   `settle.test.ts`.

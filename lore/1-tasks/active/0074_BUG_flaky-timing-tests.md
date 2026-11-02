@@ -91,6 +91,12 @@ production code.
   - Not reproduced: `settle.test.ts` alone passed 37 of 37 under the same load. A `store.get` or
     `markSuccessAnswered` delayed 300 ms doesn't fail it, so neither explains it. The answer itself
     wasn't kept, so the cause is open.
+- Hunt for that failure, 2026-11-02, `develop` `98ef2f8`, the same load and files without `mcp/pay`, up to
+  200 runs, keeping its answer: it never came back (0 of 200). Overall 186 of 200 clean; 14 failed, on
+  10 other tests, 13 in `settle.test.ts` and 1 in `settle-pool.test.ts`. Their assertions show a
+  call taking another path than the test names (`…_timeout` for `settlement_pending`, 2,567 ms for
+  under 2,500), including the fake-clock block. Those failures fit 0084's cause (derived from the
+  assertions, not measured per test); `develop`'s CI on `98ef2f8` failed on two of the same tests.
 
 ## Acceptance Criteria
 
