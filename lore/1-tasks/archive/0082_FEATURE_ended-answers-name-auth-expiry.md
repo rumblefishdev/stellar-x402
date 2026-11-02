@@ -2,9 +2,9 @@
 id: "0082"
 title: "Say when to sign again in every answer that ended a payment that didn't land"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
-related_adr: ["0006"]
+related_adr: ["0006", "0011"]
 related_tasks: ["0073", "0024", "0071"]
 tags: [facilitator, exact, payments, priority-medium, effort-small]
 links: []
@@ -20,6 +20,13 @@ history:
     status: active
     who: okarcz
     note: "Work started."
+  - date: "2026-11-02"
+    status: completed
+    who: okarcz
+    note: >
+      Merged in #108, rebased over 0093 with no conflict. All three criteria met. On the rebased
+      tip: facilitator 662 tests (10 new), signer-pool 160, MCP 112. Only fakes reach the new
+      answers: the testnet smoke run covers the normal path. No follow-up tasks.
 ---
 
 # Say when to sign again in every answer that ended a payment that didn't land
