@@ -16,6 +16,7 @@ admin with `sudo`; the admins are the explorer's (`soroban-block-explorer`'s
 | `/srv/x402/production/digest.next`  | the digest a deploy is installing, the deploy user's only file     |
 | `/srv/x402/production/creds/*.cred` | the credentials, encrypted with the host key                       |
 | `/run/x402/production/`             | the credentials decrypted for the containers (tmpfs)               |
+| `/srv/x402/openbao/`                | OpenBao's Compose project `x402-openbao`, its config and seal key  |
 | `/usr/local/libexec/x402/`          | the units' scripts (`deploy/libexec`)                              |
 | `/etc/systemd/system/x402*`         | the units (`deploy/systemd`)                                       |
 
@@ -24,6 +25,7 @@ admin with `sudo`; the admins are the explorer's (`soroban-block-explorer`'s
 | `x402@production`                | the facilitator                                 |
 | `x402-db-testnet@production`     | testnet's PostgreSQL                            |
 | `x402-tunnel@production`         | `cloudflared`                                   |
+| `x402-openbao`                   | OpenBao, the signer of every network            |
 | `x402-deploy@production`         | a deploy (a oneshot, started by `deploy.sh`)    |
 | `x402-watchdog@production.timer` | every 30 s, restarts an `unhealthy` facilitator |
 
@@ -55,8 +57,9 @@ deploy.
 
 ## Credentials
 
-Encrypted systemd credentials in `/srv/x402/production/creds/`, one per file, each decrypted by
-the unit whose container reads it ([ADR 0011](adr/0011-facilitator-hosting.md)):
+Encrypted systemd credentials in `/srv/x402/production/creds/` (OpenBao's in
+`/srv/x402/openbao/creds/`), one per file, each decrypted by the unit whose container reads it
+([ADR 0011](adr/0011-facilitator-hosting.md)):
 
 | Credential                  | Read by                        | Decrypted by        |
 | --------------------------- | ------------------------------ | ------------------- |
@@ -64,6 +67,9 @@ the unit whose container reads it ([ADR 0011](adr/0011-facilitator-hosting.md)):
 | `rpc-urls.testnet`          | facilitator                    | `x402@`             |
 | `postgres-password.testnet` | `postgres-testnet`             | `x402-db-testnet@`  |
 | `tunnel-token`              | `cloudflared`                  | `x402-tunnel@`      |
+| `approle-role-id.testnet`   | facilitator (0036)             | `x402@`             |
+| `approle-secret-id.testnet` | facilitator (0036)             | `x402@`             |
+| `seal-key`                  | `openbao`                      | `x402-openbao`      |
 
 Write one without the value reaching the disk, the shell history or the screen:
 
@@ -120,6 +126,7 @@ unset value
   `deploy/production` (both were the other way on 2026-10-29).
 - The playbook, then the credentials, then
   `sudo systemctl start x402-db-testnet@production x402-tunnel@production`.
+- OpenBao set up, with testnet's key, policy and AppRole in it (OpenBao, below).
 - Outbound 7844 over UDP and TCP allowed on the server (`cloudflared`).
 - Cloudflare: Browser Integrity Check off for the hostname, Bot Fight Mode off (0026).
 - The signer and funded channels (0036).
@@ -221,10 +228,10 @@ undoing.
 
 ## Reboots and Docker upgrades
 
-Nothing to do beforehand. The facilitator stops first and drains (up to 180 s) while Postgres
-and the tunnel are still up, then those two stop (Postgres's grace is 120 s). At boot Postgres
-and the tunnel start first, each unit decrypting its credentials again, then `x402@` with
-`digest.good`. A
+Nothing to do beforehand. The facilitator stops first and drains (up to 180 s) while Postgres,
+the tunnel and OpenBao are still up, then those stop (Postgres's grace is 120 s). At boot they
+start first, each unit decrypting its credentials again and OpenBao unsealing itself, then `x402@`
+with `digest.good`. A
 `docker-ce` upgrade stops and starts them the same way through `PartOf=docker.service`.
 Afterwards: `systemctl list-units 'x402*'` and the `/supported` check above.
 
@@ -288,10 +295,90 @@ deploy by hand on the server (Deploy, above).
      `authorized_keys`, which then holds only that one. Record its fingerprint in task 0026's
      history.
 
+## OpenBao
+
+The facilitator key of every network, in Transit ([ADR 0013](adr/0013-facilitator-key-custody.md)):
+one container, the Compose project `x402-openbao` in `/srv/x402/openbao/`, run by `x402-openbao`.
+It has no network. Testnet's facilitator reaches it over a unix socket in the volume
+`x402-openbao-testnet`, mounted into nothing else, and an admin, as root, through
+`docker compose exec`:
+
+```sh
+cd /srv/x402/openbao && sudo docker compose exec openbao bao status
+```
+
+It unseals itself at every start with the seal key `x402-openbao` decrypts. Its storage (Raft) and
+audit log are the volumes `x402-openbao-data` and `x402-openbao-audit`, made by the playbook. A
+request OpenBao can't write to the audit log fails, so a full disk stops `/settle`.
+
+**Setting it up,** once, after the playbook. The seal key and init's answer travel between the
+admin's machine and the server over SSH and never reach a disk.
+
+1. The seal key: 32 random bytes in hex, with no newline, which OpenBao refuses. Its ID is
+   `current_key_id` in `deploy/openbao/config.hcl`. Keep `$seal_key` for step 3.
+
+   ```sh
+   seal_key=$(openssl rand -hex 32)
+   printf %s "$seal_key" |
+     ssh SERVER 'sudo systemd-creds encrypt --with-key=host --name=seal-key - /srv/x402/openbao/creds/seal-key.cred'
+   ssh SERVER sudo systemctl start x402-openbao
+   ```
+
+2. Init, with ADR 0013's one recovery share:
+
+   ```sh
+   init=$(ssh SERVER 'cd /srv/x402/openbao && sudo docker compose exec -T openbao \
+     bao operator init -recovery-shares=1 -recovery-threshold=1 -format=json')
+   ```
+
+   `jq -r '.recovery_keys_b64[0]' <<<"$init"` is the recovery key, and `.root_token` the token
+   for step 4.
+
+3. The backup secret `x402/production/openbao-backup`, as ADR 0013 makes it: the seal key, its ID
+   and SHA-256, the recovery key, `seal_config` (the `seal "static"` stanza) and
+   `openbao_version` (2.7.2). The Borg and Storage Box fields come with the snapshots (Not here
+   yet). Then `unset seal_key init`.
+
+4. Per network, in a root shell on the server with init's root token. Mainnet first adds its
+   listener and socket volume (0038).
+
+   ```sh
+   sudo -i
+   cd /srv/x402/openbao
+   read -rs BAO_TOKEN && export BAO_TOKEN   # paste the root token, Enter
+   bao() { docker compose exec -T -e BAO_TOKEN openbao bao "$@"; }
+   bao secrets enable transit && bao auth enable approle   # the first network only
+
+   n=testnet
+   bao write -f transit/keys/stellar-$n type=ed25519 exportable=false allow_plaintext_backup=false
+   printf 'path "transit/sign/stellar-%s" {\n  capabilities = ["update"]\n}\n' $n |
+     bao policy write x402-$n -
+   bao write auth/approle/role/x402-$n token_policies=x402-$n token_no_default_policy=true \
+     token_ttl=1h token_max_ttl=1h secret_id_ttl=0
+   bao read -field=role_id auth/approle/role/x402-$n/role-id |
+     systemd-creds encrypt --with-key=host --name=approle-role-id.$n - \
+       /srv/x402/production/creds/approle-role-id.$n.cred
+   bao write -f -field=secret_id auth/approle/role/x402-$n/secret-id |
+     systemd-creds encrypt --with-key=host --name=approle-secret-id.$n - \
+       /srv/x402/production/creds/approle-secret-id.$n.cred
+   bao read -format=json transit/keys/stellar-$n   # .data.keys["1"].public_key
+   ```
+
+   The key's address goes into `FACILITATOR_ADDRESS_TESTNET` (0036). From its public key, in
+   `packages/signer-pool` on the admin's machine:
+
+   ```sh
+   node -e 'console.log(require("@stellar/stellar-sdk").StrKey.encodeEd25519PublicKey(Buffer.from(process.argv[1], "base64")))' PUBLIC_KEY
+   ```
+
+5. `bao token revoke -self`, `unset BAO_TOKEN`, and leave the root shell. A new root token comes
+   from the recovery key through the legacy `/sys/generate-root` API, which the admin listener
+   answers without a token (ADR 0013).
+
 ## Not here yet
 
-- The OpenBao signer: its container, unseal, snapshots and restore drill, key rotation as an
-  on-chain signer change, fee float top-ups (0036, 0047).
+- OpenBao's snapshots and restore drill, key rotation as an on-chain signer change, fee float
+  top-ups (0036, 0047).
 - pgBackRest backups, the database's restore drill and upgrade policy.
 - The CloudWatch agent and renewing its Roles Anywhere certificate (0027).
 - Restoring the service on another machine, RPC failover, testnet reset recovery, the incident

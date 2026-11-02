@@ -9,7 +9,8 @@
   2026-10-21 (the AWS logging role and the other secrets, to match ADR 0011's Hetzner revision;
   a socket per network, OpenBao's own unit and limits, from the PR #24 review); 2026-10-22 (the
   OpenBao key's own account, the theft alarm, 1-hour tokens, the admin socket and the restore
-  path, from the PR #48 review)
+  path, from the PR #48 review); 2026-11-02 (admin on a loopback listener inside the container,
+  which Raft's cluster address needs, task 0026)
 - Supersedes: the key custody part of [ADR 0011](0011-facilitator-hosting.md) ("Keys, secrets and
   access": the SSM parameter for `FACILITATOR_SECRET` and the mainnet KMS key)
 
@@ -56,9 +57,10 @@
   OpenBao key's own account. The first signature is checked against that address, so the
   facilitator starts without OpenBao.
 - **A unix socket per network only.** OpenBao has one listener per network, each on a socket in
-  its own volume, mounted only into that network's facilitator, plus an admin socket on the host
-  that only root reaches and no container mounts. It opens no TCP port, so nothing on the network
-  can reach it.
+  its own volume, mounted only into that network's facilitator, plus an admin listener on
+  loopback inside OpenBao's own container, which has no network: only root on the host reaches
+  it, through `docker compose exec`. Raft takes its cluster address only from a TCP listener,
+  hence loopback rather than a socket. Nothing on the network can reach either.
 - **AppRole login.** The role ID and secret ID come in as Compose `file:` secrets, decrypted by
   the network's unit to a tmpfs (ADR 0011), never as environment variables. The token lives
   1 hour (`token_ttl` and `token_max_ttl`), so a renewal can't stretch it; the signer logs in again
@@ -79,7 +81,7 @@
   the company's existing Hetzner Storage Box, daily, keeping 14. The snapshots are encrypted
   by OpenBao, and the Borg repository is encrypted too. The snapshot job has its own AppRole and
   a snapshot-only policy (`sys/storage/raft/snapshot`), its credential a systemd credential, and
-  uses the admin socket.
+  uses the admin listener.
 - **The backup set is kept in AWS Secrets Manager, apart from the snapshots.** A restore on a new
   server needs five items, all of which are lost with the server
   ([R-unseal-key-backup](../../lore/1-tasks/archive/0047_RESEARCH_hetzner-key-custody/notes/R-unseal-key-backup.md)):
@@ -128,10 +130,10 @@
   **Payments owns** the signer code, the key policy and this ADR.
 - **No standing admin access.** The root token is revoked after setup and regenerated with the
   recovery key when needed. Since OpenBao 2.6 the CLI's `generate-root` needs a token and the
-  unauthenticated endpoints are off by default (CVE-2026-5807), so the admin socket keeps them on
+  unauthenticated endpoints are off by default (CVE-2026-5807), so the admin listener keeps them on
   (`disable_unauthed_generate_root_endpoints=false`) and the runbook calls `/sys/generate-root/*`
-  with curl. Only root on the host reaches that socket, and root already reaches the key. Admin is
-  through SSH on the server, over that socket; no web UI, no remote admin.
+  with curl. Only root on the host reaches that listener, and root already reaches the key. Admin is
+  through SSH on the server, over that listener; no web UI, no remote admin.
 - **The audit log** goes to a file on its own volume, rotated, with an alarm at 80% disk: OpenBao
   stops signing when it can't write it.
 - **Alarms** (0027):

@@ -96,6 +96,17 @@ history:
       The public URL answers 502: the tunnel is up and the facilitator isn't. Before the first
       deploy: the signer and channels (0036 and OpenBao on the server), then the GHCR package
       made public after the first image.
+  - date: "2026-11-02"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      OpenBao's project (deploy/openbao), its unit and the playbook's steps, tried locally on
+      OpenBao 2.7.2: init with one recovery share under the static seal, Transit and an AppRole,
+      a signature through testnet's socket from a container running as uid 1000 that verifies
+      against the key, and a restart that unseals by itself. Raft needs a TCP listener for its
+      cluster address, so admin is a loopback listener inside the container instead of a host
+      socket (ADR 0013 amended). The step that moved testnet off an old key is gone: nothing ran
+      on one (0036 decision 15).
 ---
 
 # Public testnet deployment
@@ -307,17 +318,19 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   unit passing in its own credentials. None gets the Docker socket. Swap and core dumps off for
   OpenBao.
 - **Link:** a socket per network, each in its own volume, mounted into the one facilitator
-  (ADR 0013 is updated in 0077), plus the admin socket (root-only, in no container); no TCP
-  listener. OpenBao's compose service uses `network_mode: none`: it needs no network, and on the
-  server Docker's address pool has none to give, which fails a default network at start.
+  (ADR 0013 is updated in 0077), plus admin on a loopback listener inside OpenBao's container,
+  which Raft needs for its cluster address (OpenBao takes that only from a TCP listener).
+  OpenBao's compose service uses `network_mode: none`: it needs no network, nothing outside the
+  container reaches the loopback listener, and on the server Docker's address pool has none to
+  give, which fails a default network at start.
 - **Keys:** one Transit key per network, generated inside OpenBao, `type=ed25519`,
   `exportable=false`, `allow_plaintext_backup=false`. One policy per network allowing only
   `transit/sign/<key>`, and one AppRole per network: `token_ttl` and `token_max_ttl` 1 h, a secret
   ID that doesn't expire, delivered as a Compose secret.
 - **Unseal:** a static seal key as an encrypted systemd credential (`systemd-creds`, `host` mode).
   Note in the runbook whether the board has a TPM (ADR 0013's first upgrade).
-- **Init:** `bao operator init -recovery-shares=1 -recovery-threshold=1`. Check that the static
-  seal accepts these flags (the init docs name only HSM, KMS and Transit seals).
+- **Init:** `bao operator init -recovery-shares=1 -recovery-threshold=1`. The static seal accepts
+  these flags (OpenBao 2.7.2, 2026-11-02).
 - **Backup secret** (ADR 0013): `x402/production/openbao-backup` in AWS Secrets Manager,
   `eu-central-1`, in the AWS account soroban-explorer and prices-api share; tags
   `Project=stellar-x402`, `Environment=production`; 30-day recovery window; default
@@ -332,24 +345,24 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   - The server gets no AWS credentials that can read it: only the roles ADR 0011 names (today the
     logs-and-metrics role, ADR 0013). The runbook names the secret and its fields, never values.
 - **Admin:** the root token revoked after setup, regenerated with the recovery key when needed
-  through the legacy `/sys/generate-root/*` API with curl (the 2.6+ CLI needs a token); admin
-  through SSH over the admin socket (root-only, in no container, with
+  through the legacy `/sys/generate-root/*` API (the 2.6+ CLI's `generate-root` needs a token);
+  admin through SSH and `docker compose exec` on the loopback listener (with
   `disable_unauthed_generate_root_endpoints=false`); no UI.
 - **Audit log:** a file on its own volume, rotated; alarm at 80% disk (0027).
 - **Snapshots:** daily Raft snapshots to our own sub-account and Borg repository on the company's
   existing Hetzner Storage Box, keeping 14, set up like that box's other sub-account. Tell
   the team that owns the box that we depend on it. The job uses its own AppRole with a
   snapshot-only policy (`sys/storage/raft/snapshot`), its credential a systemd credential, over
-  the admin socket. A second, read-only sub-account on the same directory, its SSH key in the
+  the admin listener. A second, read-only sub-account on the same directory, its SSH key in the
   backup secret, is what a restore uses. Decide the Borg mode (repokey or keyfile); in
   keyfile mode `borg key export` goes into the backup secret.
 - **Fee float** (ADR 0013): refill to 100 XLM, alarm at 25 XLM, no upper limit, the same numbers on
   testnet for now. Set `checkFacilitatorBalance`'s `minSpendableStroops` to 25 XLM (its default is
   100 XLM).
-- **Move testnet to the OpenBao key:** stop the service; in one transaction signed by the current
-  key, create the OpenBao key's own account, a `set_options` on each channel adds the OpenBao key
-  and removes the current one, and an `accountMerge` moves the old fee account into the new one;
-  start the service in `openbao` signer mode with the new account as its address (0036).
+- **Testnet on the OpenBao key:** nothing has run on another key, so nothing moves. An ordinary
+  wallet funds the OpenBao key's account and creates its channels with `create-channels.ts`
+  (0036 decision 15, #100); the facilitator starts in `openbao` signer mode with that account as
+  its address (#102).
 - **Runbook** in `docs/runbook.md`:
   - **restore drill:** on a throwaway machine with no route to production, using only the backup
     secret and the Storage Box: pull the newest snapshot, start OpenBao with the seal key and key
@@ -365,8 +378,9 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   - **weekly review** after the mainnet deploy (okarcz): the real fee spend, the next refill
     amount, and whether ADR 0013's custody still fits the float;
   - a leaked token or secret ID: destroy the secret ID, revoke its tokens, issue a new one;
-  - a suspected key theft: new Transit key, then the same transaction as the move above with the
-    old key, check the theft alarm's history;
+  - a suspected key theft: new Transit key, then one transaction signed by the old key: a
+    `set_options` on each channel adds the new key and removes the old one, and an
+    `accountMerge` moves the old fee account into the new key's; check the theft alarm's history;
   - OpenBao upgrades and what `/settle` does meanwhile (it answers an error).
 
 ## Acceptance Criteria
