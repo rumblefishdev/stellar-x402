@@ -55,6 +55,8 @@
         - { path: "/srv/x402/{{ x402_environment }}", owner: x402, mode: "0755" }
         # Encrypted with the host key (systemd-creds), decrypted by the units only.
         - { path: "/srv/x402/{{ x402_environment }}/creds", owner: root, mode: "0700" }
+        - { path: /srv/x402/openbao, owner: x402, mode: "0755" }
+        - { path: /srv/x402/openbao/creds, owner: root, mode: "0700" }
         - { path: /usr/local/libexec/x402, owner: root, mode: "0755" }
         - { path: /var/lib/x402-deploy/.ssh, owner: x402-deploy, mode: "0700" }
 
@@ -68,6 +70,18 @@
       loop:
         - { name: compose.yaml, mode: "0644" }
         - { name: deploy.sh, mode: "0755" }
+
+    # OpenBao's own project, one for every environment on the server (ADR 0013).
+    - name: OpenBao's compose file and config
+      ansible.builtin.copy:
+        src: "{{ repo_deploy }}/openbao/{{ item }}"
+        dest: "/srv/x402/openbao/{{ item }}"
+        owner: x402
+        group: x402
+        mode: "0644"
+      loop:
+        - compose.yaml
+        - config.hcl
 
     # The only file the deploy user writes; the deploy unit reads it as root.
     - name: digest.next
@@ -114,11 +128,14 @@
         group: x402-deploy
         mode: "0600"
 
-    # External in the compose file, so `compose down -v` can't remove it.
-    - name: Testnet's database volume
+    # External in the compose files, so `compose down -v` can't remove them.
+    - name: Testnet's database volume and OpenBao's storage and audit log
       ansible.builtin.shell: >-
-        docker volume inspect x402-{{ x402_environment }}-postgres-testnet > /dev/null 2>&1
-        || docker volume create x402-{{ x402_environment }}-postgres-testnet
+        docker volume inspect {{ item }} > /dev/null 2>&1 || docker volume create {{ item }}
+      loop:
+        - "x402-{{ x402_environment }}-postgres-testnet"
+        - x402-openbao-data
+        - x402-openbao-audit
       register: volume
       changed_when: volume.stdout != ""
 
@@ -133,6 +150,11 @@
         - x402-db-testnet
         - x402-tunnel
         - x402
+
+    - name: OpenBao's unit, enabled at boot
+      ansible.builtin.systemd_service:
+        name: x402-openbao.service
+        enabled: true
 
     # Started too: it acts only while x402@ is active, so before the first deploy it does nothing.
     - name: The watchdog's timer, enabled and started
