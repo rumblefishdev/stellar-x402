@@ -255,6 +255,17 @@ async function elapse(ms: number) {
   await storeIdle();
 }
 
+/** Runs `fn` on the fake clock `elapse` moves, for a budget test outside the block that has it. */
+async function onFakeClock<T>(fn: () => Promise<T>): Promise<T> {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  try {
+    return await fn();
+  } finally {
+    await storeIdle();
+    vi.useRealTimers();
+  }
+}
+
 function setup(behaviour: Behaviour = landing(), overrides: Partial<SettlerDeps> = {}) {
   const order: string[] = [];
   const store = db.stores().settlements;
@@ -445,6 +456,8 @@ describe("createSettler", () => {
     expect((await settle(payload(), requirements)).response).toMatchObject({
       errorReason: SETTLE_REASONS.pending,
     });
+    // On a slow runner the budget can end before the hash is stored, so `land` isn't set yet.
+    await vi.waitFor(() => expect(land).toBeTypeOf("function"));
     land();
     await vi.waitFor(async () => expect((await store.get(key))?.state).toBe("success"));
     const retry = await settle(payload(), requirements);
@@ -489,7 +502,13 @@ describe("createSettler", () => {
       },
       { settleTimeoutMs: 30, budgetMs: BUDGET_MS },
     );
-    expect((await settle(payload(), requirements)).response).toMatchObject({
+    // Only the first call writes under the budget; the repeat reads what it stored.
+    const first = await onFakeClock(async () => {
+      const settled = settle(payload(), requirements);
+      await elapse(BUDGET_MS);
+      return settled;
+    });
+    expect(first.response).toMatchObject({
       success: false,
       errorReason: "settlement_pending",
       transaction: HASH,
@@ -539,6 +558,7 @@ describe("createSettler", () => {
       response: {
         isValid: false,
         invalidReason: "invalid_exact_stellar_payload_wrong_amount",
+        invalidMessage: "what the check found",
         payer,
       },
     });
@@ -546,6 +566,7 @@ describe("createSettler", () => {
     expect((await settle(payload(), requirements)).response).toMatchObject({
       success: false,
       errorReason: "invalid_exact_stellar_payload_wrong_amount",
+      errorMessage: "what the check found",
       payer,
     });
     expect(submit).not.toHaveBeenCalled();
@@ -752,6 +773,7 @@ describe("createSettler", () => {
       minValidityLedgers: 2,
       maxValidityLedgers: 66,
       latestLedger: async () => CURRENT,
+      missingTrustline: async () => undefined,
     });
     const { settle, submit } = setup(landing(), { check });
     const { response } = await settle(payload(), requirements);
@@ -1165,7 +1187,12 @@ describe("createSettler", () => {
         { budgetMs: BUDGET_MS },
       );
       const transition = vi.spyOn(store, "transition");
-      expect((await settle(payload(), requirements)).response).toMatchObject({
+      const answered = await onFakeClock(async () => {
+        const settled = settle(payload(), requirements);
+        await elapse(BUDGET_MS);
+        return settled;
+      });
+      expect(answered.response).toMatchObject({
         errorReason: SETTLE_REASONS.pending,
         transaction: HASH,
       });
@@ -2198,19 +2225,20 @@ describe("createSettler", () => {
       const OTHER = "b".repeat(64);
       let sign!: () => void;
       const signing = new Promise<void>((resolve) => (sign = resolve));
-      let calls = 0;
-      const { settle, store } = setup(
+      const first = setup(
         async (opts) => {
-          if (calls++ > 0) return landing("success", OTHER)(opts);
           await signing;
           return lateSign(opts);
         },
         { budgetMs: BUDGET_MS },
       );
-      expect((await settle(payload(), requirements)).response).toMatchObject({
+      // A budget of its own: the repeat must land, whatever the database's speed.
+      const repeat = setup(landing("success", OTHER), { budgetMs: 5_000 });
+      const store = repeat.store;
+      expect((await first.settle(payload(), requirements)).response).toMatchObject({
         errorReason: SETTLE_REASONS.timeout,
       });
-      expect((await settle(payload(), requirements)).response.success).toBe(true);
+      expect((await repeat.settle(payload(), requirements)).response.success).toBe(true);
       sign();
       await vi.waitFor(() => expect(late).toBeInstanceOf(Error));
       expect(await store.get(key)).toMatchObject({ state: "success", hashes: [OTHER] });
@@ -2373,13 +2401,12 @@ describe("attempt states (0019 decision 7)", () => {
   const OTHER = "b".repeat(64);
 
   it("stores the hash with its bounds, marks it sent, and records the outcome per hash", async () => {
-    const seen: (string | undefined)[] = [];
     const { settle, store } = setup(async (opts) => {
       await opts.onSigned?.(OTHER, BOUNDS);
       await opts.onSigned?.(HASH, BOUNDS);
       opts.onSent?.(HASH);
-      await delay(5);
-      seen.push((await store.attempts(key)).at(-1)?.state);
+      // The mark is fire and forget: it never holds the send up.
+      await vi.waitFor(async () => expect((await store.attempts(key)).at(-1)?.state).toBe("sent"));
       // The first envelope was refused with `txBadSeq`, the rebuild landed.
       return {
         ...result("success"),
@@ -2391,7 +2418,6 @@ describe("attempt states (0019 decision 7)", () => {
     });
     const settled = await settle(payload(), requirements);
     expect(settled.response.success).toBe(true);
-    expect(seen).toEqual(["sent"]);
     expect(await store.attempts(key)).toEqual([
       {
         hash: OTHER,

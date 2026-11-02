@@ -2,7 +2,7 @@
 id: "0027"
 title: "Alerts and metrics"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0007", "0011"]
 related_tasks: ["0012", "0014", "0024", "0026", "0020", "0009", "0045", "0049", "0039"]
@@ -27,6 +27,10 @@ history:
     status: backlog
     who: stkrolikiewicz
     note: "0039: the uptime check targets the Cloudflare Tunnel hostname on sorobanscan.com."
+  - date: "2026-11-02"
+    status: active
+    who: akot
+    note: "Taken at the team meeting."
 ---
 
 # Alerts and metrics

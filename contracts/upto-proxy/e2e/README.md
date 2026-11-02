@@ -7,8 +7,9 @@ the x402 facilitator will use:
   auth entry. It never builds, signs or pays for a transaction.
 - **Facilitator:** checks the client's auth tree against the payment terms, swaps in the actual
   amount and submits through `SettlementSubmitter` from `packages/signer-pool`. The transaction
-  is in the delegated-bump shape: a channel account is the transaction source, the facilitator
-  is the operation source and pays the fee bump (ADR 0003).
+  has a channel account as the transaction source, and the facilitator as the operation source
+  and fee-bump payer. The pool has refused this suite's source-account entry since `d85b041` and
+  sets no operation source since 0093, so the suite can't settle until 0015.
 - **Seller:** the recipient.
 
 ## Run

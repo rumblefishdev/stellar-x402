@@ -10,7 +10,8 @@ import type { SettlementHooks } from "../settlement/hooks.js";
 import type { LeaseKeeper } from "../settlement/lease.js";
 import type { Reconciliation } from "../settlement/reconcile.js";
 import type { Settle } from "../settlement/settle.js";
-import type { Verify, VerifyTrace } from "../settlement/verify.js";
+import { TRUSTLINE_REASONS } from "../settlement/trustline.js";
+import { FEE_EXCEEDS_MAXIMUM, type Verify, type VerifyTrace } from "../settlement/verify.js";
 import { discoveryResources } from "./discovery.js";
 import { EXTENSION_RESPONSES_HEADER, encodeExtensionResponses } from "./extension-responses.js";
 import { rateLimit } from "./rate-limit.js";
@@ -45,6 +46,15 @@ export interface AppDeps {
 
 /** Seconds a client waits before it tries `/settle` again on a process that can't settle now. */
 export const NO_LEASE_RETRY_AFTER_S = 5;
+
+/**
+ * The refusals whose message the `verified` and `settled` logs carry: it names the account and the
+ * asset (0078), or the archived entries to restore (0066). Both are bounded.
+ */
+const LOGGED_MESSAGES: ReadonlySet<string | undefined> = new Set([
+  ...TRUSTLINE_REASONS,
+  FEE_EXCEEDS_MAXIMUM,
+]);
 
 /** The status as a body code, like `not_found`: 413 → `payload_too_large`. */
 const code = (status: number) =>
@@ -166,6 +176,7 @@ export function createApp({
       payer: response.payer,
       // Which RPC URL answered: a lagging fallback rejects valid payments (AD-3).
       rpc: trace.rpc,
+      message: LOGGED_MESSAGES.has(response.invalidReason) ? response.invalidMessage : undefined,
     });
     res.json(response);
   });
@@ -208,6 +219,7 @@ export function createApp({
         replay: replay ?? false,
         success: response.success,
         errorReason: response.errorReason,
+        message: LOGGED_MESSAGES.has(response.errorReason) ? response.errorMessage : undefined,
         payer: response.payer,
         transaction: response.transaction || undefined,
       });

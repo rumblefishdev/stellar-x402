@@ -35,6 +35,7 @@ import {
 import { createLeaseKeeper } from "./settlement/lease.js";
 import { createRecords } from "./settlement/records.js";
 import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler, type Settle } from "./settlement/settle.js";
+import { createTrustlineLookup } from "./settlement/trustline.js";
 import { failoverUpstream, type EndpointFailure } from "./settlement/upstream-failover.js";
 import {
   UNEXPECTED_VERIFY_ERROR,
@@ -185,7 +186,7 @@ export const DISCOVERY_STATEMENT_TIMEOUT_MS = 2_000;
 /**
  * The deadline of the whole upstream call (AD-3): `timeoutMs` (10 s) for each of `urls` RPC URLs,
  * plus, with fee-stats bids, the bid read before them, which `FallbackRpc` bounds at 10 s per URL,
- * plus 1 s of slack. The AD-22 ledger read after it is not included.
+ * plus 1 s of slack. The AD-22 ledger read and the trustline lookup after it are not included.
  */
 export function upstreamDeadlineMs(
   urls: number,
@@ -319,7 +320,10 @@ export function buildUpstream(
  */
 export function buildChecks(
   config: Config,
-  rpc: Pick<FallbackRpc, "getLatestLedger" | "begin" | "markFailed">,
+  rpc: Pick<
+    FallbackRpc,
+    "getLatestLedger" | "begin" | "markFailed" | "simulateTransaction" | "getLedgerEntries"
+  >,
   fees: FeeSettings,
   logger: Pick<Logger, "warn" | "info">,
   seams?: UpstreamSeams,
@@ -335,6 +339,7 @@ export function buildChecks(
     minValidityLedgers: config.settlement.minValidityLedgers,
     maxValidityLedgers: config.settlement.maxValidityLedgers,
     latestLedger: async () => (await rpc.getLatestLedger()).sequence,
+    missingTrustline: createTrustlineLookup(rpc, config.network, logger),
   };
 }
 
@@ -344,7 +349,7 @@ export function buildChecks(
  */
 export function buildVerifier(
   config: Config,
-  rpc: Pick<FallbackRpc, "getLatestLedger" | "begin" | "markFailed">,
+  rpc: Parameters<typeof buildChecks>[1],
   fees: FeeSettings,
   logger: Pick<Logger, "warn" | "info">,
   seams?: UpstreamSeams,

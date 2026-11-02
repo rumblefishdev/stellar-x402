@@ -35,10 +35,10 @@ reimplement verify and settle.
   the channel-address check ([ADR 0005](0005-channel-accounts-as-facilitator-source.md)), exactly
   one auth entry for the payer, a minimum remaining validity
   ([ADR 0006](0006-settlement-record.md)), and a refusal of source-account auth entries, which
-  upstream refuses too, because the pool makes the facilitator the operation source. Before
-  upstream, we also pick the payment's network from its requirements, reject a network we don't
-  serve and a V0 envelope, and bound upstream's call with a deadline; an error inside upstream is
-  a 500, not a verdict (spine AD-3).
+  upstream refuses too, because they would authorize as the channel. Before upstream, we also
+  pick the payment's network from its requirements, reject a network we don't serve and a V0
+  envelope, and bound upstream's call with a deadline; an error inside upstream is a 500, not a
+  verdict (spine AD-3).
 - **We settle.** For a new payment, `/settle` calls upstream `verify()` again (the spec requires
   settle to verify independently), then submits through `SettlementSubmitter` in
   `packages/signer-pool`. A repeat of a known payment is answered from its record without the

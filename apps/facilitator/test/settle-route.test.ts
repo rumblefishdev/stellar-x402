@@ -11,6 +11,7 @@ import { MAX_BODY_DEPTH, NO_LEASE_RETRY_AFTER_S } from "../src/http/app.js";
 import { start, type Started } from "../src/main.js";
 import { memoryMetrics } from "../src/metrics.js";
 import type { SettlementRecord } from "../src/ports/index.js";
+import { PAYTO_TRUSTLINE_REASON } from "../src/settlement/trustline.js";
 import type { SettlementHooks } from "../src/settlement/hooks.js";
 import type { Reconciliation } from "../src/settlement/reconcile.js";
 import type { Settle } from "../src/settlement/settle.js";
@@ -180,6 +181,29 @@ describe("POST /settle", () => {
     expect(settle).not.toHaveBeenCalled();
   });
 
+  it("logs a fee refusal's message, which names archived entries, and no other failure's", async () => {
+    const refusal = (errorReason: string, errorMessage: string) =>
+      ({
+        success: false,
+        errorReason,
+        errorMessage,
+        transaction: "",
+        network: "stellar:testnet",
+      }) as const;
+    const errorMessage =
+      "simulation-derived fee 551787 stroops exceeds ceiling 250000 stroops; the payment's transaction lists 1 archived entry to restore: AAAABg==";
+    settle.mockResolvedValueOnce({
+      response: refusal("invalid_exact_stellar_payload_fee_exceeds_maximum", errorMessage),
+    });
+    settle.mockResolvedValueOnce({
+      response: refusal("invalid_exact_stellar_payload_simulation_failed", "simulation failed"),
+    });
+    await post(request);
+    await post(request);
+    const settled = lines.map((line) => JSON.parse(line)).filter((l) => l.event === "settled");
+    expect(settled.map((l) => l.message)).toEqual([errorMessage, undefined]);
+  });
+
   it("sends no header when there are no extension responses or the answer is a failure", async () => {
     settle.mockResolvedValueOnce({ response: success, record });
     extensionResponses.mockReturnValueOnce(undefined);
@@ -262,6 +286,28 @@ describe("POST /settle", () => {
     const response = await post({ ...request, x402Version: 1 });
     expect([response.status, await response.json()]).toEqual([400, { error: "bad_request" }]);
     expect(settle).not.toHaveBeenCalled();
+  });
+
+  it("logs a missing trustline's message, and no other refusal's", async () => {
+    const refusal = { success: false, transaction: "", network: requirements.network };
+    settle.mockResolvedValueOnce({
+      response: {
+        ...refusal,
+        errorReason: PAYTO_TRUSTLINE_REASON,
+        errorMessage: "G… has no USDC trustline",
+      },
+    });
+    await post(request);
+    settle.mockResolvedValueOnce({
+      response: {
+        ...refusal,
+        errorReason: "settle_exact_stellar_refused",
+        errorMessage: "not for the log",
+      },
+    });
+    await post(request);
+    const settled = lines.map((line) => JSON.parse(line)).filter((l) => l.event === "settled");
+    expect(settled.map((line) => line.message)).toEqual(["G… has no USDC trustline", undefined]);
   });
 
   it("answers 500 and logs the error when settling throws", async () => {

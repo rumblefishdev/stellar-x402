@@ -30,9 +30,9 @@ export interface SubmitterOptions {
   rpc: SorobanRpc;
   networkPassphrase: string;
   /**
-   * The facilitator. It is the operation source of every call, a signer on every channel, and the
-   * fee-bump payer. It never authorizes a call: one with a source-account auth entry, which would
-   * authorize as the operation source, is refused ({@link SourceAccountAuthError}).
+   * The facilitator. It is a signer on every channel and the fee-bump payer. It never authorizes a
+   * call: one with a source-account auth entry, which would authorize as the channel, is refused
+   * ({@link SourceAccountAuthError}).
    */
   signer: TransactionSigner;
   /** Channel account addresses. Each must list `signer.address` as a signer. */
@@ -103,7 +103,7 @@ export interface FeeEscalation {
   max?: number;
 }
 
-/** The contract call to submit. The submitter sets the facilitator as its operation source. */
+/** The contract call to submit. It has no operation source, so the channel is its caller. */
 export interface ContractCall {
   func: xdr.HostFunction;
   auth: xdr.SorobanAuthorizationEntry[];
@@ -174,7 +174,7 @@ export class SimulationError extends Error {
 
 /**
  * The call carries an auth entry with source-account credentials. It would authorize as the
- * operation source, which is the facilitator, so the call is refused before a channel is taken.
+ * channel, which is the call's source, so the call is refused before a channel is taken.
  */
 export class SourceAccountAuthError extends Error {
   override readonly name = "SourceAccountAuthError";
@@ -264,12 +264,12 @@ interface Hold {
 
 /**
  * Submits Soroban contract calls through a pool of channel accounts, one transaction in flight
- * per channel, in the shape 0006 measured as cheapest ("delegated-bump"):
+ * per channel, in the "delegated-bump" shape:
  *
- * - tx source: a channel (sequence number only);
- * - operation source: the facilitator;
- * - one facilitator signature covers both, because the facilitator is a signer on the channel;
- * - wrapped in a fee bump the facilitator pays, so channels hold only their reserve.
+ * - tx source: a channel, also the call's caller, since the operation has no source of its own;
+ * - the facilitator signs for the channel, because it is a signer on it;
+ * - wrapped in a fee bump the facilitator pays, so channels hold only their reserve, and the fee
+ *   account needs only the low threshold.
  *
  * Sequence rule: a channel's cached sequence number is advanced only when its transaction is
  * final, and dropped (re-read before next use) only when the network says it is wrong. It is
@@ -386,7 +386,7 @@ export class SettlementSubmitter {
       )
     ) {
       const error = new SourceAccountAuthError(
-        "an auth entry has source-account credentials, which would authorize as the facilitator",
+        "an auth entry has source-account credentials, which would authorize as the channel",
       );
       this.refused(undefined, error);
       throw error;
@@ -657,7 +657,7 @@ export class SettlementSubmitter {
           ledgerbounds: { minLedger: 0, maxLedger: maxLedger + 1 },
         }),
       })
-        .addOperation(Operation.invokeHostFunction({ ...call, source: this.signer.address }))
+        .addOperation(Operation.invokeHostFunction(call))
         .build();
     let draft = build(fee);
     const txSequence = BigInt(draft.sequence);

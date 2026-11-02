@@ -209,7 +209,8 @@ One request or one stop must never outlast the layer in front of it:
   | 0045, 3 URLs (its cap), fee-stats | 61 s             | 30 s         | 91 s                   |
 
   Upstream verify after 0045 is 10 s per URL, twice that with a fee-stats bid (the read before
-  the URLs), plus 1 s. Past the budget the answer is `…_timeout` before the claim, so the same
+  the URLs), plus 1 s. A failed simulation of a payload with the payer's auth entry adds the
+  trustline lookup, at most 3 s, on the shared client (0078). Past the budget the answer is `…_timeout` before the claim, so the same
   payment may be sent again; a valid payment can still get it when the first URLs hang and the
   last one answers late. These worst cases need hung RPC URLs, not slow ones.
 

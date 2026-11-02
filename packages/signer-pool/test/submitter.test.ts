@@ -55,8 +55,8 @@ describe("SettlementSubmitter", () => {
     const inner = bump.innerTransaction;
     expect(inner.source).toBe(channels[0]);
     expect(inner.sequence).toBe("1001");
-    expect(inner.operations[0]?.source).toBe(facilitator.publicKey());
-    // One facilitator signature covers the channel and the operation source.
+    // No operation source: the channel is the caller, so the fee account only pays the fee bump.
+    expect(inner.operations[0]?.source).toBeUndefined();
     expect(inner.signatures).toHaveLength(1);
     expect(fake.sequences.get(channels[0]!)).toBe(1001n);
 

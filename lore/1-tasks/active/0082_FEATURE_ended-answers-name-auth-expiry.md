@@ -2,7 +2,7 @@
 id: "0082"
 title: "Say when to sign again in every answer that ended a payment that didn't land"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0006"]
 related_tasks: ["0073", "0024", "0071"]
@@ -16,6 +16,10 @@ history:
       Spawned from 0073's PR 3 code review (decision 20): the six "nothing sent" answers now
       wait for the auth expiry; the other answers that end a payment still say "sign a new
       payment" at once.
+  - date: "2026-11-02"
+    status: active
+    who: okarcz
+    note: "Work started."
 ---
 
 # Say when to sign again in every answer that ended a payment that didn't land

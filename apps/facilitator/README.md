@@ -176,6 +176,34 @@ its record. Fencing (0071) stops the old process from sending anything new after
 not what it had already sent. Accepted for testnet; before pubnet the new process leaves such a
 channel out until its record ends (0090).
 
+## `/verify` answers
+
+`/verify` passes on upstream's `invalid_exact_stellar_*` reasons, plus the checks of its own. After
+upstream's `invalid_exact_stellar_payload_simulation_failed` it simulates once more, to name the
+one cause upstream drops:
+
+| `invalidReason`                                 | meaning                                                                     | what to do                                          |
+| ----------------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------- |
+| `invalid_exact_stellar_payto_trustline_missing` | `payTo` holds no trustline to the classic asset, or the account is unfunded | the seller funds the account and adds it            |
+| `invalid_exact_stellar_payer_trustline_missing` | the payer holds no trustline to the classic asset                           | the payer makes sure the account exists and adds it |
+
+`invalidMessage` names the account, the asset and the ledger the simulation saw, and the `verified`
+and `settled` logs carry it as `message`. The token must be a Stellar Asset Contract: any
+contract can emit the same error, and only a SAC's means a trustline. A SAC stops at its first
+failure, the payer's side first, so the payer's message adds that `payTo` wasn't checked: a seller
+missing one too shows up on the next try. Once the trustline is there, the same payment may be
+sent again until its auth expires. `/settle`'s check before the claim gives the same two reasons; a
+trustline removed after it answers `settle_exact_stellar_simulation_failed` from the pool.
+
+Every other failure keeps upstream's reason. So does a lookup that fails or takes over 3 s, logged
+as `trustline_lookup_failed`, a muxed `payTo`, because the error names its G-address, and a payload
+without exactly one auth entry of the payer's, which gets no lookup: it is free to send, and the
+lookup costs RPC calls.
+
+Upstream's client simulates before it signs, so its users get the same `Error(Contract, #13)` from
+the client and never reach `/verify`. These answers are for a client that builds its own payload,
+and for a trustline removed after signing.
+
 ## `/settle` answers
 
 Every outcome is a 200 with an x402 `SettleResponse`. A 400 is a malformed request. A 503 comes
@@ -213,7 +241,7 @@ unlocks one response.
 | `settle_exact_stellar_transaction_failed`            | the hash                | included in a ledger, but failed                                                                | sign a new payment                                                                        |
 | `settle_exact_stellar_transaction_submission_failed` | the hash                | refused by the network before inclusion                                                         | sign a new payment                                                                        |
 | `settle_exact_stellar_transaction_expired`           | the hash                | not included before its ledger bound, the payer's auth expiry; before 0073, its 60 s time bound | sign a new payment                                                                        |
-| `invalid_exact_stellar_*`, `invalid_network`         | —                       | the `/verify` checks, rerun by `/settle`, refused the payment                                   | fix the payment; for `invalid_exact_stellar_payload_fee_exceeds_maximum`, try again later |
+| `invalid_exact_stellar_*`, `invalid_network`         | —                       | the `/verify` checks, rerun by `/settle`, refused the payment                                   | fix the problem; for `invalid_exact_stellar_payload_fee_exceeds_maximum`, see notes below |
 | `unexpected_settle_error`                            | an earlier hash, if any | an error of ours after the claim                                                                | sign a new payment, and tell us                                                           |
 
 "An earlier hash, if any": a refusal after a `txBadSeq` rebuild carries the last stored hash.
@@ -224,16 +252,24 @@ below are worth repeating as they are. Any other failure gets the same answer ag
 needs a new payment (a new nonce), except for:
 
 - a refusal from the checks (`invalid_exact_stellar_*`, `invalid_network`) comes before the
-  claim and records nothing: the same payment may be sent again, and may succeed later.
+  claim and records nothing: the same payment may be sent again, and may succeed later, except
+  when its message names archived entries.
   `invalid_exact_stellar_payload_fee_exceeds_maximum` is our own fee estimate above our ceiling,
   not a fault in the payment (0086: it can settle after its payer signed again, so ask for a new
-  signature only once it can't land). `invalid_exact_stellar_signature_expiration_too_far` comes
-  from our three checks: the resource's `maxTimeoutSeconds` above 300 s at the default cap ("at
-  most 300 is allowed", which stays refused, so the resource must ask for less), the auth's own
-  expiry past the cap ("at most 66 are allowed": the client saw ledgers faster than 5 s; the
-  refused payment may pass later too, so ask for a new signature only once it can't land), or
-  past the last ledger the pool can bound. Upstream's own expiry check answers with it too, for
-  one whose message names none of these, when our RPC is 3 or more ledgers behind the client's;
+  signature only once it can't land). With the bid from fee stats (no `INCLUSION_FEE_STROOPS`),
+  the bid adds at most 20,000 stroops of it (fee stats are capped at 10,000 and the estimate
+  counts the bid twice), so rent is what usually puts it there, and waiting seldom helps. When the
+  message names archived entries
+  (`the payment's transaction lists N archived entries to restore: <LedgerKey XDR>, …`), restore
+  them and sign a new payment once this one can't land ([below](#restoring-archived-entries)); one
+  that names none may still touch archived state its transaction doesn't list.
+  `invalid_exact_stellar_signature_expiration_too_far` comes from our three checks: the resource's
+  `maxTimeoutSeconds` above 300 s at the default cap ("at most 300 is allowed", which stays
+  refused, so the resource must ask for less), the auth's own expiry past the cap ("at most 66 are
+  allowed": the client saw ledgers faster than 5 s; the refused payment may pass later too, so ask
+  for a new signature only once it can't land), or past the last ledger the pool can bound.
+  Upstream's own expiry check answers with it too, for one whose message names none of these,
+  when our RPC is 3 or more ledgers behind the client's;
 - a spend refusal the store couldn't record leaves the payment claimed, so a repeat after the
   budget gets `…_timeout` instead of the spend reason.
 
@@ -292,6 +328,73 @@ block explorer or Horizon before acting on it.
 A success answered while the store was down is marked answered once the store is back. After a
 restart the process can't know it answered one, so a repeat may get that payment's success a
 second time, at most once; no money moves twice.
+
+### Restoring archived entries
+
+A payment that touches archived state (the token's instance or code, a non-SAC balance, a
+C-account's SAC balance) restores it and pays the restore rent, which the facilitator won't pay
+above its fee ceiling (task 0066). The refusal's message names the entries as base64 `LedgerKey`
+XDR, at most four (`and N more` after them); a key over 512 characters is shown as
+`a key of N characters`, and the payment's own simulation gives it. The list is the one the
+payment was built with, as the buyer's client put it in the transaction: the facilitator names
+only persistent contract data and code from it, but doesn't check that they are archived or that
+they are the token's. Check both before paying their rent, since otherwise you pay for entries
+the buyer chose:
+
+- whose: the key says it. For a data entry,
+  `Address.fromScAddress(key.contractData().contract()).toString()` must be the token's contract
+  (`asset` in the requirements), which holds its instance and its balances; for a code entry,
+  `key.contractCode().hash()` must be the Wasm hash the token's instance names.
+- archived: `server.getLedgerEntries(...keys)` returns each entry with its `liveUntilLedgerSeq`;
+  one below the latest ledger (`server.getLatestLedger()`), or 0, is no longer live.
+
+Any funded account can restore them, all in one transaction. The snippet is for testnet; on
+pubnet use `Networks.PUBLIC` and a mainnet RPC URL:
+
+```ts
+import {
+  BASE_FEE,
+  Keypair,
+  Networks,
+  Operation,
+  rpc,
+  SorobanDataBuilder,
+  TransactionBuilder,
+  xdr,
+} from "@stellar/stellar-sdk";
+
+const server = new rpc.Server("https://soroban-testnet.stellar.org");
+const source = Keypair.fromSecret(process.env.SECRET!); // pays the restore
+const keys = ["AAAABg…"].map((k) => xdr.LedgerKey.fromXDR(k, "base64")); // from the message
+
+const restore = new TransactionBuilder(await server.getAccount(source.publicKey()), {
+  fee: BASE_FEE,
+  networkPassphrase: Networks.TESTNET,
+})
+  .addOperation(Operation.restoreFootprint({}))
+  .setSorobanData(new SorobanDataBuilder().setReadWrite(keys).build())
+  .setTimeout(60)
+  .build();
+const prepared = await server.prepareTransaction(restore); // adds the restore rent to the fee
+prepared.sign(source);
+const sent = await server.sendTransaction(prepared);
+if (sent.status !== "PENDING") throw new Error(`restore not accepted: ${sent.status}`);
+const result = await server.pollTransaction(sent.hash);
+if (result.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
+  throw new Error(`restore ${sent.hash}: ${result.status}`);
+}
+```
+
+Then sign a new payment, not the same one again: its auth may have expired, and a new one is
+built from a new simulation, so it lists only the entries still archived, if any. Ask for it
+only once the refused payment can't land: the fee check simulates again, so after the restore
+that payment can pass too, next to the new one (0086).
+
+stellar-cli restores one entry per call, and takes the parts of a key rather than the
+`LedgerKey`: an instance with `stellar contract restore --id <contract>`, code with
+`--wasm-hash <hash>` (`key.contractCode().hash().toString("hex")`), and a data entry with
+`--id <contract> --key-xdr <ScVal>` (`key.contractData().key().toXDR("base64")`), where
+`key = xdr.LedgerKey.fromXDR(k, "base64")` for a key `k` from the message.
 
 ## `/discovery/resources`
 
