@@ -75,13 +75,13 @@ hot key's weight.
 
 ## Decisions so far
 
-| # | What is done | From | Vs the task | Who does the same (checked) | Code | Test |
-|---|---|---|---|---|---|---|
-| 1 | No call through the pool has an operation source, so the channel is the caller | task AC | matches it | upstream `@x402/stellar` 2.28.0 `exact/facilitator/index.mjs:176,300` | `submitter.ts` `prepare` | `submitter.test.ts` |
-| 2 | The pool has no option to set an operation source: nothing sends `upto` through it today, and 0015 chooses how `upto` gives consent | agent | matches it (chosen in 0015) | — | `submitter.ts` | — |
-| 3 | A source-account auth entry stays refused; it would now authorize as the channel | task | matches it | upstream verify refuses it | `submitter.ts` `submit` | `settlement-guards.test.ts` |
-| 4 | `settle-smoke.ts` can raise a fresh fee account's thresholds to 1 / 2 / 2 after channel setup, and checks that a settlement lands and a Payment out is refused | agent | matches it | — | `settle-smoke.ts` | the run in the PR |
-| 5 | 0015 records that the pool refuses the harness's consent entry, and that any consent from the fee account needs the medium threshold 0048 may take away | agent | beyond it | `soroban-env-host` 30.0.0 `account_contract.rs:245` | 0015's task file | — |
+| #   | What is done                                                                                                                                                   | From    | Vs the task                 | Who does the same (checked)                                           | Code                     | Test                        |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | --------------------------- | --------------------------------------------------------------------- | ------------------------ | --------------------------- |
+| 1   | No call through the pool has an operation source, so the channel is the caller                                                                                 | task AC | matches it                  | upstream `@x402/stellar` 2.28.0 `exact/facilitator/index.mjs:176,300` | `submitter.ts` `prepare` | `submitter.test.ts`         |
+| 2   | The pool has no option to set an operation source: nothing sends `upto` through it today, and 0015 chooses how `upto` gives consent                            | agent   | matches it (chosen in 0015) | —                                                                     | `submitter.ts`           | —                           |
+| 3   | A source-account auth entry stays refused; it would now authorize as the channel                                                                               | task    | matches it                  | upstream verify refuses it                                            | `submitter.ts` `submit`  | `settlement-guards.test.ts` |
+| 4   | `settle-smoke.ts` can raise a fresh fee account's thresholds to 1 / 2 / 2 after channel setup, and checks that a settlement lands and a Payment out is refused | agent   | matches it                  | —                                                                     | `settle-smoke.ts`        | the run in the PR           |
+| 5   | 0015 records that the pool refuses the harness's consent entry, and that any consent from the fee account needs the medium threshold 0048 may take away        | agent   | beyond it                   | `soroban-env-host` 30.0.0 `account_contract.rs:245`                   | 0015's task file         | —                           |
 
 ## Not yet decided
 
