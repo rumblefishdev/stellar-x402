@@ -128,7 +128,7 @@ unset value
 - OpenBao set up, with testnet's key, policy and AppRole in it (OpenBao, below).
 - Outbound 7844 over UDP and TCP allowed on the server (`cloudflared`).
 - Cloudflare: Browser Integrity Check off for the hostname, Bot Fight Mode off (0026).
-- The signer and funded channels (0036).
+- The signer (0036), and the key's account and channels (OpenBao, step 6).
 - After the first image is pushed: the GHCR package `x402-facilitator` made public, so the server
   pulls without a login.
 
@@ -411,6 +411,23 @@ admin's machine and the server over SSH and never reach a disk.
 
 5. `bao token revoke -self`, `unset BAO_TOKEN`, and leave the root shell. On the admin's machine,
    `unset seal_key init backup back`.
+
+6. The key's own account, which pays the fee bumps (ADR 0013), then its channels, from
+   `packages/signer-pool` on the admin's machine (#100). `create-channels.ts` checks neither: it
+   makes channels for any valid address, and a wrong one leaves their reserves under a key that
+   isn't ours. On testnet Friendbot creates the account, and any Friendbot account can fund the
+   channels; mainnet's wallet comes with 0038.
+
+   ```sh
+   curl -sf "https://friendbot.stellar.org?addr=ADDRESS" >/dev/null && echo created
+   read -rs FUNDER_SECRET && export FUNDER_SECRET   # the funding wallet's S… key, Enter
+   NETWORK=testnet pnpm exec tsx scripts/create-channels.ts ADDRESS 20
+   unset FUNDER_SECRET
+   ```
+
+   It prints the channels' addresses for `CHANNELS_TESTNET` (0036); 20 channels hold ADR 0013's
+   ~30 XLM of reserves. If it stops after a batch landed, that batch's channels are in its
+   transaction on Horizon (`channel setup … landed` on stderr gives the hash).
 
 **A new root token,** when an admin needs one again, from the recovery key in the backup secret.
 The CLI's `generate-root` needs a token, so this is the legacy `/sys/generate-root` API, which the
