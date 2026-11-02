@@ -72,6 +72,14 @@ production code.
     of slack, still below the 2.4 s of an uncut call.
   - Not reproduced or explained: "waits on close() for a settlement answered pending…" (once in 5
     full runs under load) and the failure of run 41079206183 (no annotation).
+- Measured 2026-11-02 on `develop` `5a2ad44`, with #101 and #103 in, a busy loop on each of 10 cores:
+  `settle`, `settle-pool`, `postgres`, `review-2-twice` and `mcp/pay` together, 50 runs: 49 clean.
+  - Run 47 failed `settle.test.ts`, "never stores a hash for the earlier claim when another process
+    ended and reopened it". The message wasn't kept. It runs on a real 100 ms budget, like the tests
+    #101 moved (hypothesis, not reproduced), so the second criterion isn't met yet.
+  - `settle-route.test.ts`, "gives the lease up at once past a stalled client" (line 561), failed 3 of
+    3 local runs on `develop` `d11c956`, and hasn't failed in the CI runs read. Not explained; outside
+    these 50 runs.
 
 ## Acceptance Criteria
 
