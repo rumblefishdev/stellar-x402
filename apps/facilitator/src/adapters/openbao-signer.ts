@@ -35,9 +35,8 @@ export type SignerState = "unchecked" | "ok" | "failed";
 
 /**
  * Why OpenBao didn't give a usable signature, for the logs and `signer_failures_total`:
- * `sealed` (503), `denied` (403: an expired, revoked or unauthorised token, or an AppRole locked
- * after 5 failed logins, which refuses the right secret ID too until unlocked with a privileged
- * token), `refused` (another 4xx, e.g. a wrong secret ID), `error` (a 5xx, such as an audit log it can't write, or an answer
+ * `sealed` (503), `denied` (403: an expired, revoked or unauthorised token, or, where lockout is
+ * on, an AppRole locked after 5 failed logins; `deploy/openbao/config.hcl` turns it off), `refused` (another 4xx, e.g. a wrong secret ID), `error` (a 5xx, such as an audit log it can't write, or an answer
  * without a signature), `timeout`, `unreachable` (no socket), `address_mismatch` (signed by a key
  * other than the configured address's).
  */
