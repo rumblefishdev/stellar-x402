@@ -77,6 +77,14 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
     So none of them writes onto the new claim (0073 decision 24). A record claimed before 0073
     has `reopened` -1 and never reopens, as its release answered "sign a new payment" (decision
     25).
+  - Every other answer that ended a payment, on a record claimed since 0073, carries
+    `extra.retryable: false` and `extra.expirationLedger` and says "sign a new payment" only once
+    the expiration ledger has closed, or names that ledger when the latest one can't be read
+    (task 0082): a failed or refused transaction doesn't use the auth entry's nonce, so the
+    payload can land in a new envelope until then. A `…_lease_lost` record with a hash stays
+    closed, and `…_transaction_expired` comes only after the expiry, so it says nothing more. The
+    checks' refusal of a reopen leaves the record closed with nothing sent, so it answers as those
+    records do, `retryable: true` while a repeat can reopen it, before the checks' message.
   - `success: true` is answered once per record, by compare-and-set on `successAnsweredAt`. Later
     calls get `settle_exact_stellar_already_settled` with the hash. `settlement_pending` doesn't
     count, and a call whose client left before the mark marks nothing.

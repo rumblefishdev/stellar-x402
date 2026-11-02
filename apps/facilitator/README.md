@@ -234,25 +234,25 @@ unlocks one response.
 | `settle_exact_stellar_lease_lost`                    | an earlier hash, if any | this process lost the channel lease before it sent; another process holds it, or none does      | repeat the same payment while `extra.retryable` (see below)                               |
 | `settle_exact_stellar_transaction_signing_failed`    | an earlier hash, if any | the facilitator's key couldn't sign the transaction (OpenBao down, sealed or refusing)          | repeat the same payment while `extra.retryable` (see below)                               |
 | `settle_exact_stellar_fee_bump_signing_failed`       | an earlier hash, if any | the facilitator's key couldn't sign the fee bump                                                | repeat the same payment while `extra.retryable` (see below)                               |
-| `settle_exact_stellar_fee_exceeds_maximum`           | an earlier hash, if any | the network fee rose above the facilitator's ceiling                                            | sign a new payment and try again later                                                    |
-| `settle_exact_stellar_signature_expiration_too_soon` | an earlier hash, if any | the auth expires before the pool could land it                                                  | sign a new payment with a longer `maxTimeoutSeconds`                                      |
-| `settle_exact_stellar_simulation_failed`             | an earlier hash, if any | the settlement's simulation failed, e.g. the payer's balance                                    | check the payer, then sign a new payment                                                  |
-| `settle_exact_stellar_unexpected_balance_changes`    | an earlier hash, if any | the transaction moves something other than the one payment                                      | refuse: the payment is malformed                                                          |
-| `settle_exact_stellar_record_write_failed`           | an earlier hash, if any | a new envelope wasn't sent: its hash couldn't be stored, or the budget ran out                  | sign a new payment                                                                        |
-| a spend reason from the facilitator's limits         | —                       | the facilitator's spend limits refused it                                                       | sign a new payment later; this one is ended                                               |
-| `settle_exact_stellar_refused`                       | —                       | the spend-limit check failed with an error of ours                                              | sign a new payment, and tell us                                                           |
-| `settle_exact_stellar_transaction_failed`            | the hash                | included in a ledger, but failed                                                                | sign a new payment                                                                        |
-| `settle_exact_stellar_transaction_submission_failed` | the hash                | refused by the network before inclusion                                                         | sign a new payment                                                                        |
+| `settle_exact_stellar_fee_exceeds_maximum`           | an earlier hash, if any | the network fee rose above the facilitator's ceiling                                            | after `extra.expirationLedger` (see below), sign a new payment                            |
+| `settle_exact_stellar_signature_expiration_too_soon` | an earlier hash, if any | the auth expires before the pool could land it                                                  | sign a new payment with a longer `maxTimeoutSeconds`, as below                            |
+| `settle_exact_stellar_simulation_failed`             | an earlier hash, if any | the settlement's simulation failed, e.g. the payer's balance                                    | check the payer, then sign a new payment as below                                         |
+| `settle_exact_stellar_unexpected_balance_changes`    | an earlier hash, if any | the transaction moves something other than the one payment                                      | refuse: the payment is malformed; any corrected one as below                              |
+| `settle_exact_stellar_record_write_failed`           | an earlier hash, if any | a new envelope wasn't sent: its hash couldn't be stored, or the budget ran out                  | sign a new payment after `extra.expirationLedger` (see below)                             |
+| a spend reason from the facilitator's limits         | —                       | the facilitator's spend limits refused it                                                       | sign a new payment as below, later; this one is ended                                     |
+| `settle_exact_stellar_refused`                       | —                       | the spend-limit check failed with an error of ours                                              | sign a new payment as below, and tell us                                                  |
+| `settle_exact_stellar_transaction_failed`            | the hash                | included in a ledger, but failed                                                                | sign a new payment after `extra.expirationLedger` (see below)                             |
+| `settle_exact_stellar_transaction_submission_failed` | the hash                | refused by the network before inclusion                                                         | sign a new payment after `extra.expirationLedger` (see below)                             |
 | `settle_exact_stellar_transaction_expired`           | the hash                | not included before its ledger bound, the payer's auth expiry; before 0073, its 60 s time bound | sign a new payment                                                                        |
 | `invalid_exact_stellar_*`, `invalid_network`         | —                       | the `/verify` checks, rerun by `/settle`, refused the payment                                   | fix the problem; for `invalid_exact_stellar_payload_fee_exceeds_maximum`, see notes below |
-| `unexpected_settle_error`                            | an earlier hash, if any | an error of ours after the claim                                                                | sign a new payment, and tell us                                                           |
+| `unexpected_settle_error`                            | an earlier hash, if any | an error of ours after the claim                                                                | sign a new payment as below, and tell us                                                  |
 
 "An earlier hash, if any": a refusal after a `txBadSeq` rebuild carries the last stored hash.
 `transaction` is the last stored hash; it may never have reached the network.
 
 A failure with no `transaction` sent nothing. `settlement_pending` and the "nothing sent" answers
 below are worth repeating as they are. Any other failure gets the same answer again, so a retry
-needs a new payment (a new nonce), except for:
+needs a new payment (a new nonce), but only once this one can't land ("Ended", below), except for:
 
 - a refusal from the checks (`invalid_exact_stellar_*`, `invalid_network`) comes before the
   claim and records nothing: the same payment may be sent again, and may succeed later, except
@@ -287,7 +287,8 @@ answers carry `extra`:
   ledger is at most `expirationLedger - 2` (the pool needs 2 ledgers left). The facilitator runs
   the `/verify` checks again and reopens the record, so the payment settles once; a different
   payment on the same nonce still gets `…_nonce_already_used`. A payment that no longer passes
-  the checks (a balance spent meanwhile) gets their refusal, and the record stays as it was. A
+  the checks (a balance spent meanwhile) gets their refusal, after this same advice, and the record
+  stays as it was, so a later repeat may still settle it (task 0082). A
   `…_timeout` given during the checks, before anything was claimed, is repeated the same way.
 - `retryable: true` when the facilitator couldn't read the latest ledger: repeating the same
   payment is always safe, but stop once the network is past `expirationLedger`, then sign a new
@@ -297,8 +298,8 @@ answers carry `extra`:
   that ledger has closed, then sign a new payment.
 - `retryable: false` once the expiration ledger has closed: sign a new payment.
 
-The same answer with a `transaction` (an earlier hash) is never reopened: sign a new payment.
-Each reopen is logged as `settlement_reopened` with the earlier reason and counted in
+The same answer with a `transaction` (an earlier hash) is never reopened: see "Ended" below. Each
+reopen is logged as `settlement_reopened` with the earlier reason and counted in
 `settlement_reopened_total` by that `reason`; the record's `reopened` column counts them. While a
 deploy replaces a release from before task 0073, the old process answers these reasons without
 `extra`, as "sign a new payment" (and one from before task 0071 doesn't reopen `…_lease_lost`).
@@ -309,9 +310,27 @@ new payment", and doesn't reopen it.
 
 `…_lease_lost` with a `transaction` means the record has that hash, so it doesn't reopen. Either
 the lease was found lost right after the hash was stored, and that envelope was never sent, or an
-envelope was sent and refused with `txBadSeq` and the lease went before its rebuild. Sign a new
-payment, as for the other reasons above with a `transaction` (task 0082 covers when that is
-safe).
+envelope was sent and refused with `txBadSeq` and the lease went before its rebuild.
+
+**Ended** (task 0082). Every other answer that ended a payment says when a new signature is safe:
+the refusals after the claim, `…_transaction_failed`, `…_transaction_submission_failed` and a
+"nothing sent" reason with a `transaction`. The payer's auth entry can still land in a new envelope until its expiration ledger, by whoever holds the payment: a failed
+or refused transaction doesn't use its nonce. So these answers carry `extra.retryable: false` and
+`extra.expirationLedger`, and `errorMessage` names that ledger:
+
+- until the expiration ledger has closed, or when the latest ledger couldn't be read: don't sign a
+  new payment yet, it could charge the payer twice;
+- once it has closed: sign a new payment.
+
+Both carry the same `extra`, so a client that doesn't read `errorMessage` signs again once the
+network's latest ledger is at least `expirationLedger`. A repeat gets the same answer, worked out
+from the ledger of that moment.
+
+A record claimed before task 0073 answers every reason without `extra`, as "sign a new payment".
+For a record claimed since, `…_transaction_expired` comes only after the expiry, so it says nothing
+more. While a deploy replaces a release from before task 0082, and after a rollback to one, these
+reasons are answered without `extra` too: the wait still holds, and the client reads the expiry from
+the auth entry it signed.
 
 A `pending` record is finished by reconciliation (task 0019): the pool's late result, or a sweep
 that asks the network about each of the record's hashes. A hash the network doesn't know turns

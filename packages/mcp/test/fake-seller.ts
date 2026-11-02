@@ -157,6 +157,7 @@ export async function startFakeSeller(): Promise<FakeSeller> {
       network: seller.network as PaymentRequired["accepts"][number]["network"],
       payer: "GBUYER",
       errorReason: success ? undefined : "insufficient_funds",
+      errorMessage: success ? undefined : "sign a new payment once ledger 100 has closed",
     });
     res
       .writeHead(success ? seller.paidStatus : 402, {

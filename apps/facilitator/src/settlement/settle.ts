@@ -157,6 +157,19 @@ export const UNSENT_REASONS: readonly string[] = [
 const UNSENT = new Set(UNSENT_REASONS);
 
 /**
+ * Failed answers about a record that don't tell the payer to sign again (0082): it isn't over, it
+ * landed, the payload is another payment, or its auth entry has expired. Every other failed answer
+ * about a record ended a payment whose auth entry can still land until its expiration ledger, in
+ * a new envelope: a failed or refused transaction spends no nonce.
+ */
+const NOT_SIGN_AGAIN = new Set<string>([
+  SETTLE_REASONS.pending,
+  SETTLE_REASONS.alreadySettled,
+  SETTLE_REASONS.nonceUsed,
+  SETTLE_REASONS.expired,
+]);
+
+/**
  * The validity minimum `/settle` rechecks with (AD-22): the pool's own floor. `signer-pool` keeps
  * one spare ledger and refuses a call that has fewer than 2 ledgers left, so `/settle` refuses
  * only what the pool would. `/verify`'s larger `MIN_VALIDITY_LEDGERS` leaves room for the time
@@ -204,8 +217,8 @@ export interface SettlerDeps {
    */
   lease: () => LeaseFence | undefined;
   /**
-   * The network's latest ledger, to tell whether an unsent payment's auth entry can still land
-   * (0073 decision 15). Read only on those answers and before a reopen.
+   * The network's latest ledger, to tell whether a payment's auth entry can still land (0073
+   * decision 15, 0082). Read only on an answer that ended a payment and before a reopen.
    */
   latestLedger: () => Promise<number>;
   /** Estimated ledger close time, to turn the auth expiry into a deadline. */
@@ -231,6 +244,8 @@ export interface Settled {
    * stays "sign a new payment", with no `extra.retryable` (0073 decision 25).
    */
   claimedBefore0073?: boolean;
+  /** The checks refused a reopen, so the record stays as it was and a repeat may reopen it. */
+  reopenRefused?: boolean;
   /** The record behind a `success` answer, for the `EXTENSION-RESPONSES` header (AD-8). */
   record?: SettlementRecord;
   /**
@@ -380,26 +395,45 @@ export function createSettler(deps: SettlerDeps): Settle & {
    * while a repeat can still reopen it (the pool needs 2 ledgers left), or when the ledger couldn't
    * be read, since repeating the same payload is always safe. Then `false`, but "sign a new
    * payment" only once the expiration ledger has closed: the auth entry is valid in that ledger,
-   * so until then whoever holds the payload may still land it.
+   * so until then whoever holds the payload may still land it. The checks' refusal of a reopen
+   * answers the same, before their message, as the record stays closed with nothing sent (0082).
+   * Any other answer that ended a payment, a "nothing sent" one with a hash among them, never
+   * reopens: `retryable` is `false`, with the same wait before "sign a new payment".
    */
   const withRetry = async (
     settled: Settled,
     validOnce: () => Promise<Validity | undefined>,
   ): Promise<Settled> => {
     const { response } = settled;
-    if (
-      response.success ||
-      response.transaction ||
-      settled.claimedBefore0073 ||
-      !UNSENT.has(response.errorReason ?? "")
-    )
-      return settled;
+    if (response.success || settled.claimedBefore0073) return settled;
+    const reason = response.errorReason ?? "";
+    const unsent = (UNSENT.has(reason) || settled.reopenRefused) && !response.transaction;
+    const ended = settled.key !== undefined && !NOT_SIGN_AGAIN.has(reason);
+    if (!unsent && !ended) return settled;
     const valid = await validOnce();
     if (!valid) return settled;
     const { expiration, left } = valid;
+    // First: a client reads the archived entries at the end of the checks' message (0066).
+    const withExtra = (advice: string, retryable: boolean): Settled => ({
+      ...settled,
+      response: {
+        ...response,
+        errorMessage: response.errorMessage ? `${advice}; ${response.errorMessage}` : advice,
+        extra: { ...response.extra, retryable, expirationLedger: expiration },
+      },
+    });
+    if (!unsent) {
+      return withExtra(
+        left === undefined || left > 0
+          ? `the auth entry may still land in ledger ${expiration}: sign a new payment once that ` +
+              `ledger has closed`
+          : `the auth entry expired with ledger ${expiration}: sign a new payment`,
+        false,
+      );
+    }
     const retryable = left === undefined || left >= SETTLE_MIN_VALIDITY_LEDGERS;
     const then = `once the network is past ledger ${expiration}, sign a new payment instead`;
-    const errorMessage =
+    return withExtra(
       left === undefined
         ? `nothing was sent: repeat the same payment; ${then}`
         : retryable
@@ -409,15 +443,9 @@ export function createSettler(deps: SettlerDeps): Settle & {
             ? `nothing was sent, and it is too late to settle here, but the auth entry may still ` +
               `land in ledger ${expiration}: once that ledger has closed, sign a new payment`
             : `nothing was sent, and the auth entry expired with ledger ${expiration}: sign a new ` +
-              `payment`;
-    return {
-      ...settled,
-      response: {
-        ...response,
-        errorMessage,
-        extra: { ...response.extra, retryable, expirationLedger: expiration },
-      },
-    };
+              `payment`,
+      retryable,
+    );
   };
 
   /**
@@ -640,7 +668,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
           logger.error("settlement_submit_failed", { network, settlementKey: key, error });
           metrics.increment("settlement_submit_failures_total");
         }
-        // The answer is the same fixed reason, and the client needs a new payment.
+        // The answer is the same fixed reason: a new payment, once this one can't land (0082).
         flagDrift(key, errorReason, "pool");
         return await finish(key, { state: "rejected", errorReason, attempts }, call.origin, own);
       }
@@ -861,6 +889,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
       flagDrift(undefined, verdict.invalidReason, "check");
       return {
         ...untouched,
+        reopenRefused: reopening !== undefined,
         response: failure(
           verdict.invalidReason ?? SETTLE_REASONS.unexpected,
           verdict.payer,
@@ -1040,7 +1069,7 @@ interface Validity {
 }
 
 /**
- * How long reading the latest ledger may take for an unsent answer or a reopen. The longest
+ * How long reading the latest ledger may take for an ended answer or a reopen. The longest
  * budget (80 s) plus the store's grace and this stays below the load balancer's 120 s.
  */
 const LEDGER_READ_MS = 1_000;

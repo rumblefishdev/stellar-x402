@@ -75,6 +75,8 @@ the facilitator. It is built and tested against a local OpenBao in Docker, befor
 | 17 | A deploy waits for `signer` ok beside `ready` and `listed`, so an image that can't sign doesn't become the last good one. OpenBao being down rolls a deploy back the same way, and the message says so | grilling | beyond it | — | `deploy/libexec/x402-deploy` | the probe run on 6 `/health` bodies, in the PR |
 | 18 | `/verify` doesn't look at the signer. While OpenBao is down the seller's route runs and `/settle` fails: the buyer pays nothing and the seller loses the work. Named in ADR 0013; the protection is 0027's alarm. Refusing would stop every payment after one failed signature, until the next check passes | grilling | beyond it | spec: `/verify` validates the payment (`x402-specification-v2.md:309`), silent on the ability to settle | `docs/adr/0013-facilitator-key-custody.md` | — |
 | 19 | A `403` keeps the token: only a restore of an older snapshot, or revoking a token by hand, makes a new login help (measured on OpenBao 2.7.2, 1 run: seal, restart: the token works; the leak procedure: login 400 too). After a restore the facilitator is restarted | grilling | beyond it | — | `docs/adr/0013-facilitator-key-custody.md` | — |
+| 20 | One key stays each channel's only signer, as ADR 0003 and AD-12 have it; channels get no keys of their own. Own keys would protect about 30 of about 130 XLM at launch, and nothing against code running in the container. What the key can do stays 0048's re-check | grilling | beyond it | Stellar's channel accounts guide shows a channel with its own key; upstream's `@x402/stellar` takes signers that sign for themselves | `packages/signer-pool/src/setup.ts` | `setup-and-fees.test.ts` |
+| 21 | The rule that the key signs only settlements stays, for the theft alarm: any other signature by it is theft, with no exceptions to keep. OpenBao doesn't enforce the rule, since it signs any hash, so it is no defence against code in the container | grilling | beyond it | — | `docs/adr/0013-facilitator-key-custody.md` | — |
 
 ## Not yet decided
 
@@ -84,18 +86,18 @@ Nothing: the grilling's frontier is empty (2026-10-30).
 
 | PR | What | State |
 |---|---|---|
-| A | `buildCreateChannelsTx` with a funding account apart from the signer it adds, and a script that creates a fee account and channels for a given key (row 15) | #100, open |
+| A | `buildCreateChannelsTx` with a funding account apart from the signer it adds, and a script that creates channels for a given key (row 15) | #100, merged |
 | A′ | the wiring that keeps behaviour: `config.signer` with the secret, the signer passed into `buildSettlement`, `facilitatorAddress`, `verifyOnlySigner` | #106, open, stacked on #100 |
 | B | the Transit signer, its config, `/health`'s `signer`, the settle reasons, the compose variables and the tests (rows 2–14), stacked on A′ for AC 1 | #102, open, stacked on #106; rows 17–19 too |
+| C | the tests that aren't in `test/` or named `.test.ts` move there: five scripts to `test/live/`, `testing.ts` out of `src`; the rule goes into the repo's `CLAUDE.md` | after #102 |
 
 ## Out of scope
 
 - The on-chain limit of the hot key's power (thresholds, a cold key): 0048.
-- The fee account as the caller of every settlement, which keeps that limit out of reach: 0093.
-  The shape stays two facilitator signatures per settlement, both through this signer.
+- The channel as the caller of a settlement: 0093, merged. A settlement still takes two facilitator
+  signatures, both through this signer; a testnet run on that shape is in #102.
 - The OpenBao container, its unseal, backups and the move of testnet to the key: 0026.
 - The alarm on signer failures: 0027. The pubnet gate in `config.ts` names only 0024 and 0090, and it must name this alarm before mainnet.
-- Which way testnet's channels move to the key: ADR 0013 has `set_options` on the existing ones, `docs/runbook.md` new ones. 0026 settles it.
 
 ## Implementation
 

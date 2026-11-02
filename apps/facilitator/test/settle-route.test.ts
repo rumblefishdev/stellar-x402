@@ -447,6 +447,8 @@ async function stalled(url: string): Promise<{ readonly closed: boolean }> {
   const state = { closed: false };
   socket.on("error", () => {});
   socket.on("close", () => (state.closed = true));
+  // Until the server has read those bytes, Node counts the connection as idle and closes it at once.
+  await fetch(`${url}/supported`);
   return state;
 }
 

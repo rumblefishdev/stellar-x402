@@ -237,7 +237,7 @@ describe("main()'s /settle wiring, under a stale lease token (0071)", () => {
       errorReason: SETTLE_REASONS.leaseLost,
       transaction: refused,
     });
-    expect(response).not.toHaveProperty("extra");
+    expect(response.extra).toEqual({ retryable: false, expirationLedger: expect.any(Number) });
     expect(await store.get(keyOf(pay, "stellar:testnet")!)).toMatchObject({
       state: "rejected",
       hashes: [refused],
