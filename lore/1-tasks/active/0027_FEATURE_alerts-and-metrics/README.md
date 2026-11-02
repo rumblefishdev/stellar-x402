@@ -165,6 +165,70 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
 2. **Five PRs** (akot, 2026-11-02): decisions and ADRs, the metrics adapter, the server side, the
    alarms in CDK, and the off-server check with the closing docs. Each opens as a draft that
    describes its scope, and the code follows once the decisions are agreed.
+3. **The alarms are CDK in `infra/`, deployed by hand** (akot, 2026-11-02): TypeScript, as in the
+   explorer and the Prices API, with the account's existing default bootstrap in both regions.
+   An operator deploys with SSO. No workflow has AWS credentials, and 0014's own qualifier went
+   with the ECS plan.
+4. **Bill what has an alarm, and the traffic picture** (akot, 2026-11-02): per-route counts, settle
+   outcomes, one `pool_events_total` without a `type` dimension, and the event types that have an
+   alarm, about 11 traffic metrics. The other types stay a field in the log line, read with Logs
+   Insights. AC 1 holds as written. A metric costs $0.30 a month only for hours it gets data.
+5. **Uptime and readiness come from one Lambda probe, not Route 53** (akot, 2026-11-02). A small
+   function in eu-central-1 reads `/health` every minute through the public hostname, parses the
+   JSON and publishes `ready` per network. A missing point counts as down, and the alarm fires
+   after 7 failing minutes. The 99% figure comes from the same metric. It covers a crash loop, a
+   lost lease, the tunnel and Cloudflare, and it doesn't depend on the agent. It costs about $4 a
+   month less and needs no us-east-1 stack. The price is one vantage point and every alarm in one
+   region: a fault between AWS and Cloudflare reads as downtime. ADR 0011's Uptime section changes
+   with it. The probe ships with the alarms (PR 4), apart from the off-server check (PR 5), so an
+   RPC or Horizon fault can't take it down and it's ready before the first deploy.
+6. **0027 builds the role and the agent** (akot, 2026-11-02): the logging role, the Roles Anywhere
+   profile and the log groups in CDK, the agent and the helper in the playbook, and the certificate
+   renewal steps in the runbook. The holder of the ClickHouse project's CA only signs the
+   certificate. ADR 0011 names 0026 for the role and its certificate, so it changes, and Stan
+   needs to know.
+7. **Low balance: alarms at 25 and 10 XLM, the floor at 5 XLM** (akot, 2026-11-02). 0024's floor
+   took 25 XLM from ADR 0013's alarm, so the alarm fired as settlement stopped. The floor only has
+   to refuse cleanly before fees start failing on the network: fees in flight hold about 1.25 XLM
+   at 50 channels. ADR 0013's alarm stays at 25 XLM, about 5 days before the floor at 1,000
+   settlements a day, and 10 XLM repeats it about a day before. CloudWatch notifies only on a
+   change of state, hence two. The check runs off the server, every 5 minutes: it publishes
+   `spendableStroops` from `checkFacilitatorBalance`, and the thresholds live in the alarms, so
+   `low` and its 100 XLM default go unused. The message gives the network, the balance, the fee
+   account's address and the runbook's top-up step. `SPEND_FLOOR_STROOPS` moves to 50,000,000 in
+   #105.
+8. **Theft is read from the accounts, not from our hashes** (akot, 2026-11-02). The off-server
+   check compares the signers and all four thresholds of the fee account and each channel with a
+   declared set, and allows only `account_credited` among their Horizon effects. It needs nothing
+   from the server, which root could forge, and it keeps no state. On testnet the fee account
+   shows 4 effects across its settlements, all from its setup, and a token transfer shows as
+   `account_debited`. It can't see the float burned on fees alone, which gains a thief nothing;
+   the balance alarms catch that. Channel setup and key rotation fire it, with no suppression, and
+   the declared set changes first. Horizon sits behind a small port. ADR 0013's theft rule changes
+   with it, which Oskar decides.
+9. **Reads of the backup secret come from CloudTrail's event history** (akot, 2026-11-02). The
+   off-server check calls `LookupEvents` every 5 minutes over an overlapping window, so the shared
+   account needs no trail. Events lag by about 10 to 15 minutes. Every read fires, a drill's too,
+   with no suppression. The filter by the secret's name is tested once 0026 creates it.
+10. **Host signals are metric lines a probe writes to a file the agent reads** (akot, 2026-11-02).
+    A root timer runs `x402-host-probe` every minute: OpenBao up and unsealed, WAL archiving,
+    backup and snapshot ages, the certificate's days left, and a heartbeat. The watchdog adds a
+    line per restart. Only the agent holds AWS credentials, and OpenBao keeps its socket with no
+    TCP port. One failed check doesn't stop the others. Each alarm goes on once its signal exists.
+    WAL keeps ADR 0011's rule, with `last_failed_time` past `last_archived_time` in place of a
+    rising `failed_count`, which never falls. The disk threshold is read against the first real
+    numbers before it goes on, and a disk alarm goes to the explorer team, who own the server.
+    Memory gets its threshold after a week of data.
+11. **Every log line ships** (akot, 2026-11-02): 30 days for app lines and 3 for metric lines,
+    which CloudWatch has already turned into metrics. Payers are on chain anyway, and the only
+    client IP is in `rate_limited`, which fires only past a limit and lets anyone with AWS access
+    block an address at the edge without a shell on the server. The account is shared, so
+    retention and the IP are looked at again before mainnet, with 0038.
+12. **Alarms go to `stellar-x402-bot`, and a named person owns them** (akot, 2026-11-02): akot
+    first, with Stan as backup once he confirms. Oskar's weekly float review (ADR 0013) also asks
+    which alarms are in ALARM, since a shared "the team" owner is how the explorer missed 9 days
+    of muted alarms. Testnet alarms are answered in working hours. The phone or SMS route ADR 0011
+    asks for on mainnet goes to 0038.
 
 ## Acceptance Criteria
 
