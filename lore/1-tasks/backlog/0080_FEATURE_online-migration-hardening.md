@@ -9,7 +9,7 @@ related_tasks: ["0024", "0026", "0067"]
 tags: [facilitator, persistence, deploy, priority-medium, effort-medium, platform]
 links:
   - ../../../docs/adr/0012-facilitator-state-store.md
-  - ../active/0067_FEATURE_online-migration-runner/README.md
+  - ../archive/0067_FEATURE_online-migration-runner/README.md
 history:
   - date: "2026-10-27"
     status: backlog
