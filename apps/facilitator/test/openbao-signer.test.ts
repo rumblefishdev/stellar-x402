@@ -178,24 +178,17 @@ describe("openBaoSigner", () => {
     expect(fake.signs.map((s) => s.token)).toEqual(["s.token-1", "s.token-1", "s.token-2"]);
   });
 
-  it("signs with the old token while it lasts when a new login fails (decision 10)", async () => {
+  it("fails a signature when a new login fails, although the old token still lasts (decision 11)", async () => {
     const fake = await fakeOpenBao();
-    const { signer, clock, logs } = setup(fake);
+    const { signer, clock, metrics } = setup(fake);
     await sign(signer);
     clock.now = (HOUR_S - 60) * 1000;
     fake.loginStatus = 400;
 
-    await sign(signer);
-    expect(fake.signs.at(-1)!.token).toBe("s.token-1");
-    expect(logs).toContainEqual(
-      expect.objectContaining({
-        event: "signer_failed",
-        fields: expect.objectContaining({ step: "login", reason: "refused" }),
-      }),
-    );
-
-    clock.now = HOUR_S * 1000;
     expect(await failure(sign(signer))).toMatchObject({ reason: "refused" });
+    expect(fake.signs).toHaveLength(1);
+    expect(signer.state()).toBe("failed");
+    expect(metrics.value("signer_failures_total", { reason: "refused", step: "sign" })).toBe(1);
   });
 
   it("shares one login between signatures that need it at once", async () => {

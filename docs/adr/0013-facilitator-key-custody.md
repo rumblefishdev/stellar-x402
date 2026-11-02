@@ -67,7 +67,7 @@
 - **AppRole login.** The role ID and secret ID come in as Compose `file:` secrets, decrypted by
   the network's unit to a tmpfs (ADR 0011), never as environment variables. The token lives
   1 hour (`token_ttl` and `token_max_ttl`), so a renewal can't stretch it; the signer logs in again
-  once less than 5 minutes are left instead of renewing it, and the old token works meanwhile. The secret ID doesn't expire. The policy allows only
+  once less than 5 minutes are left instead of renewing it, and a login that fails ends that settlement. The secret ID doesn't expire. The policy allows only
   `transit/sign/<network key>`. A leaked token stops working within the hour; a leaked secret ID,
   or code running in the facilitator's container, signs until the secret ID is destroyed by hand
   (runbook).

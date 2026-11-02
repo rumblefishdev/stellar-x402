@@ -125,17 +125,12 @@ export function openBaoSigner(opts: OpenBaoSignerOptions): OpenBaoSigner {
     token = { value: auth.client_token, expiresAt: now() + auth.lease_duration * 1000 };
   }
 
-  /** A token with more than 5 minutes left, or, when a new login fails, the old one while it lasts. */
+  /** A token with more than 5 minutes left; a login that fails fails the signature (0036 decision 11). */
   async function currentToken(): Promise<string> {
     if (token && token.expiresAt - now() > RELOGIN_MARGIN_MS) return token.value;
     // Signatures that need a login at once share it.
     login ??= logIn().finally(() => (login = undefined));
-    try {
-      await login;
-    } catch (error) {
-      if (!token || token.expiresAt <= now()) throw error;
-      failed("login", error);
-    }
+    await login;
     return token!.value;
   }
 
@@ -159,11 +154,11 @@ export function openBaoSigner(opts: OpenBaoSignerOptions): OpenBaoSigner {
     return bytes;
   }
 
-  function failed(step: "login" | "sign" | "check", error: unknown): void {
+  function failed(step: "sign" | "check", error: unknown): void {
     const reason = error instanceof SignerError ? error.reason : "error";
     metrics.increment("signer_failures_total", { reason, step });
     logger.warn("signer_failed", { network, step, reason, error });
-    if (step !== "login") state = "failed";
+    state = "failed";
   }
 
   return {
