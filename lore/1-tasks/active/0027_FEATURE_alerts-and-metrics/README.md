@@ -6,7 +6,7 @@ status: active
 milestone: 1
 related_adr: ["0007", "0011"]
 related_tasks: ["0012", "0014", "0024", "0026", "0020", "0009", "0045", "0049", "0039"]
-tags: [facilitator, operations, monitoring, priority-medium, effort-small, platform]
+tags: [facilitator, operations, monitoring, priority-medium, effort-large, platform]
 links:
   - ../../../../docs/planning/m1-epics.md
   - ../../../../docs/architecture/m1-spine.md
@@ -153,6 +153,18 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     drill. The shared AWS account has no CloudTrail trail today, so this needs one; until then the
     drill checks the 90-day event history.
   - ADR 0011's "Slack is not a pager" still holds for money alerts on mainnet.
+
+## Design Decisions
+
+1. **The agent reads a file the unit writes, not Docker's `json-file` logs** (akot, 2026-11-02).
+   `x402@.service` runs Compose in the foreground with `--no-log-prefix --no-color` and appends
+   stdout to a file, and stderr to a second one. Lines stay raw, so `_aws` is at the root; a
+   `json-file` line wraps them. No new process, `dockerd` stays untouched, and `docker logs` keeps
+   working. stdout leaves the journal. Tested locally, the live check waits for the first deploy:
+   [R-log-path-spike](notes/R-log-path-spike.md). ADR 0011's Logs section changes with it.
+2. **Five PRs** (akot, 2026-11-02): decisions and ADRs, the metrics adapter, the server side, the
+   alarms in CDK, and the off-server check with the closing docs. Each opens as a draft that
+   describes its scope, and the code follows once the decisions are agreed.
 
 ## Acceptance Criteria
 
