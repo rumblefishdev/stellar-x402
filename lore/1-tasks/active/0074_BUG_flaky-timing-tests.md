@@ -37,6 +37,10 @@ production code.
   block) answered `settle_exact_stellar_timeout` instead of `settlement_pending` on PR #85's
   rerun (run 40911669720, job 123608719389): its 100 ms budget ran out before the hash was
   written.
+- `apps/facilitator/test/settle.test.ts`, "drains a submission that runs on after its budget
+  answer, with its record write (0025)" (the same race, a 50 ms budget): answered
+  `settle_exact_stellar_timeout` instead of `settlement_pending` on `node (24)` in run 41445511672,
+  and passed on `node (22)` on the same commit.
 - `apps/facilitator/test/settle-pool.test.ts`, "refuses a call that has signed nothing when the
   drain starts, and closes its record (0025)": answers `settle_exact_stellar_record_write_failed`
   where it expects `settle_exact_stellar_shutting_down` (PR #96, run 41052291836). It failed in
