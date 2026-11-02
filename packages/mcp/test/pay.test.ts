@@ -244,7 +244,9 @@ describe("call_paid_http", () => {
   it("returns payment_rejected when the facilitator refuses, and the budget stays spent", async () => {
     seller.settle = "rejected";
     expect((await pay()).error.code).toBe("payment_rejected");
-    expect(logs.join()).toContain("insufficient_funds");
+    expect(logs.join()).toContain(
+      "insufficient_funds: sign a new payment once ledger 100 has closed",
+    );
     seller.settle = "success";
     // 10,000 of a 15,000 budget is gone: the seller's word cannot give it back.
     expect((await pay()).error.code).toBe("over_budget");
