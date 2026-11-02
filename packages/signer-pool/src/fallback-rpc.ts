@@ -71,7 +71,9 @@ export class RpcUnavailableError extends Error {
  * how to resend (it resends the same envelope and settles uncertainty by hash).
  *
  * A response from a lagging endpoint is still correct for the submitter: `NOT_FOUND` carries that
- * endpoint's own latest close time, so it cannot report a transaction as expired too early.
+ * endpoint's own latest ledger and close time, so lag cannot report a transaction as expired too
+ * early. An endpoint at exactly the ledger bound can miss one that landed there, so the submitter
+ * trusts `NOT_FOUND` only past the bound (0088).
  *
  * The active endpoint can be shared: a caller that reaches the same URLs another way, in the same
  * order, starts on {@link begin}'s endpoint and reports a failure there with {@link markFailed}, so

@@ -1,6 +1,6 @@
 import { Transaction, rpc } from "@stellar/stellar-sdk";
 import type { StellarNetwork } from "@stellar-x402/config";
-import type { SorobanRpc, SubmitResult } from "@stellar-x402/signer-pool";
+import { cannotLand, type SorobanRpc, type SubmitResult } from "@stellar-x402/signer-pool";
 import { getNetworkPassphrase } from "@x402/stellar";
 import type { Logger } from "../logger.js";
 import type { Metrics } from "../metrics.js";
@@ -167,13 +167,11 @@ export function createReconciler(deps: ReconcilerDeps) {
     record: SettlementRecord,
     attempt: SettlementAttempt,
     res: rpc.Api.GetMissingTransactionResponse,
-  ) => {
-    const maxLedger = attempt.maxLedger ?? fallbackLedger(record);
-    return (
-      (attempt.maxTime !== undefined && res.latestLedgerCloseTime > attempt.maxTime) ||
-      (maxLedger !== undefined && res.latestLedger >= maxLedger)
-    );
-  };
+  ) =>
+    cannotLand(res, {
+      maxTime: attempt.maxTime,
+      maxLedger: attempt.maxLedger ?? fallbackLedger(record),
+    });
 
   const resolveRecord = async (record: SettlementRecord): Promise<Outcome> => {
     if (record.hashes.length === 0) {

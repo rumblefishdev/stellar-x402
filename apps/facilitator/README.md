@@ -360,6 +360,11 @@ landed, so it stays open, is logged once as `settlement_history_gone` (counted i
 `settlement_history_gone_total`) and is checked again every 5 minutes: check its hashes on a
 block explorer or Horizon before acting on it.
 
+`settlement_landed_after_expired` (counted in `settlement_landed_after_expired_total`) reports a
+transaction found on chain after its record ended `expired`. The record stays `expired`, so the
+payer was told to sign a new payment for one that landed: check the hash, and whether a second
+payment followed.
+
 A success answered while the store was down is marked answered once the store is back. After a
 restart the process can't know it answered one, so a repeat may get that payment's success a
 second time, at most once; no money moves twice.
