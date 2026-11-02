@@ -8,8 +8,8 @@ related_adr: ["0007", "0011"]
 related_tasks: ["0012", "0014", "0024", "0026", "0020", "0009", "0045", "0049", "0039"]
 tags: [facilitator, operations, monitoring, priority-medium, effort-small, platform]
 links:
-  - ../../../docs/planning/m1-epics.md
-  - ../../../docs/architecture/m1-spine.md
+  - ../../../../docs/planning/m1-epics.md
+  - ../../../../docs/architecture/m1-spine.md
 history:
   - date: "2026-10-07"
     status: backlog
@@ -39,7 +39,7 @@ history:
 
 As a facilitator operator, I want metrics and alerts for anything that costs money or can lose a payment, so that I hear about problems before users do.
 
-**Story:** [M1 Story 2.6](../../../docs/planning/m1-epics.md#story-26-alerts-and-metrics) · **Lane:** Platform · **Covers:** FR14 (AD-18); NFR7
+**Story:** [M1 Story 2.6](../../../../docs/planning/m1-epics.md#story-26-alerts-and-metrics) · **Lane:** Platform · **Covers:** FR14 (AD-18); NFR7
 
 ## Context
 
@@ -55,7 +55,7 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
   extends itself on settlements, so a low TTL means little traffic; an operator then extends it
   with `stellar contract extend` before it is archived.
 - Update `docs/monitoring.md`.
-- From 0039 ([ADR 0011](../../../docs/adr/0011-facilitator-hosting.md), revised): the backend is CloudWatch, fed from the
+- From 0039 ([ADR 0011](../../../../docs/adr/0011-facilitator-hosting.md), revised): the backend is CloudWatch, fed from the
   Hetzner server.
   - Docker keeps our containers' logs on the host (`json-file`, rotated), and the CloudWatch
     agent sends them on with the logs-and-metrics role's credentials from IAM Roles Anywhere. Only
@@ -139,7 +139,7 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
   names (`RPC_URLS[i]#<fingerprint>`). Add a `rpc_failovers_total{from,to}` counter, or an alarm on the log, since a lagging
   fallback answers valid payments with rejections (0045 decision 9). A return to the first URL
   should read as recovery, not a new outage (`rpc_failback`, info).
-- From 0047 ([ADR 0013](../../../docs/adr/0013-facilitator-key-custody.md), amended 2026-10-20):
+- From 0047 ([ADR 0013](../../../../docs/adr/0013-facilitator-key-custody.md), amended 2026-10-20):
   - **Low balance:** the fee account's spendable balance below 25 XLM (float 100 XLM), as a Slack
     message. Decide here where the check runs (in the facilitator, or off the server, e.g. a
     scheduled job reading Horizon, which still fires when the server is down) and what the message
