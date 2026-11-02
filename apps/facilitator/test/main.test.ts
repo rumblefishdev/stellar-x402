@@ -280,6 +280,33 @@ describe("main()", () => {
         signers: Record<string, string[]>;
       };
       expect(supported.signers).toEqual({ "stellar:*": [facilitator] });
+      // A payment on this network, so it reaches upstream's scheme, which takes the signer.
+      const requirements = {
+        scheme: "exact",
+        network: "stellar:testnet",
+        asset: "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+        amount: "1000",
+        payTo: Keypair.random().publicKey(),
+        maxTimeoutSeconds: 60,
+        extra: {},
+      };
+      const verified = await fetch(`${base}/verify`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          x402Version: 2,
+          paymentPayload: {
+            x402Version: 2,
+            accepted: requirements,
+            payload: { transaction: "AAAA" },
+          },
+          paymentRequirements: requirements,
+        }),
+      });
+      expect([verified.status, await verified.json()]).toEqual([
+        200,
+        { isValid: false, invalidReason: "invalid_exact_stellar_payload_malformed" },
+      ]);
       await vi.waitFor(async () => {
         const health = (await (await fetch(`${base}/health`)).json()) as { signer: string };
         expect(health.signer).toBe("failed");

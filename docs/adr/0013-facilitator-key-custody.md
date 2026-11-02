@@ -58,7 +58,8 @@
   start, so the facilitator starts without OpenBao (0036).
 - **The OpenBao key signs settlements only.** An ordinary wallet funds the fee account and creates
   the channels, writing the OpenBao key in as each channel's only signer; the channels' own fresh
-  keys sign that, so no tool signs other transactions through OpenBao (0036).
+  keys sign that, so no tool signs other transactions through OpenBao (0036). The one exception is
+  the move off a suspected stolen key, below.
 - **A unix socket per network only.** OpenBao has one listener per network, each on a socket in
   its own volume, mounted only into that network's facilitator, plus an admin socket on the host
   that only root reaches and no container mounts. It opens no TCP port, so nothing on the network

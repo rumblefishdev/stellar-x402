@@ -62,6 +62,8 @@ the unit whose container reads it ([ADR 0011](adr/0011-facilitator-hosting.md)):
 | --------------------------- | ------------------------------ | ------------------- |
 | `database-url.testnet`      | facilitator, `migrate-testnet` | `x402@`, the deploy |
 | `rpc-urls.testnet`          | facilitator                    | `x402@`             |
+| `approle-role-id.testnet`   | facilitator                    | `x402@`             |
+| `approle-secret-id.testnet` | facilitator                    | `x402@`             |
 | `postgres-password.testnet` | `postgres-testnet`             | `x402-db-testnet@`  |
 | `tunnel-token`              | `cloudflared`                  | `x402-tunnel@`      |
 

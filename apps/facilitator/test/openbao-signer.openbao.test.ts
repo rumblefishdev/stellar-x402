@@ -66,12 +66,12 @@ describe.skipIf(!ADDR || !ROOT)("openBaoSigner against OpenBao", () => {
     });
     const auths = (await admin("GET", "/v1/sys/auth"))!.data;
     if (!("approle/" in auths)) await admin("POST", "/v1/sys/auth/approle", { type: "approle" });
-    // As ADR 0013 sets it: an hour, not renewable past it. Under the 5-minute margin a 1-minute
-    // token makes every signature log in again.
+    // Not renewable past its life, as ADR 0013 sets it, but 1 second instead of an hour, so a test
+    // can wait for a token to expire.
     await admin("POST", `/v1/auth/approle/role/${ROLE}`, {
       token_policies: [ROLE],
-      token_ttl: "1m",
-      token_max_ttl: "1m",
+      token_ttl: "1s",
+      token_max_ttl: "1s",
     });
     roleId = (await admin("GET", `/v1/auth/approle/role/${ROLE}/role-id`))!.data.role_id as string;
     secretId = (await admin("POST", `/v1/auth/approle/role/${ROLE}/secret-id`))!.data
@@ -110,9 +110,9 @@ describe.skipIf(!ADDR || !ROOT)("openBaoSigner against OpenBao", () => {
       .setTimeout(60)
       .build();
 
-  it("signs a transaction with the Transit key, logging in for each short-lived token", async () => {
+  it("signs a transaction with the Transit key, and again once its token has expired", async () => {
     const { signer: s } = signer();
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 2; i++) {
       const tx = transaction();
       const { signedTxXdr } = await s.signTransaction(tx.toXDR(), {
         networkPassphrase: Networks.TESTNET,
@@ -121,6 +121,7 @@ describe.skipIf(!ADDR || !ROOT)("openBaoSigner against OpenBao", () => {
       expect(
         Keypair.fromPublicKey(address).verify(tx.hash(), signed.signatures[0]!.signature()),
       ).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 1_100));
     }
     await s.check();
     expect(s.state()).toBe("ok");
