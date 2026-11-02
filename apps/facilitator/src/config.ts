@@ -305,7 +305,8 @@ export interface Config {
   port: number;
   logLevel: "debug" | "info" | "warn" | "error";
   rpcUrls: string[];
-  facilitatorSecret: string;
+  /** How the facilitator key signs; the secret is never logged. */
+  signer: { mode: "secret"; secret: string };
   channels: string[];
   /** Never logged. */
   databaseUrl: string;
@@ -419,7 +420,7 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
     port: e.PORT,
     logLevel: e.LOG_LEVEL,
     rpcUrls: e.RPC_URLS ?? [DEFAULT_TESTNET_RPC],
-    facilitatorSecret: e.FACILITATOR_SECRET,
+    signer: { mode: "secret", secret: e.FACILITATOR_SECRET },
     channels: e.CHANNELS,
     databaseUrl: e.DATABASE_URL,
     fees: {
