@@ -2,7 +2,7 @@
 id: "0091"
 title: "Drop the containers' capabilities and run the playbook from a protected branch before the signer lands"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0011"]
 related_tasks: ["0026", "0036"]
@@ -13,6 +13,10 @@ history:
     status: backlog
     who: stkrolikiewicz
     note: "Spawned from 0026: the two items Karol left for later in his review of #91."
+  - date: "2026-11-02"
+    status: active
+    who: okarcz
+    note: "Picked up by okarcz."
 ---
 
 # Drop the containers' capabilities and run the playbook from a protected branch before the signer lands

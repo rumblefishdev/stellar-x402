@@ -1,5 +1,5 @@
 ---
-id: "0086"
+id: "0096"
 title: "Set the pubnet fee ceiling from what a new persistent entry's rent costs there"
 type: FEATURE
 status: backlog

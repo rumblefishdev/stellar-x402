@@ -1,7 +1,8 @@
 # ADR 0007: Any SEP-41 token, with fees contained by one fee config, rate limits and spend budgets
 
 - Status: accepted
-- Date: 2026-10-07, amended 2026-10-14 (task 0018: the bid counts twice)
+- Date: 2026-10-07, amended 2026-10-14 (task 0018: the bid counts twice), 2026-10-29 (task 0066:
+  restore rent)
 
 ## Context
 
@@ -41,6 +42,10 @@ It also found that two fee ceilings disagreed:
     `inclusionFeeStroops` is twice the bid, so `/verify` refuses what the pool would (spine AD-10).
   - `maxFeeStroops` and `inclusionFeeStroops` each feed both upstream `ExactStellarScheme` and the
     pool.
+  - Restore rent counts toward the ceiling (task 0066): since Protocol 23 a transaction restores
+    the archived entries it touches and pays their rent in its resource fee. Above the ceiling the
+    payment is refused and the message names the entries; below it the facilitator pays, as it
+    pays any rent.
   - `feeEscalation` is set by the app: interim testnet values in Tranche 1, mainnet values from
     task 0010.
 - **Rate limiting.**

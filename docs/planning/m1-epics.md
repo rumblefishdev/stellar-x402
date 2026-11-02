@@ -61,7 +61,7 @@ guide, the two example integrations, the security review report, uptime targets,
   the simulated resource fee plus our inclusion bid (at least 100 stroops), never the client's
   fee, and comes from one fee configuration shared by verify and settle.
 - **FR6:** Each settlement is one transaction submitted through the channel-account pool, with
-  the channel as transaction source and the facilitator as operation source and fee-bump payer.
+  the channel as transaction source and caller, and the facilitator as fee-bump payer.
 - **FR7:** The facilitator rejects any payload that references a channel account or the
   facilitator key as transaction source, operation source, `from` or auth-entry address.
 - **FR8:** The facilitator rejects a payload whose auth expires in fewer than
