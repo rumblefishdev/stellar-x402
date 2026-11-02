@@ -75,11 +75,18 @@ production code.
 - Measured 2026-11-02 on `develop` `5a2ad44`, with #101 and #103 in, a busy loop on each of 10 cores:
   `settle`, `settle-pool`, `postgres`, `review-2-twice` and `mcp/pay` together, 50 runs: 49 clean.
   - Run 47 failed `settle.test.ts`, "never stores a hash for the earlier claim when another process
-    ended and reopened it". The message wasn't kept. It runs on a real 100 ms budget, like the tests
-    #101 moved (hypothesis, not reproduced), so the second criterion isn't met yet.
-  - `settle-route.test.ts`, "gives the lease up at once past a stalled client" (line 561), failed 3 of
-    3 local runs on `develop` `d11c956`, and hasn't failed in the CI runs read. Not explained; outside
-    these 50 runs.
+    ended and reopened it": its reopened call shared the real 100 ms budget. Reproduced with
+    `addHash` delayed 150 ms (the record ends `rejected`, not `signed`); with a budget of its own the
+    same delay passes.
+  - `settle-route.test.ts`, "gives the lease up at once past a stalled client", failed every local
+    run, also on `develop` `d11c956`: the server closed before it had read the client's bytes, when
+    Node still counts the connection as idle (a plain `http` server: closed with no wait, kept after
+    1 ms, 2 of 2). A request to the server now comes first. 5 of 5 runs pass with no load.
+- The same 50 runs with both fixes and `settle-route`: 49 clean. Run 17 failed `settle.test.ts`,
+  "reopens with exactly two ledgers left, the pool's floor", at the repeat's `success`.
+  - Not reproduced: `settle.test.ts` alone passed 37 of 37 under the same load. A `store.get` or
+    `markSuccessAnswered` delayed 300 ms doesn't fail it, so neither explains it. The answer itself
+    wasn't kept, so the cause is open.
 
 ## Acceptance Criteria
 
