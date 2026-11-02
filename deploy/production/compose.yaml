@@ -45,7 +45,7 @@ services:
     networks:
       - edge
       - db
-    # Liveness only (ADR 0011); the deploy reads `ready` and `listed` with the same one-liner.
+    # Liveness only (ADR 0011); the deploy reads the body with the same one-liner.
     healthcheck:
       test:
         - CMD

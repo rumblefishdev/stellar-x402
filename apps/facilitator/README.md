@@ -137,7 +137,7 @@ default).
 - Its body is `{ "ready": …, "signer": …, "listed": … }`. `ready`: the process holds the lease and
   isn't shutting down, so `/settle` serves. `listed`: a sweep has listed the open settlement records
   (0019). A deploy waits for both and rolls back without them. `signer`: `unchecked`, `ok` or
-  `failed`, from the check after start and each signature since (0036); nothing waits for it.
+  `failed`, from the check after start and each signature since (0036); only a deploy waits for it.
 - The process starts only on a schema with every migration it knows applied, and names the
   missing ones otherwise; a schema ahead of the code passes, so a rollback starts.
 

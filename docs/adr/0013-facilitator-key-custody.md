@@ -163,7 +163,10 @@
   adds the OpenBao key and removes itself, and merges the old fee account into the new one
   (`accountMerge`). The service stops for it, as in ADR 0011's rotation steps.
 - **Rotation and break-in runbook** (0026):
-  - a leaked token or secret ID: destroy the secret ID, revoke its tokens, issue a new one;
+  - a leaked token or secret ID: destroy the secret ID, revoke its tokens, issue a new one, and
+    restart the facilitator, which reads it at start;
+  - a restore of OpenBao from a snapshot: restart the facilitator, since a token newer than the
+    snapshot answers 403 until its hour ends and a 403 doesn't make the signer log in again;
   - a suspected key theft: create a new Transit key and move to it with the old key in the same
     transaction as the testnet move (its own account, the channels re-signed, the old fee account
     merged into it), then check the theft alarm's history.
@@ -219,6 +222,10 @@
   drill checks the 90-day event history, and an alarm is a 0027 follow-up.
 - **A restart of the server stops `/settle` until OpenBao is unsealed,** which happens by itself in
   seconds.
+- **While OpenBao is down, `/verify` still accepts a payment.** The seller's route runs, `/settle`
+  fails, and the route's answer is thrown away: the buyer pays nothing and the seller loses the
+  work until 0027's alarm brings someone. `/verify` doesn't refuse, because one failed signature
+  would then stop every payment until the next check passes.
 - **We depend on another project's Storage Box.** If it is cancelled or resized, our snapshots go
   with it. 0026 tells that team.
 - **0036 becomes the OpenBao Transit signer,** owned by Payments. 0026 gains the OpenBao deployment

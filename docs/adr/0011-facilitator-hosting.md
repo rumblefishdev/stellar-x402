@@ -184,7 +184,7 @@ One request or one stop must never outlast the layer in front of it:
 | Node `keepAliveTimeout`               | 125 s              | above `cloudflared`'s idle keep-alive (90 s), or it sees 502s      |
 | Container healthcheck                 | 10 s               | liveness only                                                      |
 | `LEASE_TTL_MS`                        | 30 s               | after a crash, a new process waits at most this long               |
-| Wait for `ready` and `listed`         | 120 s              | past it, the deploy rolls back to the previous digest              |
+| Wait for `ready`, `listed`, `signer`  | 120 s              | past it, the deploy rolls back to the previous digest              |
 | Unit `TimeoutStopSec`                 | 200 s              | above `stop_grace_period`, so a reboot waits for the drain         |
 | Unit `TimeoutStartSec`                | 60 s               | covers `ExecStartPre` only: credentials and the digest, no pull    |
 | Postgres `stop_grace_period`          | 120 s              | a clean shutdown; the Compose default is 10 s                      |
