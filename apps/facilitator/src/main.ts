@@ -9,7 +9,7 @@ import {
   type SorobanRpc,
   type TransactionSigner,
 } from "@stellar-x402/signer-pool";
-import { createEd25519Signer, getNetworkPassphrase } from "@x402/stellar";
+import { getNetworkPassphrase, type FacilitatorStellarSigner } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/facilitator";
 import type pg from "pg";
 import { Agent, setGlobalDispatcher } from "undici";
@@ -201,7 +201,7 @@ export function upstreamDeadlineMs(
 export type SchemeOptions = NonNullable<ConstructorParameters<typeof ExactStellarScheme>[1]>;
 
 export type MakeScheme = (
-  signer: ReturnType<typeof createEd25519Signer>,
+  signer: FacilitatorStellarSigner,
   options: SchemeOptions,
 ) => UpstreamVerifier;
 
@@ -276,7 +276,7 @@ export function buildUpstream(
   config: Config,
   fees: FeeSettings,
   logger: Pick<Logger, "warn">,
-  facilitator: ReturnType<typeof createEd25519Signer>,
+  facilitator: FacilitatorStellarSigner,
   active: Pick<FallbackRpc, "begin" | "markFailed">,
   seams: UpstreamSeams = {},
 ): Pick<VerifierDeps, "upstream" | "upstreamTimeoutMs"> {
@@ -323,7 +323,7 @@ export function facilitatorAddress(config: Config): string {
  * address (`@x402/stellar` 2.28.0 `exact/facilitator/index.mjs:69-104`); `/settle` signs through
  * the pool, so upstream never signs and no secret is needed here.
  */
-function verifyOnlySigner(address: string): ReturnType<typeof createEd25519Signer> {
+function verifyOnlySigner(address: string): FacilitatorStellarSigner {
   const refuse = async (): Promise<never> => {
     throw new Error("upstream's scheme only verifies; the pool signs");
   };
