@@ -7,6 +7,7 @@ import {
   SettlementSubmitter,
   keypairSigner,
   type SorobanRpc,
+  type TransactionSigner,
 } from "@stellar-x402/signer-pool";
 import { createEd25519Signer, getNetworkPassphrase } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/facilitator";
@@ -312,6 +313,23 @@ export function buildUpstream(
   };
 }
 
+/** The facilitator key's address. */
+export function facilitatorAddress(config: Config): string {
+  return Keypair.fromSecret(config.signer.secret).publicKey();
+}
+
+/**
+ * Upstream's signer for `ExactStellarScheme`, which `/verify` uses only for the facilitator's
+ * address (`@x402/stellar` 2.28.0 `exact/facilitator/index.mjs:69-104`); `/settle` signs through
+ * the pool, so upstream never signs and no secret is needed here.
+ */
+function verifyOnlySigner(address: string): ReturnType<typeof createEd25519Signer> {
+  const refuse = async (): Promise<never> => {
+    throw new Error("upstream's scheme only verifies; the pool signs");
+  };
+  return { address, signAuthEntry: refuse, signTransaction: refuse };
+}
+
 /**
  * The verify checks' dependencies from the config (AD-3, AD-5, AD-10, AD-22): {@link buildUpstream},
  * the channels and the validity minimum. `/verify` and `/settle` build their checks from the same
@@ -330,7 +348,7 @@ export function buildChecks(
 ): VerifierDeps {
   // Upstream knows only the facilitator key, and only in plain form; the channels and the muxed
   // facilitator are `createChecker`'s check (AD-5).
-  const facilitator = createEd25519Signer(config.facilitatorSecret, config.network);
+  const facilitator = verifyOnlySigner(facilitatorAddress(config));
   return {
     network: config.network,
     ...buildUpstream(config, fees, logger, facilitator, rpc, seams),
@@ -381,6 +399,8 @@ export function buildSettlement(
     hooks: Pick<SettlementHooks, "beforeSubmit" | "onFinal" | "onSuccess">;
     logger: Logger;
     metrics: Metrics;
+    /** The facilitator key's signer. */
+    signer: TransactionSigner;
     /** Tests pass the pool's `sleep`. */
     sleep?: (ms: number) => Promise<void>;
     /** The channel lease this process holds, with its token, checked before each send (0025, 0071). */
@@ -409,7 +429,7 @@ export function buildSettlement(
   const submitter = new SettlementSubmitter({
     rpc: deps.rpc,
     networkPassphrase: getNetworkPassphrase(config.network),
-    signer: keypairSigner(Keypair.fromSecret(config.facilitatorSecret)),
+    signer: deps.signer,
     channels: config.channels,
     ...deps.fees.pool,
     ...(deps.sleep && { sleep: deps.sleep }),
@@ -515,6 +535,7 @@ export function compose(
     },
     logger,
     metrics,
+    signer: keypairSigner(Keypair.fromSecret(config.signer.secret)),
     ...(opts.sleep && { sleep: opts.sleep }),
     lease: lease.current,
   });
@@ -588,8 +609,7 @@ export async function main(
     // AD-12: the service starts only when no other key can move a channel. An RPC that doesn't
     // answer fails the check with its error. `compose()` only wires parts, so nothing has called
     // the RPC yet.
-    const facilitator = Keypair.fromSecret(config.facilitatorSecret).publicKey();
-    await checkChannels(rpc, config.channels, facilitator);
+    await checkChannels(rpc, config.channels, facilitatorAddress(config));
     // For the life of the process: an upstream call cut off by the deadline keeps running after
     // `close()`, and its error would reach stderr with the RPC URL in it.
     const restoreConsole = captureConsoleError(logger, config.rpcUrls);
