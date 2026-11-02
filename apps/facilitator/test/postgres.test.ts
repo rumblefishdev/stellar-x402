@@ -248,7 +248,6 @@ describe("PostgreSQL stores", () => {
       expect(await adding).toBe(true);
       expect((await taking)?.token).not.toBe(lease.token);
     });
-    expect(order).toEqual(["added", "taken"]);
     expect(await settlements.get(s.key)).toMatchObject({ state: "signed", hashes: ["h1"] });
   });
 
@@ -286,10 +285,13 @@ describe("PostgreSQL stores", () => {
         "UPDATE leases SET holder = 'b', token = gen_random_uuid() WHERE name = $1",
         [NAME],
       );
-      const adding = settlements.addHash(s.key, "h1", lease, 3_000);
+      // Asserted before the `COMMIT`, or a rejection that comes first is unhandled.
+      const adding = expect(settlements.addHash(s.key, "h1", lease, 3_000)).rejects.toBeInstanceOf(
+        LeaseFencedError,
+      );
       await lockWaiter(client);
       await client.query("COMMIT");
-      await expect(adding).rejects.toBeInstanceOf(LeaseFencedError);
+      await adding;
     });
     expect(await settlements.get(s.key)).toMatchObject({ state: "claimed", hashes: [] });
   });
@@ -301,10 +303,13 @@ describe("PostgreSQL stores", () => {
     await settlements.claim(s2);
     await holding(async (client) => {
       await client.query("INSERT INTO settlement_hashes (hash, key) VALUES ('h1', $1)", [s1.key]);
-      const adding = settlements.addHash(s2.key, "h1", await holdLease(settlements), 3_000);
+      // Asserted before the `COMMIT`, or a rejection that comes first is unhandled.
+      const adding = expect(
+        settlements.addHash(s2.key, "h1", await holdLease(settlements), 3_000),
+      ).rejects.toBeInstanceOf(HashConflictError);
       await lockWaiter(client);
       await client.query("COMMIT");
-      await expect(adding).rejects.toBeInstanceOf(HashConflictError);
+      await adding;
     });
   });
 

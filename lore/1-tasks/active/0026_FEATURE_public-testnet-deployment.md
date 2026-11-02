@@ -364,7 +364,11 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     TBD before mainnet;**
   - **weekly review** after the mainnet deploy (okarcz): the real fee spend, the next refill
     amount, and whether ADR 0013's custody still fits the float;
-  - a leaked token or secret ID: destroy the secret ID, revoke its tokens, issue a new one;
+  - a leaked token or secret ID: destroy the secret ID, revoke its tokens, issue a new one, and
+    restart the facilitator, which reads it at start;
+  - a restore of OpenBao from a snapshot: restart the facilitator, since a token newer than the
+    snapshot answers 403 until its hour ends (0036). A new login worked after a restore in one run
+    on OpenBao 2.7.2; the drill confirms it;
   - a suspected key theft: new Transit key, then the same transaction as the move above with the
     old key, check the theft alarm's history;
   - OpenBao upgrades and what `/settle` does meanwhile (it answers an error).

@@ -52,8 +52,8 @@
   `transit/sign/<network key>` with a pinned `key_version` and adds the 64-byte signature. A
   rotated Transit key can't then sign in place of the key that is on chain.
 - **The signer's address is the fee account's, from config.** The pool pays fee bumps from it and
-  uses it as the operation source and the channels' signer, so the fee account is always the
-  OpenBao key's own account. Every signature is checked against that address. After start, a
+  uses it as the channels' signer, so the fee account is always the OpenBao key's own account.
+  Every signature is checked against that address. After start, a
   signature of a fixed value, repeated every 30 s until it passes, reports the check in `/health`'s
   `signer` without holding up the start, so the facilitator starts without OpenBao (0036).
 - **The OpenBao key signs settlements only.** An ordinary wallet funds the fee account and creates

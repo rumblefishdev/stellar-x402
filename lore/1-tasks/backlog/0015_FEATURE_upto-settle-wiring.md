@@ -48,6 +48,15 @@ Add `upto` to the facilitator's settlement path built in 0009 for `exact`, and a
 `/supported`. In T1, `upto` is only the contract and its design (0004, 0005). This task comes
 after T1.
 
+**The pool refuses `upto` as the harness builds it.** `settle_upto` calls
+`facilitator.require_auth()`. The `upto` e2e suite and `testnet-smoke.ts` give that consent with a
+source-account entry, which the pool has refused since `d85b041`, so they can't settle (neither
+runs in CI). Since 0093 the pool also sets no operation source; it still accepts an address entry
+signed by the facilitator. Choose how the facilitator gives consent here. Both ways need the
+consenting account's medium threshold (`soroban-env-host` 30.0.0 `account_contract.rs:245`), so if
+0048 raises the fee account's, consent must come from another account, and clients sign that
+address.
+
 ## Context
 
 - **Waits on 0034** (okarcz, 2026-10-28): start only once the x402 Foundation accepts the

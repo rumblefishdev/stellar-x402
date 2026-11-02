@@ -77,9 +77,9 @@ graph TD
 - **Binds:** T1-facilitator, T1-channel-pool, T1-upto-prototype (ADR 0003)
 - **Prevents:** a second submit path that bypasses the pool's sequence handling, fee policy and confirmation.
 - **Rule:**
-  - Every settlement is submitted with `SettlementSubmitter.submit()` from `packages/signer-pool`, in the delegated-bump shape: the channel is the transaction source, the facilitator is the operation source and pays the fee bump.
+  - Every settlement is submitted with `SettlementSubmitter.submit()` from `packages/signer-pool`, in the delegated-bump shape: the channel is the transaction source and, with no operation source, the caller; the facilitator pays the fee bump.
   - Nothing else in the service calls `sendTransaction`.
-  - The `upto` testnet harness (0004) uses the same shape.
+  - The `upto` testnet harness (0004) has the facilitator as operation source; the pool refuses its source-account entry, so it can't settle until 0015.
 
 ### AD-3: Upstream verifies, we settle
 
@@ -98,7 +98,7 @@ graph TD
     - A call cut off by its 10 s keeps running, since upstream's clients can't be cancelled. `main()` sets undici's global header and body timeouts to 10 s, which stellar-sdk's `fetch` uses, so the abandoned request ends instead of holding its socket for undici's default 300 s.
     - Upstream's Horizon read of the ledger close time has no URL of ours to fail over to. It falls back to upstream's default on an error. Upstream reads it after its RPC calls, so a Horizon that hangs takes the URL being tried past its 10 s, which counts as that URL's timeout and moves the shared URL: `rpc_failover` with `by: "verify"` blames an RPC URL for Horizon's delay. With healthy RPCs the probe that the last URL's timeout starts brings calls back (`rpc_failback`), so while Horizon hangs the two lines repeat. Every URL times out, `rpc_exhausted` lists them, and the answer is a 500 with the `UpstreamTimeoutError` of the first URL tried, the active one, not always `RPC_URLS[0]`. Payments are unaffected: the pool's reads and sends answer on either URL.
   - **`/verify`** = upstream `verify()`, then address credentials only, the AD-5 channel check, the AD-6 one-payer-entry check, then the AD-22 validity check. The first rejection returns `isValid: false` with its reason.
-    - Address credentials only: an auth entry with source-account credentials would authorize as the operation source, which the pool makes the facilitator. Upstream refuses it too (`…_unsupported_credential_type`); we check it again because the pin `~2.28.0` lets upstream patches float, and the pool refuses such a call as well.
+    - Address credentials only: an auth entry with source-account credentials would authorize as the call's source, which the pool makes a channel. Upstream refuses it too (`…_unsupported_credential_type`); we check it again because the pin `~2.28.0` lets upstream patches float, and the pool refuses such a call as well.
     - A network check runs first: a process serves one network, and upstream would verify another network's payload against that network's default RPC. A V0 envelope is rejected as malformed there too: upstream parses it, but can't assemble its simulation onto it.
     - Upstream answers its own exceptions, such as a failed RPC call, with `unexpected_verify_error`. That is an error of ours, not a verdict on the payment, so `/verify` answers 500. So does every URL failing, by throwing, giving no answer within 10 s or answering `unexpected_verify_error`: upstream's RPC and Horizon clients have no timeout.
     - A request whose `amount` isn't a whole number is a 400: upstream's `BigInt(amount)` would throw, which would be a 500.

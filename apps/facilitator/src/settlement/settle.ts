@@ -113,7 +113,7 @@ export const SETTLE_REASONS = {
    * out). Not a bug: try again later ({@link UNSENT_REASONS}).
    */
   rpcUnavailable: "settle_exact_stellar_rpc_unavailable",
-  /** An auth entry with source-account credentials would authorize as the facilitator (AD-5). */
+  /** An auth entry with source-account credentials would authorize as the channel (AD-5). */
   unsupportedCredential: UNSUPPORTED_CREDENTIAL_REASON,
   /**
    * The facilitator stopped before anything was signed (a crash or a restart), and reconciliation

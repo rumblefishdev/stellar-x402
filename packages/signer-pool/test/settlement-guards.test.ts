@@ -92,7 +92,7 @@ const addressCredentials = (v2 = false) => {
 };
 
 describe("source-account auth", () => {
-  it("refuses a call whose auth would authorize as the facilitator, before taking a channel", async () => {
+  it("refuses a call whose auth would authorize as the channel, before taking a channel", async () => {
     const { fake, submitter, signer } = setup();
     const entry = authEntry(xdr.SorobanCredentials.sorobanCredentialsSourceAccount());
     await expect(submitter.submit({ ...call(), auth: [entry] })).rejects.toBeInstanceOf(
