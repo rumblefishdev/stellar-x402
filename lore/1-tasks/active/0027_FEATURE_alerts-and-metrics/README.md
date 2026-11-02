@@ -4,8 +4,8 @@ title: "Alerts and metrics"
 type: FEATURE
 status: active
 milestone: 1
-related_adr: ["0007", "0011"]
-related_tasks: ["0012", "0014", "0024", "0026", "0020", "0009", "0045", "0049", "0039"]
+related_adr: ["0007", "0011", "0013"]
+related_tasks: ["0012", "0014", "0024", "0026", "0020", "0009", "0045", "0049", "0039", "0036", "0038", "0048", "0077", "0089"]
 tags: [facilitator, operations, monitoring, priority-medium, effort-large, platform]
 links:
   - ../../../../docs/planning/m1-epics.md
@@ -49,18 +49,18 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
 ## Implementation
 
 - Metrics adapter in `adapters/` fed by pool events and the HTTP layer.
-- Alert rules for the five conditions; a balance check on a timer.
-- **UptoProxy TTL (from 0035):** read the proxy's instance and code TTL on the balance timer and
-  alert when either drops below about 30 days (`TTL_EXTEND_TO`, 518,400 ledgers). The contract
-  extends itself on settlements, so a low TTL means little traffic; an operator then extends it
-  with `stellar contract extend` before it is archived.
+- Alert rules for the five conditions and the rest of [the alarm list](notes/G-alarm-list.md).
+- **UptoProxy TTL (from 0035), deferred:** waits until `upto` reaches `/settle` and the deployed
+  config names the proxy. Then read its instance and code TTL off the server, in ledgers, and alert
+  well below `TTL_EXTEND_TO` (518,400 ledgers), not at it: settlements hold a used proxy's TTL at or
+  just under that target, so an alert there would stay on. An operator extends it with
+  `stellar contract extend` before it is archived.
 - Update `docs/monitoring.md`.
 - From 0039 ([ADR 0011](../../../../docs/adr/0011-facilitator-hosting.md), revised): the backend is CloudWatch, fed from the
   Hetzner server.
-  - Docker keeps our containers' logs on the host (`json-file`, rotated), and the CloudWatch
+  - The unit appends the facilitator's stdout and stderr to files (decision 1), and the CloudWatch
     agent sends them on with the logs-and-metrics role's credentials from IAM Roles Anywhere. Only
     the agent holds them, so `dockerd` stays untouched and an AWS outage never stops a container.
-    Decide how the agent picks only our containers' files.
   - The adapter writes Embedded Metric Format lines to stdout (namespace `x402-facilitator`).
     Dimensions stay low-cardinality (`network`, route, outcome, event name), never payer or
     `payTo`, and the adapter emits only listed fields. Check once that extraction works on the
@@ -72,32 +72,27 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
   - "ready to settle" (lease held; since 0019 decision 27 reconciliation runs beside `/settle`);
   - from ADR 0013: OpenBao sealed, down or failing to sign; theft (below, from 0047); and
     OpenBao's audit log disk at 80%;
-  - WAL archiving failing: `pg_stat_archiver.failed_count` rising, or the last archived segment
-    older than 10 minutes. pgBackRest acknowledges a segment only once it is in the repository,
+  - WAL archiving failing: `pg_stat_archiver.last_failed_time` past `last_archived_time`, or the
+    last archived segment older than 10 minutes. pgBackRest acknowledges a segment only once it is in the repository,
     so this covers a stuck archive, which fills a disk ClickHouse shares, and WAL that doesn't
     leave the server;
   - the last `pgbackrest backup` or the last OpenBao snapshot older than 26 hours (both run
     daily);
   - the Roles Anywhere certificate expiring within 30 days;
   - low free disk and memory on the server.
-- From 0014: uptime is a Route 53 HTTPS health check.
-  - Its metrics exist only in us-east-1, so the alarm and its SNS topic go in a small us-east-1
-    stack subscribed to the same Slack channel.
+- From 0014, changed by decision 5: uptime is a Lambda probe reading `/health` every minute at
+  `x402-facilitator.sorobanscan.com` (Cloudflare Tunnel, ADR 0011), so a Cloudflare or tunnel
+  outage counts as downtime.
   - The alarm needs more failing minutes than a deploy's worst downtime, which includes the
     migrations and the wait for `ready` (ADR 0011's Consequences). It fires after 7 failing
     minutes in a row; ADR 0011 gives the reasoning.
-  - Check `/supported` once 0020 lands, `/health` before, at
-    `x402-facilitator.sorobanscan.com` (Cloudflare Tunnel, ADR 0011), so a Cloudflare
-    or tunnel outage counts as downtime.
-  - The 99% figure counts a minute as up only when the check passes and the facilitator is ready
-    to settle.
+  - The 99% figure counts a minute as up only when the probe reads `ready`.
   - From 0020: `/supported` answers an object fixed at startup, so its 200 shows only that the
-    process is up, not that the RPC answers or the channels can settle. Readiness to settle needs
-    a check of its own, such as `/health` (0026).
+    process is up, not that the RPC answers or the channels can settle. The probe reads `/health`'s
+    body for that reason (0026).
   - From 0020: a process whose startup check fails (an RPC down, a channel another key can move)
-    exits with `startup_failed` and is restarted in a loop; it never becomes ready, so the
-    readiness alarm (criterion 3) must cover it, treating missing data as breaching, since a
-    crash-looping process reports nothing (ADR 0011).
+    exits with `startup_failed` and is restarted in a loop; it never becomes ready, and the probe
+    counts a missing answer as down, so criterion 3 covers it (ADR 0011).
 - From 0014, amended by 0009 (decisions 44, 47; ADR 0011): RPC endpoints are logged and labelled
   as `RPC_URLS[i]#<fingerprint>` (`rpcEndpointName` in `logger.ts`), never by URL or host. The
   fingerprint tells an entry from the URL it replaced after a redeploy. signer-pool's
@@ -125,11 +120,11 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
       history no longer reaches; it stays open until an operator checks it (0019 decision 22).
       `settlement_attempt_mark_failed`: a `sent` hint not written (warn, not an outage);
     - a sweep has no overall time cap when the RPC fails for every record: N records take about
-      N × the RPC timeout ÷ 4, and the next sweep waits for it. Decide a cap from real backlog
-      sizes;
+      N × the RPC timeout ÷ 4, and the next sweep waits for it. A cap waits for real backlog
+      sizes (deferred);
     - `open` in `reconcile_finished` also counts a record another writer finished during the
-      sweep (its compare-and-set lost), so an `open` alarm should allow for that, or 0027 adds a
-      separate count.
+      sweep (its compare-and-set lost). The `pending` alarm reads the oldest record's age instead,
+      so it doesn't matter there.
     - From Stan's review of PR #57 (0019 decision 36): the deploy checks reconciliation only once,
       through `listed` on `/health`, so an alarm on sweeps that stop listing is the only net for
       one that starts failing later. A sweep that changes nothing logs nothing, so add a counter
@@ -140,18 +135,10 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
   fallback answers valid payments with rejections (0045 decision 9). A return to the first URL
   should read as recovery, not a new outage (`rpc_failback`, info).
 - From 0047 ([ADR 0013](../../../../docs/adr/0013-facilitator-key-custody.md), amended 2026-10-20):
-  - **Low balance:** the fee account's spendable balance below 25 XLM (float 100 XLM), as a Slack
-    message. Decide here where the check runs (in the facilitator, or off the server, e.g. a
-    scheduled job reading Horizon, which still fires when the server is down) and what the message
-    says (network, balance, the fee account's address, the runbook's top-up step).
-  - **Theft:** a transaction with the fee account or a channel as its source or fee source whose
-    hash our submitter didn't record, and any signer or threshold change on those accounts, read
-    from Horizon (`/accounts/{id}/transactions`). It runs off the server, since root on the server
-    is the case it is for. Decide here how it gets our hashes: they sit in the server's database,
-    where root could forge them; the signer check doesn't need them.
-  - **Reads of the backup secret:** `GetSecretValue` on `x402/production/openbao-backup` outside a
-    drill. The shared AWS account has no CloudTrail trail today, so this needs one; until then the
-    drill checks the 90-day event history.
+  - **Low balance:** the fee account's spendable balance (float 100 XLM), decision 7.
+  - **Theft:** the accounts' state and Horizon effects, off the server, decision 8.
+  - **Reads of the backup secret:** `GetSecretValue` on `x402/production/openbao-backup`, from the
+    event history, decision 9.
   - ADR 0011's "Slack is not a pager" still holds for money alerts on mainnet.
 
 ## Design Decisions
@@ -235,5 +222,13 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
 - [ ] Given the running facilitator, when it serves traffic, then pool `onEvent` events, per-route request counts and settle outcomes are exported as metrics
 - [ ] Given each alert condition: budget nearly used, breaker open, low facilitator balance (`checkFacilitatorBalance`), quarantined channel, pending settlements, when it occurs, then an alert fires on CloudWatch (ADR 0011); each alert has been triggered once on testnet or with a fake
 - [ ] Given a process that stays not ready to settle (no lease) longer than the alarm window, when the alarm evaluates, then it fires (ADR 0011)
+- [ ] Given the public URL unreachable, or a process in a crash loop, for 7 minutes in a row, when the uptime probe reads `/health`, then the uptime alarm fires, and a deploy within its usual downtime doesn't fire it (ADR 0011)
 - [ ] Given a process whose sweeps don't list the records (or don't run) for longer than the alarm window, when the alarm evaluates, then it fires (ADR 0011, 0019 decision 36)
+- [ ] Given a signer or threshold change on the fee account or a channel, or an effect on them other than a credit, when the off-server check runs, then an alarm fires, with the server down too (ADR 0013)
+- [ ] Given the fee account's spendable balance below 25 XLM and below 10 XLM, when the off-server check runs, then an alarm fires each time (ADR 0013)
+- [ ] Given a read of the backup secret, when the off-server check runs, then an alarm fires (ADR 0013)
+- [ ] Given OpenBao down or sealed, WAL archiving stuck, a backup or snapshot older than 26 hours, or the certificate under 30 days from expiry, when the condition holds, then an alarm fires (ADR 0011, 0013)
+- [ ] Given the agent, the host probe or the off-server check stopped, when the alarm window passes, then an alarm fires
+- [ ] Given a deploy of the alarm stack, when it ends, then a test alarm has reached Slack and a person has seen it
+- [ ] Given a line from the facilitator on the agent's path, when it reaches CloudWatch, then its metrics exist, checked once on the real path (ADR 0011)
 - [ ] Given `docs/monitoring.md`, when this story is done, then it lists every metric and alert
