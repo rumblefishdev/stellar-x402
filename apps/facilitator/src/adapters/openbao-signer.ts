@@ -23,7 +23,8 @@ const REQUEST_TIMEOUT_MS = 1_000;
 const RELOGIN_MARGIN_MS = 5 * 60_000;
 /**
  * How soon a failed check after start tries again (an assumption): OpenBao opens seconds after its
- * unit starts (ADR 0013), and `/health` shouldn't need a payment to show that it did.
+ * unit starts (ADR 0013), and `/health` shouldn't need a payment to show that it did. It stops at
+ * the first pass: later, only a signature changes `signer`.
  */
 const CHECK_RETRY_MS = 30_000;
 /** What the check after start signs: the hash of a text, which no transaction has. */
@@ -34,8 +35,9 @@ export type SignerState = "unchecked" | "ok" | "failed";
 
 /**
  * Why OpenBao didn't give a usable signature, for the logs and `signer_failures_total`:
- * `sealed` (503), `denied` (403: an expired, revoked or unauthorised token), `refused` (another
- * 4xx, e.g. a wrong secret ID), `error` (a 5xx, such as an audit log it can't write, or an answer
+ * `sealed` (503), `denied` (403: an expired, revoked or unauthorised token, or an AppRole locked
+ * after 5 failed logins, which refuses the right secret ID too until unlocked with a privileged
+ * token), `refused` (another 4xx, e.g. a wrong secret ID), `error` (a 5xx, such as an audit log it can't write, or an answer
  * without a signature), `timeout`, `unreachable` (no socket), `address_mismatch` (signed by a key
  * other than the configured address's).
  */
