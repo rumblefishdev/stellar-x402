@@ -337,10 +337,11 @@ admin's machine and the server over SSH and never reach a disk.
 3. The backup secret `x402/production/openbao-backup`, as ADR 0013 makes it: the seal key, its ID
    and SHA-256, the recovery key, `seal_config` (the `seal "static"` stanza) and
    `openbao_version` (2.7.2). The Borg and Storage Box fields come with the snapshots (Not here
-   yet). Then `unset seal_key init`.
+   yet).
 
-4. Per network, in a root shell on the server with init's root token. Mainnet first adds its
-   listener and socket volume (0038).
+4. Per network, in a root shell on the server with init's root token, one line at a time: `read`
+   takes the next line of a paste as the token, and `docker compose exec` reads stdin and swallows
+   the rest. Mainnet first adds its listener and socket volume (0038).
 
    ```sh
    sudo -i
@@ -371,9 +372,28 @@ admin's machine and the server over SSH and never reach a disk.
    node -e 'console.log(require("@stellar/stellar-sdk").StrKey.encodeEd25519PublicKey(Buffer.from(process.argv[1], "base64")))' PUBLIC_KEY
    ```
 
-5. `bao token revoke -self`, `unset BAO_TOKEN`, and leave the root shell. A new root token comes
-   from the recovery key through the legacy `/sys/generate-root` API, which the admin listener
-   answers without a token (ADR 0013).
+5. `bao token revoke -self`, `unset BAO_TOKEN`, and leave the root shell. On the admin's machine,
+   `unset seal_key init`.
+
+**A new root token,** when an admin needs one again, from the recovery key in the backup secret.
+The CLI's `generate-root` needs a token, so this is the legacy `/sys/generate-root` API, which the
+admin listener answers without one (ADR 0013). In a root shell on the server, one line at a time;
+the values go over stdin, because the arguments of a command show in `ps`:
+
+```sh
+sudo -i
+cd /srv/x402/openbao
+bao() { docker compose exec -T -e BAO_TOKEN openbao bao "$@"; }
+read -rs key   # paste the recovery key, Enter
+n=$(bao read -field=otp_length sys/generate-root/attempt)
+otp=$(openssl rand -base64 48 | tr -dc A-Za-z0-9 | head -c "$n")
+nonce=$(printf %s "$otp" | bao write -field=nonce sys/generate-root/attempt otp=-)
+encoded=$(printf %s "$key" | bao write -field=encoded_token sys/generate-root/update key=- nonce="$nonce")
+export BAO_TOKEN=$(encoded=$encoded otp=$otp python3 -c 'import base64, os; e, o = os.environ["encoded"], os.environ["otp"]; print(bytes(a ^ b for a, b in zip(base64.b64decode(e + "=" * (-len(e) % 4)), o.encode())).decode())')
+unset key otp nonce encoded
+```
+
+When done, step 5 again.
 
 ## Not here yet
 

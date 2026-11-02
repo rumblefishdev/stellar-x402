@@ -10,7 +10,8 @@
   a socket per network, OpenBao's own unit and limits, from the PR #24 review); 2026-10-22 (the
   OpenBao key's own account, the theft alarm, 1-hour tokens, the admin socket and the restore
   path, from the PR #48 review); 2026-11-02 (admin on a loopback listener inside the container,
-  which Raft's cluster address needs, task 0026)
+  which Raft's cluster address needs, and no move of testnet to the OpenBao key, since nothing ran
+  on another key, task 0026)
 - Supersedes: the key custody part of [ADR 0011](0011-facilitator-hosting.md) ("Keys, secrets and
   access": the SSM parameter for `FACILITATOR_SECRET` and the mainnet KMS key)
 
@@ -132,7 +133,7 @@
   recovery key when needed. Since OpenBao 2.6 the CLI's `generate-root` needs a token and the
   unauthenticated endpoints are off by default (CVE-2026-5807), so the admin listener keeps them on
   (`disable_unauthed_generate_root_endpoints=false`) and the runbook calls `/sys/generate-root/*`
-  with curl. Only root on the host reaches that listener, and root already reaches the key. Admin is
+  with `bao write` inside the container. Only root on the host reaches that listener, and root already reaches the key. Admin is
   through SSH on the server, over that listener; no web UI, no remote admin.
 - **The audit log** goes to a file on its own volume, rotated, with an alarm at 80% disk: OpenBao
   stops signing when it can't write it.
@@ -155,15 +156,13 @@
     treasury behind the same root.
   - **A weekly review** after the mainnet deploy (okarcz, Payments): the real fee spend, the next
     refill amount, and whether this custody still fits the float (see Rationale).
-- **Moving to the OpenBao key on testnet:** the OpenBao key gets its own account. In one
-  transaction the current key creates that account, signs a `set_options` on each channel that
-  adds the OpenBao key and removes itself, and merges the old fee account into the new one
-  (`accountMerge`). The service stops for it, as in ADR 0011's rotation steps.
 - **Rotation and break-in runbook** (0026):
   - a leaked token or secret ID: destroy the secret ID, revoke its tokens, issue a new one;
-  - a suspected key theft: create a new Transit key and move to it with the old key in the same
-    transaction as the testnet move (its own account, the channels re-signed, the old fee account
-    merged into it), then check the theft alarm's history.
+  - a suspected key theft: create a new Transit key and move to it with the old key. In one
+    transaction the old key creates the new key's own account, signs a `set_options` on each
+    channel that adds the new key and removes itself, and merges the old fee account into the new
+    one (`accountMerge`). The service stops for it, as in ADR 0011's rotation steps. Then check the
+    theft alarm's history.
 
 ## Rationale
 
