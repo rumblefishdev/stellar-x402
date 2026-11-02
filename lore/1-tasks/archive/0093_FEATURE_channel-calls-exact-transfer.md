@@ -2,7 +2,7 @@
 id: "0093"
 title: "Make the channel the caller of an exact settlement, so the fee account only pays fees"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0003", "0005", "0013"]
 related_tasks: ["0036", "0048", "0015", "0006", "0007"]
@@ -21,6 +21,12 @@ history:
     status: active
     who: karolkow
     note: Work started.
+  - date: "2026-11-02"
+    status: completed
+    who: karolkow
+    note: >
+      Merged in #107. The pool sets no operation source, so the channel is the caller; every
+      criterion checked on develop. No threshold changed on a real account: that is 0048's.
 ---
 
 # Make the channel the caller of an exact settlement, so the fee account only pays fees
@@ -96,5 +102,25 @@ Nothing.
 ## Acceptance Criteria
 
 - [x] Given an `exact` settlement, when the pool builds it, then its `invokeHostFunction` has no operation source
-- [x] Given a fee account whose medium threshold is above the facilitator key's weight, when an `exact` settlement is sent on testnet, then it lands (`d7150967…`, 2026-11-02)
+- [x] Given a fee account whose medium threshold is above the facilitator key's weight, when an `exact` settlement is sent on testnet, then it lands (XLM `7c686d70…`, a non-SAC SEP-41 token `222700a5…`, 2026-11-02)
 - [x] 0048 is told that the fee account no longer needs the medium threshold for `exact`
+
+## Implementation Notes
+
+- One production line in `submitter.ts`; the error message of a source-account entry now names the
+  channel. Measured smaller by 36 bytes and 79 stroops on a native-XLM `transfer`.
+- `settle-smoke.ts` gained `RAISE_FEE_ACCOUNT_THRESHOLDS`, for a fresh fee account only.
+- **Modified tests:** `submitter.test.ts` now expects no operation source (intended). Titles and
+  comments in `settlement-guards.test.ts`, `verify.test.ts`, `xdr-fixture.test.ts` follow the shape.
+
+## Issues Encountered
+
+- The review found a claim of this task too strong: the pool refuses the `upto` harness's
+  source-account entry, not `upto` as such, since an address entry stays open. Corrected here and
+  in 0015.
+- Raising the thresholds on a real account would block creating channels and ADR 0013's merge steps:
+  recorded in 0048.
+
+## Future Work
+
+Nothing new: `upto`'s consent is in 0015, and the fee account's thresholds in 0048.
