@@ -264,7 +264,7 @@ interface Hold {
 
 /**
  * Submits Soroban contract calls through a pool of channel accounts, one transaction in flight
- * per channel, in the shape 0006 measured as cheapest ("delegated-bump"):
+ * per channel, in the "delegated-bump" shape:
  *
  * - tx source: a channel, also the call's caller, since the operation has no source of its own;
  * - the facilitator signs for the channel, because it is a signer on it;

@@ -61,11 +61,11 @@ hot key's weight.
   account paying every fee, channels holding only their reserve, and verify refusing source-account
   auth entries (one would then authorise as the channel).
 - Channels already give the facilitator key the medium threshold (`setup.ts:90-92`).
-- The pool has refused `upto`'s consent entry since `d85b041` (2026-10-16): `settle_upto` needs a
-  source-account auth entry for the facilitator (`contracts/upto-proxy/e2e/src/upto.ts:245`), and
-  `SettlementSubmitter.submit` refuses any such entry. So no call that goes through the pool today
-  needs the fee account as its operation source. CI runs neither the `upto` e2e suite nor
-  `testnet-smoke.ts`, so nothing reported it.
+- The pool has refused the `upto` harness's consent entry since `d85b041` (2026-10-16): the e2e
+  suite and `testnet-smoke.ts` give `facilitator.require_auth()` a source-account entry
+  (`contracts/upto-proxy/e2e/src/upto.ts:245`), and `SettlementSubmitter.submit` refuses any such
+  entry. So no call that goes through the pool today needs the fee account as its operation source;
+  an address entry stays open to `upto`. CI runs neither, so nothing reported it.
 
 ## Decisions so far
 
@@ -75,7 +75,7 @@ hot key's weight.
 | 2 | The pool has no option to set an operation source: nothing sends `upto` through it today, and 0015 chooses how `upto` gives consent | agent | matches it (chosen in 0015) | — | `submitter.ts` | — |
 | 3 | A source-account auth entry stays refused; it would now authorize as the channel | task | matches it | upstream verify refuses it | `submitter.ts` `submit` | `settlement-guards.test.ts` |
 | 4 | `settle-smoke.ts` can raise a fresh fee account's thresholds to 1 / 2 / 2 after channel setup, and checks that a settlement lands and a Payment out is refused | agent | matches it | — | `settle-smoke.ts` | the run in the PR |
-| 5 | 0015 records that the pool refuses `upto`'s consent entry, and that `upto` as a fee-account caller would need the medium threshold 0048 may take away | agent | beyond it | — | 0015's task file | — |
+| 5 | 0015 records that the pool refuses the harness's consent entry, and that any consent from the fee account needs the medium threshold 0048 may take away | agent | beyond it | `soroban-env-host` 30.0.0 `account_contract.rs:245` | 0015's task file | — |
 
 ## Not yet decided
 

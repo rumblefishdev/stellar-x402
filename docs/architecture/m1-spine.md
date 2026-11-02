@@ -79,7 +79,7 @@ graph TD
 - **Rule:**
   - Every settlement is submitted with `SettlementSubmitter.submit()` from `packages/signer-pool`, in the delegated-bump shape: the channel is the transaction source and, with no operation source, the caller; the facilitator pays the fee bump.
   - Nothing else in the service calls `sendTransaction`.
-  - The `upto` testnet harness (0004) uses the same shape.
+  - The `upto` testnet harness (0004) has the facilitator as operation source; the pool refuses its source-account entry, so it can't settle until 0015.
 
 ### AD-3: Upstream verifies, we settle
 

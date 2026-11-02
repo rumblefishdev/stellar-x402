@@ -76,6 +76,10 @@ async function funded(secret: string | undefined): Promise<Keypair> {
   return keypair;
 }
 
+const raiseThresholds = process.env.RAISE_FEE_ACCOUNT_THRESHOLDS === "1";
+if (raiseThresholds && process.env.FACILITATOR_SECRET)
+  throw new Error("raising the thresholds locks the account: use a fresh one");
+
 const facilitator = await funded(process.env.FACILITATOR_SECRET);
 const client = await funded(process.env.CLIENT_SECRET);
 const payTo = process.env.PAY_TO ?? (await funded(undefined)).publicKey();
@@ -96,9 +100,7 @@ const created = await server.pollTransaction((await server.sendTransaction(setup
 });
 if (created.status !== "SUCCESS") throw new Error(`channel setup ${created.status}`);
 
-const raiseThresholds = process.env.RAISE_FEE_ACCOUNT_THRESHOLDS === "1";
 if (raiseThresholds) {
-  if (process.env.FACILITATOR_SECRET) throw new Error("this locks the account: use a fresh one");
   const raise = new TransactionBuilder(await server.getAccount(facilitator.publicKey()), {
     fee: "1000",
     networkPassphrase: Networks.TESTNET,
@@ -191,6 +193,7 @@ try {
     paymentOut.sign(facilitator);
     paymentOutAnswer = await server.sendTransaction(paymentOut);
   }
+  const paymentOutResult = paymentOutAnswer?.errorResult?.result().results()[0]?.switch().name;
 
   const checks = {
     settled: settled.success && settled.payer === client.publicKey() && onChain === "SUCCESS",
@@ -209,7 +212,7 @@ try {
       concurrent[0]!.transaction !== settled.transaction,
     settledPaymentNoLongerVerifies: !verifySettled.isValid,
     ...(process.env.EXPECT_FAILOVER === "1" && { failedOver }),
-    ...(raiseThresholds && { paymentOutRefused: paymentOutAnswer?.status === "ERROR" }),
+    ...(raiseThresholds && { paymentOutRefused: paymentOutResult === "opBadAuth" }),
   };
   console.log(
     JSON.stringify(
@@ -224,7 +227,7 @@ try {
         concurrent,
         verifySettled,
         failedOver,
-        paymentOutResult: paymentOutAnswer?.errorResult?.result().results()[0]?.switch().name,
+        paymentOutResult,
         checks,
       },
       null,
