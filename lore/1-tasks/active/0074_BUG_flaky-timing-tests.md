@@ -37,6 +37,10 @@ production code.
   block) answered `settle_exact_stellar_timeout` instead of `settlement_pending` on PR #85's
   rerun (run 40911669720, job 123608719389): its 100 ms budget ran out before the hash was
   written.
+- `apps/facilitator/test/settle.test.ts`, "drains a submission that runs on after its budget
+  answer, with its record write (0025)" (the same race, a 50 ms budget): answered
+  `settle_exact_stellar_timeout` instead of `settlement_pending` on `node (24)` in run 41445511672,
+  and passed on `node (22)` on the same commit.
 - `apps/facilitator/test/settle-pool.test.ts`, "refuses a call that has signed nothing when the
   drain starts, and closes its record (0025)": answers `settle_exact_stellar_record_write_failed`
   where it expects `settle_exact_stellar_shutting_down` (PR #96, run 41052291836). It failed in
@@ -72,6 +76,27 @@ production code.
     of slack, still below the 2.4 s of an uncut call.
   - Not reproduced or explained: "waits on close() for a settlement answered pending…" (once in 5
     full runs under load) and the failure of run 41079206183 (no annotation).
+- Measured 2026-11-02 on `develop` `5a2ad44`, with #101 and #103 in, a busy loop on each of 10 cores:
+  `settle`, `settle-pool`, `postgres`, `review-2-twice` and `mcp/pay` together, 50 runs: 49 clean.
+  - Run 47 failed `settle.test.ts`, "never stores a hash for the earlier claim when another process
+    ended and reopened it": its reopened call shared the real 100 ms budget. Reproduced with
+    `addHash` delayed 150 ms (the record ends `rejected`, not `signed`); with a budget of its own the
+    same delay passes.
+  - `settle-route.test.ts`, "gives the lease up at once past a stalled client", failed every local
+    run, also on `develop` `d11c956`: the server closed before it had read the client's bytes, when
+    Node still counts the connection as idle (a plain `http` server: closed with no wait, kept after
+    1 ms, 2 of 2). A request to the server now comes first. 5 of 5 runs pass with no load.
+- The same 50 runs with both fixes and `settle-route`: 49 clean. Run 17 failed `settle.test.ts`,
+  "reopens with exactly two ledgers left, the pool's floor", at the repeat's `success`.
+  - Not reproduced: `settle.test.ts` alone passed 37 of 37 under the same load. A `store.get` or
+    `markSuccessAnswered` delayed 300 ms doesn't fail it, so neither explains it. The answer itself
+    wasn't kept, so the cause is open.
+- Hunt for that failure, 2026-11-02, `develop` `98ef2f8`, the same load and files without `mcp/pay`, up to
+  200 runs, keeping its answer: it never came back (0 of 200). Overall 186 of 200 clean; 14 failed, on
+  10 other tests, 13 in `settle.test.ts` and 1 in `settle-pool.test.ts`. Their assertions show a
+  call taking another path than the test names (`…_timeout` for `settlement_pending`, 2,567 ms for
+  under 2,500), including the fake-clock block. Those failures fit 0084's cause (derived from the
+  assertions, not measured per test); `develop`'s CI on `98ef2f8` failed on two of the same tests.
 
 ## Acceptance Criteria
 

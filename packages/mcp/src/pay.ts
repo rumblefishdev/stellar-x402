@@ -271,7 +271,8 @@ export async function callPaidHttp(
     throw new ToolError(
       "payment_rejected",
       "The seller's facilitator refused the payment.",
-      settle.errorReason,
+      // Seller-written, so for the log only: the message's ledger could be any number.
+      [settle.errorReason, settle.errorMessage].filter(Boolean).join(": "),
     );
   }
   // A Stellar transaction hash is 64 hex characters; anything else is not a settlement we can show.

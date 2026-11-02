@@ -47,7 +47,7 @@ describe("parseConfig", () => {
       port: 4021,
       logLevel: "info",
       rpcUrls: ["https://soroban-testnet.stellar.org"],
-      facilitatorSecret: SECRET,
+      signer: { mode: "secret", secret: SECRET },
       channels: [CHANNEL_A, CHANNEL_B],
       databaseUrl: "postgres://db.internal/x402",
       fees: { maxFeeStroops: 250_000n, inclusionFeeStroops: undefined, escalation: undefined },
@@ -116,7 +116,7 @@ describe("parseConfig", () => {
       port: 8080,
       logLevel: "debug",
       rpcUrls: ["https://a.example", "https://b.example"],
-      facilitatorSecret: SECRET,
+      signer: { mode: "secret", secret: SECRET },
       channels: [CHANNEL_B],
       databaseUrl: "postgres://db.internal/x402",
       fees: {
@@ -158,7 +158,7 @@ describe("parseConfig", () => {
       RPC_URLS: "",
       PORT: " ",
     });
-    expect(config.facilitatorSecret).toBe(SECRET);
+    expect(config.signer).toEqual({ mode: "secret", secret: SECRET });
     expect(config.channels).toEqual([CHANNEL_A]);
     expect(config.http.clientIp).toBe("socket");
     expect(config.port).toBe(4021);

@@ -220,8 +220,8 @@ One request or one stop must never outlast the layer in front of it:
   identical payload reopens the record while that auth entry is valid, so whoever holds the
   payment (the seller's resource server, or the client) repeats it as it is and it settles once;
   the answer says so with `extra.retryable`. A refusal by the simulation, the fee or a spend
-  limit still ends the payment: those need a new one (0073 decision 20 leaves their wording to a
-  backlog task). During the deploy that brings this in, the previous release still answers these
+  limit still ends the payment: those need a new one, once the first can't land, and the answer
+  says from which ledger (task 0082). During the deploy that brings this in, the previous release still answers these
   reasons as "sign a new payment", without `extra`, until it stops. That answer stays true: rows
   from before `0007_settlement_reopened`, and rows that release inserts after the migration ran,
   get `reopened` -1 and never reopen, so a payer who did sign again can't have the old payment

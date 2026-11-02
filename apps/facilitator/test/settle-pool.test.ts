@@ -1,5 +1,5 @@
 import { Keypair, StrKey, nativeToScVal, xdr, type rpc } from "@stellar/stellar-sdk";
-import type { SorobanRpc, SubmitterEvent } from "@stellar-x402/signer-pool";
+import { keypairSigner, type SorobanRpc, type SubmitterEvent } from "@stellar-x402/signer-pool";
 import { FakeRpc } from "@stellar-x402/signer-pool/testing";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -155,6 +155,7 @@ function setup(
     },
     logger: jsonLogger("warn", (line) => lines.push(line)),
     metrics: memoryMetrics(),
+    signer: keypairSigner(Keypair.fromSecret(config.signer.secret)),
     sleep: async () => {},
     lease: () => fence,
   });
@@ -235,7 +236,7 @@ describe("main()'s /settle wiring, under a stale lease token (0071)", () => {
       errorReason: SETTLE_REASONS.leaseLost,
       transaction: refused,
     });
-    expect(response).not.toHaveProperty("extra");
+    expect(response.extra).toEqual({ retryable: false, expirationLedger: expect.any(Number) });
     expect(await store.get(keyOf(pay, "stellar:testnet")!)).toMatchObject({
       state: "rejected",
       hashes: [refused],
