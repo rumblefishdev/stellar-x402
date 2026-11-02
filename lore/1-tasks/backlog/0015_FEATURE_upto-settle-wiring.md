@@ -48,6 +48,13 @@ Add `upto` to the facilitator's settlement path built in 0009 for `exact`, and a
 `/supported`. In T1, `upto` is only the contract and its design (0004, 0005). This task comes
 after T1.
 
+**The pool can't send `upto` today.** `settle_upto` calls `facilitator.require_auth()`, which needs
+a source-account entry, and the pool has refused those since `d85b041`, so the `upto` e2e suite and
+`testnet-smoke.ts` can't settle (neither runs in CI). Since 0093 the pool also sets no operation
+source. Choose how the facilitator gives consent here. If `upto` calls as the fee account, that
+account needs the medium threshold, which 0048 may take away; an account apart from the fee account
+avoids that.
+
 ## Context
 
 - **Waits on 0034** (okarcz, 2026-10-28): start only once the x402 Foundation accepts the

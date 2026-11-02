@@ -37,10 +37,11 @@ accounts (`packages/signer-pool`).
 
 - **Channels.** Each channel is an account holding only its reserve (1.5 XLM). The facilitator
   key is its signer and its master key is disabled, so the facilitator manages one key, not N.
-- **Transaction shape (`delegated-bump`).** The channel is the transaction source and supplies
-  the sequence number. The facilitator is the operation source of the contract call, so its
-  `require_auth` uses source-account credentials. The facilitator signs once and pays the fee
-  through a fee bump; channels never pay fees.
+- **Transaction shape (`delegated-bump`).** The channel is the transaction source, supplies the
+  sequence number and, with no operation source, is the caller of the contract. The facilitator
+  signs for the channel and pays the fee through a fee bump, which needs only the fee account's low
+  threshold; channels never pay fees. How `upto` gives the facilitator's `require_auth` is 0015's
+  choice: the pool refuses source-account entries.
 - **One transaction pending per channel.** `ChannelPool` hands a channel to one caller at a time,
   and callers queue in arrival order when all channels are busy. The submitter tracks each
   channel's sequence number itself and reloads it only after the pending transaction is final

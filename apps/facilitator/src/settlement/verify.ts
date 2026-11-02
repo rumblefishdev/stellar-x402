@@ -69,8 +69,8 @@ export const MUXED_FACILITATOR_REASON = "invalid_exact_stellar_payload_facilitat
 export const PAYER_AUTH_REASON = "invalid_exact_stellar_payload_payer_auth_entries";
 /**
  * Upstream's code for an auth entry without address credentials. A source-account entry
- * authorizes as the transaction's operation source, which the pool makes the facilitator, so we
- * refuse it too instead of trusting only upstream's check.
+ * authorizes as the source of the call, which the pool makes a channel, so we refuse it too
+ * instead of trusting only upstream's check.
  */
 export const UNSUPPORTED_CREDENTIAL_REASON =
   "invalid_exact_stellar_payload_unsupported_credential_type";

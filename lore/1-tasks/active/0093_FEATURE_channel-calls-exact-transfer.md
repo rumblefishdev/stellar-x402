@@ -61,6 +61,30 @@ hot key's weight.
   account paying every fee, channels holding only their reserve, and verify refusing source-account
   auth entries (one would then authorise as the channel).
 - Channels already give the facilitator key the medium threshold (`setup.ts:90-92`).
+- The pool has refused `upto`'s consent entry since `d85b041` (2026-10-16): `settle_upto` needs a
+  source-account auth entry for the facilitator (`contracts/upto-proxy/e2e/src/upto.ts:245`), and
+  `SettlementSubmitter.submit` refuses any such entry. So no call that goes through the pool today
+  needs the fee account as its operation source. CI runs neither the `upto` e2e suite nor
+  `testnet-smoke.ts`, so nothing reported it.
+
+## Decisions so far
+
+| # | What is done | From | Vs the task | Who does the same (checked) | Code | Test |
+|---|---|---|---|---|---|---|
+| 1 | No call through the pool has an operation source, so the channel is the caller | task AC | matches it | upstream `@x402/stellar` 2.28.0 `exact/facilitator/index.mjs:176,300` | `submitter.ts` `prepare` | `submitter.test.ts` |
+| 2 | The pool has no option to set an operation source: nothing sends `upto` through it today, and 0015 chooses how `upto` gives consent | agent | matches it (chosen in 0015) | — | `submitter.ts` | — |
+| 3 | A source-account auth entry stays refused; it would now authorize as the channel | task | matches it | upstream verify refuses it | `submitter.ts` `submit` | `settlement-guards.test.ts` |
+| 4 | `settle-smoke.ts` can raise a fresh fee account's thresholds to 1 / 2 / 2 after channel setup, and checks that a settlement lands and a Payment out is refused | agent | matches it | — | `settle-smoke.ts` | the run in the PR |
+| 5 | 0015 records that the pool refuses `upto`'s consent entry, and that `upto` as a fee-account caller would need the medium threshold 0048 may take away | agent | beyond it | — | 0015's task file | — |
+
+## Not yet decided
+
+Nothing.
+
+## Out of scope
+
+- Repairing the `upto` e2e suite and `testnet-smoke.ts`, refused since `d85b041`: 0015.
+- The fee account's thresholds on any real account: 0048.
 
 ## Implementation
 
@@ -71,6 +95,6 @@ hot key's weight.
 
 ## Acceptance Criteria
 
-- [ ] Given an `exact` settlement, when the pool builds it, then its `invokeHostFunction` has no operation source
-- [ ] Given a fee account whose medium threshold is above the facilitator key's weight, when an `exact` settlement is sent on testnet, then it lands
-- [ ] 0048 is told that the fee account no longer needs the medium threshold for `exact`
+- [x] Given an `exact` settlement, when the pool builds it, then its `invokeHostFunction` has no operation source
+- [x] Given a fee account whose medium threshold is above the facilitator key's weight, when an `exact` settlement is sent on testnet, then it lands (`d7150967…`, 2026-11-02)
+- [x] 0048 is told that the fee account no longer needs the medium threshold for `exact`

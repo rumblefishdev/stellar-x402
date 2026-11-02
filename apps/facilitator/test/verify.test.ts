@@ -236,7 +236,7 @@ describe("createVerifier", () => {
     expect(latestLedger).not.toHaveBeenCalled();
   });
 
-  it("rejects a source-account auth entry, which would authorize as the facilitator, even if upstream accepts it", async () => {
+  it("rejects a source-account auth entry, which would authorize as the channel, even if upstream accepts it", async () => {
     const sourceAccount = new xdr.SorobanAuthorizationEntry({
       credentials: xdr.SorobanCredentials.sorobanCredentialsSourceAccount(),
       rootInvocation: authEntry(payer, CURRENT + MIN_VALIDITY).rootInvocation(),
