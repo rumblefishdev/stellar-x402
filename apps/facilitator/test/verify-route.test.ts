@@ -11,6 +11,7 @@ import { PAYTO_TRUSTLINE_REASON } from "../src/settlement/trustline.js";
 import type { Verify } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
 import { bazaarExtensions, depthOf } from "./payment.js";
+import { signerEnv } from "./fake-openbao.js";
 
 const requirements: PaymentRequirements = {
   scheme: "exact",
@@ -38,7 +39,7 @@ describe("POST /verify", () => {
 
   beforeAll(async () => {
     const env = {
-      FACILITATOR_SECRET: Keypair.random().secret(),
+      ...signerEnv(Keypair.random().publicKey()),
       DATABASE_URL: db.urlFor(db.schema),
       CLIENT_IP: "socket",
       CHANNELS: Keypair.random().publicKey(),

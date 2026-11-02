@@ -428,8 +428,8 @@ One request or one stop must never outlast the layer in front of it:
     networks' sockets.
   - It is the only AWS credential on the server; ADR 0013 names it as the exception to "no AWS
     credentials".
-- **`FACILITATOR_SECRET` stays for local development and tests.** Deployed networks use the OpenBao
-  signer instead.
+- **The facilitator key signs only through OpenBao, everywhere.** Tests and local runs use a fake
+  OpenBao on a unix socket, so they take the same path as a deployed network (0036).
 - **Other secrets are encrypted systemd credentials,** as in ADR 0013: per network a database
   password and `RPC_URLS`, which may carry an API key, and per environment the tunnel token.
   - The files are named per network from the first deploy, so mainnet adds files and renames

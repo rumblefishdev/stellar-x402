@@ -47,6 +47,7 @@ import { createEd25519Signer } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/client";
 import { Agent, fetch } from "undici";
 import { main } from "../src/main.js";
+import { fakeOpenBao, signerEnv } from "../test/fake-openbao.js";
 
 const XLM_SAC_TESTNET = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 const RPC_URL = "https://soroban-testnet.stellar.org";
@@ -116,9 +117,11 @@ if (raiseThresholds) {
   if (raised.status !== "SUCCESS") throw new Error(`raising the thresholds ${raised.status}`);
 }
 
+// The fake OpenBao holds this run's key: a testnet account funded for the run.
+const openbao = await fakeOpenBao(facilitator);
 const facilitatorServer = await main(
   {
-    FACILITATOR_SECRET: facilitator.secret(),
+    ...signerEnv(facilitator.publicKey(), openbao.socketPath),
     CLIENT_IP: "socket",
     CHANNELS: channelKeys.map((keypair) => keypair.publicKey()).join(","),
     PORT: "0",

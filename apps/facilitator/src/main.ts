@@ -1,11 +1,10 @@
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
-import { Keypair, rpc as stellarRpc } from "@stellar/stellar-sdk";
+import { rpc as stellarRpc } from "@stellar/stellar-sdk";
 import {
   FallbackRpc,
   RpcTimeoutError,
   SettlementSubmitter,
-  keypairSigner,
   type SorobanRpc,
   type TransactionSigner,
 } from "@stellar-x402/signer-pool";
@@ -314,31 +313,6 @@ export function buildUpstream(
   };
 }
 
-/** The facilitator key's address: the secret's, or the OpenBao key's account from the config. */
-export function facilitatorAddress(config: Config): string {
-  return config.signer.mode === "secret"
-    ? Keypair.fromSecret(config.signer.secret).publicKey()
-    : config.signer.address;
-}
-
-/** The facilitator key's signer from the config: in memory, or in OpenBao Transit (ADR 0013). */
-export function buildSigner(
-  config: Config,
-  logger: Pick<Logger, "info" | "warn">,
-  metrics: Metrics,
-): OpenBaoSigner {
-  if (config.signer.mode === "secret") {
-    // In memory, a signature can only come from the key itself: nothing to check.
-    return {
-      ...keypairSigner(Keypair.fromSecret(config.signer.secret)),
-      state: () => "ok",
-      check: async () => {},
-      close: () => {},
-    };
-  }
-  return openBaoSigner({ ...config.signer, network: config.network, logger, metrics });
-}
-
 /**
  * Upstream's signer for `ExactStellarScheme`, which `/verify` uses only for the facilitator's
  * address (`@x402/stellar` 2.28.0 `exact/facilitator/index.mjs:69-104`); `/settle` signs through
@@ -369,7 +343,7 @@ export function buildChecks(
 ): VerifierDeps {
   // Upstream knows only the facilitator key, and only in plain form; the channels and the muxed
   // facilitator are `createChecker`'s check (AD-5).
-  const facilitator = verifyOnlySigner(facilitatorAddress(config));
+  const facilitator = verifyOnlySigner(config.signer.address);
   return {
     network: config.network,
     ...buildUpstream(config, fees, logger, facilitator, rpc, seams),
@@ -420,7 +394,7 @@ export function buildSettlement(
     hooks: Pick<SettlementHooks, "beforeSubmit" | "onFinal" | "onSuccess">;
     logger: Logger;
     metrics: Metrics;
-    /** The facilitator key's signer ({@link buildSigner}). */
+    /** The facilitator key's signer. */
     signer: TransactionSigner;
     /** Tests pass the pool's `sleep`. */
     sleep?: (ms: number) => Promise<void>;
@@ -541,7 +515,7 @@ export function compose(
   // they share one ceiling and one bid (AD-10).
   const fees = feeSettings(config.fees, rpc);
   const checks = buildChecks(config, rpc, fees, logger, opts.seams);
-  const signer = buildSigner(config, logger, metrics);
+  const signer = openBaoSigner({ ...config.signer, network: config.network, logger, metrics });
   // One lease per network's channel set (AD-17): only its holder settles.
   const lease = createLeaseKeeper({
     store: stores.settlements,
@@ -639,7 +613,7 @@ export async function main(
     // AD-12: the service starts only when no other key can move a channel. An RPC that doesn't
     // answer fails the check with its error. `compose()` only wires parts, so nothing has called
     // the RPC yet.
-    await checkChannels(rpc, config.channels, facilitatorAddress(config));
+    await checkChannels(rpc, config.channels, config.signer.address);
     // For the life of the process: an upstream call cut off by the deadline keeps running after
     // `close()`, and its error would reach stderr with the RPC URL in it.
     const restoreConsole = captureConsoleError(logger, config.rpcUrls);

@@ -37,6 +37,7 @@ import { parseConfig } from "../src/config.js";
 import { jsonLogger } from "../src/logger.js";
 import { UPSTREAM_TIMEOUT_MS, buildRpc, buildVerifier } from "../src/main.js";
 import { feeSettings } from "../src/settlement/fees.js";
+import { signerEnv } from "../test/fake-openbao.js";
 
 const XLM_SAC_TESTNET = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 const network = "stellar:testnet";
@@ -80,7 +81,7 @@ async function verifyWith(
   const from = events.length;
   // A fresh facilitator key: verify never spends from it.
   const config = parseConfig({
-    FACILITATOR_SECRET: Keypair.random().secret(),
+    ...signerEnv(Keypair.random().publicKey()),
     CLIENT_IP: "socket",
     CHANNELS: channels,
     LOG_LEVEL: "info",

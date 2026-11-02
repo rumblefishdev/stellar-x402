@@ -48,6 +48,7 @@ import { createEd25519Signer } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/client";
 import { Agent, fetch } from "undici";
 import { main } from "../src/main.js";
+import { fakeOpenBao, signerEnv } from "../test/fake-openbao.js";
 
 const network = "stellar:testnet";
 const server = new rpc.Server("https://soroban-testnet.stellar.org");
@@ -252,9 +253,11 @@ const setup = buildCreateChannelsTx({
 setup.sign(facilitator, ...channelKeys);
 await sendAndPoll(setup, "channel setup");
 
+// The fake OpenBao holds this run's key: a testnet account funded for the run.
+const openbao = await fakeOpenBao(facilitator);
 const facilitatorServer = await main(
   {
-    FACILITATOR_SECRET: facilitator.secret(),
+    ...signerEnv(facilitator.publicKey(), openbao.socketPath),
     CHANNELS: channelKeys.map((keypair) => keypair.publicKey()).join(","),
     PORT: "0",
     LOG_LEVEL: "warn",

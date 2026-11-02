@@ -2,14 +2,14 @@ import { Keypair, StrKey, nativeToScVal, xdr, type rpc } from "@stellar/stellar-
 import type { SorobanRpc, SubmitterEvent } from "@stellar-x402/signer-pool";
 import { FakeRpc } from "@stellar-x402/signer-pool/testing";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { openBaoSigner } from "../src/adapters/openbao-signer.js";
 import { parseConfig, type Env } from "../src/config.js";
 import { jsonLogger, rpcEndpointName } from "../src/logger.js";
 import {
   buildChecks,
   buildRpc,
   buildSettlement,
-  buildSigner,
   compose,
   start,
   type UpstreamSeams,
@@ -21,6 +21,7 @@ import { SETTLE_REASONS, keyOf } from "../src/settlement/settle.js";
 import { testDatabase } from "./database.js";
 import { transferPayload } from "./payment.js";
 import { holdLease, settlement } from "./port-contracts.js";
+import { fakeOpenBao, signerEnv } from "./fake-openbao.js";
 
 /**
  * `main()`'s `/settle` wiring with the real pool on `FakeRpc`: `/settle`'s checks, the pool's fee
@@ -28,6 +29,8 @@ import { holdLease, settlement } from "./port-contracts.js";
  */
 
 const facilitator = Keypair.random();
+const openbao = await fakeOpenBao(facilitator);
+afterAll(openbao.close);
 const channel = Keypair.random().publicKey();
 const asset = StrKey.encodeContract(Buffer.alloc(32, 7));
 const payer = Keypair.random().publicKey();
@@ -114,7 +117,7 @@ function setup(
   rpc: { endpoint?: (url: string) => SorobanRpc | undefined; timeoutMs?: number } = {},
 ) {
   const config = parseConfig({
-    FACILITATOR_SECRET: facilitator.secret(),
+    ...signerEnv(facilitator.publicKey(), openbao.socketPath),
     DATABASE_URL: db.urlFor(db.schema),
     CLIENT_IP: "socket",
     CHANNELS: channel,
@@ -156,7 +159,12 @@ function setup(
     },
     logger: jsonLogger("warn", (line) => lines.push(line)),
     metrics: memoryMetrics(),
-    signer: buildSigner(config, upstreamLogger, memoryMetrics()),
+    signer: openBaoSigner({
+      ...config.signer,
+      network: config.network,
+      logger: upstreamLogger,
+      metrics: memoryMetrics(),
+    }),
     sleep: async () => {},
     lease: () => fence,
   });
@@ -341,7 +349,7 @@ describe("main()'s composition (compose)", () => {
   /** The graph `main()` serves; it takes the lease as `start()` does, unless `lease: false`. */
   async function composed(env: Record<string, string> = {}, opts: { lease?: boolean } = {}) {
     const config = parseConfig({
-      FACILITATOR_SECRET: facilitator.secret(),
+      ...signerEnv(facilitator.publicKey(), openbao.socketPath),
       DATABASE_URL: db.urlFor(db.schema),
       CLIENT_IP: "socket",
       CHANNELS: channel,
