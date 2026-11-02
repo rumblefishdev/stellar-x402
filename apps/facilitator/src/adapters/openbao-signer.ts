@@ -34,7 +34,7 @@ export type SignerState = "unchecked" | "ok" | "failed";
  * without a signature), `timeout`, `unreachable` (no socket), `address_mismatch` (signed by a key
  * other than the configured address's).
  */
-export type SignerFailure =
+type SignerFailure =
   "sealed" | "denied" | "refused" | "error" | "timeout" | "unreachable" | "address_mismatch";
 
 export class SignerError extends Error {
@@ -48,7 +48,7 @@ export class SignerError extends Error {
   }
 }
 
-export interface OpenBaoSignerOptions {
+interface OpenBaoSignerOptions {
   /** The OpenBao key's own account: the fee account and the channels' signer (ADR 0013). */
   address: string;
   socketPath: string;

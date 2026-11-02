@@ -13,7 +13,7 @@ import { getNetworkPassphrase, type FacilitatorStellarSigner } from "@x402/stell
 import { ExactStellarScheme } from "@x402/stellar/exact/facilitator";
 import type pg from "pg";
 import { Agent, setGlobalDispatcher } from "undici";
-import { openBaoSigner, type SignerState } from "./adapters/openbao-signer.js";
+import { openBaoSigner, type OpenBaoSigner } from "./adapters/openbao-signer.js";
 import { MIGRATIONS, migrate, pendingMigrations } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
 import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
@@ -321,19 +321,12 @@ export function facilitatorAddress(config: Config): string {
     : config.signer.address;
 }
 
-/** The pool's signer, with what `/health` reports of it (0036). */
-export type FacilitatorSigner = TransactionSigner & {
-  state(): SignerState;
-  /** Signs a fixed value and checks it against the address, once after start. */
-  check(): Promise<void>;
-};
-
 /** The facilitator key's signer from the config: in memory, or in OpenBao Transit (ADR 0013). */
 export function buildSigner(
   config: Config,
   logger: Pick<Logger, "info" | "warn">,
   metrics: Metrics,
-): FacilitatorSigner {
+): OpenBaoSigner {
   if (config.signer.mode === "secret") {
     // In memory, a signature can only come from the key itself: nothing to check.
     return {
@@ -342,18 +335,7 @@ export function buildSigner(
       check: async () => {},
     };
   }
-  const { address, socketPath, key, keyVersion, roleId, secretId } = config.signer;
-  return openBaoSigner({
-    address,
-    socketPath,
-    key,
-    keyVersion,
-    roleId,
-    secretId,
-    network: config.network,
-    logger,
-    metrics,
-  });
+  return openBaoSigner({ ...config.signer, network: config.network, logger, metrics });
 }
 
 /**
@@ -539,7 +521,7 @@ export function compose(
   cataloger: Cataloger;
   metrics: Metrics;
   rpc: FallbackRpc;
-  signer: FacilitatorSigner;
+  signer: OpenBaoSigner;
 } {
   const { logger } = opts;
   const { stores } = opts;
