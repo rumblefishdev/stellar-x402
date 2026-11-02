@@ -151,10 +151,13 @@
         - x402-tunnel
         - x402
 
+    # Not under --check: the copy above doesn't run there, and the module fails on a unit it
+    # can't find.
     - name: OpenBao's unit, enabled at boot
       ansible.builtin.systemd_service:
         name: x402-openbao.service
         enabled: true
+      when: not ansible_check_mode
 
     # Started too: it acts only while x402@ is active, so before the first deploy it does nothing.
     - name: The watchdog's timer, enabled and started
