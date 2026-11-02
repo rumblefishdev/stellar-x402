@@ -439,6 +439,7 @@ with no token. When done, step 5 again.
 - OpenBao's snapshots and restore drill, key rotation as an on-chain signer change, fee float
   top-ups (0036, 0047).
 - Rotating OpenBao's audit log: nothing rotates it yet, and a full volume stops `/settle` (0026).
+- The key theft transaction (ADR 0013): no tool signs it and it has never run (0099).
 - A leaked token or secret ID, OpenBao upgrades and what `/settle` does meanwhile, whether the
   board has a TPM, and the weekly review after the mainnet deploy (0026, ADR 0013).
 - pgBackRest backups, the database's restore drill and upgrade policy.

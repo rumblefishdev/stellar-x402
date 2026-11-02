@@ -5,7 +5,7 @@ type: FEATURE
 status: active
 milestone: 1
 related_adr: ["0011", "0012", "0013"]
-related_tasks: ["0012", "0014", "0022", "0017", "0020", "0013", "0039", "0036", "0047"]
+related_tasks: ["0012", "0014", "0022", "0017", "0020", "0013", "0039", "0036", "0047", "0099"]
 tags: [facilitator, deploy, priority-high, effort-medium, platform]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -381,7 +381,7 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   - a suspected key theft: new Transit key, then one transaction signed by the old key: it creates
     the new key's own account, a `set_options` on each channel adds the new key and removes the
     old one, and an `accountMerge` moves the old fee account into it; check the theft alarm's
-    history;
+    history (its tool and rehearsal are 0099, before mainnet);
   - OpenBao upgrades and what `/settle` does meanwhile (it answers an error).
 
 ## Acceptance Criteria
