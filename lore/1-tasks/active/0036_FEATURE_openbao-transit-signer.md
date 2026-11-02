@@ -91,8 +91,8 @@ Nothing: the grilling's frontier is empty (2026-10-30).
 ## Out of scope
 
 - The on-chain limit of the hot key's power (thresholds, a cold key): 0048.
-- The fee account as the caller of every settlement, which keeps that limit out of reach: 0093.
-  The shape stays two facilitator signatures per settlement, both through this signer.
+- The channel as the caller of a settlement: 0093, merged. A settlement still takes two facilitator
+  signatures, both through this signer; a testnet run on that shape is in #102.
 - The OpenBao container, its unseal, backups and the move of testnet to the key: 0026.
 - The alarm on signer failures: 0027. The pubnet gate in `config.ts` names only 0024 and 0090, and it must name this alarm before mainnet.
 - Which way testnet's channels move to the key: ADR 0013 has `set_options` on the existing ones, `docs/runbook.md` new ones. 0026 settles it.
