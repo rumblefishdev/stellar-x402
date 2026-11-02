@@ -61,7 +61,11 @@ that can. This holds whichever custody option 0047 picks, and is a mainnet block
 ## Context
 
 - Changing signers or thresholds and `AccountMerge` need the high threshold; Invoke Host Function
-  and Payment need medium; a fee bump needs only the fee account's low threshold.
+  and Payment need medium; a fee bump needs only the fee account's low threshold. Since 0093 the
+  channel is the caller, so the fee account no longer needs medium for `exact`. Other steps still
+  need its thresholds: creating channels (medium, `setup.ts`) and merging it in ADR 0013's rotation
+  and theft steps (high). So raising them above the hot key's weight on a real account needs a
+  second signer or rewritten runbooks first: with no second signer, nothing can change that account.
 - AD-12 today requires the facilitator key to be each channel's **only** signer, and
   `checkChannel` flags any other signer as `extra-signer` and checks only medium. Both change.
 - Each extra signer adds 0.5 XLM of reserve per account, unless a cold account sponsors it.
