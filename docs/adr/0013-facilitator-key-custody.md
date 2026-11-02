@@ -11,7 +11,9 @@
   OpenBao key's own account, the theft alarm, 1-hour tokens, the admin socket and the restore
   path, from the PR #48 review); 2026-11-02 (admin on a loopback listener inside the container,
   which Raft's cluster address needs, no move of testnet to the OpenBao key, since nothing ran on
-  another key, the backup JSON over stdin, and AppRole's lockout off, task 0026)
+  another key, the backup JSON over stdin, and AppRole's lockout off, task 0026); 2026-11-02 (the
+  theft alarm reads the accounts instead of our hashes, a second balance alarm, and an alarm on
+  reads of the backup secret, from task 0027)
 - Supersedes: the key custody part of [ADR 0011](0011-facilitator-hosting.md) ("Keys, secrets and
   access": the SSM parameter for `FACILITATOR_SECRET` and the mainnet KMS key)
 
@@ -151,16 +153,21 @@
   stops signing when it can't write it.
 - **Alarms** (0027):
   - OpenBao sealed or down, or signing failing;
-  - **theft:** a transaction with the fee account or a channel as its source or fee source whose
-    hash our submitter didn't record, and any signer or threshold change on those accounts, read
-    from Horizon (`/accounts/{id}/transactions`) by a check off the server, since root on the
-    server is the case it is for. The audit log can't show signatures made with a copied key;
-  - the fee account's spendable balance below 25 XLM, as a Slack message (0027 decides where the
-    check runs and what the message says);
+  - **theft:** any signer or threshold change on the fee account or a channel, and any Horizon
+    effect on them other than a credit (`/accounts/{id}/effects`), read by a check off the server,
+    since root on the server is the case it is for. The audit log can't show signatures made with
+    a copied key. The check takes nothing from the server, since hashes kept there could be
+    forged, and comparing them would flag top-ups, channel setup, rotations and a third party's
+    fee bump. It doesn't see the float burned on fees alone, which gains a thief nothing and
+    reaches the balance alarms. Channel setup and a rotation fire it, and nothing suppresses that;
+  - the fee account's spendable balance below 25 XLM, and again below 10 XLM, as a Slack message
+    with the network, the balance, the address and the top-up step, from the same check;
+  - a read of the backup secret, from the CloudTrail event history, which needs no trail. A drill
+    fires it too;
   - the audit log disk at 80%.
 - **The fee float is 100 XLM, with the alarm at 25 XLM, and no upper limit.** That is about 24,000
-  typical `exact` settlements (~41,200 stroops each, ADR 0003), and about 6 days to act after the
-  alarm at 1,000 settlements a day. Testnet uses the same numbers for now.
+  typical `exact` settlements (~41,200 stroops each, ADR 0003), and about 5 days to act after the
+  alarm at 1,000 settlements a day, before 0024's floor stops settlement at 5 XLM. Testnet uses the same numbers for now.
   - **Top-ups are by hand.** Testnet: Friendbot, which only creates accounts, so a short script in
     the 0026 runbook funds a fresh account and merges it into the fee account. Mainnet:
     a withdrawal from the company's exchange account to the fee account; who makes it is named
@@ -226,8 +233,8 @@
 - **Losing OpenBao's data and the backup set loses the accounts.** The restore drill tests both
   before mainnet and every quarter.
 - **We depend on the shared AWS account.** If it is closed or we lose access, the backup set goes
-  with it. The AWS account has no CloudTrail trail, so nothing alarms on a read of the secret; the
-  drill checks the 90-day event history, and an alarm is a 0027 follow-up.
+  with it. The AWS account has no CloudTrail trail, so the alarm on a read of the secret and the
+  drill both use the 90-day event history, which lags by about 15 minutes.
 - **A restart of the server stops `/settle` until OpenBao is unsealed,** which happens by itself in
   seconds.
 - **While OpenBao is down, `/verify` still accepts a payment.** The seller's route runs, `/settle`

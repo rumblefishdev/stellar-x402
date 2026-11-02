@@ -7,8 +7,9 @@
   and the fingerprint's limit; how far a repeat runs past the budget), 2026-10-21 (task 0009:
   bare RPC hosts in error messages), 2026-10-27 (task 0019: reconciliation runs in every
   process, independent of the lease; `/health` reports `listed` beside `ready`, and the deploy
-  waits for both) and 2026-10-28 (task 0076: one hostname and one facilitator service for both
-  networks)
+  waits for both), 2026-10-28 (task 0076: one hostname and one facilitator service for both
+  networks) and 2026-11-02 (task 0027: the agent reads a file the unit writes, a Lambda probe
+  replaces Route 53, and 0027 builds the logging role)
 - Revised: 2026-10-13. ECS Fargate became the company Hetzner server (task 0039); the first
   version is in git history and task 0014. 2026-10-21: the key moved to OpenBao (ADR 0013), and
   deploys, reboots, backups, alarms and downtime were worked out in the PR #24 review.
@@ -151,7 +152,7 @@ a whole zone, to Cloudflare on the Free plan.
   applied (0026), and a schema behind the code stops the start, as a wrong RPC or channel does,
   so a deploy that hasn't migrated gets no `ready` and rolls back. A store per network gives a lease per network: today, with one
   network, `ready` is its lease, and what readiness means with two (what the deploy, `/health`,
-  the watchdog and 0027's "ready to settle" alarm wait for) is decided with the code in 0077.
+  the watchdog and 0027's uptime probe wait for) is decided with the code in 0077.
   - A process without the lease keeps trying to take it.
   - A process whose lease renewal fails stops new submissions until it holds the lease again.
   - A process that froze past its TTL while another took the lease sends nothing new once it
@@ -166,8 +167,8 @@ a whole zone, to Cloudflare on the Free plan.
   decision 36). Listing is one query, so it comes fast even with a big backlog. An image whose
   sweeps can't list never turns it true.
 - **The deploy's last step waits up to 120 s for `ready: true` and `listed: true`.** Without
-  them, the deploy rolls back to the previous digest and fails the run (below). A "ready to
-  settle" metric and a sweep counter also have alarms (0027).
+  them, the deploy rolls back to the previous digest and fails the run (below). The uptime
+  probe reads `ready` from then on, and a sweep counter has an alarm (0027).
 
 ### Timing
 
@@ -298,8 +299,7 @@ One request or one stop must never outlast the layer in front of it:
     facilitator stays down. With the RPCs down it never even listens: since 0020, `main()`
     checks the RPC networks and the channels before it starts the HTTP server and exits with
     `startup_failed`, so the unit crash-loops until its start limit leaves it `failed`.
-    `/health` then gives no data at all, so the readiness alarm treats missing data as
-    breaching (0027), and the uptime alarm fires too.
+    `/health` then doesn't answer at all, and the uptime probe counts that as down (0027).
   - Migrating before the stop and that rollback are both safe: a failed transactional migration
     leaves the schema as it was, a failed online one leaves the steps it finished, which the next
     deploy continues from (ADR 0012), and expand/contract keeps the older image working on a
@@ -533,12 +533,19 @@ One request or one stop must never outlast the layer in front of it:
 ### Logs, metrics and alerts
 
 - **Logs:** the 0017 `jsonLogger` stays.
-  - Its JSON lines go to stdout, and Docker keeps them on the host (`json-file`, rotated). The
-    CloudWatch agent sends our containers' logs to CloudWatch Logs with the logging role's
-    credentials, so `dockerd` stays untouched and an AWS outage never stops a container from
-    starting. The log group uses the Standard class, with 30-day retention on testnet.
-  - How the agent picks only our containers, and that EMF lines turn into metrics, is checked
-    in 0027.
+  - Its JSON lines go to stdout. `x402@<environment>` runs Compose in the foreground, so it
+    appends them to a file under `/var/log/x402/`, and stderr to a second one. The CloudWatch
+    agent sends those files to CloudWatch Logs with the logging role's credentials, so `dockerd`
+    stays untouched and an AWS outage never stops a container from starting.
+  - The agent doesn't read Docker's `json-file` logs, which stay for `docker logs`: a `json-file`
+    line wraps ours, and EMF needs `_aws` at the root
+    ([R-log-path-spike](../../lore/1-tasks/active/0027_FEATURE_alerts-and-metrics/notes/R-log-path-spike.md)).
+  - The agent keeps EMF lines and app lines in separate log groups, so that an AWS outage can
+    drop only old metric lines. Both use the Standard class: 30 days for app lines, 3 for metric
+    lines, which CloudWatch has turned into metrics by then. Every line ships, the client IP in
+    `rate_limited` too; that and the retention are looked at again before mainnet (0038).
+  - The files rotate with `logrotate` on its own timer, since they share a disk with ClickHouse.
+  - That EMF lines turn into metrics is checked once, at the first deploy (0027).
   - No pino: stdout is the only transport, and the logger already writes identifiers only.
 - **RPC endpoints are logged as `RPC_URLS[i]#<fingerprint>`, never by URL or host.** An RPC URL
   can carry an API key, and a host can be an account's own endpoint name (some providers put one
@@ -558,34 +565,43 @@ One request or one stop must never outlast the layer in front of it:
   - Namespace `x402-facilitator`.
   - Dimensions stay low-cardinality: `network`, route, outcome, event name.
   - Never payer or `payTo`: each dimension combination is a billed custom metric.
+  - Billed metrics are those with an alarm and the traffic picture (0027). Other labels stay
+    fields in the line, read with Logs Insights.
 - **Host metrics:** the CloudWatch agent on the server reports memory, CPU and free disk, since
   ClickHouse shares the machine.
 - **Alerts:** CloudWatch alarms go to an SNS topic, and Amazon Q Developer in chat applications
   (formerly AWS Chatbot) posts them to the team's Slack channel. 0027 defines them:
-  - the five AD-18 conditions; the low-balance one fires below 25 XLM of spendable balance
-    (ADR 0013);
-  - not ready to settle (the counterpart of the lease-blind `/health`);
+  - the five AD-18 conditions; the low-balance one fires below 25 XLM of spendable balance, and
+    again below 10 XLM (ADR 0013);
+  - not ready to settle, the counterpart of the lease-blind `/health`, which the uptime probe
+    reads (below);
   - no sweep listing the records within the alarm window: since the deploy checks `listed` only
     once, this is the net for sweeps that start failing later (0019 decision 36);
-  - from ADR 0013: OpenBao sealed, down or failing to sign; theft (a transaction on the fee
-    account or a channel that our submitter didn't send, or a signer or threshold change on them,
-    read from Horizon off the server); and OpenBao's audit log disk at 80%;
-  - WAL archiving failing (`pg_stat_archiver.failed_count` rising, or the last archived segment
-    older than 10 minutes). pgBackRest acknowledges a segment only once it is in the
+  - from ADR 0013: OpenBao sealed, down or failing to sign; theft and reads of the backup
+    secret, off the server; and OpenBao's audit log disk at 80%;
+  - WAL archiving failing (`pg_stat_archiver.last_failed_time` past `last_archived_time`, or the
+    last archived segment older than 10 minutes). pgBackRest acknowledges a segment only once it is in the
     repository, so this one alarm covers a stuck archive, which fills a disk ClickHouse shares,
     and WAL that doesn't leave the server;
   - the last `pgbackrest backup` or the last OpenBao snapshot older than 26 hours (both run
     daily);
   - the Roles Anywhere certificate expiring within 30 days;
   - low free disk and memory on the server.
-- **Uptime:** a Route 53 HTTPS health check on the public URL.
-  - Route 53 publishes its metrics only in us-east-1, so the alarm and its SNS topic live there.
-  - It fires after 7 failing minutes in a row, above the worst successful deploy
+- **A deploy of the alarms is done only when a test alarm reaches Slack and a person sees it.**
+- **Uptime:** a small Lambda in eu-central-1 reads `/health` on the public URL every minute and
+  publishes `ready`.
+  - It runs apart from the other off-server checks, so their dependencies can't stop it. A failed
+    read or a missing point counts as down, so a broken probe alarms rather than going quiet.
+  - The alarm fires after 7 failing minutes in a row, above the worst successful deploy
     (Consequences). A failed deploy that rolls back can take longer and should alarm; it also
     fails the workflow.
-  - It checks `/supported` once 0020 makes it real, and `/health` before that.
-  - The 99% figure counts a minute as up only when the check passes and the facilitator is ready
-    to settle.
+  - `/supported` answers an object fixed at startup, so its 200 can't show readiness, and `/health`
+    answers 200 whatever `ready` says. The probe therefore reads the body.
+  - The 99% figure is this metric: a minute counts as up only when `ready` is true.
+  - It's one vantage point, in the region of the other alarms: a fault between AWS and Cloudflare
+    reads as downtime, and a fault in eu-central-1 takes every alarm down. A Route 53 check
+    would avoid both, for about $4 a month and a us-east-1 stack, and is the way back if the
+    false alarms cost more than that.
 
 ## Rationale
 
@@ -718,19 +734,21 @@ One request or one stop must never outlast the layer in front of it:
     `soroban-infrastructure`, after the `sorobanscan.com` zone is on Cloudflare;
   - the deploy user, its one `sudo` rule, the SSH forced command, the workflow with the pinned
     host key, and the `deploy/production` branch with its protection;
-  - the OpenBao container (ADR 0013), the IAM Roles Anywhere logging role and its certificate,
-    and the secret files;
+  - the OpenBao container (ADR 0013) and the secret files;
   - the backups (pgBackRest to the Storage Box);
   - `GET /health` with `ready` and `listed`, the Node keep-alive setting, and the migration bounds;
   - the config reading `DATABASE_URL` and `RPC_URLS` from files (`*_FILE`);
   - the runbook: running the playbook, deploy, rollback, key rotation, certificate renewal,
     restore on another machine.
-- **0027 builds:** log shipping through the CloudWatch agent, the EMF adapter, the alarms above,
-  the us-east-1 uptime stack and the Slack integration.
+- **0027 builds:** log shipping through the CloudWatch agent, the IAM Roles Anywhere logging role,
+  the EMF adapter, the alarms above, the uptime probe and the Slack integration. The holder of the
+  ClickHouse project's CA signs the certificate from a request made on the server, so its key
+  never leaves it.
 - **0023 keys the limiter on `CF-Connecting-IP`** as above.
 - **Cost:**
   - The server adds nothing.
-  - CloudWatch logs, metrics and alarms, and the health check, come to a few dollars.
+  - CloudWatch logs, metrics and alarms, with the uptime probe, come to about $13 a month with
+    one network, and about $6 more with a second.
   - Off-server backups go to the existing Storage Box and add nothing.
 - **Mainnet availability is open** (0038). It needs to settle:
   - the targets for the longest downtime and the most data lost after a hardware fault;

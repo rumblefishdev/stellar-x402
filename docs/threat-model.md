@@ -339,7 +339,7 @@ the channels' reserves, about 130 XLM at launch (a 100 XLM float plus ~30 XLM of
 - **Mitigation:** The facilitator holds only an AppRole token allowed `transit/sign/<key>`, never the
   key. The token expires within 1 hour.
 - **Residual risk:** A leaked secret ID mints new tokens until it is destroyed (runbook, 0026). The
-  theft alarm shows transactions we didn't send.
+  theft alarm shows a changed signer or money leaving our accounts.
 
 #### Code runs in the facilitator's container
 
@@ -356,9 +356,9 @@ the channels' reserves, about 130 XLM at launch (a 100 XLM float plus ~30 XLM of
 
 - **Attack:** Root, through another service on the shared server or a container escape, copies the
   key from OpenBao's memory, or its disk plus the unseal credential.
-- **Mitigation:** None that stops it. The theft alarm (a transaction on the fee account or a channel
-  that our submitter didn't send, or a signer or threshold change on them, read from Horizon off
-  the server) and the 25 XLM low-balance alarm catch it; the float caps the loss. The float has no
+- **Mitigation:** None that stops it. The theft alarm (a signer or threshold change on the fee account or
+  a channel, or a Horizon effect on them other than a credit, read off the server) and the
+  low-balance alarms catch it; the float caps the loss. The float has no
   upper limit, so the weekly review re-checks that this custody still fits it.
 - **Residual risk:** Accepted at today's stakes. The hot key is each account's only signer (0048's
   cold key was declined for now), so a thief can also lock us out of the channels. Upgrades: TPM-bound
@@ -382,7 +382,7 @@ the channels' reserves, about 130 XLM at launch (a 100 XLM float plus ~30 XLM of
   through SSO only. Each restore drill checks the 90-day CloudTrail event history for reads that
   weren't drills; the theft and balance alarms catch a theft.
 - **Residual risk:** Accepted at today's stakes, as for root on the server. The account has no
-  CloudTrail trail, so nothing alarms on a read; an alarm is a 0027 follow-up.
+  CloudTrail trail, so the alarm on a read uses the event history, about 15 minutes behind.
 
 #### OpenBao lost or down
 
