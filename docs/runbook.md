@@ -426,8 +426,8 @@ admin's machine and the server over SSH and never reach a disk.
    ```
 
    It prints the channels' addresses for `CHANNELS_TESTNET` (0036); 20 channels hold ADR 0013's
-   ~30 XLM of reserves. If it stops after a batch landed, that batch's channels are in its
-   transaction on Horizon (`channel setup … landed` on stderr gives the hash).
+   ~30 XLM of reserves. If it stops after a batch landed, stderr has that batch's channels
+   (`channel setup … landed: …`): run it again for the rest and join both lists.
 
 **A new root token,** when an admin needs one again, from the recovery key in the backup secret.
 The CLI's `generate-root` needs a token, so this is the legacy `/sys/generate-root` API, which the
