@@ -204,11 +204,11 @@ describe("openBaoSigner", () => {
   });
 
   it.each([
-    ["a refused login", (fake: Fake) => (fake.loginStatus = 400), "refused"],
-    ["a denied signature", (fake: Fake) => (fake.status = 403), "denied"],
-    ["another key's signature", (fake: Fake) => (fake.key = OTHER), "address_mismatch"],
+    ["a refused login", (fake: FakeOpenBao) => (fake.loginStatus = 400), "refused"],
+    ["a denied signature", (fake: FakeOpenBao) => (fake.status = 403), "denied"],
+    ["another key's signature", (fake: FakeOpenBao) => (fake.key = OTHER), "address_mismatch"],
   ])("doesn't check again after %s, which time won't fix", async (_name, broken, reason) => {
-    const fake = await fakeOpenBao();
+    const fake = await started();
     const { signer, metrics } = setup(fake, undefined, 5);
     broken(fake);
     await signer.check();
