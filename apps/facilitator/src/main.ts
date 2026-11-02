@@ -12,7 +12,7 @@ import { createEd25519Signer, getNetworkPassphrase } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/facilitator";
 import type pg from "pg";
 import { Agent, setGlobalDispatcher } from "undici";
-import { MIGRATIONS, migrate } from "./adapters/postgres-schema.js";
+import { MIGRATIONS, migrate, pendingMigrations } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
 import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
 import { parseConfig, parseMigrateConfig } from "./config.js";
@@ -21,7 +21,7 @@ import { createApp, type AppDeps } from "./http/app.js";
 import { supportedResponse } from "./http/supported.js";
 import { captureConsoleError, jsonLogger, rpcEndpointName, type Logger } from "./logger.js";
 import { memoryMetrics, type Metrics } from "./metrics.js";
-import type { SettlementStore } from "./ports/index.js";
+import type { LeaseFence, SettlementStore } from "./ports/index.js";
 import { createPruner } from "./pruner.js";
 import { checkChannels } from "./settlement/channel-check.js";
 import { checkRpcNetworks } from "./settlement/network-check.js";
@@ -35,6 +35,7 @@ import {
 import { createLeaseKeeper } from "./settlement/lease.js";
 import { createRecords } from "./settlement/records.js";
 import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler, type Settle } from "./settlement/settle.js";
+import { createTrustlineLookup } from "./settlement/trustline.js";
 import { failoverUpstream, type EndpointFailure } from "./settlement/upstream-failover.js";
 import {
   UNEXPECTED_VERIFY_ERROR,
@@ -65,6 +66,13 @@ export const SHUTDOWN_DEADLINE_MS = 150_000;
  */
 export const SHUTDOWN_GRACE_MS = 15_000;
 
+/**
+ * How long an idle connection stays open: above `cloudflared`'s 90 s idle keep-alive, so the
+ * server never closes a connection the tunnel is about to reuse, which it would answer with a 502
+ * (ADR 0011). The header wait sits above it.
+ */
+export const KEEP_ALIVE_TIMEOUT_MS = 125_000;
+
 /** Starts the HTTP server on the graph `deps`. Tests call it with their own config and stores. */
 export async function start(
   deps: AppDeps,
@@ -73,6 +81,8 @@ export async function start(
   const { shutdownDeadlineMs = SHUTDOWN_DEADLINE_MS, shutdownGraceMs = SHUTDOWN_GRACE_MS } = opts;
   let closing = false;
   const server = createApp({ ...deps, closing: () => closing }).listen(deps.config.port);
+  server.keepAliveTimeout = KEEP_ALIVE_TIMEOUT_MS;
+  server.headersTimeout = KEEP_ALIVE_TIMEOUT_MS + 1_000;
   await once(server, "listening");
   // After listening, so `/verify` and `/supported` answer meanwhile. Sweeps run with or without the lease (0019
   // decision 37); `/settle` serves beside them (0019 decision 27) once the lease is held, and the
@@ -94,9 +104,9 @@ export async function start(
     // listens, so a new `/settle` still gets its 503 rather than a refused connection. Then it
     // closes: open requests get the grace, their connections are cut, and a sweep under way is
     // waited for, as sweeps need no lease (0019 decision 37). Past the deadline the open
-    // connections are cut, and a drain still under way leaves the lease to its TTL, so a
-    // transaction still unresolved gets that long before another process sends on its channel
-    // (decision 11).
+    // connections are cut, and a drain still under way leaves the lease to its TTL (decision 11).
+    // A transaction still unresolved can stay valid past that, until its payer's auth expires
+    // (0073): the next process's sends on its channel may then fail with `txBadSeq` and rebuild.
     close: async () => {
       closing = true;
       const begun = Date.now();
@@ -176,7 +186,7 @@ export const DISCOVERY_STATEMENT_TIMEOUT_MS = 2_000;
 /**
  * The deadline of the whole upstream call (AD-3): `timeoutMs` (10 s) for each of `urls` RPC URLs,
  * plus, with fee-stats bids, the bid read before them, which `FallbackRpc` bounds at 10 s per URL,
- * plus 1 s of slack. The AD-22 ledger read after it is not included.
+ * plus 1 s of slack. The AD-22 ledger read and the trustline lookup after it are not included.
  */
 export function upstreamDeadlineMs(
   urls: number,
@@ -310,7 +320,10 @@ export function buildUpstream(
  */
 export function buildChecks(
   config: Config,
-  rpc: Pick<FallbackRpc, "getLatestLedger" | "begin" | "markFailed">,
+  rpc: Pick<
+    FallbackRpc,
+    "getLatestLedger" | "begin" | "markFailed" | "simulateTransaction" | "getLedgerEntries"
+  >,
   fees: FeeSettings,
   logger: Pick<Logger, "warn" | "info">,
   seams?: UpstreamSeams,
@@ -324,7 +337,9 @@ export function buildChecks(
     facilitator: facilitator.address,
     channels: config.channels,
     minValidityLedgers: config.settlement.minValidityLedgers,
+    maxValidityLedgers: config.settlement.maxValidityLedgers,
     latestLedger: async () => (await rpc.getLatestLedger()).sequence,
+    missingTrustline: createTrustlineLookup(rpc, config.network, logger),
   };
 }
 
@@ -334,7 +349,7 @@ export function buildChecks(
  */
 export function buildVerifier(
   config: Config,
-  rpc: Pick<FallbackRpc, "getLatestLedger" | "begin" | "markFailed">,
+  rpc: Parameters<typeof buildChecks>[1],
   fees: FeeSettings,
   logger: Pick<Logger, "warn" | "info">,
   seams?: UpstreamSeams,
@@ -368,8 +383,8 @@ export function buildSettlement(
     metrics: Metrics;
     /** Tests pass the pool's `sleep`. */
     sleep?: (ms: number) => Promise<void>;
-    /** The channel lease's `held()`, checked again before each send (0025). */
-    held?: () => boolean;
+    /** The channel lease this process holds, with its token, checked before each send (0025, 0071). */
+    lease: () => LeaseFence | undefined;
   },
 ): {
   settle: Settle;
@@ -434,8 +449,9 @@ export function buildSettlement(
     maxFeeStroops: config.fees.maxFeeStroops,
     settleTimeoutMs: config.settlement.settleTimeoutMs,
     budgetMs: config.settlement.settleBudgetMs,
+    latestLedger: deps.checks.latestLedger,
     records,
-    ...(deps.held && { held: deps.held }),
+    lease: deps.lease,
   });
   const reconciliation = scheduleReconciliation({ reconciler, logger, network });
   // Closing the pool first refuses every call that sent nothing, so their records close too.
@@ -500,7 +516,7 @@ export function compose(
     logger,
     metrics,
     ...(opts.sleep && { sleep: opts.sleep }),
-    held: lease.held,
+    lease: lease.current,
   });
   return {
     deps: {
@@ -560,6 +576,10 @@ export async function main(
       rateLimits: createPool(url, poolErrorLogger(logger), 3),
       discovery: createPool(url, poolErrorLogger(logger), 3, DISCOVERY_STATEMENT_TIMEOUT_MS),
     };
+    // Every migration this code knows, applied by the deploy before it starts (ADR 0011). A schema
+    // ahead of the code passes, so a rollback to an earlier image starts.
+    const pending = await pendingMigrations(pools.main);
+    if (pending.length > 0) throw new Error(`the schema lacks migrations: ${pending.join(", ")}`);
     // Every RPC_URLS entry must serve NETWORK: another network's RPC reads every channel as
     // missing. Checked first, so a wrong URL is named instead of every channel.
     await checkRpcNetworks(config.rpcUrls, getNetworkPassphrase(config.network));

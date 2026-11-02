@@ -10,6 +10,7 @@ import type { SettlementHooks } from "../settlement/hooks.js";
 import type { LeaseKeeper } from "../settlement/lease.js";
 import type { Reconciliation } from "../settlement/reconcile.js";
 import type { Settle } from "../settlement/settle.js";
+import { TRUSTLINE_REASONS } from "../settlement/trustline.js";
 import { FEE_EXCEEDS_MAXIMUM, type Verify, type VerifyTrace } from "../settlement/verify.js";
 import { discoveryResources } from "./discovery.js";
 import { EXTENSION_RESPONSES_HEADER, encodeExtensionResponses } from "./extension-responses.js";
@@ -45,6 +46,15 @@ export interface AppDeps {
 
 /** Seconds a client waits before it tries `/settle` again on a process that can't settle now. */
 export const NO_LEASE_RETRY_AFTER_S = 5;
+
+/**
+ * The refusals whose message the `verified` and `settled` logs carry: it names the account and the
+ * asset (0078), or the archived entries to restore (0066). Both are bounded.
+ */
+const LOGGED_MESSAGES: ReadonlySet<string | undefined> = new Set([
+  ...TRUSTLINE_REASONS,
+  FEE_EXCEEDS_MAXIMUM,
+]);
 
 /** The status as a body code, like `not_found`: 413 → `payload_too_large`. */
 const code = (status: number) =>
@@ -120,6 +130,7 @@ export function createApp({
   settle,
   extensionResponses,
   supported,
+  reconciliation,
   lease,
   closing,
 }: AppDeps): Express {
@@ -162,11 +173,10 @@ export function createApp({
       invalidReason: response.invalidReason,
       // Our own code next to upstream's, e.g. for a channel account.
       reason: response.extra?.reason,
-      // A fee refusal's message names the archived entries to restore (0066); it is bounded.
-      message: response.invalidReason === FEE_EXCEEDS_MAXIMUM ? response.invalidMessage : undefined,
       payer: response.payer,
       // Which RPC URL answered: a lagging fallback rejects valid payments (AD-3).
       rpc: trace.rpc,
+      message: LOGGED_MESSAGES.has(response.invalidReason) ? response.invalidMessage : undefined,
     });
     res.json(response);
   });
@@ -209,8 +219,7 @@ export function createApp({
         replay: replay ?? false,
         success: response.success,
         errorReason: response.errorReason,
-        // As in `verified`: the check's fee refusal and its archived entries (0066).
-        message: response.errorReason === FEE_EXCEEDS_MAXIMUM ? response.errorMessage : undefined,
+        message: LOGGED_MESSAGES.has(response.errorReason) ? response.errorMessage : undefined,
         payer: response.payer,
         transaction: response.transaction || undefined,
       });
@@ -224,6 +233,16 @@ export function createApp({
   );
   app.get("/supported", (_req, res) => {
     res.json(supported);
+  });
+  // Liveness for the container healthcheck: 200 while the server is up, whatever the lease or the
+  // store (ADR 0011). The deploy waits for `ready`, the lease held outside a shutdown, as `/settle`
+  // needs (`main()` starts only on a migrated schema; 0049 adds the frozen RPCs), and `listed`, a
+  // sweep having listed the open records (0019 decision 36). Tests without them count as both.
+  app.get("/health", (_req, res) => {
+    res.json({
+      ready: !closing?.() && (lease?.held() ?? true),
+      listed: reconciliation?.listed() ?? true,
+    });
   });
   app.use("/discovery", limit("discovery", config.http.rateLimit.discovery));
   app.get(

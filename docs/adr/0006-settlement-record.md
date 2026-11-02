@@ -5,8 +5,12 @@
   unsigned record ends it at the first call's budget), 2026-10-16 (task 0009: the store-outage
   rule; a success answered while the store can't mark it), 2026-10-20 (task 0009: a repeat's
   settle timeout counts from the hash it sees; a refusal the store can't record), 2026-10-22
-  (task 0019: attempt states, reconciliation sweeps, the outage leftovers) and 2026-10-26 (task
-  0019: the record version, sweeps every 10 s beside `/settle`)
+  (task 0019: attempt states, reconciliation sweeps, the outage leftovers), 2026-10-26 (task
+  0019: the record version, sweeps every 10 s beside `/settle`) and 2026-10-28 (task 0073: an
+  envelope's only bound is the payer's auth expiry, so `…_transaction_expired` comes only once
+  the payment can no longer land under our hash, a fee bump someone else wraps it in being 0087;
+  a record closed with nothing sent reopens for the identical payload while its auth entry is
+  valid) and 2026-10-29 (task 0071: the lease's fencing token)
 
 ## Context
 
@@ -53,6 +57,25 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
     may still be signed. Both waits also end with the repeat's own budget. A repeat that lost the
     claim began before the first call, so its budget can end first: then it answers
     `settlement_pending` with no hash and leaves the record to the first call.
+  - A record closed `rejected` with nothing sent (no hash, and `…_timeout`, `…_interrupted`,
+    `…_shutting_down`, `…_rpc_unavailable`, `…_no_channel_in_time`, `…_no_channels` or
+    `…_lease_lost`) reopens
+    for a repeat with the same fingerprint while the payer's auth entry has at least 2 ledgers
+    left (task 0073). The repeat runs the checks again, then `reopen` moves the record back to
+    `claimed` by compare-and-set, counts it in `reopened` and sets `createdAt` to its own start,
+    so a later repeat counts the new claim's budget; the payment then settles as a first one
+    would. While a repeat can still reopen it, those answers carry `extra.retryable: true` and
+    `extra.expirationLedger`: repeat the same payment rather than sign a new one, which could
+    land beside the old one. Then `retryable` is `false` and the record stays final; with 1
+    ledger left the answer says to wait until the expiration ledger has closed, since the auth
+    entry is valid in it, and only then sign again. An unreadable ledger keeps `retryable: true`.
+    `reopen` adds one to `version`, and the writers of the earlier claim pass the version or
+    `reopened` count they read, which the store matches in the same statement: a repeat ending
+    it by its budget and the sweep's `interrupted` close pass the version; the first call's late
+    hash, its `finish` and `advance` after `submit()` and its hook refusal's close pass its claim.
+    So none of them writes onto the new claim (0073 decision 24). A record claimed before 0073
+    has `reopened` -1 and never reopens, as its release answered "sign a new payment" (decision
+    25).
   - `success: true` is answered once per record, by compare-and-set on `successAnsweredAt`. Later
     calls get `settle_exact_stellar_already_settled` with the hash. `settlement_pending` doesn't
     count, and a call whose client left before the mark marks nothing.
@@ -90,6 +113,8 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
 - **One owner of the lifecycle.** A single settlement module in `apps/facilitator` writes every
   record change.
   - States only move forward: `claimed → signed → pending → success | failed | rejected | expired`.
+    One written exception: `rejected → claimed` for a record nothing was sent for, reopened by
+    the identical payload (task 0073).
   - Each write is a compare-and-set.
   - A record keeps every hash it was signed with, and can be found by any of them.
   - Each hash keeps its attempt state (`stored → sent | unknown → landed | dead`) and its time
@@ -111,6 +136,21 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
   and doesn't serve `/settle` without it.
   - Deploys stop the old process before the new one starts.
   - Shutdown drains in-flight submissions to final or recorded-pending, then releases the lease.
+  - Every acquire draws a new fencing token (`gen_random_uuid()`), its own holder's re-acquire
+    too; a renewal keeps it (task 0071). `addHash` takes the lease's name and the caller's token
+    and stores the hash only while the token is the lease's current one, with the lease row
+    locked `FOR KEY SHARE` in the same statement. `token` is unique, so a takeover's update takes
+    the row's `FOR UPDATE` lock and either waits for the hash or is re-read and refuses it, while
+    a renewal, which changes only `expires_at`, never waits on a hash's write. A refused call sent
+    nothing and ends `rejected` with `settle_exact_stellar_lease_lost`, which reopens like the
+    other "nothing sent" reasons; a call that finds the lease lost or acquired again right after
+    its hash was stored answers it with that hash, and doesn't reopen, and so does a rebuild
+    refused after an earlier envelope was sent and refused with `txBadSeq`, with the hash of that
+    earlier envelope. An envelope stored and checked before its process froze can still go out
+    after a takeover, one per call in flight, and the send loop has no lease check, so it resends
+    until its bound; every resend has the same hash, so it lands at most once. `transition` stays unfenced: a stale
+    holder still records what it had sent, and the new holder's reconciliation finishes what it
+    can't.
 - **Minimum validity.** Payloads whose auth expiration ledger is less than `minValidityLedgers`
   ahead are rejected. The transaction's ledger bound never goes past the auth expiry, through a
   new `maxLedger` submit option (task 0016).
@@ -136,6 +176,11 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
   outcomes, and multi-hash lookup covers rebuilt transactions.
 - **The lease turns the pool's in-memory sequence tracking into a single-owner rule** that the
   store enforces, not a deployment convention.
+- **The token fences the one write before a send.** A process frozen past its TTL (a VM pause, a
+  long GC) wakes still past its lease check. Only `addHash` comes before money moves, so checking
+  the token there, in the store, stops its next send whatever its clock says. Equality is enough,
+  since the store reads the lease row itself; a random token can't repeat after a release deletes
+  the row, as a counter kept in the row would (task 0071).
 
 ## Alternatives considered
 

@@ -53,17 +53,23 @@ export interface SubmitterOptions {
    * one that also paid a TTL extension.
    */
   maxFeeStroops?: number;
-  /** Time bound of each transaction, in seconds from build. */
+  /**
+   * Time bound of a transaction submitted without `maxLedger`, in seconds from build. One with
+   * `maxLedger` has no time bound (0073).
+   */
   timeoutSeconds?: number;
   /**
    * How long past the time bound to wait for a final answer, in seconds, before reporting
-   * `pending` (default 30). Only an RPC that stops answering gets this far.
+   * `pending` (default 30). For a ledger-bounded transaction the wait runs past the ledger bound's
+   * estimated time instead, at 6 s a ledger: about 66 × 6 + 30 = 426 s at 66 ledgers. Only an RPC
+   * that stops answering, or a transaction that never shows up, gets this far.
    */
   confirmGraceSeconds?: number;
   /**
    * Longest wait for a caller's `onSigned`, in milliseconds (default 5,000). The wait also ends at
-   * the envelope's time bound and ledger bound, whichever comes first. A store that hangs rather
-   * than fails then holds a channel for this long, not for the whole time bound.
+   * the envelope's time bound, or at its ledger bound if that closes before the bound's estimated
+   * time. A store that hangs rather than fails then holds a channel for this long, not for the
+   * whole bound.
    */
   onSignedTimeoutMs?: number;
   /**
@@ -105,8 +111,12 @@ export interface ContractCall {
 
 /** The bounds of a signed envelope: past either one it can no longer land. */
 export interface SignedBounds {
-  /** The time bound, in Unix seconds: the envelope's `maxTime`. */
-  maxTime: number;
+  /**
+   * The time bound, in Unix seconds: the envelope's `maxTime`. Unset when the call set
+   * `maxLedger`: the envelope then lives until its ledger bound, its authorization's expiry, so
+   * it can no longer land exactly when the payload can't.
+   */
+  maxTime?: number;
   /** The last ledger it may land in (inclusive), when the call set `maxLedger`. */
   maxLedger?: number;
 }
@@ -220,12 +230,18 @@ const BAD_SEQ = new Set(["txBadSeq"]);
  */
 const SPARE_LEDGERS = 1;
 
+/** A ledger's close time, rounded up from the 5.0–5.8 s measured on testnet and mainnet (0043). */
+const LEDGER_SECONDS_ESTIMATE = 6;
+
 /** A signed envelope, ready to send. */
 interface Prepared {
   bump: Transaction | FeeBumpTransaction;
   hash: string;
   txSequence: bigint;
-  maxTime: number;
+  /** The time bound; unset when `maxLedger` bounds the envelope instead. */
+  maxTime?: number;
+  /** The latest ledger the simulation saw: fresh, unlike the clock after an idle stretch. */
+  simLedger: number;
   /** The caller's `maxLedger`: the last ledger the envelope may land in. */
   maxLedger?: number;
 }
@@ -265,7 +281,9 @@ interface Hold {
  * only when every transaction on it is final.
  *
  * Every wait is bounded: `submit()` returns by the time bound plus `confirmGraceSeconds` even
- * when the RPC stops answering, with `pending` if the outcome is still unknown.
+ * when the RPC stops answering, with `pending` if the outcome is still unknown. An envelope
+ * bounded by `maxLedger` alone has no time bound; its waits end at about when that ledger closes
+ * (ledgers left × 6 s) instead.
  */
 export class SettlementSubmitter {
   readonly pool: ChannelPool;
@@ -341,7 +359,8 @@ export class SettlementSubmitter {
    * and sent nothing fails with {@link ShutdownError}, whether it waits for a channel, waits
    * behind the channel's pending transaction, retries a sequence read or is about to sign, and so
    * does every later `submit()`. Calls past `onSigned` run on. Resolves once every `submit()` under
-   * way has returned: by its time bound plus `confirmGraceSeconds` at the latest. A confirmation
+   * way has returned: by its time bound, or its ledger bound's estimated time at 6 s a ledger, plus
+   * `confirmGraceSeconds` at the latest (about 426 s at 66 ledgers, 750 s at 120). A confirmation
    * still running after a `pending` result is not waited for.
    */
   async close(): Promise<void> {
@@ -575,7 +594,22 @@ export class SettlementSubmitter {
     // transaction was final. A ledger closed since then can still slip through; its send gets
     // txTooLate and is reported `expired`.
     if (this.tooCloseToBound(prepared.maxLedger, this.clock.current)) return true;
+    if (prepared.maxTime === undefined) return false;
     return Math.floor(this.now() / 1000) + this.timeoutSeconds / 2 > prepared.maxTime;
+  }
+
+  /**
+   * The envelope's time bound in Unix seconds, or, for one bounded by `maxLedger` alone, about
+   * when that ledger closes. Never a reason to call it expired: it bounds the waits, how long
+   * `submit()` waits before it answers `pending`, a resend's wait and a queued call's wait on the
+   * channel. Ledgers slower than the estimate end those waits before the envelope's real bound.
+   * Counted from the newer of the clock and the simulation's ledger: the clock polls only while
+   * someone waits, so on a fresh or idle submitter it reads 0 or an old ledger.
+   */
+  private timeBound({ maxTime, maxLedger, simLedger }: Prepared): number {
+    if (maxTime !== undefined) return maxTime;
+    const left = Math.max(0, (maxLedger ?? 0) - Math.max(this.clock.current, simLedger));
+    return Math.floor(this.now() / 1000) + left * LEDGER_SECONDS_ESTIMATE;
   }
 
   /** Whether a call bounded by `maxLedger` has too few ledgers left after `latest` to start. */
@@ -607,13 +641,17 @@ export class SettlementSubmitter {
     const base = await this.inclusionFee();
     const queued = this.pool.queued;
     let fee = this.raise(base);
-    const maxTime = Math.floor(this.now() / 1000) + this.timeoutSeconds;
     const { maxLedger } = opts;
+    // A ledger bound is the authorization's expiry: no time bound may end the envelope before it,
+    // or a payload that can still land elsewhere would be reported `expired` (0073 decision 1).
+    const maxTime =
+      maxLedger === undefined ? Math.floor(this.now() / 1000) + this.timeoutSeconds : undefined;
     const build = (bid: number) =>
       new TransactionBuilder(new Account(source, sequence.toString()), {
         fee: String(bid),
         networkPassphrase: this.passphrase,
-        timebounds: { minTime: 0, maxTime },
+        // A maxTime of 0 is no time bound.
+        timebounds: { minTime: 0, maxTime: maxTime ?? 0 },
         // A ledger bound's maxLedger is exclusive; ours is the last ledger it may land in.
         ...(maxLedger !== undefined && {
           ledgerbounds: { minLedger: 0, maxLedger: maxLedger + 1 },
@@ -666,7 +704,14 @@ export class SettlementSubmitter {
         this.passphrase,
       ),
     );
-    return { bump, hash: bump.hash().toString("hex"), txSequence, maxTime, maxLedger };
+    return {
+      bump,
+      hash: bump.hash().toString("hex"),
+      txSequence,
+      maxTime,
+      maxLedger,
+      simLedger: sim.latestLedger,
+    };
   }
 
   private async sendAndConfirm(
@@ -680,17 +725,19 @@ export class SettlementSubmitter {
     if (this.closing)
       throw new ShutdownError("the submitter closed before the envelope was signed");
     const { bump, hash, txSequence, maxTime, maxLedger } = prepared;
+    // Fixed once: a clock stalled by an RPC outage must not push the waits on.
+    const boundAt = this.timeBound(prepared);
     const base = { channel: channel.address };
     const tried: Attempt = { hash, sent: "no" };
     hold.attempts.push(tried);
     // `current` may lag the network; a send it lets through past the ledger bound gets txTooLate,
     // which is reported as `expired` below.
     const pastBounds = () =>
-      Math.floor(this.now() / 1000) > maxTime ||
+      (maxTime !== undefined && Math.floor(this.now() / 1000) > maxTime) ||
       this.pastLedgerBound(maxLedger, this.clock.current);
     // Nothing is sent until the caller has the hash: a store write that fails must stop the send.
     if (opts.onSigned) {
-      await this.awaitSigned(opts.onSigned, hash, maxTime, maxLedger);
+      await this.awaitSigned(opts.onSigned, hash, maxTime, maxLedger, boundAt);
       // The write took time: an envelope already past a bound can only get txTooLate.
       if (pastBounds()) return { ...base, status: "expired", hash };
     }
@@ -735,15 +782,21 @@ export class SettlementSubmitter {
         hash,
         reason: sent ? "try-again-later" : "send-error",
       });
-      await this.clock.following((maxTime + 1) * 1000);
+      await this.clock.following((boundAt + 1) * 1000);
       if (pastBounds()) {
         // A bound passed during the wait: a resend can only be txTooLate.
         if (uncertain) break;
         return { ...base, status: "expired", hash };
       }
+      // A ledger bound alone, its estimated time (6 s a ledger) gone with no ledger seen past it:
+      // the RPC isn't answering, or ledgers run slower than the estimate. Stop resending either
+      // way, so a down RPC can't keep the loop going; an envelope the network never took then ends
+      // `expired` at its ledger bound, with ledgers left (0073 decision 11). Confirm by hash;
+      // `submit()` answers `pending` at `dueAt`.
+      if (maxTime === undefined && Math.floor(this.now() / 1000) > boundAt) break;
     }
     if (accepted) callSafely(opts.onSent, hash);
-    const dueAt = (maxTime + this.confirmGraceSeconds) * 1000;
+    const dueAt = (boundAt + this.confirmGraceSeconds) * 1000;
     if (accepted && this.pipeline && this.pool.queued > 0) {
       const final = new Promise<void>((resolve) => (hold.finish = resolve));
       channel.pending = { sequence: txSequence, final, dueAt };
@@ -770,24 +823,26 @@ export class SettlementSubmitter {
   private async awaitSigned(
     onSigned: (hash: string, bounds: SignedBounds) => void | Promise<void>,
     hash: string,
-    maxTime: number,
+    maxTime: number | undefined,
     maxLedger: number | undefined,
+    boundAt: number,
   ): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let watchTimer: ReturnType<typeof setTimeout> | undefined;
     let settled = false;
-    const toTimeBound = Math.max(0, maxTime * 1000 - this.now());
+    const toTimeBound = maxTime === undefined ? Infinity : Math.max(0, maxTime * 1000 - this.now());
     const timedOut = new Promise<"timeout" | "time-bound">((resolve) => {
       timer =
         this.onSignedTimeoutMs < toTimeBound
           ? setTimeout(() => resolve("timeout"), this.onSignedTimeoutMs)
           : setTimeout(() => resolve("time-bound"), toTimeBound);
     });
-    // The ledger bound can come long before the time bound (a few ledgers against 60 s).
+    // The ledger bound can come long before the time bound (a few ledgers against 60 s), and is
+    // the only bound when the call set `maxLedger`.
     const pastLedger = new Promise<"ledger-bound">((resolve) => {
       if (maxLedger === undefined) return;
       watchTimer = setTimeout(async () => {
-        const deadlineMs = maxTime * 1000;
+        const deadlineMs = boundAt * 1000;
         let seen = await this.clock.following(deadlineMs);
         while (!settled && !this.pastLedgerBound(maxLedger, seen) && this.now() < deadlineMs)
           seen = await this.clock.next(seen, deadlineMs);
@@ -795,7 +850,10 @@ export class SettlementSubmitter {
       }, this.pollIntervalMs);
     });
     try {
-      const bounds: SignedBounds = { maxTime, ...(maxLedger !== undefined && { maxLedger }) };
+      const bounds: SignedBounds = {
+        ...(maxTime !== undefined && { maxTime }),
+        ...(maxLedger !== undefined && { maxLedger }),
+      };
       const written = Promise.resolve().then(() => onSigned(hash, bounds)); // a synchronous throw too
       const outcome = await Promise.race([written, timedOut, pastLedger]).catch(
         (error: unknown) => {
@@ -842,7 +900,7 @@ export class SettlementSubmitter {
       }
       if (res.status === rpc.Api.GetTransactionStatus.NOT_FOUND) {
         if (
-          res.latestLedgerCloseTime > maxTime ||
+          (maxTime !== undefined && res.latestLedgerCloseTime > maxTime) ||
           this.pastLedgerBound(maxLedger, res.latestLedger)
         ) {
           // It can no longer be applied. After an uncertain send the cached sequence may be

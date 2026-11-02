@@ -11,6 +11,7 @@ import { MAX_BODY_DEPTH, NO_LEASE_RETRY_AFTER_S } from "../src/http/app.js";
 import { start, type Started } from "../src/main.js";
 import { memoryMetrics } from "../src/metrics.js";
 import type { SettlementRecord } from "../src/ports/index.js";
+import { PAYTO_TRUSTLINE_REASON } from "../src/settlement/trustline.js";
 import type { SettlementHooks } from "../src/settlement/hooks.js";
 import type { Reconciliation } from "../src/settlement/reconcile.js";
 import type { Settle } from "../src/settlement/settle.js";
@@ -287,6 +288,28 @@ describe("POST /settle", () => {
     expect(settle).not.toHaveBeenCalled();
   });
 
+  it("logs a missing trustline's message, and no other refusal's", async () => {
+    const refusal = { success: false, transaction: "", network: requirements.network };
+    settle.mockResolvedValueOnce({
+      response: {
+        ...refusal,
+        errorReason: PAYTO_TRUSTLINE_REASON,
+        errorMessage: "G… has no USDC trustline",
+      },
+    });
+    await post(request);
+    settle.mockResolvedValueOnce({
+      response: {
+        ...refusal,
+        errorReason: "settle_exact_stellar_refused",
+        errorMessage: "not for the log",
+      },
+    });
+    await post(request);
+    const settled = lines.map((line) => JSON.parse(line)).filter((l) => l.event === "settled");
+    expect(settled.map((line) => line.message)).toEqual(["G… has no USDC trustline", undefined]);
+  });
+
   it("answers 500 and logs the error when settling throws", async () => {
     settle.mockRejectedValueOnce(new Error("store down"));
     const response = await post(request);
@@ -332,6 +355,9 @@ describe("POST /settle beside reconciliation (0019 decision 27)", () => {
       });
       expect(response.status).toBe(200);
       expect(settle).toHaveBeenCalledTimes(1);
+      // Ready, with no lease to hold here, though the first sweep hasn't listed the records yet.
+      const health = await fetch(`http://127.0.0.1:${app.port}/health`);
+      expect([health.status, await health.json()]).toEqual([200, { ready: true, listed: false }]);
     } finally {
       await app.close();
     }
@@ -346,6 +372,7 @@ describe("POST /settle without the channel lease (0025)", () => {
     let holds = false;
     const lease = {
       held: () => holds,
+      current: () => (holds ? { name: "test:channels", token: "t" } : undefined),
       start: vi.fn(async () => {}),
       runOnce: vi.fn(),
       close: vi.fn(async () => {}),
@@ -390,7 +417,14 @@ describe("POST /settle without the channel lease (0025)", () => {
       expect(hit).not.toHaveBeenCalled();
       // `/verify` doesn't need the lease.
       expect((await post("/verify")).status).toBe(200);
+      // Alive but not ready: the deploy waits on this.
+      const health = async () => {
+        const response = await fetch(`http://127.0.0.1:${app.port}/health`);
+        return [response.status, await response.json()];
+      };
+      expect(await health()).toEqual([200, { ready: false, listed: true }]);
       holds = true;
+      expect(await health()).toEqual([200, { ready: true, listed: true }]);
       expect((await post("/settle")).status).toBe(200);
       expect(settle).toHaveBeenCalledTimes(1);
     } finally {
@@ -427,6 +461,7 @@ describe("shutdown (0025)", () => {
     const settle = vi.fn<Settle>(async () => ({ response: success }));
     const lease = {
       held: () => true,
+      current: () => ({ name: "test:channels", token: "t" }),
       start: vi.fn(async () => {}),
       runOnce: vi.fn(),
       close: vi.fn(async () => {}),

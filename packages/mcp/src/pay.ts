@@ -2,13 +2,8 @@ import { LIMITS } from "@stellar-x402/bazaar";
 import { x402Client, x402HTTPClient, type SchemeRegistration } from "@x402/core/client";
 import { wrapFetchWithPayment } from "@x402/fetch";
 import { z } from "zod";
-import {
-  SellerFetchError,
-  checkUrl,
-  guardedFetch,
-  type SellerLimits,
-} from "@stellar-x402/seller-fetch";
-import { ToolError } from "./results.js";
+import { checkUrl, guardedFetch, type SellerLimits } from "@stellar-x402/seller-fetch";
+import { asToolError, ToolError } from "./results.js";
 import { countDaily, refundDaily, utcDay, type DailyEntry } from "./daily.js";
 
 /** The call_paid_http tool's input and output, as server.ts registers it. */
@@ -199,19 +194,19 @@ export async function callPaidHttp(
       body: request.body,
     });
   } catch (error) {
+    const failure = asToolError(error);
     if (paymentSent) {
       // The signed payment left this process; whether the seller settled it is unknown.
-      const detail =
-        error instanceof ToolError || error instanceof SellerFetchError
-          ? `${error.code}: ${error.detail ?? error.message}`
-          : String(error);
+      const detail = failure
+        ? `${failure.code}: ${failure.detail ?? failure.message}`
+        : String(error);
       throw new ToolError(
         "payment_unknown",
         "The payment's outcome is unknown; it counts as spent.",
         detail,
       );
     }
-    if (error instanceof ToolError || error instanceof SellerFetchError) throw error;
+    if (failure) throw failure;
     if (refusal) throw refusal;
     if (signingError) {
       // The payer's simulation fails in the asset contract: #10 is a balance too low, #13 a missing

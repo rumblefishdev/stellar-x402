@@ -85,20 +85,19 @@ code stay upstream's; when the payment's own transaction lists archived entries
   don't archive and an over-long key, and upstream's answer for another refusal and for a fee
   refusal without archived entries.
 - `apps/facilitator/src/http/app.ts`: the `verified` and `settled` logs carry the message of a
-  `…_fee_exceeds_maximum` refusal as `message`; `verify-route.test.ts` and `settle-route.test.ts`
-  pin it, and that no other refusal's message is logged.
+  `…_fee_exceeds_maximum` refusal as `message`, in `LOGGED_MESSAGES` next to 0078's trustline
+  reasons; `verify-route.test.ts` and `settle-route.test.ts` pin it, and that no other refusal's
+  message is logged.
 - `docs/threat-model.md`, "Fee inflation by rent"; `docs/adr/0007-fee-abuse-containment.md`, one
   line on restore rent; `apps/facilitator/README.md`, "Restoring archived entries".
 - Not covered: `/settle` can still refuse after the check with
   `settle_exact_stellar_fee_exceeds_maximum` when the pool's rebuild re-simulates and finds an
   entry archived since `/verify`; that message doesn't name the entries. The window is narrow.
-- Facilitator suite after the PR review: 553 tests, all passing but 0025's "gives the lease up
-  at once past a stalled client", which fails on local Node 26 on develop too (CI runs Node 22);
-  tsc and eslint clean.
+- Facilitator suite after merging develop (0073, 0078): 652 tests, all passing on Node 22; tsc and
+  eslint clean.
 
-**Modified tests:** `settle.test.ts`'s "answers a failed check with its reason, without claiming"
-now also expects the check's `invalidMessage` as `errorMessage`; it held nothing on the message
-before.
+**Modified tests:** none; `settle.test.ts` now matches develop, which pins the check's
+`invalidMessage` as `errorMessage` too.
 
 ## Design Decisions
 
@@ -128,3 +127,7 @@ before.
 7. **The message is logged on a fee refusal** (PR review): `@x402/core` puts only the reason into
    the buyer's 402, so the `verified` and `settled` logs carry it for the operator, only for
    `…_fee_exceeds_maximum`; it is bounded (four keys of at most 512 characters).
+8. **The new payment waits until the refused one can't land** (merge with develop, 0086): upstream
+   takes the fee from a new simulation, so after a restore the refused payment passes the check
+   too, and a second signature could land next to it. Decision 5 stands; the README asks for the
+   new signature only once the first can't land. 0086 closes the path itself.

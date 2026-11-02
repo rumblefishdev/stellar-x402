@@ -52,3 +52,6 @@ lore/board.json
 # BMAD (local setup and generated planning docs)
 _bmad/
 _bmad-output/
+
+# Ansible: the real inventory
+deploy/ansible/inventory.ini

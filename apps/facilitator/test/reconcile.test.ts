@@ -23,7 +23,7 @@ import {
 } from "../src/settlement/reconcile.js";
 import { createRecords } from "../src/settlement/records.js";
 import { SETTLE_REASONS } from "../src/settlement/settle.js";
-import { settlement } from "./port-contracts.js";
+import { holdLease, settlement } from "./port-contracts.js";
 import { testDatabase } from "./database.js";
 
 const db = testDatabase();
@@ -140,7 +140,7 @@ async function signed(
   nonce = "1",
 ) {
   const key = await claimed(store, nonce);
-  for (const hash of hashes) await store.addHash(key, hash, NOW, bounds);
+  for (const hash of hashes) await store.addHash(key, hash, await holdLease(store), NOW, bounds);
   return key;
 }
 
@@ -179,11 +179,35 @@ describe("createReconciler", () => {
       store.listNonFinal = async (n) => {
         const listed = await list(n);
         // The call signs between the listing and the close.
-        await store.addHash(key, A, NOW, { maxTime: 2_000 });
+        await store.addHash(key, A, await holdLease(store), NOW, { maxTime: 2_000 });
         return listed;
       };
       await reconciler.sweep();
       expect(await store.get(key)).toMatchObject({ state: "signed", hashes: [A] });
+    });
+
+    it("never closes a claim reopened after the sweep read the earlier one (0073 decision 19)", async () => {
+      // The sweep reads the old claim; before its close, a repeat's budget ends it and another
+      // repeat reopens it. The reopened claim is still `claimed` with no hash, but it is a new
+      // claim whose call may still sign: only the version the sweep read tells them apart.
+      const { store, reconciler, advance } = setup();
+      const key = await claimed(store);
+      advance(BUDGET_MS + 5_001);
+      const reason = SETTLE_REASONS.noChannelInTime;
+      const list = store.listNonFinal.bind(store);
+      store.listNonFinal = async (n) => {
+        const listed = await list(n);
+        await store.transition(key, "claimed", {
+          state: "rejected",
+          errorReason: reason,
+          updatedAt: NOW,
+        });
+        const { fingerprint } = settlement("1");
+        expect(await store.reopen(key, fingerprint, [reason], NOW)).toBeDefined();
+        return listed;
+      };
+      expect(await reconciler.sweep()).toMatchObject({ rejected: 0 });
+      expect(await store.get(key)).toMatchObject({ state: "claimed", reopened: 1, hashes: [] });
     });
   });
 
@@ -250,6 +274,18 @@ describe("createReconciler", () => {
       expect((await store.attempts(key))[0]?.state).toBe("dead");
     });
 
+    it("keeps a hash bounded by its ledger alone open past 60 s, until that ledger passes (0073)", async () => {
+      // No time bound since 0073: a close time long past signing doesn't expire it.
+      const answers = { [A]: missing(4_009, NOW / 1000 + 300) };
+      const { store, reconciler, advance } = setup(answers);
+      const key = await signed(store, [A], { maxLedger: 4_010 });
+      advance(BUDGET_MS + 5_001);
+      expect(await reconciler.sweep()).toMatchObject({ open: 1, expired: 0 });
+      expect((await store.get(key))?.state).toBe("signed");
+      answers[A] = missing(4_010, NOW / 1000 + 305);
+      expect(await reconciler.sweep()).toMatchObject({ expired: 1 });
+    });
+
     it("expires a hash once the close time passes its time bound", async () => {
       const { store, reconciler } = setup({ [A]: missing(100, 2_001) });
       const key = await signed(store, [A]);
@@ -261,7 +297,10 @@ describe("createReconciler", () => {
       const answers = { [A]: missing(4_010), [B]: missing(4_010) };
       const { store, reconciler } = setup(answers);
       const key = await signed(store, [A]);
-      await store.addHash(key, B, NOW, { maxTime: 9_999, maxLedger: 4_020 });
+      await store.addHash(key, B, await holdLease(store), NOW, {
+        maxTime: 9_999,
+        maxLedger: 4_020,
+      });
       expect(await reconciler.sweep()).toMatchObject({ open: 1 });
       expect((await store.get(key))?.state).toBe("signed");
       expect((await store.attempts(key)).map((a) => a.state)).toEqual(["dead", "stored"]);
@@ -300,7 +339,7 @@ describe("createReconciler", () => {
       advance(BUDGET_MS + 60_000);
       // The call's `txBadSeq` rebuild is stored while the sweep waits for the RPC.
       getTransaction.mockImplementationOnce(async () => {
-        await store.addHash(key, B, NOW, { maxTime: NOW / 1000 + 60 });
+        await store.addHash(key, B, await holdLease(store), NOW, { maxTime: NOW / 1000 + 60 });
         return answers[A]!;
       });
       expect(await reconciler.sweep()).toMatchObject({ open: 1, expired: 0 });
@@ -323,7 +362,7 @@ describe("createReconciler", () => {
       const { store, reconciler } = setup(answers);
       const s = { ...settlement("1"), paymentPayload: payloadWithAuth(), createdAt: NOW };
       await store.claim(s);
-      await store.addHash(s.key, A, NOW);
+      await store.addHash(s.key, A, await holdLease(store), NOW);
       await reconciler.sweep();
       expect((await store.get(s.key))?.state).toBe("signed");
       answers[A] = missing(AUTH_EXPIRY);
