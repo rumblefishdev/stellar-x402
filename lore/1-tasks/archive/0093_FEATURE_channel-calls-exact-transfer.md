@@ -1,0 +1,126 @@
+---
+id: "0093"
+title: "Make the channel the caller of an exact settlement, so the fee account only pays fees"
+type: FEATURE
+status: completed
+milestone: 1
+related_adr: ["0003", "0005", "0013"]
+related_tasks: ["0036", "0048", "0015", "0006", "0007"]
+tags: [signer-pool, keys, security, mainnet, priority-medium, effort-small, payments]
+links:
+  - ../../../packages/signer-pool/src/submitter.ts
+  - ../backlog/0048_FEATURE_channel-signer-thresholds.md
+history:
+  - date: "2026-10-30"
+    status: backlog
+    who: karolkow
+    note: >
+      Spawned from 0036's grilling: the fee account is the operation source of every settlement,
+      which only `upto` needs, and it keeps 0048 from limiting the hot key to fees.
+  - date: "2026-11-02"
+    status: active
+    who: karolkow
+    note: Work started.
+  - date: "2026-11-02"
+    status: completed
+    who: karolkow
+    note: >
+      Merged in #107. The pool sets no operation source, so the channel is the caller; every
+      criterion checked on develop. No threshold changed on a real account: that is 0048's.
+---
+
+# Make the channel the caller of an exact settlement, so the fee account only pays fees
+
+## Summary
+
+Every settlement's `invokeHostFunction` names the fee account as its operation source
+(`packages/signer-pool/src/submitter.ts:622`). An operation source needs the medium threshold, so
+the facilitator key must meet medium on the fee account, which also allows a Payment out of it. An
+`exact` settlement doesn't need the fee account there: leaving the operation source unset makes the
+channel, the transaction source, the caller. The fee account then only signs the fee bump, which
+needs the low threshold (CAP-15), and 0048 can raise the fee account's medium and high above the
+hot key's weight.
+
+**Lane:** Payments
+
+## Context
+
+- The shape was measured and chosen for `upto` in 0006: the `upto-proxy` contract calls
+  `facilitator.require_auth()`, which the operation source satisfies
+  (`lore/1-tasks/archive/0002_RESEARCH_upto-proxy-design-on-soroban/notes/R-soroban-auth-model.md:81`).
+  0007 then used one shape for every call. No reason is written for `exact`, whose `transfer` is
+  authorised by the payer's auth entry alone.
+- Measured on testnet: our settlement `355082892c83…` (2026-10-23) has the fee account
+  `GBCSI5…` as fee-bump payer and as operation source, the channel `GDNC65…` as transaction source.
+  The public x402.org facilitator's `1bc53d50a888…` (2026-10-15) leaves the operation source unset.
+- Measured on testnet (2026-10-30, a throwaway fee account F with key K, one channel, a native-XLM
+  `transfer` fee-bumped by F): with F's thresholds at 0, both shapes land (no operation source
+  `7b2e53e8…`, F as operation source `178e55b2…`). After F's thresholds are raised to low 1 /
+  medium 2 / high 2 (`fcf0e02a…`), the shape with no operation source still lands (`b5a096a2…`,
+  10,493 stroops), F as operation source is refused at submit with `opBadAuth` and no fee charged,
+  and a 10 XLM Payment out of F is refused the same way. The shape with no operation source is 36
+  bytes and 79 stroops smaller.
+- Upstream's `ExactStellarScheme` copies the client's operation with no source of its own, and its
+  verify refuses a facilitator operation source in the payload
+  (`@x402/stellar` 2.28.0 `exact/facilitator/index.mjs:176,300`).
+- What doesn't change: two facilitator signatures (the transaction and the fee bump), the fee
+  account paying every fee, channels holding only their reserve, and verify refusing source-account
+  auth entries (one would then authorise as the channel).
+- Channels already give the facilitator key the medium threshold (`setup.ts:90-92`).
+- The pool has refused the `upto` harness's consent entry since `d85b041` (2026-10-16): the e2e
+  suite and `testnet-smoke.ts` give `facilitator.require_auth()` a source-account entry
+  (`contracts/upto-proxy/e2e/src/upto.ts:245`), and `SettlementSubmitter.submit` refuses any such
+  entry. So no call that goes through the pool today needs the fee account as its operation source;
+  an address entry stays open to `upto`. CI runs neither, so nothing reported it.
+
+## Decisions so far
+
+| #   | What is done                                                                                                                                                   | From    | Vs the task                 | Who does the same (checked)                                           | Code                     | Test                        |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | --------------------------- | --------------------------------------------------------------------- | ------------------------ | --------------------------- |
+| 1   | No call through the pool has an operation source, so the channel is the caller                                                                                 | task AC | matches it                  | upstream `@x402/stellar` 2.28.0 `exact/facilitator/index.mjs:176,300` | `submitter.ts` `prepare` | `submitter.test.ts`         |
+| 2   | The pool has no option to set an operation source: nothing sends `upto` through it today, and 0015 chooses how `upto` gives consent                            | agent   | matches it (chosen in 0015) | —                                                                     | `submitter.ts`           | —                           |
+| 3   | A source-account auth entry stays refused; it would now authorize as the channel                                                                               | task    | matches it                  | upstream verify refuses it                                            | `submitter.ts` `submit`  | `settlement-guards.test.ts` |
+| 4   | `settle-smoke.ts` can raise a fresh fee account's thresholds to 1 / 2 / 2 after channel setup, and checks that a settlement lands and a Payment out is refused | agent   | matches it                  | —                                                                     | `settle-smoke.ts`        | the run in the PR           |
+| 5   | 0015 records that the pool refuses the harness's consent entry, and that any consent from the fee account needs the medium threshold 0048 may take away        | agent   | beyond it                   | `soroban-env-host` 30.0.0 `account_contract.rs:245`                   | 0015's task file         | —                           |
+
+## Not yet decided
+
+Nothing.
+
+## Out of scope
+
+- Repairing the `upto` e2e suite and `testnet-smoke.ts`, refused since `d85b041`: 0015.
+- The fee account's thresholds on any real account: 0048.
+
+## Implementation
+
+- `exact` calls go out with no operation source; `upto` (0015) keeps a way to give the
+  facilitator's consent, chosen in 0015.
+- Tests: the built transaction has no operation source; a settlement lands on testnet with the
+  fee account's thresholds raised to low 1 / medium 2 / high 2 (the hot key at weight 1).
+
+## Acceptance Criteria
+
+- [x] Given an `exact` settlement, when the pool builds it, then its `invokeHostFunction` has no operation source
+- [x] Given a fee account whose medium threshold is above the facilitator key's weight, when an `exact` settlement is sent on testnet, then it lands (XLM `7c686d70…`, a non-SAC SEP-41 token `222700a5…`, 2026-11-02)
+- [x] 0048 is told that the fee account no longer needs the medium threshold for `exact`
+
+## Implementation Notes
+
+- One production line in `submitter.ts`; the error message of a source-account entry now names the
+  channel. Measured smaller by 36 bytes and 79 stroops on a native-XLM `transfer`.
+- `settle-smoke.ts` gained `RAISE_FEE_ACCOUNT_THRESHOLDS`, for a fresh fee account only.
+- **Modified tests:** `submitter.test.ts` now expects no operation source (intended). Titles and
+  comments in `settlement-guards.test.ts`, `verify.test.ts`, `xdr-fixture.test.ts` follow the shape.
+
+## Issues Encountered
+
+- The review found a claim of this task too strong: the pool refuses the `upto` harness's
+  source-account entry, not `upto` as such, since an address entry stays open. Corrected here and
+  in 0015.
+- Raising the thresholds on a real account would block creating channels and ADR 0013's merge steps:
+  recorded in 0048.
+
+## Future Work
+
+Nothing new: `upto`'s consent is in 0015, and the fee account's thresholds in 0048.

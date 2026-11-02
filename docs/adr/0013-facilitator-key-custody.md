@@ -54,8 +54,7 @@
   `transit/sign/<network key>` with a pinned `key_version` and adds the 64-byte signature. A
   rotated Transit key can't then sign in place of the key that is on chain.
 - **The signer's address is the fee account's, from config.** The pool pays fee bumps from it and
-  uses it as the operation source and the channels' signer, so the fee account is always the
-  OpenBao key's own account. The first signature is checked against that address, so the
+  uses it as the channels' signer, so the fee account is always the OpenBao key's own account. The first signature is checked against that address, so the
   facilitator starts without OpenBao.
 - **A unix socket per network, and no network port.** OpenBao has one listener per network, each
   on a socket in its own volume, mounted only into that network's facilitator, plus an admin

@@ -1,7 +1,8 @@
-// UptoProxy on testnet (task 0004). Settlements go through SettlementSubmitter in the
-// delegated-bump shape: a channel is the transaction source, the facilitator is the operation
-// source and pays the fee bump. Rejections are checked in the submitter's enforcing simulation
-// against live testnet state, so they have no transaction hash.
+// UptoProxy on testnet (task 0004). Settlements go through SettlementSubmitter: a channel is the
+// transaction source, the facilitator is the operation source and pays the fee bump. The pool now
+// refuses that consent entry and sets no operation source, so this suite can't settle until 0015.
+// Rejections are checked in the submitter's enforcing simulation against live testnet state, so
+// they have no transaction hash.
 //
 // Run from the repo root: pnpm contracts:e2e. Results go to results/testnet-results.json.
 import { writeFileSync } from "node:fs";

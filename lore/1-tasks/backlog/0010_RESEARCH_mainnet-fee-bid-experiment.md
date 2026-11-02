@@ -3,7 +3,7 @@ id: "0010"
 title: "Measure inclusion-fee bids against inclusion delay on mainnet"
 type: RESEARCH
 status: backlog
-milestone: 1
+milestone: 2
 related_adr: []
 related_tasks: ["0007", "0006"]
 tags: [fees, mainnet, throughput, priority-medium, effort-small, payments]
@@ -19,6 +19,10 @@ history:
     status: backlog
     who: claude
     note: "Tagged Payments lane by 0012 (outside T1)."
+  - date: "2026-11-02"
+    status: backlog
+    who: okarcz
+    note: "Moved to M2: it needs real settlements on mainnet, and mainnet is outside T1's scope."
 ---
 
 # Measure inclusion-fee bids against inclusion delay on mainnet

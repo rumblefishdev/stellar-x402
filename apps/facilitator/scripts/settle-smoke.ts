@@ -15,6 +15,9 @@
  *   PAY_TO              receives (a funded account)
  *   ASSET               token contract (default: the testnet XLM SAC)
  *   AMOUNT              base units (default 1000 = 0.0001 XLM)
+ *   RAISE_FEE_ACCOUNT_THRESHOLDS  1: after channel setup, raise a fresh fee account's thresholds to
+ *                       1 / 2 / 2 above its key's weight of 1, and check that a Payment out is
+ *                       refused (0093). Nothing can change that account again
  *   RPC_URLS            passed to the facilitator (default: the testnet RPC); a hung first URL
  *                       shows `/settle`'s checks failing over (0045)
  *   EXPECT_FAILOVER     1: also check that the first `/settle` logged `rpc_failover` from
@@ -29,7 +32,15 @@
  *
  * The facilitator's log lines go to stderr, so stdout carries only the result.
  */
-import { Account, Keypair, Networks, rpc } from "@stellar/stellar-sdk";
+import {
+  Account,
+  Asset,
+  Keypair,
+  Networks,
+  Operation,
+  TransactionBuilder,
+  rpc,
+} from "@stellar/stellar-sdk";
 import { buildCreateChannelsTx, readAccountEntry } from "@stellar-x402/signer-pool";
 import type { PaymentRequirements, SettleResponse, VerifyResponse } from "@x402/core/types";
 import { createEd25519Signer } from "@x402/stellar";
@@ -65,6 +76,10 @@ async function funded(secret: string | undefined): Promise<Keypair> {
   return keypair;
 }
 
+const raiseThresholds = process.env.RAISE_FEE_ACCOUNT_THRESHOLDS === "1";
+if (raiseThresholds && process.env.FACILITATOR_SECRET)
+  throw new Error("raising the thresholds locks the account: use a fresh one");
+
 const facilitator = await funded(process.env.FACILITATOR_SECRET);
 const client = await funded(process.env.CLIENT_SECRET);
 const payTo = process.env.PAY_TO ?? (await funded(undefined)).publicKey();
@@ -84,6 +99,21 @@ const created = await server.pollTransaction((await server.sendTransaction(setup
   attempts: 30,
 });
 if (created.status !== "SUCCESS") throw new Error(`channel setup ${created.status}`);
+
+if (raiseThresholds) {
+  const raise = new TransactionBuilder(await server.getAccount(facilitator.publicKey()), {
+    fee: "1000",
+    networkPassphrase: Networks.TESTNET,
+  })
+    .addOperation(Operation.setOptions({ lowThreshold: 1, medThreshold: 2, highThreshold: 2 }))
+    .setTimeout(60)
+    .build();
+  raise.sign(facilitator);
+  const raised = await server.pollTransaction((await server.sendTransaction(raise)).hash, {
+    attempts: 30,
+  });
+  if (raised.status !== "SUCCESS") throw new Error(`raising the thresholds ${raised.status}`);
+}
 
 const facilitatorServer = await main(
   {
@@ -151,6 +181,20 @@ try {
   ]);
   const verifySettled = await post<VerifyResponse>("verify", first);
 
+  let paymentOutAnswer: rpc.Api.SendTransactionResponse | undefined;
+  if (raiseThresholds) {
+    const paymentOut = new TransactionBuilder(await server.getAccount(facilitator.publicKey()), {
+      fee: "1000",
+      networkPassphrase: Networks.TESTNET,
+    })
+      .addOperation(Operation.payment({ destination: payTo, asset: Asset.native(), amount: "10" }))
+      .setTimeout(60)
+      .build();
+    paymentOut.sign(facilitator);
+    paymentOutAnswer = await server.sendTransaction(paymentOut);
+  }
+  const paymentOutResult = paymentOutAnswer?.errorResult?.result().results()[0]?.switch().name;
+
   const checks = {
     settled: settled.success && settled.payer === client.publicKey() && onChain === "SUCCESS",
     repeatAlreadySettled:
@@ -168,6 +212,7 @@ try {
       concurrent[0]!.transaction !== settled.transaction,
     settledPaymentNoLongerVerifies: !verifySettled.isValid,
     ...(process.env.EXPECT_FAILOVER === "1" && { failedOver }),
+    ...(raiseThresholds && { paymentOutRefused: paymentOutResult === "opBadAuth" }),
   };
   console.log(
     JSON.stringify(
@@ -182,6 +227,7 @@ try {
         concurrent,
         verifySettled,
         failedOver,
+        paymentOutResult,
         checks,
       },
       null,

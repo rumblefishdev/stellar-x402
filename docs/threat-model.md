@@ -310,6 +310,20 @@ Scope: the `exact` payer's auth entry and how long it stays landable (spine AD-6
   the ledger gap and can pass later. `invalid_exact_stellar_payload_fee_exceeds_maximum` has the
   same path once fees drop (0086).
 
+#### A payment ended after its claim settles after its payer signed again
+
+- **Attack:** A payment P1 ends after the claim: a refusal by the pool or a spend limit, or a
+  transaction that failed or was refused, which doesn't use the auth entry's nonce. An answer of
+  "sign a new payment" has the payer sign P2, which settles. Whoever holds P1 then lands it before
+  its auth entry expires, through another facilitator or directly on chain.
+- **Mitigation:** Every such answer names the expiration ledger and says to sign again only once
+  it has closed (0082).
+- **Residual risk:** The answer only guides the client: nothing stops P1 landing, so a client that
+  signs early can still pay twice. A record claimed before 0073 keeps its old answer, and a release
+  from before 0082, during a deploy or after a rollback, answers without the wait. MCP agents get
+  no ledger, since it would come through the seller; they are told not to pay again without
+  checking.
+
 ## Facilitator key
 
 Scope: the facilitator key in OpenBao Transit on the facilitator's Hetzner server

@@ -2,7 +2,7 @@
 id: "0066"
 title: "Decide what /verify does when a payment must restore archived state"
 type: BUG
-status: active
+status: completed
 milestone: 1
 related_adr: ["0007"]
 related_tasks: ["0021", "0007"]
@@ -26,6 +26,14 @@ history:
       updated. 10 new facilitator tests. The max code review's fixes: indexes and keys
       deduplicated, only archivable keys of bounded length named, the message says the list is
       the transaction's, and the README checks the restore's result.
+  - date: "2026-11-02"
+    status: completed
+    who: akot
+    note: >
+      PR #83 merged on 2026-11-02: the facilitator keeps refusing a payment over its fee ceiling,
+      and the refusal's message names the archived entries the payment's transaction lists. The
+      threat model, ADR 0007 and the README record it. Follow-ups already in the backlog: 0086,
+      a refused payment settling after its payer signed again, and 0096, the pubnet ceiling.
 ---
 
 # Decide what /verify does when a payment must restore archived state
