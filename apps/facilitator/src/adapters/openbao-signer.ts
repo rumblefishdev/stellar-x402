@@ -21,6 +21,11 @@ const REQUEST_TIMEOUT_MS = 1_000;
  * signature waits on an expired one (0036 decision 10). The AWS SDK refreshes 5 minutes early too.
  */
 const RELOGIN_MARGIN_MS = 5 * 60_000;
+/**
+ * How soon a failed check after start tries again (an assumption): OpenBao opens seconds after its
+ * unit starts (ADR 0013), and `/health` shouldn't need a payment to show that it did.
+ */
+const CHECK_RETRY_MS = 30_000;
 /** What the check after start signs: the hash of a text, which no transaction has. */
 const CHECK_HASH = createHash("sha256").update("stellar-x402 signer check").digest();
 
@@ -63,12 +68,19 @@ interface OpenBaoSignerOptions {
   metrics: Metrics;
   /** Test seam: the clock tokens expire by. */
   now?: () => number;
+  /** Test seam: {@link CHECK_RETRY_MS}. */
+  checkRetryMs?: number;
 }
 
 export interface OpenBaoSigner extends TransactionSigner {
   state(): SignerState;
-  /** Signs a fixed value and checks it against `address`; the outcome goes to {@link state}. */
+  /**
+   * Signs a fixed value and checks it against `address`, and again while that fails; the outcome
+   * goes to {@link state}. The retry's timer keeps no process alive.
+   */
   check(): Promise<void>;
+  /** Stops the check's retries. */
+  close(): void;
 }
 
 export function openBaoSigner(opts: OpenBaoSignerOptions): OpenBaoSigner {
@@ -78,6 +90,8 @@ export function openBaoSigner(opts: OpenBaoSignerOptions): OpenBaoSigner {
   let token: { value: string; expiresAt: number } | undefined;
   let login: Promise<void> | undefined;
   let state: SignerState = "unchecked";
+  let retry: NodeJS.Timeout | undefined;
+  let closed = false;
 
   async function post(
     path: string,
@@ -161,6 +175,18 @@ export function openBaoSigner(opts: OpenBaoSignerOptions): OpenBaoSigner {
     state = "failed";
   }
 
+  async function check(): Promise<void> {
+    try {
+      await signatureOf(CHECK_HASH);
+    } catch (error) {
+      failed("check", error);
+      if (!closed) retry = setTimeout(check, opts.checkRetryMs ?? CHECK_RETRY_MS).unref();
+      return;
+    }
+    state = "ok";
+    logger.info("signer_checked", { network, address });
+  }
+
   return {
     address,
     async signTransaction(xdr, { networkPassphrase }) {
@@ -177,15 +203,10 @@ export function openBaoSigner(opts: OpenBaoSignerOptions): OpenBaoSigner {
       return { signedTxXdr: tx.toXDR(), signerAddress: address };
     },
     state: () => state,
-    async check() {
-      try {
-        await signatureOf(CHECK_HASH);
-      } catch (error) {
-        failed("check", error);
-        return;
-      }
-      state = "ok";
-      logger.info("signer_checked", { network, address });
+    check,
+    close() {
+      closed = true;
+      clearTimeout(retry);
     },
   };
 }

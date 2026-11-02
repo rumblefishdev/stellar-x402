@@ -10,7 +10,7 @@ import {
   TransactionBuilder,
   type Transaction,
 } from "@stellar/stellar-sdk";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { openBaoSigner, SignerError } from "../src/adapters/openbao-signer.js";
 import { memoryMetrics } from "../src/metrics.js";
 
@@ -93,7 +93,7 @@ async function fakeOpenBao(): Promise<Fake> {
   return fake;
 }
 
-function setup(fake: Fake, clock = { now: 0 }) {
+function setup(fake: Fake, clock = { now: 0 }, checkRetryMs?: number) {
   const metrics = memoryMetrics();
   const logs: { event: string; fields?: Record<string, unknown> }[] = [];
   const log = (event: string, fields?: Record<string, unknown>) => logs.push({ event, fields });
@@ -108,6 +108,7 @@ function setup(fake: Fake, clock = { now: 0 }) {
     logger: { info: log, warn: log },
     metrics,
     now: () => clock.now,
+    ...(checkRetryMs !== undefined && { checkRetryMs }),
   });
   return { signer, metrics, logs, clock };
 }
@@ -253,5 +254,28 @@ describe("openBaoSigner", () => {
         fields: expect.objectContaining({ step: "check", reason: "address_mismatch" }),
       }),
     );
+  });
+
+  it("checks again while the check fails, and stops once it passes (decision 4)", async () => {
+    const fake = await fakeOpenBao();
+    const { signer } = setup(fake, undefined, 5);
+    fake.status = 503;
+    await signer.check();
+    expect(signer.state()).toBe("failed");
+
+    fake.status = undefined;
+    await vi.waitFor(() => expect(signer.state()).toBe("ok"));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(fake.signs).toHaveLength(1);
+  });
+
+  it("stops checking again on close", async () => {
+    const fake = await fakeOpenBao();
+    const { signer, metrics } = setup(fake, undefined, 5);
+    fake.status = 503;
+    await signer.check();
+    signer.close();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(metrics.value("signer_failures_total", { reason: "sealed", step: "check" })).toBe(1);
   });
 });

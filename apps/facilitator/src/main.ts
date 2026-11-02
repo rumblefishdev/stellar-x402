@@ -333,6 +333,7 @@ export function buildSigner(
       ...keypairSigner(Keypair.fromSecret(config.signer.secret)),
       state: () => "ok",
       check: async () => {},
+      close: () => {},
     };
   }
   return openBaoSigner({ ...config.signer, network: config.network, logger, metrics });
@@ -647,7 +648,7 @@ export async function main(
       throw error;
     });
     // Not awaited: the service starts and `/verify` answers without OpenBao; the outcome goes to
-    // the log and `/health`'s `signer` (0036 decision 4).
+    // the log and `/health`'s `signer`, and a failed check tries again (0036 decision 4).
     void signer.check();
     // One window today; with per-budget windows (0024), the longest of them.
     const pruner = createPruner({
@@ -662,6 +663,7 @@ export async function main(
     // Catalog writes and a prune already under way finish before the process exits, and before
     // the pools end, even if closing the server fails; the pools end even if draining fails.
     const closeOnce = async () => {
+      signer.close();
       try {
         await started.close();
       } finally {
