@@ -9,11 +9,12 @@
 import { Keypair, Networks, StrKey, rpc } from "@stellar/stellar-sdk";
 import { MAX_CHANNELS_PER_TX, buildCreateChannelsTx, checkChannel } from "../src/index.js";
 
-const need = (k: string) =>
-  process.env[k] ??
-  (() => {
-    throw new Error(`missing ${k}`);
-  })();
+function need(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`missing ${name}`);
+  return value;
+}
+
 const network = need("NETWORK");
 if (network !== "testnet" && network !== "pubnet")
   throw new Error(`NETWORK must be testnet or pubnet, not ${network}`);
@@ -45,7 +46,9 @@ for (let i = 0; i < n; i += MAX_CHANNELS_PER_TX) {
   if (sent.status !== "PENDING") throw new Error(`channel setup ${sent.hash}: ${sent.status}`);
   const done = await server.pollTransaction(sent.hash, { attempts: 30 });
   if (done.status !== "SUCCESS") throw new Error(`channel setup ${sent.hash} ended ${done.status}`);
-  console.error(`channel setup ${sent.hash} landed`);
+  // Printed per batch: if a later one fails, these channels already exist and hold their reserve.
+  const addresses = batch.map((k) => k.publicKey()).join(",");
+  console.error(`channel setup ${sent.hash} landed: ${addresses}`);
 }
 // The same check the facilitator runs before it starts (AD-12).
 for (const channel of channels) {
