@@ -2,7 +2,7 @@
 id: "0088"
 title: "Don't take NOT_FOUND at the bound ledger itself as expired"
 type: BUG
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0006"]
 related_tasks: ["0073", "0019"]
@@ -13,6 +13,10 @@ history:
     status: backlog
     who: okarcz
     note: "Spawned from 0073's PR #85 review (Adam): a narrow window, on develop already."
+  - date: "2026-11-02"
+    status: active
+    who: akot
+    note: "Started."
 ---
 
 # Don't take NOT_FOUND at the bound ledger itself as expired

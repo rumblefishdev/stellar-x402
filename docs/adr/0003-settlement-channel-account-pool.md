@@ -37,10 +37,11 @@ accounts (`packages/signer-pool`).
 
 - **Channels.** Each channel is an account holding only its reserve (1.5 XLM). The facilitator
   key is its signer and its master key is disabled, so the facilitator manages one key, not N.
-- **Transaction shape (`delegated-bump`).** The channel is the transaction source and supplies
-  the sequence number. The facilitator is the operation source of the contract call, so its
-  `require_auth` uses source-account credentials. The facilitator signs once and pays the fee
-  through a fee bump; channels never pay fees.
+- **Transaction shape (`delegated-bump`).** The channel is the transaction source, supplies the
+  sequence number and, with no operation source, is the caller of the contract. The facilitator
+  signs for the channel and pays the fee through a fee bump, which needs only the fee account's low
+  threshold; channels never pay fees. How `upto` gives the facilitator's `require_auth` is 0015's
+  choice: the pool refuses source-account entries.
 - **One transaction pending per channel.** `ChannelPool` hands a channel to one caller at a time,
   and callers queue in arrival order when all channels are busy. The submitter tracks each
   channel's sequence number itself and reloads it only after the pending transaction is final
@@ -72,7 +73,8 @@ accounts (`packages/signer-pool`).
     cycles from 36% to 82%.
 - **`delegated-bump` is the cheapest shape measured.** 2,516 B and about 41,000 stroops, against
   2,680 B and 49,368 stroops for the address-auth shape (spike S8), which also costs 0.55 M more
-  instructions and a nonce write.
+  instructions and a nonce write. These are `settle_upto` with the facilitator as operation source;
+  a `transfer` with none is 36 bytes and 79 stroops smaller than with it (0093).
 
 ## Alternatives considered
 
@@ -80,7 +82,8 @@ accounts (`packages/signer-pool`).
 - **A hosted channel service called over the network** (RFP §3.3 option (a)). Rejected by
   [ADR 0002](0002-independent-implementation.md): we don't use or call that code.
 - **Channels bound by address auth (spike S8)** instead of the facilitator as operation source.
-  Rejected: bigger and about 20% more expensive per settlement.
+  Rejected: bigger and about 20% more expensive per settlement. 0015 may reopen it for `upto`'s
+  consent.
 - **An atomic batch with bisection (A1 in the scaling analysis).** Rejected: any payer can
   poison a batch almost for free by spending their balance or using their auth entry
   elsewhere. Every failure costs a fee and at least one ledger, and it breaks the `exact` spec.
