@@ -445,6 +445,8 @@ describe("createSettler", () => {
     expect((await settle(payload(), requirements)).response).toMatchObject({
       errorReason: SETTLE_REASONS.pending,
     });
+    // On a slow runner the budget can end before the hash is stored, so `land` isn't set yet.
+    await vi.waitFor(() => expect(land).toBeTypeOf("function"));
     land();
     await vi.waitFor(async () => expect((await store.get(key))?.state).toBe("success"));
     const retry = await settle(payload(), requirements);

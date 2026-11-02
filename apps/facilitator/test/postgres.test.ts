@@ -286,10 +286,13 @@ describe("PostgreSQL stores", () => {
         "UPDATE leases SET holder = 'b', token = gen_random_uuid() WHERE name = $1",
         [NAME],
       );
-      const adding = settlements.addHash(s.key, "h1", lease, 3_000);
+      // Asserted before the `COMMIT`, or a rejection that comes first is unhandled.
+      const adding = expect(settlements.addHash(s.key, "h1", lease, 3_000)).rejects.toBeInstanceOf(
+        LeaseFencedError,
+      );
       await lockWaiter(client);
       await client.query("COMMIT");
-      await expect(adding).rejects.toBeInstanceOf(LeaseFencedError);
+      await adding;
     });
     expect(await settlements.get(s.key)).toMatchObject({ state: "claimed", hashes: [] });
   });
