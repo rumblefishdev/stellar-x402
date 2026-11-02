@@ -672,7 +672,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
         case "success":
           return await finish(key, { state: "success", ...fields }, call.origin, own);
         case "pending":
-          // The pool keeps confirming; its `resolved` event finishes the record (0019).
+          // The pool's `resolved` event or a sweep finishes the record (0019, 0088).
           return {
             record:
               (await advance(key, { state: "pending", ...fields }, own)) ?? (await store.get(key)),

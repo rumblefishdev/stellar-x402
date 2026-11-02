@@ -2693,10 +2693,13 @@ describe("with reconciliation (0019)", () => {
   });
 
   it("finishes a payment whose process crashed between signing and sending", async () => {
-    const { store, hooks, logger, metrics, settle, reconcilerOn } = shared(async (opts) => {
-      await opts.onSigned?.(HASH, BOUNDS);
-      return new Promise(() => {}); // the process stops here
-    }, notFound(BOUNDS.maxLedger));
+    const { store, hooks, logger, metrics, settle, reconcilerOn } = shared(
+      async (opts) => {
+        await opts.onSigned?.(HASH, BOUNDS);
+        return new Promise(() => {}); // the process stops here
+      },
+      notFound(BOUNDS.maxLedger + 1),
+    );
     void settle(payload(), requirements);
     await vi.waitFor(async () => expect(await store.attempts(key)).toHaveLength(1));
     // After the restart: a new process, with its own records, on the same store.

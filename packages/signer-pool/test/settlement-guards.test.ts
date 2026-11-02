@@ -467,10 +467,17 @@ describe("maxLedger", () => {
     const { fake, submitter } = setup({ timeoutSeconds: 600 });
     fake.stalled = true;
     const start = fake.ledger;
+    const reads: number[] = [];
+    const getTransaction = fake.getTransaction.bind(fake);
+    fake.getTransaction = async (hash) => {
+      const res = await getTransaction(hash);
+      reads.push(res.latestLedger);
+      return res;
+    };
     const res = await submitter.submit(call(), { maxLedger: start + 3 });
     expect(res.status).toBe("expired");
-    // 600 s is 120 ledgers at 5 s; the ledger bound ended the wait as soon as it closed.
-    expect(fake.ledger).toBe(start + 3);
+    // 600 s is 120 ledgers at 5 s; the first read past the ledger bound ended the wait (0088).
+    expect(reads.at(-1)).toBe(start + 4);
 
     // The sequence was not used, so the channel is reused at the same number.
     fake.stalled = false;
@@ -506,6 +513,48 @@ describe("maxLedger", () => {
     const res = await submitter.submit(call(), { maxLedger });
     expect(missingBefore).toBe(true);
     expect(res).toMatchObject({ status: "success", ledger: maxLedger });
+  });
+
+  it("doesn't take NOT_FOUND read at maxLedger as expired: it may have landed there (0088)", async () => {
+    const { fake, submitter } = setup({ timeoutSeconds: 600 });
+    const maxLedger = fake.ledger + 3;
+    // The network includes it only in maxLedger.
+    const close = fake.getLatestLedger.bind(fake);
+    fake.getLatestLedger = async () => {
+      fake.stalled = fake.ledger + 1 < maxLedger;
+      return close();
+    };
+    // stellar-rpc reads the transaction, then the ledger range, with no snapshot between them.
+    let raced = false;
+    const getTransaction = fake.getTransaction.bind(fake);
+    fake.getTransaction = async (hash) => {
+      const res = await getTransaction(hash);
+      if (raced || res.latestLedger !== maxLedger) return res;
+      raced = true;
+      return { ...res, status: rpc.Api.GetTransactionStatus.NOT_FOUND } as typeof res;
+    };
+    const res = await submitter.submit(call(), { maxLedger });
+    expect(raced).toBe(true);
+    expect(res).toMatchObject({ status: "success", ledger: maxLedger });
+  });
+
+  it("leaves NOT_FOUND past the bound open when the node's history starts later (0088)", async () => {
+    const { fake, submitter } = setup({ timeoutSeconds: 600 });
+    fake.stalled = true;
+    const getTransaction = fake.getTransaction.bind(fake);
+    fake.getTransaction = async (hash) => {
+      const res = await getTransaction(hash);
+      return { ...res, oldestLedger: res.latestLedger } as typeof res;
+    };
+    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 3 });
+    expect(res.status).toBe("pending");
+
+    // It may have landed, so the channel comes back with its sequence read again.
+    fake.getTransaction = getTransaction;
+    fake.stalled = false;
+    const reads = fake.calls.getLedgerEntries ?? 0;
+    expect((await submitter.submit(call())).status).toBe("success");
+    expect(fake.calls.getLedgerEntries).toBeGreaterThan(reads);
   });
 
   it("stops resending once the ledger bound closes", async () => {

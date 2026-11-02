@@ -93,6 +93,18 @@ export function createRecords(deps: RecordsDeps) {
         (version !== undefined && current?.version !== version) ||
         (claim !== undefined && current?.reopened !== claim);
       if (!current || isFinalRecord(current) || stale) {
+        // `expired` is final, so this write is lost: only the log tells an operator (0088).
+        if (
+          current?.state === "expired" &&
+          (update.state === "success" || update.state === "failed")
+        ) {
+          logger.error("settlement_landed_after_expired", {
+            network,
+            settlementKey: key,
+            state: update.state,
+          });
+          metrics.increment("settlement_landed_after_expired_total");
+        }
         if (current && update.attempts?.length)
           await store.markAttempts(key, update.attempts, now());
         return undefined;

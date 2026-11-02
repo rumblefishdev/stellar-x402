@@ -45,6 +45,7 @@ export {
   SimulationError,
   SourceAccountAuthError,
   attemptsOf,
+  cannotLand,
   type ContractCall,
   type FeeEscalation,
   type SignedBounds,
