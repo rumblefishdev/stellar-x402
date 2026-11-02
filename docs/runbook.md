@@ -17,6 +17,7 @@ admin with `sudo`; the admins are the explorer's (`soroban-block-explorer`'s
 | `/srv/x402/production/creds/*.cred` | the credentials, encrypted with the host key                       |
 | `/run/x402/production/`             | the credentials decrypted for the containers (tmpfs)               |
 | `/srv/x402/openbao/`                | OpenBao's Compose project `x402-openbao`, its config and seal key  |
+| `/run/x402/openbao/`                | the seal key decrypted for OpenBao (tmpfs)                         |
 | `/usr/local/libexec/x402/`          | the units' scripts (`deploy/libexec`)                              |
 | `/etc/systemd/system/x402*`         | the units (`deploy/systemd`)                                       |
 
@@ -233,7 +234,14 @@ the tunnel and OpenBao are still up, then those stop (Postgres's grace is 120 s)
 start first, each unit decrypting its credentials again and OpenBao unsealing itself, then `x402@`
 with `digest.good`. A
 `docker-ce` upgrade stops and starts them the same way through `PartOf=docker.service`.
-Afterwards: `systemctl list-units 'x402*'` and the `/supported` check above.
+Afterwards: `systemctl list-units 'x402*'`, the `/supported` check above and `bao status`, which
+says `Sealed false` and exits 2 when sealed. A sealed OpenBao passes the other two: with a wrong
+seal key its container runs and its socket exists, so the unit is active, while `/supported` is
+static and every `/settle` fails.
+
+```sh
+cd /srv/x402/openbao && sudo docker compose exec -T openbao bao status
+```
 
 ## The watchdog
 
@@ -300,8 +308,8 @@ deploy by hand on the server (Deploy, above).
 The facilitator key of every network, in Transit ([ADR 0013](adr/0013-facilitator-key-custody.md)):
 one container, the Compose project `x402-openbao` in `/srv/x402/openbao/`, run by `x402-openbao`.
 It has no network. Testnet's facilitator reaches it over a unix socket in the volume
-`x402-openbao-testnet`, mounted into nothing else, and an admin, as root, through
-`docker compose exec`:
+`x402-openbao-testnet`, mounted into nothing else, and an admin, as root or in the `docker` group,
+through `docker compose exec`:
 
 ```sh
 cd /srv/x402/openbao && sudo docker compose exec openbao bao status
@@ -331,13 +339,40 @@ admin's machine and the server over SSH and never reach a disk.
      bao operator init -recovery-shares=1 -recovery-threshold=1 -format=json')
    ```
 
-   `jq -r '.recovery_keys_b64[0]' <<<"$init"` is the recovery key, and `.root_token` the token
-   for step 4.
+   `printf %s "$init" | jq -r .root_token` is the token for step 4.
 
-3. The backup secret `x402/production/openbao-backup`, as ADR 0013 makes it: the seal key, its ID
-   and SHA-256, the recovery key, `seal_config` (the `seal "static"` stanza) and
-   `openbao_version` (2.7.2). The Borg and Storage Box fields come with the snapshots (Not here
-   yet).
+3. The backup secret `x402/production/openbao-backup`, as ADR 0013 makes it, from the root of this
+   repo (`AWS_PROFILE=soroban-admin`). The JSON goes over stdin, so it never reaches a disk. The
+   previous seal key's pair stays empty until a rotation, and the Borg and Storage Box fields until
+   the snapshots (Not here yet).
+
+   ```sh
+   backup=$(seal_key=$seal_key recovery_key=$(printf %s "$init" | jq -r '.recovery_keys_b64[0]') \
+     sha=$(printf %s "$seal_key" | shasum -a 256 | cut -d' ' -f1) \
+     seal_config=$(sed -n '/^seal "static"/,/^}/p' deploy/openbao/config.hcl) \
+     jq -n '{
+       seal_key_hex: env.seal_key, seal_key_id: "x402-openbao-1", seal_key_sha256: env.sha,
+       previous_seal_key_hex: "", previous_seal_key_id: "", recovery_key: env.recovery_key,
+       borg_passphrase: "", borg_key_export: "", seal_config: env.seal_config,
+       openbao_version: "2.7.2", storage_box_ro_user: "", storage_box_ro_ssh_key: "",
+       updated: (now | todate)
+     }')
+   printf %s "$backup" | aws secretsmanager create-secret --region eu-central-1 \
+     --name x402/production/openbao-backup --secret-string file:///dev/stdin \
+     --tags Key=Project,Value=stellar-x402 Key=Environment,Value=production
+   ```
+
+   Read it back while nothing depends on it. AWS must hold what went in:
+
+   ```sh
+   back=$(aws secretsmanager get-secret-value --region eu-central-1 \
+     --secret-id x402/production/openbao-backup --query SecretString --output text)
+   [ "$back" = "$backup" ] && echo same
+   printf %s "$back" | jq -r .recovery_key
+   ```
+
+   And that recovery key must work: on the server, **A new root token** (below) with it, then
+   `bao token revoke -self` and leave that root shell. Init's root token stays valid for step 4.
 
 4. Per network, in a root shell on the server with init's root token, one line at a time: `read`
    takes the next line of a paste as the token, and `docker compose exec` reads stdin and swallows
@@ -356,14 +391,18 @@ admin's machine and the server over SSH and never reach a disk.
      bao policy write x402-$n -
    bao write auth/approle/role/x402-$n token_policies=x402-$n token_no_default_policy=true \
      token_ttl=1h token_max_ttl=1h secret_id_ttl=0
-   bao read -field=role_id auth/approle/role/x402-$n/role-id |
-     systemd-creds encrypt --with-key=host --name=approle-role-id.$n - \
+   v=$(bao read -field=role_id auth/approle/role/x402-$n/role-id) && [ -n "$v" ] &&
+     printf %s "$v" | systemd-creds encrypt --with-key=host --name=approle-role-id.$n - \
        /srv/x402/production/creds/approle-role-id.$n.cred
-   bao write -f -field=secret_id auth/approle/role/x402-$n/secret-id |
-     systemd-creds encrypt --with-key=host --name=approle-secret-id.$n - \
+   v=$(bao write -f -field=secret_id auth/approle/role/x402-$n/secret-id) && [ -n "$v" ] &&
+     printf %s "$v" | systemd-creds encrypt --with-key=host --name=approle-secret-id.$n - \
        /srv/x402/production/creds/approle-secret-id.$n.cred
+   unset v
    bao read -format=json transit/keys/stellar-$n   # .data.keys["1"].public_key
    ```
+
+   `v` is checked first because a pipe would run `systemd-creds` even when `bao` fails, and
+   overwrite the credential with an empty one.
 
    The key's address goes into `FACILITATOR_ADDRESS_TESTNET` (0036). From its public key, in
    `packages/signer-pool` on the admin's machine:
@@ -373,7 +412,7 @@ admin's machine and the server over SSH and never reach a disk.
    ```
 
 5. `bao token revoke -self`, `unset BAO_TOKEN`, and leave the root shell. On the admin's machine,
-   `unset seal_key init`.
+   `unset seal_key init backup back`.
 
 **A new root token,** when an admin needs one again, from the recovery key in the backup secret.
 The CLI's `generate-root` needs a token, so this is the legacy `/sys/generate-root` API, which the
@@ -393,12 +432,17 @@ export BAO_TOKEN=$(encoded=$encoded otp=$otp python3 -c 'import base64, os; e, o
 unset key otp nonce encoded
 ```
 
-When done, step 5 again.
+If a line after `nonce=` fails, the attempt stays open: a rerun answers 400 (`root generation
+already in progress`) and `nonce` stays empty. `bao delete sys/generate-root/attempt` clears it,
+with no token. When done, step 5 again.
 
 ## Not here yet
 
 - OpenBao's snapshots and restore drill, key rotation as an on-chain signer change, fee float
   top-ups (0036, 0047).
+- Rotating OpenBao's audit log: nothing rotates it yet, and a full volume stops `/settle` (0026).
+- A leaked token or secret ID, OpenBao upgrades and what `/settle` does meanwhile, whether the
+  board has a TPM, and the weekly review after the mainnet deploy (0026, ADR 0013).
 - pgBackRest backups, the database's restore drill and upgrade policy.
 - The CloudWatch agent and renewing its Roles Anywhere certificate (0027).
 - Restoring the service on another machine, RPC failover, testnet reset recovery, the incident

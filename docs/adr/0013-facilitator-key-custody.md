@@ -10,8 +10,8 @@
   a socket per network, OpenBao's own unit and limits, from the PR #24 review); 2026-10-22 (the
   OpenBao key's own account, the theft alarm, 1-hour tokens, the admin socket and the restore
   path, from the PR #48 review); 2026-11-02 (admin on a loopback listener inside the container,
-  which Raft's cluster address needs, and no move of testnet to the OpenBao key, since nothing ran
-  on another key, task 0026)
+  which Raft's cluster address needs, no move of testnet to the OpenBao key, since nothing ran on
+  another key, and the backup JSON over stdin, task 0026)
 - Supersedes: the key custody part of [ADR 0011](0011-facilitator-hosting.md) ("Keys, secrets and
   access": the SSM parameter for `FACILITATOR_SECRET` and the mainnet KMS key)
 
@@ -57,11 +57,14 @@
   uses it as the operation source and the channels' signer, so the fee account is always the
   OpenBao key's own account. The first signature is checked against that address, so the
   facilitator starts without OpenBao.
-- **A unix socket per network only.** OpenBao has one listener per network, each on a socket in
-  its own volume, mounted only into that network's facilitator, plus an admin listener on
-  loopback inside OpenBao's own container, which has no network: only root on the host reaches
-  it, through `docker compose exec`. Raft takes its cluster address only from a TCP listener,
-  hence loopback rather than a socket. Nothing on the network can reach either.
+- **A unix socket per network, and no network port.** OpenBao has one listener per network, each
+  on a socket in its own volume, mounted only into that network's facilitator, plus an admin
+  listener on loopback inside OpenBao's own container, which has no network: only root or the
+  `docker` group on the host reaches it, through `docker compose exec`. Raft takes its cluster
+  address only from a TCP listener: with sockets alone, `bao operator init` fails with "cluster
+  addresses not found". That listener serves the API too, so an admin socket beside it would only
+  keep `/sys/generate-root/*` off TCP, which buys almost nothing in a container with no network
+  (both tried on 2.7.2). Nothing on the network can reach either.
 - **AppRole login.** The role ID and secret ID come in as Compose `file:` secrets, decrypted by
   the network's unit to a tmpfs (ADR 0011), never as environment variables. The token lives
   1 hour (`token_ttl` and `token_max_ttl`), so a renewal can't stretch it; the signer logs in again
@@ -106,10 +109,10 @@
     justifies, and none of them may sign or read this secret. Today that is one logs-and-metrics
     role (IAM Roles Anywhere), held only by the CloudWatch agent on the host. An S3 fallback for
     the snapshots would get its own named, write-only role there, not this one.
-  - **Made by hand with the CLI, never by CDK,** so no stack teardown deletes it: stage the JSON in
-    `/dev/shm`, `create-secret`, `shred`. Later changes use `put-secret-value`; the old version
-    stays as `AWSPREVIOUS`. The 0026 operator writes it; the runbook names the fields, never the
-    values.
+  - **Made by hand with the CLI, never by CDK,** so no stack teardown deletes it: the JSON goes
+    over stdin to `create-secret`, so it never reaches a disk. Later changes use
+    `put-secret-value`; the old version stays as `AWSPREVIOUS`. The 0026 operator writes it; the
+    runbook names the fields, never the values.
   - **AWS is the only copy.** No paper copy for now.
 - **Init with one recovery share:** `bao operator init -recovery-shares=1 -recovery-threshold=1`,
   and the share goes into the secret.
@@ -133,8 +136,9 @@
   recovery key when needed. Since OpenBao 2.6 the CLI's `generate-root` needs a token and the
   unauthenticated endpoints are off by default (CVE-2026-5807), so the admin listener keeps them on
   (`disable_unauthed_generate_root_endpoints=false`) and the runbook calls `/sys/generate-root/*`
-  with `bao write` inside the container. Only root on the host reaches that listener, and root already reaches the key. Admin is
-  through SSH on the server, over that listener; no web UI, no remote admin.
+  with `bao write` inside the container. Only root or the `docker` group on the host reaches that
+  listener, and both already reach the key. Admin is through SSH on the server, over that
+  listener; no web UI, no remote admin.
 - **The audit log** goes to a file on its own volume, rotated, with an alarm at 80% disk: OpenBao
   stops signing when it can't write it.
 - **Alarms** (0027):
@@ -227,10 +231,8 @@
 ## Open questions
 
 - **Who makes mainnet top-ups,** and a backup person (before mainnet, 0026).
-- **Four facts the first drill settles:** whether a restore needs `-force`, whether
-  `-recovery-shares` works with the static seal, whether the recovery key gets a root token
-  through the legacy `/sys/generate-root/*` API on our OpenBao version, and the AppRole re-login
-  after a restore.
+- **Two facts the first drill settles:** whether a restore needs `-force`, and the AppRole
+  re-login after a restore.
 - **Whether the server has a TPM,** for the upgrade above.
 
 ## References

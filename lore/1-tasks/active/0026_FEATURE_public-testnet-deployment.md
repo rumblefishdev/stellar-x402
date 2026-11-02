@@ -338,10 +338,10 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   - One JSON: `seal_key_hex`, `seal_key_id`, `seal_key_sha256`, `previous_seal_key_hex`,
     `previous_seal_key_id`, `recovery_key`, `borg_passphrase`, `borg_key_export`, `seal_config`,
     `openbao_version`, `storage_box_ro_user`, `storage_box_ro_ssh_key`, `updated`.
-  - Made by hand from an admin's machine, never by CDK: stage the JSON in `/dev/shm`,
-    `aws secretsmanager create-secret`, `shred`. Every change (a seal key rotation, a new Borg
-    passphrase, an OpenBao upgrade) is a `put-secret-value` of the whole JSON; the old version stays
-    as `AWSPREVIOUS`.
+  - Made by hand from an admin's machine, never by CDK: the JSON goes over stdin to
+    `aws secretsmanager create-secret`, so it never reaches a disk. Every change (a seal key
+    rotation, a new Borg passphrase, an OpenBao upgrade) is a `put-secret-value` of the whole JSON;
+    the old version stays as `AWSPREVIOUS`.
   - The server gets no AWS credentials that can read it: only the roles ADR 0011 names (today the
     logs-and-metrics role, ADR 0013). The runbook names the secret and its fields, never values.
 - **Admin:** the root token revoked after setup, regenerated with the recovery key when needed

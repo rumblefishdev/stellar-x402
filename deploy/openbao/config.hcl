@@ -21,7 +21,8 @@ audit "file" "file" {
 }
 
 # Unseals itself after a restart with the key `x402-openbao.service` decrypts (ADR 0013). A key
-# rotation is a commit: the new ID here, the old pair as previous_key_id and previous_key.
+# rotation: the new ID here, the old pair as previous_key_id and previous_key, and the old key in
+# a file of its own, so a second Compose secret and a second x402-creds argument in the unit.
 seal "static" {
   current_key_id = "x402-openbao-1"
   current_key    = "file:///run/secrets/seal-key"
@@ -38,9 +39,9 @@ listener "unix" {
 }
 
 # Admin, and Raft's cluster address, which OpenBao takes only from a TCP listener: loopback in a
-# container with no network, so only `docker compose exec openbao bao …`, root on the host,
-# reaches it. A root token is regenerated from the recovery key through the legacy
-# /sys/generate-root API, which takes no token (ADR 0013).
+# container with no network, so only `docker compose exec openbao bao …`, by root or the docker
+# group on the host, reaches it. A root token is regenerated from the recovery key through the
+# legacy /sys/generate-root API, which takes no token (ADR 0013).
 listener "tcp" {
   address                                  = "127.0.0.1:8200"
   cluster_address                          = "127.0.0.1:8201"

@@ -1,5 +1,5 @@
-# x402's parts of the company Hetzner server (ADR 0011): the `x402` user and
-# /srv/x402/production, the compose file and deploy.sh, the systemd units and their scripts, and
+# x402's parts of the company Hetzner server (ADR 0011): the `x402` user, /srv/x402/production and
+# /srv/x402/openbao, the compose files and deploy.sh, the systemd units and their scripts, and
 # CI's deploy user with its forced command and one sudo rule. Never the server's base setup
 # (firewall, Docker's daemon.json, sshd, the admins), which the explorer's playbook owns. An admin
 # runs it from a reviewed commit; CI never does:
