@@ -2,7 +2,7 @@
 id: "0093"
 title: "Make the channel the caller of an exact settlement, so the fee account only pays fees"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0003", "0005", "0013"]
 related_tasks: ["0036", "0048", "0015", "0006", "0007"]
@@ -17,6 +17,10 @@ history:
     note: >
       Spawned from 0036's grilling: the fee account is the operation source of every settlement,
       which only `upto` needs, and it keeps 0048 from limiting the hot key to fees.
+  - date: "2026-11-02"
+    status: active
+    who: karolkow
+    note: Work started.
 ---
 
 # Make the channel the caller of an exact settlement, so the fee account only pays fees
