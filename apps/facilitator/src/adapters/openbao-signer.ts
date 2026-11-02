@@ -27,6 +27,8 @@ const RELOGIN_MARGIN_MS = 5 * 60_000;
  * the first pass: later, only a signature changes `signer`.
  */
 const CHECK_RETRY_MS = 30_000;
+/** What the check tries again after: an OpenBao that may yet open. A wrong secret ID or key stays wrong. */
+const CHECK_RETRIES_ON: readonly SignerFailure[] = ["sealed", "unreachable", "timeout", "error"];
 /** What the check after start signs: the hash of a text, which no transaction has. */
 const CHECK_HASH = createHash("sha256").update("stellar-x402 signer check").digest();
 
@@ -76,8 +78,8 @@ interface OpenBaoSignerOptions {
 export interface OpenBaoSigner extends TransactionSigner {
   state(): SignerState;
   /**
-   * Signs a fixed value and checks it against `address`, and again while that fails; the outcome
-   * goes to {@link state}. The retry's timer keeps no process alive.
+   * Signs a fixed value and checks it against `address`, and again while OpenBao may yet open; the
+   * outcome goes to {@link state}. The retry's timer keeps no process alive.
    */
   check(): Promise<void>;
   /** Stops the check's retries. */
@@ -181,7 +183,9 @@ export function openBaoSigner(opts: OpenBaoSignerOptions): OpenBaoSigner {
       await signatureOf(CHECK_HASH);
     } catch (error) {
       failed("check", error);
-      if (!closed) retry = setTimeout(check, opts.checkRetryMs ?? CHECK_RETRY_MS).unref();
+      const reason = error instanceof SignerError ? error.reason : "error";
+      if (!closed && CHECK_RETRIES_ON.includes(reason))
+        retry = setTimeout(check, opts.checkRetryMs ?? CHECK_RETRY_MS).unref();
       return;
     }
     state = "ok";
