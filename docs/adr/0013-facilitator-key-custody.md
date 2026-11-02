@@ -11,7 +11,7 @@
   OpenBao key's own account, the theft alarm, 1-hour tokens, the admin socket and the restore
   path, from the PR #48 review); 2026-11-02 (admin on a loopback listener inside the container,
   which Raft's cluster address needs, no move of testnet to the OpenBao key, since nothing ran on
-  another key, and the backup JSON over stdin, task 0026)
+  another key, the backup JSON over stdin, and AppRole's lockout off, task 0026)
 - Supersedes: the key custody part of [ADR 0011](0011-facilitator-hosting.md) ("Keys, secrets and
   access": the SSM parameter for `FACILITATOR_SECRET` and the mainnet KMS key)
 
@@ -70,7 +70,8 @@
   before it expires instead of renewing it. The secret ID doesn't expire. The policy allows only
   `transit/sign/<network key>`. A leaked token stops working within the hour; a leaked secret ID,
   or code running in the facilitator's container, signs until the secret ID is destroyed by hand
-  (runbook).
+  (runbook). OpenBao's user lockout is off for AppRole: only the facilitator reaches its socket,
+  and the default would lock the right secret ID too, after 5 failed logins, for 15 minutes.
 - **Fail closed.** If OpenBao is down, sealed, or can't write its audit log, `/settle` answers an
   error, `/verify` keeps working and an alarm fires. There is no fallback copy of the key.
 

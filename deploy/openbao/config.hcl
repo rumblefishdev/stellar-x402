@@ -28,6 +28,12 @@ seal "static" {
   current_key    = "file:///run/secrets/seal-key"
 }
 
+# Off: only the facilitator reaches a network's socket, so this guards against no one, and its
+# default locks the right secret ID too, after 5 failed logins, for 15 minutes.
+user_lockout "approle" {
+  disable_lockout = true
+}
+
 # Testnet's facilitator, the socket's only user: its own volume, mounted into it alone (0077). The
 # facilitator runs as uid and gid 1000, which is this image's openbao group too. OpenBao applies
 # none of the three socket settings unless all three are set.

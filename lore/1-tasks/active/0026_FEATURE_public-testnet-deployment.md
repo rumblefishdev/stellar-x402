@@ -326,7 +326,7 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 - **Keys:** one Transit key per network, generated inside OpenBao, `type=ed25519`,
   `exportable=false`, `allow_plaintext_backup=false`. One policy per network allowing only
   `transit/sign/<key>`, and one AppRole per network: `token_ttl` and `token_max_ttl` 1 h, a secret
-  ID that doesn't expire, delivered as a Compose secret.
+  ID that doesn't expire, delivered as a Compose secret. User lockout off for AppRole (ADR 0013).
 - **Unseal:** a static seal key as an encrypted systemd credential (`systemd-creds`, `host` mode).
   Note in the runbook whether the board has a TPM (ADR 0013's first upgrade).
 - **Init:** `bao operator init -recovery-shares=1 -recovery-threshold=1`. The static seal accepts
