@@ -309,6 +309,26 @@ describe("main()'s /settle wiring, with the real pool", () => {
     expect(fake.sent.map((tx) => tx.hash().toString("hex"))).toContain(response.transaction);
   });
 
+  it.each([
+    ["sealed", () => (openbao.status = 503)],
+    ["signing with another key", () => (openbao.key = Keypair.random())],
+  ])("sends nothing and says to repeat when OpenBao is %s (0036)", async (_name, broken) => {
+    const { settle, fake } = setup();
+    broken();
+    try {
+      const { response } = await settle(payload(fake.ledger + 30), requirements);
+      expect(response).toMatchObject({
+        success: false,
+        errorReason: SETTLE_REASONS.transactionSigning,
+        extra: { retryable: true },
+      });
+      expect(fake.sent).toHaveLength(0);
+    } finally {
+      openbao.status = undefined;
+      openbao.key = facilitator;
+    }
+  });
+
   it("rechecks the auth expiry at the pool's floor of 2 ledgers, not MIN_VALIDITY_LEDGERS", async () => {
     // `/verify` would refuse 12 ledgers against a minimum of 20.
     const { settle, fake } = setup({ MIN_VALIDITY_LEDGERS: "20" });

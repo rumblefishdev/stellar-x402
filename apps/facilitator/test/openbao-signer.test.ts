@@ -147,6 +147,25 @@ describe("openBaoSigner", () => {
     expect(signer.state()).toBe("ok");
   });
 
+  it("keeps its token after a 403, logs it, and doesn't sign again in the same call (decision 19)", async () => {
+    const fake = await started();
+    const { signer, logs } = setup(fake);
+    await sign(signer);
+    fake.status = 403;
+    expect(await failure(sign(signer))).toMatchObject({ reason: "denied" });
+    expect(logs).toContainEqual(
+      expect.objectContaining({
+        event: "signer_failed",
+        fields: expect.objectContaining({ step: "sign", reason: "denied" }),
+      }),
+    );
+
+    fake.status = undefined;
+    await sign(signer);
+    expect(fake.logins).toBe(1);
+    expect(fake.signs.map((s) => s.token)).toEqual(["s.token-1", "s.token-1"]);
+  });
+
   it.each([
     [503, "sealed"],
     [403, "denied"],
