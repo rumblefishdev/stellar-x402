@@ -154,8 +154,8 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
    change of state, hence two. The check runs off the server, every 5 minutes: it publishes
    `spendable_stroops` from `checkFacilitatorBalance`, and the thresholds live in the alarms, so
    `low` and its 100 XLM default go unused. The message gives the network, the balance, the fee
-   account's address and the runbook's top-up step. `SPEND_FLOOR_STROOPS` moves to 50,000,000 in
-   #105, and #105 makes that change before this PR merges (Oskar's review).
+   account's address and the runbook's top-up step. #105 moved `SPEND_FLOOR_STROOPS` to 50,000,000
+   on 2026-11-03, with its docs, before this PR merges (Oskar's review).
 8. **Theft is read from the accounts, not from our hashes** (akot, 2026-11-02; Oskar agreed on
    2026-11-02 with three conditions, met here). The off-server check compares the signers and all
    four thresholds of the fee account and each channel with a declared set, and reads their
@@ -238,6 +238,13 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
 16. **`rpc_stalled_seconds` comes from a `getLatestLedger` read every 30 s** (2026-11-03). On a
     quiet server nothing else reads the RPC, so the gauge would stop moving exactly when it
     matters.
+17. **A stale balance reading has its own alarm** (akot, 2026-11-03). #105's floor fails closed
+    once its last good reading is older than `maxStaleMs`, 5 minutes at the default interval, and
+    `/settle` then refuses every payment while `ready` stays 1 and the balance off the server looks
+    fine. #112 writes `balance_reading_age_seconds` every minute, and `balance-stale` fires above
+    300 s. A gauge, not `balance_read_failures_total`: a read that times out waits up to 10 s per
+    RPC endpoint, so the failures in 5 minutes vary in number. The floor reads on a timer, so the
+    gauge doesn't depend on traffic.
 
 ## Acceptance Criteria
 
@@ -260,7 +267,7 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
 - [ ] Given `docs/monitoring.md`, when this story is done, then it lists every metric and alert
 
 **What the criteria wait on:** the spend metrics and their alarms (budget, breaker,
-`failure-ours`, `commit-unmatched`) on 0024 (#105); the not-ready, uptime, host and real-path
-criteria on 0026's server and first deploy; the backup-secret read on 0026 creating the secret;
-`channel-held` on 0089's gauge; `disk` and `memory` on their first numbers. 0036's signer is on
-develop.
+`failure-ours`, `commit-unmatched`, `balance-stale`) on 0024 (#105); the not-ready, uptime, host
+and real-path criteria on 0026's server and first deploy; the backup-secret read on 0026 creating
+the secret; `channel-held` on 0089's gauge; `disk` and `memory` on their first numbers. 0036's
+signer is on develop.

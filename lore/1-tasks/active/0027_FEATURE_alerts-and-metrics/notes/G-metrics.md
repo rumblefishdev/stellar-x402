@@ -57,6 +57,7 @@ gauge that stops is silence, not a stale value. `settlement_sweeps_total` writes
 | `spend_commit_unmatched_total` | `spend/policy.ts` | Yes | `state` | `commit-unmatched` |
 | `spend_store_failures_total` | `spend/policy.ts` | Yes | `op` | `store-outage` |
 | `spend_refused_total` | `spend/policy.ts` | No | `reason` | None |
+| `balance_read_failures_total` | `spend/balance-floor.ts`: a failed read of the fee account | No | | None: `balance-stale` sees a reading that stays old |
 
 ## Facilitator, new in #112
 
@@ -69,6 +70,7 @@ gauge that stops is silence, not a stale value. `settlement_sweeps_total` writes
 | `pool_quarantined` | Gauge from the pool's stats: channels out of the pool since start | Yes | | `channel-quarantined` |
 | `rpc_on_fallback` | Gauge: 1 while the shared `FallbackRpc` isn't on `RPC_URLS[0]` | Yes | the endpoint's `rpcEndpointName` | `rpc-on-fallback` |
 | `rpc_stalled_seconds` | Gauge: seconds since `getLatestLedger`'s sequence last rose, read every 30 s | Yes | | `rpc-stalled` |
+| `balance_reading_age_seconds` | Gauge: seconds since the floor's last good read of the fee account, or since start before the first (decision 17) | Yes | | `balance-stale` |
 | `fee_charged_stroops` | The sum of `feeCharged`, once per landed transaction (decision 13) | Yes | `state` | None: the weekly review |
 
 `http_requests_total` has no `network`: a route serves both networks once 0077 lands.

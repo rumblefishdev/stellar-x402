@@ -55,6 +55,7 @@ the server, and their silence is read from `AWS/Lambda`.
 | --- | --- | --- | --- | --- |
 | `uptime` | The uptime probe's `ready` | Level, `Minimum` below 1, 7 of 7 one-minute periods | Not 1 for 7 minutes in a row. Its actions go on at the first good deploy | Breaching: a missing point counts as down |
 | `rpc-stalled` | `rpc_stalled_seconds` | Level, `Maximum`, 5 of 5 one-minute periods | Above 120 s for 5 minutes. `ready` doesn't show a frozen endpoint until 0049 | Not breaching: `facilitator-silent` |
+| `balance-stale` | `balance_reading_age_seconds` | Level, `Maximum`, 1 of 1 one-minute period | Above 300 s, the floor's `maxStaleMs` at the default interval: `/settle` refuses every payment with `facilitator_underfunded`, while `ready` stays 1 and the balance off the server looks fine. The floor reads on a timer, so it fires on a quiet server too | Not breaching: `facilitator-silent` |
 
 ## Money and security
 
@@ -135,6 +136,8 @@ A failed host check, or a job that never ran, writes a value past its threshold
 - `settlement_reconciled_total`, `settlement_reopened_total`, `settlement_lease_fenced_total`,
   `spend_refused_total`: traffic, read in Logs Insights. A lost lease shows in `uptime`.
 - `store_prune_failures_total`: a prune that keeps failing grows the tables, which `disk` sees.
+- `balance_read_failures_total`: after one failed read the floor keeps the last reading; reads that
+  keep failing show in `balance-stale`.
 - The catalog's metrics: discovery fails open, and nothing there costs money.
 - `spend_budget_nearing_total` for `payer` and `pay_to`: one buyer or seller near its budget is
   the budget working, not something an operator acts on. They also stay out of the billed
