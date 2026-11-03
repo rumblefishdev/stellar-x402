@@ -303,11 +303,13 @@ const envSchema = z
     message: "is no longer read: the stores are always PostgreSQL",
     path: ["STORE"],
   })
-  // `/settle` spends on pubnet, so not before spend budgets (0024) and leaving a channel with an
-  // open hash out after a deploy (0090). Whichever lands last lifts this, the other narrows its
+  // `/settle` spends on pubnet, so not before spend budgets (0024), leaving a channel with an open
+  // hash out after a deploy (0090), an alarm on a failing signer (0027) and deciding again how far
+  // the hot key's power reaches (0048). Whichever lands last lifts this, the others narrow its
   // message (0009 decision 49).
   .refine((env) => env.NETWORK !== STELLAR_NETWORKS.pubnet, {
-    message: "stellar:pubnet is refused until spend budgets (0024) and task 0090 land",
+    message:
+      "stellar:pubnet is refused until spend budgets (0024), task 0090, the signer alarm (0027) and the hot key's re-check (0048) land",
     path: ["NETWORK"],
   });
 
