@@ -14,6 +14,11 @@ history:
     who: karolkow
     note: >
       Two tests fail now and then in CI while passing locally, failing develop and unrelated PRs.
+  - date: "2026-11-03"
+    status: active
+    who: karolkow
+    note: >
+      An architecture review measured what still fails: real budgets, not leaks.
 ---
 
 # Make the timing-sensitive CI tests pass on a slow runner
@@ -97,6 +102,18 @@ production code.
   call taking another path than the test names (`…_timeout` for `settlement_pending`, 2,567 ms for
   under 2,500), including the fake-clock block. Those failures fit 0084's cause (derived from the
   assertions, not measured per test); `develop`'s CI on `98ef2f8` failed on two of the same tests.
+
+- Measured 2026-11-03 on `fa76af4`, `settle` and `settle-pool` (158 tests), 6 runs, 3 side by side, a
+  busy loop on each of 10 cores, with a log of any store call by an earlier test's settler: 6
+  failures, 0 with such a call during the failing test. All 6 ran on real budgets
+  (`settle.test.ts:724` twice, `:468`, `settle-pool.test.ts:295` three times). Not random, harsher
+  than the earlier load, and it can't show rare leaks.
+  - CI, the 27 failed runs of the last 200: the drain test's leak failed 13 runs, the last before
+    #101. After #101, 2 failed runs on 3 tests, all on a real budget, then 46 clean runs.
+  - **Next:** of 13 real budgets outside the fake block, 2 use `onFakeClock`; move the other 11 (~2 h).
+    0084 holds the per-test payment.
+  - `settle-pool.test.ts:295`'s local failures may come from #102's real socket call under
+    `AbortSignal.timeout`, which `storeIdle` can't see (assumption; no run without #102).
 
 ## Acceptance Criteria
 

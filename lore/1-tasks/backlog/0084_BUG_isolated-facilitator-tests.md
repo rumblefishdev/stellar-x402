@@ -15,6 +15,11 @@ history:
     note: >
       Spawned from the CI failures seen on the 0063 PRs. The choice between the options below waits
       until 0063 is finished.
+  - date: "2026-11-03"
+    status: backlog
+    who: karolkow
+    note: >
+      Narrowed by a measurement: per-test payment stays; one injected clock and one timer helper are dropped.
 ---
 
 # Give every facilitator test its own payment and its own clock
@@ -55,6 +60,15 @@ Each test should own its record and its time, so it gives the same result on any
 - Other tests that fail now and then and may share the first cause (not measured):
   "answers settlement_pending to a repeat…" and "attempt states… marks it sent" in
   `settle.test.ts`.
+- **Measured 2026-11-03 (0074's entry):** every failure since #101 is a real budget, none a leak.
+  By what each part prevents: a test's own payment (option B) guards the class behind 13 of 27
+  failed CI runs, 0 since #101. A shared fixture prevents nothing itself, but makes B one edit: the
+  block at `settle.test.ts:91-132` has three identical copies. Option A's held steps: unmeasured.
+  - B costs ~1.5 h, not 30 min: `const key` is fixed at `settle.test.ts:307` and read by 55
+    `store.get(key)`, so `key` must become per-test in 3 files.
+  - **Dropped:** injecting one clock into the settler: `vi.useFakeTimers` already fakes the global
+    `setTimeout` that `bounded` and `within` use. Merging the six race-timer helpers: no failure
+    points there, and two copies sit in other packages.
 - Practice: M. Fowler, "Eradicating Non-Determinism in Tests" — isolate tests, wrap the system
   clock, wait on a signal rather than a sleep.
 
