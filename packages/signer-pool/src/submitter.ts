@@ -248,6 +248,15 @@ const SPARE_LEDGERS = 1;
 /** A ledger's close time, rounded up from the 5.0–5.8 s measured on testnet and mainnet (0043). */
 const LEDGER_SECONDS_ESTIMATE = 6;
 
+/**
+ * How many ledgers past `maxLedger` a `NOT_FOUND` must be read to decide. stellar-rpc reads the
+ * transaction and then the ledger range with no snapshot, so an answer can name ledgers that closed
+ * after its read of the transaction. Three ledgers take about 15 s and an answer at most 10 s:
+ * `FallbackRpc`'s timeout, the facilitator's `UPSTREAM_TIMEOUT_MS`. Keep this above that timeout. A
+ * node catching up closes ledgers faster, so there the race stays (0088).
+ */
+export const NOT_FOUND_MARGIN_LEDGERS = 3;
+
 /** A signed envelope, ready to send. */
 interface Prepared {
   bump: Transaction | FeeBumpTransaction;
@@ -807,7 +816,7 @@ export class SettlementSubmitter {
       // A ledger bound alone, its estimated time (6 s a ledger) gone with no ledger seen past it:
       // the RPC isn't answering, or ledgers run slower than the estimate. Stop resending either
       // way, so a down RPC can't keep the loop going, with ledgers left (0073 decision 11); an
-      // envelope the network never took then ends `expired` one ledger past its bound (0088).
+      // envelope the network never took then ends `expired` past its bound's margin (0088).
       // Confirm by hash; `submit()` answers `pending` at `dueAt`.
       if (maxTime === undefined && Math.floor(this.now() / 1000) > boundAt) break;
     }
@@ -824,9 +833,11 @@ export class SettlementSubmitter {
     // The confirmation keeps running, and the channel is let go only when it is final.
     const confirmation = this.confirm(channel, prepared, uncertain);
     if (await this.settlesBy(confirmation, dueAt)) return confirmation;
-    hold.late = confirmation.then((result) =>
-      this.emit({ type: "resolved", result: { ...result, attempts: [...hold.attempts] } }),
-    );
+    hold.late = confirmation.then((result) => {
+      // A `pending` from `confirm()` ended nothing: a sweep finishes that record (0088).
+      if (result.status === "pending") return;
+      this.emit({ type: "resolved", result: { ...result, attempts: [...hold.attempts] } });
+    });
     return { ...base, status: "pending", hash };
   }
 
@@ -960,10 +971,10 @@ export class SettlementSubmitter {
 }
 
 /**
- * Whether a `NOT_FOUND` answer is past the last ledger the transaction could land in. Past the
- * ledger bound by one more ledger: stellar-rpc reads the transaction and then the ledger range with
- * no snapshot, so at `maxLedger` itself it may miss one that landed there (0088). A close time past
- * `maxTime` is already a ledger it can't have landed in. Says nothing of a node without the history.
+ * Whether a `NOT_FOUND` answer is past the last ledger the transaction could land in: by
+ * {@link NOT_FOUND_MARGIN_LEDGERS} past the ledger bound, since a read closer to it may miss one that
+ * landed there. A close time past `maxTime` is already a ledger it can't have landed in. Says
+ * nothing of a node without the history.
  */
 export function cannotLand(
   res: Pick<rpc.Api.GetMissingTransactionResponse, "latestLedger" | "latestLedgerCloseTime">,
@@ -971,7 +982,7 @@ export function cannotLand(
 ): boolean {
   return (
     (maxTime !== undefined && res.latestLedgerCloseTime > maxTime) ||
-    (maxLedger !== undefined && res.latestLedger > maxLedger)
+    (maxLedger !== undefined && res.latestLedger >= maxLedger + NOT_FOUND_MARGIN_LEDGERS)
   );
 }
 

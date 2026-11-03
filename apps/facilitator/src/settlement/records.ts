@@ -102,8 +102,10 @@ export function createRecords(deps: RecordsDeps) {
             network,
             settlementKey: key,
             state: update.state,
+            transaction: update.attempts?.find((attempt) => attempt.state === "landed")?.hash,
+            ledger: update.ledger,
           });
-          metrics.increment("settlement_landed_after_expired_total");
+          metrics.increment("settlement_landed_after_expired_total", { state: update.state });
         }
         if (current && update.attempts?.length)
           await store.markAttempts(key, update.attempts, now());

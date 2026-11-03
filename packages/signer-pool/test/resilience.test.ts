@@ -242,6 +242,26 @@ describe("unreachable RPC", () => {
     expect(innerSeq(fake)).toBe("1002");
   });
 
+  it("emits no resolved event when the late confirmation ends pending too (0088)", async () => {
+    const { fake, submitter, events } = setupVirtual();
+    fake.stalled = true;
+    // A node without the history: it can't say the transaction didn't land.
+    const getTransaction = fake.getTransaction.bind(fake);
+    fake.getTransaction = async (hash) => {
+      const res = await getTransaction(hash);
+      return { ...res, oldestLedger: res.latestLedger } as typeof res;
+    };
+    const down = outage(fake, "getTransaction");
+    const res = await submitter.submit(call());
+    expect(res.status).toBe("pending");
+    expect(submitter.pool.busy).toBe(1);
+
+    down.on = false;
+    await vi.waitFor(() => expect(submitter.pool.busy).toBe(0));
+    expect(events.some((e) => e.type === "resolved")).toBe(false);
+    expect(submitter.stats().resolved.pending).toBe(0);
+  });
+
   it("returns when no ledger can be read at all", async () => {
     const { fake, submitter } = setupVirtual();
     const down = outage(fake, "getLatestLedger");
