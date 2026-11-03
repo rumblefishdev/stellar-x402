@@ -5,6 +5,7 @@
 #
 #   FACILITATOR_IMAGE  the facilitator's image; `x402-compose` sets it from `digest`
 #   SECRETS_DIR        the decrypted credentials, /run/x402/production unless set (local runs)
+#   FACILITATOR_ADDRESS_TESTNET, CHANNELS_TESTNET  this directory's .env, once 0026 creates them
 name: x402-production
 
 services:
@@ -23,11 +24,10 @@ services:
       DATABASE_URL_FILE: /run/secrets/database-url.testnet
       RPC_URLS_FILE: /run/secrets/rpc-urls.testnet
       # The facilitator key signs in OpenBao Transit over testnet's socket, with no secret seed
-      # here (ADR 0013, 0036). The OpenBao key's account and its channels are public and known
-      # once 0026 creates them: set them in this directory's .env. Unset, the facilitator refuses
-      # to start and names them; the other services don't read them.
-      FACILITATOR_ADDRESS: ${FACILITATOR_ADDRESS_TESTNET:-}
-      CHANNELS: ${CHANNELS_TESTNET:-}
+      # here (ADR 0013, 0036). The OpenBao key's account and its channels are public. Unset, a
+      # deploy stops before it migrates; the database's and the tunnel's units set them themselves.
+      FACILITATOR_ADDRESS: ${FACILITATOR_ADDRESS_TESTNET:?set in this directory's .env}
+      CHANNELS: ${CHANNELS_TESTNET:?set in this directory's .env}
       OPENBAO_SOCKET: /run/openbao/testnet/bao.sock
       OPENBAO_KEY: stellar-testnet
       OPENBAO_KEY_VERSION: "1"
