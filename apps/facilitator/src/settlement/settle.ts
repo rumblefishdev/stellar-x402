@@ -80,10 +80,10 @@ export const SETTLE_REASONS = {
   recordWrite: "settle_exact_stellar_record_write_failed",
   /**
    * The facilitator key's signer (OpenBao, 0036) failed on the transaction (upstream's code).
-   * Nothing was sent ({@link UNSENT_REASONS}).
+   * This envelope wasn't sent ({@link UNSENT_REASONS}).
    */
   transactionSigning: "settle_exact_stellar_transaction_signing_failed",
-  /** The signer failed on the fee bump (upstream's code). Nothing was sent ({@link UNSENT_REASONS}). */
+  /** The signer failed on the fee bump (upstream's code). This envelope wasn't sent ({@link UNSENT_REASONS}). */
   feeBumpSigning: "settle_exact_stellar_fee_bump_signing_failed",
   /** No channel was free before the deadline. Nothing was sent ({@link UNSENT_REASONS}). */
   noChannelInTime: "settle_exact_stellar_no_channel_in_time",
@@ -141,7 +141,9 @@ export const SETTLE_REASONS = {
  * auth entry can still land until its expiration ledger, by whoever holds the payload, so the
  * answer never says "sign a new payment" while it is valid: it carries `extra.retryable` and
  * `extra.expirationLedger`, and the identical payload reopens the record and settles it once.
- * Past that ledger, `retryable` is `false`: sign a new payment.
+ * Past that ledger, `retryable` is `false`: sign a new payment. With a `transaction` an earlier
+ * envelope was sent and a `txBadSeq` refused it before the rebuild: the record has its hash, so it
+ * doesn't reopen and `retryable` is `false` at once.
  */
 export const UNSENT_REASONS: readonly string[] = [
   SETTLE_REASONS.timeout,
