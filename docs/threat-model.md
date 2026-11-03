@@ -357,8 +357,8 @@ the channels' reserves, about 130 XLM at launch (a 100 XLM float plus ~30 XLM of
 - **Attack:** Root, through another service on the shared server or a container escape, copies the
   key from OpenBao's memory, or its disk plus the unseal credential.
 - **Mitigation:** None that stops it. The theft alarm (a signer or threshold change on the fee account or
-  a channel, or a Horizon effect on them other than a credit, read off the server) and the
-  low-balance alarms catch it; the float caps the loss. The float has no
+  a channel, or a Horizon effect on them other than a credit or a claimable balance naming them,
+  read off the server) and the low-balance alarms catch it; the float caps the loss. The float has no
   upper limit, so the weekly review re-checks that this custody still fits it.
 - **Residual risk:** Accepted at today's stakes. The hot key is each account's only signer (0048's
   cold key was declined for now), so a thief can also lock us out of the channels. Upgrades: TPM-bound
@@ -392,3 +392,43 @@ the channels' reserves, about 130 XLM at launch (a 100 XLM float plus ~30 XLM of
   the read-only Storage Box key) is in AWS Secrets Manager, and a restore drill proves it before mainnet and every quarter.
 - **Residual risk:** The key can't be exported and has no cold backup. Losing both the snapshots and
   the backup set, or access to the shared AWS account, loses the fee account and every channel.
+
+## Monitoring
+
+Scope: the metrics and alarms of task 0027 ([ADR 0011](adr/0011-facilitator-hosting.md)): the
+facilitator's and the host's metric lines, shipped by the CloudWatch agent with the logging role,
+and the two Lambdas off the server, the uptime probe and the check that watches the accounts.
+
+### Threats
+
+#### Root on the server forges metric points
+
+- **Attack:** Root holds the agent's credentials and writes metric lines of its own. A metric
+  line's namespace is free text that no IAM condition covers, so it can add points to the
+  off-server metrics too, such as a high balance, `ready` at 1 or no mismatch, to hide what the
+  check reads. This is untested, but nothing stops it.
+- **Mitigation:** Each alarm on an off-server metric uses the statistic a forged point can't hide
+  a real one behind: `Minimum` for a balance and for `ready`, `Maximum` for a count. Root can't
+  stop the Lambdas from the server, and their silence is read from `AWS/Lambda`.
+- **Residual risk:** Forged points can raise false alarms. Metrics the server writes itself, such
+  as `fee_charged_stroops`, can be forged or held back; the weekly review sets the fee spend
+  against the balance, which comes from off the server.
+
+#### A flood of effects on our accounts
+
+- **Attack:** Anyone can send dust payments or make claimable balances that name our accounts, so
+  the check reads many pages, and a real debit sits among them.
+- **Mitigation:** Both effects are allowed, and the check pages back to where it last read in
+  full, so a debit can't fall off a page. A flood longer than a run's time fails the run, and
+  `watch-errors` fires.
+- **Residual risk:** A long enough flood keeps the check failing, which shows as an alarm, not as
+  silence.
+
+#### A client IP in the shared account's logs
+
+- **Attack:** The `rate_limited` line names the client's IP, and the logs sit in the AWS account
+  that soroban-explorer and prices-api share, so every admin there can read 30 days of them.
+- **Mitigation:** The line is written only past a rate limit, and it lets anyone with AWS access
+  block the address at the edge without a shell on the server.
+- **Residual risk:** Accepted on testnet. Looked at again before mainnet, with the retention
+  (0038).

@@ -13,7 +13,9 @@
   which Raft's cluster address needs, no move of testnet to the OpenBao key, since nothing ran on
   another key, the backup JSON over stdin, and AppRole's lockout off, task 0026); 2026-11-02 (the
   theft alarm reads the accounts instead of our hashes, a second balance alarm, and an alarm on
-  reads of the backup secret, from task 0027)
+  reads of the backup secret, from task 0027); 2026-11-03 (the effects anyone can cause, where the
+  check reads up to, statistics a forged point can't move, and the weekly review from the first
+  deploy with the fee spend metric, from the PR #111 review)
 - Supersedes: the key custody part of [ADR 0011](0011-facilitator-hosting.md) ("Keys, secrets and
   access": the SSM parameter for `FACILITATOR_SECRET` and the mainnet KMS key)
 
@@ -154,12 +156,19 @@
 - **Alarms** (0027):
   - OpenBao sealed or down, or signing failing;
   - **theft:** any signer or threshold change on the fee account or a channel, and any Horizon
-    effect on them other than a credit (`/accounts/{id}/effects`), read by a check off the server,
-    since root on the server is the case it is for. The audit log can't show signatures made with
-    a copied key. The check takes nothing from the server, since hashes kept there could be
-    forged, and comparing them would flag top-ups, channel setup, rotations and a third party's
-    fee bump. It doesn't see the float burned on fees alone, which gains a thief nothing and
-    reaches the balance alarms. Channel setup and a rotation fire it, and nothing suppresses that;
+    effect on them (`/accounts/{id}/effects`) other than the two anyone can cause: a credit
+    (`account_credited`) and a claimable balance that names the account
+    (`claimable_balance_claimant_created`). A balance made from our own account shows
+    `claimable_balance_created` and `account_debited`, so it still fires. A check off the server
+    reads them, since root on the server is the case it is for. The audit log can't show
+    signatures made with a copied key. The check takes nothing from the server, since hashes kept
+    there could be forged, and comparing them would flag top-ups, channel setup, rotations and a
+    third party's fee bump. It keeps where it read up to in AWS, written only by its own role, so
+    after an outage of any length it reads everything it missed. Root can write metric lines into
+    any namespace, so these alarms use the statistic a forged point can't hide a real one behind
+    (`Minimum` for a balance, `Maximum` for a count). It doesn't see the float burned on fees
+    alone, which gains a thief nothing and reaches the balance alarms and the weekly review.
+    Channel setup and a rotation fire it, and nothing suppresses that;
   - the fee account's spendable balance below 25 XLM, and again below 10 XLM, as a Slack message
     with the network, the balance, the address and the top-up step, from the same check;
   - a read of the backup secret, from the CloudTrail event history, which needs no trail. A drill
@@ -173,8 +182,11 @@
     a withdrawal from the company's exchange account to the fee account; who makes it is named
     before mainnet. Never an automatic top-up from a key on the server, which would put the
     treasury behind the same root.
-  - **A weekly review** after the mainnet deploy (okarcz, Payments): the real fee spend, the next
-    refill amount, and whether this custody still fits the float (see Rationale).
+  - **A weekly review** (okarcz, Payments). From the first deploy: which alarms are in ALARM
+    (0027). After the mainnet deploy, also the real fee spend, from 0027's `fee_charged_stroops`
+    summed over 7 days and set against the balance's change, where a gap means the fee account
+    paid for something other than settlements; the next refill amount; and whether this custody
+    still fits the float (see Rationale).
 - **Rotation and break-in runbook** (0026):
   - a leaked token or secret ID: destroy the secret ID, revoke its tokens, issue a new one, and
     restart the facilitator, which reads it at start;
@@ -234,7 +246,8 @@
   before mainnet and every quarter.
 - **We depend on the shared AWS account.** If it is closed or we lose access, the backup set goes
   with it. The AWS account has no CloudTrail trail, so the alarm on a read of the secret and the
-  drill both use the 90-day event history, which lags by about 15 minutes.
+  drill both use the 90-day event history, which lags by about 15 minutes. The check therefore
+  reads back an hour each time and counts each event once.
 - **A restart of the server stops `/settle` until OpenBao is unsealed,** which happens by itself in
   seconds.
 - **While OpenBao is down, `/verify` still accepts a payment.** The seller's route runs, `/settle`
