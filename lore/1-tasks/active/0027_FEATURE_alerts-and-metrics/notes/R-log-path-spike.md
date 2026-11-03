@@ -11,6 +11,10 @@ history:
     status: mature
     who: akot
     note: "Local spike for decision 1: unit file, real agent, a stub for CloudWatch. Nothing created in AWS."
+  - date: "2026-11-03"
+    status: mature
+    who: akot
+    note: "Second run from Oskar's review of #111: stderr in its own file, rotation with both agent entries, an outage across a rotation, and the agent joining whitespace lines."
 ---
 
 # How log lines reach the CloudWatch agent: spike
@@ -65,7 +69,7 @@ prints nothing, so this applies only to a step added later.
 | Endpoint refused connections for 60 s, 2,400 lines at 20/s | All delivered after it returned |
 | Longer outage, one mixed stream | The oldest lines dropped once 20,000 wait |
 | `copytruncate`, 3 rotations at 50 lines/s | 2 of 1,000 lost |
-| `copytruncate`, 2 rotations at about 2,000 lines/s | 80 of 40,000 lost, about 40 ms a rotation |
+| `copytruncate`, 2 rotations at about 2,000 lines/s | 80 of 40,000 lost, about 20 ms a rotation; the second run below found up to 250 ms |
 
 The drop comes from `plugins/outputs/cloudwatchlogs/cloudwatchlogs.go`: the first line that looks
 like EMF switches the whole destination to `AddEventNonBlocking`, which drops the oldest event once
@@ -107,6 +111,78 @@ In each run the last line of the closing batch was unsent when the test stopped 
 - Key swapped in the file and the old key rejected by the stub with `ExpiredTokenException`: the
   agent moved to the new key after 9 min 26 s, with no gap in the delivered lines. The last 12 of
   3,600 lines were unsent when the test ended and the agent was killed.
+
+## Second run: stderr, rotation and an outage across it
+
+Run on 2026-11-03 after Oskar's review of #111, with the same agent (1.300074.0b1920), Docker snap
+29.8, Compose 5.5.1 and logrotate 3.22.0 run as the user. The unit had the production flags,
+`StandardOutput=append:out.log` and `StandardError=append:err.log`. The agent had the two entries
+above (`out.log` with `exclude`, a symlink with `include`) and `err.log` as its own stream in the
+app group. Every line carried a sequence number.
+
+### stderr in its own file
+
+| Source | `out.log` | `err.log` |
+| --- | --- | --- |
+| Container stdout | All | None |
+| Container stderr | None | All |
+| `ExecStartPre` | Its stdout | Its stderr |
+| `Attaching to facilitator-1`, and `\r\x1b[K... exited with code N` | Yes, each start and exit | No |
+| Compose's progress lines (`Container ... Started`, `Stopping`) | No | Yes, each with a leading space |
+| A crash loop | `startup_failed` each start | The container's stderr each start |
+
+`out.log` kept the raw lines: every EMF line started with `{"_aws":`. `err.log` reached the app
+group as its own stream, 50 of 50 lines.
+
+### Rotation with both entries, endpoint up
+
+`copytruncate` while the container wrote a mixed stream, half EMF:
+
+| Rate | Rotations | Lost a rotation | Duplicates |
+| --- | --- | --- | --- |
+| 50 lines/s | 3 | 1 to 12 lines, 20 to 240 ms | 0 |
+| 2,000 lines/s | 8 | 20 to 500 lines, mean 353, about 175 ms | 0 |
+| `err.log`, 100 lines/s | 1 | 5 lines, 50 ms | 0 |
+
+Both entries lose about the same. No line reached the wrong group. Most of the gap is the agent's
+poll: it checks the file every 250 ms (`plugins/inputs/logfile/tail/watch/polling.go`), so up to
+250 ms of the old file is unread when it's truncated, and those lines are the tail of the rotated
+file. Only 0 to 22 lines a rotation (up to about 11 ms) fell between logrotate's copy and its
+truncate, and are in no file.
+
+### An outage across a rotation
+
+A 6 MB file, then 200 lines/s, half EMF. The endpoint went down at +10 s, the file rotated at
++40 s, and the endpoint came back at +70 s.
+
+| Destination | Delivered | Lost | Where the lost lines are |
+| --- | --- | --- | --- |
+| App group | 7,504 of 10,000 | 2,496 | 2,494 in the rotated file, every app line after the entry stopped reading; 2 in no file |
+| Metrics group | 9,985 of 10,000 | 15 | 13 in the rotated file (the usual gap), 2 in no file |
+| `err.log`, not rotated | 1,000 of 1,000 | 0 | |
+
+The app entry stopped reading about 5 s into the outage, once its sending blocked. At the
+rotation the file shrank below its offset, so after the outage it reopened at 0 and sent every
+line written since. The lines between were in `out.log.1` only. It resumed 23 s after the
+endpoint came back, as the agent's retry waits up to a minute. No duplicates. So Oskar's reasoning
+holds: a rotation during an outage longer than a few seconds loses every app line since the
+block, and keeps them on the server.
+
+### Lines that start with whitespace join the line before
+
+The agent's default `multi_line_start_pattern` is `^[\S]`, so a line that starts with a space or
+`\r` joins the previous event. Compose's exit line, `\r\x1b[K... exited with code N`, arrived
+inside the container's last stdout line, and Compose's progress lines inside the previous stderr
+line. If the last stdout line before an exit is EMF, as the adapter's flush at shutdown makes
+likely, the exit line would join it: the event still matches the `include` filter, isn't valid
+JSON, and its metrics are lost. Not tested. #113 sets a pattern that starts an event at every
+line, and tests that an EMF line before an exit keeps its metrics.
+
+### Not run
+
+- The case where the new file grows past the old offset before the agent resumes: by `tail.go`,
+  duplicates and one garbled line rather than more loss.
+- `err.log` rotated during an outage, an agent restart across a rotation, logrotate from its timer.
 
 ## Not verified
 

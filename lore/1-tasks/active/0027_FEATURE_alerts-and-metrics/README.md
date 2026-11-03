@@ -113,8 +113,11 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
    working. stdout leaves the journal. Our other units do the same, each to its own file and
    stream in the app group: Postgres, `cloudflared`, OpenBao, and the deploy with its migrations,
    so their history outlives the host (akot, 2026-11-03, Oskar's review). Tested locally, the live
-   check waits for the first deploy: [R-log-path-spike](notes/R-log-path-spike.md). ADR 0011's
-   Logs section changes with it.
+   check waits for the first deploy: [R-log-path-spike](notes/R-log-path-spike.md). Its second
+   run (Oskar's review) found that a rotation loses up to 250 ms of unread lines, and during an
+   outage every app line since the agent blocked, all but a few kept in the rotated file, which we
+   accept; and that the agent joins whitespace lines to the line before, which #113's agent config
+   turns off. ADR 0011's Logs section changes with it.
 2. **Five PRs** (akot, 2026-11-02): decisions and ADRs, the metrics adapter, the server side, the
    alarms in CDK, and the off-server check with the closing docs. Each opens as a draft that
    describes its scope, and the code follows once the decisions are agreed.

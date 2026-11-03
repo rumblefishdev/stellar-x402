@@ -549,9 +549,14 @@ One request or one stop must never outlast the layer in front of it:
     Every line ships, the client IP in `rate_limited` too; that and the retention are looked at
     again before mainnet (0038).
   - The files rotate with `logrotate` on its own timer, since they share a disk with ClickHouse,
-    using `copytruncate`, as the units hold the files open. We accept two losses: the lines
-    written while a rotation copies, about 20 ms of them, and, when a rotation falls inside an
-    AWS outage, the lines the agent hadn't sent yet. Those stay on the server in the rotated file.
+    using `copytruncate`, as the units hold the files open. We accept two losses, tested locally
+    in 0027. At each rotation, the lines the agent hadn't read yet: up to 250 ms, its poll, all
+    but a few ms of them still in the rotated file. When a rotation falls inside an AWS outage,
+    every app line since the agent stopped sending, about 5 s into it; those stay in the rotated
+    file too, which an operator reads on the server.
+  - The agent joins a line that starts with whitespace to the line before, so Compose's exit
+    line would break an EMF line before it. 0027 sets it to start an event at every line, and
+    tests that.
   - That EMF lines turn into metrics is checked once, at the first deploy (0027).
   - No pino: stdout is the only transport, and the logger already writes identifiers only.
 - **RPC endpoints are logged as `RPC_URLS[i]#<fingerprint>`, never by URL or host.** An RPC URL
