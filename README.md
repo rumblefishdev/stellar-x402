@@ -14,10 +14,9 @@ package. Status: skeleton, nothing implemented yet.
 | `packages/signer-pool`  | channel accounts: funding, sequence tracking, retry, fee bump            |
 | `packages/mcp`          | MCP tools (search, paid call) and error codes                            |
 | `packages/seller-fetch` | requests to seller URLs: public addresses only, no redirects, limits     |
-| `packages/sdk`          | seller, buyer and agent helpers (`/seller`, `/buyer`, `/agent`)          |
 | `packages/config`       | shared network config and types                                          |
 | `contracts/upto-proxy`  | Soroban contract for the `upto` scheme                                   |
-| `examples/`             | two end-to-end integrations                                              |
+| `examples/`             | a test seller (`http-api`) and a placeholder for a second example        |
 | `conformance/`          | wire-level conformance runs and report                                   |
 | `deploy/`               | per-network config and operational scripts                               |
 | `docs/`                 | ADRs, runbook, monitoring, threat model, security reviews                |
