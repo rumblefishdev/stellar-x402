@@ -135,6 +135,16 @@ ADR 0013's first upgrade (Not here yet).
 - Outbound 7844 over UDP and TCP allowed on the server (`cloudflared`).
 - Cloudflare: Browser Integrity Check off for the hostname, Bot Fight Mode off (0026).
 - The signer (0036), and the key's account and channels (OpenBao, step 6).
+- `/srv/x402/production/.env` with the key's address and its channels, from OpenBao's steps 4
+  and 6: public values, so a plain file, owned by `x402`, mode 0644, which the playbook leaves
+  alone. `compose.yaml` requires both: without them `x402@`, the deploy's `migrate-testnet` and
+  the `docker compose` commands here stop at interpolation.
+
+  ```sh
+  printf 'FACILITATOR_ADDRESS_TESTNET=%s\nCHANNELS_TESTNET=%s\n' ADDRESS CHANNELS |
+    ssh SERVER 'sudo install -o x402 -g x402 -m 0644 /dev/stdin /srv/x402/production/.env'
+  ```
+
 - After the first image is pushed: the GHCR package `x402-facilitator` made public, so the server
   pulls without a login.
 
