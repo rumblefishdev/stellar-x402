@@ -107,6 +107,23 @@ history:
       cluster address, so admin is a loopback listener inside the container instead of a host
       socket (ADR 0013 amended). The step that moved testnet off an old key is gone: nothing ran
       on one (0036 decision 15).
+  - date: "2026-11-03"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      OpenBao runs on ch-prod-01. The playbook from develop at d413e75 changed only OpenBao's
+      directories, compose file, config, unit and volumes. OpenBao started on 2026-11-02 at 16:25
+      UTC and was initialised at 16:28 with one recovery share; the backup secret was created and
+      read back the same. The admin's shell was lost before step 4, and init's root token with it:
+      a root token from the recovery key in AWS (policy root) proved the backup, and init's token
+      was revoked by its accessor. Then the Transit key stellar-testnet, the policy and AppRole
+      x402-testnet, both AppRole credentials (each decrypts to 36 bytes), and the root token
+      revoked at 08:58:39 UTC (audit log). The key's account
+      GAVE5V5IOMNNBOZXGZSQOP447L2QLCG6ELIIPO6CFJLGZVY4YIK3KKRP holds 10,000 XLM from Friendbot,
+      and 20 channels came in two transactions (2c966cac…, 34973a78…); on Horizon each has the key
+      as its only signer and 1.5 XLM. Only the admin user is in the docker group, and the OS shows
+      no TPM. The .env values (FACILITATOR_ADDRESS_TESTNET, CHANNELS_TESTNET) and the facilitator
+      wait for #102.
 ---
 
 # Public testnet deployment
