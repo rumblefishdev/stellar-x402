@@ -5,7 +5,7 @@ type: FEATURE
 status: active
 milestone: 1
 related_adr: ["0011", "0012", "0013"]
-related_tasks: ["0012", "0014", "0022", "0017", "0020", "0013", "0039", "0036", "0047", "0099"]
+related_tasks: ["0012", "0014", "0022", "0017", "0020", "0013", "0039", "0036", "0047", "0099", "0100"]
 tags: [facilitator, deploy, priority-high, effort-medium, platform]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -107,6 +107,24 @@ history:
       cluster address, so admin is a loopback listener inside the container instead of a host
       socket (ADR 0013 amended). The step that moved testnet off an old key is gone: nothing ran
       on one (0036 decision 15).
+  - date: "2026-11-03"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      OpenBao runs on ch-prod-01. The playbook from develop at d413e75 changed only OpenBao's
+      directories, compose file, config, unit and volumes. OpenBao started on 2026-11-02 at 16:25
+      UTC and was initialised at 16:28 with one recovery share; the backup secret was created and
+      read back the same. The admin's shell was lost before step 4, and init's root token with it:
+      a root token from the recovery key in AWS (policy root) proved the backup, and init's token
+      was revoked by its accessor. Then the Transit key stellar-testnet, the policy and AppRole
+      x402-testnet, both AppRole credentials (each decrypts to 36 bytes), and the root token
+      revoked on 2026-11-03 at 08:58:39 UTC (audit log). The key's account
+      GAVE5V5IOMNNBOZXGZSQOP447L2QLCG6ELIIPO6CFJLGZVY4YIK3KKRP holds 10,000 XLM from Friendbot,
+      and 20 channels came in two transactions (2c966cac…, 34973a78…); on Horizon each has the key
+      as its only signer and 1.5 XLM. Only the admin user is in the docker group. The firmware
+      exposes no TPM (no ACPI TPM2 or TCPA table, no SMBIOS type 43, no /dev/tpm*); most likely the
+      Ryzen 9 3900's fTPM is off in the BIOS, which wasn't checked. The .env values
+      (FACILITATOR_ADDRESS_TESTNET, CHANNELS_TESTNET) and the facilitator wait for #102.
 ---
 
 # Public testnet deployment
@@ -328,7 +346,8 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   `transit/sign/<key>`, and one AppRole per network: `token_ttl` and `token_max_ttl` 1 h, a secret
   ID that doesn't expire, delivered as a Compose secret. User lockout off for AppRole (ADR 0013).
 - **Unseal:** a static seal key as an encrypted systemd credential (`systemd-creds`, `host` mode).
-  Note in the runbook whether the board has a TPM (ADR 0013's first upgrade).
+  Note in the runbook whether the board has a TPM (ADR 0013's first upgrade); finding out before
+  mainnet is 0100.
 - **Init:** `bao operator init -recovery-shares=1 -recovery-threshold=1`. The static seal accepts
   these flags (OpenBao 2.7.2, 2026-11-02).
 - **Backup secret** (ADR 0013): `x402/production/openbao-backup` in AWS Secrets Manager,
