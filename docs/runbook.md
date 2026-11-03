@@ -512,8 +512,11 @@ Then step 4 in this shell, without its `read`, and step 5 (`unset self` too).
 - The key theft transaction (ADR 0013): no tool signs it and it has never run (0099).
 - A leaked token or secret ID, OpenBao upgrades and what `/settle` does meanwhile, and the weekly
   review after the mainnet deploy (0026, ADR 0013).
-- A TPM for the credentials (ADR 0013's first upgrade): the OS shows none (no
-  `/sys/class/tpm/tpm0`, 2026-11-03), and whether the board has one off in firmware isn't known.
+- A TPM for the credentials (ADR 0013's first upgrade). Checked on 2026-11-03: the firmware
+  exposes none, with no ACPI `TPM2` or `TCPA` table, no SMBIOS type 43 and no `/dev/tpm*` (ASRock
+  Rack B450D4U-V1L, BIOS L2.12, Ryzen 9 3900). Not checked: most likely the Ryzen's fTPM is off in
+  the BIOS. Turning it on needs Hetzner's KVM console and a reboot of the server the explorer
+  shares.
 - pgBackRest backups, the database's restore drill and upgrade policy.
 - The CloudWatch agent and renewing its Roles Anywhere certificate (0027).
 - Restoring the service on another machine, RPC failover, testnet reset recovery, the incident

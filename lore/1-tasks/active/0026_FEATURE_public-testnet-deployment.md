@@ -121,9 +121,10 @@ history:
       revoked on 2026-11-03 at 08:58:39 UTC (audit log). The key's account
       GAVE5V5IOMNNBOZXGZSQOP447L2QLCG6ELIIPO6CFJLGZVY4YIK3KKRP holds 10,000 XLM from Friendbot,
       and 20 channels came in two transactions (2c966cac…, 34973a78…); on Horizon each has the key
-      as its only signer and 1.5 XLM. Only the admin user is in the docker group, and the OS shows
-      no TPM. The .env values (FACILITATOR_ADDRESS_TESTNET, CHANNELS_TESTNET) and the facilitator
-      wait for #102.
+      as its only signer and 1.5 XLM. Only the admin user is in the docker group. The firmware
+      exposes no TPM (no ACPI TPM2 or TCPA table, no SMBIOS type 43, no /dev/tpm*); most likely the
+      Ryzen 9 3900's fTPM is off in the BIOS, which wasn't checked. The .env values
+      (FACILITATOR_ADDRESS_TESTNET, CHANNELS_TESTNET) and the facilitator wait for #102.
 ---
 
 # Public testnet deployment
