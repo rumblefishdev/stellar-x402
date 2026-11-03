@@ -16,7 +16,7 @@ history:
   - date: "2026-11-02"
     status: mature
     who: akot
-    note: "Margin raised from one ledger to three in the PR review of 0088."
+    note: "Margin raised from one ledger to three in the PR review of 0088, and given to maxTime too."
 ---
 
 # NOT_FOUND at the bound ledger
@@ -52,9 +52,12 @@ data: `FallbackRpc` drops an answer after 10 s, so a live node can't produce tha
 
 ## maxTime
 
-No margin needed. ✓ Core rejects at `maxTime < closeTime` of the ledger being closed
-(`TransactionFrame.cpp:1182`). ~ So a close time past `maxTime` is already a ledger after the last
-one that could hold it. ✓ Only hashes from before 0073 carry `maxTime` (`submitter.ts:647`).
+Core's rule needs no margin, the read does. ✓ Core rejects at `maxTime < closeTime` of the ledger
+being closed (`TransactionFrame.cpp:1182`), so a close time past `maxTime` is a ledger after the
+last one that could hold it. But the race is in the read: an answer can miss that last ledger, as it
+can miss `maxLedger`, so `maxTime` takes the same margin in close time, 15 s (found in the PR
+review). ✓ Only hashes from before 0073 carry `maxTime` (`submitter.ts:647`), and the pool's default
+path.
 
 ## Cost of a wrong `expired`
 
