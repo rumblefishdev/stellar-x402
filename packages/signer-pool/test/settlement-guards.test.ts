@@ -434,6 +434,35 @@ describe("maxLedger", () => {
     expect(waited).toBeLessThan(20 * 6 + 30 + 30);
   }, 5_000);
 
+  it("doesn't take NOT_FOUND inside the margin past maxTime as expired: it may have landed (0088)", async () => {
+    const { fake, submitter } = setup();
+    let maxTime = Infinity;
+    // The network includes it only in the last ledger that closes by maxTime.
+    const close = fake.getLatestLedger.bind(fake);
+    fake.getLatestLedger = async () => {
+      fake.stalled = fake.closeTime + 2 * fake.ledgerSeconds <= maxTime;
+      return close();
+    };
+    const missed: number[] = [];
+    const getTransaction = fake.getTransaction.bind(fake);
+    fake.getTransaction = async (hash) => {
+      const res = await getTransaction(hash);
+      // Up to three ledgers past maxTime, at 5 s each.
+      if (res.latestLedgerCloseTime > maxTime + 3 * fake.ledgerSeconds) return res;
+      if (res.status === rpc.Api.GetTransactionStatus.NOT_FOUND) return res;
+      missed.push(res.latestLedgerCloseTime);
+      return {
+        ...res,
+        status: rpc.Api.GetTransactionStatus.NOT_FOUND,
+      } as unknown as rpc.Api.GetTransactionResponse;
+    };
+    const res = await submitter.submit(call(), {
+      onSigned: (_hash, bounds) => void (maxTime = bounds.maxTime!),
+    });
+    expect(missed.some((closeTime) => closeTime > maxTime)).toBe(true);
+    expect(res.status).toBe("success");
+  });
+
   it("keeps the time bound for a call without a ledger bound", async () => {
     const { fake, submitter } = setup();
     await submitter.submit(call());
