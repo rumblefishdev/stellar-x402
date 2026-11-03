@@ -2,7 +2,11 @@
 # /srv/x402/openbao, the compose files and deploy.sh, the systemd units and their scripts, the
 # rotation of OpenBao's audit log, and CI's deploy user with its forced command and one sudo rule.
 # Never the server's base setup (firewall, Docker's daemon.json, sshd, the admins), which the
-# explorer's playbook owns. An admin runs it from a reviewed commit; CI never does:
+# explorer's playbook owns. An admin runs it from a commit on `deploy/production`, which takes only
+# an approved pull request, never from `develop`, which takes pushes without one; CI never runs it
+# (runbook, The playbook):
+#   git status --short   # must print nothing
+#   git fetch origin && git switch --detach origin/deploy/production
 #   cd deploy/ansible
 #   ansible-playbook -i inventory.ini playbook.yaml --check --diff
 #   ansible-playbook -i inventory.ini playbook.yaml

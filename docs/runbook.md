@@ -42,11 +42,14 @@ curl -s https://x402-facilitator.sorobanscan.com/supported
 ## The playbook
 
 It puts x402's parts on the server and touches nothing else (`deploy/ansible/playbook.yaml`). Run
-it from a reviewed commit on `develop`, never from a working branch, since whoever runs it, and
-from which commit, is the boundary around production:
+it from a commit on `deploy/production`, never from `develop` or a working branch: root runs what
+it installs, so whoever runs it, and from which commit, is the boundary around production.
+`deploy/production` takes only an approved pull request with no bypass (Before the first deploy);
+`develop` takes pushes without a review.
 
 ```sh
-git fetch origin && git switch --detach origin/develop
+git status --short  # must print nothing: a local edit or new file would ride along unreviewed
+git fetch origin && git switch --detach origin/deploy/production
 cd deploy/ansible   # inventory.ini from inventory.ini.example, git-ignored
 ansible-playbook -i inventory.ini playbook.yaml --check --diff
 ansible-playbook -i inventory.ini playbook.yaml
@@ -55,6 +58,48 @@ ansible-playbook -i inventory.ini playbook.yaml
 It enables the units and starts only the watchdog's timer. A changed unit or compose file takes
 effect at that unit's next restart; a restart of `x402@production` drains it, so plan it like a
 deploy.
+
+**A change under `deploy/`** reaches the server in this order:
+
+1. The pull request to `deploy/production` merges. Its deploy starts at once, since the workflow
+   ignores only `lore/**`, `docs/**` and `**/*.md`, and runs with the files already on the
+   server, so a change under `deploy/` must still work with the old ones until step 3. When it
+   can't, for example a new credential the new image reads, split it into two pull requests: the
+   files first, written to work with the image that runs, through steps 1 to 3; then the image
+   change, as a plain deploy.
+2. Once that deploy has ended (`journalctl -fu x402-deploy@production`; it can take as long as a
+   migration), the playbook from that merge, as above. Run during the deploy, it would replace
+   `deploy.sh` and the compose file under it.
+3. A restart of each unit whose files changed. The production compose file is the facilitator's,
+   the databases' and the tunnel's: stop the facilitator first, which drains, so no settlement
+   loses its database or the tunnel mid-request, then restart the others and start it again.
+   OpenBao's compose file and `config.hcl` are `x402-openbao`'s alone.
+
+   ```sh
+   sudo systemctl stop x402@production
+   sudo systemctl restart x402-db-testnet@production x402-tunnel@production
+   sudo systemctl start x402@production
+   sudo systemctl restart x402-openbao   # only when its files changed: every /settle fails meanwhile
+   ```
+
+   `x402@production` starts `digest.good`, so if step 1's deploy failed, the new image isn't
+   running yet: **Run workflow** on `deploy/production` again now.
+
+Then check that each container kept what its compose file drops (task 0091):
+
+```sh
+sudo docker ps -q --filter label=com.docker.compose.project=x402-production \
+  --filter label=com.docker.compose.project=x402-openbao \
+  | xargs -r sudo docker inspect --format \
+    '{{.Name}} drop={{.HostConfig.CapDrop}} add={{.HostConfig.CapAdd}} {{.HostConfig.SecurityOpt}}'
+sudo /usr/local/libexec/x402/x402-compose production --profile migrate config migrate-testnet \
+  | grep -A1 -E 'cap_drop|security_opt'
+```
+
+Each running container shows `drop=[ALL]` and `[no-new-privileges:true]`; only Postgres adds
+`CAP_CHOWN CAP_DAC_READ_SEARCH CAP_SETGID CAP_SETUID`. `migrate-testnet` runs only during a deploy,
+so the second command reads its settings from the compose file instead: `ALL` and
+`no-new-privileges:true`.
 
 ## Credentials
 
@@ -313,7 +358,9 @@ deploy by hand on the server (Deploy, above).
      `sudo truncate -s 0 /var/lib/x402-deploy/.ssh/authorized_keys`.
   2. Make a new pair as in "Before the first deploy": the private half into `DEPLOY_SSH_KEY`, the
      public half into `deploy/ansible/files/deploy-production.pub` by pull request.
-  3. Once that is on `develop`, run the playbook before the next deploy: it writes the new key into
+  3. Once that is on `deploy/production`, run the playbook from it (The playbook, above), then
+     **Run workflow** on `deploy/production`: the merge's own deploy failed on the old key, and
+     nothing else starts one. The playbook writes the new key into
      `authorized_keys`, which then holds only that one. Record its fingerprint in task 0026's
      history.
 

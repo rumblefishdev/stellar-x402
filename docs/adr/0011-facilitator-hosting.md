@@ -357,8 +357,9 @@ One request or one stop must never outlast the layer in front of it:
 - **An Ansible playbook in `deploy/ansible/` provisions the server's x402 parts:** the `x402`
   user, `/srv/x402/<environment>/`, the systemd units and timers, the compose files,
   `deploy.sh`, the deploy user's one `sudo` rule and its `authorized_keys` forced command,
-  `cloudflared`, and the pgBackRest and CloudWatch agent config. An admin runs it from a reviewed
-  commit, as the explorer's own playbook is run. It touches only x402's parts, never the server's
+  `cloudflared`, and the pgBackRest and CloudWatch agent config. An admin runs it, as the
+  explorer's own playbook is run, from a reviewed commit on `deploy/production`; never from
+  `develop`, which takes unreviewed pushes (0091). It touches only x402's parts, never the server's
   base setup (firewall, `daemon.json`, users), which the ClickHouse project owns. Whoever runs
   the playbook, and from which commit, is the real boundary around production.
 - **Per-merge deploys stay a digest over SSH** (above), and CI never runs the playbook. Ansible
