@@ -1,6 +1,7 @@
 import { Address, FeeBumpTransaction, Keypair, StrKey, rpc, xdr } from "@stellar/stellar-sdk";
 import { describe, expect, it, vi } from "vitest";
 import {
+  NOT_FOUND_MARGIN_LEDGERS,
   LedgerBoundError,
   SettlementSubmitter,
   SignedHookError,
@@ -476,8 +477,8 @@ describe("maxLedger", () => {
     };
     const res = await submitter.submit(call(), { maxLedger: start + 3 });
     expect(res.status).toBe("expired");
-    // 600 s is 120 ledgers at 5 s; the first read past the ledger bound ended the wait (0088).
-    expect(reads.at(-1)).toBe(start + 4);
+    // 600 s is 120 ledgers at 5 s; the first read the margin past the ledger bound ended the wait.
+    expect(reads.at(-1)).toBe(start + 3 + NOT_FOUND_MARGIN_LEDGERS);
 
     // The sequence was not used, so the channel is reused at the same number.
     fake.stalled = false;
@@ -515,7 +516,7 @@ describe("maxLedger", () => {
     expect(res).toMatchObject({ status: "success", ledger: maxLedger });
   });
 
-  it("doesn't take NOT_FOUND read at maxLedger as expired: it may have landed there (0088)", async () => {
+  it("doesn't take NOT_FOUND inside the margin as expired: it may have landed in maxLedger (0088)", async () => {
     const { fake, submitter } = setup({ timeoutSeconds: 600 });
     const maxLedger = fake.ledger + 3;
     // The network includes it only in maxLedger.
@@ -525,20 +526,43 @@ describe("maxLedger", () => {
       return close();
     };
     // stellar-rpc reads the transaction, then the ledger range, with no snapshot between them.
-    let raced = false;
+    const missed: number[] = [];
     const getTransaction = fake.getTransaction.bind(fake);
     fake.getTransaction = async (hash) => {
       const res = await getTransaction(hash);
-      if (raced || res.latestLedger !== maxLedger) return res;
-      raced = true;
+      if (res.latestLedger < maxLedger || res.latestLedger >= maxLedger + NOT_FOUND_MARGIN_LEDGERS)
+        return res;
+      missed.push(res.latestLedger);
       return { ...res, status: rpc.Api.GetTransactionStatus.NOT_FOUND } as typeof res;
     };
     const res = await submitter.submit(call(), { maxLedger });
-    expect(raced).toBe(true);
+    expect(missed).toEqual([maxLedger, maxLedger + 1, maxLedger + 2]);
     expect(res).toMatchObject({ status: "success", ledger: maxLedger });
   });
 
-  it("leaves NOT_FOUND past the bound open when the node's history starts later (0088)", async () => {
+  it.each([
+    ["reaches the envelope's ledger: expired", 0, "expired"],
+    ["starts after the envelope's ledger: pending", 1, "pending"],
+  ])("answers NOT_FOUND past the bound when the history %s (0088)", async (_, past, status) => {
+    const { fake, submitter } = setup({ timeoutSeconds: 600 });
+    fake.stalled = true;
+    let simLedger = 0;
+    const simulate = fake.simulateTransaction.bind(fake);
+    fake.simulateTransaction = async (...a) => {
+      const res = await simulate(...a);
+      simLedger = res.latestLedger;
+      return res;
+    };
+    const getTransaction = fake.getTransaction.bind(fake);
+    fake.getTransaction = async (hash) => {
+      const res = await getTransaction(hash);
+      return { ...res, oldestLedger: simLedger + past } as typeof res;
+    };
+    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 3 });
+    expect(res.status).toBe(status);
+  });
+
+  it("frees the channel with its sequence read again after NOT_FOUND from a node without the history (0088)", async () => {
     const { fake, submitter } = setup({ timeoutSeconds: 600 });
     fake.stalled = true;
     const getTransaction = fake.getTransaction.bind(fake);

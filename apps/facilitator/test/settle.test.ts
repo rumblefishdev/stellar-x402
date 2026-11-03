@@ -2620,7 +2620,11 @@ describe("attempt states (0019 decision 7)", () => {
 
 describe("with reconciliation (0019)", () => {
   /** A settler and a reconciler sharing one store and one `records`, as `buildSettlement` builds. */
-  function shared(behaviour: Behaviour, answer: rpc.Api.GetTransactionResponse) {
+  function shared(
+    behaviour: Behaviour,
+    answer: rpc.Api.GetTransactionResponse,
+    overrides: Partial<SettlerDeps> = {},
+  ) {
     const store = db.stores().settlements;
     const hooks = {
       onFinal: vi.fn<SettlementHooks["onFinal"]>(async () => {}),
@@ -2629,7 +2633,7 @@ describe("with reconciliation (0019)", () => {
     const logger = jsonLogger("error", () => {});
     const metrics = memoryMetrics();
     const records = createRecords({ network, store, hooks, logger, metrics });
-    const { settle } = setup(behaviour, { store, records });
+    const { settle } = setup(behaviour, { store, records, ...overrides });
     const reconcilerOn = (r = records) =>
       createReconciler({
         network,
@@ -2692,13 +2696,36 @@ describe("with reconciliation (0019)", () => {
     expect((await first).response).toEqual(alreadySettled);
   });
 
+  it("keeps a record the pool left pending open, through a repeat, until a sweep finishes it (0088)", async () => {
+    const landed = {
+      status: rpc.Api.GetTransactionStatus.SUCCESS,
+      ledger: 1001,
+      resultXdr: { feeCharged: () => ({ toBigInt: () => 41_000n }) },
+    } as unknown as rpc.Api.GetTransactionResponse;
+    const { store, hooks, settle, reconcilerOn } = shared(landing("pending"), landed, {
+      settleTimeoutMs: 30,
+    });
+    const pending = { success: false, errorReason: "settlement_pending", transaction: HASH };
+    expect((await settle(payload(), requirements)).response).toMatchObject(pending);
+    expect((await settle(payload(), requirements)).response).toMatchObject(pending);
+    expect((await store.get(key))?.state).toBe("pending");
+    expect(hooks.onFinal).not.toHaveBeenCalled();
+
+    expect(await reconcilerOn().sweep()).toMatchObject({ success: 1 });
+    expect((await store.get(key))?.state).toBe("success");
+    expect((await settle(payload(), requirements)).response).toMatchObject({
+      success: true,
+      transaction: HASH,
+    });
+  });
+
   it("finishes a payment whose process crashed between signing and sending", async () => {
     const { store, hooks, logger, metrics, settle, reconcilerOn } = shared(
       async (opts) => {
         await opts.onSigned?.(HASH, BOUNDS);
         return new Promise(() => {}); // the process stops here
       },
-      notFound(BOUNDS.maxLedger + 1),
+      notFound(BOUNDS.maxLedger + 3),
     );
     void settle(payload(), requirements);
     await vi.waitFor(async () => expect(await store.attempts(key)).toHaveLength(1));

@@ -72,8 +72,8 @@ export class RpcUnavailableError extends Error {
  *
  * A response from a lagging endpoint is still correct for the submitter: `NOT_FOUND` carries that
  * endpoint's own latest ledger and close time, so lag cannot report a transaction as expired too
- * early. An endpoint at exactly the ledger bound can miss one that landed there, so the submitter
- * trusts `NOT_FOUND` only past the bound (0088).
+ * early. An endpoint near the ledger bound can miss one that landed there, so the submitter trusts
+ * `NOT_FOUND` only a margin past the bound, which relies on this class's timeout (0088).
  *
  * The active endpoint can be shared: a caller that reaches the same URLs another way, in the same
  * order, starts on {@link begin}'s endpoint and reports a failure there with {@link markFailed}, so

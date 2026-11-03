@@ -39,6 +39,7 @@ export {
 export {
   FeeLimitError,
   LedgerBoundError,
+  NOT_FOUND_MARGIN_LEDGERS,
   SettlementSubmitter,
   SignedHookError,
   SimulationCheckError,
