@@ -135,6 +135,16 @@ ADR 0013's first upgrade (Not here yet).
 - Outbound 7844 over UDP and TCP allowed on the server (`cloudflared`).
 - Cloudflare: Browser Integrity Check off for the hostname, Bot Fight Mode off (0026).
 - The signer (0036), and the key's account and channels (OpenBao, step 6).
+- `/srv/x402/production/.env` with the key's address and its channels, from OpenBao's steps 4
+  and 6: public values, so a plain file, owned by `x402`, mode 0644, which the playbook leaves
+  alone. `compose.yaml` requires both: without them `x402@`, the deploy's `migrate-testnet` and
+  the `docker compose` commands here stop at interpolation.
+
+  ```sh
+  printf 'FACILITATOR_ADDRESS_TESTNET=%s\nCHANNELS_TESTNET=%s\n' ADDRESS CHANNELS |
+    ssh SERVER 'sudo install -o x402 -g x402 -m 0644 /dev/stdin /srv/x402/production/.env'
+  ```
+
 - After the first image is pushed: the GHCR package `x402-facilitator` made public, so the server
   pulls without a login.
 
@@ -321,7 +331,19 @@ cd /srv/x402/openbao && sudo docker compose exec openbao bao status
 
 It unseals itself at every start with the seal key `x402-openbao` decrypts. Its storage (Raft) and
 audit log are the volumes `x402-openbao-data` and `x402-openbao-audit`, made by the playbook. A
-request OpenBao can't write to the audit log fails, so a full disk stops `/settle`.
+request OpenBao can't write to the audit log fails, so a full disk stops `/settle`. The playbook's
+`/etc/logrotate.d/x402-openbao` rotates that log daily and keeps a year, compressed: `logrotate`
+renames the file, and SIGHUP makes OpenBao open a new one. About 5 MB a day at 1,000 settlements.
+After a playbook run that changes it, check one rotation by hand:
+
+```sh
+sudo logrotate -d /etc/logrotate.d/x402-openbao   # reads it, rotates nothing
+sudo logrotate -f /etc/logrotate.d/x402-openbao
+cd /srv/x402/openbao && sudo docker compose exec -T openbao ls -l /openbao/logs
+```
+
+A new `audit.log` that grows beside `audit.log.1`, and `signer: "ok"` in `/health` (What is
+where, above), mean OpenBao reopened it and still signs.
 
 **Setting it up,** once, after the playbook. The seal key and init's answer travel between the
 admin's machine and the server over SSH and never reach a disk, so they live only in the admin's
@@ -511,7 +533,6 @@ Then step 4 in this shell, without its `read`, and step 5 (`unset self` too).
 - OpenBao's snapshots and restore drill, key rotation as an on-chain signer change, fee float
   top-ups (0036, 0047). After a restore on the same server, restart the facilitator: a token newer
   than the snapshot answers 403 until its hour ends, and a 403 doesn't make the signer log in again.
-- Rotating OpenBao's audit log: nothing rotates it yet, and a full volume stops `/settle` (0026).
 - The key theft transaction (ADR 0013): no tool signs it and it has never run (0099).
 - A leaked token or secret ID, OpenBao upgrades and what `/settle` does meanwhile, and the weekly
   review after the mainnet deploy (0026, ADR 0013).

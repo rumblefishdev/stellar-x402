@@ -26,7 +26,8 @@ jobs:
           --health-retries 10
       # The OpenBao signer's tests (0036): a dev server, unsealed, with a known root token.
       openbao:
-        image: openbao/openbao:2.7.2
+        # The digest production pins (deploy/openbao/compose.yaml), so CI tests that image.
+        image: openbao/openbao:2.7.2@sha256:5046911075e137e154ce49ab051502f4ec7cf367d484ae4a4dce665d9b90561f
         env:
           BAO_DEV_ROOT_TOKEN_ID: root
         ports:
