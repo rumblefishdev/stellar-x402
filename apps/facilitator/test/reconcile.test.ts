@@ -301,9 +301,13 @@ describe("createReconciler", () => {
       },
     );
 
-    it("expires a hash once the close time passes its time bound", async () => {
-      const { store, reconciler } = setup({ [A]: missing(100, 2_001) });
+    it("expires a hash once the close time passes its time bound by the margin (0088)", async () => {
+      const answers = { [A]: missing(100, 2_015) };
+      const { store, reconciler } = setup(answers);
       const key = await signed(store, [A]);
+      await reconciler.sweep();
+      expect((await store.get(key))?.state).toBe("signed");
+      answers[A] = missing(100, 2_016);
       await reconciler.sweep();
       expect((await store.get(key))?.state).toBe("expired");
     });

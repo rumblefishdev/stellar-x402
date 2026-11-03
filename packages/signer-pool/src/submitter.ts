@@ -257,6 +257,9 @@ const LEDGER_SECONDS_ESTIMATE = 6;
  */
 export const NOT_FOUND_MARGIN_LEDGERS = 3;
 
+/** The same margin past `maxTime`, at 5 s a ledger: the stall it needs is what the timeout rules out. */
+export const NOT_FOUND_MARGIN_SECONDS = NOT_FOUND_MARGIN_LEDGERS * 5;
+
 /** A signed envelope, ready to send. */
 interface Prepared {
   bump: Transaction | FeeBumpTransaction;
@@ -971,17 +974,17 @@ export class SettlementSubmitter {
 }
 
 /**
- * Whether a `NOT_FOUND` answer is past the last ledger the transaction could land in: by
- * {@link NOT_FOUND_MARGIN_LEDGERS} past the ledger bound, since a read closer to it may miss one that
- * landed there. A close time past `maxTime` is already a ledger it can't have landed in. Says
- * nothing of a node without the history.
+ * Whether a `NOT_FOUND` answer is past the last ledger the transaction could land in, by a margin
+ * past either bound: {@link NOT_FOUND_MARGIN_LEDGERS} past `maxLedger`, or
+ * {@link NOT_FOUND_MARGIN_SECONDS} of close time past `maxTime`, since a read closer to it may miss
+ * one that landed in the bound's last ledger. Says nothing of a node without the history.
  */
 export function cannotLand(
   res: Pick<rpc.Api.GetMissingTransactionResponse, "latestLedger" | "latestLedgerCloseTime">,
   { maxTime, maxLedger }: SignedBounds,
 ): boolean {
   return (
-    (maxTime !== undefined && res.latestLedgerCloseTime > maxTime) ||
+    (maxTime !== undefined && res.latestLedgerCloseTime > maxTime + NOT_FOUND_MARGIN_SECONDS) ||
     (maxLedger !== undefined && res.latestLedger >= maxLedger + NOT_FOUND_MARGIN_LEDGERS)
   );
 }

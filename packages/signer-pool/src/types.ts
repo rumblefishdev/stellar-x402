@@ -49,7 +49,9 @@ export type SubmitStatus =
    * transaction may still land. The channel stays out of the pool until it is final, and a
    * `resolved` event reports the outcome. Also the outcome of a `NOT_FOUND` past the bound from a
    * node whose history starts later: it may have landed, only the hash can tell, and the channel
-   * is free again (0088).
+   * is free again. That `pending` ends nothing, so it emits no `resolved`, also after a `pending`
+   * at `dueAt`: reconciliation finishes the record. `pending` minus `resolved` therefore doesn't
+   * count the settlements still being confirmed (0088).
    */
   | "pending";
 

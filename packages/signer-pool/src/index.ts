@@ -40,6 +40,7 @@ export {
   FeeLimitError,
   LedgerBoundError,
   NOT_FOUND_MARGIN_LEDGERS,
+  NOT_FOUND_MARGIN_SECONDS,
   SettlementSubmitter,
   SignedHookError,
   SigningError,
