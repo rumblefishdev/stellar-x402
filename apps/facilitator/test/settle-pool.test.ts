@@ -329,6 +329,45 @@ describe("main()'s /settle wiring, with the real pool", () => {
     }
   });
 
+  it("answers the sent hash a txBadSeq refused when signing its rebuild fails, and doesn't reopen (0036)", async () => {
+    const { settle, fake, store } = setup();
+    await settle(payload(fake.ledger + 30), requirements);
+    // Another sender used the channel, so the next envelope is refused with txBadSeq.
+    fake.sequences.set(channel, 5000n);
+    // OpenBao seals between the refused send and its rebuild.
+    const send = fake.sendTransaction.bind(fake);
+    vi.spyOn(fake, "sendTransaction").mockImplementation(async (tx) => {
+      const sent = await send(tx);
+      openbao.status = 503;
+      return sent;
+    });
+    const pay = payload(fake.ledger + 30, undefined, "8");
+    try {
+      const { response } = await settle(pay, requirements);
+      expect(fake.sent).toHaveLength(2);
+      const refused = fake.sent[1]!.hash().toString("hex");
+      expect(response).toMatchObject({
+        success: false,
+        errorReason: SETTLE_REASONS.transactionSigning,
+        transaction: refused,
+      });
+      expect(response.extra).toEqual({ retryable: false, expirationLedger: expect.any(Number) });
+      expect(await store.get(keyOf(pay, "stellar:testnet")!)).toMatchObject({
+        state: "rejected",
+        hashes: [refused],
+      });
+      openbao.status = undefined;
+      const repeat = await settle(pay, requirements);
+      expect(repeat.response).toMatchObject({
+        errorReason: SETTLE_REASONS.transactionSigning,
+        transaction: refused,
+      });
+      expect(fake.sent).toHaveLength(2);
+    } finally {
+      openbao.status = undefined;
+    }
+  });
+
   it("rechecks the auth expiry at the pool's floor of 2 ledgers, not MIN_VALIDITY_LEDGERS", async () => {
     // `/verify` would refuse 12 ledgers against a minimum of 20.
     const { settle, fake } = setup({ MIN_VALIDITY_LEDGERS: "20" });
