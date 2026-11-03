@@ -36,10 +36,11 @@ Figures are from `origin/develop` on 2026-11-03. Work each item from what is tru
 ## Implementation
 
 1. **`[structure only]`, ~50 min. Packages with no importer.** Delete `packages/sdk` (8 lines of
-   empty exports) and `examples/mcp-metered`, the two `package.json` edges from `bazaar` and
-   `signer-pool` to `config`, and `isAttemptForward` in `adapters/rules.ts`, which never had a
-   caller (`git log -S`). Reword `README.md`, ADR 0001 and task 0092, which name `packages/sdk`.
-   0102 keeps the RFP's SDK visible. The edge from the facilitator to `mcp` stays with 0063.
+   empty exports), the two `package.json` edges from `bazaar` and `signer-pool` to `config`, and
+   `isAttemptForward` in `adapters/rules.ts`, which no commit on `develop` ever called. Reword
+   `README.md`, ADR 0001 and task 0092, which name `packages/sdk`. 0102 keeps the RFP's SDK visible.
+   `examples/mcp-metered` stays, without its dependency on the SDK. The edge from the facilitator to
+   `mcp` stays with 0063.
 2. **`[refactor]`, 2–3 h, after #110. Submitter statistics.** `stats()` has 0 production readers,
    also in 0027's PRs: `main.ts` reads `onEvent`. Remove `SubmitterStats`, `stats()`,
    `refusalReason` and `RefusalReason`, about 128 lines; `stats.ts`'s event types stay. 33
@@ -64,6 +65,7 @@ Figures are from `origin/develop` on 2026-11-03. Work each item from what is tru
 | 2 | Drop `config` from `bazaar` and `signer-pool`: neither imports it | task item | matches | both `package.json`, `pnpm-lock.yaml` | CI steps, assertions unchanged |
 | 3 | Delete `isAttemptForward`: only the memory store's branch called it, 0064 dropped that store, and `attemptRankSql` holds the order | task item | matches | `adapters/rules.ts` | CI steps, assertions unchanged |
 | 4 | ADR 0001 says `packages/sdk` is created when its first helper exists | task item | matches | `docs/adr/0001-repo-layout.md` | none, wording |
+| 5 | Keep `examples/mcp-metered`, without its dependency on `packages/sdk`: it records the idea of a second example, and 0041 hasn't chosen one | owner | changes it | `examples/mcp-metered/package.json` | CI steps, assertions unchanged |
 
 ## PR split
 
@@ -72,9 +74,6 @@ touched, or start from what is true then.
 
 ## Not yet decided
 
-- `examples/mcp-metered`: its description is the only record of a second-example idea, "metered paid
-  MCP tool used by an agent", and 0041 hasn't chosen one. Delete it and copy the idea to 0041, delete
-  it alone, or keep it without its dependency on `packages/sdk`.
 - Merging `packages/mcp` into `apps/mcp-local` (1–1.5 h, `[structure only]`): one importer, and e2e
   reaches across by relative path, but the interface is already 3 names. Layout is the owner's call.
 
