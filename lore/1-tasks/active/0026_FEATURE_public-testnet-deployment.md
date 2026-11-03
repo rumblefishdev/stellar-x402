@@ -196,8 +196,8 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 - From 0039, provisioning (ADR 0011): an Ansible playbook in `deploy/ansible/`, run by an admin
   from a reviewed commit, sets up x402's parts of the server: the `x402` user,
   `/srv/x402/production/`, the units and timers, the compose files, `deploy.sh`, the deploy
-  user's `sudo` rule and forced command, `cloudflared`, and the pgBackRest and CloudWatch agent
-  config. It never touches the server's base setup (firewall, `daemon.json`, users), and CI
+  user's `sudo` rule and forced command, `cloudflared`, and the pgBackRest config; 0027 adds the
+  CloudWatch agent and its signing helper. It never touches the server's base setup (firewall, `daemon.json`, users), and CI
   never runs it.
 - From 0039, the deploy:
   - GitHub Actions connects over SSH to the server's existing SSH port, with the server's host
@@ -242,11 +242,11 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     environment secret.
 - From 0039, keys and secrets:
   - the facilitator signs through OpenBao Transit on the server (ADR 0013, 0036 a prerequisite);
-  - the server gets short-lived AWS credentials through IAM Roles Anywhere, for a role that only
-    writes logs and metrics, held only by the CloudWatch agent. The trust anchor is the
-    ClickHouse project's existing client-certificate CA; the server certificate is issued with
-    that project's script, valid for a year, its CN accepted by the role's trust policy and kept
-    off the ClickHouse site's allowlist. Ask that project to tell us when it rotates its CA;
+  - the server's short-lived AWS credentials through IAM Roles Anywhere, for a role that only
+    writes logs and metrics and is held only by the CloudWatch agent, come with 0027: the role,
+    its profile, the agent, the certificate request and its renewal steps (0027 decision 6,
+    agreed by Stan on 2026-11-03). The first deploy goes out without CloudWatch logs until 0027
+    lands;
   - the database password and any keyed RPC URL are encrypted systemd credentials
     (`systemd-creds`), decrypted to `/run/x402/production/` and mounted as Compose `file:` secrets,
     never `environment:`. The files are named per network, so mainnet adds its own and renames
@@ -290,8 +290,8 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   (automatic on a failed deploy; by hand, redeploy an earlier digest), long migrations outside
   the deploy, reboots, fetching the tunnel token from Cloudflare (dashboard, API or
   `terraform output`) into its systemd credential, rotating that token and checking the
-  tunnel's connector count, renewing the Roles Anywhere certificate, key
-  rotation as an on-chain signer change, and restoring the service on another machine.
+  tunnel's connector count, key rotation as an on-chain signer change (0027 adds renewing the
+  Roles Anywhere certificate), and restoring the service on another machine.
 - From 0013 ([ADR 0012](../../../docs/adr/0012-facilitator-state-store.md)), the database, on the
   server (ADR 0011):
   - the `postgres-testnet` container above, its credentials a Compose secret file;
@@ -375,9 +375,10 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   the admin listener. A second, read-only sub-account on the same directory, its SSH key in the
   backup secret, is what a restore uses. Decide the Borg mode (repokey or keyfile); in
   keyfile mode `borg key export` goes into the backup secret.
-- **Fee float** (ADR 0013): refill to 100 XLM, alarm at 25 XLM, no upper limit, the same numbers on
-  testnet for now. Set `checkFacilitatorBalance`'s `minSpendableStroops` to 25 XLM (its default is
-  100 XLM).
+- **Fee float** (ADR 0013): refill to 100 XLM, alarms at 25 and 10 XLM, no upper limit, the same
+  numbers on testnet for now. The alarms come from 0027's off-server check, which publishes the
+  spendable balance, so `checkFacilitatorBalance`'s `minSpendableStroops` isn't set (0027
+  decision 7).
 - **Testnet on the OpenBao key:** nothing has run on another key, so nothing moves. An ordinary
   wallet funds the OpenBao key's account and creates its channels with `create-channels.ts`
   (0036 decision 15, #100); the facilitator starts in `openbao` signer mode with that account as
@@ -394,8 +395,10 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     funds a fresh account and merges it into the fee account); mainnet by a withdrawal from the
     company's exchange account to the fee account (no memo). **Who makes it, and a backup person:
     TBD before mainnet;**
-  - **weekly review** after the mainnet deploy (okarcz): the real fee spend, the next refill
-    amount, and whether ADR 0013's custody still fits the float;
+  - **weekly review** (okarcz): from the first deploy, which alarms are in ALARM; after the
+    mainnet deploy also the real fee spend (0027's `fee_charged_stroops` over 7 days, against the
+    balance's change), the next refill amount, and whether ADR 0013's custody still fits the
+    float;
   - a leaked token or secret ID: destroy the secret ID, revoke its tokens, issue a new one, and
     restart the facilitator, which reads it at start;
   - a restore of OpenBao from a snapshot: restart the facilitator, since a token newer than the
