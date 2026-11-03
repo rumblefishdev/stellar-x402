@@ -10,7 +10,11 @@ import {
   nativeToScVal,
   xdr,
 } from "@stellar/stellar-sdk";
-import type { SorobanRpc } from "@stellar-x402/signer-pool";
+import {
+  NOT_FOUND_MARGIN_LEDGERS,
+  NOT_FOUND_MARGIN_SECONDS,
+  type SorobanRpc,
+} from "@stellar-x402/signer-pool";
 import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/core/types";
 import { describe, expect, it, vi } from "vitest";
 import { parseConfig, type Config } from "../src/config.js";
@@ -195,6 +199,13 @@ function setup(
 const fixedBid: Config = { ...config, fees: { ...config.fees, inclusionFeeStroops: 100n } };
 
 const down = { isValid: false, invalidReason: "unexpected_verify_error" } as const;
+
+describe("UPSTREAM_TIMEOUT_MS", () => {
+  it("stays under the NOT_FOUND margins, so no answer can span them (0088)", () => {
+    expect(UPSTREAM_TIMEOUT_MS).toBeLessThan(NOT_FOUND_MARGIN_LEDGERS * 5_000);
+    expect(UPSTREAM_TIMEOUT_MS).toBeLessThan(NOT_FOUND_MARGIN_SECONDS * 1_000);
+  });
+});
 
 describe("buildVerifier (the /verify wiring in main)", () => {
   it("gives each RPC URL's scheme the facilitator key, the ceiling and twice the shared bid", async () => {

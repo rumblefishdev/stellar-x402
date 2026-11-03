@@ -1,5 +1,5 @@
 import { Keypair, StrKey, nativeToScVal, xdr, type rpc } from "@stellar/stellar-sdk";
-import type { SorobanRpc } from "@stellar-x402/signer-pool";
+import { NOT_FOUND_MARGIN_LEDGERS, type SorobanRpc } from "@stellar-x402/signer-pool";
 import { FakeRpc } from "@stellar-x402/signer-pool/testing";
 import type { PaymentRequirements } from "@x402/core/types";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -163,8 +163,8 @@ describe("a deploy with a 5-minute envelope (0073)", () => {
       const maxLedger = attempt!.maxLedger!;
       network.thaw();
       if (outcome === "success") fake.stalled = false;
-      // The ledger after the bound closes (or the one it lands in).
-      while (fake.ledger <= maxLedger) await fake.getLatestLedger();
+      // The ledgers up to the NOT_FOUND margin past the bound close (or the one it lands in).
+      while (fake.ledger < maxLedger + NOT_FOUND_MARGIN_LEDGERS) await fake.getLatestLedger();
 
       const second = await composed(fake, false);
       try {

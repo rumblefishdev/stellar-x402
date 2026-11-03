@@ -531,7 +531,8 @@ Then step 4 in this shell, without its `read`, and step 5 (`unset self` too).
 ## Not here yet
 
 - OpenBao's snapshots and restore drill, key rotation as an on-chain signer change, fee float
-  top-ups (0036, 0047).
+  top-ups (0036, 0047). After a restore on the same server, restart the facilitator: a token newer
+  than the snapshot answers 403 until its hour ends, and a 403 doesn't make the signer log in again.
 - The key theft transaction (ADR 0013): no tool signs it and it has never run (0099).
 - A leaked token or secret ID, OpenBao upgrades and what `/settle` does meanwhile, and the weekly
   review after the mainnet deploy (0026, ADR 0013).

@@ -248,6 +248,18 @@ const SPARE_LEDGERS = 1;
 /** A ledger's close time, rounded up from the 5.0–5.8 s measured on testnet and mainnet (0043). */
 const LEDGER_SECONDS_ESTIMATE = 6;
 
+/**
+ * How many ledgers past `maxLedger` a `NOT_FOUND` must be read to decide. stellar-rpc reads the
+ * transaction and then the ledger range with no snapshot, so an answer can name ledgers that closed
+ * after its read of the transaction. Three ledgers take about 15 s and an answer at most 10 s:
+ * `FallbackRpc`'s timeout, the facilitator's `UPSTREAM_TIMEOUT_MS`. Keep this above that timeout. A
+ * node catching up closes ledgers faster, so there the race stays (0088).
+ */
+export const NOT_FOUND_MARGIN_LEDGERS = 3;
+
+/** The same margin past `maxTime`, at 5 s a ledger: the stall it needs is what the timeout rules out. */
+export const NOT_FOUND_MARGIN_SECONDS = NOT_FOUND_MARGIN_LEDGERS * 5;
+
 /** A signed envelope, ready to send. */
 interface Prepared {
   bump: Transaction | FeeBumpTransaction;
@@ -806,9 +818,9 @@ export class SettlementSubmitter {
       }
       // A ledger bound alone, its estimated time (6 s a ledger) gone with no ledger seen past it:
       // the RPC isn't answering, or ledgers run slower than the estimate. Stop resending either
-      // way, so a down RPC can't keep the loop going; an envelope the network never took then ends
-      // `expired` at its ledger bound, with ledgers left (0073 decision 11). Confirm by hash;
-      // `submit()` answers `pending` at `dueAt`.
+      // way, so a down RPC can't keep the loop going, with ledgers left (0073 decision 11); an
+      // envelope the network never took then ends `expired` past its bound's margin (0088).
+      // Confirm by hash; `submit()` answers `pending` at `dueAt`.
       if (maxTime === undefined && Math.floor(this.now() / 1000) > boundAt) break;
     }
     if (accepted) callSafely(opts.onSent, hash);
@@ -824,9 +836,11 @@ export class SettlementSubmitter {
     // The confirmation keeps running, and the channel is let go only when it is final.
     const confirmation = this.confirm(channel, prepared, uncertain);
     if (await this.settlesBy(confirmation, dueAt)) return confirmation;
-    hold.late = confirmation.then((result) =>
-      this.emit({ type: "resolved", result: { ...result, attempts: [...hold.attempts] } }),
-    );
+    hold.late = confirmation.then((result) => {
+      // A `pending` from `confirm()` ended nothing: a sweep finishes that record (0088).
+      if (result.status === "pending") return;
+      this.emit({ type: "resolved", result: { ...result, attempts: [...hold.attempts] } });
+    });
     return { ...base, status: "pending", hash };
   }
 
@@ -901,7 +915,7 @@ export class SettlementSubmitter {
   /** One status check per new ledger until the transaction is final or provably never will be. */
   private async confirm(
     channel: Channel,
-    { hash, txSequence, maxTime, maxLedger }: Prepared,
+    { hash, txSequence, maxTime, maxLedger, simLedger }: Prepared,
     uncertain: boolean,
   ): Promise<Outcome> {
     const base = { channel: channel.address };
@@ -915,16 +929,16 @@ export class SettlementSubmitter {
         continue; // The transaction may still land; keep the sequence number and retry.
       }
       if (res.status === rpc.Api.GetTransactionStatus.NOT_FOUND) {
-        if (
-          (maxTime !== undefined && res.latestLedgerCloseTime > maxTime) ||
-          this.pastLedgerBound(maxLedger, res.latestLedger)
-        ) {
-          // It can no longer be applied. After an uncertain send the cached sequence may be
-          // stale, and re-reading it is now safe.
-          if (uncertain) channel.sequence = undefined;
-          return { ...base, status: "expired", hash };
+        if (!cannotLand(res, { maxTime, maxLedger })) continue;
+        // It can no longer be applied, but a node whose history starts after the envelope was
+        // built can't tell whether it did. Reconciliation finishes the record (0088).
+        if (res.oldestLedger > simLedger) {
+          channel.sequence = undefined;
+          return { ...base, status: "pending", hash };
         }
-        continue;
+        // After an uncertain send the cached sequence may be stale, and re-reading it is now safe.
+        if (uncertain) channel.sequence = undefined;
+        return { ...base, status: "expired", hash };
       }
       channel.sequence = txSequence;
       const feeCharged = res.resultXdr.feeCharged().toBigInt();
@@ -957,6 +971,22 @@ export class SettlementSubmitter {
     }
     return TransactionBuilder.fromXDR(signedTxXdr, this.passphrase);
   }
+}
+
+/**
+ * Whether a `NOT_FOUND` answer is past the last ledger the transaction could land in, by a margin
+ * past either bound: {@link NOT_FOUND_MARGIN_LEDGERS} past `maxLedger`, or
+ * {@link NOT_FOUND_MARGIN_SECONDS} of close time past `maxTime`, since a read closer to it may miss
+ * one that landed in the bound's last ledger. Says nothing of a node without the history.
+ */
+export function cannotLand(
+  res: Pick<rpc.Api.GetMissingTransactionResponse, "latestLedger" | "latestLedgerCloseTime">,
+  { maxTime, maxLedger }: SignedBounds,
+): boolean {
+  return (
+    (maxTime !== undefined && res.latestLedgerCloseTime > maxTime + NOT_FOUND_MARGIN_SECONDS) ||
+    (maxLedger !== undefined && res.latestLedger >= maxLedger + NOT_FOUND_MARGIN_LEDGERS)
+  );
 }
 
 /** Calls a caller's hook; a hook that throws must not break settlement. */
