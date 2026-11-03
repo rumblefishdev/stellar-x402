@@ -317,7 +317,9 @@ cd /srv/x402/openbao && sudo docker compose exec openbao bao status
 
 It unseals itself at every start with the seal key `x402-openbao` decrypts. Its storage (Raft) and
 audit log are the volumes `x402-openbao-data` and `x402-openbao-audit`, made by the playbook. A
-request OpenBao can't write to the audit log fails, so a full disk stops `/settle`.
+request OpenBao can't write to the audit log fails, so a full disk stops `/settle`. The playbook's
+`/etc/logrotate.d/x402-openbao` rotates that log daily and keeps 30 days, compressed: `logrotate`
+renames the file, and SIGHUP makes OpenBao open a new one. About 5 MB a day at 1,000 settlements.
 
 **Setting it up,** once, after the playbook. The seal key and init's answer travel between the
 admin's machine and the server over SSH and never reach a disk.
@@ -457,7 +459,6 @@ with no token. When done, step 5 again.
 
 - OpenBao's snapshots and restore drill, key rotation as an on-chain signer change, fee float
   top-ups (0036, 0047).
-- Rotating OpenBao's audit log: nothing rotates it yet, and a full volume stops `/settle` (0026).
 - The key theft transaction (ADR 0013): no tool signs it and it has never run (0099).
 - A leaked token or secret ID, OpenBao upgrades and what `/settle` does meanwhile, whether the
   board has a TPM, and the weekly review after the mainnet deploy (0026, ADR 0013).
