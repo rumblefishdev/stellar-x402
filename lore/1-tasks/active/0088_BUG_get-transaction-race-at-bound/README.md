@@ -48,13 +48,16 @@ for a transaction that landed in ledger E. Read at the bound, that answer ends t
 
 - `cannotLand` in `packages/signer-pool/src/submitter.ts`, the one rule for `confirm()` and
   `pastBound` in `reconcile.ts`: on `NOT_FOUND`, `latestLedger >= maxLedger + 3`
-  (`NOT_FOUND_MARGIN_LEDGERS`), also for a bound read from the auth entry. The comment at `fallback-rpc.ts:73` said an endpoint can't report too early;
-  true of lag, not of the race.
+  (`NOT_FOUND_MARGIN_LEDGERS`), also for a bound read from the auth entry, and a close time past
+  `maxTime + 15` (`NOT_FOUND_MARGIN_SECONDS`). The comment at `fallback-rpc.ts:73` said an endpoint
+  can't report too early; true of lag, not of the race.
 - `confirm()` answers `pending` when `oldestLedger` is past the ledger the envelope was built on,
   and drops the channel's sequence. A late `pending` emits no `resolved`: nothing ended.
+  `types.ts` says so: `pending` minus `resolved` no longer counts what is still being confirmed.
   `records.ts` logs `settlement_landed_after_expired` with the hash, the ledger and the state.
 - Tests: `settlement-guards.test.ts` and `reconcile.test.ts` take `NOT_FOUND` from E to E+2, then
-  `SUCCESS`. Both failed before the change. The fallback bound stays open to `AUTH_EXPIRY + 2`.
+  `SUCCESS`, and the pool also up to 15 s of close time past `maxTime`. All failed before the
+  change. The fallback bound stays open to `AUTH_EXPIRY + 2`.
 - Research, with sources: [R-not-found-at-bound](notes/R-not-found-at-bound.md).
 
 **Modified tests:** the fixtures past the bound in `reconcile.test.ts`, one in `settle.test.ts` and
@@ -74,8 +77,11 @@ clock's polls.
 
 2. **Only on `NOT_FOUND`**: the guards before a send keep `>=` (`pastLedgerBound`), which is right
    for whether a new envelope can still land.
-3. **`maxTime` stays as it is**: a close time past it is already a ledger the transaction can't
-   have landed in.
+3. **`maxTime` gets the margin too** (PR review): core's rule needs none, but the read does. An
+   answer can miss the last ledger that closed by `maxTime`, as it can miss `maxLedger`. So
+   `NOT_FOUND` decides only at a close time `NOT_FOUND_MARGIN_SECONDS` (15 s) past `maxTime`. The
+   facilitator always passes `maxLedger` (`settle.ts:628`), so this covers the pool's default path
+   and hashes stored before 0073.
 4. **Three ledgers, not one** (PR review): the race needs one answer to span the margin. One ledger
    is about 5 s, a stall a live node can produce. Three are about 15 s, and `FallbackRpc` drops any
    answer after 10 s. `NOT_FOUND_MARGIN_LEDGERS` must stay above that timeout, and a test ties it to
