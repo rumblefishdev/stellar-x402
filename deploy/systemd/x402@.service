@@ -13,7 +13,7 @@ StartLimitBurst=5
 
 [Service]
 WorkingDirectory=/srv/x402/%i
-ExecStartPre=/usr/local/libexec/x402/x402-creds %i database-url.testnet:1000 rpc-urls.testnet:1000
+ExecStartPre=/usr/local/libexec/x402/x402-creds %i database-url.testnet:1000 rpc-urls.testnet:1000 approle-role-id.testnet:1000 approle-secret-id.testnet:1000
 # The last image that was ready, unless a deploy is starting this one.
 ExecStartPre=/bin/sh -c '[ -e /run/x402/%i/deploying ] || cp digest.good digest'
 # --exit-code-from: a plain `up` exits 0 whatever the container's code.

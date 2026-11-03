@@ -34,6 +34,7 @@ import {
   spendStoreContract,
 } from "./port-contracts.js";
 import { hardened, rpcStub } from "./rpc-stub.js";
+import { signerEnv } from "./fake-openbao.js";
 
 // `main()` checks its channel at startup, on the RPC it builds from `RPC_URLS`.
 const bootSecret = Keypair.random().secret();
@@ -537,7 +538,7 @@ describe("PostgreSQL stores", () => {
     await stores();
     const app = await main({
       DATABASE_URL: urlFor(schema),
-      FACILITATOR_SECRET: bootSecret,
+      ...signerEnv(Keypair.fromSecret(bootSecret).publicKey()),
       CLIENT_IP: "socket",
       CHANNELS: bootChannel,
       RPC_URLS: rpc.url,
@@ -637,7 +638,7 @@ describe("PostgreSQL stores", () => {
     await settlements.transition(key, "signed", { state: "success", updatedAt: now });
     const app = await main({
       DATABASE_URL: urlFor(schema),
-      FACILITATOR_SECRET: bootSecret,
+      ...signerEnv(Keypair.fromSecret(bootSecret).publicKey()),
       CLIENT_IP: "socket",
       CHANNELS: bootChannel,
       RPC_URLS: rpc.url,
@@ -667,7 +668,7 @@ describe("PostgreSQL stores", () => {
     await stores();
     const env = {
       DATABASE_URL: urlFor(schema),
-      FACILITATOR_SECRET: bootSecret,
+      ...signerEnv(Keypair.fromSecret(bootSecret).publicKey()),
       CLIENT_IP: "socket",
       CHANNELS: bootChannel,
       RPC_URLS: rpc.url,
@@ -705,7 +706,7 @@ describe("PostgreSQL stores", () => {
   it("closes once when two signals call close()", async () => {
     const app = await main({
       DATABASE_URL: urlFor(schema),
-      FACILITATOR_SECRET: bootSecret,
+      ...signerEnv(Keypair.fromSecret(bootSecret).publicKey()),
       CLIENT_IP: "socket",
       CHANNELS: bootChannel,
       RPC_URLS: rpc.url,

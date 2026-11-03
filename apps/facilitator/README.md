@@ -69,6 +69,18 @@ Every request counts, a malformed or oversized one too. `/supported` has no limi
   logged. A client over its budget is answered from the process until its window ends, without a
   store write.
 
+## The signer
+
+- The facilitator key signs only in OpenBao Transit, over a unix socket (ADR 0013). No secret seed
+  reaches the service, and a leftover `FACILITATOR_SECRET` is refused at startup.
+- `FACILITATOR_ADDRESS`: the key's own account, the fee account and every channel's signer.
+  `OPENBAO_SOCKET`, `OPENBAO_KEY`, `OPENBAO_KEY_VERSION`: the socket, the Transit key and its pinned
+  version. `OPENBAO_ROLE_ID`, `OPENBAO_SECRET_ID`: the AppRole login; a deploy passes both as files
+  (`_FILE`). All required.
+- Tests and local runs use a fake OpenBao on a unix socket, `test/fake-openbao.ts`.
+  `LOCAL_KEY_SECRET=S… pnpm dev:openbao` starts it for `pnpm dev` and prints the settings to export;
+  the key must stay the same, since channels name it as their signer.
+
 ## The store
 
 - Every store is PostgreSQL, tests included. A leftover `STORE` is refused at startup.
@@ -134,9 +146,10 @@ default).
 
 - `GET /health` is liveness: 200 while the server is up, whatever the lease or the store. The
   container healthcheck calls it (ADR 0011).
-- Its body is `{ "ready": …, "listed": … }`. `ready`: the process holds the lease and isn't
-  shutting down, so `/settle` serves. `listed`: a sweep has listed the open settlement records
-  (0019). A deploy waits for both and rolls back without them.
+- Its body is `{ "ready": …, "signer": …, "listed": … }`. `ready`: the process holds the lease and
+  isn't shutting down, so `/settle` serves. `listed`: a sweep has listed the open settlement records
+  (0019). A deploy waits for both and rolls back without them. `signer`: `unchecked`, `ok` or
+  `failed`, from the check after start and each signature since (0036); only a deploy waits for it.
 - The process starts only on a schema with every migration it knows applied, and names the
   missing ones otherwise; a schema ahead of the code passes, so a rollback starts.
 
@@ -231,6 +244,8 @@ unlocks one response.
 | `settle_exact_stellar_no_channel_in_time`            | —                       | every channel was busy until the deadline                                                       | repeat the same payment while `extra.retryable` (see below)                               |
 | `settle_exact_stellar_no_channels`                   | —                       | every channel is out of the pool                                                                | repeat the same payment while `extra.retryable` (see below)                               |
 | `settle_exact_stellar_lease_lost`                    | an earlier hash, if any | this process lost the channel lease before it sent; another process holds it, or none does      | repeat the same payment while `extra.retryable` (see below)                               |
+| `settle_exact_stellar_transaction_signing_failed`    | an earlier hash, if any | the facilitator's key couldn't sign the transaction (OpenBao down, sealed or refusing)          | repeat the same payment while `extra.retryable` (see below)                               |
+| `settle_exact_stellar_fee_bump_signing_failed`       | an earlier hash, if any | the facilitator's key couldn't sign the fee bump                                                | repeat the same payment while `extra.retryable` (see below)                               |
 | `settle_exact_stellar_fee_exceeds_maximum`           | an earlier hash, if any | the network fee rose above the facilitator's ceiling                                            | after `extra.expirationLedger` (see below), sign a new payment                            |
 | `settle_exact_stellar_signature_expiration_too_soon` | an earlier hash, if any | the auth expires before the pool could land it                                                  | sign a new payment with a longer `maxTimeoutSeconds`, as below                            |
 | `settle_exact_stellar_simulation_failed`             | an earlier hash, if any | the settlement's simulation failed, e.g. the payer's balance                                    | check the payer, then sign a new payment as below                                         |
@@ -274,8 +289,9 @@ needs a new payment (a new nonce), but only once this one can't land ("Ended", b
   budget gets `…_timeout` instead of the spend reason.
 
 **Nothing sent** (task 0073). `…_timeout`, `…_interrupted`, `…_shutting_down`,
-`…_rpc_unavailable`, `…_no_channel_in_time`, `…_no_channels` and `…_lease_lost` (task 0071) with
-no `transaction` mean nothing was sent, but the payer's signed auth entry can still land until its expiration ledger, by
+`…_rpc_unavailable`, `…_no_channel_in_time`, `…_no_channels`, `…_lease_lost` (task 0071) and
+the two `…_signing_failed` (task 0036) with no `transaction` mean nothing was sent, but the
+payer's signed auth entry can still land until its expiration ledger, by
 whoever holds the payment. Signing a new payment then could charge the payer twice, so these
 answers carry `extra`:
 

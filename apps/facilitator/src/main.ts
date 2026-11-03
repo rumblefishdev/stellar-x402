@@ -1,11 +1,10 @@
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
-import { Keypair, rpc as stellarRpc } from "@stellar/stellar-sdk";
+import { rpc as stellarRpc } from "@stellar/stellar-sdk";
 import {
   FallbackRpc,
   RpcTimeoutError,
   SettlementSubmitter,
-  keypairSigner,
   type SorobanRpc,
   type TransactionSigner,
 } from "@stellar-x402/signer-pool";
@@ -13,6 +12,7 @@ import { getNetworkPassphrase, type FacilitatorStellarSigner } from "@x402/stell
 import { ExactStellarScheme } from "@x402/stellar/exact/facilitator";
 import type pg from "pg";
 import { Agent, setGlobalDispatcher } from "undici";
+import { openBaoSigner, type OpenBaoSigner } from "./adapters/openbao-signer.js";
 import { MIGRATIONS, migrate, pendingMigrations } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
 import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
@@ -313,11 +313,6 @@ export function buildUpstream(
   };
 }
 
-/** The facilitator key's address. */
-export function facilitatorAddress(config: Config): string {
-  return Keypair.fromSecret(config.signer.secret).publicKey();
-}
-
 /**
  * Upstream's signer for `ExactStellarScheme`, which `/verify` uses only for the facilitator's
  * address (`@x402/stellar` 2.28.0 `exact/facilitator/index.mjs:69-104`); `/settle` signs through
@@ -348,7 +343,7 @@ export function buildChecks(
 ): VerifierDeps {
   // Upstream knows only the facilitator key, and only in plain form; the channels and the muxed
   // facilitator are `createChecker`'s check (AD-5).
-  const facilitator = verifyOnlySigner(facilitatorAddress(config));
+  const facilitator = verifyOnlySigner(config.signer.address);
   return {
     network: config.network,
     ...buildUpstream(config, fees, logger, facilitator, rpc, seams),
@@ -496,7 +491,13 @@ export function compose(
     seams?: UpstreamSeams;
     sleep?: (ms: number) => Promise<void>;
   },
-): { deps: AppDeps; cataloger: Cataloger; metrics: Metrics; rpc: FallbackRpc } {
+): {
+  deps: AppDeps;
+  cataloger: Cataloger;
+  metrics: Metrics;
+  rpc: FallbackRpc;
+  signer: OpenBaoSigner;
+} {
   const { logger } = opts;
   const { stores } = opts;
   // Cataloging plugs into `/settle` through `extensionResponses` and `onSuccess` (AD-8).
@@ -514,6 +515,7 @@ export function compose(
   // they share one ceiling and one bid (AD-10).
   const fees = feeSettings(config.fees, rpc);
   const checks = buildChecks(config, rpc, fees, logger, opts.seams);
+  const signer = openBaoSigner({ ...config.signer, network: config.network, logger, metrics });
   // One lease per network's channel set (AD-17): only its holder settles.
   const lease = createLeaseKeeper({
     store: stores.settlements,
@@ -535,7 +537,7 @@ export function compose(
     },
     logger,
     metrics,
-    signer: keypairSigner(Keypair.fromSecret(config.signer.secret)),
+    signer,
     ...(opts.sleep && { sleep: opts.sleep }),
     lease: lease.current,
   });
@@ -552,10 +554,12 @@ export function compose(
       reconciliation,
       lease,
       drain,
+      signerState: signer.state,
     },
     cataloger,
     metrics,
     rpc,
+    signer,
   };
 }
 
@@ -605,11 +609,11 @@ export async function main(
     // missing. Checked first, so a wrong URL is named instead of every channel.
     await checkRpcNetworks(config.rpcUrls, getNetworkPassphrase(config.network));
     const stores = postgresStores(pools.main, pools);
-    const { deps, cataloger, metrics, rpc } = compose(config, { logger, stores });
+    const { deps, cataloger, metrics, rpc, signer } = compose(config, { logger, stores });
     // AD-12: the service starts only when no other key can move a channel. An RPC that doesn't
     // answer fails the check with its error. `compose()` only wires parts, so nothing has called
     // the RPC yet.
-    await checkChannels(rpc, config.channels, facilitatorAddress(config));
+    await checkChannels(rpc, config.channels, config.signer.address);
     // For the life of the process: an upstream call cut off by the deadline keeps running after
     // `close()`, and its error would reach stderr with the RPC URL in it.
     const restoreConsole = captureConsoleError(logger, config.rpcUrls);
@@ -617,6 +621,9 @@ export async function main(
       restoreConsole();
       throw error;
     });
+    // Not awaited: the service starts and `/verify` answers without OpenBao; the outcome goes to
+    // the log and `/health`'s `signer`, and a failed check tries again (0036 decision 4).
+    void signer.check();
     // One window today; with per-budget windows (0024), the longest of them.
     const pruner = createPruner({
       spend: stores.spend,
@@ -630,6 +637,7 @@ export async function main(
     // Catalog writes and a prune already under way finish before the process exits, and before
     // the pools end, even if closing the server fails; the pools end even if draining fails.
     const closeOnce = async () => {
+      signer.close();
       try {
         await started.close();
       } finally {

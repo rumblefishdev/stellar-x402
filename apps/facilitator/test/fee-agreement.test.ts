@@ -29,6 +29,7 @@ import { buildChecks, buildRpc, buildVerifier, settleCheck } from "../src/main.j
 import { feeSettings } from "../src/settlement/fees.js";
 import { PAYTO_TRUSTLINE_REASON } from "../src/settlement/trustline.js";
 import { createVerifier, type VerifyTrace } from "../src/settlement/verify.js";
+import { signerEnv } from "./fake-openbao.js";
 import realTrustlineMissing from "./fixtures/trustline-missing.json" with { type: "json" };
 
 const MAX_FEE = 250_000;
@@ -136,7 +137,7 @@ const poolRpc = {
 
 describe("the fee ceiling at /verify and in the pool (AD-10)", () => {
   const config = parseConfig({
-    FACILITATOR_SECRET: facilitator.secret(),
+    ...signerEnv(facilitator.publicKey()),
     DATABASE_URL: "postgres://db.internal/x402",
     CLIENT_IP: "socket",
     CHANNELS: channel,
@@ -248,7 +249,7 @@ describe("real upstream refusing a payment with no trustline (0078)", () => {
       .build();
     const usdcRequirements = { ...requirements, asset: usdc, payTo: account };
     const config = parseConfig({
-      FACILITATOR_SECRET: facilitator.secret(),
+      ...signerEnv(facilitator.publicKey()),
       DATABASE_URL: "postgres://db.internal/x402",
       CLIENT_IP: "socket",
       CHANNELS: channel,
@@ -285,7 +286,7 @@ describe("real upstream refusing a payment with no trustline (0078)", () => {
 describe("real upstream with a down first RPC URL (AD-3)", () => {
   it("answers from the second URL, and leaves the shared client on the first (decision 22)", async () => {
     const config = parseConfig({
-      FACILITATOR_SECRET: facilitator.secret(),
+      ...signerEnv(facilitator.publicKey()),
       DATABASE_URL: "postgres://db.internal/x402",
       CLIENT_IP: "socket",
       CHANNELS: channel,
@@ -383,7 +384,7 @@ describe("a fee refusal for a payment that restores archived state (task 0066)",
   /** The checks `main()` builds for `/verify` and `/settle`, simulating `fee` stroops. */
   function checksAt(fee: number) {
     const config = parseConfig({
-      FACILITATOR_SECRET: facilitator.secret(),
+      ...signerEnv(facilitator.publicKey()),
       DATABASE_URL: "postgres://db.internal/x402",
       CLIENT_IP: "socket",
       CHANNELS: channel,

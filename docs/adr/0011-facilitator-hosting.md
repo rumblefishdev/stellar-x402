@@ -184,7 +184,7 @@ One request or one stop must never outlast the layer in front of it:
 | Node `keepAliveTimeout`               | 125 s              | above `cloudflared`'s idle keep-alive (90 s), or it sees 502s      |
 | Container healthcheck                 | 10 s               | liveness only                                                      |
 | `LEASE_TTL_MS`                        | 30 s               | after a crash, a new process waits at most this long               |
-| Wait for `ready` and `listed`         | 120 s              | past it, the deploy rolls back to the previous digest              |
+| Wait for `ready`, `listed`, `signer`  | 120 s              | past it, the deploy rolls back to the previous digest              |
 | Unit `TimeoutStopSec`                 | 200 s              | above `stop_grace_period`, so a reboot waits for the drain         |
 | Unit `TimeoutStartSec`                | 60 s               | covers `ExecStartPre` only: credentials and the digest, no pull    |
 | Postgres `stop_grace_period`          | 120 s              | a clean shutdown; the Compose default is 10 s                      |
@@ -428,8 +428,8 @@ One request or one stop must never outlast the layer in front of it:
     networks' sockets.
   - It is the only AWS credential on the server; ADR 0013 names it as the exception to "no AWS
     credentials".
-- **`FACILITATOR_SECRET` stays for local development and tests.** Deployed networks use the OpenBao
-  signer instead.
+- **The facilitator service signs only through OpenBao, wherever it runs.** Its tests and local
+  runs use a fake OpenBao on a unix socket, so they take the same path as a deployed network (0036).
 - **Other secrets are encrypted systemd credentials,** as in ADR 0013: per network a database
   password and `RPC_URLS`, which may carry an API key, and per environment the tunnel token.
   - The files are named per network from the first deploy, so mainnet adds files and renames

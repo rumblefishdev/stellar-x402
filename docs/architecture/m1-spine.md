@@ -212,8 +212,8 @@ graph TD
 - **Binds:** configuration, `TransactionSigner`, startup
 - **Prevents:** key sprawl, keys shared between networks, and channels another key can move.
 - **Rule:**
-  - **Key.** Each network has one facilitator key. It signs for the channels and pays fee bumps, and it reaches the pool only as a `TransactionSigner`, so the OpenBao Transit signer can replace it ([ADR 0013](../adr/0013-facilitator-key-custody.md), task 0036).
-  - **Config.** `FACILITATOR_SECRET`, or in `openbao` mode the Transit key, its version and the fee account's address (ADR 0013), plus `CHANNELS` (addresses, never secrets).
+  - **Key.** Each network has one facilitator key. It signs for the channels and pays fee bumps, and it reaches the pool only as a `TransactionSigner`, the OpenBao Transit signer ([ADR 0013](../adr/0013-facilitator-key-custody.md), task 0036).
+  - **Config.** The Transit key, its version and the fee account's address (ADR 0013), plus `CHANNELS` (addresses, never secrets).
   - **Startup check.** The service refuses to start unless every channel has its master key weight at 0 and the facilitator key as its only signer (`checkChannel`).
   - **Separation.** Testnet and mainnet never share a key or a channel. They share the facilitator process and OpenBao, but each network has its own key, Transit policy, OpenBao socket, channels, RPC endpoints and database ([ADR 0011](../adr/0011-facilitator-hosting.md), [ADR 0013](../adr/0013-facilitator-key-custody.md), task 0077).
 
@@ -260,7 +260,7 @@ graph TD
   - records stuck pending forever after a restart
 - **Rule:**
   - **One owner.** A single settlement module in `apps/facilitator` owns every write to `SettlementStore`. Handlers and event listeners call it; they never write to the store themselves.
-  - **States.** They only move forward: `claimed → signed → pending → success | failed | rejected | expired`. Each write is a compare-and-set, so a write that would move a record backwards is dropped. One written exception (task 0073): a record closed `rejected` with nothing sent (no hash, one of the seven "nothing sent" reasons) moves back to `claimed` when the identical payload returns while the payer's auth entry is valid. `reopen` does it by compare-and-set, counts it in `reopened`, and restarts the record's budget from the reopening call.
+  - **States.** They only move forward: `claimed → signed → pending → success | failed | rejected | expired`. Each write is a compare-and-set, so a write that would move a record backwards is dropped. One written exception (task 0073): a record closed `rejected` with nothing sent (no hash, one of the "nothing sent" reasons) moves back to `claimed` when the identical payload returns while the payer's auth entry is valid. `reopen` does it by compare-and-set, counts it in `reopened`, and restarts the record's budget from the reopening call.
   - **Hashes.** A record keeps every hash it was signed with, because a rebuild produces a new one. It can be found by any of them.
   - **Durable write.** The hash is stored durably before the first send. This requires `signer-pool` to await an async `onSigned` and to abort the send if it rejects; that change to the library is a T1 prerequisite.
   - **Attempts.** Each hash keeps its own state, `stored → sent | unknown → landed | dead`, and its time and ledger bounds. `stored` and `sent` are hints that can lag the network; only `landed` and `dead` are its answers.

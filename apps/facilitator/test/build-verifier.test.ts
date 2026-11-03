@@ -38,6 +38,7 @@ import {
   type UpstreamVerifier,
   type VerifyTrace,
 } from "../src/settlement/verify.js";
+import { signerEnv } from "./fake-openbao.js";
 
 const secret = Keypair.random().secret();
 const channel = Keypair.random().publicKey();
@@ -47,7 +48,7 @@ const payTo = Keypair.random().publicKey();
 const CURRENT = 1_000;
 
 const env = {
-  FACILITATOR_SECRET: secret,
+  ...signerEnv(Keypair.fromSecret(secret).publicKey()),
   DATABASE_URL: "postgres://db.internal/x402",
   CLIENT_IP: "socket",
   CHANNELS: channel,
