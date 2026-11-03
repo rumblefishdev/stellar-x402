@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Keypair } from "@stellar/stellar-sdk";
 
 /**
@@ -81,7 +82,7 @@ export function signerEnv(address: string, socketPath = "/nonexistent/openbao.so
     OPENBAO_SOCKET: socketPath,
     OPENBAO_KEY: "stellar-testnet",
     OPENBAO_KEY_VERSION: "1",
-    OPENBAO_ROLE_ID: "role",
-    OPENBAO_SECRET_ID: "secret-id",
+    OPENBAO_ROLE_ID_FILE: fileURLToPath(new URL("fixtures/approle-role-id", import.meta.url)),
+    OPENBAO_SECRET_ID_FILE: fileURLToPath(new URL("fixtures/approle-secret-id", import.meta.url)),
   };
 }

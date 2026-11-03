@@ -126,7 +126,7 @@ const envSchema = z
     OPENBAO_KEY: z.string(),
     /** Pinned, so a rotated Transit key can't sign in place of the one on chain. */
     OPENBAO_KEY_VERSION: int(1),
-    /** The AppRole login; never logged. A deploy passes both as files (`_FILE`). */
+    /** The AppRole login; never logged. Set only as files (`_FILE`). */
     OPENBAO_ROLE_ID: z.string(),
     OPENBAO_SECRET_ID: z.string(),
     /** Refused on the field: zod skips a refine on the object while a required setting is missing. */
@@ -378,9 +378,11 @@ export class ConfigError extends Error {
 
 /**
  * Settings a deploy passes as a file, `<NAME>_FILE`: a Compose `file:` secret, so the value never
- * sits in `environment:`, which `docker inspect` shows (ADR 0011). Local runs set them plainly.
+ * sits in `environment:`, which `docker inspect` shows (ADR 0011). Local runs set the first two
+ * plainly; the AppRole login is a file everywhere, so one way of passing it runs (ADR 0013).
  */
 const FILE_SETTINGS = ["DATABASE_URL", "RPC_URLS", "OPENBAO_ROLE_ID", "OPENBAO_SECRET_ID"] as const;
+const FILE_ONLY_SETTINGS: readonly string[] = ["OPENBAO_ROLE_ID", "OPENBAO_SECRET_ID"];
 
 /** `env` with each {@link FILE_SETTINGS} entry read from its `_FILE`, where one is set. */
 function readFileSettings(
@@ -389,6 +391,10 @@ function readFileSettings(
   const read = { ...env };
   const problems: string[] = [];
   for (const name of FILE_SETTINGS) {
+    if (FILE_ONLY_SETTINGS.includes(name) && env[name]?.trim()) {
+      problems.push(`${name} is read only from ${name}_FILE`);
+      continue;
+    }
     const path = env[`${name}_FILE`]?.trim();
     if (!path) continue;
     // Refused, so a leftover plain value can't look like the one in use.

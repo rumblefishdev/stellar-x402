@@ -75,8 +75,8 @@ Every request counts, a malformed or oversized one too. `/supported` has no limi
   reaches the service, and a leftover `FACILITATOR_SECRET` is refused at startup.
 - `FACILITATOR_ADDRESS`: the key's own account, the fee account and every channel's signer.
   `OPENBAO_SOCKET`, `OPENBAO_KEY`, `OPENBAO_KEY_VERSION`: the socket, the Transit key and its pinned
-  version. `OPENBAO_ROLE_ID`, `OPENBAO_SECRET_ID`: the AppRole login; a deploy passes both as files
-  (`_FILE`). All required.
+  version. `OPENBAO_ROLE_ID_FILE`, `OPENBAO_SECRET_ID_FILE`: files holding the AppRole login; the plain
+  variables are refused. All required.
 - Tests and local runs use a fake OpenBao on a unix socket, `test/fake-openbao.ts`.
   `LOCAL_KEY_SECRET=S… pnpm dev:openbao` starts it for `pnpm dev` and prints the settings to export;
   the key must stay the same, since channels name it as their signer.
