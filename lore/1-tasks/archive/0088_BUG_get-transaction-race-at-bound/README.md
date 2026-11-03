@@ -2,7 +2,7 @@
 id: "0088"
 title: "Don't take NOT_FOUND at the bound ledger itself as expired"
 type: BUG
-status: active
+status: completed
 milestone: 1
 related_adr: ["0006"]
 related_tasks: ["0073", "0019"]
@@ -17,6 +17,14 @@ history:
     status: active
     who: akot
     note: "Started."
+  - date: "2026-11-03"
+    status: completed
+    who: akot
+    note: >
+      Merged in #110. All three criteria met. NOT_FOUND decides three ledgers past maxLedger, or
+      15 s of close time past maxTime, and a node without the history answers pending. Signer pool
+      166 tests (5 new), facilitator 670 (18 new). Testnet run through a proxy faking
+      getTransaction. No follow-up tasks.
 ---
 
 # Don't take NOT_FOUND at the bound ledger itself as expired
@@ -65,6 +73,16 @@ the ledger loop in `drain-takeover.test.ts` read `latestLedger` just past the bo
 three ledgers past it. "reports expired
 once the ledger bound passes" now checks the last read's ledger: `fake.ledger` also moves with the
 clock's polls.
+
+## Issues Encountered
+
+- **OpenZeppelin in the research**: the brief listed OZ Relayer and its x402 plugin, and their code
+  was read, against ADR 0002 (AGPL). Review caught it; the two rows were amended out of the note
+  before merge. No decision drew on them.
+- **A margin of one ledger wasn't enough** (review): it narrowed the race, three close it on a live
+  node. `maxTime` had the same race (review), first ruled out by core's rule, which the read doesn't
+  follow.
+- **Flaky tests**: 0074's real-budget races in `settle.test.ts` failed CI runs, and passed on rerun.
 
 ## Design Decisions
 
