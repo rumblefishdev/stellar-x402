@@ -66,6 +66,8 @@ Encrypted systemd credentials in `/srv/x402/production/creds/` (OpenBao's in
 | --------------------------- | ------------------------------ | ------------------- |
 | `database-url.testnet`      | facilitator, `migrate-testnet` | `x402@`, the deploy |
 | `rpc-urls.testnet`          | facilitator                    | `x402@`             |
+| `approle-role-id.testnet`   | facilitator                    | `x402@`             |
+| `approle-secret-id.testnet` | facilitator                    | `x402@`             |
 | `postgres-password.testnet` | `postgres-testnet`             | `x402-db-testnet@`  |
 | `tunnel-token`              | `cloudflared`                  | `x402-tunnel@`      |
 | `seal-key`                  | `openbao`                      | `x402-openbao`      |
@@ -147,13 +149,13 @@ sudo -u x402-deploy env SSH_ORIGINAL_COMMAND=sha256:… /srv/x402/production/dep
 
 The deploy unit decrypts the database URL, pulls the image, runs `migrate-testnet` while the old
 facilitator serves, then restarts `x402@production` on the new image and waits up to 120 s for
-`ready` and `listed`. A failed migration changes nothing. Follow it with
+`ready`, `listed` and `signer` ok. A failed migration changes nothing. Follow it with
 `journalctl -fu x402-deploy@production`.
 
 ## Rollback
 
-- **Automatic:** a new image that isn't `ready` and `listed` in 120 s is replaced by
-  `digest.good`, and the deploy fails.
+- **Automatic:** a new image that isn't `ready`, `listed` and `signer` ok in 120 s is replaced by
+  `digest.good`, and the deploy fails. OpenBao being down fails it the same way.
 - **By hand:** deploy an earlier digest. Each deployment's status carries it; a tag doesn't, since
   any workflow that may write packages can overwrite one:
 

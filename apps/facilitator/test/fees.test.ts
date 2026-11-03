@@ -3,9 +3,10 @@ import type { SorobanRpc } from "@stellar-x402/signer-pool";
 import { describe, expect, it, vi } from "vitest";
 import { ConfigError, parseConfig } from "../src/config.js";
 import { atCurrentBid, feeSettings } from "../src/settlement/fees.js";
+import { signerEnv } from "./fake-openbao.js";
 
 const env = {
-  FACILITATOR_SECRET: Keypair.random().secret(),
+  ...signerEnv(Keypair.random().publicKey()),
   DATABASE_URL: "postgres://db.internal/x402",
   CLIENT_IP: "socket",
   CHANNELS: Keypair.random().publicKey(),

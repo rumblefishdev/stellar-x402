@@ -1,8 +1,8 @@
 #!/bin/sh
 # The deploy, run by x402-deploy@<environment>.service, which deploy.sh starts after writing
 # digest.next under its lock (ADR 0011). It migrates from the new image while the old facilitator
-# still serves, then restarts x402@<environment> on it and waits up to 120 s for `ready` and
-# `listed`. A failed migration changes nothing; a failed start goes back to digest.good.
+# still serves, then restarts x402@<environment> on it and waits up to 120 s for `ready`, `listed`
+# and `signer` ok. A failed migration changes nothing; a failed start goes back to digest.good.
 #   x402-deploy <environment>           the unit's ExecStart
 #   x402-deploy <environment> stopped   its ExecStopPost, after any end
 set -eu
@@ -57,7 +57,7 @@ FACILITATOR_IMAGE="$repo@$new" docker compose run --rm --name "$migrate" migrate
 rm -f "$run/migrating"
 
 # The healthcheck's one-liner, reading the body.
-probe="fetch('http://127.0.0.1:4021/health',{signal:AbortSignal.timeout(5000)}).then((r)=>r.json()).then((b)=>process.exit(b.ready&&b.listed?0:1),()=>process.exit(1))"
+probe="fetch('http://127.0.0.1:4021/health',{signal:AbortSignal.timeout(5000)}).then((r)=>r.json()).then((b)=>process.exit(b.ready&&b.listed&&b.signer==='ok'?0:1),()=>process.exit(1))"
 started() {
   restart || return 1
   deadline=$(($(date +%s) + 120))
@@ -78,7 +78,7 @@ if started; then
   exit 0
 fi
 
-echo "$new isn't ready and listed after 120 s; back to ${good:-nothing, the first deploy}" >&2
+echo "$new isn't ready, listed and signing after 120 s (signing also fails with OpenBao down); back to ${good:-nothing, the first deploy}" >&2
 if [ -n "$good" ]; then
   printf '%s\n' "$good" > digest.tmp && mv digest.tmp digest
   restart || echo "x402@$env didn't start on $good" >&2

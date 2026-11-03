@@ -54,8 +54,16 @@
   `transit/sign/<network key>` with a pinned `key_version` and adds the 64-byte signature. A
   rotated Transit key can't then sign in place of the key that is on chain.
 - **The signer's address is the fee account's, from config.** The pool pays fee bumps from it and
-  uses it as the channels' signer, so the fee account is always the OpenBao key's own account. The first signature is checked against that address, so the
-  facilitator starts without OpenBao.
+  uses it as the channels' signer, so the fee account is always the OpenBao key's own account.
+  Every signature is checked against that address. After start, a
+  signature of a fixed value, repeated every 30 s while OpenBao is closed or unreachable, reports the check in `/health`'s
+  `signer` without holding up the start, so the facilitator starts without OpenBao (0036).
+- **The OpenBao key signs settlements only.** An ordinary wallet funds the fee account and creates
+  the channels, writing the OpenBao key in as each channel's only signer; the channels' own fresh
+  keys sign that, so no tool signs other transactions through OpenBao (0036). OpenBao doesn't
+  enforce this, since it signs any hash; the rule keeps the theft alarm free of exceptions, as any
+  other signature by this key is theft. The one exception is the move off a suspected stolen key,
+  below.
 - **A unix socket per network, and no network port.** OpenBao has one listener per network, each
   on a socket in its own volume, mounted only into that network's facilitator, plus an admin
   listener on loopback inside OpenBao's own container, which has no network: only root or the
@@ -67,7 +75,7 @@
 - **AppRole login.** The role ID and secret ID come in as Compose `file:` secrets, decrypted by
   the network's unit to a tmpfs (ADR 0011), never as environment variables. The token lives
   1 hour (`token_ttl` and `token_max_ttl`), so a renewal can't stretch it; the signer logs in again
-  before it expires instead of renewing it. The secret ID doesn't expire. The policy allows only
+  once less than 5 minutes are left instead of renewing it, and a login that fails ends that settlement. The secret ID doesn't expire. The policy allows only
   `transit/sign/<network key>`. A leaked token stops working within the hour; a leaked secret ID,
   or code running in the facilitator's container, signs until the secret ID is destroyed by hand
   (runbook). OpenBao's user lockout is off for AppRole: only the facilitator reaches its socket,
@@ -161,7 +169,10 @@
   - **A weekly review** after the mainnet deploy (okarcz, Payments): the real fee spend, the next
     refill amount, and whether this custody still fits the float (see Rationale).
 - **Rotation and break-in runbook** (0026):
-  - a leaked token or secret ID: destroy the secret ID, revoke its tokens, issue a new one;
+  - a leaked token or secret ID: destroy the secret ID, revoke its tokens, issue a new one, and
+    restart the facilitator, which reads it at start;
+  - a restore of OpenBao from a snapshot: restart the facilitator, since a token newer than the
+    snapshot answers 403 until its hour ends and a 403 doesn't make the signer log in again;
   - a suspected key theft: create a new Transit key and move to it with the old key. In one
     transaction the old key creates the new key's own account, signs a `set_options` on each
     channel that adds the new key and removes itself, and merges the old fee account into the new
@@ -219,6 +230,10 @@
   drill checks the 90-day event history, and an alarm is a 0027 follow-up.
 - **A restart of the server stops `/settle` until OpenBao is unsealed,** which happens by itself in
   seconds.
+- **While OpenBao is down, `/verify` still accepts a payment.** The seller's route runs, `/settle`
+  fails, and the route's answer is thrown away: the buyer pays nothing and the seller loses the
+  work until 0027's alarm brings someone. `/verify` doesn't refuse, because one failed signature
+  would then stop every payment until the next check passes.
 - **We depend on another project's Storage Box.** If it is cancelled or resized, our snapshots go
   with it. 0026 tells that team.
 - **0036 becomes the OpenBao Transit signer,** owned by Payments. 0026 gains the OpenBao deployment

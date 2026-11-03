@@ -24,8 +24,22 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      # The OpenBao signer's tests (0036): a dev server, unsealed, with a known root token.
+      openbao:
+        image: openbao/openbao:2.7.2
+        env:
+          BAO_DEV_ROOT_TOKEN_ID: root
+        ports:
+          - 8200:8200
+        options: >-
+          --health-cmd "bao status -address=http://127.0.0.1:8200"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      TEST_OPENBAO_ADDR: http://127.0.0.1:8200
+      TEST_OPENBAO_TOKEN: root
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

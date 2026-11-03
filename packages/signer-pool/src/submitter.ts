@@ -208,6 +208,21 @@ export class SignedHookError extends Error {
   override readonly name = "SignedHookError";
 }
 
+/**
+ * The signer failed on the transaction or on the fee bump; that envelope was not sent. After a
+ * `txBadSeq` rebuild an earlier envelope for the same call was sent ({@link attemptsOf} lists them).
+ */
+export class SigningError extends Error {
+  override readonly name = "SigningError";
+  constructor(
+    readonly stage: "transaction" | "fee-bump",
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+  }
+}
+
 /** A submission's outcome before its attempts are attached. */
 type Outcome = Omit<SubmitResult, "attempts">;
 
@@ -694,7 +709,7 @@ export class SettlementSubmitter {
       throw new FeeLimitError(`fee ${total(fee)} stroops is above the limit of ${this.maxFee}`);
     if (fee > base) this.emit({ type: "fee-raised", channel: source, base, bid: fee, queued });
 
-    const inner = await this.sign(rpc.assembleTransaction(draft, sim).build());
+    const inner = await this.sign(rpc.assembleTransaction(draft, sim).build(), "transaction");
     if (!(inner instanceof Transaction)) throw new Error("signer returned a fee bump");
     const bump = await this.sign(
       TransactionBuilder.buildFeeBumpTransaction(
@@ -703,6 +718,7 @@ export class SettlementSubmitter {
         inner,
         this.passphrase,
       ),
+      "fee-bump",
     );
     return {
       bump,
@@ -927,10 +943,18 @@ export class SettlementSubmitter {
 
   private async sign(
     tx: Transaction | FeeBumpTransaction,
+    stage: SigningError["stage"],
   ): Promise<Transaction | FeeBumpTransaction> {
-    const { signedTxXdr } = await this.signer.signTransaction(tx.toXDR(), {
-      networkPassphrase: this.passphrase,
-    });
+    let signedTxXdr: string;
+    try {
+      ({ signedTxXdr } = await this.signer.signTransaction(tx.toXDR(), {
+        networkPassphrase: this.passphrase,
+      }));
+    } catch (error) {
+      throw new SigningError(stage, error instanceof Error ? error.message : String(error), {
+        cause: error,
+      });
+    }
     return TransactionBuilder.fromXDR(signedTxXdr, this.passphrase);
   }
 }
@@ -952,6 +976,7 @@ function refusalReason(error: unknown): RefusalReason {
   if (error instanceof QueueTimeoutError) return "queue-timeout";
   if (error instanceof LedgerBoundError) return "ledger-bound";
   if (error instanceof SignedHookError) return "on-signed";
+  if (error instanceof SigningError) return "signing";
   if (error instanceof NoChannelsError) return "no-channels";
   if (error instanceof ShutdownError) return "shutdown";
   return "other";

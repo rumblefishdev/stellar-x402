@@ -1,8 +1,9 @@
 import { Keypair, StrKey, nativeToScVal, xdr, type rpc } from "@stellar/stellar-sdk";
-import { keypairSigner, type SorobanRpc, type SubmitterEvent } from "@stellar-x402/signer-pool";
+import type { SorobanRpc, SubmitterEvent } from "@stellar-x402/signer-pool";
 import { FakeRpc } from "@stellar-x402/signer-pool/testing";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { openBaoSigner } from "../src/adapters/openbao-signer.js";
 import { parseConfig, type Env } from "../src/config.js";
 import { jsonLogger, rpcEndpointName } from "../src/logger.js";
 import {
@@ -20,6 +21,7 @@ import { SETTLE_REASONS, keyOf } from "../src/settlement/settle.js";
 import { testDatabase } from "./database.js";
 import { transferPayload } from "./payment.js";
 import { holdLease, settlement } from "./port-contracts.js";
+import { fakeOpenBao, signerEnv } from "./fake-openbao.js";
 
 /**
  * `main()`'s `/settle` wiring with the real pool on `FakeRpc`: `/settle`'s checks, the pool's fee
@@ -27,6 +29,8 @@ import { holdLease, settlement } from "./port-contracts.js";
  */
 
 const facilitator = Keypair.random();
+const openbao = await fakeOpenBao(facilitator);
+afterAll(openbao.close);
 const channel = Keypair.random().publicKey();
 const asset = StrKey.encodeContract(Buffer.alloc(32, 7));
 const payer = Keypair.random().publicKey();
@@ -113,7 +117,7 @@ function setup(
   rpc: { endpoint?: (url: string) => SorobanRpc | undefined; timeoutMs?: number } = {},
 ) {
   const config = parseConfig({
-    FACILITATOR_SECRET: facilitator.secret(),
+    ...signerEnv(facilitator.publicKey(), openbao.socketPath),
     DATABASE_URL: db.urlFor(db.schema),
     CLIENT_IP: "socket",
     CHANNELS: channel,
@@ -155,7 +159,12 @@ function setup(
     },
     logger: jsonLogger("warn", (line) => lines.push(line)),
     metrics: memoryMetrics(),
-    signer: keypairSigner(Keypair.fromSecret(config.signer.secret)),
+    signer: openBaoSigner({
+      ...config.signer,
+      network: config.network,
+      logger: { info: vi.fn(), error: vi.fn() },
+      metrics: memoryMetrics(),
+    }),
     sleep: async () => {},
     lease: () => fence,
   });
@@ -300,6 +309,65 @@ describe("main()'s /settle wiring, with the real pool", () => {
     expect(fake.sent.map((tx) => tx.hash().toString("hex"))).toContain(response.transaction);
   });
 
+  it.each([
+    ["sealed", () => (openbao.status = 503)],
+    ["signing with another key", () => (openbao.key = Keypair.random())],
+  ])("sends nothing and says to repeat when OpenBao is %s (0036)", async (_name, broken) => {
+    const { settle, fake } = setup();
+    broken();
+    try {
+      const { response } = await settle(payload(fake.ledger + 30), requirements);
+      expect(response).toMatchObject({
+        success: false,
+        errorReason: SETTLE_REASONS.transactionSigning,
+        extra: { retryable: true },
+      });
+      expect(fake.sent).toHaveLength(0);
+    } finally {
+      openbao.status = undefined;
+      openbao.key = facilitator;
+    }
+  });
+
+  it("answers the sent hash a txBadSeq refused when signing its rebuild fails, and doesn't reopen (0036)", async () => {
+    const { settle, fake, store } = setup();
+    await settle(payload(fake.ledger + 30), requirements);
+    // Another sender used the channel, so the next envelope is refused with txBadSeq.
+    fake.sequences.set(channel, 5000n);
+    // OpenBao seals between the refused send and its rebuild.
+    const send = fake.sendTransaction.bind(fake);
+    vi.spyOn(fake, "sendTransaction").mockImplementation(async (tx) => {
+      const sent = await send(tx);
+      openbao.status = 503;
+      return sent;
+    });
+    const pay = payload(fake.ledger + 30, undefined, "8");
+    try {
+      const { response } = await settle(pay, requirements);
+      expect(fake.sent).toHaveLength(2);
+      const refused = fake.sent[1]!.hash().toString("hex");
+      expect(response).toMatchObject({
+        success: false,
+        errorReason: SETTLE_REASONS.transactionSigning,
+        transaction: refused,
+      });
+      expect(response.extra).toEqual({ retryable: false, expirationLedger: expect.any(Number) });
+      expect(await store.get(keyOf(pay, "stellar:testnet")!)).toMatchObject({
+        state: "rejected",
+        hashes: [refused],
+      });
+      openbao.status = undefined;
+      const repeat = await settle(pay, requirements);
+      expect(repeat.response).toMatchObject({
+        errorReason: SETTLE_REASONS.transactionSigning,
+        transaction: refused,
+      });
+      expect(fake.sent).toHaveLength(2);
+    } finally {
+      openbao.status = undefined;
+    }
+  });
+
   it("rechecks the auth expiry at the pool's floor of 2 ledgers, not MIN_VALIDITY_LEDGERS", async () => {
     // `/verify` would refuse 12 ledgers against a minimum of 20.
     const { settle, fake } = setup({ MIN_VALIDITY_LEDGERS: "20" });
@@ -340,7 +408,7 @@ describe("main()'s composition (compose)", () => {
   /** The graph `main()` serves; it takes the lease as `start()` does, unless `lease: false`. */
   async function composed(env: Record<string, string> = {}, opts: { lease?: boolean } = {}) {
     const config = parseConfig({
-      FACILITATOR_SECRET: facilitator.secret(),
+      ...signerEnv(facilitator.publicKey(), openbao.socketPath),
       DATABASE_URL: db.urlFor(db.schema),
       CLIENT_IP: "socket",
       CHANNELS: channel,
