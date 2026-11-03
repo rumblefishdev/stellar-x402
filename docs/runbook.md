@@ -516,7 +516,7 @@ Then step 4 in this shell, without its `read`, and step 5 (`unset self` too).
   exposes none, with no ACPI `TPM2` or `TCPA` table, no SMBIOS type 43 and no `/dev/tpm*` (ASRock
   Rack B450D4U-V1L, BIOS L2.12, Ryzen 9 3900). Not checked: most likely the Ryzen's fTPM is off in
   the BIOS. Turning it on needs Hetzner's KVM console and a reboot of the server the explorer
-  shares.
+  shares (0100, before mainnet).
 - pgBackRest backups, the database's restore drill and upgrade policy.
 - The CloudWatch agent and renewing its Roles Anywhere certificate (0027).
 - Restoring the service on another machine, RPC failover, testnet reset recovery, the incident

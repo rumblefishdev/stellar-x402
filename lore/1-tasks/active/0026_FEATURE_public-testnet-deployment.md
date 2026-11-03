@@ -5,7 +5,7 @@ type: FEATURE
 status: active
 milestone: 1
 related_adr: ["0011", "0012", "0013"]
-related_tasks: ["0012", "0014", "0022", "0017", "0020", "0013", "0039", "0036", "0047", "0099"]
+related_tasks: ["0012", "0014", "0022", "0017", "0020", "0013", "0039", "0036", "0047", "0099", "0100"]
 tags: [facilitator, deploy, priority-high, effort-medium, platform]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -346,7 +346,8 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   `transit/sign/<key>`, and one AppRole per network: `token_ttl` and `token_max_ttl` 1 h, a secret
   ID that doesn't expire, delivered as a Compose secret. User lockout off for AppRole (ADR 0013).
 - **Unseal:** a static seal key as an encrypted systemd credential (`systemd-creds`, `host` mode).
-  Note in the runbook whether the board has a TPM (ADR 0013's first upgrade).
+  Note in the runbook whether the board has a TPM (ADR 0013's first upgrade); finding out before
+  mainnet is 0100.
 - **Init:** `bao operator init -recovery-shares=1 -recovery-threshold=1`. The static seal accepts
   these flags (OpenBao 2.7.2, 2026-11-02).
 - **Backup secret** (ADR 0013): `x402/production/openbao-backup` in AWS Secrets Manager,
