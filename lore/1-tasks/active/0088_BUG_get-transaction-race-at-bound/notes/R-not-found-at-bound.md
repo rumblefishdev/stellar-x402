@@ -13,14 +13,18 @@ history:
     status: mature
     who: akot
     note: "stellar-rpc, stellar-core and facilitator survey. Our code at develop b019d59."
+  - date: "2026-11-02"
+    status: mature
+    who: akot
+    note: "Margin raised from one ledger to three in the PR review of 0088."
 ---
 
 # NOT_FOUND at the bound ledger
 
-**Recommendation: a one-ledger margin, `latestLedger > maxLedger`, only on `NOT_FOUND`, in
+**Recommendation: a three-ledger margin, `latestLedger >= maxLedger + 3`, only on `NOT_FOUND`, in
 `confirm()` and `pastBound`.** One response decides, whichever node answered, with no state. It
-costs one ledger on `expired` answers only. The pre-send guards keep `>=`, and `fallback-rpc.ts:73`
-needs correcting: a node at exactly E can report too early. (✓ read in code, ~ inferred.)
+costs three ledgers on `expired` answers only. The pre-send guards keep `>=`, and `fallback-rpc.ts:73`
+needs correcting: a node near E can report too early. (✓ read in code, ~ inferred.)
 
 ## The race
 
@@ -36,13 +40,15 @@ needs correcting: a node at exactly E can report too early. (✓ read in code, ~
 
 | | Added latency | RPC cost | Fallback RPC | Still wrong when (~) |
 |---|---|---|---|---|
-| **A. Margin** | ~1 ledger; sweep 0-10 s | one more wait | unaffected | one request stalls from E's commit to E+1's publish |
+| **A. Margin, 1 ledger** | ~1 ledger; sweep 0-10 s | one more wait | unaffected | one request stalls from E's commit to E+1's publish |
+| **A3. Margin, 3 ledgers** | ~3 ledgers; sweep 0-10 s | three more waits | unaffected | a node catching up: live, the stall is ~15 s and an answer gets 10 s |
 | **B. Second read** | round trip | +1 read | may hit another node | two nodes at E, both in their commit window |
 | **C. A + B** | ~1 ledger + round trip | both | unaffected | that stall, then the same on a second node |
 | **D. Prior read ≥ bound** | ~0 | 0 in `confirm()`, +1 in sweep | as B | poll on X shows E, read goes to Y in its window |
 
 B and D prove it only if both calls reach one node, which a URL doesn't show. ~ A's stall is 5 s+
-live, one ingest cycle in catch-up. No data separates A from C, so C isn't justified.
+live, one ingest cycle in catch-up. No data separates A from C, so C isn't justified. A3 needs no
+data: `FallbackRpc` drops an answer after 10 s, so a live node can't produce that stall.
 
 ## maxTime
 
