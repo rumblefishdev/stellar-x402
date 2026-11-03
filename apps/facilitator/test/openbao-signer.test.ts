@@ -39,7 +39,7 @@ function setup(fake: FakeOpenBao, clock = { now: 0 }, checkRetryMs?: number) {
     roleId: "role",
     secretId: "secret",
     network: "stellar:testnet",
-    logger: { info: log, warn: log },
+    logger: { info: log, error: log },
     metrics,
     now: () => clock.now,
     ...(checkRetryMs !== undefined && { checkRetryMs }),

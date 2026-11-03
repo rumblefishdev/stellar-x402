@@ -67,7 +67,7 @@ interface OpenBaoSignerOptions {
   roleId: string;
   secretId: string;
   network: string;
-  logger: Pick<Logger, "info" | "warn">;
+  logger: Pick<Logger, "info" | "error">;
   metrics: Metrics;
   /** Test seam: the clock tokens expire by. */
   now?: () => number;
@@ -174,7 +174,7 @@ export function openBaoSigner(opts: OpenBaoSignerOptions): OpenBaoSigner {
   function failed(step: "sign" | "check", error: unknown): void {
     const reason = error instanceof SignerError ? error.reason : "error";
     metrics.increment("signer_failures_total", { reason, step });
-    logger.warn("signer_failed", { network, step, reason, error });
+    logger.error("signer_failed", { network, step, reason, error });
     state = "failed";
   }
 

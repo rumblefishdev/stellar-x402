@@ -162,7 +162,7 @@ function setup(
     signer: openBaoSigner({
       ...config.signer,
       network: config.network,
-      logger: upstreamLogger,
+      logger: { info: vi.fn(), error: vi.fn() },
       metrics: memoryMetrics(),
     }),
     sleep: async () => {},

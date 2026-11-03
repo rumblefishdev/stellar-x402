@@ -95,7 +95,7 @@ describe.skipIf(!ADDR || !ROOT)("openBaoSigner against OpenBao", () => {
         roleId,
         secretId: overrides.secretId ?? secretId,
         network: "stellar:testnet",
-        logger: { info: () => {}, warn: () => {} },
+        logger: { info: () => {}, error: () => {} },
         metrics,
       }),
     };
