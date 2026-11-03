@@ -2,7 +2,7 @@
 id: "0101"
 title: "Drop what the settlement modules no longer need"
 type: FEATURE
-status: backlog
+status: active
 related_adr: ["0001", "0004", "0012"]
 related_tasks: ["0036", "0102", "0063"]
 tags: [facilitator, signer-pool, refactor, priority-low, effort-medium]
@@ -14,6 +14,10 @@ history:
     note: >
       From an architecture review of develop: of ten candidates, these six small changes survived
       an attempt to refute each one.
+  - date: "2026-11-03"
+    status: active
+    who: karolkow
+    note: Starting with item 1, the packages with no importer.
 ---
 
 # Drop what the settlement modules no longer need
