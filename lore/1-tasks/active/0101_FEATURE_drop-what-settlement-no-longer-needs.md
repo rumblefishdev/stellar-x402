@@ -56,8 +56,25 @@ Figures are from `origin/develop` on 2026-11-03. Work each item from what is tru
 6. **`[refactor]`, ~30 min, after #105. One `resultUpdate(result)`.** `settle.ts` and `reconcile.ts`
    build the same update from a pool result, and #105 adds a line to both.
 
+## Decisions so far
+
+| # | What is done | From | Vs the task | Code | Test |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Delete `packages/sdk`: its entry points hold no code, and 0102 creates it with its first helper. The cost of keeping it is small: a misleading `README.md` row and two empty builds | owner | matches | `packages/sdk` | CI steps, assertions unchanged |
+| 2 | Drop `config` from `bazaar` and `signer-pool`: neither imports it | task item | matches | both `package.json`, `pnpm-lock.yaml` | CI steps, assertions unchanged |
+| 3 | Delete `isAttemptForward`: only the memory store's branch called it, 0064 dropped that store, and `attemptRankSql` holds the order | task item | matches | `adapters/rules.ts` | CI steps, assertions unchanged |
+| 4 | ADR 0001 says `packages/sdk` is created when its first helper exists | task item | matches | `docs/adr/0001-repo-layout.md` | none, wording |
+
+## PR split
+
+One PR per item of Implementation. Item 1 goes first. Items 2, 5 and 6 wait for code #105 or #110
+touched, or start from what is true then.
+
 ## Not yet decided
 
+- `examples/mcp-metered`: its description is the only record of a second-example idea, "metered paid
+  MCP tool used by an agent", and 0041 hasn't chosen one. Delete it and copy the idea to 0041, delete
+  it alone, or keep it without its dependency on `packages/sdk`.
 - Merging `packages/mcp` into `apps/mcp-local` (1–1.5 h, `[structure only]`): one importer, and e2e
   reaches across by relative path, but the interface is already 3 names. Layout is the owner's call.
 
