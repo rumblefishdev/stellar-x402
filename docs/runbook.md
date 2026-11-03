@@ -332,8 +332,18 @@ cd /srv/x402/openbao && sudo docker compose exec openbao bao status
 It unseals itself at every start with the seal key `x402-openbao` decrypts. Its storage (Raft) and
 audit log are the volumes `x402-openbao-data` and `x402-openbao-audit`, made by the playbook. A
 request OpenBao can't write to the audit log fails, so a full disk stops `/settle`. The playbook's
-`/etc/logrotate.d/x402-openbao` rotates that log daily and keeps 30 days, compressed: `logrotate`
+`/etc/logrotate.d/x402-openbao` rotates that log daily and keeps a year, compressed: `logrotate`
 renames the file, and SIGHUP makes OpenBao open a new one. About 5 MB a day at 1,000 settlements.
+After a playbook run that changes it, check one rotation by hand:
+
+```sh
+sudo logrotate -d /etc/logrotate.d/x402-openbao   # reads it, rotates nothing
+sudo logrotate -f /etc/logrotate.d/x402-openbao
+cd /srv/x402/openbao && sudo docker compose exec -T openbao ls -l /openbao/logs
+```
+
+A new `audit.log` that grows beside `audit.log.1`, and `signer: "ok"` in `/health` (What is
+where, above), mean OpenBao reopened it and still signs.
 
 **Setting it up,** once, after the playbook. The seal key and init's answer travel between the
 admin's machine and the server over SSH and never reach a disk, so they live only in the admin's

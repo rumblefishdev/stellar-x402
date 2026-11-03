@@ -147,20 +147,23 @@
       check_mode: false
 
     # A request OpenBao can't log fails, so a full disk stops /settle (ADR 0013). After the rename,
-    # SIGHUP makes OpenBao open a new file under the old name. 30 days kept is an assumption.
+    # SIGHUP makes OpenBao open a new file under the old name; it's sent through the project, as the
+    # unit does, since a missed one leaves OpenBao on the renamed file. A year kept: the log is the
+    # only record of which token signed what, and a leak can come out months later.
     - name: OpenBao's audit log, rotated daily
       ansible.builtin.copy:
         content: |
           {{ (docker_info.stdout | from_json).DockerRootDir }}/volumes/x402-openbao-audit/_data/audit.log {
             daily
-            rotate 30
+            rotate 365
+            maxage 365
             compress
             delaycompress
             missingok
             notifempty
             nocreate
             postrotate
-              /usr/bin/docker kill --signal=HUP x402-openbao-openbao-1 > /dev/null
+              /usr/bin/docker compose -f /srv/x402/openbao/compose.yaml kill -s HUP openbao > /dev/null
             endscript
           }
         dest: /etc/logrotate.d/x402-openbao

@@ -368,7 +368,7 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   admin through SSH and `docker compose exec` on the loopback listener (with
   `disable_unauthed_generate_root_endpoints=false`); no UI.
 - **Audit log:** a file on its own volume, rotated daily by the playbook's
-  `/etc/logrotate.d/x402-openbao` (30 days, compressed; SIGHUP makes OpenBao reopen it); alarm at
+  `/etc/logrotate.d/x402-openbao` (a year, compressed; SIGHUP makes OpenBao reopen it); alarm at
   80% disk (0027).
 - **Snapshots:** daily Raft snapshots to our own sub-account and Borg repository on the company's
   existing Hetzner Storage Box, keeping 14, set up like that box's other sub-account. Tell
@@ -417,4 +417,4 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 - [x] Given `DATABASE_URL_FILE` or `RPC_URLS_FILE`, when the service starts, then it reads the value from that file, and with neither set it falls back to `DATABASE_URL` and `RPC_URLS`
 - [ ] Given the durable stores from 0022, when the service runs, then it uses them, and `docs/runbook.md` has the deploy and rollback steps
 - [ ] Given the deployed facilitator, when it settles, then it signs through OpenBao Transit over the unix socket, no secret seed is on the server outside OpenBao, the backup secret exists in AWS, and a restore drill from it has passed
-- [ ] Given OpenBao's audit log on the server, when `logrotate` runs, then the file is renamed, OpenBao writes to a new `audit.log` and still signs, and old files past 30 days are removed
+- [ ] Given OpenBao's audit log on the server, when `logrotate` runs, then the file is renamed, OpenBao writes to a new `audit.log` and still signs, and old files past a year are removed (runbook, OpenBao)
