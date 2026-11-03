@@ -78,6 +78,10 @@ printf %s "$value" | sudo systemd-creds encrypt --with-key=host --name=NAME - /s
 unset value
 ```
 
+`systemd-creds` warns that `/var/lib/systemd/credential.secret` "is not located on encrypted media,
+using anyway". That is `host` mode: the key it encrypts with sits on the server's disk. A TPM is
+ADR 0013's first upgrade (Not here yet).
+
 - **The database password**, once, before `x402-db-testnet@production` first starts: Postgres
   takes it only when it creates the database.
 
@@ -318,7 +322,9 @@ audit log are the volumes `x402-openbao-data` and `x402-openbao-audit`, made by 
 request OpenBao can't write to the audit log fails, so a full disk stops `/settle`.
 
 **Setting it up,** once, after the playbook. The seal key and init's answer travel between the
-admin's machine and the server over SSH and never reach a disk.
+admin's machine and the server over SSH and never reach a disk, so they live only in the admin's
+shell: keep it open until step 5. If it's lost after step 3, the backup secret has what it held
+(**A lost shell**, below).
 
 1. The seal key: 32 random bytes in hex, with no newline, which OpenBao refuses. Its ID is
    `current_key_id` in `deploy/openbao/config.hcl`. Keep `$seal_key` for step 3.
@@ -366,11 +372,11 @@ admin's machine and the server over SSH and never reach a disk.
    back=$(aws secretsmanager get-secret-value --region eu-central-1 \
      --secret-id x402/production/openbao-backup --query SecretString --output text)
    [ "$back" = "$backup" ] && echo same
-   printf %s "$back" | jq -r .recovery_key
    ```
 
-   And that recovery key must work: on the server, **A new root token** (below) with it, then
-   `bao token revoke -self` and leave that root shell. Init's root token stays valid for step 4.
+   And its recovery key must work: **A new root token** (below), which takes it from this secret,
+   then `bao token revoke -self` and leave that root shell. Init's root token stays valid for
+   step 4.
 
 4. Per network, in a root shell on the server with init's root token, one line at a time: `read`
    takes the next line of a paste as the token, and `docker compose exec` reads stdin and swallows
@@ -415,14 +421,16 @@ admin's machine and the server over SSH and never reach a disk.
 6. The key's own account, which pays the fee bumps (ADR 0013), then its channels, from
    `packages/signer-pool` on the admin's machine (#100). `create-channels.ts` checks neither: it
    makes channels for any valid address, and a wrong one leaves their reserves under a key that
-   isn't ours. On testnet Friendbot creates the account, and any Friendbot account can fund the
-   channels; mainnet's wallet comes with 0038.
+   isn't ours. On testnet Friendbot creates the account, and a one-off wallet that Friendbot funds
+   pays the channels; its secret lives only in this shell. Mainnet's wallet comes with 0038.
 
    ```sh
    curl -sf "https://friendbot.stellar.org?addr=ADDRESS" >/dev/null && echo created
-   read -rs FUNDER_SECRET && export FUNDER_SECRET   # the funding wallet's S… key, Enter
+   export FUNDER_SECRET=$(node -e 'console.log(require("@stellar/stellar-sdk").Keypair.random().secret())')
+   funder=$(node -e 'console.log(require("@stellar/stellar-sdk").Keypair.fromSecret(process.env.FUNDER_SECRET).publicKey())')
+   curl -sf "https://friendbot.stellar.org?addr=$funder" >/dev/null && echo funded
    NETWORK=testnet pnpm exec tsx scripts/create-channels.ts ADDRESS 20
-   unset FUNDER_SECRET
+   unset FUNDER_SECRET funder
    ```
 
    It prints the channels' addresses for `CHANNELS_TESTNET` (0036); 20 channels hold ADR 0013's
@@ -431,25 +439,52 @@ admin's machine and the server over SSH and never reach a disk.
 
 **A new root token,** when an admin needs one again, from the recovery key in the backup secret.
 The CLI's `generate-root` needs a token, so this is the legacy `/sys/generate-root` API, which the
-admin listener answers without one (ADR 0013). In a root shell on the server, one line at a time;
-the values go over stdin, because the arguments of a command show in `ps`:
+admin listener answers without one (ADR 0013). First, on the admin's machine, the recovery key
+goes from the backup secret to a file in `/run`, a tmpfs, that only root reads. It never passes
+the clipboard or the screen: on 2026-11-03 a paste from the clipboard reached `read` empty.
+
+```sh
+AWS_PROFILE=soroban-admin aws secretsmanager get-secret-value --region eu-central-1 \
+  --secret-id x402/production/openbao-backup --query SecretString --output text |
+  jq -r .recovery_key |
+  ssh SERVER 'sudo sh -c "umask 077; cat > /run/x402/openbao/recovery-key"'
+```
+
+Then in a root shell on the server, one line at a time; the values go over stdin, because the
+arguments of a command show in `ps`:
 
 ```sh
 sudo -i
 cd /srv/x402/openbao
 bao() { docker compose exec -T -e BAO_TOKEN openbao bao "$@"; }
-read -rs key   # paste the recovery key, Enter
+key=$(cat /run/x402/openbao/recovery-key) && rm /run/x402/openbao/recovery-key
+echo ${#key}   # 44
 n=$(bao read -field=otp_length sys/generate-root/attempt)
 otp=$(openssl rand -base64 48 | tr -dc A-Za-z0-9 | head -c "$n")
 nonce=$(printf %s "$otp" | bao write -field=nonce sys/generate-root/attempt otp=-)
 encoded=$(printf %s "$key" | bao write -field=encoded_token sys/generate-root/update key=- nonce="$nonce")
 export BAO_TOKEN=$(encoded=$encoded otp=$otp python3 -c 'import base64, os; e, o = os.environ["encoded"], os.environ["otp"]; print(bytes(a ^ b for a, b in zip(base64.b64decode(e + "=" * (-len(e) % 4)), o.encode())).decode())')
 unset key otp nonce encoded
+bao token lookup -format=json | python3 -c 'import json, sys; print(json.load(sys.stdin)["data"]["policies"])'   # ['root']
 ```
 
 If a line after `nonce=` fails, the attempt stays open: a rerun answers 400 (`root generation
 already in progress`) and `nonce` stays empty. `bao delete sys/generate-root/attempt` clears it,
 with no token. When done, step 5 again.
+
+**A lost shell,** after step 3: `$init` is gone, and init's root token with it, though it stays
+valid. A new root token as above, then, in the same root shell, init's revoked by its accessor.
+The loop prints every other token's accessor, policies and creation time (Unix seconds); init's
+has `['root']` and the init's time. `</dev/null` keeps each `bao` from reading the terminal.
+
+```sh
+self=$(bao token lookup -format=json | python3 -c 'import json, sys; print(json.load(sys.stdin)["data"]["accessor"])')
+for a in $(bao list -format=json auth/token/accessors </dev/null | self=$self python3 -c 'import json, sys, os; print(" ".join(a for a in json.load(sys.stdin) if a != os.environ["self"]))'); do bao write -format=json auth/token/lookup-accessor accessor=$a </dev/null | python3 -c 'import json, sys; d = json.load(sys.stdin)["data"]; print(d["accessor"], d["policies"], d["creation_time"])'; done
+bao write auth/token/revoke-accessor accessor=ACCESSOR   # init's, from the loop
+```
+
+The loop, run again, prints nothing. Then step 4 in this shell, without its `read`, and step 5
+(`unset self` too).
 
 ## Not here yet
 
@@ -457,8 +492,10 @@ with no token. When done, step 5 again.
   top-ups (0036, 0047).
 - Rotating OpenBao's audit log: nothing rotates it yet, and a full volume stops `/settle` (0026).
 - The key theft transaction (ADR 0013): no tool signs it and it has never run (0099).
-- A leaked token or secret ID, OpenBao upgrades and what `/settle` does meanwhile, whether the
-  board has a TPM, and the weekly review after the mainnet deploy (0026, ADR 0013).
+- A leaked token or secret ID, OpenBao upgrades and what `/settle` does meanwhile, and the weekly
+  review after the mainnet deploy (0026, ADR 0013).
+- A TPM for the credentials (ADR 0013's first upgrade): the OS shows none (no
+  `/sys/class/tpm/tpm0`, 2026-11-03), and whether the board has one off in firmware isn't known.
 - pgBackRest backups, the database's restore drill and upgrade policy.
 - The CloudWatch agent and renewing its Roles Anywhere certificate (0027).
 - Restoring the service on another machine, RPC failover, testnet reset recovery, the incident
