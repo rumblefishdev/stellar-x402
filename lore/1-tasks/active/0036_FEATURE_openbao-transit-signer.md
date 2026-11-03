@@ -79,6 +79,7 @@ the facilitator. It is built and tested against a local OpenBao in Docker, befor
 | 21 | The rule that the key signs only settlements stays, for the theft alarm: any other signature by it is theft, with no exceptions to keep. OpenBao doesn't enforce the rule, since it signs any hash, so it is no defence against code in the container | grilling | beyond it | — | `docs/adr/0013-facilitator-key-custody.md` | — |
 | 22 | The `secret` signer mode goes: the facilitator always signs through OpenBao Transit, and tests and local runs use a fake OpenBao on a unix socket, so one signing path runs everywhere. The real-server tests hold the signer to OpenBao; nothing compares the fake with it. Replaces ADR 0011's "`FACILITATOR_SECRET` stays for local development and tests" and row 6's refusal on pubnet | grilling | changes it (the task had a `secret` mode for local and tests) | upstream's `@x402/stellar` takes any signer object | `apps/facilitator/src/config.ts`; `test/fake-openbao.ts` | `config.test.ts` the signer; `settle-pool.test.ts` |
 | 23 | `/health`'s `signer` stays the deploy's gate and can go stale on a server with no payments; the alarm on OpenBao down or sealed comes from 0027's host probe, not from this field | grilling | beyond it | — | `apps/facilitator/src/http/app.ts` | `main.test.ts` |
+| 24 | The pubnet gate also names 0027's signer alarm and 0048's re-check of the hot key, so the last task landing can't lift it without them | grilling | beyond it | — | `apps/facilitator/src/config.ts` | `config.test.ts` |
 
 ## Not yet decided
 
@@ -99,7 +100,7 @@ Nothing: the grilling's frontier is empty (2026-10-30).
 - The channel as the caller of a settlement: 0093, merged. A settlement still takes two facilitator
   signatures, both through this signer; a testnet run on that shape is in #102.
 - The OpenBao container, its unseal, backups and the move of testnet to the key: 0026.
-- The alarm on signer failures: 0027. The pubnet gate in `config.ts` names only 0024 and 0090, and it must name this alarm before mainnet.
+- The alarm on signer failures: 0027.
 
 ## Implementation
 
