@@ -118,7 +118,7 @@ history:
       a root token from the recovery key in AWS (policy root) proved the backup, and init's token
       was revoked by its accessor. Then the Transit key stellar-testnet, the policy and AppRole
       x402-testnet, both AppRole credentials (each decrypts to 36 bytes), and the root token
-      revoked at 08:58:39 UTC (audit log). The key's account
+      revoked on 2026-11-03 at 08:58:39 UTC (audit log). The key's account
       GAVE5V5IOMNNBOZXGZSQOP447L2QLCG6ELIIPO6CFJLGZVY4YIK3KKRP holds 10,000 XLM from Friendbot,
       and 20 channels came in two transactions (2c966cac…, 34973a78…); on Horizon each has the key
       as its only signer and 1.5 XLM. Only the admin user is in the docker group, and the OS shows

@@ -17,7 +17,7 @@ admin with `sudo`; the admins are the explorer's (`soroban-block-explorer`'s
 | `/srv/x402/production/creds/*.cred` | the credentials, encrypted with the host key                       |
 | `/run/x402/production/`             | the credentials decrypted for the containers (tmpfs)               |
 | `/srv/x402/openbao/`                | OpenBao's Compose project `x402-openbao`, its config and seal key  |
-| `/run/x402/openbao/`                | the seal key decrypted for OpenBao (tmpfs)                         |
+| `/run/x402/openbao/`                | the decrypted seal key; the recovery key for a moment (tmpfs)      |
 | `/usr/local/libexec/x402/`          | the units' scripts (`deploy/libexec`)                              |
 | `/etc/systemd/system/x402*`         | the units (`deploy/systemd`)                                       |
 
@@ -323,8 +323,19 @@ request OpenBao can't write to the audit log fails, so a full disk stops `/settl
 
 **Setting it up,** once, after the playbook. The seal key and init's answer travel between the
 admin's machine and the server over SSH and never reach a disk, so they live only in the admin's
-shell: keep it open until step 5. If it's lost after step 3, the backup secret has what it held
-(**A lost shell**, below).
+shell: keep it open until step 5. Lost after step 3's `create-secret`, the backup secret has what
+it held (**A lost shell**, below). Lost before it, between `init=` and `create-secret`, init's
+answer is gone for good, and init can't run again on the same Raft storage, so OpenBao starts over
+with new volumes. A stopped container still holds its volumes, so `down` comes before `rm`:
+
+```sh
+ssh SERVER sudo systemctl stop x402-openbao
+ssh SERVER 'cd /srv/x402/openbao && sudo docker compose down'
+ssh SERVER sudo docker volume rm x402-openbao-data x402-openbao-audit
+ssh SERVER 'sudo docker volume create x402-openbao-data && sudo docker volume create x402-openbao-audit'
+```
+
+Then step 1 again, which writes a new `seal-key.cred`.
 
 1. The seal key: 32 random bytes in hex, with no newline, which OpenBao refuses. Its ID is
    `current_key_id` in `deploy/openbao/config.hcl`. Keep `$seal_key` for step 3.
@@ -446,9 +457,11 @@ the clipboard or the screen: on 2026-11-03 a paste from the clipboard reached `r
 ```sh
 AWS_PROFILE=soroban-admin aws secretsmanager get-secret-value --region eu-central-1 \
   --secret-id x402/production/openbao-backup --query SecretString --output text |
-  jq -r .recovery_key |
+  jq -er .recovery_key |
   ssh SERVER 'sudo sh -c "umask 077; cat > /run/x402/openbao/recovery-key"'
 ```
+
+If you stop here, remove it: `ssh SERVER sudo rm -f /run/x402/openbao/recovery-key`.
 
 Then in a root shell on the server, one line at a time; the values go over stdin, because the
 arguments of a command show in `ps`:
@@ -458,7 +471,7 @@ sudo -i
 cd /srv/x402/openbao
 bao() { docker compose exec -T -e BAO_TOKEN openbao bao "$@"; }
 key=$(cat /run/x402/openbao/recovery-key) && rm /run/x402/openbao/recovery-key
-echo ${#key}   # 44
+[ ${#key} -eq 44 ] && echo ok || echo 'bad key: stop here'
 n=$(bao read -field=otp_length sys/generate-root/attempt)
 otp=$(openssl rand -base64 48 | tr -dc A-Za-z0-9 | head -c "$n")
 nonce=$(printf %s "$otp" | bao write -field=nonce sys/generate-root/attempt otp=-)
@@ -472,19 +485,24 @@ If a line after `nonce=` fails, the attempt stays open: a rerun answers 400 (`ro
 already in progress`) and `nonce` stays empty. `bao delete sys/generate-root/attempt` clears it,
 with no token. When done, step 5 again.
 
-**A lost shell,** after step 3: `$init` is gone, and init's root token with it, though it stays
-valid. A new root token as above, then, in the same root shell, init's revoked by its accessor.
-The loop prints every other token's accessor, policies and creation time (Unix seconds); init's
-has `['root']` and the init's time. `</dev/null` keeps each `bao` from reading the terminal.
+**A lost shell,** after step 3's `create-secret`: `$init` is gone, and init's root token with it,
+though it stays valid. A new root token as above, then, in the same root shell, one line at a
+time, every other root token revoked by its accessor. Before step 4 those are the only other
+tokens: init's, and step 3's if its `revoke -self` didn't run. `</dev/null` keeps each `bao`
+from reading the terminal.
 
 ```sh
-self=$(bao token lookup -format=json | python3 -c 'import json, sys; print(json.load(sys.stdin)["data"]["accessor"])')
-for a in $(bao list -format=json auth/token/accessors </dev/null | self=$self python3 -c 'import json, sys, os; print(" ".join(a for a in json.load(sys.stdin) if a != os.environ["self"]))'); do bao write -format=json auth/token/lookup-accessor accessor=$a </dev/null | python3 -c 'import json, sys; d = json.load(sys.stdin)["data"]; print(d["accessor"], d["policies"], d["creation_time"])'; done
-bao write auth/token/revoke-accessor accessor=ACCESSOR   # init's, from the loop
+self=$(bao token lookup -format=json </dev/null | python3 -c 'import json, sys; print(json.load(sys.stdin)["data"]["accessor"])')
+for a in $(bao list -format=json auth/token/accessors </dev/null | self=$self python3 -c 'import json, sys, os; print(" ".join(a for a in json.load(sys.stdin) if a != os.environ["self"]))'); do bao write -format=json auth/token/lookup-accessor accessor=$a </dev/null | python3 -c 'import json, sys; sys.exit("root" not in json.load(sys.stdin)["data"]["policies"])' && bao write auth/token/revoke-accessor accessor=$a </dev/null >/dev/null && echo "revoked $a"; done
 ```
 
-The loop, run again, prints nothing. Then step 4 in this shell, without its `read`, and step 5
-(`unset self` too).
+The check prints every other token's accessor, policies and creation time, so here nothing:
+
+```sh
+for a in $(bao list -format=json auth/token/accessors </dev/null | self=$self python3 -c 'import json, sys, os; print(" ".join(a for a in json.load(sys.stdin) if a != os.environ["self"]))'); do bao write -format=json auth/token/lookup-accessor accessor=$a </dev/null | python3 -c 'import json, sys; d = json.load(sys.stdin)["data"]; print(d["accessor"], d["policies"], d["creation_time"])'; done
+```
+
+Then step 4 in this shell, without its `read`, and step 5 (`unset self` too).
 
 ## Not here yet
 
