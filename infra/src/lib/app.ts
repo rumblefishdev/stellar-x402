@@ -3,10 +3,12 @@ import * as cdk from "aws-cdk-lib";
 import { type EnvironmentConfig, validateConfig } from "./config.js";
 import { stackPrefix } from "./names.js";
 import { AlarmsStack } from "./stacks/alarms-stack.js";
+import { UptimeStack } from "./stacks/uptime-stack.js";
 
 export interface X402App {
   readonly app: cdk.App;
   readonly alarms: AlarmsStack;
+  readonly uptime: UptimeStack;
 }
 
 export function createApp(config: EnvironmentConfig, app = new cdk.App()): X402App {
@@ -23,5 +25,6 @@ export function createApp(config: EnvironmentConfig, app = new cdk.App()): X402A
   return {
     app,
     alarms: new AlarmsStack(app, `${prefix}-Alarms`, props("Alarms")),
+    uptime: new UptimeStack(app, `${prefix}-Uptime`, props("Uptime")),
   };
 }
