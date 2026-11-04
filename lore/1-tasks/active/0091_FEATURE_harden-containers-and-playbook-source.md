@@ -44,8 +44,9 @@ installs what root runs on the shared server, comes from `develop`, which has no
 ## Implementation
 
 - Compose: `cap_drop: [ALL]` and `security_opt: [no-new-privileges:true]` on `facilitator`,
-  `migrate-testnet` and `cloudflared`. `postgres-testnet` starts as root and drops to `postgres`,
-  so it keeps what its entrypoint needs, found by a run on a fresh volume, not guessed.
+  `migrate-testnet` and `cloudflared`. ~~`postgres-testnet` starts as root and drops to
+  `postgres`, so it keeps what its entrypoint needs, found by a run on a fresh volume, not
+  guessed.~~ `postgres-testnet` starts as `postgres` (`user: "999:999"`) with none (decision 10).
 - ~~0036's OpenBao container gets the same treatment when it arrives.~~ Done by 0026 (#104).
 - Playbook: the runbook and the playbook's header run it from `origin/deploy/production`.
 - A change under `deploy/` merged to `deploy/production` also starts a deploy, since the workflow's
@@ -58,9 +59,9 @@ installs what root runs on the shared server, comes from `develop`, which has no
       merge, with the runbook's check)
 - [ ] Given those settings, when a fresh database starts, a migration runs, a deploy restarts the
       facilitator and the server reboots, then all of them still work (passed locally on
-      2026-11-03 with plain Compose: a new database, a migration and a container restart. Not
-      yet: secrets at `x402-creds`' owner and mode, the deploy path (`deploy.sh`,
-      `x402@.service`) and the reboot, decision 3)
+      2026-11-03 with plain Compose: a new database, a migration and a container restart;
+      Postgres as 999 with its secret at `x402-creds`' owner and mode on 2026-11-04. Not yet: the
+      deploy path (`deploy.sh`, `x402@.service`) and the reboot, decision 3)
 - [x] Given the runbook, when an admin follows it, then the playbook comes from a commit on
       `deploy/production`
 - [x] Given a change under `deploy/`, when it ships, then the runbook gives the order of the
@@ -68,9 +69,9 @@ installs what root runs on the shared server, comes from `develop`, which has no
 
 ## Implementation Notes
 
-- `deploy/production/compose.yaml`: both settings on all four services; `postgres-testnet` adds
-  back `CHOWN`, `DAC_READ_SEARCH`, `SETUID` and `SETGID`, with a comment on which start step needs
-  each.
+- `deploy/production/compose.yaml`: both settings on all four services; `postgres-testnet` runs
+  as `999:999` with no `cap_add` (until Stan's review it added back `CHOWN`, `DAC_READ_SEARCH`,
+  `SETUID` and `SETGID`; decision 10).
 - `docs/runbook.md`, The playbook: runs from `origin/deploy/production`, the order for a change
   under `deploy/`, and a `docker inspect` check. The deploy key step runs the playbook from
   `deploy/production` too.
@@ -89,6 +90,12 @@ installs what root runs on the shared server, comes from `develop`, which has no
   - `docker inspect`: `CapDrop=[ALL]` and `no-new-privileges:true` on all four, `CapAdd` empty but
     for Postgres's four.
   - Not tested: systemd units, `x402-creds`, `deploy.sh` and a reboot.
+- Local test, 2026-11-04, Postgres as `999:999`, `cap_drop: [ALL]`, `no-new-privileges`, no
+  `cap_add`, password secret 0400 and owned by 999 (as `x402-creds` writes it): a new volume
+  (`initdb`), a restart, a recreated container on the used volume, and a volume first made by the
+  root entrypoint with Docker's defaults (as the server's would be) all reach `pg_isready`, with no
+  error in the log. `CapEff` and `CapBnd` 0, `NoNewPrivs` 1; a root `docker compose exec` also
+  gets `CapBnd` 0. Password login over TCP works.
 
 ## Issues Encountered
 
@@ -105,13 +112,23 @@ installs what root runs on the shared server, comes from `develop`, which has no
 - **`chmod … Operation not permitted` stays in Postgres's log.** Root can't chmod directories
   `postgres` owns without `FOWNER`; the entrypoint ignores that failure (`|| :`) and repeats the
   chmod as `postgres` after gosu, so the modes end right (`3775`, `700`).
+- **The three above applied to the root start only** and went away with decision 10: started as
+  999, the entrypoint skips the chown, the `find` and gosu, and reads the secret as its owner.
+- **`DAC_READ_SEARCH` widened what root could do** (Stan's review). It isn't one of Docker's
+  defaults, and the default seccomp profile allows `open_by_handle_at` (the Shocker escape's call)
+  only with it, so root in the container, through `docker compose exec`, could make a call it
+  couldn't before this PR.
+- **The runbook's `docker inspect` check inspected nothing** (Stan's review). Repeated `label`
+  filters must all match, no container is in both projects, so `docker ps` printed nothing and the
+  check passed. Now one `docker ps` per project.
 
 ## Design Decisions
 
 ### From Plan
 
-1. **Postgres: drop all and add back what a run shows** (okarcz, 2026-11-03), rather than starting
-   it as `postgres` with none, or keeping Docker's defaults with only `no-new-privileges`.
+1. ~~**Postgres: drop all and add back what a run shows** (okarcz, 2026-11-03), rather than
+   starting it as `postgres` with none, or keeping Docker's defaults with only
+   `no-new-privileges`.~~ Replaced by decision 10.
 2. **A change under `deploy/`: merge, then the playbook, then restart** (okarcz, 2026-11-03).
    The playbook must come from `deploy/production`, so the merge comes first, and its deploy runs
    with the old files; a change must work with them until the restart.
@@ -121,8 +138,8 @@ installs what root runs on the shared server, comes from `develop`, which has no
 
 ### Emerged
 
-5. **`DAC_READ_SEARCH` added** after the restart failure (Issues Encountered). Without `FOWNER`,
-   left out since its chmod failure is harmless.
+5. ~~**`DAC_READ_SEARCH` added** after the restart failure (Issues Encountered). Without
+   `FOWNER`, left out since its chmod failure is harmless.~~ Gone with decision 10.
 6. **ADR 0011's playbook line and the deploy key step** name `deploy/production` too: both said
    "a reviewed commit" or `develop`, and would contradict the runbook.
 7. **A `docker inspect` check in the runbook,** for criterion 1 on the server after the merge.
@@ -135,6 +152,23 @@ installs what root runs on the shared server, comes from `develop`, which has no
    runbook adds: wait for the merge's deploy before the playbook, rerun a failed deploy after
    step 3, restart OpenBao only for its own files, a clean checkout before the playbook, and Run
    workflow after a deploy key change.
+10. **Postgres starts as `999:999` with no capability** (okarcz, 2026-11-04, Stan's suggestion on
+    #118), replacing decision 1: `DAC_READ_SEARCH` opened `open_by_handle_at`, and as 999 none is
+    needed. Chosen over `DAC_OVERRIDE` in its place (a default, but broader) and over keeping it.
+11. **The `docker inspect` check runs one `docker ps` per project** (okarcz, 2026-11-04, Stan's
+    suggestion), and also prints each container's user.
+12. **The first playbook run from `deploy/production` comes after #119** (okarcz, 2026-11-04,
+    Stan's suggestion): until then the branch is `f391494`, older than the server's files.
+13. **`require_last_push_approval` on in `deploy/production`'s ruleset** (okarcz, 2026-11-04,
+    from Stan's question): without it, someone who pushes to `develop` while a promotion is open
+    can approve and merge it, as long as they didn't open it. The cost: whoever pushed last can't
+    approve that promotion. The runbook and ADR 0011 say so.
+14. **The image change stays off `develop` until the files' promotion has been through steps 1 to
+    3** (okarcz, 2026-11-04, Stan's suggestion): a promotion carries everything on `develop`.
+15. **Step 2 waits on the workflow run, not `journalctl`** (okarcz, 2026-11-04, Stan's
+    suggestion): the deploy unit starts only after the image job and the SSH step.
+16. **OpenBao restarts between the facilitator's stop and start** (okarcz, 2026-11-04, Stan's
+    nit): one `/settle` outage instead of two.
 
 ## Review
 
@@ -143,3 +177,8 @@ installs what root runs on the shared server, comes from `develop`, which has no
 requires 1 approving review and has no bypass actors. Deferred: no CI job starts the production
 compose file, so a Postgres image bump that needs another capability would pass CI and fail on
 the server; a backlog candidate after 0036.
+
+2026-11-04, Stan's review of #118: 1 issue, 5 non-blocking comments and a nit, all taken
+(decisions 10 to 16). His run covered Postgres with the secret at `x402-creds`' owner and mode
+(then with the four capabilities). He takes the deploy key rotation's step 3, which doesn't restart
+the other units a promotion may change, to 0026's runbook.
