@@ -239,10 +239,11 @@ facilitator serves, then restarts `x402@production` on the new image and waits u
   The older image's migrations are already applied, and every migration is expand/contract, so
   it runs on the newer schema.
 
-  `gh workflow run` and **Run workflow** need GitHub to know the workflow. It knows the ones on the
-  default branch, `main`, which doesn't have this one; whether a run from a push to
-  `deploy/production` is enough hasn't been tried. If GitHub refuses, deploy the digest on the
-  server instead (Deploy, above).
+  `gh workflow run` and **Run workflow** need the workflow on the default branch, `main`, so `main`
+  holds a copy of `deploy-production.yml` for that alone: a run uses `deploy/production`'s own
+  file, and a push to `deploy/production` starts one without the copy (2026-11-04). Keep the
+  copy's `on:` the same as the real one. If GitHub refuses, deploy the digest on the server
+  instead (Deploy, above).
 
 ## Long migrations
 
