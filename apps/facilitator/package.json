@@ -5,6 +5,9 @@
   "description": "x402 facilitator service: verify, settle, supported, discovery and MCP",
   "license": "Apache-2.0",
   "type": "module",
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

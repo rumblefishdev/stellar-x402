@@ -13,6 +13,7 @@ import {
   nativeToScVal,
 } from "@stellar/stellar-sdk";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { MIGRATIONS, migrate } from "../src/adapters/postgres-schema.js";
 import { ConfigError, parseConfig } from "../src/config.js";
 import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger, rpcEndpointName } from "../src/logger.js";
@@ -238,6 +239,43 @@ describe("main()", () => {
       write.mockRestore();
       console.error = original;
       await app.close();
+    }
+  });
+
+  it("reports ready and listed on /health once it holds the lease and a sweep has listed", async () => {
+    const app = await main({ ...env, RPC_URLS: rpc.url, PORT: "0", LOG_LEVEL: "error" });
+    try {
+      await app.reconciled;
+      const response = await fetch(`http://127.0.0.1:${app.port}/health`);
+      expect([response.status, await response.json()]).toEqual([
+        200,
+        { ready: true, listed: true },
+      ]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("refuses to start on a schema behind the code, naming what it lacks, and starts on one ahead", async () => {
+    const fresh = `${db.schema}_behind`;
+    await db.pool.query(`CREATE SCHEMA ${fresh}`);
+    const pool = db.poolFor(fresh, 2);
+    const freshEnv = { ...env, DATABASE_URL: db.urlFor(fresh), RPC_URLS: rpc.url, PORT: "0" };
+    try {
+      await migrate(pool, 0, MIGRATIONS.slice(0, 1));
+      const error = await main({ ...freshEnv, LOG_LEVEL: "error" }, { write: () => {} }).catch(
+        (e: unknown) => e,
+      );
+      const rest = MIGRATIONS.slice(1).map((migration) => migration.name);
+      expect((error as Error).message).toBe(`the schema lacks migrations: ${rest.join(", ")}`);
+      // A rollback to an earlier image runs on the newer schema (ADR 0012).
+      await migrate(pool);
+      await pool.query("INSERT INTO schema_migrations (name, applied_at) VALUES ('9999_next', 0)");
+      const app = await main({ ...freshEnv, LOG_LEVEL: "error" });
+      await app.close();
+    } finally {
+      await pool.end();
+      await db.pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
     }
   });
 

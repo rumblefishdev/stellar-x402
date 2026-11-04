@@ -32,6 +32,7 @@ import { feeSettings, type FeeSettings } from "../src/settlement/fees.js";
 import {
   CHANNEL_ACCOUNT_REASON,
   MUXED_FACILITATOR_REASON,
+  PAYER_AUTH_REASON,
   UpstreamTimeoutError,
   type UpstreamVerifier,
   type VerifyTrace,
@@ -44,14 +45,15 @@ const payer = Keypair.random().publicKey();
 const payTo = Keypair.random().publicKey();
 const CURRENT = 1_000;
 
-const config = parseConfig({
+const env = {
   FACILITATOR_SECRET: secret,
   DATABASE_URL: "postgres://db.internal/x402",
   CLIENT_IP: "socket",
   CHANNELS: channel,
   RPC_URLS: "https://rpc-a.example,https://rpc-b.example",
   MAX_FEE_STROOPS: "300000",
-});
+};
+const config = parseConfig(env);
 /** How the logs name `RPC_URLS[i]`. */
 const rpc = (i: number) => rpcEndpointName(config.rpcUrls[i]!, i);
 
@@ -65,31 +67,36 @@ const requirements: PaymentRequirements = {
   extra: {},
 };
 
-/** A `transfer` from the payer, with auth to `expiration` and `source` as the transaction source. */
+/**
+ * A `transfer` from the payer, with auth to `expiration` and `source` as the transaction source,
+ * plus an entry for each of `others`.
+ */
 function payload(
   source: Account | MuxedAccount = new Account(payer, "1"),
   expiration = CURRENT + 12,
+  others: string[] = [],
 ): PaymentPayload {
-  const auth = new xdr.SorobanAuthorizationEntry({
-    credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(
-      new xdr.SorobanAddressCredentials({
-        address: new Address(payer).toScAddress(),
-        nonce: xdr.Int64.fromString("1"),
-        signatureExpirationLedger: expiration,
-        signature: xdr.ScVal.scvVoid(),
-      }),
-    ),
-    rootInvocation: new xdr.SorobanAuthorizedInvocation({
-      function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
-        new xdr.InvokeContractArgs({
-          contractAddress: new Address(asset).toScAddress(),
-          functionName: "transfer",
-          args: [],
+  const entry = (address: string) =>
+    new xdr.SorobanAuthorizationEntry({
+      credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(
+        new xdr.SorobanAddressCredentials({
+          address: new Address(address).toScAddress(),
+          nonce: xdr.Int64.fromString("1"),
+          signatureExpirationLedger: expiration,
+          signature: xdr.ScVal.scvVoid(),
         }),
       ),
-      subInvocations: [],
-    }),
-  });
+      rootInvocation: new xdr.SorobanAuthorizedInvocation({
+        function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
+          new xdr.InvokeContractArgs({
+            contractAddress: new Address(asset).toScAddress(),
+            functionName: "transfer",
+            args: [],
+          }),
+        ),
+        subInvocations: [],
+      }),
+    });
   const transaction = new TransactionBuilder(source, {
     fee: "100",
     networkPassphrase: Networks.TESTNET,
@@ -103,7 +110,7 @@ function payload(
           nativeToScVal(payTo, { type: "address" }),
           nativeToScVal(1000n, { type: "i128" }),
         ],
-        auth: [auth],
+        auth: [payer, ...others].map(entry),
       }),
     )
     .setTimeout(60)
@@ -234,6 +241,59 @@ describe("buildVerifier (the /verify wiring in main)", () => {
       isValid: false,
       invalidReason: "invalid_exact_stellar_signature_expiration_too_soon",
     });
+  });
+
+  it("caps the auth expiry at MAX_VALIDITY_LEDGERS (default 66) in /verify and /settle's check", async () => {
+    const { verify, check } = setup();
+    const ok = payload(undefined, CURRENT + 66);
+    const far = payload(undefined, CURRENT + 67);
+    await expect(verify(ok, requirements)).resolves.toEqual({ isValid: true, payer });
+    expect((await check(ok, requirements)).response).toEqual({ isValid: true, payer });
+    for (const answer of [
+      await verify(far, requirements),
+      (await check(far, requirements)).response,
+    ])
+      expect(answer).toMatchObject({
+        isValid: false,
+        invalidReason: "invalid_exact_stellar_signature_expiration_too_far",
+      });
+  });
+
+  it("takes a non-default MAX_VALIDITY_LEDGERS in /verify, /settle's check and the ceiling alike", async () => {
+    const cfg = parseConfig({ ...env, MAX_VALIDITY_LEDGERS: "80" });
+    const { verify, check } = setup(undefined, { config: cfg });
+    // 80 ledgers less a tenth, at 5 s: 363 s.
+    const wide = { ...requirements, maxTimeoutSeconds: 363 };
+    const ok = payload(undefined, CURRENT + 80);
+    const far = payload(undefined, CURRENT + 81);
+    for (const run of [
+      verify,
+      async (...args: Parameters<typeof verify>) => (await check(...args)).response,
+    ]) {
+      await expect(run(ok, wide)).resolves.toEqual({ isValid: true, payer });
+      await expect(run(far, wide)).resolves.toMatchObject({
+        isValid: false,
+        invalidReason: "invalid_exact_stellar_signature_expiration_too_far",
+        invalidMessage: expect.stringContaining("at most 80 are allowed"),
+      });
+      await expect(run(ok, { ...wide, maxTimeoutSeconds: 364 })).resolves.toMatchObject({
+        isValid: false,
+        invalidMessage: expect.stringContaining("at most 363 is allowed"),
+      });
+    }
+  });
+
+  it("refuses an extra address's auth entry through /verify and /settle's check (0073 decision 21)", async () => {
+    const { verify, check } = setup();
+    const extra = payload(undefined, CURRENT + 10, [Keypair.random().publicKey()]);
+    for (const answer of [
+      await verify(extra, requirements),
+      (await check(extra, requirements)).response,
+    ])
+      expect(answer).toMatchObject({
+        isValid: false,
+        invalidReason: PAYER_AUTH_REASON,
+      });
   });
 
   it("answers from the second RPC URL when the first throws, and moves the shared client there", async () => {

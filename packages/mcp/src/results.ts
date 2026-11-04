@@ -1,4 +1,5 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { SellerFetchError } from "@stellar-x402/seller-fetch";
 /** Closed set of error codes; an agent branches on `error.code`, never on the message. */
 export type ErrorCode =
   | "upstream_error"
@@ -27,6 +28,17 @@ export class ToolError extends Error {
   ) {
     super(message);
   }
+}
+
+/**
+ * The tool error a failure stands for: a seller-fetch refusal keeps its code, message and detail.
+ * Any other error gives `undefined`: the caller decides what it means.
+ */
+export function asToolError(error: unknown): ToolError | undefined {
+  if (error instanceof ToolError) return error;
+  if (error instanceof SellerFetchError)
+    return new ToolError(error.code, error.message, error.detail);
+  return undefined;
 }
 
 /**

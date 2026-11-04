@@ -4,7 +4,8 @@ import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 /**
  * Lifecycle of a settlement record (AD-16). States only move forward:
  * `claimed → signed → pending → success | failed | rejected | expired`.
- * A record can skip a state, e.g. `signed → success`.
+ * A record can skip a state, e.g. `signed → success`. One written exception (0073 decision 5):
+ * {@link SettlementStore.reopen} moves a `rejected` record that never had a hash back to `claimed`.
  */
 export type SettlementState =
   "claimed" | "signed" | "pending" | "success" | "failed" | "rejected" | "expired";
@@ -41,11 +42,18 @@ export interface SettlementRecord {
   /** When a `/settle` call first answered this record's `success` (AD-6: once per record). */
   successAnsweredAt?: number;
   /**
-   * Starts at 0 and goes up by one with every hash `addHash` appends, so a write that passes the
-   * version it read fails once a hash was stored after that read (0019 decision 26).
+   * Starts at 0 and goes up by one with every hash `addHash` appends and with every reopen, so a
+   * write that passes the version it read fails once a hash was stored, or the record reopened,
+   * after that read (0019 decision 26, 0073 decision 19).
    */
   version: number;
-  /** Milliseconds since the epoch. */
+  /**
+   * How many times {@link SettlementStore.reopen} moved the record back to `claimed` (0073
+   * decision 14); 0 for a record claimed once. -1 for a record claimed before 0073, which never
+   * reopens: its release answered "sign a new payment" (0073 decision 25).
+   */
+  reopened: number;
+  /** Milliseconds since the epoch; a reopen sets it to the reopening call's start. */
   createdAt: number;
   updatedAt: number;
 }
@@ -60,6 +68,7 @@ export type NewSettlement = Omit<
   | "errorReason"
   | "successAnsweredAt"
   | "version"
+  | "reopened"
   | "updatedAt"
 >;
 
@@ -87,8 +96,8 @@ export type AttemptState = "stored" | "sent" | "unknown" | "landed" | "dead";
 
 /** The bounds of a signed transaction: past either one it can no longer land. */
 export interface AttemptBounds {
-  /** The time bound, in Unix seconds. */
-  maxTime: number;
+  /** The time bound, in Unix seconds; unset for an envelope bounded by `maxLedger` alone (0073). */
+  maxTime?: number;
   /** The last ledger it may land in (inclusive). */
   maxLedger?: number;
 }
@@ -154,7 +163,8 @@ export interface SettlementStore {
    * Appends a signed hash, durably, before it is first sent, moves `claimed` to `signed` and adds
    * one to the record's `version`.
    * In order of precedence:
-   * 1. a missing or final record resolves `false`;
+   * 1. a missing or final record, or with `claim` one reopened since that claim (its `reopened`
+   *    differs, 0073 decision 19), resolves `false`;
    * 2. a hash already on this record resolves `true`, a no-op;
    * 3. a hash on another record rejects with `HashConflictError`, and neither record changes;
    * 4. otherwise the hash is appended and it resolves `true`.
@@ -168,6 +178,7 @@ export interface SettlementStore {
     hash: string,
     updatedAt: number,
     bounds?: AttemptBounds,
+    claim?: number,
   ): Promise<boolean>;
   /** The record's attempts, oldest first, in the order of `hashes`. */
   attempts(key: SettlementKey): Promise<SettlementAttempt[]>;
@@ -191,13 +202,32 @@ export interface SettlementStore {
    * never moves on (AD-16). Rejects a `feeCharged` that isn't a non-negative int64.
    * `update.attempts` are applied as {@link markAttempts} would, in the same transaction, also
    * when the state doesn't move. With `expectedVersion`, the record must also still have that
-   * `version`: no hash was appended since the caller read it.
+   * `version`: no hash was appended since the caller read it. With `claim`, it must still have
+   * that `reopened` count: a write of an earlier claim never lands on a reopened one (0073
+   * decision 24).
    */
   transition(
     key: SettlementKey,
     expected: SettlementState,
     update: SettlementUpdate,
     expectedVersion?: number,
+    claim?: number,
+  ): Promise<SettlementRecord | undefined>;
+  /**
+   * Compare-and-set, the one backward move (0073 decision 5): moves the record from `rejected`
+   * back to `claimed` while it has the same `fingerprint`, one of `reasons` as its `errorReason`,
+   * no hash, so nothing was ever sent for it, and was claimed since 0073 (`reopened` not -1). Clears `errorReason`, adds one to `reopened` and
+   * to `version`, and sets `createdAt` and `updatedAt` to `now`, so a repeat counts the new
+   * claim's budget from it, and a writer that read the earlier claim and passes its version or
+   * `reopened` count fails (0073 decision 19).
+   * Resolves the reopened record, or `undefined` if any condition fails: exactly one of several
+   * concurrent callers wins.
+   */
+  reopen(
+    key: SettlementKey,
+    fingerprint: string,
+    reasons: readonly string[],
+    now: number,
   ): Promise<SettlementRecord | undefined>;
   /** Records not yet final, for the startup re-check (AD-16). */
   listNonFinal(network: StellarNetwork): Promise<SettlementRecord[]>;

@@ -1,0 +1,9 @@
+# One pass of the facilitator's watchdog (ADR 0011), started by x402-watchdog@<environment>.timer.
+[Unit]
+Description=x402 facilitator watchdog (%i)
+Documentation=https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/adr/0011-facilitator-hosting.md
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/x402/x402-watchdog %i

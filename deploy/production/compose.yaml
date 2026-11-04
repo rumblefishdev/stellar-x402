@@ -1,0 +1,114 @@
+# The production environment (ADR 0011, 0077): one facilitator for every network it serves (today
+# testnet), a database and a migration service per network, and the tunnel connector. Each service
+# has a systemd unit of its own (`deploy/systemd`), so none has a restart policy, and none
+# publishes a port. On the server this is /srv/x402/production/compose.yaml.
+#
+#   FACILITATOR_IMAGE  the facilitator's image; `x402-compose` sets it from `digest`
+#   SECRETS_DIR        the decrypted credentials, /run/x402/production unless set (local runs)
+name: x402-production
+
+services:
+  facilitator:
+    image: ${FACILITATOR_IMAGE:?set from digest by x402-compose}
+    read_only: true
+    mem_limit: 512m
+    cpus: 1
+    stop_grace_period: 180s
+    environment:
+      NETWORK: stellar:testnet
+      # cloudflare/x402.tf in soroban-infrastructure routes to facilitator:4021: change both or
+      # neither.
+      PORT: "4021"
+      CLIENT_IP: cloudflare
+      DATABASE_URL_FILE: /run/secrets/database-url.testnet
+      RPC_URLS_FILE: /run/secrets/rpc-urls.testnet
+      # The signer (OpenBao Transit, its AppRole files and sockets) and CHANNELS come with 0036,
+      # which moves testnet's channels to the OpenBao key.
+    secrets:
+      - database-url.testnet
+      - rpc-urls.testnet
+    networks:
+      - edge
+      - db
+    # Liveness only (ADR 0011); the deploy reads `ready` and `listed` with the same one-liner.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:4021/health',{signal:AbortSignal.timeout(5000)}).then((r)=>process.exit(r.ok?0:1),()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  # `docker compose run --rm migrate-testnet`, from the deploy only. Its statement timeouts are
+  # the migration runner's own (ADR 0012), not the app pool's.
+  migrate-testnet:
+    image: ${FACILITATOR_IMAGE:?set from digest by x402-compose}
+    profiles: [migrate]
+    command: [node, dist/migrate.js]
+    # Node as PID 1 ignores SIGTERM without a listener; under an init it exits on the stop that
+    # Compose forwards.
+    init: true
+    read_only: true
+    mem_limit: 512m
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database-url.testnet
+    secrets:
+      - database-url.testnet
+    networks:
+      - db
+    healthcheck:
+      disable: true
+
+  postgres-testnet:
+    image: postgres:18@sha256:979bccfde35445db618c65107d27d08c6c21339d8dc3ad4c830c6633947be0e4
+    mem_limit: 1g
+    shm_size: 256m
+    stop_grace_period: 120s
+    environment:
+      POSTGRES_DB: x402
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password.testnet
+    secrets:
+      - postgres-password.testnet
+    # 18 keeps PGDATA in /var/lib/postgresql/18/docker and refuses a mount at …/data.
+    volumes:
+      - postgres-testnet:/var/lib/postgresql
+    networks:
+      - db
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.1@sha256:a15a3b50b8dabd57ac2090e9484c0247dba9dfa1f0df4d298d4317f9d69eb2d5
+    command: [tunnel, run, --token-file, /run/secrets/tunnel-token]
+    read_only: true
+    mem_limit: 128m
+    secrets:
+      - tunnel-token
+    networks:
+      - edge
+
+networks:
+  edge:
+    name: x402-production-edge
+  # No route out: the facilitator, the databases and the migration services only.
+  db:
+    name: x402-production-db
+    internal: true
+
+volumes:
+  # Made by the playbook and never by Compose, so `compose down -v` can't remove the only copy.
+  postgres-testnet:
+    external: true
+    name: x402-production-postgres-testnet
+
+# Bind mounts outside swarm: each file keeps the owner and mode `x402-creds` gives it.
+secrets:
+  database-url.testnet:
+    file: ${SECRETS_DIR:-/run/x402/production}/database-url.testnet
+  rpc-urls.testnet:
+    file: ${SECRETS_DIR:-/run/x402/production}/rpc-urls.testnet
+  postgres-password.testnet:
+    file: ${SECRETS_DIR:-/run/x402/production}/postgres-password.testnet
+  tunnel-token:
+    file: ${SECRETS_DIR:-/run/x402/production}/tunnel-token

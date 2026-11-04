@@ -156,6 +156,8 @@ interface SettlementRow {
   success_answered_at?: string | null;
   /** Absent on a database `0005_settlement_attempts` hasn't reached (`SELECT s.*`). */
   version?: number;
+  /** Absent on a database `0007_settlement_reopened` hasn't reached (`SELECT s.*`). */
+  reopened?: number;
   created_at: string;
   updated_at: string;
   hashes?: string[];
@@ -171,6 +173,8 @@ function toRecord(row: SettlementRow, hashes = row.hashes ?? []): SettlementReco
     state: row.state as SettlementState,
     hashes,
     version: row.version ?? 0,
+    // Without the column, nothing can reopen: as a record claimed before 0073.
+    reopened: row.reopened ?? -1,
     paymentPayload: row.payment_payload,
     paymentRequirements: row.payment_requirements,
     createdAt: Number(row.created_at),
@@ -246,8 +250,8 @@ export class PostgresSettlementStore implements SettlementStore {
     const s = settlement;
     const { rows } = await this.pool.query<SettlementRow>(
       `INSERT INTO settlements (key, network, payer, nonce, fingerprint, state, payment_payload,
-         payment_requirements, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, 'claimed', $6, $7, $8, $8)
+         payment_requirements, created_at, updated_at, reopened)
+       VALUES ($1, $2, $3, $4, $5, 'claimed', $6, $7, $8, $8, 0)
        ON CONFLICT (key) DO NOTHING
        RETURNING *`,
       [
@@ -292,6 +296,7 @@ export class PostgresSettlementStore implements SettlementStore {
     hash: string,
     updatedAt: number,
     bounds?: AttemptBounds,
+    claim?: number,
   ): Promise<boolean> {
     const { rows } = await this.pool.query<{
       state: string | null;
@@ -299,7 +304,8 @@ export class PostgresSettlementStore implements SettlementStore {
       owner: string | null;
     }>(
       `WITH rec AS (
-         SELECT key, state FROM settlements WHERE key = $1 FOR UPDATE
+         SELECT key, state FROM settlements
+         WHERE key = $1 AND ($6::integer IS NULL OR reopened = $6) FOR UPDATE
        ), ins AS (
          INSERT INTO settlement_hashes (hash, key, state, max_time, max_ledger, updated_at)
          SELECT $2, key, 'stored', $4::bigint, $5::bigint, $3 FROM rec
@@ -317,10 +323,10 @@ export class PostgresSettlementStore implements SettlementStore {
        SELECT (SELECT state FROM rec) AS state,
               EXISTS (SELECT 1 FROM upd) AS added,
               (SELECT key FROM settlement_hashes WHERE hash = $2) AS owner`,
-      [key, hash, updatedAt, bounds?.maxTime ?? null, bounds?.maxLedger ?? null],
+      [key, hash, updatedAt, bounds?.maxTime ?? null, bounds?.maxLedger ?? null, claim ?? null],
     );
     const { state, added, owner } = rows[0]!;
-    // 1. A missing or final record.
+    // 1. A missing or final record, or one reopened since the caller's claim.
     if (state === null || isFinal(state as SettlementState)) return false;
     // 4. Appended.
     if (added) return true;
@@ -379,15 +385,16 @@ export class PostgresSettlementStore implements SettlementStore {
     expected: SettlementState,
     update: SettlementUpdate,
     expectedVersion?: number,
+    claim?: number,
   ): Promise<SettlementRecord | undefined> {
     if (update.feeCharged !== undefined) assertStroops(update.feeCharged, "feeCharged");
     const { attempts } = update;
     if (attempts?.length)
       return inTransaction(this.pool, async (client) => {
         await client.query(MARK_ATTEMPTS, [key, update.updatedAt, attemptsJson(attempts)]);
-        return this.moveState(client, key, expected, update, expectedVersion);
+        return this.moveState(client, key, expected, update, expectedVersion, claim);
       });
-    return this.moveState(this.pool, key, expected, update, expectedVersion);
+    return this.moveState(this.pool, key, expected, update, expectedVersion, claim);
   }
 
   private async moveState(
@@ -396,6 +403,7 @@ export class PostgresSettlementStore implements SettlementStore {
     expected: SettlementState,
     update: SettlementUpdate,
     expectedVersion?: number,
+    claim?: number,
   ): Promise<SettlementRecord | undefined> {
     if (!isForward(expected, update.state)) return undefined;
     const values: unknown[] = [key, expected, update.state, update.updatedAt];
@@ -413,6 +421,10 @@ export class PostgresSettlementStore implements SettlementStore {
       values.push(expectedVersion);
       where += ` AND version = $${values.length}`;
     }
+    if (claim !== undefined) {
+      values.push(claim);
+      where += ` AND reopened = $${values.length}`;
+    }
     const { rows } = await db.query<SettlementRow>(
       `UPDATE settlements SET ${sets.join(", ")} WHERE ${where} RETURNING *`,
       values,
@@ -428,6 +440,26 @@ export class PostgresSettlementStore implements SettlementStore {
       rows[0],
       hashes.rows.map((row) => row.hash),
     );
+  }
+
+  /** One conditional `UPDATE`: the row lock lets exactly one of several callers reopen it. */
+  async reopen(
+    key: SettlementKey,
+    fingerprint: string,
+    reasons: readonly string[],
+    now: number,
+  ): Promise<SettlementRecord | undefined> {
+    const { rows } = await this.pool.query<SettlementRow>(
+      `UPDATE settlements s
+       SET state = 'claimed', error_reason = NULL, reopened = s.reopened + 1,
+           version = s.version + 1, created_at = $4, updated_at = $4
+       WHERE s.key = $1 AND s.state = 'rejected' AND s.fingerprint = $2
+         AND s.error_reason = ANY ($3::text[]) AND s.reopened >= 0
+         AND NOT EXISTS (SELECT 1 FROM settlement_hashes h WHERE h.key = s.key)
+       RETURNING *`,
+      [key, fingerprint, [...reasons], now],
+    );
+    return rows[0] && toRecord(rows[0], []);
   }
 
   async listNonFinal(network: StellarNetwork): Promise<SettlementRecord[]> {

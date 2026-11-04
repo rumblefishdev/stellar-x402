@@ -183,6 +183,15 @@ CREATE TABLE catalog_attempts (
 CREATE INDEX catalog_attempts_at ON catalog_attempts (at);
 `,
   },
+  {
+    // 0073: how many times a record nothing was sent for was reopened by the identical payload
+    // (decisions 5, 14). -1 for the rows already there and for the ones a release before 0073
+    // still inserts during the deploy, which leaves the column out: their answer was "sign a new
+    // payment", so they never reopen. `claim()` writes 0 (decision 25). After #89's
+    // `0006_catalog_seller_check` (decision 27).
+    name: "0007_settlement_reopened",
+    sql: "ALTER TABLE settlements ADD COLUMN reopened integer NOT NULL DEFAULT -1;",
+  },
 ];
 
 /** Runs in one transaction with the transactional migrations next to it, as before 0067. */
@@ -363,6 +372,23 @@ async function lock(client: pg.PoolClient, waitMs: number): Promise<void> {
     if (Date.now() >= deadline)
       throw new Error(`another migrate run held the lock for ${waitMs} ms`);
     await sleep(LOCK_POLL_MS);
+  }
+}
+
+/**
+ * The names of `migrations` the schema hasn't applied, in order: `[]` when it is current, or ahead
+ * of the code, as after a rollback to an earlier image (0026).
+ */
+export async function pendingMigrations(
+  pool: pg.Pool,
+  migrations: readonly Migration[] = MIGRATIONS,
+): Promise<string[]> {
+  const client = await pool.connect();
+  try {
+    const done = await markers(client);
+    return migrations.map((migration) => migration.name).filter((name) => !done.has(name));
+  } finally {
+    client.release();
   }
 }
 

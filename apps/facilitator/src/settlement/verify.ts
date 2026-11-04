@@ -32,6 +32,11 @@ export interface VerifierDeps {
   channels: readonly string[];
   /** Least ledgers left before the payer's auth expires (AD-22). */
   minValidityLedgers: number;
+  /**
+   * Most ledgers left before the payer's auth expires (0073 decision 2): an envelope lives as
+   * long as its auth entry, so this bounds a channel's wait on one transaction.
+   */
+  maxValidityLedgers: number;
   /** Sequence of the latest closed ledger. */
   latestLedger: () => Promise<number>;
   /**
@@ -54,7 +59,8 @@ export const CHANNEL_ACCOUNT_REASON = "invalid_exact_stellar_payload_channel_acc
 export const MUXED_FACILITATOR_REASON = "invalid_exact_stellar_payload_facilitator_muxed";
 /**
  * The payload doesn't carry exactly one auth entry for the payer, so it has no settlement key
- * (AD-6). Upstream de-duplicates signers and doesn't count entries.
+ * (AD-6), or it carries another address's entry too (0073 decision 21). Upstream de-duplicates
+ * signers and doesn't count entries.
  */
 export const PAYER_AUTH_REASON = "invalid_exact_stellar_payload_payer_auth_entries";
 /**
@@ -66,8 +72,10 @@ export const UNSUPPORTED_CREDENTIAL_REASON =
   "invalid_exact_stellar_payload_unsupported_credential_type";
 
 /**
- * The auth expires at or past the last ledger the pool can bound an envelope by: `/settle` passes
- * it as `maxLedger`, and the envelope's bound (`maxLedger + 1`) is a uint32.
+ * The resource's `maxTimeoutSeconds` is above what the cap fits (0073 decision 22), the auth
+ * expires more than `maxValidityLedgers` after the latest ledger (0073 decision 2), or at or past
+ * the last ledger the pool can bound an envelope by: `/settle` passes it as `maxLedger`, and the
+ * envelope's bound (`maxLedger + 1`) is a uint32.
  */
 export const EXPIRATION_TOO_FAR_REASON = "invalid_exact_stellar_signature_expiration_too_far";
 const MAX_EXPIRATION_LEDGER = 2 ** 32 - 2;
@@ -114,7 +122,7 @@ export interface Verified {
   payer: string;
   /** The int64 nonce of the payer's one auth entry, as a decimal string (AD-6). */
   nonce: string;
-  /** The earliest `signatureExpirationLedger` of the auth entries. */
+  /** The payer's `signatureExpirationLedger`: its entry is the only address-credential one. */
   expirationLedger: number;
   /** The ledger the validity check read. */
   currentLedger: number;
@@ -130,6 +138,11 @@ export type Check = (
 export function createChecker(deps: VerifierDeps): Check {
   const accounts = new Set([...deps.channels, deps.facilitator]);
   const timeoutMs = deps.upstreamTimeoutMs ?? 10_000;
+  // The longest `maxTimeoutSeconds` the cap fits, less a tenth spare, at upstream's default 5 s a
+  // ledger: 300 s at 66 ledgers. A client that reads faster ledgers signs more (75 at 4 s).
+  const ceiling = Math.floor(
+    (deps.maxValidityLedgers * DEFAULT_ESTIMATED_LEDGER_SECONDS * 10) / 11,
+  );
   return async (payload, requirements, trace) => {
     // Upstream would verify against any Stellar network's default RPC; this process serves one.
     if (requirements.network !== deps.network) {
@@ -193,13 +206,15 @@ export function createChecker(deps: VerifierDeps): Check {
       return { response };
     }
     // `/settle` keys the settlement on this nonce; `/verify` must not accept what it can't settle.
+    // Another address's entry would stand in for the payer's in the expiry checks below, which
+    // read the earliest one (0073 decision 21).
     const nonce = payerNonce({ transaction, payer: upstream.payer });
-    if (nonce === undefined) {
+    if (nonce === undefined || hasOtherAddressAuth(transaction, upstream.payer)) {
       return {
         response: invalid(
           PAYER_AUTH_REASON,
           upstream.payer,
-          "the payload must carry exactly one auth entry for the payer",
+          "the payload must carry exactly one auth entry: the payer's",
         ),
       };
     }
@@ -221,6 +236,32 @@ export function createChecker(deps: VerifierDeps): Check {
           upstream.payer,
           `auth expires at ledger ${expiration}, ${expiration - current} ledgers after ledger ` +
             `${current}; at least ${deps.minValidityLedgers} are required${hint}`,
+        ),
+      };
+    }
+    // On the requirements, not the ledger: the gap below shrinks as ledgers close, so the same
+    // payment refused by it now would pass later, after its payer may have signed another
+    // (0073 decision 22). Refused here, a retry as it is stays refused.
+    if (requirements.maxTimeoutSeconds > ceiling) {
+      return {
+        response: invalid(
+          EXPIRATION_TOO_FAR_REASON,
+          upstream.payer,
+          `maxTimeoutSeconds ${requirements.maxTimeoutSeconds} is about ` +
+            `${signedLedgers(requirements.maxTimeoutSeconds)} ledgers; at most ${ceiling} is ` +
+            `allowed, assuming about 5 s a ledger`,
+        ),
+      };
+    }
+    // Within the ceiling, only a client that read faster ledgers, an RPC behind the client's or a
+    // payload signed by hand gets here.
+    if (expiration - current > deps.maxValidityLedgers) {
+      return {
+        response: invalid(
+          EXPIRATION_TOO_FAR_REASON,
+          upstream.payer,
+          `auth expires at ledger ${expiration}, ${expiration - current} ledgers after ledger ` +
+            `${current}; at most ${deps.maxValidityLedgers} are allowed`,
         ),
       };
     }
@@ -330,7 +371,36 @@ export function payerNonce({
   return nonces.length === 1 ? nonces[0] : undefined;
 }
 
-/** The earliest `signatureExpirationLedger` of the payload's address-credential auth entries. */
+/** The payer's one auth entry's `signatureExpirationLedger`, or `undefined` without exactly one. */
+export function payerExpiration(transaction: Transaction, payer: string): number | undefined {
+  const expirations: number[] = [];
+  for (const operation of transaction.operations) {
+    if (operation.type !== "invokeHostFunction") continue;
+    for (const entry of operation.auth ?? []) {
+      const credentials = getAddressCredentials(entry.credentials());
+      if (credentials && addressOf(credentials.address()) === payer)
+        expirations.push(credentials.signatureExpirationLedger());
+    }
+  }
+  return expirations.length === 1 ? expirations[0] : undefined;
+}
+
+/** Whether the payload carries an address-credential auth entry of anyone but `payer`. */
+function hasOtherAddressAuth(transaction: Transaction, payer: string): boolean {
+  return transaction.operations.some(
+    (operation) =>
+      operation.type === "invokeHostFunction" &&
+      (operation.auth ?? []).some((entry) => {
+        const credentials = getAddressCredentials(entry.credentials());
+        return credentials !== undefined && addressOf(credentials.address()) !== payer;
+      }),
+  );
+}
+
+/**
+ * The earliest `signatureExpirationLedger` of the payload's address-credential auth entries: the
+ * payer's, once the checks refused any other (0073 decision 21).
+ */
 export function authExpiration(transaction: Transaction): number {
   let earliest = Number.POSITIVE_INFINITY;
   for (const operation of transaction.operations) {
