@@ -11,6 +11,7 @@ import { rateLimit } from "../src/http/rate-limit.js";
 import { memoryMetrics } from "../src/metrics.js";
 import type { RateLimitStore, Stores } from "../src/ports/index.js";
 import { testDatabase } from "./database.js";
+import { signerEnv } from "./fake-openbao.js";
 
 const db = testDatabase();
 beforeEach(db.empty);
@@ -28,7 +29,7 @@ afterEach(async () => {
  */
 async function serve(env: Record<string, string> = {}, stores: Stores = db.stores()) {
   const config = parseConfig({
-    FACILITATOR_SECRET: Keypair.random().secret(),
+    ...signerEnv(Keypair.random().publicKey()),
     DATABASE_URL: db.urlFor(db.schema),
     CLIENT_IP: "socket",
     CHANNELS: Keypair.random().publicKey(),

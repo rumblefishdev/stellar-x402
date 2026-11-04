@@ -48,6 +48,7 @@ import { createEd25519Signer } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/client";
 import { Agent, fetch } from "undici";
 import { main } from "../src/main.js";
+import { fakeOpenBao, signerEnv } from "../test/fake-openbao.js";
 
 const network = "stellar:testnet";
 const server = new rpc.Server("https://soroban-testnet.stellar.org");
@@ -243,7 +244,8 @@ const channelKeys = Array.from({ length: CHANNELS }, () => Keypair.random());
 const facilitatorEntry = await readAccountEntry(server, source);
 if (!facilitatorEntry) throw new Error("the facilitator account does not exist");
 const setup = buildCreateChannelsTx({
-  facilitator: new Account(source, facilitatorEntry.seqNum().toString()),
+  funder: new Account(source, facilitatorEntry.seqNum().toString()),
+  signer: source,
   channels: channelKeys,
   networkPassphrase: Networks.TESTNET,
   fee: 1000,
@@ -251,9 +253,11 @@ const setup = buildCreateChannelsTx({
 setup.sign(facilitator, ...channelKeys);
 await sendAndPoll(setup, "channel setup");
 
+// The fake OpenBao holds this run's key: a testnet account funded for the run.
+const openbao = await fakeOpenBao(facilitator);
 const facilitatorServer = await main(
   {
-    FACILITATOR_SECRET: facilitator.secret(),
+    ...signerEnv(facilitator.publicKey(), openbao.socketPath),
     CHANNELS: channelKeys.map((keypair) => keypair.publicKey()).join(","),
     PORT: "0",
     LOG_LEVEL: "warn",
@@ -377,4 +381,5 @@ try {
   if (!Object.values(checks).every(Boolean)) process.exitCode = 1;
 } finally {
   await facilitatorServer.close();
+  openbao.close();
 }

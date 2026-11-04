@@ -110,12 +110,32 @@ const envSchema = z
       )
       .optional(),
 
-    /** The facilitator key: signs for the channels and pays fee bumps. Never logged. */
-    FACILITATOR_SECRET: z
+    /**
+     * The OpenBao key's own account, the fee account and the channels' signer (ADR 0013). Startup
+     * doesn't ask OpenBao, so every signature is checked against it instead.
+     */
+    FACILITATOR_ADDRESS: z
       .string()
       .refine(
-        (value) => StrKey.isValidEd25519SecretSeed(value),
-        "must be a Stellar secret key (S…)",
+        (value) => StrKey.isValidEd25519PublicKey(value),
+        "must be a Stellar account address (G…)",
+      ),
+    /** OpenBao's listener socket for this network; it opens no TCP port (ADR 0013). */
+    OPENBAO_SOCKET: z.string(),
+    /** The Transit key's name. */
+    OPENBAO_KEY: z.string(),
+    /** Pinned, so a rotated Transit key can't sign in place of the one on chain. */
+    OPENBAO_KEY_VERSION: int(1),
+    /** The AppRole login; never logged. A deploy passes both as files (`_FILE`). */
+    OPENBAO_ROLE_ID: z.string(),
+    OPENBAO_SECRET_ID: z.string(),
+    /** Refused on the field: zod skips a refine on the object while a required setting is missing. */
+    FACILITATOR_SECRET: z
+      .string()
+      .optional()
+      .refine(
+        (value) => value === undefined,
+        "is no longer read: the key signs in OpenBao (ADR 0013)",
       ),
     /** Comma-separated channel account addresses (never secrets). */
     CHANNELS: list.pipe(
@@ -283,12 +303,13 @@ const envSchema = z
     message: "is no longer read: the stores are always PostgreSQL",
     path: ["STORE"],
   })
-  // `/settle` spends on pubnet, so not before spend budgets (0024) and the lease's fencing token
-  // (0071). Whichever lands last lifts this; the other narrows the message to what is still
-  // missing (0009 decision 49).
+  // `/settle` spends on pubnet, so not before spend budgets (0024), leaving a channel with an open
+  // hash out after a deploy (0090), an alarm on a failing signer (0027) and deciding again how far
+  // the hot key's power reaches (0048). Whichever lands last lifts this, the others narrow its
+  // message (0009 decision 49).
   .refine((env) => env.NETWORK !== STELLAR_NETWORKS.pubnet, {
     message:
-      "stellar:pubnet is refused until spend budgets (0024) and the lease fencing token (0071) land",
+      "stellar:pubnet is refused until spend budgets (0024), task 0090, the signer alarm (0027) and the hot key's re-check (0048) land",
     path: ["NETWORK"],
   });
 
@@ -306,7 +327,15 @@ export interface Config {
   port: number;
   logLevel: "debug" | "info" | "warn" | "error";
   rpcUrls: string[];
-  facilitatorSecret: string;
+  /** The facilitator key in OpenBao Transit (0036); the AppRole is never logged. */
+  signer: {
+    address: string;
+    socketPath: string;
+    key: string;
+    keyVersion: number;
+    roleId: string;
+    secretId: string;
+  };
   channels: string[];
   /** Never logged. */
   databaseUrl: string;
@@ -351,7 +380,7 @@ export class ConfigError extends Error {
  * Settings a deploy passes as a file, `<NAME>_FILE`: a Compose `file:` secret, so the value never
  * sits in `environment:`, which `docker inspect` shows (ADR 0011). Local runs set them plainly.
  */
-const FILE_SETTINGS = ["DATABASE_URL", "RPC_URLS"] as const;
+const FILE_SETTINGS = ["DATABASE_URL", "RPC_URLS", "OPENBAO_ROLE_ID", "OPENBAO_SECRET_ID"] as const;
 
 /** `env` with each {@link FILE_SETTINGS} entry read from its `_FILE`, where one is set. */
 function readFileSettings(
@@ -420,7 +449,14 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
     port: e.PORT,
     logLevel: e.LOG_LEVEL,
     rpcUrls: e.RPC_URLS ?? [DEFAULT_TESTNET_RPC],
-    facilitatorSecret: e.FACILITATOR_SECRET,
+    signer: {
+      address: e.FACILITATOR_ADDRESS,
+      socketPath: e.OPENBAO_SOCKET,
+      key: e.OPENBAO_KEY,
+      keyVersion: e.OPENBAO_KEY_VERSION,
+      roleId: e.OPENBAO_ROLE_ID,
+      secretId: e.OPENBAO_SECRET_ID,
+    },
     channels: e.CHANNELS,
     databaseUrl: e.DATABASE_URL,
     fees: {

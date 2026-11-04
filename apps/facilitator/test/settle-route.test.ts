@@ -11,11 +11,13 @@ import { MAX_BODY_DEPTH, NO_LEASE_RETRY_AFTER_S } from "../src/http/app.js";
 import { start, type Started } from "../src/main.js";
 import { memoryMetrics } from "../src/metrics.js";
 import type { SettlementRecord } from "../src/ports/index.js";
+import { PAYTO_TRUSTLINE_REASON } from "../src/settlement/trustline.js";
 import type { SettlementHooks } from "../src/settlement/hooks.js";
 import type { Reconciliation } from "../src/settlement/reconcile.js";
 import type { Settle } from "../src/settlement/settle.js";
 import { testDatabase } from "./database.js";
 import { bazaarExtensions, depthOf } from "./payment.js";
+import { signerEnv } from "./fake-openbao.js";
 
 const requirements: PaymentRequirements = {
   scheme: "exact",
@@ -51,7 +53,7 @@ describe("POST /settle", () => {
 
   beforeAll(async () => {
     const env = {
-      FACILITATOR_SECRET: Keypair.random().secret(),
+      ...signerEnv(Keypair.random().publicKey()),
       DATABASE_URL: db.urlFor(db.schema),
       CLIENT_IP: "socket",
       CHANNELS: Keypair.random().publicKey(),
@@ -180,6 +182,29 @@ describe("POST /settle", () => {
     expect(settle).not.toHaveBeenCalled();
   });
 
+  it("logs a fee refusal's message, which names archived entries, and no other failure's", async () => {
+    const refusal = (errorReason: string, errorMessage: string) =>
+      ({
+        success: false,
+        errorReason,
+        errorMessage,
+        transaction: "",
+        network: "stellar:testnet",
+      }) as const;
+    const errorMessage =
+      "simulation-derived fee 551787 stroops exceeds ceiling 250000 stroops; the payment's transaction lists 1 archived entry to restore: AAAABg==";
+    settle.mockResolvedValueOnce({
+      response: refusal("invalid_exact_stellar_payload_fee_exceeds_maximum", errorMessage),
+    });
+    settle.mockResolvedValueOnce({
+      response: refusal("invalid_exact_stellar_payload_simulation_failed", "simulation failed"),
+    });
+    await post(request);
+    await post(request);
+    const settled = lines.map((line) => JSON.parse(line)).filter((l) => l.event === "settled");
+    expect(settled.map((l) => l.message)).toEqual([errorMessage, undefined]);
+  });
+
   it("sends no header when there are no extension responses or the answer is a failure", async () => {
     settle.mockResolvedValueOnce({ response: success, record });
     extensionResponses.mockReturnValueOnce(undefined);
@@ -266,6 +291,28 @@ describe("POST /settle", () => {
     expect(settle).not.toHaveBeenCalled();
   });
 
+  it("logs a missing trustline's message, and no other refusal's", async () => {
+    const refusal = { success: false, transaction: "", network: requirements.network };
+    settle.mockResolvedValueOnce({
+      response: {
+        ...refusal,
+        errorReason: PAYTO_TRUSTLINE_REASON,
+        errorMessage: "G… has no USDC trustline",
+      },
+    });
+    await post(request);
+    settle.mockResolvedValueOnce({
+      response: {
+        ...refusal,
+        errorReason: "settle_exact_stellar_refused",
+        errorMessage: "not for the log",
+      },
+    });
+    await post(request);
+    const settled = lines.map((line) => JSON.parse(line)).filter((l) => l.event === "settled");
+    expect(settled.map((line) => line.message)).toEqual(["G… has no USDC trustline", undefined]);
+  });
+
   it("answers 500 and logs the error when settling throws", async () => {
     settle.mockRejectedValueOnce(new Error("store down"));
     const response = await post(request);
@@ -285,7 +332,7 @@ describe("POST /settle beside reconciliation (0019 decision 27)", () => {
       close: vi.fn(async () => {}),
     };
     const env = {
-      FACILITATOR_SECRET: Keypair.random().secret(),
+      ...signerEnv(Keypair.random().publicKey()),
       DATABASE_URL: db.urlFor(db.schema),
       CHANNELS: Keypair.random().publicKey(),
       CLIENT_IP: "socket",
@@ -328,6 +375,7 @@ describe("POST /settle without the channel lease (0025)", () => {
     let holds = false;
     const lease = {
       held: () => holds,
+      current: () => (holds ? { name: "test:channels", token: "t" } : undefined),
       start: vi.fn(async () => {}),
       runOnce: vi.fn(),
       close: vi.fn(async () => {}),
@@ -336,7 +384,7 @@ describe("POST /settle without the channel lease (0025)", () => {
     const rateLimits = db.stores().rateLimits;
     const hit = vi.spyOn(rateLimits, "hit");
     const env = {
-      FACILITATOR_SECRET: Keypair.random().secret(),
+      ...signerEnv(Keypair.random().publicKey()),
       DATABASE_URL: db.urlFor(db.schema),
       CHANNELS: Keypair.random().publicKey(),
       CLIENT_IP: "socket",
@@ -402,6 +450,8 @@ async function stalled(url: string): Promise<{ readonly closed: boolean }> {
   const state = { closed: false };
   socket.on("error", () => {});
   socket.on("close", () => (state.closed = true));
+  // Until the server has read those bytes, Node counts the connection as idle and closes it at once.
+  await fetch(`${url}/supported`);
   return state;
 }
 
@@ -416,13 +466,14 @@ describe("shutdown (0025)", () => {
     const settle = vi.fn<Settle>(async () => ({ response: success }));
     const lease = {
       held: () => true,
+      current: () => ({ name: "test:channels", token: "t" }),
       start: vi.fn(async () => {}),
       runOnce: vi.fn(),
       close: vi.fn(async () => {}),
       release: vi.fn(async () => {}),
     };
     const env = {
-      FACILITATOR_SECRET: Keypair.random().secret(),
+      ...signerEnv(Keypair.random().publicKey()),
       DATABASE_URL: db.urlFor(db.schema),
       CHANNELS: Keypair.random().publicKey(),
       CLIENT_IP: "socket",

@@ -21,6 +21,7 @@ import {
   RpcTimeoutError,
   RpcUnavailableError,
   SignedHookError,
+  SigningError,
   SimulationCheckError,
   SimulationError,
   SourceAccountAuthError,
@@ -32,11 +33,18 @@ import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
-import type { SettlementStore } from "../src/ports/index.js";
+import {
+  LEASE_SKEW_MARGIN_MS,
+  LeaseFencedError,
+  type LeaseFence,
+  type SettlementStore,
+} from "../src/ports/index.js";
 import type { SettlementHooks } from "../src/settlement/hooks.js";
+import { createLeaseKeeper } from "../src/settlement/lease.js";
 import { createReconciler } from "../src/settlement/reconcile.js";
 import { createRecords } from "../src/settlement/records.js";
 import {
+  LeaseLostError,
   SETTLE_REASONS,
   createSettler,
   expectTransfer,
@@ -51,6 +59,7 @@ import {
   type Check,
 } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
+import { holdLease } from "./port-contracts.js";
 
 // `attemptsOf` reads a private WeakMap that only the real submitter fills; these tests put the
 // attempts on the error instead. `settle-pool.test.ts` runs the real pool's.
@@ -214,6 +223,11 @@ const landing =
 
 const db = testDatabase();
 beforeEach(db.empty);
+/** The lease `/settle` sends under, taken again for every test (0071). */
+let fence: LeaseFence | undefined;
+beforeEach(async () => {
+  fence = await holdLease(db.stores().settlements);
+});
 
 /**
  * A `/settle` budget for the cases where it runs out: the claim and the hash's write, each a few
@@ -240,6 +254,17 @@ async function elapse(ms: number) {
     await vi.advanceTimersByTimeAsync(1);
   }
   await storeIdle();
+}
+
+/** Runs `fn` on the fake clock `elapse` moves, for a budget test outside the block that has it. */
+async function onFakeClock<T>(fn: () => Promise<T>): Promise<T> {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  try {
+    return await fn();
+  } finally {
+    await storeIdle();
+    vi.useRealTimers();
+  }
 }
 
 function setup(behaviour: Behaviour = landing(), overrides: Partial<SettlerDeps> = {}) {
@@ -273,12 +298,20 @@ function setup(behaviour: Behaviour = landing(), overrides: Partial<SettlerDeps>
     budgetMs: 5_000,
     pollMs: 5,
     latestLedger: async () => CURRENT,
+    lease: () => fence,
     ...overrides,
   });
   return { settle, store, submit, hooks, order, lines, metrics };
 }
 
 const key = `${network}:${payer}:7` as const;
+/** What an answer that ended a payment adds while its auth entry can still land (0082). */
+const untilExpiry = {
+  errorMessage:
+    `the auth entry may still land in ledger ${EXPIRATION}: ` +
+    `sign a new payment once that ledger has closed`,
+  extra: { retryable: false, expirationLedger: EXPIRATION },
+};
 const alreadySettled = {
   success: false,
   errorReason: SETTLE_REASONS.alreadySettled,
@@ -431,6 +464,8 @@ describe("createSettler", () => {
     expect((await settle(payload(), requirements)).response).toMatchObject({
       errorReason: SETTLE_REASONS.pending,
     });
+    // On a slow runner the budget can end before the hash is stored, so `land` isn't set yet.
+    await vi.waitFor(() => expect(land).toBeTypeOf("function"));
     land();
     await vi.waitFor(async () => expect((await store.get(key))?.state).toBe("success"));
     const retry = await settle(payload(), requirements);
@@ -475,7 +510,13 @@ describe("createSettler", () => {
       },
       { settleTimeoutMs: 30, budgetMs: BUDGET_MS },
     );
-    expect((await settle(payload(), requirements)).response).toMatchObject({
+    // Only the first call writes under the budget; the repeat reads what it stored.
+    const first = await onFakeClock(async () => {
+      const settled = settle(payload(), requirements);
+      await elapse(BUDGET_MS);
+      return settled;
+    });
+    expect(first.response).toMatchObject({
       success: false,
       errorReason: "settlement_pending",
       transaction: HASH,
@@ -525,6 +566,7 @@ describe("createSettler", () => {
       response: {
         isValid: false,
         invalidReason: "invalid_exact_stellar_payload_wrong_amount",
+        invalidMessage: "what the check found",
         payer,
       },
     });
@@ -532,6 +574,7 @@ describe("createSettler", () => {
     expect((await settle(payload(), requirements)).response).toMatchObject({
       success: false,
       errorReason: "invalid_exact_stellar_payload_wrong_amount",
+      errorMessage: "what the check found",
       payer,
     });
     expect(submit).not.toHaveBeenCalled();
@@ -563,9 +606,32 @@ describe("createSettler", () => {
       payer,
       transaction: HASH,
       network,
+      // `expired` comes only once the auth entry has (0082 decision 1).
+      ...(status !== "expired" && untilExpiry),
     });
     expect(await store.get(key)).toMatchObject({ state: status, errorReason: reason });
     expect(hooks.onFinal).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps …_record_write_failed when addHash fails for a reason other than the lease", async () => {
+    let sent = false;
+    const { settle, store } = setup(async (opts) => {
+      const signed = await Promise.resolve(opts.onSigned!(HASH, BOUNDS)).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      if (signed === undefined) {
+        sent = true;
+        return result("success");
+      }
+      throw Object.assign(new SignedHookError("onSigned failed", { cause: signed }), {
+        attempts: [{ hash: HASH, sent: "no" }],
+      });
+    });
+    vi.spyOn(store, "addHash").mockRejectedValue(new Error("store down"));
+    const { response } = await settle(payload(), requirements);
+    expect(sent).toBe(false);
+    expect(response).toMatchObject({ errorReason: SETTLE_REASONS.recordWrite, ...untilExpiry });
   });
 
   it.each([
@@ -574,6 +640,17 @@ describe("createSettler", () => {
     [new FeeLimitError("x"), "settle_exact_stellar_fee_exceeds_maximum"],
     [new LedgerBoundError("x"), "settle_exact_stellar_signature_expiration_too_soon"],
     [new SignedHookError("x"), "settle_exact_stellar_record_write_failed"],
+    [
+      new SignedHookError("x", { cause: new Error("store down") }),
+      "settle_exact_stellar_record_write_failed",
+    ],
+    [new SignedHookError("x", { cause: new LeaseLostError() }), "settle_exact_stellar_lease_lost"],
+    [
+      new SignedHookError("x", { cause: new LeaseFencedError("stellar:testnet:channels") }),
+      "settle_exact_stellar_lease_lost",
+    ],
+    [new SigningError("transaction", "x"), "settle_exact_stellar_transaction_signing_failed"],
+    [new SigningError("fee-bump", "x"), "settle_exact_stellar_fee_bump_signing_failed"],
     [new QueueTimeoutError("x"), "settle_exact_stellar_no_channel_in_time"],
     [new NoChannelsError("x"), "settle_exact_stellar_no_channels"],
     [new ShutdownError("x"), "settle_exact_stellar_shutting_down"],
@@ -588,10 +665,23 @@ describe("createSettler", () => {
     // Nothing was sent, so the auth entry can still land: repeat it, don't sign again (0073).
     // Written out, not read from `UNSENT_REASONS`, so a reason dropped from it fails here.
     const unsent = [
+      "settle_exact_stellar_transaction_signing_failed",
+      "settle_exact_stellar_fee_bump_signing_failed",
       "settle_exact_stellar_no_channel_in_time",
       "settle_exact_stellar_no_channels",
       "settle_exact_stellar_shutting_down",
       "settle_exact_stellar_rpc_unavailable",
+      "settle_exact_stellar_lease_lost",
+    ].includes(reason);
+    // Refused after the claim: the auth entry can still land too, but this one never reopens (0082).
+    const ended = [
+      "settle_exact_stellar_simulation_failed",
+      "settle_exact_stellar_unexpected_balance_changes",
+      "invalid_exact_stellar_payload_unsupported_credential_type",
+      "settle_exact_stellar_fee_exceeds_maximum",
+      "settle_exact_stellar_signature_expiration_too_soon",
+      "settle_exact_stellar_record_write_failed",
+      "unexpected_settle_error",
     ].includes(reason);
     expect((await settle(payload(), requirements)).response).toEqual({
       success: false,
@@ -605,6 +695,7 @@ describe("createSettler", () => {
           `${EXPIRATION - 2}; once the network is past ledger ${EXPIRATION}, sign a new payment instead`,
         extra: { retryable: true, expirationLedger: EXPIRATION },
       }),
+      ...(ended && untilExpiry),
     });
     expect(await store.get(key)).toMatchObject({ state: "rejected", errorReason: reason });
     expect(hooks.onFinal).toHaveBeenCalledTimes(1);
@@ -664,6 +755,7 @@ describe("createSettler", () => {
     ] as const) {
       // Each case settles the same payment, so each starts on empty stores.
       await db.empty();
+      fence = await holdLease(db.stores().settlements);
       const { settle, lines, metrics } = setup(async () => {
         throw error;
       });
@@ -681,6 +773,7 @@ describe("createSettler", () => {
     }
     // Other refusals are not a drift between the two.
     await db.empty();
+    fence = await holdLease(db.stores().settlements);
     const { settle, lines } = setup(async () => {
       throw new SimulationError("x");
     });
@@ -704,6 +797,7 @@ describe("createSettler", () => {
       minValidityLedgers: 2,
       maxValidityLedgers: 66,
       latestLedger: async () => CURRENT,
+      missingTrustline: async () => undefined,
     });
     const { settle, submit } = setup(landing(), { check });
     const { response } = await settle(payload(), requirements);
@@ -764,28 +858,172 @@ describe("createSettler", () => {
     expect((await store.get(key))?.state).toBe("rejected");
   });
 
-  it("sends nothing once the lease is lost after the request came in (0025 decision 22)", async () => {
+  /** As the pool does: a hook that throws means this envelope is not sent. */
+  const signedThen = (onSigned: () => void) => async (opts: SubmitOptions) => {
+    onSigned();
+    const signed = await Promise.resolve(opts.onSigned!(HASH, BOUNDS)).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    if (signed === undefined) return result("success");
+    throw Object.assign(new SignedHookError("onSigned failed", { cause: signed }), {
+      attempts: [{ hash: HASH, sent: "no" }],
+    });
+  };
+
+  it("sends nothing once the lease is lost after the request came in (0025 decision 22, 0071)", async () => {
     let held = true;
-    let signed: unknown = "not called";
+    const { settle, store } = setup(
+      // E.g. a DB failover during the wait for a channel: the next renewal fails.
+      signedThen(() => (held = false)),
+      { lease: () => (held ? fence : undefined) },
+    );
+    const { response } = await settle(payload(), requirements);
+    expect(response).toMatchObject({
+      errorReason: SETTLE_REASONS.leaseLost,
+      extra: { retryable: true },
+    });
+    expect(response).toMatchObject({ transaction: "" });
+    // Nothing was stored, so the identical payload can reopen it (0073).
+    expect(await store.get(key)).toMatchObject({
+      state: "rejected",
+      errorReason: SETTLE_REASONS.leaseLost,
+      hashes: [],
+    });
+  });
+
+  it("sends nothing when the lease is lost while its hash is stored, and answers it with the hash (0071)", async () => {
+    let reads = 0;
+    let sent = false;
     const { settle, store } = setup(
       async (opts) => {
-        // E.g. a DB failover during the wait for a channel: the next renewal fails.
-        held = false;
-        // As the pool does: a hook that throws means this envelope is not sent.
-        signed = await Promise.resolve(opts.onSigned!(HASH, BOUNDS)).then(
-          () => "sent",
+        const signed = await Promise.resolve(opts.onSigned!(HASH, BOUNDS)).then(
+          () => undefined,
           (error: unknown) => error,
         );
-        throw Object.assign(new SignedHookError("x"), { attempts: [{ hash: HASH, sent: "no" }] });
+        if (signed === undefined) {
+          sent = true;
+          return result("success");
+        }
+        throw Object.assign(new SignedHookError("onSigned failed", { cause: signed }), {
+          attempts: [{ hash: HASH, sent: "no" }],
+        });
       },
-      { held: () => held },
+      // Held as the hash is written, gone by the re-check: its expiry passed during the write.
+      { lease: () => (reads++ === 0 ? fence : undefined) },
+    );
+    const { response } = await settle(payload(), requirements);
+    expect(sent).toBe(false);
+    // A record with a hash never reopens: sign a new payment, after the expiry (0082 decision 2).
+    expect(response).toMatchObject({
+      errorReason: SETTLE_REASONS.leaseLost,
+      transaction: HASH,
+      ...untilExpiry,
+    });
+    expect(await store.get(key)).toMatchObject({
+      state: "rejected",
+      errorReason: SETTLE_REASONS.leaseLost,
+      hashes: [HASH],
+    });
+  });
+
+  it("sends nothing when the lease was acquired again while its hash was stored (0071 decision 1)", async () => {
+    let reads = 0;
+    const { settle, store } = setup(
+      signedThen(() => {}),
+      {
+        lease: () => (reads++ === 0 ? fence : { name: fence!.name, token: "a-later-acquire" }),
+      },
     );
     expect((await settle(payload(), requirements)).response).toMatchObject({
-      errorReason: SETTLE_REASONS.recordWrite,
+      errorReason: SETTLE_REASONS.leaseLost,
     });
-    expect(signed).toBeInstanceOf(Error);
-    expect((signed as Error).message).toBe("the channel lease was lost");
     expect(await store.get(key)).toMatchObject({ state: "rejected", hashes: [HASH] });
+  });
+
+  it("stores nothing and sends nothing once another process took the lease (0071)", async () => {
+    const { settle, store, lines, metrics } = setup(
+      // A stale holder: its keeper still has the token another process's acquire replaced.
+      signedThen(() => {}),
+      { lease: () => ({ name: fence!.name, token: "00000000-0000-4000-8000-000000000071" }) },
+    );
+    const { response } = await settle(payload(), requirements);
+    expect(response).toMatchObject({
+      errorReason: SETTLE_REASONS.leaseLost,
+      extra: { retryable: true },
+    });
+    expect(await store.get(key)).toMatchObject({
+      state: "rejected",
+      errorReason: SETTLE_REASONS.leaseLost,
+      hashes: [],
+    });
+    expect(lines.some((line) => line.includes('"settlement_lease_fenced"'))).toBe(true);
+    expect(metrics.value("settlement_lease_fenced_total")).toBe(1);
+  });
+
+  it("sends nothing for a call whose process froze past its lease while another took it (0071)", async () => {
+    const store = db.stores().settlements;
+    let clock = 1_000_000;
+    const TTL = 3_000;
+    const process = (holder: string) =>
+      createLeaseKeeper({
+        store,
+        network,
+        ttlMs: TTL,
+        logger: jsonLogger("error"),
+        metrics: memoryMetrics(),
+        holder,
+        now: () => clock,
+      });
+    const first = process("first");
+    const second = process("second");
+    await first.runOnce();
+    await second.runOnce();
+    expect([first.held(), second.held()]).toEqual([true, false]);
+    // The first process freezes after its lease check, before the hash's write reaches the store.
+    let thaw!: () => void;
+    const frozen = new Promise<void>((resolve) => (thaw = resolve));
+    let froze!: () => void;
+    const atWrite = new Promise<void>((resolve) => (froze = resolve));
+    const addHash = store.addHash.bind(store);
+    vi.spyOn(store, "addHash").mockImplementation(async (...args) => {
+      froze();
+      await frozen;
+      return addHash(...args);
+    });
+    const { settle } = setup(
+      signedThen(() => {}),
+      { store, lease: first.current },
+    );
+    const settling = settle(payload(), requirements);
+    await atWrite;
+    clock += TTL + LEASE_SKEW_MARGIN_MS + 1;
+    await second.runOnce();
+    expect(second.held()).toBe(true);
+    thaw();
+    expect((await settling).response).toMatchObject({ errorReason: SETTLE_REASONS.leaseLost });
+    expect(await store.get(key)).toMatchObject({ state: "rejected", hashes: [] });
+  });
+
+  it("settles a payment fenced on a stale lease once the identical payload comes back (0071)", async () => {
+    let stale = true;
+    const { settle, store } = setup(
+      signedThen(() => {}),
+      {
+        lease: () =>
+          stale ? { name: fence!.name, token: "00000000-0000-4000-8000-000000000071" } : fence,
+      },
+    );
+    expect((await settle(payload(), requirements)).response).toMatchObject({
+      errorReason: SETTLE_REASONS.leaseLost,
+    });
+    // The retry reaches a process that holds the lease.
+    stale = false;
+    expect((await settle(payload(), requirements)).response).toMatchObject({
+      success: true,
+      transaction: HASH,
+    });
+    expect(await store.get(key)).toMatchObject({ state: "success", hashes: [HASH], reopened: 1 });
   });
 
   it("answers pending with the hash of a send that may have reached the network, even when the store fails", async () => {
@@ -976,7 +1214,12 @@ describe("createSettler", () => {
         { budgetMs: BUDGET_MS },
       );
       const transition = vi.spyOn(store, "transition");
-      expect((await settle(payload(), requirements)).response).toMatchObject({
+      const answered = await onFakeClock(async () => {
+        const settled = settle(payload(), requirements);
+        await elapse(BUDGET_MS);
+        return settled;
+      });
+      expect(answered.response).toMatchObject({
         errorReason: SETTLE_REASONS.pending,
         transaction: HASH,
       });
@@ -1042,6 +1285,7 @@ describe("createSettler", () => {
         payer,
         transaction: HASH,
         network,
+        ...(status === "failed" && untilExpiry),
       });
       expect(settled.record).toBeUndefined();
     },
@@ -1299,9 +1543,25 @@ describe("createSettler", () => {
       expect((await store.get(key))?.hashes).toEqual([HASH]);
     });
 
+    it("names no hash in a budget answer when the lease stopped the call before its write", async () => {
+      const { settle, store } = setup(
+        async (opts) => {
+          await Promise.resolve(opts.onSigned?.(HASH, BOUNDS)).catch(() => {});
+          return new Promise(() => {});
+        },
+        { budgetMs: BUDGET_MS, lease: () => undefined },
+      );
+      vi.spyOn(store, "transition").mockRejectedValue(new Error("store down"));
+      const settled = settle(payload(), requirements);
+      await elapse(BUDGET_MS);
+      const { response } = await settled;
+      expect(response).toMatchObject({ errorReason: SETTLE_REASONS.timeout, transaction: "" });
+    });
+
     it("answers from what the call knows when the store fails as the budget runs out", async () => {
       for (const signs of [false, true]) {
         await db.empty();
+        fence = await holdLease(db.stores().settlements);
         const { settle, store, lines } = setup(
           async (opts) => {
             if (signs) await opts.onSigned?.(HASH, BOUNDS);
@@ -1339,6 +1599,7 @@ describe("createSettler", () => {
       ];
       for (const [name, hang] of cases) {
         await db.empty();
+        fence = await holdLease(db.stores().settlements);
         const s = setup(landing(), { budgetMs: BUDGET_MS });
         hang(s);
         let answered = false;
@@ -1568,7 +1829,7 @@ describe("createSettler", () => {
         state: "rejected",
         errorReason: SETTLE_REASONS.timeout,
       });
-      expect(await store.addHash(key, HASH, Date.now())).toBe(false);
+      expect(await store.addHash(key, HASH, await holdLease(store), Date.now())).toBe(false);
     });
 
     describe("a repeat that lost the claim to a call that started after it", () => {
@@ -1715,6 +1976,27 @@ describe("createSettler", () => {
       ).toBe(1);
       // Settled: a third call is a repeat of a success, never another reopen.
       expect((await settle(payload(), requirements)).response).toEqual(alreadySettled);
+      expect(submit).toHaveBeenCalledTimes(2);
+    });
+
+    it("settles the identical payload once the signer is back, after it failed to sign (0036)", async () => {
+      let calls = 0;
+      const { settle, store, submit } = setup(async (opts) => {
+        if (calls++ === 0) throw new SigningError("transaction", "OpenBao is sealed");
+        return landing()(opts);
+      });
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.transactionSigning,
+        extra: { retryable: true, expirationLedger: EXPIRATION },
+      });
+
+      expect((await settle(payload(), requirements)).response).toEqual({
+        success: true,
+        transaction: HASH,
+        network,
+        payer,
+      });
+      expect(await store.get(key)).toMatchObject({ state: "success", reopened: 1 });
       expect(submit).toHaveBeenCalledTimes(2);
     });
 
@@ -1922,6 +2204,7 @@ describe("createSettler", () => {
         payer,
         transaction: HASH,
         network,
+        ...untilExpiry,
       });
       expect(submit).toHaveBeenCalledTimes(1);
     });
@@ -1992,19 +2275,20 @@ describe("createSettler", () => {
       const OTHER = "b".repeat(64);
       let sign!: () => void;
       const signing = new Promise<void>((resolve) => (sign = resolve));
-      let calls = 0;
-      const { settle, store } = setup(
+      const first = setup(
         async (opts) => {
-          if (calls++ > 0) return landing("success", OTHER)(opts);
           await signing;
           return lateSign(opts);
         },
         { budgetMs: BUDGET_MS },
       );
-      expect((await settle(payload(), requirements)).response).toMatchObject({
+      // A budget of its own: the repeat must land, whatever the database's speed.
+      const repeat = setup(landing("success", OTHER), { budgetMs: 5_000 });
+      const store = repeat.store;
+      expect((await first.settle(payload(), requirements)).response).toMatchObject({
         errorReason: SETTLE_REASONS.timeout,
       });
-      expect((await settle(payload(), requirements)).response.success).toBe(true);
+      expect((await repeat.settle(payload(), requirements)).response.success).toBe(true);
       sign();
       await vi.waitFor(() => expect(late).toBeInstanceOf(Error));
       expect(await store.get(key)).toMatchObject({ state: "success", hashes: [OTHER] });
@@ -2107,18 +2391,20 @@ describe("createSettler", () => {
         await firstSigns;
         return lateSign(opts);
       });
+      const ending = setup(landing(), { budgetMs: BUDGET_MS });
+      // A budget of its own: the reopened call must sign, whatever the database's speed.
       const other = setup(
         async (opts) => {
           await opts.onSigned?.(OTHER, BOUNDS);
           await lands;
           return result("success", OTHER);
         },
-        { budgetMs: BUDGET_MS },
+        { budgetMs: 5_000 },
       );
       void first.settle(payload(), requirements);
       await vi.waitFor(async () => expect(await other.store.get(key)).toBeDefined());
       // The other process's repeat ends the claim by its own, shorter budget.
-      expect((await other.settle(payload(), requirements)).response).toMatchObject({
+      expect((await ending.settle(payload(), requirements)).response).toMatchObject({
         errorReason: SETTLE_REASONS.timeout,
       });
       const reopened = other.settle(payload(), requirements);
@@ -2129,7 +2415,6 @@ describe("createSettler", () => {
       await vi.waitFor(() => expect(late).toBeInstanceOf(Error));
       land();
       await reopened;
-      // Its budget answer may come before the landing; the submission finishes the record.
       await vi.waitFor(async () =>
         expect(await other.store.get(key)).toMatchObject({ state: "success", hashes: [OTHER] }),
       );
@@ -2163,17 +2448,149 @@ describe("createSettler", () => {
   });
 });
 
+describe("an answer that ended a payment (0082)", () => {
+  it("says to sign again only once the expiration ledger has closed, on a repeat too", async () => {
+    let ledger = EXPIRATION - 1;
+    const { settle, submit } = setup(landing("failed"), { latestLedger: async () => ledger });
+    expect((await settle(payload(), requirements)).response).toMatchObject({
+      errorReason: SETTLE_REASONS.failed,
+      ...untilExpiry,
+    });
+    // Its ledger is the last one the auth entry is valid in, and it hasn't closed at `left` 1.
+    expect((await settle(payload(), requirements)).response).toMatchObject(untilExpiry);
+    ledger = EXPIRATION;
+    expect((await settle(payload(), requirements)).response).toMatchObject({
+      errorReason: SETTLE_REASONS.failed,
+      errorMessage: `the auth entry expired with ledger ${EXPIRATION}: sign a new payment`,
+      extra: { retryable: false, expirationLedger: EXPIRATION },
+    });
+    expect(submit).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the wait when the latest ledger can't be read", async () => {
+    const { settle } = setup(landing("rejected"), {
+      latestLedger: async () => {
+        throw new Error("rpc down");
+      },
+    });
+    expect((await settle(payload(), requirements)).response).toMatchObject({
+      errorReason: SETTLE_REASONS.rejected,
+      ...untilExpiry,
+    });
+  });
+
+  it("covers a hook's refusal, whatever its reason, as stored for a repeat too", async () => {
+    const { settle, hooks } = setup();
+    hooks.beforeSubmit.mockResolvedValueOnce({ allow: false, errorReason: "over_budget" });
+    const expected = { errorReason: "over_budget", ...untilExpiry };
+    expect((await settle(payload(), requirements)).response).toMatchObject(expected);
+    expect((await settle(payload(), requirements)).response).toMatchObject(expected);
+  });
+
+  it("answers the checks' refusal of a reopen as nothing sent, and a later repeat settles", async () => {
+    const check = vi.fn(passing);
+    let calls = 0;
+    const { settle, store } = setup(
+      async (opts) => {
+        if (calls++ === 0) throw new NoChannelsError("x");
+        return landing()(opts);
+      },
+      { check },
+    );
+    await settle(payload(), requirements);
+    check.mockResolvedValueOnce({
+      response: {
+        isValid: false,
+        invalidReason: "invalid_exact_stellar_payload_fee_exceeds_maximum",
+        invalidMessage: "lists 1 archived entry to restore: AAAA",
+        payer,
+      },
+    });
+    const refused = await settle(payload(), requirements);
+    // The checks' message stays last: a client reads the archived entries at its end (0066).
+    expect(refused.response).toMatchObject({
+      errorReason: "invalid_exact_stellar_payload_fee_exceeds_maximum",
+      errorMessage:
+        `nothing was sent: repeat the same payment while the latest ledger is at most ` +
+        `${EXPIRATION - 2}; once the network is past ledger ${EXPIRATION}, sign a new payment ` +
+        `instead; lists 1 archived entry to restore: AAAA`,
+      extra: { retryable: true, expirationLedger: EXPIRATION },
+    });
+    expect(await store.get(key)).toMatchObject({ errorReason: SETTLE_REASONS.noChannels });
+    expect((await settle(payload(), requirements)).response).toMatchObject({ success: true });
+  });
+
+  it("reads the latest ledger once for a reopen that ends", async () => {
+    const latestLedger = vi.fn(async () => CURRENT);
+    let calls = 0;
+    const { settle } = setup(
+      async () => {
+        if (calls++ === 0) throw new NoChannelsError("x");
+        throw new SimulationError("x");
+      },
+      { latestLedger },
+    );
+    await settle(payload(), requirements);
+    latestLedger.mockClear();
+    expect((await settle(payload(), requirements)).response).toMatchObject({
+      errorReason: SETTLE_REASONS.simulation,
+      ...untilExpiry,
+    });
+    expect(latestLedger).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves a record claimed before 0073 as it was, with a hash too (0073 decision 25)", async () => {
+    const { settle } = setup(landing("failed"));
+    await settle(payload(), requirements);
+    await db.pool.query("UPDATE settlements SET reopened = -1 WHERE key = $1", [key]);
+    const { response } = await settle(payload(), requirements);
+    expect(response).toMatchObject({ errorReason: SETTLE_REASONS.failed, transaction: HASH });
+    expect(response).not.toHaveProperty("extra");
+    expect(response.errorMessage).toBeUndefined();
+  });
+
+  it("leaves a first payment the checks refused as it was, with no ledger read", async () => {
+    const latestLedger = vi.fn(async () => CURRENT);
+    const check: Check = async () => ({
+      response: { isValid: false, invalidReason: "invalid_exact_stellar_payload_x", payer },
+    });
+    const { settle } = setup(landing(), { check, latestLedger });
+    const { response } = await settle(payload(), requirements);
+    expect(response).toMatchObject({ errorReason: "invalid_exact_stellar_payload_x" });
+    expect(response).not.toHaveProperty("extra");
+    expect(latestLedger).not.toHaveBeenCalled();
+  });
+
+  it("reads the latest ledger once for one answer", async () => {
+    const latestLedger = vi.fn(async () => CURRENT);
+    const { settle } = setup(landing("failed"), { latestLedger });
+    await settle(payload(), requirements);
+    expect(latestLedger).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["a pending payment", landing("pending"), SETTLE_REASONS.pending],
+    ["an expired transaction", landing("expired"), SETTLE_REASONS.expired],
+  ])("leaves %s as it is", async (_, submit, errorReason) => {
+    const latestLedger = vi.fn(async () => CURRENT);
+    const { settle } = setup(submit, { latestLedger });
+    const { response } = await settle(payload(), requirements);
+    expect(response).toMatchObject({ errorReason });
+    expect(response).not.toHaveProperty("extra");
+    expect(latestLedger).not.toHaveBeenCalled();
+  });
+});
+
 describe("attempt states (0019 decision 7)", () => {
   const OTHER = "b".repeat(64);
 
   it("stores the hash with its bounds, marks it sent, and records the outcome per hash", async () => {
-    const seen: (string | undefined)[] = [];
     const { settle, store } = setup(async (opts) => {
       await opts.onSigned?.(OTHER, BOUNDS);
       await opts.onSigned?.(HASH, BOUNDS);
       opts.onSent?.(HASH);
-      await delay(5);
-      seen.push((await store.attempts(key)).at(-1)?.state);
+      // The mark is fire and forget: it never holds the send up.
+      await vi.waitFor(async () => expect((await store.attempts(key)).at(-1)?.state).toBe("sent"));
       // The first envelope was refused with `txBadSeq`, the rebuild landed.
       return {
         ...result("success"),
@@ -2185,7 +2602,6 @@ describe("attempt states (0019 decision 7)", () => {
     });
     const settled = await settle(payload(), requirements);
     expect(settled.response.success).toBe(true);
-    expect(seen).toEqual(["sent"]);
     expect(await store.attempts(key)).toEqual([
       {
         hash: OTHER,
@@ -2230,7 +2646,11 @@ describe("attempt states (0019 decision 7)", () => {
 
 describe("with reconciliation (0019)", () => {
   /** A settler and a reconciler sharing one store and one `records`, as `buildSettlement` builds. */
-  function shared(behaviour: Behaviour, answer: rpc.Api.GetTransactionResponse) {
+  function shared(
+    behaviour: Behaviour,
+    answer: rpc.Api.GetTransactionResponse,
+    overrides: Partial<SettlerDeps> = {},
+  ) {
     const store = db.stores().settlements;
     const hooks = {
       onFinal: vi.fn<SettlementHooks["onFinal"]>(async () => {}),
@@ -2239,7 +2659,7 @@ describe("with reconciliation (0019)", () => {
     const logger = jsonLogger("error", () => {});
     const metrics = memoryMetrics();
     const records = createRecords({ network, store, hooks, logger, metrics });
-    const { settle } = setup(behaviour, { store, records });
+    const { settle } = setup(behaviour, { store, records, ...overrides });
     const reconcilerOn = (r = records) =>
       createReconciler({
         network,
@@ -2302,11 +2722,37 @@ describe("with reconciliation (0019)", () => {
     expect((await first).response).toEqual(alreadySettled);
   });
 
+  it("keeps a record the pool left pending open, through a repeat, until a sweep finishes it (0088)", async () => {
+    const landed = {
+      status: rpc.Api.GetTransactionStatus.SUCCESS,
+      ledger: 1001,
+      resultXdr: { feeCharged: () => ({ toBigInt: () => 41_000n }) },
+    } as unknown as rpc.Api.GetTransactionResponse;
+    const { store, hooks, settle, reconcilerOn } = shared(landing("pending"), landed, {
+      settleTimeoutMs: 30,
+    });
+    const pending = { success: false, errorReason: "settlement_pending", transaction: HASH };
+    expect((await settle(payload(), requirements)).response).toMatchObject(pending);
+    expect((await settle(payload(), requirements)).response).toMatchObject(pending);
+    expect((await store.get(key))?.state).toBe("pending");
+    expect(hooks.onFinal).not.toHaveBeenCalled();
+
+    expect(await reconcilerOn().sweep()).toMatchObject({ success: 1 });
+    expect((await store.get(key))?.state).toBe("success");
+    expect((await settle(payload(), requirements)).response).toMatchObject({
+      success: true,
+      transaction: HASH,
+    });
+  });
+
   it("finishes a payment whose process crashed between signing and sending", async () => {
-    const { store, hooks, logger, metrics, settle, reconcilerOn } = shared(async (opts) => {
-      await opts.onSigned?.(HASH, BOUNDS);
-      return new Promise(() => {}); // the process stops here
-    }, notFound(BOUNDS.maxLedger));
+    const { store, hooks, logger, metrics, settle, reconcilerOn } = shared(
+      async (opts) => {
+        await opts.onSigned?.(HASH, BOUNDS);
+        return new Promise(() => {}); // the process stops here
+      },
+      notFound(BOUNDS.maxLedger + 3),
+    );
     void settle(payload(), requirements);
     await vi.waitFor(async () => expect(await store.attempts(key)).toHaveLength(1));
     // After the restart: a new process, with its own records, on the same store.

@@ -1,0 +1,59 @@
+# OpenBao, which holds the facilitator key of every network (ADR 0013, 0077): its own project, one
+# container on the server, run by `x402-openbao.service`. On the server this is
+# /srv/x402/openbao/compose.yaml, beside config.hcl.
+#
+#   SECRETS_DIR  the decrypted seal key, /run/x402/openbao unless set (local runs)
+name: x402-openbao
+
+services:
+  openbao:
+    image: openbao/openbao:2.7.2@sha256:5046911075e137e154ce49ab051502f4ec7cf367d484ae4a4dce665d9b90561f
+    # Not the image's entrypoint, which adds dev-mode flags; `init` reaps and forwards signals.
+    entrypoint: [bao, server, -config=/openbao/config/config.hcl]
+    init: true
+    # No network at all: the sockets are its only way in, and on the server Docker's address pool
+    # has none to give (compose.yaml of the production environment).
+    network_mode: none
+    read_only: true
+    mem_limit: 256m
+    # Equal to mem_limit: no swap, so the key never reaches the disk; nor do core dumps.
+    memswap_limit: 256m
+    cpus: 0.5
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    ulimits:
+      core: 0
+    environment:
+      # For `docker compose exec openbao bao …`: the admin listener on loopback.
+      BAO_ADDR: http://127.0.0.1:8200
+    secrets:
+      - seal-key
+    volumes:
+      - ./config.hcl:/openbao/config/config.hcl:ro
+      # The image's own data and log directories, so a new volume takes their owner (uid 100).
+      - data:/openbao/file
+      - audit:/openbao/logs
+      - testnet-socket:/run/openbao/testnet
+    tmpfs:
+      - /tmp
+
+volumes:
+  # Made by the playbook and never by Compose, so `compose down -v` can't remove them.
+  data:
+    external: true
+    name: x402-openbao-data
+  audit:
+    external: true
+    name: x402-openbao-audit
+  # Testnet's socket, which the facilitator mounts as an external volume (0077 decision 4). A
+  # tmpfs: nothing in it outlives the socket, and its owner and mode come from these options.
+  testnet-socket:
+    name: x402-openbao-testnet
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: uid=100,gid=1000,mode=0750
+
+secrets:
+  seal-key:
+    file: ${SECRETS_DIR:-/run/x402/openbao}/seal-key

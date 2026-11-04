@@ -110,6 +110,10 @@ a whole zone, to Cloudflare on the Free plan.
     (0077 decision 3).
   - The facilitator never joins the ClickHouse project's `app` network, so it can't reach
     ClickHouse. OpenBao is reached over unix sockets (ADR 0013), not a network.
+  - Each network has a fixed /28 from `172.31.200.0/24`, set in the compose file, since the
+    server's Docker address pool is taken whole by that `app` network. A second pool in
+    `daemon.json` would also work, but it changes Docker for every project on the server, for the
+    sake of two networks.
 - **systemd restarts a facilitator that crashes, not Docker.** Its unit runs Compose in the
   foreground with `--exit-code-from <service>`, since a plain `docker compose up` exits 0
   whatever the container's code, and with `Restart=on-failure`, so the unit ends with the
@@ -150,6 +154,10 @@ a whole zone, to Cloudflare on the Free plan.
   the watchdog and 0027's "ready to settle" alarm wait for) is decided with the code in 0077.
   - A process without the lease keeps trying to take it.
   - A process whose lease renewal fails stops new submissions until it holds the lease again.
+  - A process that froze past its TTL while another took the lease sends nothing new once it
+    wakes: the store refuses its hash under the replaced fencing token (task 0071). The
+    exception is an envelope stored and checked before the freeze: it can still go out, and
+    resend until its bound, under its one hash.
 - **AD-16 reconciliation doesn't depend on the lease** (0019 decisions 27 and 37). It starts once
   the server listens and sweeps every 10 s beside `/settle`, in every process. It only reads the
   chain, and every write is a compare-and-set on the record's version, so a process waiting for
@@ -176,7 +184,7 @@ One request or one stop must never outlast the layer in front of it:
 | Node `keepAliveTimeout`               | 125 s              | above `cloudflared`'s idle keep-alive (90 s), or it sees 502s      |
 | Container healthcheck                 | 10 s               | liveness only                                                      |
 | `LEASE_TTL_MS`                        | 30 s               | after a crash, a new process waits at most this long               |
-| Wait for `ready` and `listed`         | 120 s              | past it, the deploy rolls back to the previous digest              |
+| Wait for `ready`, `listed`, `signer`  | 120 s              | past it, the deploy rolls back to the previous digest              |
 | Unit `TimeoutStopSec`                 | 200 s              | above `stop_grace_period`, so a reboot waits for the drain         |
 | Unit `TimeoutStartSec`                | 60 s               | covers `ExecStartPre` only: credentials and the digest, no pull    |
 | Postgres `stop_grace_period`          | 120 s              | a clean shutdown; the Compose default is 10 s                      |
@@ -201,18 +209,19 @@ One request or one stop must never outlast the layer in front of it:
   | 0045, 3 URLs (its cap), fee-stats | 61 s             | 30 s         | 91 s                   |
 
   Upstream verify after 0045 is 10 s per URL, twice that with a fee-stats bid (the read before
-  the URLs), plus 1 s. Past the budget the answer is `…_timeout` before the claim, so the same
+  the URLs), plus 1 s. A failed simulation of a payload with the payer's auth entry adds the
+  trustline lookup, at most 3 s, on the shared client (0078). Past the budget the answer is `…_timeout` before the claim, so the same
   payment may be sent again; a valid payment can still get it when the first URLs hang and the
   last one answers late. These worst cases need hung RPC URLs, not slow ones.
 
 - **"Nothing sent → `rejected`" reopens.** The resource is usually served before `/settle`.
-  After a failure before anything was signed (no channel, the budget, the RPCs down, a restart
-  or a deploy), the record ends, but the payer's auth entry can still land. Since task 0073 the
+  After a failure before anything was signed (no channel, the budget, the RPCs down, a restart,
+  a deploy or a lost lease), the record ends, but the payer's auth entry can still land. Since task 0073 the
   identical payload reopens the record while that auth entry is valid, so whoever holds the
   payment (the seller's resource server, or the client) repeats it as it is and it settles once;
   the answer says so with `extra.retryable`. A refusal by the simulation, the fee or a spend
-  limit still ends the payment: those need a new one (0073 decision 20 leaves their wording to a
-  backlog task). During the deploy that brings this in, the previous release still answers these
+  limit still ends the payment: those need a new one, once the first can't land, and the answer
+  says from which ledger (task 0082). During the deploy that brings this in, the previous release still answers these
   reasons as "sign a new payment", without `extra`, until it stops. That answer stays true: rows
   from before `0007_settlement_reopened`, and rows that release inserts after the migration ran,
   get `reopened` -1 and never reopen, so a payer who did sign again can't have the old payment
@@ -419,8 +428,8 @@ One request or one stop must never outlast the layer in front of it:
     networks' sockets.
   - It is the only AWS credential on the server; ADR 0013 names it as the exception to "no AWS
     credentials".
-- **`FACILITATOR_SECRET` stays for local development and tests.** Deployed networks use the OpenBao
-  signer instead.
+- **The facilitator service signs only through OpenBao, wherever it runs.** Its tests and local
+  runs use a fake OpenBao on a unix socket, so they take the same path as a deployed network (0036).
 - **Other secrets are encrypted systemd credentials,** as in ADR 0013: per network a database
   password and `RPC_URLS`, which may carry an API key, and per environment the tunnel token.
   - The files are named per network from the first deploy, so mainnet adds files and renames

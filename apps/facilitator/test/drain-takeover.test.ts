@@ -1,8 +1,8 @@
 import { Keypair, StrKey, nativeToScVal, xdr, type rpc } from "@stellar/stellar-sdk";
-import type { SorobanRpc } from "@stellar-x402/signer-pool";
+import { NOT_FOUND_MARGIN_LEDGERS, type SorobanRpc } from "@stellar-x402/signer-pool";
 import { FakeRpc } from "@stellar-x402/signer-pool/testing";
 import type { PaymentRequirements } from "@x402/core/types";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseConfig } from "../src/config.js";
 import { jsonLogger } from "../src/logger.js";
 import { compose, start } from "../src/main.js";
@@ -10,6 +10,7 @@ import { LEASE_SKEW_MARGIN_MS } from "../src/ports/index.js";
 import { SETTLE_REASONS, keyOf } from "../src/settlement/settle.js";
 import { testDatabase } from "./database.js";
 import { transferPayload } from "./payment.js";
+import { fakeOpenBao, signerEnv } from "./fake-openbao.js";
 
 /**
  * A deploy with a 5-minute envelope (0073 decision 4): the old process's drain ends at its
@@ -19,6 +20,8 @@ import { transferPayload } from "./payment.js";
  */
 
 const facilitator = Keypair.random();
+const openbao = await fakeOpenBao(facilitator);
+afterAll(openbao.close);
 const channel = Keypair.random().publicKey();
 const asset = StrKey.encodeContract(Buffer.alloc(32, 7));
 const payer = Keypair.random().publicKey();
@@ -110,7 +113,7 @@ beforeEach(db.empty);
 /** The graph `main()` serves, on `rpc`; it takes the lease when `lease` is set. */
 async function composed(rpc: SorobanRpc, lease: boolean) {
   const config = parseConfig({
-    FACILITATOR_SECRET: facilitator.secret(),
+    ...signerEnv(facilitator.publicKey(), openbao.socketPath),
     DATABASE_URL: db.urlFor(db.schema),
     CLIENT_IP: "socket",
     CHANNELS: channel,
@@ -160,8 +163,8 @@ describe("a deploy with a 5-minute envelope (0073)", () => {
       const maxLedger = attempt!.maxLedger!;
       network.thaw();
       if (outcome === "success") fake.stalled = false;
-      // The ledger after the bound closes (or the one it lands in).
-      while (fake.ledger <= maxLedger) await fake.getLatestLedger();
+      // The ledgers up to the NOT_FOUND margin past the bound close (or the one it lands in).
+      while (fake.ledger < maxLedger + NOT_FOUND_MARGIN_LEDGERS) await fake.getLatestLedger();
 
       const second = await composed(fake, false);
       try {

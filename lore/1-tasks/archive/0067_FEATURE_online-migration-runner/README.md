@@ -2,7 +2,7 @@
 id: "0067"
 title: "Run migrations on a live database without the one-transaction limit"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0012"]
 related_tasks: ["0022", "0026", "0050", "0080"]
@@ -18,6 +18,13 @@ history:
     status: active
     who: akot
     note: "Work starts."
+  - date: "2026-11-02"
+    status: completed
+    who: akot
+    note: >
+      PR #73 merged on 2026-10-28: migrations run online step by step, with per-step markers, bounded
+      locks and a keyset backfill. AC1 ran at 1 000 000 reservations; ADRs 0011 and 0012 amended.
+      `MIGRATIONS` holds no online migration until 0080, already in the backlog, hardens the runner.
 ---
 
 # Run migrations on a live database without the one-transaction limit

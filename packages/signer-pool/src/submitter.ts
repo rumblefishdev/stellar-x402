@@ -30,9 +30,9 @@ export interface SubmitterOptions {
   rpc: SorobanRpc;
   networkPassphrase: string;
   /**
-   * The facilitator. It is the operation source of every call, a signer on every channel, and the
-   * fee-bump payer. It never authorizes a call: one with a source-account auth entry, which would
-   * authorize as the operation source, is refused ({@link SourceAccountAuthError}).
+   * The facilitator. It is a signer on every channel and the fee-bump payer. It never authorizes a
+   * call: one with a source-account auth entry, which would authorize as the channel, is refused
+   * ({@link SourceAccountAuthError}).
    */
   signer: TransactionSigner;
   /** Channel account addresses. Each must list `signer.address` as a signer. */
@@ -103,7 +103,7 @@ export interface FeeEscalation {
   max?: number;
 }
 
-/** The contract call to submit. The submitter sets the facilitator as its operation source. */
+/** The contract call to submit. It has no operation source, so the channel is its caller. */
 export interface ContractCall {
   func: xdr.HostFunction;
   auth: xdr.SorobanAuthorizationEntry[];
@@ -174,7 +174,7 @@ export class SimulationError extends Error {
 
 /**
  * The call carries an auth entry with source-account credentials. It would authorize as the
- * operation source, which is the facilitator, so the call is refused before a channel is taken.
+ * channel, which is the call's source, so the call is refused before a channel is taken.
  */
 export class SourceAccountAuthError extends Error {
   override readonly name = "SourceAccountAuthError";
@@ -208,6 +208,21 @@ export class SignedHookError extends Error {
   override readonly name = "SignedHookError";
 }
 
+/**
+ * The signer failed on the transaction or on the fee bump; that envelope was not sent. After a
+ * `txBadSeq` rebuild an earlier envelope for the same call was sent ({@link attemptsOf} lists them).
+ */
+export class SigningError extends Error {
+  override readonly name = "SigningError";
+  constructor(
+    readonly stage: "transaction" | "fee-bump",
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+  }
+}
+
 /** A submission's outcome before its attempts are attached. */
 type Outcome = Omit<SubmitResult, "attempts">;
 
@@ -232,6 +247,18 @@ const SPARE_LEDGERS = 1;
 
 /** A ledger's close time, rounded up from the 5.0–5.8 s measured on testnet and mainnet (0043). */
 const LEDGER_SECONDS_ESTIMATE = 6;
+
+/**
+ * How many ledgers past `maxLedger` a `NOT_FOUND` must be read to decide. stellar-rpc reads the
+ * transaction and then the ledger range with no snapshot, so an answer can name ledgers that closed
+ * after its read of the transaction. Three ledgers take about 15 s and an answer at most 10 s:
+ * `FallbackRpc`'s timeout, the facilitator's `UPSTREAM_TIMEOUT_MS`. Keep this above that timeout. A
+ * node catching up closes ledgers faster, so there the race stays (0088).
+ */
+export const NOT_FOUND_MARGIN_LEDGERS = 3;
+
+/** The same margin past `maxTime`, at 5 s a ledger: the stall it needs is what the timeout rules out. */
+export const NOT_FOUND_MARGIN_SECONDS = NOT_FOUND_MARGIN_LEDGERS * 5;
 
 /** A signed envelope, ready to send. */
 interface Prepared {
@@ -264,12 +291,12 @@ interface Hold {
 
 /**
  * Submits Soroban contract calls through a pool of channel accounts, one transaction in flight
- * per channel, in the shape 0006 measured as cheapest ("delegated-bump"):
+ * per channel, in the "delegated-bump" shape:
  *
- * - tx source: a channel (sequence number only);
- * - operation source: the facilitator;
- * - one facilitator signature covers both, because the facilitator is a signer on the channel;
- * - wrapped in a fee bump the facilitator pays, so channels hold only their reserve.
+ * - tx source: a channel, also the call's caller, since the operation has no source of its own;
+ * - the facilitator signs for the channel, because it is a signer on it;
+ * - wrapped in a fee bump the facilitator pays, so channels hold only their reserve, and the fee
+ *   account needs only the low threshold.
  *
  * Sequence rule: a channel's cached sequence number is advanced only when its transaction is
  * final, and dropped (re-read before next use) only when the network says it is wrong. It is
@@ -386,7 +413,7 @@ export class SettlementSubmitter {
       )
     ) {
       const error = new SourceAccountAuthError(
-        "an auth entry has source-account credentials, which would authorize as the facilitator",
+        "an auth entry has source-account credentials, which would authorize as the channel",
       );
       this.refused(undefined, error);
       throw error;
@@ -657,7 +684,7 @@ export class SettlementSubmitter {
           ledgerbounds: { minLedger: 0, maxLedger: maxLedger + 1 },
         }),
       })
-        .addOperation(Operation.invokeHostFunction({ ...call, source: this.signer.address }))
+        .addOperation(Operation.invokeHostFunction(call))
         .build();
     let draft = build(fee);
     const txSequence = BigInt(draft.sequence);
@@ -694,7 +721,7 @@ export class SettlementSubmitter {
       throw new FeeLimitError(`fee ${total(fee)} stroops is above the limit of ${this.maxFee}`);
     if (fee > base) this.emit({ type: "fee-raised", channel: source, base, bid: fee, queued });
 
-    const inner = await this.sign(rpc.assembleTransaction(draft, sim).build());
+    const inner = await this.sign(rpc.assembleTransaction(draft, sim).build(), "transaction");
     if (!(inner instanceof Transaction)) throw new Error("signer returned a fee bump");
     const bump = await this.sign(
       TransactionBuilder.buildFeeBumpTransaction(
@@ -703,6 +730,7 @@ export class SettlementSubmitter {
         inner,
         this.passphrase,
       ),
+      "fee-bump",
     );
     return {
       bump,
@@ -790,9 +818,9 @@ export class SettlementSubmitter {
       }
       // A ledger bound alone, its estimated time (6 s a ledger) gone with no ledger seen past it:
       // the RPC isn't answering, or ledgers run slower than the estimate. Stop resending either
-      // way, so a down RPC can't keep the loop going; an envelope the network never took then ends
-      // `expired` at its ledger bound, with ledgers left (0073 decision 11). Confirm by hash;
-      // `submit()` answers `pending` at `dueAt`.
+      // way, so a down RPC can't keep the loop going, with ledgers left (0073 decision 11); an
+      // envelope the network never took then ends `expired` past its bound's margin (0088).
+      // Confirm by hash; `submit()` answers `pending` at `dueAt`.
       if (maxTime === undefined && Math.floor(this.now() / 1000) > boundAt) break;
     }
     if (accepted) callSafely(opts.onSent, hash);
@@ -808,9 +836,11 @@ export class SettlementSubmitter {
     // The confirmation keeps running, and the channel is let go only when it is final.
     const confirmation = this.confirm(channel, prepared, uncertain);
     if (await this.settlesBy(confirmation, dueAt)) return confirmation;
-    hold.late = confirmation.then((result) =>
-      this.emit({ type: "resolved", result: { ...result, attempts: [...hold.attempts] } }),
-    );
+    hold.late = confirmation.then((result) => {
+      // A `pending` from `confirm()` ended nothing: a sweep finishes that record (0088).
+      if (result.status === "pending") return;
+      this.emit({ type: "resolved", result: { ...result, attempts: [...hold.attempts] } });
+    });
     return { ...base, status: "pending", hash };
   }
 
@@ -885,7 +915,7 @@ export class SettlementSubmitter {
   /** One status check per new ledger until the transaction is final or provably never will be. */
   private async confirm(
     channel: Channel,
-    { hash, txSequence, maxTime, maxLedger }: Prepared,
+    { hash, txSequence, maxTime, maxLedger, simLedger }: Prepared,
     uncertain: boolean,
   ): Promise<Outcome> {
     const base = { channel: channel.address };
@@ -899,16 +929,16 @@ export class SettlementSubmitter {
         continue; // The transaction may still land; keep the sequence number and retry.
       }
       if (res.status === rpc.Api.GetTransactionStatus.NOT_FOUND) {
-        if (
-          (maxTime !== undefined && res.latestLedgerCloseTime > maxTime) ||
-          this.pastLedgerBound(maxLedger, res.latestLedger)
-        ) {
-          // It can no longer be applied. After an uncertain send the cached sequence may be
-          // stale, and re-reading it is now safe.
-          if (uncertain) channel.sequence = undefined;
-          return { ...base, status: "expired", hash };
+        if (!cannotLand(res, { maxTime, maxLedger })) continue;
+        // It can no longer be applied, but a node whose history starts after the envelope was
+        // built can't tell whether it did. Reconciliation finishes the record (0088).
+        if (res.oldestLedger > simLedger) {
+          channel.sequence = undefined;
+          return { ...base, status: "pending", hash };
         }
-        continue;
+        // After an uncertain send the cached sequence may be stale, and re-reading it is now safe.
+        if (uncertain) channel.sequence = undefined;
+        return { ...base, status: "expired", hash };
       }
       channel.sequence = txSequence;
       const feeCharged = res.resultXdr.feeCharged().toBigInt();
@@ -927,12 +957,36 @@ export class SettlementSubmitter {
 
   private async sign(
     tx: Transaction | FeeBumpTransaction,
+    stage: SigningError["stage"],
   ): Promise<Transaction | FeeBumpTransaction> {
-    const { signedTxXdr } = await this.signer.signTransaction(tx.toXDR(), {
-      networkPassphrase: this.passphrase,
-    });
+    let signedTxXdr: string;
+    try {
+      ({ signedTxXdr } = await this.signer.signTransaction(tx.toXDR(), {
+        networkPassphrase: this.passphrase,
+      }));
+    } catch (error) {
+      throw new SigningError(stage, error instanceof Error ? error.message : String(error), {
+        cause: error,
+      });
+    }
     return TransactionBuilder.fromXDR(signedTxXdr, this.passphrase);
   }
+}
+
+/**
+ * Whether a `NOT_FOUND` answer is past the last ledger the transaction could land in, by a margin
+ * past either bound: {@link NOT_FOUND_MARGIN_LEDGERS} past `maxLedger`, or
+ * {@link NOT_FOUND_MARGIN_SECONDS} of close time past `maxTime`, since a read closer to it may miss
+ * one that landed in the bound's last ledger. Says nothing of a node without the history.
+ */
+export function cannotLand(
+  res: Pick<rpc.Api.GetMissingTransactionResponse, "latestLedger" | "latestLedgerCloseTime">,
+  { maxTime, maxLedger }: SignedBounds,
+): boolean {
+  return (
+    (maxTime !== undefined && res.latestLedgerCloseTime > maxTime + NOT_FOUND_MARGIN_SECONDS) ||
+    (maxLedger !== undefined && res.latestLedger >= maxLedger + NOT_FOUND_MARGIN_LEDGERS)
+  );
 }
 
 /** Calls a caller's hook; a hook that throws must not break settlement. */
@@ -952,6 +1006,7 @@ function refusalReason(error: unknown): RefusalReason {
   if (error instanceof QueueTimeoutError) return "queue-timeout";
   if (error instanceof LedgerBoundError) return "ledger-bound";
   if (error instanceof SignedHookError) return "on-signed";
+  if (error instanceof SigningError) return "signing";
   if (error instanceof NoChannelsError) return "no-channels";
   if (error instanceof ShutdownError) return "shutdown";
   return "other";

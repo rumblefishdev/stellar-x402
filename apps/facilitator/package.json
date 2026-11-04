@@ -14,6 +14,7 @@
     "test": "vitest run --passWithNoTests",
     "clean": "rm -rf dist .turbo",
     "dev": "tsx src/migrate.ts && tsx watch src/server.ts",
+    "dev:openbao": "tsx test/local-openbao.ts",
     "start": "node dist/server.js",
     "migrate": "node dist/migrate.js"
   },

@@ -6,6 +6,7 @@ import {
   getNetworkPassphrase,
 } from "@x402/stellar";
 import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/core/types";
+import type { FindMissingTrustline } from "./trustline.js";
 
 /** Upstream `ExactStellarScheme` as `/verify` uses it: only `verify()`, never `settle()` (AD-3). */
 export interface UpstreamVerifier {
@@ -39,10 +40,13 @@ export interface VerifierDeps {
   maxValidityLedgers: number;
   /** Sequence of the latest closed ledger. */
   latestLedger: () => Promise<number>;
+  /** Looks for a missing trustline behind upstream's `simulation_failed`. */
+  missingTrustline: FindMissingTrustline;
   /**
    * How long the whole upstream call may take, in milliseconds, across every RPC URL it tries and
    * the bid read before them; 10,000 by default. Upstream's RPC and Horizon clients have no timeout
-   * of their own. The AD-22 ledger read comes after it, with `FallbackRpc`'s own timeout.
+   * of their own. The AD-22 ledger read comes after it, with `FallbackRpc`'s own timeout, and so
+   * does the trustline lookup, with a limit of its own.
    */
   upstreamTimeoutMs?: number;
 }
@@ -65,8 +69,8 @@ export const MUXED_FACILITATOR_REASON = "invalid_exact_stellar_payload_facilitat
 export const PAYER_AUTH_REASON = "invalid_exact_stellar_payload_payer_auth_entries";
 /**
  * Upstream's code for an auth entry without address credentials. A source-account entry
- * authorizes as the transaction's operation source, which the pool makes the facilitator, so we
- * refuse it too instead of trusting only upstream's check.
+ * authorizes as the source of the call, which the pool makes a channel, so we refuse it too
+ * instead of trusting only upstream's check.
  */
 export const UNSUPPORTED_CREDENTIAL_REASON =
   "invalid_exact_stellar_payload_unsupported_credential_type";
@@ -82,6 +86,8 @@ const MAX_EXPIRATION_LEDGER = 2 ** 32 - 2;
 
 /** Upstream's code for an exception inside its `verify()`. */
 export const UNEXPECTED_VERIFY_ERROR = "unexpected_verify_error";
+/** Upstream's code for a failed simulation, the only cause it keeps of what the RPC said. */
+const SIMULATION_FAILED_REASON = "invalid_exact_stellar_payload_simulation_failed";
 
 export class UpstreamTimeoutError extends Error {
   override readonly name = "UpstreamTimeoutError";
@@ -105,10 +111,13 @@ export type Verify = (
 
 /**
  * The `exact` verification `/verify` answers with and `/settle` (0009) runs again (AD-3): the
- * network and envelope checks, upstream `verify()`, then address credentials only, the channel
+ * network and envelope checks, upstream `verify()`, whose failed simulation gets a look for a
+ * missing trustline (0078), then address credentials only, the channel
  * check (AD-5, with the facilitator's muxed address), the payer's one auth entry (AD-6), then the
- * validity check (AD-22). The first rejection is the answer. Errors are thrown, not answered: ours (the ledger read), upstream's, which it reports as
- * `unexpected_verify_error`, and an upstream call past `upstreamTimeoutMs`.
+ * validity check (AD-22). The first rejection is the answer; upstream's fee refusal also names the
+ * archived entries the payment's transaction lists (0066). Errors are thrown, not answered: ours
+ * (the ledger read), upstream's, which it reports as `unexpected_verify_error`, and an upstream
+ * call past `upstreamTimeoutMs`.
  */
 export function createVerifier(deps: VerifierDeps): Verify {
   const check = createChecker(deps);
@@ -172,7 +181,28 @@ export function createChecker(deps: VerifierDeps): Check {
     if (upstream.invalidReason === UNEXPECTED_VERIFY_ERROR) {
       throw new Error(`upstream verify failed with ${UNEXPECTED_VERIFY_ERROR}`);
     }
-    if (!upstream.isValid) return { response: upstream };
+    if (upstream.invalidReason === SIMULATION_FAILED_REASON && upstream.payer !== undefined) {
+      const transaction = new Transaction(
+        (payload.payload as { transaction: string }).transaction,
+        getNetworkPassphrase(deps.network),
+      );
+      // A payload without the payer's entry is free to send, so it buys no more RPC calls.
+      const missing =
+        payerNonce({ transaction, payer: upstream.payer }) === undefined
+          ? undefined
+          : await deps.missingTrustline({
+              transaction,
+              asset: requirements.asset,
+              payer: upstream.payer,
+              payTo: requirements.payTo,
+            });
+      if (missing) {
+        return {
+          response: invalid(missing.invalidReason, upstream.payer, missing.invalidMessage),
+        };
+      }
+    }
+    if (!upstream.isValid) return { response: withArchivedEntries(upstream, payload) };
     // Upstream always names the payer of a valid payment; without one, nothing below can run.
     if (upstream.payer === undefined) throw new Error("upstream verify named no payer");
 
@@ -427,6 +457,85 @@ function isV0Envelope(payload: PaymentPayload): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Upstream's fee refusal, its message followed by the archived entries the payment's transaction
+ * lists (task 0066). Since Protocol 23 a transaction pays their restore rent, which can put the
+ * fee over the ceiling; anyone can restore them from their own account and pay again. The buyer's
+ * client puts its simulation's Soroban data in the transaction, so the entries come with the
+ * payment, unchecked: they only describe the refusal, which stays upstream's, and the message
+ * says they are the transaction's. Any other answer, or a transaction that lists none, is
+ * returned as it is.
+ */
+function withArchivedEntries(response: VerifyResponse, payload: PaymentPayload): VerifyResponse {
+  if (response.invalidReason !== FEE_EXCEEDS_MAXIMUM) return response;
+  const keys = archivedEntries(payload);
+  if (keys.length === 0) return response;
+  const entries = keys.length === 1 ? "1 archived entry" : `${keys.length} archived entries`;
+  const named = keys.slice(0, ARCHIVED_ENTRIES_NAMED);
+  if (keys.length > named.length) named.push(`and ${keys.length - named.length} more`);
+  return {
+    ...response,
+    invalidMessage: `${response.invalidMessage}; the payment's transaction lists ${entries} to restore: ${named.join(", ")}`,
+  };
+}
+
+/** Upstream's fee refusal, the one whose message names archived entries (task 0066). */
+export const FEE_EXCEEDS_MAXIMUM = "invalid_exact_stellar_payload_fee_exceeds_maximum";
+
+/** Most archived entries a refusal names: the client chooses how many it lists. */
+const ARCHIVED_ENTRIES_NAMED = 4;
+/**
+ * Longest key a refusal names, in base64: a token's instance key is 64 and a balance's about 160.
+ * A longer one is counted and shown by its length, so a client can't make the message long.
+ */
+const ARCHIVED_KEY_MAX_CHARS = 512;
+
+/**
+ * The distinct entries the payload's transaction lists as archived, if it decodes, as their base64
+ * `LedgerKey`s: only persistent contract data and contract code, the entries that archive, and a
+ * key longer than `ARCHIVED_KEY_MAX_CHARS` as its length. Each footprint entry is encoded at most
+ * once, however often the client repeats its index.
+ */
+function archivedEntries(payload: PaymentPayload): string[] {
+  const transaction = (payload.payload as { transaction?: unknown } | undefined)?.transaction;
+  if (typeof transaction !== "string") return [];
+  try {
+    const envelope = xdr.TransactionEnvelope.fromXDR(transaction, "base64");
+    if (envelope.switch() !== xdr.EnvelopeType.envelopeTypeTx()) return [];
+    const ext = envelope.v1().tx().ext();
+    if (ext.switch() !== 1) return [];
+    const data = ext.sorobanData();
+    if (data.ext().switch() !== 1) return [];
+    const readWrite = data.resources().footprint().readWrite();
+    const keys = new Map<string, string>();
+    for (const i of new Set(
+      (data.ext().value() as xdr.SorobanResourcesExtV0).archivedSorobanEntries(),
+    )) {
+      const key = readWrite[i];
+      if (key === undefined || !archivable(key)) continue;
+      const encoded = key.toXDR("base64");
+      keys.set(
+        encoded,
+        encoded.length <= ARCHIVED_KEY_MAX_CHARS
+          ? encoded
+          : `a key of ${encoded.length} characters`,
+      );
+    }
+    return [...keys.values()];
+  } catch {
+    return [];
+  }
+}
+
+/** Whether `key` is of an entry that archives: persistent contract data or contract code. */
+function archivable(key: xdr.LedgerKey): boolean {
+  if (key.switch() === xdr.LedgerEntryType.contractCode()) return true;
+  return (
+    key.switch() === xdr.LedgerEntryType.contractData() &&
+    key.contractData().durability() === xdr.ContractDataDurability.persistent()
+  );
 }
 
 /**

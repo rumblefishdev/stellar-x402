@@ -17,6 +17,7 @@ import {
   RpcUnavailableError,
   ShutdownError,
   SignedHookError,
+  SigningError,
   SimulationCheckError,
   SimulationError,
   SourceAccountAuthError,
@@ -29,7 +30,13 @@ import type { PaymentPayload, PaymentRequirements, SettleResponse } from "@x402/
 import { getNetworkPassphrase } from "@x402/stellar";
 import type { Logger } from "../logger.js";
 import type { Metrics } from "../metrics.js";
-import type { SettlementKey, SettlementRecord, SettlementStore } from "../ports/index.js";
+import {
+  LeaseFencedError,
+  type LeaseFence,
+  type SettlementKey,
+  type SettlementRecord,
+  type SettlementStore,
+} from "../ports/index.js";
 import type { BeforeSubmitResult, SettlementHooks, SettlementOrigin } from "./hooks.js";
 import {
   attemptUpdates,
@@ -71,6 +78,13 @@ export const SETTLE_REASONS = {
   ledgerBound: "settle_exact_stellar_signature_expiration_too_soon",
   /** The signed hash could not be stored, so nothing was sent. */
   recordWrite: "settle_exact_stellar_record_write_failed",
+  /**
+   * The facilitator key's signer (OpenBao, 0036) failed on the transaction (upstream's code).
+   * This envelope wasn't sent ({@link UNSENT_REASONS}).
+   */
+  transactionSigning: "settle_exact_stellar_transaction_signing_failed",
+  /** The signer failed on the fee bump (upstream's code). This envelope wasn't sent ({@link UNSENT_REASONS}). */
+  feeBumpSigning: "settle_exact_stellar_fee_bump_signing_failed",
   /** No channel was free before the deadline. Nothing was sent ({@link UNSENT_REASONS}). */
   noChannelInTime: "settle_exact_stellar_no_channel_in_time",
   /** Every channel is out of the pool. Nothing was sent ({@link UNSENT_REASONS}). */
@@ -99,7 +113,7 @@ export const SETTLE_REASONS = {
    * out). Not a bug: try again later ({@link UNSENT_REASONS}).
    */
   rpcUnavailable: "settle_exact_stellar_rpc_unavailable",
-  /** An auth entry with source-account credentials would authorize as the facilitator (AD-5). */
+  /** An auth entry with source-account credentials would authorize as the channel (AD-5). */
   unsupportedCredential: UNSUPPORTED_CREDENTIAL_REASON,
   /**
    * The facilitator stopped before anything was signed (a crash or a restart), and reconciliation
@@ -111,6 +125,13 @@ export const SETTLE_REASONS = {
    * sent for this payment ({@link UNSENT_REASONS}); a retry reaches the next process (0025).
    */
   shuttingDown: "settle_exact_stellar_shutting_down",
+  /**
+   * This process lost the channel lease before it sent this envelope: another process took it,
+   * or none holds it (0071). Nothing is on its way for this payment ({@link UNSENT_REASONS}); a
+   * retry reaches the process that holds it. With a `transaction` the record has that hash, so it
+   * doesn't reopen: an envelope never sent, or one a `txBadSeq` refused before the rebuild.
+   */
+  leaseLost: "settle_exact_stellar_lease_lost",
   /** Anything else (upstream's code). */
   unexpected: "unexpected_settle_error",
 } as const;
@@ -120,7 +141,9 @@ export const SETTLE_REASONS = {
  * auth entry can still land until its expiration ledger, by whoever holds the payload, so the
  * answer never says "sign a new payment" while it is valid: it carries `extra.retryable` and
  * `extra.expirationLedger`, and the identical payload reopens the record and settles it once.
- * Past that ledger, `retryable` is `false`: sign a new payment.
+ * Past that ledger, `retryable` is `false`: sign a new payment. With a `transaction` an earlier
+ * envelope was sent and a `txBadSeq` refused it before the rebuild: the record has its hash, so it
+ * doesn't reopen and `retryable` is `false` at once.
  */
 export const UNSENT_REASONS: readonly string[] = [
   SETTLE_REASONS.timeout,
@@ -129,8 +152,24 @@ export const UNSENT_REASONS: readonly string[] = [
   SETTLE_REASONS.shuttingDown,
   SETTLE_REASONS.noChannelInTime,
   SETTLE_REASONS.noChannels,
+  SETTLE_REASONS.leaseLost,
+  SETTLE_REASONS.transactionSigning,
+  SETTLE_REASONS.feeBumpSigning,
 ];
 const UNSENT = new Set(UNSENT_REASONS);
+
+/**
+ * Failed answers about a record that don't tell the payer to sign again (0082): it isn't over, it
+ * landed, the payload is another payment, or its auth entry has expired. Every other failed answer
+ * about a record ended a payment whose auth entry can still land until its expiration ledger, in
+ * a new envelope: a failed or refused transaction spends no nonce.
+ */
+const NOT_SIGN_AGAIN = new Set<string>([
+  SETTLE_REASONS.pending,
+  SETTLE_REASONS.alreadySettled,
+  SETTLE_REASONS.nonceUsed,
+  SETTLE_REASONS.expired,
+]);
 
 /**
  * The validity minimum `/settle` rechecks with (AD-22): the pool's own floor. `signer-pool` keeps
@@ -173,14 +212,15 @@ export interface SettlerDeps {
   /** How long one `/settle` call may take, the wait for a channel included (ADR 0011). */
   budgetMs: number;
   /**
-   * Whether this process still holds the channel lease (0025). Checked again once a hash is
-   * stored, so a call let in before the lease was lost sends nothing on channels another
-   * process may own. Always held when unset.
+   * The channel lease this process holds now, with its token, or `undefined` (0025, 0071).
+   * `addHash` stores a hash only under the lease's current token, so a call let in before the
+   * lease was lost, or one whose process froze past its TTL, sends nothing on channels another
+   * process may own. Read again once the hash is stored (0025 decision 22).
    */
-  held?: () => boolean;
+  lease: () => LeaseFence | undefined;
   /**
-   * The network's latest ledger, to tell whether an unsent payment's auth entry can still land
-   * (0073 decision 15). Read only on those answers and before a reopen.
+   * The network's latest ledger, to tell whether a payment's auth entry can still land (0073
+   * decision 15, 0082). Read only on an answer that ended a payment and before a reopen.
    */
   latestLedger: () => Promise<number>;
   /** Estimated ledger close time, to turn the auth expiry into a deadline. */
@@ -206,6 +246,8 @@ export interface Settled {
    * stays "sign a new payment", with no `extra.retryable` (0073 decision 25).
    */
   claimedBefore0073?: boolean;
+  /** The checks refused a reopen, so the record stays as it was and a repeat may reopen it. */
+  reopenRefused?: boolean;
   /** The record behind a `success` answer, for the `EXTENSION-RESPONSES` header (AD-8). */
   record?: SettlementRecord;
   /**
@@ -355,26 +397,45 @@ export function createSettler(deps: SettlerDeps): Settle & {
    * while a repeat can still reopen it (the pool needs 2 ledgers left), or when the ledger couldn't
    * be read, since repeating the same payload is always safe. Then `false`, but "sign a new
    * payment" only once the expiration ledger has closed: the auth entry is valid in that ledger,
-   * so until then whoever holds the payload may still land it.
+   * so until then whoever holds the payload may still land it. The checks' refusal of a reopen
+   * answers the same, before their message, as the record stays closed with nothing sent (0082).
+   * Any other answer that ended a payment, a "nothing sent" one with a hash among them, never
+   * reopens: `retryable` is `false`, with the same wait before "sign a new payment".
    */
   const withRetry = async (
     settled: Settled,
     validOnce: () => Promise<Validity | undefined>,
   ): Promise<Settled> => {
     const { response } = settled;
-    if (
-      response.success ||
-      response.transaction ||
-      settled.claimedBefore0073 ||
-      !UNSENT.has(response.errorReason ?? "")
-    )
-      return settled;
+    if (response.success || settled.claimedBefore0073) return settled;
+    const reason = response.errorReason ?? "";
+    const unsent = (UNSENT.has(reason) || settled.reopenRefused) && !response.transaction;
+    const ended = settled.key !== undefined && !NOT_SIGN_AGAIN.has(reason);
+    if (!unsent && !ended) return settled;
     const valid = await validOnce();
     if (!valid) return settled;
     const { expiration, left } = valid;
+    // First: a client reads the archived entries at the end of the checks' message (0066).
+    const withExtra = (advice: string, retryable: boolean): Settled => ({
+      ...settled,
+      response: {
+        ...response,
+        errorMessage: response.errorMessage ? `${advice}; ${response.errorMessage}` : advice,
+        extra: { ...response.extra, retryable, expirationLedger: expiration },
+      },
+    });
+    if (!unsent) {
+      return withExtra(
+        left === undefined || left > 0
+          ? `the auth entry may still land in ledger ${expiration}: sign a new payment once that ` +
+              `ledger has closed`
+          : `the auth entry expired with ledger ${expiration}: sign a new payment`,
+        false,
+      );
+    }
     const retryable = left === undefined || left >= SETTLE_MIN_VALIDITY_LEDGERS;
     const then = `once the network is past ledger ${expiration}, sign a new payment instead`;
-    const errorMessage =
+    return withExtra(
       left === undefined
         ? `nothing was sent: repeat the same payment; ${then}`
         : retryable
@@ -384,15 +445,9 @@ export function createSettler(deps: SettlerDeps): Settle & {
             ? `nothing was sent, and it is too late to settle here, but the auth entry may still ` +
               `land in ledger ${expiration}: once that ledger has closed, sign a new payment`
             : `nothing was sent, and the auth entry expired with ledger ${expiration}: sign a new ` +
-              `payment`;
-    return {
-      ...settled,
-      response: {
-        ...response,
-        errorMessage,
-        extra: { ...response.extra, retryable, expirationLedger: expiration },
-      },
-    };
+              `payment`,
+      retryable,
+    );
   };
 
   /**
@@ -539,14 +594,33 @@ export function createSettler(deps: SettlerDeps): Settle & {
             // After the budget answer nothing new is signed: the answer named the last hash, and
             // a rebuild's would land under another.
             if (call.budgetOver) throw new Error("the settle budget ran out");
+            // The lease may have gone since the request came in, after a long body upload or
+            // wait for a channel (0025 decision 22): another process may send on this channel.
+            const lease = deps.lease();
+            if (!lease) throw new LeaseLostError();
             call.signing = hash;
             // Durable before the first send (AD-16); a final or missing record stops the send.
             // Only on this call's own claim: once reopened, the record is another call's (0073).
-            if (!(await store.addHash(key, hash, now(), bounds, claimed.reopened)))
-              throw new Error("the settlement record is final or missing");
-            // The lease may have gone since the request came in, after a long body upload or
-            // wait for a channel (0025 decision 22): another process may send on this channel.
-            if (deps.held && !deps.held()) throw new Error("the channel lease was lost");
+            // Only under the lease's current token: a takeover since refuses it (0071).
+            let added: boolean;
+            try {
+              added = await store.addHash(key, hash, lease, now(), bounds, claimed.reopened);
+            } catch (error) {
+              if (error instanceof LeaseFencedError) {
+                logger.warn("settlement_lease_fenced", {
+                  network,
+                  settlementKey: key,
+                  lease: lease.name,
+                  transaction: hash,
+                });
+                metrics.increment("settlement_lease_fenced_total");
+              }
+              throw error;
+            }
+            if (!added) throw new Error("the settlement record is final or missing");
+            // The stored expiry may have passed while the store wrote, or the lease lapsed and was
+            // acquired again: a new token fences this call too (decision 1).
+            if (deps.lease()?.token !== lease.token) throw new LeaseLostError();
             // The budget answer may have gone out while the store wrote: it named the hash it
             // could read, so this one isn't sent.
             if (call.budgetOver) throw new Error("the settle budget ran out");
@@ -596,7 +670,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
           logger.error("settlement_submit_failed", { network, settlementKey: key, error });
           metrics.increment("settlement_submit_failures_total");
         }
-        // The answer is the same fixed reason, and the client needs a new payment.
+        // The answer is the same fixed reason: a new payment, once this one can't land (0082).
         flagDrift(key, errorReason, "pool");
         return await finish(key, { state: "rejected", errorReason, attempts }, call.origin, own);
       }
@@ -610,7 +684,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
         case "success":
           return await finish(key, { state: "success", ...fields }, call.origin, own);
         case "pending":
-          // The pool keeps confirming; its `resolved` event finishes the record (0019).
+          // The pool's `resolved` event or a sweep finishes the record (0019, 0088).
           return {
             record:
               (await advance(key, { state: "pending", ...fields }, own)) ?? (await store.get(key)),
@@ -817,6 +891,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
       flagDrift(undefined, verdict.invalidReason, "check");
       return {
         ...untouched,
+        reopenRefused: reopening !== undefined,
         response: failure(
           verdict.invalidReason ?? SETTLE_REASONS.unexpected,
           verdict.payer,
@@ -996,7 +1071,7 @@ interface Validity {
 }
 
 /**
- * How long reading the latest ledger may take for an unsent answer or a reopen. The longest
+ * How long reading the latest ledger may take for an ended answer or a reopen. The longest
  * budget (80 s) plus the store's grace and this stays below the load balancer's 120 s.
  */
 const LEDGER_READ_MS = 1_000;
@@ -1057,13 +1132,28 @@ async function within<T>(promise: Promise<T>, ms: number): Promise<T | undefined
   }
 }
 
+/** `onSigned` found this process no longer holds the channel lease, so the hash isn't sent. */
+export class LeaseLostError extends Error {
+  override readonly name = "LeaseLostError";
+  constructor() {
+    super("the channel lease was lost");
+  }
+}
+
 /** The fixed `errorReason` for each error `submit()` throws (AD-6). */
 export function reasonFor(error: unknown): string {
   if (error instanceof SimulationCheckError) return SETTLE_REASONS.balanceChanges;
   if (error instanceof SimulationError) return SETTLE_REASONS.simulation;
   if (error instanceof FeeLimitError) return SETTLE_REASONS.fee;
   if (error instanceof LedgerBoundError) return SETTLE_REASONS.ledgerBound;
-  if (error instanceof SignedHookError) return SETTLE_REASONS.recordWrite;
+  if (error instanceof SignedHookError)
+    return error.cause instanceof LeaseLostError || error.cause instanceof LeaseFencedError
+      ? SETTLE_REASONS.leaseLost
+      : SETTLE_REASONS.recordWrite;
+  if (error instanceof SigningError)
+    return error.stage === "transaction"
+      ? SETTLE_REASONS.transactionSigning
+      : SETTLE_REASONS.feeBumpSigning;
   if (error instanceof QueueTimeoutError) return SETTLE_REASONS.noChannelInTime;
   if (error instanceof NoChannelsError) return SETTLE_REASONS.noChannels;
   if (error instanceof ShutdownError) return SETTLE_REASONS.shuttingDown;

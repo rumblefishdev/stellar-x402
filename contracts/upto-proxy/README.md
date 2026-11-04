@@ -223,11 +223,12 @@ Every invariant has a test in `src/test/` (§8):
 
 ### Recommended submission shape
 
-Submit in the `delegated-bump` shape ([ADR 0003](../../docs/adr/0003-settlement-channel-account-pool.md)):
-a channel account is the transaction source, the facilitator is the operation source (so its
-authorization is source-account credentials) and pays a fee bump. Each channel's master key is
-disabled and the facilitator key is its only signer. `packages/signer-pool`'s
-`SettlementSubmitter` builds this shape.
+Submit in the shape 0006 measured for `settle_upto`: a channel account is the transaction source,
+the facilitator is the operation source (so its authorization is source-account credentials) and
+pays a fee bump. Each channel's master key is disabled and the facilitator key is its only signer.
+`packages/signer-pool`'s `SettlementSubmitter` doesn't build this shape any more
+([ADR 0003](../../docs/adr/0003-settlement-channel-account-pool.md)): 0015 chooses how it settles
+`upto`.
 
 With N channels, N settlements can land per ledger; one source account allows only one. The
 cost of each shape, the throughput and the limits are measured in the

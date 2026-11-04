@@ -10,22 +10,31 @@ import {
   parseConfig,
   parseMigrateConfig,
 } from "../src/config.js";
+import { signerEnv } from "./fake-openbao.js";
 
 const keypair = (byte: number) => Keypair.fromRawEd25519Seed(Buffer.alloc(32, byte));
-const SECRET = keypair(1).secret();
+const ADDRESS = keypair(1).publicKey();
 const CHANNEL_A = keypair(2).publicKey();
 const CHANNEL_B = keypair(3).publicKey();
+const SIGNER = {
+  address: ADDRESS,
+  socketPath: "/nonexistent/openbao.sock",
+  key: "stellar-testnet",
+  keyVersion: 1,
+  roleId: "role",
+  secretId: "secret-id",
+};
 
 const minimal = {
-  FACILITATOR_SECRET: SECRET,
+  ...signerEnv(ADDRESS),
   CHANNELS: `${CHANNEL_A}, ${CHANNEL_B}`,
   CLIENT_IP: "socket",
   DATABASE_URL: "postgres://db.internal/x402",
 };
-/** Pubnet is refused until 0024 and 0071 land. */
+/** Pubnet is refused until 0024 and 0090 land. */
 const pubnet = { NETWORK: "stellar:pubnet" };
 const PUBNET_REFUSED =
-  "NETWORK stellar:pubnet is refused until spend budgets (0024) and the lease fencing token (0071) land";
+  "NETWORK stellar:pubnet is refused until spend budgets (0024), task 0090, the signer alarm (0027) and the hot key's re-check (0048) land";
 
 function problems(
   env: Record<string, string | undefined>,
@@ -47,7 +56,7 @@ describe("parseConfig", () => {
       port: 4021,
       logLevel: "info",
       rpcUrls: ["https://soroban-testnet.stellar.org"],
-      facilitatorSecret: SECRET,
+      signer: SIGNER,
       channels: [CHANNEL_A, CHANNEL_B],
       databaseUrl: "postgres://db.internal/x402",
       fees: { maxFeeStroops: 250_000n, inclusionFeeStroops: undefined, escalation: undefined },
@@ -84,7 +93,7 @@ describe("parseConfig", () => {
       PORT: "8080",
       LOG_LEVEL: "debug",
       RPC_URLS: "https://a.example, https://b.example",
-      FACILITATOR_SECRET: SECRET,
+      ...signerEnv(ADDRESS),
       CHANNELS: CHANNEL_B,
       DATABASE_URL: "postgres://db.internal/x402",
       MAX_FEE_STROOPS: "300001",
@@ -116,7 +125,7 @@ describe("parseConfig", () => {
       port: 8080,
       logLevel: "debug",
       rpcUrls: ["https://a.example", "https://b.example"],
-      facilitatorSecret: SECRET,
+      signer: SIGNER,
       channels: [CHANNEL_B],
       databaseUrl: "postgres://db.internal/x402",
       fees: {
@@ -151,14 +160,15 @@ describe("parseConfig", () => {
 
   it("trims values and treats blank ones as unset", () => {
     const config = parseConfig({
-      FACILITATOR_SECRET: `${SECRET}\n`,
+      ...signerEnv(ADDRESS),
+      FACILITATOR_ADDRESS: `${ADDRESS}\n`,
       CHANNELS: ` ${CHANNEL_A} `,
       CLIENT_IP: " socket ",
       DATABASE_URL: " postgres://db.internal/x402 ",
       RPC_URLS: "",
       PORT: " ",
     });
-    expect(config.facilitatorSecret).toBe(SECRET);
+    expect(config.signer).toEqual(SIGNER);
     expect(config.channels).toEqual([CHANNEL_A]);
     expect(config.http.clientIp).toBe("socket");
     expect(config.port).toBe(4021);
@@ -166,7 +176,12 @@ describe("parseConfig", () => {
 
   it("names missing required values", () => {
     expect(problems({})).toEqual([
-      "FACILITATOR_SECRET is required",
+      "FACILITATOR_ADDRESS is required",
+      "OPENBAO_SOCKET is required",
+      "OPENBAO_KEY is required",
+      "OPENBAO_KEY_VERSION is required",
+      "OPENBAO_ROLE_ID is required",
+      "OPENBAO_SECRET_ID is required",
       "CHANNELS is required",
       "DATABASE_URL is required",
       "CLIENT_IP is required",
@@ -174,11 +189,11 @@ describe("parseConfig", () => {
   });
 
   it("names invalid values without echoing them", () => {
-    const secret = `S${"A".repeat(55)}`; // right shape, bad checksum
-    const found = problems({ ...minimal, FACILITATOR_SECRET: secret, LOG_LEVEL: "verbose-xyz" });
+    const secret = keypair(9).secret(); // a secret key pasted in place of the address
+    const found = problems({ ...minimal, FACILITATOR_ADDRESS: secret, LOG_LEVEL: "verbose-xyz" });
     expect(found).toEqual([
       "LOG_LEVEL must be one of debug, info, warn, error",
-      "FACILITATOR_SECRET must be a Stellar secret key (S…)",
+      "FACILITATOR_ADDRESS must be a Stellar account address (G…)",
     ]);
     expect(found.join(" ")).not.toContain(secret);
     expect(found.join(" ")).not.toContain("verbose-xyz");
@@ -359,8 +374,8 @@ describe("parseConfig", () => {
       ]);
   });
 
-  it("refuses stellar:pubnet with nothing else wrong, until 0024 and 0071 land", () => {
-    // `/settle` would spend there with allow-all spend hooks and an unfenced lease.
+  it("refuses stellar:pubnet with nothing else wrong, until 0024 and 0090 land", () => {
+    // `/settle` would spend there with allow-all spend hooks.
     expect(problems({ ...minimal, ...pubnet, RPC_URLS: "https://rpc.example" })).toEqual([
       PUBNET_REFUSED,
     ]);
@@ -501,5 +516,51 @@ describe("settings read from files", () => {
     });
     expect(found).toEqual(["DATABASE_URL must be a postgres:// URL"]);
     expect(found.join(" ")).not.toContain("secret");
+  });
+});
+
+describe("the signer (0036)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "x402-signer-"));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  const file = (name: string, value: string) => {
+    const path = join(dir, name);
+    writeFileSync(path, value);
+    return path;
+  };
+
+  it("reads the OpenBao settings, the AppRole's from files", () => {
+    const config = parseConfig({
+      ...minimal,
+      OPENBAO_ROLE_ID: undefined,
+      OPENBAO_SECRET_ID: undefined,
+      OPENBAO_ROLE_ID_FILE: file("approle-role-id", "role\n"),
+      OPENBAO_SECRET_ID_FILE: file("approle-secret-id", "secret-id\n"),
+    });
+    expect(config.signer).toEqual(SIGNER);
+  });
+
+  const leftover = "FACILITATOR_SECRET is no longer read: the key signs in OpenBao (ADR 0013)";
+
+  it("refuses a leftover FACILITATOR_SECRET, so it can't look like it signs", () => {
+    expect(problems({ ...minimal, FACILITATOR_SECRET: "S-leftover" })).toEqual([leftover]);
+  });
+
+  it("names a leftover FACILITATOR_SECRET in an old environment with no OpenBao settings", () => {
+    const found = problems({
+      FACILITATOR_SECRET: "S-leftover",
+      CHANNELS: CHANNEL_A,
+      CLIENT_IP: "socket",
+      DATABASE_URL: "postgres://db.internal/x402",
+    });
+    expect(found).toContain(leftover);
+    expect(found).toContain("FACILITATOR_ADDRESS is required");
+    expect(found.join(" ")).not.toContain("S-leftover");
+  });
+
+  it.each([
+    ["FACILITATOR_ADDRESS", "S-not-an-address", "must be a Stellar account address (G…)"],
+    ["OPENBAO_KEY_VERSION", "0", "must be at least 1"],
+  ])("checks %s", (name, value, message) => {
+    expect(problems({ ...minimal, [name]: value })).toEqual([`${name} ${message}`]);
   });
 });

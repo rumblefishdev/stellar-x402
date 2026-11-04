@@ -14,6 +14,7 @@ import type { Stores } from "../src/ports/index.js";
 import type { Settle } from "../src/settlement/settle.js";
 import type { Verify } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
+import { signerEnv } from "./fake-openbao.js";
 
 /** The network `parseConfig` defaults to, and so the one the route below serves. */
 const SERVED = STELLAR_NETWORKS.testnet;
@@ -166,7 +167,7 @@ describe("GET /discovery/resources", () => {
 
   beforeAll(async () => {
     const env = {
-      FACILITATOR_SECRET: Keypair.random().secret(),
+      ...signerEnv(Keypair.random().publicKey()),
       DATABASE_URL: db.urlFor(db.schema),
       CHANNELS: Keypair.random().publicKey(),
       CLIENT_IP: "socket",
