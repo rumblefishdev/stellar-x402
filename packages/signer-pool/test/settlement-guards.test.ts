@@ -766,7 +766,7 @@ describe("our inner transaction under another envelope (0087)", () => {
    */
   function stalledWith(
     landed: (ours: FeeBumpTransaction) => FeeBumpTransaction | Transaction | undefined,
-    opts: { throwsFirst?: boolean } = {},
+    opts: { throwsFirst?: boolean; status?: "SUCCESS" | "FAILED" } = {},
   ) {
     const { fake, submitter } = setup({ timeoutSeconds: 600 });
     fake.stalled = true;
@@ -782,15 +782,18 @@ describe("our inner transaction under another envelope (0087)", () => {
       const tx = landed(ours);
       const res = await getTransaction(hash);
       if (!tx) return res;
+      const failed = opts.status === "FAILED";
       return {
         ...res,
-        status: rpc.Api.GetTransactionStatus.SUCCESS,
+        status: failed ? rpc.Api.GetTransactionStatus.FAILED : rpc.Api.GetTransactionStatus.SUCCESS,
         ledger: fake.ledger - 1,
         envelopeXdr: tx.toEnvelope(),
         resultXdr: xdr.TransactionResult.fromXDR(
           new xdr.TransactionResult({
             feeCharged: xdr.Int64.fromString("410000"),
-            result: xdr.TransactionResultResult.txSuccess([]),
+            result: failed
+              ? xdr.TransactionResultResult.txFailed([])
+              : xdr.TransactionResultResult.txSuccess([]),
             ext: new xdr.TransactionResultExt(0),
           }).toXDR(),
         ),
@@ -850,6 +853,64 @@ describe("our inner transaction under another envelope (0087)", () => {
     const { fake, submitter } = stalledWith(rewrap, { throwsFirst: true });
     const res = await submitter.submit(call(), { maxLedger: fake.ledger + 3 });
     expect(res.status).toBe("success");
+  });
+
+  it("lands our own fee bump found by the inner hash as ours: no rewrap, its fee kept", async () => {
+    const { fake, submitter } = stalledWith((ours) => ours);
+    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 3 });
+    const ours = fake.sent[0] as FeeBumpTransaction;
+    expect(res).toMatchObject({
+      status: "success",
+      hash: ours.hash().toString("hex"),
+      feeCharged: 410000n,
+    });
+    expect(res.rewrap).toBeUndefined();
+  });
+
+  it("waits a ledger when the inner read comes from a node behind the bound", async () => {
+    const { fake, submitter } = setup({ timeoutSeconds: 600 });
+    fake.stalled = true;
+    const maxLedger = fake.ledger + 3;
+    const getTransaction = fake.getTransaction.bind(fake);
+    let behind = true;
+    fake.getTransaction = async (hash) => {
+      const ours = fake.sent.at(-1) as FeeBumpTransaction | undefined;
+      const res = await getTransaction(hash);
+      if (!ours || hash !== ours.innerTransaction.hash().toString("hex")) return res;
+      if (behind) {
+        behind = false;
+        // A node that hasn't reached the bound yet: its NOT_FOUND says nothing.
+        return { ...res, latestLedger: maxLedger - 1 } as typeof res;
+      }
+      const bump = rewrap(ours);
+      return {
+        ...res,
+        status: rpc.Api.GetTransactionStatus.SUCCESS,
+        ledger: maxLedger,
+        envelopeXdr: bump.toEnvelope(),
+        resultXdr: new xdr.TransactionResult({
+          feeCharged: xdr.Int64.fromString("410000"),
+          result: xdr.TransactionResultResult.txSuccess([]),
+          ext: new xdr.TransactionResultExt(0),
+        }),
+      } as rpc.Api.GetTransactionResponse;
+    };
+    const res = await submitter.submit(call(), { maxLedger });
+    expect(res).toMatchObject({ status: "success", feeCharged: 0n });
+    expect(behind).toBe(false);
+  });
+
+  it("ends failed under their hash when their fee bump landed and failed", async () => {
+    const { fake, submitter } = stalledWith(rewrap, { status: "FAILED" });
+    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 3 });
+    const ours = fake.sent[0] as FeeBumpTransaction;
+    expect(res).toMatchObject({
+      status: "failed",
+      hash: rewrap(ours).hash().toString("hex"),
+      feeCharged: 0n,
+      errorCode: "txFailed",
+      rewrap: { of: ours.hash().toString("hex"), feeSource: rival.publicKey() },
+    });
   });
 
   it("keeps the fee charged when the inner transaction landed bare: the channel paid it", async () => {

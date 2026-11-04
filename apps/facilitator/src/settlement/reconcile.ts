@@ -256,6 +256,12 @@ export function createReconciler(deps: ReconcilerDeps) {
             const inner = await deps.rpc.getTransaction(attempt.innerHash);
             if (inner.status !== rpc.Api.GetTransactionStatus.NOT_FOUND)
               return land(record, attempt, inner, dead, true);
+            // The same rule as for our own hash: a node behind the bound, or without the
+            // history, may not have seen theirs land, so the attempt stays open.
+            if (!pastBound(record, attempt, inner) || !historyCovers(record, inner)) {
+              open++;
+              continue;
+            }
           }
           dead.push({ hash: attempt.hash, state: "dead" });
         } else {
@@ -269,6 +275,8 @@ export function createReconciler(deps: ReconcilerDeps) {
               network,
               settlementKey: record.key,
               transaction: attempt.hash,
+              // Someone else's fee bump of it lands under another hash, found by this one (0087).
+              ...(attempt.innerHash !== undefined && { innerHash: attempt.innerHash }),
               oldestLedger: res.oldestLedger,
             });
             metrics.increment("settlement_history_gone_total");

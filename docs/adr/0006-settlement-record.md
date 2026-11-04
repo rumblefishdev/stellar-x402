@@ -136,10 +136,11 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
   - Each hash also keeps its inner transaction's hash (task 0087). Anyone can wrap our inner
     transaction in a fee bump of their own at ten times the fee, and it then lands under their
     hash. Before calling a hash past its bound `dead`, the pool and reconciliation read it once by
-    its inner hash. If that finds it in a ledger, ours is `dead`, theirs is added last as `landed`
-    (so it is the hash the answer names), the fee is 0 since their fee account paid, and
-    `settlement_rewrapped` logs who paid. A hash stored before the inner hash was kept is read by
-    itself alone.
+    its inner hash, under the same bound rule. If that finds it in a ledger, ours is `dead`, theirs
+    is added last as `landed` (so it is the hash the answer names), and `settlement_rewrapped`
+    logs who paid. The fee is 0 under someone else's fee bump, since their fee account paid; the
+    inner transaction sent bare keeps its fee, which the channel paid. A hash stored before the
+    inner hash was kept is read by itself alone.
 - **Durable hash.** `signer-pool` awaits an async `onSigned` before every send and aborts the
   send if it rejects (task 0016).
 - **Reconciliation.** From startup, and every 10 s after, the module re-checks every non-final

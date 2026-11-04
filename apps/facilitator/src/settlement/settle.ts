@@ -739,20 +739,25 @@ export function createSettler(deps: SettlerDeps): Settle & {
         feeCharged: result.feeCharged,
         attempts: attemptUpdates(result.attempts, result),
       };
-      if (
-        result.rewrap &&
-        result.hash &&
-        (result.status === "success" || result.status === "failed")
-      )
-        records.rewrapped(key, {
-          ours: result.rewrap.of,
-          landed: result.hash,
-          feeSource: result.rewrap.feeSource,
-          state: result.status,
-        });
+      // Logged by the write that made the record final, as reconciliation does (0087).
+      const noteRewrap = <T extends { won: boolean }>(settled: T): T => {
+        if (
+          settled.won &&
+          result?.rewrap &&
+          result.hash &&
+          (result.status === "success" || result.status === "failed")
+        )
+          records.rewrapped(key, {
+            ours: result.rewrap.of,
+            landed: result.hash,
+            feeSource: result.rewrap.feeSource,
+            state: result.status,
+          });
+        return settled;
+      };
       switch (result.status) {
         case "success":
-          return await finish(key, { state: "success", ...fields }, call.origin, own);
+          return noteRewrap(await finish(key, { state: "success", ...fields }, call.origin, own));
         case "pending":
           // The pool's `resolved` event or a sweep finishes the record (0019, 0088).
           return {
@@ -762,16 +767,18 @@ export function createSettler(deps: SettlerDeps): Settle & {
             origin: call.origin,
           };
         default:
-          return await finish(
-            key,
-            {
-              state: result.status,
-              errorReason: SETTLE_REASONS[result.status],
-              ...(result.failure && { failure: result.failure }),
-              ...fields,
-            },
-            call.origin,
-            own,
+          return noteRewrap(
+            await finish(
+              key,
+              {
+                state: result.status,
+                errorReason: SETTLE_REASONS[result.status],
+                ...(result.failure && { failure: result.failure }),
+                ...fields,
+              },
+              call.origin,
+              own,
+            ),
           );
       }
     } catch (error) {
