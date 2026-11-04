@@ -2,12 +2,12 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 
-/** The project's example seller (`examples/http-api`), built, settled by the public x402.org facilitator. */
+/** The project's example seller (`examples/http-api`), built. */
 const EXAMPLE_SELLER = fileURLToPath(
   new URL("../../../../examples/http-api/dist/index.js", import.meta.url),
 );
 
-async function freePort(): Promise<number> {
+export async function freePort(): Promise<number> {
   const server = createServer();
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
   const { port } = server.address() as { port: number };
@@ -20,11 +20,19 @@ export interface ExampleSeller {
   stop(): void;
 }
 
-/** Starts the example seller paying `payTo`, and waits until it listens. */
-export async function startExampleSeller(payTo: string): Promise<ExampleSeller> {
+/** Starts the example seller paying `payTo` through `facilitatorUrl`, and waits until it listens. */
+export async function startExampleSeller(
+  payTo: string,
+  facilitatorUrl: string,
+): Promise<ExampleSeller> {
   const port = await freePort();
   const child: ChildProcess = spawn(process.execPath, [EXAMPLE_SELLER], {
-    env: { PATH: process.env.PATH!, SELLER_ADDRESS: payTo, PORT: String(port) },
+    env: {
+      PATH: process.env.PATH!,
+      SELLER_ADDRESS: payTo,
+      PORT: String(port),
+      FACILITATOR_URL: facilitatorUrl,
+    },
   });
   await new Promise<void>((resolve, reject) => {
     let output = "";
