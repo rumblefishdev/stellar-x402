@@ -15,6 +15,8 @@ import {
   start,
   type UpstreamSeams,
 } from "../src/main.js";
+import type { BuildIssue } from "../src/adapters/emf.js";
+import { emfMetrics } from "../src/adapters/emf-metrics.js";
 import { memoryMetrics, type ProcessMetrics } from "../src/metrics.js";
 import type { LeaseFence, SettlementStore, SpendScope } from "../src/ports/index.js";
 import { feeSettings } from "../src/settlement/fees.js";
@@ -543,6 +545,49 @@ describe("main()'s composition (compose)", () => {
     // Without `opts.metrics`, `compose()` counts in memory.
     return { deps, cataloger, metrics: metrics as MemoryMetrics, fake };
   }
+
+  /** An EMF writer on a captured sink and a scheduler that never fires: only `flush()` writes. */
+  function capturedEmf() {
+    const lines: string[] = [];
+    const issues: BuildIssue[] = [];
+    const metrics = emfMetrics({
+      write: (line) => void lines.push(line),
+      onIssue: (issue) => void issues.push(issue),
+      schedule: { setTimeout: () => undefined, clearTimeout: () => {} },
+    });
+    type Line = { _aws: { CloudWatchMetrics: { Dimensions: string[][] }[] } } & Record<
+      string,
+      unknown
+    >;
+    const linesFor = (name: string) =>
+      lines.map((line) => JSON.parse(line) as Line).filter((line) => name in line);
+    return { metrics, lines, issues, linesFor };
+  }
+
+  it("writes a settle's settlement_outcomes_total with network and result, and no issue (0027)", async () => {
+    const emf = capturedEmf();
+    const { deps, cataloger, fake } = await composed({}, { metrics: emf.metrics });
+    const settled = await deps.settle(payload(fake.ledger + 30, { bazaar }), requirements);
+    expect(settled.response).toMatchObject({ success: true });
+    settled.afterResponse!();
+    await cataloger.drain();
+    await emf.metrics.close();
+    const [outcome, ...rest] = emf.linesFor("settlement_outcomes_total");
+    expect(rest).toEqual([]);
+    expect(outcome).toMatchObject({
+      network: "stellar:testnet",
+      result: "success",
+      settlement_outcomes_total: 1,
+    });
+    expect(outcome!._aws.CloudWatchMetrics[0]!.Dimensions).toEqual([["network", "result"]]);
+    // A network-scoped metric written through the root would write no line and report
+    // `no-valid-set`; the catalog's line, process-scoped, carries no `network`.
+    expect(emf.issues).toEqual([]);
+    const [upsert] = emf.linesFor("catalog_upserts_total");
+    expect(upsert).toBeDefined();
+    expect(upsert).not.toHaveProperty("network");
+    expect(emf.linesFor("lease_changes_total")[0]).toMatchObject({ network: "stellar:testnet" });
+  });
 
   it("gives the network-scoped parts one network child and discovery and HTTP the root (0027)", async () => {
     const root = memoryMetrics();

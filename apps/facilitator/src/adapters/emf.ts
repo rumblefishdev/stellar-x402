@@ -34,31 +34,39 @@ export interface BuildIssue {
 }
 
 /** EMF's limit on the values of one metric in one line. */
-const MAX_VALUES = 100;
+export const MAX_VALUES = 100;
 
 // BigInt is not valid JSON; a bigint log field is written as a decimal string.
 const bigintAsString = (_key: string, v: unknown) => (typeof v === "bigint" ? v.toString() : v);
 
 /**
- * Each billed dimension's written value: the label as a string, or `other` for a value outside
- * the dimension's closed list (with an issue). A missing, empty, overlong or unprintable value
- * is absent from the map, so every set holding that dimension is invalid.
+ * The value a dimension is written as: the label as a string, or `other` for one outside the
+ * dimension's closed list (`unknown`, with the raw value). `undefined` for a missing, empty,
+ * overlong or unprintable value, which leaves every set holding the dimension invalid. The one
+ * home of the rule: the writer keys its window with it too.
  */
+export function dimValue(
+  def: MetricDef,
+  dim: string,
+  raw: Labels[string] | null | undefined,
+): { value: string; unknown?: string } | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const s = String(raw);
+  if (!isDimValue(s)) return undefined;
+  const closed = def.values?.[dim];
+  return closed && !closed.includes(s) ? { value: "other", unknown: s } : { value: s };
+}
+
+/** Each billed dimension's written value ({@link dimValue}), with an issue for each `other`. */
 function billedValues(def: MetricDef, labels: Labels, issues: BuildIssue[]): Map<string, string> {
   const dims = new Set(effectiveSets(def).flatMap((s) => s.dims));
   const out = new Map<string, string>();
   for (const dim of dims) {
-    const raw = labels[dim];
-    if (raw === undefined || raw === null) continue;
-    const s = String(raw);
-    if (!isDimValue(s)) continue;
-    const closed = def.values?.[dim];
-    if (closed && !closed.includes(s)) {
-      issues.push({ kind: "unknown-value", name: def.name, dim, value: s });
-      out.set(dim, "other");
-    } else {
-      out.set(dim, s);
-    }
+    const written = dimValue(def, dim, labels[dim]);
+    if (!written) continue;
+    if (written.unknown !== undefined)
+      issues.push({ kind: "unknown-value", name: def.name, dim, value: written.unknown });
+    out.set(dim, written.value);
   }
   return out;
 }

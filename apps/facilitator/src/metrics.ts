@@ -41,6 +41,14 @@ export interface MetricsWriter {
   registerGauge(name: GaugeName, read: GaugeRead): void;
 }
 
+/** One series' identity: its name and its labels, stringified and sorted. */
+export const seriesKey = (name: string, labels: Labels = {}) =>
+  `${name}${JSON.stringify(
+    Object.entries(labels)
+      .map(([k, v]) => [k, String(v)])
+      .sort(),
+  )}`;
+
 /** A thin child over `writer` that adds `network` to every label set. */
 export function scoped(writer: MetricsWriter, network: Network): NetworkMetrics {
   return {
@@ -72,12 +80,7 @@ export function memoryMetrics(): MetricsWriter & {
 } {
   const counts = new Map<string, number>();
   const gauges = new Map<string, GaugeRead[]>();
-  const id = (name: string, labels: Labels = {}) =>
-    `${name}${JSON.stringify(
-      Object.entries(labels)
-        .map(([k, v]) => [k, String(v)])
-        .sort(),
-    )}`;
+  const id = seriesKey;
   const root: MetricsWriter = {
     increment(name, labels, by = 1) {
       const key = id(name, labels);
