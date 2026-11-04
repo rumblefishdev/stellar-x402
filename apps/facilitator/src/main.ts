@@ -12,6 +12,7 @@ import { getNetworkPassphrase, getUsdcAddress, type FacilitatorStellarSigner } f
 import { ExactStellarScheme } from "@x402/stellar/exact/facilitator";
 import type pg from "pg";
 import { Agent, setGlobalDispatcher } from "undici";
+import { emfMetrics } from "./adapters/emf-metrics.js";
 import { openBaoSigner, type OpenBaoSigner } from "./adapters/openbao-signer.js";
 import { MIGRATIONS, migrate, pendingMigrations } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
@@ -498,8 +499,8 @@ export function buildSettlement(
 /**
  * Every part `main()` serves, built from the config on the given stores: the cataloger, one RPC
  * and one fee configuration shared by `/verify`, `/settle` and the pool. `main()` passes the
- * PostgreSQL stores; tests pass their own `rpc`, `makeScheme`, pool `sleep` and `metrics` (in
- * memory by default).
+ * PostgreSQL stores and the EMF writer; tests pass their own `rpc`, `makeScheme`, pool `sleep`
+ * and `metrics` (in memory by default).
  *
  * Metrics follow each one's catalog `scope` (0027 AD-3): every part of this network (settlement,
  * records, reconciliation, the pool, the lease, the spend lane, the balance floor, the signer)
@@ -649,7 +650,10 @@ export function compose(
 }
 
 export interface MainOptions {
-  /** Where the log lines go; stdout by default. The smoke scripts read them here. */
+  /**
+   * Where the log lines and the EMF metric lines go, each ending in a newline; stdout by default.
+   * The smoke scripts read them here.
+   */
   write?: (line: string) => void;
 }
 
@@ -666,6 +670,7 @@ export async function main(
   let pools:
     { main: pg.Pool; reserve: pg.Pool; rateLimits: pg.Pool; discovery: pg.Pool } | undefined;
   const endPools = () => Promise.all(Object.values(pools ?? {}).map((p) => p.end()));
+  let rpcStall: RpcStallTracker | undefined;
   try {
     // stellar-sdk's RPC and Horizon clients use the global fetch with no timeout of their own, and
     // an upstream call cut off by its deadline can't be cancelled. undici's defaults would hold its
@@ -694,7 +699,23 @@ export async function main(
     // missing. Checked first, so a wrong URL is named instead of every channel.
     await checkRpcNetworks(config.rpcUrls, getNetworkPassphrase(config.network));
     const stores = postgresStores(pools.main, pools);
-    const { deps, cataloger, metrics, rpc, signer } = compose(config, { logger, stores });
+    // The EMF writer (0027 AD-4) on its own sink, never through the logger. Its timers start
+    // here, with the graph, so a startup that hangs still writes the zero seed every minute. On
+    // stdout by default, where each write is awaited by the final flush.
+    const { write } = opts;
+    const metrics = emfMetrics({
+      ...(write && { write: (line: string) => write(`${line}\n`) }),
+      seedZero: [
+        { name: "settlement_sweeps_total", labels: { network: config.network, outcome: "listed" } },
+      ],
+      onIssue: (issue) => logger.warn("metric_issue", { ...issue }),
+    });
+    const composed = compose(config, { logger, stores, metrics });
+    const { deps, cataloger, rpc, signer } = composed;
+    // With the graph, like the writer's timers: an RPC that hangs the startup checks shows as a
+    // rising `rpc_stalled_seconds`.
+    rpcStall = composed.rpcStall;
+    rpcStall.start();
     // AD-12: the service starts only when no other key can move a channel. An RPC that doesn't
     // answer fails the check with its error. `compose()` only wires parts, so nothing has called
     // the RPC yet.
@@ -721,16 +742,24 @@ export async function main(
     pruner.start();
     // Catalog writes and a prune already under way finish before the process exits, and before
     // the pools end, even if closing the server fails; the pools end even if draining fails.
+    // The metrics' final flush comes last, after every part that counts, and is awaited:
+    // `server.ts` exits once this resolves, and a write to a stdout pipe is asynchronous.
     const closeOnce = async () => {
       signer.close();
       try {
-        await started.close();
-      } finally {
         try {
-          await Promise.all([cataloger.drain(), pruner.close()]);
+          await started.close();
         } finally {
-          await endPools();
+          try {
+            await Promise.all([cataloger.drain(), pruner.close()]);
+          } finally {
+            await endPools();
+          }
         }
+      } finally {
+        // Its last reading goes out with the final flush; no read starts after it.
+        rpcStall?.stop();
+        await metrics.close();
       }
     };
     let closing: Promise<void> | undefined;
@@ -753,6 +782,12 @@ export async function main(
     // Logged here, where an RPC URL is named as its `RPC_URLS` entry, never by its host
     // (ADR 0011); `server.ts` logs only a `ConfigError`, which comes before the logger.
     logger.error("startup_failed", { error });
+    // No final metrics flush here: the open window always holds the zero seed, so it would add a
+    // liveness point for every start that failed, and a crash loop of short starts would keep
+    // `facilitator-silent` quiet. A start that crosses a minute boundary has written the seed
+    // already, by design (a hung start writes it); `sweeps-stopped` and `uptime` see that one.
+    // Eager-first lines are out already; the writer's timers are unref'd.
+    rpcStall?.stop();
     await endPools();
     throw error;
   }

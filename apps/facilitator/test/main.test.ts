@@ -12,6 +12,7 @@ import {
   TransactionBuilder,
   nativeToScVal,
 } from "@stellar/stellar-sdk";
+import { EMF_LINE_PREFIX } from "@stellar-x402/metrics-catalog";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { MIGRATIONS, migrate } from "../src/adapters/postgres-schema.js";
 import { ConfigError, parseConfig } from "../src/config.js";
@@ -22,6 +23,21 @@ import { memoryMetrics } from "../src/metrics.js";
 import { testDatabase } from "./database.js";
 import { hardened, ledgerEntries, rpcStub } from "./rpc-stub.js";
 import { fakeOpenBao, signerEnv } from "./fake-openbao.js";
+
+type EmfModule = typeof import("../src/adapters/emf-metrics.js");
+/** The options each `emfMetrics()` call got: `main()`'s seed is checked on them (0027). */
+const emfOptions = vi.hoisted(() => [] as Parameters<EmfModule["emfMetrics"]>[0][]);
+vi.mock("../src/adapters/emf-metrics.js", async (importActual) => {
+  const actual = await importActual<EmfModule>();
+  return {
+    ...actual,
+    emfMetrics: (opts: Parameters<EmfModule["emfMetrics"]>[0]) => {
+      emfOptions.push(opts);
+      // Off stdout unless the test gives `main()` a sink: `LOG_LEVEL` quiets the logger only.
+      return actual.emfMetrics({ write: () => {}, ...opts });
+    },
+  };
+});
 
 const db = testDatabase();
 const key = Keypair.random();
@@ -340,6 +356,50 @@ describe("main()", () => {
       await pool.end();
       await db.pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
     }
+  });
+
+  it("seeds settlement_sweeps_total for its network's listed sweeps, and nothing else (0027)", async () => {
+    emfOptions.length = 0;
+    const app = await main(
+      { ...env, RPC_URLS: rpc.url, PORT: "0", LOG_LEVEL: "error" },
+      { write: () => {} },
+    );
+    await app.close();
+    expect(emfOptions).toHaveLength(1);
+    expect(emfOptions[0]?.seedZero).toEqual([
+      {
+        name: "settlement_sweeps_total",
+        labels: { network: "stellar:testnet", outcome: "listed" },
+      },
+    ]);
+  });
+
+  it("ends close() with the metrics' final flush, on the log's sink (0027)", async () => {
+    const lines: string[] = [];
+    const app = await main(
+      { ...env, RPC_URLS: rpc.url, PORT: "0", LOG_LEVEL: "info" },
+      { write: (line) => void lines.push(line) },
+    );
+    // The start sweep has listed, and the next one is an interval away: exactly one `listed`.
+    await app.reconciled;
+    await app.close();
+    // After the drain, the cataloger and the pruner: nothing writes once close() resolves.
+    const last = lines.at(-1)!;
+    expect(last.startsWith(EMF_LINE_PREFIX)).toBe(true);
+    // One line per write, as the log's.
+    expect(last.indexOf("\n")).toBe(last.length - 1);
+    // The seeded series, written in every window, so the flush always holds it. Summed over the
+    // windows (close() may fall in a later minute than the sweep), the one sweep that listed.
+    const seeds = lines
+      .filter((line) => line.startsWith(EMF_LINE_PREFIX))
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((line) => "settlement_sweeps_total" in line && line.outcome === "listed");
+    expect(seeds.at(-1)).toMatchObject({ network: "stellar:testnet", outcome: "listed" });
+    expect(seeds.reduce((sum, line) => sum + Number(line.settlement_sweeps_total), 0)).toBe(1);
+    // Found first: a missing `shutdown_started` (-1) would pass the order check on its own.
+    const shutdown = lines.findIndex((line) => line.includes('"event":"shutdown_started"'));
+    expect(shutdown).toBeGreaterThanOrEqual(0);
+    expect(lines.lastIndexOf(last)).toBeGreaterThan(shutdown);
   });
 
   it("serves /supported for the key it checked the channels against", async () => {
