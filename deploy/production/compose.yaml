@@ -1,8 +1,8 @@
 # The production environment (ADR 0011, 0077): one facilitator for every network it serves (today
 # testnet), a database and a migration service per network, and the tunnel connector. Each service
 # has a systemd unit of its own (`deploy/systemd`), so none has a restart policy, and none
-# publishes a port. Each drops every capability and sets no-new-privileges; only Postgres adds
-# some back. On the server this is /srv/x402/production/compose.yaml.
+# publishes a port. Each drops every capability and sets no-new-privileges, and runs as a user
+# other than root. On the server this is /srv/x402/production/compose.yaml.
 #
 #   FACILITATOR_IMAGE  the facilitator's image; `x402-compose` sets it from `digest`
 #   SECRETS_DIR        the decrypted credentials, /run/x402/production unless set (local runs)
