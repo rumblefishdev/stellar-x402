@@ -157,7 +157,8 @@ ALTER TABLE settlement_hashes
   {
     // 0063: a listing comes from the seller's own 402, so writes are ordered by when the check
     // that read it started; nullable, so the release before it keeps working, and a null reads as
-    // 0. Every listing attempt is a row, pruned after 30 days; the pruner deletes by `at`.
+    // 0. Every attempt to change a listing is a row, pruned after 30 days; the pruner deletes by
+    // `at`.
     name: "0006_catalog_seller_check",
     sql: `
 ALTER TABLE catalog ADD COLUMN checked_at bigint;
