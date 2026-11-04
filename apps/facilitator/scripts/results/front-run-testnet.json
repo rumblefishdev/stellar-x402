@@ -1,0 +1,81 @@
+{
+  "network": "stellar:testnet",
+  "ranAt": "2026-11-04T08:58:06.980Z",
+  "owner": "GDP6RE2JI64EOF4KJUTOJRVNSQUOBCHGO4Q4EK76FP7DIR5TORWHXG7T",
+  "cases": [
+    {
+      "kind": "wasm",
+      "token": "CBWBB6VQWIMFVEOBY23U3Q2JRUVF4HC7CV2UESKNK2H5U65LAAYTGWGB",
+      "wallet": "CBGOSKWQ54AZO7GYBYJJF5RKXYA52KQNWBE7ENH6TCNSDBD6VSGX44N6",
+      "frontRun": {
+        "hash": "37815fda7c8284b6efcde7820eae4da711b9ae7a1ee25e6120f513c24e2fc188",
+        "status": "SUCCESS",
+        "ledger": 5551814
+      },
+      "ours": {
+        "hash": "39f63dd4dbf48f6404f3d7c57def5af96d42fc751ae0db96a71eed1dce8b9927",
+        "status": "FAILED",
+        "ledger": 5551815,
+        "feeCharged": "7546",
+        "failureCause": {
+          "opCode": "invokeHostFunctionTrapped",
+          "error": {
+            "type": "sceAuth",
+            "code": "scecExistingValue"
+          },
+          "contract": "CBWBB6VQWIMFVEOBY23U3Q2JRUVF4HC7CV2UESKNK2H5U65LAAYTGWGB",
+          "data": ["CBGOSKWQ54AZO7GYBYJJF5RKXYA52KQNWBE7ENH6TCNSDBD6VSGX44N6"]
+        },
+        "errorEvents": [
+          {
+            "type": "diagnostic",
+            "contract": "CBWBB6VQWIMFVEOBY23U3Q2JRUVF4HC7CV2UESKNK2H5U65LAAYTGWGB",
+            "error": "sceAuth",
+            "code": "scecExistingValue"
+          },
+          {
+            "type": "diagnostic",
+            "contract": "CBWBB6VQWIMFVEOBY23U3Q2JRUVF4HC7CV2UESKNK2H5U65LAAYTGWGB",
+            "error": "sceAuth",
+            "code": "scecExistingValue"
+          }
+        ],
+        "faults": []
+      }
+    },
+    {
+      "kind": "sac",
+      "token": "CBR4YBXVOYW6L3VIBA4OXVXBGPQNVVVOTPR4GHMQR4PBLI4VD3MNQEBZ",
+      "wallet": "CBGOSKWQ54AZO7GYBYJJF5RKXYA52KQNWBE7ENH6TCNSDBD6VSGX44N6",
+      "frontRun": {
+        "hash": "d789aba373474ddaa1fcfab2d264e9ae502807a0a5c6fcd1c52cfde24c81b8cf",
+        "status": "SUCCESS",
+        "ledger": 5551820
+      },
+      "ours": {
+        "hash": "401016df03d0cf1fe1e828ae4b28156b3b46bdb61f8a64b100d9fdefb59ca0d0",
+        "status": "FAILED",
+        "ledger": 5551821,
+        "feeCharged": "5819",
+        "failureCause": {
+          "opCode": "invokeHostFunctionTrapped",
+          "error": {
+            "type": "sceAuth",
+            "code": "scecExistingValue"
+          },
+          "contract": "CBR4YBXVOYW6L3VIBA4OXVXBGPQNVVVOTPR4GHMQR4PBLI4VD3MNQEBZ",
+          "data": ["CBGOSKWQ54AZO7GYBYJJF5RKXYA52KQNWBE7ENH6TCNSDBD6VSGX44N6"]
+        },
+        "errorEvents": [
+          {
+            "type": "diagnostic",
+            "contract": "CBR4YBXVOYW6L3VIBA4OXVXBGPQNVVVOTPR4GHMQR4PBLI4VD3MNQEBZ",
+            "error": "sceAuth",
+            "code": "scecExistingValue"
+          }
+        ],
+        "faults": []
+      }
+    }
+  ]
+}
