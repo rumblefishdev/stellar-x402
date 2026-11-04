@@ -140,7 +140,8 @@ export function createRecords(deps: RecordsDeps) {
    * back to the record, so its hooks would never run. Reconciliation reads each, runs the hooks of
    * one it finds final, and leaves one it doesn't to the usual path (0019 decision 29). A writer in
    * this process takes the key out while its write runs, so the sweep doesn't run the hooks beside
-   * it, and keeps it out once the record is final (decision 35); a restart forgets it.
+   * it, and keeps it out once the record is final (decision 35), also when another writer put it
+   * back meanwhile; a restart forgets it.
    */
   const unconfirmed = new Set<SettlementKey>();
 
@@ -162,6 +163,10 @@ export function createRecords(deps: RecordsDeps) {
     }
     // Lost to another writer: an earlier write of ours may still be the one that committed.
     if (!record && listed) unconfirmed.add(key);
+    // Won: this compare-and-set moved the record from a non-final state, so no write that threw
+    // committed first, and none can commit after. A racing writer that threw and put the key back
+    // while this one ran would have the sweep run the hooks, and count the fee, a second time.
+    if (record) unconfirmed.delete(key);
     return record;
   };
 

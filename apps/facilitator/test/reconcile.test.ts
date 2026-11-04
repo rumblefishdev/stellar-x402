@@ -484,6 +484,78 @@ describe("createReconciler", () => {
       expect(metrics.value("fee_charged_stroops", { state: "success" })).toBe(41_000);
     });
 
+    it("runs the hooks once when a writer that lost takes the key out while the sweep reads it", async () => {
+      const { store, hooks, records, reconciler, metrics } = setup({ [A]: landed("SUCCESS") });
+      const key = await signed(store, [A]);
+      const transition = store.transition.bind(store);
+      vi.spyOn(store, "transition").mockImplementationOnce(async (...args) => {
+        await transition(...args);
+        throw new Error("connection lost after commit");
+      });
+      expect(await reconciler.sweep()).toMatchObject({ errors: 1 });
+      expect(records.unconfirmed.has(key)).toBe(true);
+      // The next sweep listed the key; while it reads the record, a writer that read it before the
+      // commit takes the key out, and its compare-and-set from `signed` loses and puts it back.
+      let writer: Promise<unknown> | undefined;
+      const get = store.get.bind(store);
+      vi.spyOn(store, "get").mockImplementationOnce(async (k) => {
+        const record = await get(k);
+        writer = records.finalWrite(key, () =>
+          transition(key, "signed", { state: "success", updatedAt: NOW }),
+        );
+        return record;
+      });
+      await reconciler.sweep();
+      expect(await writer).toBeUndefined();
+      expect(records.unconfirmed.has(key)).toBe(true);
+      await reconciler.sweep();
+      await reconciler.sweep();
+      expect(records.unconfirmed.has(key)).toBe(false);
+      expect(hooks.onFinal).toHaveBeenCalledTimes(1);
+      expect(hooks.onSuccess).toHaveBeenCalledTimes(1);
+      expect(metrics.value("fee_charged_stroops", { state: "success" })).toBe(41_000);
+    });
+
+    it("forgets the key when a final write wins after a racing one threw without committing", async () => {
+      const { store, hooks, records, reconciler, metrics } = setup();
+      const key = await signed(store, [A]);
+      // Writer 1 takes the key out (it isn't listed), then its write fails without committing.
+      let fail!: () => void;
+      const failing = new Promise<void>((r) => (fail = r));
+      const writer1 = records.finalWrite(key, async () => {
+        await failing;
+        throw new Error("store down");
+      });
+      // Writer 2 enters while writer 1 is out, so it finds the key unlisted; its commit lands
+      // after writer 1 has put the key back.
+      const transition = store.transition.bind(store);
+      let commit!: () => void;
+      const committing = new Promise<void>((r) => (commit = r));
+      const entered = vi.spyOn(store, "transition").mockImplementationOnce(async (...args) => {
+        await committing;
+        return transition(...args);
+      });
+      const writer2 = records.finish(
+        key,
+        { state: "success", ledger: 4_000, feeCharged: 41_000n },
+        "settle",
+      );
+      await vi.waitFor(() => expect(entered).toHaveBeenCalled());
+      fail();
+      await expect(writer1).rejects.toThrow("store down");
+      expect(records.unconfirmed.has(key)).toBe(true);
+      commit();
+      expect(await writer2).toMatchObject({ won: true });
+      // Writer 2 ran the hooks; no sweep runs them again.
+      expect(records.unconfirmed.has(key)).toBe(false);
+      await reconciler.sweep();
+      await reconciler.sweep();
+      expect(hooks.onFinal).toHaveBeenCalledTimes(1);
+      // finish() runs onFinal only; the writer's caller runs onSuccess, and no sweep may run it.
+      expect(hooks.onSuccess).not.toHaveBeenCalled();
+      expect(metrics.value("fee_charged_stroops", { state: "success" })).toBe(41_000);
+    });
+
     it("leaves one that didn't commit to the writer that finishes it, so its hooks run once", async () => {
       const { store, hooks, records, reconciler } = setup({ [A]: landed("SUCCESS") });
       const key = await signed(store, [A]);

@@ -133,8 +133,10 @@ export function createReconciler(deps: ReconcilerDeps) {
       try {
         const record = await store.get(key);
         if (!record) records.unconfirmed.delete(key);
-        else if (isFinalRecord(record)) {
-          records.unconfirmed.delete(key);
+        // Only while the key is still listed: a writer that took it out during the read either
+        // won (and runs the hooks) or lost to this final record and puts it back for the next
+        // sweep, so the hooks, and the fee, run once.
+        else if (isFinalRecord(record) && records.unconfirmed.delete(key)) {
           records.onFinal(record, "resolved");
           if (record.state === "success") records.onSuccess(record, "resolved");
         }
