@@ -47,7 +47,16 @@ export function testDatabase(max = 10): TestDatabase {
     applied: [],
     stores: () => postgresStores(db.pool),
     empty: async () => {
-      await db.pool.query(truncate);
+      // The spend policy's `onFinal` runs after a test's answer, so its late write can deadlock
+      // with this: it locks a transaction's tables in another order.
+      for (let attempt = 1; ; attempt++) {
+        try {
+          await db.pool.query(truncate);
+          return;
+        } catch (error) {
+          if ((error as { code?: string }).code !== "40P01" || attempt === 3) throw error;
+        }
+      }
     },
     urlFor,
     poolFor,

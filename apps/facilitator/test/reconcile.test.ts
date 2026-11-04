@@ -23,6 +23,7 @@ import {
 } from "../src/settlement/reconcile.js";
 import { createRecords } from "../src/settlement/records.js";
 import { SETTLE_REASONS } from "../src/settlement/settle.js";
+import { failedResult } from "@stellar-x402/signer-pool/testing";
 import { holdLease, settlement } from "./port-contracts.js";
 import { testDatabase } from "./database.js";
 
@@ -258,6 +259,19 @@ describe("createReconciler", () => {
       });
     });
 
+    it("stores why a landed failure failed", async () => {
+      const failed = {
+        ...landed("FAILED"),
+        resultXdr: failedResult("invokeHostFunctionEntryArchived"),
+      } as unknown as rpc.Api.GetTransactionResponse;
+      const { store, reconciler } = setup({ [A]: failed });
+      const key = await signed(store, [A]);
+      await reconciler.sweep();
+      expect((await store.get(key))?.failure).toEqual({
+        opCode: "invokeHostFunctionEntryArchived",
+      });
+    });
+
     it("keeps a hash the network doesn't know open until its ledger bound passes (decision 1)", async () => {
       const answers = { [A]: missing(4_009) };
       const { store, reconciler, advance } = setup(answers);
@@ -345,6 +359,28 @@ describe("createReconciler", () => {
       expect(await reconciler.sweep()).toMatchObject({ open: 1, expired: 0 });
       advance(5 * 60_000);
       expect(await reconciler.sweep()).toMatchObject({ expired: 1 });
+    });
+
+    it("frees the payer and asset's in-flight slot when a record's history is gone, so the next payment isn't blocked (0024)", async () => {
+      // Past its bound (with the NOT_FOUND margin), history starting after the claim: it stays
+      // open, but can't land again.
+      const answers = { [A]: missing(4_013, 0, NOW / 1000 + 1) };
+      const { store, reconciler } = setup(answers);
+      const key = await signed(store, [A]);
+      const slot = async () =>
+        (
+          await db.pool.query<{ key: string }>(
+            "SELECT key FROM settlement_in_flight WHERE key = $1",
+            [key],
+          )
+        ).rows;
+      // The claim took the (network, payer, asset) slot.
+      expect(await slot()).toHaveLength(1);
+      expect(await reconciler.sweep()).toMatchObject({ open: 1, expired: 0 });
+      // The record stays open for the operator, but the slot is freed: nothing can land past the
+      // bound, so another payment of this payer and asset must not be answered `payer_busy` forever.
+      expect((await store.get(key))?.state).toBe("signed");
+      expect(await slot()).toHaveLength(0);
     });
 
     it("doesn't expire a record when a rebuild stores a hash during the sweep (decision 26)", async () => {
@@ -540,6 +576,27 @@ describe("createReconciler", () => {
         ["landed", undefined],
       ]);
       expect(hooks.onSuccess).toHaveBeenCalledWith(expect.objectContaining({ key }), "resolved");
+    });
+
+    it("keeps the failure cause of a pending record that failed", async () => {
+      const { store, reconciler } = setup();
+      const key = await signed(store, [A]);
+      await store.transition(key, "signed", { state: "pending", updatedAt: NOW });
+      const failure = {
+        opCode: "invokeHostFunctionTrapped",
+        error: { type: "sceAuth", code: "x" },
+      };
+      await reconciler.resolved({
+        status: "failed",
+        hash: A,
+        channel: "GCHANNEL",
+        ledger: 4_001,
+        feeCharged: 41_000n,
+        errorCode: "txFeeBumpInnerFailed",
+        failure,
+        attempts: [{ hash: A, sent: "yes" }],
+      });
+      expect(await store.get(key)).toMatchObject({ state: "failed", failure });
     });
 
     it("finishes an expired one with its reason", async () => {

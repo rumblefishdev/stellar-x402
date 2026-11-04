@@ -1,4 +1,5 @@
 import type { rpc } from "@stellar/stellar-sdk";
+import type { FailureCause } from "./failure-cause.js";
 
 /**
  * The RPC calls the pool needs. `rpc.Server` satisfies it; tests pass a fake. Accounts are read
@@ -82,6 +83,8 @@ export interface SubmitResult {
    * for an `expired` send the network refused.
    */
   errorCode?: string;
+  /** Why an included transaction failed; set only with `failed`, and empty when unreadable. */
+  failure?: FailureCause;
   /** Every attempt of this submission, in order; the last one is `hash`. */
   attempts: Attempt[];
 }

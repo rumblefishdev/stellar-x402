@@ -6,7 +6,7 @@ status: backlog
 milestone: 1
 related_adr: ["0008"]
 related_tasks: ["0063", "0037"]
-tags: [mcp, bazaar, security, priority-medium, effort-small]
+tags: [mcp, bazaar, security, before-pubnet, priority-medium, effort-small]
 links:
   - ../../../docs/adr/0008-bazaar-catalog-integrity.md
 history:
@@ -16,6 +16,12 @@ history:
     note: >
       Spawned from 0063: the catalog will match the seller's 402 when an entry is written, but a
       seller can change its 402 afterwards.
+  - date: "2026-11-04"
+    status: backlog
+    who: karolkow
+    note: >
+      Required before pubnet: the 0063 check doesn't prove who owns a listing's payTo, so a URL can
+      name another seller's account and change its 402 later (ADR 0008).
 ---
 
 # Refuse a paid call when the seller asks more than its catalog listing or names another payTo
