@@ -51,5 +51,6 @@ export function synth(config: EnvironmentConfig) {
   const x: X402App = createApp(config);
   const alarms = json(x.alarms);
   const uptime = json(x.uptime);
-  return { x, alarms, uptime, all: [alarms, uptime] };
+  const telemetry = json(x.telemetry);
+  return { x, alarms, uptime, telemetry, all: [alarms, uptime, telemetry] };
 }
