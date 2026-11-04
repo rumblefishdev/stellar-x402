@@ -203,7 +203,7 @@ graph TD
 - **Rule:**
   - One middleware, with separate budgets for `/verify`, `/settle` and `/discovery/*`. Exceeding a budget returns HTTP 429.
   - **Client IP.** It comes only from the header the edge sets (`CF-Connecting-IP` behind Cloudflare Tunnel, ADR 0011; `CLIENT_IP=cloudflare`), never from `X-Forwarded-For`. An IPv6 client is counted per /56.
-  - **API key.** An optional per-caller API key as an alternative limiter key is not built in T1 (task 0060): without a registry of issued keys, a caller's own key would bypass the limit.
+  - **API key.** On testnet an API key is ignored, in T1 and after. On pubnet (M2) `/verify` and `/settle` require one, issued by our portal after Discord sign-in, and the limiter counts a caller by its key instead of its IP (tasks 0105, 0106; ADR 0007's amendment of 2026-11-03).
   - **Storage.** Counters go through `RateLimitStore`.
   - **Payer, recipient and asset.** Limits on these are AD-18's job, not the IP limiter's.
 
@@ -278,21 +278,26 @@ graph TD
 
 ### AD-18: Spend budgets contain fee abuse
 
-- **Binds:** `/settle`, `SpendStore`, alerts
-- **Prevents:** someone draining the facilitator's XLM through valid self-payments or junk tokens, which IP limits can't stop.
-- **Rule:**
-  - **Budgets.** Before `submit()`, `/settle` checks and reserves the fee against:
-    - a global rolling fee budget
-    - per-payer, per-`payTo` and per-asset budgets
-  - **Over budget.** Returns `success: false` and submits nothing.
+- **Binds:** `/settle`, `/verify`, `SpendStore`, alerts
+- **Prevents:** someone draining the facilitator's XLM through valid self-payments, junk tokens or payments that fail on chain, which IP limits can't stop.
+- **Rule** (task 0024, [S-design](../../lore/1-tasks/active/0024_FEATURE_spend-budgets-and-breakers/notes/S-design.md)):
+  - **Payer proof.** `/settle` refuses a settlement whose simulation didn't use the payer's auth entry (its nonce key isn't in the read-write footprint), so the payer every budget is keyed by signed the payment.
+  - **One at a time.** At most one settlement per (network, payer, asset) is in flight; another waits within the settle budget, then gets `settle_exact_stellar_payer_busy`, retryable with the same payment.
+  - **Order.** In the `beforeSubmit` hook: the fee account's balance floor, then the breakers, then the budgets.
+  - **Budgets.** `/settle` reserves the fee ceiling against, narrowest first: the payer and the `payTo` (each one scope for the known assets, one per other asset), the asset (a high budget for a known asset, USDC; a low one for any other), `tier:other` (every other asset together) and a global budget. All or none.
+  - **Over budget.** Returns `success: false` with a reason naming the narrowest full budget, and submits nothing.
+  - **Accounting.** When the record is final, the reservation is lowered to the fee charged, or released when nothing was charged. A release leaves a tombstone, so a reserve that arrives after it counts nothing. A store that doesn't answer refuses the settlement (fail closed).
   - **Windows.** A budget sums what was reserved or paid in its rolling window, exact to the
     millisecond. A committed fee keeps its reservation's time, however late the commit. The store
     keeps reservations for twice the longest window or 7 days, whichever is longer (task 0050).
-  - **Circuit breaker.** A breaker per asset and per `payTo` opens after repeated on-chain failures.
+    Every budget has the same 24 h window.
+  - **Circuit breakers.** Per payer, per `payTo` and per wasm asset, never per SAC. Only included, charged failures count, against the party that caused them; a payment whose nonce someone else used first counts against nobody. A breaker opens after repeated failures for a time that grows on each reopening. `/settle` and `/verify` refuse while one is open.
+  - **Balance floor.** `/settle` refuses while the fee account's spendable balance (balance minus reserve and selling liabilities), read in the background, is below `SPEND_FLOOR_STROOPS`, or before its first reading.
+  - **What it bounds.** Per-party budgets bound one address, which is free. The global and per-asset budgets bound the total loss; they don't keep the shared budgets available against self-payments from many addresses (ADR 0007, amended 2026-10-30).
   - **Alerts.** These raise alerts:
-    - the budget nearing its limit
+    - a budget nearing its limit (80 %)
     - an open breaker
-    - a low facilitator balance (`checkFacilitatorBalance`)
+    - a low facilitator balance (the floor, and `checkFacilitatorBalance`)
     - quarantined channels
     - pending results
 

@@ -1,8 +1,9 @@
 # Threat model
 
-Not written yet, except for the `upto` contract, `/verify` RPC failover, auth-entry expiry and
-facilitator key sections below. Planned sections: assets (fee budget, catalog integrity), fee griefing via failed
-transactions, auth-entry validation, SSRF in Bazaar metadata, API key abuse.
+Written so far: the `upto` contract, `/verify` RPC failover, auth-entry expiry, settlement fees
+(what `/settle` can cost the facilitator: spend budgets, breakers, fee griefing with failed
+transactions) and the facilitator key. Planned: catalog integrity, auth-entry validation, SSRF in
+Bazaar metadata, API key abuse.
 
 ## `upto` contract
 
@@ -323,6 +324,122 @@ Scope: the `exact` payer's auth entry and how long it stays landable (spine AD-6
   from before 0082, during a deploy or after a rollback, answers without the wait. MCP agents get
   no ledger, since it would come through the seller; they are told not to pay again without
   checking.
+
+## Settlement fees
+
+Scope: what `/settle` for `exact` can cost the facilitator, which pays every fee (AD-10), and the
+spend budgets and breakers that bound it (AD-18, [ADR 0007](adr/0007-fee-abuse-containment.md),
+task 0024). `/settle` accepts any SEP-41 token. On testnet it takes no API key; on pubnet it will
+require one (0105).
+
+### Threats
+
+#### Parallel spend of one balance
+
+- **Attack:** A payer funded with one payment's `amount` signs N payments with N nonces and sends
+  N `/settle` calls at once. Each passes both simulations, N channels submit in one ledger, and
+  N−1 fail on chain at our fee. Done to USDC, the failures could also trip a breaker that refuses
+  everyone's USDC.
+- **Mitigation:** At most one settlement per (network, payer, asset) is in flight, enforced by
+  PostgreSQL in the claim and in a reopen (0073), across instances and lease hand-overs. Another
+  call waits within the settle budget, then gets `settle_exact_stellar_payer_busy` with nothing
+  recorded. The next settlement's simulation sees the previous transfer, so a payment the balance
+  no longer covers is refused before anything is sent. Failures count against the payer, never
+  against a SAC asset.
+- **Residual risk:** A payer that sends its payments one after another pays for its own failures,
+  up to its budget. Fan-out from one payer in one asset is serialized, which may slow a buyer
+  that pays many sellers at once.
+
+#### A token that skips `require_auth`
+
+- **Attack:** A wasm token whose `transfer` never calls `from.require_auth()`. Upstream checks
+  only that the payer's auth entry is signed, and Soroban checks an entry only when `require_auth`
+  uses it, so the payment settles with any `from` and any nonce. On testnet it settled with a
+  victim as payer who never signed. Per-payer budgets and breakers then bound nothing, and records
+  and the catalog carry a payer the attacker picked.
+- **Mitigation:** `/settle` requires the payer's nonce key in the settlement simulation's
+  read-write footprint, which the host writes only for an auth entry it matched, authenticated and
+  found fresh. Without it the settlement is refused before anything is signed
+  (`settle_exact_stellar_payer_not_authorized`). It works for G and C payers, SAC and wasm tokens.
+- **Residual risk:** `/verify` doesn't run the check, so it accepts such a payment. Only a seller
+  paid in its own forged token is fooled, and `/settle` refuses it at no cost.
+
+#### Breaker abuse
+
+- **Attack:** Someone makes a breaker refuse other people's payments: a payer fails a few USDC
+  payments on purpose to close USDC for everyone, or pays a competing seller with failing
+  payments to close its `payTo`.
+- **Mitigation:** Breakers count only included, charged failures, against the party that caused
+  them (attribution from the operation result and the host's diagnostic events; an event a
+  contract publishes itself is ignored, so a token can't name an error of its choice). A SAC's code
+  is the host's, so a SAC asset never has a breaker, and a failure that is ours counts against
+  nobody. A failure on the recipient's side of a SAC transfer blames the `payTo` only for a known
+  asset and only when the error names it alone; anything else blames the payer, since whoever
+  issues a classic asset can wrap it in a SAC and deauthorize any `payTo`. A C-account payer's
+  breaker opens on one failure only in its own contract; elsewhere it takes 3, like a G-account's.
+  The payer's and the `payTo`'s scopes are split per other asset, so a seller's own token can't
+  trip a buyer's USDC scope, nor a junk token a seller's. A wasm token's breaker needs 5 failures
+  and at least as many failures as successes.
+- **Residual risk:** A wasm token's issuer, or its payers together, can close that token. A
+  `payTo` whose own contract fails transfers to it closes itself. Both hurt only that token or
+  seller. Each failure still costs us its fee, bounded by the budgets.
+
+#### Payload front-running
+
+- **Attack:** A seller (or anyone the payload reaches) submits the buyer's signed payload itself,
+  paying its own fee, before the facilitator does. Our transaction then fails on chain at our fee
+  with `Error(Auth, ExistingValue)`: the nonce is used. Charged to the payer, three of them would
+  close the buyer's USDC breaker for every seller.
+- **Mitigation:** A reused nonce feeds no breaker: the payer signed one payment and it settled.
+  The fee still counts against the budgets. The payment itself settled once, so nobody is paid
+  twice. The host checks the nonce when the token calls `require_auth`, before a C-account's
+  `__check_auth` runs, so the error names the token, never the payer: shown on testnet for a
+  `test-wallet` payer in a wasm token and in a SAC (task 0024,
+  `apps/facilitator/scripts/results/front-run-testnet.json`).
+- **Residual risk:** Each front-run costs us one fee, bounded by the budgets, and costs the
+  front-runner its own. A wasm token can raise `Error(Auth, ExistingValue)` itself (a
+  `require_auth` of its own on a used entry), so its failures feed no breaker; they stay bounded
+  by the budgets. The same error in a C-account payer's own frame can't come from a front-run
+  (the token's frame fails first), only from the wallet's own nested auth, so it is blamed on the
+  payer like any failure there: its breaker opens at once.
+
+#### Shared budget exhaustion by Sybil self-payments
+
+- **Attack:** Someone pays themself valid 1-unit USDC payments (the value comes back) from many
+  cheap addresses. Per-payer and per-`payTo` budgets stop each address, but `asset:USDC`,
+  `tier:other` and `global` sum over everyone. At the defaults about 13 payers and 3 `payTo`s
+  fill `asset:USDC` in about 17,000 payments. With one payment per payer in flight, 13 payers take
+  about two hours; about 50 payers and 50 channels take half an hour.
+  The addresses' reserves (about 1.5 XLM each) come back on merge, and about 0.2 payments a second
+  keep USDC closed as the window rolls. Every payment succeeds, so no breaker opens. USDC is then
+  refused for every seller. `global` stays out of reach while USDC is the only known asset.
+- **Mitigation:** The loss stops at the budgets, 25 XLM for USDC and 10 XLM for other tokens per
+  window; with no budget the same attack would empty the 100 XLM float. The budgets bound the
+  rate, not the sum: kept up for under three days, the attack takes the float to its 5 XLM floor,
+  and `/settle` then refuses everyone until a top-up.
+  `spend_budget_nearing` fires at 80 % of a shared budget, and the facilitator README has a
+  runbook to tell an attack from real traffic.
+- **Residual risk:** Accepted on testnet (decided by akot, 2026-10-30): the shared budgets bound
+  the loss, not availability. On pubnet `/verify` and `/settle` will require an API key issued
+  after Discord sign-in, and a key's settlements count in a budget of its own, not in the shared
+  ones (0105, 0106, 0107; akot, 2026-11-03); `stellar:pubnet` is refused until they land. A
+  Discord account then plays the part of an address, but only up to its free quota, and all free
+  quotas share one budget, so many accounts use up only the free traffic (0107).
+
+#### Targeted `payTo` budget exhaustion
+
+- **Attack:** Someone fills one seller's `payTo` budget so its real payments are refused
+  (`settle_exact_stellar_spend_limit_pay_to`) until the window rolls. The budget counts the fee of
+  every payment to that seller, whoever pays. In USDC, about 7,000 1-unit payments from a handful
+  of cheap payers (each within its own budget) fill its 10 XLM; the units go to the seller. In a
+  junk token the attacker issues, the same payments would cost it nothing.
+- **Mitigation:** The `payTo` budget is split by tier like the payer's: payments in another token
+  count in `payTo:<address>/<token>`, so a junk token fills only that, never the seller's USDC
+  budget. The USDC route stays bounded by `asset:USDC` and `global`, and `spend_budget_nearing`
+  reports the `payTo` budget at 80 %.
+- **Residual risk:** The USDC route is accepted, as Sybil self-payments are: per-party budgets
+  bound one address, not one attacker. On pubnet API keys (0105) close it only if the `payTo`
+  budget is also kept per caller, one of 0107's decisions.
 
 ## Facilitator key
 
