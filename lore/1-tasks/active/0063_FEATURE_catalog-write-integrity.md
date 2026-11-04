@@ -114,6 +114,7 @@ description or price, and nobody can make `/discovery/resources` answer megabyte
 | 38 | Only a payment whose copy is new or differs from the stored listing is an attempt and a `catalog_attempts` row, a refused copy and a skipped check included; a copy equal to the listing only increments the counter | grilling | changes row 23 | spec silent | | |
 | 39 | The check doesn't prove that a listing's `payTo` belongs to the URL's owner: ADR 0008 says so, and 0068 is required before pubnet. No proof of the account for a listing: none of the 10 Stellar accounts in the largest public catalog could show one through SEP-1 | grilling | beyond it | spec silent; SEP-1 | | |
 | 40 | A seller's response headers are read up to 24 KiB, so a 16 KiB listing fits once base64-encoded; over that is `response_too_large`, like a body over its cap, instead of a dropped connection | grilling | beyond it | spec silent | | |
+| 41 | A URL without a valid template stays a listing of its own, as the spec says; ADR 0008 names the risk that a client's value is then public. 33 of 104,924 such URLs in the largest public catalog hold an identifier-like value, 2 an e-mail | grilling | beyond it | `bazaar.md:543,579` | | |
 
 ## Not yet decided
 
