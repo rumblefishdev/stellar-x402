@@ -65,7 +65,15 @@ docker compose restart postgres-testnet
 ready "a restart"
 docker compose up --detach --no-deps --force-recreate postgres-testnet
 ready "a new container on the used volume"
-docker compose exec -T -e PGPASSWORD=ci-only postgres-testnet \
-  psql --host 127.0.0.1 --username postgres --dbname x402 --tuples-only --command 'select 1' \
-  > /dev/null
-echo "password login works"
+# Over the `db` network, as the facilitator's DATABASE_URL connects: initdb trusts 127.0.0.1, so a
+# login there passes with any password. A wrong one must fail, or this proves nothing.
+login() {
+  docker compose exec -T -e PGPASSWORD="$1" postgres-testnet psql --host postgres-testnet \
+    --username postgres --dbname x402 --tuples-only --command 'select 1' > /dev/null 2>&1
+}
+if login wrong; then
+  echo "a wrong password logs in over the db network" >&2
+  exit 1
+fi
+login ci-only
+echo "password login over the db network works"
