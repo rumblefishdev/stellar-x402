@@ -237,6 +237,8 @@ const landing =
 
 const db = testDatabase();
 beforeEach(db.empty);
+// A test that times out on the fake clock doesn't stop every later test's real sleeps.
+afterEach(() => vi.useRealTimers());
 /** The lease `/settle` sends under, taken again for every test (0071). */
 let fence: LeaseFence | undefined;
 beforeEach(async () => {
@@ -482,25 +484,33 @@ describe("createSettler", () => {
 
   it("gives the success to the retry after a settlement_pending answer: pending doesn't use it up", async () => {
     let land!: () => void;
+    const lands = new Promise<void>((resolve) => (land = resolve));
+    let signed!: () => void;
+    const isSigned = new Promise<void>((resolve) => (signed = resolve));
     const { settle, store } = setup(
       async (opts) => {
         await opts.onSigned?.(HASH, BOUNDS);
-        await new Promise<void>((resolve) => (land = resolve));
+        signed();
+        await lands;
         return result();
       },
       { budgetMs: BUDGET_MS, settleTimeoutMs: BUDGET_MS },
     );
-    expect((await settle(payload(), requirements)).response).toMatchObject({
-      errorReason: SETTLE_REASONS.pending,
+    const first = await onFakeClock(async () => {
+      const settled = settle(payload(), requirements);
+      await isSigned;
+      await elapse(BUDGET_MS);
+      return settled;
     });
-    // On a slow runner the budget can end before the hash is stored, so `land` isn't set yet.
-    await vi.waitFor(() => expect(land).toBeTypeOf("function"));
+    expect(first.response).toMatchObject({ errorReason: SETTLE_REASONS.pending });
     land();
     await vi.waitFor(async () => expect((await store.get(key))?.state).toBe("success"));
-    const retry = await settle(payload(), requirements);
+    // Only the first call runs out of budget: the retries read what it stored.
+    const patient = setup();
+    const retry = await patient.settle(payload(), requirements);
     expect(retry.response).toEqual({ success: true, transaction: HASH, network, payer });
     expect(retry.record?.state).toBe("success");
-    expect((await settle(payload(), requirements)).response).toEqual(alreadySettled);
+    expect((await patient.settle(payload(), requirements)).response).toEqual(alreadySettled);
   });
 
   it("shares one store read per poll among the repeats of a key, and stops a repeat whose client left", async () => {
@@ -532,16 +542,19 @@ describe("createSettler", () => {
   });
 
   it("answers settlement_pending to a repeat once the settle timeout runs out", async () => {
+    let signed!: () => void;
+    const isSigned = new Promise<void>((resolve) => (signed = resolve));
     const { settle } = setup(
       async (opts) => {
         await opts.onSigned?.(HASH, BOUNDS);
+        signed();
         return new Promise(() => {});
       },
       { settleTimeoutMs: 30, budgetMs: BUDGET_MS },
     );
-    // Only the first call writes under the budget; the repeat reads what it stored.
     const first = await onFakeClock(async () => {
       const settled = settle(payload(), requirements);
+      await isSigned;
       await elapse(BUDGET_MS);
       return settled;
     });
@@ -550,7 +563,9 @@ describe("createSettler", () => {
       errorReason: "settlement_pending",
       transaction: HASH,
     });
-    expect((await settle(payload(), requirements)).response).toMatchObject({
+    // Only the first call runs out of budget: the repeat reads what it stored.
+    const repeat = setup(landing(), { settleTimeoutMs: 30 });
+    expect((await repeat.settle(payload(), requirements)).response).toMatchObject({
       errorReason: "settlement_pending",
       transaction: HASH,
     });
@@ -736,13 +751,15 @@ describe("createSettler", () => {
   it("drains a submission that runs on after its budget answer, with its record write (0025)", async () => {
     let land!: () => void;
     const landed = new Promise<void>((resolve) => (land = resolve));
+    // Real time, with a budget a slow database's write of the hash fits in: `drain` waits for writes
+    // that outlive the fake clock.
     const { settle, store } = setup(
       async (opts) => {
         await opts.onSigned?.(HASH, BOUNDS);
         await landed;
         return result("success");
       },
-      { budgetMs: 50 },
+      { budgetMs: 1_000 },
     );
     expect((await settle(payload(), requirements)).response).toMatchObject({
       errorReason: SETTLE_REASONS.pending,
@@ -1241,9 +1258,11 @@ describe("createSettler", () => {
         return get(k);
       });
       const waiting = settle(second(), requirements);
-      await delay(50);
       // The failed read was followed by more: the wait went on.
-      expect(reads.mock.calls.filter(([k]) => k === key).length).toBeGreaterThan(1);
+      await vi.waitFor(
+        () => expect(reads.mock.calls.filter(([k]) => k === key).length).toBeGreaterThan(1),
+        { timeout: 4_000 },
+      );
       land();
       await first;
       expect((await waiting).response).toMatchObject({ success: true, transaction: HASH_2 });
@@ -1553,11 +1572,12 @@ describe("createSettler", () => {
 
     it("never says sign a new payment for an unsigned record it couldn't end", async () => {
       // The refusal couldn't be stored, so the record stays `claimed` with no hash.
-      const s = setup(landing(), { budgetMs: BUDGET_MS });
+      // A budget the first call's claim fits in, however slow the database.
+      const s = setup(landing(), { budgetMs: 1_000 });
       s.hooks.beforeSubmit.mockResolvedValueOnce({ allow: false, errorReason: "over_budget" });
       vi.spyOn(s.store, "transition").mockRejectedValue(new Error("store down"));
       await s.settle(payload(), requirements);
-      await delay(BUDGET_MS + 10);
+      await delay(1_010);
       // The repeat can't end it either: the record may still be signed elsewhere.
       expect((await s.settle(payload(), requirements)).response).toMatchObject({
         success: false,
@@ -1991,7 +2011,7 @@ describe("createSettler", () => {
     it("keeps a repeat waiting past the settle timeout while nothing is signed yet, up to its budget", async () => {
       let sign!: () => void;
       const signing = new Promise<void>((resolve) => (sign = resolve));
-      const { settle, submit } = setup(
+      const { settle, store, submit } = setup(
         async (opts) => {
           await signing;
           return landing()(opts);
@@ -1999,6 +2019,8 @@ describe("createSettler", () => {
         { settleTimeoutMs: 100, budgetMs: 2_000 },
       );
       const first = settle(payload(), requirements);
+      // The repeat must find the first call's claim, however slow the database.
+      while (!(await store.get(key))) await storeIdle();
       await elapse(5);
       const repeat = settle(payload(), requirements);
       // Past the settle timeout from the repeat's start (5 + 100).
@@ -2081,13 +2103,13 @@ describe("createSettler", () => {
         });
         const loser = ctx.settle(payload(), requirements);
         const winner = delay(150).then(() => ctx.settle(payload(), requirements));
-        return { ...ctx, loser, winner };
+        return { ...ctx, loser, winner, winnersClaim };
       };
 
       it("leaves the record to the winner while its budget runs: a late reservation is released after it", async () => {
         const order: string[] = [];
         let reserve!: () => void;
-        const { hooks, loser, winner } = race(landing());
+        const { hooks, loser, winner, winnersClaim } = race(landing());
         hooks.beforeSubmit.mockImplementationOnce(
           () =>
             new Promise((resolve) => {
@@ -2100,7 +2122,10 @@ describe("createSettler", () => {
         hooks.onFinal.mockImplementation(async () => {
           order.push("onFinal");
         });
-        await elapse(300);
+        await elapse(150);
+        // The clock stands still until the winner's claim is stored, however slow the database.
+        await winnersClaim;
+        await elapse(150);
         // By its own budget, before the winner's ends, and with no hash.
         expect((await loser).response).toMatchObject({
           errorReason: SETTLE_REASONS.pending,
@@ -2121,7 +2146,9 @@ describe("createSettler", () => {
           await run.loser;
           return landing()(opts);
         });
-        await elapse(300);
+        await elapse(150);
+        await run.winnersClaim;
+        await elapse(150);
         expect((await run.loser).response).toMatchObject({ errorReason: SETTLE_REASONS.pending });
         expect((await run.winner).response).toMatchObject({ success: true, transaction: HASH });
         expect((await run.store.get(key))?.state).toBe("success");
@@ -2517,7 +2544,7 @@ describe("createSettler", () => {
       });
       expect((await repeat.settle(payload(), requirements)).response.success).toBe(true);
       sign();
-      await vi.waitFor(() => expect(late).toBeInstanceOf(Error));
+      await vi.waitFor(() => expect(late).toBeInstanceOf(Error), { timeout: 4_000 });
       expect(await store.get(key)).toMatchObject({ state: "success", hashes: [OTHER] });
     });
 
@@ -2555,7 +2582,7 @@ describe("createSettler", () => {
       );
       const finals = vi.mocked(first.hooks.onFinal).mock.calls.length;
       sign();
-      await vi.waitFor(() => expect(late).toBeInstanceOf(Error));
+      await vi.waitFor(() => expect(late).toBeInstanceOf(Error), { timeout: 4_000 });
       await first.settle.drain();
       expect(await repeat.store.get(key)).toMatchObject({
         state: "signed",
@@ -2595,7 +2622,7 @@ describe("createSettler", () => {
         expect(await repeat.store.get(key)).toMatchObject({ state: "claimed", reopened: 1 }),
       );
       sign();
-      await vi.waitFor(() => expect(late).toBeInstanceOf(Error));
+      await vi.waitFor(() => expect(late).toBeInstanceOf(Error), { timeout: 4_000 });
       await first.settle.drain();
       expect(await repeat.store.get(key)).toMatchObject({
         state: "claimed",
@@ -2639,7 +2666,7 @@ describe("createSettler", () => {
         expect(await other.store.get(key)).toMatchObject({ state: "signed", hashes: [OTHER] }),
       );
       signFirst();
-      await vi.waitFor(() => expect(late).toBeInstanceOf(Error));
+      await vi.waitFor(() => expect(late).toBeInstanceOf(Error), { timeout: 4_000 });
       land();
       await reopened;
       await vi.waitFor(async () =>
