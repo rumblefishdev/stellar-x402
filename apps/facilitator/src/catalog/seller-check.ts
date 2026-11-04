@@ -5,6 +5,13 @@ import { SellerFetchError, guardedFetch, type SellerLimits } from "@stellar-x402
 import { decodePaymentRequiredHeader } from "@x402/core/http";
 import { PaymentRequiredV2Schema } from "@x402/core/schemas";
 import type { PaymentRequired } from "@x402/core/types";
+import type { Logger } from "../logger.js";
+
+/**
+ * How long ending an MCP session may take, past the check's own deadline: about the p95 of a
+ * seller's answer (1.85 s, measured 2026-10-28).
+ */
+const SESSION_END_MS = 2_000;
 
 /** Why a seller gave no usable answer; `detail` is for logs and the attempt's row only. */
 export type SellerAnswer =
@@ -62,14 +69,17 @@ export async function askMcpSeller(
   url: string,
   call: { name: string; arguments: Record<string, unknown> },
   limits: SellerLimits,
+  logger: Logger,
 ): Promise<SellerAnswer> {
   const mcp = new Client({ name: "stellar-x402-facilitator", version: "0.0.0" });
   const deadline = AbortSignal.timeout(limits.timeoutMs);
-  const fetch = guardedFetch(limits, deadline);
+  let fetch = guardedFetch(limits, deadline);
   // The SDK waits for an answer up to its own 60 s after the request is sent; the deadline ends
   // that wait too, for a server that accepts a call and never sends its result.
   const options = { signal: deadline };
-  const transport = new StreamableHTTPClientTransport(new URL(url), { fetch });
+  const transport = new StreamableHTTPClientTransport(new URL(url), {
+    fetch: (input, init) => fetch(input, init),
+  });
   try {
     await mcp.connect(transport, options);
     let listed = false;
@@ -128,8 +138,10 @@ export async function askMcpSeller(
     // `close()` only aborts the client's requests; a stateful server's session ends with the
     // DELETE this sends (none without a session id). A failed one leaves the session to the
     // server's own cleanup, so it is logged and the answer stands.
+    // It gets its own deadline, since a check can end because the check's deadline passed.
+    fetch = guardedFetch(limits, AbortSignal.timeout(SESSION_END_MS));
     await transport.terminateSession().catch((error: unknown) => {
-      console.warn("mcp_session_end_failed", url, String(error));
+      logger.warn("mcp_session_end_failed", { url, error: String(error) });
     });
     await mcp.close();
   }

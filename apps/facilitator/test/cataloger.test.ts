@@ -731,6 +731,24 @@ describe("cataloger, an MCP listing (0063 rows 5, 18)", () => {
     expect(mcp.ended).toEqual(["s-1"]);
   });
 
+  it("ends a stateful seller's session after the seller deadline too (row 34)", async () => {
+    mcp = await startMcpSeller(() => "never", { session: "s-1" });
+    const { cataloger } = setup({ sellerTimeoutMs: 300 });
+    await cataloger.onSuccess(paid(), "settle");
+    expect(mcp.ended).toEqual(["s-1"]);
+  });
+
+  it("logs a session end that failed, and the answer stands (row 34)", async () => {
+    mcp = await startMcpSeller(() => terms, { session: "s-1", sessionEndStatus: 500 });
+    const { cataloger, counted, logger } = setup();
+    await cataloger.onSuccess(paid(), "settle");
+    expect(counted("seller", "refreshed", "inserted")).toBe(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      "mcp_session_end_failed",
+      expect.objectContaining({ url: expect.stringContaining("http") }),
+    );
+  });
+
   it("closes the seller's event stream once the check is done", async () => {
     mcp = await startMcpSeller(() => terms);
     const { cataloger } = setup();

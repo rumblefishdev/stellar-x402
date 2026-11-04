@@ -40,12 +40,14 @@ export async function startMcpSeller(
     textOnly = false,
     description = "",
     session,
+    sessionEndStatus = 200,
   }: {
     tools?: string[];
     outputSchema?: boolean;
     textOnly?: boolean;
     description?: string;
     session?: string;
+    sessionEndStatus?: number;
   } = {},
 ): Promise<McpSeller> {
   const streams = new Set<IncomingMessage>();
@@ -60,7 +62,7 @@ export async function startMcpSeller(
         if (session) {
           if (req.method === "DELETE") {
             seller.ended.push(String(req.headers["mcp-session-id"]));
-            res.writeHead(200).end();
+            res.writeHead(sessionEndStatus).end();
             return;
           }
           res.setHeader("mcp-session-id", session);

@@ -261,10 +261,12 @@ export function createCataloger({
       const input = result.discovered.discoveryInfo.input;
       const answer =
         input.type === "mcp"
-          ? await askMcpSeller(result.resourceUrl, bazaarLib.toolCall(input), {
-              ...sellerLimits,
-              maxResponseBytes: MCP_RESPONSE_BYTES,
-            })
+          ? await askMcpSeller(
+              result.resourceUrl,
+              bazaarLib.toolCall(input),
+              { ...sellerLimits, maxResponseBytes: MCP_RESPONSE_BYTES },
+              logger,
+            )
           : await askSeller(
               bazaarLib.sellerRequest(result.resourceUrl, { ...input, method: key.method }),
               sellerLimits,
