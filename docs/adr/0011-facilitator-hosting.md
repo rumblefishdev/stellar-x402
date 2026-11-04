@@ -335,7 +335,8 @@ One request or one stop must never outlast the layer in front of it:
     `deploy/production`. `develop` stays open for direct pushes such as lore status changes.
   - The SSH key is a secret of the `production` GitHub environment, which carries the rules the
     OIDC trust policy used to: deployment branches limited to `deploy/production`, which is
-    protected: a pull request with an approving review, and no bypass, admins included. The
+    protected: a pull request with an approving review given after its last push by someone
+    other than whoever made it, and no bypass, admins included. The
     workflow runs as it is on that branch, so a change to it is reviewed too.
     - A job outside those rules never gets the key.
     - Before mainnet joins, 0038 weighs the rules the `mainnet` environment was to have: `v*`
