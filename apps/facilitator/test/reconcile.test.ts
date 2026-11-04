@@ -23,7 +23,8 @@ import {
 } from "../src/settlement/reconcile.js";
 import { createRecords } from "../src/settlement/records.js";
 import { SETTLE_REASONS } from "../src/settlement/settle.js";
-import { settlement } from "./port-contracts.js";
+import { failedResult } from "@stellar-x402/signer-pool/testing";
+import { holdLease, settlement } from "./port-contracts.js";
 import { testDatabase } from "./database.js";
 
 const db = testDatabase();
@@ -140,7 +141,7 @@ async function signed(
   nonce = "1",
 ) {
   const key = await claimed(store, nonce);
-  for (const hash of hashes) await store.addHash(key, hash, NOW, bounds);
+  for (const hash of hashes) await store.addHash(key, hash, await holdLease(store), NOW, bounds);
   return key;
 }
 
@@ -179,11 +180,35 @@ describe("createReconciler", () => {
       store.listNonFinal = async (n) => {
         const listed = await list(n);
         // The call signs between the listing and the close.
-        await store.addHash(key, A, NOW, { maxTime: 2_000 });
+        await store.addHash(key, A, await holdLease(store), NOW, { maxTime: 2_000 });
         return listed;
       };
       await reconciler.sweep();
       expect(await store.get(key)).toMatchObject({ state: "signed", hashes: [A] });
+    });
+
+    it("never closes a claim reopened after the sweep read the earlier one (0073 decision 19)", async () => {
+      // The sweep reads the old claim; before its close, a repeat's budget ends it and another
+      // repeat reopens it. The reopened claim is still `claimed` with no hash, but it is a new
+      // claim whose call may still sign: only the version the sweep read tells them apart.
+      const { store, reconciler, advance } = setup();
+      const key = await claimed(store);
+      advance(BUDGET_MS + 5_001);
+      const reason = SETTLE_REASONS.noChannelInTime;
+      const list = store.listNonFinal.bind(store);
+      store.listNonFinal = async (n) => {
+        const listed = await list(n);
+        await store.transition(key, "claimed", {
+          state: "rejected",
+          errorReason: reason,
+          updatedAt: NOW,
+        });
+        const { fingerprint } = settlement("1");
+        expect(await store.reopen(key, fingerprint, [reason], NOW)).toBeDefined();
+        return listed;
+      };
+      expect(await reconciler.sweep()).toMatchObject({ rejected: 0 });
+      expect(await store.get(key)).toMatchObject({ state: "claimed", reopened: 1, hashes: [] });
     });
   });
 
@@ -234,13 +259,26 @@ describe("createReconciler", () => {
       });
     });
 
+    it("stores why a landed failure failed", async () => {
+      const failed = {
+        ...landed("FAILED"),
+        resultXdr: failedResult("invokeHostFunctionEntryArchived"),
+      } as unknown as rpc.Api.GetTransactionResponse;
+      const { store, reconciler } = setup({ [A]: failed });
+      const key = await signed(store, [A]);
+      await reconciler.sweep();
+      expect((await store.get(key))?.failure).toEqual({
+        opCode: "invokeHostFunctionEntryArchived",
+      });
+    });
+
     it("keeps a hash the network doesn't know open until its ledger bound passes (decision 1)", async () => {
       const answers = { [A]: missing(4_009) };
       const { store, reconciler, advance } = setup(answers);
       const key = await signed(store, [A]);
       expect(await reconciler.sweep()).toMatchObject({ open: 1 });
       expect((await store.get(key))?.state).toBe("signed");
-      answers[A] = missing(4_010);
+      answers[A] = missing(4_013);
       advance(BUDGET_MS + 5_001);
       expect(await reconciler.sweep()).toMatchObject({ expired: 1 });
       expect(await store.get(key)).toMatchObject({
@@ -250,29 +288,63 @@ describe("createReconciler", () => {
       expect((await store.attempts(key))[0]?.state).toBe("dead");
     });
 
-    it("expires a hash once the close time passes its time bound", async () => {
-      const { store, reconciler } = setup({ [A]: missing(100, 2_001) });
+    it("keeps a hash bounded by its ledger alone open past 60 s, until that ledger passes (0073)", async () => {
+      // No time bound since 0073: a close time long past signing doesn't expire it.
+      const answers = { [A]: missing(4_009, NOW / 1000 + 300) };
+      const { store, reconciler, advance } = setup(answers);
+      const key = await signed(store, [A], { maxLedger: 4_010 });
+      advance(BUDGET_MS + 5_001);
+      expect(await reconciler.sweep()).toMatchObject({ open: 1, expired: 0 });
+      expect((await store.get(key))?.state).toBe("signed");
+      answers[A] = missing(4_013, NOW / 1000 + 305);
+      expect(await reconciler.sweep()).toMatchObject({ expired: 1 });
+    });
+
+    it.each([4_010, 4_011, 4_012])(
+      "doesn't take NOT_FOUND read at ledger %i of a bound at 4010 as dead: it may have landed (0088)",
+      async (latestLedger) => {
+        const answers = { [A]: missing(latestLedger) };
+        const { store, reconciler } = setup(answers);
+        const key = await signed(store, [A], { maxLedger: 4_010 });
+        expect(await reconciler.sweep()).toMatchObject({ open: 1, expired: 0 });
+        expect((await store.get(key))?.state).toBe("signed");
+        expect((await store.attempts(key))[0]?.state).toBe("stored");
+        answers[A] = landed("SUCCESS");
+        expect(await reconciler.sweep()).toMatchObject({ success: 1 });
+        expect((await store.get(key))?.state).toBe("success");
+      },
+    );
+
+    it("expires a hash once the close time passes its time bound by the margin (0088)", async () => {
+      const answers = { [A]: missing(100, 2_015) };
+      const { store, reconciler } = setup(answers);
       const key = await signed(store, [A]);
+      await reconciler.sweep();
+      expect((await store.get(key))?.state).toBe("signed");
+      answers[A] = missing(100, 2_016);
       await reconciler.sweep();
       expect((await store.get(key))?.state).toBe("expired");
     });
 
     it("expires a record only once every hash is dead (decision 5)", async () => {
-      const answers = { [A]: missing(4_010), [B]: missing(4_010) };
+      const answers = { [A]: missing(4_013), [B]: missing(4_013) };
       const { store, reconciler } = setup(answers);
       const key = await signed(store, [A]);
-      await store.addHash(key, B, NOW, { maxTime: 9_999, maxLedger: 4_020 });
+      await store.addHash(key, B, await holdLease(store), NOW, {
+        maxTime: 9_999,
+        maxLedger: 4_020,
+      });
       expect(await reconciler.sweep()).toMatchObject({ open: 1 });
       expect((await store.get(key))?.state).toBe("signed");
       expect((await store.attempts(key)).map((a) => a.state)).toEqual(["dead", "stored"]);
-      answers[B] = missing(4_020);
+      answers[B] = missing(4_023);
       await reconciler.sweep();
       expect((await store.get(key))?.state).toBe("expired");
     });
 
     it("keeps a record open while the RPC's history doesn't reach back to it, and reports it once (decision 22)", async () => {
       // The oldest ledger the RPC keeps closed after the claim: a landed hash would be NOT_FOUND too.
-      const answers = { [A]: missing(4_010, 0, NOW / 1000 + 1) };
+      const answers = { [A]: missing(4_013, 0, NOW / 1000 + 1) };
       const { store, reconciler, lines, metrics, advance } = setup(answers);
       const key = await signed(store, [A]);
       expect(await reconciler.sweep()).toMatchObject({ open: 1, expired: 0 });
@@ -282,16 +354,38 @@ describe("createReconciler", () => {
       expect(lines.filter((line) => line.includes('"settlement_history_gone"'))).toHaveLength(1);
       expect(metrics.value("settlement_history_gone_total")).toBe(1);
       // History from the claim on: NOT_FOUND past the bound now means it never landed.
-      answers[A] = missing(4_010, 0, NOW / 1000);
+      answers[A] = missing(4_013, 0, NOW / 1000);
       // Checked again only every 5 minutes (decision 27).
       expect(await reconciler.sweep()).toMatchObject({ open: 1, expired: 0 });
       advance(5 * 60_000);
       expect(await reconciler.sweep()).toMatchObject({ expired: 1 });
     });
 
+    it("frees the payer and asset's in-flight slot when a record's history is gone, so the next payment isn't blocked (0024)", async () => {
+      // Past its bound (with the NOT_FOUND margin), history starting after the claim: it stays
+      // open, but can't land again.
+      const answers = { [A]: missing(4_013, 0, NOW / 1000 + 1) };
+      const { store, reconciler } = setup(answers);
+      const key = await signed(store, [A]);
+      const slot = async () =>
+        (
+          await db.pool.query<{ key: string }>(
+            "SELECT key FROM settlement_in_flight WHERE key = $1",
+            [key],
+          )
+        ).rows;
+      // The claim took the (network, payer, asset) slot.
+      expect(await slot()).toHaveLength(1);
+      expect(await reconciler.sweep()).toMatchObject({ open: 1, expired: 0 });
+      // The record stays open for the operator, but the slot is freed: nothing can land past the
+      // bound, so another payment of this payer and asset must not be answered `payer_busy` forever.
+      expect((await store.get(key))?.state).toBe("signed");
+      expect(await slot()).toHaveLength(0);
+    });
+
     it("doesn't expire a record when a rebuild stores a hash during the sweep (decision 26)", async () => {
       const answers: Record<string, rpc.Api.GetTransactionResponse> = {
-        [A]: missing(4_010),
+        [A]: missing(4_013),
         [B]: landed("SUCCESS"),
       };
       const { store, reconciler, getTransaction, advance } = setup(answers);
@@ -300,7 +394,7 @@ describe("createReconciler", () => {
       advance(BUDGET_MS + 60_000);
       // The call's `txBadSeq` rebuild is stored while the sweep waits for the RPC.
       getTransaction.mockImplementationOnce(async () => {
-        await store.addHash(key, B, NOW, { maxTime: NOW / 1000 + 60 });
+        await store.addHash(key, B, await holdLease(store), NOW, { maxTime: NOW / 1000 + 60 });
         return answers[A]!;
       });
       expect(await reconciler.sweep()).toMatchObject({ open: 1, expired: 0 });
@@ -311,7 +405,7 @@ describe("createReconciler", () => {
     });
 
     it("finishes by the hash that landed, also when another died (decision 5)", async () => {
-      const { store, reconciler } = setup({ [A]: missing(4_010), [B]: landed("SUCCESS") });
+      const { store, reconciler } = setup({ [A]: missing(4_013), [B]: landed("SUCCESS") });
       const key = await signed(store, [A, B]);
       await reconciler.sweep();
       expect((await store.get(key))?.state).toBe("success");
@@ -323,10 +417,16 @@ describe("createReconciler", () => {
       const { store, reconciler } = setup(answers);
       const s = { ...settlement("1"), paymentPayload: payloadWithAuth(), createdAt: NOW };
       await store.claim(s);
-      await store.addHash(s.key, A, NOW);
+      await store.addHash(s.key, A, await holdLease(store), NOW);
       await reconciler.sweep();
       expect((await store.get(s.key))?.state).toBe("signed");
       answers[A] = missing(AUTH_EXPIRY);
+      await reconciler.sweep();
+      expect((await store.get(s.key))?.state).toBe("signed");
+      answers[A] = missing(AUTH_EXPIRY + 2);
+      await reconciler.sweep();
+      expect((await store.get(s.key))?.state).toBe("signed");
+      answers[A] = missing(AUTH_EXPIRY + 3);
       await reconciler.sweep();
       expect((await store.get(s.key))?.state).toBe("expired");
     });
@@ -413,6 +513,44 @@ describe("createReconciler", () => {
   });
 
   describe("the pool's resolved event", () => {
+    it.each(["success", "failed"] as const)(
+      "reports a hash that landed as %s after its record ended expired (0088)",
+      async (status) => {
+        const { store, reconciler, lines, metrics } = setup({ [A]: missing(4_013) });
+        const key = await signed(store, [A]);
+        await reconciler.sweep();
+        await reconciler.resolved({
+          status,
+          hash: A,
+          channel: "GCHANNEL",
+          ledger: 4_010,
+          feeCharged: 41_000n,
+          attempts: [{ hash: A, sent: "yes" }],
+        });
+        expect((await store.get(key))?.state).toBe("expired");
+        const reports = lines
+          .filter((line) => line.includes('"settlement_landed_after_expired"'))
+          .map((line) => JSON.parse(line) as Record<string, unknown>);
+        expect(reports).toHaveLength(1);
+        expect(reports[0]).toMatchObject({ state: status, transaction: A, ledger: 4_010 });
+        expect(metrics.value("settlement_landed_after_expired_total", { state: status })).toBe(1);
+      },
+    );
+
+    it("doesn't report a pool's expired on a record a sweep already ended expired (0088)", async () => {
+      const { store, reconciler, lines } = setup({ [A]: missing(4_013) });
+      const key = await signed(store, [A]);
+      await reconciler.sweep();
+      await reconciler.resolved({
+        status: "expired",
+        hash: A,
+        channel: "GCHANNEL",
+        attempts: [{ hash: A, sent: "yes" }],
+      });
+      expect((await store.get(key))?.state).toBe("expired");
+      expect(lines.some((line) => line.includes('"settlement_landed_after_expired"'))).toBe(false);
+    });
+
     it("finishes a pending record from the pool's result, with its attempts", async () => {
       const { store, hooks, reconciler } = setup();
       const key = await signed(store, [A, B]);
@@ -438,6 +576,27 @@ describe("createReconciler", () => {
         ["landed", undefined],
       ]);
       expect(hooks.onSuccess).toHaveBeenCalledWith(expect.objectContaining({ key }), "resolved");
+    });
+
+    it("keeps the failure cause of a pending record that failed", async () => {
+      const { store, reconciler } = setup();
+      const key = await signed(store, [A]);
+      await store.transition(key, "signed", { state: "pending", updatedAt: NOW });
+      const failure = {
+        opCode: "invokeHostFunctionTrapped",
+        error: { type: "sceAuth", code: "x" },
+      };
+      await reconciler.resolved({
+        status: "failed",
+        hash: A,
+        channel: "GCHANNEL",
+        ledger: 4_001,
+        feeCharged: 41_000n,
+        errorCode: "txFeeBumpInnerFailed",
+        failure,
+        attempts: [{ hash: A, sent: "yes" }],
+      });
+      expect(await store.get(key)).toMatchObject({ state: "failed", failure });
     });
 
     it("finishes an expired one with its reason", async () => {
@@ -591,7 +750,7 @@ describe("scheduleReconciliation (decision 27)", () => {
   it("checks a record whose history is gone only every 5 minutes", async () => {
     vi.useFakeTimers();
     // Past its bound, and the RPC's history starts after the record was made.
-    const t = setup({ [A]: missing(4_010, 0, NOW / 1000 + 1) });
+    const t = setup({ [A]: missing(4_013, 0, NOW / 1000 + 1) });
     await signed(t.store, [A]);
     const { schedule, sweep } = scheduled(t);
     // The store's queries take real time: wait for the sweep a tick started.

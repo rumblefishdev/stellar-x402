@@ -1,8 +1,12 @@
-# x402's parts of the company Hetzner server (ADR 0011): the `x402` user and
-# /srv/x402/production, the compose file and deploy.sh, the systemd units and their scripts, and
-# CI's deploy user with its forced command and one sudo rule. Never the server's base setup
-# (firewall, Docker's daemon.json, sshd, the admins), which the explorer's playbook owns. An admin
-# runs it from a reviewed commit; CI never does:
+# x402's parts of the company Hetzner server (ADR 0011): the `x402` user, /srv/x402/production and
+# /srv/x402/openbao, the compose files and deploy.sh, the systemd units and their scripts, the
+# rotation of OpenBao's audit log, and CI's deploy user with its forced command and one sudo rule.
+# Never the server's base setup (firewall, Docker's daemon.json, sshd, the admins), which the
+# explorer's playbook owns. An admin runs it from a commit on `deploy/production`, which takes only
+# an approved pull request, never from `develop`, which takes pushes without one; CI never runs it
+# (runbook, The playbook):
+#   git status --short   # must print nothing
+#   git fetch origin && git switch --detach origin/deploy/production
 #   cd deploy/ansible
 #   ansible-playbook -i inventory.ini playbook.yaml --check --diff
 #   ansible-playbook -i inventory.ini playbook.yaml
@@ -55,6 +59,8 @@
         - { path: "/srv/x402/{{ x402_environment }}", owner: x402, mode: "0755" }
         # Encrypted with the host key (systemd-creds), decrypted by the units only.
         - { path: "/srv/x402/{{ x402_environment }}/creds", owner: root, mode: "0700" }
+        - { path: /srv/x402/openbao, owner: x402, mode: "0755" }
+        - { path: /srv/x402/openbao/creds, owner: root, mode: "0700" }
         - { path: /usr/local/libexec/x402, owner: root, mode: "0755" }
         - { path: /var/lib/x402-deploy/.ssh, owner: x402-deploy, mode: "0700" }
 
@@ -68,6 +74,18 @@
       loop:
         - { name: compose.yaml, mode: "0644" }
         - { name: deploy.sh, mode: "0755" }
+
+    # OpenBao's own project, one for every environment on the server (ADR 0013).
+    - name: OpenBao's compose file and config
+      ansible.builtin.copy:
+        src: "{{ repo_deploy }}/openbao/{{ item }}"
+        dest: "/srv/x402/openbao/{{ item }}"
+        owner: x402
+        group: x402
+        mode: "0644"
+      loop:
+        - compose.yaml
+        - config.hcl
 
     # The only file the deploy user writes; the deploy unit reads it as root.
     - name: digest.next
@@ -114,13 +132,48 @@
         group: x402-deploy
         mode: "0600"
 
-    # External in the compose file, so `compose down -v` can't remove it.
-    - name: Testnet's database volume
+    # External in the compose files, so `compose down -v` can't remove them.
+    - name: Testnet's database volume and OpenBao's storage and audit log
       ansible.builtin.shell: >-
-        docker volume inspect x402-{{ x402_environment }}-postgres-testnet > /dev/null 2>&1
-        || docker volume create x402-{{ x402_environment }}-postgres-testnet
+        docker volume inspect {{ item }} > /dev/null 2>&1 || docker volume create {{ item }}
+      loop:
+        - "x402-{{ x402_environment }}-postgres-testnet"
+        - x402-openbao-data
+        - x402-openbao-audit
       register: volume
       changed_when: volume.stdout != ""
+
+    # Where the audit volume's files sit on the host, for logrotate below.
+    - name: Docker's data root
+      ansible.builtin.command: docker info --format json
+      register: docker_info
+      changed_when: false
+      check_mode: false
+
+    # A request OpenBao can't log fails, so a full disk stops /settle (ADR 0013). After the rename,
+    # SIGHUP makes OpenBao open a new file under the old name; it's sent through the project, as the
+    # unit does, since a missed one leaves OpenBao on the renamed file. A year kept: the log is the
+    # only record of which token signed what, and a leak can come out months later.
+    - name: OpenBao's audit log, rotated daily
+      ansible.builtin.copy:
+        content: |
+          {{ (docker_info.stdout | from_json).DockerRootDir }}/volumes/x402-openbao-audit/_data/audit.log {
+            daily
+            rotate 365
+            maxage 365
+            compress
+            delaycompress
+            missingok
+            notifempty
+            nocreate
+            postrotate
+              /usr/bin/docker compose -f /srv/x402/openbao/compose.yaml kill -s HUP openbao > /dev/null
+            endscript
+          }
+        dest: /etc/logrotate.d/x402-openbao
+        owner: root
+        group: root
+        mode: "0644"
 
     - name: Reload systemd before enabling
       ansible.builtin.meta: flush_handlers
@@ -133,6 +186,14 @@
         - x402-db-testnet
         - x402-tunnel
         - x402
+
+    # Not under --check: the copy above doesn't run there, and the module fails on a unit it
+    # can't find.
+    - name: OpenBao's unit, enabled at boot
+      ansible.builtin.systemd_service:
+        name: x402-openbao.service
+        enabled: true
+      when: not ansible_check_mode
 
     # Started too: it acts only while x402@ is active, so before the first deploy it does nothing.
     - name: The watchdog's timer, enabled and started

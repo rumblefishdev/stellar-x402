@@ -1,0 +1,18 @@
+[package]
+name = "test-wallet"
+version = "0.0.0"
+description = "Testnet-only custom account: one ed25519 key signs for its C-address"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+ed25519-dalek = "2.2.0"

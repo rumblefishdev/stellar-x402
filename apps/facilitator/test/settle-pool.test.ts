@@ -1,8 +1,10 @@
-import { Keypair, StrKey, nativeToScVal, xdr, type rpc } from "@stellar/stellar-sdk";
+import { Keypair, StrKey, Transaction, nativeToScVal, xdr, type rpc } from "@stellar/stellar-sdk";
 import type { SorobanRpc, SubmitterEvent } from "@stellar-x402/signer-pool";
 import { FakeRpc } from "@stellar-x402/signer-pool/testing";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getUsdcAddress } from "@x402/stellar";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { openBaoSigner } from "../src/adapters/openbao-signer.js";
 import { parseConfig, type Env } from "../src/config.js";
 import { jsonLogger, rpcEndpointName } from "../src/logger.js";
 import {
@@ -14,12 +16,15 @@ import {
   type UpstreamSeams,
 } from "../src/main.js";
 import { memoryMetrics } from "../src/metrics.js";
-import type { SettlementStore } from "../src/ports/index.js";
+import type { LeaseFence, SettlementStore, SpendScope } from "../src/ports/index.js";
 import { feeSettings } from "../src/settlement/fees.js";
 import { SETTLE_REASONS, keyOf } from "../src/settlement/settle.js";
+import { payerScope } from "../src/spend/limits.js";
+import { BREAKERS } from "../src/spend/policy.js";
 import { testDatabase } from "./database.js";
-import { transferPayload } from "./payment.js";
-import { settlement } from "./port-contracts.js";
+import { transferPayload, usedNonces } from "./payment.js";
+import { holdLease, settlement } from "./port-contracts.js";
+import { fakeOpenBao, signerEnv } from "./fake-openbao.js";
 
 /**
  * `main()`'s `/settle` wiring with the real pool on `FakeRpc`: `/settle`'s checks, the pool's fee
@@ -27,11 +32,19 @@ import { settlement } from "./port-contracts.js";
  */
 
 const facilitator = Keypair.random();
+const openbao = await fakeOpenBao(facilitator);
+afterAll(openbao.close);
 const channel = Keypair.random().publicKey();
 const asset = StrKey.encodeContract(Buffer.alloc(32, 7));
 const payer = Keypair.random().publicKey();
 const payTo = Keypair.random().publicKey();
+type MemoryMetrics = ReturnType<typeof memoryMetrics>;
+
 const MAX_FEE = 250_000;
+/** The fee `FakeRpc` charges every transaction it includes. */
+const FEE_CHARGED = 41_000n;
+/** The fee account's float (ADR 0013): 100 XLM. */
+const FLOAT = 1_000_000_000n;
 const BID = 1_000;
 
 const requirements: PaymentRequirements = {
@@ -46,6 +59,8 @@ const requirements: PaymentRequirements = {
 
 /** `FakeRpc` whose simulation emits the payment's transfer, for the balance-change check. */
 class PaymentRpc extends FakeRpc {
+  /** The token whose transfer the simulation emits. */
+  token = asset;
   /** Delay before an account read answers, to hold a settlement before it signs. */
   accountDelayMs = 0;
   /** Account reads begun: a test waits for one before acting on a held settlement. */
@@ -73,7 +88,7 @@ class PaymentRpc extends FakeRpc {
       event: new xdr.ContractEvent({
         ext: new xdr.ExtensionPoint(0),
         contractId: StrKey.decodeContract(
-          asset,
+          this.token,
         ) as unknown as xdr.ContractEvent["contractId"] extends () => infer T ? T : never,
         type: xdr.ContractEventType.contract(),
         body: new xdr.ContractEventBody(
@@ -82,13 +97,66 @@ class PaymentRpc extends FakeRpc {
         ),
       }),
     });
-    return { ...sim, events: [event] } as rpc.Api.SimulateTransactionResponse;
+    return {
+      ...sim,
+      events: [event],
+      transactionData: usedNonces(args[0] as Transaction),
+    } as rpc.Api.SimulateTransactionResponse;
   }
 }
 
-/** A `transfer` from the payer, with its one auth entry valid to `expiration`. */
-function payload(expiration: number, extensions?: Record<string, unknown>): PaymentPayload {
-  return transferPayload({ payer, payTo, requirements }, expiration, extensions);
+/**
+ * `PaymentRpc` whose payer's balance covers `covers` payments: a simulation sees the payments
+ * applied so far, as the network's does, and a payment applied past them fails on chain, with the
+ * facilitator's fee paid.
+ */
+class BalanceRpc extends PaymentRpc {
+  applied = 0;
+  failedOnChain = 0;
+
+  constructor(
+    accounts: Record<string, bigint>,
+    readonly covers: number,
+  ) {
+    super(accounts);
+    this.apply = () => {
+      if (this.applied < this.covers) {
+        this.applied++;
+        return true;
+      }
+      this.failedOnChain++;
+      return false;
+    };
+  }
+
+  override async simulateTransaction(
+    ...args: Parameters<FakeRpc["simulateTransaction"]>
+  ): Promise<rpc.Api.SimulateTransactionResponse> {
+    if (this.applied >= this.covers)
+      return {
+        id: "1",
+        latestLedger: this.ledger,
+        error: "HostError: balance is not sufficient to spend",
+        events: [],
+        _parsed: true,
+      } satisfies rpc.Api.SimulateTransactionErrorResponse;
+    return super.simulateTransaction(...args);
+  }
+}
+
+/** From 1000, so a generated nonce never meets a small one a test passes itself (`"8"`). */
+let nonces = 1_000;
+/**
+ * A `transfer` from the payer, with its one auth entry valid to `expiration` and, unless given, a
+ * nonce of its own: the spend policy's `onFinal` runs after a test's answer, and a late release
+ * from the test before would refuse a reservation under the same key.
+ */
+function payload(
+  expiration: number,
+  extensions?: Record<string, unknown>,
+  nonce: string = String(++nonces),
+): PaymentPayload {
+  return transferPayload({ payer, payTo, requirements }, expiration, extensions, nonce);
 }
 
 /**
@@ -97,14 +165,24 @@ function payload(expiration: number, extensions?: Record<string, unknown>): Paym
  */
 const db = testDatabase();
 beforeEach(db.empty);
+/** The lease `/settle` sends under, taken again for every test (0071). */
+let fence: LeaseFence | undefined;
+beforeEach(async () => {
+  fence = await holdLease(db.stores().settlements);
+});
 
 function setup(
   env: Partial<Env> = {},
   seams?: UpstreamSeams,
-  rpc: { endpoint?: (url: string) => SorobanRpc | undefined; timeoutMs?: number } = {},
+  rpc: {
+    endpoint?: (url: string) => SorobanRpc | undefined;
+    timeoutMs?: number;
+    /** The fake every URL reaches unless `endpoint` names another; one channel by default. */
+    fake?: PaymentRpc;
+  } = {},
 ) {
   const config = parseConfig({
-    FACILITATOR_SECRET: facilitator.secret(),
+    ...signerEnv(facilitator.publicKey(), openbao.socketPath),
     DATABASE_URL: db.urlFor(db.schema),
     CLIENT_IP: "socket",
     CHANNELS: channel,
@@ -112,7 +190,7 @@ function setup(
     INCLUSION_FEE_STROOPS: String(BID),
     ...env,
   });
-  const fake = new PaymentRpc({ [channel]: 1_000n });
+  const fake = rpc.fake ?? new PaymentRpc({ [channel]: 1_000n });
   fake.feeStats = {
     sorobanInclusionFee: { p90: String(BID) },
   } as unknown as NonNullable<FakeRpc["feeStats"]>;
@@ -146,7 +224,14 @@ function setup(
     },
     logger: jsonLogger("warn", (line) => lines.push(line)),
     metrics: memoryMetrics(),
+    signer: openBaoSigner({
+      ...config.signer,
+      network: config.network,
+      logger: { info: vi.fn(), error: vi.fn() },
+      metrics: memoryMetrics(),
+    }),
     sleep: async () => {},
+    lease: () => fence,
   });
   /** The pool's `onEvent`, as it reports a submission it answered `pending` ending. */
   const emit = (event: SubmitterEvent) =>
@@ -187,6 +272,55 @@ describe("main()'s /settle wiring, with a hung RPC_URLS[0]", () => {
     expect(response).toMatchObject({ success: false, errorReason: SETTLE_REASONS.timeout });
     expect(fake.sent).toHaveLength(0);
     expect(Date.now() - started).toBeLessThan(1_800);
+  });
+});
+
+describe("main()'s /settle wiring, under a stale lease token (0071)", () => {
+  it("stores nothing and sends nothing through the real pool", async () => {
+    const { settle, fake, store } = setup();
+    // Another process took the lease since this one's keeper read it.
+    const current = fence!;
+    fence = { name: current.name, token: "00000000-0000-4000-8000-000000000071" };
+    const pay = payload(fake.ledger + 30);
+    const { response } = await settle(pay, requirements);
+    expect(response).toMatchObject({ success: false, errorReason: SETTLE_REASONS.leaseLost });
+    expect(fake.sent).toHaveLength(0);
+    const record = await store.get(keyOf(pay, "stellar:testnet")!);
+    expect(record).toMatchObject({ state: "rejected", hashes: [] });
+  });
+
+  it("answers the sent hash a txBadSeq refused when the rebuild is fenced, and doesn't reopen", async () => {
+    const { settle, fake, store } = setup();
+    await settle(payload(fake.ledger + 30), requirements);
+    // Another sender used the channel, so the next envelope is refused with txBadSeq.
+    fake.sequences.set(channel, 5000n);
+    // The takeover comes between the refused send and its rebuild.
+    const send = fake.sendTransaction.bind(fake);
+    vi.spyOn(fake, "sendTransaction").mockImplementation(async (tx) => {
+      const sent = await send(tx);
+      fence = { name: fence!.name, token: "00000000-0000-4000-8000-000000000071" };
+      return sent;
+    });
+    const pay = payload(fake.ledger + 30, undefined, "8");
+    const { response } = await settle(pay, requirements);
+    expect(fake.sent).toHaveLength(2);
+    const refused = fake.sent[1]!.hash().toString("hex");
+    expect(response).toMatchObject({
+      success: false,
+      errorReason: SETTLE_REASONS.leaseLost,
+      transaction: refused,
+    });
+    expect(response.extra).toEqual({ retryable: false, expirationLedger: expect.any(Number) });
+    expect(await store.get(keyOf(pay, "stellar:testnet")!)).toMatchObject({
+      state: "rejected",
+      hashes: [refused],
+    });
+    const repeat = await settle(pay, requirements);
+    expect(repeat.response).toMatchObject({
+      errorReason: SETTLE_REASONS.leaseLost,
+      transaction: refused,
+    });
+    expect(fake.sent).toHaveLength(2);
   });
 });
 
@@ -240,6 +374,105 @@ describe("main()'s /settle wiring, with the real pool", () => {
     expect(fake.sent.map((tx) => tx.hash().toString("hex"))).toContain(response.transaction);
   });
 
+  it("stores why an included settlement failed, from the pool's result", async () => {
+    const { settle, fake, store } = setup();
+    fake.failOnChain = true;
+    fake.failure = { opCode: "invokeHostFunctionResourceLimitExceeded" };
+    const { response } = await settle(payload(fake.ledger + 30), requirements);
+    expect(response).toMatchObject({ success: false, errorReason: SETTLE_REASONS.failed });
+    const record = await store.findByHash(response.transaction);
+    expect(record).toMatchObject({
+      state: "failed",
+      failure: { opCode: "invokeHostFunctionResourceLimitExceeded" },
+    });
+  });
+
+  it("settles a burst from one balance one at a time and fails none on chain", async () => {
+    // Four channels, so nothing but the claim keeps the payments apart; the balance covers two.
+    // Simulated at once, all four would pass and two would fail on chain at the facilitator's fee.
+    const channels = [channel, ...Array.from({ length: 3 }, () => Keypair.random().publicKey())];
+    const fake = new BalanceRpc(Object.fromEntries(channels.map((c) => [c, 1_000n])), 2);
+    const { settle } = setup({ CHANNELS: channels.join(",") }, undefined, { fake });
+    const answers = await Promise.all(
+      ["1", "2", "3", "4"].map(
+        async (nonce) =>
+          (
+            await settle(
+              transferPayload({ payer, payTo, requirements }, fake.ledger + 30, undefined, nonce),
+              requirements,
+            )
+          ).response,
+      ),
+    );
+    expect(answers.filter((answer) => answer.success)).toHaveLength(2);
+    // Refused at the re-simulation, before anything was signed: no fee.
+    expect(answers.filter((answer) => !answer.success)).toEqual([
+      expect.objectContaining({ errorReason: SETTLE_REASONS.simulation, transaction: "" }),
+      expect.objectContaining({ errorReason: SETTLE_REASONS.simulation, transaction: "" }),
+    ]);
+    expect(fake.failedOnChain).toBe(0);
+    expect(fake.sent).toHaveLength(2);
+  });
+
+  it.each([
+    ["sealed", () => (openbao.status = 503)],
+    ["signing with another key", () => (openbao.key = Keypair.random())],
+  ])("sends nothing and says to repeat when OpenBao is %s (0036)", async (_name, broken) => {
+    const { settle, fake } = setup();
+    broken();
+    try {
+      const { response } = await settle(payload(fake.ledger + 30), requirements);
+      expect(response).toMatchObject({
+        success: false,
+        errorReason: SETTLE_REASONS.transactionSigning,
+        extra: { retryable: true },
+      });
+      expect(fake.sent).toHaveLength(0);
+    } finally {
+      openbao.status = undefined;
+      openbao.key = facilitator;
+    }
+  });
+
+  it("answers the sent hash a txBadSeq refused when signing its rebuild fails, and doesn't reopen (0036)", async () => {
+    const { settle, fake, store } = setup();
+    await settle(payload(fake.ledger + 30), requirements);
+    // Another sender used the channel, so the next envelope is refused with txBadSeq.
+    fake.sequences.set(channel, 5000n);
+    // OpenBao seals between the refused send and its rebuild.
+    const send = fake.sendTransaction.bind(fake);
+    vi.spyOn(fake, "sendTransaction").mockImplementation(async (tx) => {
+      const sent = await send(tx);
+      openbao.status = 503;
+      return sent;
+    });
+    const pay = payload(fake.ledger + 30, undefined, "8");
+    try {
+      const { response } = await settle(pay, requirements);
+      expect(fake.sent).toHaveLength(2);
+      const refused = fake.sent[1]!.hash().toString("hex");
+      expect(response).toMatchObject({
+        success: false,
+        errorReason: SETTLE_REASONS.transactionSigning,
+        transaction: refused,
+      });
+      expect(response.extra).toEqual({ retryable: false, expirationLedger: expect.any(Number) });
+      expect(await store.get(keyOf(pay, "stellar:testnet")!)).toMatchObject({
+        state: "rejected",
+        hashes: [refused],
+      });
+      openbao.status = undefined;
+      const repeat = await settle(pay, requirements);
+      expect(repeat.response).toMatchObject({
+        errorReason: SETTLE_REASONS.transactionSigning,
+        transaction: refused,
+      });
+      expect(fake.sent).toHaveLength(2);
+    } finally {
+      openbao.status = undefined;
+    }
+  });
+
   it("rechecks the auth expiry at the pool's floor of 2 ledgers, not MIN_VALIDITY_LEDGERS", async () => {
     // `/verify` would refuse 12 ledgers against a minimum of 20.
     const { settle, fake } = setup({ MIN_VALIDITY_LEDGERS: "20" });
@@ -265,12 +498,14 @@ describe("main()'s /settle wiring, with the real pool", () => {
 
   it("ends a call at SETTLE_BUDGET_MS when it is shorter than the default", async () => {
     // 1.2 s: neither the 30 s default nor SETTLE_TIMEOUT_MS, so neither can stand in for it.
-    const { settle, fake } = setup({ SETTLE_TIMEOUT_MS: "1000", SETTLE_BUDGET_MS: "1200" });
+    const { settle, fake, drain } = setup({ SETTLE_TIMEOUT_MS: "1000", SETTLE_BUDGET_MS: "1200" });
     fake.accountDelayMs = 3_000;
     const started = Date.now();
     const { response } = await settle(payload(fake.ledger + 30), requirements);
     expect(response).toMatchObject({ success: false, errorReason: SETTLE_REASONS.timeout });
     expect(Date.now() - started).toBeLessThan(2_500);
+    // The call goes on past its answer: left running, it writes into the next test's record.
+    await drain();
   });
 });
 
@@ -278,14 +513,16 @@ describe("main()'s composition (compose)", () => {
   /** The graph `main()` serves; it takes the lease as `start()` does, unless `lease: false`. */
   async function composed(env: Record<string, string> = {}, opts: { lease?: boolean } = {}) {
     const config = parseConfig({
-      FACILITATOR_SECRET: facilitator.secret(),
+      ...signerEnv(facilitator.publicKey(), openbao.socketPath),
       DATABASE_URL: db.urlFor(db.schema),
       CLIENT_IP: "socket",
       CHANNELS: channel,
       MAX_FEE_STROOPS: String(MAX_FEE),
       ...env,
     });
-    const fake = new PaymentRpc({ [channel]: 1_000n });
+    // The fee account holds the float (ADR 0013), well above the floor.
+    const fake = new PaymentRpc({ [channel]: 1_000n, [facilitator.publicKey()]: 1n });
+    fake.balances.set(facilitator.publicKey(), FLOAT);
     fake.feeStats = {
       sorobanInclusionFee: { p90: String(BID) },
     } as unknown as NonNullable<FakeRpc["feeStats"]>;
@@ -296,15 +533,32 @@ describe("main()'s composition (compose)", () => {
       seams: { makeScheme: () => ({ verify: async () => ({ isValid: true, payer }) }) },
       sleep: async () => {},
     });
+    // `start()` reads the balance and takes the lease first.
+    await deps.floor!.runOnce();
     if (opts.lease !== false) await deps.lease!.runOnce();
-    return { deps, cataloger, metrics, fake };
+    // `compose()` counts in memory until 0027.
+    return { deps, cataloger, metrics: metrics as MemoryMetrics, fake };
   }
+  /** Posts `body` to the app's `route`; the JSON answer. */
+  const post = async (app: { port: number }, route: string, body: unknown) => {
+    const response = await fetch(`http://127.0.0.1:${app.port}${route}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return response.json();
+  };
+  const request = (pay: PaymentPayload) => ({
+    x402Version: 2,
+    paymentPayload: pay,
+    paymentRequirements: requirements,
+  });
   const bazaar = { info: { input: { type: "http", method: "GET" } }, routeTemplate: "/users/:id" };
 
-  it("sends nothing from a process without the lease (0025 decision 22)", async () => {
+  it("sends nothing from a process without the lease (0025 decision 22, 0071)", async () => {
     const { deps, fake } = await composed({}, { lease: false });
     const settled = await deps.settle(payload(fake.ledger + 30), requirements);
-    expect(settled.response).toMatchObject({ errorReason: SETTLE_REASONS.recordWrite });
+    expect(settled.response).toMatchObject({ errorReason: SETTLE_REASONS.leaseLost });
     expect(fake.sent).toHaveLength(0);
   });
 
@@ -381,6 +635,140 @@ describe("main()'s composition (compose)", () => {
     expect(stateAtRelease).toBe("success");
   });
 
+  it("refuses a /settle over the payer's budget and sends nothing (0024)", async () => {
+    // The smallest budget the config takes holds one ceiling; an earlier settlement filled it.
+    const { deps, fake, metrics } = await composed({
+      SPEND_PER_PAYER_STROOPS: String(MAX_FEE),
+      PORT: "0",
+    });
+    const window = { maxStroops: BigInt(MAX_FEE), windowMs: 86_400_000 };
+    await deps.stores.spend.reserve({
+      id: "earlier",
+      amount: BigInt(MAX_FEE),
+      // The test's asset is no known one, so the payer's scope is keyed by it.
+      limits: [{ scope: `payer:${payer}/${asset}`, ...window }],
+      now: Date.now(),
+    });
+    const app = await start(deps);
+    try {
+      expect(await post(app, "/settle", request(payload(fake.ledger + 30)))).toMatchObject({
+        success: false,
+        errorReason: SETTLE_REASONS.spendLimitPayer,
+      });
+      expect(fake.sent).toHaveLength(0);
+      expect(metrics.value("spend_refused_total", { reason: SETTLE_REASONS.spendLimitPayer })).toBe(
+        1,
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  /** Each scope's sum over the default window, now. */
+  const usedIn = (deps: Awaited<ReturnType<typeof composed>>["deps"], scopes: string[]) =>
+    Promise.all(
+      scopes.map((scope) => deps.stores.spend.used(scope as SpendScope, 86_400_000, Date.now())),
+    );
+
+  it("commits the fee a settlement paid to the budgets (0024)", async () => {
+    const { deps, fake } = await composed();
+    const settled = await deps.settle(payload(fake.ledger + 30), requirements);
+    expect(settled.response).toMatchObject({ success: true });
+    // Reserved at the ceiling, then lowered to the fee charged once the record is final, in
+    // every budget of an other-tier token.
+    const scopes = [
+      `payer:${payer}/${asset}`,
+      `payTo:${payTo}/${asset}`,
+      `asset:${asset}`,
+      "tier:other",
+      "global",
+    ];
+    await vi.waitFor(async () => {
+      expect(await usedIn(deps, scopes)).toEqual(scopes.map(() => FEE_CHARGED));
+    });
+  });
+
+  it("counts a USDC settlement in the known tier's budgets, not tier:other (0024)", async () => {
+    const usdc = getUsdcAddress("stellar:testnet");
+    const known = { ...requirements, asset: usdc };
+    const { deps, fake } = await composed();
+    fake.token = usdc;
+    const pay = transferPayload(
+      { payer, payTo, requirements: known },
+      fake.ledger + 30,
+      undefined,
+      String(++nonces),
+    );
+    expect((await deps.settle(pay, known)).response).toMatchObject({ success: true });
+    const knownScopes = [`payer:${payer}`, `payTo:${payTo}`, `asset:${usdc}`, "global"];
+    const otherScopes = ["tier:other", `payer:${payer}/${usdc}`, `payTo:${payTo}/${usdc}`];
+    await vi.waitFor(async () => {
+      expect(await usedIn(deps, knownScopes)).toEqual(knownScopes.map(() => FEE_CHARGED));
+    });
+    expect(await usedIn(deps, otherScopes)).toEqual(otherScopes.map(() => 0n));
+  });
+
+  it("holds USDC to SPEND_PER_ASSET_STROOPS, the known tier's asset budget (0024)", async () => {
+    const usdc = getUsdcAddress("stellar:testnet");
+    const known = { ...requirements, asset: usdc };
+    // One ceiling for the known asset, the other tier's default above it.
+    const { deps, fake } = await composed({ SPEND_PER_ASSET_STROOPS: String(MAX_FEE) });
+    fake.token = usdc;
+    await deps.stores.spend.reserve({
+      id: "earlier",
+      amount: BigInt(MAX_FEE),
+      limits: [{ scope: `asset:${usdc}`, maxStroops: BigInt(MAX_FEE), windowMs: 86_400_000 }],
+      now: Date.now(),
+    });
+    const pay = transferPayload(
+      { payer, payTo, requirements: known },
+      fake.ledger + 30,
+      undefined,
+      String(++nonces),
+    );
+    expect((await deps.settle(pay, known)).response).toMatchObject({
+      success: false,
+      errorReason: SETTLE_REASONS.spendLimitAsset,
+    });
+    expect(fake.sent).toHaveLength(0);
+  });
+
+  it("refuses a /settle while the fee account is below the floor (0024)", async () => {
+    const { deps, fake } = await composed();
+    fake.balances.set(facilitator.publicKey(), 1n);
+    await deps.floor!.runOnce();
+    const settled = await deps.settle(payload(fake.ledger + 30), requirements);
+    expect(settled.response).toMatchObject({
+      success: false,
+      errorReason: SETTLE_REASONS.facilitatorUnderfunded,
+    });
+    expect(fake.sent).toHaveLength(0);
+  });
+
+  it("refuses /verify while the payer's breaker is open, and answers upstream's verdict when the store fails (0024)", async () => {
+    const { deps, fake, metrics } = await composed({ PORT: "0" });
+    const app = await start(deps);
+    try {
+      const body = request(payload(fake.ledger + 30));
+      await deps.stores.spend.openBreaker(
+        payerScope(payer, asset, "other"),
+        Date.now(),
+        BREAKERS.payer.backoff,
+      );
+      expect(await post(app, "/verify", body)).toMatchObject({
+        isValid: false,
+        invalidReason: SETTLE_REASONS.breakerOpenPayer,
+        payer,
+      });
+      // `/verify` spends nothing, and `/settle` checks the breakers again, failing closed.
+      vi.spyOn(deps.stores.spend, "breakersOpen").mockRejectedValue(new Error("store down"));
+      expect(await post(app, "/verify", body)).toMatchObject({ isValid: true });
+      expect(metrics.value("spend_store_failures_total", { op: "breaker" })).toBe(1);
+    } finally {
+      await app.close();
+    }
+  });
+
   it("reads the fee-stats bid once for /verify, /settle and the pool (AD-10)", async () => {
     const { deps, fake } = await composed();
     const p = payload(fake.ledger + 30);
@@ -408,7 +796,7 @@ describe("main()'s pool events (0019)", () => {
   async function pendingRecord(store: SettlementStore) {
     const s = settlement("1");
     await store.claim(s);
-    await store.addHash(s.key, HASH, 0, { maxTime: 1 });
+    await store.addHash(s.key, HASH, await holdLease(store), 0, { maxTime: 1 });
     await store.transition(s.key, "signed", { state: "pending", updatedAt: 0 });
     return s.key;
   }
@@ -431,6 +819,30 @@ describe("main()'s pool events (0019)", () => {
       state: "rejected",
       errorReason: SETTLE_REASONS.shuttingDown,
       hashes: [],
+    });
+  });
+
+  it("reads the answer's ledger from the checks' RPC: one ledger left says to wait, not repeat (0073)", async () => {
+    // The retry answer asks the same shared client the checks read; at one ledger left the pool
+    // can't use the auth entry, so `retryable` is false while the entry may still land.
+    const { settle, fake, drain } = setup();
+    fake.accountDelayMs = 200;
+    const expiration = fake.ledger + 30;
+    // A nonce of its own: a call an earlier test left running writes onto nonce 7's record (0084).
+    const pay = payload(expiration, undefined, "8");
+    const settling = settle(pay, requirements);
+    await vi.waitFor(() => expect(fake.accountReads).toBeGreaterThan(0));
+    await drain();
+    expect((await settling).response).toMatchObject({
+      errorReason: SETTLE_REASONS.shuttingDown,
+      extra: { retryable: true, expirationLedger: expiration },
+    });
+    // The next read closes a ledger: it answers `expiration - 1`.
+    fake.ledger = expiration - 2;
+    expect((await settle(pay, requirements)).response).toMatchObject({
+      errorReason: SETTLE_REASONS.shuttingDown,
+      errorMessage: expect.stringContaining(`may still land in ledger ${expiration}`),
+      extra: { retryable: false, expirationLedger: expiration },
     });
   });
 

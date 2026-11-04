@@ -10,22 +10,31 @@ import {
   parseConfig,
   parseMigrateConfig,
 } from "../src/config.js";
+import { signerEnv } from "./fake-openbao.js";
 
 const keypair = (byte: number) => Keypair.fromRawEd25519Seed(Buffer.alloc(32, byte));
-const SECRET = keypair(1).secret();
+const ADDRESS = keypair(1).publicKey();
 const CHANNEL_A = keypair(2).publicKey();
 const CHANNEL_B = keypair(3).publicKey();
+const SIGNER = {
+  address: ADDRESS,
+  socketPath: "/nonexistent/openbao.sock",
+  key: "stellar-testnet",
+  keyVersion: 1,
+  roleId: "role",
+  secretId: "secret-id",
+};
 
 const minimal = {
-  FACILITATOR_SECRET: SECRET,
+  ...signerEnv(ADDRESS),
   CHANNELS: `${CHANNEL_A}, ${CHANNEL_B}`,
   CLIENT_IP: "socket",
   DATABASE_URL: "postgres://db.internal/x402",
 };
-/** Pubnet is refused until 0024 and 0071 land. */
+/** Pubnet is refused until 0090, API keys on pubnet (0105) and per-key fee budgets (0107) land. */
 const pubnet = { NETWORK: "stellar:pubnet" };
 const PUBNET_REFUSED =
-  "NETWORK stellar:pubnet is refused until spend budgets (0024) and the lease fencing token (0071) land";
+  "NETWORK stellar:pubnet is refused until task 0090, API keys on pubnet (0105), per-key fee budgets (0107), the signer alarm (0027) and the hot key's re-check (0048) land";
 
 function problems(
   env: Record<string, string | undefined>,
@@ -47,12 +56,13 @@ describe("parseConfig", () => {
       port: 4021,
       logLevel: "info",
       rpcUrls: ["https://soroban-testnet.stellar.org"],
-      facilitatorSecret: SECRET,
+      signer: SIGNER,
       channels: [CHANNEL_A, CHANNEL_B],
       databaseUrl: "postgres://db.internal/x402",
       fees: { maxFeeStroops: 250_000n, inclusionFeeStroops: undefined, escalation: undefined },
       settlement: {
         minValidityLedgers: 4,
+        maxValidityLedgers: 66,
         settleTimeoutMs: 20_000,
         settleBudgetMs: 30_000,
         leaseTtlMs: 30_000,
@@ -64,12 +74,14 @@ describe("parseConfig", () => {
       },
       spend: {
         windowMs: 86_400_000,
-        globalStroops: 5_000_000_000n,
-        perPayerStroops: 50_000_000n,
-        perPayToStroops: 500_000_000n,
-        perAssetStroops: 2_000_000_000n,
-        breakerFailures: 5,
-        breakerCooldownMs: 600_000,
+        globalStroops: 500_000_000n,
+        perPayerStroops: 20_000_000n,
+        perPayToStroops: 100_000_000n,
+        perAssetStroops: 250_000_000n,
+        perOtherAssetStroops: 20_000_000n,
+        tierOtherStroops: 100_000_000n,
+        floorStroops: 50_000_000n,
+        balanceIntervalMs: 30_000,
       },
       catalog: { listLocal: false },
     });
@@ -83,7 +95,7 @@ describe("parseConfig", () => {
       PORT: "8080",
       LOG_LEVEL: "debug",
       RPC_URLS: "https://a.example, https://b.example",
-      FACILITATOR_SECRET: SECRET,
+      ...signerEnv(ADDRESS),
       CHANNELS: CHANNEL_B,
       DATABASE_URL: "postgres://db.internal/x402",
       MAX_FEE_STROOPS: "300001",
@@ -91,6 +103,7 @@ describe("parseConfig", () => {
       FEE_ESCALATION_FACTOR: "1.5",
       FEE_ESCALATION_MAX_STROOPS: "1002",
       MIN_VALIDITY_LEDGERS: "13",
+      MAX_VALIDITY_LEDGERS: "70",
       SETTLE_TIMEOUT_MS: "31000",
       SETTLE_BUDGET_MS: "60000",
       LEASE_TTL_MS: "32000",
@@ -101,12 +114,14 @@ describe("parseConfig", () => {
       RATE_LIMIT_SETTLE: "122",
       RATE_LIMIT_DISCOVERY: "123",
       SPEND_WINDOW_MS: "3600000",
-      SPEND_GLOBAL_STROOPS: "11",
-      SPEND_PER_PAYER_STROOPS: "12",
-      SPEND_PER_PAY_TO_STROOPS: "13",
-      SPEND_PER_ASSET_STROOPS: "14",
-      BREAKER_FAILURES: "7",
-      BREAKER_COOLDOWN_MS: "5000",
+      SPEND_GLOBAL_STROOPS: "300011",
+      SPEND_PER_PAYER_STROOPS: "300012",
+      SPEND_PER_PAY_TO_STROOPS: "300013",
+      SPEND_PER_ASSET_STROOPS: "300014",
+      SPEND_PER_ASSET_OTHER_STROOPS: "300015",
+      SPEND_TIER_OTHER_STROOPS: "300016",
+      SPEND_FLOOR_STROOPS: "17",
+      SPEND_BALANCE_INTERVAL_MS: "18000",
       CATALOG_LIST_LOCAL: "true",
     });
     expect(config).toEqual<Config>({
@@ -114,7 +129,7 @@ describe("parseConfig", () => {
       port: 8080,
       logLevel: "debug",
       rpcUrls: ["https://a.example", "https://b.example"],
-      facilitatorSecret: SECRET,
+      signer: SIGNER,
       channels: [CHANNEL_B],
       databaseUrl: "postgres://db.internal/x402",
       fees: {
@@ -124,6 +139,7 @@ describe("parseConfig", () => {
       },
       settlement: {
         minValidityLedgers: 13,
+        maxValidityLedgers: 70,
         settleTimeoutMs: 31_000,
         settleBudgetMs: 60_000,
         leaseTtlMs: 32_000,
@@ -135,12 +151,14 @@ describe("parseConfig", () => {
       },
       spend: {
         windowMs: 3_600_000,
-        globalStroops: 11n,
-        perPayerStroops: 12n,
-        perPayToStroops: 13n,
-        perAssetStroops: 14n,
-        breakerFailures: 7,
-        breakerCooldownMs: 5_000,
+        globalStroops: 300_011n,
+        perPayerStroops: 300_012n,
+        perPayToStroops: 300_013n,
+        perAssetStroops: 300_014n,
+        perOtherAssetStroops: 300_015n,
+        tierOtherStroops: 300_016n,
+        floorStroops: 17n,
+        balanceIntervalMs: 18_000,
       },
       catalog: { listLocal: true },
     });
@@ -148,14 +166,15 @@ describe("parseConfig", () => {
 
   it("trims values and treats blank ones as unset", () => {
     const config = parseConfig({
-      FACILITATOR_SECRET: `${SECRET}\n`,
+      ...signerEnv(ADDRESS),
+      FACILITATOR_ADDRESS: `${ADDRESS}\n`,
       CHANNELS: ` ${CHANNEL_A} `,
       CLIENT_IP: " socket ",
       DATABASE_URL: " postgres://db.internal/x402 ",
       RPC_URLS: "",
       PORT: " ",
     });
-    expect(config.facilitatorSecret).toBe(SECRET);
+    expect(config.signer).toEqual(SIGNER);
     expect(config.channels).toEqual([CHANNEL_A]);
     expect(config.http.clientIp).toBe("socket");
     expect(config.port).toBe(4021);
@@ -163,7 +182,12 @@ describe("parseConfig", () => {
 
   it("names missing required values", () => {
     expect(problems({})).toEqual([
-      "FACILITATOR_SECRET is required",
+      "FACILITATOR_ADDRESS is required",
+      "OPENBAO_SOCKET is required",
+      "OPENBAO_KEY is required",
+      "OPENBAO_KEY_VERSION is required",
+      "OPENBAO_ROLE_ID is required",
+      "OPENBAO_SECRET_ID is required",
       "CHANNELS is required",
       "DATABASE_URL is required",
       "CLIENT_IP is required",
@@ -171,11 +195,11 @@ describe("parseConfig", () => {
   });
 
   it("names invalid values without echoing them", () => {
-    const secret = `S${"A".repeat(55)}`; // right shape, bad checksum
-    const found = problems({ ...minimal, FACILITATOR_SECRET: secret, LOG_LEVEL: "verbose-xyz" });
+    const secret = keypair(9).secret(); // a secret key pasted in place of the address
+    const found = problems({ ...minimal, FACILITATOR_ADDRESS: secret, LOG_LEVEL: "verbose-xyz" });
     expect(found).toEqual([
       "LOG_LEVEL must be one of debug, info, warn, error",
-      "FACILITATOR_SECRET must be a Stellar secret key (S…)",
+      "FACILITATOR_ADDRESS must be a Stellar account address (G…)",
     ]);
     expect(found.join(" ")).not.toContain(secret);
     expect(found.join(" ")).not.toContain("verbose-xyz");
@@ -245,6 +269,14 @@ describe("parseConfig", () => {
     // The pool keeps one spare ledger, so 1 lets `/verify` accept what `/settle` refuses.
     expect(problems({ ...minimal, MIN_VALIDITY_LEDGERS: "1" })).toEqual([
       "MIN_VALIDITY_LEDGERS must be at least 2",
+    ]);
+    // A cap at or below the floor would refuse every payment.
+    expect(
+      problems({ ...minimal, MIN_VALIDITY_LEDGERS: "10", MAX_VALIDITY_LEDGERS: "10" }),
+    ).toEqual(["MAX_VALIDITY_LEDGERS must be above MIN_VALIDITY_LEDGERS"]);
+    // About 10 minutes at most, so a typo can't reopen days-long signatures.
+    expect(problems({ ...minimal, MAX_VALIDITY_LEDGERS: "121" })).toEqual([
+      "MAX_VALIDITY_LEDGERS must be between 3 and 120",
     ]);
   });
 
@@ -348,8 +380,62 @@ describe("parseConfig", () => {
       ]);
   });
 
-  it("refuses stellar:pubnet with nothing else wrong, until 0024 and 0071 land", () => {
-    // `/settle` would spend there with allow-all spend hooks and an unfenced lease.
+  it("refuses a leftover BREAKER_FAILURES or BREAKER_COOLDOWN_MS", () => {
+    // Left set, either would look like it still tuned the breakers, whose policy is fixed now.
+    expect(problems({ ...minimal, BREAKER_FAILURES: "5", BREAKER_COOLDOWN_MS: "600000" })).toEqual([
+      'BREAKER_FAILURES is no longer read: the breakers are fixed in code, see "Breakers" in the facilitator README (task 0024)',
+      'BREAKER_COOLDOWN_MS is no longer read: the breakers are fixed in code, see "Breakers" in the facilitator README (task 0024)',
+    ]);
+  });
+
+  it("bounds every spend budget and the floor to int64, the store's column", () => {
+    const max = "9223372036854775807";
+    for (const name of [
+      "SPEND_GLOBAL_STROOPS",
+      "SPEND_PER_PAYER_STROOPS",
+      "SPEND_PER_PAY_TO_STROOPS",
+      "SPEND_PER_ASSET_STROOPS",
+      "SPEND_PER_ASSET_OTHER_STROOPS",
+      "SPEND_TIER_OTHER_STROOPS",
+      "SPEND_FLOOR_STROOPS",
+    ]) {
+      expect(() => parseConfig({ ...minimal, [name]: max })).not.toThrow();
+      expect(problems({ ...minimal, [name]: "9223372036854775808" })).toEqual([
+        `${name} must be at most ${max}`,
+      ]);
+      // A budget at 0 is also below the fee ceiling, and says so.
+      expect(problems({ ...minimal, [name]: "0" })[0]).toBe(`${name} must be at least 1`);
+    }
+    expect(problems({ ...minimal, SPEND_BALANCE_INTERVAL_MS: "999" })).toEqual([
+      "SPEND_BALANCE_INTERVAL_MS must be between 1000 and 2147483647",
+    ]);
+  });
+
+  it("refuses a spend budget below MAX_FEE_STROOPS, which would refuse every settlement", () => {
+    // A settlement reserves the fee ceiling, so a budget below it can't hold a single one.
+    for (const name of [
+      "SPEND_GLOBAL_STROOPS",
+      "SPEND_PER_PAYER_STROOPS",
+      "SPEND_PER_PAY_TO_STROOPS",
+      "SPEND_PER_ASSET_STROOPS",
+      "SPEND_PER_ASSET_OTHER_STROOPS",
+      "SPEND_TIER_OTHER_STROOPS",
+    ]) {
+      expect(problems({ ...minimal, MAX_FEE_STROOPS: "300000", [name]: "299999" })).toEqual([
+        `${name} must be at least MAX_FEE_STROOPS (300000): a settlement reserves the fee ceiling`,
+      ]);
+      expect(() =>
+        parseConfig({ ...minimal, MAX_FEE_STROOPS: "300000", [name]: "300000" }),
+      ).not.toThrow();
+    }
+    // The floor is not a budget: nothing is reserved against it.
+    expect(() => parseConfig({ ...minimal, SPEND_FLOOR_STROOPS: "1" })).not.toThrow();
+  });
+
+  it("refuses stellar:pubnet with nothing else wrong, until 0090, API keys and per-key fee budgets land", () => {
+    // Spend budgets (0024) bound the loss, but Sybil self-payments can still use up the shared
+    // budgets until callers are authenticated or pay (S-design, residual risk).
+    expect(PUBNET_REFUSED).not.toContain("0024");
     expect(problems({ ...minimal, ...pubnet, RPC_URLS: "https://rpc.example" })).toEqual([
       PUBNET_REFUSED,
     ]);
@@ -490,5 +576,51 @@ describe("settings read from files", () => {
     });
     expect(found).toEqual(["DATABASE_URL must be a postgres:// URL"]);
     expect(found.join(" ")).not.toContain("secret");
+  });
+});
+
+describe("the signer (0036)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "x402-signer-"));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  const file = (name: string, value: string) => {
+    const path = join(dir, name);
+    writeFileSync(path, value);
+    return path;
+  };
+
+  it("reads the OpenBao settings, the AppRole's from files", () => {
+    const config = parseConfig({
+      ...minimal,
+      OPENBAO_ROLE_ID: undefined,
+      OPENBAO_SECRET_ID: undefined,
+      OPENBAO_ROLE_ID_FILE: file("approle-role-id", "role\n"),
+      OPENBAO_SECRET_ID_FILE: file("approle-secret-id", "secret-id\n"),
+    });
+    expect(config.signer).toEqual(SIGNER);
+  });
+
+  const leftover = "FACILITATOR_SECRET is no longer read: the key signs in OpenBao (ADR 0013)";
+
+  it("refuses a leftover FACILITATOR_SECRET, so it can't look like it signs", () => {
+    expect(problems({ ...minimal, FACILITATOR_SECRET: "S-leftover" })).toEqual([leftover]);
+  });
+
+  it("names a leftover FACILITATOR_SECRET in an old environment with no OpenBao settings", () => {
+    const found = problems({
+      FACILITATOR_SECRET: "S-leftover",
+      CHANNELS: CHANNEL_A,
+      CLIENT_IP: "socket",
+      DATABASE_URL: "postgres://db.internal/x402",
+    });
+    expect(found).toContain(leftover);
+    expect(found).toContain("FACILITATOR_ADDRESS is required");
+    expect(found.join(" ")).not.toContain("S-leftover");
+  });
+
+  it.each([
+    ["FACILITATOR_ADDRESS", "S-not-an-address", "must be a Stellar account address (G…)"],
+    ["OPENBAO_KEY_VERSION", "0", "must be at least 1"],
+  ])("checks %s", (name, value, message) => {
+    expect(problems({ ...minimal, [name]: value })).toEqual([`${name} ${message}`]);
   });
 });

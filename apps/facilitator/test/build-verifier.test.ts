@@ -10,7 +10,11 @@ import {
   nativeToScVal,
   xdr,
 } from "@stellar/stellar-sdk";
-import type { SorobanRpc } from "@stellar-x402/signer-pool";
+import {
+  NOT_FOUND_MARGIN_LEDGERS,
+  NOT_FOUND_MARGIN_SECONDS,
+  type SorobanRpc,
+} from "@stellar-x402/signer-pool";
 import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/core/types";
 import { describe, expect, it, vi } from "vitest";
 import { parseConfig, type Config } from "../src/config.js";
@@ -29,13 +33,16 @@ import {
 } from "../src/main.js";
 import { rpcEndpointName } from "../src/logger.js";
 import { feeSettings, type FeeSettings } from "../src/settlement/fees.js";
+import { PAYTO_TRUSTLINE_REASON } from "../src/settlement/trustline.js";
 import {
   CHANNEL_ACCOUNT_REASON,
   MUXED_FACILITATOR_REASON,
+  PAYER_AUTH_REASON,
   UpstreamTimeoutError,
   type UpstreamVerifier,
   type VerifyTrace,
 } from "../src/settlement/verify.js";
+import { signerEnv } from "./fake-openbao.js";
 
 const secret = Keypair.random().secret();
 const channel = Keypair.random().publicKey();
@@ -44,14 +51,15 @@ const payer = Keypair.random().publicKey();
 const payTo = Keypair.random().publicKey();
 const CURRENT = 1_000;
 
-const config = parseConfig({
-  FACILITATOR_SECRET: secret,
+const env = {
+  ...signerEnv(Keypair.fromSecret(secret).publicKey()),
   DATABASE_URL: "postgres://db.internal/x402",
   CLIENT_IP: "socket",
   CHANNELS: channel,
   RPC_URLS: "https://rpc-a.example,https://rpc-b.example",
   MAX_FEE_STROOPS: "300000",
-});
+};
+const config = parseConfig(env);
 /** How the logs name `RPC_URLS[i]`. */
 const rpc = (i: number) => rpcEndpointName(config.rpcUrls[i]!, i);
 
@@ -65,31 +73,36 @@ const requirements: PaymentRequirements = {
   extra: {},
 };
 
-/** A `transfer` from the payer, with auth to `expiration` and `source` as the transaction source. */
+/**
+ * A `transfer` from the payer, with auth to `expiration` and `source` as the transaction source,
+ * plus an entry for each of `others`.
+ */
 function payload(
   source: Account | MuxedAccount = new Account(payer, "1"),
   expiration = CURRENT + 12,
+  others: string[] = [],
 ): PaymentPayload {
-  const auth = new xdr.SorobanAuthorizationEntry({
-    credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(
-      new xdr.SorobanAddressCredentials({
-        address: new Address(payer).toScAddress(),
-        nonce: xdr.Int64.fromString("1"),
-        signatureExpirationLedger: expiration,
-        signature: xdr.ScVal.scvVoid(),
-      }),
-    ),
-    rootInvocation: new xdr.SorobanAuthorizedInvocation({
-      function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
-        new xdr.InvokeContractArgs({
-          contractAddress: new Address(asset).toScAddress(),
-          functionName: "transfer",
-          args: [],
+  const entry = (address: string) =>
+    new xdr.SorobanAuthorizationEntry({
+      credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(
+        new xdr.SorobanAddressCredentials({
+          address: new Address(address).toScAddress(),
+          nonce: xdr.Int64.fromString("1"),
+          signatureExpirationLedger: expiration,
+          signature: xdr.ScVal.scvVoid(),
         }),
       ),
-      subInvocations: [],
-    }),
-  });
+      rootInvocation: new xdr.SorobanAuthorizedInvocation({
+        function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
+          new xdr.InvokeContractArgs({
+            contractAddress: new Address(asset).toScAddress(),
+            functionName: "transfer",
+            args: [],
+          }),
+        ),
+        subInvocations: [],
+      }),
+    });
   const transaction = new TransactionBuilder(source, {
     fee: "100",
     networkPassphrase: Networks.TESTNET,
@@ -103,7 +116,7 @@ function payload(
           nativeToScVal(payTo, { type: "address" }),
           nativeToScVal(1000n, { type: "i128" }),
         ],
-        auth: [auth],
+        auth: [payer, ...others].map(entry),
       }),
     )
     .setTimeout(60)
@@ -121,6 +134,8 @@ interface SetupOptions {
   config?: Config;
   /** The latest ledger per RPC URL, for the AD-22 read and the probe. */
   latestLedger?: (url: string) => Promise<number>;
+  /** The stub RPC's answers, over the ones `setup` gives. */
+  rpc?: Partial<SorobanRpc>;
 }
 
 /** `answer` may depend on the scheme's RPC URL and get the call's arguments. */
@@ -152,6 +167,8 @@ function setup(
             ? Promise.resolve(stats)
             : new Promise<FeeStats>((resolve) => setTimeout(() => resolve(stats), feeStatsMs)),
         getLatestLedger: async () => ({ sequence: await latestLedger(url) }),
+        simulateTransaction: () => Promise.reject(new Error("no simulation here")),
+        ...opts.rpc,
       }) as unknown as SorobanRpc,
   );
   const schemes: { signer: string; options: SchemeOptions }[] = [];
@@ -182,6 +199,13 @@ function setup(
 const fixedBid: Config = { ...config, fees: { ...config.fees, inclusionFeeStroops: 100n } };
 
 const down = { isValid: false, invalidReason: "unexpected_verify_error" } as const;
+
+describe("UPSTREAM_TIMEOUT_MS", () => {
+  it("stays under the NOT_FOUND margins, so no answer can span them (0088)", () => {
+    expect(UPSTREAM_TIMEOUT_MS).toBeLessThan(NOT_FOUND_MARGIN_LEDGERS * 5_000);
+    expect(UPSTREAM_TIMEOUT_MS).toBeLessThan(NOT_FOUND_MARGIN_SECONDS * 1_000);
+  });
+});
 
 describe("buildVerifier (the /verify wiring in main)", () => {
   it("gives each RPC URL's scheme the facilitator key, the ceiling and twice the shared bid", async () => {
@@ -234,6 +258,59 @@ describe("buildVerifier (the /verify wiring in main)", () => {
       isValid: false,
       invalidReason: "invalid_exact_stellar_signature_expiration_too_soon",
     });
+  });
+
+  it("caps the auth expiry at MAX_VALIDITY_LEDGERS (default 66) in /verify and /settle's check", async () => {
+    const { verify, check } = setup();
+    const ok = payload(undefined, CURRENT + 66);
+    const far = payload(undefined, CURRENT + 67);
+    await expect(verify(ok, requirements)).resolves.toEqual({ isValid: true, payer });
+    expect((await check(ok, requirements)).response).toEqual({ isValid: true, payer });
+    for (const answer of [
+      await verify(far, requirements),
+      (await check(far, requirements)).response,
+    ])
+      expect(answer).toMatchObject({
+        isValid: false,
+        invalidReason: "invalid_exact_stellar_signature_expiration_too_far",
+      });
+  });
+
+  it("takes a non-default MAX_VALIDITY_LEDGERS in /verify, /settle's check and the ceiling alike", async () => {
+    const cfg = parseConfig({ ...env, MAX_VALIDITY_LEDGERS: "80" });
+    const { verify, check } = setup(undefined, { config: cfg });
+    // 80 ledgers less a tenth, at 5 s: 363 s.
+    const wide = { ...requirements, maxTimeoutSeconds: 363 };
+    const ok = payload(undefined, CURRENT + 80);
+    const far = payload(undefined, CURRENT + 81);
+    for (const run of [
+      verify,
+      async (...args: Parameters<typeof verify>) => (await check(...args)).response,
+    ]) {
+      await expect(run(ok, wide)).resolves.toEqual({ isValid: true, payer });
+      await expect(run(far, wide)).resolves.toMatchObject({
+        isValid: false,
+        invalidReason: "invalid_exact_stellar_signature_expiration_too_far",
+        invalidMessage: expect.stringContaining("at most 80 are allowed"),
+      });
+      await expect(run(ok, { ...wide, maxTimeoutSeconds: 364 })).resolves.toMatchObject({
+        isValid: false,
+        invalidMessage: expect.stringContaining("at most 363 is allowed"),
+      });
+    }
+  });
+
+  it("refuses an extra address's auth entry through /verify and /settle's check (0073 decision 21)", async () => {
+    const { verify, check } = setup();
+    const extra = payload(undefined, CURRENT + 10, [Keypair.random().publicKey()]);
+    for (const answer of [
+      await verify(extra, requirements),
+      (await check(extra, requirements)).response,
+    ])
+      expect(answer).toMatchObject({
+        isValid: false,
+        invalidReason: PAYER_AUTH_REASON,
+      });
   });
 
   it("answers from the second RPC URL when the first throws, and moves the shared client there", async () => {
@@ -452,6 +529,92 @@ describe("buildVerifier (the /verify wiring in main)", () => {
   it("throws when upstream reports unexpected_verify_error on every RPC URL", async () => {
     const { verify } = setup({ isValid: false, invalidReason: "unexpected_verify_error", payer });
     await expect(verify(payload(), requirements)).rejects.toThrow("unexpected_verify_error");
+  });
+
+  it("looks for a missing trustline after simulation_failed, in /verify and /settle's check", async () => {
+    const failed = {
+      isValid: false,
+      invalidReason: "invalid_exact_stellar_payload_simulation_failed",
+      payer,
+    };
+    const { verify, check, logger } = setup(failed);
+    // The stub's RPC can't simulate: reaching it proves the wiring, and upstream's answer stands.
+    await expect(verify(payload(), requirements)).resolves.toEqual(failed);
+    expect(logger.warn).toHaveBeenCalledWith("trustline_lookup_failed", expect.anything());
+    logger.warn.mockClear();
+    await expect(check(payload(), requirements)).resolves.toEqual({ response: failed });
+    expect(logger.warn).toHaveBeenCalledWith("trustline_lookup_failed", expect.anything());
+  });
+
+  it("answers a missing trustline through the real lookup, in /verify and /settle's check", async () => {
+    const issuer = Keypair.random().publicKey();
+    const name = `USDC:${issuer}`;
+    const trustlineMissing = new xdr.DiagnosticEvent({
+      inSuccessfulContractCall: false,
+      event: new xdr.ContractEvent({
+        ext: new xdr.ExtensionPoint(0),
+        contractId: StrKey.decodeContract(asset) as never,
+        type: xdr.ContractEventType.diagnostic(),
+        body: new xdr.ContractEventBody(
+          0,
+          new xdr.ContractEventV0({
+            topics: [xdr.ScVal.scvSymbol("error"), xdr.ScVal.scvError(xdr.ScError.sceContract(13))],
+            data: xdr.ScVal.scvVec([nativeToScVal("text"), new Address(payTo).toScVal()]),
+          }),
+        ),
+      }),
+    });
+    const instance = xdr.ScVal.scvContractInstance(
+      new xdr.ScContractInstance({
+        executable: xdr.ContractExecutable.contractExecutableStellarAsset(),
+        storage: [
+          new xdr.ScMapEntry({
+            key: xdr.ScVal.scvSymbol("METADATA"),
+            val: nativeToScVal({ name }),
+          }),
+        ],
+      }),
+    );
+    const contractData = new xdr.ContractDataEntry({
+      ext: new xdr.ExtensionPoint(0),
+      contract: new Address(asset).toScAddress(),
+      key: xdr.ScVal.scvLedgerKeyContractInstance(),
+      durability: xdr.ContractDataDurability.persistent(),
+      val: instance,
+    });
+    const { verify, check, logger } = setup(
+      {
+        isValid: false,
+        invalidReason: "invalid_exact_stellar_payload_simulation_failed",
+        payer,
+      },
+      {
+        rpc: {
+          simulateTransaction: async () =>
+            ({
+              id: "1",
+              latestLedger: CURRENT,
+              events: [trustlineMissing],
+              _parsed: true,
+              error: "HostError: Error(Contract, #13)",
+            }) as never,
+          getLedgerEntries: async () =>
+            ({
+              latestLedger: CURRENT,
+              entries: [{ val: xdr.LedgerEntryData.contractData(contractData) }],
+            }) as never,
+        },
+      },
+    );
+    const refused = {
+      isValid: false,
+      invalidReason: PAYTO_TRUSTLINE_REASON,
+      invalidMessage: `${payTo} has no ${name} trustline as of ledger ${CURRENT}: the account must exist and hold one`,
+      payer,
+    };
+    await expect(verify(payload(), requirements)).resolves.toEqual(refused);
+    await expect(check(payload(), requirements)).resolves.toEqual({ response: refused });
+    expect(logger.warn).not.toHaveBeenCalledWith("trustline_lookup_failed", expect.anything());
   });
 
   it("rechecks /settle's auth expiry at the pool's floor of 2, not MIN_VALIDITY_LEDGERS", async () => {

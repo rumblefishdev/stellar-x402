@@ -145,7 +145,8 @@ for (let i = 0; i < fresh.length; i += MAX_CHANNELS_PER_TX) {
   const facilitatorEntry = await readAccountEntry(server, facilitator.publicKey());
   if (!facilitatorEntry) throw new Error("the facilitator account does not exist");
   const setupTx = buildCreateChannelsTx({
-    facilitator: new Account(facilitator.publicKey(), facilitatorEntry.seqNum().toString()),
+    funder: new Account(facilitator.publicKey(), facilitatorEntry.seqNum().toString()),
+    signer: facilitator.publicKey(),
     channels: batch,
     networkPassphrase: passphrase,
     fee: 1000,

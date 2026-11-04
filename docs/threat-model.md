@@ -1,8 +1,9 @@
 # Threat model
 
-Not written yet, except for the `upto` contract, `/verify` RPC failover and facilitator key
-sections below. Planned sections: assets (fee budget, catalog integrity), fee griefing via failed
-transactions, auth-entry validation, SSRF in Bazaar metadata, API key abuse.
+Written so far: the `upto` contract, `/verify` RPC failover, auth-entry expiry, settlement fees
+(what `/settle` can cost the facilitator: spend budgets, breakers, fee griefing with failed
+transactions) and the facilitator key. Planned: catalog integrity, auth-entry validation, SSRF in
+Bazaar metadata, API key abuse.
 
 ## `upto` contract
 
@@ -149,7 +150,10 @@ What each party must trust:
 - **Attack:** Payments that create ledger entries (a recipient's first balance in a token, a
   client's first allowance entry, a nonce entry with a long TTL) or extend an entry's TTL (a token
   instance whose TTL runs low, or the proxy's own instance and code) pay rent on top of the normal
-  fee.
+  fee. A payment that touches an archived entry (the token's instance or code, a non-SAC balance,
+  a C-account's SAC balance) restores it and pays its restore rent in the same fee: 0021's testnet
+  run measured resource fees of 342,189 and 551,787 stroops with archived entries, against 14,278
+  for live USDC.
   The payer picks `allowance_expiration_ledger`, and the facilitator pays temporary rent on the
   nonce entry and the token's allowance entry until then: in the unit test
   `a_far_allowance_expiration_costs_the_facilitator_rent`, the furthest expiry the network allows
@@ -166,6 +170,10 @@ What each party must trust:
   expiry more than 17,280 ledgers (about a day) ahead, so even a facilitator that skips the check
   pays at most about 25,000 stroops of it (ADR 0010, D11). The proxy's own extension
   is capped at 720 ledgers per settlement, about 149,000 stroops on testnet (ADR 0010, D10).
+  For `exact`, restore rent is rent too: over the ceiling the payment is refused, and when its
+  transaction lists the archived entries the refusal's message names them, so anyone can restore
+  them from their own account and pay again (task 0066); under the ceiling the facilitator pays it.
+  The list comes from the buyer's transaction and is not checked against the chain.
 - **Residual risk:** Rent depends on the entry's size and the length of the extension, so there
   is no fixed bound. When the token extends its own instance in the same settlement as the
   proxy's extension, the total goes over the default ceiling, and a valid payment is refused
@@ -253,7 +261,11 @@ Scope: upstream verify's failover across `RPC_URLS` (spine AD-3, task 0045).
   verdict can't be chosen this way: a rejection is never failed over.
 - **Residual risk:** Until the rate limit (0023), anyone can spend `RPC_URLS[0]`'s quota, and
   traffic stays on the fallback while they do. Each probe interval then costs one probe, not a
-  user request.
+  user request. The trustline lookup (0078) adds to that: it runs on the shared client after
+  upstream's `simulation_failed`, so a client can trigger it, and with `RPC_URLS[0]` at its quota
+  its failed read moves every caller sooner. A payload needs the payer's one auth entry to reach
+  it, so one without costs upstream's 1 call; one with a junk entry costs 2, and only a real `#13`
+  costs the 3rd.
 
 #### Lagging RPC answers
 
@@ -268,6 +280,166 @@ Scope: upstream verify's failover across `RPC_URLS` (spine AD-3, task 0045).
 - **Residual risk:** A seller that serves on `/verify`'s answer alone, without `/settle`, can serve
   a payment that never settles. For `upto` (0015) `/verify` carries more weight, so its rules must
   not rely on a single RPC's view.
+
+## Auth-entry expiry
+
+Scope: the `exact` payer's auth entry and how long it stays landable (spine AD-6, AD-22, task 0073).
+
+### Threats
+
+#### An extra auth entry hides the payer's expiry
+
+- **Attack:** A seller adds a second signed auth entry from an account it controls, valid for 60
+  ledgers, next to the payer's entry signed for days. Upstream accepts it, and an expiry check
+  that reads the earliest entry sees 60, so the payer's signature stays landable for days, and a
+  "sign a new payment" answer given once the extra entry expires invites a second payment.
+- **Mitigation:** `/verify` and `/settle` refuse any address-credential entry that isn't the
+  payer's (`…_payer_auth_entries`, 0073 decision 21), so every expiry the facilitator reads is
+  the payer's.
+- **Residual risk:** None known.
+
+#### A refused payment settles after its payer signed again
+
+- **Attack:** A payment P1 is refused before the claim, which records nothing. The seller has its
+  payer sign P2, which settles. P1 is then sent again, by a seller retrying with backoff or by
+  anyone holding it, once the reason it was refused no longer holds, and settles too.
+- **Mitigation:** A resource asking for more than the cap fits is refused on its
+  `maxTimeoutSeconds`, which doesn't change over time, so the same request stays refused (0073
+  decision 22).
+- **Residual risk:** A sender who edits `maxTimeoutSeconds` gets P1 through; it holds P1, so it
+  could submit it on chain without us anyway. A 300 s payment signed at 4 s ledgers is refused by
+  the ledger gap and can pass later. `invalid_exact_stellar_payload_fee_exceeds_maximum` has the
+  same path once fees drop (0086).
+
+#### A payment ended after its claim settles after its payer signed again
+
+- **Attack:** A payment P1 ends after the claim: a refusal by the pool or a spend limit, or a
+  transaction that failed or was refused, which doesn't use the auth entry's nonce. An answer of
+  "sign a new payment" has the payer sign P2, which settles. Whoever holds P1 then lands it before
+  its auth entry expires, through another facilitator or directly on chain.
+- **Mitigation:** Every such answer names the expiration ledger and says to sign again only once
+  it has closed (0082).
+- **Residual risk:** The answer only guides the client: nothing stops P1 landing, so a client that
+  signs early can still pay twice. A record claimed before 0073 keeps its old answer, and a release
+  from before 0082, during a deploy or after a rollback, answers without the wait. MCP agents get
+  no ledger, since it would come through the seller; they are told not to pay again without
+  checking.
+
+## Settlement fees
+
+Scope: what `/settle` for `exact` can cost the facilitator, which pays every fee (AD-10), and the
+spend budgets and breakers that bound it (AD-18, [ADR 0007](adr/0007-fee-abuse-containment.md),
+task 0024). `/settle` accepts any SEP-41 token. On testnet it takes no API key; on pubnet it will
+require one (0105).
+
+### Threats
+
+#### Parallel spend of one balance
+
+- **Attack:** A payer funded with one payment's `amount` signs N payments with N nonces and sends
+  N `/settle` calls at once. Each passes both simulations, N channels submit in one ledger, and
+  N−1 fail on chain at our fee. Done to USDC, the failures could also trip a breaker that refuses
+  everyone's USDC.
+- **Mitigation:** At most one settlement per (network, payer, asset) is in flight, enforced by
+  PostgreSQL in the claim and in a reopen (0073), across instances and lease hand-overs. Another
+  call waits within the settle budget, then gets `settle_exact_stellar_payer_busy` with nothing
+  recorded. The next settlement's simulation sees the previous transfer, so a payment the balance
+  no longer covers is refused before anything is sent. Failures count against the payer, never
+  against a SAC asset.
+- **Residual risk:** A payer that sends its payments one after another pays for its own failures,
+  up to its budget. Fan-out from one payer in one asset is serialized, which may slow a buyer
+  that pays many sellers at once.
+
+#### A token that skips `require_auth`
+
+- **Attack:** A wasm token whose `transfer` never calls `from.require_auth()`. Upstream checks
+  only that the payer's auth entry is signed, and Soroban checks an entry only when `require_auth`
+  uses it, so the payment settles with any `from` and any nonce. On testnet it settled with a
+  victim as payer who never signed. Per-payer budgets and breakers then bound nothing, and records
+  and the catalog carry a payer the attacker picked.
+- **Mitigation:** `/settle` requires the payer's nonce key in the settlement simulation's
+  read-write footprint, which the host writes only for an auth entry it matched, authenticated and
+  found fresh. Without it the settlement is refused before anything is signed
+  (`settle_exact_stellar_payer_not_authorized`). It works for G and C payers, SAC and wasm tokens.
+- **Residual risk:** `/verify` doesn't run the check, so it accepts such a payment. Only a seller
+  paid in its own forged token is fooled, and `/settle` refuses it at no cost.
+
+#### Breaker abuse
+
+- **Attack:** Someone makes a breaker refuse other people's payments: a payer fails a few USDC
+  payments on purpose to close USDC for everyone, or pays a competing seller with failing
+  payments to close its `payTo`.
+- **Mitigation:** Breakers count only included, charged failures, against the party that caused
+  them (attribution from the operation result and the host's diagnostic events; an event a
+  contract publishes itself is ignored, so a token can't name an error of its choice). A SAC's code
+  is the host's, so a SAC asset never has a breaker, and a failure that is ours counts against
+  nobody. A failure on the recipient's side of a SAC transfer blames the `payTo` only for a known
+  asset and only when the error names it alone; anything else blames the payer, since whoever
+  issues a classic asset can wrap it in a SAC and deauthorize any `payTo`. A C-account payer's
+  breaker opens on one failure only in its own contract; elsewhere it takes 3, like a G-account's.
+  The payer's and the `payTo`'s scopes are split per other asset, so a seller's own token can't
+  trip a buyer's USDC scope, nor a junk token a seller's. A wasm token's breaker needs 5 failures
+  and at least as many failures as successes.
+- **Residual risk:** A wasm token's issuer, or its payers together, can close that token. A
+  `payTo` whose own contract fails transfers to it closes itself. Both hurt only that token or
+  seller. Each failure still costs us its fee, bounded by the budgets.
+
+#### Payload front-running
+
+- **Attack:** A seller (or anyone the payload reaches) submits the buyer's signed payload itself,
+  paying its own fee, before the facilitator does. Our transaction then fails on chain at our fee
+  with `Error(Auth, ExistingValue)`: the nonce is used. Charged to the payer, three of them would
+  close the buyer's USDC breaker for every seller.
+- **Mitigation:** A reused nonce feeds no breaker: the payer signed one payment and it settled.
+  The fee still counts against the budgets. The payment itself settled once, so nobody is paid
+  twice. The host checks the nonce when the token calls `require_auth`, before a C-account's
+  `__check_auth` runs, so the error names the token, never the payer: shown on testnet for a
+  `test-wallet` payer in a wasm token and in a SAC (task 0024,
+  `apps/facilitator/scripts/results/front-run-testnet.json`).
+- **Residual risk:** Each front-run costs us one fee, bounded by the budgets, and costs the
+  front-runner its own. A wasm token can raise `Error(Auth, ExistingValue)` itself (a
+  `require_auth` of its own on a used entry), so its failures feed no breaker; they stay bounded
+  by the budgets. The same error in a C-account payer's own frame can't come from a front-run
+  (the token's frame fails first), only from the wallet's own nested auth, so it is blamed on the
+  payer like any failure there: its breaker opens at once.
+
+#### Shared budget exhaustion by Sybil self-payments
+
+- **Attack:** Someone pays themself valid 1-unit USDC payments (the value comes back) from many
+  cheap addresses. Per-payer and per-`payTo` budgets stop each address, but `asset:USDC`,
+  `tier:other` and `global` sum over everyone. At the defaults about 13 payers and 3 `payTo`s
+  fill `asset:USDC` in about 17,000 payments. With one payment per payer in flight, 13 payers take
+  about two hours; about 50 payers and 50 channels take half an hour.
+  The addresses' reserves (about 1.5 XLM each) come back on merge, and about 0.2 payments a second
+  keep USDC closed as the window rolls. Every payment succeeds, so no breaker opens. USDC is then
+  refused for every seller. `global` stays out of reach while USDC is the only known asset.
+- **Mitigation:** The loss stops at the budgets, 25 XLM for USDC and 10 XLM for other tokens per
+  window; with no budget the same attack would empty the 100 XLM float. The budgets bound the
+  rate, not the sum: kept up for under three days, the attack takes the float to its 5 XLM floor,
+  and `/settle` then refuses everyone until a top-up.
+  `spend_budget_nearing` fires at 80 % of a shared budget, and the facilitator README has a
+  runbook to tell an attack from real traffic.
+- **Residual risk:** Accepted on testnet (decided by akot, 2026-10-30): the shared budgets bound
+  the loss, not availability. On pubnet `/verify` and `/settle` will require an API key issued
+  after Discord sign-in, and a key's settlements count in a budget of its own, not in the shared
+  ones (0105, 0106, 0107; akot, 2026-11-03); `stellar:pubnet` is refused until they land. A
+  Discord account then plays the part of an address, but only up to its free quota, and all free
+  quotas share one budget, so many accounts use up only the free traffic (0107).
+
+#### Targeted `payTo` budget exhaustion
+
+- **Attack:** Someone fills one seller's `payTo` budget so its real payments are refused
+  (`settle_exact_stellar_spend_limit_pay_to`) until the window rolls. The budget counts the fee of
+  every payment to that seller, whoever pays. In USDC, about 7,000 1-unit payments from a handful
+  of cheap payers (each within its own budget) fill its 10 XLM; the units go to the seller. In a
+  junk token the attacker issues, the same payments would cost it nothing.
+- **Mitigation:** The `payTo` budget is split by tier like the payer's: payments in another token
+  count in `payTo:<address>/<token>`, so a junk token fills only that, never the seller's USDC
+  budget. The USDC route stays bounded by `asset:USDC` and `global`, and `spend_budget_nearing`
+  reports the `payTo` budget at 80 %.
+- **Residual risk:** The USDC route is accepted, as Sybil self-payments are: per-party budgets
+  bound one address, not one attacker. On pubnet API keys (0105) close it only if the `payTo`
+  budget is also kept per caller, one of 0107's decisions.
 
 ## Facilitator key
 
@@ -284,7 +456,7 @@ the channels' reserves, about 130 XLM at launch (a 100 XLM float plus ~30 XLM of
 - **Mitigation:** The facilitator holds only an AppRole token allowed `transit/sign/<key>`, never the
   key. The token expires within 1 hour.
 - **Residual risk:** A leaked secret ID mints new tokens until it is destroyed (runbook, 0026). The
-  theft alarm shows transactions we didn't send.
+  theft alarm shows a changed signer or money leaving our accounts.
 
 #### Code runs in the facilitator's container
 
@@ -301,9 +473,9 @@ the channels' reserves, about 130 XLM at launch (a 100 XLM float plus ~30 XLM of
 
 - **Attack:** Root, through another service on the shared server or a container escape, copies the
   key from OpenBao's memory, or its disk plus the unseal credential.
-- **Mitigation:** None that stops it. The theft alarm (a transaction on the fee account or a channel
-  that our submitter didn't send, or a signer or threshold change on them, read from Horizon off
-  the server) and the 25 XLM low-balance alarm catch it; the float caps the loss. The float has no
+- **Mitigation:** None that stops it. The theft alarm (a signer or threshold change on the fee account or
+  a channel, or a Horizon effect on them other than a credit or a claimable balance naming them,
+  read off the server) and the low-balance alarms catch it; the float caps the loss. The float has no
   upper limit, so the weekly review re-checks that this custody still fits it.
 - **Residual risk:** Accepted at today's stakes. The hot key is each account's only signer (0048's
   cold key was declined for now), so a thief can also lock us out of the channels. Upgrades: TPM-bound
@@ -327,7 +499,7 @@ the channels' reserves, about 130 XLM at launch (a 100 XLM float plus ~30 XLM of
   through SSO only. Each restore drill checks the 90-day CloudTrail event history for reads that
   weren't drills; the theft and balance alarms catch a theft.
 - **Residual risk:** Accepted at today's stakes, as for root on the server. The account has no
-  CloudTrail trail, so nothing alarms on a read; an alarm is a 0027 follow-up.
+  CloudTrail trail, so the alarm on a read uses the event history, about 15 minutes behind.
 
 #### OpenBao lost or down
 
@@ -337,3 +509,43 @@ the channels' reserves, about 130 XLM at launch (a 100 XLM float plus ~30 XLM of
   the read-only Storage Box key) is in AWS Secrets Manager, and a restore drill proves it before mainnet and every quarter.
 - **Residual risk:** The key can't be exported and has no cold backup. Losing both the snapshots and
   the backup set, or access to the shared AWS account, loses the fee account and every channel.
+
+## Monitoring
+
+Scope: the metrics and alarms of task 0027 ([ADR 0011](adr/0011-facilitator-hosting.md)): the
+facilitator's and the host's metric lines, shipped by the CloudWatch agent with the logging role,
+and the two Lambdas off the server, the uptime probe and the check that watches the accounts.
+
+### Threats
+
+#### Root on the server forges metric points
+
+- **Attack:** Root holds the agent's credentials and writes metric lines of its own. A metric
+  line's namespace is free text that no IAM condition covers, so it can add points to the
+  off-server metrics too, such as a high balance, `ready` at 1 or no mismatch, to hide what the
+  check reads. This is untested, but nothing stops it.
+- **Mitigation:** Each alarm on an off-server metric uses the statistic a forged point can't hide
+  a real one behind: `Minimum` for a balance and for `ready`, `Maximum` for a count. Root can't
+  stop the Lambdas from the server, and their silence is read from `AWS/Lambda`.
+- **Residual risk:** Forged points can raise false alarms. Metrics the server writes itself, such
+  as `fee_charged_stroops`, can be forged or held back; the weekly review sets the fee spend
+  against the balance, which comes from off the server.
+
+#### A flood of effects on our accounts
+
+- **Attack:** Anyone can send dust payments or make claimable balances that name our accounts, so
+  the check reads many pages, and a real debit sits among them.
+- **Mitigation:** Both effects are allowed, and the check pages back to where it last read in
+  full, so a debit can't fall off a page. A flood longer than a run's time fails the run, and
+  `watch-errors` fires.
+- **Residual risk:** A long enough flood keeps the check failing, which shows as an alarm, not as
+  silence.
+
+#### A client IP in the shared account's logs
+
+- **Attack:** The `rate_limited` line names the client's IP, and the logs sit in the AWS account
+  that soroban-explorer and prices-api share, so every admin there can read 30 days of them.
+- **Mitigation:** The line is written only past a rate limit, and it lets anyone with AWS access
+  block the address at the edge without a shell on the server.
+- **Residual risk:** Accepted on testnet. Looked at again before mainnet, with the retention
+  (0038).

@@ -1,17 +1,18 @@
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
-import { Keypair, rpc as stellarRpc } from "@stellar/stellar-sdk";
+import { rpc as stellarRpc } from "@stellar/stellar-sdk";
 import {
   FallbackRpc,
   RpcTimeoutError,
   SettlementSubmitter,
-  keypairSigner,
   type SorobanRpc,
+  type TransactionSigner,
 } from "@stellar-x402/signer-pool";
-import { createEd25519Signer, getNetworkPassphrase } from "@x402/stellar";
+import { getNetworkPassphrase, getUsdcAddress, type FacilitatorStellarSigner } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/facilitator";
 import type pg from "pg";
 import { Agent, setGlobalDispatcher } from "undici";
+import { openBaoSigner, type OpenBaoSigner } from "./adapters/openbao-signer.js";
 import { MIGRATIONS, migrate, pendingMigrations } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
 import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
@@ -21,7 +22,7 @@ import { createApp, type AppDeps } from "./http/app.js";
 import { supportedResponse } from "./http/supported.js";
 import { captureConsoleError, jsonLogger, rpcEndpointName, type Logger } from "./logger.js";
 import { memoryMetrics, type Metrics } from "./metrics.js";
-import type { SettlementStore } from "./ports/index.js";
+import type { LeaseFence, SettlementStore } from "./ports/index.js";
 import { createPruner } from "./pruner.js";
 import { checkChannels } from "./settlement/channel-check.js";
 import { checkRpcNetworks } from "./settlement/network-check.js";
@@ -35,7 +36,11 @@ import {
 import { createLeaseKeeper } from "./settlement/lease.js";
 import { createRecords } from "./settlement/records.js";
 import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler, type Settle } from "./settlement/settle.js";
+import { createTrustlineLookup } from "./settlement/trustline.js";
 import { failoverUpstream, type EndpointFailure } from "./settlement/upstream-failover.js";
+import { createAssetKinds } from "./spend/asset-kinds.js";
+import { createBalanceFloor } from "./spend/balance-floor.js";
+import { createSpendPolicy, verifyWithBreakers } from "./spend/policy.js";
 import {
   UNEXPECTED_VERIFY_ERROR,
   UpstreamTimeoutError,
@@ -83,6 +88,9 @@ export async function start(
   server.keepAliveTimeout = KEEP_ALIVE_TIMEOUT_MS;
   server.headersTimeout = KEEP_ALIVE_TIMEOUT_MS + 1_000;
   await once(server, "listening");
+  // The first balance reading comes before the lease, so `/settle` isn't refused for want of one
+  // once it can serve. A failed read is logged, and the floor fails closed until one succeeds.
+  await deps.floor?.start();
   // After listening, so `/verify` and `/supported` answer meanwhile. Sweeps run with or without the lease (0019
   // decision 37); `/settle` serves beside them (0019 decision 27) once the lease is held, and the
   // keeper keeps trying when it isn't (0025 decision 1).
@@ -103,9 +111,9 @@ export async function start(
     // listens, so a new `/settle` still gets its 503 rather than a refused connection. Then it
     // closes: open requests get the grace, their connections are cut, and a sweep under way is
     // waited for, as sweeps need no lease (0019 decision 37). Past the deadline the open
-    // connections are cut, and a drain still under way leaves the lease to its TTL, so a
-    // transaction still unresolved gets that long before another process sends on its channel
-    // (decision 11).
+    // connections are cut, and a drain still under way leaves the lease to its TTL (decision 11).
+    // A transaction still unresolved can stay valid past that, until its payer's auth expires
+    // (0073): the next process's sends on its channel may then fail with `txBadSeq` and rebuild.
     close: async () => {
       closing = true;
       const begun = Date.now();
@@ -155,6 +163,7 @@ export async function start(
       } finally {
         clearTimeout(timer);
         clearTimeout(grace);
+        deps.floor?.stop();
         // Past the deadline the drain may still fail, or the late `server.close()` may.
         drained.catch(() => {});
         closed?.catch(() => {});
@@ -185,7 +194,7 @@ export const DISCOVERY_STATEMENT_TIMEOUT_MS = 2_000;
 /**
  * The deadline of the whole upstream call (AD-3): `timeoutMs` (10 s) for each of `urls` RPC URLs,
  * plus, with fee-stats bids, the bid read before them, which `FallbackRpc` bounds at 10 s per URL,
- * plus 1 s of slack. The AD-22 ledger read after it is not included.
+ * plus 1 s of slack. The AD-22 ledger read and the trustline lookup after it are not included.
  */
 export function upstreamDeadlineMs(
   urls: number,
@@ -199,7 +208,7 @@ export function upstreamDeadlineMs(
 export type SchemeOptions = NonNullable<ConstructorParameters<typeof ExactStellarScheme>[1]>;
 
 export type MakeScheme = (
-  signer: ReturnType<typeof createEd25519Signer>,
+  signer: FacilitatorStellarSigner,
   options: SchemeOptions,
 ) => UpstreamVerifier;
 
@@ -274,7 +283,7 @@ export function buildUpstream(
   config: Config,
   fees: FeeSettings,
   logger: Pick<Logger, "warn">,
-  facilitator: ReturnType<typeof createEd25519Signer>,
+  facilitator: FacilitatorStellarSigner,
   active: Pick<FallbackRpc, "begin" | "markFailed">,
   seams: UpstreamSeams = {},
 ): Pick<VerifierDeps, "upstream" | "upstreamTimeoutMs"> {
@@ -312,6 +321,18 @@ export function buildUpstream(
 }
 
 /**
+ * Upstream's signer for `ExactStellarScheme`, which `/verify` uses only for the facilitator's
+ * address (`@x402/stellar` 2.28.0 `exact/facilitator/index.mjs:69-104`); `/settle` signs through
+ * the pool, so upstream never signs and no secret is needed here.
+ */
+function verifyOnlySigner(address: string): FacilitatorStellarSigner {
+  const refuse = async (): Promise<never> => {
+    throw new Error("upstream's scheme only verifies; the pool signs");
+  };
+  return { address, signAuthEntry: refuse, signTransaction: refuse };
+}
+
+/**
  * The verify checks' dependencies from the config (AD-3, AD-5, AD-10, AD-22): {@link buildUpstream},
  * the channels and the validity minimum. `/verify` and `/settle` build their checks from the same
  * object. `fees` is the caller's, so the pool is built from the same `fees.pool` and shares its
@@ -319,21 +340,26 @@ export function buildUpstream(
  */
 export function buildChecks(
   config: Config,
-  rpc: Pick<FallbackRpc, "getLatestLedger" | "begin" | "markFailed">,
+  rpc: Pick<
+    FallbackRpc,
+    "getLatestLedger" | "begin" | "markFailed" | "simulateTransaction" | "getLedgerEntries"
+  >,
   fees: FeeSettings,
   logger: Pick<Logger, "warn" | "info">,
   seams?: UpstreamSeams,
 ): VerifierDeps {
   // Upstream knows only the facilitator key, and only in plain form; the channels and the muxed
   // facilitator are `createChecker`'s check (AD-5).
-  const facilitator = createEd25519Signer(config.facilitatorSecret, config.network);
+  const facilitator = verifyOnlySigner(config.signer.address);
   return {
     network: config.network,
     ...buildUpstream(config, fees, logger, facilitator, rpc, seams),
     facilitator: facilitator.address,
     channels: config.channels,
     minValidityLedgers: config.settlement.minValidityLedgers,
+    maxValidityLedgers: config.settlement.maxValidityLedgers,
     latestLedger: async () => (await rpc.getLatestLedger()).sequence,
+    missingTrustline: createTrustlineLookup(rpc, config.network, logger),
   };
 }
 
@@ -343,7 +369,7 @@ export function buildChecks(
  */
 export function buildVerifier(
   config: Config,
-  rpc: Pick<FallbackRpc, "getLatestLedger" | "begin" | "markFailed">,
+  rpc: Parameters<typeof buildChecks>[1],
   fees: FeeSettings,
   logger: Pick<Logger, "warn" | "info">,
   seams?: UpstreamSeams,
@@ -375,10 +401,12 @@ export function buildSettlement(
     hooks: Pick<SettlementHooks, "beforeSubmit" | "onFinal" | "onSuccess">;
     logger: Logger;
     metrics: Metrics;
+    /** The facilitator key's signer. */
+    signer: TransactionSigner;
     /** Tests pass the pool's `sleep`. */
     sleep?: (ms: number) => Promise<void>;
-    /** The channel lease's `held()`, checked again before each send (0025). */
-    held?: () => boolean;
+    /** The channel lease this process holds, with its token, checked before each send (0025, 0071). */
+    lease: () => LeaseFence | undefined;
   },
 ): {
   settle: Settle;
@@ -403,7 +431,7 @@ export function buildSettlement(
   const submitter = new SettlementSubmitter({
     rpc: deps.rpc,
     networkPassphrase: getNetworkPassphrase(config.network),
-    signer: keypairSigner(Keypair.fromSecret(config.facilitatorSecret)),
+    signer: deps.signer,
     channels: config.channels,
     ...deps.fees.pool,
     ...(deps.sleep && { sleep: deps.sleep }),
@@ -443,8 +471,9 @@ export function buildSettlement(
     maxFeeStroops: config.fees.maxFeeStroops,
     settleTimeoutMs: config.settlement.settleTimeoutMs,
     budgetMs: config.settlement.settleBudgetMs,
+    latestLedger: deps.checks.latestLedger,
     records,
-    ...(deps.held && { held: deps.held }),
+    lease: deps.lease,
   });
   const reconciliation = scheduleReconciliation({ reconciler, logger, network });
   // Closing the pool first refuses every call that sent nothing, so their records close too.
@@ -469,7 +498,13 @@ export function compose(
     seams?: UpstreamSeams;
     sleep?: (ms: number) => Promise<void>;
   },
-): { deps: AppDeps; cataloger: Cataloger; metrics: Metrics; rpc: FallbackRpc } {
+): {
+  deps: AppDeps;
+  cataloger: Cataloger;
+  metrics: Metrics;
+  rpc: FallbackRpc;
+  signer: OpenBaoSigner;
+} {
   const { logger } = opts;
   const { stores } = opts;
   // Cataloging plugs into `/settle` through `extensionResponses` and `onSuccess` (AD-8).
@@ -487,6 +522,7 @@ export function compose(
   // they share one ceiling and one bid (AD-10).
   const fees = feeSettings(config.fees, rpc);
   const checks = buildChecks(config, rpc, fees, logger, opts.seams);
+  const signer = openBaoSigner({ ...config.signer, network: config.network, logger, metrics });
   // One lease per network's channel set (AD-17): only its holder settles.
   const lease = createLeaseKeeper({
     store: stores.settlements,
@@ -495,21 +531,49 @@ export function compose(
     logger,
     metrics,
   });
+  // The spend lane (AD-18, 0024): before a submit, the fee account's balance floor, the breakers
+  // and the fee budgets; once a record is final, the fee charged and the breakers' counts. The fee
+  // account is the facilitator's key, which signs every fee bump.
+  const floor = createBalanceFloor({
+    rpc,
+    account: checks.facilitator,
+    floorStroops: config.spend.floorStroops,
+    intervalMs: config.spend.balanceIntervalMs,
+    logger,
+    metrics,
+  });
+  const policy = createSpendPolicy({
+    store: stores.spend,
+    // USDC is the known asset (the high tier); every other token, SAC or wasm, gets the low one.
+    assets: createAssetKinds({ rpc, known: [getUsdcAddress(config.network)] }),
+    floor,
+    budgets: {
+      windowMs: config.spend.windowMs,
+      globalStroops: config.spend.globalStroops,
+      perPayerStroops: config.spend.perPayerStroops,
+      perPayToStroops: config.spend.perPayToStroops,
+      perKnownAssetStroops: config.spend.perAssetStroops,
+      perOtherAssetStroops: config.spend.perOtherAssetStroops,
+      tierOtherStroops: config.spend.tierOtherStroops,
+    },
+    logger,
+    metrics,
+  });
   const { settle, reconciliation, drain } = buildSettlement(config, {
     rpc,
     fees,
     checks,
     store: stores.settlements,
-    // Spend budgets plug in here with 0024.
     hooks: {
-      beforeSubmit: async () => ({ allow: true }),
-      onFinal: async () => {},
+      beforeSubmit: policy.beforeSubmit,
+      onFinal: policy.onFinal,
       onSuccess: cataloger.onSuccess,
     },
     logger,
     metrics,
+    signer,
     ...(opts.sleep && { sleep: opts.sleep }),
-    held: lease.held,
+    lease: lease.current,
   });
   return {
     deps: {
@@ -517,17 +581,20 @@ export function compose(
       logger,
       metrics,
       stores,
-      verify: createVerifier(checks),
+      verify: verifyWithBreakers(createVerifier(checks), { policy, logger, metrics }),
       settle,
       extensionResponses: cataloger.extensionResponses,
       supported: supportedResponse(config.network, checks.facilitator),
       reconciliation,
       lease,
+      floor,
       drain,
+      signerState: signer.state,
     },
     cataloger,
     metrics,
     rpc,
+    signer,
   };
 }
 
@@ -577,12 +644,11 @@ export async function main(
     // missing. Checked first, so a wrong URL is named instead of every channel.
     await checkRpcNetworks(config.rpcUrls, getNetworkPassphrase(config.network));
     const stores = postgresStores(pools.main, pools);
-    const { deps, cataloger, metrics, rpc } = compose(config, { logger, stores });
+    const { deps, cataloger, metrics, rpc, signer } = compose(config, { logger, stores });
     // AD-12: the service starts only when no other key can move a channel. An RPC that doesn't
     // answer fails the check with its error. `compose()` only wires parts, so nothing has called
     // the RPC yet.
-    const facilitator = Keypair.fromSecret(config.facilitatorSecret).publicKey();
-    await checkChannels(rpc, config.channels, facilitator);
+    await checkChannels(rpc, config.channels, config.signer.address);
     // For the life of the process: an upstream call cut off by the deadline keeps running after
     // `close()`, and its error would reach stderr with the RPC URL in it.
     const restoreConsole = captureConsoleError(logger, config.rpcUrls);
@@ -590,7 +656,10 @@ export async function main(
       restoreConsole();
       throw error;
     });
-    // One window today; with per-budget windows (0024), the longest of them.
+    // Not awaited: the service starts and `/verify` answers without OpenBao; the outcome goes to
+    // the log and `/health`'s `signer`, and a failed check tries again (0036 decision 4).
+    void signer.check();
+    // Every budget sums the one window (0024 S-design §5).
     const pruner = createPruner({
       spend: stores.spend,
       rateLimits: stores.rateLimits,
@@ -603,6 +672,7 @@ export async function main(
     // Catalog writes and a prune already under way finish before the process exits, and before
     // the pools end, even if closing the server fails; the pools end even if draining fails.
     const closeOnce = async () => {
+      signer.close();
       try {
         await started.close();
       } finally {

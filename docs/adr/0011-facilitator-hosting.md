@@ -7,8 +7,11 @@
   and the fingerprint's limit; how far a repeat runs past the budget), 2026-10-21 (task 0009:
   bare RPC hosts in error messages), 2026-10-27 (task 0019: reconciliation runs in every
   process, independent of the lease; `/health` reports `listed` beside `ready`, and the deploy
-  waits for both) and 2026-10-28 (task 0076: one hostname and one facilitator service for both
-  networks)
+  waits for both), 2026-10-28 (task 0076: one hostname and one facilitator service for both
+  networks), 2026-11-02 (task 0027: the agent reads a file the unit writes, a Lambda probe
+  replaces Route 53, and 0027 builds the logging role) and 2026-11-03 (task 0027, from the PR
+  #111 review: every unit's output ships, the loss the log path accepts, the uptime alarm from
+  the first good deploy, the disk alarm to our channel, and certificate renewal in 0027)
 - Revised: 2026-10-13. ECS Fargate became the company Hetzner server (task 0039); the first
   version is in git history and task 0014. 2026-10-21: the key moved to OpenBao (ADR 0013), and
   deploys, reboots, backups, alarms and downtime were worked out in the PR #24 review.
@@ -38,8 +41,13 @@ The host must:
   scale-to-zero and no idle CPU throttling;
 - **stop the old process before the new one starts.** One process owns a channel set through a
   store lease, so deploys can't overlap (AD-17);
-- **give at least 90–120 s after SIGTERM.** The process drains in-flight submissions, and with the
-  pool's defaults (`timeoutSeconds` 60 + `confirmGraceSeconds` 30) a sent one can take ~90 s;
+- **give 180 s after SIGTERM** (`stop_grace_period`). The process drains in-flight submissions
+  for at most 150 s, leaving the rest for its store writes and the lease release. Since 0073 a
+  sent one can stay valid until the payer's auth expires (`MAX_VALIDITY_LEDGERS`: 66 ledgers by default, about 5.5 minutes; at most 120, about 10 minutes). The pool waits for it until that bound's estimated time at 6 s a ledger plus
+  `confirmGraceSeconds` 30, about 426 s by default and 750 s at 120, so it can outlast the drain. One still open at 150 s is finished by
+  the next process's reconciliation, and until it lands or expires the next process's sends on
+  its channel may fail with `txBadSeq` and rebuild, for minutes rather than about 60 s. Accepted
+  for testnet; before pubnet the next process leaves such a channel out (0090);
 - **keep the facilitator key out of the image, the logs and the facilitator's process** (AD-12);
 - **offer a durable store** for the PostgreSQL schema of ADR 0012.
 
@@ -105,6 +113,10 @@ a whole zone, to Cloudflare on the Free plan.
     (0077 decision 3).
   - The facilitator never joins the ClickHouse project's `app` network, so it can't reach
     ClickHouse. OpenBao is reached over unix sockets (ADR 0013), not a network.
+  - Each network has a fixed /28 from `172.31.200.0/24`, set in the compose file, since the
+    server's Docker address pool is taken whole by that `app` network. A second pool in
+    `daemon.json` would also work, but it changes Docker for every project on the server, for the
+    sake of two networks.
 - **systemd restarts a facilitator that crashes, not Docker.** Its unit runs Compose in the
   foreground with `--exit-code-from <service>`, since a plain `docker compose up` exits 0
   whatever the container's code, and with `Restart=on-failure`, so the unit ends with the
@@ -142,9 +154,13 @@ a whole zone, to Cloudflare on the Free plan.
   applied (0026), and a schema behind the code stops the start, as a wrong RPC or channel does,
   so a deploy that hasn't migrated gets no `ready` and rolls back. A store per network gives a lease per network: today, with one
   network, `ready` is its lease, and what readiness means with two (what the deploy, `/health`,
-  the watchdog and 0027's "ready to settle" alarm wait for) is decided with the code in 0077.
+  the watchdog and 0027's uptime probe wait for) is decided with the code in 0077.
   - A process without the lease keeps trying to take it.
   - A process whose lease renewal fails stops new submissions until it holds the lease again.
+  - A process that froze past its TTL while another took the lease sends nothing new once it
+    wakes: the store refuses its hash under the replaced fencing token (task 0071). The
+    exception is an envelope stored and checked before the freeze: it can still go out, and
+    resend until its bound, under its one hash.
 - **AD-16 reconciliation doesn't depend on the lease** (0019 decisions 27 and 37). It starts once
   the server listens and sweeps every 10 s beside `/settle`, in every process. It only reads the
   chain, and every write is a compare-and-set on the record's version, so a process waiting for
@@ -153,8 +169,8 @@ a whole zone, to Cloudflare on the Free plan.
   decision 36). Listing is one query, so it comes fast even with a big backlog. An image whose
   sweeps can't list never turns it true.
 - **The deploy's last step waits up to 120 s for `ready: true` and `listed: true`.** Without
-  them, the deploy rolls back to the previous digest and fails the run (below). A "ready to
-  settle" metric and a sweep counter also have alarms (0027).
+  them, the deploy rolls back to the previous digest and fails the run (below). The uptime
+  probe reads `ready` from then on, and a sweep counter has an alarm (0027).
 
 ### Timing
 
@@ -166,12 +182,12 @@ One request or one stop must never outlast the layer in front of it:
 | `/settle` response budget             | 30 s, at most 80 s | well below the seller's 90 s, so our answer reaches it             |
 | `/settle` checks                      | see below          | inside the budget: past it, `…_timeout` and nothing is claimed     |
 | Repeat wait (`SETTLE_TIMEOUT_MS`)     | 20 s, ≤ the budget | and never past the repeat's own budget                             |
-| `stop_grace_period`                   | 180 s              | sent submissions (≤ 90 s) plus a 90 s margin                       |
+| `stop_grace_period`                   | 180 s              | the 150 s drain plus 30 s for the store and the lease (0073)       |
 | Cloudflare's response limit           | 100 s              | above the 80 s cap; past it Cloudflare answers 524                 |
 | Node `keepAliveTimeout`               | 125 s              | above `cloudflared`'s idle keep-alive (90 s), or it sees 502s      |
 | Container healthcheck                 | 10 s               | liveness only                                                      |
 | `LEASE_TTL_MS`                        | 30 s               | after a crash, a new process waits at most this long               |
-| Wait for `ready` and `listed`         | 120 s              | past it, the deploy rolls back to the previous digest              |
+| Wait for `ready`, `listed`, `signer`  | 120 s              | past it, the deploy rolls back to the previous digest              |
 | Unit `TimeoutStopSec`                 | 200 s              | above `stop_grace_period`, so a reboot waits for the drain         |
 | Unit `TimeoutStartSec`                | 60 s               | covers `ExecStartPre` only: credentials and the digest, no pull    |
 | Postgres `stop_grace_period`          | 120 s              | a clean shutdown; the Compose default is 10 s                      |
@@ -179,7 +195,8 @@ One request or one stop must never outlast the layer in front of it:
 
 - **Past the budget,** `/settle` answers `settlement_pending` with the hash if one was signed,
   and nothing new is signed after it. If nothing was signed, the record ends and the answer is
-  `settle_exact_stellar_timeout`: the client signs a new payment. 30 s fits 97 % of the
+  `settle_exact_stellar_timeout`: the client repeats the same payment while `extra.retryable`
+  says so, and signs a new one only after (0073). 30 s fits 97 % of the
   settlements measured in task 0043. Every store and hook call is bounded by what is left of it,
   plus the store's 1 s grace for each of the last store calls: a repeat's last poll read, its end
   of the record and its success mark, so up to the poll interval plus 3 s past the budget (3.46 s
@@ -195,16 +212,30 @@ One request or one stop must never outlast the layer in front of it:
   | 0045, 3 URLs (its cap), fee-stats | 61 s             | 30 s         | 91 s                   |
 
   Upstream verify after 0045 is 10 s per URL, twice that with a fee-stats bid (the read before
-  the URLs), plus 1 s. Past the budget the answer is `…_timeout` before the claim, so the same
+  the URLs), plus 1 s. A failed simulation of a payload with the payer's auth entry adds the
+  trustline lookup, at most 3 s, on the shared client (0078). Past the budget the answer is `…_timeout` before the claim, so the same
   payment may be sent again; a valid payment can still get it when the first URLs hang and the
   last one answers late. These worst cases need hung RPC URLs, not slow ones.
 
-- **Known cost of "nothing sent → `rejected`".** The resource is usually served before `/settle`.
-  After a failure before anything was signed (no channel, the budget, the simulation, the RPCs
-  down), the record ends and the same payload can't be settled again: only the buyer can pay, by
-  signing a new payment, and nothing makes them. Claiming such a record again by the same
-  fingerprint would close it; it is not planned.
-- **The budget covers the wait for a channel.** The pool's own bounds (60 s + 30 s) start only
+- **"Nothing sent → `rejected`" reopens.** The resource is usually served before `/settle`.
+  After a failure before anything was signed (no channel, the budget, the RPCs down, a restart,
+  a deploy or a lost lease), the record ends, but the payer's auth entry can still land. Since task 0073 the
+  identical payload reopens the record while that auth entry is valid, so whoever holds the
+  payment (the seller's resource server, or the client) repeats it as it is and it settles once;
+  the answer says so with `extra.retryable`. A refusal by the simulation, the fee or a spend
+  limit still ends the payment: those need a new one, once the first can't land, and the answer
+  says from which ledger (task 0082). During the deploy that brings this in, the previous release still answers these
+  reasons as "sign a new payment", without `extra`, until it stops. That answer stays true: rows
+  from before `0007_settlement_reopened`, and rows that release inserts after the migration ran,
+  get `reopened` -1 and never reopen, so a payer who did sign again can't have the old payment
+  land beside it through `/settle` (0073 decision 25). A rollback to a release before 0073 runs on
+  the newer schema (its inserts get -1 too) but takes the promise back: it answers a repeat from
+  the record, as "sign a new payment", without reopening it. Deploying this release again after
+  that is an accepted gap: a record it claimed keeps `reopened` 0 through the rollback, so such a
+  payment reopens, and it can land beside a newly signed one if both deploys fit inside the auth's
+  life (0073 decision 28).
+- **The budget covers the wait for a channel.** The pool's own bounds (until the payer's auth expiry ledger, then 30 s; 60 s + 30 s
+  for a call without a ledger bound) start only
   once a channel is acquired, so the `/settle` handler passes the pool a deadline (0009).
 - **On SIGTERM the facilitator stops taking `/settle` itself** (503), refuses at once every call
   not yet signed and sent, lets only sent ones finish, and drains (0025). `cloudflared` has no
@@ -270,8 +301,7 @@ One request or one stop must never outlast the layer in front of it:
     facilitator stays down. With the RPCs down it never even listens: since 0020, `main()`
     checks the RPC networks and the channels before it starts the HTTP server and exits with
     `startup_failed`, so the unit crash-loops until its start limit leaves it `failed`.
-    `/health` then gives no data at all, so the readiness alarm treats missing data as
-    breaching (0027), and the uptime alarm fires too.
+    `/health` then doesn't answer at all, and the uptime probe counts that as down (0027).
   - Migrating before the stop and that rollback are both safe: a failed transactional migration
     leaves the schema as it was, a failed online one leaves the steps it finished, which the next
     deploy continues from (ADR 0012), and expand/contract keeps the older image working on a
@@ -307,7 +337,8 @@ One request or one stop must never outlast the layer in front of it:
     `deploy/production`. `develop` stays open for direct pushes such as lore status changes.
   - The SSH key is a secret of the `production` GitHub environment, which carries the rules the
     OIDC trust policy used to: deployment branches limited to `deploy/production`, which is
-    protected: a pull request with an approving review, and no bypass, admins included. The
+    protected: a pull request with an approving review given after its last push by someone
+    other than whoever made it, and no bypass, admins included. The
     workflow runs as it is on that branch, so a change to it is reviewed too.
     - A job outside those rules never gets the key.
     - Before mainnet joins, 0038 weighs the rules the `mainnet` environment was to have: `v*`
@@ -327,8 +358,9 @@ One request or one stop must never outlast the layer in front of it:
 - **An Ansible playbook in `deploy/ansible/` provisions the server's x402 parts:** the `x402`
   user, `/srv/x402/<environment>/`, the systemd units and timers, the compose files,
   `deploy.sh`, the deploy user's one `sudo` rule and its `authorized_keys` forced command,
-  `cloudflared`, and the pgBackRest and CloudWatch agent config. An admin runs it from a reviewed
-  commit, as the explorer's own playbook is run. It touches only x402's parts, never the server's
+  `cloudflared`, and the pgBackRest and CloudWatch agent config. An admin runs it, as the
+  explorer's own playbook is run, from a reviewed commit on `deploy/production`; never from
+  `develop`, which takes unreviewed pushes (0091). It touches only x402's parts, never the server's
   base setup (firewall, `daemon.json`, users), which the ClickHouse project owns. Whoever runs
   the playbook, and from which commit, is the real boundary around production.
 - **Per-merge deploys stay a digest over SSH** (above), and CI never runs the playbook. Ansible
@@ -387,8 +419,8 @@ One request or one stop must never outlast the layer in front of it:
   - The trust anchor is the ClickHouse project's existing client-certificate CA, so there is no
     CA of our own to run or pay for. The role's trust policy accepts only our server
     certificate's CN, which isn't on the ClickHouse site's allowlist, so the certificate opens
-    nothing else. It is valid for a year and Platform renews it by hand; 0027 alarms 30 days
-    before it expires. That project tells us when it rotates its CA, since our trust anchor
+    nothing else. It is valid for a year and renewed by hand with 0027's runbook steps; 0027
+    alarms 30 days before it expires. That project tells us when it rotates its CA, since our trust anchor
     changes with it. Anyone with that CA's key can issue our CN, which is accepted at a logging
     role's stakes.
   - The role may only write the facilitator's log groups and metrics, only from the server's IP.
@@ -400,8 +432,8 @@ One request or one stop must never outlast the layer in front of it:
     networks' sockets.
   - It is the only AWS credential on the server; ADR 0013 names it as the exception to "no AWS
     credentials".
-- **`FACILITATOR_SECRET` stays for local development and tests.** Deployed networks use the OpenBao
-  signer instead.
+- **The facilitator service signs only through OpenBao, wherever it runs.** Its tests and local
+  runs use a fake OpenBao on a unix socket, so they take the same path as a deployed network (0036).
 - **Other secrets are encrypted systemd credentials,** as in ADR 0013: per network a database
   password and `RPC_URLS`, which may carry an API key, and per environment the tunnel token.
   - The files are named per network from the first deploy, so mainnet adds files and renames
@@ -505,12 +537,29 @@ One request or one stop must never outlast the layer in front of it:
 ### Logs, metrics and alerts
 
 - **Logs:** the 0017 `jsonLogger` stays.
-  - Its JSON lines go to stdout, and Docker keeps them on the host (`json-file`, rotated). The
-    CloudWatch agent sends our containers' logs to CloudWatch Logs with the logging role's
-    credentials, so `dockerd` stays untouched and an AWS outage never stops a container from
-    starting. The log group uses the Standard class, with 30-day retention on testnet.
-  - How the agent picks only our containers, and that EMF lines turn into metrics, is checked
-    in 0027.
+  - Its JSON lines go to stdout. `x402@<environment>` runs Compose in the foreground, so it
+    appends them to a file under `/var/log/x402/`, and stderr to a second one. Each of our other
+    units does the same with its own container's output: Postgres, `cloudflared`, OpenBao, and the
+    deploy with its migrations. The CloudWatch agent sends those files to CloudWatch Logs with the
+    logging role's credentials, so `dockerd` stays untouched, an AWS outage never stops a
+    container from starting, and the history outlives the host.
+  - The agent doesn't read Docker's `json-file` logs, which stay for `docker logs`: a `json-file`
+    line wraps ours, and EMF needs `_aws` at the root (task 0027's log path spike).
+  - The agent keeps EMF lines and app lines in separate log groups. During an AWS outage it holds
+    app lines back and drops the oldest metric lines once 20,000 wait, which CloudWatch would have
+    turned into metrics. Both use the Standard class: 30 days for app lines, 3 for metric lines.
+    Every line ships, the client IP in `rate_limited` too; that and the retention are looked at
+    again before mainnet (0038).
+  - The files rotate with `logrotate` on its own timer, since they share a disk with ClickHouse,
+    using `copytruncate`, as the units hold the files open. We accept two losses, tested locally
+    in 0027. At each rotation, the lines the agent hadn't read yet: up to 250 ms, its poll, all
+    but a few ms of them still in the rotated file. When a rotation falls inside an AWS outage,
+    every app line since the agent stopped sending, about 5 s into it; those stay in the rotated
+    file too, which an operator reads on the server.
+  - The agent joins a line that starts with whitespace to the line before, so Compose's exit
+    line would break an EMF line before it. 0027 sets it to start an event at every line, and
+    tests that.
+  - That EMF lines turn into metrics is checked once, at the first deploy (0027).
   - No pino: stdout is the only transport, and the logger already writes identifiers only.
 - **RPC endpoints are logged as `RPC_URLS[i]#<fingerprint>`, never by URL or host.** An RPC URL
   can carry an API key, and a host can be an account's own endpoint name (some providers put one
@@ -530,34 +579,46 @@ One request or one stop must never outlast the layer in front of it:
   - Namespace `x402-facilitator`.
   - Dimensions stay low-cardinality: `network`, route, outcome, event name.
   - Never payer or `payTo`: each dimension combination is a billed custom metric.
+  - Billed metrics are those with an alarm and the traffic picture (0027). Other labels stay
+    fields in the line, read with Logs Insights.
 - **Host metrics:** the CloudWatch agent on the server reports memory, CPU and free disk, since
   ClickHouse shares the machine.
 - **Alerts:** CloudWatch alarms go to an SNS topic, and Amazon Q Developer in chat applications
   (formerly AWS Chatbot) posts them to the team's Slack channel. 0027 defines them:
-  - the five AD-18 conditions; the low-balance one fires below 25 XLM of spendable balance
-    (ADR 0013);
-  - not ready to settle (the counterpart of the lease-blind `/health`);
+  - the five AD-18 conditions; the low-balance one fires below 25 XLM of spendable balance, and
+    again below 10 XLM (ADR 0013);
+  - not ready to settle: `/health`'s status is 200 whatever the lease says, so the uptime probe
+    reads `ready` from its body (below);
   - no sweep listing the records within the alarm window: since the deploy checks `listed` only
     once, this is the net for sweeps that start failing later (0019 decision 36);
-  - from ADR 0013: OpenBao sealed, down or failing to sign; theft (a transaction on the fee
-    account or a channel that our submitter didn't send, or a signer or threshold change on them,
-    read from Horizon off the server); and OpenBao's audit log disk at 80%;
-  - WAL archiving failing (`pg_stat_archiver.failed_count` rising, or the last archived segment
-    older than 10 minutes). pgBackRest acknowledges a segment only once it is in the
+  - from ADR 0013: OpenBao sealed, down or failing to sign; theft and reads of the backup
+    secret, off the server; and OpenBao's audit log disk at 80%;
+  - WAL archiving failing (`pg_stat_archiver.last_failed_time` past `last_archived_time`, or the
+    last archived segment older than 10 minutes). pgBackRest acknowledges a segment only once it is in the
     repository, so this one alarm covers a stuck archive, which fills a disk ClickHouse shares,
     and WAL that doesn't leave the server;
   - the last `pgbackrest backup` or the last OpenBao snapshot older than 26 hours (both run
     daily);
   - the Roles Anywhere certificate expiring within 30 days;
-  - low free disk and memory on the server.
-- **Uptime:** a Route 53 HTTPS health check on the public URL.
-  - Route 53 publishes its metrics only in us-east-1, so the alarm and its SNS topic live there.
-  - It fires after 7 failing minutes in a row, above the worst successful deploy
+  - low free disk and memory on the server. The disk alarm goes to our channel too: our Platform
+    lane runs the server's base setup, and our WAL and logs are what fills the disk.
+- **A deploy of the alarms is done only when a test alarm reaches Slack and a person sees it.**
+- **Uptime:** a small Lambda in eu-central-1 reads `/health` on the public URL every minute and
+  publishes `ready`.
+  - It runs apart from the other off-server checks, so their dependencies can't stop it. A failed
+    read or a missing point counts as down, so a broken probe alarms rather than going quiet.
+  - The alarm fires after 7 failing minutes in a row, above the worst successful deploy
     (Consequences). A failed deploy that rolls back can take longer and should alarm; it also
     fails the workflow.
-  - It checks `/supported` once 0020 makes it real, and `/health` before that.
-  - The 99% figure counts a minute as up only when the check passes and the facilitator is ready
-    to settle.
+  - `/supported` answers an object fixed at startup, so its 200 can't show readiness, and `/health`
+    answers 200 whatever `ready` says. The probe therefore reads the body.
+  - The 99% figure is this metric: a minute counts as up only when `ready` is true.
+  - `/health` answers 502 until the first deploy, so the probe may run before it, but the alarm's
+    actions go on, and the 99% starts counting, at the first good deploy.
+  - It's one vantage point, in the region of the other alarms: a fault between AWS and Cloudflare
+    reads as downtime, and a fault in eu-central-1 takes every alarm down. A Route 53 check
+    would avoid both, for about $4 a month and a us-east-1 stack, and is the way back if the
+    false alarms cost more than that.
 
 ## Rationale
 
@@ -566,7 +627,8 @@ One request or one stop must never outlast the layer in front of it:
   costs about €0 more, against about $60–70 a month on testnet and $150 on mainnet for ECS
   Fargate.
 - **It meets both hard rules.** Compose stops the old container first, and the grace period has no
-  platform cap, so 180 s covers the drain with room to spare.
+  platform cap, so 180 s covers the 150 s drain. A submission still open then is finished by the
+  next process (0073).
 - **The alerting design carries over:** the same logger, the same EMF metrics, CloudWatch alarms
   and Slack.
 - **Docker is already on the server,** and the company already runs sorobanscan's API behind
@@ -673,7 +735,7 @@ One request or one stop must never outlast the layer in front of it:
   worst it is about 5 minutes: a 180 s drain and up to 120 s for `ready` and `listed`. The uptime alarm waits 7 failing
   minutes for that reason.
 - **After a crash,** systemd restarts the container (`Restart=on-failure`). The new process
-  reconciles at once and waits up to 30 s for the lease before it settles new payments. Records keep each transaction's time bound, so a hash
+  reconciles at once and waits up to 30 s for the lease before it settles new payments. Records keep each transaction's ledger bound, so a hash
   that can't be found yet stays non-final until that bound passes (0019).
 - **The OpenBao signer (0036, ADR 0013) blocks the testnet deploy (0026).**
 - **ADR 0012's store moves from RDS to a container on the server.** Its schema, adapter rules and
@@ -689,19 +751,23 @@ One request or one stop must never outlast the layer in front of it:
     `soroban-infrastructure`, after the `sorobanscan.com` zone is on Cloudflare;
   - the deploy user, its one `sudo` rule, the SSH forced command, the workflow with the pinned
     host key, and the `deploy/production` branch with its protection;
-  - the OpenBao container (ADR 0013), the IAM Roles Anywhere logging role and its certificate,
-    and the secret files;
+  - the OpenBao container (ADR 0013) and the secret files;
   - the backups (pgBackRest to the Storage Box);
   - `GET /health` with `ready` and `listed`, the Node keep-alive setting, and the migration bounds;
   - the config reading `DATABASE_URL` and `RPC_URLS` from files (`*_FILE`);
-  - the runbook: running the playbook, deploy, rollback, key rotation, certificate renewal,
-    restore on another machine.
-- **0027 builds:** log shipping through the CloudWatch agent, the EMF adapter, the alarms above,
-  the us-east-1 uptime stack and the Slack integration.
+  - the runbook: running the playbook, deploy, rollback, key rotation, restore on another
+    machine.
+- **0027 builds:** log shipping through the CloudWatch agent, with the agent and its signing
+  helper in the playbook; the IAM Roles Anywhere logging role and profile; the EMF adapter, the
+  alarms above, the uptime probe and the Slack integration; and the runbook's certificate renewal
+  steps. The holder of the ClickHouse project's CA signs the certificate from a request made on
+  the server, so its key never leaves it. 0026's first deploy goes out without CloudWatch logs
+  until 0027 lands.
 - **0023 keys the limiter on `CF-Connecting-IP`** as above.
 - **Cost:**
   - The server adds nothing.
-  - CloudWatch logs, metrics and alarms, and the health check, come to a few dollars.
+  - CloudWatch logs, metrics and alarms, with the uptime probe, come to about $13 a month with
+    one network, and about $6 more with a second.
   - Off-server backups go to the existing Storage Box and add nothing.
 - **Mainnet availability is open** (0038). It needs to settle:
   - the targets for the longest downtime and the most data lost after a hardware fault;

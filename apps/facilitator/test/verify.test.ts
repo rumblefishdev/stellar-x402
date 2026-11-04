@@ -13,7 +13,9 @@ import {
 import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/core/types";
 import { describe, expect, it, vi } from "vitest";
+import type { FindMissingTrustline, MissingTrustline } from "../src/settlement/trustline.js";
 import {
+  AMOUNT_ZERO_REASON,
   CHANNEL_ACCOUNT_REASON,
   EXPIRATION_TOO_FAR_REASON,
   MUXED_FACILITATOR_REASON,
@@ -23,6 +25,7 @@ import {
   createVerifier,
   signedLedgers,
   type UpstreamVerifier,
+  type VerifierDeps,
 } from "../src/settlement/verify.js";
 
 const network = STELLAR_NETWORKS.testnet;
@@ -34,6 +37,7 @@ const otherChannel = Keypair.random().publicKey();
 const facilitator = Keypair.random().publicKey();
 const CURRENT = 1_000;
 const MIN_VALIDITY = 12;
+const MAX_VALIDITY = 66;
 
 const requirements: PaymentRequirements = {
   scheme: "exact",
@@ -107,18 +111,26 @@ function payload(shape: Shape = {}): PaymentPayload {
   };
 }
 
-function setup(upstreamResponse: VerifyResponse = { isValid: true, payer }) {
+function setup(
+  upstreamResponse: VerifyResponse = { isValid: true, payer },
+  deps: Partial<VerifierDeps> = {},
+  missing?: MissingTrustline,
+) {
   const upstream = { verify: vi.fn<UpstreamVerifier["verify"]>(async () => upstreamResponse) };
   const latestLedger = vi.fn(async () => CURRENT);
+  const missingTrustline = vi.fn<FindMissingTrustline>(async () => missing);
   const verify = createVerifier({
     network,
     upstream,
     facilitator,
     channels: [channel, otherChannel],
     minValidityLedgers: MIN_VALIDITY,
+    maxValidityLedgers: MAX_VALIDITY,
     latestLedger,
+    missingTrustline,
+    ...deps,
   });
-  return { verify, upstream, latestLedger };
+  return { verify, upstream, latestLedger, missingTrustline };
 }
 
 const rejected = (invalidReason: string) =>
@@ -153,6 +165,56 @@ describe("createVerifier", () => {
     expect(latestLedger).not.toHaveBeenCalled();
   });
 
+  describe("after upstream's simulation_failed", () => {
+    const failed = {
+      isValid: false,
+      invalidReason: "invalid_exact_stellar_payload_simulation_failed",
+      payer,
+    };
+
+    it("answers the missing trustline it found, for the payload's transaction", async () => {
+      const missing = { invalidReason: "a_trustline_reason", invalidMessage: "G… has none" };
+      const { verify, missingTrustline } = setup(failed, {}, missing);
+      const p = payload();
+      await expect(verify(p, requirements)).resolves.toEqual({
+        isValid: false,
+        invalidReason: "a_trustline_reason",
+        invalidMessage: "G… has none",
+        payer,
+      });
+      const [payment] = missingTrustline.mock.calls[0]!;
+      expect(payment).toMatchObject({ asset, payer, payTo });
+      expect(payment.transaction.toXDR()).toBe((p.payload as { transaction: string }).transaction);
+    });
+
+    it("keeps upstream's answer when no trustline is missing", async () => {
+      const { verify, missingTrustline } = setup(failed);
+      await expect(verify(payload(), requirements)).resolves.toBe(failed);
+      expect(missingTrustline).toHaveBeenCalledOnce();
+    });
+
+    it("doesn't look for a payload without exactly one entry of the payer's", async () => {
+      const { verify, missingTrustline } = setup(failed);
+      for (const auth of [[], [authEntry(payTo, CURRENT + MIN_VALIDITY)]]) {
+        await expect(verify(payload({ auth }), requirements)).resolves.toBe(failed);
+      }
+      expect(missingTrustline).not.toHaveBeenCalled();
+    });
+
+    it("looks only after simulation_failed, and only with a payer to compare", async () => {
+      const wrongAmount = {
+        ...failed,
+        invalidReason: "invalid_exact_stellar_payload_wrong_amount",
+      };
+      const other = setup(wrongAmount);
+      await other.verify(payload(), requirements);
+      expect(other.missingTrustline).not.toHaveBeenCalled();
+      const noPayer = setup({ ...failed, payer: undefined });
+      await noPayer.verify(payload(), requirements);
+      expect(noPayer.missingTrustline).not.toHaveBeenCalled();
+    });
+  });
+
   it("passes upstream's payer on only when it is a string", async () => {
     // Upstream reads `payer` from `from` before any signature check; the client picks its type.
     for (const notString of [5, 5n]) {
@@ -175,7 +237,7 @@ describe("createVerifier", () => {
     expect(latestLedger).not.toHaveBeenCalled();
   });
 
-  it("rejects a source-account auth entry, which would authorize as the facilitator, even if upstream accepts it", async () => {
+  it("rejects a source-account auth entry, which would authorize as the channel, even if upstream accepts it", async () => {
     const sourceAccount = new xdr.SorobanAuthorizationEntry({
       credentials: xdr.SorobanCredentials.sorobanCredentialsSourceAccount(),
       rootInvocation: authEntry(payer, CURRENT + MIN_VALIDITY).rootInvocation(),
@@ -196,7 +258,9 @@ describe("createVerifier", () => {
       facilitator,
       channels: [channel],
       minValidityLedgers: MIN_VALIDITY,
+      maxValidityLedgers: MAX_VALIDITY,
       latestLedger: async () => CURRENT,
+      missingTrustline: async () => undefined,
       upstreamTimeoutMs: 20,
     });
     await expect(verify(payload(), requirements)).rejects.toThrow(UpstreamTimeoutError);
@@ -240,6 +304,28 @@ describe("createVerifier", () => {
       invalidReason: "invalid_network",
     });
     expect(upstream.verify).not.toHaveBeenCalled();
+  });
+
+  it("refuses a zero amount before upstream sees it", async () => {
+    // A zero transfer moves nothing, yet it would take a nonce, a channel and a fee.
+    for (const amount of ["0", "000"]) {
+      const { verify, upstream } = setup();
+      await expect(verify(payload(), { ...requirements, amount })).resolves.toMatchObject({
+        isValid: false,
+        invalidReason: AMOUNT_ZERO_REASON,
+        invalidMessage: "the payment amount is 0",
+      });
+      expect(upstream.verify).not.toHaveBeenCalled();
+    }
+  });
+
+  it("passes an amount of 1 on to upstream", async () => {
+    const { verify, upstream } = setup();
+    await expect(verify(payload(), { ...requirements, amount: "1" })).resolves.toEqual({
+      isValid: true,
+      payer,
+    });
+    expect(upstream.verify).toHaveBeenCalledTimes(1);
   });
 
   describe("channel accounts (AD-5)", () => {
@@ -357,11 +443,32 @@ describe("createVerifier", () => {
         "no auth entry for the payer",
         () => [authEntry(Keypair.random().publicKey(), CURRENT + MIN_VALIDITY)],
       ],
+      [
+        "another address's entry next to the payer's",
+        () => [
+          authEntry(payer, CURRENT + MIN_VALIDITY),
+          authEntry(Keypair.random().publicKey(), CURRENT + MIN_VALIDITY),
+        ],
+      ],
     ])("rejects %s, which /settle couldn't settle", async (_, auth) => {
       const { verify } = setup();
-      await expect(verify(payload({ auth: auth() }), requirements)).resolves.toEqual(
-        rejected(PAYER_AUTH_REASON),
+      const answer = await verify(payload({ auth: auth() }), requirements);
+      expect(answer).toEqual(rejected(PAYER_AUTH_REASON));
+      expect(answer.invalidMessage).toBe(
+        "the payload must carry exactly one auth entry: the payer's",
       );
+    });
+
+    it("rejects a short-lived extra entry that would let the payer's outlast the cap (0073 decision 21)", async () => {
+      // The expiry checks read the earliest entry: the extra one's 60 would pass the cap, while the
+      // payer's stays landable for days. Upstream accepts an extra signed entry.
+      const { verify } = setup();
+      const auth = [
+        authEntry(payer, CURRENT + 120_960),
+        authEntry(Keypair.random().publicKey(), CURRENT + 60),
+      ];
+      const answer = await verify(payload({ auth }), { ...requirements, maxTimeoutSeconds: 300 });
+      expect(answer).toEqual(rejected(PAYER_AUTH_REASON));
     });
 
     it("hands /settle the payer's nonce, its auth expiry and the ledger it read", async () => {
@@ -371,7 +478,9 @@ describe("createVerifier", () => {
         facilitator,
         channels: [channel],
         minValidityLedgers: MIN_VALIDITY,
+        maxValidityLedgers: MAX_VALIDITY,
         latestLedger: async () => CURRENT,
+        missingTrustline: async () => undefined,
       });
       const { verified } = await check(payload(), requirements);
       expect(verified).toMatchObject({
@@ -397,26 +506,78 @@ describe("createVerifier", () => {
       },
     );
 
+    it.each(["address", "addressV2"])(
+      "accepts auth exactly maxValidityLedgers ahead and rejects one ledger more, with %s credentials",
+      async (credentialType) => {
+        const { verify } = setup();
+        const at = (expiration: number) =>
+          verify(payload({ auth: [authEntry(payer, expiration, credentialType)] }), requirements);
+        await expect(at(CURRENT + MAX_VALIDITY)).resolves.toEqual({ isValid: true, payer });
+        await expect(at(CURRENT + MAX_VALIDITY + 1)).resolves.toEqual(
+          rejected(EXPIRATION_TOO_FAR_REASON),
+        );
+      },
+    );
+
+    it("refuses a resource asking for more than the cap fits, whatever the ledger (0073 decision 22)", async () => {
+      // Seven days, as a caller writing its own requirements could ask for.
+      const week = 7 * 24 * 3600;
+      const { verify, upstream } = setup();
+      const answer = await verify(payload({ auth: [authEntry(payer, CURRENT + week / 5)] }), {
+        ...requirements,
+        maxTimeoutSeconds: week,
+      });
+      expect(upstream.verify).toHaveBeenCalledOnce();
+      expect(answer).toEqual(rejected(EXPIRATION_TOO_FAR_REASON));
+      expect(answer.invalidMessage).toBe(
+        "maxTimeoutSeconds 604800 is about 120960 ledgers; at most 300 is allowed, assuming " +
+          "about 5 s a ledger",
+      );
+    });
+
+    it("accepts a maxTimeoutSeconds of exactly 300 at the default cap and refuses 301", async () => {
+      const { verify } = setup();
+      const at = (maxTimeoutSeconds: number) =>
+        verify(payload({ auth: [authEntry(payer, CURRENT + 60)] }), {
+          ...requirements,
+          maxTimeoutSeconds,
+        });
+      await expect(at(300)).resolves.toEqual({ isValid: true, payer });
+      await expect(at(301)).resolves.toEqual(rejected(EXPIRATION_TOO_FAR_REASON));
+    });
+
+    it("still refuses the same payment once its expiry comes within the cap", async () => {
+      // An hour's resource: refused now, the same request stays refused after 55 minutes, when
+      // the gap alone would let it through after its payer may have signed again.
+      const { verify, latestLedger } = setup();
+      const hour = payload({ auth: [authEntry(payer, CURRENT + 720)] });
+      const hourly = { ...requirements, maxTimeoutSeconds: 3600 };
+      await expect(verify(hour, hourly)).resolves.toEqual(rejected(EXPIRATION_TOO_FAR_REASON));
+      latestLedger.mockResolvedValue(CURRENT + 660);
+      await expect(verify(hour, hourly)).resolves.toEqual(rejected(EXPIRATION_TOO_FAR_REASON));
+    });
+
+    it("refuses by the gap a 300 s payment signed at 4 s ledgers, with no maxTimeoutSeconds advice", async () => {
+      // Upstream's client rounds the ledger time up to whole seconds: at 4 s, 300 s is 75 ledgers.
+      const { verify } = setup();
+      const answer = await verify(payload({ auth: [authEntry(payer, CURRENT + 75)] }), {
+        ...requirements,
+        maxTimeoutSeconds: 300,
+      });
+      expect(answer).toEqual(rejected(EXPIRATION_TOO_FAR_REASON));
+      expect(answer.invalidMessage).toBe(
+        "auth expires at ledger 1075, 75 ledgers after ledger 1000; at most 66 are allowed",
+      );
+    });
+
     it("rejects auth that expires past the last ledger the pool can bound an envelope by", async () => {
       // A huge maxTimeoutSeconds signs to 0xFFFFFFFF, which `submit()`'s `maxLedger` refuses.
-      const { verify } = setup();
+      // The cap is raised here so the uint32 bound is the one that answers.
+      const { verify } = setup(undefined, { maxValidityLedgers: 2 ** 32 });
       const at = (expiration: number) =>
         verify(payload({ auth: [authEntry(payer, expiration)] }), requirements);
       await expect(at(2 ** 32 - 2)).resolves.toEqual({ isValid: true, payer });
       await expect(at(2 ** 32 - 1)).resolves.toEqual(rejected(EXPIRATION_TOO_FAR_REASON));
-    });
-
-    it("counts the earliest expiring auth entry", async () => {
-      const { verify } = setup();
-      const auth = [
-        authEntry(payer, CURRENT + 100),
-        authEntry(Keypair.random().publicKey(), CURRENT + 5),
-      ];
-      const answer = await verify(payload({ auth }), { ...requirements, maxTimeoutSeconds: 300 });
-      expect(answer).toEqual(rejected("invalid_exact_stellar_signature_expiration_too_soon"));
-      expect(answer.invalidMessage).toBe(
-        "auth expires at ledger 1005, 5 ledgers after ledger 1000; at least 12 are required",
-      );
     });
 
     it("says when the resource's maxTimeoutSeconds signs for about minValidityLedgers or fewer", async () => {

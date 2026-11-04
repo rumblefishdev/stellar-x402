@@ -55,8 +55,8 @@ describe("SettlementSubmitter", () => {
     const inner = bump.innerTransaction;
     expect(inner.source).toBe(channels[0]);
     expect(inner.sequence).toBe("1001");
-    expect(inner.operations[0]?.source).toBe(facilitator.publicKey());
-    // One facilitator signature covers the channel and the operation source.
+    // No operation source: the channel is the caller, so the fee account only pays the fee bump.
+    expect(inner.operations[0]?.source).toBeUndefined();
     expect(inner.signatures).toHaveLength(1);
     expect(fake.sequences.get(channels[0]!)).toBe(1001n);
 
@@ -154,6 +154,20 @@ describe("SettlementSubmitter", () => {
     fake.failOnChain = false;
     await submitter.submit(call());
     expect((fake.sent.at(-1) as FeeBumpTransaction).innerTransaction.sequence).toBe("1002");
+  });
+
+  it("carries why an included transaction failed", async () => {
+    const { fake, submitter } = setup({}, 1);
+    fake.failOnChain = true;
+    fake.failure = { opCode: "invokeHostFunctionTrapped" };
+    const res = await submitter.submit(call());
+    expect(res).toMatchObject({
+      status: "failed",
+      failure: { opCode: "invokeHostFunctionTrapped" },
+    });
+    // The default failed result holds no operation results.
+    fake.failure = undefined;
+    expect((await submitter.submit(call())).failure).toEqual({});
   });
 
   it("expires a transaction that never lands and reuses its sequence number", async () => {

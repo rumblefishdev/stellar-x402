@@ -1,9 +1,11 @@
 import { Address, FeeBumpTransaction, Keypair, StrKey, rpc, xdr } from "@stellar/stellar-sdk";
 import { describe, expect, it, vi } from "vitest";
 import {
+  NOT_FOUND_MARGIN_LEDGERS,
   LedgerBoundError,
   SettlementSubmitter,
   SignedHookError,
+  SigningError,
   SourceAccountAuthError,
   attemptsOf,
   keypairSigner,
@@ -91,7 +93,7 @@ const addressCredentials = (v2 = false) => {
 };
 
 describe("source-account auth", () => {
-  it("refuses a call whose auth would authorize as the facilitator, before taking a channel", async () => {
+  it("refuses a call whose auth would authorize as the channel, before taking a channel", async () => {
     const { fake, submitter, signer } = setup();
     const entry = authEntry(xdr.SorobanCredentials.sorobanCredentialsSourceAccount());
     await expect(submitter.submit({ ...call(), auth: [entry] })).rejects.toBeInstanceOf(
@@ -144,7 +146,8 @@ describe("onSigned", () => {
     const maxLedger = fake.ledger + 10;
     const given: unknown[] = [];
     await submitter.submit(call(), { maxLedger, onSigned: (_, bounds) => void given.push(bounds) });
-    expect(given).toEqual([{ maxTime: Number(inner(fake).timeBounds?.maxTime), maxLedger }]);
+    // A ledger-bounded envelope has no time bound (0073 decision 1).
+    expect(given).toEqual([{ maxLedger }]);
 
     // Without a ledger bound only the time bound is given.
     given.length = 0;
@@ -260,6 +263,28 @@ describe("onSigned", () => {
     }
   });
 
+  it("stops watching the ledger at the bound's estimated time when ledgers are slow (0073)", async () => {
+    // 8 s ledgers: the estimated time of the bound passes with ledgers left. The watcher stops
+    // polling there, so the hook's own timeout answers, and the ledger reads stop.
+    const { fake, submitter } = setup({ pollIntervalMs: 1, onSignedTimeoutMs: 300 });
+    const maxLedger = fake.ledger + 20;
+    let reads = 0;
+    const close = fake.getLatestLedger.bind(fake);
+    fake.getLatestLedger = async () => {
+      reads++;
+      fake.closeTime += 3;
+      return close();
+    };
+    const error = await submitter
+      .submit(call(), { maxLedger, onSigned: () => new Promise<void>(() => {}) })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SignedHookError);
+    expect((error as SignedHookError).message).toMatch(/did not finish in 300 ms/);
+    expect(fake.ledger).toBeLessThan(maxLedger);
+    expect(reads).toBeLessThan(30);
+    expect(fake.sent).toHaveLength(0);
+  }, 5_000);
+
   it("gives up on a hook that never settles after onSignedTimeoutMs, 5 s by default", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
@@ -332,6 +357,116 @@ describe("maxLedger", () => {
     expect(res.status).toBe("success");
     // A ledger bound's maxLedger is exclusive.
     expect(inner(fake).ledgerBounds).toEqual({ minLedger: 0, maxLedger: maxLedger + 1 });
+    // No time bound may end it before its authorization expires (0073 decision 1).
+    expect(Number(inner(fake).timeBounds?.maxTime)).toBe(0);
+  });
+
+  it(
+    "confirms a ledger-bounded envelope past 60 s and calls it expired only after its ledger bound (0073)",
+    { timeout: 5_000 },
+    async () => {
+      // 5 s ledgers: 30 ledgers is 150 s, well past the 60 s a time bound would allow.
+      const { fake, submitter } = setup();
+      fake.stalled = true;
+      const start = { time: fake.closeTime };
+      const maxLedger = fake.ledger + 30;
+      const res = await submitter.submit(call(), { maxLedger });
+      expect(res.status).toBe("expired");
+      expect(fake.ledger).toBeGreaterThanOrEqual(maxLedger);
+      expect(fake.closeTime - start.time).toBeGreaterThan(60);
+      // The channel is back once it can no longer land.
+      expect(submitter.stats()).toMatchObject({ busy: 0 });
+    },
+  );
+
+  it("answers success for a ledger-bounded envelope that lands after 60 s (0073)", async () => {
+    const { fake, submitter } = setup();
+    fake.stalled = true;
+    const start = fake.closeTime;
+    const close = fake.getLatestLedger.bind(fake);
+    Object.assign(fake, {
+      getLatestLedger: async () => {
+        if (fake.closeTime - start >= 120) fake.stalled = false; // lands at about 2 minutes
+        return close();
+      },
+    });
+    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 60 });
+    expect(res.status).toBe("success");
+    expect(fake.closeTime - start).toBeGreaterThan(60);
+  });
+
+  it("answers pending at about ledgers left × 6 s plus grace, counted from the simulation's ledger (0073)", async () => {
+    // A real network's ledger sequence, and a clock that never polled: counting from it would
+    // put the answer months ahead. No ledger closes, as time passes, so nothing confirms.
+    const { fake, submitter } = setup();
+    fake.ledger = 5_434_800;
+    fake.stalled = true;
+    const start = fake.closeTime;
+    const close = fake.getLatestLedger.bind(fake);
+    fake.getLatestLedger = async () => {
+      fake.closeTime += fake.ledgerSeconds;
+      return { sequence: fake.ledger } as rpc.Api.GetLatestLedgerResponse;
+    };
+    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 60 });
+    expect(res.status).toBe("pending");
+    const waited = fake.closeTime - start;
+    // Ledgers close again, so the confirmation that runs on can end (expired).
+    fake.getLatestLedger = close;
+    expect(waited).toBeGreaterThanOrEqual(60 * 6 + 30);
+    expect(waited).toBeLessThan(60 * 6 + 30 + 30);
+  }, 5_000);
+
+  it("ends a resend's wait for a ledger-bounded envelope when the RPC stops answering (0073)", async () => {
+    // TRY_AGAIN_LATER, then no ledger read ever answers: the wait for the next ledger has no
+    // time bound to end it, so it ends at about when the ledger bound would pass.
+    const { fake, submitter } = setup();
+    fake.sendScript.push("TRY_AGAIN_LATER");
+    const start = fake.closeTime;
+    const close = fake.getLatestLedger.bind(fake);
+    fake.getLatestLedger = async () => {
+      fake.closeTime += fake.ledgerSeconds;
+      throw new Error("rpc down");
+    };
+    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 20 });
+    const waited = fake.closeTime - start;
+    // The RPC answers again, so the confirmation that runs on can end.
+    fake.getLatestLedger = close;
+    expect(res.status).toBe("pending");
+    expect(waited).toBeLessThan(20 * 6 + 30 + 30);
+  }, 5_000);
+
+  it("doesn't take NOT_FOUND inside the margin past maxTime as expired: it may have landed (0088)", async () => {
+    const { fake, submitter } = setup();
+    let maxTime = Infinity;
+    // The network includes it only in the last ledger that closes by maxTime.
+    const close = fake.getLatestLedger.bind(fake);
+    fake.getLatestLedger = async () => {
+      fake.stalled = fake.closeTime + 2 * fake.ledgerSeconds <= maxTime;
+      return close();
+    };
+    const missed: number[] = [];
+    const getTransaction = fake.getTransaction.bind(fake);
+    fake.getTransaction = async (hash) => {
+      const res = await getTransaction(hash);
+      // Up to three ledgers past maxTime, at 5 s each.
+      if (res.latestLedgerCloseTime > maxTime + 3 * fake.ledgerSeconds) return res;
+      if (res.status === rpc.Api.GetTransactionStatus.NOT_FOUND) return res;
+      missed.push(res.latestLedgerCloseTime);
+      return {
+        ...res,
+        status: rpc.Api.GetTransactionStatus.NOT_FOUND,
+      } as unknown as rpc.Api.GetTransactionResponse;
+    };
+    const res = await submitter.submit(call(), {
+      onSigned: (_hash, bounds) => void (maxTime = bounds.maxTime!),
+    });
+    expect(missed.some((closeTime) => closeTime > maxTime)).toBe(true);
+    expect(res.status).toBe("success");
+  });
+
+  it("keeps the time bound for a call without a ledger bound", async () => {
+    const { fake, submitter } = setup();
+    await submitter.submit(call());
     expect(Number(inner(fake).timeBounds?.maxTime)).toBeGreaterThan(0);
   });
 
@@ -363,10 +498,17 @@ describe("maxLedger", () => {
     const { fake, submitter } = setup({ timeoutSeconds: 600 });
     fake.stalled = true;
     const start = fake.ledger;
+    const reads: number[] = [];
+    const getTransaction = fake.getTransaction.bind(fake);
+    fake.getTransaction = async (hash) => {
+      const res = await getTransaction(hash);
+      reads.push(res.latestLedger);
+      return res;
+    };
     const res = await submitter.submit(call(), { maxLedger: start + 3 });
     expect(res.status).toBe("expired");
-    // 600 s is 120 ledgers at 5 s; the ledger bound ended the wait as soon as it closed.
-    expect(fake.ledger).toBe(start + 3);
+    // 600 s is 120 ledgers at 5 s; the first read the margin past the ledger bound ended the wait.
+    expect(reads.at(-1)).toBe(start + 3 + NOT_FOUND_MARGIN_LEDGERS);
 
     // The sequence was not used, so the channel is reused at the same number.
     fake.stalled = false;
@@ -404,6 +546,71 @@ describe("maxLedger", () => {
     expect(res).toMatchObject({ status: "success", ledger: maxLedger });
   });
 
+  it("doesn't take NOT_FOUND inside the margin as expired: it may have landed in maxLedger (0088)", async () => {
+    const { fake, submitter } = setup({ timeoutSeconds: 600 });
+    const maxLedger = fake.ledger + 3;
+    // The network includes it only in maxLedger.
+    const close = fake.getLatestLedger.bind(fake);
+    fake.getLatestLedger = async () => {
+      fake.stalled = fake.ledger + 1 < maxLedger;
+      return close();
+    };
+    // stellar-rpc reads the transaction, then the ledger range, with no snapshot between them.
+    const missed: number[] = [];
+    const getTransaction = fake.getTransaction.bind(fake);
+    fake.getTransaction = async (hash) => {
+      const res = await getTransaction(hash);
+      if (res.latestLedger < maxLedger || res.latestLedger >= maxLedger + NOT_FOUND_MARGIN_LEDGERS)
+        return res;
+      missed.push(res.latestLedger);
+      return { ...res, status: rpc.Api.GetTransactionStatus.NOT_FOUND } as typeof res;
+    };
+    const res = await submitter.submit(call(), { maxLedger });
+    expect(missed).toEqual([maxLedger, maxLedger + 1, maxLedger + 2]);
+    expect(res).toMatchObject({ status: "success", ledger: maxLedger });
+  });
+
+  it.each([
+    ["reaches the envelope's ledger: expired", 0, "expired"],
+    ["starts after the envelope's ledger: pending", 1, "pending"],
+  ])("answers NOT_FOUND past the bound when the history %s (0088)", async (_, past, status) => {
+    const { fake, submitter } = setup({ timeoutSeconds: 600 });
+    fake.stalled = true;
+    let simLedger = 0;
+    const simulate = fake.simulateTransaction.bind(fake);
+    fake.simulateTransaction = async (...a) => {
+      const res = await simulate(...a);
+      simLedger = res.latestLedger;
+      return res;
+    };
+    const getTransaction = fake.getTransaction.bind(fake);
+    fake.getTransaction = async (hash) => {
+      const res = await getTransaction(hash);
+      return { ...res, oldestLedger: simLedger + past } as typeof res;
+    };
+    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 3 });
+    expect(res.status).toBe(status);
+  });
+
+  it("frees the channel with its sequence read again after NOT_FOUND from a node without the history (0088)", async () => {
+    const { fake, submitter } = setup({ timeoutSeconds: 600 });
+    fake.stalled = true;
+    const getTransaction = fake.getTransaction.bind(fake);
+    fake.getTransaction = async (hash) => {
+      const res = await getTransaction(hash);
+      return { ...res, oldestLedger: res.latestLedger } as typeof res;
+    };
+    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 3 });
+    expect(res.status).toBe("pending");
+
+    // It may have landed, so the channel comes back with its sequence read again.
+    fake.getTransaction = getTransaction;
+    fake.stalled = false;
+    const reads = fake.calls.getLedgerEntries ?? 0;
+    expect((await submitter.submit(call())).status).toBe("success");
+    expect(fake.calls.getLedgerEntries).toBeGreaterThan(reads);
+  });
+
   it("stops resending once the ledger bound closes", async () => {
     const { fake, submitter } = setup({ timeoutSeconds: 600 });
     const maxLedger = fake.ledger + 3;
@@ -422,6 +629,45 @@ describe("maxLedger", () => {
     expect(sentAt.length).toBeGreaterThan(1);
     expect(sentAt.every((l) => l < maxLedger)).toBe(true);
   });
+
+  it("stops resending at the ledger bound's estimated time when ledgers are slow (0073 decision 11)", async () => {
+    // 8 s ledgers against the 6 s estimate: the resends stop with ledgers still left, and the
+    // envelope the network never took ends at its ledger bound.
+    const { fake, submitter } = setup();
+    const maxLedger = fake.ledger + 20;
+    fake.sendScript = Array(40).fill("TRY_AGAIN_LATER");
+    const close = fake.getLatestLedger.bind(fake);
+    fake.getLatestLedger = async () => {
+      fake.closeTime += 3;
+      return close();
+    };
+    const sentAt: number[] = [];
+    const send = fake.sendTransaction.bind(fake);
+    fake.sendTransaction = (tx) => {
+      sentAt.push(fake.ledger);
+      return send(tx);
+    };
+    const res = await submitter.submit(call(), { maxLedger });
+    expect(res.status).toBe("pending");
+    expect(Math.max(...sentAt)).toBeLessThan(maxLedger - 1);
+    expect(res.attempts).toEqual([{ hash: res.hash, sent: "no" }]);
+  }, 5_000);
+
+  it("stops resending when the RPC stops answering after TRY_AGAIN_LATER (0073)", async () => {
+    // No ledger read answers, so no ledger ever passes the bound: only the estimated time ends
+    // the resends, and without it the loop would send on as fast as it can.
+    const { fake, submitter } = setup();
+    fake.sendScript = Array(1000).fill("TRY_AGAIN_LATER");
+    const close = fake.getLatestLedger.bind(fake);
+    fake.getLatestLedger = async () => {
+      fake.closeTime += fake.ledgerSeconds;
+      throw new Error("rpc down");
+    };
+    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 20 });
+    fake.getLatestLedger = close;
+    expect(res.status).toBe("pending");
+    expect(fake.sendScript.length).toBeGreaterThan(1000 - 25);
+  }, 5_000);
 
   it("marks an attempt whose sends all threw as unknown", async () => {
     const { fake, submitter } = setup({ timeoutSeconds: 600 });
@@ -477,5 +723,26 @@ describe("maxLedger", () => {
     await expect(submitter.submit(call(), { maxLedger })).rejects.toBeInstanceOf(RangeError);
     expect(fake.calls.simulateTransaction).toBeUndefined();
     expect(submitter.stats()).toMatchObject({ busy: 0 });
+  });
+});
+
+describe("a signer that fails", () => {
+  // A remote signer (OpenBao, 0036) may be sealed or unreachable: the call is refused with the
+  // envelope it failed on, nothing is sent, and the channel goes back to the pool.
+  it.each([
+    [1, "transaction"],
+    [2, "fee-bump"],
+  ] as const)("names signature %i as the %s stage", async (failing, stage) => {
+    const { fake, submitter, signer } = setup();
+    const sign = signer.signTransaction.bind(signer);
+    signer.signTransaction = async (xdr, o) => {
+      if (signer.signs + 1 === failing) throw new Error("OpenBao is sealed");
+      return sign(xdr, o);
+    };
+    const error = await submitter.submit(call()).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SigningError);
+    expect(error).toMatchObject({ stage, message: "OpenBao is sealed" });
+    expect(fake.sent).toHaveLength(0);
+    expect(submitter.stats()).toMatchObject({ busy: 0, refused: { signing: 1 } });
   });
 });

@@ -16,6 +16,8 @@ admin with `sudo`; the admins are the explorer's (`soroban-block-explorer`'s
 | `/srv/x402/production/digest.next`  | the digest a deploy is installing, the deploy user's only file     |
 | `/srv/x402/production/creds/*.cred` | the credentials, encrypted with the host key                       |
 | `/run/x402/production/`             | the credentials decrypted for the containers (tmpfs)               |
+| `/srv/x402/openbao/`                | OpenBao's Compose project `x402-openbao`, its config and seal key  |
+| `/run/x402/openbao/`                | the decrypted seal key; the recovery key for a moment (tmpfs)      |
 | `/usr/local/libexec/x402/`          | the units' scripts (`deploy/libexec`)                              |
 | `/etc/systemd/system/x402*`         | the units (`deploy/systemd`)                                       |
 
@@ -24,6 +26,7 @@ admin with `sudo`; the admins are the explorer's (`soroban-block-explorer`'s
 | `x402@production`                | the facilitator                                 |
 | `x402-db-testnet@production`     | testnet's PostgreSQL                            |
 | `x402-tunnel@production`         | `cloudflared`                                   |
+| `x402-openbao`                   | OpenBao, the signer of every network            |
 | `x402-deploy@production`         | a deploy (a oneshot, started by `deploy.sh`)    |
 | `x402-watchdog@production.timer` | every 30 s, restarts an `unhealthy` facilitator |
 
@@ -39,11 +42,16 @@ curl -s https://x402-facilitator.sorobanscan.com/supported
 ## The playbook
 
 It puts x402's parts on the server and touches nothing else (`deploy/ansible/playbook.yaml`). Run
-it from a reviewed commit on `develop`, never from a working branch, since whoever runs it, and
-from which commit, is the boundary around production:
+it from a commit on `deploy/production`, never from `develop` or a working branch: root runs what
+it installs, so whoever runs it, and from which commit, is the boundary around production.
+`deploy/production` takes only an approved pull request with no bypass (Before the first deploy);
+`develop` takes pushes without a review. The first run from `deploy/production` comes after #119,
+the first promotion, merges: until then it is `f391494`, older than the server's files (the run
+before it was from `develop`, `e6774c8`), and would put those older files back.
 
 ```sh
-git fetch origin && git switch --detach origin/develop
+git status --short  # must print nothing: a local edit or new file would ride along unreviewed
+git fetch origin && git switch --detach origin/deploy/production
 cd deploy/ansible   # inventory.ini from inventory.ini.example, git-ignored
 ansible-playbook -i inventory.ini playbook.yaml --check --diff
 ansible-playbook -i inventory.ini playbook.yaml
@@ -53,17 +61,71 @@ It enables the units and starts only the watchdog's timer. A changed unit or com
 effect at that unit's next restart; a restart of `x402@production` drains it, so plan it like a
 deploy.
 
+**A change under `deploy/`** reaches the server in this order:
+
+1. The pull request to `deploy/production` merges. Its deploy starts at once, since the workflow
+   ignores only `lore/**`, `docs/**` and `**/*.md`, and runs with the files already on the
+   server, so a change under `deploy/` must still work with the old ones until step 3. When it
+   can't, for example a new credential the new image reads, split it into two pull requests: the
+   files first, written to work with the image that runs, through steps 1 to 3; then the image
+   change, as a plain deploy. A promotion carries everything waiting on `develop`, so the image
+   change stays off `develop` until the files' promotion has been through steps 1 to 3.
+2. Once that deploy has ended, the playbook from that merge, as above. Run during the deploy, it
+   would replace `deploy.sh` and the compose file under it. Wait for the workflow run, not the
+   unit: `x402-deploy@production` starts only after the image job and the SSH step, so right after
+   the merge it is still inactive and looks ended. The run can take as long as a migration:
+
+   ```sh
+   gh run list --branch deploy/production --workflow deploy-production.yml --limit 1
+   gh run watch <run id> --exit-status
+   ```
+
+3. A restart of each unit whose files changed. The production compose file is the facilitator's,
+   the databases' and the tunnel's: stop the facilitator first, which drains, so no settlement
+   loses its database or the tunnel mid-request, then restart the others and start it again.
+   OpenBao's compose file and `config.hcl` are `x402-openbao`'s alone.
+
+   ```sh
+   sudo systemctl stop x402@production
+   sudo systemctl restart x402-db-testnet@production x402-tunnel@production
+   sudo systemctl restart x402-openbao   # only when its files changed; here, /settle is down once
+   sudo systemctl start x402@production
+   ```
+
+   `x402@production` starts `digest.good`, so if step 1's deploy failed, the new image isn't
+   running yet: **Run workflow** on `deploy/production` again now.
+
+Then check that each container kept what its compose file drops (task 0091):
+
+```sh
+for p in x402-production x402-openbao; do  # one each: repeated label filters must all match
+  sudo docker ps -q --filter label=com.docker.compose.project=$p
+done | xargs -r sudo docker inspect --format \
+  '{{.Name}} user={{.Config.User}} drop={{.HostConfig.CapDrop}} add={{.HostConfig.CapAdd}} {{.HostConfig.SecurityOpt}}'
+sudo /usr/local/libexec/x402/x402-compose production --profile migrate config migrate-testnet \
+  | grep -A1 -E 'cap_drop|security_opt'
+```
+
+Each running container shows `drop=[ALL]`, `add=[]` and `[no-new-privileges:true]`, and Postgres
+`user=999:999`. `migrate-testnet` runs only during a deploy,
+so the second command reads its settings from the compose file instead: `ALL` and
+`no-new-privileges:true`.
+
 ## Credentials
 
-Encrypted systemd credentials in `/srv/x402/production/creds/`, one per file, each decrypted by
-the unit whose container reads it ([ADR 0011](adr/0011-facilitator-hosting.md)):
+Encrypted systemd credentials in `/srv/x402/production/creds/` (OpenBao's in
+`/srv/x402/openbao/creds/`), one per file, each decrypted by the unit whose container reads it
+([ADR 0011](adr/0011-facilitator-hosting.md)):
 
 | Credential                  | Read by                        | Decrypted by        |
 | --------------------------- | ------------------------------ | ------------------- |
 | `database-url.testnet`      | facilitator, `migrate-testnet` | `x402@`, the deploy |
 | `rpc-urls.testnet`          | facilitator                    | `x402@`             |
+| `approle-role-id.testnet`   | facilitator                    | `x402@`             |
+| `approle-secret-id.testnet` | facilitator                    | `x402@`             |
 | `postgres-password.testnet` | `postgres-testnet`             | `x402-db-testnet@`  |
 | `tunnel-token`              | `cloudflared`                  | `x402-tunnel@`      |
+| `seal-key`                  | `openbao`                      | `x402-openbao`      |
 
 Write one without the value reaching the disk, the shell history or the screen:
 
@@ -72,6 +134,10 @@ read -rs value   # paste, Enter
 printf %s "$value" | sudo systemd-creds encrypt --with-key=host --name=NAME - /srv/x402/production/creds/NAME.cred
 unset value
 ```
+
+`systemd-creds` warns that `/var/lib/systemd/credential.secret` "is not located on encrypted media,
+using anyway". That is `host` mode: the key it encrypts with sits on the server's disk. A TPM is
+ADR 0013's first upgrade (Not here yet).
 
 - **The database password**, once, before `x402-db-testnet@production` first starts: Postgres
   takes it only when it creates the database.
@@ -114,15 +180,27 @@ unset value
   reviewers with "Prevent self-review" on, since a dispatched `digest` skips the pull request, and
   the secret `DEPLOY_HOST` (a variable would print the server's address in every run's public
   log) and the variable `DEPLOY_PORT`. `deploy/production` is protected: a pull request with an
-  approving review, no bypass.
+  approving review, approved after its last push by someone other than whoever made it (a push to
+  `develop` while a promotion is open lands in it), no bypass.
 - The repo's Actions settings: default workflow permissions read-only, and "Allow GitHub Actions
   to create and approve pull requests" off, so no workflow can approve its own way onto
   `deploy/production` (both were the other way on 2026-10-29).
 - The playbook, then the credentials, then
   `sudo systemctl start x402-db-testnet@production x402-tunnel@production`.
+- OpenBao set up, with testnet's key, policy and AppRole in it (OpenBao, below).
 - Outbound 7844 over UDP and TCP allowed on the server (`cloudflared`).
 - Cloudflare: Browser Integrity Check off for the hostname, Bot Fight Mode off (0026).
-- The signer and funded channels (0036).
+- The signer (0036), and the key's account and channels (OpenBao, step 6).
+- `/srv/x402/production/.env` with the key's address and its channels, from OpenBao's steps 4
+  and 6: public values, so a plain file, owned by `x402`, mode 0644, which the playbook leaves
+  alone. `compose.yaml` requires both: without them `x402@`, the deploy's `migrate-testnet` and
+  the `docker compose` commands here stop at interpolation.
+
+  ```sh
+  printf 'FACILITATOR_ADDRESS_TESTNET=%s\nCHANNELS_TESTNET=%s\n' ADDRESS CHANNELS |
+    ssh SERVER 'sudo install -o x402 -g x402 -m 0644 /dev/stdin /srv/x402/production/.env'
+  ```
+
 - After the first image is pushed: the GHCR package `x402-facilitator` made public, so the server
   pulls without a login.
 
@@ -141,13 +219,13 @@ sudo -u x402-deploy env SSH_ORIGINAL_COMMAND=sha256:… /srv/x402/production/dep
 
 The deploy unit decrypts the database URL, pulls the image, runs `migrate-testnet` while the old
 facilitator serves, then restarts `x402@production` on the new image and waits up to 120 s for
-`ready` and `listed`. A failed migration changes nothing. Follow it with
+`ready`, `listed` and `signer` ok. A failed migration changes nothing. Follow it with
 `journalctl -fu x402-deploy@production`.
 
 ## Rollback
 
-- **Automatic:** a new image that isn't `ready` and `listed` in 120 s is replaced by
-  `digest.good`, and the deploy fails.
+- **Automatic:** a new image that isn't `ready`, `listed` and `signer` ok in 120 s is replaced by
+  `digest.good`, and the deploy fails. OpenBao being down fails it the same way.
 - **By hand:** deploy an earlier digest. Each deployment's status carries it; a tag doesn't, since
   any workflow that may write packages can overwrite one:
 
@@ -160,6 +238,11 @@ facilitator serves, then restarts `x402@production` on the new image and waits u
 
   The older image's migrations are already applied, and every migration is expand/contract, so
   it runs on the newer schema.
+
+  `gh workflow run` and **Run workflow** need GitHub to know the workflow. It knows the ones on the
+  default branch, `main`, which doesn't have this one; whether a run from a push to
+  `deploy/production` is enough hasn't been tried. If GitHub refuses, deploy the digest on the
+  server instead (Deploy, above).
 
 ## Long migrations
 
@@ -216,12 +299,19 @@ undoing.
 
 ## Reboots and Docker upgrades
 
-Nothing to do beforehand. The facilitator stops first and drains (up to 180 s) while Postgres
-and the tunnel are still up, then those two stop (Postgres's grace is 120 s). At boot Postgres
-and the tunnel start first, each unit decrypting its credentials again, then `x402@` with
-`digest.good`. A
+Nothing to do beforehand. The facilitator stops first and drains (up to 180 s) while Postgres,
+the tunnel and OpenBao are still up, then those stop (Postgres's grace is 120 s). At boot they
+start first, each unit decrypting its credentials again and OpenBao unsealing itself, then `x402@`
+with `digest.good`. A
 `docker-ce` upgrade stops and starts them the same way through `PartOf=docker.service`.
-Afterwards: `systemctl list-units 'x402*'` and the `/supported` check above.
+Afterwards: `systemctl list-units 'x402*'`, the `/supported` check above and `bao status`, which
+says `Sealed false` and exits 2 when sealed. A sealed OpenBao passes the other two: with a wrong
+seal key its container runs and its socket exists, so the unit is active, while `/supported` is
+static and every `/settle` fails.
+
+```sh
+cd /srv/x402/openbao && sudo docker compose exec -T openbao bao status
+```
 
 ## The watchdog
 
@@ -263,10 +353,252 @@ time), fetch the new token into the credential as above, restart the unit, then 
 connections (`DELETE $api/$tunnel/connections`): ours reconnects with the new token, a connector
 with the old one can't. Check the connections again.
 
+## The deploy key and the host key
+
+Both are pinned in the repo, so a change to either is a pull request, and it reaches
+`deploy/production` only together with everything else waiting on `develop`. Until it does,
+deploy by hand on the server (Deploy, above).
+
+- **A new host key,** after a reinstall: CI refuses the server, as it should. Read the new
+  `/etc/ssh/ssh_host_ed25519_key.pub` on the server itself, through Hetzner's console or a session
+  you trust, never from a scan; pin it in `HOST_KEY` by pull request, and record its fingerprint in
+  task 0026's history.
+- **A leaked or lost deploy key:**
+  1. On a leak, cut the old key off at once; workflow deploys stop until step 3. It is
+     `x402-deploy`'s file, not the one of `deploy`, the admin user, in `/home/deploy`:
+     `sudo truncate -s 0 /var/lib/x402-deploy/.ssh/authorized_keys`.
+  2. Make a new pair as in "Before the first deploy": the private half into `DEPLOY_SSH_KEY`, the
+     public half into `deploy/ansible/files/deploy-production.pub` by pull request.
+  3. Once that is on `deploy/production`, run the playbook from it (The playbook, above), then
+     **Run workflow** on `deploy/production`: the merge's own deploy failed on the old key, and
+     nothing else starts one. The playbook writes the new key into
+     `authorized_keys`, which then holds only that one. Record its fingerprint in task 0026's
+     history.
+
+## OpenBao
+
+The facilitator key of every network, in Transit ([ADR 0013](adr/0013-facilitator-key-custody.md)):
+one container, the Compose project `x402-openbao` in `/srv/x402/openbao/`, run by `x402-openbao`.
+It has no network. Testnet's facilitator reaches it over a unix socket in the volume
+`x402-openbao-testnet`, mounted into nothing else, and an admin, as root or in the `docker` group,
+through `docker compose exec`:
+
+```sh
+cd /srv/x402/openbao && sudo docker compose exec openbao bao status
+```
+
+It unseals itself at every start with the seal key `x402-openbao` decrypts. Its storage (Raft) and
+audit log are the volumes `x402-openbao-data` and `x402-openbao-audit`, made by the playbook. A
+request OpenBao can't write to the audit log fails, so a full disk stops `/settle`. The playbook's
+`/etc/logrotate.d/x402-openbao` rotates that log daily and keeps a year, compressed: `logrotate`
+renames the file, and SIGHUP makes OpenBao open a new one. About 5 MB a day at 1,000 settlements.
+After a playbook run that changes it, check one rotation by hand:
+
+```sh
+sudo logrotate -d /etc/logrotate.d/x402-openbao   # reads it, rotates nothing
+sudo logrotate -f /etc/logrotate.d/x402-openbao
+cd /srv/x402/openbao && sudo docker compose exec -T openbao ls -l /openbao/logs
+```
+
+A new `audit.log` that grows beside `audit.log.1`, and `signer: "ok"` in `/health` (What is
+where, above), mean OpenBao reopened it and still signs.
+
+**Setting it up,** once, after the playbook. The seal key and init's answer travel between the
+admin's machine and the server over SSH and never reach a disk, so they live only in the admin's
+shell: keep it open until step 5. Lost after step 3's `create-secret`, the backup secret has what
+it held (**A lost shell**, below). Lost before it, between `init=` and `create-secret`, init's
+answer is gone for good, and init can't run again on the same Raft storage, so OpenBao starts over
+with new volumes. A stopped container still holds its volumes, so `down` comes before `rm`:
+
+```sh
+ssh SERVER sudo systemctl stop x402-openbao
+ssh SERVER 'cd /srv/x402/openbao && sudo docker compose down'
+ssh SERVER sudo docker volume rm x402-openbao-data x402-openbao-audit
+ssh SERVER 'sudo docker volume create x402-openbao-data && sudo docker volume create x402-openbao-audit'
+```
+
+Then step 1 again, which writes a new `seal-key.cred`.
+
+1. The seal key: 32 random bytes in hex, with no newline, which OpenBao refuses. Its ID is
+   `current_key_id` in `deploy/openbao/config.hcl`. Keep `$seal_key` for step 3.
+
+   ```sh
+   seal_key=$(openssl rand -hex 32)
+   printf %s "$seal_key" |
+     ssh SERVER 'sudo systemd-creds encrypt --with-key=host --name=seal-key - /srv/x402/openbao/creds/seal-key.cred'
+   ssh SERVER sudo systemctl start x402-openbao
+   ```
+
+2. Init, with ADR 0013's one recovery share:
+
+   ```sh
+   init=$(ssh SERVER 'cd /srv/x402/openbao && sudo docker compose exec -T openbao \
+     bao operator init -recovery-shares=1 -recovery-threshold=1 -format=json')
+   ```
+
+   `printf %s "$init" | jq -r .root_token` is the token for step 4.
+
+3. The backup secret `x402/production/openbao-backup`, as ADR 0013 makes it, from the root of this
+   repo (`AWS_PROFILE=soroban-admin`). The JSON goes over stdin, so it never reaches a disk. The
+   previous seal key's pair stays empty until a rotation, and the Borg and Storage Box fields until
+   the snapshots (Not here yet).
+
+   ```sh
+   backup=$(seal_key=$seal_key recovery_key=$(printf %s "$init" | jq -r '.recovery_keys_b64[0]') \
+     sha=$(printf %s "$seal_key" | shasum -a 256 | cut -d' ' -f1) \
+     seal_config=$(sed -n '/^seal "static"/,/^}/p' deploy/openbao/config.hcl) \
+     jq -n '{
+       seal_key_hex: env.seal_key, seal_key_id: "x402-openbao-1", seal_key_sha256: env.sha,
+       previous_seal_key_hex: "", previous_seal_key_id: "", recovery_key: env.recovery_key,
+       borg_passphrase: "", borg_key_export: "", seal_config: env.seal_config,
+       openbao_version: "2.7.2", storage_box_ro_user: "", storage_box_ro_ssh_key: "",
+       updated: (now | todate)
+     }')
+   printf %s "$backup" | aws secretsmanager create-secret --region eu-central-1 \
+     --name x402/production/openbao-backup --secret-string file:///dev/stdin \
+     --tags Key=Project,Value=stellar-x402 Key=Environment,Value=production
+   ```
+
+   Read it back while nothing depends on it. AWS must hold what went in:
+
+   ```sh
+   back=$(aws secretsmanager get-secret-value --region eu-central-1 \
+     --secret-id x402/production/openbao-backup --query SecretString --output text)
+   [ "$back" = "$backup" ] && echo same
+   ```
+
+   And its recovery key must work: **A new root token** (below), which takes it from this secret,
+   then `bao token revoke -self` and leave that root shell. Init's root token stays valid for
+   step 4.
+
+4. Per network, in a root shell on the server with init's root token, one line at a time: `read`
+   takes the next line of a paste as the token, and `docker compose exec` reads stdin and swallows
+   the rest. Mainnet first adds its listener and socket volume (0038).
+
+   ```sh
+   sudo -i
+   cd /srv/x402/openbao
+   read -rs BAO_TOKEN && export BAO_TOKEN   # paste the root token, Enter
+   bao() { docker compose exec -T -e BAO_TOKEN openbao bao "$@"; }
+   bao secrets enable transit && bao auth enable approle   # the first network only
+
+   n=testnet
+   bao write -f transit/keys/stellar-$n type=ed25519 exportable=false allow_plaintext_backup=false
+   printf 'path "transit/sign/stellar-%s" {\n  capabilities = ["update"]\n}\n' $n |
+     bao policy write x402-$n -
+   bao write auth/approle/role/x402-$n token_policies=x402-$n token_no_default_policy=true \
+     token_ttl=1h token_max_ttl=1h secret_id_ttl=0
+   v=$(bao read -field=role_id auth/approle/role/x402-$n/role-id) && [ -n "$v" ] &&
+     printf %s "$v" | systemd-creds encrypt --with-key=host --name=approle-role-id.$n - \
+       /srv/x402/production/creds/approle-role-id.$n.cred
+   v=$(bao write -f -field=secret_id auth/approle/role/x402-$n/secret-id) && [ -n "$v" ] &&
+     printf %s "$v" | systemd-creds encrypt --with-key=host --name=approle-secret-id.$n - \
+       /srv/x402/production/creds/approle-secret-id.$n.cred
+   unset v
+   bao read -format=json transit/keys/stellar-$n   # .data.keys["1"].public_key
+   ```
+
+   `v` is checked first because a pipe would run `systemd-creds` even when `bao` fails, and
+   overwrite the credential with an empty one.
+
+   The key's address goes into `FACILITATOR_ADDRESS_TESTNET` (0036). From its public key, in
+   `packages/signer-pool` on the admin's machine:
+
+   ```sh
+   node -e 'console.log(require("@stellar/stellar-sdk").StrKey.encodeEd25519PublicKey(Buffer.from(process.argv[1], "base64")))' PUBLIC_KEY
+   ```
+
+5. `bao token revoke -self`, `unset BAO_TOKEN`, and leave the root shell. On the admin's machine,
+   `unset seal_key init backup back`.
+
+6. The key's own account, which pays the fee bumps (ADR 0013), then its channels, from
+   `packages/signer-pool` on the admin's machine (#100). `create-channels.ts` checks neither: it
+   makes channels for any valid address, and a wrong one leaves their reserves under a key that
+   isn't ours. On testnet Friendbot creates the account, and a one-off wallet that Friendbot funds
+   pays the channels; its secret lives only in this shell. Mainnet's wallet comes with 0038.
+
+   ```sh
+   curl -sf "https://friendbot.stellar.org?addr=ADDRESS" >/dev/null && echo created
+   export FUNDER_SECRET=$(node -e 'console.log(require("@stellar/stellar-sdk").Keypair.random().secret())')
+   funder=$(node -e 'console.log(require("@stellar/stellar-sdk").Keypair.fromSecret(process.env.FUNDER_SECRET).publicKey())')
+   curl -sf "https://friendbot.stellar.org?addr=$funder" >/dev/null && echo funded
+   NETWORK=testnet pnpm exec tsx scripts/create-channels.ts ADDRESS 20
+   unset FUNDER_SECRET funder
+   ```
+
+   It prints the channels' addresses for `CHANNELS_TESTNET` (0036); 20 channels hold ADR 0013's
+   ~30 XLM of reserves. If it stops after a batch landed, stderr has that batch's channels
+   (`channel setup … landed: …`): run it again for the rest and join both lists.
+
+**A new root token,** when an admin needs one again, from the recovery key in the backup secret.
+The CLI's `generate-root` needs a token, so this is the legacy `/sys/generate-root` API, which the
+admin listener answers without one (ADR 0013). First, on the admin's machine, the recovery key
+goes from the backup secret to a file in `/run`, a tmpfs, that only root reads. It never passes
+the clipboard or the screen: on 2026-11-03 a paste from the clipboard reached `read` empty.
+
+```sh
+AWS_PROFILE=soroban-admin aws secretsmanager get-secret-value --region eu-central-1 \
+  --secret-id x402/production/openbao-backup --query SecretString --output text |
+  jq -er .recovery_key |
+  ssh SERVER 'sudo sh -c "umask 077; cat > /run/x402/openbao/recovery-key"'
+```
+
+If you stop here, remove it: `ssh SERVER sudo rm -f /run/x402/openbao/recovery-key`.
+
+Then in a root shell on the server, one line at a time; the values go over stdin, because the
+arguments of a command show in `ps`:
+
+```sh
+sudo -i
+cd /srv/x402/openbao
+bao() { docker compose exec -T -e BAO_TOKEN openbao bao "$@"; }
+key=$(cat /run/x402/openbao/recovery-key) && rm /run/x402/openbao/recovery-key
+[ ${#key} -eq 44 ] && echo ok || echo 'bad key: stop here'
+n=$(bao read -field=otp_length sys/generate-root/attempt)
+otp=$(openssl rand -base64 48 | tr -dc A-Za-z0-9 | head -c "$n")
+nonce=$(printf %s "$otp" | bao write -field=nonce sys/generate-root/attempt otp=-)
+encoded=$(printf %s "$key" | bao write -field=encoded_token sys/generate-root/update key=- nonce="$nonce")
+export BAO_TOKEN=$(encoded=$encoded otp=$otp python3 -c 'import base64, os; e, o = os.environ["encoded"], os.environ["otp"]; print(bytes(a ^ b for a, b in zip(base64.b64decode(e + "=" * (-len(e) % 4)), o.encode())).decode())')
+unset key otp nonce encoded
+bao token lookup -format=json | python3 -c 'import json, sys; print(json.load(sys.stdin)["data"]["policies"])'   # ['root']
+```
+
+If a line after `nonce=` fails, the attempt stays open: a rerun answers 400 (`root generation
+already in progress`) and `nonce` stays empty. `bao delete sys/generate-root/attempt` clears it,
+with no token. When done, step 5 again.
+
+**A lost shell,** after step 3's `create-secret`: `$init` is gone, and init's root token with it,
+though it stays valid. A new root token as above, then, in the same root shell, one line at a
+time, every other root token revoked by its accessor. Before step 4 those are the only other
+tokens: init's, and step 3's if its `revoke -self` didn't run. `</dev/null` keeps each `bao`
+from reading the terminal.
+
+```sh
+self=$(bao token lookup -format=json </dev/null | python3 -c 'import json, sys; print(json.load(sys.stdin)["data"]["accessor"])')
+for a in $(bao list -format=json auth/token/accessors </dev/null | self=$self python3 -c 'import json, sys, os; print(" ".join(a for a in json.load(sys.stdin) if a != os.environ["self"]))'); do bao write -format=json auth/token/lookup-accessor accessor=$a </dev/null | python3 -c 'import json, sys; sys.exit("root" not in json.load(sys.stdin)["data"]["policies"])' && bao write auth/token/revoke-accessor accessor=$a </dev/null >/dev/null && echo "revoked $a"; done
+```
+
+The check prints every other token's accessor, policies and creation time, so here nothing:
+
+```sh
+for a in $(bao list -format=json auth/token/accessors </dev/null | self=$self python3 -c 'import json, sys, os; print(" ".join(a for a in json.load(sys.stdin) if a != os.environ["self"]))'); do bao write -format=json auth/token/lookup-accessor accessor=$a </dev/null | python3 -c 'import json, sys; d = json.load(sys.stdin)["data"]; print(d["accessor"], d["policies"], d["creation_time"])'; done
+```
+
+Then step 4 in this shell, without its `read`, and step 5 (`unset self` too).
+
 ## Not here yet
 
-- The OpenBao signer: its container, unseal, snapshots and restore drill, key rotation as an
-  on-chain signer change, fee float top-ups (0036, 0047).
+- OpenBao's snapshots and restore drill, key rotation as an on-chain signer change, fee float
+  top-ups (0036, 0047). After a restore on the same server, restart the facilitator: a token newer
+  than the snapshot answers 403 until its hour ends, and a 403 doesn't make the signer log in again.
+- The key theft transaction (ADR 0013): no tool signs it and it has never run (0099).
+- A leaked token or secret ID, OpenBao upgrades and what `/settle` does meanwhile, and the weekly
+  review after the mainnet deploy (0026, ADR 0013).
+- A TPM for the credentials (ADR 0013's first upgrade). Checked on 2026-11-03: the firmware
+  exposes none, with no ACPI `TPM2` or `TCPA` table, no SMBIOS type 43 and no `/dev/tpm*` (ASRock
+  Rack B450D4U-V1L, BIOS L2.12, Ryzen 9 3900). Not checked: most likely the Ryzen's fTPM is off in
+  the BIOS. Turning it on needs Hetzner's KVM console and a reboot of the server the explorer
+  shares (0100, before mainnet).
 - pgBackRest backups, the database's restore drill and upgrade policy.
 - The CloudWatch agent and renewing its Roles Anywhere certificate (0027).
 - Restoring the service on another machine, RPC failover, testnet reset recovery, the incident

@@ -77,9 +77,9 @@ graph TD
 - **Binds:** T1-facilitator, T1-channel-pool, T1-upto-prototype (ADR 0003)
 - **Prevents:** a second submit path that bypasses the pool's sequence handling, fee policy and confirmation.
 - **Rule:**
-  - Every settlement is submitted with `SettlementSubmitter.submit()` from `packages/signer-pool`, in the delegated-bump shape: the channel is the transaction source, the facilitator is the operation source and pays the fee bump.
+  - Every settlement is submitted with `SettlementSubmitter.submit()` from `packages/signer-pool`, in the delegated-bump shape: the channel is the transaction source and, with no operation source, the caller; the facilitator pays the fee bump.
   - Nothing else in the service calls `sendTransaction`.
-  - The `upto` testnet harness (0004) uses the same shape.
+  - The `upto` testnet harness (0004) has the facilitator as operation source; the pool refuses its source-account entry, so it can't settle until 0015.
 
 ### AD-3: Upstream verifies, we settle
 
@@ -92,13 +92,13 @@ graph TD
     - **Return to `RPC_URLS[0]`** (`FallbackRpc`'s). While calls are off it, a call that finds 60 s passed starts a probe beside itself, never inside it: `getLatestLedger` on `RPC_URLS[0]` and on the active URL, each within 10 s. Calls return to `RPC_URLS[0]` only if it answers and trails the active URL by at most 2 ledgers; otherwise the next probe is 60 s later. A client's payload never decides it: upstream refuses many payloads (a wrong amount, recipient, asset or operation) before any RPC call, so a dead RPC would "answer" them in a millisecond; a verify call never moves the URL on an answer. A failure doesn't bring it back either: a failure of the last URL moves calls to the next fallback, or, with none left, keeps them where they are and starts a probe at once (0045 decision 26). Nor does a `FallbackRpc` read (pool, ledger or fee-stats) that fails on the active URL and wraps around to `RPC_URLS[0]`: it returns that answer and counts as that URL's failure, since an RPC that answers can still trail (0061). A probe started at once waits 5 s after the last one began, so a URL that keeps failing starts one per 5 s, not one per call. The 60 s count from the moment calls left `RPC_URLS[0]`; a switch between fallbacks doesn't restart them.
     - **Logs**, each with the network and `RPC_URLS[i]#<fingerprint>` names, never URLs: the shared client's `rpc_failover` (warn, `component: "rpc"`, with `by`, the method or caller that saw the failure, `from`, `to` and a URL-free `reason`), `rpc_failback` (info, with the lag) and `rpc_probe_failed` (warn); upstream's `rpc_exhausted` (warn, `component: "verify"`, every URL tried and why). The `verified` log names the URL that answered as `rpc`.
     - **A rejection is never failed over.** `/verify` is read-only and `/settle` checks again, so the reason is cost and one stable answer per payload, not safety. A lagging RPC can answer either way: it can reject a valid payment (a simulation that fails, `…_expiration_too_far`), and it can accept one the first URL would refuse (a nonce already used on chain, a balance spent since its ledger, a revoked SAC authorization). For `exact` the false accept costs little: `/settle` simulates again through `FallbackRpc`, and AD-6 refuses a replay. For `upto` (0015) `/verify`'s answer carries more weight, so it must not rely on it (threat model).
-    - **Steering.** A client can't choose its own verdict by failing over, but it can push everyone's calls to a fallback: exhaust `RPC_URLS[0]`'s per-key quota until it answers 429 (upstream: `unexpected_verify_error`) and every call moves. Until a rate limit (0023), the probe bounds this: calls return once `RPC_URLS[0]` answers the probe, and no payload can keep them away (threat model).
+    - **Steering.** A client can't choose its own verdict by failing over, but it can push everyone's calls to a fallback: exhaust `RPC_URLS[0]`'s per-key quota until it answers 429 (upstream: `unexpected_verify_error`) and every call moves. Until a rate limit (0023), the probe bounds this: calls return once `RPC_URLS[0]` answers the probe, and no payload can keep them away (threat model). The trustline lookup after upstream's `simulation_failed` is such a read too, so it needs the payer's one auth entry, and it never decides the verdict: a failed lookup keeps upstream's (0078).
     - With fee-stats bids (AD-10), the bid is read once per call, before any URL's 10 s starts and before the call reads the active URL, and each bid gets one scheme per URL. A bid read that waits out a hung URL moves the shared URL, so the verify call starts on the next one.
     - Upstream's deadline is 10 s per URL, plus, with fee-stats bids, the bid read before them (`FallbackRpc` bounds it at 10 s per URL), plus 1 s, so the last URL's own deadline fires first: 21 s with two URLs and a fixed bid, 41 s with fee-stats, 61 s with three URLs and fee-stats. It is not `/verify`'s whole time: the AD-22 ledger read after it can add `FallbackRpc`'s 10 s per URL. With the shared URL a hung `RPC_URLS[0]` costs one of these waits, not one per client, so the first `/settle` fits its budget (ADR 0011); calls already waiting on it when it is moved still wait their own 10 s.
     - A call cut off by its 10 s keeps running, since upstream's clients can't be cancelled. `main()` sets undici's global header and body timeouts to 10 s, which stellar-sdk's `fetch` uses, so the abandoned request ends instead of holding its socket for undici's default 300 s.
     - Upstream's Horizon read of the ledger close time has no URL of ours to fail over to. It falls back to upstream's default on an error. Upstream reads it after its RPC calls, so a Horizon that hangs takes the URL being tried past its 10 s, which counts as that URL's timeout and moves the shared URL: `rpc_failover` with `by: "verify"` blames an RPC URL for Horizon's delay. With healthy RPCs the probe that the last URL's timeout starts brings calls back (`rpc_failback`), so while Horizon hangs the two lines repeat. Every URL times out, `rpc_exhausted` lists them, and the answer is a 500 with the `UpstreamTimeoutError` of the first URL tried, the active one, not always `RPC_URLS[0]`. Payments are unaffected: the pool's reads and sends answer on either URL.
   - **`/verify`** = upstream `verify()`, then address credentials only, the AD-5 channel check, the AD-6 one-payer-entry check, then the AD-22 validity check. The first rejection returns `isValid: false` with its reason.
-    - Address credentials only: an auth entry with source-account credentials would authorize as the operation source, which the pool makes the facilitator. Upstream refuses it too (`…_unsupported_credential_type`); we check it again because the pin `~2.28.0` lets upstream patches float, and the pool refuses such a call as well.
+    - Address credentials only: an auth entry with source-account credentials would authorize as the call's source, which the pool makes a channel. Upstream refuses it too (`…_unsupported_credential_type`); we check it again because the pin `~2.28.0` lets upstream patches float, and the pool refuses such a call as well.
     - A network check runs first: a process serves one network, and upstream would verify another network's payload against that network's default RPC. A V0 envelope is rejected as malformed there too: upstream parses it, but can't assemble its simulation onto it.
     - Upstream answers its own exceptions, such as a failed RPC call, with `unexpected_verify_error`. That is an error of ours, not a verdict on the payment, so `/verify` answers 500. So does every URL failing, by throwing, giving no answer within 10 s or answering `unexpected_verify_error`: upstream's RPC and Horizon clients have no timeout.
     - A request whose `amount` isn't a whole number is a 400: upstream's `BigInt(amount)` would throw, which would be a 500.
@@ -132,7 +132,7 @@ graph TD
   - one payment being replayed to unlock another merchant's resource
   - one payment unlocking the same resource more than once
 - **Rule:**
-  - **Key.** The settlement key is `network:payer:nonce`. The nonce is the int64 nonce of the payer's auth entry, held as a decimal string. A payload must carry exactly one payer auth entry, otherwise the `/verify` checks reject it, at `/verify` and `/settle` alike (upstream de-duplicates signers and doesn't count entries).
+  - **Key.** The settlement key is `network:payer:nonce`. The nonce is the int64 nonce of the payer's auth entry, held as a decimal string. A payload must carry exactly one payer auth entry and no other address's, otherwise the `/verify` checks reject it, at `/verify` and `/settle` alike (upstream de-duplicates signers and doesn't count entries; another address's entry would stand in for the payer's expiry, task 0073 decision 21).
   - **Fingerprint.** Each record stores a fingerprint: a hash of the canonical payload plus `paymentRequirements`.
   - **Known key first.** `/settle` reads the key from the payload and looks it up before any check. A known key is a repeat; only a new key is checked and claimed.
   - **Claim.** After verification and before `submit()`, `/settle` claims the key with an atomic insert-if-absent. Only the caller that wins the claim submits.
@@ -203,7 +203,7 @@ graph TD
 - **Rule:**
   - One middleware, with separate budgets for `/verify`, `/settle` and `/discovery/*`. Exceeding a budget returns HTTP 429.
   - **Client IP.** It comes only from the header the edge sets (`CF-Connecting-IP` behind Cloudflare Tunnel, ADR 0011; `CLIENT_IP=cloudflare`), never from `X-Forwarded-For`. An IPv6 client is counted per /56.
-  - **API key.** An optional per-caller API key as an alternative limiter key is not built in T1 (task 0060): without a registry of issued keys, a caller's own key would bypass the limit.
+  - **API key.** On testnet an API key is ignored, in T1 and after. On pubnet (M2) `/verify` and `/settle` require one, issued by our portal after Discord sign-in, and the limiter counts a caller by its key instead of its IP (tasks 0105, 0106; ADR 0007's amendment of 2026-11-03).
   - **Storage.** Counters go through `RateLimitStore`.
   - **Payer, recipient and asset.** Limits on these are AD-18's job, not the IP limiter's.
 
@@ -212,8 +212,8 @@ graph TD
 - **Binds:** configuration, `TransactionSigner`, startup
 - **Prevents:** key sprawl, keys shared between networks, and channels another key can move.
 - **Rule:**
-  - **Key.** Each network has one facilitator key. It signs for the channels and pays fee bumps, and it reaches the pool only as a `TransactionSigner`, so the OpenBao Transit signer can replace it ([ADR 0013](../adr/0013-facilitator-key-custody.md), task 0036).
-  - **Config.** `FACILITATOR_SECRET`, or in `openbao` mode the Transit key, its version and the fee account's address (ADR 0013), plus `CHANNELS` (addresses, never secrets).
+  - **Key.** Each network has one facilitator key. It signs for the channels and pays fee bumps, and it reaches the pool only as a `TransactionSigner`, the OpenBao Transit signer ([ADR 0013](../adr/0013-facilitator-key-custody.md), task 0036).
+  - **Config.** The Transit key, its version and the fee account's address (ADR 0013), plus `CHANNELS` (addresses, never secrets).
   - **Startup check.** The service refuses to start unless every channel has its master key weight at 0 and the facilitator key as its only signer (`checkChannel`).
   - **Separation.** Testnet and mainnet never share a key or a channel.
 
@@ -260,7 +260,7 @@ graph TD
   - records stuck pending forever after a restart
 - **Rule:**
   - **One owner.** A single settlement module in `apps/facilitator` owns every write to `SettlementStore`. Handlers and event listeners call it; they never write to the store themselves.
-  - **States.** They only move forward: `claimed → signed → pending → success | failed | rejected | expired`. Each write is a compare-and-set, so a write that would move a record backwards is dropped.
+  - **States.** They only move forward: `claimed → signed → pending → success | failed | rejected | expired`. Each write is a compare-and-set, so a write that would move a record backwards is dropped. One written exception (task 0073): a record closed `rejected` with nothing sent (no hash, one of the "nothing sent" reasons) moves back to `claimed` when the identical payload returns while the payer's auth entry is valid. `reopen` does it by compare-and-set, counts it in `reopened`, and restarts the record's budget from the reopening call.
   - **Hashes.** A record keeps every hash it was signed with, because a rebuild produces a new one. It can be found by any of them.
   - **Durable write.** The hash is stored durably before the first send. This requires `signer-pool` to await an async `onSigned` and to abort the send if it rejects; that change to the library is a T1 prerequisite.
   - **Attempts.** Each hash keeps its own state, `stored → sent | unknown → landed | dead`, and its time and ledger bounds. `stored` and `sent` are hints that can lag the network; only `landed` and `dead` are its answers.
@@ -272,26 +272,32 @@ graph TD
 - **Prevents:** two processes using one channel's sequence numbers, for example during a rolling deploy.
 - **Rule:**
   - **Lease.** At startup a process takes an exclusive lease on its network's channel set through the store and keeps renewing it. Without the lease it doesn't serve `/settle`.
+  - **Fencing.** Every acquire draws a new token; a hash is stored, and so sent, only under the lease's current token (task 0071). A holder that lost the lease while frozen sends nothing new, except an envelope already stored and checked when it froze, one per call in flight: the send loop has no lease check, so it resends that envelope until its bound, under one hash.
   - **Deploys.** They stop the old process before the new one takes the lease.
   - **Shutdown.** The process stops accepting `/settle`, waits until every in-flight submission is final or recorded as pending, then releases the lease.
 
 ### AD-18: Spend budgets contain fee abuse
 
-- **Binds:** `/settle`, `SpendStore`, alerts
-- **Prevents:** someone draining the facilitator's XLM through valid self-payments or junk tokens, which IP limits can't stop.
-- **Rule:**
-  - **Budgets.** Before `submit()`, `/settle` checks and reserves the fee against:
-    - a global rolling fee budget
-    - per-payer, per-`payTo` and per-asset budgets
-  - **Over budget.** Returns `success: false` and submits nothing.
+- **Binds:** `/settle`, `/verify`, `SpendStore`, alerts
+- **Prevents:** someone draining the facilitator's XLM through valid self-payments, junk tokens or payments that fail on chain, which IP limits can't stop.
+- **Rule** (task 0024, [S-design](../../lore/1-tasks/active/0024_FEATURE_spend-budgets-and-breakers/notes/S-design.md)):
+  - **Payer proof.** `/settle` refuses a settlement whose simulation didn't use the payer's auth entry (its nonce key isn't in the read-write footprint), so the payer every budget is keyed by signed the payment.
+  - **One at a time.** At most one settlement per (network, payer, asset) is in flight; another waits within the settle budget, then gets `settle_exact_stellar_payer_busy`, retryable with the same payment.
+  - **Order.** In the `beforeSubmit` hook: the fee account's balance floor, then the breakers, then the budgets.
+  - **Budgets.** `/settle` reserves the fee ceiling against, narrowest first: the payer and the `payTo` (each one scope for the known assets, one per other asset), the asset (a high budget for a known asset, USDC; a low one for any other), `tier:other` (every other asset together) and a global budget. All or none.
+  - **Over budget.** Returns `success: false` with a reason naming the narrowest full budget, and submits nothing.
+  - **Accounting.** When the record is final, the reservation is lowered to the fee charged, or released when nothing was charged. A release leaves a tombstone, so a reserve that arrives after it counts nothing. A store that doesn't answer refuses the settlement (fail closed).
   - **Windows.** A budget sums what was reserved or paid in its rolling window, exact to the
     millisecond. A committed fee keeps its reservation's time, however late the commit. The store
     keeps reservations for twice the longest window or 7 days, whichever is longer (task 0050).
-  - **Circuit breaker.** A breaker per asset and per `payTo` opens after repeated on-chain failures.
+    Every budget has the same 24 h window.
+  - **Circuit breakers.** Per payer, per `payTo` and per wasm asset, never per SAC. Only included, charged failures count, against the party that caused them; a payment whose nonce someone else used first counts against nobody. A breaker opens after repeated failures for a time that grows on each reopening. `/settle` and `/verify` refuse while one is open.
+  - **Balance floor.** `/settle` refuses while the fee account's spendable balance (balance minus reserve and selling liabilities), read in the background, is below `SPEND_FLOOR_STROOPS`, or before its first reading.
+  - **What it bounds.** Per-party budgets bound one address, which is free. The global and per-asset budgets bound the total loss; they don't keep the shared budgets available against self-payments from many addresses (ADR 0007, amended 2026-10-30).
   - **Alerts.** These raise alerts:
-    - the budget nearing its limit
+    - a budget nearing its limit (80 %)
     - an open breaker
-    - a low facilitator balance (`checkFacilitatorBalance`)
+    - a low facilitator balance (the floor, and `checkFacilitatorBalance`)
     - quarantined channels
     - pending results
 
@@ -343,11 +349,12 @@ graph TD
 - **Prevents:** paying the fee for a transaction whose authorization expires before it can land.
 - **Rule:**
   - A payload whose auth expiration ledger is less than `minValidityLedgers` ahead of the current ledger is rejected.
-  - The transaction never stays valid past the auth expiry. `signer-pool`'s `maxLedger` submit option (task 0016) sets the expiry ledger as the envelope's ledger bound, next to its time bound.
+  - The transaction never stays valid past the auth expiry. `signer-pool`'s `maxLedger` submit option (task 0016) sets the expiry ledger as the envelope's ledger bound. Since 0073 such an envelope carries no time bound: it can no longer land exactly when the auth can't, so `…_transaction_expired` is true when it is answered, for our own outer hash. Only the fee source signs a fee bump, so someone else can wrap the inner transaction in their own and land it under another hash; confirming by the inner hash is 0087.
   - `signer-pool` keeps one spare ledger: it refuses, after simulation, a call that could land only in the ledger after the one simulated. So `minValidityLedgers` must be at least 2 plus the expected wait for a channel, or a payload `/verify` accepts can fail at `/settle` with `LedgerBoundError` after a simulation.
   - `minValidityLedgers` must also stay well below the client's signing window. Upstream's client signs its auth to expire ⌈`maxTimeoutSeconds` / ledger time⌉ ledgers after signing, with the ledger time from Horizon (5 s when Horizon doesn't answer): about 12 ledgers at the usual 60 s. Ledgers usually pass before `/verify`. So a minimum of 12 rejects nearly every payment; the default is 4: 2 for the pool plus about 2 of channel wait.
   - So a resource needs a `maxTimeoutSeconds` well above `minValidityLedgers × 5` seconds, 20 s at the default. Near that bound, most payments are rejected as too soon. When ⌈`maxTimeoutSeconds` / 5⌉ is at most the minimum, the reason says so.
   - `/settle` rechecks the expiry at the pool's floor of 2 ledgers, not at `minValidityLedgers`: a payload `/verify` accepted has used part of its margin by then, and the pool refuses only below 2.
+  - A payload whose auth expires more than `maxValidityLedgers` ahead is rejected too (`…_signature_expiration_too_far`), in `/verify` and `/settle`, whatever `maxTimeoutSeconds` allows (task 0073). The default is 66: a 300 s resource signs 60 ledgers at 5 s (upstream's client rounds the ledger time up to whole seconds), upstream's own check allows 2 more, and the rest is spare. A resource whose `maxTimeoutSeconds` is above the cap less a tenth at 5 s a ledger (300 s at 66) is refused with the same reason whatever the ledger, so a refused payment doesn't pass later, after its payer may have signed again (0073 decision 22); the ledger gap shrinks, the requirements don't. A lagging RPC is upstream's risk: its expiry check refuses an honest payment once our RPC is 3 or more ledgers behind the client's, an accepted risk (0073 decision 9). The cap is at most 120 ledgers. Whoever calls `/settle` writes the requirements, so without the cap a caller could sign for days, and a transaction that never shows up on chain would hold its channel until the auth expiry once the envelope lives as long as it.
 
 ## Consistency Conventions
 

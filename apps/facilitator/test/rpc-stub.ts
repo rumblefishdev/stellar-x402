@@ -7,6 +7,8 @@ import { Keypair, Networks, StrKey, xdr } from "@stellar/stellar-sdk";
 export interface StubAccount {
   signers: string[];
   masterWeight: number;
+  /** Stroops; 1.5 XLM by default. */
+  balance?: bigint;
 }
 
 /** A channel set up as AD-12 requires: master key weight 0, the facilitator its only signer. */
@@ -18,12 +20,13 @@ export const hardened = (facilitator: string): StubAccount => ({
 /**
  * A Stellar RPC over HTTP for `main()`, which builds its own RPC from `RPC_URLS`: it answers
  * `getNetwork` with `passphrase`, `getLedgerEntries` for `accounts` (any other account doesn't
- * exist), and every other method with a 503.
+ * exist), and every other method with a 503. `reads` lists each account read, in order.
  */
 export async function rpcStub(
   accounts: Record<string, StubAccount>,
   passphrase: string = Networks.TESTNET,
-): Promise<{ url: string; close(): Promise<void> }> {
+): Promise<{ url: string; reads: string[]; close(): Promise<void> }> {
+  const reads: string[] = [];
   const server = createServer((req, res) => {
     let body = "";
     req.on("data", (chunk) => (body += chunk));
@@ -44,12 +47,14 @@ export async function rpcStub(
         res.writeHead(503).end();
         return;
       }
+      for (const key of params.keys) reads.push(accountOf(key));
       res.end(JSON.stringify({ jsonrpc: "2.0", id, result: ledgerEntries(params.keys, accounts) }));
     });
   }).listen(0, "127.0.0.1");
   await once(server, "listening");
   return {
     url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    reads,
     close: () => new Promise((resolve) => server.close(() => resolve())),
   };
 }
@@ -58,7 +63,7 @@ export async function rpcStub(
 export function ledgerEntries(keys: string[], accounts: Record<string, StubAccount>) {
   const entries = keys.flatMap((key) => {
     const accountId = xdr.LedgerKey.fromXDR(key, "base64").account().accountId();
-    const account = accounts[StrKey.encodeEd25519PublicKey(accountId.ed25519())];
+    const account = accounts[accountOf(key)];
     if (!account) return [];
     const data = xdr.LedgerEntryData.account(accountEntry(accountId, account));
     return [{ key, xdr: data.toXDR("base64"), lastModifiedLedgerSeq: 1 }];
@@ -66,11 +71,17 @@ export function ledgerEntries(keys: string[], accounts: Record<string, StubAccou
   return { entries, latestLedger: 100 };
 }
 
-/** The ledger's entry for an account with these signers and this master key weight. */
+/** The address of an account's ledger key, in base64 XDR. */
+function accountOf(key: string): string {
+  const accountId = xdr.LedgerKey.fromXDR(key, "base64").account().accountId();
+  return StrKey.encodeEd25519PublicKey(accountId.ed25519());
+}
+
+/** The ledger's entry for an account with these signers, master key weight and balance. */
 export function accountEntry(accountId: xdr.PublicKey, account: StubAccount): xdr.AccountEntry {
   return new xdr.AccountEntry({
     accountId,
-    balance: xdr.Int64.fromString("15000000"),
+    balance: xdr.Int64.fromString(String(account.balance ?? 15_000_000n)),
     seqNum: xdr.Int64.fromString("1"),
     numSubEntries: account.signers.length,
     inflationDest: null,

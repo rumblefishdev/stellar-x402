@@ -1,6 +1,11 @@
 import { Transaction, rpc } from "@stellar/stellar-sdk";
 import type { StellarNetwork } from "@stellar-x402/config";
-import type { SorobanRpc, SubmitResult } from "@stellar-x402/signer-pool";
+import {
+  cannotLand,
+  failureCause,
+  type SorobanRpc,
+  type SubmitResult,
+} from "@stellar-x402/signer-pool";
 import { getNetworkPassphrase } from "@x402/stellar";
 import type { Logger } from "../logger.js";
 import type { Metrics } from "../metrics.js";
@@ -72,7 +77,7 @@ export function createReconciler(deps: ReconcilerDeps) {
         ledger: res.ledger,
         feeCharged: res.resultXdr.feeCharged().toBigInt(),
         ...(attempt.channel !== undefined && { channel: attempt.channel }),
-        ...(!success && { errorReason: SETTLE_REASONS.failed }),
+        ...(!success && { errorReason: SETTLE_REASONS.failed, failure: failureCause(res) }),
         attempts: [...others, { hash: attempt.hash, state: "landed" }],
       },
       "resolved",
@@ -167,13 +172,11 @@ export function createReconciler(deps: ReconcilerDeps) {
     record: SettlementRecord,
     attempt: SettlementAttempt,
     res: rpc.Api.GetMissingTransactionResponse,
-  ) => {
-    const maxLedger = attempt.maxLedger ?? fallbackLedger(record);
-    return (
-      (attempt.maxTime !== undefined && res.latestLedgerCloseTime > attempt.maxTime) ||
-      (maxLedger !== undefined && res.latestLedger >= maxLedger)
-    );
-  };
+  ) =>
+    cannotLand(res, {
+      maxTime: attempt.maxTime,
+      maxLedger: attempt.maxLedger ?? fallbackLedger(record),
+    });
 
   const resolveRecord = async (record: SettlementRecord): Promise<Outcome> => {
     if (record.hashes.length === 0) {
@@ -181,12 +184,14 @@ export function createReconciler(deps: ReconcilerDeps) {
       // A call may still sign it, also another process's during a deploy (decisions 13, 27).
       if (now() <= record.createdAt + deps.budgetMs + MARGIN_MS) return "open";
       // Explicitly from `claimed`: atomic with `addHash`, so a hash stored meanwhile wins.
+      // Against the version this sweep read: a claim reopened since is a new one (0073).
       const ended = await records.finalWrite(record.key, () =>
-        store.transition(record.key, "claimed", {
-          state: "rejected",
-          errorReason: SETTLE_REASONS.interrupted,
-          updatedAt: now(),
-        }),
+        store.transition(
+          record.key,
+          "claimed",
+          { state: "rejected", errorReason: SETTLE_REASONS.interrupted, updatedAt: now() },
+          record.version,
+        ),
       );
       if (!ended) return "open";
       records.onFinal(ended, "resolved");
@@ -203,8 +208,11 @@ export function createReconciler(deps: ReconcilerDeps) {
         if (!pastBound(record, attempt, res)) open++;
         else if (historyCovers(record, res)) dead.push({ hash: attempt.hash, state: "dead" });
         else {
-          // It may have landed before the RPC's history: an operator checks it (decision 22).
+          // It may have landed before the RPC's history: an operator checks it (decision 22). It
+          // can't land again past its bound, so free its payer and asset's slot (0024): held, it
+          // would answer every later payment of them `busy` for good.
           open++;
+          await store.freeInFlight(record.key);
           if (!historyGone.has(record.key)) {
             logger.warn("settlement_history_gone", {
               network,
@@ -228,7 +236,7 @@ export function createReconciler(deps: ReconcilerDeps) {
         record.key,
         { state: "expired", errorReason: SETTLE_REASONS.expired, attempts: dead },
         "resolved",
-        record.version,
+        { version: record.version },
       );
       return won ? "expired" : "open";
     }
@@ -305,7 +313,12 @@ export function createReconciler(deps: ReconcilerDeps) {
       record.key,
       result.status === "success"
         ? { state: "success", ...fields }
-        : { state: result.status, errorReason: SETTLE_REASONS[result.status], ...fields },
+        : {
+            state: result.status,
+            errorReason: SETTLE_REASONS[result.status],
+            ...(result.failure && { failure: result.failure }),
+            ...fields,
+          },
       "resolved",
     );
     if (result.status === "success" && won && finished) await markIfAnswered(finished);

@@ -1,10 +1,12 @@
 import type { StellarNetwork } from "@stellar-x402/config";
+import type { FailureCause } from "@stellar-x402/signer-pool";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 
 /**
  * Lifecycle of a settlement record (AD-16). States only move forward:
  * `claimed → signed → pending → success | failed | rejected | expired`.
- * A record can skip a state, e.g. `signed → success`.
+ * A record can skip a state, e.g. `signed → success`. One written exception (0073 decision 5):
+ * {@link SettlementStore.reopen} moves a `rejected` record that never had a hash back to `claimed`.
  */
 export type SettlementState =
   "claimed" | "signed" | "pending" | "success" | "failed" | "rejected" | "expired";
@@ -38,14 +40,23 @@ export interface SettlementRecord {
   feeCharged?: bigint;
   /** x402 `errorReason` for a final state other than `success`. */
   errorReason?: string;
+  /** Why an included transaction failed, as far as the RPC said (`failed` only). */
+  failure?: FailureCause;
   /** When a `/settle` call first answered this record's `success` (AD-6: once per record). */
   successAnsweredAt?: number;
   /**
-   * Starts at 0 and goes up by one with every hash `addHash` appends, so a write that passes the
-   * version it read fails once a hash was stored after that read (0019 decision 26).
+   * Starts at 0 and goes up by one with every hash `addHash` appends and with every reopen, so a
+   * write that passes the version it read fails once a hash was stored, or the record reopened,
+   * after that read (0019 decision 26, 0073 decision 19).
    */
   version: number;
-  /** Milliseconds since the epoch. */
+  /**
+   * How many times {@link SettlementStore.reopen} moved the record back to `claimed` (0073
+   * decision 14); 0 for a record claimed once. -1 for a record claimed before 0073, which never
+   * reopens: its release answered "sign a new payment" (0073 decision 25).
+   */
+  reopened: number;
+  /** Milliseconds since the epoch; a reopen sets it to the reopening call's start. */
   createdAt: number;
   updatedAt: number;
 }
@@ -58,19 +69,29 @@ export type NewSettlement = Omit<
   | "ledger"
   | "feeCharged"
   | "errorReason"
+  | "failure"
   | "successAnsweredAt"
   | "version"
+  | "reopened"
   | "updatedAt"
 >;
 
 export type ClaimResult =
   | { claimed: true; record: SettlementRecord }
   /** The key already exists; the caller compares fingerprints (AD-6). */
-  | { claimed: false; existing: SettlementRecord };
+  | { claimed: false; existing: SettlementRecord }
+  /**
+   * Another key of the same payer and asset on the network is not final yet (0024): its key. No
+   * record was written, so the same payment can be claimed once the blocker is final.
+   */
+  | { claimed: false; busy: SettlementKey };
+
+/** The reopened record; `undefined` if a condition failed; or who holds the payer's slot (0024). */
+export type ReopenResult = SettlementRecord | { busy: SettlementKey } | undefined;
 
 /** Fields a state change may set. */
 export type SettlementUpdate = Partial<
-  Pick<SettlementRecord, "channel" | "ledger" | "feeCharged" | "errorReason">
+  Pick<SettlementRecord, "channel" | "ledger" | "feeCharged" | "errorReason" | "failure">
 > & {
   state: SettlementState;
   updatedAt: number;
@@ -87,8 +108,8 @@ export type AttemptState = "stored" | "sent" | "unknown" | "landed" | "dead";
 
 /** The bounds of a signed transaction: past either one it can no longer land. */
 export interface AttemptBounds {
-  /** The time bound, in Unix seconds. */
-  maxTime: number;
+  /** The time bound, in Unix seconds; unset for an envelope bounded by `maxLedger` alone (0073). */
+  maxTime?: number;
   /** The last ledger it may land in (inclusive). */
   maxLedger?: number;
 }
@@ -123,6 +144,18 @@ export class HashConflictError extends Error {
 }
 
 /**
+ * `addHash` was given a lease token that is no longer the lease's current one (0071): another
+ * process took the lease since this one acquired it, or nobody holds it. Nothing changed, and
+ * the hash must not be sent.
+ */
+export class LeaseFencedError extends Error {
+  override readonly name = "LeaseFencedError";
+  constructor(readonly lease: string) {
+    super(`the lease ${lease} has a newer holder or none, so this process may not send`);
+  }
+}
+
+/**
  * How long past a lease's `expiresAt` another holder must wait to take it (0025 decision 16).
  * `expiresAt` comes from the holder's clock and is compared with the acquirer's, so a holder whose
  * clock lags by less than this still renews before anyone takes over. One value for every process
@@ -138,14 +171,25 @@ export interface ChannelLease {
   holder: string;
   /** Milliseconds since the epoch. */
   expiresAt: number;
+  /** New on every acquire, kept by a renewal (0071 decisions 1, 2). */
+  token: string;
 }
+
+/** The lease a call claims to send under: its name and the token of the acquire that took it. */
+export type LeaseFence = Pick<ChannelLease, "name" | "token">;
 
 /**
  * Settlement records and the channel lease (AD-6, AD-7, AD-16, AD-17). Only the settlement
  * module writes to it.
  */
 export interface SettlementStore {
-  /** Atomic insert-if-absent: exactly one of several concurrent claims for a key wins. */
+  /**
+   * Atomic insert-if-absent: exactly one of several concurrent claims for a key wins, and the
+   * others get the record as `existing`. A new key is claimed only while no other record of its
+   * network, payer and `paymentRequirements.asset` is non-final, so one balance is spent by one
+   * settlement at a time (0024); otherwise it answers `busy` and writes nothing. Of several
+   * concurrent claims for different keys of one payer and asset, exactly one wins.
+   */
   claim(settlement: NewSettlement): Promise<ClaimResult>;
   get(key: SettlementKey): Promise<SettlementRecord | undefined>;
   /** Finds a record by any of its hashes. */
@@ -154,7 +198,11 @@ export interface SettlementStore {
    * Appends a signed hash, durably, before it is first sent, moves `claimed` to `signed` and adds
    * one to the record's `version`.
    * In order of precedence:
-   * 1. a missing or final record resolves `false`;
+   * 0. a `lease` whose token is no longer the lease's current one, or a lease nobody holds,
+   *    rejects with `LeaseFencedError`, and nothing changes (0071). The lease row is locked in
+   *    the same statement, so a takeover either waits for the hash to be stored or is seen;
+   * 1. a missing or final record, or with `claim` one reopened since that claim (its `reopened`
+   *    differs, 0073 decision 19), resolves `false`;
    * 2. a hash already on this record resolves `true`, a no-op;
    * 3. a hash on another record rejects with `HashConflictError`, and neither record changes;
    * 4. otherwise the hash is appended and it resolves `true`.
@@ -166,8 +214,10 @@ export interface SettlementStore {
   addHash(
     key: SettlementKey,
     hash: string,
+    lease: LeaseFence,
     updatedAt: number,
     bounds?: AttemptBounds,
+    claim?: number,
   ): Promise<boolean>;
   /** The record's attempts, oldest first, in the order of `hashes`. */
   attempts(key: SettlementKey): Promise<SettlementAttempt[]>;
@@ -188,24 +238,58 @@ export interface SettlementStore {
    * the updated record, or `undefined` if the state had already moved on. An `update.state`
    * that isn't ahead of `expected` in the lifecycle order, the same state included, is dropped
    * the same way, so exactly one of several concurrent callers wins. A record in a final state
-   * never moves on (AD-16). Rejects a `feeCharged` that isn't a non-negative int64.
+   * never moves on (AD-16), and a move to a final state frees its payer and asset for the next
+   * `claim`. Rejects a `feeCharged` that isn't a non-negative int64.
    * `update.attempts` are applied as {@link markAttempts} would, in the same transaction, also
    * when the state doesn't move. With `expectedVersion`, the record must also still have that
-   * `version`: no hash was appended since the caller read it.
+   * `version`: no hash was appended since the caller read it. With `claim`, it must still have
+   * that `reopened` count: a write of an earlier claim never lands on a reopened one (0073
+   * decision 24).
    */
   transition(
     key: SettlementKey,
     expected: SettlementState,
     update: SettlementUpdate,
     expectedVersion?: number,
+    claim?: number,
   ): Promise<SettlementRecord | undefined>;
+  /**
+   * Compare-and-set, the one backward move (0073 decision 5): moves the record from `rejected`
+   * back to `claimed` while it has the same `fingerprint`, one of `reasons` as its `errorReason`,
+   * no hash, so nothing was ever sent for it, and was claimed since 0073 (`reopened` not -1). Clears `errorReason`, adds one to `reopened` and
+   * to `version`, and sets `createdAt` and `updatedAt` to `now`, so a repeat counts the new
+   * claim's budget from it, and a writer that read the earlier claim and passes its version or
+   * `reopened` count fails (0073 decision 19).
+   * Resolves the reopened record, or `undefined` if any condition fails: exactly one of several
+   * concurrent callers wins. A reopened record takes its payer and asset's slot, as `claim` does,
+   * so one balance is spent by one settlement at a time (0024): while another key of them is not
+   * final it answers `busy`, and the record stays as it is.
+   */
+  reopen(
+    key: SettlementKey,
+    fingerprint: string,
+    reasons: readonly string[],
+    now: number,
+  ): Promise<ReopenResult>;
   /** Records not yet final, for the startup re-check (AD-16). */
   listNonFinal(network: StellarNetwork): Promise<SettlementRecord[]>;
 
   /**
+   * Frees the in-flight slot `key` holds, if it still holds one (0024). A move to a final state
+   * frees the slot in the same statement, but a record left non-final whose payment can no longer
+   * land — its history is gone past the bound (reconciliation, decision 22) — would hold the slot
+   * for good and answer every later payment of that payer and asset `busy`. This releases it
+   * without ending the record, so an operator can still examine it. Keyed by `key`, so it never
+   * frees a slot a later claim of another key took over.
+   */
+  freeInFlight(key: SettlementKey): Promise<void>;
+
+  /**
    * Takes the lease if it is free, already held by `holder`, or another holder's that expired more
-   * than {@link LEASE_SKEW_MARGIN_MS} before `now`, and sets its expiry to `now + ttlMs`. Resolves
-   * the lease, or `undefined` if another holder has it.
+   * than {@link LEASE_SKEW_MARGIN_MS} before `now`, and sets its expiry to `now + ttlMs`. Every
+   * acquire gives the lease a new `token`, also one by its own holder (0071 decision 1), so a call
+   * that carries an earlier token is refused by `addHash`. Resolves the lease, or `undefined` if
+   * another holder has it.
    */
   acquireLease(
     name: string,
@@ -214,8 +298,8 @@ export interface SettlementStore {
     now: number,
   ): Promise<ChannelLease | undefined>;
   /**
-   * Extends a lease `holder` still holds. Resolves `false` if it was lost, including once
-   * `now > expiresAt`: an expired lease must be acquired again.
+   * Extends a lease `holder` still holds, keeping its token. Resolves `false` if it was lost,
+   * including once `now > expiresAt`: an expired lease must be acquired again.
    */
   renewLease(name: string, holder: string, ttlMs: number, now: number): Promise<boolean>;
   /** Releases the lease if `holder` holds it. */

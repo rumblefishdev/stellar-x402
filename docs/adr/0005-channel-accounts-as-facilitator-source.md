@@ -13,8 +13,7 @@ client's payload.
 [ADR 0003](0003-settlement-channel-account-pool.md) settles every payment in the
 `delegated-bump` shape:
 
-- a channel account is the transaction source;
-- the facilitator is the operation source;
+- a channel account is the transaction source and, with no operation source, the caller;
 - the facilitator pays a fee bump.
 
 Each channel's master key is disabled and the facilitator key is its only signer. The literal

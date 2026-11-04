@@ -7,9 +7,11 @@ import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import { start, type Started } from "../src/main.js";
+import { PAYTO_TRUSTLINE_REASON } from "../src/settlement/trustline.js";
 import type { Verify } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
 import { bazaarExtensions, depthOf } from "./payment.js";
+import { signerEnv } from "./fake-openbao.js";
 
 const requirements: PaymentRequirements = {
   scheme: "exact",
@@ -37,7 +39,7 @@ describe("POST /verify", () => {
 
   beforeAll(async () => {
     const env = {
-      FACILITATOR_SECRET: Keypair.random().secret(),
+      ...signerEnv(Keypair.random().publicKey()),
       DATABASE_URL: db.urlFor(db.schema),
       CLIENT_IP: "socket",
       CHANNELS: Keypair.random().publicKey(),
@@ -100,6 +102,23 @@ describe("POST /verify", () => {
     expect(verified).toMatchObject({ isValid: false, rpc: "RPC_URLS[1]" });
   });
 
+  it("logs a missing trustline's message, and no other refusal's", async () => {
+    verify.mockResolvedValueOnce({
+      isValid: false,
+      invalidReason: PAYTO_TRUSTLINE_REASON,
+      invalidMessage: "G… has no USDC trustline",
+    });
+    await post(request);
+    verify.mockResolvedValueOnce({
+      isValid: false,
+      invalidReason: "invalid_exact_stellar_payload_simulation_failed",
+      invalidMessage: "not for the log",
+    });
+    await post(request);
+    const verified = lines.map((line) => JSON.parse(line)).filter((l) => l.event === "verified");
+    expect(verified.map((line) => line.message)).toEqual(["G… has no USDC trustline", undefined]);
+  });
+
   it("logs our own reason next to upstream's", async () => {
     verify.mockResolvedValueOnce({
       isValid: false,
@@ -112,6 +131,25 @@ describe("POST /verify", () => {
       invalidReason: "invalid_exact_stellar_payload_unsafe_tx_or_op_source",
       reason: "invalid_exact_stellar_payload_channel_account",
     });
+  });
+
+  it("logs a fee refusal's message, which names archived entries, and no other refusal's", async () => {
+    const invalidMessage =
+      "simulation-derived fee 551787 stroops exceeds ceiling 250000 stroops; the payment's transaction lists 1 archived entry to restore: AAAABg==";
+    verify.mockResolvedValueOnce({
+      isValid: false,
+      invalidReason: "invalid_exact_stellar_payload_fee_exceeds_maximum",
+      invalidMessage,
+    });
+    verify.mockResolvedValueOnce({
+      isValid: false,
+      invalidReason: "invalid_exact_stellar_payload_simulation_failed",
+      invalidMessage: "simulation failed",
+    });
+    await post(request);
+    await post(request);
+    const verified = lines.map((line) => JSON.parse(line)).filter((l) => l.event === "verified");
+    expect(verified.map((l) => l.message)).toEqual([invalidMessage, undefined]);
   });
 
   it.each([

@@ -48,7 +48,8 @@ describe("protocol-29 XDR fixture", () => {
     const op = inner.operations[0]!;
     expect(op.type).toBe("invokeHostFunction");
     if (op.type !== "invokeHostFunction") return;
-    // The facilitator is the fee-bump payer and the operation source; a channel is the tx source.
+    // Recorded before 0093: the facilitator is the fee-bump payer and the operation source; a
+    // channel is the tx source.
     expect(op.source).toBe(bump.feeSource);
     expect(inner.source).not.toBe(bump.feeSource);
 

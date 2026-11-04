@@ -3,9 +3,11 @@ import {
   Address,
   Networks,
   Operation,
+  SorobanDataBuilder,
   TransactionBuilder,
   nativeToScVal,
   xdr,
+  type Transaction,
 } from "@stellar/stellar-sdk";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import { declareDiscoveryExtension } from "@x402/extensions/bazaar";
@@ -18,20 +20,21 @@ export interface Transfer {
 }
 
 /**
- * A testnet `transfer` of `requirements.amount` from the payer, with its one auth entry (nonce 7)
- * valid to `expiration`, unsigned.
+ * A testnet `transfer` of `requirements.amount` from the payer, with its one auth entry (`nonce`, 7
+ * by default) valid to `expiration`, unsigned.
  */
 export function transferPayload(
   { payer, payTo, requirements }: Transfer,
   expiration: number,
   extensions?: Record<string, unknown>,
+  nonce = "7",
 ): PaymentPayload {
   const asset = requirements.asset;
   const auth = new xdr.SorobanAuthorizationEntry({
     credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(
       new xdr.SorobanAddressCredentials({
         address: new Address(payer).toScAddress(),
-        nonce: xdr.Int64.fromString("7"),
+        nonce: xdr.Int64.fromString(nonce),
         signatureExpirationLedger: expiration,
         signature: xdr.ScVal.scvVoid(),
       }),
@@ -93,4 +96,20 @@ export function bazaarExtensions(levels: number): Record<string, unknown> {
 export function depthOf(value: unknown): number {
   if (value === null || typeof value !== "object") return 0;
   return 1 + Math.max(0, ...Object.values(value).map(depthOf));
+}
+
+/** A simulation's footprint: the host writes the nonce of each address auth entry it used. */
+export function usedNonces(transaction: Transaction): SorobanDataBuilder {
+  const call = transaction.operations[0] as { auth?: xdr.SorobanAuthorizationEntry[] };
+  const nonces = (call.auth ?? []).map((entry) => {
+    const credentials = entry.credentials().address();
+    return xdr.LedgerKey.contractData(
+      new xdr.LedgerKeyContractData({
+        contract: credentials.address(),
+        key: xdr.ScVal.scvLedgerKeyNonce(new xdr.ScNonceKey({ nonce: credentials.nonce() })),
+        durability: xdr.ContractDataDurability.temporary(),
+      }),
+    );
+  });
+  return new SorobanDataBuilder().setFootprint([], nonces);
 }

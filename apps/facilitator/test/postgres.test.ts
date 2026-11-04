@@ -3,11 +3,17 @@ import { Keypair, Networks, StrKey, Transaction } from "@stellar/stellar-sdk";
 import type { PaymentRequirements } from "@x402/core/types";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { postgresStores } from "../src/adapters/postgres.js";
+import { PostgresSpendStore, postgresStores } from "../src/adapters/postgres.js";
 import { MIGRATIONS, migrate } from "../src/adapters/postgres-schema.js";
 import { NON_FINAL_STATES } from "../src/adapters/rules.js";
 import { main, migrateMain } from "../src/main.js";
-import { HashConflictError, type Stores } from "../src/ports/index.js";
+import {
+  HashConflictError,
+  LEASE_SKEW_MARGIN_MS,
+  LeaseFencedError,
+  type NewSettlement,
+  type Stores,
+} from "../src/ports/index.js";
 import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import {
@@ -24,10 +30,12 @@ import {
   catalogStoreContract,
   rateLimitStoreContract,
   settlement,
+  holdLease,
   settlementStoreContract,
   spendStoreContract,
 } from "./port-contracts.js";
 import { hardened, rpcStub } from "./rpc-stub.js";
+import { signerEnv } from "./fake-openbao.js";
 
 // `main()` checks its channel at startup, on the RPC it builds from `RPC_URLS`.
 const bootSecret = Keypair.random().secret();
@@ -107,6 +115,8 @@ describe("PostgreSQL stores", () => {
     /** Two settlers on the store, with one pool that signs and lands once `land()` is called. */
     async function twoSettlers(settleTimeoutMs = 2_000) {
       const { settlements } = await stores();
+      // One lease for both: this is about the claim, not about which of them may send.
+      const fence = await holdLease(settlements);
       let land!: () => void;
       const landed = new Promise<void>((resolve) => (land = resolve));
       const submit = vi.fn<Submitter["submit"]>(async (_call, opts = {}) => {
@@ -138,6 +148,8 @@ describe("PostgreSQL stores", () => {
           settleTimeoutMs,
           budgetMs: 5_000,
           pollMs: 5,
+          latestLedger: async () => 1_000,
+          lease: () => fence,
         });
       return { a: settler(), b: settler(), submit, land, settlements };
     }
@@ -209,6 +221,83 @@ describe("PostgreSQL stores", () => {
     }
   };
 
+  // 0071: the lease row's `FOR KEY SHARE` orders a takeover against the hash's write.
+  it("makes a takeover wait until a hash under the old token is stored", async () => {
+    const { settlements } = await stores();
+    const NAME = "stellar:testnet:channels";
+    const lease = (await settlements.acquireLease(NAME, "a", 1_000, 0))!;
+    const s = settlement("1");
+    await settlements.claim(s);
+    const order: string[] = [];
+    await holding(async (client) => {
+      // Holds the record, so addHash waits there, its lease row already locked.
+      await client.query("SELECT 1 FROM settlements WHERE key = $1 FOR UPDATE", [s.key]);
+      const adding = settlements.addHash(s.key, "h1", lease, 3_000).then((added) => {
+        order.push("added");
+        return added;
+      });
+      await lockWaiter(client);
+      const taking = settlements
+        .acquireLease(NAME, "b", 1_000, 1_001 + LEASE_SKEW_MARGIN_MS)
+        .then((taken) => {
+          order.push("taken");
+          return taken;
+        });
+      // The takeover waits on addHash's lock on the lease row, not on this transaction.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(order).toEqual([]);
+      await client.query("COMMIT");
+      expect(await adding).toBe(true);
+      expect((await taking)?.token).not.toBe(lease.token);
+    });
+    expect(await settlements.get(s.key)).toMatchObject({ state: "signed", hashes: ["h1"] });
+  });
+
+  it("lets a renewal through while addHash holds the lease row (0071 decision 16)", async () => {
+    const { settlements } = await stores();
+    const NAME = "stellar:testnet:channels";
+    const lease = (await settlements.acquireLease(NAME, "a", 1_000, 0))!;
+    const s = settlement("1");
+    await settlements.claim(s);
+    await holding(async (client) => {
+      // Holds the record, so addHash waits there with the lease row locked.
+      await client.query("SELECT 1 FROM settlements WHERE key = $1 FOR UPDATE", [s.key]);
+      const adding = settlements.addHash(s.key, "h1", lease, 3_000);
+      await lockWaiter(client);
+      // A renewal changes only `expires_at`, so `FOR KEY SHARE` doesn't hold it up.
+      const renewed = await Promise.race([
+        settlements.renewLease(NAME, "a", 1_000, 500),
+        new Promise((resolve) => setTimeout(() => resolve("waited"), 2_000)),
+      ]);
+      expect(renewed).toBe(true);
+      await client.query("COMMIT");
+      expect(await adding).toBe(true);
+    });
+  });
+
+  it("refuses a hash when a takeover commits while addHash waits on the lease row", async () => {
+    const { settlements } = await stores();
+    const NAME = "stellar:testnet:channels";
+    const lease = (await settlements.acquireLease(NAME, "a", 1_000, 0))!;
+    const s = settlement("1");
+    await settlements.claim(s);
+    await holding(async (client) => {
+      // A takeover as its UPDATE runs, holding the lease row.
+      await client.query(
+        "UPDATE leases SET holder = 'b', token = gen_random_uuid() WHERE name = $1",
+        [NAME],
+      );
+      // Asserted before the `COMMIT`, or a rejection that comes first is unhandled.
+      const adding = expect(settlements.addHash(s.key, "h1", lease, 3_000)).rejects.toBeInstanceOf(
+        LeaseFencedError,
+      );
+      await lockWaiter(client);
+      await client.query("COMMIT");
+      await adding;
+    });
+    expect(await settlements.get(s.key)).toMatchObject({ state: "claimed", hashes: [] });
+  });
+
   it("rejects a hash another record's insert commits while addHash waits on it", async () => {
     const { settlements } = await stores();
     const [s1, s2] = [settlement("1"), settlement("2")];
@@ -216,10 +305,13 @@ describe("PostgreSQL stores", () => {
     await settlements.claim(s2);
     await holding(async (client) => {
       await client.query("INSERT INTO settlement_hashes (hash, key) VALUES ('h1', $1)", [s1.key]);
-      const adding = settlements.addHash(s2.key, "h1", 3_000);
+      // Asserted before the `COMMIT`, or a rejection that comes first is unhandled.
+      const adding = expect(
+        settlements.addHash(s2.key, "h1", await holdLease(settlements), 3_000),
+      ).rejects.toBeInstanceOf(HashConflictError);
       await lockWaiter(client);
       await client.query("COMMIT");
-      await expect(adding).rejects.toBeInstanceOf(HashConflictError);
+      await adding;
     });
   });
 
@@ -233,7 +325,7 @@ describe("PostgreSQL stores", () => {
         "UPDATE settlements SET state = 'pending', updated_at = 2500 WHERE key = $1",
         [key],
       );
-      const adding = settlements.addHash(key, "h1", 3_000);
+      const adding = settlements.addHash(key, "h1", await holdLease(settlements), 3_000);
       await lockWaiter(client);
       await client.query("COMMIT");
       expect(await adding).toBe(true);
@@ -250,7 +342,7 @@ describe("PostgreSQL stores", () => {
     const { settlements } = await stores();
     const { key } = settlement("1");
     await settlements.claim(settlement("1"));
-    await settlements.addHash(key, "h1", 2_000);
+    await settlements.addHash(key, "h1", await holdLease(settlements), 2_000);
     await settlements.transition(key, "signed", { state: "pending", updatedAt: 2_500 });
     await holding(async (client) => {
       await client.query("SELECT 1 FROM settlements WHERE key = $1 FOR UPDATE", [key]);
@@ -263,6 +355,91 @@ describe("PostgreSQL stores", () => {
       await lockWaiter(client);
       await client.query("COMMIT");
       expect(await moving).toMatchObject({ state: "success", hashes: ["h1", "h2"] });
+    });
+  });
+
+  describe("one non-final settlement per payer and asset (0024)", () => {
+    const [s1, s2, s3] = ["1", "2", "3"].map((nonce) =>
+      settlement(nonce, "stellar:testnet", "CONE"),
+    ) as [NewSettlement, NewSettlement, NewSettlement];
+    const inFlight = async () =>
+      (await pool.query<{ key: string }>("SELECT key FROM settlement_in_flight")).rows.map(
+        (row) => row.key,
+      );
+
+    it("takes over a row whose settlement is final or missing", async () => {
+      // A release before 0008 ends a record without deleting its row.
+      const { settlements } = await stores();
+      await settlements.claim(s1);
+      await pool.query("UPDATE settlements SET state = 'success' WHERE key = $1", [s1.key]);
+      expect(await settlements.claim(s2)).toMatchObject({ claimed: true });
+      expect(await inFlight()).toEqual([s2.key]);
+      // A row naming no record.
+      await stores();
+      await pool.query(
+        `INSERT INTO settlement_in_flight (network, payer, asset, key)
+         VALUES ('stellar:testnet', $1, 'CONE', 'stellar:testnet:GPAYER:gone')`,
+        [s1.payer],
+      );
+      expect(await settlements.claim(s3)).toMatchObject({ claimed: true });
+      expect(await inFlight()).toEqual([s3.key]);
+    });
+
+    it("answers busy to a claim that waited on another key's claim of the payer and asset", async () => {
+      // The waiting claim's first statement began before the winner committed, so it can't see
+      // the winner's record: it must read it again before it calls the row's record missing.
+      const { settlements } = await stores();
+      await holding(async (client) => {
+        await client.query(
+          `INSERT INTO settlements (key, network, payer, nonce, fingerprint, state, payment_payload,
+             payment_requirements, created_at, updated_at)
+           VALUES ($1, 'stellar:testnet', $2, '1', 'fp', 'claimed', '{}', $3, 1, 1)`,
+          [s1.key, s1.payer, JSON.stringify(s1.paymentRequirements)],
+        );
+        await client.query(
+          `INSERT INTO settlement_in_flight (network, payer, asset, key)
+           VALUES ('stellar:testnet', $1, 'CONE', $2)`,
+          [s1.payer, s1.key],
+        );
+        const claiming = settlements.claim(s2);
+        await lockWaiter(client);
+        await client.query("COMMIT");
+        expect(await claiming).toEqual({ claimed: false, busy: s1.key });
+      });
+      expect(await settlements.get(s2.key)).toBeUndefined();
+      expect(await inFlight()).toEqual([s1.key]);
+    });
+
+    it("claims once the blocker's final transition it waited on commits", async () => {
+      const { settlements } = await stores();
+      await settlements.claim(s1);
+      await holding(async (client) => {
+        // What `transition` to a final state writes, held open.
+        await client.query("UPDATE settlements SET state = 'rejected' WHERE key = $1", [s1.key]);
+        await client.query("DELETE FROM settlement_in_flight WHERE key = $1", [s1.key]);
+        const claiming = settlements.claim(s2);
+        await lockWaiter(client);
+        await client.query("COMMIT");
+        expect(await claiming).toMatchObject({ claimed: true });
+      });
+      expect(await inFlight()).toEqual([s2.key]);
+    });
+
+    it("deletes the row on a final transition only while it still names the record", async () => {
+      const { settlements } = await stores();
+      await settlements.claim(s1);
+      await holding(async (client) => {
+        // Another key takes the row while the final write of s1 waits on it.
+        await client.query("UPDATE settlement_in_flight SET key = $1", [s2.key]);
+        const ending = settlements.transition(s1.key, "claimed", {
+          state: "expired",
+          updatedAt: 3_000,
+        });
+        await lockWaiter(client);
+        await client.query("COMMIT");
+        expect(await ending).toMatchObject({ state: "expired" });
+      });
+      expect(await inFlight()).toEqual([s2.key]);
     });
   });
 
@@ -279,7 +456,7 @@ describe("PostgreSQL stores", () => {
         await pool.query("SELECT pg_terminate_backend($1)", [await lockWaiter(client)]);
         await expect(reserving).rejects.toThrow();
       });
-      expect(await spend.reserve({ id: "b", amount: 1n, limits, now: 0 })).toEqual({
+      expect(await spend.reserve({ id: "b", amount: 1n, limits, now: 0 })).toMatchObject({
         reserved: true,
       });
       expect((await settlements.claim(settlement("1"))).claimed).toBe(true);
@@ -378,19 +555,8 @@ describe("PostgreSQL stores", () => {
         code: "55P03",
       });
     });
-    expect(await spend.reserve({ id: "a", amount: 1n, limits, now: 0 })).toEqual({
+    expect(await spend.reserve({ id: "a", amount: 1n, limits, now: 0 })).toMatchObject({
       reserved: true,
-    });
-  });
-
-  it("resets no failures without waiting on a reservation's scope lock", async () => {
-    const { spend } = await stores();
-    await pool.query("INSERT INTO spend_scopes (scope) VALUES ('asset:CX')");
-    await holding(async (client) => {
-      await client.query("SELECT scope FROM spend_scopes WHERE scope = 'asset:CX' FOR UPDATE");
-      const reset = spend.recordSuccess("asset:CX").then(() => "reset");
-      const waited = new Promise((resolve) => setTimeout(() => resolve("waited"), 1_000));
-      expect(await Promise.race([reset, waited])).toBe("reset");
     });
   });
 
@@ -447,7 +613,7 @@ describe("PostgreSQL stores", () => {
     await stores();
     const app = await main({
       DATABASE_URL: urlFor(schema),
-      FACILITATOR_SECRET: bootSecret,
+      ...signerEnv(Keypair.fromSecret(bootSecret).publicKey()),
       CLIENT_IP: "socket",
       CHANNELS: bootChannel,
       RPC_URLS: rpc.url,
@@ -543,11 +709,11 @@ describe("PostgreSQL stores", () => {
       paymentRequirements: requirements,
       createdAt: now,
     });
-    await settlements.addHash(key, "h1", now);
+    await settlements.addHash(key, "h1", await holdLease(settlements), now);
     await settlements.transition(key, "signed", { state: "success", updatedAt: now });
     const app = await main({
       DATABASE_URL: urlFor(schema),
-      FACILITATOR_SECRET: bootSecret,
+      ...signerEnv(Keypair.fromSecret(bootSecret).publicKey()),
       CLIENT_IP: "socket",
       CHANNELS: bootChannel,
       RPC_URLS: rpc.url,
@@ -577,7 +743,7 @@ describe("PostgreSQL stores", () => {
     await stores();
     const env = {
       DATABASE_URL: urlFor(schema),
-      FACILITATOR_SECRET: bootSecret,
+      ...signerEnv(Keypair.fromSecret(bootSecret).publicKey()),
       CLIENT_IP: "socket",
       CHANNELS: bootChannel,
       RPC_URLS: rpc.url,
@@ -615,7 +781,7 @@ describe("PostgreSQL stores", () => {
   it("closes once when two signals call close()", async () => {
     const app = await main({
       DATABASE_URL: urlFor(schema),
-      FACILITATOR_SECRET: bootSecret,
+      ...signerEnv(Keypair.fromSecret(bootSecret).publicKey()),
       CLIENT_IP: "socket",
       CHANNELS: bootChannel,
       RPC_URLS: rpc.url,
@@ -684,8 +850,38 @@ describe("PostgreSQL stores", () => {
     }
   });
 
+  it("never reopens a record a release before 0073 inserted after the migration (0073 decision 25)", async () => {
+    // During the deploy the old release still runs on the migrated schema: its inserts leave
+    // `reopened` out, so they get the column's default and stay closed for good.
+    const { settlements } = await stores();
+    const s = settlement("1");
+    await pool.query(
+      `INSERT INTO settlements (key, network, payer, nonce, fingerprint, state, payment_payload,
+         payment_requirements, created_at, updated_at, error_reason)
+       VALUES ($1, $2, $3, $4, $5, 'rejected', $6, $7, $8, $8, 'unsent')`,
+      [
+        s.key,
+        s.network,
+        s.payer,
+        s.nonce,
+        s.fingerprint,
+        JSON.stringify(s.paymentPayload),
+        JSON.stringify(s.paymentRequirements),
+        s.createdAt,
+      ],
+    );
+    expect(await settlements.get(s.key)).toMatchObject({ state: "rejected", reopened: -1 });
+    expect(await settlements.reopen(s.key, s.fingerprint, ["unsent"], 5_000)).toBeUndefined();
+    // This release's own claims start at 0, and reopen.
+    const t = settlement("2");
+    await settlements.claim(t);
+    expect((await settlements.get(t.key))?.reopened).toBe(0);
+  });
+
   it("reads records on a database `0002_success_answered` hasn't reached", async () => {
-    // A release started before `pnpm migrate`: `SELECT s.*` has no `success_answered_at`.
+    // A release started before `pnpm migrate`: `SELECT s.*` has no `success_answered_at`. The
+    // record is written as that schema's release wrote it: this one's `claim()` sets `reopened`,
+    // which needs `0007_settlement_reopened`.
     const fresh = `${schema}_0001`;
     await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
     await pool.query(`CREATE SCHEMA ${fresh}`);
@@ -694,8 +890,26 @@ describe("PostgreSQL stores", () => {
       expect(await migrate(old, 0, MIGRATIONS.slice(0, 1))).toEqual(["0001_init"]);
       const { settlements } = postgresStores(old);
       const s = settlement("1");
-      await settlements.claim(s);
-      expect(await settlements.get(s.key)).not.toHaveProperty("successAnsweredAt");
+      // Written as that release claims; this one's claim needs `0011_settlement_in_flight`.
+      await old.query(
+        `INSERT INTO settlements (key, network, payer, nonce, fingerprint, state, payment_payload,
+           payment_requirements, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, 'claimed', $6, $7, $8, $8)`,
+        [
+          s.key,
+          s.network,
+          s.payer,
+          s.nonce,
+          s.fingerprint,
+          JSON.stringify(s.paymentPayload),
+          JSON.stringify(s.paymentRequirements),
+          s.createdAt,
+        ],
+      );
+      const record = await settlements.get(s.key);
+      expect(record).not.toHaveProperty("successAnsweredAt");
+      // Without the column nothing reopens, as for a record claimed before 0073.
+      expect(record?.reopened).toBe(-1);
     } finally {
       await old.end();
       await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
@@ -725,6 +939,11 @@ describe("PostgreSQL stores", () => {
           "0003_catalog_type_seq",
           "0004_spend_window",
           "0005_settlement_attempts",
+          "0007_settlement_reopened",
+          "0008_lease_token",
+          "0009_spend_budgets",
+          "0010_settlement_failure",
+          "0011_settlement_in_flight",
         ]);
         expect(await typeIndex(old), built).toBe(1);
       } finally {
@@ -746,7 +965,15 @@ describe("PostgreSQL stores", () => {
         `INSERT INTO spend_reservations (id, amount, at, state) VALUES ('a', 60, 5, 'committed');
          INSERT INTO spend_reservation_scopes (id, scope) VALUES ('a', 'global'), ('a', 'payer:P')`,
       );
-      expect(await migrate(old)).toEqual(["0004_spend_window", "0005_settlement_attempts"]);
+      expect(await migrate(old)).toEqual([
+        "0004_spend_window",
+        "0005_settlement_attempts",
+        "0007_settlement_reopened",
+        "0008_lease_token",
+        "0009_spend_budgets",
+        "0010_settlement_failure",
+        "0011_settlement_in_flight",
+      ]);
       const { rows } = await old.query(
         "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",
       );
@@ -755,6 +982,15 @@ describe("PostgreSQL stores", () => {
         { scope: "payer:P", at: "5", amount: "60" },
       ]);
       expect(await postgresStores(old).spend.used("payer:P", 10, 6)).toBe(60n);
+      // 0006's state CHECK is added NOT VALID, so no scan, and still holds every new row.
+      await old.query(
+        "INSERT INTO spend_reservations (id, amount, at, state) VALUES ('b', 1, 5, 'released')",
+      );
+      await expect(
+        old.query(
+          "INSERT INTO spend_reservations (id, amount, at, state) VALUES ('c', 1, 5, 'spent')",
+        ),
+      ).rejects.toThrow(/spend_reservations_state_check/);
     } finally {
       await old.end();
       await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
@@ -778,6 +1014,97 @@ describe("PostgreSQL stores", () => {
       // A sum that waits fails here, and the rollback then lets it finish.
       const blocked = new Promise((resolve) => setTimeout(() => resolve("blocked"), 1_000));
       expect(await Promise.race([spend.used("global", 100, 50), blocked])).toBe(20n);
+    });
+  });
+
+  it("gives up a success count rather than wait on a locked scope row (0024)", async () => {
+    const { spend } = await stores();
+    const scope = "asset:CONE" as const;
+    await spend.recordFailure(scope, 0, 60_000); // creates the row
+    await holding(async (client) => {
+      // `reserve` holds this scope row FOR UPDATE: a success write that waited would hold a
+      // main-pool connection until the lock cleared, starving claim/addHash. It gives up instead.
+      await client.query("SELECT 1 FROM spend_scopes WHERE scope = $1 FOR UPDATE", [scope]);
+      const blocked = new Promise((resolve) => setTimeout(() => resolve("blocked"), 1_500));
+      expect(
+        await Promise.race([spend.recordSuccess(scope, 1, 60_000).then(() => "done"), blocked]),
+      ).toBe("done");
+    });
+    // Best-effort: the contended success wasn't counted, which only makes the breaker more eager.
+    expect(await spend.recordFailure(scope, 2, 60_000)).toMatchObject({
+      failures: 2,
+      successes: 0,
+    });
+  });
+
+  it("prunes quiescent spend_scopes rows and keeps the active ones (0024)", async () => {
+    const { spend } = await stores();
+    // A lock row a reserve left long ago: no failure, no breaker — safe to forget.
+    await pool.query("INSERT INTO spend_scopes (scope, window_start) VALUES ('payer:OLD', 100)");
+    // A breaker still open in the future must survive.
+    await pool.query(
+      "INSERT INTO spend_scopes (scope, window_start, breaker_until) VALUES ('asset:OPEN', 100, 9999999)",
+    );
+    // Recent strikes must survive, so the backoff escalation isn't lost.
+    await pool.query(
+      "INSERT INTO spend_scopes (scope, window_start, strikes, last_opened_at) VALUES ('payer:STRIKING', 100, 2, 5000)",
+    );
+    // A failure count whose window is still running must survive, with no breaker or strike.
+    await pool.query(
+      "INSERT INTO spend_scopes (scope, window_start) VALUES ('payer:COUNTING', 5000)",
+    );
+    // A budget-only scope: `reserve` never sets `window_start`, so only its reservations in the
+    // horizon keep it.
+    await pool.query("INSERT INTO spend_scopes (scope) VALUES ('global')");
+    await pool.query(
+      `INSERT INTO spend_reservations (id, amount, at) VALUES ('r', 10, 5000);
+       INSERT INTO spend_reservation_scopes (id, scope, at, amount) VALUES ('r', 'global', 5000, 10)`,
+    );
+    expect(await spend.pruneScopes(1_000, 100)).toBe(1);
+    const { rows } = await pool.query<{ scope: string }>(
+      "SELECT scope FROM spend_scopes ORDER BY scope",
+    );
+    expect(rows.map((r) => r.scope)).toEqual([
+      "asset:OPEN",
+      "global",
+      "payer:COUNTING",
+      "payer:STRIKING",
+    ]);
+  });
+
+  it("keeps a scope row a reserve has locked from the pruner until it commits (0024)", async () => {
+    const { spend } = await stores();
+    // An existing, quiescent row: `reserve`'s insert finds it, the case where `ON CONFLICT DO
+    // NOTHING` took no lock and a prune between the insert and the lock let two reserves through.
+    await pool.query("INSERT INTO spend_scopes (scope) VALUES ('global')");
+    let pruned: number | undefined;
+    let inserted = false;
+    const reservePool = {
+      connect: async () => {
+        const client = await pool.connect();
+        const query = client.query.bind(client) as (...args: unknown[]) => Promise<unknown>;
+        return Object.assign(Object.create(client) as pg.PoolClient, {
+          query: async (...args: unknown[]) => {
+            // Right after the scope rows' insert, before anything else: a prune now must skip.
+            if (inserted && pruned === undefined)
+              pruned = await spend.pruneScopes(Number.MAX_SAFE_INTEGER, 100);
+            if (String(args[0]).includes("INSERT INTO spend_scopes")) inserted = true;
+            return query(...args);
+          },
+          release: (error?: Error | boolean) => client.release(error),
+        });
+      },
+    } as unknown as pg.Pool;
+    const store = new PostgresSpendStore(pool, reservePool);
+    const limits = [{ scope: "global" as const, maxStroops: 100n, windowMs: 1_000 }];
+    expect(await store.reserve({ id: "a", amount: 60n, limits, now: 0 })).toMatchObject({
+      reserved: true,
+    });
+    expect(pruned).toBe(0);
+    // And the second reserve, serialized on the same row, sees the first.
+    expect(await spend.reserve({ id: "b", amount: 60n, limits, now: 1 })).toEqual({
+      reserved: false,
+      scope: "global",
     });
   });
 

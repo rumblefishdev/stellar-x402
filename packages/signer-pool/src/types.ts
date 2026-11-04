@@ -1,4 +1,5 @@
 import type { rpc } from "@stellar/stellar-sdk";
+import type { FailureCause } from "./failure-cause.js";
 
 /**
  * The RPC calls the pool needs. `rpc.Server` satisfies it; tests pass a fake. Accounts are read
@@ -47,7 +48,11 @@ export type SubmitStatus =
   /**
    * No final answer by the time bound plus `confirmGraceSeconds` (the RPC did not answer): the
    * transaction may still land. The channel stays out of the pool until it is final, and a
-   * `resolved` event reports the outcome.
+   * `resolved` event reports the outcome. Also the outcome of a `NOT_FOUND` past the bound from a
+   * node whose history starts later: it may have landed, only the hash can tell, and the channel
+   * is free again. That `pending` ends nothing, so it emits no `resolved`, also after a `pending`
+   * at `dueAt`: reconciliation finishes the record. `pending` minus `resolved` therefore doesn't
+   * count the settlements still being confirmed (0088).
    */
   | "pending";
 
@@ -78,6 +83,8 @@ export interface SubmitResult {
    * for an `expired` send the network refused.
    */
   errorCode?: string;
+  /** Why an included transaction failed; set only with `failed`, and empty when unreadable. */
+  failure?: FailureCause;
   /** Every attempt of this submission, in order; the last one is `hash`. */
   attempts: Attempt[];
 }

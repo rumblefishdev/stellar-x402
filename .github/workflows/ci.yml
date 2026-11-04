@@ -24,8 +24,23 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      # The OpenBao signer's tests (0036): a dev server, unsealed, with a known root token.
+      openbao:
+        # The digest production pins (deploy/openbao/compose.yaml), so CI tests that image.
+        image: openbao/openbao:2.7.2@sha256:5046911075e137e154ce49ab051502f4ec7cf367d484ae4a4dce665d9b90561f
+        env:
+          BAO_DEV_ROOT_TOKEN_ID: root
+        ports:
+          - 8200:8200
+        options: >-
+          --health-cmd "bao status -address=http://127.0.0.1:8200"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      TEST_OPENBAO_ADDR: http://127.0.0.1:8200
+      TEST_OPENBAO_TOKEN: root
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -39,6 +54,14 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+
+  # Production's Postgres from its own compose file, as its unit starts it (task 0091). On every
+  # pull request, not only those under deploy/: a job skipped by a paths filter can't be required.
+  production-postgres:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: deploy/scripts/check-production-postgres.sh
 
   contracts:
     runs-on: ubuntu-latest

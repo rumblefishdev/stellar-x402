@@ -15,6 +15,11 @@ history:
     note: >
       Spawned from 0037 (W352): what the testnet prototype leaves out on purpose (scope) and what
       must hold before real money (security), collected in its review.
+  - date: "2026-11-03"
+    status: backlog
+    who: karolkow
+    note: >
+      An architecture review narrowed a rewrite of the paid round trip to this first step.
 ---
 
 # Prepare the MCP server for mainnet: assets, networks, payee allowlist, key storage
@@ -68,6 +73,20 @@ is decided with the owner (options and a recommendation) before it is built.
   exceed (agentpay-mcp; its contract enforcement not yet confirmed).
 - **A cap on `STELLAR_X402_TIMEOUT_MS`:** today any value is accepted, also one past the MCP
   client's 60 s.
+
+## First step: drop `wrapFetchWithPayment`
+
+`pay.ts` detects paying by sniffing a header and failures by matching upstream's error prefixes, both
+because `wrapFetchWithPayment` runs the round trip. Run the public `x402HTTPClient` calls in order
+instead (upstream's `examples/typescript/clients/custom/index.ts:46-82`, a17c668), ~3 h, `[refactor]`,
+on the money path. The 36 `pay.test.ts` tests go through a fake seller and never mock the wrapper.
+
+- Goes: `paymentSent`, the header sniff, the prefix regex. Of three ordering fixes, it would have
+  prevented one (be5d836). No ordering fix since 2026-10-15, so nothing here is breaking today.
+- Stays: `x402Client`'s hooks and `refusal`, `paid`, `signingError`, because
+  `selectPaymentRequirements` is private. `preview.ts` stays stricter by design.
+- Lost from the wrapper, none in use: the `onPaymentRequired` hook, the recovery retry and the
+  "Payment already attempted" guard. Keep the `Access-Control-Expose-Headers` request line.
 
 ## Acceptance Criteria
 

@@ -5,7 +5,7 @@ type: FEATURE
 status: active
 milestone: 1
 related_adr: ["0011", "0012", "0013"]
-related_tasks: ["0012", "0014", "0022", "0017", "0020", "0013", "0039", "0036", "0047"]
+related_tasks: ["0012", "0014", "0022", "0017", "0020", "0013", "0039", "0036", "0047", "0099", "0100"]
 tags: [facilitator, deploy, priority-high, effort-medium, platform]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -81,6 +81,50 @@ history:
     status: active
     who: stkrolikiewicz
     note: "The production environment's reviewers are the x402 team only: stkrolikiewicz, karolko9, karczuRF and adamkoot; kowalski and mmisiorek came off the list."
+  - date: "2026-10-30"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      ch-prod-01 is set up up to the facilitator. deploy/production exists, protected by a ruleset
+      (a pull request with one approval, no deletion or force push, no bypass). The playbook ran
+      from develop, last at bb0660c, whose check run changed only compose.yaml. The four credentials are
+      encrypted with the host key: the database password and URL, the RPC URLs (version
+      2026-10-30: SDF's and gateway.fm's testnet RPC) and the tunnel token.
+      x402-db-testnet@production and x402-tunnel@production run on the fixed subnets of #98, after
+      the first start failed on Docker's empty address pool. cloudflared passed UDP and TCP 7844
+      and uses QUIC; Browser Integrity Check is off for the hostname (soroban-infrastructure#2).
+      The public URL answers 502: the tunnel is up and the facilitator isn't. Before the first
+      deploy: the signer and channels (0036 and OpenBao on the server), then the GHCR package
+      made public after the first image.
+  - date: "2026-11-02"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      OpenBao's project (deploy/openbao), its unit and the playbook's steps, tried locally on
+      OpenBao 2.7.2: init with one recovery share under the static seal, Transit and an AppRole,
+      a signature through testnet's socket from a container running as uid 1000 that verifies
+      against the key, and a restart that unseals by itself. Raft needs a TCP listener for its
+      cluster address, so admin is a loopback listener inside the container instead of a host
+      socket (ADR 0013 amended). The step that moved testnet off an old key is gone: nothing ran
+      on one (0036 decision 15).
+  - date: "2026-11-03"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      OpenBao runs on ch-prod-01. The playbook from develop at d413e75 changed only OpenBao's
+      directories, compose file, config, unit and volumes. OpenBao started on 2026-11-02 at 16:25
+      UTC and was initialised at 16:28 with one recovery share; the backup secret was created and
+      read back the same. The admin's shell was lost before step 4, and init's root token with it:
+      a root token from the recovery key in AWS (policy root) proved the backup, and init's token
+      was revoked by its accessor. Then the Transit key stellar-testnet, the policy and AppRole
+      x402-testnet, both AppRole credentials (each decrypts to 36 bytes), and the root token
+      revoked on 2026-11-03 at 08:58:39 UTC (audit log). The key's account
+      GAVE5V5IOMNNBOZXGZSQOP447L2QLCG6ELIIPO6CFJLGZVY4YIK3KKRP holds 10,000 XLM from Friendbot,
+      and 20 channels came in two transactions (2c966cac…, 34973a78…); on Horizon each has the key
+      as its only signer and 1.5 XLM. Only the admin user is in the docker group. The firmware
+      exposes no TPM (no ACPI TPM2 or TCPA table, no SMBIOS type 43, no /dev/tpm*); most likely the
+      Ryzen 9 3900's fTPM is off in the BIOS, which wasn't checked. The .env values
+      (FACILITATOR_ADDRESS_TESTNET, CHANNELS_TESTNET) and the facilitator wait for #102.
 ---
 
 # Public testnet deployment
@@ -125,8 +169,9 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     reachable only from the facilitator and the migration service.
   - Networks `x402-production-edge` (`cloudflared` and the facilitator) and
     `x402-production-db` (`internal: true`, the facilitator, each network's Postgres and
-    migration service), both part of the production compose project. Only the facilitator and
-    `migrate-testnet` hold testnet's database password.
+    migration service), both part of the production compose project, on fixed subnets
+    (`172.31.200.0/28` and `172.31.200.16/28`) since the server's Docker address pool is taken.
+    Only the facilitator and `migrate-testnet` hold testnet's database password.
   - `cloudflared`: Cloudflare's tunnel connector pinned by digest, memory limit 128 MiB, under
     its own unit `x402-tunnel@production.service`, enabled at boot and untouched by deploys, so
     it keeps forwarding while the facilitator drains; `x402@production` runs after it. The unit
@@ -151,8 +196,8 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 - From 0039, provisioning (ADR 0011): an Ansible playbook in `deploy/ansible/`, run by an admin
   from a reviewed commit, sets up x402's parts of the server: the `x402` user,
   `/srv/x402/production/`, the units and timers, the compose files, `deploy.sh`, the deploy
-  user's `sudo` rule and forced command, `cloudflared`, and the pgBackRest and CloudWatch agent
-  config. It never touches the server's base setup (firewall, `daemon.json`, users), and CI
+  user's `sudo` rule and forced command, `cloudflared`, and the pgBackRest config; 0027 adds the
+  CloudWatch agent and its signing helper. It never touches the server's base setup (firewall, `daemon.json`, users), and CI
   never runs it.
 - From 0039, the deploy:
   - GitHub Actions connects over SSH to the server's existing SSH port, with the server's host
@@ -197,11 +242,11 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     environment secret.
 - From 0039, keys and secrets:
   - the facilitator signs through OpenBao Transit on the server (ADR 0013, 0036 a prerequisite);
-  - the server gets short-lived AWS credentials through IAM Roles Anywhere, for a role that only
-    writes logs and metrics, held only by the CloudWatch agent. The trust anchor is the
-    ClickHouse project's existing client-certificate CA; the server certificate is issued with
-    that project's script, valid for a year, its CN accepted by the role's trust policy and kept
-    off the ClickHouse site's allowlist. Ask that project to tell us when it rotates its CA;
+  - the server's short-lived AWS credentials through IAM Roles Anywhere, for a role that only
+    writes logs and metrics and is held only by the CloudWatch agent, come with 0027: the role,
+    its profile, the agent, the certificate request and its renewal steps (0027 decision 6,
+    agreed by Stan on 2026-11-03). The first deploy goes out without CloudWatch logs until 0027
+    lands;
   - the database password and any keyed RPC URL are encrypted systemd credentials
     (`systemd-creds`), decrypted to `/run/x402/production/` and mounted as Compose `file:` secrets,
     never `environment:`. The files are named per network, so mainnet adds its own and renames
@@ -236,15 +281,17 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     it off for `x402-facilitator.sorobanscan.com` with a configuration rule in
     `soroban-infrastructure` (the rest of the zone keeps it for sorobanscan's site), checking which
     token permission the ruleset needs. Bot Fight Mode couldn't be read (the token has no Bot
-    Management permission): check its toggle in the dashboard, Security → Bots.
+    Management permission): check its toggle in the dashboard, Security → Bots. Done: Bot Fight
+    Mode is off (2026-10-29), and the rule is applied (soroban-infrastructure#2, 2026-10-30); a
+    request with no `User-Agent` reaches the tunnel instead of answering 1010.
 - From 0039: `GET /health` answers 200 and reports `ready` and `listed` in its body (`listed`
   since 0019, `05dcfae`: a sweep has listed the non-final records).
 - From 0039, the runbook: running the playbook from a reviewed commit, deploy, rollback
   (automatic on a failed deploy; by hand, redeploy an earlier digest), long migrations outside
   the deploy, reboots, fetching the tunnel token from Cloudflare (dashboard, API or
   `terraform output`) into its systemd credential, rotating that token and checking the
-  tunnel's connector count, renewing the Roles Anywhere certificate, key
-  rotation as an on-chain signer change, and restoring the service on another machine.
+  tunnel's connector count, key rotation as an on-chain signer change (0027 adds renewing the
+  Roles Anywhere certificate), and restoring the service on another machine.
 - From 0013 ([ADR 0012](../../../docs/adr/0012-facilitator-state-store.md)), the database, on the
   server (ADR 0011):
   - the `postgres-testnet` container above, its credentials a Compose secret file;
@@ -289,16 +336,20 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   unit passing in its own credentials. None gets the Docker socket. Swap and core dumps off for
   OpenBao.
 - **Link:** a socket per network, each in its own volume, mounted into the one facilitator
-  (ADR 0013 is updated in 0077), plus the admin socket (root-only, in no container); no TCP
-  listener.
+  (ADR 0013 is updated in 0077), plus admin on a loopback listener inside OpenBao's container,
+  which Raft needs for its cluster address (OpenBao takes that only from a TCP listener).
+  OpenBao's compose service uses `network_mode: none`: it needs no network, nothing outside the
+  container reaches the loopback listener, and on the server Docker's address pool has none to
+  give, which fails a default network at start.
 - **Keys:** one Transit key per network, generated inside OpenBao, `type=ed25519`,
   `exportable=false`, `allow_plaintext_backup=false`. One policy per network allowing only
   `transit/sign/<key>`, and one AppRole per network: `token_ttl` and `token_max_ttl` 1 h, a secret
-  ID that doesn't expire, delivered as a Compose secret.
+  ID that doesn't expire, delivered as a Compose secret. User lockout off for AppRole (ADR 0013).
 - **Unseal:** a static seal key as an encrypted systemd credential (`systemd-creds`, `host` mode).
-  Note in the runbook whether the board has a TPM (ADR 0013's first upgrade).
-- **Init:** `bao operator init -recovery-shares=1 -recovery-threshold=1`. Check that the static
-  seal accepts these flags (the init docs name only HSM, KMS and Transit seals).
+  Note in the runbook whether the board has a TPM (ADR 0013's first upgrade); finding out before
+  mainnet is 0100.
+- **Init:** `bao operator init -recovery-shares=1 -recovery-threshold=1`. The static seal accepts
+  these flags (OpenBao 2.7.2, 2026-11-02).
 - **Backup secret** (ADR 0013): `x402/production/openbao-backup` in AWS Secrets Manager,
   `eu-central-1`, in the AWS account soroban-explorer and prices-api share; tags
   `Project=stellar-x402`, `Environment=production`; 30-day recovery window; default
@@ -306,31 +357,34 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   - One JSON: `seal_key_hex`, `seal_key_id`, `seal_key_sha256`, `previous_seal_key_hex`,
     `previous_seal_key_id`, `recovery_key`, `borg_passphrase`, `borg_key_export`, `seal_config`,
     `openbao_version`, `storage_box_ro_user`, `storage_box_ro_ssh_key`, `updated`.
-  - Made by hand from an admin's machine, never by CDK: stage the JSON in `/dev/shm`,
-    `aws secretsmanager create-secret`, `shred`. Every change (a seal key rotation, a new Borg
-    passphrase, an OpenBao upgrade) is a `put-secret-value` of the whole JSON; the old version stays
-    as `AWSPREVIOUS`.
+  - Made by hand from an admin's machine, never by CDK: the JSON goes over stdin to
+    `aws secretsmanager create-secret`, so it never reaches a disk. Every change (a seal key
+    rotation, a new Borg passphrase, an OpenBao upgrade) is a `put-secret-value` of the whole JSON;
+    the old version stays as `AWSPREVIOUS`.
   - The server gets no AWS credentials that can read it: only the roles ADR 0011 names (today the
     logs-and-metrics role, ADR 0013). The runbook names the secret and its fields, never values.
 - **Admin:** the root token revoked after setup, regenerated with the recovery key when needed
-  through the legacy `/sys/generate-root/*` API with curl (the 2.6+ CLI needs a token); admin
-  through SSH over the admin socket (root-only, in no container, with
+  through the legacy `/sys/generate-root/*` API (the 2.6+ CLI's `generate-root` needs a token);
+  admin through SSH and `docker compose exec` on the loopback listener (with
   `disable_unauthed_generate_root_endpoints=false`); no UI.
-- **Audit log:** a file on its own volume, rotated; alarm at 80% disk (0027).
+- **Audit log:** a file on its own volume, rotated daily by the playbook's
+  `/etc/logrotate.d/x402-openbao` (a year, compressed; SIGHUP makes OpenBao reopen it); alarm at
+  80% disk (0027).
 - **Snapshots:** daily Raft snapshots to our own sub-account and Borg repository on the company's
   existing Hetzner Storage Box, keeping 14, set up like that box's other sub-account. Tell
   the team that owns the box that we depend on it. The job uses its own AppRole with a
   snapshot-only policy (`sys/storage/raft/snapshot`), its credential a systemd credential, over
-  the admin socket. A second, read-only sub-account on the same directory, its SSH key in the
+  the admin listener. A second, read-only sub-account on the same directory, its SSH key in the
   backup secret, is what a restore uses. Decide the Borg mode (repokey or keyfile); in
   keyfile mode `borg key export` goes into the backup secret.
-- **Fee float** (ADR 0013): refill to 100 XLM, alarm at 25 XLM, no upper limit, the same numbers on
-  testnet for now. Set `checkFacilitatorBalance`'s `minSpendableStroops` to 25 XLM (its default is
-  100 XLM).
-- **Move testnet to the OpenBao key:** stop the service; in one transaction signed by the current
-  key, create the OpenBao key's own account, a `set_options` on each channel adds the OpenBao key
-  and removes the current one, and an `accountMerge` moves the old fee account into the new one;
-  start the service in `openbao` signer mode with the new account as its address (0036).
+- **Fee float** (ADR 0013): refill to 100 XLM, alarms at 25 and 10 XLM, no upper limit, the same
+  numbers on testnet for now. The alarms come from 0027's off-server check, which publishes the
+  spendable balance, so `checkFacilitatorBalance`'s `minSpendableStroops` isn't set (0027
+  decision 7).
+- **Testnet on the OpenBao key:** nothing has run on another key, so nothing moves. An ordinary
+  wallet funds the OpenBao key's account and creates its channels with `create-channels.ts`
+  (0036 decision 15, #100); the facilitator starts in `openbao` signer mode with that account as
+  its address (#102).
 - **Runbook** in `docs/runbook.md`:
   - **restore drill:** on a throwaway machine with no route to production, using only the backup
     secret and the Storage Box: pull the newest snapshot, start OpenBao with the seal key and key
@@ -343,11 +397,19 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
     funds a fresh account and merges it into the fee account); mainnet by a withdrawal from the
     company's exchange account to the fee account (no memo). **Who makes it, and a backup person:
     TBD before mainnet;**
-  - **weekly review** after the mainnet deploy (okarcz): the real fee spend, the next refill
-    amount, and whether ADR 0013's custody still fits the float;
-  - a leaked token or secret ID: destroy the secret ID, revoke its tokens, issue a new one;
-  - a suspected key theft: new Transit key, then the same transaction as the move above with the
-    old key, check the theft alarm's history;
+  - **weekly review** (okarcz): from the first deploy, which alarms are in ALARM; after the
+    mainnet deploy also the real fee spend (0027's `fee_charged_stroops` over 7 days, against the
+    balance's change), the next refill amount, and whether ADR 0013's custody still fits the
+    float;
+  - a leaked token or secret ID: destroy the secret ID, revoke its tokens, issue a new one, and
+    restart the facilitator, which reads it at start;
+  - a restore of OpenBao from a snapshot: restart the facilitator, since a token newer than the
+    snapshot answers 403 until its hour ends (0036). A new login worked after a restore in one run
+    on OpenBao 2.7.2; the drill confirms it;
+  - a suspected key theft: new Transit key, then one transaction signed by the old key: it creates
+    the new key's own account, a `set_options` on each channel adds the new key and removes the
+    old one, and an `accountMerge` moves the old fee account into it; check the theft alarm's
+    history (its tool and rehearsal are 0099, before mainnet);
   - OpenBao upgrades and what `/settle` does meanwhile (it answers an error).
 
 ## Acceptance Criteria
@@ -358,3 +420,4 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 - [x] Given `DATABASE_URL_FILE` or `RPC_URLS_FILE`, when the service starts, then it reads the value from that file, and with neither set it falls back to `DATABASE_URL` and `RPC_URLS`
 - [ ] Given the durable stores from 0022, when the service runs, then it uses them, and `docs/runbook.md` has the deploy and rollback steps
 - [ ] Given the deployed facilitator, when it settles, then it signs through OpenBao Transit over the unix socket, no secret seed is on the server outside OpenBao, the backup secret exists in AWS, and a restore drill from it has passed
+- [ ] Given OpenBao's audit log on the server, when `logrotate` runs, then the file is renamed, OpenBao writes to a new `audit.log` and still signs, and old files past a year are removed (runbook, OpenBao)

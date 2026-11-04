@@ -112,6 +112,8 @@ description or price, and nobody can make `/discovery/resources` answer megabyte
 | 36 | A check's row keeps the seller's 402 as answered up to the fetch limits (64 KiB HTTP, 256 KiB MCP), also when the listing is then refused as too large: what a seller sent stays readable; the per-host budget (row 3) and the 30-day pruning bound the space | grilling | beyond it | spec silent | | |
 | 37 | A whole listing, serialized, takes at most 16 KiB; over it the listing is refused as `too_large` with detail `listing`, and the payment never is. A page of 100 stays under 1.6 MB, where the field limits alone let an MCP listing reach about 67 KiB. In the largest public catalog 5 of 95,733 listings are larger, all HTTP | grilling | beyond it (row 9's field limits stay) | spec silent | | |
 | 38 | Only a payment whose copy is new or differs from the stored listing is an attempt and a `catalog_attempts` row, a refused copy and a skipped check included; a copy equal to the listing only increments the counter | grilling | changes row 23 | spec silent | | |
+| 39 | The check doesn't prove that a listing's `payTo` belongs to the URL's owner: ADR 0008 says so, and 0068 is required before pubnet. No proof of the account for a listing: none of the 10 Stellar accounts in the largest public catalog could show one through SEP-1 | grilling | beyond it | spec silent; SEP-1 | | |
+| 40 | A seller's response headers are read up to 24 KiB, so a 16 KiB listing fits once base64-encoded; over that is `response_too_large`, like a body over its cap, instead of a dropped connection | grilling | beyond it | spec silent | | |
 
 ## Not yet decided
 
