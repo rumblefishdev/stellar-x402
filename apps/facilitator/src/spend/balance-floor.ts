@@ -7,6 +7,12 @@ import type { Logger } from "../logger.js";
 import type { NetworkMetrics } from "../metrics.js";
 import type { BalanceFloor } from "./policy.js";
 
+/**
+ * The age above which the `balance-stale` alarm fires (0027 G-alarm-list): the floor's
+ * `maxStaleMs` at the default 30 s interval. Startup warns when the configured bound differs.
+ */
+export const BALANCE_STALE_ALARM_MS = 300_000;
+
 /** The floor as `start()` and `close()` run it: read in the background, checked in memory. */
 export interface BalanceReader extends BalanceFloor {
   /** Reads the balance once, then every `intervalMs` until `stop()`; never rejects. */
@@ -15,6 +21,14 @@ export interface BalanceReader extends BalanceFloor {
   runOnce(): Promise<void>;
   /** Stops the timer; a read under way still finishes, and schedules none. */
   stop(): void;
+  /**
+   * How old the last successful reading is, at the call; before one, the time since `start()` (or
+   * since the floor was built, before that). Pure: it logs nothing, unlike `below()`. The
+   * `balance_reading_age_seconds` gauge (0027 AD-5).
+   */
+  readingAgeMs(): number;
+  /** How old a reading may be before `below()` fails closed. */
+  readonly maxStaleMs: number;
 }
 
 /**
@@ -51,6 +65,8 @@ export function createBalanceFloor(deps: {
   let lastOkAt: number | undefined;
   /** Whether `facilitator_balance_stale` was logged for the reading `lastOkAt` names. */
   let staleLogged = false;
+  /** What the reading's age counts from before the first good read: `start()`, else creation. */
+  let startedAt = clock();
 
   /** Whether a reading is there but too old to trust; logs the first time it finds so. */
   function stale(): boolean {
@@ -104,8 +120,11 @@ export function createBalanceFloor(deps: {
     // one is too old.
     below: () => stale() || (below ?? true) || lastOkAt === undefined,
     runOnce,
+    readingAgeMs: () => Math.max(0, clock() - (lastOkAt ?? startedAt)),
+    maxStaleMs,
     async start() {
       stopped = false;
+      startedAt = clock();
       await runOnce();
       schedule();
     },

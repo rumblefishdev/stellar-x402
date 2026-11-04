@@ -24,6 +24,7 @@ import { captureConsoleError, jsonLogger, rpcEndpointName, type Logger } from ".
 import { memoryMetrics, type NetworkMetrics, type ProcessMetrics } from "./metrics.js";
 import type { LeaseFence, SettlementStore } from "./ports/index.js";
 import { createPruner } from "./pruner.js";
+import { createRpcStallTracker, type RpcStallTracker } from "./rpc-stall.js";
 import { checkChannels } from "./settlement/channel-check.js";
 import { checkRpcNetworks } from "./settlement/network-check.js";
 import { atCurrentBid, feeSettings, type FeeSettings } from "./settlement/fees.js";
@@ -39,7 +40,7 @@ import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler, type Settle } from "./settl
 import { createTrustlineLookup } from "./settlement/trustline.js";
 import { failoverUpstream, type EndpointFailure } from "./settlement/upstream-failover.js";
 import { createAssetKinds } from "./spend/asset-kinds.js";
-import { createBalanceFloor } from "./spend/balance-floor.js";
+import { BALANCE_STALE_ALARM_MS, createBalanceFloor } from "./spend/balance-floor.js";
 import { createSpendPolicy, verifyWithBreakers } from "./spend/policy.js";
 import {
   UNEXPECTED_VERIFY_ERROR,
@@ -476,6 +477,16 @@ export function buildSettlement(
     lease: deps.lease,
   });
   const reconciliation = scheduleReconciliation({ reconciler, logger, metrics, network });
+  // Gauges read at each sample, from memory only (0027 AD-5): `stats()` copies the pool's
+  // counters and load, and the reconciler's age is taken at the read.
+  metrics.registerGauge("pool_queued", () => {
+    const { queued, channels, busy } = submitter.stats();
+    return { value: queued, labels: { channels, busy } };
+  });
+  metrics.registerGauge("pool_quarantined", () => ({ value: submitter.stats().quarantined }));
+  metrics.registerGauge("settlement_oldest_open_seconds", () => ({
+    value: reconciler.oldestOpenSeconds(),
+  }));
   // Closing the pool first refuses every call that sent nothing, so their records close too.
   const drain = async () => {
     await submitter.close();
@@ -512,6 +523,8 @@ export function compose(
   metrics: ProcessMetrics;
   rpc: FallbackRpc;
   signer: OpenBaoSigner;
+  /** Unstarted: `main()` starts it with the process and stops it before the final flush. */
+  rpcStall: RpcStallTracker;
 } {
   const { logger } = opts;
   const { stores } = opts;
@@ -530,6 +543,17 @@ export function compose(
   // One client for every RPC_URLS read and send, whose active URL upstream verify shares (AD-3).
   // A test's `rpc` serves every URL.
   const rpc = buildRpc(config, logger, opts.rpc && (() => opts.rpc!));
+  // 1 while calls are off `RPC_URLS[0]` (0027 AD-5). `active` is a plain read; `begin()` could
+  // start a probe. The label is the endpoint's name, as `buildRpc` names it, never its URL.
+  const primary = rpcEndpointName(config.rpcUrls[0]!, 0);
+  metrics.registerGauge("rpc_on_fallback", () => {
+    const active = rpc.active;
+    return { value: active === primary ? 0 : 1, labels: { rpc: active } };
+  });
+  // The time since the ledger sequence last changed, on the client settlement uses (0027 AD-5).
+  // The poll's own reads may move `active`; that is what settlement would see.
+  const rpcStall = createRpcStallTracker({ rpc, now: Date.now });
+  metrics.registerGauge("rpc_stalled_seconds", () => ({ value: rpcStall.stalledSeconds() }));
   // One fee configuration: `/verify` and `/settle` check with it, and the pool pays with it, so
   // they share one ceiling and one bid (AD-10).
   const fees = feeSettings(config.fees, rpc);
@@ -554,6 +578,18 @@ export function compose(
     logger,
     metrics,
   });
+  metrics.registerGauge("balance_reading_age_seconds", () => ({
+    value: floor.readingAgeMs() / 1000,
+  }));
+  // The `balance-stale` alarm fires above 300 s, the floor's bound at the default interval; with
+  // another bound it fires before `/settle` fails closed, or after.
+  if (floor.maxStaleMs !== BALANCE_STALE_ALARM_MS) {
+    logger.warn("balance_stale_threshold_mismatch", {
+      network: config.network,
+      maxStaleMs: floor.maxStaleMs,
+      alarmThresholdMs: BALANCE_STALE_ALARM_MS,
+    });
+  }
   const policy = createSpendPolicy({
     store: stores.spend,
     // USDC is the known asset (the high tier); every other token, SAC or wasm, gets the low one.
@@ -608,6 +644,7 @@ export function compose(
     metrics: root,
     rpc,
     signer,
+    rpcStall,
   };
 }
 
