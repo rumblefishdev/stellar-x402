@@ -2974,7 +2974,7 @@ describe("with reconciliation (0019)", () => {
       ledger: 1001,
       resultXdr: { feeCharged: () => ({ toBigInt: () => 41_000n }) },
     } as unknown as rpc.Api.GetTransactionResponse;
-    const { store, settle, reconcilerOn } = shared(landing(), landed);
+    const { store, settle, reconcilerOn, metrics } = shared(landing(), landed);
     // The success write fails, and the call's read-back waits until the store is back.
     const transition = store.transition.bind(store);
     let readBack: (() => void) | undefined;
@@ -2995,6 +2995,16 @@ describe("with reconciliation (0019)", () => {
     expect((await settle(payload(), requirements)).response.success).toBe(true);
     readBack!();
     expect((await first).response).toEqual(alreadySettled);
+    // One landed transaction, one fee: the sweep's write won (0027).
+    expect(metrics.value("fee_charged_stroops", { state: "success" })).toBe(41_000);
+  });
+
+  it("adds /settle's own success fee once: a repeat and a sweep add nothing (0027)", async () => {
+    const { settle, reconcilerOn, metrics } = shared(landing(), notFound(1));
+    expect((await settle(payload(), requirements)).response.success).toBe(true);
+    expect((await settle(payload(), requirements)).response).toEqual(alreadySettled);
+    await reconcilerOn().sweep();
+    expect(metrics.value("fee_charged_stroops", { state: "success" })).toBe(41_000);
   });
 
   it("keeps a record the pool left pending open, through a repeat, until a sweep finishes it (0088)", async () => {

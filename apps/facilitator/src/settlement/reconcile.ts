@@ -357,9 +357,11 @@ export const SWEEP_INTERVAL_MS = 10_000;
 export function scheduleReconciliation(opts: {
   reconciler: Reconciler;
   logger: Logger;
+  /** The network's child: `settlement_sweeps_total` is network-scoped. */
+  metrics: NetworkMetrics;
   network: StellarNetwork;
 }): Reconciliation {
-  const { reconciler, logger, network } = opts;
+  const { reconciler, logger, metrics, network } = opts;
   let closed = false;
   let listed = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -368,11 +370,18 @@ export function scheduleReconciliation(opts: {
   const done = new Promise<void>((resolve) => (reconciled = resolve));
 
   const tick = () => (sweeping = sweepOnce().finally(() => (sweeping = undefined)));
+  // `listed` at the listing, not at the sweep's end: a long sweep doesn't read as stopped, and a
+  // record that fails doesn't take it back (0027, `sweeps-stopped`). Once per sweep, not per record.
+  const onListed = () => {
+    listed = true;
+    metrics.increment("settlement_sweeps_total", { outcome: "listed" });
+  };
   const sweepOnce = async () => {
     try {
-      await reconciler.sweep(() => (listed = true));
+      await reconciler.sweep(onListed);
     } catch (error) {
       logger.warn("reconcile_failed", { network, error });
+      metrics.increment("settlement_sweeps_total", { outcome: "failed" });
     }
     reconciled();
     if (closed) return;

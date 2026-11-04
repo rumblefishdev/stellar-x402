@@ -475,7 +475,7 @@ export function buildSettlement(
     records,
     lease: deps.lease,
   });
-  const reconciliation = scheduleReconciliation({ reconciler, logger, network });
+  const reconciliation = scheduleReconciliation({ reconciler, logger, metrics, network });
   // Closing the pool first refuses every call that sent nothing, so their records close too.
   const drain = async () => {
     await submitter.close();

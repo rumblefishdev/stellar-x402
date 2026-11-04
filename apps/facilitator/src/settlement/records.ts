@@ -66,8 +66,21 @@ export function createRecords(deps: RecordsDeps) {
     }
   };
 
-  const onFinal = (record: SettlementRecord, origin: SettlementOrigin) =>
+  /**
+   * `fee_charged_stroops` (0027): a transaction that landed was charged its fee. Counted where
+   * `onFinal` runs, once for the write that made the record final (or for the sweep that found a
+   * write that threw final, decision 29), so a record two writers race to finish counts once, as
+   * the spend policy's `commit` does. A record with no fee (rejected, expired) adds nothing.
+   */
+  const charged = (state: SettlementRecord["state"], feeCharged: bigint | undefined) => {
+    if (feeCharged !== undefined)
+      metrics.increment("fee_charged_stroops", { state }, Number(feeCharged));
+  };
+
+  const onFinal = (record: SettlementRecord, origin: SettlementOrigin) => {
+    charged(record.state, record.feeCharged);
     runHook("onFinal", record.key, () => deps.hooks.onFinal(record, origin));
+  };
 
   const onSuccess = (record: SettlementRecord, origin: SettlementOrigin) =>
     runHook("onSuccess", record.key, () => deps.hooks.onSuccess(record, origin));
@@ -106,6 +119,8 @@ export function createRecords(deps: RecordsDeps) {
             ledger: update.ledger,
           });
           metrics.increment("settlement_landed_after_expired_total", { state: update.state });
+          // The write is lost, but the network charged the fee: no `onFinal` counts it.
+          charged(update.state, update.feeCharged);
         }
         if (current && update.attempts?.length)
           await store.markAttempts(key, update.attempts, now());
