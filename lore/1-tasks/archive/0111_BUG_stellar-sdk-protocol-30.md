@@ -2,7 +2,7 @@
 id: "0111"
 title: "Move stellar-sdk to 16.4.1, so a buyer can build a payment on protocol 30"
 type: BUG
-status: active
+status: completed
 milestone: 1
 related_adr: []
 related_tasks: ["0063"]
@@ -14,6 +14,12 @@ history:
     status: active
     who: karolkow
     note: "Found while re-running the 0063 testnet smoke. Testnet moved to protocol 30."
+  - date: "2026-11-04"
+    status: completed
+    who: karolkow
+    note: >
+      PR #124 merged: the lockfile moved to SDK 16.4.1 and the settle smoke finishes on real
+      testnet. pnpm mcp:e2e stays red at 14 of 25 tests, left for a separate piece of work.
 ---
 
 # Move stellar-sdk to 16.4.1, so a buyer can build a payment on protocol 30
@@ -24,9 +30,9 @@ Testnet RPC reports protocol 30. With `@stellar/stellar-sdk` 16.3.0, `rpc.Server
 throws while decoding the ledger header, and `@x402/stellar` 2.28.0 `createPaymentPayload` stops on
 it, so a buyer can't build an `exact` payment on testnet. Moving the lockfile to 16.4.1 fixes it.
 
-## Status: Active
+## Status: Completed
 
-**Current state:** the lockfile move and its testnet evidence go out as one PR.
+**Current state:** done, merged in PR #124.
 
 ## Context
 
@@ -92,3 +98,7 @@ Move the lockfile from 16.3.0 to 16.4.1. Raise the `package.json` ranges only if
     out. The latency's source isn't measured; 16.3.0 can't be compared, since the call fails there;
   - E-21 and E-22 pay through the public `x402.org` facilitator: one run answered `payment_unknown`
     with the money moved, one answered 504 from its `/settle`.
+
+## Future Work
+
+- `pnpm mcp:e2e` is red on testnet, with the causes above. It has no lore task yet.
