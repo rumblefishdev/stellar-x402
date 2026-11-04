@@ -202,6 +202,7 @@ interface AttemptRow {
   max_ledger: string | null;
   channel: string | null;
   error_code: string | null;
+  inner_hash: string | null;
   updated_at: string | null;
 }
 
@@ -214,6 +215,7 @@ function toAttempt(row: AttemptRow): SettlementAttempt {
   if (row.max_ledger !== null) attempt.maxLedger = Number(row.max_ledger);
   if (row.channel !== null) attempt.channel = row.channel;
   if (row.error_code !== null) attempt.errorCode = row.error_code;
+  if (row.inner_hash !== null) attempt.innerHash = row.inner_hash;
   if (row.updated_at !== null) attempt.updatedAt = Number(row.updated_at);
   return attempt;
 }
@@ -221,22 +223,38 @@ function toAttempt(row: AttemptRow): SettlementAttempt {
 /**
  * Moves the named attempts of `$1` forward, each on its own, and stamps `$2`; `$3` is the updates
  * as JSON. The rank comparison drops an update that isn't ahead, so concurrent writers can only
- * move an attempt on.
+ * move an attempt on. An update with `rewrap_of` adds its hash after the record's others, with
+ * that attempt's inner hash (0087); the `UPDATE`'s snapshot doesn't see the row, so it doesn't
+ * move it too. Returns one row per attempt moved or added.
  */
-const MARK_ATTEMPTS = `UPDATE settlement_hashes h
-  SET state = u.state,
-      channel = coalesce(u.channel, h.channel),
-      error_code = coalesce(u.error_code, h.error_code),
-      updated_at = $2
-  FROM jsonb_to_recordset($3::jsonb) AS u(hash text, state text, channel text, error_code text)
-  WHERE h.hash = u.hash AND h.key = $1
-    AND ${attemptRankSql("u.state")} > ${attemptRankSql("h.state")}`;
+const MARK_ATTEMPTS = `WITH u AS (
+    SELECT * FROM jsonb_to_recordset($3::jsonb)
+      AS u(hash text, state text, channel text, error_code text, rewrap_of text)
+  ), added AS (
+    INSERT INTO settlement_hashes (hash, key, state, channel, error_code, inner_hash, updated_at)
+    SELECT u.hash, h.key, u.state, coalesce(u.channel, h.channel), u.error_code, h.inner_hash, $2
+    FROM u JOIN settlement_hashes h ON h.hash = u.rewrap_of AND h.key = $1
+    ON CONFLICT (hash) DO NOTHING
+    RETURNING hash
+  ), moved AS (
+    UPDATE settlement_hashes h
+    SET state = u.state,
+        channel = coalesce(u.channel, h.channel),
+        error_code = coalesce(u.error_code, h.error_code),
+        updated_at = $2
+    FROM u
+    WHERE h.hash = u.hash AND h.key = $1 AND u.rewrap_of IS NULL
+      AND ${attemptRankSql("u.state")} > ${attemptRankSql("h.state")}
+    RETURNING h.hash
+  )
+  SELECT hash FROM added UNION ALL SELECT hash FROM moved`;
 
 const attemptsJson = (updates: AttemptUpdate[]) =>
   JSON.stringify(
-    updates.map(({ hash, state, channel, errorCode }) => ({
+    updates.map(({ hash, state, channel, errorCode, rewrapOf }) => ({
       hash,
       state,
+      rewrap_of: rewrapOf ?? null,
       channel: channel ?? null,
       error_code: errorCode ?? null,
     })),
@@ -373,6 +391,7 @@ export class PostgresSettlementStore implements SettlementStore {
     updatedAt: number,
     bounds?: AttemptBounds,
     claim?: number,
+    innerHash?: string,
   ): Promise<boolean> {
     const { rows } = await this.pool.query<{
       fenced: boolean;
@@ -388,8 +407,9 @@ export class PostgresSettlementStore implements SettlementStore {
            AND EXISTS (SELECT 1 FROM fence)
          FOR UPDATE
        ), ins AS (
-         INSERT INTO settlement_hashes (hash, key, state, max_time, max_ledger, updated_at)
-         SELECT $2, key, 'stored', $4::bigint, $5::bigint, $3 FROM rec
+         INSERT INTO settlement_hashes
+           (hash, key, state, max_time, max_ledger, inner_hash, updated_at)
+         SELECT $2, key, 'stored', $4::bigint, $5::bigint, $9::text, $3 FROM rec
          WHERE state IN (${NON_FINAL_SQL})
          ON CONFLICT (hash) DO NOTHING
          RETURNING key
@@ -414,6 +434,7 @@ export class PostgresSettlementStore implements SettlementStore {
         claim ?? null,
         lease.name,
         lease.token,
+        innerHash ?? null,
       ],
     );
     const { fenced, state, added, owner } = rows[0]!;
@@ -442,7 +463,7 @@ export class PostgresSettlementStore implements SettlementStore {
 
   async attempts(key: SettlementKey): Promise<SettlementAttempt[]> {
     const { rows } = await this.pool.query<AttemptRow>(
-      `SELECT hash, state, max_time, max_ledger, channel, error_code, updated_at
+      `SELECT hash, state, max_time, max_ledger, channel, error_code, inner_hash, updated_at
        FROM settlement_hashes WHERE key = $1 ORDER BY seq`,
       [key],
     );

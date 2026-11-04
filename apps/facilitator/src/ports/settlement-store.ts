@@ -123,6 +123,12 @@ export interface SettlementAttempt extends Partial<AttemptBounds> {
   channel?: string;
   /** Why it died, e.g. `txBadSeq`. */
   errorCode?: string;
+  /**
+   * The inner transaction's hash (0087): reconciliation reads it before calling the attempt dead,
+   * since someone else's fee bump of it lands under another hash. Absent for a hash stored
+   * before it was kept.
+   */
+  innerHash?: string;
   /** Milliseconds since the epoch; absent until it is first written with a state. */
   updatedAt?: number;
 }
@@ -133,6 +139,13 @@ export interface AttemptUpdate {
   state: AttemptState;
   channel?: string;
   errorCode?: string;
+  /**
+   * A hash the record doesn't have, which landed in place of this attempt of the record (0087):
+   * another envelope of its inner transaction. It is added as a new attempt, last, with the inner
+   * hash of `rewrapOf`, so the record's last hash is the one that landed. Dropped when the record
+   * has no such attempt.
+   */
+  rewrapOf?: string;
 }
 
 /** `addHash` was given a hash another settlement already has; neither record changed. */
@@ -209,7 +222,8 @@ export interface SettlementStore {
    * Atomic with {@link transition}: against a concurrent `transition(key, "claimed", …)` to a
    * final state, exactly one wins. A check-then-write would let `/settle` answer `…_timeout` for a
    * hash that is then sent. An appended hash is a `stored` attempt with `bounds`, which
-   * reconciliation needs to tell when a hash the network doesn't know can no longer land.
+   * reconciliation needs to tell when a hash the network doesn't know can no longer land, and
+   * `innerHash`, to look for the transaction under another fee bump (0087).
    */
   addHash(
     key: SettlementKey,
@@ -218,12 +232,14 @@ export interface SettlementStore {
     updatedAt: number,
     bounds?: AttemptBounds,
     claim?: number,
+    innerHash?: string,
   ): Promise<boolean>;
   /** The record's attempts, oldest first, in the order of `hashes`. */
   attempts(key: SettlementKey): Promise<SettlementAttempt[]>;
   /**
    * Moves the record's attempts forward, each on its own: an update that isn't ahead of the
-   * attempt's state, or names a hash of another record, is dropped. Resolves how many moved.
+   * attempt's state, or names a hash of another record, is dropped. One with `rewrapOf` adds its
+   * hash instead. Resolves how many moved or were added.
    */
   markAttempts(key: SettlementKey, updates: AttemptUpdate[], updatedAt: number): Promise<number>;
   /**
