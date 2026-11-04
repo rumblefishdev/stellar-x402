@@ -98,6 +98,35 @@ const missing = (latestLedger: number, latestLedgerCloseTime = 0, oldestLedgerCl
     oldestLedgerCloseTime,
   }) as unknown as rpc.Api.GetTransactionResponse;
 
+/**
+ * Our inner transaction, and someone else's fee bump of it (0087): the answer a read by the inner
+ * hash gets once theirs landed.
+ */
+function rewrapped(status: "SUCCESS" | "FAILED" = "SUCCESS") {
+  const channel = Keypair.random();
+  const inner = new TransactionBuilder(new Account(channel.publicKey(), "1"), {
+    fee: "100",
+    networkPassphrase: Networks.TESTNET,
+  })
+    .addOperation(Operation.bumpSequence({ bumpTo: "2" }))
+    .setTimeout(0)
+    .build();
+  inner.sign(channel);
+  const rival = Keypair.random();
+  const bump = TransactionBuilder.buildFeeBumpTransaction(rival, "2000", inner, Networks.TESTNET);
+  bump.sign(rival);
+  const answer = {
+    ...(landed(status) as object),
+    envelopeXdr: bump.toEnvelope(),
+  } as unknown as rpc.Api.GetTransactionResponse;
+  return {
+    innerHash: inner.hash().toString("hex"),
+    theirs: bump.hash().toString("hex"),
+    feeSource: rival.publicKey(),
+    answer,
+  };
+}
+
 function setup(answers: Record<string, rpc.Api.GetTransactionResponse | Error> = {}) {
   const store = db.stores().settlements;
   const hooks = {
@@ -325,6 +354,77 @@ describe("createReconciler", () => {
       answers[A] = missing(100, 2_016);
       await reconciler.sweep();
       expect((await store.get(key))?.state).toBe("expired");
+    });
+
+    describe("our inner transaction under someone else's fee bump (0087)", () => {
+      /** A record whose one hash, `A`, is past its bounds and was stored with its inner hash. */
+      async function rewrapSetup(innerAnswer?: rpc.Api.GetTransactionResponse) {
+        const found = rewrapped();
+        const answers = { [A]: missing(4_013), [found.innerHash]: innerAnswer ?? found.answer };
+        const env = setup(answers);
+        const key = await claimed(env.store);
+        await env.store.addHash(
+          key,
+          A,
+          await holdLease(env.store),
+          NOW,
+          { maxTime: 2_000, maxLedger: 4_010 },
+          undefined,
+          found.innerHash,
+        );
+        return { ...env, key, found };
+      }
+
+      it("finishes success under their hash, charged nothing, and logs who paid", async () => {
+        const { store, reconciler, key, found, lines, metrics } = await rewrapSetup();
+        expect(await reconciler.sweep()).toMatchObject({ success: 1 });
+        expect(await store.get(key)).toMatchObject({
+          state: "success",
+          feeCharged: 0n,
+          hashes: [A, found.theirs],
+        });
+        expect((await store.attempts(key)).map((a) => [a.hash, a.state, a.innerHash])).toEqual([
+          [A, "dead", found.innerHash],
+          [found.theirs, "landed", found.innerHash],
+        ]);
+        const logged = lines
+          .filter((line) => line.includes('"settlement_rewrapped"'))
+          .map((line) => JSON.parse(line) as Record<string, unknown>);
+        expect(logged).toEqual([
+          expect.objectContaining({
+            level: "warn",
+            transaction: found.theirs,
+            ours: A,
+            feeSource: found.feeSource,
+            state: "success",
+          }),
+        ]);
+        expect(metrics.value("settlement_rewrapped_total", { state: "success" })).toBe(1);
+      });
+
+      it("expires it when nothing is found by the inner hash either", async () => {
+        const { store, reconciler, key, found, getTransaction } = await rewrapSetup(missing(4_013));
+        expect(await reconciler.sweep()).toMatchObject({ expired: 1 });
+        expect((await store.get(key))?.state).toBe("expired");
+        expect(getTransaction.mock.calls.map(([hash]) => hash)).toEqual([A, found.innerHash]);
+      });
+
+      it("reads by the inner hash only once ours can no longer land", async () => {
+        const { store, reconciler, key, getTransaction } = await rewrapSetup();
+        const answers = { [A]: missing(4_012) };
+        getTransaction.mockImplementation(async (hash: string) => answers[hash] ?? missing(1));
+        expect(await reconciler.sweep()).toMatchObject({ open: 1 });
+        expect((await store.get(key))?.state).toBe("signed");
+        expect(getTransaction.mock.calls.map(([hash]) => hash)).toEqual([A]);
+      });
+
+      it("resolves a hash stored without its inner hash by its own hash alone, as before", async () => {
+        const { store, reconciler, getTransaction } = setup({ [A]: missing(4_013) });
+        const key = await signed(store, [A]);
+        expect(await reconciler.sweep()).toMatchObject({ expired: 1 });
+        expect((await store.get(key))?.state).toBe("expired");
+        expect(getTransaction.mock.calls.map(([hash]) => hash)).toEqual([A]);
+      });
     });
 
     it("expires a record only once every hash is dead (decision 5)", async () => {
@@ -768,6 +868,31 @@ describe("createReconciler", () => {
         ["landed", undefined],
       ]);
       expect(hooks.onSuccess).toHaveBeenCalledWith(expect.objectContaining({ key }), "resolved");
+    });
+
+    it("finishes a pending record by our hash when the pool found theirs landed (0087)", async () => {
+      const { store, reconciler, lines } = setup();
+      const key = await signed(store, [A]);
+      await store.transition(key, "signed", { state: "pending", updatedAt: NOW });
+      await reconciler.resolved({
+        status: "success",
+        hash: B,
+        channel: "GCHANNEL",
+        ledger: 4_001,
+        feeCharged: 0n,
+        rewrap: { of: A, feeSource: "GRIVAL" },
+        attempts: [{ hash: A, sent: "yes" }],
+      });
+      expect(await store.get(key)).toMatchObject({
+        state: "success",
+        feeCharged: 0n,
+        hashes: [A, B],
+      });
+      expect((await store.attempts(key)).map((a) => [a.hash, a.state])).toEqual([
+        [A, "dead"],
+        [B, "landed"],
+      ]);
+      expect(lines.filter((line) => line.includes('"settlement_rewrapped"'))).toHaveLength(1);
     });
 
     it("keeps the failure cause of a pending record that failed", async () => {

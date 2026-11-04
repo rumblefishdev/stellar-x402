@@ -405,6 +405,35 @@ describe("createSettler", () => {
     );
   });
 
+  it("answers and stores the hash that landed when someone else's fee bump carried ours (0087)", async () => {
+    const THEIRS = "d".repeat(64);
+    const { settle, store, lines, metrics } = setup(async (opts) => {
+      await opts.onSigned?.(HASH, BOUNDS, "e".repeat(64));
+      return {
+        ...result("success", THEIRS),
+        feeCharged: 0n,
+        rewrap: { of: HASH, feeSource: "GRIVAL" },
+        attempts: [{ hash: HASH, sent: "yes" }],
+      };
+    });
+    const settled = await settle(payload(), requirements);
+    expect(settled.response).toEqual({ success: true, transaction: THEIRS, network, payer });
+    expect(await store.get(key)).toMatchObject({
+      state: "success",
+      feeCharged: 0n,
+      hashes: [HASH, THEIRS],
+    });
+    expect((await store.attempts(key)).map((a) => [a.hash, a.state, a.innerHash])).toEqual([
+      [HASH, "dead", "e".repeat(64)],
+      [THEIRS, "landed", "e".repeat(64)],
+    ]);
+    expect(lines.filter((line) => line.includes('"settlement_rewrapped"'))).toHaveLength(1);
+    expect(metrics.value("settlement_rewrapped_total", { state: "success" })).toBe(1);
+    // A repeat answers with it too.
+    const repeat = await settle(payload(), requirements);
+    expect(repeat.response).toMatchObject({ transaction: THEIRS });
+  });
+
   it("submits once for concurrent calls with one settlement key, and answers success once, to whichever marks it", async () => {
     // A repeat may mark the success before the submitting call does (see `respond`).
     const { settle, submit, hooks, metrics } = setup(async (opts) => {
