@@ -45,6 +45,13 @@ export default defineConfig([
     languageOptions: { globals: { console: "readonly", process: "readonly" } },
   },
   {
+    // Lambda handlers run as plain ES modules on the Node.js runtime (infra/, task 0027).
+    files: ["infra/lambdas/**/*.mjs"],
+    languageOptions: {
+      globals: { console: "readonly", process: "readonly", AbortSignal: "readonly" },
+    },
+  },
+  {
     files: ["conformance/external-proxy/*.mjs"],
     languageOptions: { globals: { console: "readonly", process: "readonly", fetch: "readonly" } },
   },
