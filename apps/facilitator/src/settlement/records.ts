@@ -1,7 +1,7 @@
 import type { StellarNetwork } from "@stellar-x402/config";
 import type { Attempt, SubmitResult } from "@stellar-x402/signer-pool";
 import type { Logger } from "../logger.js";
-import type { Metrics } from "../metrics.js";
+import type { NetworkMetrics } from "../metrics.js";
 import {
   FINAL_SETTLEMENT_STATES,
   type AttemptUpdate,
@@ -17,7 +17,7 @@ export interface RecordsDeps {
   store: SettlementStore;
   hooks: Pick<SettlementHooks, "onFinal" | "onSuccess">;
   logger: Logger;
-  metrics: Metrics;
+  metrics: NetworkMetrics;
   now?: () => number;
 }
 

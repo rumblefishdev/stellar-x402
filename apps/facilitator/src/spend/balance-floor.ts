@@ -4,7 +4,7 @@ import {
   type SorobanRpc,
 } from "@stellar-x402/signer-pool";
 import type { Logger } from "../logger.js";
-import type { Metrics } from "../metrics.js";
+import type { NetworkMetrics } from "../metrics.js";
 import type { BalanceFloor } from "./policy.js";
 
 /** The floor as `start()` and `close()` run it: read in the background, checked in memory. */
@@ -34,7 +34,7 @@ export function createBalanceFloor(deps: {
   floorStroops: bigint;
   intervalMs: number;
   logger: Logger;
-  metrics: Metrics;
+  metrics: NetworkMetrics;
   /** How stale the last reading may be before `below()` fails closed again (defaults below). */
   maxStaleMs?: number;
   now?: () => number;

@@ -8,7 +8,7 @@ import {
 } from "@stellar-x402/signer-pool";
 import { getNetworkPassphrase } from "@x402/stellar";
 import type { Logger } from "../logger.js";
-import type { Metrics } from "../metrics.js";
+import type { NetworkMetrics } from "../metrics.js";
 import type {
   AttemptUpdate,
   SettlementAttempt,
@@ -26,7 +26,7 @@ export interface ReconcilerDeps {
   /** Shared with `/settle`, so both write through one module and see one `answeredHere`. */
   records: Records;
   logger: Logger;
-  metrics: Metrics;
+  metrics: NetworkMetrics;
   /** `SETTLE_BUDGET_MS`: past it plus `MARGIN_MS`, no call adds a hash to a claim. */
   budgetMs: number;
   now?: () => number;

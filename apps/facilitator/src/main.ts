@@ -21,7 +21,7 @@ import type { Config } from "./config.js";
 import { createApp, type AppDeps } from "./http/app.js";
 import { supportedResponse } from "./http/supported.js";
 import { captureConsoleError, jsonLogger, rpcEndpointName, type Logger } from "./logger.js";
-import { memoryMetrics, type Metrics } from "./metrics.js";
+import { memoryMetrics, type NetworkMetrics, type ProcessMetrics } from "./metrics.js";
 import type { LeaseFence, SettlementStore } from "./ports/index.js";
 import { createPruner } from "./pruner.js";
 import { checkChannels } from "./settlement/channel-check.js";
@@ -400,7 +400,7 @@ export function buildSettlement(
     store: SettlementStore;
     hooks: Pick<SettlementHooks, "beforeSubmit" | "onFinal" | "onSuccess">;
     logger: Logger;
-    metrics: Metrics;
+    metrics: NetworkMetrics;
     /** The facilitator key's signer. */
     signer: TransactionSigner;
     /** Tests pass the pool's `sleep`. */
@@ -487,7 +487,13 @@ export function buildSettlement(
 /**
  * Every part `main()` serves, built from the config on the given stores: the cataloger, one RPC
  * and one fee configuration shared by `/verify`, `/settle` and the pool. `main()` passes the
- * PostgreSQL stores; tests pass their own `rpc`, `makeScheme` and pool `sleep`.
+ * PostgreSQL stores; tests pass their own `rpc`, `makeScheme`, pool `sleep` and `metrics` (in
+ * memory by default).
+ *
+ * Metrics follow each one's catalog `scope` (0027 AD-3): every part of this network (settlement,
+ * records, reconciliation, the pool, the lease, the spend lane, the balance floor, the signer)
+ * writes through one child scoped to `config.network`; the cataloger, discovery and the HTTP app
+ * write through the root, as does the pruner `main()` builds on the returned `metrics`.
  */
 export function compose(
   config: Config,
@@ -497,22 +503,28 @@ export function compose(
     rpc?: SorobanRpc;
     seams?: UpstreamSeams;
     sleep?: (ms: number) => Promise<void>;
+    metrics?: ProcessMetrics;
   },
 ): {
   deps: AppDeps;
   cataloger: Cataloger;
-  metrics: Metrics;
+  /** The root: for the process-scoped parts `main()` builds. */
+  metrics: ProcessMetrics;
   rpc: FallbackRpc;
   signer: OpenBaoSigner;
 } {
   const { logger } = opts;
   const { stores } = opts;
-  // Cataloging plugs into `/settle` through `extensionResponses` and `onSuccess` (AD-8).
-  const metrics = memoryMetrics();
+  const root = opts.metrics ?? memoryMetrics();
+  // One child per network; a root write of a network-scoped metric would carry no `network`, so
+  // the root's type doesn't take one.
+  const metrics = root.for({ network: config.network });
+  // Cataloging plugs into `/settle` through `extensionResponses` and `onSuccess` (AD-8). The
+  // catalog's rows serve every network, so it writes through the root.
   const cataloger = createCataloger({
     store: stores.catalog,
     logger,
-    metrics,
+    metrics: root,
     listLocal: config.catalog.listLocal,
   });
   // One client for every RPC_URLS read and send, whose active URL upstream verify shares (AD-3).
@@ -579,7 +591,8 @@ export function compose(
     deps: {
       config,
       logger,
-      metrics,
+      // The HTTP app and discovery: a route serves every network.
+      metrics: root,
       stores,
       verify: verifyWithBreakers(createVerifier(checks), { policy, logger, metrics }),
       settle,
@@ -592,7 +605,7 @@ export function compose(
       signerState: signer.state,
     },
     cataloger,
-    metrics,
+    metrics: root,
     rpc,
     signer,
   };

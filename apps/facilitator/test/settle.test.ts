@@ -52,6 +52,7 @@ import {
   expectTransfer,
   fingerprintOf,
   reasonFor,
+  reopenedLabels,
   type SettlerDeps,
   type Submitter,
 } from "../src/settlement/settle.js";
@@ -346,6 +347,19 @@ describe("reasonFor", () => {
 
   it("keeps a plain check failure as a balance change", () => {
     expect(reasonFor(new SimulationCheckError("x"))).toBe(SETTLE_REASONS.balanceChanges);
+  });
+});
+
+describe("reopenedLabels (0027)", () => {
+  it("carries the reason the record closed with", () => {
+    expect(reopenedLabels(SETTLE_REASONS.noChannelInTime)).toEqual({
+      reason: SETTLE_REASONS.noChannelInTime,
+    });
+  });
+
+  it("leaves reason out when it is empty", () => {
+    expect(reopenedLabels("")).toEqual({});
+    expect(reopenedLabels(undefined)).toEqual({});
   });
 });
 
@@ -1186,15 +1200,21 @@ describe("createSettler", () => {
     });
   });
 
-  it("counts every answer by its outcome", async () => {
+  it("counts every answer by its outcome: result success or error (0027)", async () => {
+    // `result` is the outcome's only dimension set: without it the EMF line has no valid set.
     const { settle, metrics } = setup();
     await settle(payload(), requirements);
     await settle(payload(), requirements);
-    expect(metrics.value("settlement_outcomes_total", { reason: "success", replay: "false" })).toBe(
-      1,
-    );
     expect(
       metrics.value("settlement_outcomes_total", {
+        result: "success",
+        reason: "success",
+        replay: "false",
+      }),
+    ).toBe(1);
+    expect(
+      metrics.value("settlement_outcomes_total", {
+        result: "error",
         reason: SETTLE_REASONS.alreadySettled,
         replay: "true",
       }),
@@ -1386,6 +1406,7 @@ describe("createSettler", () => {
       expect(submit).toHaveBeenCalledTimes(1);
       expect(
         metrics.value("settlement_outcomes_total", {
+          result: "error",
           reason: SETTLE_REASONS.payerBusy,
           replay: "false",
         }),

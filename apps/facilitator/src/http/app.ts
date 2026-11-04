@@ -5,7 +5,7 @@ import express, { type ErrorRequestHandler, type Express, type RequestHandler } 
 import type { SignerState } from "../adapters/openbao-signer.js";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
-import type { Metrics } from "../metrics.js";
+import type { ProcessMetrics } from "../metrics.js";
 import type { Stores } from "../ports/index.js";
 import type { SettlementHooks } from "../settlement/hooks.js";
 import type { LeaseKeeper } from "../settlement/lease.js";
@@ -22,7 +22,7 @@ import { rateLimit } from "./rate-limit.js";
 export interface AppDeps {
   config: Config;
   logger: Logger;
-  metrics: Metrics;
+  metrics: ProcessMetrics;
   stores: Stores;
   verify: Verify;
   settle: Settle;

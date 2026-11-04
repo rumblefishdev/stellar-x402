@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { StellarNetwork } from "@stellar-x402/config";
 import type { Logger } from "../logger.js";
-import type { Metrics } from "../metrics.js";
+import type { NetworkMetrics } from "../metrics.js";
 import type { LeaseFence, SettlementStore } from "../ports/index.js";
 
 /** The lease of one network's channel set, so testnet and pubnet never wait on each other. */
@@ -13,7 +13,7 @@ export interface LeaseKeeperDeps {
   /** `LEASE_TTL_MS`; the keeper tries every third of it (0025 decision 2). */
   ttlMs: number;
   logger: Logger;
-  metrics: Metrics;
+  metrics: NetworkMetrics;
   /** A new one for every process start by default, so a restart never inherits a lease. */
   holder?: string;
   /** The app clock, as for every stored time. */
