@@ -33,13 +33,22 @@ history:
     status: developing
     who: akot
     note: "metric-issue dropped: the port's types reject a metric in the wrong scope, so the case it watched for doesn't compile."
+  - date: "2026-11-04"
+    status: developing
+    who: akot
+    note: "#114's plan (decisions 23-28): every alarm built in #114, each group absent until its series has data, gauges-silent closes the open item."
+  - date: "2026-11-05"
+    status: developing
+    who: akot
+    note: "From the whole-task review: the backup and snapshot alarms leave host for groups of their own (decision 40), and the balance alarms name the fee account and the top-up step (decision 41)."
 ---
 
 # The alarms 0027 builds
 
 `docs/monitoring.md` takes this list over in the last PR, with how each alarm was fired and when.
-Each group goes on once its series has data, or with `WarmUpConfiguration`, so no alarm reads OK on
-a series that doesn't exist yet. The metrics are in [G-metrics](G-metrics.md).
+#114 builds every alarm below (decision 23). A group's alarms are created only once its series has
+data, which `make check-series` checks, and none exists without its actions (decision 26), so no
+alarm reads OK on a series that doesn't exist yet. The metrics are in [G-metrics](G-metrics.md).
 
 ## Shapes
 
@@ -83,11 +92,12 @@ aggregates an array as samples is unverified: verify it at the first deploy.
 
 ## Money and security
 
-From the off-server check, every 5 minutes, so they fire with the server down.
+From the off-server check, every 5 minutes, so they fire with the server down. Built in #114 in the
+`watch` group, which stays off until #115's Lambda runs (decision 23).
 
 | Alarm | Signal | Shape | Fires when | Missing data |
 | --- | --- | --- | --- | --- |
-| `balance-low` | `spendable_stroops` | Level, `Minimum`, 1 of 1 five-minute period | Below 25 XLM | Ignore: `watch-errors`, `watch-no-invocations` |
+| `balance-low` | `spendable_stroops` | Level, `Minimum`, 1 of 1 five-minute period | Below 25 XLM. The description names the fee account (`feeAccounts` in the infra config) and the runbook's top-up step, as ADR 0013 asks | Ignore: `watch-errors`, `watch-no-invocations` |
 | `balance-critical` | `spendable_stroops` | Level, `Minimum`, 1 of 1 five-minute period | Below 10 XLM, about a day before the 5 XLM floor | As above |
 | `account-state` | `account_state_mismatches` | Level, `Maximum`, 2 of 2 five-minute periods | Signers or any of the four thresholds differ from the declared set, or the account is gone, in 2 reads in a row | As above |
 | `account-effects` | `account_effects_unexpected` | Event, `Maximum`, 5-minute periods, N = 3 | Any effect but `account_credited` and `claimable_balance_claimant_created`, which anyone can cause | Not breaching: as above; after a gap the cursor reads what was missed |
@@ -109,7 +119,7 @@ dimensions would cost about $15 a month at 50 channels, so we accept this.
 | `budget-nearing` | `spend_budget_nearing_total`: one series for `asset`, `other` and `global`, with no `budget` dimension | Event, 5-minute periods, N = 4, so its 15-minute repeat doesn't flap | Any. `global` alone can't reach 80% on the defaults | Not breaching: as above |
 | `store-outage` | `settlement_record_failures_total` plus `spend_store_failures_total`, by metric math | Event | 1 or more. The only alarm that stays metric math | Not breaching: as above |
 | `refused-after-verify` | `settlement_refused_after_verify_total` for `stage="pool"` | Event | 1 or more | Not breaching: as above |
-| `history-gone` | `settlement_history_gone_total` | Event | 1 or more; an operator closes the record (runbook). A key is reported once per process, so after each restart or deploy it fires again for every record still open with its history gone. Match the `settlementKey` in the `settlement_history_gone` log against the records already being handled, and close them to stop the repeats | Not breaching: as above |
+| `history-gone` | `settlement_history_gone_total` | Event | 1 or more; an operator closes the record (runbook). A key is reported once per process, so after each restart or deploy every record still open with its history gone is reported again, in one message: read the log for each record. Match the `settlementKey` in the `settlement_history_gone` log against the records already being handled, and close them to stop the repeats | Not breaching: as above |
 | `landed-after-expired` | `settlement_landed_after_expired_total` | Event | 1 or more | Not breaching: as above |
 | `sweeps-stopped` | `settlement_sweeps_total{outcome:"listed"}`, per network | Level, `Sum` below 1, 5 of 5 one-minute periods | No sweep listed the records for 5 minutes. A live process with failing or hung sweeps writes 0 | Ignore: as above |
 | `http-500` | `http_requests_total`, the `[status]` set at `500`: no `route`, no `network` | Count | 5 or more in 5 minutes. A count, since a rate flaps at low traffic. A lease or drain 503 isn't counted | Not breaching: as above |
@@ -135,7 +145,9 @@ dimensions would cost about $15 a month at 50 channels, so we accept this.
 | `watchdog-restart` | `watchdog_restarts_total` | Event | 1 or more | Not breaching: a stopped watchdog leaves a hung facilitator to `uptime` |
 
 A failed host check, or a job that never ran, writes a value past its threshold
-([G-metrics](G-metrics.md#host-namespace-x402-host)).
+([G-metrics](G-metrics.md#host-namespace-x402-host)). So `wal-failing`, `wal-stale` and
+`backup-age` are a group of their own, `backups`, and `snapshot-age` is `snapshots`: their jobs come
+with 0026, and in `host` they would keep the probe's other alarms off until then (decision 40).
 
 ## Cost, silence and delivery
 
@@ -146,6 +158,7 @@ A failed host check, or a job that never ran, writes a value past its threshold
 | `emf-parsing` | `AWS/Logs EMFParsingErrors` for the metrics log group | Event | 1 or more: a line CloudWatch couldn't parse as EMF | As above |
 | `telemetry-silent` | `mem_used_percent` from the agent | Silence | 15 minutes: agent, credentials or egress | Breaching |
 | `facilitator-silent` | `settlement_sweeps_total{outcome:"listed"}`, per network, written every minute once the service has started, 0 included | Silence | 15 minutes. Fires beside `uptime` when the process is down, or when its start hangs or fails, a crash loop included: a start writes the point only once it has started | Breaching |
+| `gauges-silent` | The six facilitator gauges' `SampleCount`, and `channel_longest_hold_seconds`'s once `channelHeld` is on, per network, against the sweeps' | Metric math: `(MIN([FILL(g, 0), ...]) < 1) * (FILL(sweeps, 0) >= 1)` at 1, 3 of 3 five-minute periods, with an OK message | A gauge sent no point for 15 minutes while sweeps arrived: its read keeps throwing, and its Level alarm keeps its state (decision 28). Quiet when the whole process is down | Not breaching: the expression always has a value |
 | `probe-silent` | `host_probe_heartbeat` | Silence | 15 minutes | Breaching |
 | `watch-errors` | `AWS/Lambda Errors` of the off-server check | Level, `Sum` at 1 or more, 2 of 3 five-minute periods | 2 of 3 runs. Each section that fails throws at the end of the run, after the others publish | Ignore: `watch-no-invocations` |
 | `watch-no-invocations` | `AWS/Lambda Invocations` of the off-server check | Silence | 15 minutes | Breaching |
@@ -182,11 +195,6 @@ fields from it, and the weekly fee review needs a week of it.
   dimensions, as in #105's README.
 - `fee_charged_stroops`: read in the weekly review against the balance's change (decision 13). The
   metric is approximate, so the review takes the database as the source of truth.
-
-## Open
-
-- A single gauge that goes silent while sweeps continue is caught by no alarm: `facilitator-silent`
-  reads the sweeps, and a Level alarm keeps its state. Decide in #114 whether one is worth adding.
 
 ## Deferred
 

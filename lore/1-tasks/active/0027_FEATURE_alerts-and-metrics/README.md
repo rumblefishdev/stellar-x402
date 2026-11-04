@@ -35,10 +35,18 @@ history:
     status: active
     who: akot
     note: "Decisions 18-20 after comparing with the Prices API and the explorer: metric lines kept 30 days, Level alarms ignore missing data, no CPU metric. Decisions 21-22 from #112's code: hooks and fee run once, scope checked by the compiler."
+  - date: "2026-11-04"
+    status: active
+    who: akot
+    note: "#114's plan after reading the siblings' infra/ (notes/R-infra-patterns.md): decisions 23-28 (every alarm in #114, names, the shared CA and CN, groups absent or on, three stacks, gauges-silent), 29-39 emerged, two of them from the reviews."
   - date: "2026-11-05"
     status: active
     who: akot
     note: "From the whole-task review of #111-#115: decision 4 amended (every catalog metric is billed), and the catalog names the disk's dimension `path`, as the CloudWatch agent writes it."
+  - date: "2026-11-05"
+    status: active
+    who: akot
+    note: "#114, from the same review: decisions 40-41 (the backups and snapshots groups apart from host, the fee account named in the balance alarms with a testnet top-up in the runbook)."
 ---
 
 # Alerts and metrics
@@ -305,6 +313,134 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     `metric-issue` alarm on the writer's warn log to catch it; the in-memory double didn't check
     scope, so no test would have. A wrong scope now doesn't compile, and the alarm is dropped.
     The child no longer re-scopes with a second `for()`, which nothing used.
+23. **#114 builds every alarm in the list** (akot, 2026-11-04). The money and security alarms
+    (`balance-low`, `balance-critical`, `account-state`, `account-effects`,
+    `backup-secret-read`), `watch-errors` and `watch-no-invocations` are in #114 with the rest, in
+    a group that stays off until #115's Lambda runs (decision 26). #115 adds the Lambda and
+    `docs/monitoring.md`; the Lambda is named `x402-production-watch`, since the two `watch-*`
+    alarms read `AWS/Lambda` by that name. One PR holds the whole list and the one alarm helper,
+    and an alarm still goes on only with its signal (the spine's AD-6).
+24. **One environment file and fixed names** (akot, 2026-11-04). `infra/envs/production.json` is
+    `x402@production`. Its `networks` (`["stellar:testnet"]` today) decides which `network` values
+    the network-scoped alarms get. Stacks are `X402-production-<Stack>`. Alarms are
+    `x402-production-<alarm>`, and a network-scoped one ends with the network's name
+    (`x402-production-sweeps-stopped-testnet`), so pubnet renames nothing. The log groups are
+    `/x402/production/app` and `/x402/production/metrics`, the topic `x402-production-alarms`,
+    the Lambdas `x402-production-uptime-probe` and `x402-production-watch`, and the SSM parameters
+    sit under `/x402/production/`.
+25. **The logging role trusts the shared CA, for one CN** (akot, 2026-11-04; as ADR 0011). The
+    trust anchor is the explorer's ClickHouse client CA, `soroban-internal-ca-2026`, which the
+    Prices API's ClickHouse certificates come from too. No sibling uses Roles Anywhere, so ours is
+    the CA's first trust anchor. Every certificate the CA signs can reach it, so the trust policy
+    accepts only `CN=x402-cloudwatch-agent-production` and only our anchor, and every permission
+    needs the server's IP. The CN follows the siblings' `<project>-<component>-<env>`
+    (`prices-api-production`) and names the agent, the only holder of the credentials. A CA of our
+    own would cost about $400 a month (AWS Private CA; $50 in short-lived mode) or another key to
+    guard, for a role that can only write our logs and host metrics from our server. Whoever holds
+    the CA key can issue our CN, and one certificate can't be revoked without a CRL: a leaked key
+    means a new CN and a Telemetry deploy. ADR 0011 accepts both; look again with 0038 if the role
+    ever gains more.
+26. **An alarm group is either absent or on with its actions** (akot, 2026-11-04). `alarmGroups`
+    in the config: off creates none of the group's alarms, on creates them with their actions. No
+    alarm has `actionsEnabled: false`: an alarm without actions is a muted alarm (the explorer's 9
+    days, the Prices API's alarm with an empty action list). `make check-series GROUP=<group>`
+    lists every series the group's alarms read and fails on one CloudWatch doesn't have, so a
+    group goes on once its series have data (AD-6). No `WarmUpConfiguration`: it lasts at most 2
+    days, applies only at creation, and its docs don't cover metric math. At the first deploy only
+    `telemetry` (the EMF error alarms) is on: `uptime` waits for the probe's first points
+    (decision 37), `facilitator` and `host` on #113, `watch` on #115, `channelHeld` on 0089,
+    `backups` and `snapshots` on 0026's jobs (decision 40). The groups
+    `disk`, `memory` and `logVolume` also need a measured threshold, and `host` the audit
+    volume's mount, and synth refuses each one on without it.
+27. **Three stacks with no reference between them** (akot, 2026-11-04). Telemetry (the Roles
+    Anywhere anchor, profile and role, and the two log groups), Alarms (the topic, Chatbot and the
+    alarms) and Uptime (the probe, its schedule and its role). Alarms read metrics by namespace,
+    name and dimensions, and the log groups and Lambdas have fixed names, so no stack exports
+    anything and each deploys alone with `--exclusively` (the Prices API's 0141). A threshold
+    change never shows IAM in the diff, and the probe's code ships without touching an alarm.
+    #115 adds its Lambda as a fourth stack.
+28. **`gauges-silent`, one per network** (akot, 2026-11-04; closes the alarm list's open item). A
+    gauge whose read keeps throwing goes silent while sweeps continue: its Level alarm keeps its
+    state (decision 19), and `facilitator-silent` reads the sweeps, so nothing fired. A
+    `balance_reading_age_seconds` that stopped would keep `balance-stale` quiet while `/settle`
+    refuses every payment. One metric-math alarm per network fires when the sweeps arrive and any
+    of the six gauges sent no point for 3 five-minute periods. With the process down the sweeps
+    stop too, so it stays quiet beside `facilitator-silent`. About $0.70 a month per network.
+    Once `channelHeld` is on, it watches 0089's `channel_longest_hold_seconds` too, whose
+    `channel-held` keeps its state the same way (2026-11-05, Karol's review of #114).
+29. **The CA is a copied file, the server's IP our own SSM parameter** (2026-11-04). The CA's
+    public certificate is copied into `infra/trust/` from the explorer's
+    `infra-hetzner/ca/ca.crt`, so a change of trust root goes through review, and a test checks
+    that it is a CA and not expired. The IP is `/x402/production/server-ip`, kept out of the repo
+    as the explorer keeps `/soroban/production/ch-ip`. It's a parameter of our own, since `ch-ip`
+    describes ClickHouse, and our role shouldn't follow ClickHouse to another box.
+30. **12-hour sessions, and the IP on the permissions** (2026-11-04). The profile and the role
+    allow the 12 hours #113's `aws_signing_helper update` asks for, so the agent keeps shipping
+    through a shorter Roles Anywhere outage; a session used anywhere but the server gets nothing.
+    `aws:SourceIp` sits on each allowed action rather than in the trust policy: it is the agent's
+    own calls the IP limits, and whether Roles Anywhere passes the client's IP to the trust policy
+    is untested. The role only writes: `logs:CreateLogStream`, `logs:PutLogEvents` and
+    `logs:DescribeLogStreams` on the two groups, and `cloudwatch:PutMetricData` for the namespace
+    `x402-host` (the agent's memory and disk). EMF lines need no `PutMetricData`. So #113's agent
+    config can't create groups or set their retention. The namespace condition binds
+    `PutMetricData` only: an EMF line in the metrics group can name any namespace, `x402-watch`
+    included, so it doesn't guard the off-server alarms. Their statistics and the Lambdas'
+    `AWS/Lambda` silence alarms do (G-alarm-list, "Statistics"; 2026-11-05, Karol's review of
+    #114).
+31. **The log groups outlive their stack** (2026-11-04). The app and metrics groups are kept on a
+    stack delete: their history is meant to outlive the host (decision 1), so a `cdk destroy`
+    shouldn't take it. Not on a first create's rollback (`RETAIN_ON_UPDATE_OR_DELETE`), or the
+    empty groups would block the next deploy with "already exists" (the second review). The probe's own group goes with its stack, as the explorer's
+    Lambda groups do.
+32. **Chatbot's guardrail is read-only** (2026-11-04). The siblings leave it at the default,
+    `AdministratorAccess`. The role already limits Chatbot to `CloudWatchReadOnlyAccess`; on a
+    shared account the channel's guardrail says the same.
+33. **`check-series` waits only on the series written all the time** (2026-11-04). A failure
+    counter (`signer_failures_total`, the EMF errors) is written only when the failure happens,
+    so it can't show data before its group goes on, and a check that required it would never
+    pass. The check fails on a gauge, the sweeps' zero, a Lambda's own metrics or a log group's
+    bytes with no data in the last 3 hours, and lists the failure counters: they travel the same
+    path, and the catalog checks their names and dimensions at synth.
+34. **The shapes the list left open** (2026-11-04). `memory`: `Minimum` over 5-minute periods, 3 of
+    3, so it fires on a lasting squeeze, not a ClickHouse merge's spike. `log-volume`: `Sum` of
+    `IncomingBytes` per log group over an hour, 1 of 1. Both stay off until their thresholds are
+    measured. `disk` and `log-volume` make one alarm per mount and per log group, named after it.
+35. **The delivery test fires `emf-validation`** (2026-11-04). `make fire-test` sets an alarm to
+    ALARM by hand. `emf-validation` reads a metric written only on a failure, so its next
+    evaluation puts it back to OK with no OK message, and no real alarm is touched. The target
+    prints the alarm's action history, since a publish SNS refuses shows only there (the
+    explorer's 2026-08-27).
+36. **The siblings' library ranges, today's versions** (2026-11-04). `aws-cdk-lib ^2.245.0`,
+    `constructs ^10.6.0`, `aws-cdk ^2.1114.1`, as both siblings, resolved to 2.275.0, 10.8.1 and
+    2.1147.0. `cdk.json` takes the explorer's feature flags, plus the eight newer than its CDK at
+    their recommended values; the templates are the same with and without them.
+37. **`uptime` goes on after the probe's first points** (2026-11-04, from the second review of
+    #114). Missing data breaches it, so an alarm made before `ready` has 7 minutes of points posts
+    "not ready" at once. The first deploy makes the probe, and the group goes on once
+    `make check-series GROUP=uptime` sees `ready`. Decision 5's condition, the first good deploy,
+    was met by #119.
+38. **The probe runs at the start of every minute** (2026-11-04, the second review).
+    `cron(* * * * ? *)`, not `rate(1 minute)`, which counts from the schedule's creation: a run
+    near a minute's edge could land in the next minute and leave one with no point, read as down
+    and taken off the 99%. Each point is stamped when its run starts.
+39. **#115 publishes every metric on every run, 0 included** (2026-11-04). `check-series` counts
+    `x402-watch` as written all the time, so the `watch` group goes on only once each series has
+    arrived. A count published only when it isn't 0 would leave `account-effects` and
+    `backup-secret-read` reading OK on series that might not exist.
+40. **The backup and snapshot alarms are groups of their own** (2026-11-05, from the whole-task
+    review). `host` held `wal-failing`, `wal-stale`, `backup-age` and `snapshot-age`, whose jobs,
+    pgBackRest and OpenBao's daily snapshot, come with 0026 and don't run yet. The probe writes a
+    value past the threshold for a job that never ran (decision 10), so `host` could never go on,
+    and `openbao-down`, `certificate`, `probe-silent` and `telemetry-silent` would wait with it.
+    `backups` holds the three pgBackRest alarms and `snapshots` holds `snapshot-age`, apart, since
+    the two jobs can land at different times.
+41. **The balance alarms name the fee account, from the infra config** (2026-11-05, from the
+    whole-task review; ADR 0013 asks for the address and the top-up step). `feeAccounts` in
+    `infra/envs/<env>.json` holds one `G...` address per served network; synth refuses a missing
+    one, one for a network not served, and a failed checksum, so a typo can't send a top-up
+    elsewhere. The address is public: `/supported` lists it as the signer. The descriptions point to
+    the runbook's new Topping up the fee account, whose testnet merge was tried between two one-off
+    accounts. An address change, a key rotation, is a config change and an alarm deploy.
 
 ## Acceptance Criteria
 
