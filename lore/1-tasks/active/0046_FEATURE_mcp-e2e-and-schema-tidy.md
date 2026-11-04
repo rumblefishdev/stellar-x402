@@ -97,8 +97,12 @@ rows, with no XDR error in the second run's log. Measured causes:
 | 1 | The suite starts our built facilitator, and the example seller settles through it | owner | beyond it | upstream's e2e starts its own facilitators (`e2e/test.ts:886`@58e667f) |
 | 2 | Paid scenarios get a time limit past what signing takes; scenarios that sign nothing keep 3 s | owner | beyond it | checked: no upstream rule |
 
+The first limit for real payments, 30 s, failed E-21 and E-22 in 1 of 2 runs with the money moved:
+it can't hold signing and our facilitator's own 30 s settle budget. At 55 s, under the MCP client's
+60 s, 3 of 3 full runs passed all 121 rows.
+
 ## Acceptance Criteria
 
 - [ ] One `[structure only]` PR; unit tests unchanged; an e2e run passes on its head
 - [ ] `server.ts` holds no schema
-- [ ] `pnpm mcp:e2e` passes on real testnet, with E-21 and E-22 settled by the suite's own facilitator
+- [x] `pnpm mcp:e2e` passes on real testnet, with E-21 and E-22 settled by the suite's own facilitator
