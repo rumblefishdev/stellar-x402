@@ -97,7 +97,7 @@ Nothing: the grilling's frontier is empty (2026-10-30).
 | B | the Transit signer, its config, `/health`'s `signer`, the settle reasons, the compose variables and the tests (rows 2–14), stacked on A′ for AC 1 | #102, merged; rows 17–19, 22 and 25–26 too (#116 merged into it) |
 | C | the tests that aren't in `test/` or named `.test.ts` move there: five scripts to `test/live/`, `testing.ts` out of `src`; the rule goes into the repo's `CLAUDE.md`; `verifyOnlySigner`'s comment cites the lines that prove it; `keypairSigner`, with no production caller after D, moves to `./testing` | after #102 |
 | D | the AppRole login only from files (row 27) | #121, open |
-| E | the comments on a signing failure after a sent envelope (row 16) | #122, open |
+| E | the comments on a signing failure after a sent envelope (row 16) | #122, merged |
 
 ## Out of scope
 
