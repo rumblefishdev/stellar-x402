@@ -24,6 +24,11 @@ export interface BeforeSubmitContext {
    */
   reopened: number;
   now: number;
+  /**
+   * When the settle budget runs out, in milliseconds since the epoch: an answer after it is cut
+   * off (see `beforeSubmit`), so a hook that retries stops before it.
+   */
+  deadline: number;
 }
 
 export type BeforeSubmitResult =

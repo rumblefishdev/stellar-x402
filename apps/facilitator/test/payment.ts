@@ -3,9 +3,11 @@ import {
   Address,
   Networks,
   Operation,
+  SorobanDataBuilder,
   TransactionBuilder,
   nativeToScVal,
   xdr,
+  type Transaction,
 } from "@stellar/stellar-sdk";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import { declareDiscoveryExtension } from "@x402/extensions/bazaar";
@@ -94,4 +96,20 @@ export function bazaarExtensions(levels: number): Record<string, unknown> {
 export function depthOf(value: unknown): number {
   if (value === null || typeof value !== "object") return 0;
   return 1 + Math.max(0, ...Object.values(value).map(depthOf));
+}
+
+/** A simulation's footprint: the host writes the nonce of each address auth entry it used. */
+export function usedNonces(transaction: Transaction): SorobanDataBuilder {
+  const call = transaction.operations[0] as { auth?: xdr.SorobanAuthorizationEntry[] };
+  const nonces = (call.auth ?? []).map((entry) => {
+    const credentials = entry.credentials().address();
+    return xdr.LedgerKey.contractData(
+      new xdr.LedgerKeyContractData({
+        contract: credentials.address(),
+        key: xdr.ScVal.scvLedgerKeyNonce(new xdr.ScNonceKey({ nonce: credentials.nonce() })),
+        durability: xdr.ContractDataDurability.temporary(),
+      }),
+    );
+  });
+  return new SorobanDataBuilder().setFootprint([], nonces);
 }

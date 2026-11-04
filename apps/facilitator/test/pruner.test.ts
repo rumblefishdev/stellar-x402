@@ -92,6 +92,20 @@ describe("pruner", () => {
     expect(rows).toEqual([{ at: String(NOW - 30 * DAY) }]);
   });
 
+  it("prunes quiescent spend_scopes rows, keeping those with an open breaker (0024)", async () => {
+    const { spend } = db.stores();
+    await db.pool.query("INSERT INTO spend_scopes (scope, window_start) VALUES ('payer:GONE', 1)");
+    await db.pool.query(
+      "INSERT INTO spend_scopes (scope, breaker_until) VALUES ('asset:OPEN', $1)",
+      [NOW + DAY],
+    );
+    await createPruner(deps({ spend })).runOnce();
+    const { rows } = await db.pool.query<{ scope: string }>(
+      "SELECT scope FROM spend_scopes ORDER BY scope",
+    );
+    expect(rows.map((r) => r.scope)).toEqual(["asset:OPEN"]);
+  });
+
   it("prunes in batches until one comes back short, each table within its own time budget", async () => {
     // A flood: every batch comes back full, and each takes 300 ms.
     let clock = 0;
@@ -104,7 +118,7 @@ describe("pruner", () => {
     const { logger, events } = recordingLogger();
     await createPruner(
       deps({
-        spend: { prune: full("spend") },
+        spend: { prune: full("spend"), pruneScopes: async () => 0 },
         rateLimits: { prune: full("rate") },
         logger,
         clock: () => clock,
@@ -129,7 +143,7 @@ describe("pruner", () => {
     const short = recordingLogger();
     await createPruner(
       deps({
-        spend: { prune: async () => 7 },
+        spend: { prune: async () => 7, pruneScopes: async () => 0 },
         rateLimits: { prune: async () => 0 },
         logger: short.logger,
       }),
@@ -151,7 +165,7 @@ describe("pruner", () => {
     const error = new Error("connection terminated");
     await createPruner(
       deps({
-        spend: { prune: () => Promise.reject(error) },
+        spend: { prune: () => Promise.reject(error), pruneScopes: async () => 0 },
         rateLimits,
         logger,
         metrics,
@@ -174,7 +188,7 @@ describe("pruner", () => {
       .mockResolvedValueOnce(1_000)
       .mockResolvedValueOnce(1_000)
       .mockRejectedValueOnce(error);
-    await createPruner(deps({ spend: { prune }, logger })).runOnce();
+    await createPruner(deps({ spend: { prune, pruneScopes: async () => 0 }, logger })).runOnce();
     expect(events).toContainEqual({
       level: "warn",
       event: "store_prune_failed",
@@ -192,6 +206,7 @@ describe("pruner", () => {
         await new Promise<void>((resolve) => (release = resolve));
         return 0;
       },
+      pruneScopes: async () => 0,
     };
     // random() = 0: the earliest a tick may come, 54 s.
     const pruner = createPruner(deps({ spend, random: () => 0 }));

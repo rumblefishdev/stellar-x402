@@ -15,6 +15,7 @@ import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/
 import { describe, expect, it, vi } from "vitest";
 import type { FindMissingTrustline, MissingTrustline } from "../src/settlement/trustline.js";
 import {
+  AMOUNT_ZERO_REASON,
   CHANNEL_ACCOUNT_REASON,
   EXPIRATION_TOO_FAR_REASON,
   MUXED_FACILITATOR_REASON,
@@ -303,6 +304,28 @@ describe("createVerifier", () => {
       invalidReason: "invalid_network",
     });
     expect(upstream.verify).not.toHaveBeenCalled();
+  });
+
+  it("refuses a zero amount before upstream sees it", async () => {
+    // A zero transfer moves nothing, yet it would take a nonce, a channel and a fee.
+    for (const amount of ["0", "000"]) {
+      const { verify, upstream } = setup();
+      await expect(verify(payload(), { ...requirements, amount })).resolves.toMatchObject({
+        isValid: false,
+        invalidReason: AMOUNT_ZERO_REASON,
+        invalidMessage: "the payment amount is 0",
+      });
+      expect(upstream.verify).not.toHaveBeenCalled();
+    }
+  });
+
+  it("passes an amount of 1 on to upstream", async () => {
+    const { verify, upstream } = setup();
+    await expect(verify(payload(), { ...requirements, amount: "1" })).resolves.toEqual({
+      isValid: true,
+      payer,
+    });
+    expect(upstream.verify).toHaveBeenCalledTimes(1);
   });
 
   describe("channel accounts (AD-5)", () => {

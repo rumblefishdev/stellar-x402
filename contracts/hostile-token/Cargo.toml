@@ -1,0 +1,17 @@
+[package]
+name = "hostile-token"
+version = "0.0.0"
+description = "Testnet-only SEP-41 token whose transfer can skip auth or fail on chain; anyone can mint and set its mode"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
