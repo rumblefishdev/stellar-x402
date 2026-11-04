@@ -3,7 +3,7 @@ import { Keypair, Networks, StrKey, Transaction } from "@stellar/stellar-sdk";
 import type { PaymentRequirements } from "@x402/core/types";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { postgresStores } from "../src/adapters/postgres.js";
+import { PostgresSpendStore, postgresStores } from "../src/adapters/postgres.js";
 import { MIGRATIONS, migrate } from "../src/adapters/postgres-schema.js";
 import { NON_FINAL_STATES } from "../src/adapters/rules.js";
 import { main, migrateMain } from "../src/main.js";
@@ -11,6 +11,7 @@ import {
   HashConflictError,
   LEASE_SKEW_MARGIN_MS,
   LeaseFencedError,
+  type NewSettlement,
   type Stores,
 } from "../src/ports/index.js";
 import { jsonLogger } from "../src/logger.js";
@@ -357,6 +358,91 @@ describe("PostgreSQL stores", () => {
     });
   });
 
+  describe("one non-final settlement per payer and asset (0024)", () => {
+    const [s1, s2, s3] = ["1", "2", "3"].map((nonce) =>
+      settlement(nonce, "stellar:testnet", "CONE"),
+    ) as [NewSettlement, NewSettlement, NewSettlement];
+    const inFlight = async () =>
+      (await pool.query<{ key: string }>("SELECT key FROM settlement_in_flight")).rows.map(
+        (row) => row.key,
+      );
+
+    it("takes over a row whose settlement is final or missing", async () => {
+      // A release before 0008 ends a record without deleting its row.
+      const { settlements } = await stores();
+      await settlements.claim(s1);
+      await pool.query("UPDATE settlements SET state = 'success' WHERE key = $1", [s1.key]);
+      expect(await settlements.claim(s2)).toMatchObject({ claimed: true });
+      expect(await inFlight()).toEqual([s2.key]);
+      // A row naming no record.
+      await stores();
+      await pool.query(
+        `INSERT INTO settlement_in_flight (network, payer, asset, key)
+         VALUES ('stellar:testnet', $1, 'CONE', 'stellar:testnet:GPAYER:gone')`,
+        [s1.payer],
+      );
+      expect(await settlements.claim(s3)).toMatchObject({ claimed: true });
+      expect(await inFlight()).toEqual([s3.key]);
+    });
+
+    it("answers busy to a claim that waited on another key's claim of the payer and asset", async () => {
+      // The waiting claim's first statement began before the winner committed, so it can't see
+      // the winner's record: it must read it again before it calls the row's record missing.
+      const { settlements } = await stores();
+      await holding(async (client) => {
+        await client.query(
+          `INSERT INTO settlements (key, network, payer, nonce, fingerprint, state, payment_payload,
+             payment_requirements, created_at, updated_at)
+           VALUES ($1, 'stellar:testnet', $2, '1', 'fp', 'claimed', '{}', $3, 1, 1)`,
+          [s1.key, s1.payer, JSON.stringify(s1.paymentRequirements)],
+        );
+        await client.query(
+          `INSERT INTO settlement_in_flight (network, payer, asset, key)
+           VALUES ('stellar:testnet', $1, 'CONE', $2)`,
+          [s1.payer, s1.key],
+        );
+        const claiming = settlements.claim(s2);
+        await lockWaiter(client);
+        await client.query("COMMIT");
+        expect(await claiming).toEqual({ claimed: false, busy: s1.key });
+      });
+      expect(await settlements.get(s2.key)).toBeUndefined();
+      expect(await inFlight()).toEqual([s1.key]);
+    });
+
+    it("claims once the blocker's final transition it waited on commits", async () => {
+      const { settlements } = await stores();
+      await settlements.claim(s1);
+      await holding(async (client) => {
+        // What `transition` to a final state writes, held open.
+        await client.query("UPDATE settlements SET state = 'rejected' WHERE key = $1", [s1.key]);
+        await client.query("DELETE FROM settlement_in_flight WHERE key = $1", [s1.key]);
+        const claiming = settlements.claim(s2);
+        await lockWaiter(client);
+        await client.query("COMMIT");
+        expect(await claiming).toMatchObject({ claimed: true });
+      });
+      expect(await inFlight()).toEqual([s2.key]);
+    });
+
+    it("deletes the row on a final transition only while it still names the record", async () => {
+      const { settlements } = await stores();
+      await settlements.claim(s1);
+      await holding(async (client) => {
+        // Another key takes the row while the final write of s1 waits on it.
+        await client.query("UPDATE settlement_in_flight SET key = $1", [s2.key]);
+        const ending = settlements.transition(s1.key, "claimed", {
+          state: "expired",
+          updatedAt: 3_000,
+        });
+        await lockWaiter(client);
+        await client.query("COMMIT");
+        expect(await ending).toMatchObject({ state: "expired" });
+      });
+      expect(await inFlight()).toEqual([s2.key]);
+    });
+  });
+
   it("fails a transaction whose connection drops, keeps running, and drops the connection", async () => {
     await stores();
     // One connection, so the calls after the drop must reuse it or replace it.
@@ -370,7 +456,7 @@ describe("PostgreSQL stores", () => {
         await pool.query("SELECT pg_terminate_backend($1)", [await lockWaiter(client)]);
         await expect(reserving).rejects.toThrow();
       });
-      expect(await spend.reserve({ id: "b", amount: 1n, limits, now: 0 })).toEqual({
+      expect(await spend.reserve({ id: "b", amount: 1n, limits, now: 0 })).toMatchObject({
         reserved: true,
       });
       expect((await settlements.claim(settlement("1"))).claimed).toBe(true);
@@ -469,19 +555,8 @@ describe("PostgreSQL stores", () => {
         code: "55P03",
       });
     });
-    expect(await spend.reserve({ id: "a", amount: 1n, limits, now: 0 })).toEqual({
+    expect(await spend.reserve({ id: "a", amount: 1n, limits, now: 0 })).toMatchObject({
       reserved: true,
-    });
-  });
-
-  it("resets no failures without waiting on a reservation's scope lock", async () => {
-    const { spend } = await stores();
-    await pool.query("INSERT INTO spend_scopes (scope) VALUES ('asset:CX')");
-    await holding(async (client) => {
-      await client.query("SELECT scope FROM spend_scopes WHERE scope = 'asset:CX' FOR UPDATE");
-      const reset = spend.recordSuccess("asset:CX").then(() => "reset");
-      const waited = new Promise((resolve) => setTimeout(() => resolve("waited"), 1_000));
-      expect(await Promise.race([reset, waited])).toBe("reset");
     });
   });
 
@@ -815,6 +890,7 @@ describe("PostgreSQL stores", () => {
       expect(await migrate(old, 0, MIGRATIONS.slice(0, 1))).toEqual(["0001_init"]);
       const { settlements } = postgresStores(old);
       const s = settlement("1");
+      // Written as that release claims; this one's claim needs `0011_settlement_in_flight`.
       await old.query(
         `INSERT INTO settlements (key, network, payer, nonce, fingerprint, state, payment_payload,
            payment_requirements, created_at, updated_at)
@@ -865,6 +941,9 @@ describe("PostgreSQL stores", () => {
           "0005_settlement_attempts",
           "0007_settlement_reopened",
           "0008_lease_token",
+          "0009_spend_budgets",
+          "0010_settlement_failure",
+          "0011_settlement_in_flight",
         ]);
         expect(await typeIndex(old), built).toBe(1);
       } finally {
@@ -891,6 +970,9 @@ describe("PostgreSQL stores", () => {
         "0005_settlement_attempts",
         "0007_settlement_reopened",
         "0008_lease_token",
+        "0009_spend_budgets",
+        "0010_settlement_failure",
+        "0011_settlement_in_flight",
       ]);
       const { rows } = await old.query(
         "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",
@@ -900,6 +982,15 @@ describe("PostgreSQL stores", () => {
         { scope: "payer:P", at: "5", amount: "60" },
       ]);
       expect(await postgresStores(old).spend.used("payer:P", 10, 6)).toBe(60n);
+      // 0006's state CHECK is added NOT VALID, so no scan, and still holds every new row.
+      await old.query(
+        "INSERT INTO spend_reservations (id, amount, at, state) VALUES ('b', 1, 5, 'released')",
+      );
+      await expect(
+        old.query(
+          "INSERT INTO spend_reservations (id, amount, at, state) VALUES ('c', 1, 5, 'spent')",
+        ),
+      ).rejects.toThrow(/spend_reservations_state_check/);
     } finally {
       await old.end();
       await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
@@ -923,6 +1014,97 @@ describe("PostgreSQL stores", () => {
       // A sum that waits fails here, and the rollback then lets it finish.
       const blocked = new Promise((resolve) => setTimeout(() => resolve("blocked"), 1_000));
       expect(await Promise.race([spend.used("global", 100, 50), blocked])).toBe(20n);
+    });
+  });
+
+  it("gives up a success count rather than wait on a locked scope row (0024)", async () => {
+    const { spend } = await stores();
+    const scope = "asset:CONE" as const;
+    await spend.recordFailure(scope, 0, 60_000); // creates the row
+    await holding(async (client) => {
+      // `reserve` holds this scope row FOR UPDATE: a success write that waited would hold a
+      // main-pool connection until the lock cleared, starving claim/addHash. It gives up instead.
+      await client.query("SELECT 1 FROM spend_scopes WHERE scope = $1 FOR UPDATE", [scope]);
+      const blocked = new Promise((resolve) => setTimeout(() => resolve("blocked"), 1_500));
+      expect(
+        await Promise.race([spend.recordSuccess(scope, 1, 60_000).then(() => "done"), blocked]),
+      ).toBe("done");
+    });
+    // Best-effort: the contended success wasn't counted, which only makes the breaker more eager.
+    expect(await spend.recordFailure(scope, 2, 60_000)).toMatchObject({
+      failures: 2,
+      successes: 0,
+    });
+  });
+
+  it("prunes quiescent spend_scopes rows and keeps the active ones (0024)", async () => {
+    const { spend } = await stores();
+    // A lock row a reserve left long ago: no failure, no breaker — safe to forget.
+    await pool.query("INSERT INTO spend_scopes (scope, window_start) VALUES ('payer:OLD', 100)");
+    // A breaker still open in the future must survive.
+    await pool.query(
+      "INSERT INTO spend_scopes (scope, window_start, breaker_until) VALUES ('asset:OPEN', 100, 9999999)",
+    );
+    // Recent strikes must survive, so the backoff escalation isn't lost.
+    await pool.query(
+      "INSERT INTO spend_scopes (scope, window_start, strikes, last_opened_at) VALUES ('payer:STRIKING', 100, 2, 5000)",
+    );
+    // A failure count whose window is still running must survive, with no breaker or strike.
+    await pool.query(
+      "INSERT INTO spend_scopes (scope, window_start) VALUES ('payer:COUNTING', 5000)",
+    );
+    // A budget-only scope: `reserve` never sets `window_start`, so only its reservations in the
+    // horizon keep it.
+    await pool.query("INSERT INTO spend_scopes (scope) VALUES ('global')");
+    await pool.query(
+      `INSERT INTO spend_reservations (id, amount, at) VALUES ('r', 10, 5000);
+       INSERT INTO spend_reservation_scopes (id, scope, at, amount) VALUES ('r', 'global', 5000, 10)`,
+    );
+    expect(await spend.pruneScopes(1_000, 100)).toBe(1);
+    const { rows } = await pool.query<{ scope: string }>(
+      "SELECT scope FROM spend_scopes ORDER BY scope",
+    );
+    expect(rows.map((r) => r.scope)).toEqual([
+      "asset:OPEN",
+      "global",
+      "payer:COUNTING",
+      "payer:STRIKING",
+    ]);
+  });
+
+  it("keeps a scope row a reserve has locked from the pruner until it commits (0024)", async () => {
+    const { spend } = await stores();
+    // An existing, quiescent row: `reserve`'s insert finds it, the case where `ON CONFLICT DO
+    // NOTHING` took no lock and a prune between the insert and the lock let two reserves through.
+    await pool.query("INSERT INTO spend_scopes (scope) VALUES ('global')");
+    let pruned: number | undefined;
+    let inserted = false;
+    const reservePool = {
+      connect: async () => {
+        const client = await pool.connect();
+        const query = client.query.bind(client) as (...args: unknown[]) => Promise<unknown>;
+        return Object.assign(Object.create(client) as pg.PoolClient, {
+          query: async (...args: unknown[]) => {
+            // Right after the scope rows' insert, before anything else: a prune now must skip.
+            if (inserted && pruned === undefined)
+              pruned = await spend.pruneScopes(Number.MAX_SAFE_INTEGER, 100);
+            if (String(args[0]).includes("INSERT INTO spend_scopes")) inserted = true;
+            return query(...args);
+          },
+          release: (error?: Error | boolean) => client.release(error),
+        });
+      },
+    } as unknown as pg.Pool;
+    const store = new PostgresSpendStore(pool, reservePool);
+    const limits = [{ scope: "global" as const, maxStroops: 100n, windowMs: 1_000 }];
+    expect(await store.reserve({ id: "a", amount: 60n, limits, now: 0 })).toMatchObject({
+      reserved: true,
+    });
+    expect(pruned).toBe(0);
+    // And the second reserve, serialized on the same row, sees the first.
+    expect(await spend.reserve({ id: "b", amount: 60n, limits, now: 1 })).toEqual({
+      reserved: false,
+      scope: "global",
     });
   });
 
