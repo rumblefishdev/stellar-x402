@@ -75,8 +75,8 @@ installs what root runs on the shared server, comes from `develop`, which has no
 - `deploy/scripts/check-production-postgres.sh` and CI's `production-postgres` job (decision 17):
   starts `postgres-testnet` from the production compose file with the secret owned by the uid in
   `x402-db-testnet@.service`'s x402-creds line, 0400, and waits with that unit's readiness command,
-  on a new volume, after a restart and in a new container on the used volume, then logs in with
-  the password. Locally it passes as committed and fails, on `Permission denied` for the secret,
+  on a new volume, after a restart and in a new container on the used volume, then logs in over
+  the `db` network, where a wrong password must fail and the secret's must pass. Locally it passes as committed and fails, on `Permission denied` for the secret,
   with `user:` removed, with `user: "1000:1000"`, and with the unit's owner set to 1000.
 - `docs/runbook.md`, The playbook: runs from `origin/deploy/production`, the order for a change
   under `deploy/`, and a `docker inspect` check. The deploy key step runs the playbook from
@@ -101,7 +101,8 @@ installs what root runs on the shared server, comes from `develop`, which has no
   (`initdb`), a restart, a recreated container on the used volume, and a volume first made by the
   root entrypoint with Docker's defaults (as the server's would be) all reach `pg_isready`, with no
   error in the log. `CapEff` and `CapBnd` 0, `NoNewPrivs` 1; a root `docker compose exec` also
-  gets `CapBnd` 0. Password login over TCP works.
+  gets `CapBnd` 0. ~~Password login over TCP works.~~ It went to 127.0.0.1, which `initdb` trusts,
+  so it proved nothing about the password (Stan's re-review).
 
 ## Issues Encountered
 
@@ -132,6 +133,11 @@ installs what root runs on the shared server, comes from `develop`, which has no
   check reads from the compose file and the unit. A plain `pg_isready`, as the unit runs it, fails
   for a uid with no passwd entry (`no attempt`), so a `user:` other than 999 would also fail the
   unit's wait.
+- **The check's first login passed with any password** (Stan's re-review). It went to `127.0.0.1`
+  inside the container, and the image's `initdb` writes `host all all 127.0.0.1/32 trust` ahead of
+  the entrypoint's `scram-sha-256` line. Now it logs in over the `db` network as the facilitator
+  does, and first checks that a wrong password fails. With `POSTGRES_HOST_AUTH_METHOD: trust` the
+  check fails on that step. No risk on the server: only the container reaches its own loopback.
 - **The runbook's `docker inspect` check inspected nothing** (Stan's review). Repeated `label`
   filters must all match, no container is in both projects, so `docker ps` printed nothing and the
   check passed. Now one `docker ps` per project.
