@@ -18,7 +18,7 @@ const BUDGET_MS = 1_000;
 export const spendHorizonMs = (windowMs: number) => Math.max(2 * windowMs, 7 * DAY_MS);
 
 export interface PrunerDeps {
-  spend: Pick<SpendStore, "prune">;
+  spend: Pick<SpendStore, "prune" | "pruneScopes">;
   rateLimits: Pick<RateLimitStore, "prune">;
   /** The longest window any spend budget sums. */
   spendWindowMs: number;
@@ -60,6 +60,14 @@ export function createPruner(deps: PrunerDeps): Pruner {
     {
       table: "spend_reservations",
       store: deps.spend,
+      horizonMs: spendHorizonMs(deps.spendWindowMs),
+    },
+    // Scope lock and counter rows a reserve or a breaker left behind, quiescent past the same
+    // horizon (it covers the window and the longest strike reset): one per payer, recipient and
+    // asset ever seen, so without this the table grows for good (0024).
+    {
+      table: "spend_scopes",
+      store: { prune: (before: number, limit: number) => deps.spend.pruneScopes(before, limit) },
       horizonMs: spendHorizonMs(deps.spendWindowMs),
     },
     // A window that ended a window ago: a hit from a clock that lags by less still finds it.
