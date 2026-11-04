@@ -125,6 +125,23 @@ history:
       exposes no TPM (no ACPI TPM2 or TCPA table, no SMBIOS type 43, no /dev/tpm*); most likely the
       Ryzen 9 3900's fTPM is off in the BIOS, which wasn't checked. The .env values
       (FACILITATOR_ADDRESS_TESTNET, CHANNELS_TESTNET) and the facilitator wait for #102.
+  - date: "2026-11-04"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      The first deploy. #119 merged develop at 17dbc45 (with 0091's #118 and #120) into
+      deploy/production as e577fe6 at 12:32 UTC, and the push started Deploy production (run
+      41830217640) although the workflow isn't on main; the image job built
+      sha256:a56db8b2… by 12:34. While the deploy job waited for the production environment, the
+      playbook from origin/deploy/production at e577fe6 changed two things, the hardened
+      compose.yaml and /etc/logrotate.d/x402-openbao; x402-db-testnet@ and x402-tunnel@ were
+      restarted onto it, and docker inspect showed Postgres as 999:999, cloudflared as
+      65532:65532 and OpenBao as openbao, each with drop [ALL], add [] and no-new-privileges. The
+      GHCR package x402-facilitator was made public (an anonymous token lists its tags). karczuRF
+      approved the deploy, which ran from 12:57:07 to 12:57:37 UTC. /health answers ready, signer
+      ok and listed; /supported lists exact on stellar:testnet with fees sponsored and the signer
+      GAVE5V5I…KKRP. Not yet: a /settle through OpenBao, the facilitator container's inspect, and
+      Run workflow (a rollback by digest), which needs the workflow on main.
 ---
 
 # Public testnet deployment
@@ -414,7 +431,7 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 
 ## Acceptance Criteria
 
-- [ ] Given the Hetzner server and Docker Compose of ADR 0011 (revised in 0039 and 0077), when a deploy runs, then a container image built from the repo is deployed to it as the ADR describes, and the service answers `/supported` at a public HTTPS URL
+- [x] Given the Hetzner server and Docker Compose of ADR 0011 (revised in 0039 and 0077), when a deploy runs, then a container image built from the repo is deployed to it as the ADR describes, and the service answers `/supported` at a public HTTPS URL
 - [ ] Given a running instance, when a new version is deployed, then the old process stops before the new one starts; the process is long-lived and never scaled to zero
 - [ ] Given the facilitator key, when the service is deployed, then it signs through the testnet OpenBao Transit key, the raw key never reaches the facilitator's process, the image or the logs, and it is a testnet-only key (ADR 0013)
 - [x] Given `DATABASE_URL_FILE` or `RPC_URLS_FILE`, when the service starts, then it reads the value from that file, and with neither set it falls back to `DATABASE_URL` and `RPC_URLS`
