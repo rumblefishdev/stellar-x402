@@ -136,7 +136,7 @@ settlement.
   key or locks a seller out of its own listing; the seller's own 402 is what every buyer already
   trusts before it pays.
 - **Asking only on a difference keeps the cost to new and changed listings.** Buyers echo the
-  seller's 402, so an unchanged listing costs no request; the budgets bound what a flood of
+  seller's 402, so an unchanged listing on a route without path values costs no request; the budgets bound what a flood of
   paid copies can make the facilitator send.
 - **The check runs after the settle response** because the seller's middleware holds the
   buyer's answer until `/settle` returns (`@x402/express` 2.28.0). Payment latency comes first.
@@ -214,6 +214,18 @@ settlement.
   state) closes the second part and is required before pubnet. Proof of the account is not required
   for a listing: none of the 10 Stellar accounts in the largest public catalog could show one through
   `stellar.toml` (SEP-1) on 2026-10-29, so it would empty the Stellar catalog.
+- A listing keeps the path values the seller's 402 carries (`info.input.pathParams`). 173 of 198
+  hosts measured on 2026-11-04 echo the client's value there, an e-mail on two of them, so that
+  value is public until the next check, and each payment with another value is a differing copy: a
+  row, and a check at most once a minute. Most catalogs checked store these values too.
+- A URL without a valid template stays a listing of its own, as the spec says (`bazaar.md:543,579`),
+  so a value in it is public: 33 of 104,924 such URLs in the largest public catalog hold an
+  identifier-like value, 2 an e-mail (2026-11-04).
+- Other parts of a 402 can vary per call or repeat a client's value: 55 of 613 hosts answer the same
+  request differently, mostly in `extra` (0 of 4 hosts offering Stellar), and 5 fields on 508 hosts
+  repeat a value in the description, schema or example output. The copy then differs on each
+  payment, and the check's input, chosen by the payer, can pick the listed price on a route priced
+  per request (3 of 508). A buyer still pays the live 402.
 - A plain-`http` resource URL is no longer listed outside `CATALOG_LIST_LOCAL`: the check calls
   https only. None of 10,126 entries in the largest public catalog uses one (2026-10-28).
 - An `mcp://tool/<name>` listing can't be checked (`mcp_tool_url`), so the e2e gate's MCP
