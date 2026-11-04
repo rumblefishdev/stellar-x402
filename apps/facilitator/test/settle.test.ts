@@ -434,6 +434,53 @@ describe("createSettler", () => {
     expect(repeat.response).toMatchObject({ transaction: THEIRS });
   });
 
+  it("records a rewrap that landed and failed as failed under their hash, logged once (0087)", async () => {
+    const THEIRS = "d".repeat(64);
+    const { settle, store, lines, metrics } = setup(async (opts) => {
+      await opts.onSigned?.(HASH, BOUNDS, "e".repeat(64));
+      return {
+        ...result("failed", THEIRS),
+        feeCharged: 0n,
+        rewrap: { of: HASH, feeSource: "GRIVAL" },
+        attempts: [{ hash: HASH, sent: "yes" }],
+      };
+    });
+    await settle(payload(), requirements);
+    expect(await store.get(key)).toMatchObject({
+      state: "failed",
+      feeCharged: 0n,
+      hashes: [HASH, THEIRS],
+    });
+    expect(lines.filter((line) => line.includes('"settlement_rewrapped"'))).toHaveLength(1);
+    expect(metrics.value("settlement_rewrapped_total", { state: "failed" })).toBe(1);
+  });
+
+  it("doesn't log a rewrap whose record another writer finished first (0087)", async () => {
+    const THEIRS = "d".repeat(64);
+    const { settle, store, lines } = setup(async (opts) => {
+      await opts.onSigned?.(HASH, BOUNDS, "e".repeat(64));
+      // A sweep finished it meanwhile, and logged it then.
+      await store.transition(key, "signed", {
+        state: "success",
+        feeCharged: 0n,
+        updatedAt: Date.now(),
+        attempts: [
+          { hash: HASH, state: "dead" },
+          { hash: THEIRS, state: "landed", rewrapOf: HASH },
+        ],
+      });
+      return {
+        ...result("success", THEIRS),
+        feeCharged: 0n,
+        rewrap: { of: HASH, feeSource: "GRIVAL" },
+        attempts: [{ hash: HASH, sent: "yes" }],
+      };
+    });
+    await settle(payload(), requirements);
+    expect((await store.get(key))?.state).toBe("success");
+    expect(lines.some((line) => line.includes('"settlement_rewrapped"'))).toBe(false);
+  });
+
   it("submits once for concurrent calls with one settlement key, and answers success once, to whichever marks it", async () => {
     // A repeat may mark the success before the submitting call does (see `respond`).
     const { settle, submit, hooks, metrics } = setup(async (opts) => {

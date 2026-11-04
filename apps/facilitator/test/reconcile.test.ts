@@ -117,6 +117,8 @@ function rewrapped(status: "SUCCESS" | "FAILED" = "SUCCESS") {
   bump.sign(rival);
   const answer = {
     ...(landed(status) as object),
+    // A real result for a failure: the outcome reads its code too.
+    ...(status === "FAILED" && { resultXdr: failedResult("invokeHostFunctionTrapped") }),
     envelopeXdr: bump.toEnvelope(),
   } as unknown as rpc.Api.GetTransactionResponse;
   return {
@@ -400,6 +402,69 @@ describe("createReconciler", () => {
           }),
         ]);
         expect(metrics.value("settlement_rewrapped_total", { state: "success" })).toBe(1);
+      });
+
+      it("finishes failed under their hash when their fee bump landed and failed", async () => {
+        const found = rewrapped("FAILED");
+        const { store, reconciler, lines, metrics } = setup({
+          [A]: missing(4_013),
+          [found.innerHash]: found.answer,
+        });
+        const key = await claimed(store);
+        await store.addHash(
+          key,
+          A,
+          await holdLease(store),
+          NOW,
+          { maxTime: 2_000, maxLedger: 4_010 },
+          undefined,
+          found.innerHash,
+        );
+        expect(await reconciler.sweep()).toMatchObject({ failed: 1 });
+        expect(await store.get(key)).toMatchObject({
+          state: "failed",
+          errorReason: SETTLE_REASONS.failed,
+          feeCharged: 0n,
+          hashes: [A, found.theirs],
+        });
+        expect((await store.attempts(key)).map((a) => a.state)).toEqual(["dead", "landed"]);
+        expect(lines.filter((line) => line.includes('"settlement_rewrapped"'))).toHaveLength(1);
+        expect(metrics.value("settlement_rewrapped_total", { state: "failed" })).toBe(1);
+      });
+
+      it("lands our own fee bump found by the inner hash as ours, with its fee", async () => {
+        // A read by our hash that raced its landing, then one by the inner hash that found it.
+        const found = rewrapped();
+        const ours = found.theirs;
+        const { store, reconciler, lines } = setup({
+          [ours]: missing(4_013),
+          [found.innerHash]: found.answer,
+        });
+        const key = await claimed(store);
+        await store.addHash(
+          key,
+          ours,
+          await holdLease(store),
+          NOW,
+          { maxTime: 2_000, maxLedger: 4_010 },
+          undefined,
+          found.innerHash,
+        );
+        expect(await reconciler.sweep()).toMatchObject({ success: 1 });
+        expect(await store.get(key)).toMatchObject({
+          state: "success",
+          feeCharged: 41_000n,
+          hashes: [ours],
+        });
+        expect((await store.attempts(key)).map((a) => a.state)).toEqual(["landed"]);
+        expect(lines.some((line) => line.includes('"settlement_rewrapped"'))).toBe(false);
+      });
+
+      it("keeps it open when the inner read comes from a node behind the bound", async () => {
+        const { store, reconciler, key } = await rewrapSetup(missing(4_012));
+        expect(await reconciler.sweep()).toMatchObject({ open: 1 });
+        expect((await store.get(key))?.state).toBe("signed");
+        expect((await store.attempts(key))[0]?.state).toBe("stored");
       });
 
       it("expires it when nothing is found by the inner hash either", async () => {

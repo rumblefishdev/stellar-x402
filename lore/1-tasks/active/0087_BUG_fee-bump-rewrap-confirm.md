@@ -81,6 +81,12 @@ record ends `…_transaction_expired` ("sign a new payment") for a payment that 
   bare inner transaction), store contract 4, reconcile 5, settle 1. Turned off, the pool and sweep
   fallbacks and the `rewrap.of` lookup each fail their tests. Full suite green: facilitator 869,
   pool 185.
+- After the review: the inner read's `NOT_FOUND` counts only past the bound by its own answer, in
+  the pool (`cannotLand`) and the sweep (`pastBound` and `historyCovers`). `/settle` logs a rewrap
+  only when its write won. `settlement_history_gone` carries `innerHash`. The README documents
+  `settlement_rewrapped`, and ADR 0006 the bare case's fee. 8 more tests: pool 3 (our own fee
+  bump found by the inner hash, a node behind the bound, a failed rewrap), reconcile 3, settle 2;
+  each fix, turned off, fails its test. Facilitator 874, pool 188.
 - ADR 0006 (date line, attempts bullet) and spine AD-22 say the rewrap case is covered.
 
 ## Issues Encountered
@@ -121,3 +127,9 @@ record ends `…_transaction_expired` ("sign a new payment") for a payment that 
    channel, our account, paid it.
 8. **`onSigned`'s inner hash is optional in the type**: the pool always passes it, and the test
    stand-ins that call it with two arguments keep working.
+
+## Review
+
+2026-11-04, four layers (full mode): no decision, 7 patches applied, 1 deferred, 15 rejected.
+Deferred: 0027's metrics and alarm lists don't name `settlement_rewrapped_total` (a warning, not an
+alarm, decision 5), a note for 0027.

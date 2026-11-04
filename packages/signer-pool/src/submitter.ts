@@ -958,6 +958,8 @@ export class SettlementSubmitter {
           channel.sequence = txSequence;
           return { ...base, ...rewrappedOutcome(rewrapped, hash, this.passphrase) };
         }
+        // The same rule as for ours: a node behind the bound may not have seen theirs land.
+        if (!cannotLand(rewrapped, { maxTime, maxLedger })) continue;
         // After an uncertain send the cached sequence may be stale, and re-reading it is now safe.
         if (uncertain) channel.sequence = undefined;
         return { ...base, status: "expired", hash };
