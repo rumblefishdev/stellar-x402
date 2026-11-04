@@ -1,0 +1,130 @@
+{
+  "startedAt": "2026-10-30T12:15:30.532Z",
+  "steps": [
+    {
+      "step": "accounts",
+      "data": {
+        "facilitator": "GCLK526EQOIJSEFV537LG7DLXOWLYUCLR2ENUWEINP62XZ3LMCIQ7NVR",
+        "payer": "GAQB5BHBWNFL2523ST64WLYYKUV4AGVLGHPSR4NI4IASBKPBXGBAOTSI",
+        "victim": "GD5N6IO4255DMFCK73CHIQKFJH64P4NLEGLTLSJJA4KVE4RXS5SAO47E",
+        "payTo": "GANXANARI7TUZX4HFAQVAMN3B7KLMJCRUQPT3VHRYVWSGO3BV3JOWOHD"
+      }
+    },
+    {
+      "step": "contracts",
+      "data": {
+        "noauthToken": "CB42Q4JSGVCP5SEANNMENS4JZLXVI37ZDQKUH5NDINKTXAU6B6P65NHE",
+        "testToken": "CBDENRYRSOFEC3UAS3OSJ3NTMGSTLMX6YA5O6Q6BM6TFPIGXFDRQWWMA",
+        "xlmSac": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"
+      }
+    },
+    {
+      "step": "A forged payer, token without require_auth",
+      "data": {
+        "verify": {
+          "isValid": true,
+          "payer": "GD5N6IO4255DMFCK73CHIQKFJH64P4NLEGLTLSJJA4KVE4RXS5SAO47E"
+        },
+        "enforceSimulation": {
+          "simulation": "success",
+          "minResourceFee": "29101",
+          "readWriteKeys": 2,
+          "nonceKeysReadWrite": [],
+          "nonceKeysReadOnly": [],
+          "events": 3
+        },
+        "payerNonceInReadWrite": false
+      }
+    },
+    {
+      "step": "B honest payer, test-token (require_auth)",
+      "data": {
+        "verify": {
+          "isValid": true,
+          "payer": "GAQB5BHBWNFL2523ST64WLYYKUV4AGVLGHPSR4NI4IASBKPBXGBAOTSI"
+        },
+        "enforceSimulation": {
+          "simulation": "success",
+          "minResourceFee": "33149",
+          "readWriteKeys": 3,
+          "nonceKeysReadWrite": [
+            {
+              "owner": "GAQB5BHBWNFL2523ST64WLYYKUV4AGVLGHPSR4NI4IASBKPBXGBAOTSI",
+              "nonce": "3809456743993276870"
+            }
+          ],
+          "nonceKeysReadOnly": [],
+          "events": 3
+        },
+        "payerNonceInReadWrite": true
+      }
+    },
+    {
+      "step": "C honest payer, native XLM SAC",
+      "data": {
+        "verify": {
+          "isValid": true,
+          "payer": "GAQB5BHBWNFL2523ST64WLYYKUV4AGVLGHPSR4NI4IASBKPBXGBAOTSI"
+        },
+        "enforceSimulation": {
+          "simulation": "success",
+          "minResourceFee": "15362",
+          "readWriteKeys": 3,
+          "nonceKeysReadWrite": [
+            {
+              "owner": "GAQB5BHBWNFL2523ST64WLYYKUV4AGVLGHPSR4NI4IASBKPBXGBAOTSI",
+              "nonce": "8132615594837944768"
+            }
+          ],
+          "nonceKeysReadOnly": [],
+          "events": 3
+        },
+        "payerNonceInReadWrite": true
+      }
+    },
+    {
+      "step": "D forged payer, native XLM SAC",
+      "data": {
+        "verify": {
+          "isValid": false,
+          "invalidReason": "invalid_exact_stellar_payload_simulation_failed",
+          "payer": "GD5N6IO4255DMFCK73CHIQKFJH64P4NLEGLTLSJJA4KVE4RXS5SAO47E"
+        },
+        "enforceSimulation": {
+          "simulation": "error",
+          "error": "HostError: Error(Auth, InvalidAction)\n\nEvent log (newest first):\n   0: [Diagnostic Event] contract:CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC, topics:[error, Error(Auth, InvalidAction)], data:[\"failed account authentication with error\", GD5N6IO4255DMFCK73CHIQKFJH64P4NLEGLTLSJJA4KVE4RXS"
+        },
+        "payerNonceInReadWrite": false
+      }
+    },
+    {
+      "step": "settle A forged payer, token without require_auth",
+      "data": {
+        "settled": {
+          "success": true,
+          "transaction": "ee726e6b74f37dc3eedce57c5e054a9b89b6621070f429d76204b32eefd3df87",
+          "network": "stellar:testnet",
+          "payer": "GD5N6IO4255DMFCK73CHIQKFJH64P4NLEGLTLSJJA4KVE4RXS5SAO47E"
+        },
+        "payerBalanceBefore": "1000",
+        "payerBalanceAfter": "990",
+        "payToBalanceAfter": "10"
+      }
+    },
+    {
+      "step": "settle B honest payer, test-token (require_auth)",
+      "data": {
+        "settled": {
+          "success": true,
+          "transaction": "2d59dfc6a54e2b2e5667ed1846556a1de36fb9244f2fc7f8545b3c83c97bdcae",
+          "network": "stellar:testnet",
+          "payer": "GAQB5BHBWNFL2523ST64WLYYKUV4AGVLGHPSR4NI4IASBKPBXGBAOTSI"
+        },
+        "payerBalanceBefore": "1000",
+        "payerBalanceAfter": "990",
+        "payToBalanceAfter": "10"
+      }
+    }
+  ],
+  "finishedAt": "2026-10-30T12:16:41.755Z"
+}

@@ -30,6 +30,16 @@ behind Cloudflare with the same `CF-Connecting-IP`, `2a06:98c0:3600::103` (Cloud
 request headers reference, cross-zone Worker subrequests), so they all share one budget. Sellers
 behind one cloud NAT share theirs the same way.
 
+## API keys on pubnet (0024, 2026-11-03)
+
+Decided by akot (0024 decision 31, ADR 0007's amendment of 2026-11-03): on pubnet `/verify` and
+`/settle` require a key from our portal, issued after Discord sign-in, and the limiter counts a
+caller by it ([0105](0105_FEATURE_api-keys-on-pubnet.md),
+[0106](0106_FEATURE_api-key-portal-discord.md)); its fee budget is
+[0107](0107_FEATURE_per-key-fee-quota.md). On testnet a key is ignored. So the pubnet key is no
+longer this task's, and a key on testnet won't solve the Cloudflare Workers case above: it needs
+another answer before 0026, or is accepted there, for this task's owner to decide.
+
 ## Implementation
 
 - `API_KEYS` in the config: SHA-256 hashes of the issued keys, never the keys.
