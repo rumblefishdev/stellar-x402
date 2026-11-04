@@ -488,9 +488,9 @@ describe("get_resource", () => {
     expect((await preview()).status).toBe(402);
   });
 
-  it("returns upstream_error for terms larger than an HTTP header can carry", async () => {
+  it("returns response_too_large for terms larger than an HTTP header can carry", async () => {
     seller.description = "d".repeat(40_000);
-    expect((await preview()).error.code).toBe("upstream_error");
+    expect((await preview()).error.code).toBe("response_too_large");
   });
 
   it("returns upstream_error when the seller stops sending its response", async () => {
