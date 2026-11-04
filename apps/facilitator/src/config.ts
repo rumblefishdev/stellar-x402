@@ -55,6 +55,24 @@ const stroops = (min: bigint) =>
 /** The floor of `signer-pool`'s `feeStatsInclusionFee` bid, used when no bid is set. */
 const FEE_STATS_MIN_BID_STROOPS = BigInt(FEE_STATS_MIN_STROOPS);
 
+/** Largest int64: spend amounts are `bigint` columns in the store. */
+const INT64_MAX = 9_223_372_036_854_775_807n;
+/** A spend budget or the balance floor: at least 1 stroop, at most what the store holds. */
+const spendStroops = stroops(1n).refine(
+  (value) => value <= INT64_MAX,
+  `must be at most ${INT64_MAX}`,
+);
+
+/** The spend budgets (S-design §5), each of which a settlement reserves its ceiling against. */
+const SPEND_BUDGET_VARS = [
+  "SPEND_GLOBAL_STROOPS",
+  "SPEND_PER_PAYER_STROOPS",
+  "SPEND_PER_PAY_TO_STROOPS",
+  "SPEND_PER_ASSET_STROOPS",
+  "SPEND_PER_ASSET_OTHER_STROOPS",
+  "SPEND_TIER_OTHER_STROOPS",
+] as const;
+
 /** Fee settings reach upstream and the pool as a `number`. */
 const feeStroops = stroops(100n).refine(
   (value) => value <= BigInt(Number.MAX_SAFE_INTEGER),
@@ -230,10 +248,27 @@ const envSchema = z
 
     /** Rolling window of every spend budget (AD-18); a store window, not a timer. */
     SPEND_WINDOW_MS: int(60_000).default("86400000"),
-    SPEND_GLOBAL_STROOPS: stroops(1n).default("5000000000"),
-    SPEND_PER_PAYER_STROOPS: stroops(1n).default("50000000"),
-    SPEND_PER_PAY_TO_STROOPS: stroops(1n).default("500000000"),
-    SPEND_PER_ASSET_STROOPS: stroops(1n).default("2000000000"),
+    /**
+     * The fee budgets of one window, in stroops (S-design §5). `global` stays below the float
+     * less its alarm (ADR 0013), so one window can't empty the fee account.
+     */
+    SPEND_GLOBAL_STROOPS: spendStroops.default("500000000"),
+    /** One payer in the known assets together, and again in each other token. */
+    SPEND_PER_PAYER_STROOPS: spendStroops.default("20000000"),
+    SPEND_PER_PAY_TO_STROOPS: spendStroops.default("100000000"),
+    /** One known asset (USDC). */
+    SPEND_PER_ASSET_STROOPS: spendStroops.default("250000000"),
+    /** One other token, SAC or wasm: anyone can mint one, so it gets the low tier. */
+    SPEND_PER_ASSET_OTHER_STROOPS: spendStroops.default("20000000"),
+    /** All other tokens together, so junk tokens can't spend what USDC sellers need. */
+    SPEND_TIER_OTHER_STROOPS: spendStroops.default("100000000"),
+    /**
+     * `/settle` refuses while the fee account can spend less: 5 XLM, enough for the fees in flight
+     * (about 1.25 XLM at 50 channels), so ADR 0013's alarms at 25 and 10 XLM fire first (0027).
+     */
+    SPEND_FLOOR_STROOPS: spendStroops.default("50000000"),
+    /** How often the fee account's balance is read for the floor. */
+    SPEND_BALANCE_INTERVAL_MS: ms(1_000).default("30000"),
     /**
      * Development only: also list loopback, private and IP resource URLs and `mcp:` tool names,
      * which the catalog refuses on every network (0054), for a facilitator run locally and the
@@ -243,9 +278,9 @@ const envSchema = z
       .default("false")
       .transform((value) => value === "true"),
 
-    /** Consecutive on-chain failures that open an asset or `payTo` breaker. */
-    BREAKER_FAILURES: int(1).default("5"),
-    BREAKER_COOLDOWN_MS: int(1_000).default("600000"),
+    /** The breakers are fixed in code now (0024, `BREAKERS` in `spend/policy.ts`); refused, like `STORE`. */
+    BREAKER_FAILURES: z.string().optional(),
+    BREAKER_COOLDOWN_MS: z.string().optional(),
   })
   .refine((env) => env.RPC_URLS !== undefined || env.NETWORK === STELLAR_NETWORKS.testnet, {
     message: "is required outside testnet",
@@ -303,13 +338,38 @@ const envSchema = z
     message: "is no longer read: the stores are always PostgreSQL",
     path: ["STORE"],
   })
-  // `/settle` spends on pubnet, so not before spend budgets (0024), leaving a channel with an open
-  // hash out after a deploy (0090), an alarm on a failing signer (0027) and deciding again how far
-  // the hot key's power reaches (0048). Whichever lands last lifts this, the others narrow its
-  // message (0009 decision 49).
+  .refine((env) => env.BREAKER_FAILURES === undefined, {
+    message:
+      'is no longer read: the breakers are fixed in code, see "Breakers" in the facilitator README (task 0024)',
+    path: ["BREAKER_FAILURES"],
+  })
+  .refine((env) => env.BREAKER_COOLDOWN_MS === undefined, {
+    message:
+      'is no longer read: the breakers are fixed in code, see "Breakers" in the facilitator README (task 0024)',
+    path: ["BREAKER_COOLDOWN_MS"],
+  })
+  // A settlement reserves the fee ceiling against every budget, so a budget below it refuses
+  // every payment. The floor is not a budget: nothing is reserved against it.
+  .superRefine((env, ctx) => {
+    for (const name of SPEND_BUDGET_VARS) {
+      if (env[name] >= env.MAX_FEE_STROOPS) continue;
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `must be at least MAX_FEE_STROOPS (${env.MAX_FEE_STROOPS}): a settlement reserves the fee ceiling`,
+        path: [name],
+      });
+    }
+  })
+  // `/settle` spends on pubnet, so not before leaving a channel with an open hash out after a
+  // deploy (0090), pubnet's callers presenting an API key (0105) whose settlements count in a fee
+  // budget of its own (0107), an alarm on a failing signer (0027) and deciding again how far the
+  // hot key's power reaches (0048). The spend budgets (0024) bound the loss, but self-payments
+  // from many cheap addresses can still use up the shared budgets and refuse every seller's USDC
+  // (0024 S-design, "Residual risk"; decision 31). Whatever lands narrows the message to what is
+  // still missing (0009 decision 49).
   .refine((env) => env.NETWORK !== STELLAR_NETWORKS.pubnet, {
     message:
-      "stellar:pubnet is refused until spend budgets (0024), task 0090, the signer alarm (0027) and the hot key's re-check (0048) land",
+      "stellar:pubnet is refused until task 0090, API keys on pubnet (0105), per-key fee budgets (0107), the signer alarm (0027) and the hot key's re-check (0048) land",
     path: ["NETWORK"],
   });
 
@@ -361,9 +421,13 @@ export interface Config {
     globalStroops: bigint;
     perPayerStroops: bigint;
     perPayToStroops: bigint;
+    /** One known asset; `compose` maps these onto the policy's `SpendBudgets`. */
     perAssetStroops: bigint;
-    breakerFailures: number;
-    breakerCooldownMs: number;
+    perOtherAssetStroops: bigint;
+    tierOtherStroops: bigint;
+    /** The fee account's balance below which `/settle` refuses. */
+    floorStroops: bigint;
+    balanceIntervalMs: number;
   };
   catalog: { listLocal: boolean };
 }
@@ -488,8 +552,10 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
       perPayerStroops: e.SPEND_PER_PAYER_STROOPS,
       perPayToStroops: e.SPEND_PER_PAY_TO_STROOPS,
       perAssetStroops: e.SPEND_PER_ASSET_STROOPS,
-      breakerFailures: e.BREAKER_FAILURES,
-      breakerCooldownMs: e.BREAKER_COOLDOWN_MS,
+      perOtherAssetStroops: e.SPEND_PER_ASSET_OTHER_STROOPS,
+      tierOtherStroops: e.SPEND_TIER_OTHER_STROOPS,
+      floorStroops: e.SPEND_FLOOR_STROOPS,
+      balanceIntervalMs: e.SPEND_BALANCE_INTERVAL_MS,
     },
     catalog: { listLocal: e.CATALOG_LIST_LOCAL },
   };

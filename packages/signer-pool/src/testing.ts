@@ -37,11 +37,19 @@ export class FakeRpc implements SorobanRpc {
   closeTime = 1_000_000;
   readonly ledgerSeconds = 5;
   readonly sequences = new Map<string, bigint>();
+  /** Each account's balance in stroops, where it isn't `accountEntry`'s default. */
+  readonly balances = new Map<string, bigint>();
   readonly sent: (Transaction | FeeBumpTransaction)[] = [];
   readonly calls: Record<string, number> = {};
   private pending = new Map<
     string,
-    { source: string; seq: bigint; maxTime: number; maxLedger: number }
+    {
+      source: string;
+      seq: bigint;
+      maxTime: number;
+      maxLedger: number;
+      tx: Transaction | FeeBumpTransaction;
+    }
   >();
   private done = new Map<string, { ledger: number; ok: boolean }>();
   /** Scripted results, consumed one per call before the default behaviour. */
@@ -55,6 +63,16 @@ export class FakeRpc implements SorobanRpc {
   resourceFee = 40_000;
   /** Every included transaction fails on-chain (still consuming its sequence number). */
   failOnChain = false;
+  /**
+   * Decides, as each included transaction applies, whether it succeeds; a failed one still
+   * consumes its sequence number. `!failOnChain` when unset.
+   */
+  apply?: (tx: Transaction | FeeBumpTransaction) => boolean;
+  /**
+   * With `failOnChain`: the operation result and diagnostic events a failed transaction carries;
+   * without it the result holds no operation results and the response no events.
+   */
+  failure?: { opCode: InvokeHostFunctionFailure; diagnosticEvents?: xdr.DiagnosticEvent[] };
   /** Stops including transactions (simulates a full or stalled network). */
   stalled = false;
 
@@ -66,12 +84,19 @@ export class FakeRpc implements SorobanRpc {
     this.calls[name] = (this.calls[name] ?? 0) + 1;
   }
 
-  /** Answers account keys only, with no entry for an unknown account, as the RPC does. */
+  /**
+   * Answers account keys only, with no entry for an unknown account, as the RPC does, and none
+   * for any other key (a contract's instance, say).
+   */
   async getLedgerEntries(...keys: xdr.LedgerKey[]): Promise<rpc.Api.GetLedgerEntriesResponse> {
     this.count("getLedgerEntries");
-    const accountId = keys[0]!.account().accountId();
-    const seq = this.sequences.get(StrKey.encodeEd25519PublicKey(accountId.ed25519()));
-    const entries = seq === undefined ? [] : [accountEntry(accountId, seq)];
+    const key = keys[0]!;
+    if (key.switch().name !== "account") return { entries: [], latestLedger: this.ledger };
+    const accountId = key.account().accountId();
+    const address = StrKey.encodeEd25519PublicKey(accountId.ed25519());
+    const seq = this.sequences.get(address);
+    const entries =
+      seq === undefined ? [] : [accountEntry(accountId, seq, [], this.balances.get(address))];
     return { entries, latestLedger: this.ledger };
   }
 
@@ -139,7 +164,7 @@ export class FakeRpc implements SorobanRpc {
       return { ...base, status: "TRY_AGAIN_LATER" };
     if (current === undefined || seq !== current + 1n)
       return { ...base, status: "ERROR", errorResult: result("txBadSeq", true) };
-    this.pending.set(hash, { source: inner.source, seq, maxTime, maxLedger });
+    this.pending.set(hash, { source: inner.source, seq, maxTime, maxLedger, tx });
     if (script === "ACCEPT_THEN_THROW") throw new Error("connection reset");
     return { ...base, status: "PENDING" };
   }
@@ -167,9 +192,15 @@ export class FakeRpc implements SorobanRpc {
       applicationOrder: 1,
       feeBump: true,
       envelopeXdr: undefined as unknown as xdr.TransactionEnvelope,
-      resultXdr: d.ok ? result("txSuccess") : result("txFailed", true),
+      resultXdr: d.ok
+        ? result("txSuccess")
+        : this.failure
+          ? failedResult(this.failure.opCode)
+          : result("txFailed", true),
       resultMetaXdr: undefined as unknown as xdr.TransactionMeta,
       events: { transactionEventsXdr: [], contractEventsXdr: [] },
+      ...(!d.ok &&
+        this.failure?.diagnosticEvents && { diagnosticEventsXdr: this.failure.diagnosticEvents }),
     } as rpc.Api.GetTransactionResponse;
   }
 
@@ -185,7 +216,7 @@ export class FakeRpc implements SorobanRpc {
         this.pending.delete(hash);
         if (expired(p)) continue; // expired, seq untouched
         this.sequences.set(p.source, p.seq);
-        this.done.set(hash, { ledger: this.ledger, ok: !this.failOnChain });
+        this.done.set(hash, { ledger: this.ledger, ok: this.apply?.(p.tx) ?? !this.failOnChain });
       }
     } else {
       for (const [hash, p] of this.pending) if (expired(p)) this.pending.delete(hash);
@@ -236,15 +267,58 @@ function result(code: string, inner = false): xdr.TransactionResult {
   });
 }
 
-/** An account's ledger entry with sequence `seq`, as `getLedgerEntries` returns it. */
+/** A failure name of `InvokeHostFunctionResult`, e.g. `invokeHostFunctionTrapped`. */
+export type InvokeHostFunctionFailure = Exclude<
+  xdr.InvokeHostFunctionResultCode["name"],
+  "invokeHostFunctionSuccess"
+>;
+
+/**
+ * The result of a fee-bumped transaction whose inner transaction failed in its one
+ * invoke-host-function operation with `opCode`, as the facilitator's settlements do.
+ */
+export function failedResult(
+  opCode: InvokeHostFunctionFailure,
+  options: { feeBump?: boolean } = {},
+): xdr.TransactionResult {
+  const fee = xdr.Int64.fromString("41000");
+  const op = xdr.OperationResult.opInner(
+    xdr.OperationResultTr.invokeHostFunction(xdr.InvokeHostFunctionResult[opCode]()),
+  );
+  if (options.feeBump === false)
+    return new xdr.TransactionResult({
+      feeCharged: fee,
+      result: xdr.TransactionResultResult.txFailed([op]),
+      ext: new xdr.TransactionResultExt(0),
+    });
+  const pair = new xdr.InnerTransactionResultPair({
+    transactionHash: Buffer.alloc(32),
+    result: new xdr.InnerTransactionResult({
+      feeCharged: fee,
+      result: xdr.InnerTransactionResultResult.txFailed([op]),
+      ext: new xdr.InnerTransactionResultExt(0),
+    }),
+  });
+  return new xdr.TransactionResult({
+    feeCharged: fee,
+    result: xdr.TransactionResultResult.txFeeBumpInnerFailed(pair),
+    ext: new xdr.TransactionResultExt(0),
+  });
+}
+
+/**
+ * An account's ledger entry with sequence `seq`, as `getLedgerEntries` returns it, holding
+ * `balance` stroops (1.5 XLM by default).
+ */
 export function accountEntry(
   accountId: xdr.AccountId,
   seq: bigint,
   signers: Keypair[] = [],
+  balance = 15_000_000n,
 ): rpc.Api.LedgerEntryResult {
   const entry = new xdr.AccountEntry({
     accountId,
-    balance: xdr.Int64.fromString("15000000"),
+    balance: xdr.Int64.fromString(balance.toString()),
     seqNum: xdr.Int64.fromString(seq.toString()),
     numSubEntries: signers.length,
     inflationDest: null,

@@ -62,6 +62,11 @@ export const CHANNEL_ACCOUNT_REASON = "invalid_exact_stellar_payload_channel_acc
  */
 export const MUXED_FACILITATOR_REASON = "invalid_exact_stellar_payload_facilitator_muxed";
 /**
+ * The requirements ask for an amount of 0. Upstream accepts a zero transfer, which moves nothing
+ * yet takes a nonce, a channel and a fee, so we refuse it before the upstream call.
+ */
+export const AMOUNT_ZERO_REASON = "invalid_exact_stellar_payload_amount_zero";
+/**
  * The payload doesn't carry exactly one auth entry for the payer, so it has no settlement key
  * (AD-6), or it carries another address's entry too (0073 decision 21). Upstream de-duplicates
  * signers and doesn't count entries.
@@ -158,6 +163,9 @@ export function createChecker(deps: VerifierDeps): Check {
       return {
         response: invalid("invalid_network", undefined, `this facilitator serves ${deps.network}`),
       };
+    }
+    if (/^0+$/.test(requirements.amount)) {
+      return { response: invalid(AMOUNT_ZERO_REASON, undefined, "the payment amount is 0") };
     }
     // Upstream parses a V0 envelope, and its simulation result then can't be assembled onto it.
     if (isV0Envelope(payload)) {

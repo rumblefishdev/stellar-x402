@@ -42,6 +42,8 @@ beforeAll(async () => {
   rpc = await rpcStub({
     [env.CHANNELS]: hardened(facilitator),
     [masterActive]: { signers: [facilitator], masterWeight: 1 },
+    // The fee account, holding the float (ADR 0013): above the balance floor.
+    [facilitator]: { signers: [], masterWeight: 1, balance: 1_000_000_000n },
   });
 });
 afterAll(() => rpc.close());
@@ -138,7 +140,8 @@ describe("startup with a bad config", () => {
   }, 20_000);
 
   it("refuses stellar:pubnet before serving anything", async () => {
-    // `/settle` spends there: not without spend budgets, rate limits and the channel lease.
+    // `/settle` spends there: not without the lease's fencing token, and not while self-payments
+    // can use up the shared spend budgets (0024's residual risk).
     const pubnet = {
       ...env,
       NETWORK: "stellar:pubnet",
@@ -147,7 +150,7 @@ describe("startup with a bad config", () => {
     const error = await main(pubnet).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ConfigError);
     expect((error as ConfigError).problems).toEqual([
-      "NETWORK stellar:pubnet is refused until spend budgets (0024), task 0090, the signer alarm (0027) and the hot key's re-check (0048) land",
+      "NETWORK stellar:pubnet is refused until task 0090, API keys on pubnet (0105), per-key fee budgets (0107), the signer alarm (0027) and the hot key's re-check (0048) land",
     ]);
   });
 });
@@ -408,6 +411,38 @@ describe("main()", () => {
       prune.mockClear();
       await vi.advanceTimersByTimeAsync(10 * 66_000);
       expect(prune).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reads the fee account's balance for the floor from start, on its timer, until it closes", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const lines: string[] = [];
+    try {
+      const app = await main(
+        { ...env, RPC_URLS: rpc.url, PORT: "0", SPEND_BALANCE_INTERVAL_MS: "1000" },
+        { write: (line) => lines.push(line) },
+      );
+      const reads = () => rpc.reads.filter((account) => account === facilitator).length;
+      const before = reads();
+      try {
+        // Read before the lease is taken, so the first `/settle` isn't refused for want of one.
+        expect(before).toBeGreaterThan(0);
+        expect(lines.map((line) => JSON.parse(line))).toContainEqual(
+          expect.objectContaining({ event: "facilitator_funded", account: facilitator }),
+        );
+        // Each tick's read is a real request, which the next tick waits for.
+        for (let tick = 1; tick <= 3; tick++) {
+          await vi.advanceTimersByTimeAsync(1_000);
+          await vi.waitFor(() => expect(reads()).toBe(before + tick));
+        }
+      } finally {
+        await app.close();
+      }
+      const after = reads();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(reads()).toBe(after);
     } finally {
       vi.useRealTimers();
     }

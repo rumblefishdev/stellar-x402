@@ -43,11 +43,16 @@ const requirements = (overrides: Partial<PaymentRequirements> = {}): PaymentRequ
   ...overrides,
 });
 
+/**
+ * A settlement of `PAYER`'s. Each nonce pays in an asset of its own unless `asset` is given, so
+ * records of one payer don't wait on each other: only one per payer and asset is non-final (0024).
+ */
 export function settlement(
   nonce: string,
   network: StellarNetwork = "stellar:testnet",
+  asset = `CASSET${nonce}`,
 ): NewSettlement {
-  const accepted = requirements({ network });
+  const accepted = requirements({ network, asset });
   const paymentPayload: PaymentPayload = { x402Version: 2, accepted, payload: { tx: "AAAA" } };
   return {
     key: `${network}:${PAYER}:${nonce}` as SettlementKey,
@@ -340,6 +345,32 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       expect(await store.get(key)).toMatchObject({ state: "success", feeCharged: 41_000n });
     });
 
+    it("keeps a failure cause with the final record, and has none otherwise", async () => {
+      const failure = {
+        opCode: "invokeHostFunctionTrapped",
+        error: { type: "sceContract", code: "10" },
+        contract: "CSAC",
+        data: ["GPAYER", "CPAYTO"],
+      };
+      const { key } = settlement("1");
+      await store.claim(settlement("1"));
+      expect((await store.get(key))?.failure).toBeUndefined();
+      const failed = await store.transition(key, "claimed", {
+        state: "failed",
+        errorReason: "x",
+        failure,
+        updatedAt: 2_000,
+      });
+      expect(failed?.failure).toEqual(failure);
+      expect((await store.get(key))?.failure).toEqual(failure);
+      await store.claim(settlement("2"));
+      const success = await store.transition(settlement("2").key, "claimed", {
+        state: "success",
+        updatedAt: 2_000,
+      });
+      expect(success).not.toHaveProperty("failure");
+    });
+
     it("clears a field a transition gives as undefined", async () => {
       const { key } = settlement("1");
       await store.claim(settlement("1"));
@@ -426,7 +457,9 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
           errorReason: "unsent_a",
           updatedAt: 6_000,
         });
-        expect((await store.reopen(s.key, s.fingerprint, UNSENT, 7_000))?.reopened).toBe(2);
+        expect(await store.reopen(s.key, s.fingerprint, UNSENT, 7_000)).toMatchObject({
+          reopened: 2,
+        });
       });
 
       it("refuses another fingerprint, another reason, a record with a hash, or one not rejected", async () => {
@@ -681,6 +714,170 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       });
     });
 
+    describe("one non-final settlement per payer and asset (0024)", () => {
+      /** A settlement in one asset, `CONE`, unless the overrides say otherwise. */
+      const of = (
+        nonce: string,
+        overrides: { payer?: string; asset?: string; network?: StellarNetwork } = {},
+      ): NewSettlement => {
+        const network = overrides.network ?? "stellar:testnet";
+        const payer = overrides.payer ?? PAYER;
+        return {
+          ...settlement(nonce, network, overrides.asset ?? "CONE"),
+          key: `${network}:${payer}:${nonce}` as SettlementKey,
+          payer,
+        };
+      };
+      const reject = (key: SettlementKey) =>
+        store.transition(key, "claimed", { state: "rejected", errorReason: "x", updatedAt: 2_000 });
+
+      it("answers busy with the blocker's key for a second key of one payer and asset", async () => {
+        expect(await store.claim(of("1"))).toMatchObject({ claimed: true });
+        expect(await store.claim(of("2"))).toEqual({ claimed: false, busy: of("1").key });
+        // No record is written, so the same payment can be claimed later.
+        expect(await store.get(of("2").key)).toBeUndefined();
+        expect((await store.listNonFinal("stellar:testnet")).map((r) => r.nonce)).toEqual(["1"]);
+      });
+
+      it("gives one of several concurrent keys of one payer and asset the claim, the rest its key", async () => {
+        const results = await Promise.all(
+          Array.from({ length: 10 }, (_, i) => store.claim(of(String(i)))),
+        );
+        const winners = results.flatMap((result) => (result.claimed ? [result.record.key] : []));
+        expect(winners).toHaveLength(1);
+        const winner = winners[0];
+        expect(results.filter((result) => !result.claimed)).toEqual(
+          Array.from({ length: 9 }, () => ({ claimed: false, busy: winner })),
+        );
+        expect((await store.listNonFinal("stellar:testnet")).map((r) => r.key)).toEqual([winner]);
+      });
+
+      it("claims for another asset, another payer or another network", async () => {
+        await store.claim(of("1"));
+        for (const other of [
+          of("2", { asset: "CTWO" }),
+          of("3", { payer: "GOTHER" }),
+          of("4", { network: "stellar:pubnet" }),
+        ])
+          expect(await store.claim(other)).toMatchObject({ claimed: true });
+      });
+
+      it("still answers existing for a repeat of the same key", async () => {
+        await store.claim(of("1"));
+        expect(await store.claim(of("1"))).toMatchObject({
+          claimed: false,
+          existing: { key: of("1").key, state: "claimed" },
+        });
+        // Also once it is final and another key of the payer and asset holds the slot.
+        await reject(of("1").key);
+        await store.claim(of("2"));
+        expect(await store.claim(of("1"))).toMatchObject({
+          claimed: false,
+          existing: { key: of("1").key, state: "rejected" },
+        });
+      });
+
+      it("frees the slot when the blocker turns final, in any final state, and not before", async () => {
+        const ends: ((key: SettlementKey) => Promise<unknown>)[] = [
+          reject,
+          (key) => store.transition(key, "claimed", { state: "expired", updatedAt: 2_000 }),
+          (key) => store.transition(key, "claimed", { state: "failed", updatedAt: 2_000 }),
+          // Through the transaction that writes attempts too.
+          async (key) => {
+            await store.addHash(key, `h-${key}`, LEASE, 2_000);
+            await store.transition(key, "signed", { state: "pending", updatedAt: 2_500 });
+            expect(await store.claim(of("next"))).toEqual({ claimed: false, busy: key });
+            return store.transition(key, "pending", {
+              state: "success",
+              updatedAt: 3_000,
+              attempts: [{ hash: `h-${key}`, state: "landed" }],
+            });
+          },
+        ];
+        for (const [i, end] of ends.entries()) {
+          const { key } = of(String(i));
+          expect(await store.claim(of(String(i)))).toMatchObject({ claimed: true });
+          // A compare-and-set that lost moves nothing, so it frees nothing.
+          await store.transition(key, "signed", { state: "expired", updatedAt: 2_000 });
+          expect(await store.claim(of("next"))).toEqual({ claimed: false, busy: key });
+          await end(key);
+          expect(await store.claim(of(`after-${i}`))).toMatchObject({ claimed: true });
+          await reject(of(`after-${i}`).key);
+        }
+      });
+
+      it("never leaves the slot held when a claim races the blocker's final transition", async () => {
+        for (let i = 0; i < 10; i++) {
+          const [a, b] = [of(`a${i}`), of(`b${i}`)];
+          await store.claim(a);
+          const [, raced] = await Promise.all([reject(a.key), store.claim(b)]);
+          if (!raced.claimed) {
+            expect(raced).toEqual({ claimed: false, busy: a.key });
+            expect(await store.claim(b)).toMatchObject({ claimed: true });
+          }
+          await reject(b.key);
+        }
+      });
+
+      describe("reopen (0073)", () => {
+        const REASONS = ["x"];
+
+        it("answers busy, and leaves the record closed, while another key holds the slot", async () => {
+          const closed = of("1");
+          await store.claim(closed);
+          await reject(closed.key);
+          await store.claim(of("2"));
+          const before = await store.get(closed.key);
+
+          expect(await store.reopen(closed.key, closed.fingerprint, REASONS, 5_000)).toEqual({
+            busy: of("2").key,
+          });
+          expect(await store.get(closed.key)).toEqual(before);
+
+          await reject(of("2").key);
+          expect(await store.reopen(closed.key, closed.fingerprint, REASONS, 6_000)).toMatchObject({
+            state: "claimed",
+            reopened: 1,
+          });
+        });
+
+        it("takes the slot, so a reopened record blocks other keys until it is final", async () => {
+          const closed = of("1");
+          await store.claim(closed);
+          await reject(closed.key);
+
+          await store.reopen(closed.key, closed.fingerprint, REASONS, 5_000);
+          expect(await store.claim(of("2"))).toEqual({ claimed: false, busy: closed.key });
+
+          await store.transition(closed.key, "claimed", {
+            state: "rejected",
+            errorReason: "x",
+            updatedAt: 6_000,
+          });
+          expect(await store.claim(of("2"))).toMatchObject({ claimed: true });
+        });
+
+        it("lets one of a reopen and a claim of one payer and asset hold the slot", async () => {
+          for (let i = 0; i < 10; i++) {
+            const [closed, other] = [of(`c${i}`), of(`o${i}`)];
+            await store.claim(closed);
+            await reject(closed.key);
+            const [reopened, claimed] = await Promise.all([
+              store.reopen(closed.key, closed.fingerprint, REASONS, 5_000),
+              store.claim(other),
+            ]);
+            expect(reopened).toBeDefined();
+            const holders = [
+              reopened !== undefined && !("busy" in reopened),
+              claimed.claimed,
+            ].filter(Boolean);
+            expect(holders).toHaveLength(1);
+            await reject(claimed.claimed ? other.key : closed.key);
+          }
+        });
+      });
+    });
+
     describe("channel lease", () => {
       const NAME = "stellar:testnet:channels";
 
@@ -843,9 +1040,9 @@ export function spendStoreContract(make: Make<SpendStore>) {
     ];
 
     it("reserves against every limit, or against none", async () => {
-      expect(await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 0 })).toEqual({
-        reserved: true,
-      });
+      expect(
+        await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 0 }),
+      ).toMatchObject({ reserved: true });
       expect(await store.reserve({ id: "b", amount: 60n, limits: limits(100n), now: 1 })).toEqual({
         reserved: false,
         scope: "global",
@@ -891,7 +1088,7 @@ export function spendStoreContract(make: Make<SpendStore>) {
           limits: limits(INT64_MAX, INT64_MAX),
           now: 0,
         }),
-      ).toEqual({ reserved: true });
+      ).toMatchObject({ reserved: true });
       expect(await store.used("global", DAY, 0)).toBe(INT64_MAX);
       expect(await store.used(`payer:${PAYER}`, DAY, 0)).toBe(INT64_MAX);
       expect(
@@ -917,9 +1114,9 @@ export function spendStoreContract(make: Make<SpendStore>) {
 
     it("treats a repeated id as a no-op", async () => {
       await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 0 });
-      expect(await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 1 })).toEqual({
-        reserved: true,
-      });
+      expect(
+        await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 1 }),
+      ).toMatchObject({ reserved: true });
       expect(await store.used("global", DAY, 1)).toBe(60n);
     });
 
@@ -929,10 +1126,10 @@ export function spendStoreContract(make: Make<SpendStore>) {
         reserved: false,
         scope: "global",
       });
-      await store.release("a");
-      expect(await store.reserve({ id: "b", amount: 60n, limits: limits(100n), now: 2 })).toEqual({
-        reserved: true,
-      });
+      await store.release("a", 5);
+      expect(
+        await store.reserve({ id: "b", amount: 60n, limits: limits(100n), now: 2 }),
+      ).toMatchObject({ reserved: true });
       expect(await store.used("global", DAY, 2)).toBe(60n);
     });
 
@@ -949,7 +1146,7 @@ export function spendStoreContract(make: Make<SpendStore>) {
       await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 0 });
       await store.reserve({ id: "b", amount: 30n, limits: limits(100n), now: 0 });
       await store.commit("a", 20n);
-      await store.release("b");
+      await store.release("b", 5);
       expect(await store.used("global", DAY, 10)).toBe(20n);
     });
 
@@ -966,19 +1163,109 @@ export function spendStoreContract(make: Make<SpendStore>) {
       await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 0 });
       expect(await store.commit("a", 20n)).toBe(true);
       // The fee was paid on-chain; a late release (a timed-out path) can't hand it back.
-      await store.release("a");
+      await store.release("a", 5);
       expect(await store.used("global", DAY, 10)).toBe(20n);
       expect(await store.commit("missing", 20n)).toBe(false);
       expect(await store.used("global", DAY, 10)).toBe(20n);
+    });
+
+    it("returns each limit's window sum, this reservation included", async () => {
+      await store.reserve({ id: "a", amount: 10n, limits: limits(100n), now: 0 });
+      const result = await store.reserve({
+        id: "b",
+        amount: 30n,
+        limits: limits(100n, 500n),
+        now: 1,
+      });
+      expect(result).toEqual({
+        reserved: true,
+        usage: [
+          { scope: "global", usedStroops: 40n, maxStroops: 100n },
+          { scope: `payer:${PAYER}`, usedStroops: 40n, maxStroops: 500n },
+        ],
+      });
+    });
+
+    it("returns no usage for a repeated id", async () => {
+      await store.reserve({ id: "a", amount: 10n, limits: limits(100n), now: 0 });
+      expect(await store.reserve({ id: "a", amount: 10n, limits: limits(100n), now: 1 })).toEqual({
+        reserved: true,
+        usage: [],
+      });
+      await store.commit("a", 5n);
+      expect(await store.reserve({ id: "a", amount: 10n, limits: limits(100n), now: 2 })).toEqual({
+        reserved: true,
+        usage: [],
+      });
+    });
+
+    it("refuses a reserve after its release and counts nothing", async () => {
+      await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 0 });
+      await store.release("a", 1);
+      expect(await store.used("global", DAY, 1)).toBe(0n);
+      expect(await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 2 })).toEqual({
+        reserved: false,
+        released: true,
+      });
+      expect(await store.used("global", DAY, 2)).toBe(0n);
+      await store.release("a", 3);
+      expect(await store.used("global", DAY, 3)).toBe(0n);
+    });
+
+    it("tombstones a release of an unknown id, so a later reserve is refused", async () => {
+      await store.release("a", 1);
+      expect(await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 2 })).toEqual({
+        reserved: false,
+        released: true,
+      });
+      expect(await store.used("global", DAY, 2)).toBe(0n);
+    });
+
+    it("keeps a committed reservation on release", async () => {
+      await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 0 });
+      await store.commit("a", 20n);
+      await store.release("a", 5);
+      expect(await store.used("global", DAY, 5)).toBe(20n);
+      expect(await store.used(`payer:${PAYER}`, DAY, 5)).toBe(20n);
+    });
+
+    it("resolves commit false on a released id", async () => {
+      await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 0 });
+      await store.release("a", 1);
+      expect(await store.commit("a", 20n)).toBe(false);
+      await store.release("b", 1);
+      expect(await store.commit("b", 20n)).toBe(false);
+      expect(await store.used("global", DAY, 2)).toBe(0n);
+    });
+
+    it("prunes released rows like the others", async () => {
+      await store.release("a", 1);
+      expect(await store.prune(2, 10)).toBe(1);
+      expect(
+        await store.reserve({ id: "a", amount: 10n, limits: limits(100n), now: 3 }),
+      ).toMatchObject({
+        reserved: true,
+      });
+    });
+
+    it("never leaves a reservation counted when a release races its reserve", async () => {
+      for (let i = 0; i < 20; i++) {
+        const id = `r${i}`;
+        await Promise.all([
+          store.reserve({ id, amount: 10n, limits: limits(1_000n), now: 0 }),
+          store.release(id, 0),
+        ]);
+      }
+      expect(await store.used("global", DAY, 0)).toBe(0n);
     });
 
     it("counts only the rolling window", async () => {
       await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 0 });
       expect(await store.used("global", DAY, DAY - 1)).toBe(60n);
       expect(await store.used("global", DAY, DAY)).toBe(0n);
-      expect(await store.reserve({ id: "b", amount: 60n, limits: limits(100n), now: DAY })).toEqual(
-        { reserved: true },
-      );
+      expect(
+        await store.reserve({ id: "b", amount: 60n, limits: limits(100n), now: DAY }),
+      ).toMatchObject({ reserved: true });
     });
 
     it("prunes reservations stamped before a time, in either state, at most a limit at a time", async () => {
@@ -1002,46 +1289,141 @@ export function spendStoreContract(make: Make<SpendStore>) {
         { scope: `payer:${name}`, maxStroops: 100n, windowMs: DAY },
       ];
       await store.reserve({ id: "a", amount: 80n, limits: payer("A"), now: 0 });
-      expect(await store.reserve({ id: "b", amount: 80n, limits: payer("B"), now: 0 })).toEqual({
-        reserved: true,
-      });
+      expect(
+        await store.reserve({ id: "b", amount: 80n, limits: payer("B"), now: 0 }),
+      ).toMatchObject({ reserved: true });
       expect(await store.used("payer:A", DAY, 0)).toBe(80n);
       expect(await store.used("payer:B", DAY, 0)).toBe(80n);
       expect(await store.used("global", DAY, 0)).toBe(0n);
     });
 
+    const backoff = { baseMs: 1_000, factor: 2, maxMs: 5_000, strikeResetMs: 100_000 };
+
     it("keeps each scope's failures and breaker apart", async () => {
       const [x, y] = ["asset:CX", "asset:CY"] as const;
-      await store.recordFailure(x, 0);
-      await store.recordFailure(x, 1);
-      expect(await store.recordFailure(y, 2)).toBe(1);
-      await store.recordSuccess(y);
-      expect(await store.recordFailure(x, 3)).toBe(3);
-      await store.openBreaker(x, 1_000);
-      expect(await store.breakerOpenUntil(y, 0)).toBeUndefined();
-      expect(await store.breakerOpenUntil(x, 0)).toBe(1_000);
+      await store.recordFailure(x, 0, 60_000);
+      await store.recordFailure(x, 1, 60_000);
+      expect(await store.recordFailure(y, 2, 60_000)).toMatchObject({ failures: 1 });
+      await store.recordSuccess(y, 3, 60_000);
+      expect(await store.recordFailure(x, 3, 60_000)).toMatchObject({ failures: 3, successes: 0 });
+      expect(await store.openBreaker(x, 4, backoff)).toBe(1_004);
+      expect(await store.breakerOpenUntil(y, 5)).toBeUndefined();
+      expect(await store.breakerOpenUntil(x, 5)).toBe(1_004);
     });
 
-    it("counts consecutive failures and opens a breaker until a time", async () => {
+    it("counts failures within the window and restarts after it", async () => {
       const scope = "asset:CASSET" as const;
-      expect(await store.recordFailure(scope, 0)).toBe(1);
-      expect(await store.recordFailure(scope, 1)).toBe(2);
-      await store.recordSuccess(scope);
-      expect(await store.recordFailure(scope, 2)).toBe(1);
+      expect(await store.recordFailure(scope, 0, 1_000)).toEqual({
+        failures: 1,
+        successes: 0,
+        strikes: 0,
+      });
+      expect(await store.recordFailure(scope, 1_000, 1_000)).toMatchObject({ failures: 2 });
+      // The window runs from its first event, not from the latest one.
+      expect(await store.recordFailure(scope, 1_001, 1_000)).toMatchObject({ failures: 1 });
+      expect(await store.recordFailure(scope, 2_000, 1_000)).toMatchObject({ failures: 2 });
+    });
+
+    it("counts successes without resetting failures, and restarts both with the window", async () => {
+      const scope = "asset:CASSET" as const;
+      await store.recordFailure(scope, 0, 1_000);
+      await store.recordSuccess(scope, 1, 1_000);
+      await store.recordSuccess(scope, 2, 1_000);
+      expect(await store.recordFailure(scope, 3, 1_000)).toMatchObject({
+        failures: 2,
+        successes: 2,
+      });
+      // A success after the window ends starts the next one.
+      await store.recordSuccess(scope, 1_001, 1_000);
+      expect(await store.recordFailure(scope, 1_002, 1_000)).toMatchObject({
+        failures: 1,
+        successes: 1,
+      });
+    });
+
+    it("opens a breaker until a time", async () => {
+      const scope = "asset:CASSET" as const;
       expect(await store.breakerOpenUntil(scope, 0)).toBeUndefined();
-      await store.openBreaker(scope, 1_000);
+      expect(await store.openBreaker(scope, 0, backoff)).toBe(1_000);
       expect(await store.breakerOpenUntil(scope, 999)).toBe(1_000);
       expect(await store.breakerOpenUntil(scope, 1_000)).toBeUndefined();
     });
 
-    it("keeps the later end when a breaker is opened again", async () => {
+    it("reports which of several scopes have an open breaker in one read", async () => {
+      await store.openBreaker("payer:P", 0, backoff);
+      await store.openBreaker("asset:CASSET", 0, backoff);
+      expect(await store.breakersOpen(["payer:P", "payTo:S", "asset:CASSET"], 999)).toEqual(
+        new Set(["payer:P", "asset:CASSET"]),
+      );
+      // Both close at baseMs; none is open after.
+      expect(await store.breakersOpen(["payer:P", "asset:CASSET"], 1_000)).toEqual(new Set());
+      expect(await store.breakersOpen([], 0)).toEqual(new Set());
+    });
+
+    it("opens for baseMs first, then base x factor, capped at maxMs", async () => {
       const scope = "asset:CASSET" as const;
-      await store.openBreaker(scope, 2_000);
-      // Another task opening it with an earlier end can't close it early.
-      await store.openBreaker(scope, 1_000);
+      const ends: number[] = [];
+      let now = 0;
+      for (let i = 0; i < 6; i++) {
+        const until = await store.openBreaker(scope, now, backoff);
+        ends.push(until - now);
+        now = until;
+      }
+      expect(ends).toEqual([1_000, 2_000, 4_000, 5_000, 5_000, 5_000]);
+      expect(await store.recordFailure(scope, now, 1_000)).toMatchObject({ strikes: 6 });
+    });
+
+    it("returns an open breaker's end unchanged, with no new strike", async () => {
+      const scope = "asset:CASSET" as const;
+      expect(await store.openBreaker(scope, 0, backoff)).toBe(1_000);
+      expect(await store.openBreaker(scope, 500, backoff)).toBe(1_000);
+      expect(await store.recordFailure(scope, 500, 1_000)).toMatchObject({
+        strikes: 1,
+        lastOpenedAt: 0,
+      });
+      // Closed again, the next opening is the second strike.
+      expect(await store.openBreaker(scope, 1_000, backoff)).toBe(3_000);
+    });
+
+    it("does not overflow on a huge strike count or factor", async () => {
+      const scope = "asset:CASSET" as const;
+      const wild = { baseMs: 1_000, factor: 1e6, maxMs: 7_000, strikeResetMs: 1e12 };
+      let now = 0;
+      for (let i = 0; i < 5; i++) now = await store.openBreaker(scope, now, wild);
+      expect(now).toBe(1_000 + 4 * 7_000);
+    });
+
+    it("adds one strike when two instances open it together", async () => {
+      const scope = "asset:CASSET" as const;
+      const ends = await Promise.all([
+        store.openBreaker(scope, 10, backoff),
+        store.openBreaker(scope, 10, backoff),
+        store.openBreaker(scope, 11, backoff),
+      ]);
+      expect(new Set(ends).size).toBe(1);
+      expect(await store.recordFailure(scope, 12, 1_000)).toMatchObject({ strikes: 1 });
+    });
+
+    it("clears strikes after strikeResetMs without an opening", async () => {
+      const scope = "asset:CASSET" as const;
+      expect(await store.openBreaker(scope, 0, backoff)).toBe(1_000);
+      expect(await store.openBreaker(scope, 1_000, backoff)).toBe(3_000);
+      // Quiet for longer than strikeResetMs since the last opening: back to the first step.
+      expect(await store.openBreaker(scope, 103_001, backoff)).toBe(104_001);
+      expect(await store.recordFailure(scope, 103_002, 1_000)).toMatchObject({
+        strikes: 1,
+        lastOpenedAt: 103_001,
+      });
+    });
+
+    it("leaves an open breaker as it is: its end, and its strikes", async () => {
+      const scope = "asset:CASSET" as const;
+      const long = { ...backoff, baseMs: 2_000 };
+      expect(await store.openBreaker(scope, 0, long)).toBe(2_000);
+      // A shorter opening while it is open neither moves its end earlier nor adds a strike.
+      expect(await store.openBreaker(scope, 1_000, backoff)).toBe(2_000);
       expect(await store.breakerOpenUntil(scope, 1_500)).toBe(2_000);
-      await store.openBreaker(scope, 3_000);
-      expect(await store.breakerOpenUntil(scope, 2_500)).toBe(3_000);
+      expect(await store.recordFailure(scope, 1_500, 1_000)).toMatchObject({ strikes: 1 });
     });
   });
 }

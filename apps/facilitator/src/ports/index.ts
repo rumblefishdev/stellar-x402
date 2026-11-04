@@ -28,6 +28,7 @@ export {
   type ClaimResult,
   type LeaseFence,
   type NewSettlement,
+  type ReopenResult,
   type SettlementAttempt,
   type SettlementKey,
   type SettlementRecord,
@@ -36,7 +37,9 @@ export {
   type SettlementUpdate,
 } from "./settlement-store.js";
 export type {
+  BreakerBackoff,
   ReserveResult,
+  ScopeUsage,
   SpendLimit,
   SpendReservation,
   SpendScope,

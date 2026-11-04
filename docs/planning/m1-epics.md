@@ -534,9 +534,11 @@ So that nobody can drain the facilitator's XLM with valid self-payments or junk 
 **When** it is final  
 **Then** the reservation is settled at the fee actually paid or released
 
-**Given** repeated on-chain failures for one asset or one `payTo`  
+**Given** repeated on-chain failures attributed to one wasm asset, one `payTo` or one payer  
 **When** the threshold is reached  
-**Then** that breaker opens and settlements for it are refused until it resets
+**Then** that breaker opens and settlements for it are refused until it resets  
+**And** a Stellar Asset Contract (USDC) never gets an asset breaker: its code is the host's, so its
+failures are the payer's or the `payTo`'s
 
 **Given** a budget nearing its limit or a breaker opening  
 **When** it happens  

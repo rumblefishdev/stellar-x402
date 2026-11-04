@@ -31,10 +31,10 @@ const minimal = {
   CLIENT_IP: "socket",
   DATABASE_URL: "postgres://db.internal/x402",
 };
-/** Pubnet is refused until 0024 and 0090 land. */
+/** Pubnet is refused until 0090, API keys on pubnet (0105) and per-key fee budgets (0107) land. */
 const pubnet = { NETWORK: "stellar:pubnet" };
 const PUBNET_REFUSED =
-  "NETWORK stellar:pubnet is refused until spend budgets (0024), task 0090, the signer alarm (0027) and the hot key's re-check (0048) land";
+  "NETWORK stellar:pubnet is refused until task 0090, API keys on pubnet (0105), per-key fee budgets (0107), the signer alarm (0027) and the hot key's re-check (0048) land";
 
 function problems(
   env: Record<string, string | undefined>,
@@ -74,12 +74,14 @@ describe("parseConfig", () => {
       },
       spend: {
         windowMs: 86_400_000,
-        globalStroops: 5_000_000_000n,
-        perPayerStroops: 50_000_000n,
-        perPayToStroops: 500_000_000n,
-        perAssetStroops: 2_000_000_000n,
-        breakerFailures: 5,
-        breakerCooldownMs: 600_000,
+        globalStroops: 500_000_000n,
+        perPayerStroops: 20_000_000n,
+        perPayToStroops: 100_000_000n,
+        perAssetStroops: 250_000_000n,
+        perOtherAssetStroops: 20_000_000n,
+        tierOtherStroops: 100_000_000n,
+        floorStroops: 50_000_000n,
+        balanceIntervalMs: 30_000,
       },
       catalog: { listLocal: false },
     });
@@ -112,12 +114,14 @@ describe("parseConfig", () => {
       RATE_LIMIT_SETTLE: "122",
       RATE_LIMIT_DISCOVERY: "123",
       SPEND_WINDOW_MS: "3600000",
-      SPEND_GLOBAL_STROOPS: "11",
-      SPEND_PER_PAYER_STROOPS: "12",
-      SPEND_PER_PAY_TO_STROOPS: "13",
-      SPEND_PER_ASSET_STROOPS: "14",
-      BREAKER_FAILURES: "7",
-      BREAKER_COOLDOWN_MS: "5000",
+      SPEND_GLOBAL_STROOPS: "300011",
+      SPEND_PER_PAYER_STROOPS: "300012",
+      SPEND_PER_PAY_TO_STROOPS: "300013",
+      SPEND_PER_ASSET_STROOPS: "300014",
+      SPEND_PER_ASSET_OTHER_STROOPS: "300015",
+      SPEND_TIER_OTHER_STROOPS: "300016",
+      SPEND_FLOOR_STROOPS: "17",
+      SPEND_BALANCE_INTERVAL_MS: "18000",
       CATALOG_LIST_LOCAL: "true",
     });
     expect(config).toEqual<Config>({
@@ -147,12 +151,14 @@ describe("parseConfig", () => {
       },
       spend: {
         windowMs: 3_600_000,
-        globalStroops: 11n,
-        perPayerStroops: 12n,
-        perPayToStroops: 13n,
-        perAssetStroops: 14n,
-        breakerFailures: 7,
-        breakerCooldownMs: 5_000,
+        globalStroops: 300_011n,
+        perPayerStroops: 300_012n,
+        perPayToStroops: 300_013n,
+        perAssetStroops: 300_014n,
+        perOtherAssetStroops: 300_015n,
+        tierOtherStroops: 300_016n,
+        floorStroops: 17n,
+        balanceIntervalMs: 18_000,
       },
       catalog: { listLocal: true },
     });
@@ -374,8 +380,62 @@ describe("parseConfig", () => {
       ]);
   });
 
-  it("refuses stellar:pubnet with nothing else wrong, until 0024 and 0090 land", () => {
-    // `/settle` would spend there with allow-all spend hooks.
+  it("refuses a leftover BREAKER_FAILURES or BREAKER_COOLDOWN_MS", () => {
+    // Left set, either would look like it still tuned the breakers, whose policy is fixed now.
+    expect(problems({ ...minimal, BREAKER_FAILURES: "5", BREAKER_COOLDOWN_MS: "600000" })).toEqual([
+      'BREAKER_FAILURES is no longer read: the breakers are fixed in code, see "Breakers" in the facilitator README (task 0024)',
+      'BREAKER_COOLDOWN_MS is no longer read: the breakers are fixed in code, see "Breakers" in the facilitator README (task 0024)',
+    ]);
+  });
+
+  it("bounds every spend budget and the floor to int64, the store's column", () => {
+    const max = "9223372036854775807";
+    for (const name of [
+      "SPEND_GLOBAL_STROOPS",
+      "SPEND_PER_PAYER_STROOPS",
+      "SPEND_PER_PAY_TO_STROOPS",
+      "SPEND_PER_ASSET_STROOPS",
+      "SPEND_PER_ASSET_OTHER_STROOPS",
+      "SPEND_TIER_OTHER_STROOPS",
+      "SPEND_FLOOR_STROOPS",
+    ]) {
+      expect(() => parseConfig({ ...minimal, [name]: max })).not.toThrow();
+      expect(problems({ ...minimal, [name]: "9223372036854775808" })).toEqual([
+        `${name} must be at most ${max}`,
+      ]);
+      // A budget at 0 is also below the fee ceiling, and says so.
+      expect(problems({ ...minimal, [name]: "0" })[0]).toBe(`${name} must be at least 1`);
+    }
+    expect(problems({ ...minimal, SPEND_BALANCE_INTERVAL_MS: "999" })).toEqual([
+      "SPEND_BALANCE_INTERVAL_MS must be between 1000 and 2147483647",
+    ]);
+  });
+
+  it("refuses a spend budget below MAX_FEE_STROOPS, which would refuse every settlement", () => {
+    // A settlement reserves the fee ceiling, so a budget below it can't hold a single one.
+    for (const name of [
+      "SPEND_GLOBAL_STROOPS",
+      "SPEND_PER_PAYER_STROOPS",
+      "SPEND_PER_PAY_TO_STROOPS",
+      "SPEND_PER_ASSET_STROOPS",
+      "SPEND_PER_ASSET_OTHER_STROOPS",
+      "SPEND_TIER_OTHER_STROOPS",
+    ]) {
+      expect(problems({ ...minimal, MAX_FEE_STROOPS: "300000", [name]: "299999" })).toEqual([
+        `${name} must be at least MAX_FEE_STROOPS (300000): a settlement reserves the fee ceiling`,
+      ]);
+      expect(() =>
+        parseConfig({ ...minimal, MAX_FEE_STROOPS: "300000", [name]: "300000" }),
+      ).not.toThrow();
+    }
+    // The floor is not a budget: nothing is reserved against it.
+    expect(() => parseConfig({ ...minimal, SPEND_FLOOR_STROOPS: "1" })).not.toThrow();
+  });
+
+  it("refuses stellar:pubnet with nothing else wrong, until 0090, API keys and per-key fee budgets land", () => {
+    // Spend budgets (0024) bound the loss, but Sybil self-payments can still use up the shared
+    // budgets until callers are authenticated or pay (S-design, residual risk).
+    expect(PUBNET_REFUSED).not.toContain("0024");
     expect(problems({ ...minimal, ...pubnet, RPC_URLS: "https://rpc.example" })).toEqual([
       PUBNET_REFUSED,
     ]);

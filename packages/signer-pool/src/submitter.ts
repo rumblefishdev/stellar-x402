@@ -16,6 +16,7 @@ import {
   ShutdownError,
   type Channel,
 } from "./channel-pool.js";
+import { failureCause } from "./failure-cause.js";
 import { feeStatsInclusionFee } from "./fees.js";
 import { LedgerClock } from "./ledger-clock.js";
 import {
@@ -951,6 +952,7 @@ export class SettlementSubmitter {
         ledger: res.ledger,
         feeCharged,
         errorCode: resultCode(res.resultXdr),
+        failure: failureCause(res),
       };
     }
   }

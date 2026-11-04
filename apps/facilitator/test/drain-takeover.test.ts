@@ -1,4 +1,11 @@
-import { Keypair, StrKey, nativeToScVal, xdr, type rpc } from "@stellar/stellar-sdk";
+import {
+  Keypair,
+  StrKey,
+  nativeToScVal,
+  xdr,
+  type Transaction,
+  type rpc,
+} from "@stellar/stellar-sdk";
 import { NOT_FOUND_MARGIN_LEDGERS, type SorobanRpc } from "@stellar-x402/signer-pool";
 import { FakeRpc } from "@stellar-x402/signer-pool/testing";
 import type { PaymentRequirements } from "@x402/core/types";
@@ -9,7 +16,7 @@ import { compose, start } from "../src/main.js";
 import { LEASE_SKEW_MARGIN_MS } from "../src/ports/index.js";
 import { SETTLE_REASONS, keyOf } from "../src/settlement/settle.js";
 import { testDatabase } from "./database.js";
-import { transferPayload } from "./payment.js";
+import { transferPayload, usedNonces } from "./payment.js";
 import { fakeOpenBao, signerEnv } from "./fake-openbao.js";
 
 /**
@@ -62,7 +69,11 @@ class PaymentRpc extends FakeRpc {
         ),
       }),
     });
-    return { ...sim, events: [event] } as rpc.Api.SimulateTransactionResponse;
+    return {
+      ...sim,
+      events: [event],
+      transactionData: usedNonces(args[0] as Transaction),
+    } as rpc.Api.SimulateTransactionResponse;
   }
 }
 
@@ -73,7 +84,9 @@ class PaymentRpc extends FakeRpc {
  * ledger reads of a few hundred milliseconds.
  */
 function sharedNetwork() {
-  const fake = new PaymentRpc({ [channel]: 1_000n });
+  // The fee account holds the float (ADR 0013), well above the floor.
+  const fake = new PaymentRpc({ [channel]: 1_000n, [facilitator.publicKey()]: 1n });
+  fake.balances.set(facilitator.publicKey(), 10_000_000_000n);
   fake.feeStats = {
     sorobanInclusionFee: { p90: "1000" },
   } as unknown as NonNullable<FakeRpc["feeStats"]>;
@@ -134,18 +147,25 @@ async function composed(rpc: SorobanRpc, lease: boolean) {
 
 describe("a deploy with a 5-minute envelope (0073)", () => {
   it.each([
-    ["never lands", "expired"],
-    ["lands after the old process died, before its lease expires", "success"],
+    ["never lands", "expired", "7"],
+    ["lands after the old process died, before its lease expires", "success", "8"],
   ] as const)(
     "lets the next process end a record the drain left open when its transaction %s",
-    async (_, outcome) => {
+    async (_, outcome, nonce) => {
       const network = sharedNetwork();
       const { fake } = network;
       fake.stalled = true;
       const first = await composed(network.viaProcess1, true);
       const app = await start(first, { shutdownDeadlineMs: 300 });
       // About 5 minutes of ledgers: the pool may wait on it past the 180 s stop grace.
-      const pay = transferPayload({ payer, payTo, requirements }, fake.ledger + 60);
+      // A nonce per case: the first case's late `onFinal` can land after this case emptied the
+      // tables, and a release of this key would refuse its reservation.
+      const pay = transferPayload(
+        { payer, payTo, requirements },
+        fake.ledger + 60,
+        undefined,
+        nonce,
+      );
       const key = keyOf(pay, "stellar:testnet")!;
       expect((await first.settle(pay, requirements)).response).toMatchObject({
         errorReason: SETTLE_REASONS.pending,
