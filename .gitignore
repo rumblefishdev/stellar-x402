@@ -3,6 +3,7 @@ node_modules/
 
 # Build output
 dist/
+cdk.out/
 *.tsbuildinfo
 .turbo/
 coverage/

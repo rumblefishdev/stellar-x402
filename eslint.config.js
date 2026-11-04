@@ -9,6 +9,7 @@ export default defineConfig([
     "**/.turbo/",
     "**/coverage/",
     "contracts/target/",
+    "**/cdk.out/",
   ]),
   js.configs.recommended,
   tseslint.configs.recommended,
