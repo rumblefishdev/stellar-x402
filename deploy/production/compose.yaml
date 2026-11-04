@@ -83,14 +83,12 @@ services:
 
   postgres-testnet:
     image: postgres:18@sha256:979bccfde35445db618c65107d27d08c6c21339d8dc3ad4c830c6633947be0e4
-    # The entrypoint starts as root, reads the password, gives the data directory to `postgres`
-    # and drops to it with gosu, which then holds none of these. DAC_READ_SEARCH at every start:
-    # root reads the password secret, 0400 and owned by 999 (x402-creds), and on a used volume
-    # its `find` reads the 0700 data directory `postgres` owns. CHOWN for a new volume; SETUID
-    # and SETGID for gosu. Its chmod of directories `postgres` owns fails without FOWNER, which it
-    # ignores and repeats as `postgres`. Found by runs on a new and an existing volume.
+    # Started as `postgres` (999), the entrypoint skips its root step (the chown and gosu) and
+    # reads the password secret, 0400 and owned by 999 (x402-creds), as its owner, so it needs no
+    # capability. A new volume gets /var/lib/postgresql from the image, already 999's. Run as root
+    # it would need CHOWN, SETUID, SETGID and DAC_READ_SEARCH, the last outside Docker's defaults.
+    user: "999:999"
     cap_drop: [ALL]
-    cap_add: [CHOWN, DAC_READ_SEARCH, SETUID, SETGID]
     security_opt: [no-new-privileges:true]
     mem_limit: 1g
     shm_size: 256m
