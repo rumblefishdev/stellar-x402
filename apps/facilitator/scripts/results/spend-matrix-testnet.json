@@ -1,0 +1,730 @@
+{
+  "ranAt": "2026-11-02T09:10:50.353Z",
+  "network": "stellar:testnet",
+  "facilitator": "GCO7XQ6R4Z6IXIL563ZZSQPOCZKYLQWYSV5GDBYACPGLJUBIEAEESG4A",
+  "channels": [
+    "GDYYFU34DNXB3AYXZK3SMVFQPXJFJFUXG2S5EPXG3OZIP264I73J6YQU",
+    "GBEGN4HU333A65RYSKX4JYU57FH2S77LRRI6YKQU6E6E2RQE5Y46GBND",
+    "GCRHJ74CHSSE5VQSZFYJE7PTCKVCXE2A46NPLGQE2UFRVHX4ZA6JHXVR",
+    "GAMBBHZ3P5KKYG3Y7JCH6H5ABKHWHIJ2Y5JS2ABZI2HA6YLEVCEDX4C7"
+  ],
+  "funder": "GAU5MRA2IWBTHQIQ5IKT773OTQWTO7O77OZMFYUZAELRCU5RUB5W6ALM",
+  "seller": "GCJLYHW7XI5SJYNHAE3FULOVIBJ4RTMQZQ7UCG47KSZ6FSC36BJFEFUH",
+  "amount": "1000",
+  "contracts": {
+    "testToken": {
+      "contract": "CBOGZJYAWFZZIATNRISUVPH7WBE6UQOMTPUHCEEZBJQ5TI6DNQTM7G4M",
+      "wasmSha256": "4d92892ae1f0db166af9f898413806ca959e0d10e763d45f22ab4121746ddeb1"
+    },
+    "hostileToken": {
+      "contract": "CB4MHTTKDS3H32PUOE3AZ425NZGOG4HY6365O7SRLG3FHYYBDWOPFCK5",
+      "wasmSha256": "558caa22dee280906f39bab1f435296b81449e13c7e9014dadab27a00a4da362"
+    },
+    "testWallet": {
+      "contract": "CDFKMSANFEGSFI6LRSFEMLI7I2O3UR2RY6G275MBT74APC5MG4PWCH3F",
+      "wasmSha256": "db9c1ff3bf85c1066c580db9ff0535540720b2db252ad0d1868a87bb34f797cf"
+    },
+    "sac": {
+      "contract": "CAXU27NURKIPU65M6BDU3JV3OM2UW52QG3KGA6JGGIF4XI3L3A4K53LY",
+      "asset": "SPENDMX:GCUJY7OLSOMXOSYVOSDTINHN4OKGRIYKSXWMLSVJRKWA5VWAQAERCKQP"
+    }
+  },
+  "cases": {
+    "settles": [
+      {
+        "kind": "usdc",
+        "tier": "known",
+        "contract": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+        "status": "not run (needs CLIENT_SECRET: an account holding Circle-faucet testnet USDC)"
+      },
+      {
+        "kind": "test-token (wasm)",
+        "tier": "other",
+        "contract": "CBOGZJYAWFZZIATNRISUVPH7WBE6UQOMTPUHCEEZBJQ5TI6DNQTM7G4M",
+        "verified": true,
+        "verifyMs": 1365,
+        "settled": true,
+        "payer": "GBVZNR2SHPRWHJCIKZ4VDHKSYFIKYIFF4JZKIZQLI5AFIDCGMEIZEKSC",
+        "settleMs": 6895,
+        "chain": {
+          "hash": "7b2ebcf9ed1e3e671e7f298af41c09a1ac740d2cd05c9e77a62bf8edcca9cb44",
+          "status": "SUCCESS",
+          "ledger": 5517360,
+          "feeCharged": "26093"
+        }
+      },
+      {
+        "kind": "self-issued SAC (SPENDMX)",
+        "tier": "other",
+        "contract": "CAXU27NURKIPU65M6BDU3JV3OM2UW52QG3KGA6JGGIF4XI3L3A4K53LY",
+        "verified": true,
+        "verifyMs": 812,
+        "settled": true,
+        "payer": "GBVZNR2SHPRWHJCIKZ4VDHKSYFIKYIFF4JZKIZQLI5AFIDCGMEIZEKSC",
+        "settleMs": 3051,
+        "chain": {
+          "hash": "eb2b05fd4be7d2e3b6ccd33fb9946f5abe19e53ec0b6ce62b1f30b38186be55a",
+          "status": "SUCCESS",
+          "ledger": 5517361,
+          "feeCharged": "11901"
+        }
+      }
+    ],
+    "oneBalanceSixPayments": {
+      "payer": "GDLFUTQX3Q7KE3VMKGIPFLS3RRIMNW5JYYIKMRBAPJYGTQQQBIACDTK3",
+      "balanceBefore": "1000",
+      "balanceAfter": "0",
+      "ms": 7417,
+      "payments": [
+        {
+          "verified": true,
+          "verifyMs": 597,
+          "settled": true,
+          "payer": "GDLFUTQX3Q7KE3VMKGIPFLS3RRIMNW5JYYIKMRBAPJYGTQQQBIACDTK3",
+          "settleMs": 5169,
+          "chain": {
+            "hash": "28e5d0f26ccb4fe53a5a931797bb89c6f69eff3be67446a5ccbd92a3b4e1ec33",
+            "status": "SUCCESS",
+            "ledger": 5517363,
+            "feeCharged": "10440"
+          }
+        },
+        {
+          "verified": true,
+          "verifyMs": 742,
+          "settled": false,
+          "errorReason": "settle_exact_stellar_simulation_failed",
+          "payer": "GDLFUTQX3Q7KE3VMKGIPFLS3RRIMNW5JYYIKMRBAPJYGTQQQBIACDTK3",
+          "settleMs": 5938
+        },
+        {
+          "verified": true,
+          "verifyMs": 1258,
+          "settled": false,
+          "errorReason": "settle_exact_stellar_simulation_failed",
+          "payer": "GDLFUTQX3Q7KE3VMKGIPFLS3RRIMNW5JYYIKMRBAPJYGTQQQBIACDTK3",
+          "settleMs": 6157
+        },
+        {
+          "verified": true,
+          "verifyMs": 1235,
+          "settled": false,
+          "errorReason": "settle_exact_stellar_simulation_failed",
+          "payer": "GDLFUTQX3Q7KE3VMKGIPFLS3RRIMNW5JYYIKMRBAPJYGTQQQBIACDTK3",
+          "settleMs": 5679
+        },
+        {
+          "verified": true,
+          "verifyMs": 1222,
+          "settled": false,
+          "errorReason": "settle_exact_stellar_simulation_failed",
+          "payer": "GDLFUTQX3Q7KE3VMKGIPFLS3RRIMNW5JYYIKMRBAPJYGTQQQBIACDTK3",
+          "settleMs": 5072
+        },
+        {
+          "verified": true,
+          "verifyMs": 1181,
+          "settled": false,
+          "errorReason": "settle_exact_stellar_simulation_failed",
+          "payer": "GDLFUTQX3Q7KE3VMKGIPFLS3RRIMNW5JYYIKMRBAPJYGTQQQBIACDTK3",
+          "settleMs": 5981
+        }
+      ],
+      "stored": [
+        {
+          "state": "success",
+          "errorReason": null,
+          "hashes": ["28e5d0f26ccb4fe53a5a931797bb89c6f69eff3be67446a5ccbd92a3b4e1ec33"]
+        },
+        {
+          "state": "rejected",
+          "errorReason": "settle_exact_stellar_simulation_failed",
+          "hashes": []
+        },
+        {
+          "state": "rejected",
+          "errorReason": "settle_exact_stellar_simulation_failed",
+          "hashes": []
+        },
+        {
+          "state": "rejected",
+          "errorReason": "settle_exact_stellar_simulation_failed",
+          "hashes": []
+        },
+        {
+          "state": "rejected",
+          "errorReason": "settle_exact_stellar_simulation_failed",
+          "hashes": []
+        },
+        {
+          "state": "rejected",
+          "errorReason": "settle_exact_stellar_simulation_failed",
+          "hashes": []
+        }
+      ]
+    },
+    "payerNotAuthorized": {
+      "token": "CB4MHTTKDS3H32PUOE3AZ425NZGOG4HY6365O7SRLG3FHYYBDWOPFCK5",
+      "mode": 1,
+      "victim": "GD6HF4GUZLATWCLNC35W6MHLLTJBIMWZKKVZ5ENFQ6J2GNROCCNSUMVV",
+      "verified": true,
+      "verifyMs": 1814,
+      "settled": false,
+      "errorReason": "settle_exact_stellar_payer_not_authorized",
+      "payer": "GD6HF4GUZLATWCLNC35W6MHLLTJBIMWZKKVZ5ENFQ6J2GNROCCNSUMVV",
+      "settleMs": 1174,
+      "victimBalance": {
+        "before": "1000000000",
+        "after": "1000000000"
+      },
+      "stored": [
+        {
+          "state": "rejected",
+          "errorReason": "settle_exact_stellar_payer_not_authorized",
+          "hashes": []
+        }
+      ]
+    },
+    "cAccountPayer": {
+      "wallet": "CDFKMSANFEGSFI6LRSFEMLI7I2O3UR2RY6G275MBT74APC5MG4PWCH3F",
+      "owner": "GBTEAEMCJJNE2RPXT5PSLABEAGI3PUUKDUQREXPPY4YUHADFZPURRZ46",
+      "verified": true,
+      "verifyMs": 819,
+      "settled": true,
+      "payer": "CDFKMSANFEGSFI6LRSFEMLI7I2O3UR2RY6G275MBT74APC5MG4PWCH3F",
+      "settleMs": 3185,
+      "chain": {
+        "hash": "7388e55bd1d9d84815657317d4dafbc8236363e8454995e0606a82bd273e637e",
+        "status": "SUCCESS",
+        "ledger": 5517366,
+        "feeCharged": "9532"
+      }
+    },
+    "mode2Sample": {
+      "token": "CB4MHTTKDS3H32PUOE3AZ425NZGOG4HY6365O7SRLG3FHYYBDWOPFCK5",
+      "mode": 2,
+      "payer": "GCVOEPT2UVYXHHQUNQAN2Z4BWCKYQBBLGQXLZMBZV6BRFUB227ZNAQMO",
+      "attempts": [
+        {
+          "attempt": 1,
+          "verified": true,
+          "verifyMs": 594,
+          "settled": true,
+          "payer": "GCVOEPT2UVYXHHQUNQAN2Z4BWCKYQBBLGQXLZMBZV6BRFUB227ZNAQMO",
+          "settleMs": 8152,
+          "chain": {
+            "hash": "4ac68232d2d7f506317eb2ed2f2f43ab428f0cdaf944bde2b698ba35fa708976",
+            "status": "SUCCESS",
+            "ledger": 5517370,
+            "feeCharged": "26096"
+          }
+        },
+        {
+          "attempt": 2,
+          "verified": true,
+          "verifyMs": 1168,
+          "settled": false,
+          "errorReason": "settle_exact_stellar_simulation_failed",
+          "payer": "GCVOEPT2UVYXHHQUNQAN2Z4BWCKYQBBLGQXLZMBZV6BRFUB227ZNAQMO",
+          "settleMs": 1300
+        },
+        {
+          "attempt": 3,
+          "verified": true,
+          "verifyMs": 1367,
+          "settled": true,
+          "payer": "GCVOEPT2UVYXHHQUNQAN2Z4BWCKYQBBLGQXLZMBZV6BRFUB227ZNAQMO",
+          "settleMs": 8023,
+          "chain": {
+            "hash": "ed0991ed6a44a3e4fd315d3cb0265f59ff69ece19f1c0ef0cf014a473e56e09f",
+            "status": "SUCCESS",
+            "ledger": 5517374,
+            "feeCharged": "10443"
+          }
+        },
+        {
+          "attempt": 4,
+          "verified": true,
+          "verifyMs": 902,
+          "settled": false,
+          "errorReason": "settle_exact_stellar_simulation_failed",
+          "payer": "GCVOEPT2UVYXHHQUNQAN2Z4BWCKYQBBLGQXLZMBZV6BRFUB227ZNAQMO",
+          "settleMs": 1217
+        },
+        {
+          "attempt": 5,
+          "verified": true,
+          "verifyMs": 1016,
+          "settled": false,
+          "errorReason": "settle_exact_stellar_simulation_failed",
+          "payer": "GCVOEPT2UVYXHHQUNQAN2Z4BWCKYQBBLGQXLZMBZV6BRFUB227ZNAQMO",
+          "settleMs": 2001
+        },
+        {
+          "attempt": 6,
+          "verified": true,
+          "verifyMs": 874,
+          "settled": true,
+          "payer": "GCVOEPT2UVYXHHQUNQAN2Z4BWCKYQBBLGQXLZMBZV6BRFUB227ZNAQMO",
+          "settleMs": 6330,
+          "chain": {
+            "hash": "7c46274c172c5aecafa1ecee6f47e70a4c094ba0b6e467d8d0d8aa75586afd08",
+            "status": "SUCCESS",
+            "ledger": 5517380,
+            "feeCharged": "10443"
+          }
+        }
+      ],
+      "settled": 3,
+      "failedOnChain": 0,
+      "refusedBySimulation": 3
+    },
+    "assetBreaker": {
+      "token": "CB4MHTTKDS3H32PUOE3AZ425NZGOG4HY6365O7SRLG3FHYYBDWOPFCK5",
+      "mode": 3,
+      "rounds": [
+        {
+          "round": 1,
+          "payments": [
+            {
+              "payer": "GDWAHFONW77D5SF64DQ47EJ6OHBTKVN5DM5CXUJS2CM5BGRE74KSILWA",
+              "verified": true,
+              "settled": false,
+              "errorReason": "settle_exact_stellar_transaction_failed",
+              "settleMs": 13722,
+              "chain": {
+                "hash": "298b2a57c0825022edc7cf57f59fff0e62dc49e2a3bfcee05566c65bb7c30ec6",
+                "status": "FAILED",
+                "ledger": 5517385,
+                "feeCharged": "10188"
+              }
+            },
+            {
+              "payer": "GA6IKHIBGU4QUM72EC4WQWPBE3QJO6ZE4R6EIU7BP44AO3YNYE36KBHS",
+              "verified": true,
+              "settled": true,
+              "settleMs": 3097,
+              "chain": {
+                "hash": "d6c5e7c1bff271cd9f1ecaa5e52e2a8bde82285cb86870f7d22b171d56355c6a",
+                "status": "SUCCESS",
+                "ledger": 5517383,
+                "feeCharged": "13217"
+              }
+            },
+            {
+              "payer": "GBRDG5MRRJR5Z5YG3VNKD2QT55BY2AG2Q7KFQRLVE5AZOJV5KT6Q6C5J",
+              "verified": true,
+              "settled": false,
+              "errorReason": "settle_exact_stellar_transaction_failed",
+              "settleMs": 8376,
+              "chain": {
+                "hash": "5df8e6809e38cc953a51347f8e95399e41643e856f756aecfd405a7e62c5983d",
+                "status": "FAILED",
+                "ledger": 5517384,
+                "feeCharged": "10186"
+              }
+            },
+            {
+              "payer": "GBAPBOL2DEEVVHDVIRRHMUTJM6DVMO2V2DSZUIQ4EOLTLUSMPX2EZ7ZL",
+              "verified": true,
+              "settled": false,
+              "errorReason": "settle_exact_stellar_transaction_failed",
+              "settleMs": 8380,
+              "chain": {
+                "hash": "baa049b054546d42d30e49c99439ff7e01a3d339a3e404c405c412197fb9d15a",
+                "status": "FAILED",
+                "ledger": 5517384,
+                "feeCharged": "10186"
+              }
+            },
+            {
+              "payer": "GDXYDXYZ4PDSXK3E4HLUHXWXTQ75JZUOS7D436O4FIRG6LEJ6GCUSTVV",
+              "verified": true,
+              "settled": true,
+              "settleMs": 8362,
+              "chain": {
+                "hash": "d3748f8f64c26bcc077526df61c5f89d39a5e6d508f29ec988cbc28cb2b0cc2d",
+                "status": "SUCCESS",
+                "ledger": 5517384,
+                "feeCharged": "11921"
+              }
+            },
+            {
+              "payer": "GAP44GODB6VPKQIX5VKQN2RCM6RJCV652RKA34VIOQOO3R3RJLHZZ4EJ",
+              "verified": true,
+              "settled": true,
+              "settleMs": 13764,
+              "chain": {
+                "hash": "7b81f96f7aa5924b2096a3b05f7782ed14ae73c72d663803df6f2ea00e75fba7",
+                "status": "SUCCESS",
+                "ledger": 5517385,
+                "feeCharged": "11919"
+              }
+            }
+          ]
+        },
+        {
+          "round": 2,
+          "payments": [
+            {
+              "payer": "GD7KYUFKP7WZWD5ECSSOLTK4XQHIQ3MOD6PHURU6HDJ5BGCBFESJKJGD",
+              "verified": true,
+              "settled": true,
+              "settleMs": 6986,
+              "chain": {
+                "hash": "695dbb8248dfd85bcdc9f2946fef9906a90e897c57406d6f927bcc3bc1ac117d",
+                "status": "SUCCESS",
+                "ledger": 5517391,
+                "feeCharged": "11925"
+              }
+            },
+            {
+              "payer": "GBDEQE7JZDQKZ6EGOLHKCZFE6YKPSKYET4F5EWRNGHVFUL4HXNW7I2BM",
+              "verified": true,
+              "settled": false,
+              "errorReason": "settle_exact_stellar_transaction_failed",
+              "settleMs": 6695,
+              "chain": {
+                "hash": "a7cc8210b26c2d52cbb9a281979ac3d36ed9d85d23132d3a58cc98341a9a6ca0",
+                "status": "FAILED",
+                "ledger": 5517391,
+                "feeCharged": "10190"
+              }
+            },
+            {
+              "payer": "GDXQD6TDWOV3B27BEKXYX42P5IFMSAPRB2KTM72TADFIW2DSC4QQCCS5",
+              "verified": true,
+              "settled": false,
+              "errorReason": "settle_exact_stellar_transaction_failed",
+              "settleMs": 6693,
+              "chain": {
+                "hash": "b5c54ecb5ccfa9692d29466c40bd3ae7e4c18030df32e30fa4630234b807c7c9",
+                "status": "FAILED",
+                "ledger": 5517391,
+                "feeCharged": "10192"
+              }
+            },
+            {
+              "payer": "GB2LGLOXBIGN5XOEUO6AGBZ4M5NKRIA6T24RALMMYLSNHRUGAL5KVHGA",
+              "verified": true,
+              "settled": false,
+              "errorReason": "settle_exact_stellar_transaction_failed",
+              "settleMs": 10982,
+              "chain": {
+                "hash": "35882c04a9c22974a7ac17dc1c1ba229acc5930ad2b12e5b693d38f9a06dc136",
+                "status": "FAILED",
+                "ledger": 5517392,
+                "feeCharged": "10190"
+              }
+            },
+            {
+              "payer": "GALBIZ3QCY4AGZ5ECEJCK6FNWTHEBHRNUI3T6MORH2UFPX4ZIPNPYLFS",
+              "verified": true,
+              "settled": false,
+              "errorReason": "settle_exact_stellar_transaction_failed",
+              "settleMs": 6684,
+              "chain": {
+                "hash": "1ef5acece77372c3eed7621299b22db19ae7d616ff289c5d4e3a381ab5fc392b",
+                "status": "FAILED",
+                "ledger": 5517391,
+                "feeCharged": "10190"
+              }
+            },
+            {
+              "payer": "GCMLM4FMXDCPGSC7JCJWPZ47SS6OAWDWBSMKTGLB5VYZOA64VNBQPIWG",
+              "verified": true,
+              "settled": true,
+              "settleMs": 11039,
+              "chain": {
+                "hash": "19aced67e50e6a7dd16b9f15e47f0b6286cb9975540a5f75a95807f53f5107e2",
+                "status": "SUCCESS",
+                "ledger": 5517392,
+                "feeCharged": "11925"
+              }
+            }
+          ]
+        },
+        {
+          "round": 3,
+          "payments": [
+            {
+              "payer": "GDWAHFONW77D5SF64DQ47EJ6OHBTKVN5DM5CXUJS2CM5BGRE74KSILWA",
+              "verified": true,
+              "settled": false,
+              "errorReason": "settle_exact_stellar_transaction_failed",
+              "settleMs": 5299,
+              "chain": {
+                "hash": "793ee2c6df7bf8b606b85994de672a26eca7712bc86bc9ecce4db3be499bd05e",
+                "status": "FAILED",
+                "ledger": 5517397,
+                "feeCharged": "10192"
+              }
+            },
+            {
+              "payer": "GA6IKHIBGU4QUM72EC4WQWPBE3QJO6ZE4R6EIU7BP44AO3YNYE36KBHS",
+              "verified": true,
+              "settled": true,
+              "settleMs": 5308,
+              "chain": {
+                "hash": "a0469e30f080545c32fe65f3750e3a7b65bdc39d22cb7bb46375121e238cdca6",
+                "status": "SUCCESS",
+                "ledger": 5517397,
+                "feeCharged": "11923"
+              }
+            },
+            {
+              "payer": "GBRDG5MRRJR5Z5YG3VNKD2QT55BY2AG2Q7KFQRLVE5AZOJV5KT6Q6C5J",
+              "verified": true,
+              "settled": false,
+              "errorReason": "settle_exact_stellar_transaction_failed",
+              "settleMs": 9652,
+              "chain": {
+                "hash": "4b70ea14187165427c59db27ca6f8fe02b53db2e0152724559f522093e7f4efa",
+                "status": "FAILED",
+                "ledger": 5517398,
+                "feeCharged": "10190"
+              }
+            },
+            {
+              "payer": "GBAPBOL2DEEVVHDVIRRHMUTJM6DVMO2V2DSZUIQ4EOLTLUSMPX2EZ7ZL",
+              "verified": true,
+              "settled": false,
+              "errorReason": "settle_exact_stellar_transaction_failed",
+              "settleMs": 5298,
+              "chain": {
+                "hash": "5a4df2c10ec01d201335d0ad8980acfb5f0cc47549d0da614a54060ed57f452a",
+                "status": "FAILED",
+                "ledger": 5517397,
+                "feeCharged": "10190"
+              }
+            },
+            {
+              "payer": "GDXYDXYZ4PDSXK3E4HLUHXWXTQ75JZUOS7D436O4FIRG6LEJ6GCUSTVV",
+              "verified": true,
+              "settled": false,
+              "errorReason": "settle_exact_stellar_transaction_failed",
+              "settleMs": 5290,
+              "chain": {
+                "hash": "f66562fc45f59518dca1cdb308c8d01d5f135ab178fd32d89d1176b5e9d927de",
+                "status": "FAILED",
+                "ledger": 5517397,
+                "feeCharged": "10192"
+              }
+            },
+            {
+              "payer": "GAP44GODB6VPKQIX5VKQN2RCM6RJCV652RKA34VIOQOO3R3RJLHZZ4EJ",
+              "verified": true,
+              "settled": true,
+              "settleMs": 9676,
+              "chain": {
+                "hash": "8ff82a9109123e60d7c85f4c28038f9e960d1597e7a78e64f3330defb9a0dfcc",
+                "status": "SUCCESS",
+                "ledger": 5517398,
+                "feeCharged": "11923"
+              }
+            }
+          ]
+        }
+      ],
+      "failedSettlements": [
+        {
+          "hashes": ["298b2a57c0825022edc7cf57f59fff0e62dc49e2a3bfcee05566c65bb7c30ec6"],
+          "feeCharged": "10188",
+          "failure": {
+            "error": {
+              "code": "3",
+              "type": "sceContract"
+            },
+            "opCode": "invokeHostFunctionTrapped",
+            "contract": "CB4MHTTKDS3H32PUOE3AZ425NZGOG4HY6365O7SRLG3FHYYBDWOPFCK5"
+          }
+        },
+        {
+          "hashes": ["793ee2c6df7bf8b606b85994de672a26eca7712bc86bc9ecce4db3be499bd05e"],
+          "feeCharged": "10192",
+          "failure": {
+            "error": {
+              "code": "3",
+              "type": "sceContract"
+            },
+            "opCode": "invokeHostFunctionTrapped",
+            "contract": "CB4MHTTKDS3H32PUOE3AZ425NZGOG4HY6365O7SRLG3FHYYBDWOPFCK5"
+          }
+        },
+        {
+          "hashes": ["5df8e6809e38cc953a51347f8e95399e41643e856f756aecfd405a7e62c5983d"],
+          "feeCharged": "10186",
+          "failure": {
+            "error": {
+              "code": "3",
+              "type": "sceContract"
+            },
+            "opCode": "invokeHostFunctionTrapped",
+            "contract": "CB4MHTTKDS3H32PUOE3AZ425NZGOG4HY6365O7SRLG3FHYYBDWOPFCK5"
+          }
+        },
+        {
+          "hashes": ["4b70ea14187165427c59db27ca6f8fe02b53db2e0152724559f522093e7f4efa"],
+          "feeCharged": "10190",
+          "failure": {
+            "error": {
+              "code": "3",
+              "type": "sceContract"
+            },
+            "opCode": "invokeHostFunctionTrapped",
+            "contract": "CB4MHTTKDS3H32PUOE3AZ425NZGOG4HY6365O7SRLG3FHYYBDWOPFCK5"
+          }
+        },
+        {
+          "hashes": ["baa049b054546d42d30e49c99439ff7e01a3d339a3e404c405c412197fb9d15a"],
+          "feeCharged": "10186",
+          "failure": {
+            "error": {
+              "code": "3",
+              "type": "sceContract"
+            },
+            "opCode": "invokeHostFunctionTrapped",
+            "contract": "CB4MHTTKDS3H32PUOE3AZ425NZGOG4HY6365O7SRLG3FHYYBDWOPFCK5"
+          }
+        },
+        {
+          "hashes": ["5a4df2c10ec01d201335d0ad8980acfb5f0cc47549d0da614a54060ed57f452a"],
+          "feeCharged": "10190",
+          "failure": {
+            "error": {
+              "code": "3",
+              "type": "sceContract"
+            },
+            "opCode": "invokeHostFunctionTrapped",
+            "contract": "CB4MHTTKDS3H32PUOE3AZ425NZGOG4HY6365O7SRLG3FHYYBDWOPFCK5"
+          }
+        },
+        {
+          "hashes": ["f66562fc45f59518dca1cdb308c8d01d5f135ab178fd32d89d1176b5e9d927de"],
+          "feeCharged": "10192",
+          "failure": {
+            "error": {
+              "code": "3",
+              "type": "sceContract"
+            },
+            "opCode": "invokeHostFunctionTrapped",
+            "contract": "CB4MHTTKDS3H32PUOE3AZ425NZGOG4HY6365O7SRLG3FHYYBDWOPFCK5"
+          }
+        },
+        {
+          "hashes": ["a7cc8210b26c2d52cbb9a281979ac3d36ed9d85d23132d3a58cc98341a9a6ca0"],
+          "feeCharged": "10190",
+          "failure": {
+            "error": {
+              "code": "3",
+              "type": "sceContract"
+            },
+            "opCode": "invokeHostFunctionTrapped",
+            "contract": "CB4MHTTKDS3H32PUOE3AZ425NZGOG4HY6365O7SRLG3FHYYBDWOPFCK5"
+          }
+        },
+        {
+          "hashes": ["b5c54ecb5ccfa9692d29466c40bd3ae7e4c18030df32e30fa4630234b807c7c9"],
+          "feeCharged": "10192",
+          "failure": {
+            "error": {
+              "code": "3",
+              "type": "sceContract"
+            },
+            "opCode": "invokeHostFunctionTrapped",
+            "contract": "CB4MHTTKDS3H32PUOE3AZ425NZGOG4HY6365O7SRLG3FHYYBDWOPFCK5"
+          }
+        },
+        {
+          "hashes": ["35882c04a9c22974a7ac17dc1c1ba229acc5930ad2b12e5b693d38f9a06dc136"],
+          "feeCharged": "10190",
+          "failure": {
+            "error": {
+              "code": "3",
+              "type": "sceContract"
+            },
+            "opCode": "invokeHostFunctionTrapped",
+            "contract": "CB4MHTTKDS3H32PUOE3AZ425NZGOG4HY6365O7SRLG3FHYYBDWOPFCK5"
+          }
+        },
+        {
+          "hashes": ["1ef5acece77372c3eed7621299b22db19ae7d616ff289c5d4e3a381ab5fc392b"],
+          "feeCharged": "10190",
+          "failure": {
+            "error": {
+              "code": "3",
+              "type": "sceContract"
+            },
+            "opCode": "invokeHostFunctionTrapped",
+            "contract": "CB4MHTTKDS3H32PUOE3AZ425NZGOG4HY6365O7SRLG3FHYYBDWOPFCK5"
+          }
+        }
+      ],
+      "successes": 12,
+      "breakerOpenings": [
+        {
+          "time": "2026-11-02T09:10:26.947Z",
+          "level": "warn",
+          "event": "spend_breaker_opened",
+          "scope": "asset:CB4MHTTKDS3H32PUOE3AZ425NZGOG4HY6365O7SRLG3FHYYBDWOPFCK5",
+          "until": 1793611226944
+        }
+      ],
+      "probe": {
+        "afterMs": 91625,
+        "afterRound": 3,
+        "verified": false,
+        "invalidReason": "settle_exact_stellar_breaker_open_asset",
+        "verifyMs": 806,
+        "settled": false,
+        "errorReason": "settle_exact_stellar_breaker_open_asset",
+        "payer": "GC2EOOXJVR4J7V3IQC2VA2NA6RLEH4YG75XVRBAKET6FQODNVWNS6CPD",
+        "settleMs": 923
+      }
+    },
+    "budgetRefusal": {
+      "perPayerStroops": "260000",
+      "reservationStroops": "250000",
+      "payer": "GDJG4ILLBZ4EQCQQ2TPTHJKYZULXM5GUPNPUSLSX344SFOWDJC32OTXX",
+      "payTo": "GAR5RMDR7L6WB3ZMBVOWDJP2WYW75UMU5CIR6ETLPL6JCXB5OFRKKW4Y",
+      "payments": [
+        {
+          "payment": 1,
+          "verified": true,
+          "verifyMs": 1173,
+          "settled": true,
+          "payer": "GDJG4ILLBZ4EQCQQ2TPTHJKYZULXM5GUPNPUSLSX344SFOWDJC32OTXX",
+          "settleMs": 5851,
+          "chain": {
+            "hash": "34a4094d930d98950397b61fedca35cf705dbffbbabebd24cbeb232c98d1727d",
+            "status": "SUCCESS",
+            "ledger": 5517401,
+            "feeCharged": "26094"
+          }
+        },
+        {
+          "payment": 2,
+          "verified": true,
+          "verifyMs": 1182,
+          "settled": false,
+          "errorReason": "settle_exact_stellar_spend_limit_payer",
+          "payer": "GDJG4ILLBZ4EQCQQ2TPTHJKYZULXM5GUPNPUSLSX344SFOWDJC32OTXX",
+          "settleMs": 1272
+        }
+      ],
+      "why": "first fee 26094 + reservation 250000 = 276094 > 260000"
+    }
+  },
+  "checks": {
+    "everyTokenRunSettled": true,
+    "oneOfSixSettled": true,
+    "restRefusedWithoutATransaction": true,
+    "noFailedTransaction": true,
+    "forgedPayerRefused": true,
+    "cAccountSettled": true,
+    "assetBreakerOpenedAfterFiveFailures": true,
+    "noPayerBreakerOpened": true,
+    "failureCauseStored": true,
+    "secondPaymentRefusedByPayerBudget": true
+  }
+}
