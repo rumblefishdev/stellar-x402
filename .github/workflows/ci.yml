@@ -55,6 +55,14 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
+  # Production's Postgres from its own compose file, as its unit starts it (task 0091). On every
+  # pull request, not only those under deploy/: a job skipped by a paths filter can't be required.
+  production-postgres:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: deploy/scripts/check-production-postgres.sh
+
   contracts:
     runs-on: ubuntu-latest
     steps:

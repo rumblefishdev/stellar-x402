@@ -72,6 +72,12 @@ installs what root runs on the shared server, comes from `develop`, which has no
 - `deploy/production/compose.yaml`: both settings on all four services; `postgres-testnet` runs
   as `999:999` with no `cap_add` (until Stan's review it added back `CHOWN`, `DAC_READ_SEARCH`,
   `SETUID` and `SETGID`; decision 10).
+- `deploy/scripts/check-production-postgres.sh` and CI's `production-postgres` job (decision 17):
+  starts `postgres-testnet` from the production compose file with the secret owned by the uid in
+  `x402-db-testnet@.service`'s x402-creds line, 0400, and waits with that unit's readiness command,
+  on a new volume, after a restart and in a new container on the used volume, then logs in with
+  the password. Locally it passes as committed and fails, on `Permission denied` for the secret,
+  with `user:` removed, with `user: "1000:1000"`, and with the unit's owner set to 1000.
 - `docs/runbook.md`, The playbook: runs from `origin/deploy/production`, the order for a change
   under `deploy/`, and a `docker inspect` check. The deploy key step runs the playbook from
   `deploy/production` too.
@@ -118,6 +124,14 @@ installs what root runs on the shared server, comes from `develop`, which has no
   defaults, and the default seccomp profile allows `open_by_handle_at` (the Shocker escape's call)
   only with it, so root in the container, through `docker compose exec`, could make a call it
   couldn't before this PR.
+- **A new image with another uid for `postgres` would not break the start**, contrary to what was
+  first assumed while choosing decision 17. `/var/lib/postgresql` is mode 1777 in the image, and the
+  entrypoint fakes a passwd entry (`nss_wrapper`) for a uid without one, so Postgres runs as any
+  `user:` on a new volume (tried with 1234). With `user:`, the secret and the volume all 999, the
+  image's own uid doesn't matter. What breaks the start is our own files disagreeing, which the
+  check reads from the compose file and the unit. A plain `pg_isready`, as the unit runs it, fails
+  for a uid with no passwd entry (`no attempt`), so a `user:` other than 999 would also fail the
+  unit's wait.
 - **The runbook's `docker inspect` check inspected nothing** (Stan's review). Repeated `label`
   filters must all match, no container is in both projects, so `docker ps` printed nothing and the
   check passed. Now one `docker ps` per project.
@@ -169,6 +183,11 @@ installs what root runs on the shared server, comes from `develop`, which has no
     suggestion): the deploy unit starts only after the image job and the SSH step.
 16. **OpenBao restarts between the facilitator's stop and start** (okarcz, 2026-11-04, Stan's
     nit): one `/settle` outage instead of two.
+17. **A CI job starts production's Postgres in this PR** (okarcz, 2026-11-04): it closes, for
+    Postgres, the gap the first review deferred. It runs on every pull request, since a job that
+    a paths filter skips can't be required. A playbook guard, which would check the same before
+    the compose file is replaced and so also cover a reboot before step 3, is left out; extra
+    cover if wanted.
 
 ## Review
 
@@ -176,7 +195,8 @@ installs what root runs on the shared server, comes from `develop`, which has no
 6 rejected. Checked during the review: `deploy/production`'s ruleset (`26205855`) is active,
 requires 1 approving review and has no bypass actors. Deferred: no CI job starts the production
 compose file, so a Postgres image bump that needs another capability would pass CI and fail on
-the server; a backlog candidate after 0036.
+the server; a backlog candidate after 0036. Closed for Postgres by decision 17; the facilitator
+and `migrate-testnet` under the production compose file are still not started by CI.
 
 2026-11-04, Stan's review of #118: 1 issue, 5 non-blocking comments and a nit, all taken
 (decisions 10 to 16). His run covered Postgres with the secret at `x402-creds`' owner and mode
