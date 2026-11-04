@@ -50,5 +50,6 @@ const json = (s: Parameters<typeof Template.fromStack>[0]) =>
 export function synth(config: EnvironmentConfig) {
   const x: X402App = createApp(config);
   const alarms = json(x.alarms);
-  return { x, alarms, all: [alarms] };
+  const uptime = json(x.uptime);
+  return { x, alarms, uptime, all: [alarms, uptime] };
 }
