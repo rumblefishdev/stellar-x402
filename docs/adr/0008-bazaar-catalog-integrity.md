@@ -75,9 +75,10 @@ settlement.
     hosts.
   - The facilitator calls a seller URL only for the listing check above, through the
     `packages/seller-fetch` guard: https only, the address checked where it connects (no
-    loopback, private or special-use address), no redirects, a 10 s deadline and a 64 KiB body
-    cap (256 KiB for an MCP server, above). `CATALOG_LIST_LOCAL` also opens http to this
-    machine.
+    loopback, private or special-use address), no redirects, a 10 s deadline, a 64 KiB body cap
+    (256 KiB for an MCP server, above) and a 24 KiB header cap, enough for a 16 KiB listing once
+    base64-encoded in a header. Either cap passed is `response_too_large`. `CATALOG_LIST_LOCAL`
+    also opens http to this machine.
   - Resource URLs carry a scheme allowlist by listing type (task 0053): an `http` listing takes
     `https` and `http`, an `mcp` listing also `mcp` (`@x402/mcp`'s `mcp://tool/<name>`). An `mcp:`
     host must be a DNS-style name (letters, digits, hyphens; labels up to 63 characters, the host
@@ -206,6 +207,13 @@ settlement.
   Tranche 1, and quality is handled by curation and ranking later.
 - An existing listing changes only when the seller's own 402 says so (task 0063). A seller that
   doesn't answer the unpaid request with a usable 402 within 10 s is not listed.
+- The check proves how a URL answers, not that the `payTo` belongs to the URL's owner. Whoever runs
+  `eve.example/api` can answer "pay Alice", pay Alice 1 stroop and list "`eve.example/api`, paid to
+  Alice": Alice's account then shows a service she doesn't run, and Eve can later change the 402 to
+  her own account. Task 0068 (the buyer's MCP refuses a live `payTo` or price the listing doesn't
+  state) closes the second part and is required before pubnet. Proof of the account is not required
+  for a listing: none of the 10 Stellar accounts in the largest public catalog could show one through
+  `stellar.toml` (SEP-1) on 2026-10-29, so it would empty the Stellar catalog.
 - A plain-`http` resource URL is no longer listed outside `CATALOG_LIST_LOCAL`: the check calls
   https only. None of 10,126 entries in the largest public catalog uses one (2026-10-28).
 - An `mcp://tool/<name>` listing can't be checked (`mcp_tool_url`), so the e2e gate's MCP
