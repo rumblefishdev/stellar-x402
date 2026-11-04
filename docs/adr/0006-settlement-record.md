@@ -10,7 +10,9 @@
   envelope's only bound is the payer's auth expiry, so `…_transaction_expired` comes only once
   the payment can no longer land under our hash, a fee bump someone else wraps it in being 0087;
   a record closed with nothing sent reopens for the identical payload while its auth entry is
-  valid) and 2026-10-29 (task 0071: the lease's fencing token)
+  valid), 2026-10-29 (task 0071: the lease's fencing token) and 2026-11-04 (task 0087: a hash
+  past its bound is read once more by its inner hash before it is `dead`, so a payment someone
+  else's fee bump landed ends `success` under their hash)
 
 ## Context
 
@@ -130,7 +132,14 @@ The canonical x402 resource server retries `/settle` exactly once, immediately, 
     and ledger bounds (0019 decision 7). `sent` is written without waiting, so it can lag;
     reconciliation decides from the network, not from `stored`, `sent` or `unknown`. It skips a
     `dead` hash: one is `dead` only once the pool saw it refused or past its bounds, or the
-    network didn't know it past its bound.
+    network didn't know it past its bound, by itself or by its inner hash.
+  - Each hash also keeps its inner transaction's hash (task 0087). Anyone can wrap our inner
+    transaction in a fee bump of their own at ten times the fee, and it then lands under their
+    hash. Before calling a hash past its bound `dead`, the pool and reconciliation read it once by
+    its inner hash. If that finds it in a ledger, ours is `dead`, theirs is added last as `landed`
+    (so it is the hash the answer names), the fee is 0 since their fee account paid, and
+    `settlement_rewrapped` logs who paid. A hash stored before the inner hash was kept is read by
+    itself alone.
 - **Durable hash.** `signer-pool` awaits an async `onSigned` before every send and aborts the
   send if it rejects (task 0016).
 - **Reconciliation.** From startup, and every 10 s after, the module re-checks every non-final
