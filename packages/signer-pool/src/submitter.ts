@@ -143,8 +143,13 @@ export interface SubmitOptions {
    * timed out may still finish its write after the channel has reused the sequence. An attempt
    * cannot land once its time bound or ledger bound has passed, so the caller can resolve each
    * stored hash with `getTransaction` and the bounds, which `bounds` carries.
+   *
+   * `innerHash` is the inner transaction's hash. Anyone can wrap that transaction in a fee bump of
+   * their own at ten times the fee, and it then lands under another hash; `getTransaction` finds
+   * it by the inner hash too, so the caller stores it to check one before calling it dead (0087).
+   * This submitter always passes it; optional so a caller's stand-in may leave it out.
    */
-  onSigned?: (hash: string, bounds: SignedBounds) => void | Promise<void>;
+  onSigned?: (hash: string, bounds: SignedBounds, innerHash?: string) => void | Promise<void>;
   /**
    * Called once the network accepts the transaction (`PENDING`), before it is final. Must not
    * throw (errors are ignored).
@@ -265,6 +270,8 @@ export const NOT_FOUND_MARGIN_SECONDS = NOT_FOUND_MARGIN_LEDGERS * 5;
 interface Prepared {
   bump: Transaction | FeeBumpTransaction;
   hash: string;
+  /** The inner transaction's hash: a fee bump someone else wraps it in carries the same (0087). */
+  innerHash: string;
   txSequence: bigint;
   /** The time bound; unset when `maxLedger` bounds the envelope instead. */
   maxTime?: number;
@@ -736,6 +743,7 @@ export class SettlementSubmitter {
     return {
       bump,
       hash: bump.hash().toString("hex"),
+      innerHash: inner.hash().toString("hex"),
       txSequence,
       maxTime,
       maxLedger,
@@ -753,7 +761,7 @@ export class SettlementSubmitter {
     // here too, so a closing submitter sends no new envelope.
     if (this.closing)
       throw new ShutdownError("the submitter closed before the envelope was signed");
-    const { bump, hash, txSequence, maxTime, maxLedger } = prepared;
+    const { bump, hash, innerHash, txSequence, maxTime, maxLedger } = prepared;
     // Fixed once: a clock stalled by an RPC outage must not push the waits on.
     const boundAt = this.timeBound(prepared);
     const base = { channel: channel.address };
@@ -766,7 +774,7 @@ export class SettlementSubmitter {
       this.pastLedgerBound(maxLedger, this.clock.current);
     // Nothing is sent until the caller has the hash: a store write that fails must stop the send.
     if (opts.onSigned) {
-      await this.awaitSigned(opts.onSigned, hash, maxTime, maxLedger, boundAt);
+      await this.awaitSigned(opts.onSigned, hash, innerHash, maxTime, maxLedger, boundAt);
       // The write took time: an envelope already past a bound can only get txTooLate.
       if (pastBounds()) return { ...base, status: "expired", hash };
     }
@@ -852,8 +860,9 @@ export class SettlementSubmitter {
    * `getLatestLedger` poll.
    */
   private async awaitSigned(
-    onSigned: (hash: string, bounds: SignedBounds) => void | Promise<void>,
+    onSigned: NonNullable<SubmitOptions["onSigned"]>,
     hash: string,
+    innerHash: string,
     maxTime: number | undefined,
     maxLedger: number | undefined,
     boundAt: number,
@@ -885,7 +894,7 @@ export class SettlementSubmitter {
         ...(maxTime !== undefined && { maxTime }),
         ...(maxLedger !== undefined && { maxLedger }),
       };
-      const written = Promise.resolve().then(() => onSigned(hash, bounds)); // a synchronous throw too
+      const written = Promise.resolve().then(() => onSigned(hash, bounds, innerHash)); // a synchronous throw too
       const outcome = await Promise.race([written, timedOut, pastLedger]).catch(
         (error: unknown) => {
           throw new SignedHookError(
@@ -916,7 +925,7 @@ export class SettlementSubmitter {
   /** One status check per new ledger until the transaction is final or provably never will be. */
   private async confirm(
     channel: Channel,
-    { hash, txSequence, maxTime, maxLedger, simLedger }: Prepared,
+    { hash, innerHash, txSequence, maxTime, maxLedger, simLedger }: Prepared,
     uncertain: boolean,
   ): Promise<Outcome> {
     const base = { channel: channel.address };
@@ -937,23 +946,24 @@ export class SettlementSubmitter {
           channel.sequence = undefined;
           return { ...base, status: "pending", hash };
         }
+        // Our envelope never landed, but someone else's fee bump of the same inner transaction
+        // may have (0087): one more read, by the inner hash, before calling it expired.
+        let rewrapped: rpc.Api.GetTransactionResponse;
+        try {
+          rewrapped = await this.rpc.getTransaction(innerHash);
+        } catch {
+          continue; // Unread, so not yet expired: both reads again on the next ledger.
+        }
+        if (rewrapped.status !== rpc.Api.GetTransactionStatus.NOT_FOUND) {
+          channel.sequence = txSequence;
+          return { ...base, ...rewrappedOutcome(rewrapped, hash, this.passphrase) };
+        }
         // After an uncertain send the cached sequence may be stale, and re-reading it is now safe.
         if (uncertain) channel.sequence = undefined;
         return { ...base, status: "expired", hash };
       }
       channel.sequence = txSequence;
-      const feeCharged = res.resultXdr.feeCharged().toBigInt();
-      if (res.status === rpc.Api.GetTransactionStatus.SUCCESS)
-        return { ...base, status: "success", hash, ledger: res.ledger, feeCharged };
-      return {
-        ...base,
-        status: "failed",
-        hash,
-        ledger: res.ledger,
-        feeCharged,
-        errorCode: resultCode(res.resultXdr),
-        failure: failureCause(res),
-      };
+      return { ...base, ...landedOutcome(res, hash) };
     }
   }
 
@@ -989,6 +999,50 @@ export function cannotLand(
     (maxTime !== undefined && res.latestLedgerCloseTime > maxTime + NOT_FOUND_MARGIN_SECONDS) ||
     (maxLedger !== undefined && res.latestLedger >= maxLedger + NOT_FOUND_MARGIN_LEDGERS)
   );
+}
+
+/** The outcome of our fee bump `hash` in a ledger. */
+export function landedOutcome(
+  res: rpc.Api.GetSuccessfulTransactionResponse | rpc.Api.GetFailedTransactionResponse,
+  hash: string,
+): Omit<Outcome, "channel"> {
+  const found = { hash, ledger: res.ledger, feeCharged: res.resultXdr.feeCharged().toBigInt() };
+  if (res.status === rpc.Api.GetTransactionStatus.SUCCESS) return { status: "success", ...found };
+  return {
+    status: "failed",
+    ...found,
+    errorCode: resultCode(res.resultXdr),
+    failure: failureCause(res),
+  };
+}
+
+/**
+ * The outcome of a transaction found by our inner hash after our fee bump `hash` was not (0087).
+ * The envelope that landed is someone else's fee bump of our inner transaction, whose fee account
+ * paid, so ours was charged nothing, or the inner transaction sent bare, whose fee the channel
+ * paid. Its hash is the one that landed. One with our own hash (a read that raced the landing)
+ * is our own landing.
+ */
+export function rewrappedOutcome(
+  res: rpc.Api.GetSuccessfulTransactionResponse | rpc.Api.GetFailedTransactionResponse,
+  hash: string,
+  passphrase: string,
+): Omit<Outcome, "channel"> {
+  const ours = landedOutcome(res, hash);
+  const envelope = res.envelopeXdr;
+  const tx =
+    envelope.switch() === xdr.EnvelopeType.envelopeTypeTxFeeBump()
+      ? new FeeBumpTransaction(envelope, passphrase)
+      : new Transaction(envelope, passphrase);
+  const landed = tx.hash().toString("hex");
+  if (landed === hash) return ours;
+  const bumped = tx instanceof FeeBumpTransaction;
+  return {
+    ...ours,
+    hash: landed,
+    feeCharged: bumped ? 0n : ours.feeCharged,
+    rewrap: { of: hash, feeSource: bumped ? tx.feeSource : tx.source },
+  };
 }
 
 /** Calls a caller's hook; a hook that throws must not break settlement. */

@@ -49,6 +49,7 @@ export {
   SourceAccountAuthError,
   attemptsOf,
   cannotLand,
+  rewrappedOutcome,
   type ContractCall,
   type FeeEscalation,
   type SignedBounds,
@@ -57,6 +58,7 @@ export {
 } from "./submitter.js";
 export type {
   Attempt,
+  Rewrap,
   SorobanRpc,
   SubmitResult,
   SubmitStatus,
