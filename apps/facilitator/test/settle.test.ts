@@ -1572,11 +1572,12 @@ describe("createSettler", () => {
 
     it("never says sign a new payment for an unsigned record it couldn't end", async () => {
       // The refusal couldn't be stored, so the record stays `claimed` with no hash.
-      const s = setup(landing(), { budgetMs: BUDGET_MS });
+      let time = 0;
+      const s = setup(landing(), { now: () => time });
       s.hooks.beforeSubmit.mockResolvedValueOnce({ allow: false, errorReason: "over_budget" });
       vi.spyOn(s.store, "transition").mockRejectedValue(new Error("store down"));
       await s.settle(payload(), requirements);
-      await delay(BUDGET_MS + 10);
+      time += 5_010;
       // The repeat can't end it either: the record may still be signed elsewhere.
       expect((await s.settle(payload(), requirements)).response).toMatchObject({
         success: false,
