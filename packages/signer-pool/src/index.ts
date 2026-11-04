@@ -19,6 +19,7 @@ export {
   type FallbackRpcOptions,
   type RpcEndpoint,
 } from "./fallback-rpc.js";
+export { failureCause, type FailureCause } from "./failure-cause.js";
 export { FEE_STATS_MIN_STROOPS, feeStatsInclusionFee, type FeeStatsOptions } from "./fees.js";
 export { LedgerClock } from "./ledger-clock.js";
 export {
@@ -39,6 +40,8 @@ export {
 export {
   FeeLimitError,
   LedgerBoundError,
+  NOT_FOUND_MARGIN_LEDGERS,
+  NOT_FOUND_MARGIN_SECONDS,
   SettlementSubmitter,
   SignedHookError,
   SigningError,
@@ -46,6 +49,7 @@ export {
   SimulationError,
   SourceAccountAuthError,
   attemptsOf,
+  cannotLand,
   type ContractCall,
   type FeeEscalation,
   type SignedBounds,

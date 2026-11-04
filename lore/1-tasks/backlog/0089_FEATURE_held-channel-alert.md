@@ -27,9 +27,10 @@ for a channel until its budget ends. Nothing shows a held channel today.
 ## Implementation
 
 - A metric of channels busy and of the longest hold, from the pool's stats or events.
-- A CloudWatch alarm on a channel held past N seconds, N to be chosen (0027's alerting).
+- The CloudWatch alarm is 0027's `channel-held`, above 300 s on `channel_longest_hold_seconds`;
+  this task builds that gauge (0027's alarm list, from Oskar's review of PR #111).
 - The README's `CHANNELS` note names the metric.
 
 ## Acceptance Criteria
 
-- [ ] Given a channel held past N seconds, when the alarm checks, then it fires
+- [ ] Given a channel held past 300 s, when 0027's `channel-held` alarm checks, then it fires

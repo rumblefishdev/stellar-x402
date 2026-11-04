@@ -8,7 +8,7 @@ import {
   type SorobanRpc,
   type TransactionSigner,
 } from "@stellar-x402/signer-pool";
-import { getNetworkPassphrase, type FacilitatorStellarSigner } from "@x402/stellar";
+import { getNetworkPassphrase, getUsdcAddress, type FacilitatorStellarSigner } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/facilitator";
 import type pg from "pg";
 import { Agent, setGlobalDispatcher } from "undici";
@@ -38,6 +38,9 @@ import { createRecords } from "./settlement/records.js";
 import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler, type Settle } from "./settlement/settle.js";
 import { createTrustlineLookup } from "./settlement/trustline.js";
 import { failoverUpstream, type EndpointFailure } from "./settlement/upstream-failover.js";
+import { createAssetKinds } from "./spend/asset-kinds.js";
+import { createBalanceFloor } from "./spend/balance-floor.js";
+import { createSpendPolicy, verifyWithBreakers } from "./spend/policy.js";
 import {
   UNEXPECTED_VERIFY_ERROR,
   UpstreamTimeoutError,
@@ -85,6 +88,9 @@ export async function start(
   server.keepAliveTimeout = KEEP_ALIVE_TIMEOUT_MS;
   server.headersTimeout = KEEP_ALIVE_TIMEOUT_MS + 1_000;
   await once(server, "listening");
+  // The first balance reading comes before the lease, so `/settle` isn't refused for want of one
+  // once it can serve. A failed read is logged, and the floor fails closed until one succeeds.
+  await deps.floor?.start();
   // After listening, so `/verify` and `/supported` answer meanwhile. Sweeps run with or without the lease (0019
   // decision 37); `/settle` serves beside them (0019 decision 27) once the lease is held, and the
   // keeper keeps trying when it isn't (0025 decision 1).
@@ -157,6 +163,7 @@ export async function start(
       } finally {
         clearTimeout(timer);
         clearTimeout(grace);
+        deps.floor?.stop();
         // Past the deadline the drain may still fail, or the late `server.close()` may.
         drained.catch(() => {});
         closed?.catch(() => {});
@@ -524,15 +531,42 @@ export function compose(
     logger,
     metrics,
   });
+  // The spend lane (AD-18, 0024): before a submit, the fee account's balance floor, the breakers
+  // and the fee budgets; once a record is final, the fee charged and the breakers' counts. The fee
+  // account is the facilitator's key, which signs every fee bump.
+  const floor = createBalanceFloor({
+    rpc,
+    account: checks.facilitator,
+    floorStroops: config.spend.floorStroops,
+    intervalMs: config.spend.balanceIntervalMs,
+    logger,
+    metrics,
+  });
+  const policy = createSpendPolicy({
+    store: stores.spend,
+    // USDC is the known asset (the high tier); every other token, SAC or wasm, gets the low one.
+    assets: createAssetKinds({ rpc, known: [getUsdcAddress(config.network)] }),
+    floor,
+    budgets: {
+      windowMs: config.spend.windowMs,
+      globalStroops: config.spend.globalStroops,
+      perPayerStroops: config.spend.perPayerStroops,
+      perPayToStroops: config.spend.perPayToStroops,
+      perKnownAssetStroops: config.spend.perAssetStroops,
+      perOtherAssetStroops: config.spend.perOtherAssetStroops,
+      tierOtherStroops: config.spend.tierOtherStroops,
+    },
+    logger,
+    metrics,
+  });
   const { settle, reconciliation, drain } = buildSettlement(config, {
     rpc,
     fees,
     checks,
     store: stores.settlements,
-    // Spend budgets plug in here with 0024.
     hooks: {
-      beforeSubmit: async () => ({ allow: true }),
-      onFinal: async () => {},
+      beforeSubmit: policy.beforeSubmit,
+      onFinal: policy.onFinal,
       onSuccess: cataloger.onSuccess,
     },
     logger,
@@ -547,12 +581,13 @@ export function compose(
       logger,
       metrics,
       stores,
-      verify: createVerifier(checks),
+      verify: verifyWithBreakers(createVerifier(checks), { policy, logger, metrics }),
       settle,
       extensionResponses: cataloger.extensionResponses,
       supported: supportedResponse(config.network, checks.facilitator),
       reconciliation,
       lease,
+      floor,
       drain,
       signerState: signer.state,
     },
@@ -624,7 +659,7 @@ export async function main(
     // Not awaited: the service starts and `/verify` answers without OpenBao; the outcome goes to
     // the log and `/health`'s `signer`, and a failed check tries again (0036 decision 4).
     void signer.check();
-    // One window today; with per-budget windows (0024), the longest of them.
+    // Every budget sums the one window (0024 S-design §5).
     const pruner = createPruner({
       spend: stores.spend,
       rateLimits: stores.rateLimits,

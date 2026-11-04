@@ -4,6 +4,7 @@ import {
   Keypair,
   Networks,
   Operation,
+  SorobanDataBuilder,
   StrKey,
   TransactionBuilder,
   nativeToScVal,
@@ -45,10 +46,12 @@ import { createReconciler } from "../src/settlement/reconcile.js";
 import { createRecords } from "../src/settlement/records.js";
 import {
   LeaseLostError,
+  PayerNotAuthorizedError,
   SETTLE_REASONS,
   createSettler,
   expectTransfer,
   fingerprintOf,
+  reasonFor,
   type SettlerDeps,
   type Submitter,
 } from "../src/settlement/settle.js";
@@ -198,8 +201,19 @@ const transferEvent = (from = payer, to = payTo, data?: xdr.ScVal, contract?: st
     data,
     contract,
   );
+/** The footprint key the host writes when the payer's auth entry (nonce 7) is used. */
+const payerNonceKey = xdr.LedgerKey.contractData(
+  new xdr.LedgerKeyContractData({
+    contract: new Address(payer).toScAddress(),
+    key: xdr.ScVal.scvLedgerKeyNonce(new xdr.ScNonceKey({ nonce: xdr.Int64.fromString("7") })),
+    durability: xdr.ContractDataDurability.temporary(),
+  }),
+);
 const sim = (...events: xdr.DiagnosticEvent[]) =>
-  ({ events }) as unknown as rpc.Api.SimulateTransactionSuccessResponse;
+  ({
+    events,
+    transactionData: new SorobanDataBuilder().setFootprint([], [payerNonceKey]),
+  }) as unknown as rpc.Api.SimulateTransactionSuccessResponse;
 
 type Behaviour = (opts: SubmitOptions) => Promise<SubmitResult>;
 
@@ -322,6 +336,17 @@ const alreadySettled = {
 };
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+describe("reasonFor", () => {
+  it("names a payer whose auth was never used, behind the pool's wrapper", () => {
+    const error = new SimulationCheckError("x", { cause: new PayerNotAuthorizedError("y") });
+    expect(reasonFor(error)).toBe(SETTLE_REASONS.payerNotAuthorized);
+  });
+
+  it("keeps a plain check failure as a balance change", () => {
+    expect(reasonFor(new SimulationCheckError("x"))).toBe(SETTLE_REASONS.balanceChanges);
+  });
+});
+
 describe("createSettler", () => {
   it("claims, runs beforeSubmit, submits the client's call bounded by its auth, and answers success", async () => {
     const { settle, store, submit, hooks, order } = setup();
@@ -333,6 +358,10 @@ describe("createSettler", () => {
     expect(hooks.beforeSubmit).toHaveBeenCalledWith(
       expect.objectContaining({ key, payer, payTo, asset, amount: 1000n, maxFeeStroops: 250_000n }),
     );
+    // The hook's deadline is the settle budget's end: 5 s after the call started.
+    const context = hooks.beforeSubmit.mock.calls[0]![0];
+    expect(context.deadline - context.now).toBeGreaterThan(0);
+    expect(context.deadline - context.now).toBeLessThanOrEqual(5_000);
 
     const [call, opts] = submit.mock.calls[0]!;
     const op = transaction().operations[0] as Operation.InvokeHostFunction;
@@ -1153,6 +1182,204 @@ describe("createSettler", () => {
         replay: "true",
       }),
     ).toBe(1);
+  });
+
+  describe("one settlement per payer and asset at a time (0024)", () => {
+    /** The payer's next payment in the same asset: nonce 8, landing as `hash`. */
+    const second = () => payload([authEntry(payer, "8")]);
+    const HASH_2 = "b".repeat(64);
+    const key2 = `${network}:${payer}:8` as const;
+
+    /** The first call signs its hash, then holds until `land()`; later calls land at once. */
+    function held() {
+      let land!: () => void;
+      const landed = new Promise<void>((resolve) => (land = resolve));
+      let signed!: () => void;
+      const isSigned = new Promise<void>((resolve) => (signed = resolve));
+      let calls = 0;
+      const behaviour: Behaviour = async (opts) => {
+        if (calls++ > 0) return landing("success", HASH_2)(opts);
+        await opts.onSigned?.(HASH, BOUNDS);
+        signed();
+        await landed;
+        return result();
+      };
+      return { behaviour, land, isSigned };
+    }
+
+    it("waits for the blocker and settles once it is final", async () => {
+      const { behaviour, land, isSigned } = held();
+      const { settle, store, submit } = setup(behaviour);
+      const first = settle(payload(), requirements);
+      await isSigned;
+      const waiting = settle(second(), requirements);
+      await delay(50);
+      // Still waiting: no record of its own, and nothing submitted for it.
+      expect(await store.get(key2)).toBeUndefined();
+      expect(submit).toHaveBeenCalledTimes(1);
+      land();
+      expect((await first).response).toMatchObject({ success: true, transaction: HASH });
+      expect((await waiting).response).toEqual({
+        success: true,
+        transaction: HASH_2,
+        network,
+        payer,
+      });
+      expect(submit).toHaveBeenCalledTimes(2);
+      expect(await store.get(key2)).toMatchObject({ state: "success", hashes: [HASH_2] });
+    });
+
+    it("reads the blocker again after a failed read, as no store failure of its own", async () => {
+      const { behaviour, land, isSigned } = held();
+      const { settle, store, lines } = setup(behaviour);
+      const first = settle(payload(), requirements);
+      await isSigned;
+      const get = store.get.bind(store);
+      let failed = 0;
+      const reads = vi.spyOn(store, "get").mockImplementation(async (k) => {
+        if (k === key && failed++ === 0) throw new Error("store down");
+        return get(k);
+      });
+      const waiting = settle(second(), requirements);
+      await delay(50);
+      // The failed read was followed by more: the wait went on.
+      expect(reads.mock.calls.filter(([k]) => k === key).length).toBeGreaterThan(1);
+      land();
+      await first;
+      expect((await waiting).response).toMatchObject({ success: true, transaction: HASH_2 });
+      // The blocker is another payment's record: its failed read is no outage of this one's.
+      expect(lines.some((line) => line.includes('"settlement_record_failed"'))).toBe(false);
+    });
+
+    /** Claims `payload()` and closes it with nothing sent, as a full channel set does. */
+    async function closedUnsent(store: SettlementStore) {
+      await store.claim({
+        key,
+        network,
+        payer,
+        nonce: "7",
+        fingerprint: fingerprintOf(payload(), requirements),
+        paymentPayload: payload(),
+        paymentRequirements: requirements,
+        createdAt: Date.now(),
+      });
+      await store.transition(key, "claimed", {
+        state: "rejected",
+        errorReason: SETTLE_REASONS.noChannelInTime,
+        updatedAt: Date.now(),
+      });
+    }
+
+    it("makes a reopened payment wait for another of its payer and asset (0073)", async () => {
+      const { behaviour, land, isSigned } = held();
+      const { settle, store, submit } = setup(behaviour);
+      await closedUnsent(store);
+      const other = settle(second(), requirements);
+      await isSigned;
+
+      const reopening = settle(payload(), requirements);
+      await delay(50);
+      // Still closed, and nothing submitted for it: one balance, one settlement at a time.
+      expect(await store.get(key)).toMatchObject({ state: "rejected", reopened: 0 });
+      expect(submit).toHaveBeenCalledTimes(1);
+
+      land();
+      expect((await other).response).toMatchObject({ success: true, transaction: HASH });
+      expect((await reopening).response).toMatchObject({ success: true, transaction: HASH_2 });
+      expect(await store.get(key)).toMatchObject({ state: "success", reopened: 1 });
+      expect(submit).toHaveBeenCalledTimes(2);
+    });
+
+    // The floor momentarily below, or the store timing out: nothing was sent and the auth entry
+    // is still valid, so the identical payload reopens and settles once it recovers.
+    it.each([SETTLE_REASONS.facilitatorUnderfunded, SETTLE_REASONS.spendStoreUnavailable])(
+      "reopens a payment %s refused, instead of ending it (0024)",
+      async (reason) => {
+        const { settle, store, hooks } = setup();
+        hooks.beforeSubmit.mockResolvedValueOnce({ allow: false, errorReason: reason });
+        const first = await settle(payload(), requirements);
+        expect(first.response).toMatchObject({
+          errorReason: reason,
+          extra: { retryable: true, expirationLedger: EXPIRATION },
+        });
+        expect(await store.get(key)).toMatchObject({ state: "rejected", reopened: 0 });
+        const second = await settle(payload(), requirements);
+        expect(second.response).toMatchObject({ success: true });
+        expect(await store.get(key)).toMatchObject({ state: "success", reopened: 1 });
+      },
+    );
+
+    // A budget or a breaker is a deliberate wait or cut-off: the payment ends, and the same
+    // payload gets the same answer.
+    it.each([SETTLE_REASONS.spendLimitPayer, SETTLE_REASONS.breakerOpenPayer])(
+      "ends a payment %s refused (0024)",
+      async (reason) => {
+        const { settle, store, hooks, submit } = setup();
+        hooks.beforeSubmit.mockResolvedValueOnce({ allow: false, errorReason: reason });
+        const ended = { errorReason: reason, ...untilExpiry };
+        expect((await settle(payload(), requirements)).response).toMatchObject(ended);
+        expect((await settle(payload(), requirements)).response).toMatchObject(ended);
+        expect(await store.get(key)).toMatchObject({ state: "rejected", reopened: 0 });
+        expect(hooks.beforeSubmit).toHaveBeenCalledTimes(1);
+        expect(submit).not.toHaveBeenCalled();
+      },
+    );
+
+    it("answers payer_busy past the budget and leaves a closed record to reopen later", async () => {
+      const { behaviour, land, isSigned } = held();
+      const { settle, store, submit } = setup(behaviour, { budgetMs: 300 });
+      await closedUnsent(store);
+      const other = settle(second(), requirements);
+      await isSigned;
+
+      const busy = await settle(payload(), requirements);
+      expect(busy.response).toMatchObject({ errorReason: SETTLE_REASONS.payerBusy, payer });
+      expect(await store.get(key)).toMatchObject({ state: "rejected", reopened: 0 });
+      expect(submit).toHaveBeenCalledTimes(1);
+
+      land();
+      await other;
+      await settle.drain();
+      expect((await settle(payload(), requirements)).response).toMatchObject({ success: true });
+      expect(await store.get(key)).toMatchObject({ state: "success", reopened: 1 });
+    });
+
+    it("answers payer_busy past the budget and writes no record", async () => {
+      const { behaviour, land, isSigned } = held();
+      const { settle, store, submit, metrics } = setup(behaviour, { budgetMs: 300 });
+      const first = settle(payload(), requirements);
+      await isSigned;
+      const busy = await settle(second(), requirements);
+      expect(busy).toMatchObject({
+        key: key2,
+        response: {
+          success: false,
+          errorReason: SETTLE_REASONS.payerBusy,
+          payer,
+          transaction: "",
+          network,
+          // Nothing was recorded, signed or sent, so the same payment can be sent again (0024):
+          // the answer is retryable, unlike an answer that ended the payment.
+          extra: { retryable: true, expirationLedger: EXPIRATION },
+        },
+      });
+      expect(await store.get(key2)).toBeUndefined();
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(
+        metrics.value("settlement_outcomes_total", {
+          reason: SETTLE_REASONS.payerBusy,
+          replay: "false",
+        }),
+      ).toBe(1);
+      // The first lands; the same payment sent again then settles.
+      land();
+      await first;
+      await settle.drain();
+      expect((await settle(second(), requirements)).response).toMatchObject({
+        success: true,
+        transaction: HASH_2,
+      });
+    });
   });
 
   describe("when the store can't mark a success answered (ADR 0006)", () => {
@@ -2646,7 +2873,11 @@ describe("attempt states (0019 decision 7)", () => {
 
 describe("with reconciliation (0019)", () => {
   /** A settler and a reconciler sharing one store and one `records`, as `buildSettlement` builds. */
-  function shared(behaviour: Behaviour, answer: rpc.Api.GetTransactionResponse) {
+  function shared(
+    behaviour: Behaviour,
+    answer: rpc.Api.GetTransactionResponse,
+    overrides: Partial<SettlerDeps> = {},
+  ) {
     const store = db.stores().settlements;
     const hooks = {
       onFinal: vi.fn<SettlementHooks["onFinal"]>(async () => {}),
@@ -2655,7 +2886,7 @@ describe("with reconciliation (0019)", () => {
     const logger = jsonLogger("error", () => {});
     const metrics = memoryMetrics();
     const records = createRecords({ network, store, hooks, logger, metrics });
-    const { settle } = setup(behaviour, { store, records });
+    const { settle } = setup(behaviour, { store, records, ...overrides });
     const reconcilerOn = (r = records) =>
       createReconciler({
         network,
@@ -2718,11 +2949,37 @@ describe("with reconciliation (0019)", () => {
     expect((await first).response).toEqual(alreadySettled);
   });
 
+  it("keeps a record the pool left pending open, through a repeat, until a sweep finishes it (0088)", async () => {
+    const landed = {
+      status: rpc.Api.GetTransactionStatus.SUCCESS,
+      ledger: 1001,
+      resultXdr: { feeCharged: () => ({ toBigInt: () => 41_000n }) },
+    } as unknown as rpc.Api.GetTransactionResponse;
+    const { store, hooks, settle, reconcilerOn } = shared(landing("pending"), landed, {
+      settleTimeoutMs: 30,
+    });
+    const pending = { success: false, errorReason: "settlement_pending", transaction: HASH };
+    expect((await settle(payload(), requirements)).response).toMatchObject(pending);
+    expect((await settle(payload(), requirements)).response).toMatchObject(pending);
+    expect((await store.get(key))?.state).toBe("pending");
+    expect(hooks.onFinal).not.toHaveBeenCalled();
+
+    expect(await reconcilerOn().sweep()).toMatchObject({ success: 1 });
+    expect((await store.get(key))?.state).toBe("success");
+    expect((await settle(payload(), requirements)).response).toMatchObject({
+      success: true,
+      transaction: HASH,
+    });
+  });
+
   it("finishes a payment whose process crashed between signing and sending", async () => {
-    const { store, hooks, logger, metrics, settle, reconcilerOn } = shared(async (opts) => {
-      await opts.onSigned?.(HASH, BOUNDS);
-      return new Promise(() => {}); // the process stops here
-    }, notFound(BOUNDS.maxLedger));
+    const { store, hooks, logger, metrics, settle, reconcilerOn } = shared(
+      async (opts) => {
+        await opts.onSigned?.(HASH, BOUNDS);
+        return new Promise(() => {}); // the process stops here
+      },
+      notFound(BOUNDS.maxLedger + 3),
+    );
     void settle(payload(), requirements);
     await vi.waitFor(async () => expect(await store.attempts(key)).toHaveLength(1));
     // After the restart: a new process, with its own records, on the same store.
@@ -2739,10 +2996,15 @@ describe("with reconciliation (0019)", () => {
 
 describe("expectTransfer", () => {
   const transfer = transferEvent;
-  const check = expectTransfer({ asset, from: payer, to: payTo, amount: 1000n });
+  const check = expectTransfer({ asset, from: payer, to: payTo, amount: 1000n, nonce: "7" });
 
   it("accepts exactly the expected transfer", () => {
     expect(() => check(sim(transfer()))).not.toThrow();
+  });
+
+  it("refuses a transfer whose footprint lacks the payer's nonce", () => {
+    const bare = { ...sim(transfer()), transactionData: new SorobanDataBuilder() };
+    expect(() => check(bare as never)).toThrow(PayerNotAuthorizedError);
   });
 
   it.each([

@@ -32,6 +32,7 @@ import type { Logger } from "../logger.js";
 import type { Metrics } from "../metrics.js";
 import {
   LeaseFencedError,
+  type ClaimResult,
   type LeaseFence,
   type SettlementKey,
   type SettlementRecord,
@@ -72,6 +73,11 @@ export const SETTLE_REASONS = {
   simulation: "settle_exact_stellar_simulation_failed",
   /** The settlement's simulation moves something other than the one expected transfer. */
   balanceChanges: "settle_exact_stellar_unexpected_balance_changes",
+  /**
+   * The settlement's simulation never used the payer's auth entry: the token's `transfer` doesn't
+   * require the payer's signature, so the event's `from` proves nothing.
+   */
+  payerNotAuthorized: "settle_exact_stellar_payer_not_authorized",
   /** The settlement's simulated fee is above `MAX_FEE_STROOPS`. */
   fee: "settle_exact_stellar_fee_exceeds_maximum",
   /** Fewer than two ledgers were left before the auth expiry by the time a channel was free. */
@@ -80,10 +86,10 @@ export const SETTLE_REASONS = {
   recordWrite: "settle_exact_stellar_record_write_failed",
   /**
    * The facilitator key's signer (OpenBao, 0036) failed on the transaction (upstream's code).
-   * Nothing was sent ({@link UNSENT_REASONS}).
+   * This envelope wasn't sent ({@link UNSENT_REASONS}).
    */
   transactionSigning: "settle_exact_stellar_transaction_signing_failed",
-  /** The signer failed on the fee bump (upstream's code). Nothing was sent ({@link UNSENT_REASONS}). */
+  /** The signer failed on the fee bump (upstream's code). This envelope wasn't sent ({@link UNSENT_REASONS}). */
   feeBumpSigning: "settle_exact_stellar_fee_bump_signing_failed",
   /** No channel was free before the deadline. Nothing was sent ({@link UNSENT_REASONS}). */
   noChannelInTime: "settle_exact_stellar_no_channel_in_time",
@@ -132,6 +138,38 @@ export const SETTLE_REASONS = {
    * doesn't reopen: an envelope never sent, or one a `txBadSeq` refused before the rebuild.
    */
   leaseLost: "settle_exact_stellar_lease_lost",
+  /**
+   * Another payment from this payer in this asset was still settling when the settle budget ran
+   * out (0024): one balance is spent by one settlement at a time. Nothing was claimed, signed or
+   * sent for this payment: send the same payment again.
+   */
+  payerBusy: "settle_exact_stellar_payer_busy",
+  /**
+   * The payer's fee budget for this window is spent (AD-18): for a known asset its budget, for
+   * another token its budget in that token. Nothing was sent; the buyer waits for the window.
+   */
+  spendLimitPayer: "settle_exact_stellar_spend_limit_payer",
+  /** The recipient's fee budget for this window is spent. The seller asks the operator. */
+  spendLimitPayTo: "settle_exact_stellar_spend_limit_pay_to",
+  /** The asset's fee budget for this window is spent. Pay in another asset. */
+  spendLimitAsset: "settle_exact_stellar_spend_limit_asset",
+  /** The budget all tokens but the known ones share is spent. Pay in a known asset. */
+  spendLimitOther: "settle_exact_stellar_spend_limit_other",
+  /** The facilitator's fee budget for this window is spent. Use another facilitator. */
+  spendLimitGlobal: "settle_exact_stellar_spend_limit_global",
+  /** The payer's settlements failed on chain too often: its breaker is open for a while. */
+  breakerOpenPayer: "settle_exact_stellar_breaker_open_payer",
+  /** Settlements to this recipient failed on chain too often: its breaker is open for a while. */
+  breakerOpenPayTo: "settle_exact_stellar_breaker_open_pay_to",
+  /** This wasm token's transfers failed on chain too often: its breaker is open for a while. */
+  breakerOpenAsset: "settle_exact_stellar_breaker_open_asset",
+  /**
+   * The spend store didn't answer within the settle budget, so no fee could be reserved and
+   * nothing was sent (fail closed). Sign a new payment shortly.
+   */
+  spendStoreUnavailable: "settle_exact_stellar_spend_store_unavailable",
+  /** The facilitator's fee account is below its floor. Nothing was sent; the operator acts. */
+  facilitatorUnderfunded: "settle_exact_stellar_facilitator_underfunded",
   /** Anything else (upstream's code). */
   unexpected: "unexpected_settle_error",
 } as const;
@@ -141,7 +179,9 @@ export const SETTLE_REASONS = {
  * auth entry can still land until its expiration ledger, by whoever holds the payload, so the
  * answer never says "sign a new payment" while it is valid: it carries `extra.retryable` and
  * `extra.expirationLedger`, and the identical payload reopens the record and settles it once.
- * Past that ledger, `retryable` is `false`: sign a new payment.
+ * Past that ledger, `retryable` is `false`: sign a new payment. With a `transaction` an earlier
+ * envelope was sent and a `txBadSeq` refused it before the rebuild: the record has its hash, so it
+ * doesn't reopen and `retryable` is `false` at once.
  */
 export const UNSENT_REASONS: readonly string[] = [
   SETTLE_REASONS.timeout,
@@ -153,12 +193,19 @@ export const UNSENT_REASONS: readonly string[] = [
   SETTLE_REASONS.leaseLost,
   SETTLE_REASONS.transactionSigning,
   SETTLE_REASONS.feeBumpSigning,
+  // Transient spend-lane refusals (0024): the floor was momentarily below, or the store timed
+  // out. Nothing was sent and the payment is still valid, so the identical payload reopens and
+  // settles once the floor or store recovers, as the infra failures above do. The budget and
+  // breaker refusals are not here: those are a deliberate wait or cut-off, not a transient miss.
+  SETTLE_REASONS.facilitatorUnderfunded,
+  SETTLE_REASONS.spendStoreUnavailable,
 ];
 const UNSENT = new Set(UNSENT_REASONS);
 
 /**
  * Failed answers about a record that don't tell the payer to sign again (0082): it isn't over, it
- * landed, the payload is another payment, or its auth entry has expired. Every other failed answer
+ * landed, the payload is another payment, its auth entry has expired, or nothing was recorded
+ * because another payment of the payer and asset held the slot (0024). Every other failed answer
  * about a record ended a payment whose auth entry can still land until its expiration ledger, in
  * a new envelope: a failed or refused transaction spends no nonce.
  */
@@ -167,6 +214,7 @@ const NOT_SIGN_AGAIN = new Set<string>([
   SETTLE_REASONS.alreadySettled,
   SETTLE_REASONS.nonceUsed,
   SETTLE_REASONS.expired,
+  SETTLE_REASONS.payerBusy,
 ]);
 
 /**
@@ -407,7 +455,11 @@ export function createSettler(deps: SettlerDeps): Settle & {
     const { response } = settled;
     if (response.success || settled.claimedBefore0073) return settled;
     const reason = response.errorReason ?? "";
-    const unsent = (UNSENT.has(reason) || settled.reopenRefused) && !response.transaction;
+    // `payer_busy` recorded nothing (0024): like an unsent answer, the same payment can be sent
+    // again, so it carries `retryable` and "repeat the same payment", not "sign a new one".
+    const unsent =
+      ((UNSENT.has(reason) || settled.reopenRefused) && !response.transaction) ||
+      reason === SETTLE_REASONS.payerBusy;
     const ended = settled.key !== undefined && !NOT_SIGN_AGAIN.has(reason);
     if (!unsent && !ended) return settled;
     const valid = await validOnce();
@@ -587,6 +639,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
             from: verified.payer,
             to: requirements.payTo,
             amount: BigInt(requirements.amount),
+            nonce: verified.nonce,
           }),
           onSigned: async (hash, bounds) => {
             // After the budget answer nothing new is signed: the answer named the last hash, and
@@ -682,7 +735,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
         case "success":
           return await finish(key, { state: "success", ...fields }, call.origin, own);
         case "pending":
-          // The pool keeps confirming; its `resolved` event finishes the record (0019).
+          // The pool's `resolved` event or a sweep finishes the record (0019, 0088).
           return {
             record:
               (await advance(key, { state: "pending", ...fields }, own)) ?? (await store.get(key)),
@@ -692,7 +745,12 @@ export function createSettler(deps: SettlerDeps): Settle & {
         default:
           return await finish(
             key,
-            { state: result.status, errorReason: SETTLE_REASONS[result.status], ...fields },
+            {
+              state: result.status,
+              errorReason: SETTLE_REASONS[result.status],
+              ...(result.failure && { failure: result.failure }),
+              ...fields,
+            },
             call.origin,
             own,
           );
@@ -900,39 +958,70 @@ export function createSettler(deps: SettlerDeps): Settle & {
     const { payer, nonce } = verified;
     const key: SettlementKey = `${network}:${payer}:${nonce}`;
     if (left() <= 0) return unclaimed();
+    const settlement = {
+      key,
+      network,
+      payer,
+      nonce,
+      fingerprint,
+      paymentPayload: payload,
+      paymentRequirements: requirements,
+      createdAt: startedAt,
+    };
     // At least the store's grace: a claim cut off by a 0 ms bound may still land. A claim past
     // it is a 500, and the client's repeat finds the record.
-    const reopened =
-      reopening &&
-      (await bounded(
-        store.reopen(key, fingerprint, UNSENT_REASONS, startedAt),
-        Math.max(left(), storeGraceMs),
-      ));
-    if (reopened) {
-      logger.info("settlement_reopened", {
-        network,
-        settlementKey: key,
-        errorReason: reopening.errorReason,
-        reopened: reopened.reopened,
-      });
-      metrics.increment("settlement_reopened_total", { reason: reopening.errorReason ?? "" });
-    }
-    // A reopen that lost (another call reopened it first, or the record moved on) is a repeat.
-    const claim = reopened
-      ? { claimed: true as const, record: reopened }
-      : await bounded(
-          store.claim({
-            key,
-            network,
-            payer,
-            nonce,
-            fingerprint,
-            paymentPayload: payload,
-            paymentRequirements: requirements,
-            createdAt: startedAt,
-          }),
+    const claimOnce = async (): Promise<ClaimResult> => {
+      const reopened =
+        reopening &&
+        (await bounded(
+          store.reopen(key, fingerprint, UNSENT_REASONS, startedAt),
           Math.max(left(), storeGraceMs),
+        ));
+      if (reopened && "busy" in reopened) return { claimed: false, busy: reopened.busy };
+      if (reopened) {
+        logger.info("settlement_reopened", {
+          network,
+          settlementKey: key,
+          errorReason: reopening.errorReason,
+          reopened: reopened.reopened,
+        });
+        metrics.increment("settlement_reopened_total", { reason: reopening.errorReason ?? "" });
+        return { claimed: true, record: reopened };
+      }
+      // A reopen that lost (another call reopened it first, or the record moved on) is a repeat.
+      return bounded(store.claim(settlement), Math.max(left(), storeGraceMs));
+    };
+    let claim = await claimOnce();
+    // Another payment of this payer and asset is settling (0024): wait for it to turn final, as
+    // a repeat waits, then claim again, maybe behind a newer one. The pool's re-simulation then
+    // sees its transfer, so a payment the balance no longer covers is refused before it is sent.
+    // Past the budget nothing is recorded, so the same payment can be sent again.
+    const busy = () => ({
+      ...untouched,
+      key,
+      response: failure(SETTLE_REASONS.payerBusy, payer),
+    });
+    while ("busy" in claim) {
+      const blocker = claim.busy;
+      let record: SettlementRecord | undefined;
+      do {
+        // Read the blocker directly, not through `nextRead`: its failure path counts the read as
+        // this record's store failure (`settlement_record_failed`, an outage alarm), and the
+        // blocker is another payment's record. A failed read counts as missing: the next claim
+        // decides.
+        const read = await within(
+          sleep(pollMs)
+            .then(() => bounded(store.get(blocker), storeGraceMs))
+            .then((value) => ({ value }))
+            .catch(() => ({ value: undefined as SettlementRecord | undefined })),
+          left(),
         );
+        if (!read || signal?.aborted) return busy();
+        record = read.value;
+      } while (record && !isFinal(record));
+      if (left() <= 0) return busy();
+      claim = await claimOnce();
+    }
     if (!claim.claimed) return replay(claim.existing, fingerprint, signal, startedAt);
 
     const call: Call = { budgetOver: false, origin: "settle" };
@@ -974,6 +1063,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
         paymentRequirements: requirements,
         reopened: claim.record.reopened,
         now: now(),
+        deadline: startedAt + deps.budgetMs,
       });
       verdictOfHook = await bounded(hook, left());
     } catch (error) {
@@ -1140,6 +1230,9 @@ export class LeaseLostError extends Error {
 
 /** The fixed `errorReason` for each error `submit()` throws (AD-6). */
 export function reasonFor(error: unknown): string {
+  // The pool wraps whatever the check threw.
+  if (error instanceof SimulationCheckError && error.cause instanceof PayerNotAuthorizedError)
+    return SETTLE_REASONS.payerNotAuthorized;
   if (error instanceof SimulationCheckError) return SETTLE_REASONS.balanceChanges;
   if (error instanceof SimulationError) return SETTLE_REASONS.simulation;
   if (error instanceof FeeLimitError) return SETTLE_REASONS.fee;
@@ -1198,16 +1291,45 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 
+/** The settlement's simulation never wrote the payer's nonce: its auth entry was not used. */
+export class PayerNotAuthorizedError extends Error {}
+
+/**
+ * Whether the simulation's read-write footprint holds the payer's nonce key. The host writes it
+ * only when the payer's auth entry was used and authenticated, so a token whose `transfer` skips
+ * `from.require_auth()` leaves it out, whatever its events say.
+ */
+export function hasPayerNonce(
+  sim: rpc.Api.SimulateTransactionSuccessResponse,
+  payer: string,
+  nonce: string,
+): boolean {
+  const readWrite = sim.transactionData.build().resources().footprint().readWrite();
+  return readWrite.some((key) => {
+    if (key.switch().name !== "contractData") return false;
+    const data = key.contractData();
+    return (
+      data.key().switch().name === "scvLedgerKeyNonce" &&
+      data.durability().name === "temporary" &&
+      Address.fromScAddress(data.contract()).toString() === payer &&
+      data.key().nonceKey().nonce().toString() === nonce
+    );
+  });
+}
+
 /**
  * The spec's balance-change check on the settlement's own simulation (AD-3): exactly one
  * `transfer` event, from the asset contract, of `amount` from the payer to `payTo`, and no other
- * contract event. It reads the events as upstream `verify()` reads its simulation's.
+ * contract event. It reads the events as upstream `verify()` reads its simulation's. It then
+ * requires the payer's nonce in the footprint, which is what proves the payer authorized it.
  */
 export function expectTransfer(expected: {
   asset: string;
   from: string;
   to: string;
   amount: bigint;
+  /** The payer's auth-entry nonce, as a decimal string. */
+  nonce: string;
 }): (sim: rpc.Api.SimulateTransactionSuccessResponse) => void {
   return (sim) => {
     const transfers: { asset: string; from: unknown; to: unknown; amount: unknown }[] = [];
@@ -1242,6 +1364,11 @@ export function expectTransfer(expected: {
       transfer!.amount !== expected.amount
     ) {
       throw new Error("the simulated transfer differs from the payment");
+    }
+    if (!hasPayerNonce(sim, expected.from, expected.nonce)) {
+      throw new PayerNotAuthorizedError(
+        "the simulation never used the payer's authorization: the token's transfer does not require it",
+      );
     }
   };
 }

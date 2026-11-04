@@ -1,4 +1,5 @@
 import type { StellarNetwork } from "@stellar-x402/config";
+import type { FailureCause } from "@stellar-x402/signer-pool";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 
 /**
@@ -39,6 +40,8 @@ export interface SettlementRecord {
   feeCharged?: bigint;
   /** x402 `errorReason` for a final state other than `success`. */
   errorReason?: string;
+  /** Why an included transaction failed, as far as the RPC said (`failed` only). */
+  failure?: FailureCause;
   /** When a `/settle` call first answered this record's `success` (AD-6: once per record). */
   successAnsweredAt?: number;
   /**
@@ -66,6 +69,7 @@ export type NewSettlement = Omit<
   | "ledger"
   | "feeCharged"
   | "errorReason"
+  | "failure"
   | "successAnsweredAt"
   | "version"
   | "reopened"
@@ -75,11 +79,19 @@ export type NewSettlement = Omit<
 export type ClaimResult =
   | { claimed: true; record: SettlementRecord }
   /** The key already exists; the caller compares fingerprints (AD-6). */
-  | { claimed: false; existing: SettlementRecord };
+  | { claimed: false; existing: SettlementRecord }
+  /**
+   * Another key of the same payer and asset on the network is not final yet (0024): its key. No
+   * record was written, so the same payment can be claimed once the blocker is final.
+   */
+  | { claimed: false; busy: SettlementKey };
+
+/** The reopened record; `undefined` if a condition failed; or who holds the payer's slot (0024). */
+export type ReopenResult = SettlementRecord | { busy: SettlementKey } | undefined;
 
 /** Fields a state change may set. */
 export type SettlementUpdate = Partial<
-  Pick<SettlementRecord, "channel" | "ledger" | "feeCharged" | "errorReason">
+  Pick<SettlementRecord, "channel" | "ledger" | "feeCharged" | "errorReason" | "failure">
 > & {
   state: SettlementState;
   updatedAt: number;
@@ -171,7 +183,13 @@ export type LeaseFence = Pick<ChannelLease, "name" | "token">;
  * module writes to it.
  */
 export interface SettlementStore {
-  /** Atomic insert-if-absent: exactly one of several concurrent claims for a key wins. */
+  /**
+   * Atomic insert-if-absent: exactly one of several concurrent claims for a key wins, and the
+   * others get the record as `existing`. A new key is claimed only while no other record of its
+   * network, payer and `paymentRequirements.asset` is non-final, so one balance is spent by one
+   * settlement at a time (0024); otherwise it answers `busy` and writes nothing. Of several
+   * concurrent claims for different keys of one payer and asset, exactly one wins.
+   */
   claim(settlement: NewSettlement): Promise<ClaimResult>;
   get(key: SettlementKey): Promise<SettlementRecord | undefined>;
   /** Finds a record by any of its hashes. */
@@ -220,7 +238,8 @@ export interface SettlementStore {
    * the updated record, or `undefined` if the state had already moved on. An `update.state`
    * that isn't ahead of `expected` in the lifecycle order, the same state included, is dropped
    * the same way, so exactly one of several concurrent callers wins. A record in a final state
-   * never moves on (AD-16). Rejects a `feeCharged` that isn't a non-negative int64.
+   * never moves on (AD-16), and a move to a final state frees its payer and asset for the next
+   * `claim`. Rejects a `feeCharged` that isn't a non-negative int64.
    * `update.attempts` are applied as {@link markAttempts} would, in the same transaction, also
    * when the state doesn't move. With `expectedVersion`, the record must also still have that
    * `version`: no hash was appended since the caller read it. With `claim`, it must still have
@@ -242,16 +261,28 @@ export interface SettlementStore {
    * claim's budget from it, and a writer that read the earlier claim and passes its version or
    * `reopened` count fails (0073 decision 19).
    * Resolves the reopened record, or `undefined` if any condition fails: exactly one of several
-   * concurrent callers wins.
+   * concurrent callers wins. A reopened record takes its payer and asset's slot, as `claim` does,
+   * so one balance is spent by one settlement at a time (0024): while another key of them is not
+   * final it answers `busy`, and the record stays as it is.
    */
   reopen(
     key: SettlementKey,
     fingerprint: string,
     reasons: readonly string[],
     now: number,
-  ): Promise<SettlementRecord | undefined>;
+  ): Promise<ReopenResult>;
   /** Records not yet final, for the startup re-check (AD-16). */
   listNonFinal(network: StellarNetwork): Promise<SettlementRecord[]>;
+
+  /**
+   * Frees the in-flight slot `key` holds, if it still holds one (0024). A move to a final state
+   * frees the slot in the same statement, but a record left non-final whose payment can no longer
+   * land — its history is gone past the bound (reconciliation, decision 22) — would hold the slot
+   * for good and answer every later payment of that payer and asset `busy`. This releases it
+   * without ending the record, so an operator can still examine it. Keyed by `key`, so it never
+   * frees a slot a later claim of another key took over.
+   */
+  freeInFlight(key: SettlementKey): Promise<void>;
 
   /**
    * Takes the lease if it is free, already held by `holder`, or another holder's that expired more
