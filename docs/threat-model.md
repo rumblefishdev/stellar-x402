@@ -1,7 +1,7 @@
 # Threat model
 
-Not written yet, except for the `upto` contract, `/verify` RPC failover and facilitator key
-sections below. Planned sections: assets (fee budget, catalog integrity), fee griefing via failed
+Not written yet, except for the `upto` contract, `/verify` RPC failover, auth-entry expiry and
+facilitator key sections below. Planned sections: assets (fee budget, catalog integrity), fee griefing via failed
 transactions, auth-entry validation, SSRF in Bazaar metadata, API key abuse.
 
 ## `upto` contract
@@ -149,7 +149,10 @@ What each party must trust:
 - **Attack:** Payments that create ledger entries (a recipient's first balance in a token, a
   client's first allowance entry, a nonce entry with a long TTL) or extend an entry's TTL (a token
   instance whose TTL runs low, or the proxy's own instance and code) pay rent on top of the normal
-  fee.
+  fee. A payment that touches an archived entry (the token's instance or code, a non-SAC balance,
+  a C-account's SAC balance) restores it and pays its restore rent in the same fee: 0021's testnet
+  run measured resource fees of 342,189 and 551,787 stroops with archived entries, against 14,278
+  for live USDC.
   The payer picks `allowance_expiration_ledger`, and the facilitator pays temporary rent on the
   nonce entry and the token's allowance entry until then: in the unit test
   `a_far_allowance_expiration_costs_the_facilitator_rent`, the furthest expiry the network allows
@@ -166,6 +169,10 @@ What each party must trust:
   expiry more than 17,280 ledgers (about a day) ahead, so even a facilitator that skips the check
   pays at most about 25,000 stroops of it (ADR 0010, D11). The proxy's own extension
   is capped at 720 ledgers per settlement, about 149,000 stroops on testnet (ADR 0010, D10).
+  For `exact`, restore rent is rent too: over the ceiling the payment is refused, and when its
+  transaction lists the archived entries the refusal's message names them, so anyone can restore
+  them from their own account and pay again (task 0066); under the ceiling the facilitator pays it.
+  The list comes from the buyer's transaction and is not checked against the chain.
 - **Residual risk:** Rent depends on the entry's size and the length of the extension, so there
   is no fixed bound. When the token extends its own instance in the same settlement as the
   proxy's extension, the total goes over the default ceiling, and a valid payment is refused
@@ -253,7 +260,11 @@ Scope: upstream verify's failover across `RPC_URLS` (spine AD-3, task 0045).
   verdict can't be chosen this way: a rejection is never failed over.
 - **Residual risk:** Until the rate limit (0023), anyone can spend `RPC_URLS[0]`'s quota, and
   traffic stays on the fallback while they do. Each probe interval then costs one probe, not a
-  user request.
+  user request. The trustline lookup (0078) adds to that: it runs on the shared client after
+  upstream's `simulation_failed`, so a client can trigger it, and with `RPC_URLS[0]` at its quota
+  its failed read moves every caller sooner. A payload needs the payer's one auth entry to reach
+  it, so one without costs upstream's 1 call; one with a junk entry costs 2, and only a real `#13`
+  costs the 3rd.
 
 #### Lagging RPC answers
 
@@ -268,6 +279,50 @@ Scope: upstream verify's failover across `RPC_URLS` (spine AD-3, task 0045).
 - **Residual risk:** A seller that serves on `/verify`'s answer alone, without `/settle`, can serve
   a payment that never settles. For `upto` (0015) `/verify` carries more weight, so its rules must
   not rely on a single RPC's view.
+
+## Auth-entry expiry
+
+Scope: the `exact` payer's auth entry and how long it stays landable (spine AD-6, AD-22, task 0073).
+
+### Threats
+
+#### An extra auth entry hides the payer's expiry
+
+- **Attack:** A seller adds a second signed auth entry from an account it controls, valid for 60
+  ledgers, next to the payer's entry signed for days. Upstream accepts it, and an expiry check
+  that reads the earliest entry sees 60, so the payer's signature stays landable for days, and a
+  "sign a new payment" answer given once the extra entry expires invites a second payment.
+- **Mitigation:** `/verify` and `/settle` refuse any address-credential entry that isn't the
+  payer's (`…_payer_auth_entries`, 0073 decision 21), so every expiry the facilitator reads is
+  the payer's.
+- **Residual risk:** None known.
+
+#### A refused payment settles after its payer signed again
+
+- **Attack:** A payment P1 is refused before the claim, which records nothing. The seller has its
+  payer sign P2, which settles. P1 is then sent again, by a seller retrying with backoff or by
+  anyone holding it, once the reason it was refused no longer holds, and settles too.
+- **Mitigation:** A resource asking for more than the cap fits is refused on its
+  `maxTimeoutSeconds`, which doesn't change over time, so the same request stays refused (0073
+  decision 22).
+- **Residual risk:** A sender who edits `maxTimeoutSeconds` gets P1 through; it holds P1, so it
+  could submit it on chain without us anyway. A 300 s payment signed at 4 s ledgers is refused by
+  the ledger gap and can pass later. `invalid_exact_stellar_payload_fee_exceeds_maximum` has the
+  same path once fees drop (0086).
+
+#### A payment ended after its claim settles after its payer signed again
+
+- **Attack:** A payment P1 ends after the claim: a refusal by the pool or a spend limit, or a
+  transaction that failed or was refused, which doesn't use the auth entry's nonce. An answer of
+  "sign a new payment" has the payer sign P2, which settles. Whoever holds P1 then lands it before
+  its auth entry expires, through another facilitator or directly on chain.
+- **Mitigation:** Every such answer names the expiration ledger and says to sign again only once
+  it has closed (0082).
+- **Residual risk:** The answer only guides the client: nothing stops P1 landing, so a client that
+  signs early can still pay twice. A record claimed before 0073 keeps its old answer, and a release
+  from before 0082, during a deploy or after a rollback, answers without the wait. MCP agents get
+  no ledger, since it would come through the seller; they are told not to pay again without
+  checking.
 
 ## Facilitator key
 

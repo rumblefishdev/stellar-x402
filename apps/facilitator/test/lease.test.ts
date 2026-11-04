@@ -237,4 +237,26 @@ describe("lease keeper (0025)", () => {
     await vi.advanceTimersByTimeAsync(10 * TTL);
     expect(renew).toHaveBeenCalledTimes(1);
   });
+
+  it("hands out the token of its own acquire while held, and a new one after a lapse (0071)", async () => {
+    const store = db.stores().settlements;
+    const a = keeper(store);
+    expect(a.lease.current()).toBeUndefined();
+    await a.lease.runOnce();
+    const first = a.lease.current();
+    expect(first).toEqual({ name: "stellar:testnet:channels", token: expect.any(String) });
+    // A renewal keeps it.
+    a.clock.now += TTL / 3;
+    await a.lease.runOnce();
+    expect(a.lease.current()).toEqual(first);
+    // Past its expiry with no renewal it is no longer held; acquired again, it is a new token.
+    a.clock.now += TTL + 1;
+    expect(a.lease.current()).toBeUndefined();
+    await a.lease.runOnce();
+    await a.lease.runOnce();
+    expect(a.lease.current()?.token).toMatch(/^[0-9a-f-]{36}$/);
+    expect(a.lease.current()?.token).not.toBe(first?.token);
+    await a.lease.release();
+    expect(a.lease.current()).toBeUndefined();
+  });
 });

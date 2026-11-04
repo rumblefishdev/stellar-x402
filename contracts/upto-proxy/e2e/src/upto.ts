@@ -132,7 +132,7 @@ export async function clientSign(
   t: UptoTerms,
   client: Keypair,
 ): Promise<xdr.SorobanAuthorizationEntry> {
-  // The facilitator is the simulation source, as it is the operation source on chain: with the
+  // The facilitator is the simulation source, as this suite's call has it as caller: with the
   // client as source, its auth would be recorded as source-account credentials, not a signable
   // address entry.
   const draft = new TransactionBuilder(await server.getAccount(t.facilitator), {
@@ -239,7 +239,7 @@ export function checkClientAuth(
 
 /**
  * Facilitator side: the call it submits, with `actual` swapped in. The facilitator authorizes as
- * the operation source (source-account credentials); the pool sets it as the operation source.
+ * the operation source (source-account credentials), which the pool now refuses (see 0015).
  * `argsTerms` lets a test tamper with the submitted arguments while keeping the signed entry.
  */
 export function settleCall(

@@ -1,5 +1,8 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Keypair } from "@stellar/stellar-sdk";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import {
   type Config,
   ConfigError,
@@ -7,26 +10,38 @@ import {
   parseConfig,
   parseMigrateConfig,
 } from "../src/config.js";
+import { signerEnv } from "./fake-openbao.js";
 
 const keypair = (byte: number) => Keypair.fromRawEd25519Seed(Buffer.alloc(32, byte));
-const SECRET = keypair(1).secret();
+const ADDRESS = keypair(1).publicKey();
 const CHANNEL_A = keypair(2).publicKey();
 const CHANNEL_B = keypair(3).publicKey();
+const SIGNER = {
+  address: ADDRESS,
+  socketPath: "/nonexistent/openbao.sock",
+  key: "stellar-testnet",
+  keyVersion: 1,
+  roleId: "role",
+  secretId: "secret-id",
+};
 
 const minimal = {
-  FACILITATOR_SECRET: SECRET,
+  ...signerEnv(ADDRESS),
   CHANNELS: `${CHANNEL_A}, ${CHANNEL_B}`,
   CLIENT_IP: "socket",
   DATABASE_URL: "postgres://db.internal/x402",
 };
-/** Pubnet is refused until 0024 and 0071 land. */
+/** Pubnet is refused until 0024 and 0090 land. */
 const pubnet = { NETWORK: "stellar:pubnet" };
 const PUBNET_REFUSED =
-  "NETWORK stellar:pubnet is refused until spend budgets (0024) and the lease fencing token (0071) land";
+  "NETWORK stellar:pubnet is refused until spend budgets (0024), task 0090, the signer alarm (0027) and the hot key's re-check (0048) land";
 
-function problems(env: Record<string, string | undefined>): string[] {
+function problems(
+  env: Record<string, string | undefined>,
+  parse: (env: Record<string, string | undefined>) => unknown = parseConfig,
+): string[] {
   try {
-    parseConfig(env);
+    parse(env);
   } catch (error) {
     expect(error).toBeInstanceOf(ConfigError);
     return (error as ConfigError).problems;
@@ -41,12 +56,13 @@ describe("parseConfig", () => {
       port: 4021,
       logLevel: "info",
       rpcUrls: ["https://soroban-testnet.stellar.org"],
-      facilitatorSecret: SECRET,
+      signer: SIGNER,
       channels: [CHANNEL_A, CHANNEL_B],
       databaseUrl: "postgres://db.internal/x402",
       fees: { maxFeeStroops: 250_000n, inclusionFeeStroops: undefined, escalation: undefined },
       settlement: {
         minValidityLedgers: 4,
+        maxValidityLedgers: 66,
         settleTimeoutMs: 20_000,
         settleBudgetMs: 30_000,
         leaseTtlMs: 30_000,
@@ -77,7 +93,7 @@ describe("parseConfig", () => {
       PORT: "8080",
       LOG_LEVEL: "debug",
       RPC_URLS: "https://a.example, https://b.example",
-      FACILITATOR_SECRET: SECRET,
+      ...signerEnv(ADDRESS),
       CHANNELS: CHANNEL_B,
       DATABASE_URL: "postgres://db.internal/x402",
       MAX_FEE_STROOPS: "300001",
@@ -85,6 +101,7 @@ describe("parseConfig", () => {
       FEE_ESCALATION_FACTOR: "1.5",
       FEE_ESCALATION_MAX_STROOPS: "1002",
       MIN_VALIDITY_LEDGERS: "13",
+      MAX_VALIDITY_LEDGERS: "70",
       SETTLE_TIMEOUT_MS: "31000",
       SETTLE_BUDGET_MS: "60000",
       LEASE_TTL_MS: "32000",
@@ -108,7 +125,7 @@ describe("parseConfig", () => {
       port: 8080,
       logLevel: "debug",
       rpcUrls: ["https://a.example", "https://b.example"],
-      facilitatorSecret: SECRET,
+      signer: SIGNER,
       channels: [CHANNEL_B],
       databaseUrl: "postgres://db.internal/x402",
       fees: {
@@ -118,6 +135,7 @@ describe("parseConfig", () => {
       },
       settlement: {
         minValidityLedgers: 13,
+        maxValidityLedgers: 70,
         settleTimeoutMs: 31_000,
         settleBudgetMs: 60_000,
         leaseTtlMs: 32_000,
@@ -142,14 +160,15 @@ describe("parseConfig", () => {
 
   it("trims values and treats blank ones as unset", () => {
     const config = parseConfig({
-      FACILITATOR_SECRET: `${SECRET}\n`,
+      ...signerEnv(ADDRESS),
+      FACILITATOR_ADDRESS: `${ADDRESS}\n`,
       CHANNELS: ` ${CHANNEL_A} `,
       CLIENT_IP: " socket ",
       DATABASE_URL: " postgres://db.internal/x402 ",
       RPC_URLS: "",
       PORT: " ",
     });
-    expect(config.facilitatorSecret).toBe(SECRET);
+    expect(config.signer).toEqual(SIGNER);
     expect(config.channels).toEqual([CHANNEL_A]);
     expect(config.http.clientIp).toBe("socket");
     expect(config.port).toBe(4021);
@@ -157,7 +176,12 @@ describe("parseConfig", () => {
 
   it("names missing required values", () => {
     expect(problems({})).toEqual([
-      "FACILITATOR_SECRET is required",
+      "FACILITATOR_ADDRESS is required",
+      "OPENBAO_SOCKET is required",
+      "OPENBAO_KEY is required",
+      "OPENBAO_KEY_VERSION is required",
+      "OPENBAO_ROLE_ID is required",
+      "OPENBAO_SECRET_ID is required",
       "CHANNELS is required",
       "DATABASE_URL is required",
       "CLIENT_IP is required",
@@ -165,11 +189,11 @@ describe("parseConfig", () => {
   });
 
   it("names invalid values without echoing them", () => {
-    const secret = `S${"A".repeat(55)}`; // right shape, bad checksum
-    const found = problems({ ...minimal, FACILITATOR_SECRET: secret, LOG_LEVEL: "verbose-xyz" });
+    const secret = keypair(9).secret(); // a secret key pasted in place of the address
+    const found = problems({ ...minimal, FACILITATOR_ADDRESS: secret, LOG_LEVEL: "verbose-xyz" });
     expect(found).toEqual([
       "LOG_LEVEL must be one of debug, info, warn, error",
-      "FACILITATOR_SECRET must be a Stellar secret key (S…)",
+      "FACILITATOR_ADDRESS must be a Stellar account address (G…)",
     ]);
     expect(found.join(" ")).not.toContain(secret);
     expect(found.join(" ")).not.toContain("verbose-xyz");
@@ -239,6 +263,14 @@ describe("parseConfig", () => {
     // The pool keeps one spare ledger, so 1 lets `/verify` accept what `/settle` refuses.
     expect(problems({ ...minimal, MIN_VALIDITY_LEDGERS: "1" })).toEqual([
       "MIN_VALIDITY_LEDGERS must be at least 2",
+    ]);
+    // A cap at or below the floor would refuse every payment.
+    expect(
+      problems({ ...minimal, MIN_VALIDITY_LEDGERS: "10", MAX_VALIDITY_LEDGERS: "10" }),
+    ).toEqual(["MAX_VALIDITY_LEDGERS must be above MIN_VALIDITY_LEDGERS"]);
+    // About 10 minutes at most, so a typo can't reopen days-long signatures.
+    expect(problems({ ...minimal, MAX_VALIDITY_LEDGERS: "121" })).toEqual([
+      "MAX_VALIDITY_LEDGERS must be between 3 and 120",
     ]);
   });
 
@@ -342,8 +374,8 @@ describe("parseConfig", () => {
       ]);
   });
 
-  it("refuses stellar:pubnet with nothing else wrong, until 0024 and 0071 land", () => {
-    // `/settle` would spend there with allow-all spend hooks and an unfenced lease.
+  it("refuses stellar:pubnet with nothing else wrong, until 0024 and 0090 land", () => {
+    // `/settle` would spend there with allow-all spend hooks.
     expect(problems({ ...minimal, ...pubnet, RPC_URLS: "https://rpc.example" })).toEqual([
       PUBNET_REFUSED,
     ]);
@@ -403,5 +435,132 @@ describe("parseMigrateConfig", () => {
     expect(problems({ ...minimal, RPC_URLS: urls(MAX_RPC_URLS + 1) })).toEqual([
       `RPC_URLS must list at most ${MAX_RPC_URLS} URLs`,
     ]);
+  });
+});
+
+describe("settings read from files", () => {
+  const dir = mkdtempSync(join(tmpdir(), "x402-config-"));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  const file = (name: string, value: string) => {
+    const path = join(dir, name);
+    writeFileSync(path, value);
+    return path;
+  };
+  const withoutDatabaseUrl = { ...minimal, DATABASE_URL: undefined };
+  const NAMES = ["DATABASE_URL", "RPC_URLS"] as const;
+  const plain = { DATABASE_URL: "postgres://db.internal/x402", RPC_URLS: "https://rpc-0.example" };
+
+  it("reads DATABASE_URL_FILE and RPC_URLS_FILE, trimming the file's newline", () => {
+    const config = parseConfig({
+      ...withoutDatabaseUrl,
+      DATABASE_URL_FILE: file("database-url", "postgres://db.internal/x402\n"),
+      RPC_URLS_FILE: file("rpc-urls", "https://rpc-0.example, https://rpc-1.example\n"),
+    });
+    expect(config.databaseUrl).toBe("postgres://db.internal/x402");
+    expect(config.rpcUrls).toEqual(["https://rpc-0.example", "https://rpc-1.example"]);
+    expect(
+      parseMigrateConfig({ DATABASE_URL_FILE: file("migrate-url", "postgres://db/x402\n") }),
+    ).toEqual({ databaseUrl: "postgres://db/x402" });
+  });
+
+  it("falls back to the plain values when no _FILE is set", () => {
+    const config = parseConfig({ ...minimal, ...plain, DATABASE_URL_FILE: " ", RPC_URLS_FILE: "" });
+    expect(config.databaseUrl).toBe(plain.DATABASE_URL);
+    expect(config.rpcUrls).toEqual([plain.RPC_URLS]);
+  });
+
+  it("reads the file beside a blank plain value, as the deploy env examples ship them", () => {
+    const config = parseConfig({
+      ...minimal,
+      DATABASE_URL: " ",
+      DATABASE_URL_FILE: file("blank-database-url", `${plain.DATABASE_URL}\n`),
+      RPC_URLS: "",
+      RPC_URLS_FILE: file("blank-rpc-urls", `${plain.RPC_URLS}\n`),
+    });
+    expect(config.databaseUrl).toBe(plain.DATABASE_URL);
+    expect(config.rpcUrls).toEqual([plain.RPC_URLS]);
+  });
+
+  it.each(NAMES)("refuses %s set both ways", (name) => {
+    expect(
+      problems({ ...minimal, ...plain, [`${name}_FILE`]: file(`both-${name}`, plain[name]) }),
+    ).toEqual([`${name} and ${name}_FILE must not both be set`]);
+  });
+
+  it.each(NAMES)("refuses an empty %s_FILE rather than read it as unset", (name) => {
+    expect(
+      problems({ ...minimal, [name]: undefined, [`${name}_FILE`]: file(`empty-${name}`, "\n") }),
+    ).toEqual([`${name}_FILE is empty`]);
+  });
+
+  it.each(NAMES)("names a %s_FILE it can't read, without echoing its path", (name) => {
+    const found = problems({
+      ...minimal,
+      [name]: undefined,
+      [`${name}_FILE`]: join(dir, "missing-secret"),
+    });
+    expect(found).toEqual([`${name}_FILE can't be read (ENOENT)`]);
+    expect(found.join(" ")).not.toContain("missing-secret");
+  });
+
+  it("refuses a bad DATABASE_URL_FILE for pnpm migrate too", () => {
+    expect(
+      problems({ DATABASE_URL_FILE: file("empty-migrate-url", "") }, parseMigrateConfig),
+    ).toEqual(["DATABASE_URL_FILE is empty"]);
+  });
+
+  it("checks a file's value as the plain one, without echoing it", () => {
+    const found = problems({
+      ...withoutDatabaseUrl,
+      DATABASE_URL_FILE: file("mysql-url", "mysql://u:secret@db/x"),
+    });
+    expect(found).toEqual(["DATABASE_URL must be a postgres:// URL"]);
+    expect(found.join(" ")).not.toContain("secret");
+  });
+});
+
+describe("the signer (0036)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "x402-signer-"));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  const file = (name: string, value: string) => {
+    const path = join(dir, name);
+    writeFileSync(path, value);
+    return path;
+  };
+
+  it("reads the OpenBao settings, the AppRole's from files", () => {
+    const config = parseConfig({
+      ...minimal,
+      OPENBAO_ROLE_ID: undefined,
+      OPENBAO_SECRET_ID: undefined,
+      OPENBAO_ROLE_ID_FILE: file("approle-role-id", "role\n"),
+      OPENBAO_SECRET_ID_FILE: file("approle-secret-id", "secret-id\n"),
+    });
+    expect(config.signer).toEqual(SIGNER);
+  });
+
+  const leftover = "FACILITATOR_SECRET is no longer read: the key signs in OpenBao (ADR 0013)";
+
+  it("refuses a leftover FACILITATOR_SECRET, so it can't look like it signs", () => {
+    expect(problems({ ...minimal, FACILITATOR_SECRET: "S-leftover" })).toEqual([leftover]);
+  });
+
+  it("names a leftover FACILITATOR_SECRET in an old environment with no OpenBao settings", () => {
+    const found = problems({
+      FACILITATOR_SECRET: "S-leftover",
+      CHANNELS: CHANNEL_A,
+      CLIENT_IP: "socket",
+      DATABASE_URL: "postgres://db.internal/x402",
+    });
+    expect(found).toContain(leftover);
+    expect(found).toContain("FACILITATOR_ADDRESS is required");
+    expect(found.join(" ")).not.toContain("S-leftover");
+  });
+
+  it.each([
+    ["FACILITATOR_ADDRESS", "S-not-an-address", "must be a Stellar account address (G…)"],
+    ["OPENBAO_KEY_VERSION", "0", "must be at least 1"],
+  ])("checks %s", (name, value, message) => {
+    expect(problems({ ...minimal, [name]: value })).toEqual([`${name} ${message}`]);
   });
 });

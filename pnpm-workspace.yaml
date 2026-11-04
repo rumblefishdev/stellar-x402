@@ -6,5 +6,8 @@ packages:
   - contracts/upto-proxy/e2e
   - apps/mcp-local/e2e
 
+# `pnpm deploy` (the facilitator's image) copies workspace packages into its output.
+injectWorkspacePackages: true
+
 allowBuilds:
   esbuild: true

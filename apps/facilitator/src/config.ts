@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { StrKey } from "@stellar/stellar-sdk";
 import { FEE_STATS_MIN_STROOPS } from "@stellar-x402/signer-pool";
 import { STELLAR_NETWORKS } from "@stellar-x402/config";
@@ -5,8 +6,9 @@ import { z } from "zod";
 
 /**
  * Facilitator configuration, read and validated once at startup from the environment (AD-12,
- * spine "Config" convention). Only `src/main.ts` reads `process.env`; everything else gets the
- * parsed {@link Config} through constructors.
+ * spine "Config" convention), and from the files it names for secrets ({@link FILE_SETTINGS}).
+ * Only `src/main.ts` reads `process.env`; everything else gets the parsed {@link Config} through
+ * constructors.
  *
  * Numeric defaults are interim testnet values; mainnet fee values come from task 0010.
  */
@@ -108,12 +110,32 @@ const envSchema = z
       )
       .optional(),
 
-    /** The facilitator key: signs for the channels and pays fee bumps. Never logged. */
-    FACILITATOR_SECRET: z
+    /**
+     * The OpenBao key's own account, the fee account and the channels' signer (ADR 0013). Startup
+     * doesn't ask OpenBao, so every signature is checked against it instead.
+     */
+    FACILITATOR_ADDRESS: z
       .string()
       .refine(
-        (value) => StrKey.isValidEd25519SecretSeed(value),
-        "must be a Stellar secret key (S…)",
+        (value) => StrKey.isValidEd25519PublicKey(value),
+        "must be a Stellar account address (G…)",
+      ),
+    /** OpenBao's listener socket for this network; it opens no TCP port (ADR 0013). */
+    OPENBAO_SOCKET: z.string(),
+    /** The Transit key's name. */
+    OPENBAO_KEY: z.string(),
+    /** Pinned, so a rotated Transit key can't sign in place of the one on chain. */
+    OPENBAO_KEY_VERSION: int(1),
+    /** The AppRole login; never logged. A deploy passes both as files (`_FILE`). */
+    OPENBAO_ROLE_ID: z.string(),
+    OPENBAO_SECRET_ID: z.string(),
+    /** Refused on the field: zod skips a refine on the object while a required setting is missing. */
+    FACILITATOR_SECRET: z
+      .string()
+      .optional()
+      .refine(
+        (value) => value === undefined,
+        "is no longer read: the key signs in OpenBao (ADR 0013)",
       ),
     /** Comma-separated channel account addresses (never secrets). */
     CHANNELS: list.pipe(
@@ -160,6 +182,17 @@ const envSchema = z
      * pool refuses at `/settle` what `/verify` accepted (its one spare ledger).
      */
     MIN_VALIDITY_LEDGERS: int(2).default("4"),
+    /**
+     * Most ledgers left before the payer's auth expires (0073 decisions 2, 6). An envelope lives
+     * as long as its auth entry, so this bounds how long a channel can wait on one transaction,
+     * and how long a payload stays landable. Upstream's client signs ⌈maxTimeoutSeconds / t⌉
+     * ledgers, with `t` the Horizon average rounded up to whole seconds: 300 s is 60 ledgers at
+     * 5 s, 50 at 6 s and 75 at 4 s. Upstream's own check allows 2 more, so at 5 s at most 62 reach
+     * this one; the rest of 66 is spare. A resource may ask for this less a tenth, at 5 s a
+     * ledger: 300 s at 66 (decision 22). At most 120, about 10 minutes, so a typo can't reopen
+     * days-long signatures (review D3).
+     */
+    MAX_VALIDITY_LEDGERS: int(3, 120).default("66"),
     /**
      * How long a repeat `/settle` waits for a signed record to turn final (AD-6); at most the
      * budget. Unset means 20 s, or the budget when that is shorter. At least 1 s, so a seller's
@@ -243,6 +276,10 @@ const envSchema = z
       path: ["MAX_FEE_STROOPS"],
     },
   )
+  .refine((env) => env.MAX_VALIDITY_LEDGERS > env.MIN_VALIDITY_LEDGERS, {
+    message: "must be above MIN_VALIDITY_LEDGERS",
+    path: ["MAX_VALIDITY_LEDGERS"],
+  })
   // A repeat waits at most what the call it repeats could take.
   .refine((env) => (env.SETTLE_TIMEOUT_MS ?? 0) <= env.SETTLE_BUDGET_MS, {
     message: "must be at most SETTLE_BUDGET_MS",
@@ -266,12 +303,13 @@ const envSchema = z
     message: "is no longer read: the stores are always PostgreSQL",
     path: ["STORE"],
   })
-  // `/settle` spends on pubnet, so not before spend budgets (0024) and the lease's fencing token
-  // (0071). Whichever lands last lifts this; the other narrows the message to what is still
-  // missing (0009 decision 49).
+  // `/settle` spends on pubnet, so not before spend budgets (0024), leaving a channel with an open
+  // hash out after a deploy (0090), an alarm on a failing signer (0027) and deciding again how far
+  // the hot key's power reaches (0048). Whichever lands last lifts this, the others narrow its
+  // message (0009 decision 49).
   .refine((env) => env.NETWORK !== STELLAR_NETWORKS.pubnet, {
     message:
-      "stellar:pubnet is refused until spend budgets (0024) and the lease fencing token (0071) land",
+      "stellar:pubnet is refused until spend budgets (0024), task 0090, the signer alarm (0027) and the hot key's re-check (0048) land",
     path: ["NETWORK"],
   });
 
@@ -289,7 +327,15 @@ export interface Config {
   port: number;
   logLevel: "debug" | "info" | "warn" | "error";
   rpcUrls: string[];
-  facilitatorSecret: string;
+  /** The facilitator key in OpenBao Transit (0036); the AppRole is never logged. */
+  signer: {
+    address: string;
+    socketPath: string;
+    key: string;
+    keyVersion: number;
+    roleId: string;
+    secretId: string;
+  };
   channels: string[];
   /** Never logged. */
   databaseUrl: string;
@@ -300,6 +346,7 @@ export interface Config {
   };
   settlement: {
     minValidityLedgers: number;
+    maxValidityLedgers: number;
     settleTimeoutMs: number;
     settleBudgetMs: number;
     leaseTtlMs: number;
@@ -329,6 +376,41 @@ export class ConfigError extends Error {
   }
 }
 
+/**
+ * Settings a deploy passes as a file, `<NAME>_FILE`: a Compose `file:` secret, so the value never
+ * sits in `environment:`, which `docker inspect` shows (ADR 0011). Local runs set them plainly.
+ */
+const FILE_SETTINGS = ["DATABASE_URL", "RPC_URLS", "OPENBAO_ROLE_ID", "OPENBAO_SECRET_ID"] as const;
+
+/** `env` with each {@link FILE_SETTINGS} entry read from its `_FILE`, where one is set. */
+function readFileSettings(
+  env: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  const read = { ...env };
+  const problems: string[] = [];
+  for (const name of FILE_SETTINGS) {
+    const path = env[`${name}_FILE`]?.trim();
+    if (!path) continue;
+    // Refused, so a leftover plain value can't look like the one in use.
+    if (env[name]?.trim()) {
+      problems.push(`${name} and ${name}_FILE must not both be set`);
+      continue;
+    }
+    let value: string;
+    try {
+      value = readFileSync(path, "utf8");
+    } catch (error) {
+      problems.push(`${name}_FILE can't be read (${(error as NodeJS.ErrnoException).code})`);
+      continue;
+    }
+    // Refused, not read as unset: an empty RPC_URLS would quietly start on testnet's public RPC.
+    if (!value.trim()) problems.push(`${name}_FILE is empty`);
+    read[name] = value;
+  }
+  if (problems.length > 0) throw new ConfigError(problems);
+  return read;
+}
+
 /** Parses `env` with `schema`, or throws a {@link ConfigError} naming each bad setting. */
 function parseEnv<S extends z.ZodTypeAny>(
   schema: S,
@@ -337,7 +419,7 @@ function parseEnv<S extends z.ZodTypeAny>(
   // Values are trimmed (a secret read from a file keeps its newline); blank means "unset", as in
   // the deploy env examples.
   const present = Object.fromEntries(
-    Object.entries(env)
+    Object.entries(readFileSettings(env))
       .map(([name, value]) => [name, value?.trim()] as const)
       .filter(([, value]) => value !== undefined && value !== ""),
   );
@@ -367,7 +449,14 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
     port: e.PORT,
     logLevel: e.LOG_LEVEL,
     rpcUrls: e.RPC_URLS ?? [DEFAULT_TESTNET_RPC],
-    facilitatorSecret: e.FACILITATOR_SECRET,
+    signer: {
+      address: e.FACILITATOR_ADDRESS,
+      socketPath: e.OPENBAO_SOCKET,
+      key: e.OPENBAO_KEY,
+      keyVersion: e.OPENBAO_KEY_VERSION,
+      roleId: e.OPENBAO_ROLE_ID,
+      secretId: e.OPENBAO_SECRET_ID,
+    },
     channels: e.CHANNELS,
     databaseUrl: e.DATABASE_URL,
     fees: {
@@ -377,6 +466,7 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
     },
     settlement: {
       minValidityLedgers: e.MIN_VALIDITY_LEDGERS,
+      maxValidityLedgers: e.MAX_VALIDITY_LEDGERS,
       settleTimeoutMs:
         e.SETTLE_TIMEOUT_MS ?? Math.min(DEFAULT_SETTLE_TIMEOUT_MS, e.SETTLE_BUDGET_MS),
       settleBudgetMs: e.SETTLE_BUDGET_MS,
@@ -405,7 +495,7 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
   };
 }
 
-/** The config of `pnpm migrate`: only `DATABASE_URL`, which it requires. */
+/** The config of `pnpm migrate`: only `DATABASE_URL` (or its `_FILE`), which it requires. */
 export function parseMigrateConfig(env: Record<string, string | undefined>): {
   databaseUrl: string;
 } {

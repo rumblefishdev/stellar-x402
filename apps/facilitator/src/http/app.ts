@@ -2,6 +2,7 @@ import { STATUS_CODES } from "node:http";
 import { PaymentPayloadV2Schema, PaymentRequirementsV2Schema } from "@x402/core/schemas";
 import type { SupportedResponse, VerifyRequest } from "@x402/core/types";
 import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
+import type { SignerState } from "../adapters/openbao-signer.js";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
 import type { Metrics } from "../metrics.js";
@@ -10,7 +11,8 @@ import type { SettlementHooks } from "../settlement/hooks.js";
 import type { LeaseKeeper } from "../settlement/lease.js";
 import type { Reconciliation } from "../settlement/reconcile.js";
 import type { Settle } from "../settlement/settle.js";
-import type { Verify, VerifyTrace } from "../settlement/verify.js";
+import { TRUSTLINE_REASONS } from "../settlement/trustline.js";
+import { FEE_EXCEEDS_MAXIMUM, type Verify, type VerifyTrace } from "../settlement/verify.js";
 import { discoveryResources } from "./discovery.js";
 import { EXTENSION_RESPONSES_HEADER, encodeExtensionResponses } from "./extension-responses.js";
 import { rateLimit } from "./rate-limit.js";
@@ -41,10 +43,21 @@ export interface AppDeps {
    * waits for each submission under way and its record write. Run by `start()`'s `close()`.
    */
   drain?: () => Promise<void>;
+  /** The facilitator key's signer as `/health` reports it (0036); tests may leave it out. */
+  signerState?: () => SignerState;
 }
 
 /** Seconds a client waits before it tries `/settle` again on a process that can't settle now. */
 export const NO_LEASE_RETRY_AFTER_S = 5;
+
+/**
+ * The refusals whose message the `verified` and `settled` logs carry: it names the account and the
+ * asset (0078), or the archived entries to restore (0066). Both are bounded.
+ */
+const LOGGED_MESSAGES: ReadonlySet<string | undefined> = new Set([
+  ...TRUSTLINE_REASONS,
+  FEE_EXCEEDS_MAXIMUM,
+]);
 
 /** The status as a body code, like `not_found`: 413 → `payload_too_large`. */
 const code = (status: number) =>
@@ -120,8 +133,10 @@ export function createApp({
   settle,
   extensionResponses,
   supported,
+  reconciliation,
   lease,
   closing,
+  signerState,
 }: AppDeps): Express {
   const app = express();
   app.disable("x-powered-by");
@@ -165,6 +180,7 @@ export function createApp({
       payer: response.payer,
       // Which RPC URL answered: a lagging fallback rejects valid payments (AD-3).
       rpc: trace.rpc,
+      message: LOGGED_MESSAGES.has(response.invalidReason) ? response.invalidMessage : undefined,
     });
     res.json(response);
   });
@@ -207,6 +223,7 @@ export function createApp({
         replay: replay ?? false,
         success: response.success,
         errorReason: response.errorReason,
+        message: LOGGED_MESSAGES.has(response.errorReason) ? response.errorMessage : undefined,
         payer: response.payer,
         transaction: response.transaction || undefined,
       });
@@ -220,6 +237,19 @@ export function createApp({
   );
   app.get("/supported", (_req, res) => {
     res.json(supported);
+  });
+  // Liveness for the container healthcheck: 200 while the server is up, whatever the lease or the
+  // store (ADR 0011). The deploy waits for `ready`, the lease held outside a shutdown, as `/settle`
+  // needs (`main()` starts only on a migrated schema; 0049 adds the frozen RPCs), and `listed`, a
+  // sweep having listed the open records (0019 decision 36), and for `signer` ok, so an image that
+  // can't sign doesn't become the last good one. Tests without them count as both.
+  app.get("/health", (_req, res) => {
+    res.json({
+      ready: !closing?.() && (lease?.held() ?? true),
+      // Not part of `ready`: the service runs and verifies without OpenBao (0036 decision 4).
+      ...(signerState && { signer: signerState() }),
+      listed: reconciliation?.listed() ?? true,
+    });
   });
   app.use("/discovery", limit("discovery", config.http.rateLimit.discovery));
   app.get(

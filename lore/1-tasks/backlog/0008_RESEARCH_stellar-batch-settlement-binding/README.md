@@ -3,13 +3,13 @@ id: "0008"
 title: "Research a Stellar binding for the x402 batch-settlement scheme"
 type: RESEARCH
 status: backlog
-milestone: 1
+milestone: 2
 related_adr: []
 related_tasks: ["0006", "0007"]
 tags: [x402, batch-settlement, session, throughput, priority-low, effort-large, payments]
 links:
-  - ../archive/0006_RESEARCH_upto-settlement-scaling/notes/S-session-aggregation.md
-  - ../archive/0006_RESEARCH_upto-settlement-scaling/notes/R-x402-batch-settlement.md
+  - ../../archive/0006_RESEARCH_upto-settlement-scaling/notes/S-session-aggregation.md
+  - ../../archive/0006_RESEARCH_upto-settlement-scaling/notes/R-x402-batch-settlement.md
 history:
   - date: "2026-10-05"
     status: backlog
@@ -19,6 +19,14 @@ history:
     status: backlog
     who: claude
     note: "Tagged Payments lane by 0012 (outside T1)."
+  - date: "2026-11-02"
+    status: active
+    who: okarcz
+    note: "Started. Research task, so moved to the directory format."
+  - date: "2026-11-02"
+    status: backlog
+    who: okarcz
+    note: "Back to the backlog and moved to M2: outside T1's scope and not an RFP deliverable."
 ---
 
 # Research a Stellar binding for the x402 batch-settlement scheme
@@ -38,10 +46,10 @@ is not part of the RFP deliverables, so the task is parked at low priority.
   - about 105 per ledger (about 20/s) at best.
 
   See 0006's
-  [S-session-aggregation](../archive/0006_RESEARCH_upto-settlement-scaling/notes/S-session-aggregation.md).
+  [S-session-aggregation](../../archive/0006_RESEARCH_upto-settlement-scaling/notes/S-session-aggregation.md).
 - **The upstream scheme.** x402 has a `batch-settlement` scheme with EVM, Solana and Cloudflare
   bindings, but none for Stellar. 0006's
-  [R-x402-batch-settlement](../archive/0006_RESEARCH_upto-settlement-scaling/notes/R-x402-batch-settlement.md)
+  [R-x402-batch-settlement](../../archive/0006_RESEARCH_upto-settlement-scaling/notes/R-x402-batch-settlement.md)
   summarizes the EVM binding. Copies of the specs are in 0006's `sources/`.
 - **Options already rejected in 0006:** stretching one `upto` authorization over a session (the
   seller is unsecured, and it breaks the spec) and a batch router (at most 1.5–2×).

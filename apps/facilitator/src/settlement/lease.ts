@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { StellarNetwork } from "@stellar-x402/config";
 import type { Logger } from "../logger.js";
 import type { Metrics } from "../metrics.js";
-import type { SettlementStore } from "../ports/index.js";
+import type { LeaseFence, SettlementStore } from "../ports/index.js";
 
 /** The lease of one network's channel set, so testnet and pubnet never wait on each other. */
 export const leaseName = (network: StellarNetwork) => `${network}:channels`;
@@ -23,6 +23,11 @@ export interface LeaseKeeperDeps {
 export interface LeaseKeeper {
   /** Whether this process may send through the channel set now; no store call (decision 4). */
   held(): boolean;
+  /**
+   * The lease while `held()`, with the token of the acquire that took it, for `addHash` to check
+   * (0071). `undefined` while it isn't held.
+   */
+  current(): LeaseFence | undefined;
   /** Tries to take the lease once, then every `ttlMs / 3` until `close()`. Never rejects. */
   start(): Promise<void>;
   /** One attempt: renews a held lease or tries to take a free one. For tests. */
@@ -54,10 +59,13 @@ export function createLeaseKeeper(deps: LeaseKeeperDeps): LeaseKeeper {
   const intervalMs = ttlMs / 3;
   /** The expiry this process last wrote; `undefined` while it doesn't hold the lease. */
   let expiresAt: number | undefined;
+  /** The token of the acquire that took the lease; a renewal keeps it (0071 decision 1). */
+  let token: string | undefined;
 
   const changed = (held: boolean) => metrics.increment("lease_changes_total", { held: `${held}` });
   const lose = (reason: "taken" | "expired" | "store_failed", error?: unknown) => {
     expiresAt = undefined;
+    token = undefined;
     logger.warn("lease_lost", {
       network,
       lease: name,
@@ -72,9 +80,13 @@ export function createLeaseKeeper(deps: LeaseKeeperDeps): LeaseKeeper {
     const previous = expiresAt;
     const had = previous !== undefined;
     try {
-      const ok = had
-        ? await store.renewLease(name, holder, ttlMs, at)
-        : (await store.acquireLease(name, holder, ttlMs, at)) !== undefined;
+      let ok: boolean;
+      if (had) ok = await store.renewLease(name, holder, ttlMs, at);
+      else {
+        const lease = await store.acquireLease(name, holder, ttlMs, at);
+        ok = lease !== undefined;
+        token = lease?.token;
+      }
       if (ok) {
         expiresAt = at + ttlMs;
         if (!had) {
@@ -113,8 +125,10 @@ export function createLeaseKeeper(deps: LeaseKeeperDeps): LeaseKeeper {
     await running;
   };
 
+  const held = () => expiresAt !== undefined && now() < expiresAt;
   return {
-    held: () => expiresAt !== undefined && now() < expiresAt,
+    held,
+    current: () => (held() && token !== undefined ? { name, token } : undefined),
     start: attempt,
     runOnce,
     close,
@@ -122,6 +136,7 @@ export function createLeaseKeeper(deps: LeaseKeeperDeps): LeaseKeeper {
       await close();
       const had = expiresAt !== undefined;
       expiresAt = undefined;
+      token = undefined;
       // The delete names this holder, so it never touches another process's lease.
       try {
         await store.releaseLease(name, holder);

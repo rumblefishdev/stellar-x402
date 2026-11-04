@@ -37,6 +37,7 @@ import pg from "pg";
 import { Agent, fetch } from "undici";
 import { migrate } from "../src/adapters/postgres-schema.js";
 import { main } from "../src/main.js";
+import { fakeOpenBao, signerEnv } from "../test/fake-openbao.js";
 
 const XLM_SAC_TESTNET = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 const RPC_URL = "https://soroban-testnet.stellar.org";
@@ -77,7 +78,8 @@ const channelKeys = [Keypair.random(), Keypair.random()];
 const facilitatorEntry = await readAccountEntry(server, facilitator.publicKey());
 if (!facilitatorEntry) throw new Error("the facilitator account does not exist");
 const setup = buildCreateChannelsTx({
-  facilitator: new Account(facilitator.publicKey(), facilitatorEntry.seqNum().toString()),
+  funder: new Account(facilitator.publicKey(), facilitatorEntry.seqNum().toString()),
+  signer: facilitator.publicKey(),
   channels: channelKeys,
   networkPassphrase: Networks.TESTNET,
   fee: 1000,
@@ -88,9 +90,11 @@ const created = await server.pollTransaction((await server.sendTransaction(setup
 });
 if (created.status !== "SUCCESS") throw new Error(`channel setup ${created.status}`);
 
+// The fake OpenBao holds this run's key: a testnet account funded for the run.
+const openbao = await fakeOpenBao(facilitator);
 const facilitatorServer = await main(
   {
-    FACILITATOR_SECRET: facilitator.secret(),
+    ...signerEnv(facilitator.publicKey(), openbao.socketPath),
     DATABASE_URL: databaseUrl,
     CLIENT_IP: "socket",
     CHANNELS: channelKeys.map((keypair) => keypair.publicKey()).join(","),
@@ -291,6 +295,7 @@ try {
 } finally {
   sellerServer.close();
   await facilitatorServer.close();
+  openbao.close();
   await db.end();
   await admin.end();
 }

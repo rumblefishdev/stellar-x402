@@ -4,7 +4,7 @@
 // to the example seller and settle through the public x402.org facilitator; every other paid path
 // uses a local fake seller that never forwards what it receives, so no money moves.
 //
-// Run from the repo root: pnpm e2e:testnet. Results go to results/testnet-results.json.
+// Run from the repo root: pnpm mcp:e2e. Results go to results/testnet-results.json.
 import { afterAll, beforeAll, it } from "vitest";
 import { captured, started } from "../src/cli.js";
 import { row } from "../src/results.js";

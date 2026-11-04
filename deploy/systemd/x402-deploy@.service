@@ -1,0 +1,19 @@
+# A deploy of an environment (ADR 0011): x402-deploy@production, started by deploy.sh, the deploy
+# key's forced command, through the deploy user's one sudo rule. A unit, so a cancelled job or a
+# dropped runner can't cut it between stopping the old facilitator and starting the new one.
+[Unit]
+Description=x402 deploy (%i)
+Documentation=https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/adr/0011-facilitator-hosting.md
+Wants=x402-db-testnet@%i.service
+After=docker.service x402-db-testnet@%i.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/x402/x402-deploy %i
+# After any end: removes the marker, stops this deploy's migration, and unless the deploy
+# succeeded, puts the facilitator back on digest.good.
+ExecStopPost=/usr/local/libexec/x402/x402-deploy %i stopped
+# The cap on a long migration (ADR 0011, 0067), and on the restart after it: a stop by the cap or
+# by hand ends on the last good image, and the next deploy continues the migration from its
+# markers.
+TimeoutStartSec=60min

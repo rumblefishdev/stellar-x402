@@ -17,6 +17,12 @@ export interface BeforeSubmitContext {
   maxFeeStroops: bigint;
   paymentPayload: PaymentPayload;
   paymentRequirements: PaymentRequirements;
+  /**
+   * How many times the record was reopened (0073 decision 16): 0 for a first claim. A reopened
+   * record's earlier claim may still get its `onFinal` after this call reserves, so a reservation
+   * keyed by `key` alone could be released by it; key it by `key` and `reopened`.
+   */
+  reopened: number;
   now: number;
 }
 
@@ -50,11 +56,14 @@ export interface SettlementHooks {
    */
   beforeSubmit(context: BeforeSubmitContext): Promise<BeforeSubmitResult>;
   /**
-   * Runs once when a record turns final, in any final state, after `beforeSubmit` allowed it or
-   * didn't answer within the budget: settles or releases the spend reservation, which may then
-   * not exist, and feeds the breakers (AD-18). Its errors never
-   * reach the caller and never change the settle outcome; `/settle` doesn't wait for it. The
-   * settlement module logs and counts them.
+   * Runs once each time a record turns final, in any final state, after `beforeSubmit` allowed it
+   * or didn't answer within the budget: settles or releases the spend reservation, which may then
+   * not exist, and feeds the breakers (AD-18). A reopened record (0073) turns final again, so key
+   * what it settles by `record.key` and `record.reopened`. Not exactly once per claim: a claim's
+   * final write whose answer was lost may never get its call when a later claim of the record
+   * finishes first, and across processes a claim's call can repeat, so it must be idempotent
+   * (0073 decision 26, a constraint of 0024). Its errors never reach the caller and never change
+   * the settle outcome; `/settle` doesn't wait for it. The settlement module logs and counts them.
    */
   onFinal(record: SettlementRecord, origin: SettlementOrigin): Promise<void>;
   /**

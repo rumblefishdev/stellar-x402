@@ -136,6 +136,28 @@ describe("pipelining", () => {
     });
   });
 
+  it("sends a ledger-bounded envelope prepared ahead as is, past half of timeoutSeconds (0073)", async () => {
+    // A ledger-bounded envelope has no time bound, so only "too few ledgers left" rebuilds it.
+    const { fake, submitter } = setup({ timeoutSeconds: 40 });
+    fake.stalled = true;
+    const start = fake.closeTime;
+    const close = fake.getLatestLedger.bind(fake);
+    Object.assign(fake, {
+      getLatestLedger: async () => {
+        if (fake.closeTime - start >= 25) fake.stalled = false;
+        return close();
+      },
+    });
+    const maxLedger = fake.ledger + 60;
+    const results = await Promise.all([
+      submitter.submit(call(), { maxLedger }),
+      submitter.submit(call(), { maxLedger }),
+    ]);
+    expect(results.map((r) => r.status)).toEqual(["success", "success"]);
+    expect(innerSeqs(fake)).toEqual(["1001", "1002"]);
+    expect(submitter.stats().preparedAhead).toEqual({ used: 1, rebuilt: 0 });
+  });
+
   it("rebuilds when the pending transaction lands with less than half the bound left", async () => {
     const { fake, submitter } = setup({ timeoutSeconds: 40 });
     fake.stalled = true;

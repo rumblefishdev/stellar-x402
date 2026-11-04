@@ -61,7 +61,7 @@ guide, the two example integrations, the security review report, uptime targets,
   the simulated resource fee plus our inclusion bid (at least 100 stroops), never the client's
   fee, and comes from one fee configuration shared by verify and settle.
 - **FR6:** Each settlement is one transaction submitted through the channel-account pool, with
-  the channel as transaction source and the facilitator as operation source and fee-bump payer.
+  the channel as transaction source and caller, and the facilitator as fee-bump payer.
 - **FR7:** The facilitator rejects any payload that references a channel account or the
   facilitator key as transaction source, operation source, `from` or auth-entry address.
 - **FR8:** The facilitator rejects a payload whose auth expires in fewer than
@@ -148,8 +148,10 @@ From the spine and ADRs, affecting how the work is split:
 - **Upstream boundaries (AD-3):** never call upstream `ExactStellarScheme.settle()`, and never
   call `sendTransaction` outside the pool. Bazaar types come from `@x402/extensions`, and
   `packages/bazaar` holds only a pure validator and normalizer.
-- **Key and config model (AD-12):** `FACILITATOR_SECRET` plus `CHANNELS` (addresses only). The
-  existing deploy env (`FACILITATOR_SIGNER_SECRETS`, `FEE_BUMP_SIGNER_SECRET`) collapses into it.
+- **Key and config model (AD-12):** `FACILITATOR_ADDRESS` plus `CHANNELS` (addresses only), the
+  facilitator key held in OpenBao Transit (ADR 0013, since 0036). The earlier deploy env
+  (`FACILITATOR_SIGNER_SECRETS`, `FEE_BUMP_SIGNER_SECRET`) and then `FACILITATOR_SECRET` gave way
+  to it.
 - **Error mapping (AD-6):** every `SubmitStatus` and submitter error class maps to a fixed
   `errorReason`, and `pending` maps to `settlement_pending` with the hash.
 - **Decisions this work depends on:** the state store (0013, ADR) is needed before real store
@@ -418,14 +420,14 @@ So that clients aren't misled and our channel accounts stay under the facilitato
 **Then** it lists `exact` on `stellar:testnet` with `extra.areFeesSponsored: true`, the `bazaar` extension, and the facilitator key's address as the only signer  
 **And** channel addresses never appear, and `upto` is not listed
 
-**Given** `FACILITATOR_SECRET` and `CHANNELS` (addresses only) in config  
+**Given** `FACILITATOR_ADDRESS` and `CHANNELS` (addresses only) in config, the key in OpenBao (0036)  
 **When** the service starts  
 **Then** it checks every channel with `checkChannel`: master key weight 0 and the facilitator key as the only signer  
 **And** if any channel fails, the service refuses to start and names the channel
 
 **Given** the deploy env examples  
 **When** they are updated  
-**Then** `deploy/testnet.env.example` and `deploy/mainnet.env.example` use `FACILITATOR_SECRET` and `CHANNELS` instead of `FACILITATOR_SIGNER_SECRETS` and `FEE_BUMP_SIGNER_SECRET`  
+**Then** `deploy/testnet.env.example` and `deploy/mainnet.env.example` use `FACILITATOR_ADDRESS` and `CHANNELS` (`FACILITATOR_SECRET` until 0036) instead of `FACILITATOR_SIGNER_SECRETS` and `FEE_BUMP_SIGNER_SECRET`  
 **And** the facilitator key reaches the pool only as a `TransactionSigner`
 
 ### Story 1.7: Testnet token matrix

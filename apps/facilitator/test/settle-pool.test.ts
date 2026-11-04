@@ -2,7 +2,8 @@ import { Keypair, StrKey, nativeToScVal, xdr, type rpc } from "@stellar/stellar-
 import type { SorobanRpc, SubmitterEvent } from "@stellar-x402/signer-pool";
 import { FakeRpc } from "@stellar-x402/signer-pool/testing";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { openBaoSigner } from "../src/adapters/openbao-signer.js";
 import { parseConfig, type Env } from "../src/config.js";
 import { jsonLogger, rpcEndpointName } from "../src/logger.js";
 import {
@@ -14,13 +15,14 @@ import {
   type UpstreamSeams,
 } from "../src/main.js";
 import { memoryMetrics } from "../src/metrics.js";
-import type { SettlementStore } from "../src/ports/index.js";
+import type { LeaseFence, SettlementStore } from "../src/ports/index.js";
 import { feeSettings } from "../src/settlement/fees.js";
 import { SETTLE_REASONS, keyOf } from "../src/settlement/settle.js";
 import { testDatabase } from "./database.js";
 import { transferPayload } from "./payment.js";
-import { settlement } from "./port-contracts.js";
+import { holdLease, settlement } from "./port-contracts.js";
 import { startSeller } from "./seller.js";
+import { fakeOpenBao, signerEnv } from "./fake-openbao.js";
 
 /**
  * `main()`'s `/settle` wiring with the real pool on `FakeRpc`: `/settle`'s checks, the pool's fee
@@ -28,6 +30,8 @@ import { startSeller } from "./seller.js";
  */
 
 const facilitator = Keypair.random();
+const openbao = await fakeOpenBao(facilitator);
+afterAll(openbao.close);
 const channel = Keypair.random().publicKey();
 const asset = StrKey.encodeContract(Buffer.alloc(32, 7));
 const payer = Keypair.random().publicKey();
@@ -88,8 +92,12 @@ class PaymentRpc extends FakeRpc {
 }
 
 /** A `transfer` from the payer, with its one auth entry valid to `expiration`. */
-function payload(expiration: number, extensions?: Record<string, unknown>): PaymentPayload {
-  return transferPayload({ payer, payTo, requirements }, expiration, extensions);
+function payload(
+  expiration: number,
+  extensions?: Record<string, unknown>,
+  nonce?: string,
+): PaymentPayload {
+  return transferPayload({ payer, payTo, requirements }, expiration, extensions, nonce);
 }
 
 /**
@@ -98,6 +106,11 @@ function payload(expiration: number, extensions?: Record<string, unknown>): Paym
  */
 const db = testDatabase();
 beforeEach(db.empty);
+/** The lease `/settle` sends under, taken again for every test (0071). */
+let fence: LeaseFence | undefined;
+beforeEach(async () => {
+  fence = await holdLease(db.stores().settlements);
+});
 
 function setup(
   env: Partial<Env> = {},
@@ -105,7 +118,7 @@ function setup(
   rpc: { endpoint?: (url: string) => SorobanRpc | undefined; timeoutMs?: number } = {},
 ) {
   const config = parseConfig({
-    FACILITATOR_SECRET: facilitator.secret(),
+    ...signerEnv(facilitator.publicKey(), openbao.socketPath),
     DATABASE_URL: db.urlFor(db.schema),
     CLIENT_IP: "socket",
     CHANNELS: channel,
@@ -147,7 +160,14 @@ function setup(
     },
     logger: jsonLogger("warn", (line) => lines.push(line)),
     metrics: memoryMetrics(),
+    signer: openBaoSigner({
+      ...config.signer,
+      network: config.network,
+      logger: { info: vi.fn(), error: vi.fn() },
+      metrics: memoryMetrics(),
+    }),
     sleep: async () => {},
+    lease: () => fence,
   });
   /** The pool's `onEvent`, as it reports a submission it answered `pending` ending. */
   const emit = (event: SubmitterEvent) =>
@@ -188,6 +208,55 @@ describe("main()'s /settle wiring, with a hung RPC_URLS[0]", () => {
     expect(response).toMatchObject({ success: false, errorReason: SETTLE_REASONS.timeout });
     expect(fake.sent).toHaveLength(0);
     expect(Date.now() - started).toBeLessThan(1_800);
+  });
+});
+
+describe("main()'s /settle wiring, under a stale lease token (0071)", () => {
+  it("stores nothing and sends nothing through the real pool", async () => {
+    const { settle, fake, store } = setup();
+    // Another process took the lease since this one's keeper read it.
+    const current = fence!;
+    fence = { name: current.name, token: "00000000-0000-4000-8000-000000000071" };
+    const pay = payload(fake.ledger + 30);
+    const { response } = await settle(pay, requirements);
+    expect(response).toMatchObject({ success: false, errorReason: SETTLE_REASONS.leaseLost });
+    expect(fake.sent).toHaveLength(0);
+    const record = await store.get(keyOf(pay, "stellar:testnet")!);
+    expect(record).toMatchObject({ state: "rejected", hashes: [] });
+  });
+
+  it("answers the sent hash a txBadSeq refused when the rebuild is fenced, and doesn't reopen", async () => {
+    const { settle, fake, store } = setup();
+    await settle(payload(fake.ledger + 30), requirements);
+    // Another sender used the channel, so the next envelope is refused with txBadSeq.
+    fake.sequences.set(channel, 5000n);
+    // The takeover comes between the refused send and its rebuild.
+    const send = fake.sendTransaction.bind(fake);
+    vi.spyOn(fake, "sendTransaction").mockImplementation(async (tx) => {
+      const sent = await send(tx);
+      fence = { name: fence!.name, token: "00000000-0000-4000-8000-000000000071" };
+      return sent;
+    });
+    const pay = payload(fake.ledger + 30, undefined, "8");
+    const { response } = await settle(pay, requirements);
+    expect(fake.sent).toHaveLength(2);
+    const refused = fake.sent[1]!.hash().toString("hex");
+    expect(response).toMatchObject({
+      success: false,
+      errorReason: SETTLE_REASONS.leaseLost,
+      transaction: refused,
+    });
+    expect(response.extra).toEqual({ retryable: false, expirationLedger: expect.any(Number) });
+    expect(await store.get(keyOf(pay, "stellar:testnet")!)).toMatchObject({
+      state: "rejected",
+      hashes: [refused],
+    });
+    const repeat = await settle(pay, requirements);
+    expect(repeat.response).toMatchObject({
+      errorReason: SETTLE_REASONS.leaseLost,
+      transaction: refused,
+    });
+    expect(fake.sent).toHaveLength(2);
   });
 });
 
@@ -241,6 +310,65 @@ describe("main()'s /settle wiring, with the real pool", () => {
     expect(fake.sent.map((tx) => tx.hash().toString("hex"))).toContain(response.transaction);
   });
 
+  it.each([
+    ["sealed", () => (openbao.status = 503)],
+    ["signing with another key", () => (openbao.key = Keypair.random())],
+  ])("sends nothing and says to repeat when OpenBao is %s (0036)", async (_name, broken) => {
+    const { settle, fake } = setup();
+    broken();
+    try {
+      const { response } = await settle(payload(fake.ledger + 30), requirements);
+      expect(response).toMatchObject({
+        success: false,
+        errorReason: SETTLE_REASONS.transactionSigning,
+        extra: { retryable: true },
+      });
+      expect(fake.sent).toHaveLength(0);
+    } finally {
+      openbao.status = undefined;
+      openbao.key = facilitator;
+    }
+  });
+
+  it("answers the sent hash a txBadSeq refused when signing its rebuild fails, and doesn't reopen (0036)", async () => {
+    const { settle, fake, store } = setup();
+    await settle(payload(fake.ledger + 30), requirements);
+    // Another sender used the channel, so the next envelope is refused with txBadSeq.
+    fake.sequences.set(channel, 5000n);
+    // OpenBao seals between the refused send and its rebuild.
+    const send = fake.sendTransaction.bind(fake);
+    vi.spyOn(fake, "sendTransaction").mockImplementation(async (tx) => {
+      const sent = await send(tx);
+      openbao.status = 503;
+      return sent;
+    });
+    const pay = payload(fake.ledger + 30, undefined, "8");
+    try {
+      const { response } = await settle(pay, requirements);
+      expect(fake.sent).toHaveLength(2);
+      const refused = fake.sent[1]!.hash().toString("hex");
+      expect(response).toMatchObject({
+        success: false,
+        errorReason: SETTLE_REASONS.transactionSigning,
+        transaction: refused,
+      });
+      expect(response.extra).toEqual({ retryable: false, expirationLedger: expect.any(Number) });
+      expect(await store.get(keyOf(pay, "stellar:testnet")!)).toMatchObject({
+        state: "rejected",
+        hashes: [refused],
+      });
+      openbao.status = undefined;
+      const repeat = await settle(pay, requirements);
+      expect(repeat.response).toMatchObject({
+        errorReason: SETTLE_REASONS.transactionSigning,
+        transaction: refused,
+      });
+      expect(fake.sent).toHaveLength(2);
+    } finally {
+      openbao.status = undefined;
+    }
+  });
+
   it("rechecks the auth expiry at the pool's floor of 2 ledgers, not MIN_VALIDITY_LEDGERS", async () => {
     // `/verify` would refuse 12 ledgers against a minimum of 20.
     const { settle, fake } = setup({ MIN_VALIDITY_LEDGERS: "20" });
@@ -266,12 +394,14 @@ describe("main()'s /settle wiring, with the real pool", () => {
 
   it("ends a call at SETTLE_BUDGET_MS when it is shorter than the default", async () => {
     // 1.2 s: neither the 30 s default nor SETTLE_TIMEOUT_MS, so neither can stand in for it.
-    const { settle, fake } = setup({ SETTLE_TIMEOUT_MS: "1000", SETTLE_BUDGET_MS: "1200" });
+    const { settle, fake, drain } = setup({ SETTLE_TIMEOUT_MS: "1000", SETTLE_BUDGET_MS: "1200" });
     fake.accountDelayMs = 3_000;
     const started = Date.now();
     const { response } = await settle(payload(fake.ledger + 30), requirements);
     expect(response).toMatchObject({ success: false, errorReason: SETTLE_REASONS.timeout });
     expect(Date.now() - started).toBeLessThan(2_500);
+    // The call goes on past its answer: left running, it writes into the next test's record.
+    await drain();
   });
 });
 
@@ -279,7 +409,7 @@ describe("main()'s composition (compose)", () => {
   /** The graph `main()` serves; it takes the lease as `start()` does, unless `lease: false`. */
   async function composed(env: Record<string, string> = {}, opts: { lease?: boolean } = {}) {
     const config = parseConfig({
-      FACILITATOR_SECRET: facilitator.secret(),
+      ...signerEnv(facilitator.publicKey(), openbao.socketPath),
       DATABASE_URL: db.urlFor(db.schema),
       CLIENT_IP: "socket",
       CHANNELS: channel,
@@ -302,10 +432,10 @@ describe("main()'s composition (compose)", () => {
   }
   const bazaar = { info: { input: { type: "http", method: "GET" } }, routeTemplate: "/users/:id" };
 
-  it("sends nothing from a process without the lease (0025 decision 22)", async () => {
+  it("sends nothing from a process without the lease (0025 decision 22, 0071)", async () => {
     const { deps, fake } = await composed({}, { lease: false });
     const settled = await deps.settle(payload(fake.ledger + 30), requirements);
-    expect(settled.response).toMatchObject({ errorReason: SETTLE_REASONS.recordWrite });
+    expect(settled.response).toMatchObject({ errorReason: SETTLE_REASONS.leaseLost });
     expect(fake.sent).toHaveLength(0);
   });
 
@@ -411,7 +541,7 @@ describe("main()'s pool events (0019)", () => {
   async function pendingRecord(store: SettlementStore) {
     const s = settlement("1");
     await store.claim(s);
-    await store.addHash(s.key, HASH, 0, { maxTime: 1 });
+    await store.addHash(s.key, HASH, await holdLease(store), 0, { maxTime: 1 });
     await store.transition(s.key, "signed", { state: "pending", updatedAt: 0 });
     return s.key;
   }
@@ -434,6 +564,30 @@ describe("main()'s pool events (0019)", () => {
       state: "rejected",
       errorReason: SETTLE_REASONS.shuttingDown,
       hashes: [],
+    });
+  });
+
+  it("reads the answer's ledger from the checks' RPC: one ledger left says to wait, not repeat (0073)", async () => {
+    // The retry answer asks the same shared client the checks read; at one ledger left the pool
+    // can't use the auth entry, so `retryable` is false while the entry may still land.
+    const { settle, fake, drain } = setup();
+    fake.accountDelayMs = 200;
+    const expiration = fake.ledger + 30;
+    // A nonce of its own: a call an earlier test left running writes onto nonce 7's record (0084).
+    const pay = payload(expiration, undefined, "8");
+    const settling = settle(pay, requirements);
+    await vi.waitFor(() => expect(fake.accountReads).toBeGreaterThan(0));
+    await drain();
+    expect((await settling).response).toMatchObject({
+      errorReason: SETTLE_REASONS.shuttingDown,
+      extra: { retryable: true, expirationLedger: expiration },
+    });
+    // The next read closes a ledger: it answers `expiration - 1`.
+    fake.ledger = expiration - 2;
+    expect((await settle(pay, requirements)).response).toMatchObject({
+      errorReason: SETTLE_REASONS.shuttingDown,
+      errorMessage: expect.stringContaining(`may still land in ledger ${expiration}`),
+      extra: { retryable: false, expirationLedger: expiration },
     });
   });
 
