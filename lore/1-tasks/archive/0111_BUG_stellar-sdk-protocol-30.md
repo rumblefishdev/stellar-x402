@@ -57,7 +57,7 @@ Move the lockfile from 16.3.0 to 16.4.1. Raise the `package.json` ranges only if
 - [x] typecheck, lint and format pass
 - [x] `pnpm test` passes for the packages that use the SDK (CI on Node 22 and 24; the local timing
       failures are below)
-- [ ] `pnpm mcp:e2e` passes: 14 of 25 tests, red for the reasons below, none an XDR error.
+- [ ] `pnpm mcp:e2e` passes: 14 of 25 tests, red for the reasons below. The error text was read for E-24 and E-21 only; neither is an XDR error.
       `contracts:e2e` wasn't run: its README says it can't settle until 0015
 - [x] `apps/facilitator/scripts/settle-smoke.ts` finishes on real testnet
 
