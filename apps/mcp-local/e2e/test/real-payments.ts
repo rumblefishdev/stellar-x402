@@ -13,6 +13,12 @@ import {
   weather,
 } from "./context.js";
 
+/**
+ * A real payment waits for signing (up to 14.5 s measured) and for the facilitator's settle budget
+ * (30 s by default), and must still stay under the MCP client's own 60 s.
+ */
+const PAYMENT_LIMIT_MS = "55000";
+
 describe("real payments on testnet (0.002 USDC)", () => {
   /** Pays the example seller once and checks it on Horizon: the transfer, both balances, the fees. */
   async function payAndCheck(id: string, env: Record<string, string>): Promise<void> {
@@ -62,13 +68,13 @@ describe("real payments on testnet (0.002 USDC)", () => {
   }
 
   it("E-21 pays the example seller", async () => {
-    await payAndCheck("E-21", paying({ STELLAR_X402_TIMEOUT_MS: "30000" }));
+    await payAndCheck("E-21", paying({ STELLAR_X402_TIMEOUT_MS: PAYMENT_LIMIT_MS }));
   });
 
   it("E-22 pays once more, then the shared budget and the price limit refuse", async () => {
     const dir = freshDir();
     const env = paying({
-      STELLAR_X402_TIMEOUT_MS: "30000",
+      STELLAR_X402_TIMEOUT_MS: PAYMENT_LIMIT_MS,
       STELLAR_X402_STATE_DIR: dir,
       STELLAR_X402_DAILY_BUDGET: PRICE,
     });
