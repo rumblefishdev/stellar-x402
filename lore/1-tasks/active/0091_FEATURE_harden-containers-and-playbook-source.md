@@ -208,3 +208,38 @@ and `migrate-testnet` under the production compose file are still not started by
 (decisions 10 to 16). His run covered Postgres with the secret at `x402-creds`' owner and mode
 (then with the four capabilities). He takes the deploy key rotation's step 3, which doesn't restart
 the other units a promotion may change, to 0026's runbook.
+
+2026-11-04, Stan's re-review: approved at `a5daddd`, with one non-blocking comment (the check's
+login went to the trusted `127.0.0.1`), taken in `03e5806`. #118 merged to `develop` as
+`17dbc45`.
+
+## Before Closing
+
+The code is merged; criteria 1 and 2 need the server. In this order (runbook, The playbook):
+
+1. **#119 merges first.** Until then `deploy/production` is `f391494`, older than the server's
+   files, and a playbook run from it would put them back.
+2. **A promotion carrying `17dbc45` merges to `deploy/production`.** Wait for its deploy with
+   `gh run list --branch deploy/production` and `gh run watch`, not `journalctl`.
+3. **The playbook from `origin/deploy/production`**, from a clean checkout, `--check --diff`
+   first.
+4. **Step 3's restarts:** stop `x402@production`, restart `x402-db-testnet@production` and
+   `x402-tunnel@production` (and `x402-openbao` only if its files changed), start
+   `x402@production`.
+5. **Criterion 1:** the runbook's `docker inspect` loop shows `drop=[ALL]`, `add=[]` and
+   `[no-new-privileges:true]` on every container, Postgres with `user=999:999`, and the
+   `config migrate-testnet` check shows `ALL` and `no-new-privileges:true`.
+6. **Criterion 2:**
+   - Postgres as 999 reaches ready on the server's own volume: `x402-db-testnet@production` is
+     active. No test has used that volume yet; every run was local or in CI.
+   - The facilitator's `/health` shows `ready` and `listed`, and `/supported` answers 200.
+   - A deploy through `deploy.sh` and `x402-deploy` (the next promotion, or **Run workflow** on
+     `deploy/production`) runs `migrate-testnet` and restarts `x402@production` healthy.
+   - The reboot: okarcz decides how and when (decision 3). The server is shared with the
+     explorer, so a reboot stops its services too.
+7. **If Postgres doesn't start on the server's volume:** `journalctl -u x402-db-testnet@production`
+   for the path it can't read, and a pull request for the fix. Never an edit on the server, which
+   the next playbook run would undo.
+
+Then tick criteria 1 and 2 with the date and what was run, add the history entry, and close the
+task with `promote-task`.
