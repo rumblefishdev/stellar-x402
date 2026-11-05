@@ -146,6 +146,26 @@ history:
       Run workflow (a rollback by digest), which needs the workflow on main: #126 puts a stub
       there. Making develop the default branch would remove that stub and deploy-board.yml's pin;
       a repo setting for the team, not decided.
+  - date: "2026-11-05"
+    status: active
+    who: okarcz
+    note: >
+      okarcz takes over the server side from Stan: the second deploy and its checks, the no-seed,
+      logrotate and audit-log checks, the backups and the restore drill. Karol has 0029. #126
+      (main's stub, squashed) merged to main as 0e73532 and #125 to develop. The second deploy:
+      before it, the running facilitator had only OPENBAO_ROLE_ID_FILE and OPENBAO_SECRET_ID_FILE,
+      and no file under /srv/x402 set the plain names #121 refuses. Under deploy/ only the two
+      .env.example files had changed, which the playbook doesn't install, so no playbook run.
+      #132 merged develop at 1f7ece4 into deploy/production as 1df2055 at 11:46 UTC; the image job
+      built sha256:e6bfaa1a… by 11:48 (run 42021731996), Stan approved the deploy, which ran from
+      12:15:46 to 12:16:19 UTC. x402-deploy@production: the migration applied nothing, then
+      "service facilitator is not running" at 12:15:59 (the probe's first try, with the old
+      container already gone), the new one started at 12:15:59.7 and "deployed" at 12:16:17.
+      digest and digest.good are both e6bfaa1a…, GitHub's production deployment records it beside
+      a56db8b2…, and x402@, x402-db-testnet@, x402-tunnel@ and x402-openbao are active. /health
+      answers ready, signer ok and listed; /supported 200. docker inspect: facilitator node,
+      Postgres 999:999, cloudflared 65532:65532 and OpenBao openbao, each with drop [ALL], add []
+      and no-new-privileges; migrate-testnet's config shows ALL and no-new-privileges:true.
 ---
 
 # Public testnet deployment
@@ -436,7 +456,7 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 ## Acceptance Criteria
 
 - [x] Given the Hetzner server and Docker Compose of ADR 0011 (revised in 0039 and 0077), when a deploy runs, then a container image built from the repo is deployed to it as the ADR describes, and the service answers `/supported` at a public HTTPS URL
-- [ ] Given a running instance, when a new version is deployed, then the old process stops before the new one starts; the process is long-lived and never scaled to zero
+- [x] Given a running instance, when a new version is deployed, then the old process stops before the new one starts; the process is long-lived and never scaled to zero (2026-11-05, the second deploy, run 42021731996: the old container was gone at 12:15:59 before the new one started at 12:15:59.7, healthy at 12:16:17)
 - [ ] Given the facilitator key, when the service is deployed, then it signs through the testnet OpenBao Transit key, the raw key never reaches the facilitator's process, the image or the logs, and it is a testnet-only key (ADR 0013)
 - [x] Given `DATABASE_URL_FILE` or `RPC_URLS_FILE`, when the service starts, then it reads the value from that file, and with neither set it falls back to `DATABASE_URL` and `RPC_URLS`
 - [ ] Given the durable stores from 0022, when the service runs, then it uses them, and `docs/runbook.md` has the deploy and rollback steps
