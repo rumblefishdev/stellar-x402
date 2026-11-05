@@ -12,7 +12,8 @@
   replaces Route 53, and 0027 builds the logging role), 2026-11-03 (task 0027, from the PR
   #111 review: every unit's output ships, the loss the log path accepts, the uptime alarm from
   the first good deploy, the disk alarm to our channel, and certificate renewal in 0027) and
-  2026-11-04 (task 0027 decisions 18 and 20: metric lines kept 30 days, no CPU metric)
+  2026-11-04 (task 0027 decisions 18 and 20: metric lines kept 30 days, no CPU metric) and
+  2026-11-05 (task 0027 decision 4 amended: every metric in the catalog is billed)
 - Revised: 2026-10-13. ECS Fargate became the company Hetzner server (task 0039); the first
   version is in git history and task 0014. 2026-10-21: the key moved to OpenBao (ADR 0013), and
   deploys, reboots, backups, alarms and downtime were worked out in the PR #24 review.
@@ -581,11 +582,11 @@ One request or one stop must never outlast the layer in front of it:
   - Namespace `x402-facilitator`.
   - Dimensions stay low-cardinality: `network`, route, outcome, event name.
   - Never payer or `payTo`: each dimension combination is a billed custom metric.
-  - Billed metrics are those with an alarm and the traffic picture (0027). Other labels stay
-    fields in the line, read with Logs Insights.
+  - Every metric in 0027's catalog is billed (decision 4 as amended). Labels that aren't
+    dimensions stay fields in the line, read with Logs Insights.
 - **Host metrics:** the CloudWatch agent on the server reports memory and disk use, since
-  ClickHouse shares the machine. No CPU: nothing alarms on it, and a metric is billed only with an
-  alarm (0027 decision 20).
+  ClickHouse shares the machine. No CPU: nothing alarms on it, and every metric written is
+  billed (0027 decisions 4 and 20).
 - **Alerts:** CloudWatch alarms go to an SNS topic, and Amazon Q Developer in chat applications
   (formerly AWS Chatbot) posts them to the team's Slack channel. 0027 defines them:
   - the five AD-18 conditions; the low-balance one fires below 25 XLM of spendable balance, and

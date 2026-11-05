@@ -211,7 +211,7 @@ flowchart LR
   - `failed` is counted in the scheduler's catch.
 - `settlement_outcomes_total` gets a `result` label (`success` or `error`) at its call site.
 - `fee_charged_stroops` is counted where the record's final write wins, plus the
-  landed-after-expired path. It is approximate (EMF is at least once), so the weekly review takes
+  landed-after-expired path. It is approximate (EMF is at most once), so the weekly review takes
   the database as the source of truth.
 
 ## Handed to the later PRs

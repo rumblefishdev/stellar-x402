@@ -30,7 +30,10 @@ namespace `x402-facilitator`. Every metric here is billed (decision 4 as amended
 "Billed by" lists the dimensions a metric carries, plus `network` when it is network-scoped. "Yes"
 means `network` alone, or no dimension on a process-scoped metric. A label not listed as billed
 stays a field in the line, read with Logs Insights. "Only for X" means that the line carries the dimension set for that
-value only, so the other values add no metric.
+value only. The other values write no line at all, so their label is in no metric line either.
+Where the call site logs the event, the app log has it: `settlement_refused_after_verify` with its
+`stage`, and `spend_budget_nearing` with its `scope`. A `fault` other than `ours` is in no line;
+the failure itself is in `settlement_outcomes_total` and the database.
 
 **Scope.** A network-scoped metric carries `network` in every set. Its value is the CAIP-2 string
 from `STELLAR_NETWORKS` (`stellar:testnet`, `stellar:pubnet`), never retyped. A process-scoped
@@ -58,7 +61,7 @@ metrics. A gauge that stops is silence, not a stale value. The only zero written
 | Metric | Source | Billed by | Log fields | Alarm |
 | --- | --- | --- | --- | --- |
 | `settlement_outcomes_total` | Every `/settle` answer, `settle.ts`, which sets `result` at the call site | `result`: `success` or `error` | `reason`, `replay` | None: traffic, AC 1 |
-| `settlement_refused_after_verify_total` | `settle.ts` | `stage`, only for `pool` | `reason` | `refused-after-verify` |
+| `settlement_refused_after_verify_total` | `settle.ts` | `stage`, only for `pool` | `reason` (on `pool` lines; a `check` refusal is in the `settlement_refused_after_verify` log only) | `refused-after-verify` |
 | `settlement_record_failures_total` | `records.ts` | Yes | | `store-outage` |
 | `settlement_history_gone_total` | `reconcile.ts` | Yes | | `history-gone` |
 | `settlement_landed_after_expired_total` | `records.ts` (0088) | Yes | `state` | `landed-after-expired` |
@@ -82,8 +85,8 @@ metrics. A gauge that stops is silence, not a stale value. The only zero written
 | Metric | Source | Billed by | Log fields | Alarm |
 | --- | --- | --- | --- | --- |
 | `spend_breaker_opened_total` | `spend/policy.ts` | Yes | `breaker` | `breaker-opened` |
-| `spend_budget_nearing_total` | `spend/policy.ts` | Yes, only for `budget` `asset`, `other` and `global`. The set has no `budget`, so the three share one series | `budget` | `budget-nearing` |
-| `spend_failure_attributed_total` | `spend/policy.ts` | `fault`, only for `ours` | `fault` | `failure-ours` |
+| `spend_budget_nearing_total` | `spend/policy.ts` | Yes, only for `budget` `asset`, `other` and `global`. The set has no `budget`, so the three share one series | `budget` (a `payer` budget is in the `spend_budget_nearing` log only) | `budget-nearing` |
+| `spend_failure_attributed_total` | `spend/policy.ts` | `fault`, only for `ours` | None: only `ours` writes a line | `failure-ours` |
 | `spend_commit_unmatched_total` | `spend/policy.ts` | Yes | `state` | `commit-unmatched` |
 | `spend_store_failures_total` | `spend/policy.ts` | Yes | `op` | `store-outage` |
 | `spend_refused_total` | `spend/policy.ts` | Yes | `reason` | None |
@@ -101,7 +104,7 @@ metrics. A gauge that stops is silence, not a stale value. The only zero written
 | `rpc_on_fallback` | Gauge: 1 while the shared `FallbackRpc`'s `active` isn't endpoint 0's name | Yes | `rpc`: the active endpoint's name | `rpc-on-fallback` |
 | `rpc_stalled_seconds` | Gauge: seconds since the ledger sequence last changed, read every 30 s through the shared `FallbackRpc`. A new active endpoint or a lower sequence starts a new baseline | Yes | | `rpc-stalled` |
 | `balance_reading_age_seconds` | Gauge: seconds since the floor's last good read of the fee account, or since start before the first (decision 17) | Yes | | `balance-stale` |
-| `fee_charged_stroops` | The sum of `feeCharged`, where a record's final write wins, plus the landed-after-expired path (decision 13). Approximate: EMF is at least once | Yes | `state` | None: the weekly review, which takes the database as the source of truth |
+| `fee_charged_stroops` | The sum of `feeCharged`, where a record's final write wins, plus the landed-after-expired path (decision 13). Approximate: EMF is at most once | Yes | `state` | None: the weekly review, which takes the database as the source of truth |
 
 `http_requests_total` is process-scoped: it has no `network`, since a route serves both networks once
 0077 lands. A middleware mounted first counts it once, when the response closes. The `route` label

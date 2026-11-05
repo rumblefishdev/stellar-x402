@@ -247,7 +247,9 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
 15. **A dimension can be billed for some of its values only** (2026-11-03, for decision 4). The
     adapter writes a dimension set only for the values with an alarm: `stage` for `pool`,
     `budget` for `asset`, `other` and `global`, `fault` for `ours`, `type` for `sequence-resync`,
-    `status` for `500`. The other values add no metric. HTTP metrics carry no `network`, since a
+    `status` for `500`. The other values write no line at all, so they are in no metric line
+    either; `stage: check` and a `payer` budget are in the app log, which logs each such event
+    (2026-11-05, from Karol's review of #112). HTTP metrics carry no `network`, since a
     route serves both networks after 0077. Host lines go to `x402-host` and the Lambdas' metrics to
     `x402-watch`, apart from the facilitator's `x402-facilitator`. `disk_used_percent`'s dimension
     is `path` (2026-11-05, from the whole-task review): that is the CloudWatch agent's name for the
@@ -280,8 +282,9 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     Count alarms stay not breaching, since for them no data means nothing happened. `uptime`
     stays breaching: its missing point counts as down (decision 5).
 20. **No CPU metric** (akot, 2026-11-04; amends the agent's metrics above and ADR 0011's Host
-    metrics). Nothing alarms on CPU, and decision 4 bills only what has an alarm. The sibling
-    projects don't collect it either: the explorer removed its CPU widgets (its task 0239), and
+    metrics). Nothing alarms on CPU, and decision 4 bills only what has an alarm (since its
+    amendment, everything written is billed, so a CPU metric would cost with nothing reading
+    it). The sibling projects don't collect it either: the explorer removed its CPU widgets (its task 0239), and
     the Prices API watches only free disk on the same Hetzner host. The Prices API already alarms
     on that host's free disk (`prices-<env>-ch-disk-free`); our `disk` alarm reads our mounts, and
     its description names theirs.
