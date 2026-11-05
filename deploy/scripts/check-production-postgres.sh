@@ -52,7 +52,7 @@ docker volume create "$volume" > /dev/null
 # The unit's ExecStartPost, with its 50 s.
 ready() {
   if ! timeout 50 sh -c \
-    'until docker compose exec -T postgres-testnet pg_isready --quiet; do sleep 1; done'; then
+    'until docker compose exec -T postgres-testnet pg_isready --quiet > /dev/null 2>&1; do sleep 1; done'; then
     echo "not ready after $1" >&2
     exit 1
   fi

@@ -260,6 +260,22 @@ describe("emfMetrics", () => {
     ]);
   });
 
+  it("a gauge read with no value yet writes no sample and reports nothing", () => {
+    const { m, writes, issues, time } = setup();
+    let n = 0;
+    m.for({ network: TESTNET }).registerGauge("settlement_oldest_open_seconds", () => {
+      n += 1;
+      return n <= 3 ? undefined : { value: n };
+    });
+    time.advance(MIN);
+    expect(
+      linesFor("settlement_oldest_open_seconds", writes).map(
+        (o) => o.settlement_oldest_open_seconds,
+      ),
+    ).toEqual([[4, 5, 6]]);
+    expect(issues).toEqual([]);
+  });
+
   it("a gauge's changing log field keeps its minute in one line, with the last sample's field", () => {
     const { m, writes, time } = setup();
     let n = 0;

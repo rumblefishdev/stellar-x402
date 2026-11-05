@@ -72,12 +72,12 @@ metrics. A gauge that stops is silence, not a stale value. The only zero written
 | `signer_failures_total` | `openbao-signer.ts` (0036) | Yes | `reason`, `step` | `signer-failures` |
 | `pool_events_total` | The pool's `onEvent`, `main.ts` | Yes, and `type` only for `sequence-resync` | `type`, `status` on `resolved` | `pool-health` |
 | `settlement_uncertain_total` | `settle.ts` | Yes | | None |
-| `settlement_submit_failures_total` | `settle.ts` | Yes | | None |
+| `settlement_submit_failures_total` | `settle.ts`: an `unexpected_settle_error` with nothing sent, answered with status 200 | Yes | | `submit-failed` |
 | `settlement_budget_exhausted_total` | `settle.ts` | Yes | `signed` | None |
-| `settlement_reconciled_total` | `reconcile.ts` | Yes | `state` | None |
+| `settlement_reconciled_total` | `reconcile.ts` | Yes, and `state` only for `expired` | `state` | `settlement-expired` |
 | `settlement_reopened_total` | `settle.ts` | Yes | `reason` | None |
 | `settlement_lease_fenced_total` | `settle.ts` | Yes | | None |
-| `settlement_hook_failures_total` | `records.ts` | Yes | `hook` | None |
+| `settlement_hook_failures_total` | `records.ts` | Yes | `hook` | `hook-failures` |
 | `settlement_already_settled_total` | `settle.ts` | Yes | | None |
 | `settlement_nonce_reuse_total` | `settle.ts` | Yes | | None |
 | `lease_changes_total` | `lease.ts` | Yes | `held` | None |
@@ -88,7 +88,7 @@ metrics. A gauge that stops is silence, not a stale value. The only zero written
 
 | Metric | Source | Billed by | Log fields | Alarm |
 | --- | --- | --- | --- | --- |
-| `spend_breaker_opened_total` | `spend/policy.ts` | Yes | `breaker` | `breaker-opened` |
+| `spend_breaker_opened_total` | `spend/policy.ts` | `breaker`: `payer`, `pay_to` or `asset` | | `breaker-opened`, one per kind |
 | `spend_budget_nearing_total` | `spend/policy.ts` | Yes, only for `budget` `asset`, `other` and `global`. The set has no `budget`, so the three share one series | `budget` (a `payer` budget is in the `spend_budget_nearing` log only) | `budget-nearing` |
 | `spend_failure_attributed_total` | `spend/policy.ts` | `fault`, only for `ours` | None: only `ours` writes a line | `failure-ours` |
 | `spend_commit_unmatched_total` | `spend/policy.ts` | Yes | `state` | `commit-unmatched` |
@@ -102,7 +102,7 @@ metrics. A gauge that stops is silence, not a stale value. The only zero written
 | --- | --- | --- | --- | --- |
 | `http_requests_total` | Every HTTP answer Express sees, when its response closes | Two sets: `[route]` (`/verify`, `/settle`, `/supported`, `/health`, `/discovery`, `other`), and `[status]`, only for `500` | `status` | `http-500` |
 | `settlement_sweeps_total` | Each sweep, `reconcile.ts`: `listed` once it has listed the records, `failed` when it rejects. Only `listed` is written as 0 | `outcome`: `listed` or `failed` | | `sweeps-stopped`, `facilitator-silent` |
-| `settlement_oldest_open_seconds` | Gauge, computed at the read: the age of the oldest record the latest sweep left open, `history_gone` ones left out; 0 with none | Yes | | `pending` |
+| `settlement_oldest_open_seconds` | Gauge, computed at the read: the age of the oldest record the latest sweep left open, `history_gone` ones left out; 0 with none; set right after the listing too; no sample until a sweep has listed, so a restart doesn't read 0 (decision 56) | Yes | | `pending` |
 | `pool_queued` | Gauge from the pool's stats | Yes | `channels`, `busy` | `queue-waiting` |
 | `pool_quarantined` | Gauge from the pool's stats: channels out of the pool since start | Yes | | `channel-quarantined` |
 | `rpc_on_fallback` | Gauge: 1 while the shared `FallbackRpc`'s `active` isn't endpoint 0's name | Yes | `rpc`: the active endpoint's name | `rpc-on-fallback` |

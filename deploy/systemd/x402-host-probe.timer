@@ -1,0 +1,12 @@
+# The host probe every minute, at :30 (lore 0027 decision 10): clear of the facilitator's EMF
+# flush at :00 and of the rotation at :20, so each minute gets one point.
+[Unit]
+Description=x402 host probe, every minute
+Documentation=https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/adr/0011-facilitator-hosting.md
+
+[Timer]
+OnCalendar=*-*-* *:*:30
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

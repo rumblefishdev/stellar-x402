@@ -556,6 +556,120 @@ describe("createReconciler", () => {
       expect(metrics.value("fee_charged_stroops", { state: "success" })).toBe(41_000);
     });
 
+    it("keeps the key out when a racing write throws after another writer won and returned", async () => {
+      const { store, hooks, records, reconciler, metrics } = setup();
+      const key = await signed(store, [A]);
+      // Writer 1 takes the key out, and its write hangs.
+      let fail!: () => void;
+      const failing = new Promise<void>((r) => (fail = r));
+      const writer1 = records.finalWrite(key, async () => {
+        await failing;
+        throw new Error("store down");
+      });
+      // Writer 2 wins and returns first, so it ran the hooks and counted the fee.
+      expect(
+        await records.finish(
+          key,
+          { state: "success", ledger: 4_000, feeCharged: 41_000n },
+          "settle",
+        ),
+      ).toMatchObject({ won: true });
+      // Writer 1 throws only now: it can't have committed, since writer 2 moved the record from a
+      // non-final state, so it must not put the key back for a sweep to run the hooks again.
+      fail();
+      await expect(writer1).rejects.toThrow("store down");
+      expect(records.unconfirmed.has(key)).toBe(false);
+      await reconciler.sweep();
+      await reconciler.sweep();
+      expect(hooks.onFinal).toHaveBeenCalledTimes(1);
+      expect(metrics.value("fee_charged_stroops", { state: "success" })).toBe(41_000);
+    });
+
+    it("keeps the key out when a racing write loses after another writer won and returned", async () => {
+      const { store, hooks, records, reconciler, metrics } = setup();
+      const key = await signed(store, [A]);
+      // An earlier write threw without committing, so the key is listed.
+      vi.spyOn(store, "transition").mockRejectedValueOnce(new Error("store down"));
+      await expect(
+        records.finish(key, { state: "success", ledger: 4_000, feeCharged: 41_000n }, "settle"),
+      ).rejects.toThrow("store down");
+      expect(records.unconfirmed.has(key)).toBe(true);
+      // Writer 1 takes the listed key out, and its compare-and-set from `signed` hangs.
+      const transition = store.transition.bind(store);
+      let lose!: () => void;
+      const losing = new Promise<void>((r) => (lose = r));
+      const writer1 = records.finalWrite(key, async () => {
+        await losing;
+        return transition(key, "signed", { state: "success", updatedAt: NOW });
+      });
+      // Writer 2 wins and returns first.
+      expect(
+        await records.finish(
+          key,
+          { state: "success", ledger: 4_000, feeCharged: 41_000n },
+          "settle",
+        ),
+      ).toMatchObject({ won: true });
+      // Writer 1 loses to writer 2's record, not to the earlier write: no key goes back.
+      lose();
+      expect(await writer1).toBeUndefined();
+      expect(records.unconfirmed.has(key)).toBe(false);
+      await reconciler.sweep();
+      await reconciler.sweep();
+      expect(hooks.onFinal).toHaveBeenCalledTimes(1);
+      expect(metrics.value("fee_charged_stroops", { state: "success" })).toBe(41_000);
+    });
+
+    it("runs the hooks once when a write that throws races a winning one on PostgreSQL, 200 times", async () => {
+      let twice = 0;
+      for (let run = 0; run < 200; run++) {
+        await db.empty();
+        const { store, hooks, records, reconciler, metrics } = setup({ [A]: landed("SUCCESS") });
+        const key = await signed(store, [A]);
+        // One of the two writes fails without committing, a moment later, as a dropped connection
+        // does; the other goes to PostgreSQL. Whichever returns first, the hooks run once.
+        const transition = store.transition.bind(store);
+        vi.spyOn(store, "transition").mockImplementationOnce(async () => {
+          await new Promise((resolve) => setTimeout(resolve, run % 4));
+          throw new Error("store down");
+        });
+        const update = { state: "success" as const, ledger: 4_000, feeCharged: 41_000n };
+        const results = await Promise.allSettled([
+          records.finish(key, update, "settle"),
+          records.finish(key, update, "resolved"),
+        ]);
+        vi.mocked(store.transition).mockImplementation(transition);
+        expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+        await reconciler.sweep();
+        await reconciler.sweep();
+        if (hooks.onFinal.mock.calls.length !== 1) twice++;
+        expect(metrics.value("fee_charged_stroops", { state: "success" }), `run ${run}`).toBe(
+          41_000,
+        );
+      }
+      expect(twice).toBe(0);
+    }, 120_000);
+
+    it("lists the key again for a later claim's write that throws, once the race is over", async () => {
+      const { store, records } = setup();
+      const key = await signed(store, [A]);
+      expect(
+        await records.finish(
+          key,
+          { state: "success", ledger: 4_000, feeCharged: 41_000n },
+          "settle",
+        ),
+      ).toMatchObject({ won: true });
+      // With no writer in flight, a win is forgotten: a reopened record's write (0073) that throws
+      // may have committed, so it is listed as before.
+      await expect(
+        records.finalWrite(key, async () => {
+          throw new Error("store down");
+        }),
+      ).rejects.toThrow("store down");
+      expect(records.unconfirmed.has(key)).toBe(true);
+    });
+
     it("leaves one that didn't commit to the writer that finishes it, so its hooks run once", async () => {
       const { store, hooks, records, reconciler } = setup({ [A]: landed("SUCCESS") });
       const key = await signed(store, [A]);

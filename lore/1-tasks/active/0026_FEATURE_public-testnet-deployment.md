@@ -184,6 +184,56 @@ history:
       with exportable=false. logrotate hasn't rotated audit.log yet: its state file shows
       2026-11-05 00:00, the first sight of a config the playbook installed on 2026-11-04, so the
       first rotation is due after 00:00 UTC on 2026-11-06.
+  - date: "2026-11-05"
+    status: active
+    who: okarcz
+    note: >
+      The backups' Storage Box access, set up and tested. Stan made two sub-accounts on BX21
+      ch-prod-01-backup (SSH on port 23, ed25519 host key
+      SHA256:XqONwb1S0zuj5A1CDxpOSuD2hnAArV1A3wKY7Z3sdgM): u595862-sub2 writes, home /x402,
+      reachable only from ch-prod-01; u595862-sub3 reads only, home /x402/data, so its
+      authorized_keys isn't the write account's. The data goes in /x402/data/pgbackrest and
+      /x402/data/openbao. The write key was made on ch-prod-01 in /run and kept only as the
+      host-encrypted credential /srv/x402/backup/creds/storage-box-ssh-key.cred
+      (--name=storage-box-ssh-key, fingerprint SHA256:B7SozkS7mimbWA1OLyEdfRJ/Yp0i/T5pfTnWJB4bQU0).
+      The restore key was made on okarcz's machine in /dev/shm and kept only in the backup
+      secret, as storage_box_ro_ssh_key with storage_box_ro_user u595862-sub3 (fingerprint
+      SHA256:cusjUd5fHX1CBCnAj1e7Fnn9E6iK9PUNgLN8aVxwgw0). It is version 2ce8bec6…; the
+      original stays as AWSPREVIOUS 226d488f…, and no other field changed. Tests, with the host key
+      pinned: from ch-prod-01, sub2 logged in with the credential's key and lists data/openbao
+      and data/pgbackrest, both empty. From outside Hetzner, sub3 logged in with the key read from
+      the secret and lists the same two, and its mkdir failed. Left open: data/.ssh, which holds
+      sub3's keys, belongs to sub2, so a compromised server could change them, as it could delete
+      the backups; Storage Box snapshots were asked about for that. pgBackRest runs on the host
+      (okarcz), and Borg's key mode is still to decide.
+  - date: "2026-11-05"
+    status: active
+    who: okarcz
+    note: >
+      Storage Box snapshots, which answer the data/.ssh point above. Stan turned on BX21's
+      automatic snapshots: daily, 7 kept (BX21 has 20 slots), raised to 14 if space allows; he
+      checks the space after the explorer's weekly Borg prune and compact on Monday. .zfs is
+      read-only and only the Hetzner Console or API deletes a snapshot, so the write key on
+      ch-prod-01 can't touch them: a server that is taken over can wipe the live repositories, not
+      the last 7 days. A snapshot covers the whole box, the explorer's ClickHouse backups too, so
+      a restore from one copies our files from .zfs/snapshot with the box's main account, never a
+      Console rollback, which reverts the whole box. That path needs the main account; the normal
+      restore reads the live repositories with u595862-sub3 and the backup secret. For ADR 0013,
+      with the backups: this, and the read-only account's own directory (Stan).
+  - date: "2026-11-05"
+    status: active
+    who: okarcz
+    note: >
+      Borg's key mode decided, after a question to Stan: repokey, with borg key export in the
+      backup secret's borg_key_export. 0047's rule meant that the Storage Box alone must not
+      decrypt a backup, and a key locked by the passphrase keeps that, as pgBackRest's cipher-pass
+      does; the export covers a damaged key in the repository. Chosen over keyfile, whose only gain
+      is against someone with the box and not the passphrase, already stopped by a long random
+      passphrase and by OpenBao's own encryption of the Raft snapshot. From Stan: a passphrase
+      change replaces borg_passphrase and borg_key_export in one put-secret-value, since the
+      export is encrypted with it; and the restore drill imports the export into a local copy of
+      the repository, since the read-only account can't write to it. Both are in ADR 0013 and
+      this task's Implementation.
 ---
 
 # Public testnet deployment
@@ -433,9 +483,14 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   existing Hetzner Storage Box, keeping 14, set up like that box's other sub-account. Tell
   the team that owns the box that we depend on it. The job uses its own AppRole with a
   snapshot-only policy (`sys/storage/raft/snapshot`), its credential a systemd credential, over
-  the admin listener. A second, read-only sub-account on the same directory, its SSH key in the
-  backup secret, is what a restore uses. Decide the Borg mode (repokey or keyfile); in
-  keyfile mode `borg key export` goes into the backup secret.
+  the admin listener. A second, read-only sub-account, its SSH key in the backup secret, is what
+  a restore uses; its home is the repositories' directory, one below the write account's (ADR
+  0013). Borg runs in **repokey** mode, and `borg key export` goes into the backup secret's
+  `borg_key_export` anyway (okarcz with Stan, 2026-11-05): nothing on the Storage Box decrypts a
+  backup by itself, since the key there is locked by the passphrase, as pgBackRest's
+  `cipher-pass` is. The export is encrypted with the current passphrase, so a
+  `borg key change-passphrase` replaces `borg_passphrase` and `borg_key_export` together, in one
+  `put-secret-value`.
 - **Fee float** (ADR 0013): refill to 100 XLM, alarms at 25 and 10 XLM, no upper limit, the same
   numbers on testnet for now. The alarms come from 0027's off-server check, which publishes the
   spendable balance, so `checkFacilitatorBalance`'s `minSpendableStroops` isn't set (0027
@@ -446,7 +501,10 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   its address (#102).
 - **Runbook** in `docs/runbook.md`:
   - **restore drill:** on a throwaway machine with no route to production, using only the backup
-    secret and the Storage Box: pull the newest snapshot, start OpenBao with the seal key and key
+    secret and the Storage Box: copy the Borg repository to the machine through the read-only
+    account and `borg key import` the secret's export into that copy (the read-only account
+    can't write to the repository, and this is the restore a damaged repository key needs),
+    pull the newest snapshot from the copy, start OpenBao with the seal key and key
     ID, init, restore (first without `-force`, then with it), regenerate a root token with the
     recovery key (legacy API), issue an AppRole login, check that the Transit public key equals the on-chain
     signer, check the CloudTrail event history for reads that weren't drills, destroy the machine,
