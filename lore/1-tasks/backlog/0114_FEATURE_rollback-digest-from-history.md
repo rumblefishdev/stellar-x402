@@ -3,6 +3,7 @@ id: "0114"
 title: "Accept a rollback digest only if production has run it before"
 type: FEATURE
 status: backlog
+milestone: 2
 related_adr: ["0011"]
 related_tasks: ["0026", "0113"]
 tags: [deploy, ci, security, priority-medium, effort-small, platform]

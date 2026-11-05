@@ -3,6 +3,7 @@ id: "0113"
 title: "Record the digest on this run's deployment, not the newest one for the commit"
 type: BUG
 status: backlog
+milestone: 2
 related_adr: ["0011"]
 related_tasks: ["0026"]
 tags: [deploy, ci, priority-low, effort-small, platform]
