@@ -45,9 +45,8 @@ It puts x402's parts on the server and touches nothing else (`deploy/ansible/pla
 it from a commit on `deploy/production`, never from `develop` or a working branch: root runs what
 it installs, so whoever runs it, and from which commit, is the boundary around production.
 `deploy/production` takes only an approved pull request with no bypass (Before the first deploy);
-`develop` takes pushes without a review. The first run from `deploy/production` comes after #119,
-the first promotion, merges: until then it is `f391494`, older than the server's files (the run
-before it was from `develop`, `e6774c8`), and would put those older files back.
+`develop` takes pushes without a review. Each promotion moves `deploy/production`'s tip, and an
+older commit would put older files back, so fetch it first, as below.
 
 ```sh
 git status --short  # must print nothing: a local edit or new file would ride along unreviewed
@@ -70,10 +69,13 @@ deploy.
    files first, written to work with the image that runs, through steps 1 to 3; then the image
    change, as a plain deploy. A promotion carries everything waiting on `develop`, so the image
    change stays off `develop` until the files' promotion has been through steps 1 to 3.
-2. Once that deploy has ended, the playbook from that merge, as above. Run during the deploy, it
-   would replace `deploy.sh` and the compose file under it. Wait for the workflow run, not the
-   unit: `x402-deploy@production` starts only after the image job and the SSH step, so right after
-   the merge it is still inactive and looks ended. The run can take as long as a migration:
+2. The playbook from that merge, as above, at one of two times. Before approving the `deploy` job,
+   which waits for the production environment: run step 3 too, and approve only once both have
+   ended, so the deploy starts the new image on the new files (2026-11-04). Or once that deploy
+   has ended. Run during the deploy, it would replace `deploy.sh` and the compose file under it.
+   After the deploy, wait for the workflow run, not the unit: `x402-deploy@production` starts
+   only after the image job and the SSH step, so right after the merge it is still inactive and
+   looks ended. The run can take as long as a migration:
 
    ```sh
    gh run list --branch deploy/production --workflow deploy-production.yml --limit 1
@@ -240,10 +242,12 @@ facilitator serves, then restarts `x402@production` on the new image and waits u
   it runs on the newer schema.
 
   `gh workflow run` and **Run workflow** need the workflow on the default branch, `main`, so `main`
-  holds a copy of `deploy-production.yml` for that alone: a run uses `deploy/production`'s own
-  file, and a push to `deploy/production` starts one without the copy (2026-11-04). Keep the
-  copy's `on:` the same as the real one. If GitHub refuses, deploy the digest on the server
-  instead (Deploy, above).
+  holds a stub of `deploy-production.yml` for that alone (#126). The form opens on `main`: choose
+  **Use workflow from → `deploy/production`**; a run from `main` fails and says so. A run uses
+  `deploy/production`'s own file, and a push to `deploy/production` starts one without the stub
+  (2026-11-04). Keep the stub's `name` and inputs the same as the real file's, since the form and
+  `-f` read them from `main`. If GitHub refuses, deploy the digest on the server instead (Deploy,
+  above).
 
 ## Long migrations
 
