@@ -8,7 +8,7 @@
 //      [SELLERS] how many sellers to pay (default all; 1 = the one-seller scenario),
 //      [CHANNELS_FILE] JSON list of channel addresses reused across runs; missing channels are
 //      created and appended
-// Usage: tsx scripts/testnet-smoke.ts <channels> <payments>
+// Usage: tsx test/live/testnet-smoke.ts <channels> <payments>
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import {
@@ -30,9 +30,9 @@ import {
   buildCreateChannelsTx,
   checkChannel,
   feeStatsInclusionFee,
-  keypairSigner,
   readAccountEntry,
-} from "../src/index.js";
+} from "../../src/index.js";
+import { keypairSigner } from "../testing.js";
 
 const need = (k: string) =>
   process.env[k] ??

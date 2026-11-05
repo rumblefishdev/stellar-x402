@@ -20,10 +20,10 @@
  *   RPC_URLS         passed to the facilitator (default: the testnet RPC)
  *
  *   cd apps/facilitator
- *   CLIENT_SECRET=S… npx tsx scripts/token-matrix.ts
+ *   CLIENT_SECRET=S… npx tsx test/live/token-matrix.ts
  *
  * The facilitator, its 4 channels and the seller are new each run. The results, with every hash,
- * go to `scripts/results/token-matrix-testnet.json`; log lines go to stderr.
+ * go to `test/live/results/token-matrix-testnet.json`; log lines go to stderr.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import {
@@ -47,8 +47,8 @@ import type { PaymentRequirements, SettleResponse, VerifyResponse } from "@x402/
 import { createEd25519Signer } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/client";
 import { Agent, fetch } from "undici";
-import { main } from "../src/main.js";
-import { fakeOpenBao, signerEnv } from "../test/fake-openbao.js";
+import { main } from "../../src/main.js";
+import { fakeOpenBao, signerEnv } from "../fake-openbao.js";
 
 const network = "stellar:testnet";
 const server = new rpc.Server("https://soroban-testnet.stellar.org");

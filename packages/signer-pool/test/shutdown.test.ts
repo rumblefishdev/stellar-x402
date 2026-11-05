@@ -4,9 +4,9 @@ import {
   SettlementSubmitter,
   ShutdownError,
   attemptsOf,
-  keypairSigner,
   type SubmitterOptions,
 } from "../src/index.js";
+import { keypairSigner } from "./testing.js";
 import { FakeRpc, channels, facilitator } from "./fake-rpc.js";
 
 const PASSPHRASE = "Test SDF Network ; September 2015";

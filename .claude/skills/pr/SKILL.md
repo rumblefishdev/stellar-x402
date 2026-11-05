@@ -90,11 +90,11 @@ Reviewers, please confirm:
 
 **Testing includes a run against the real thing.** Unit tests show the code matches our understanding; they don't show the understanding is right. Use the check that fits the change:
 
-| The change touches              | Run against the real thing                                                                                   |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| UptoProxy contract              | `pnpm contracts:e2e` on testnet (needs the funded accounts in `contracts/upto-proxy/e2e/secrets/`)           |
-| signer pool / settlement submit | `pnpm exec tsx scripts/testnet-smoke.ts <channels> <payments>` in `packages/signer-pool` (env in its header) |
-| facilitator HTTP                | `pnpm --filter @stellar-x402/facilitator dev` with testnet env, then `curl` the routes                       |
+| The change touches              | Run against the real thing                                                                                     |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| UptoProxy contract              | `pnpm contracts:e2e` on testnet (needs the funded accounts in `contracts/upto-proxy/e2e/secrets/`)             |
+| signer pool / settlement submit | `pnpm exec tsx test/live/testnet-smoke.ts <channels> <payments>` in `packages/signer-pool` (env in its header) |
+| facilitator HTTP                | `pnpm --filter @stellar-x402/facilitator dev` with testnet env, then `curl` the routes                         |
 
 Write the command and what it reported. A change none of these can exercise (types only, docs, CI) says `Testnet: N/A — <reason>`. No such line, no PR: stop and run the check first.
 

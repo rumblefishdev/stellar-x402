@@ -395,7 +395,7 @@ require one (0105).
   twice. The host checks the nonce when the token calls `require_auth`, before a C-account's
   `__check_auth` runs, so the error names the token, never the payer: shown on testnet for a
   `test-wallet` payer in a wasm token and in a SAC (task 0024,
-  `apps/facilitator/scripts/results/front-run-testnet.json`).
+  `apps/facilitator/test/live/results/front-run-testnet.json`).
 - **Residual risk:** Each front-run costs us one fee, bounded by the budgets, and costs the
   front-runner its own. A wasm token can raise `Error(Auth, ExistingValue)` itself (a
   `require_auth` of its own on a used entry), so its failures feed no breaker; they stay bounded

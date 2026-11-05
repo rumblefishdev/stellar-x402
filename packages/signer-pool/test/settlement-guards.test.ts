@@ -8,10 +8,10 @@ import {
   SigningError,
   SourceAccountAuthError,
   attemptsOf,
-  keypairSigner,
   type SubmitterOptions,
   type TransactionSigner,
 } from "../src/index.js";
+import { keypairSigner } from "./testing.js";
 import { FakeRpc, channels, facilitator } from "./fake-rpc.js";
 
 // The two library changes the T1 facilitator needs (task 0016): an awaited `onSigned`, so the

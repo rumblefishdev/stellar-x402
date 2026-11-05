@@ -18,9 +18,9 @@ import {
   FeeLimitError,
   SettlementSubmitter,
   SignedHookError,
-  keypairSigner,
   type SorobanRpc,
 } from "@stellar-x402/signer-pool";
+import { keypairSigner } from "@stellar-x402/signer-pool/testing";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { parseConfig } from "../src/config.js";
