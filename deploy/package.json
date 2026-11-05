@@ -1,0 +1,16 @@
+{
+  "name": "@stellar-x402/deploy",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Tests for the server's units, scripts and CloudWatch agent config, against the metric catalog",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rm -rf .turbo"
+  },
+  "dependencies": {
+    "@stellar-x402/metrics-catalog": "workspace:*"
+  }
+}
