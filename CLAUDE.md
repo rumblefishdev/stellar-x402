@@ -13,6 +13,10 @@
 
 **Writing code without an active task is FORBIDDEN.**
 
+## Tests
+
+A TypeScript test lives in its package's `test/`: `*.test.ts` runs in `pnpm test`; a script that runs against a real network goes in `test/live/` and runs by hand.
+
 ## Context
 
 @lore/0-session/current-user.md
