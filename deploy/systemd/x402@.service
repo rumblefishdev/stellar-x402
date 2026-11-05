@@ -13,12 +13,21 @@ StartLimitBurst=5
 
 [Service]
 WorkingDirectory=/srv/x402/%i
+# Raw lines for the CloudWatch agent (0027 decision 1): stdout carries the logger's JSON and the
+# EMF lines, which the agent splits into two log groups; stderr, Compose's progress and a crash's
+# trace. append:, so copytruncate leaves no hole. The playbook makes the directory and the files.
+StandardOutput=append:/var/log/x402/%i/facilitator.log
+StandardError=append:/var/log/x402/%i/facilitator.err.log
 ExecStartPre=/usr/local/libexec/x402/x402-creds %i database-url.testnet:1000 rpc-urls.testnet:1000 approle-role-id.testnet:1000 approle-secret-id.testnet:1000
 # The last image that was ready, unless a deploy is starting this one.
 ExecStartPre=/bin/sh -c '[ -e /run/x402/%i/deploying ] || cp digest.good digest'
 # --exit-code-from: a plain `up` exits 0 whatever the container's code.
-ExecStart=/usr/local/libexec/x402/x402-compose %i up --no-deps --pull never --exit-code-from facilitator facilitator
+ExecStart=/usr/local/libexec/x402/x402-compose %i up --no-log-prefix --no-color --no-deps --pull never --exit-code-from facilitator facilitator
 ExecStop=/usr/local/libexec/x402/x402-compose %i stop facilitator
+# Every end but a success counts facilitator_failures_total (0027 decision 43): a crash after
+# ready in cycles of a minute or more never reaches StartLimitBurst. "-": a failed write never
+# changes the result or the restart.
+ExecStopPost=-/usr/local/libexec/x402/x402-host-probe stopped
 Restart=on-failure
 RestartSec=5
 TimeoutStartSec=60

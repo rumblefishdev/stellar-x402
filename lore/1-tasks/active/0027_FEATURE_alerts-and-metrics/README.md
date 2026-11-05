@@ -47,6 +47,10 @@ history:
     status: active
     who: akot
     note: "#114, from the same review: decisions 40-41 (the backups and snapshots groups apart from host, the fee account named in the balance alarms with a testnet top-up in the runbook)."
+  - date: "2026-11-05"
+    status: active
+    who: akot
+    note: "Decisions 42-54 for #113, the server side, from its spine (notes/S-pr113-spine.md): a counter for failed ends of x402@, the agent's two host series, one file per unit, an hourly signing helper, OpenBao on its socket, stamp files, `/` as the one mount, the restart window, the Docker CE spike."
 ---
 
 # Alerts and metrics
@@ -441,6 +445,77 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     elsewhere. The address is public: `/supported` lists it as the signer. The descriptions point to
     the runbook's new Topping up the fee account, whose testnet merge was tried between two one-off
     accounts. An address change, a key rotation, is a config change and an alarm deploy.
+42. **The server side has a spine of its own** (akot, 2026-11-05).
+    [S-pr113-spine](notes/S-pr113-spine.md) fixes what #113's units, agent config, probe and
+    playbook share with each other and with #112 and #114: one table of files, streams and
+    filters, one emitter for host lines, one creator per path, and the rollout. It comes from
+    seven researches against the sources (systemd 255, the agent 1.300074, the signing helper
+    1.8.6, Compose 5.1.3, logrotate 3.21, Ansible) and four reviews of the spine. Decisions 43-54
+    are its choices. #113's decisions are numbered after #114's 23-41.
+43. **A failed end of the facilitator's unit is counted** (akot, 2026-11-05). `x402@`'s
+    `ExecStopPost` runs `x402-host-probe stopped`, which writes `facilitator_failures_total` when
+    `SERVICE_RESULT` isn't `success`, and `facilitator-failed` is an Event alarm in `host` (#114).
+    A crash after `ready` in cycles of a minute or more never reaches `StartLimitBurst`, so nothing
+    fired on it. `NRestarts` would lose counts: `reset-failed` and a manual restart, which the
+    watchdog and the deploy both do, zero it. The counter also takes a drain cut by
+    `TimeoutStopSec`, a `dockerd` crash, and the watchdog's kill of a hung process, which
+    `watchdog-restart` reports too.
+44. **The agent writes the catalog's two host series and nothing else** (akot, 2026-11-05).
+    `omit_hostname`, a rollup to `[["path"]]` and `drop_original_metrics` give
+    `disk_used_percent{path="/"}` and `mem_used_percent` with no dimension. Nothing in the
+    agent's JSON drops `fstype`, and `drop_device` stays out: an original with only `path` gets
+    no rollup and would be dropped whole. The catalog closes `path` to `/`, and
+    `telemetry-silent` reads both series (#114), so a lost disk series fires.
+45. **One file per unit, split only where EMF is** (akot, 2026-11-05). Only `x402@` keeps stdout
+    and stderr apart; the other units write both to one file, in order. Every line starts an event
+    on the files that carry EMF, and the others keep the agent's default, so a stack trace stays
+    one event. Each file is its own stream. The directories are `root:cwagent` 2750, and a
+    logrotate config, state and 10-minute timer (`*:00/10:20`) of our own keep the daily
+    `logrotate.timer` off the files.
+46. **The signing helper runs once an hour** (akot, 2026-11-05). `aws_signing_helper update
+    --once`, a oneshot as `cwagent` on an hourly timer, asks for a 12 h session each time, so the
+    file always holds keys with about 11 h left and the agent ships through a Roles Anywhere
+    outage that long (decision 30); a helper left running refreshes only 5 minutes before expiry.
+    The key reaches it through `LoadCredentialEncrypted=`, since `x402-creds` decrypts for
+    root-run containers. `credentials_age_seconds` and `credentials-stale` (above 7,500 s: two
+    runs and 5 minutes) show a helper that stopped before its keys run out.
+47. **OpenBao is checked on testnet's socket** (akot, 2026-11-05). The probe asks `sys/health`
+    from the host through the socket the facilitator signs through. `bao status` through
+    `docker compose exec` would run about 71 MB inside OpenBao's 256 MB limit every minute, and a
+    timed-out `exec` leaves its process behind. A sign that fails while OpenBao is up stays
+    `signer-failures`' (#112).
+48. **Backup and snapshot ages come from stamp files** (akot, 2026-11-05). A job touches
+    `/var/lib/x402/last-ok/<job>` only after it succeeded, as root, and the probe reads the mtime;
+    a missing stamp reads as a job that never ran. 0026 adds the `touch` to its jobs, and may set
+    the time from the repository. `wal_failing` reads 1 after a Postgres crash too, since
+    PostgreSQL 15 and later reset `pg_stat_archiver`; 0026 is asked for `pg_switch_wal()` after a
+    start and an `archive_timeout` of about 60 s.
+49. **The disks and the audit volume are `/`** (akot, 2026-11-05). `host.diskMounts` is `["/"]`
+    and `host.auditDiskMount` is `"/"` (#114): OpenBao's audit volume lies on `/` with everything
+    else, so `audit-disk` and `disk` read one series. `/boot` stays out: filling it blocks a
+    kernel update, not the facilitator.
+50. **The restart window, in the brief's order, while idle** (akot, 2026-11-05). After the merge's
+    deploy, the playbook and the admin step: stop `x402@production`, restart `x402-openbao`,
+    `x402-db-testnet@production` and `x402-tunnel@production`, start `x402@production`. The
+    runbook takes this order. Typically 30 to 60 s, about 8.3 minutes with every cap hit, so it
+    runs while `/settle` is idle and, when the timing allows, before `uptime`'s group goes on.
+51. **The hand-run migration writes to `deploy.log`** (akot, 2026-11-05). The runbook's
+    `systemd-run --unit=x402-migrate` appends to the deploy's file, so a migration run by hand
+    ships like one in a deploy (decision 1).
+52. **A full disk never stops a rollback, and every timed oneshot has a timeout** (akot,
+    2026-11-05). `x402-deploy` prints through a `say` that ignores a failed write: under
+    `set -e`, a failed `echo` ended the script before its rollback. The watchdog gets the
+    `TimeoutStartSec` it lacked. The runbook's `journalctl` steps for units whose output moves to
+    files change with them.
+53. **`cwagent`'s way to root waits for 0038** (akot, 2026-11-05). The agent hands its `etc/` to
+    `cwagent` at every start, and its root wrapper translates that config at the next one, so a
+    compromised `cwagent` could make the agent root. A drop-in that restores a root-owned config
+    first comes before mainnet.
+54. **The spike is repeated on Docker CE in a VM** (akot, 2026-11-05). A multipass VM with Ubuntu
+    24.04, systemd 255, and the server's Docker CE 29.5.1, Compose 5.1.3 and `daemon.json` repeats
+    the spike's cases and adds dockerd restarts under `live-restore`, a full disk, the
+    `ExecStopPost` results, the playbook's runs, and a stub that answers the agent's CBOR
+    `PutMetricData`. Nothing runs on the server for it.
 55. **A write that loses or throws after another won keeps the key out** (akot, 2026-11-05;
     from Karol's review of #112; completes decision 21). Decision 21 fixed the order where the
     winner returns last. In the other order, a winner that returned first and a racing write that
