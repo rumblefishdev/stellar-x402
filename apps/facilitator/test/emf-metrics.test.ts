@@ -201,6 +201,21 @@ describe("emfMetrics", () => {
     expect(stamps("settlement_sweeps_total", writes)).toEqual([T0 + MIN]);
   });
 
+  it("a seed keys as an increment does: a value outside its list shares the `other` line", () => {
+    const { m, writes, issues, time } = setup();
+    m.seedZero([
+      { name: "settlement_sweeps_total", labels: { network: TESTNET, outcome: "bogus" } },
+    ]);
+    m.for({ network: TESTNET }).increment("settlement_sweeps_total", { outcome: "weird" });
+    time.advance(MIN);
+    const got = linesFor("settlement_sweeps_total", writes);
+    expect(got.map((o) => [o.outcome, o.settlement_sweeps_total])).toEqual([["other", 1]]);
+    expect(issues.filter((i) => i.kind === "unknown-value").map((i) => i.value)).toEqual([
+      "bogus",
+      "weird",
+    ]);
+  });
+
   it("stop() drops the open window, stops the timers and writes nothing after it", async () => {
     const { m, writes, time } = setup();
     const net = m.for({ network: TESTNET });
@@ -408,14 +423,21 @@ describe("emfMetrics", () => {
     }
   });
 
-  it("a non-finite or negative by is ignored; labels are copied on store", () => {
-    const { m, writes, time } = setup();
+  it("a non-finite or negative by is dropped and reported; labels are copied on store", () => {
+    const { m, writes, issues, time } = setup();
     const net = m.for({ network: TESTNET });
     for (const by of [NaN, Infinity, -1]) {
       net.increment("settlement_outcomes_total", OUTCOME, by);
       net.increment("signer_failures_total", {}, by);
     }
     expect(writes).toHaveLength(0);
+    // Each kind once per name: a fee turned NaN leaves a trace instead of vanishing.
+    expect(issues).toEqual([
+      { kind: "non-finite", name: "settlement_outcomes_total" },
+      { kind: "non-finite", name: "signer_failures_total" },
+      { kind: "negative", name: "settlement_outcomes_total" },
+      { kind: "negative", name: "signer_failures_total" },
+    ]);
     // The root passes the caller's object on as is; the stored series must not follow it.
     const labels: Labels = { route: "/verify", status: 200 };
     m.increment("http_requests_total", labels);

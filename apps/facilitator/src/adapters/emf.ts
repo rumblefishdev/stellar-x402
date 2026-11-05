@@ -24,9 +24,11 @@ export interface BuildIssue {
   /**
    * `no-valid-set`: a set's `when` matched (or it had none) but a dimension had no valid value. A
    * line whose sets all have a `when` that doesn't match is a designed-silent path, no issue.
-   * `read-failed` comes from the adapter only: a gauge's `read()` threw.
+   * `read-failed` and `negative` come from the adapter only: a gauge's `read()` threw, or an
+   * increment's `by` was below 0 (a non-finite `by` is `non-finite`).
    */
-  kind: "unknown-metric" | "unknown-value" | "no-valid-set" | "non-finite" | "read-failed";
+  kind:
+    "unknown-metric" | "unknown-value" | "no-valid-set" | "non-finite" | "negative" | "read-failed";
   name: string;
   /** For `unknown-value`: the dimension, and the value written as `other`. */
   dim?: string;

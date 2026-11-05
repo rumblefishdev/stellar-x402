@@ -153,7 +153,9 @@ export function emfMetrics(
 
   function applySeeds(): void {
     for (const { name, labels } of seeds) {
-      const key = keyOf(name, labels);
+      // Keyed as an increment is, so a value written as `other` shares the increments' line.
+      const { key, issues } = counterKeyOf(name, labels);
+      report(issues);
       const series = counters.get(key);
       if (series) series.seed = true;
       else counters.set(key, { name, labels, sum: 0, seed: true });
@@ -290,7 +292,9 @@ export function emfMetrics(
     increment(name, labels = {}, by = 1) {
       try {
         if (stopped) return;
-        if (typeof by !== "number" || !Number.isFinite(by) || by < 0) return;
+        if (typeof by !== "number" || !Number.isFinite(by))
+          return report([{ kind: "non-finite", name }]);
+        if (by < 0) return report([{ kind: "negative", name }]);
         if (!byName(name)) return report([{ kind: "unknown-metric", name }]);
         roll(now());
         arm();
