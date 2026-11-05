@@ -61,8 +61,7 @@ that differs from the shape's defaults.
 
 | Shape | Rule | Missing data | OK message |
 | --- | --- | --- | --- |
-| Event | The statistic at or over the threshold in 1 of N periods, so a late point still counts. Default: `Sum`, 1-minute periods, N = 15 | Not breaching | None: OK proves nothing about the cause |
-| Count | `Sum` over one 5-minute period at or over the threshold, 1 of 3 periods. A burst that a period boundary splits counts in two periods: accepted | Not breaching | None |
+| Event | The statistic at or over the threshold in 1 of N periods, so a late point still counts. Default: `Sum`, 1-minute periods, N = 15, at 1 or more. A count over 5 minutes is an Event with 5-minute periods, N = 3 and its threshold; a burst that a period boundary splits counts in two periods: accepted | Not breaching | None: OK proves nothing about the cause |
 | Level | The statistic past the threshold in M of M periods, as listed | Ignore (`treatMissingData: ignore`): the alarm keeps its state, so a crash isn't read as a recovery (decision 19). A row may say otherwise | Yes, with how it re-arms |
 | Silence | `FILL(SampleCount(m), 0) < 1` in 3 of 3 five-minute periods, so it tests that points arrive, not their value. `BREACHING` as a backstop | Breaching | Yes |
 
@@ -126,10 +125,10 @@ dimensions would cost about $15 a month at 50 channels, so we accept this.
 | `history-gone` | `settlement_history_gone_total` | Event | 1 or more; an operator closes the record (runbook). A key is reported once per process, so after each restart or deploy every record still open with its history gone is reported again, in one message: read the log for each record. Match the `settlementKey` in the `settlement_history_gone` log against the records already being handled, and close them to stop the repeats | Not breaching: as above |
 | `landed-after-expired` | `settlement_landed_after_expired_total` | Event | 1 or more | Not breaching: as above |
 | `sweeps-stopped` | `settlement_sweeps_total{outcome:"listed"}`, per network | Level, `Sum` below 1, 5 of 5 one-minute periods | No sweep listed the records for 5 minutes. A live process with failing or hung sweeps writes 0 | Ignore: as above |
-| `http-500` | `http_requests_total`, the `[status]` set at `500`: no `route`, no `network` | Count | 5 or more in 5 minutes. A count, since a rate flaps at low traffic. A lease or drain 503 isn't counted | Not breaching: as above |
+| `http-500` | `http_requests_total`, the `[status]` set at `500`: no `route`, no `network` | Event, 5-minute periods, N = 3, at 5 or more | 5 or more in 5 minutes. A count, since a rate flaps at low traffic. A lease or drain 503 isn't counted | Not breaching: as above |
 | `signer-failures` | `signer_failures_total` | Event | 1 or more. On a quiet server one failed payment may be all there is, and nothing else sees a signer that fails while OpenBao looks healthy (a restored snapshot, a changed key policy). The check after start counts each retry, and the alarm sends one message for them | Not breaching: as above |
 | `rpc-on-fallback` | `rpc_on_fallback` | Level, `Minimum`, 15 of 15 one-minute periods | 1 for 15 minutes; its OK reads as the recovery. Reads the sampled `Values` | Ignore: as above |
-| `pool-health` | `pool_events_total` for `type="sequence-resync"` | Count | 5 or more in 5 minutes | Not breaching: as above |
+| `pool-health` | `pool_events_total` for `type="sequence-resync"` | Event, 5-minute periods, N = 3, at 5 or more | 5 or more in 5 minutes | Not breaching: as above |
 | `failure-ours` | `spend_failure_attributed_total` for `fault="ours"` | Event | 1 or more | Not breaching: as above |
 | `commit-unmatched` | `spend_commit_unmatched_total` | Event | 1 or more | Not breaching: as above |
 
@@ -160,7 +159,7 @@ with 0026, and in `host` they would keep the probe's other alarms off until then
 | Alarm | Signal | Shape | Fires when | Missing data |
 | --- | --- | --- | --- | --- |
 | `log-volume` | `AWS/Logs IncomingBytes` | Level | Measure: a flood of log lines, on the bill as on the disk | Ignore: `telemetry-silent` |
-| `emf-validation` | `AWS/Logs EMFValidationErrors` for the metrics log group | Event | 1 or more: CloudWatch rejected a line, so its metrics are gone: Event and Count alarms on them read OK, and Level ones keep their last state | Not breaching: written only when a line fails |
+| `emf-validation` | `AWS/Logs EMFValidationErrors` for the metrics log group | Event | 1 or more: CloudWatch rejected a line, so its metrics are gone: Event alarms on them read OK, and Level ones keep their last state | Not breaching: written only when a line fails |
 | `emf-parsing` | `AWS/Logs EMFParsingErrors` for the metrics log group | Event | 1 or more: a line CloudWatch couldn't parse as EMF | As above |
 | `telemetry-silent` | `mem_used_percent` and `disk_used_percent{path="/"}` from the agent: `MIN([FILL(mem, 0), FILL(disk, 0)])` | Silence | 15 minutes of either: agent, credentials or egress, or a config that lost one series (decision 44) | Breaching |
 | `facilitator-silent` | `settlement_sweeps_total{outcome:"listed"}`, per network, written every minute once the service has started, 0 included | Silence | 15 minutes. Fires beside `uptime` when the process is down, or when its start hangs or fails, a crash loop included: a start writes the point only once it has started | Breaching |

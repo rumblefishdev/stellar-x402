@@ -49,10 +49,9 @@ describe("series come only through the catalog", () => {
   test("a dimension value the catalog doesn't write fails synth", () => {
     const { f } = factory();
     expect(() =>
-      f.count("x", {
+      f.event("x", {
         group: "facilitator",
         signal: { catalog: "http_requests_total", dims: { status: "404" } },
-        threshold: 5,
         description: text,
       }),
     ).toThrow(/written only when/);
@@ -110,11 +109,17 @@ describe("shapes", () => {
     expect(a?.Properties).not.toHaveProperty("OKActions");
   });
 
-  test("Count: a 5-minute Sum, 1 of 3, no OK message", () => {
+  test("Event as a count: a 5-minute Sum at the threshold, 1 of 3, no OK message", () => {
     const { f, alarms } = factory();
-    f.count("http-500", {
+    f.event("pool-health", {
       group: "facilitator",
-      signal: { catalog: "http_requests_total", dims: { status: "500" } },
+      network: "stellar:testnet",
+      signal: {
+        catalog: "pool_events_total",
+        dims: { network: "stellar:testnet", type: "sequence-resync" },
+      },
+      periodMinutes: 5,
+      periods: 3,
       threshold: 5,
       description: text,
     });
@@ -249,7 +254,7 @@ describe("descriptions", () => {
       "What happened. Next: Do this. No data: Covered by x. OK once it is back within its threshold; the next crossing fires it again. Runbook: docs/monitoring.md, pending.",
     );
     expect(describeAlarm("probe-silent", text, "silence")).toContain("OK once points arrive again");
-    expect(describeAlarm("http-500", text, "count")).not.toContain(" OK ");
+    expect(describeAlarm("http-500", text, "event")).not.toContain(" OK ");
   });
 
   test("refuse non-ASCII, which cdk diff would show as a change forever", () => {

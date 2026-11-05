@@ -57,7 +57,7 @@ export function addCostSilenceAlarms(f: AlarmFactory, c: EnvironmentConfig): voi
       group: "telemetry",
       signal: { aws: "AWS/Logs", metric, dims: { LogGroupName: n.metricsLogGroup } },
       description: {
-        what: `CloudWatch ${kind} an EMF line in ${n.metricsLogGroup}, so its metrics are gone: Event and Count alarms on them read OK, and Level ones keep their last state.`,
+        what: `CloudWatch ${kind} an EMF line in ${n.metricsLogGroup}, so its metrics are gone: Event alarms on them read OK, and Level ones keep their last state.`,
         next: "Find the line with Logs Insights in that group around the time; a writer or catalog change is the usual cause.",
         noData: "Written only when a line fails, so no data means none failed.",
       },

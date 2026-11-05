@@ -302,8 +302,8 @@ const LEVEL: Record<string, readonly [keyof typeof OP, number, string, number, n
   "watch-errors": [">=", 1, "Sum", 300, 2, 3],
 };
 
-/** Each Count alarm's threshold; the shape fixes the rest. */
-const COUNT: Record<string, number> = {
+/** Each Event alarm's threshold other than 1, which the list writes as "at N or more". */
+const EVENT_THRESHOLD: Record<string, number> = {
   "http-500": t.http500Count,
   "pool-health": t.sequenceResyncCount,
 };
@@ -315,11 +315,17 @@ describe("each alarm matches its row in G-alarm-list", () => {
     expect([...new Set(records.map((r) => r.base))].sort()).toEqual(rows.map((r) => r.name).sort());
   });
 
-  test("LEVEL and COUNT write out every Level and Count alarm, and only those", () => {
+  test("LEVEL writes out every Level alarm, and only those", () => {
     const bases = (shape: string) =>
       [...new Set(records.filter((r) => r.shape === shape).map((r) => r.base))].sort();
     expect(Object.keys(LEVEL).sort()).toEqual(bases("level"));
-    expect(Object.keys(COUNT).sort()).toEqual(bases("count"));
+  });
+
+  test("an Event row says its threshold exactly when it isn't 1", () => {
+    for (const row of rows.filter((r) => r.shape.startsWith("Event"))) {
+      const said = /at (\d+) or more/.exec(row.shape)?.[1];
+      expect(said === undefined ? 1 : Number(said), row.name).toBe(EVENT_THRESHOLD[row.name] ?? 1);
+    }
   });
 
   test.each(rows.map((r) => [r.name, r]))("%s", (base, row: Row) => {
@@ -338,19 +344,7 @@ describe("each alarm matches its row in G-alarm-list", () => {
         expect(p["DatapointsToAlarm"]).toBe(1);
         expect([p["ComparisonOperator"], p["Threshold"]]).toEqual([
           "GreaterThanOrEqualToThreshold",
-          1,
-        ]);
-      } else if (row.shape.startsWith("Count")) {
-        expect(r.shape).toBe("count");
-        expect([statOf(p), periodOf(p), p["EvaluationPeriods"], p["DatapointsToAlarm"]]).toEqual([
-          "Sum",
-          300,
-          3,
-          1,
-        ]);
-        expect([p["ComparisonOperator"], p["Threshold"]]).toEqual([
-          "GreaterThanOrEqualToThreshold",
-          COUNT[base],
+          EVENT_THRESHOLD[base] ?? 1,
         ]);
       } else if (row.shape.startsWith("Silence")) {
         expect(r.shape).toBe("silence");

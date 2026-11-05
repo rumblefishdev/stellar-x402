@@ -9,9 +9,11 @@ const SILENT_EVENT = "Nothing happened; facilitator-silent covers a stopped proc
 export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
   const t = c.thresholds;
 
-  f.count("http-500", {
+  f.event("http-500", {
     group: "facilitator",
     signal: { catalog: "http_requests_total", dims: { status: "500" } },
+    periodMinutes: 5,
+    periods: 3,
     threshold: t.http500Count,
     description: {
       what: `The facilitator answered with status 500 at least ${t.http500Count} times in 5 minutes, across every route and network. A lease or drain 503 isn't counted.`,
@@ -209,10 +211,12 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
       },
     });
 
-    f.count("pool-health", {
+    f.event("pool-health", {
       group: "facilitator",
       network,
       signal: { catalog: "pool_events_total", dims: { network, type: "sequence-resync" } },
+      periodMinutes: 5,
+      periods: 3,
       threshold: t.sequenceResyncCount,
       description: {
         what: `Channels on ${network} resynced their sequence numbers ${t.sequenceResyncCount} or more times in 5 minutes: something else uses the channel accounts, or submissions keep failing.`,

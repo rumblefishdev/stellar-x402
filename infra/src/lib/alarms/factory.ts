@@ -11,7 +11,7 @@ import type { Construct } from "constructs";
 import type { AlarmGroup } from "../config.js";
 import { networkSuffix } from "../names.js";
 
-export type Shape = "event" | "count" | "level" | "silence";
+export type Shape = "event" | "level" | "silence";
 
 /**
  * The AWS metrics an alarm may read. The catalog declares only our three namespaces, so these are
@@ -89,11 +89,6 @@ export interface EventSpec extends Common {
   readonly threshold?: number;
 }
 
-export interface CountSpec extends Common {
-  readonly signal: Signal;
-  readonly threshold: number;
-}
-
 export interface LevelSpec extends Common {
   readonly signal: Signal | MathSignal;
   readonly statistic: Statistic;
@@ -168,7 +163,10 @@ export class AlarmFactory {
     private readonly props: AlarmFactoryProps,
   ) {}
 
-  /** The Event shape: the statistic at or over the threshold in 1 of N periods, no OK message. */
+  /**
+   * The Event shape: the statistic at or over the threshold in 1 of N periods, no OK message. A
+   * count over 5 minutes (`pool-health`) is this shape with 5-minute periods and a threshold.
+   */
   event(base: string, spec: EventSpec): cloudwatch.Alarm | undefined {
     const periods = spec.periods ?? 15;
     return this.make(base, "event", spec, {
@@ -176,18 +174,6 @@ export class AlarmFactory {
       comparisonOperator: COMPARISON[">="],
       threshold: spec.threshold ?? 1,
       evaluationPeriods: periods,
-      datapointsToAlarm: 1,
-      treatMissingData: MISSING.notBreaching,
-    });
-  }
-
-  /** The Count shape: `Sum` over 5 minutes at or over the threshold, 1 of 3, no OK message. */
-  count(base: string, spec: CountSpec): cloudwatch.Alarm | undefined {
-    return this.make(base, "count", spec, {
-      metric: this.metric(spec.signal, "Sum", 5),
-      comparisonOperator: COMPARISON[">="],
-      threshold: spec.threshold,
-      evaluationPeriods: 3,
       datapointsToAlarm: 1,
       treatMissingData: MISSING.notBreaching,
     });
@@ -245,7 +231,7 @@ export class AlarmFactory {
       actionsEnabled: true,
     });
     alarm.addAlarmAction(this.props.action);
-    // An OK on an Event or Count alarm proves nothing about the cause (G-alarm-list).
+    // An OK on an Event alarm proves nothing about the cause (G-alarm-list).
     if (shape === "level" || shape === "silence") alarm.addOkAction(this.props.action);
     this.records.push({
       alarmName,
