@@ -20,15 +20,22 @@ admin with `sudo`; the admins are the explorer's (`soroban-block-explorer`'s
 | `/run/x402/openbao/`                | the decrypted seal key; the recovery key for a moment (tmpfs)      |
 | `/usr/local/libexec/x402/`          | the units' scripts (`deploy/libexec`)                              |
 | `/etc/systemd/system/x402*`         | the units (`deploy/systemd`)                                       |
+| `/etc/x402/`                        | the CloudWatch agent's config, the rotation's, the helper's ARNs   |
+| `/var/log/x402/`                    | the files the CloudWatch agent ships (The CloudWatch agent)        |
+| `/var/lib/x402/last-ok/`            | the stamps a backup or snapshot job touches after it succeeds      |
 
-| Unit                             | Runs                                            |
-| -------------------------------- | ----------------------------------------------- |
-| `x402@production`                | the facilitator                                 |
-| `x402-db-testnet@production`     | testnet's PostgreSQL                            |
-| `x402-tunnel@production`         | `cloudflared`                                   |
-| `x402-openbao`                   | OpenBao, the signer of every network            |
-| `x402-deploy@production`         | a deploy (a oneshot, started by `deploy.sh`)    |
-| `x402-watchdog@production.timer` | every 30 s, restarts an `unhealthy` facilitator |
+| Unit                                | Runs                                            |
+| ----------------------------------- | ----------------------------------------------- |
+| `x402@production`                   | the facilitator                                 |
+| `x402-db-testnet@production`        | testnet's PostgreSQL                            |
+| `x402-tunnel@production`            | `cloudflared`                                   |
+| `x402-openbao`                      | OpenBao, the signer of every network            |
+| `x402-deploy@production`            | a deploy (a oneshot, started by `deploy.sh`)    |
+| `x402-watchdog@production.timer`    | every 30 s, restarts an `unhealthy` facilitator |
+| `amazon-cloudwatch-agent`           | the CloudWatch agent, as `cwagent`              |
+| `x402-cloudwatch-credentials.timer` | every hour, the agent's 12-hour AWS keys        |
+| `x402-host-probe.timer`             | every minute, the host's signals as metrics     |
+| `x402-logrotate.timer`              | every 10 minutes, rotates `/var/log/x402`       |
 
 Status at a glance:
 
@@ -632,6 +639,98 @@ testnet's reset, Friendbot creates it again (OpenBao, step 6).
 **Mainnet.** A withdrawal from the company's exchange account to the fee account. Who makes it,
 and a backup person, are named before mainnet (ADR 0013, 0026).
 
+## The CloudWatch agent
+
+The only process on the server that talks to AWS (0027, its server-side spine): it ships the
+files under `/var/log/x402/` to `/x402/production/app` and `/x402/production/metrics`, and the
+server's memory and disk use to `x402-host`. Nothing is ordered after it, so an AWS or agent
+outage stops no container. Its keys come from IAM Roles Anywhere: every hour
+`x402-cloudwatch-credentials` runs `aws_signing_helper update --once` as `cwagent`, with the key
+`/srv/x402/production/creds/cloudwatch-agent-key.cred` and the certificate
+`/srv/x402/production/cloudwatch-agent.crt`, and writes 12-hour keys to
+`/run/x402-cloudwatch/credentials`, which only `cwagent` reads. So the agent ships through a Roles
+Anywhere outage of up to about 11 hours. The agent starts the helper at boot, and starts whether
+it succeeded or not.
+
+**Before the first start,** once, each step agreed separately (the AWS account is shared):
+
+1. `/x402/production/server-ip` in SSM and the Telemetry stack (`infra/README.md`): the trust
+   anchor, profile, logging role and the two log groups.
+2. The ARNs into `deploy/ansible/inventory.ini` (`logging_trust_anchor_arn`,
+   `logging_profile_arn`): `make telemetry-arns` in `infra/`. The playbook builds the role's ARN
+   from their account.
+3. The certificate. The key was made on the server on 2026-11-05 and its CSR
+   (`CN=x402-cloudwatch-agent-production`, `CA:FALSE`, `digitalSignature`, `clientAuth`, as
+   Roles Anywhere and the trust policy require) went to the ClickHouse project's CA holder, who
+   signs it for 365 days; the explorer's `issue-client-cert.sh` makes its own key, so it signs
+   our CSR instead. The certificate is public: commit it as
+   `deploy/ansible/files/cloudwatch-agent-production.crt` by pull request to `deploy/production`.
+   The playbook checks it (`deploy/scripts/check-agent-certificate.sh`) and that it is the key's
+   before it copies it.
+
+**The admin step,** as `deploy` with sudo, after the playbook run from that merge:
+
+```sh
+sudo systemctl start x402-cloudwatch-credentials.service
+journalctl -u x402-cloudwatch-credentials -n 5   # "Credentials will be refreshed at ..."
+sudo test -s /run/x402-cloudwatch/credentials && echo ok
+sudo systemctl start x402-cloudwatch-credentials.timer amazon-cloudwatch-agent
+sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a status
+ps -o user= -p "$(systemctl show -p MainPID --value amazon-cloudwatch-agent)"   # cwagent
+sudo grep -E ' E! |AccessDenied|Expired' /opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log
+sudo tail -n 8 /var/log/x402/host/metrics.log   # credentials_age_seconds under 3600
+```
+
+Then, with SSO, `aws logs tail /x402/production/metrics --log-stream-names host --since 5m` shows
+the probe's lines, and `make check-series GROUP=host` in `infra/` the series.
+
+**Renewing the certificate,** yearly; the `certificate` alarm fires 30 days ahead. A new key each
+time, kept as a dated version behind `cloudwatch-agent-key.cred`, as `rpc-urls.testnet` is
+(Credentials). The decrypted key goes through a pipe only:
+
+```sh
+d=$(date +%F); c=/srv/x402/production/creds
+sudo sh -c "umask 077; openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 |
+  systemd-creds encrypt --with-key=host --name=cloudwatch-agent-key - $c/cloudwatch-agent-key.$d.cred"
+sudo systemd-creds decrypt --name=cloudwatch-agent-key "$c/cloudwatch-agent-key.$d.cred" - |
+  openssl req -new -key /dev/stdin -subj /CN=x402-cloudwatch-agent-production \
+    -addext 'basicConstraints=critical,CA:FALSE' -addext 'keyUsage=critical,digitalSignature' \
+    -addext 'extendedKeyUsage=clientAuth'   # the CSR, for the CA holder
+```
+
+The CA holder reissues the CN (`--force`) from the CSR, and the certificate goes through a pull
+request to `deploy/production`. Once its deploy has ended, in one sitting: the key first, since
+the playbook refuses a certificate that isn't the active key's.
+
+```sh
+# The first renewal only: today's key becomes its first dated version.
+sudo mv "$c/cloudwatch-agent-key.cred" "$c/cloudwatch-agent-key.2026-11-05.cred"
+sudo ln -sfn "cloudwatch-agent-key.$d.cred" "$c/cloudwatch-agent-key.cred"
+```
+
+Then the playbook, which now copies the certificate, and
+`sudo systemctl start x402-cloudwatch-credentials.service` with the checks of the admin step. The
+keys in the file last 12 hours, which covers the sitting; moving the symlink back undoes it.
+Remove the old version once the start succeeded.
+
+**Upgrading the agent or the helper** changes the version and the SHA-256 in the playbook's vars
+by pull request. The agent's package is signed: verify it once, on a laptop, before pinning it,
+and re-run the 0027 spike's stub case for its `PutMetricData` before it merges.
+
+```sh
+v=1.300074.1b2005; u=https://amazoncloudwatch-agent.s3.amazonaws.com
+curl -fsSLO "$u/ubuntu/amd64/$v/amazon-cloudwatch-agent.deb"
+curl -fsSLO "$u/ubuntu/amd64/$v/amazon-cloudwatch-agent.deb.sig"
+curl -fsSL "$u/assets/amazon-cloudwatch-agent.gpg" | gpg --import
+gpg --fingerprint 937616F3450B7D806CBD9725D58167303B789C72   # must be listed
+gpg --verify amazon-cloudwatch-agent.deb.sig amazon-cloudwatch-agent.deb
+sha256sum amazon-cloudwatch-agent.deb
+```
+
+AWS doesn't sign the helper's Linux build: its SHA-256 is the one the Roles Anywhere user guide's
+credential helper page lists, which shows only the current version, so read it on the day of the
+pin.
+
 ## Not here yet
 
 - OpenBao's snapshots and restore drill, key rotation as an on-chain signer change, mainnet's
@@ -646,6 +745,8 @@ and a backup person, are named before mainnet (ADR 0013, 0026).
   the BIOS. Turning it on needs Hetzner's KVM console and a reboot of the server the explorer
   shares (0100, before mainnet).
 - pgBackRest backups, the database's restore drill and upgrade policy.
-- The CloudWatch agent and renewing its Roles Anywhere certificate (0027).
+- The agent's config under `cwagent`: the agent hands its `etc/` to `cwagent` at every start and
+  its root wrapper translates it at the next one, so a compromised `cwagent` could make the agent
+  root. A drop-in that restores a root-owned config first comes before mainnet (0038).
 - Restoring the service on another machine, RPC failover, testnet reset recovery, the incident
   process; mainnet (0038).
