@@ -181,8 +181,22 @@ describe("CATALOG", () => {
       const keys = [
         ...setsOf(m).flatMap((s) => [...s.dims, ...Object.keys(s.when ?? {})]),
         ...Object.keys(m.values ?? {}),
+        ...(m.fields ?? []),
       ];
       for (const k of keys) expect(["payer", "payTo", "pay_to"], m.name).not.toContain(k);
+    }
+  });
+
+  test("a log field is in no set and no values list, and never network (decision 57)", () => {
+    for (const m of ALL) {
+      const billed = new Set([
+        ...setsOf(m).flatMap((s) => [...s.dims, ...Object.keys(s.when ?? {})]),
+        ...Object.keys(m.values ?? {}),
+        "network",
+      ]);
+      for (const field of m.fields ?? [])
+        expect(billed.has(field), `${m.name}.${field}`).toBe(false);
+      expect(new Set(m.fields ?? []).size, m.name).toBe((m.fields ?? []).length);
     }
   });
 

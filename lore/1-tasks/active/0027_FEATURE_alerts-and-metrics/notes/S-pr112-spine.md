@@ -100,8 +100,9 @@ Each `AD` names what it **Binds**, what it **Prevents**, and the **Rule**.
     network-scoped name on the root writes no line (no valid set) and the writer logs
     `metric_issue` once; a process-scoped name on a child writes its line, with `network` only a
     log field.
-  - **Labels:** only `name` is typed against the catalog. `labels` stays a permissive record, and
-    `network` is reserved for `for()`.
+  - **Labels:** typed against the catalog too (decision 57): a metric's port takes only its sets'
+    dims and `when` keys, its `values` keys and its `fields` (log-only labels), so a mistyped key
+    doesn't compile; one with none takes no labels. `network` is reserved for `for()`.
   - **Test double:** `memoryMetrics()` itself takes every facilitator name, so a test can hand it
     to a part of either scope; its `for()` child is a plain `NetworkMetrics`, and the parts' types
     do the checking.

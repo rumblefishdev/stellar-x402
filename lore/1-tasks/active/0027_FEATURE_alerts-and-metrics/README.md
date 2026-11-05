@@ -325,6 +325,15 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     covers a listing that keeps failing. It is also set right after `listNonFinal`, from what was
     listed, so a first sweep stuck on the RPC already shows the backlog, and again at the end
     from what the sweep left open.
+57. **Label keys are typed from the catalog** (akot, 2026-11-05; from Karol's review of #112;
+    amends the spine's AD-3). A mistyped key, `{ faults: "ours" }`, matched no set's `when`, so
+    it wrote no line and logged nothing, and decision 22's scope types didn't catch it. Each
+    catalog entry now lists its log-only labels in `fields`; with its sets' dims, their `when`
+    keys and its `values`, they are the keys the port's `increment` and `registerGauge` accept
+    for that name, and a metric with none takes no labels at all. Declaring them showed 20
+    metrics writing log fields the catalog didn't name (`reason`, `origin`, `breaker`, ...); all
+    are listed now. The writer is unchanged: it still takes any record, and an `undefined`
+    value is a label not given.
 
 ## Acceptance Criteria
 

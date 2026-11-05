@@ -1,6 +1,7 @@
 import type {
   CounterName,
   GaugeName,
+  LabelKey,
   Network,
   NetworkCounterName,
   NetworkGaugeName,
@@ -8,21 +9,31 @@ import type {
   ProcessGaugeName,
 } from "@stellar-x402/metrics-catalog";
 
-export type Labels = Record<string, string | number | boolean | bigint>;
+export type LabelValue = string | number | boolean | bigint;
+/** A label set as the writer takes it; an `undefined` value is a label not given. */
+export type Labels = Record<string, LabelValue | undefined>;
+/**
+ * The labels the port accepts for `N`: only the keys the catalog declares for it (decision 57),
+ * so a mistyped key, which would write no line and log nothing, doesn't compile.
+ */
+export type LabelsOf<N extends CounterName | GaugeName> = [LabelKey<N>] extends [never]
+  ? // `{}` would take any key: a metric with none takes no label at all.
+    Record<string, never>
+  : { [K in LabelKey<N>]?: LabelValue };
 
 /** A gauge's read at a sample; `undefined` writes no sample this time (no value yet). */
-export type GaugeRead = () => { value: number; labels?: Labels } | undefined;
+export type GaugeRead<L = Labels> = () => { value: number; labels?: L } | undefined;
 
 /**
  * The root, for the parts that serve every network (the HTTP app, discovery, the cataloger, the
  * pruner). Counters push, gauges pull, and `increment` never throws. Names are typed against the
  * catalog by scope (0027 AD-3): the root takes only process-scoped names, so a network-scoped
- * metric written without its `network` doesn't compile. Labels stay a permissive record, and
- * `network` is reserved for `for()`.
+ * metric written without its `network` doesn't compile. Label keys are typed too, from the
+ * catalog's sets, `values` and `fields` (decision 57), and `network` is reserved for `for()`.
  */
 export interface ProcessMetrics {
-  increment(name: ProcessCounterName, labels?: Labels, by?: number): void;
-  registerGauge(name: ProcessGaugeName, read: GaugeRead): void;
+  increment<N extends ProcessCounterName>(name: N, labels?: LabelsOf<N>, by?: number): void;
+  registerGauge<N extends ProcessGaugeName>(name: N, read: GaugeRead<LabelsOf<N>>): void;
   /** A child scoped to one network: it adds `network` to every label set, over any given. */
   for(scope: { network: Network }): NetworkMetrics;
 }
@@ -32,8 +43,8 @@ export interface ProcessMetrics {
  * the lease, the spend lane, the balance floor, the signer). It takes only network-scoped names.
  */
 export interface NetworkMetrics {
-  increment(name: NetworkCounterName, labels?: Labels, by?: number): void;
-  registerGauge(name: NetworkGaugeName, read: GaugeRead): void;
+  increment<N extends NetworkCounterName>(name: N, labels?: LabelsOf<N>, by?: number): void;
+  registerGauge<N extends NetworkGaugeName>(name: N, read: GaugeRead<LabelsOf<N>>): void;
 }
 
 /** What a writer implements underneath both: any facilitator name, labels as given. */
@@ -46,6 +57,7 @@ export interface MetricsWriter {
 export const seriesKey = (name: string, labels: Labels = {}) =>
   `${name}${JSON.stringify(
     Object.entries(labels)
+      .filter(([, v]) => v !== undefined)
       .map(([k, v]) => [k, String(v)])
       .sort(),
   )}`;

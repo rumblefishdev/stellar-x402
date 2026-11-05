@@ -29,7 +29,7 @@ import {
 import type { PaymentPayload, PaymentRequirements, SettleResponse } from "@x402/core/types";
 import { getNetworkPassphrase } from "@x402/stellar";
 import type { Logger } from "../logger.js";
-import type { Labels, NetworkMetrics } from "../metrics.js";
+import type { LabelsOf, NetworkMetrics } from "../metrics.js";
 import {
   LeaseFencedError,
   type ClaimResult,
@@ -1179,8 +1179,9 @@ function transferFrom(transaction: Transaction): string | undefined {
 }
 
 /** `settlement_reopened_total`'s labels: `reason`, a log field, only when it isn't empty (0027). */
-export const reopenedLabels = (errorReason: string | undefined): Labels =>
-  errorReason ? { reason: errorReason } : {};
+export const reopenedLabels = (
+  errorReason: string | undefined,
+): LabelsOf<"settlement_reopened_total"> => (errorReason ? { reason: errorReason } : {});
 
 /** A record claimed before 0073 (`reopened` -1) never reopens (0073 decision 25). */
 function reopenable(record: SettlementRecord, fingerprint: string): boolean {
