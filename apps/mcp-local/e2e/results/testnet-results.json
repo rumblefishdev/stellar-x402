@@ -1,6 +1,6 @@
 {
-  "ranAt": "2026-11-04T13:24:28.318Z",
-  "commit": "6fc1623278dd56e7d1ceea270e150e264d9480d8",
+  "ranAt": "2026-11-05T08:58:44.780Z",
+  "commit": "ad62a461dc449ee928c09f8d6300b460f926ef20",
   "rows": 121,
   "failed": 0,
   "results": [
@@ -27,7 +27,7 @@
     },
     {
       "id": "E-13b",
-      "check": "signature valid for 59 more ledgers: within the offer's 300 s and 300 s",
+      "check": "signature valid for 60 more ledgers: within the offer's 300 s and 300 s",
       "expected": [
         true,
         true
@@ -1002,7 +1002,7 @@
     },
     {
       "id": "E-06",
-      "check": "call_paid_http {\"url\":\"http://127.0.0.1:65522/ok\",\"method\":\"HEAD\"}: -32602",
+      "check": "call_paid_http {\"url\":\"http://127.0.0.1:58912/ok\",\"method\":\"HEAD\"}: -32602",
       "expected": [
         true,
         true
@@ -1053,8 +1053,8 @@
     {
       "id": "E-07",
       "check": "buyer balance unchanged",
-      "expected": "196779972",
-      "got": "196779972",
+      "expected": "196729972",
+      "got": "196729972",
       "pass": true
     },
     {
@@ -1244,7 +1244,7 @@
     },
     {
       "id": "E-09g",
-      "check": "get_resource http://127.0.0.1.nip.io:49154/free",
+      "check": "get_resource http://127.0.0.1.nip.io:58928/free",
       "expected": "unsafe_url",
       "got": "unsafe_url",
       "pass": true
@@ -1409,7 +1409,7 @@
         true
       ],
       "pass": true,
-      "transaction": "1ee590b48b951008bbd1e20e6e7085e82e968801482dca39ea8129921d1db0a5"
+      "transaction": "c913a30bc2b3f1d0469298e8d6031858828650e50f25bac54579585af99c75e5"
     },
     {
       "id": "E-21",
@@ -1431,7 +1431,7 @@
         }
       ],
       "pass": true,
-      "transaction": "1ee590b48b951008bbd1e20e6e7085e82e968801482dca39ea8129921d1db0a5"
+      "transaction": "c913a30bc2b3f1d0469298e8d6031858828650e50f25bac54579585af99c75e5"
     },
     {
       "id": "E-21",
@@ -1447,7 +1447,7 @@
         "0"
       ],
       "pass": true,
-      "transaction": "1ee590b48b951008bbd1e20e6e7085e82e968801482dca39ea8129921d1db0a5"
+      "transaction": "c913a30bc2b3f1d0469298e8d6031858828650e50f25bac54579585af99c75e5"
     },
     {
       "id": "E-22a",
@@ -1471,7 +1471,7 @@
         true
       ],
       "pass": true,
-      "transaction": "3c5891c5901be08fe455d81110bf349cbe93790f232d8a89435afb29c4c5409e"
+      "transaction": "42ff9d9894a9b80ee083885e3a8b25ca9b9f9772295aa9f84011a59e5834be7e"
     },
     {
       "id": "E-22a",
@@ -1493,7 +1493,7 @@
         }
       ],
       "pass": true,
-      "transaction": "3c5891c5901be08fe455d81110bf349cbe93790f232d8a89435afb29c4c5409e"
+      "transaction": "42ff9d9894a9b80ee083885e3a8b25ca9b9f9772295aa9f84011a59e5834be7e"
     },
     {
       "id": "E-22a",
@@ -1509,7 +1509,7 @@
         "0"
       ],
       "pass": true,
-      "transaction": "3c5891c5901be08fe455d81110bf349cbe93790f232d8a89435afb29c4c5409e"
+      "transaction": "42ff9d9894a9b80ee083885e3a8b25ca9b9f9772295aa9f84011a59e5834be7e"
     },
     {
       "id": "E-22b",
@@ -1529,46 +1529,46 @@
       "id": "E-22",
       "check": "buyer balance unchanged after b and after c",
       "expected": [
-        "196759972",
-        "196759972"
+        "196709972",
+        "196709972"
       ],
       "got": [
-        "196759972",
-        "196759972"
+        "196709972",
+        "196709972"
       ],
       "pass": true
     },
     {
       "id": "E-23",
-      "check": "no buyer secret in 266 captures from 54 processes",
+      "check": "no buyer secret in 267 captures from 54 processes",
       "expected": false,
       "got": false,
       "pass": true
     },
     {
       "id": "E-23",
-      "check": "no buyer without its S secret in 266 captures from 54 processes",
+      "check": "no buyer without its S secret in 267 captures from 54 processes",
       "expected": false,
       "got": false,
       "pass": true
     },
     {
       "id": "E-23",
-      "check": "no unfunded secret in 266 captures from 54 processes",
+      "check": "no unfunded secret in 267 captures from 54 processes",
       "expected": false,
       "got": false,
       "pass": true
     },
     {
       "id": "E-23",
-      "check": "no drained (E-14b) secret in 266 captures from 54 processes",
+      "check": "no drained (E-14b) secret in 267 captures from 54 processes",
       "expected": false,
       "got": false,
       "pass": true
     },
     {
       "id": "E-23",
-      "check": "no malformed key of E-01l secret in 266 captures from 54 processes",
+      "check": "no malformed key of E-01l secret in 267 captures from 54 processes",
       "expected": false,
       "got": false,
       "pass": true

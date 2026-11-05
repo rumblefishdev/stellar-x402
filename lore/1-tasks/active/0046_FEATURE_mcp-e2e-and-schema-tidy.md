@@ -101,6 +101,10 @@ The first limit for real payments, 30 s, failed E-21 and E-22 in 1 of 2 runs wit
 it can't hold signing and our facilitator's own 30 s settle budget. At 55 s, under the MCP client's
 60 s, 3 of 3 full runs passed all 121 rows.
 
+After the review each run got a schema of its own, one channel, and the facilitator's log on stderr.
+3 more full runs: 2 passed all 121 rows. In the third, E-22a got `payment_rejected` with no money
+moved, because `/verify` hit its 10 s limit per RPC URL on the slow public RPC.
+
 ## Acceptance Criteria
 
 - [ ] One `[structure only]` PR; unit tests unchanged; an e2e run passes on its head
