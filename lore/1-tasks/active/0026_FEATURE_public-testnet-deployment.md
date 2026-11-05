@@ -184,6 +184,28 @@ history:
       with exportable=false. logrotate hasn't rotated audit.log yet: its state file shows
       2026-11-05 00:00, the first sight of a config the playbook installed on 2026-11-04, so the
       first rotation is due after 00:00 UTC on 2026-11-06.
+  - date: "2026-11-05"
+    status: active
+    who: okarcz
+    note: >
+      The backups' Storage Box access, set up and tested. Stan made two sub-accounts on BX21
+      ch-prod-01-backup (SSH on port 23, ed25519 host key
+      SHA256:XqONwb1S0zuj5A1CDxpOSuD2hnAArV1A3wKY7Z3sdgM): u595862-sub2 writes, home /x402,
+      reachable only from ch-prod-01; u595862-sub3 reads only, home /x402/data, so its
+      authorized_keys isn't the write account's. The data goes in /x402/data/pgbackrest and
+      /x402/data/openbao. The write key was made on ch-prod-01 in /run and kept only as the
+      host-encrypted credential /srv/x402/backup/creds/storage-box-ssh-key.cred
+      (--name=storage-box-ssh-key, fingerprint SHA256:B7SozkS7mimbWA1OLyEdfRJ/Yp0i/T5pfTnWJB4bQU0).
+      The restore key was made on okarcz's machine in /dev/shm and kept only in the backup
+      secret, as storage_box_ro_ssh_key with storage_box_ro_user u595862-sub3 (fingerprint
+      SHA256:cusjUd5fHX1CBCnAj1e7Fnn9E6iK9PUNgLN8aVxwgw0). It is version 2ce8bec6…; the
+      original stays as AWSPREVIOUS 226d488f…, and no other field changed. Tests, with the host key
+      pinned: from ch-prod-01, sub2 logged in with the credential's key and lists data/openbao
+      and data/pgbackrest, both empty. From outside Hetzner, sub3 logged in with the key read from
+      the secret and lists the same two, and its mkdir failed. Left open: data/.ssh, which holds
+      sub3's keys, belongs to sub2, so a compromised server could change them, as it could delete
+      the backups; Storage Box snapshots were asked about for that. pgBackRest runs on the host
+      (okarcz), and Borg's key mode is still to decide.
 ---
 
 # Public testnet deployment
