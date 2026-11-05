@@ -4,8 +4,9 @@
 // whose absence would leave the agent without keys.
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { byName } from "@stellar-x402/metrics-catalog";
 import { describe, expect, test } from "vitest";
-import { absolute, FILES } from "./files.js";
+import { absolute, ENV, FILES } from "./files.js";
 
 const DEPLOY = fileURLToPath(new URL("..", import.meta.url));
 const read = (path: string) => readFileSync(`${DEPLOY}/${path}`, "utf8");
@@ -170,4 +171,96 @@ test("nothing under deploy/ points AWS at a dual-stack or overridden endpoint", 
     expect(text, file).not.toMatch(/api\.aws|endpoint_override|AWS_ENDPOINT_URL/);
     expect(text, file).not.toMatch(/dualstack[^\n]*(true|=\s*1)/i);
   }
+});
+
+describe("the units' output", () => {
+  const services = readdirSync(`${DEPLOY}/systemd`).filter((f) => f.endsWith(".service"));
+  /** Each unit's append: paths, with %i as the environment. */
+  const appends = (file: string) =>
+    [...unit(file).matchAll(/^Standard(Output|Error)=append:(.*)$/gm)].map((m) =>
+      m[2]!.trim().replaceAll("%i", ENV),
+    );
+  const writers: Record<string, string> = {
+    "x402@.service": "facilitator",
+    "x402-db-testnet@.service": "postgres-testnet",
+    "x402-tunnel@.service": "cloudflared",
+    "x402-openbao.service": "openbao",
+    "x402-deploy@.service": "deploy",
+  };
+
+  test("every file a unit appends to is a row, and every unit's row has its unit", () => {
+    const rows = new Set(FILES.map(absolute));
+    for (const file of services)
+      for (const path of appends(file)) expect(rows.has(path), `${file}: ${path}`).toBe(true);
+    for (const [file, stream] of Object.entries(writers)) {
+      const mine = FILES.filter((r) => r.group === "app" && r.stream === stream).map(absolute);
+      expect(appends(file), file).toEqual(expect.arrayContaining(mine));
+    }
+  });
+
+  test("only the facilitator splits stdout and stderr; the others write both in order", () => {
+    expect(appends("x402@.service")).toEqual([
+      `/var/log/x402/${ENV}/facilitator.log`,
+      `/var/log/x402/${ENV}/facilitator.err.log`,
+    ]);
+    for (const file of Object.keys(writers).filter((f) => f !== "x402@.service")) {
+      expect(appends(file), file).toHaveLength(1);
+      expect(settings(unit(file), "StandardError"), file).toEqual(["inherit"]);
+    }
+  });
+
+  test("every docker compose up writes raw lines", () => {
+    for (const file of Object.keys(writers).filter((f) => f !== "x402-deploy@.service")) {
+      const ups = settings(unit(file), "ExecStart").filter((e) => / up /.test(e));
+      expect(ups, file).toHaveLength(1);
+      expect(ups[0], file).toMatch(/ up --no-log-prefix --no-color /);
+    }
+  });
+
+  // An Exec line that prints into a full disk fails, and with it the start (the spike).
+  test("the wait loops print nothing", () => {
+    for (const file of ["x402-db-testnet@.service", "x402-openbao.service"])
+      for (const post of settings(unit(file), "ExecStartPost"))
+        expect(post, file).toMatch(/exec -T [^;]*> \/dev\/null 2>&1;/);
+  });
+
+  test("no unit re-owns a shared directory or changes its files' mode", () => {
+    for (const file of services) {
+      const text = unit(file);
+      expect(text, file).not.toMatch(/^(LogsDirectory|StateDirectory|UMask)=/m);
+    }
+  });
+
+  test("x402@ counts every end but a success, without ever failing for it", () => {
+    expect(settings(unit("x402@.service"), "ExecStopPost")).toEqual([
+      "-/usr/local/libexec/x402/x402-host-probe stopped",
+    ]);
+  });
+
+  test("every count the scripts write is a host counter of the catalog", () => {
+    const calls = readdirSync(`${DEPLOY}/libexec`).flatMap((f) => [
+      ...read(`libexec/${f}`).matchAll(/x402-host-probe count ([a-z0-9_]+)/g),
+    ]);
+    expect(calls.map((m) => m[1])).toEqual(["watchdog_restarts_total"]);
+    for (const m of calls) {
+      const def = byName(m[1]!);
+      expect(def?.namespace, m[1]).toBe("x402-host");
+      expect(def?.kind, m[1]).toBe("counter");
+    }
+  });
+
+  test("every oneshot a timer starts has a timeout", () => {
+    for (const timer of readdirSync(`${DEPLOY}/systemd`).filter((f) => f.endsWith(".timer"))) {
+      const service = timer.replace(/\.timer$/, ".service");
+      expect(settings(unit(service), "TimeoutStartSec"), service).toHaveLength(1);
+    }
+  });
+
+  // Under set -e, a failed echo into a full disk ended the deploy before its rollback.
+  test("the deploy prints only through say, which ignores a failed write", () => {
+    const script = read("libexec/x402-deploy");
+    expect(script).toContain(`say() { printf '%s\\n' "$*" || :; }`);
+    expect(script).not.toMatch(/^\s*(echo|printf '%s\\n' "\$\w+" >&2)\b/m);
+    expect(script.match(/\becho\b/g)).toBeNull();
+  });
 });

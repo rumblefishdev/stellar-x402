@@ -544,7 +544,9 @@ One request or one stop must never outlast the layer in front of it:
     units does the same with its own container's output: Postgres, `cloudflared`, OpenBao, and the
     deploy with its migrations. The CloudWatch agent sends those files to CloudWatch Logs with the
     logging role's credentials, so `dockerd` stays untouched, an AWS outage never stops a
-    container from starting, and the history outlives the host.
+    container from starting, and the history outlives the host. The files, their streams and
+    their rotation are in the runbook (The CloudWatch agent); a unit's journal keeps only its own
+    start and stop lines.
   - The agent doesn't read Docker's `json-file` logs, which stay for `docker logs`: a `json-file`
     line wraps ours, and EMF needs `_aws` at the root (task 0027's log path spike).
   - The agent keeps EMF lines and app lines in separate log groups. During an AWS outage it holds
@@ -553,8 +555,9 @@ One request or one stop must never outlast the layer in front of it:
     dimension lives only as a field in the metric line, read with Logs Insights, and the weekly
     fee review reads a week of it (0027 decision 18). Every line ships, the client IP in
     `rate_limited` too; that and the retention are looked at again before mainnet (0038).
-  - The files rotate with `logrotate` on its own timer, since they share a disk with ClickHouse,
-    using `copytruncate`, as the units hold the files open. We accept two losses, tested locally
+  - The files rotate with `logrotate` on its own timer, every 10 minutes past 100 MB with 10
+    kept, since they share a disk with ClickHouse, using `copytruncate`, as the units hold the
+    files open. We accept two losses, tested locally
     in 0027. At each rotation, the lines the agent hadn't read yet: up to 250 ms, its poll, all
     but a few ms of them still in the rotated file. When a rotation falls inside an AWS outage,
     every app line since the agent stopped sending, about 5 s into it; those stay in the rotated
@@ -602,7 +605,10 @@ One request or one stop must never outlast the layer in front of it:
     repository, so this one alarm covers a stuck archive, which fills a disk ClickHouse shares,
     and WAL that doesn't leave the server;
   - the last `pgbackrest backup` or the last OpenBao snapshot older than 26 hours (both run
-    daily);
+    daily). Each job touches its stamp, `/var/lib/x402/last-ok/pgbackrest-backup` or
+    `openbao-snapshot`, as root and only after it succeeded, and may set its time from the
+    repository; the host probe reports the stamp's age, and a missing one reads as a job that
+    never ran. Stamps live on disk, so a reboot doesn't read as a missed job (0027);
   - the Roles Anywhere certificate expiring within 30 days;
   - low free disk and memory on the server. The disk alarm goes to our channel too: our Platform
     lane runs the server's base setup, and our WAL and logs are what fills the disk.

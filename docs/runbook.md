@@ -93,12 +93,16 @@ deploy.
 3. A restart of each unit whose files changed. The production compose file is the facilitator's,
    the databases' and the tunnel's: stop the facilitator first, which drains, so no settlement
    loses its database or the tunnel mid-request, then restart the others and start it again.
-   OpenBao's compose file and `config.hcl` are `x402-openbao`'s alone.
+   OpenBao's compose file and `config.hcl` are `x402-openbao`'s alone. Run it while `/settle` is
+   idle: the drain then ends in seconds, and the whole window takes 30 to 60 s. With every unit
+   at its cap it can take about 8 minutes, past `uptime`'s 7; once that alarm is on, post in the
+   channel first.
 
    ```sh
    sudo systemctl stop x402@production
-   sudo systemctl restart x402-db-testnet@production x402-tunnel@production
-   sudo systemctl restart x402-openbao   # only when its files changed; here, /settle is down once
+   sudo systemctl restart x402-openbao   # only when its files changed; /settle is down anyway
+   sudo systemctl restart x402-db-testnet@production
+   sudo systemctl restart x402-tunnel@production
    sudo systemctl start x402@production
    ```
 
@@ -231,7 +235,8 @@ sudo -u x402-deploy env SSH_ORIGINAL_COMMAND=sha256:… /srv/x402/production/dep
 The deploy unit decrypts the database URL, pulls the image, runs `migrate-testnet` while the old
 facilitator serves, then restarts `x402@production` on the new image and waits up to 120 s for
 `ready`, `listed` and `signer` ok. A failed migration changes nothing. Follow it with
-`journalctl -fu x402-deploy@production`.
+`sudo tail -F /var/log/x402/production/deploy.log`; `journalctl -u x402-deploy@production` has only
+its start and end.
 
 ## Rollback
 
@@ -302,9 +307,10 @@ undoing.
   ```sh
   sudo /usr/local/libexec/x402/x402-creds production database-url.testnet:1000
   sudo systemd-run --unit=x402-migrate --collect --working-directory=/srv/x402/production \
+    -p StandardOutput=append:/var/log/x402/production/deploy.log -p StandardError=inherit \
     --setenv=FACILITATOR_IMAGE=ghcr.io/rumblefishdev/x402-facilitator@sha256:… \
     docker compose run --rm --name x402-production-migrate-testnet migrate-testnet
-  journalctl -fu x402-migrate
+  sudo tail -F /var/log/x402/production/deploy.log   # shipped with the deploys' lines
   ```
 
   Deploy once `systemctl is-active x402-migrate` says `inactive`; a deploy meanwhile fails on the
@@ -331,9 +337,17 @@ cd /srv/x402/openbao && sudo docker compose exec -T openbao bao status
 
 Every 30 s, while `x402@production` is active, it stops an `unhealthy` facilitator with a 10 s
 timeout and restarts the unit; it leaves a deploy, a reboot or a drain alone. Its restarts are in
-`journalctl -u x402-watchdog@production`. Five starts in 300 s, a crash loop's, leave
-`x402@production` `failed`; the deploy and the watchdog reset that count before their own
-restarts. After fixing the cause: `sudo systemctl reset-failed x402@production` and start it.
+`journalctl -u x402-watchdog@production`, and each one counts `watchdog_restarts_total`, which
+fires `watchdog-restart`. Five starts in 300 s, a crash loop's, leave `x402@production` `failed`;
+the deploy and the watchdog reset that count before their own restarts. After fixing the cause:
+`sudo systemctl reset-failed x402@production` and start it.
+
+A crash after `ready` in cycles of a minute or more never reaches that limit, so every end of
+`x402@production` but a success counts `facilitator_failures_total`, which fires
+`facilitator-failed`: a crash, a failed start, a drain cut short, a `dockerd` crash, and the
+watchdog's kill of a hung process, which fires `watchdog-restart` beside it. The line in
+`/var/log/x402/host/metrics.log` says how it ended (`result`, `exit_code`, `exit_status`), and
+the reason is at the end of `facilitator.log` or `facilitator.err.log` just before it.
 
 ## The tunnel token
 
@@ -683,6 +697,30 @@ sudo tail -n 8 /var/log/x402/host/metrics.log   # credentials_age_seconds under 
 
 Then, with SSO, `aws logs tail /x402/production/metrics --log-stream-names host --since 5m` shows
 the probe's lines, and `make check-series GROUP=host` in `infra/` the series.
+
+**Where the logs are.** Each unit appends its output to a file the agent ships, so its history
+outlives the server (0027 decision 1); `journalctl -u` keeps only a unit's own start and stop
+lines. The watchdog, the host probe, the helper and the agent itself stay in the journal (the
+agent's own log is `/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log`).
+
+| `/var/log/x402/`                  | Written by                                    | Stream, group                                      |
+| --------------------------------- | --------------------------------------------- | -------------------------------------------------- |
+| `production/facilitator.log`      | `x402@production`, stdout                     | `facilitator` in `app`; its EMF lines in `metrics` |
+| `production/facilitator.err.log`  | `x402@production`, stderr                     | `facilitator-stderr` in `app`                      |
+| `production/postgres-testnet.log` | `x402-db-testnet@production`                  | `postgres-testnet` in `app`                        |
+| `production/cloudflared.log`      | `x402-tunnel@production`                      | `cloudflared` in `app`                             |
+| `production/deploy.log`           | the deploys, their migrations, `x402-migrate` | `deploy` in `app`                                  |
+| `openbao/openbao.log`             | `x402-openbao`                                | `openbao` in `app`                                 |
+| `host/metrics.log`                | the host probe, the watchdog, `x402@`'s stop  | `host` in `metrics`                                |
+
+`x402-logrotate.timer` rotates a file past 100 MB every 10 minutes and keeps 10: `*.log.1` as it
+was, the older ones compressed. A rotation during an AWS outage loses the app lines the agent
+hadn't sent yet from CloudWatch, never from the server: they are in `*.log.1` (ADR 0011).
+
+**The units' first move to files** (0027), after the admin step, in the window of The playbook's
+step 3 with all four units restarted: the facilitator, OpenBao, the database and the tunnel.
+`x402-deploy@production` takes its new unit at the next deploy. Then `/health` says `ready`, the
+files above grow, and their streams arrive in both groups.
 
 **Renewing the certificate,** yearly; the `certificate` alarm fires 30 days ahead. A new key each
 time, kept as a dated version behind `cloudwatch-agent-key.cred`, as `rpc-urls.testnet` is
