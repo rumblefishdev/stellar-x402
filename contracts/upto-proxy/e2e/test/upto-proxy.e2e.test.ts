@@ -9,7 +9,8 @@ import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Address, authorizeEntry, nativeToScVal, type xdr } from "@stellar/stellar-sdk";
-import { type ContractCall, SettlementSubmitter, keypairSigner } from "@stellar-x402/signer-pool";
+import { type ContractCall, SettlementSubmitter } from "@stellar-x402/signer-pool";
+import { keypairSigner } from "@stellar-x402/signer-pool/testing";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   PASSPHRASE,

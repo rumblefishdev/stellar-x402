@@ -11,10 +11,15 @@ StartLimitBurst=5
 
 [Service]
 WorkingDirectory=/srv/x402/openbao
+# OpenBao's server log, stdout and stderr in order, for the CloudWatch agent (0027 decision 1).
+# One OpenBao serves every environment; its file ships with production's.
+StandardOutput=append:/var/log/x402/openbao/openbao.log
+StandardError=inherit
 ExecStartPre=/usr/local/libexec/x402/x402-creds openbao seal-key:100
-ExecStart=/usr/bin/docker compose up --no-deps --exit-code-from openbao openbao
-# Started means testnet's socket exists, so x402@ mounts a volume that has it.
-ExecStartPost=/usr/bin/timeout 50 /bin/sh -c 'until docker compose exec -T openbao test -S /run/openbao/testnet/bao.sock; do sleep 1; done'
+ExecStart=/usr/bin/docker compose up --no-log-prefix --no-color --no-deps --exit-code-from openbao openbao
+# Started means testnet's socket exists, so x402@ mounts a volume that has it. Quiet: an Exec line
+# that prints into a full disk fails the start.
+ExecStartPost=/usr/bin/timeout 50 /bin/sh -c 'until docker compose exec -T openbao test -S /run/openbao/testnet/bao.sock > /dev/null 2>&1; do sleep 1; done'
 ExecStop=/usr/bin/docker compose stop openbao
 Restart=on-failure
 RestartSec=5

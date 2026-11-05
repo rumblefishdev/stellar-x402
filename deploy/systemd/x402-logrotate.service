@@ -1,0 +1,12 @@
+# One rotation of the files under /var/log/x402 (lore 0027 decision 45), started by
+# x402-logrotate.timer, with its own config and state: the daily logrotate.timer never sees them.
+# OpenBao's audit log keeps its own daily rule in /etc/logrotate.d/x402-openbao.
+[Unit]
+Description=x402 log rotation
+Documentation=https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/runbook.md
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/logrotate --state /var/lib/x402-logrotate/status /etc/x402/logrotate.conf
+# Under the timer's 10 minutes, so a rotation never runs into the next.
+TimeoutStartSec=9min

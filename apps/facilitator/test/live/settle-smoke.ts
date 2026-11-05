@@ -1,0 +1,245 @@
+/**
+ * Testnet smoke run of `POST /settle` (0009): real `exact` payments, signed with upstream's
+ * client, settled through the channel pool by a facilitator built by `main()`.
+ *
+ * 1. A payment settles: `success: true`, and the transaction is `SUCCESS` on chain.
+ * 2. The same request again gets `…_already_settled` with the same hash: success is answered once.
+ * 3. The same payload with other requirements is refused (`…_nonce_already_used`), with the hash.
+ * 4. Two concurrent calls for one new payment submit one transaction; one gets the success.
+ * 5. `/verify` of the settled payment fails: its nonce is used on chain.
+ *
+ * Env (each optional but DATABASE_URL; a missing key is a fresh friendbot-funded one, printed by
+ * address only):
+ *   FACILITATOR_SECRET  pays the fees and creates 2 channels (1.5 XLM each)
+ *   CLIENT_SECRET       pays AMOUNT of ASSET per payment
+ *   PAY_TO              receives (a funded account)
+ *   ASSET               token contract (default: the testnet XLM SAC)
+ *   AMOUNT              base units (default 1000 = 0.0001 XLM)
+ *   RAISE_FEE_ACCOUNT_THRESHOLDS  1: after channel setup, raise a fresh fee account's thresholds to
+ *                       1 / 2 / 2 above its key's weight of 1, and check that a Payment out is
+ *                       refused (0093). Nothing can change that account again
+ *   RPC_URLS            passed to the facilitator (default: the testnet RPC); a hung first URL
+ *                       shows `/settle`'s checks failing over (0045)
+ *   EXPECT_FAILOVER     1: also check that the first `/settle` logged `rpc_failover` from
+ *                       `RPC_URLS[0]` to `RPC_URLS[1]`; with the shared active URL it waits for a
+ *                       hung first URL once, so it settles within the budget (0045)
+ *   INCLUSION_FEE_STROOPS  passed to the facilitator (default: the fee-stats bid), to run the
+ *                       hung-URL check in both bid modes
+ *   DATABASE_URL        required: the facilitator's PostgreSQL, migrated (`pnpm migrate`); the
+ *                       local one from `compose.yaml` is postgres://postgres:postgres@127.0.0.1:15432/postgres
+ *
+ *   cd apps/facilitator && npx tsx test/live/settle-smoke.ts
+ *
+ * The facilitator's log lines go to stderr, so stdout carries only the result.
+ */
+import {
+  Account,
+  Asset,
+  Keypair,
+  Networks,
+  Operation,
+  TransactionBuilder,
+  rpc,
+} from "@stellar/stellar-sdk";
+import { buildCreateChannelsTx, readAccountEntry } from "@stellar-x402/signer-pool";
+import type { PaymentRequirements, SettleResponse, VerifyResponse } from "@x402/core/types";
+import { createEd25519Signer } from "@x402/stellar";
+import { ExactStellarScheme } from "@x402/stellar/exact/client";
+import { Agent, fetch } from "undici";
+import { main } from "../../src/main.js";
+import { fakeOpenBao, signerEnv } from "../fake-openbao.js";
+
+const XLM_SAC_TESTNET = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
+const RPC_URL = "https://soroban-testnet.stellar.org";
+const network = "stellar:testnet";
+const server = new rpc.Server(RPC_URL);
+
+/**
+ * The script's own HTTP client, apart from the global one `main()` sets for the facilitator: that
+ * one ends a request after 10 s without headers, and a `/settle` behind a hung first RPC URL, or a
+ * slow friendbot, takes longer.
+ */
+const http = new Agent({ headersTimeout: 120_000 });
+
+const events: { event: string; from?: string; to?: string }[] = [];
+const write = (line: string) => {
+  events.push(JSON.parse(line) as { event: string; from?: string; to?: string });
+  process.stderr.write(line);
+};
+
+async function funded(secret: string | undefined): Promise<Keypair> {
+  if (secret) return Keypair.fromSecret(secret);
+  const keypair = Keypair.random();
+  const response = await fetch(`https://friendbot.stellar.org/?addr=${keypair.publicKey()}`, {
+    dispatcher: http,
+  });
+  if (!response.ok) throw new Error(`friendbot: ${response.status}`);
+  return keypair;
+}
+
+const raiseThresholds = process.env.RAISE_FEE_ACCOUNT_THRESHOLDS === "1";
+if (raiseThresholds && process.env.FACILITATOR_SECRET)
+  throw new Error("raising the thresholds locks the account: use a fresh one");
+
+const facilitator = await funded(process.env.FACILITATOR_SECRET);
+const client = await funded(process.env.CLIENT_SECRET);
+const payTo = process.env.PAY_TO ?? (await funded(undefined)).publicKey();
+
+// Two delegated channels: master key off, the facilitator their only signer.
+const channelKeys = [Keypair.random(), Keypair.random()];
+const facilitatorEntry = await readAccountEntry(server, facilitator.publicKey());
+if (!facilitatorEntry) throw new Error("the facilitator account does not exist");
+const setup = buildCreateChannelsTx({
+  funder: new Account(facilitator.publicKey(), facilitatorEntry.seqNum().toString()),
+  signer: facilitator.publicKey(),
+  channels: channelKeys,
+  networkPassphrase: Networks.TESTNET,
+  fee: 1000,
+});
+setup.sign(facilitator, ...channelKeys);
+const created = await server.pollTransaction((await server.sendTransaction(setup)).hash, {
+  attempts: 30,
+});
+if (created.status !== "SUCCESS") throw new Error(`channel setup ${created.status}`);
+
+if (raiseThresholds) {
+  const raise = new TransactionBuilder(await server.getAccount(facilitator.publicKey()), {
+    fee: "1000",
+    networkPassphrase: Networks.TESTNET,
+  })
+    .addOperation(Operation.setOptions({ lowThreshold: 1, medThreshold: 2, highThreshold: 2 }))
+    .setTimeout(60)
+    .build();
+  raise.sign(facilitator);
+  const raised = await server.pollTransaction((await server.sendTransaction(raise)).hash, {
+    attempts: 30,
+  });
+  if (raised.status !== "SUCCESS") throw new Error(`raising the thresholds ${raised.status}`);
+}
+
+// The fake OpenBao holds this run's key: a testnet account funded for the run.
+const openbao = await fakeOpenBao(facilitator);
+const facilitatorServer = await main(
+  {
+    ...signerEnv(facilitator.publicKey(), openbao.socketPath),
+    CLIENT_IP: "socket",
+    CHANNELS: channelKeys.map((keypair) => keypair.publicKey()).join(","),
+    PORT: "0",
+    LOG_LEVEL: "warn",
+    DATABASE_URL: process.env.DATABASE_URL,
+    RPC_URLS: process.env.RPC_URLS,
+    INCLUSION_FEE_STROOPS: process.env.INCLUSION_FEE_STROOPS,
+  },
+  { write },
+);
+
+const requirements: PaymentRequirements = {
+  scheme: "exact",
+  network,
+  asset: process.env.ASSET ?? XLM_SAC_TESTNET,
+  amount: process.env.AMOUNT ?? "1000",
+  payTo,
+  maxTimeoutSeconds: 60,
+  extra: { areFeesSponsored: true },
+};
+const payer = new ExactStellarScheme(createEd25519Signer(client.secret(), network));
+const pay = async () => ({
+  ...(await payer.createPaymentPayload(2, requirements)),
+  accepted: requirements,
+});
+const post = async <T>(
+  route: string,
+  paymentPayload: unknown,
+  paymentRequirements = requirements,
+) => {
+  const response = await fetch(`http://127.0.0.1:${facilitatorServer.port}/${route}`, {
+    dispatcher: http,
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ x402Version: 2, paymentPayload, paymentRequirements }),
+  });
+  if (response.status !== 200) throw new Error(`/${route} answered ${response.status}`);
+  return (await response.json()) as T;
+};
+
+try {
+  const first = await pay();
+  const settled = await post<SettleResponse>("settle", first);
+  const failedOver = events.some(
+    // Logs name an entry `RPC_URLS[i]#<fingerprint>` (0009 decision 47).
+    (e) =>
+      e.event === "rpc_failover" &&
+      e.from?.startsWith("RPC_URLS[0]#") &&
+      e.to?.startsWith("RPC_URLS[1]#"),
+  );
+  const onChain = settled.success
+    ? (await server.pollTransaction(settled.transaction, { attempts: 30 })).status
+    : undefined;
+  const repeat = await post<SettleResponse>("settle", first);
+  const other = { ...requirements, extra: { ...requirements.extra, merchant: "another" } };
+  const reused = await post<SettleResponse>("settle", { ...first, accepted: other }, other);
+  const second = await pay();
+  const concurrent = await Promise.all([
+    post<SettleResponse>("settle", second),
+    post<SettleResponse>("settle", second),
+  ]);
+  const verifySettled = await post<VerifyResponse>("verify", first);
+
+  let paymentOutAnswer: rpc.Api.SendTransactionResponse | undefined;
+  if (raiseThresholds) {
+    const paymentOut = new TransactionBuilder(await server.getAccount(facilitator.publicKey()), {
+      fee: "1000",
+      networkPassphrase: Networks.TESTNET,
+    })
+      .addOperation(Operation.payment({ destination: payTo, asset: Asset.native(), amount: "10" }))
+      .setTimeout(60)
+      .build();
+    paymentOut.sign(facilitator);
+    paymentOutAnswer = await server.sendTransaction(paymentOut);
+  }
+  const paymentOutResult = paymentOutAnswer?.errorResult?.result().results()[0]?.switch().name;
+
+  const checks = {
+    settled: settled.success && settled.payer === client.publicKey() && onChain === "SUCCESS",
+    repeatAlreadySettled:
+      !repeat.success &&
+      repeat.errorReason === "settle_exact_stellar_already_settled" &&
+      repeat.transaction === settled.transaction,
+    nonceReuseRefused:
+      !reused.success &&
+      reused.errorReason === "settle_exact_stellar_nonce_already_used" &&
+      reused.transaction === settled.transaction,
+    concurrentOneTransaction:
+      concurrent.filter((answer) => answer.success).length === 1 &&
+      concurrent.some((answer) => answer.errorReason === "settle_exact_stellar_already_settled") &&
+      concurrent[0]!.transaction === concurrent[1]!.transaction &&
+      concurrent[0]!.transaction !== settled.transaction,
+    settledPaymentNoLongerVerifies: !verifySettled.isValid,
+    ...(process.env.EXPECT_FAILOVER === "1" && { failedOver }),
+    ...(raiseThresholds && { paymentOutRefused: paymentOutResult === "opBadAuth" }),
+  };
+  console.log(
+    JSON.stringify(
+      {
+        facilitator: facilitator.publicKey(),
+        payer: client.publicKey(),
+        payTo,
+        settled,
+        onChain,
+        repeat,
+        reused,
+        concurrent,
+        verifySettled,
+        failedOver,
+        paymentOutResult,
+        checks,
+      },
+      null,
+      2,
+    ),
+  );
+  if (!Object.values(checks).every(Boolean)) process.exitCode = 1;
+} finally {
+  await facilitatorServer.close();
+  openbao.close();
+}

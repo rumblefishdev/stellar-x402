@@ -7,3 +7,6 @@ After=docker.service
 [Service]
 Type=oneshot
 ExecStart=/usr/local/libexec/x402/x402-watchdog %i
+# Above its 10 s stop and x402@'s start (60 s), so a wedged docker or systemctl ends the pass
+# instead of every later one waiting behind it.
+TimeoutStartSec=5min

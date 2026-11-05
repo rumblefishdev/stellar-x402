@@ -1,0 +1,166 @@
+#!/bin/sh
+# Host signals as EMF lines in the file the CloudWatch agent ships to /x402/<env>/metrics (lore
+# 0027 decision 10; the server-side spine's AD-5 and AD-6). The only writer of the format: the
+# watchdog and x402@'s ExecStopPost call it too. Each check is independent; one that fails, or a
+# job that never ran, writes a value past its alarm's threshold. Nothing goes to stdout;
+# diagnostics go to stderr (the journal, or the calling unit's file).
+#   x402-host-probe              every check once (x402-host-probe.timer, root, every minute)
+#   x402-host-probe count NAME   one line with 1 for the counter NAME (the watchdog)
+#   x402-host-probe stopped      x402@<env>'s ExecStopPost: facilitator_failures_total unless
+#                                SERVICE_RESULT is success
+# Paths default to the server's; the test and a fire drill override them.
+set -u
+: "${X402_HOST_EMF:=/var/log/x402/host/metrics.log}"
+: "${X402_OPENBAO_SOCKET:=}" # default: testnet's socket under Docker's data root
+: "${X402_PROJECT:=x402-production}"
+: "${X402_STAMPS:=/var/lib/x402/last-ok}"
+: "${X402_CERT:=/srv/x402/production/cloudwatch-agent.crt}"
+: "${X402_CREDENTIALS:=/run/x402-cloudwatch/credentials}"
+
+NAMESPACE=x402-host
+NO_AGE=1000000000 # past every age threshold: the check failed or the job never ran
+NO_DAYS=-1        # under the certificate's threshold
+status=0
+
+warn() { printf 'x402-host-probe: %s\n' "$*" >&2; }
+is_int() { case $1 in '' | - | *[!0-9-]* | ?*-*) return 1 ;; esac; }
+# A log field's value as written: kept only when it is a plain word, so it can't break the JSON.
+word() { case $1 in *[!A-Za-z0-9_.-]*) ;; *) printf '%s' "$1" ;; esac; }
+
+# The catalog's unit for each name this script writes (packages/metrics-catalog; the test pins it).
+unit_of() {
+  case $1 in
+    openbao_up | wal_failing | certificate_days_left | host_probe_heartbeat) echo None ;;
+    wal_last_archived_age_seconds | backup_age_seconds | snapshot_age_seconds) echo Seconds ;;
+    credentials_age_seconds) echo Seconds ;;
+    watchdog_restarts_total | facilitator_failures_total) echo Count ;;
+    *) return 1 ;;
+  esac
+}
+
+# One line, one metric, no dimension: the facilitator's shape (apps/facilitator/src/adapters/emf.ts).
+# One printf to an O_APPEND file: one write(2), so lines from concurrent writers never interleave.
+emit() { # name value [timestamp-ms [log fields, each ,"key":"value"]]
+  unit=$(unit_of "$1") || { warn "$1 is no host metric"; status=1; return; }
+  is_int "$2" || { warn "$1: value '$2' is not an integer"; status=1; return; }
+  printf '{"_aws":{"Timestamp":%s,"CloudWatchMetrics":[{"Namespace":"%s","Dimensions":[[]],"Metrics":[{"Name":"%s","Unit":"%s"}]}]}%s,"%s":%s}\n' \
+    "${3:-$(date +%s%3N)}" "$NAMESPACE" "$1" "$unit" "${4:-}" "$1" "$2" >> "$X402_HOST_EMF" ||
+    { warn "can't append $1 to $X402_HOST_EMF"; status=1; }
+}
+
+# 1 when testnet's listener, the one the facilitator signs through, answers unsealed. sys/health
+# needs no token and isn't audited: 200 unsealed, 503 sealed, 501 not initialised.
+openbao_up() {
+  sock=$X402_OPENBAO_SOCKET
+  if [ -z "$sock" ]; then
+    root=$(timeout 5 docker info --format '{{.DockerRootDir}}' 2> /dev/null)
+    [ -n "$root" ] || { warn "openbao: docker info gave no data root"; echo 0; return; }
+    sock=$root/volumes/x402-openbao-testnet/_data/bao.sock
+  fi
+  code=$(timeout 5 curl --silent --output /dev/null --write-out '%{http_code}' --max-time 4 \
+    --unix-socket "$sock" http://openbao/v1/sys/health)
+  [ "$code" = 200 ] && echo 1 && return
+  warn "openbao: sys/health on $sock answered ${code:-nothing}"
+  echo 0
+}
+
+# "<failing> <age>" from pg_stat_archiver: failing when nothing was archived (yet, or since a
+# crash reset the view) or the last failure is past the last success; the age since the last
+# success. The check failing gives "1 $NO_AGE". The timeout inside the container ends psql too:
+# killing `docker exec` doesn't.
+WAL_SQL="SELECT CASE WHEN last_archived_time IS NULL OR last_failed_time > last_archived_time
+  THEN 1 ELSE 0 END, COALESCE(floor(extract(epoch FROM now() - last_archived_time))::bigint, $NO_AGE)
+  FROM pg_stat_archiver"
+wal() {
+  id=$(timeout 5 docker ps --quiet --filter status=running \
+    --filter "label=com.docker.compose.project=$X402_PROJECT" \
+    --filter label=com.docker.compose.service=postgres-testnet \
+    --filter label=com.docker.compose.oneoff=False)
+  if [ -z "$id" ]; then
+    warn "wal: no running postgres-testnet in $X402_PROJECT"
+  elif out=$(timeout 10 docker exec -e PGCONNECT_TIMEOUT=4 -e PGOPTIONS='-c statement_timeout=4000' \
+    "$id" timeout 8 psql -XAtq -F ' ' -U postgres -d x402 -c "$WAL_SQL" < /dev/null); then
+    # Unquoted: the two columns become $1 and $2.
+    set -- $out
+    if [ $# -eq 2 ] && is_int "$1" && is_int "$2"; then echo "$1 $2" && return; fi
+    warn "wal: unexpected answer '$out'"
+  else
+    warn "wal: psql in $id failed"
+  fi
+  echo "1 $NO_AGE"
+}
+
+# Seconds since a file's mtime, or $NO_AGE when it's missing or empty.
+age_of() { # path what
+  if s=$(stat -c '%s %Y' "$1" 2> /dev/null); then
+    size=${s% *}
+    m=${s#* }
+    if is_int "$m" && [ "$size" != 0 ]; then
+      age=$((now - m))
+      [ "$age" -lt 0 ] && age=0
+      echo "$age"
+      return
+    fi
+  fi
+  warn "$2: $1 is missing or empty"
+  echo "$NO_AGE"
+}
+
+# Seconds since a job last succeeded: the mtime of the stamp it touches then (AD-7; 0026's jobs).
+stamp_age() {
+  if m=$(stat -c %Y "$X402_STAMPS/$1" 2> /dev/null) && is_int "$m"; then
+    age=$((now - m))
+    [ "$age" -lt 0 ] && age=0
+    echo "$age"
+  else
+    warn "$1: no stamp in $X402_STAMPS, the job never succeeded"
+    echo "$NO_AGE"
+  fi
+}
+
+# Whole days the Roles Anywhere certificate has left, rounded down, so negative once expired.
+certificate_days_left() {
+  end=$(timeout 5 openssl x509 -noout -enddate -in "$X402_CERT" 2> /dev/null) &&
+    end=$(date -u -d "${end#notAfter=}" +%s 2> /dev/null) && is_int "$end" || {
+    warn "certificate: can't read the end date of $X402_CERT"
+    echo "$NO_DAYS"
+    return
+  }
+  left=$((end - now))
+  if [ "$left" -ge 0 ]; then echo $((left / 86400)); else echo $(((left - 86399) / 86400)); fi
+}
+
+case ${1:-} in
+  count)
+    [ $# -eq 2 ] && [ "$(unit_of "$2")" = Count ] || { warn "usage: $0 count <counter>"; exit 2; }
+    emit "$2" 1
+    exit "$status"
+    ;;
+  stopped)
+    [ $# -eq 1 ] && [ -n "${SERVICE_RESULT:-}" ] ||
+      { warn "usage: $0 stopped, from a unit's ExecStopPost"; exit 2; }
+    [ "$SERVICE_RESULT" = success ] && exit 0
+    fields=$(printf ',"result":"%s","exit_code":"%s","exit_status":"%s"' \
+      "$(word "$SERVICE_RESULT")" "$(word "${EXIT_CODE:-}")" "$(word "${EXIT_STATUS:-}")")
+    emit facilitator_failures_total 1 "$(date +%s%3N)" "$fields"
+    exit "$status"
+    ;;
+  '') ;;
+  *) warn "usage: $0 [count <counter> | stopped]"; exit 2 ;;
+esac
+
+# One stamp for the run: each point is the minute its run started.
+ts=$(date +%s%3N)
+now=${ts%???}
+emit openbao_up "$(openbao_up)" "$ts"
+# Unquoted: the two values become $1 and $2.
+set -- $(wal)
+emit wal_failing "$1" "$ts"
+emit wal_last_archived_age_seconds "$2" "$ts"
+emit backup_age_seconds "$(stamp_age pgbackrest-backup)" "$ts"
+emit snapshot_age_seconds "$(stamp_age openbao-snapshot)" "$ts"
+emit certificate_days_left "$(certificate_days_left)" "$ts"
+emit credentials_age_seconds "$(age_of "$X402_CREDENTIALS" credentials)" "$ts"
+# Last: a run that hangs before here writes no heartbeat, and probe-silent fires.
+emit host_probe_heartbeat 1 "$ts"
+exit "$status"

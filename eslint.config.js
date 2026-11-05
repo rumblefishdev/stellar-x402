@@ -9,14 +9,14 @@ export default defineConfig([
     "**/.turbo/",
     "**/coverage/",
     "contracts/target/",
+    "**/cdk.out/",
   ]),
   js.configs.recommended,
   tseslint.configs.recommended,
   {
-    // `<package>/testing` subpaths hold test helpers (e.g. `FakeRpc`); they ship in `dist` but
-    // must never reach production code, by package subpath or by relative path.
+    // `<package>/testing` subpaths hold test helpers (e.g. `FakeRpc`); they must never reach
+    // production code, by package subpath or by relative path.
     files: ["apps/*/src/**/*.ts", "packages/*/src/**/*.ts"],
-    ignores: ["packages/*/src/testing.ts"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -43,6 +43,13 @@ export default defineConfig([
   {
     files: ["tools/scripts/**/*.mjs"],
     languageOptions: { globals: { console: "readonly", process: "readonly" } },
+  },
+  {
+    // Lambda handlers run as plain ES modules on the Node.js runtime (infra/, task 0027).
+    files: ["infra/lambdas/**/*.mjs"],
+    languageOptions: {
+      globals: { console: "readonly", process: "readonly", AbortSignal: "readonly" },
+    },
   },
   {
     files: ["conformance/external-proxy/*.mjs"],

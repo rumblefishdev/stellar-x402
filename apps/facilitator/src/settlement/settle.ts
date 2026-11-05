@@ -29,7 +29,7 @@ import {
 import type { PaymentPayload, PaymentRequirements, SettleResponse } from "@x402/core/types";
 import { getNetworkPassphrase } from "@x402/stellar";
 import type { Logger } from "../logger.js";
-import type { Metrics } from "../metrics.js";
+import type { LabelsOf, NetworkMetrics } from "../metrics.js";
 import {
   LeaseFencedError,
   type ClaimResult,
@@ -250,7 +250,7 @@ export interface SettlerDeps {
   submitter: Submitter;
   hooks: Pick<SettlementHooks, "beforeSubmit" | "onFinal" | "onSuccess">;
   logger: Logger;
-  metrics: Metrics;
+  metrics: NetworkMetrics;
   /** Passed to `beforeSubmit` as the most the facilitator can pay for this settlement. */
   maxFeeStroops: bigint;
   /** How long a repeat call waits for a signed record to turn final (AD-6). */
@@ -985,7 +985,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
           errorReason: reopening.errorReason,
           reopened: reopened.reopened,
         });
-        metrics.increment("settlement_reopened_total", { reason: reopening.errorReason ?? "" });
+        metrics.increment("settlement_reopened_total", reopenedLabels(reopening.errorReason));
         return { claimed: true, record: reopened };
       }
       // A reopen that lost (another call reopened it first, or the record moved on) is a repeat.
@@ -1132,7 +1132,9 @@ export function createSettler(deps: SettlerDeps): Settle & {
       validOnce,
     );
     const { response } = settled;
+    // `result` is the only dimension; `reason` and `replay` are log fields of the line.
     metrics.increment("settlement_outcomes_total", {
+      result: response.success ? "success" : "error",
       reason: response.success ? "success" : (response.errorReason ?? SETTLE_REASONS.unexpected),
       replay: String(settled.replay ?? false),
     });
@@ -1175,6 +1177,11 @@ function transferFrom(transaction: Transaction): string | undefined {
   const from: unknown = scValToNative(operation.func.invokeContract().args()[0]!);
   return typeof from === "string" ? from : undefined;
 }
+
+/** `settlement_reopened_total`'s labels: `reason`, a log field, only when it isn't empty (0027). */
+export const reopenedLabels = (
+  errorReason: string | undefined,
+): LabelsOf<"settlement_reopened_total"> => (errorReason ? { reason: errorReason } : {});
 
 /** A record claimed before 0073 (`reopened` -1) never reopens (0073 decision 25). */
 function reopenable(record: SettlementRecord, fingerprint: string): boolean {

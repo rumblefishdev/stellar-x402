@@ -8,7 +8,7 @@ import {
 } from "@stellar-x402/signer-pool";
 import { getNetworkPassphrase } from "@x402/stellar";
 import type { Logger } from "../logger.js";
-import type { Metrics } from "../metrics.js";
+import type { NetworkMetrics } from "../metrics.js";
 import type {
   AttemptUpdate,
   SettlementAttempt,
@@ -26,7 +26,7 @@ export interface ReconcilerDeps {
   /** Shared with `/settle`, so both write through one module and see one `answeredHere`. */
   records: Records;
   logger: Logger;
-  metrics: Metrics;
+  metrics: NetworkMetrics;
   /** `SETTLE_BUDGET_MS`: past it plus `MARGIN_MS`, no call adds a hash to a claim. */
   budgetMs: number;
   now?: () => number;
@@ -133,8 +133,10 @@ export function createReconciler(deps: ReconcilerDeps) {
       try {
         const record = await store.get(key);
         if (!record) records.unconfirmed.delete(key);
-        else if (isFinalRecord(record)) {
-          records.unconfirmed.delete(key);
+        // Only while the key is still listed: a writer that took it out during the read either
+        // won (and runs the hooks) or lost to this final record and puts it back for the next
+        // sweep, so the hooks, and the fee, run once.
+        else if (isFinalRecord(record) && records.unconfirmed.delete(key)) {
           records.onFinal(record, "resolved");
           if (record.state === "success") records.onSuccess(record, "resolved");
         }
@@ -167,6 +169,24 @@ export function createReconciler(deps: ReconcilerDeps) {
    * last checked: an operator resolves it, so it is checked again only every few minutes.
    */
   const historyGone = new Map<SettlementRecord["key"], number>();
+
+  /**
+   * The `createdAt` of the oldest record the latest listing left open, `history_gone` ones left
+   * out (an operator owns them): `null` with none, `undefined` before the first listing. Set
+   * right after each listing, from what it listed, and again at the end of the sweep, from what
+   * it left open; a sweep that couldn't list keeps it, so the age it feeds keeps rising (0027
+   * AD-5, decision 56).
+   */
+  let oldestOpenCreatedAt: number | null | undefined;
+
+  const oldestOf = (listed: readonly SettlementRecord[]): number | null => {
+    let oldest: number | null = null;
+    for (const record of listed) {
+      if (historyGone.has(record.key)) continue;
+      if (oldest === null || record.createdAt < oldest) oldest = record.createdAt;
+    }
+    return oldest;
+  };
 
   const pastBound = (
     record: SettlementRecord,
@@ -261,7 +281,11 @@ export function createReconciler(deps: ReconcilerDeps) {
     await runLostHooks();
     await retryMarks();
     const queue = await store.listNonFinal(network);
+    // Before any record is read, so a first sweep stuck on the RPC already shows the backlog.
+    oldestOpenCreatedAt = oldestOf(queue);
     onListed?.();
+    /** Listed records this sweep left non-final; the history_gone ones are filtered out below. */
+    const open: SettlementRecord[] = [];
     const worker = async () => {
       for (let record = queue.shift(); record; record = queue.shift()) {
         const checkedAt = historyGone.get(record.key);
@@ -281,13 +305,17 @@ export function createReconciler(deps: ReconcilerDeps) {
           outcome = "errors";
         }
         report[outcome]++;
-        if (outcome !== "open" && outcome !== "errors") {
+        if (outcome === "open" || outcome === "errors") open.push(record);
+        else {
           historyGone.delete(record.key);
           metrics.increment("settlement_reconciled_total", { state: outcome });
         }
       }
     };
     await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+    // At the end, so both the pass that found a record's history gone and the skip above leave it
+    // out.
+    oldestOpenCreatedAt = oldestOf(open);
     // Only a sweep that changed or failed something: one runs every few seconds.
     if (report.open < Object.values(report).reduce((sum, n) => sum + n, 0))
       logger.info("reconcile_finished", { network, ...report });
@@ -324,7 +352,21 @@ export function createReconciler(deps: ReconcilerDeps) {
     if (result.status === "success" && won && finished) await markIfAnswered(finished);
   };
 
-  return { sweep, resolved };
+  /**
+   * `settlement_oldest_open_seconds` (0027 AD-5): the age of the oldest record the latest listing
+   * left open, at the time of the read, so a record a stuck or failing sweep leaves open shows as a
+   * rising value; 0 with none. `undefined`, so no sample, until a sweep has listed: after a
+   * restart a 0 would read as nothing open while a record is (decision 56). A sweep that hangs or
+   * fails after one that left nothing open reads 0 meanwhile: `sweeps-stopped` covers it
+   * (G-alarm-list). Memory only.
+   */
+  const oldestOpenSeconds = (): number | undefined => {
+    if (oldestOpenCreatedAt === undefined) return undefined;
+    if (oldestOpenCreatedAt === null) return 0;
+    return Math.max(0, (now() - oldestOpenCreatedAt) / 1000);
+  };
+
+  return { sweep, resolved, oldestOpenSeconds };
 }
 
 export type Reconciler = ReturnType<typeof createReconciler>;
@@ -357,9 +399,11 @@ export const SWEEP_INTERVAL_MS = 10_000;
 export function scheduleReconciliation(opts: {
   reconciler: Reconciler;
   logger: Logger;
+  /** The network's child: `settlement_sweeps_total` is network-scoped. */
+  metrics: NetworkMetrics;
   network: StellarNetwork;
 }): Reconciliation {
-  const { reconciler, logger, network } = opts;
+  const { reconciler, logger, metrics, network } = opts;
   let closed = false;
   let listed = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -368,11 +412,18 @@ export function scheduleReconciliation(opts: {
   const done = new Promise<void>((resolve) => (reconciled = resolve));
 
   const tick = () => (sweeping = sweepOnce().finally(() => (sweeping = undefined)));
+  // `listed` at the listing, not at the sweep's end: a long sweep doesn't read as stopped, and a
+  // record that fails doesn't take it back (0027, `sweeps-stopped`). Once per sweep, not per record.
+  const onListed = () => {
+    listed = true;
+    metrics.increment("settlement_sweeps_total", { outcome: "listed" });
+  };
   const sweepOnce = async () => {
     try {
-      await reconciler.sweep(() => (listed = true));
+      await reconciler.sweep(onListed);
     } catch (error) {
       logger.warn("reconcile_failed", { network, error });
+      metrics.increment("settlement_sweeps_total", { outcome: "failed" });
     }
     reconciled();
     if (closed) return;

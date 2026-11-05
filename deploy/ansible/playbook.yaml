@@ -1,15 +1,23 @@
 # x402's parts of the company Hetzner server (ADR 0011): the `x402` user, /srv/x402/production and
 # /srv/x402/openbao, the compose files and deploy.sh, the systemd units and their scripts, the
 # rotation of OpenBao's audit log, and CI's deploy user with its forced command and one sudo rule.
+# Since 0027: the CloudWatch agent and its Roles Anywhere signing helper, the files the units and
+# the host probe write under /var/log/x402, and their rotation.
 # Never the server's base setup (firewall, Docker's daemon.json, sshd, the admins), which the
-# explorer's playbook owns. An admin runs it from a reviewed commit; CI never does:
+# explorer's playbook owns. An admin runs it from a commit on `deploy/production`, which takes only
+# an approved pull request, never from `develop`, which takes pushes without one; CI never runs it
+# (runbook, The playbook):
+#   git status --short   # must print nothing
+#   git fetch origin && git switch --detach origin/deploy/production
 #   cd deploy/ansible
 #   ansible-playbook -i inventory.ini playbook.yaml --check --diff
 #   ansible-playbook -i inventory.ini playbook.yaml
 #
-# It enables the units and starts none but the watchdog's timer: they need their encrypted
-# credentials first (runbook). A changed unit or compose file takes effect at that unit's next
-# restart, so a run never restarts the facilitator.
+# It enables the units and starts none but the timers of the watchdog, the host probe and the
+# rotation: the units need their encrypted credentials first, and the agent its certificate
+# (runbook). A changed unit or compose file takes effect at that unit's next restart, so a run
+# never restarts the facilitator. The CloudWatch agent alone restarts, when its config changed:
+# no container waits on it.
 - name: x402 on the server
   hosts: x402
   become: true
@@ -19,11 +27,42 @@
     # The public half of the environment's deploy key, whose private half is the GitHub
     # environment's secret (runbook).
     deploy_key: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/files/deploy-' ~ x402_environment ~ '.pub') }}"
+    aws_region: eu-central-1
+    # The CloudWatch agent, a build AWS signed: its signature was checked with AWS's key when this
+    # pin was chosen (runbook, The CloudWatch agent). An upgrade changes both lines by pull request.
+    cwagent_version: 1.300074.1b2005
+    cwagent_sha256: 3477032345ce3b325ed21269505f992813ee0508aafc516feb2eaf00f58270de
+    # AWS signs no Linux build of the helper: the SHA-256 is the one its docs listed on 2026-11-05.
+    signing_helper_version: 1.8.6
+    signing_helper_sha256: 3553fdc515e5682541a9ebdd37031ec7f461169aa13ccbb6fbd5b7259644113d
+    cwagent_etc: /opt/aws/amazon-cloudwatch-agent/etc
+    # The agent's public certificate, committed once the CA holder has signed it (runbook).
+    cwagent_cert: "{{ playbook_dir }}/files/cloudwatch-agent-{{ x402_environment }}.crt"
+    # The files table of 0027's server-side spine; deploy/test checks both lists against it.
+    x402_log_dirs:
+      - /var/log/x402
+      - "/var/log/x402/{{ x402_environment }}"
+      - "/var/log/x402/{{ x402_environment }}/emf"
+      - /var/log/x402/openbao
+      - /var/log/x402/host
+    x402_log_files:
+      - "/var/log/x402/{{ x402_environment }}/facilitator.log"
+      - "/var/log/x402/{{ x402_environment }}/facilitator.err.log"
+      - "/var/log/x402/{{ x402_environment }}/postgres-testnet.log"
+      - "/var/log/x402/{{ x402_environment }}/cloudflared.log"
+      - "/var/log/x402/{{ x402_environment }}/deploy.log"
+      - /var/log/x402/openbao/openbao.log
+      - /var/log/x402/host/metrics.log
 
   handlers:
     - name: Reload systemd
       ansible.builtin.systemd_service:
         daemon_reload: true
+
+    # A changed config reaches a running agent only at a restart. Not a start: the runbook's admin
+    # step starts it the first time.
+    - name: Restart the CloudWatch agent if it runs
+      ansible.builtin.command: systemctl try-restart amazon-cloudwatch-agent.service
 
   tasks:
     - name: The x402 user, owner of /srv/x402; nobody logs in as it
@@ -43,6 +82,58 @@
         shell: /bin/sh
         home: /var/lib/x402-deploy
 
+    # Copied from the Telemetry stack's outputs (runbook, The CloudWatch agent). Until then the
+    # signing helper can't run, and nothing else here needs them.
+    - name: The logging role's ARNs from inventory.ini, if it has them
+      ansible.builtin.assert:
+        that:
+          - logging_trust_anchor_arn is defined
+          - logging_profile_arn is defined
+          - logging_trust_anchor_arn is match('^arn:aws:rolesanywhere:' ~ aws_region ~ ':[0-9]{12}:trust-anchor/[0-9a-f-]{36}$')
+          - logging_profile_arn is match('^arn:aws:rolesanywhere:' ~ aws_region ~ ':[0-9]{12}:profile/[0-9a-f-]{36}$')
+          - logging_trust_anchor_arn.split(':')[4] == logging_profile_arn.split(':')[4]
+        fail_msg: Copy TrustAnchorArn and ProfileArn from X402-production-Telemetry into inventory.ini (runbook, The CloudWatch agent).
+        quiet: true
+      when: logging_trust_anchor_arn is defined or logging_profile_arn is defined
+
+    # What the host probe and the rotation run; the server has them already.
+    - name: The host probe's and the rotation's tools
+      ansible.builtin.apt:
+        name: [curl, openssl, logrotate]
+        state: present
+
+    # A running helper keeps the old binary until its next run.
+    - name: IAM Roles Anywhere's signing helper
+      ansible.builtin.get_url:
+        url: "https://rolesanywhere.amazonaws.com/releases/{{ signing_helper_version }}/X86_64/Linux/Amzn2023/aws_signing_helper"
+        checksum: "sha256:{{ signing_helper_sha256 }}"
+        dest: /usr/local/bin/aws_signing_helper
+        owner: root
+        group: root
+        mode: "0755"
+
+    # get_url refuses any other file. In /var/cache itself: under --check it fails on a directory
+    # that doesn't exist yet.
+    - name: The CloudWatch agent's package
+      ansible.builtin.get_url:
+        url: "https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/{{ cwagent_version }}/amazon-cloudwatch-agent.deb"
+        checksum: "sha256:{{ cwagent_sha256 }}"
+        dest: /var/cache/x402-amazon-cloudwatch-agent.deb
+        owner: root
+        group: root
+        mode: "0644"
+      register: cwagent_deb
+
+    # Creates the user and group cwagent and the agent's unit, which it leaves stopped. An upgrade
+    # stops a running agent and starts it again (the package's own scripts); it resumes from its
+    # saved offsets. Not under --check while the file above would change: it isn't there yet.
+    - name: The CloudWatch agent
+      ansible.builtin.apt:
+        deb: /var/cache/x402-amazon-cloudwatch-agent.deb
+        allow_downgrade: true
+      when: not (ansible_check_mode and cwagent_deb is changed)
+      notify: Reload systemd
+
     - name: Directories
       ansible.builtin.file:
         path: "{{ item.path }}"
@@ -59,6 +150,145 @@
         - { path: /srv/x402/openbao/creds, owner: root, mode: "0700" }
         - { path: /usr/local/libexec/x402, owner: root, mode: "0755" }
         - { path: /var/lib/x402-deploy/.ssh, owner: x402-deploy, mode: "0700" }
+        # The agent's config, the rotation's and the signing helper's ARNs.
+        - { path: /etc/x402, owner: root, mode: "0755" }
+        - { path: /var/lib/x402-logrotate, owner: root, mode: "0700" }
+        # A backup or snapshot job touches its stamp here after it succeeds, as root (0026).
+        - { path: /var/lib/x402, owner: root, mode: "0755" }
+        - { path: /var/lib/x402/last-ok, owner: root, mode: "0755" }
+
+    # After the package, which creates the group, and before any unit that writes here is copied:
+    # a reloaded unit opens its new files at its next stop or start. The units append, the agent
+    # reads as cwagent: setgid keeps the group on a file systemd creates, and only root writes, as
+    # logrotate requires.
+    - name: The log directories, read by the agent
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: cwagent
+        mode: "2750"
+      loop: "{{ x402_log_dirs }}"
+      when: not (ansible_check_mode and cwagent_deb is changed)
+
+    - name: The log files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: touch
+        owner: root
+        group: cwagent
+        mode: "0640"
+        modification_time: preserve
+        access_time: preserve
+      loop: "{{ x402_log_files }}"
+      when: not (ansible_check_mode and cwagent_deb is changed)
+
+    # The facilitator's stdout under a second path, so the agent's metrics entry keeps its own
+    # saved offset (0027 decision 1).
+    - name: The EMF entry's path to the facilitator's stdout
+      ansible.builtin.file:
+        path: "/var/log/x402/{{ x402_environment }}/emf/facilitator.log"
+        src: ../facilitator.log
+        state: link
+        force: true
+      when: not (ansible_check_mode and cwagent_deb is changed)
+
+    # The CN the logging role accepts, a client certificate, not expired (runbook): checked here,
+    # on the admin's machine, before it reaches the server.
+    - name: The agent's certificate, checked
+      ansible.builtin.command:
+        argv:
+          - "{{ repo_deploy }}/scripts/check-agent-certificate.sh"
+          - "{{ cwagent_cert }}"
+          - "x402-cloudwatch-agent-{{ x402_environment }}"
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      check_mode: false
+      when: cwagent_cert is file
+
+    # Only the public key leaves systemd-creds; no_log in case anything else does.
+    - name: The agent's key's public half
+      ansible.builtin.shell: >-
+        systemd-creds decrypt --name=cloudwatch-agent-key
+        /srv/x402/{{ x402_environment }}/creds/cloudwatch-agent-key.cred - < /dev/null
+        | openssl pkey -pubout
+      register: agent_key_public
+      changed_when: false
+      check_mode: false
+      no_log: true
+      when: cwagent_cert is file
+
+    - name: The certificate is the key's
+      ansible.builtin.assert:
+        that: agent_key_public.stdout == lookup('ansible.builtin.pipe', 'openssl x509 -pubkey -noout -in ' ~ cwagent_cert)
+        fail_msg: The committed certificate isn't for the agent's active key (runbook, The CloudWatch agent).
+        quiet: true
+      when: cwagent_cert is file
+
+    # Public, signed by the ClickHouse project's CA for a year (0027 decision 25).
+    - name: The agent's certificate
+      ansible.builtin.copy:
+        src: "{{ cwagent_cert }}"
+        dest: "/srv/x402/{{ x402_environment }}/cloudwatch-agent.crt"
+        owner: root
+        group: root
+        mode: "0644"
+      when: cwagent_cert is file
+
+    - name: The logging role's ARNs, for the signing helper
+      ansible.builtin.copy:
+        content: |
+          TRUST_ANCHOR_ARN={{ logging_trust_anchor_arn }}
+          PROFILE_ARN={{ logging_profile_arn }}
+          ROLE_ARN=arn:aws:iam::{{ logging_trust_anchor_arn.split(':')[4] }}:role/x402-{{ x402_environment }}-logging
+        dest: /etc/x402/cloudwatch-credentials.env
+        owner: root
+        group: root
+        mode: "0600"
+      when: logging_trust_anchor_arn is defined
+
+    # Where the agent finds the helper's keys, at the only path it reads. No owner: the agent
+    # hands etc/ to cwagent at every start, so one set here would flip back each run.
+    - name: The agent's credentials setting
+      ansible.builtin.copy:
+        src: "{{ repo_deploy }}/cloudwatch-agent/common-config.toml"
+        dest: "{{ cwagent_etc }}/common-config.toml"
+        mode: "0644"
+      when: not (ansible_check_mode and cwagent_deb is changed)
+      notify: Restart the CloudWatch agent if it runs
+
+    - name: The agent's config
+      ansible.builtin.copy:
+        src: "{{ repo_deploy }}/cloudwatch-agent/config.json"
+        dest: /etc/x402/cloudwatch-agent.json
+        owner: root
+        group: root
+        mode: "0644"
+
+    # fetch-config validates the file and fails the run on a bad one; without -s it neither starts
+    # nor restarts the agent. Compared with the agent's copy rather than run as a handler, so a run
+    # that failed after the copy still applies it. Off AWS it wants a region before it reads the
+    # file; the agent itself takes the region from the file.
+    - name: The agent's config, applied
+      ansible.builtin.shell: >-
+        cmp -s /etc/x402/cloudwatch-agent.json {{ cwagent_etc }}/amazon-cloudwatch-agent.d/file_cloudwatch-agent.json
+        || AWS_REGION={{ aws_region }} /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl
+        -a fetch-config -m onPremise -c file:/etc/x402/cloudwatch-agent.json
+      register: cwagent_fetch
+      changed_when: cwagent_fetch.stdout != ""
+      when: not ansible_check_mode
+      notify: Restart the CloudWatch agent if it runs
+
+    # Its own state and timer: in /etc/logrotate.d, logrotate.timer would rotate the files daily
+    # too, with other settings.
+    - name: The rotation of our logs
+      ansible.builtin.copy:
+        src: "{{ repo_deploy }}/logrotate/x402-logs.conf"
+        dest: /etc/x402/logrotate.conf
+        owner: root
+        group: root
+        mode: "0644"
 
     - name: The compose file and deploy.sh
       ansible.builtin.copy:
@@ -109,6 +339,7 @@
         owner: root
         group: root
         mode: "0644"
+      register: units
       notify: Reload systemd
 
     - name: The deploy user's one sudo rule
@@ -197,3 +428,27 @@
         name: "x402-watchdog@{{ x402_environment }}.timer"
         enabled: true
         state: started
+
+    # Enabled, not started: the runbook's admin step starts them once the certificate is on the
+    # server. At boot the agent starts the helper itself. Not under --check while this run would
+    # add their units: the module fails on a unit it can't find.
+    - name: The CloudWatch agent and its credentials' timer, enabled at boot
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        enabled: true
+      loop:
+        - amazon-cloudwatch-agent.service
+        - x402-cloudwatch-credentials.timer
+      when: not (ansible_check_mode and (units is changed or cwagent_deb is changed))
+
+    # Started too: the probe writes its lines whether the agent runs or not, and the rotation
+    # bounds them.
+    - name: The host probe's and the rotation's timers, enabled and started
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop:
+        - x402-host-probe.timer
+        - x402-logrotate.timer
+      when: not (ansible_check_mode and units is changed)

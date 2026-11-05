@@ -10,12 +10,16 @@ StartLimitBurst=5
 
 [Service]
 WorkingDirectory=/srv/x402/%i
+# Postgres's output, stdout and stderr in order, for the CloudWatch agent (0027 decision 1).
+StandardOutput=append:/var/log/x402/%i/postgres-testnet.log
+StandardError=inherit
 # Compose reads the whole file; this unit never starts the facilitator.
 Environment=FACILITATOR_IMAGE=unused FACILITATOR_ADDRESS_TESTNET=unused CHANNELS_TESTNET=unused
 ExecStartPre=/usr/local/libexec/x402/x402-creds %i postgres-password.testnet:999
-ExecStart=/usr/bin/docker compose up --no-deps --exit-code-from postgres-testnet postgres-testnet
-# Started means accepting connections, so the units after this one find it up.
-ExecStartPost=/usr/bin/timeout 50 /bin/sh -c 'until docker compose exec -T postgres-testnet pg_isready --quiet; do sleep 1; done'
+ExecStart=/usr/bin/docker compose up --no-log-prefix --no-color --no-deps --exit-code-from postgres-testnet postgres-testnet
+# Started means accepting connections, so the units after this one find it up. Quiet: an Exec
+# line that prints into a full disk fails the start.
+ExecStartPost=/usr/bin/timeout 50 /bin/sh -c 'until docker compose exec -T postgres-testnet pg_isready --quiet > /dev/null 2>&1; do sleep 1; done'
 ExecStop=/usr/bin/docker compose stop postgres-testnet
 Restart=on-failure
 RestartSec=5

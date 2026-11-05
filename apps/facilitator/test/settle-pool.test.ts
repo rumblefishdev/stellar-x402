@@ -15,7 +15,9 @@ import {
   start,
   type UpstreamSeams,
 } from "../src/main.js";
-import { memoryMetrics } from "../src/metrics.js";
+import type { BuildIssue } from "../src/adapters/emf.js";
+import { emfMetrics } from "../src/adapters/emf-metrics.js";
+import { memoryMetrics, type ProcessMetrics } from "../src/metrics.js";
 import type { LeaseFence, SettlementStore, SpendScope } from "../src/ports/index.js";
 import { feeSettings } from "../src/settlement/fees.js";
 import { SETTLE_REASONS, keyOf } from "../src/settlement/settle.js";
@@ -511,7 +513,10 @@ describe("main()'s /settle wiring, with the real pool", () => {
 
 describe("main()'s composition (compose)", () => {
   /** The graph `main()` serves; it takes the lease as `start()` does, unless `lease: false`. */
-  async function composed(env: Record<string, string> = {}, opts: { lease?: boolean } = {}) {
+  async function composed(
+    env: Record<string, string> = {},
+    opts: { lease?: boolean; metrics?: ProcessMetrics } = {},
+  ) {
     const config = parseConfig({
       ...signerEnv(facilitator.publicKey(), openbao.socketPath),
       DATABASE_URL: db.urlFor(db.schema),
@@ -532,13 +537,91 @@ describe("main()'s composition (compose)", () => {
       rpc: fake,
       seams: { makeScheme: () => ({ verify: async () => ({ isValid: true, payer }) }) },
       sleep: async () => {},
+      ...(opts.metrics && { metrics: opts.metrics }),
     });
     // `start()` reads the balance and takes the lease first.
     await deps.floor!.runOnce();
     if (opts.lease !== false) await deps.lease!.runOnce();
-    // `compose()` counts in memory until 0027.
+    // Without `opts.metrics`, `compose()` counts in memory.
     return { deps, cataloger, metrics: metrics as MemoryMetrics, fake };
   }
+
+  /** An EMF writer on a captured sink and a scheduler that never fires: only `flush()` writes. */
+  function capturedEmf() {
+    const lines: string[] = [];
+    const issues: BuildIssue[] = [];
+    const metrics = emfMetrics({
+      write: (line) => void lines.push(line),
+      onIssue: (issue) => void issues.push(issue),
+      schedule: { setTimeout: () => undefined, clearTimeout: () => {} },
+    });
+    type Line = { _aws: { CloudWatchMetrics: { Dimensions: string[][] }[] } } & Record<
+      string,
+      unknown
+    >;
+    const linesFor = (name: string) =>
+      lines.map((line) => JSON.parse(line) as Line).filter((line) => name in line);
+    return { metrics, lines, issues, linesFor };
+  }
+
+  it("writes a settle's settlement_outcomes_total with network and result, and no issue (0027)", async () => {
+    const emf = capturedEmf();
+    const { deps, cataloger, fake } = await composed({}, { metrics: emf.metrics });
+    const settled = await deps.settle(payload(fake.ledger + 30, { bazaar }), requirements);
+    expect(settled.response).toMatchObject({ success: true });
+    settled.afterResponse!();
+    await cataloger.drain();
+    await emf.metrics.close();
+    const [outcome, ...rest] = emf.linesFor("settlement_outcomes_total");
+    expect(rest).toEqual([]);
+    expect(outcome).toMatchObject({
+      network: "stellar:testnet",
+      result: "success",
+      settlement_outcomes_total: 1,
+    });
+    expect(outcome!._aws.CloudWatchMetrics[0]!.Dimensions).toEqual([["network", "result"]]);
+    // A network-scoped metric written through the root would write no line and report
+    // `no-valid-set`; the catalog's line, process-scoped, carries no `network`.
+    expect(emf.issues).toEqual([]);
+    const [upsert] = emf.linesFor("catalog_upserts_total");
+    expect(upsert).toBeDefined();
+    expect(upsert).not.toHaveProperty("network");
+    expect(emf.linesFor("lease_changes_total")[0]).toMatchObject({ network: "stellar:testnet" });
+  });
+
+  it("gives the network-scoped parts one network child and discovery and HTTP the root (0027)", async () => {
+    const root = memoryMetrics();
+    const scope = vi.spyOn(root, "for");
+    const { deps, cataloger, metrics, fake } = await composed({}, { metrics: root });
+    expect(scope.mock.calls).toEqual([[{ network: "stellar:testnet" }]]);
+    expect(metrics).toBe(root);
+    expect(deps.metrics).toBe(root);
+    const settled = await deps.settle(payload(fake.ledger + 30, { bazaar }), requirements);
+    expect(settled.response).toMatchObject({ success: true });
+    settled.afterResponse!();
+    await cataloger.drain();
+    const labels = { result: "success", reason: "success", replay: "false" };
+    expect(root.value("settlement_outcomes_total", { ...labels, network: "stellar:testnet" })).toBe(
+      1,
+    );
+    expect(root.value("settlement_outcomes_total", labels)).toBe(0);
+    expect(root.value("lease_changes_total", { held: "true", network: "stellar:testnet" })).toBe(1);
+    expect(root.value("catalog_upserts_total", { origin: "settle", outcome: "inserted" })).toBe(1);
+  });
+
+  it("counts in memory without opts.metrics", async () => {
+    const { deps, metrics, fake } = await composed();
+    const settled = await deps.settle(payload(fake.ledger + 30), requirements);
+    expect(settled.response).toMatchObject({ success: true });
+    expect(
+      metrics.value("settlement_outcomes_total", {
+        result: "success",
+        reason: "success",
+        replay: "false",
+        network: "stellar:testnet",
+      }),
+    ).toBe(1);
+  });
   /** Posts `body` to the app's `route`; the JSON answer. */
   const post = async (app: { port: number }, route: string, body: unknown) => {
     const response = await fetch(`http://127.0.0.1:${app.port}${route}`, {
@@ -656,9 +739,12 @@ describe("main()'s composition (compose)", () => {
         errorReason: SETTLE_REASONS.spendLimitPayer,
       });
       expect(fake.sent).toHaveLength(0);
-      expect(metrics.value("spend_refused_total", { reason: SETTLE_REASONS.spendLimitPayer })).toBe(
-        1,
-      );
+      expect(
+        metrics.value("spend_refused_total", {
+          reason: SETTLE_REASONS.spendLimitPayer,
+          network: "stellar:testnet",
+        }),
+      ).toBe(1);
     } finally {
       await app.close();
     }
@@ -763,7 +849,9 @@ describe("main()'s composition (compose)", () => {
       // `/verify` spends nothing, and `/settle` checks the breakers again, failing closed.
       vi.spyOn(deps.stores.spend, "breakersOpen").mockRejectedValue(new Error("store down"));
       expect(await post(app, "/verify", body)).toMatchObject({ isValid: true });
-      expect(metrics.value("spend_store_failures_total", { op: "breaker" })).toBe(1);
+      expect(
+        metrics.value("spend_store_failures_total", { op: "breaker", network: "stellar:testnet" }),
+      ).toBe(1);
     } finally {
       await app.close();
     }

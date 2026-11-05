@@ -9,10 +9,10 @@ import {
   RpcUnavailableError,
   SettlementSubmitter,
   checkChannel,
-  keypairSigner,
   readAccountEntry,
   type SubmitterEvent,
 } from "../src/index.js";
+import { keypairSigner } from "./testing.js";
 import { FakeRpc, accountEntry, channels, facilitator } from "./fake-rpc.js";
 
 // Account reads over HTTP, against a JSON-RPC stub: what an RPC outage looks like to the pool.

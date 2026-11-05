@@ -14,7 +14,9 @@
   task 0026); 2026-11-02 (the theft alarm reads the accounts instead of our hashes, a second
   balance alarm, and an alarm on reads of the backup secret, from task 0027); 2026-11-03 (the
   effects anyone can cause, where the check reads up to, statistics a forged point can't move,
-  and the weekly review from the first deploy with the fee spend metric, from the PR #111 review)
+  and the weekly review from the first deploy with the fee spend metric, from the PR #111 review);
+  2026-11-05 (the read-only Storage Box account's own directory, and the Storage Box's own
+  snapshots, restored by a copy and never a rollback, from Stan's setup of the box in task 0026)
 - Supersedes: the key custody part of [ADR 0011](0011-facilitator-hosting.md) ("Keys, secrets and
   access": the SSM parameter for `FACILITATOR_SECRET` and the mainnet KMS key)
 
@@ -70,9 +72,9 @@
 - **The OpenBao key signs settlements only.** An ordinary wallet funds the fee account and creates
   the channels, writing the OpenBao key in as each channel's only signer; the channels' own fresh
   keys sign that, so no tool signs other transactions through OpenBao (0036). OpenBao doesn't
-  enforce this, since it signs any hash; the rule keeps the theft alarm free of exceptions, as any
-  other signature by this key is theft. The one exception is the move off a suspected stolen key,
-  below.
+  enforce this, since it signs any hash. The theft alarm reads the accounts, not signatures, so the
+  rule keeps it free of exceptions: no tool of ours changes these accounts' signers, and such a
+  change is theft. The one exception is the move off a suspected stolen key, below.
 - **A unix socket per network, and no network port.** OpenBao has one listener per network, each
   on a socket in its own volume, mounted into the facilitator, plus an admin listener on loopback
   inside OpenBao's own container, which has no network: only root or the `docker` group on the
@@ -103,6 +105,13 @@
   by OpenBao, and the Borg repository is encrypted too. The snapshot job has its own AppRole and
   a snapshot-only policy (`sys/storage/raft/snapshot`), its credential a systemd credential, and
   uses the admin listener.
+- **The Storage Box keeps its own snapshots.** Daily, keeping 7 (14 if the space allows), in the
+  box's `.zfs`, which is read-only; only the Hetzner Console or API deletes one. The server's
+  write key can wipe the live repositories, and change the read-only account's keys, which sit
+  under its home (below), but not the last 7 days. A snapshot covers the whole box, the other
+  projects' backups too, so a restore from one copies our directory out of `.zfs/snapshot` with
+  the box's main account. Never a rollback in the Console: it reverts the whole box. The normal
+  restore doesn't need this: it reads the live repositories with the read-only account.
 - **The backup set is kept in AWS Secrets Manager, apart from the snapshots.** A restore on a new
   server needs five items, all of which are lost with the server
   ([R-unseal-key-backup](../../lore/1-tasks/archive/0047_RESEARCH_hetzner-key-custody/notes/R-unseal-key-backup.md)):
@@ -111,8 +120,10 @@
   2. the recovery key, which regenerates a root token (it can't unseal or open a snapshot);
   3. the Borg passphrase, plus `borg key export` output in keyfile mode;
   4. the `seal "static"` stanza and the OpenBao version;
-  5. the SSH key of a second, read-only Storage Box sub-account on the same directory: the
-     server's own key dies with the server.
+  5. the SSH key of a second, read-only Storage Box sub-account: the server's own key dies with
+     the server. Its home is the repositories' directory (`/x402/data`), one below the write
+     account's (`/x402`), not the same one: a sub-account's `authorized_keys` lives in its home,
+     so a shared home would let either account's key log in as the other.
 - **One secret, `x402/production/openbao-backup`,** in `eu-central-1`, in the AWS account that
   soroban-explorer and prices-api share. One server runs both networks, so one OpenBao and one
   secret. It is one JSON (`seal_key_hex`, `seal_key_id`, `seal_key_sha256`,

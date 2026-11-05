@@ -1,0 +1,59 @@
+{
+  "envName": "production",
+  "awsRegion": "eu-central-1",
+  "networks": ["stellar:testnet"],
+  "logging": {
+    "certificateCn": "x402-cloudwatch-agent-production",
+    "trustAnchorCertificate": "trust/soroban-internal-ca-2026.crt",
+    "serverIpSsmParam": "/x402/production/server-ip",
+    "sessionHours": 12
+  },
+  "uptime": {
+    "url": "https://x402-facilitator.sorobanscan.com/health"
+  },
+  "feeAccounts": {
+    "stellar:testnet": "GAVE5V5IOMNNBOZXGZSQOP447L2QLCG6ELIIPO6CFJLGZVY4YIK3KKRP"
+  },
+  "slack": {
+    "workspaceIdSsmParam": "/x402/production/slack-workspace-id",
+    "channelIdSsmParam": "/x402/production/slack-channel-id"
+  },
+  "host": {
+    "diskMounts": ["/"],
+    "auditDiskMount": "/"
+  },
+  "alarmGroups": {
+    "uptime": false,
+    "telemetry": true,
+    "facilitator": false,
+    "channelHeld": false,
+    "host": false,
+    "backups": false,
+    "snapshots": false,
+    "disk": false,
+    "memory": false,
+    "logVolume": false,
+    "watch": false
+  },
+  "thresholds": {
+    "uptimeFailingMinutes": 7,
+    "uptimeFlapFailingMinutes": 10,
+    "uptimeFlapWindowMinutes": 30,
+    "rpcStalledSeconds": 120,
+    "balanceStaleSeconds": 300,
+    "pendingSeconds": 900,
+    "channelHeldSeconds": 300,
+    "sequenceResyncCount": 5,
+    "balanceLowStroops": 250000000,
+    "balanceCriticalStroops": 100000000,
+    "auditDiskUsedPercent": 80,
+    "walStaleSeconds": 600,
+    "backupAgeSeconds": 93600,
+    "snapshotAgeSeconds": 93600,
+    "certificateDaysLeft": 30,
+    "credentialsAgeSeconds": 7500,
+    "diskUsedPercent": null,
+    "memoryUsedPercent": null,
+    "logVolumeBytesPerHour": 200000000
+  }
+}

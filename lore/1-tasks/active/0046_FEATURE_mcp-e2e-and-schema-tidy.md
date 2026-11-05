@@ -18,6 +18,12 @@ history:
     note: >
       Started with an over-engineering review of the whole 0037 server (W477 A): what goes, what
       stays, in a refactor PR and a behaviour PR.
+  - date: "2026-11-04"
+    status: active
+    who: karolkow
+    note: >
+      Added: make the red e2e suite pass, with its own facilitator and its own time limit. Found in
+      the review of 0111's PR #124.
 ---
 
 # Simplify the MCP server after 0037, tidy its e2e suite and move the tool schemas out of server.ts
@@ -75,7 +81,24 @@ Kept: the address guard, the price-above-zero check, `BEGIN IMMEDIATE` and one d
 payment, the after-sending outcomes, the 300 s cap, loud unknown variables, `allowInsecureLocal`,
 `insufficient_funds`, and the upstream catalog client.
 
+## The red suite (2026-11-04)
+
+`pnpm mcp:e2e` was last green on 2026-10-15. Two full runs on SDK 16.4.1 failed 27 and 22 of 119
+rows, with no XDR error in the second run's log. Measured causes:
+
+- Paid scenarios set a 3 s limit (`test/context.ts`). Building a payment took 0.8 to 14.5 s in 20
+  calls, because the public testnet RPC answers slowly: `curl` alone, 0.3 to 6.6 s in 30 calls. All
+  18 rows of this kind answered "The time limit passed before the payment was sent".
+- E-21 and E-22 settle through the public x402.org facilitator. Direct calls to its `/settle` in 3
+  rounds: 200 at 14.3 s, then 504 at 15.2 s twice, and all 3 payments landed on chain.
+
+| # | What is done | From | vs the task | Who does the same (checked) |
+| --- | --- | --- | --- | --- |
+| 1 | The suite starts our built facilitator, and the example seller settles through it | owner | beyond it | upstream's e2e starts its own facilitators (`e2e/test.ts:886`@58e667f) |
+| 2 | Paid scenarios get a time limit past what signing takes; scenarios that sign nothing keep 3 s | owner | beyond it | checked: no upstream rule |
+
 ## Acceptance Criteria
 
 - [ ] One `[structure only]` PR; unit tests unchanged; an e2e run passes on its head
 - [ ] `server.ts` holds no schema
+- [ ] `pnpm mcp:e2e` passes on real testnet, with E-21 and E-22 settled by the suite's own facilitator

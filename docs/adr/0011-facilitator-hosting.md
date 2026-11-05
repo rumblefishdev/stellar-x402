@@ -9,9 +9,11 @@
   process, independent of the lease; `/health` reports `listed` beside `ready`, and the deploy
   waits for both), 2026-10-28 (task 0076: one hostname and one facilitator service for both
   networks), 2026-11-02 (task 0027: the agent reads a file the unit writes, a Lambda probe
-  replaces Route 53, and 0027 builds the logging role) and 2026-11-03 (task 0027, from the PR
+  replaces Route 53, and 0027 builds the logging role), 2026-11-03 (task 0027, from the PR
   #111 review: every unit's output ships, the loss the log path accepts, the uptime alarm from
-  the first good deploy, the disk alarm to our channel, and certificate renewal in 0027)
+  the first good deploy, the disk alarm to our channel, and certificate renewal in 0027) and
+  2026-11-04 (task 0027 decisions 18 and 20: metric lines kept 30 days, no CPU metric) and
+  2026-11-05 (task 0027 decision 4 amended: every metric in the catalog is billed)
 - Revised: 2026-10-13. ECS Fargate became the company Hetzner server (task 0039); the first
   version is in git history and task 0014. 2026-10-21: the key moved to OpenBao (ADR 0013), and
   deploys, reboots, backups, alarms and downtime were worked out in the PR #24 review.
@@ -337,7 +339,8 @@ One request or one stop must never outlast the layer in front of it:
     `deploy/production`. `develop` stays open for direct pushes such as lore status changes.
   - The SSH key is a secret of the `production` GitHub environment, which carries the rules the
     OIDC trust policy used to: deployment branches limited to `deploy/production`, which is
-    protected: a pull request with an approving review, and no bypass, admins included. The
+    protected: a pull request with an approving review given after its last push by someone
+    other than whoever made it, and no bypass, admins included. The
     workflow runs as it is on that branch, so a change to it is reviewed too.
     - A job outside those rules never gets the key.
     - Before mainnet joins, 0038 weighs the rules the `mainnet` environment was to have: `v*`
@@ -357,8 +360,9 @@ One request or one stop must never outlast the layer in front of it:
 - **An Ansible playbook in `deploy/ansible/` provisions the server's x402 parts:** the `x402`
   user, `/srv/x402/<environment>/`, the systemd units and timers, the compose files,
   `deploy.sh`, the deploy user's one `sudo` rule and its `authorized_keys` forced command,
-  `cloudflared`, and the pgBackRest and CloudWatch agent config. An admin runs it from a reviewed
-  commit, as the explorer's own playbook is run. It touches only x402's parts, never the server's
+  `cloudflared`, and the pgBackRest and CloudWatch agent config. An admin runs it, as the
+  explorer's own playbook is run, from a reviewed commit on `deploy/production`; never from
+  `develop`, which takes unreviewed pushes (0091). It touches only x402's parts, never the server's
   base setup (firewall, `daemon.json`, users), which the ClickHouse project owns. Whoever runs
   the playbook, and from which commit, is the real boundary around production.
 - **Per-merge deploys stay a digest over SSH** (above), and CI never runs the playbook. Ansible
@@ -540,16 +544,20 @@ One request or one stop must never outlast the layer in front of it:
     units does the same with its own container's output: Postgres, `cloudflared`, OpenBao, and the
     deploy with its migrations. The CloudWatch agent sends those files to CloudWatch Logs with the
     logging role's credentials, so `dockerd` stays untouched, an AWS outage never stops a
-    container from starting, and the history outlives the host.
+    container from starting, and the history outlives the host. The files, their streams and
+    their rotation are in the runbook (The CloudWatch agent); a unit's journal keeps only its own
+    start and stop lines.
   - The agent doesn't read Docker's `json-file` logs, which stay for `docker logs`: a `json-file`
     line wraps ours, and EMF needs `_aws` at the root (task 0027's log path spike).
   - The agent keeps EMF lines and app lines in separate log groups. During an AWS outage it holds
     app lines back and drops the oldest metric lines once 20,000 wait, which CloudWatch would have
-    turned into metrics. Both use the Standard class: 30 days for app lines, 3 for metric lines.
-    Every line ships, the client IP in `rate_limited` too; that and the retention are looked at
-    again before mainnet (0038).
-  - The files rotate with `logrotate` on its own timer, since they share a disk with ClickHouse,
-    using `copytruncate`, as the units hold the files open. We accept two losses, tested locally
+    turned into metrics. Both use the Standard class and keep 30 days: a label that isn't a
+    dimension lives only as a field in the metric line, read with Logs Insights, and the weekly
+    fee review reads a week of it (0027 decision 18). Every line ships, the client IP in
+    `rate_limited` too; that and the retention are looked at again before mainnet (0038).
+  - The files rotate with `logrotate` on its own timer, every 10 minutes past 100 MB with 10
+    kept, since they share a disk with ClickHouse, using `copytruncate`, as the units hold the
+    files open. We accept two losses, tested locally
     in 0027. At each rotation, the lines the agent hadn't read yet: up to 250 ms, its poll, all
     but a few ms of them still in the rotated file. When a rotation falls inside an AWS outage,
     every app line since the agent stopped sending, about 5 s into it; those stay in the rotated
@@ -577,10 +585,11 @@ One request or one stop must never outlast the layer in front of it:
   - Namespace `x402-facilitator`.
   - Dimensions stay low-cardinality: `network`, route, outcome, event name.
   - Never payer or `payTo`: each dimension combination is a billed custom metric.
-  - Billed metrics are those with an alarm and the traffic picture (0027). Other labels stay
-    fields in the line, read with Logs Insights.
-- **Host metrics:** the CloudWatch agent on the server reports memory, CPU and free disk, since
-  ClickHouse shares the machine.
+  - Every metric in 0027's catalog is billed (decision 4 as amended). Labels that aren't
+    dimensions stay fields in the line, read with Logs Insights.
+- **Host metrics:** the CloudWatch agent on the server reports memory and disk use, since
+  ClickHouse shares the machine. No CPU: nothing alarms on it, and every metric written is
+  billed (0027 decisions 4 and 20).
 - **Alerts:** CloudWatch alarms go to an SNS topic, and Amazon Q Developer in chat applications
   (formerly AWS Chatbot) posts them to the team's Slack channel. 0027 defines them:
   - the five AD-18 conditions; the low-balance one fires below 25 XLM of spendable balance, and
@@ -596,7 +605,10 @@ One request or one stop must never outlast the layer in front of it:
     repository, so this one alarm covers a stuck archive, which fills a disk ClickHouse shares,
     and WAL that doesn't leave the server;
   - the last `pgbackrest backup` or the last OpenBao snapshot older than 26 hours (both run
-    daily);
+    daily). Each job touches its stamp, `/var/lib/x402/last-ok/pgbackrest-backup` or
+    `openbao-snapshot`, as root and only after it succeeded, and may set its time from the
+    repository; the host probe reports the stamp's age, and a missing one reads as a job that
+    never ran. Stamps live on disk, so a reboot doesn't read as a missed job (0027);
   - the Roles Anywhere certificate expiring within 30 days;
   - low free disk and memory on the server. The disk alarm goes to our channel too: our Platform
     lane runs the server's base setup, and our WAL and logs are what fills the disk.
