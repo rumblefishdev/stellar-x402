@@ -144,6 +144,16 @@ export function createRecords(deps: RecordsDeps) {
    * back meanwhile; a restart forgets it.
    */
   const unconfirmed = new Set<SettlementKey>();
+  /** How many final writes per key are running now, in this process. */
+  const inFlight = new Map<SettlementKey, number>();
+  /**
+   * Keys a final write in this process won while others were still running (0027 decision 55).
+   * A win moves the record from a non-final state, so a racing write that throws or loses after it
+   * can't be the one that committed, and must not put the key back: the sweep would run the hooks,
+   * and count the fee, a second time. Forgotten once the last write for the key ends, so a
+   * reopened record's later write (0073) is listed as before.
+   */
+  const won = new Set<SettlementKey>();
 
   /**
    * Runs `write`, one store write that may make the record final, keeping track of it for the
@@ -154,20 +164,33 @@ export function createRecords(deps: RecordsDeps) {
     write: () => Promise<SettlementRecord | undefined>,
   ) => {
     const listed = unconfirmed.delete(key);
-    let record: SettlementRecord | undefined;
+    inFlight.set(key, (inFlight.get(key) ?? 0) + 1);
     try {
-      record = await write();
-    } catch (error) {
-      unconfirmed.add(key);
-      throw error;
+      let record: SettlementRecord | undefined;
+      try {
+        record = await write();
+      } catch (error) {
+        if (!won.has(key)) unconfirmed.add(key);
+        throw error;
+      }
+      if (record) {
+        // Won: this compare-and-set moved the record from a non-final state, so no write that
+        // threw committed first, and none can commit after.
+        won.add(key);
+        unconfirmed.delete(key);
+      } else if (listed && !won.has(key)) {
+        // Lost, and not to a writer here: an earlier write of ours may be the one that committed.
+        unconfirmed.add(key);
+      }
+      return record;
+    } finally {
+      const left = (inFlight.get(key) ?? 1) - 1;
+      if (left > 0) inFlight.set(key, left);
+      else {
+        inFlight.delete(key);
+        won.delete(key);
+      }
     }
-    // Lost to another writer: an earlier write of ours may still be the one that committed.
-    if (!record && listed) unconfirmed.add(key);
-    // Won: this compare-and-set moved the record from a non-final state, so no write that threw
-    // committed first, and none can commit after. A racing writer that threw and put the key back
-    // while this one ran would have the sweep run the hooks, and count the fee, a second time.
-    if (record) unconfirmed.delete(key);
-    return record;
   };
 
   /** {@link advance}, then `onFinal` once for the writer that made the record final. */

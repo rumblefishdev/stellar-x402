@@ -305,6 +305,17 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     `metric-issue` alarm on the writer's warn log to catch it; the in-memory double didn't check
     scope, so no test would have. A wrong scope now doesn't compile, and the alarm is dropped.
     The child no longer re-scopes with a second `for()`, which nothing used.
+55. **A write that loses or throws after another won keeps the key out** (akot, 2026-11-05;
+    from Karol's review of #112; completes decision 21). Decision 21 fixed the order where the
+    winner returns last. In the other order, a winner that returned first and a racing write that
+    threw or lost after it, the loser put the key back in `unconfirmed`, so the next sweep ran
+    `onFinal`, `onSuccess` and the fee count again; with the real spend policy two failed
+    settlements recorded 4 failures and opened breakers early. `finalWrite` now counts the writes
+    in flight per key and remembers a win until the last of them ends: a win moves the record
+    from a non-final state, so a write that throws or loses after it can't be the one that
+    committed. Once no write is in flight the win is forgotten, so a reopened record's write
+    (0073) that throws is listed as before. A test races a write that throws a moment late with
+    one that commits, 200 times on PostgreSQL: before the fix the fee was counted twice by run 3.
 
 ## Acceptance Criteria
 
