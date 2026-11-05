@@ -72,12 +72,12 @@ metrics. A gauge that stops is silence, not a stale value. The only zero written
 | `signer_failures_total` | `openbao-signer.ts` (0036) | Yes | `reason`, `step` | `signer-failures` |
 | `pool_events_total` | The pool's `onEvent`, `main.ts` | Yes, and `type` only for `sequence-resync` | `type`, `status` on `resolved` | `pool-health` |
 | `settlement_uncertain_total` | `settle.ts` | Yes | | None |
-| `settlement_submit_failures_total` | `settle.ts` | Yes | | None |
+| `settlement_submit_failures_total` | `settle.ts`: an `unexpected_settle_error` with nothing sent, answered with status 200 | Yes | | `submit-failed` |
 | `settlement_budget_exhausted_total` | `settle.ts` | Yes | `signed` | None |
-| `settlement_reconciled_total` | `reconcile.ts` | Yes | `state` | None |
+| `settlement_reconciled_total` | `reconcile.ts` | Yes, and `state` only for `expired` | `state` | `settlement-expired` |
 | `settlement_reopened_total` | `settle.ts` | Yes | `reason` | None |
 | `settlement_lease_fenced_total` | `settle.ts` | Yes | | None |
-| `settlement_hook_failures_total` | `records.ts` | Yes | `hook` | None |
+| `settlement_hook_failures_total` | `records.ts` | Yes | `hook` | `hook-failures` |
 | `settlement_already_settled_total` | `settle.ts` | Yes | | None |
 | `settlement_nonce_reuse_total` | `settle.ts` | Yes | | None |
 | `lease_changes_total` | `lease.ts` | Yes | `held` | None |

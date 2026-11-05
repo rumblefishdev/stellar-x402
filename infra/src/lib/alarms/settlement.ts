@@ -184,6 +184,41 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
       },
     });
 
+    // A payment that failed with nothing of ours to blame by the other alarms (Karol's review of
+    // #114, point 1): `failure-ours` needs a fee, `pending` a record past 750 s, `http-500` a 500.
+    f.event("settlement-expired", {
+      group: "facilitator",
+      network,
+      signal: { catalog: "settlement_reconciled_total", dims: { network, state: "expired" } },
+      description: {
+        what: `A settlement on ${network} expired: reconciliation found no transaction of it landed by its ledger bound, so the payer's payment did not settle and the payer has to sign a new one. One is rare; several mean submissions don't land.`,
+        next: "Read reconcile_finished and the record's settlement_hashes for its attempts, then the pool events (fee-raised, send-retry) and the RPC around that time.",
+        noData: SILENT_EVENT,
+      },
+    });
+
+    f.event("submit-failed", {
+      group: "facilitator",
+      network,
+      signal: { catalog: "settlement_submit_failures_total", dims: on },
+      description: {
+        what: `Settle on ${network} failed with unexpected_settle_error before anything was sent: the payer got status 200 with success false, which http-500 doesn't see.`,
+        next: "Read settlement_submit_failed in the app logs for the error; it is a bug or an outage we don't classify yet.",
+        noData: SILENT_EVENT,
+      },
+    });
+
+    f.event("hook-failures", {
+      group: "facilitator",
+      network,
+      signal: { catalog: "settlement_hook_failures_total", dims: on },
+      description: {
+        what: `A settlement hook threw on ${network}: the spend policy's fee count, failure count or breaker may have missed a final settlement, so budgets and breakers undercount.`,
+        next: "Read settlement_hook_failed in the app logs for the hook and the error, and spend_store_failed if the store is the cause.",
+        noData: SILENT_EVENT,
+      },
+    });
+
     f.event("signer-failures", {
       group: "facilitator",
       network,

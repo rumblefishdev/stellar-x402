@@ -171,7 +171,7 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
-    emit: "aggregated",
+    emit: "eager-first",
   },
   {
     namespace: FAC,
@@ -189,9 +189,10 @@ export const CATALOG = [
     kind: "counter",
     unit: "Count",
     scope: "network",
-    sets: PLAIN,
-    fields: ["state"],
-    emit: "aggregated",
+    // `state` only for `expired`: a payment that never landed, which `settlement-expired` reads.
+    sets: [{ dims: [] }, { dims: ["state"], when: { state: ["expired"] } }],
+    values: { state: ["rejected", "success", "failed", "expired", "other"] },
+    emit: "eager-first",
   },
   {
     namespace: FAC,
@@ -220,7 +221,7 @@ export const CATALOG = [
     scope: "network",
     sets: PLAIN,
     fields: ["hook"],
-    emit: "aggregated",
+    emit: "eager-first",
   },
   {
     namespace: FAC,

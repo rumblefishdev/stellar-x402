@@ -23,7 +23,7 @@ import {
 } from "../src/index.js";
 
 /** The facilitator metrics an Event-shape alarm reads (G-alarm-list), written eager-first. */
-const TEN = [
+const EVENT_METRICS = [
   "spend_breaker_opened_total",
   "spend_budget_nearing_total",
   "settlement_record_failures_total",
@@ -34,6 +34,9 @@ const TEN = [
   "signer_failures_total",
   "spend_failure_attributed_total",
   "spend_commit_unmatched_total",
+  "settlement_reconciled_total",
+  "settlement_submit_failures_total",
+  "settlement_hook_failures_total",
 ];
 
 const ALL: readonly MetricDef[] = CATALOG;
@@ -164,8 +167,8 @@ describe("CATALOG", () => {
     });
   });
 
-  test("emit is eager-first for exactly the 10 Event-alarm metrics", () => {
-    expect(eagerNames).toEqual(new Set(TEN));
+  test("emit is eager-first for exactly the Event-alarm metrics", () => {
+    expect(eagerNames).toEqual(new Set(EVENT_METRICS));
     for (const m of ALL) expect(["eager-first", "aggregated"]).toContain(m.emit);
   });
 
@@ -299,6 +302,10 @@ describe("CATALOG", () => {
     expect(def("spend_failure_attributed_total").sets).toEqual([
       { dims: ["fault"], when: { fault: ["ours"] } },
     ]);
+    expect(def("settlement_reconciled_total").sets).toEqual([
+      { dims: [] },
+      { dims: ["state"], when: { state: ["expired"] } },
+    ]);
     // Every other metric is one plain set.
     const split = [
       "settlement_outcomes_total",
@@ -308,6 +315,7 @@ describe("CATALOG", () => {
       "spend_failure_attributed_total",
       "http_requests_total",
       "settlement_sweeps_total",
+      "settlement_reconciled_total",
       "disk_used_percent",
     ];
     for (const m of ALL.filter((x) => !split.includes(x.name)))

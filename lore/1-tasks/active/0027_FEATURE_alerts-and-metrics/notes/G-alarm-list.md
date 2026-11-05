@@ -126,6 +126,9 @@ dimensions would cost about $15 a month at 50 channels, so we accept this.
 | `landed-after-expired` | `settlement_landed_after_expired_total` | Event | 1 or more | Not breaching: as above |
 | `sweeps-stopped` | `settlement_sweeps_total{outcome:"listed"}`, per network | Level, `Sum` below 1, 5 of 5 one-minute periods | No sweep listed the records for 5 minutes. A live process with failing or hung sweeps writes 0 | Ignore: as above |
 | `http-500` | `http_requests_total`, the `[status]` set at `500`: no `route`, no `network` | Event, 5-minute periods, N = 3, at 5 or more | 5 or more in 5 minutes. A count, since a rate flaps at low traffic. A lease or drain 503 isn't counted | Not breaching: as above |
+| `settlement-expired` | `settlement_reconciled_total` for `state="expired"` | Event | 1 or more: a payment that never landed by its bound. Neither `failure-ours` (needs a fee) nor `pending` (needs a record past 750 s) sees it | Not breaching: as above |
+| `submit-failed` | `settlement_submit_failures_total` | Event | 1 or more: an `unexpected_settle_error` with nothing sent, answered with status 200, so `http-500` doesn't see it | Not breaching: as above |
+| `hook-failures` | `settlement_hook_failures_total` | Event | 1 or more: a hook that threw, so the fee count or a breaker may have missed a settlement | Not breaching: as above |
 | `signer-failures` | `signer_failures_total` | Event | 1 or more. On a quiet server one failed payment may be all there is, and nothing else sees a signer that fails while OpenBao looks healthy (a restored snapshot, a changed key policy). The check after start counts each retry, and the alarm sends one message for them | Not breaching: as above |
 | `rpc-on-fallback` | `rpc_on_fallback` | Level, `Minimum`, 15 of 15 one-minute periods | 1 for 15 minutes; its OK reads as the recovery. Reads the sampled `Values` | Ignore: as above |
 | `pool-health` | `pool_events_total` for `type="sequence-resync"` | Event, 5-minute periods, N = 3, at 5 or more | 5 or more in 5 minutes | Not breaching: as above |
@@ -184,13 +187,13 @@ fields from it, and the weekly fee review needs a week of it.
 ## Metrics with no alarm
 
 - `settlement_uncertain_total`: transient, and `pending` covers one that stays.
-- `settlement_hook_failures_total`, `settlement_already_settled_total`,
-  `settlement_nonce_reuse_total` (forged bodies raise it), `lease_changes_total` (moves on every
-  deploy).
-- `settlement_submit_failures_total` and `settlement_budget_exhausted_total`: a payment that failed
-  or ran out of time is its payer's answer; `failure-ours` and `pending` cover what's ours.
-- `settlement_reconciled_total`, `settlement_reopened_total`, `settlement_lease_fenced_total`,
-  `spend_refused_total`: traffic, read in Logs Insights. A lost lease shows in `uptime`.
+- `settlement_already_settled_total`, `settlement_nonce_reuse_total` (forged bodies raise it),
+  `lease_changes_total` (moves on every deploy).
+- `settlement_budget_exhausted_total`: a payment that ran out of time is its payer's answer;
+  `pending` covers one of ours that stays open.
+- `settlement_reconciled_total` but for `expired`, `settlement_reopened_total`,
+  `settlement_lease_fenced_total`, `spend_refused_total`: traffic, read in Logs Insights. A lost
+  lease shows in `uptime`.
 - `store_prune_failures_total`: a prune that keeps failing grows the tables, which `disk` sees.
 - `balance_read_failures_total`: after one failed read the floor keeps the last reading; reads that
   keep failing show in `balance-stale`.
