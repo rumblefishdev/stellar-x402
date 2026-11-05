@@ -5,7 +5,7 @@ import { join } from "node:path";
 export const UPSTREAM_REPO = "https://github.com/x402-foundation/x402.git";
 
 /** The pinned suite version (ADR 0009). Bumping it means a new gate run and new results. */
-export const UPSTREAM_COMMIT = "10b2d06b9472bc467d139b272d01bface38ae2d8";
+export const UPSTREAM_COMMIT = "8827cf19fa9a7b120588b8cc56f56a3def13bb97";
 
 function run(command: string, args: string[], cwd: string) {
   console.log(`$ ${command} ${args.join(" ")}   (in ${cwd})`);

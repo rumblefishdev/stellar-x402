@@ -255,6 +255,8 @@ export function createApp({
       // Not part of `ready`: the service runs and verifies without OpenBao (0036 decision 4).
       ...(signerState && { signer: signerState() }),
       listed: reconciliation?.listed() ?? true,
+      // Which build answers, so a conformance run's record can name it (0029).
+      commit: config.gitCommit,
     });
   });
   app.use("/discovery", limit("discovery", config.http.rateLimit.discovery));

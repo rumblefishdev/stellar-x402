@@ -25,5 +25,8 @@ WORKDIR /app
 # also makes the root filesystem read-only.
 COPY --from=build /out ./
 USER node
+# The commit this image is built from; `/health` reports it. Last, so the layers above stay cached.
+ARG GIT_COMMIT
+ENV GIT_COMMIT=${GIT_COMMIT}
 # Node is PID 1 and handles SIGTERM itself (`src/server.ts`).
 CMD ["node", "dist/server.js"]

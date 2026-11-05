@@ -55,6 +55,14 @@ if (stellarSigners.length === 0) {
   );
 }
 
+// Which build answers, for the record: our facilitator names its commit on /health (a public one
+// used for a dry run may not).
+const health = await fetch(`${facilitatorUrl}/health`);
+const { commit: facilitatorCommit = null } = health.ok
+  ? ((await health.json()) as { commit?: string })
+  : {};
+console.log(`Facilitator commit: ${facilitatorCommit}`);
+
 // A new folder per run, gone when the gate exits, failed or not (~6 GB). In /tmp, not $TMPDIR:
 // the suite's stack traces print this path into suite.json, which is committed as is, and
 // $TMPDIR on macOS names a per-user folder. Its real path, as stack traces print it (macOS links
@@ -165,6 +173,7 @@ if (run) {
     upstream: { repo: UPSTREAM_REPO, commit: UPSTREAM_COMMIT },
     date,
     facilitatorUrl,
+    facilitatorCommit,
     command: `pnpm ${filters.join(" ")}`,
     signers: stellarSigners,
     startedAt: new Date(startedAt * 1000).toISOString(),
