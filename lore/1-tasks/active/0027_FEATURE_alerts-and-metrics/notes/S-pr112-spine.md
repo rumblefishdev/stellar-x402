@@ -49,7 +49,10 @@ Each `AD` names what it **Binds**, what it **Prevents**, and the **Rule**.
 - **Binds:** the facilitator (#112), the host probe (#113), the CDK (#114), the Lambdas (#115).
 - **Prevents:** names, dimensions and `network` values drifting between emitter and alarm.
 - **Rule:**
-  - `packages/metrics-catalog` holds only data and types. Its only dependency is
+  - `packages/metrics-catalog` holds data and types, plus the series rule over them
+    (`effectiveSets`, `whenHolds`, `isDimValue`, `seriesDims`): small pure functions that the
+    facilitator's EMF builder, the alarms (#114) and the Lambdas (#115) must all apply the same
+    way, so they live with the data rather than in three copies (decision 58). Its only dependency is
     `@stellar-x402/config`, so `network` values are the CAIP-2 strings from `STELLAR_NETWORKS`
     (`stellar:testnet`), never retyped.
   - It declares the `x402-facilitator`, `x402-host` and `x402-watch` namespaces and their metrics.

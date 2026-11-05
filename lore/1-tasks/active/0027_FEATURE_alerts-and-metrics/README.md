@@ -334,6 +334,12 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     metrics writing log fields the catalog didn't name (`reason`, `origin`, `breaker`, ...); all
     are listed now. The writer is unchanged: it still takes any record, and an `undefined`
     value is a label not given.
+58. **The catalog holds the series rule beside its data** (akot, 2026-11-05; from Karol's review
+    of #112; corrects the spine's AD-1 wording). The spine said `packages/metrics-catalog` holds
+    only data and types, while it exports `effectiveSets`, `whenHolds`, `isDimValue` and
+    `seriesDims`. The wording changes, not the code: they are small pure functions over the
+    catalog that the EMF builder, the alarms and the Lambdas must apply alike, and moving them
+    would mean a second package or three copies. The catalog's header already said so.
 
 ## Acceptance Criteria
 
