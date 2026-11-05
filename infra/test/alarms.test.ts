@@ -74,8 +74,8 @@ describe("every alarm reads a series the catalog declares (AD-1)", () => {
 });
 
 describe("the Alarms template", () => {
-  test("has every alarm of the list once per network, 69 with two networks", () => {
-    expect(alarms).toHaveLength(69);
+  test("has every alarm of the list once per network, 71 with two networks", () => {
+    expect(alarms).toHaveLength(71);
     expect(new Set(byName.keys()).size).toBe(alarms.length);
   });
 
@@ -146,6 +146,8 @@ describe("the Alarms template", () => {
     expect(bases("host")).toEqual([
       "audit-disk",
       "certificate",
+      "credentials-stale",
+      "facilitator-failed",
       "openbao-down",
       "probe-silent",
       "telemetry-silent",
@@ -294,6 +296,7 @@ const LEVEL: Record<string, readonly [keyof typeof OP, number, string, number, n
   "backup-age": [">", t.backupAgeSeconds, "Minimum", 60, 3, 3],
   "snapshot-age": [">", t.snapshotAgeSeconds, "Minimum", 60, 3, 3],
   certificate: ["<", t.certificateDaysLeft, "Maximum", 3600, 1, 1],
+  "credentials-stale": [">", t.credentialsAgeSeconds, "Minimum", 60, 3, 3],
   "log-volume": [">", t.logVolumeBytesPerHour!, "Sum", 3600, 1, 1],
   "gauges-silent": [">=", 1, "SampleCount", 300, 3, 3],
   "watch-errors": [">=", 1, "Sum", 300, 2, 3],
@@ -351,8 +354,9 @@ describe("each alarm matches its row in G-alarm-list", () => {
         ]);
       } else if (row.shape.startsWith("Silence")) {
         expect(r.shape).toBe("silence");
+        // telemetry-silent watches both of the agent's series, so a lost disk series fires too.
         expect((p["Metrics"] as MathMetric[]).find((m) => m.Expression)?.Expression).toBe(
-          "FILL(m, 0)",
+          base === "telemetry-silent" ? "MIN([FILL(mem, 0), FILL(disk, 0)])" : "FILL(m, 0)",
         );
         expect([statOf(p), periodOf(p), p["EvaluationPeriods"], p["DatapointsToAlarm"]]).toEqual([
           "SampleCount",

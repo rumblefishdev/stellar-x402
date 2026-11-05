@@ -109,7 +109,8 @@ export interface LevelSpec extends Common {
 }
 
 export interface SilenceSpec extends Common {
-  readonly signal: Signal;
+  /** One series, or several by id: the silence of any one of them fires. */
+  readonly signal: Signal | { readonly each: Readonly<Record<string, Signal>> };
 }
 
 const COMPARISON = {
@@ -210,12 +211,11 @@ export class AlarmFactory {
    * existed (the Prices API's 0222: a breaching-only silence alarm missed a 3-hour halt).
    */
   silence(base: string, spec: SilenceSpec): cloudwatch.Alarm | undefined {
+    const using = "each" in spec.signal ? spec.signal.each : { m: spec.signal };
+    const fills = Object.keys(using).map((id) => `FILL(${id}, 0)`);
+    const expression = fills.length === 1 ? fills[0]! : `MIN([${fills.join(", ")}])`;
     return this.make(base, "silence", spec, {
-      metric: this.metric(
-        { expression: "FILL(m, 0)", using: { m: spec.signal } },
-        "SampleCount",
-        5,
-      ),
+      metric: this.metric({ expression, using }, "SampleCount", 5),
       comparisonOperator: COMPARISON["<"],
       threshold: 1,
       evaluationPeriods: 3,

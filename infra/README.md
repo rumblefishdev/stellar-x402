@@ -83,19 +83,19 @@ is in `us-east-1`, `/aws/chatbot/x402-production-alarms`.
 A group in `envs/production.json`'s `alarmGroups` is either absent or on with its actions; no alarm
 exists with its actions off (decision 26).
 
-| Group         | Alarms                                                                                              | On when                                                                                   |
-| ------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `uptime`      | `uptime`                                                                                            | The probe's `ready` has data, a few minutes after the Uptime stack's deploy (decision 37) |
-| `telemetry`   | `emf-validation`, `emf-parsing`                                                                     | On                                                                                        |
-| `facilitator` | Availability and Settlement, `facilitator-silent`, `gauges-silent`                                  | The facilitator's metric lines reach CloudWatch (#113)                                    |
-| `channelHeld` | `channel-held`                                                                                      | 0089 emits its gauge                                                                      |
-| `host`        | `openbao-down`, `certificate`, `watchdog-restart`, `probe-silent`, `telemetry-silent`, `audit-disk` | #113's probe and agent run, `host.auditDiskMount` set                                     |
-| `backups`     | `wal-failing`, `wal-stale`, `backup-age`                                                            | pgBackRest archives WAL and has made a backup (0026; decision 40)                         |
-| `snapshots`   | `snapshot-age`                                                                                      | OpenBao's daily snapshot has run (0026; decision 40)                                      |
-| `disk`        | `disk` per mount                                                                                    | A threshold read against the first numbers, `host.diskMounts` set                         |
-| `memory`      | `memory`                                                                                            | A threshold after a week of data                                                          |
-| `logVolume`   | `log-volume` per log group                                                                          | A measured threshold                                                                      |
-| `watch`       | Money and security, `watch-errors`, `watch-no-invocations`                                          | #115's off-server check runs as `x402-production-watch`                                   |
+| Group         | Alarms                                                                                                                                         | On when                                                                                   |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `uptime`      | `uptime`                                                                                                                                       | The probe's `ready` has data, a few minutes after the Uptime stack's deploy (decision 37) |
+| `telemetry`   | `emf-validation`, `emf-parsing`                                                                                                                | On                                                                                        |
+| `facilitator` | Availability and Settlement, `facilitator-silent`, `gauges-silent`                                                                             | The facilitator's metric lines reach CloudWatch (#113)                                    |
+| `channelHeld` | `channel-held`                                                                                                                                 | 0089 emits its gauge                                                                      |
+| `host`        | `openbao-down`, `certificate`, `credentials-stale`, `watchdog-restart`, `facilitator-failed`, `probe-silent`, `telemetry-silent`, `audit-disk` | #113's probe and agent run, after its restart window                                      |
+| `backups`     | `wal-failing`, `wal-stale`, `backup-age`                                                                                                       | pgBackRest archives WAL and has made a backup (0026; decision 40)                         |
+| `snapshots`   | `snapshot-age`                                                                                                                                 | OpenBao's daily snapshot has run (0026; decision 40)                                      |
+| `disk`        | `disk` per mount                                                                                                                               | A threshold read against the first numbers, `host.diskMounts` set                         |
+| `memory`      | `memory`                                                                                                                                       | A threshold after a week of data                                                          |
+| `logVolume`   | `log-volume` per log group                                                                                                                     | A measured threshold                                                                      |
+| `watch`       | Money and security, `watch-errors`, `watch-no-invocations`                                                                                     | #115's off-server check runs as `x402-production-watch`                                   |
 
 To turn one on: `make check-series GROUP=<group>` until it passes, then set the flag (and any
 threshold it needs; synth refuses a group without one), `make deploy-production-alarms`, and
@@ -126,11 +126,11 @@ with every group on, and checks:
   #113's live check, after this stack is deployed and the certificate is signed.
 - Whether CloudWatch aggregates a gauge's `Values` array as samples (`Minimum`, `Maximum`): the
   first deploy of #113.
-- That the agent's own series match the catalog. The catalog takes the disk plugin's `path` for
-  the mount point (decision 15), but every metric gets a `host` dimension unless `omit_hostname`
-  is set, and the disk plugin adds `device` and `fstype` by default; #113's agent config has to
-  write `mem_used_percent` with no dimension and `disk_used_percent` with `path` only.
-  `make check-series GROUP=host` shows it before the group goes on.
+- That the agent's own series match the catalog: `mem_used_percent` with no dimension and
+  `disk_used_percent` with `path` `/` only. #113's config gets there with `omit_hostname` and a
+  rollup to `path` with the original dropped (decision 44), tested against the catalog and, in
+  #113's spike, against the agent's real `PutMetricData`. `make check-series GROUP=host` shows
+  it before the group goes on.
 - The metric-math alarms, `store-outage` and `gauges-silent`, fired on purpose. A read-only check
   on 2026-11-04 showed two of their parts: `FILL` returns 0 for a series never written, so a
   Silence alarm fires on one, and `gauges-silent`'s expression returns 1 while one gauge is

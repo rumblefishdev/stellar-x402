@@ -19,8 +19,8 @@
     "channelIdSsmParam": "/x402/production/slack-channel-id"
   },
   "host": {
-    "diskMounts": [],
-    "auditDiskMount": null
+    "diskMounts": ["/"],
+    "auditDiskMount": "/"
   },
   "alarmGroups": {
     "uptime": false,
@@ -50,6 +50,7 @@
     "backupAgeSeconds": 93600,
     "snapshotAgeSeconds": 93600,
     "certificateDaysLeft": 30,
+    "credentialsAgeSeconds": 7500,
     "diskUsedPercent": null,
     "memoryUsedPercent": null,
     "logVolumeBytesPerHour": null
