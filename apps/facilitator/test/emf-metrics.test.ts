@@ -95,7 +95,8 @@ describe("emfMetrics", () => {
   });
 
   it("a 130 s clock jump writes the closed window once, no duplicate, no skipped write of pending data", () => {
-    const { m, writes, time } = setup({ start: T0 + 5_000, seedZero: [SEEDS[0]!] });
+    const { m, writes, time } = setup({ start: T0 + 5_000 });
+    m.seedZero([SEEDS[0]!]);
     const net = m.for({ network: TESTNET });
     net.increment("settlement_outcomes_total", OUTCOME, 3);
     time.jump(130_000); // now T0 + 135 s, the T0 boundary timer fires late
@@ -161,12 +162,13 @@ describe("emfMetrics", () => {
   });
 
   it("seedZero listed per network written every window, also after a reset", () => {
-    const { m, writes, time } = setup({ seedZero: SEEDS });
+    const { m, writes, time } = setup();
     const window = (start: number) =>
       linesFor("settlement_sweeps_total", writes)
         .filter((o) => o._aws.Timestamp === start)
         .map((o) => [o.network, o.outcome, o.settlement_sweeps_total]);
-    // The writer runs from construction: the zeros go out with no other use.
+    m.seedZero(SEEDS);
+    // The seed starts the timers: the zeros go out with no other use.
     time.advance(MIN);
     expect(window(T0)).toEqual([
       [TESTNET, "listed", 0],
@@ -183,6 +185,39 @@ describe("emfMetrics", () => {
       [TESTNET, "listed", 0],
       [PUBNET, "listed", 0],
     ]);
+  });
+
+  it("seeds nothing until seedZero(), then from the open window on", () => {
+    const { m, writes, time } = setup();
+    // A writer with no seed, counter or gauge has no timer and writes nothing.
+    expect(time.timers()).toBe(0);
+    time.advance(MIN);
+    expect(writes).toEqual([]);
+    // Seeded mid-window: the open window (T0 + 1 min) already holds the zero.
+    time.advance(20_000);
+    m.seedZero([SEEDS[0]!]);
+    expect(time.timers()).toBeGreaterThan(0);
+    time.advance(MIN);
+    expect(stamps("settlement_sweeps_total", writes)).toEqual([T0 + MIN]);
+  });
+
+  it("stop() drops the open window, stops the timers and writes nothing after it", async () => {
+    const { m, writes, time } = setup();
+    const net = m.for({ network: TESTNET });
+    m.seedZero(SEEDS);
+    net.increment("settlement_outcomes_total", OUTCOME);
+    net.registerGauge("pool_queued", () => ({ value: 1 }));
+    time.advance(30_000);
+    m.stop();
+    expect(time.timers()).toBe(0);
+    await m.flush();
+    await m.close();
+    net.increment("settlement_outcomes_total", OUTCOME);
+    net.increment("signer_failures_total");
+    m.seedZero(SEEDS);
+    time.advance(5 * MIN);
+    expect(time.timers()).toBe(0);
+    expect(writes).toEqual([]);
   });
 
   it("gauge sampled every 10 s -> Values array of 6 per minute; a throwing read skips that sample only", () => {
@@ -333,7 +368,8 @@ describe("emfMetrics", () => {
   });
 
   it("increment after close() does not restart timers", async () => {
-    const { m, writes, time } = setup({ seedZero: SEEDS });
+    const { m, writes, time } = setup();
+    m.seedZero(SEEDS);
     expect(time.timers()).toBeGreaterThan(0);
     await m.close();
     expect(time.timers()).toBe(0);
@@ -355,11 +391,11 @@ describe("emfMetrics", () => {
     ]) {
       const { m, time } = setup({
         write,
-        seedZero: SEEDS,
         onIssue: () => {
           throw new Error("onIssue boom");
         },
       });
+      m.seedZero(SEEDS);
       const net = m.for({ network: TESTNET });
       net.registerGauge("pool_queued", () => ({ value: 1 }));
       expect(() => net.increment("signer_failures_total")).not.toThrow();

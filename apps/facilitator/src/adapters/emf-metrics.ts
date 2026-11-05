@@ -72,17 +72,23 @@ export function emfMetrics(
   opts: {
     write?: (line: string) => void | Promise<void>;
     now?: () => number;
-    /**
-     * Counters written as 0 in every window, `network` included in their labels: the liveness
-     * points a Silence alarm reads. They start the timers at construction.
-     */
-    seedZero?: ReadonlyArray<{ name: CounterName; labels: Labels }>;
     /** Each distinct issue once (per kind, name, dim and value), at most 1000 of them. */
     onIssue?: (issue: BuildIssue) => void;
     sampleEveryMs?: number;
     schedule?: Scheduler;
   } = {},
-): ProcessMetrics & { flush(): Promise<void>; close(): Promise<void> } {
+): ProcessMetrics & {
+  /**
+   * Counters written as 0 in every window from the open one on, `network` included in their
+   * labels: the liveness points a Silence alarm reads. They start the timers. `main()` seeds once
+   * the service has started, so a start that hangs or fails shows as missing data (AD-4).
+   */
+  seedZero(series: ReadonlyArray<{ name: CounterName; labels: Labels }>): void;
+  flush(): Promise<void>;
+  close(): Promise<void>;
+  /** Stops the timers and drops the open window unwritten: for a start that failed (AD-4). */
+  stop(): void;
+} {
   const write = opts.write ?? stdoutWrite;
   const now = opts.now ?? Date.now;
   const schedule = opts.schedule ?? unrefTimers;
@@ -92,7 +98,7 @@ export function emfMetrics(
     opts.sampleEveryMs > 0
       ? opts.sampleEveryMs
       : SAMPLE_EVERY_MS;
-  const seeds = (opts.seedZero ?? []).map((s) => ({ name: s.name, labels: { ...s.labels } }));
+  const seeds: { name: string; labels: Labels }[] = [];
 
   // ---- state of the open window ----
   let windowStart = minuteOf(now());
@@ -318,12 +324,21 @@ export function emfMetrics(
     },
   };
 
-  applySeeds();
-  if (seeds.length > 0) arm();
-
   return {
     ...root,
     for: (scope) => scoped(root, scope.network),
+    seedZero(series) {
+      try {
+        if (stopped) return;
+        // Into the window of the call: with no timer running, the open one may be minutes old.
+        roll(now());
+        seeds.push(...series.map((s) => ({ name: s.name, labels: { ...s.labels } })));
+        applySeeds();
+        arm();
+      } catch {
+        /* never throws */
+      }
+    },
     flush() {
       if (stopped) return closing ?? Promise.resolve();
       return flushNow();
@@ -334,6 +349,13 @@ export function emfMetrics(
       disarm();
       closing = flushNow();
       return closing;
+    },
+    stop() {
+      stopped = true;
+      disarm();
+      counters.clear();
+      samples.clear();
+      closing ??= Promise.resolve();
     },
   };
 }

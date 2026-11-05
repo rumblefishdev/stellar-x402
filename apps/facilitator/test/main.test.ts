@@ -25,16 +25,33 @@ import { hardened, ledgerEntries, rpcStub } from "./rpc-stub.js";
 import { fakeOpenBao, signerEnv } from "./fake-openbao.js";
 
 type EmfModule = typeof import("../src/adapters/emf-metrics.js");
-/** The options each `emfMetrics()` call got: `main()`'s seed is checked on them (0027). */
-const emfOptions = vi.hoisted(() => [] as Parameters<EmfModule["emfMetrics"]>[0][]);
+type EmfWriter = ReturnType<EmfModule["emfMetrics"]>;
+/**
+ * Each `emfMetrics()` call's options, the writer it returned and the seeds `main()` gave that
+ * writer: `main()`'s seed and its issue logging are checked on them (0027).
+ */
+const emf = vi.hoisted(() => ({
+  options: [] as Parameters<EmfModule["emfMetrics"]>[0][],
+  writers: [] as EmfWriter[],
+  seeds: [] as Parameters<EmfWriter["seedZero"]>[0][],
+}));
 vi.mock("../src/adapters/emf-metrics.js", async (importActual) => {
   const actual = await importActual<EmfModule>();
   return {
     ...actual,
     emfMetrics: (opts: Parameters<EmfModule["emfMetrics"]>[0]) => {
-      emfOptions.push(opts);
+      emf.options.push(opts);
       // Off stdout unless the test gives `main()` a sink: `LOG_LEVEL` quiets the logger only.
-      return actual.emfMetrics({ write: () => {}, ...opts });
+      const writer = actual.emfMetrics({ write: () => {}, ...opts });
+      emf.writers.push(writer);
+      const seedZero = writer.seedZero;
+      return {
+        ...writer,
+        seedZero: (series: Parameters<EmfWriter["seedZero"]>[0]) => {
+          emf.seeds.push(series);
+          seedZero(series);
+        },
+      };
     },
   };
 });
@@ -359,19 +376,41 @@ describe("main()", () => {
   });
 
   it("seeds settlement_sweeps_total for its network's listed sweeps, and nothing else (0027)", async () => {
-    emfOptions.length = 0;
+    emf.options.length = 0;
+    emf.seeds.length = 0;
     const app = await main(
       { ...env, RPC_URLS: rpc.url, PORT: "0", LOG_LEVEL: "error" },
       { write: () => {} },
     );
     await app.close();
-    expect(emfOptions).toHaveLength(1);
-    expect(emfOptions[0]?.seedZero).toEqual([
-      {
-        name: "settlement_sweeps_total",
-        labels: { network: "stellar:testnet", outcome: "listed" },
-      },
+    expect(emf.options).toHaveLength(1);
+    expect(emf.seeds).toEqual([
+      [
+        {
+          name: "settlement_sweeps_total",
+          labels: { network: "stellar:testnet", outcome: "listed" },
+        },
+      ],
     ]);
+  });
+
+  it("writes no liveness seed for a start that fails, and stops the writer (0027 AD-4)", async () => {
+    emf.writers.length = 0;
+    emf.seeds.length = 0;
+    const lines: string[] = [];
+    const error = await main(
+      { ...env, CHANNELS: `${env.CHANNELS},${masterActive}`, RPC_URLS: rpc.url, PORT: "0" },
+      { write: (line) => void lines.push(line) },
+    ).catch((e: unknown) => e);
+    expect(String(error)).toContain(`${masterActive}: master-key-active`);
+    expect(emf.seeds).toEqual([]);
+    // A crash loop of short starts shows as missing data, so `facilitator-silent` fires: the
+    // writer is stopped, and a flush (a minute boundary would run one) writes nothing, not even
+    // a count that came after the error.
+    expect(emf.writers).toHaveLength(1);
+    emf.writers[0]!.increment("http_requests_total", { route: "/verify", status: 200 });
+    await emf.writers[0]!.flush();
+    expect(lines.filter((line) => line.startsWith(EMF_LINE_PREFIX))).toEqual([]);
   });
 
   it("ends close() with the metrics' final flush, on the log's sink (0027)", async () => {

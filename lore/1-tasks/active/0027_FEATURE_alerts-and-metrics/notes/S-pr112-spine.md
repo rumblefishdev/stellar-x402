@@ -139,16 +139,20 @@ Each `AD` names what it **Binds**, what it **Prevents**, and the **Rule**.
     and `Maximum` describe the minute. The array semantics are unverified in the docs; check them
     at the first deploy.
   - **Zero seeds:** the only zero written is `settlement_sweeps_total{outcome="listed"}` for each
-    configured network. Zeros make an hour billable.
+    configured network, from the service's start on (below). Zeros make an hour billable.
   - **Never throws.** Each public method and each gauge read is isolated, and one failure never
     drops the rest of a tick.
-  - **Lifecycle:** `main()` builds the writer, with its seed, after the RPC network check and just
-    before `compose()`, which takes it as the root (`memoryMetrics()` when none is given), so a
-    startup that hangs after it (the channel check, the lease) still writes its zeros; one stuck in
-    the network check, which fails within seconds, writes none. `main()` starts the RPC stall tracker `compose()` builds at the same time. The final
-    flush runs at the end of `closeOnce`, after the tracker stops, and is awaited before
-    `process.exit`, since a stdout pipe is asynchronous. A `startup_failed` exit writes no final
-    flush, so a start that failed writes no liveness point.
+  - **Lifecycle:** `main()` builds the writer after the RPC network check and just before
+    `compose()`, which takes it as the root (`memoryMetrics()` when none is given). Its timers
+    start with the graph's gauges, so a startup that hangs after it (the channel check, the lease)
+    still writes them. `main()` starts the RPC stall tracker `compose()` builds at the same time.
+    The zero seed is added only once `start()` has resolved: a start that hangs or fails, a crash
+    loop of short starts included, writes no liveness point and shows as missing data, so
+    `facilitator-silent` fires. A `startup_failed` exit stops the writer with its open window
+    unwritten. The final flush runs at the end of `closeOnce`, after the tracker stops, and is
+    awaited before `process.exit`, since a stdout pipe is asynchronous. (Changed 2026-11-05 from
+    Karol's review of #112: the seed came with the writer, so a start that crossed a minute
+    boundary wrote it, and a crash loop could keep `facilitator-silent` quiet.)
 
 ### AD-5: gauges are computed when read
 - **Binds:** the gauge sources, #114's Level alarms.

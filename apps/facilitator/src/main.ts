@@ -671,6 +671,8 @@ export async function main(
     { main: pg.Pool; reserve: pg.Pool; rateLimits: pg.Pool; discovery: pg.Pool } | undefined;
   const endPools = () => Promise.all(Object.values(pools ?? {}).map((p) => p.end()));
   let rpcStall: RpcStallTracker | undefined;
+  /** The EMF writer, for the catch: a start that failed stops it. */
+  let emf: ReturnType<typeof emfMetrics> | undefined;
   try {
     // stellar-sdk's RPC and Horizon clients use the global fetch with no timeout of their own, and
     // an upstream call cut off by its deadline can't be cancelled. undici's defaults would hold its
@@ -700,16 +702,13 @@ export async function main(
     await checkRpcNetworks(config.rpcUrls, getNetworkPassphrase(config.network));
     const stores = postgresStores(pools.main, pools);
     // The EMF writer (0027 AD-4) on its own sink, never through the logger. Its timers start
-    // here, with the graph, so a startup that hangs still writes the zero seed every minute. On
-    // stdout by default, where each write is awaited by the final flush.
+    // with the graph's gauges, so a startup that hangs still writes them; its liveness seed waits
+    // for `start()` below. On stdout by default, where each write is awaited by the final flush.
     const { write } = opts;
-    const metrics = emfMetrics({
+    const metrics = (emf = emfMetrics({
       ...(write && { write: (line: string) => write(`${line}\n`) }),
-      seedZero: [
-        { name: "settlement_sweeps_total", labels: { network: config.network, outcome: "listed" } },
-      ],
       onIssue: (issue) => logger.warn("metric_issue", { ...issue }),
-    });
+    }));
     const composed = compose(config, { logger, stores, metrics });
     const { deps, cataloger, rpc, signer } = composed;
     // With the graph, like the writer's timers: an RPC that hangs the startup checks shows as a
@@ -727,6 +726,11 @@ export async function main(
       restoreConsole();
       throw error;
     });
+    // The liveness point `facilitator-silent` reads, from the service's start on (AD-4): a start
+    // that hangs or fails, a crash loop of them included, writes none and shows as missing data.
+    metrics.seedZero([
+      { name: "settlement_sweeps_total", labels: { network: config.network, outcome: "listed" } },
+    ]);
     // Not awaited: the service starts and `/verify` answers without OpenBao; the outcome goes to
     // the log and `/health`'s `signer`, and a failed check tries again (0036 decision 4).
     void signer.check();
@@ -782,11 +786,10 @@ export async function main(
     // Logged here, where an RPC URL is named as its `RPC_URLS` entry, never by its host
     // (ADR 0011); `server.ts` logs only a `ConfigError`, which comes before the logger.
     logger.error("startup_failed", { error });
-    // No final metrics flush here: the open window always holds the zero seed, so it would add a
-    // liveness point for every start that failed, and a crash loop of short starts would keep
-    // `facilitator-silent` quiet. A start that crosses a minute boundary has written the seed
-    // already, by design (a hung start writes it); `sweeps-stopped` and `uptime` see that one.
-    // Eager-first lines are out already; the writer's timers are unref'd.
+    // No final metrics flush: the writer stops with its open window unwritten, so a start that
+    // failed adds no point after the error. It wrote no seed either (above), so a crash loop
+    // shows as missing data. Eager-first lines are out already.
+    emf?.stop();
     rpcStall?.stop();
     await endPools();
     throw error;

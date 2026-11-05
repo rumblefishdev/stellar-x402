@@ -145,7 +145,7 @@ A failed host check, or a job that never ran, writes a value past its threshold
 | `emf-validation` | `AWS/Logs EMFValidationErrors` for the metrics log group | Event | 1 or more: CloudWatch rejected a line, so its metrics are gone: Event and Count alarms on them read OK, and Level ones keep their last state | Not breaching: written only when a line fails |
 | `emf-parsing` | `AWS/Logs EMFParsingErrors` for the metrics log group | Event | 1 or more: a line CloudWatch couldn't parse as EMF | As above |
 | `telemetry-silent` | `mem_used_percent` from the agent | Silence | 15 minutes: agent, credentials or egress | Breaching |
-| `facilitator-silent` | `settlement_sweeps_total{outcome:"listed"}`, per network, written every minute, 0 included | Silence | 15 minutes. Fires beside `uptime` when the process is down | Breaching |
+| `facilitator-silent` | `settlement_sweeps_total{outcome:"listed"}`, per network, written every minute once the service has started, 0 included | Silence | 15 minutes. Fires beside `uptime` when the process is down, or when its start hangs or fails, a crash loop included: a start writes the point only once it has started | Breaching |
 | `probe-silent` | `host_probe_heartbeat` | Silence | 15 minutes | Breaching |
 | `watch-errors` | `AWS/Lambda Errors` of the off-server check | Level, `Sum` at 1 or more, 2 of 3 five-minute periods | 2 of 3 runs. Each section that fails throws at the end of the run, after the others publish | Ignore: `watch-no-invocations` |
 | `watch-no-invocations` | `AWS/Lambda Invocations` of the off-server check | Silence | 15 minutes | Breaching |
