@@ -19,6 +19,11 @@ history:
     who: karolkow
     note: >
       An architecture review measured what still fails: real budgets, not leaks.
+  - date: "2026-11-05"
+    status: active
+    who: karolkow
+    note: >
+      Replanning how the settlement tests are built; first decisions recorded below.
 ---
 
 # Make the timing-sensitive CI tests pass on a slow runner
@@ -131,5 +136,30 @@ production code.
 ## Acceptance Criteria
 
 - [ ] Each failure's cause is named with evidence (a reproduction before and after the fix)
-- [ ] Both test groups pass 50 looped runs under a simulated slow runner
+- [ ] Both test groups pass 50 looped runs with a busy loop on every core
 - [ ] CI on develop is green
+- [ ] A fixed list of 10–15 seeded defects runs before and after the test rewrite, and its result
+      is in the PR's evidence
+
+## Decisions so far
+
+| # | What is done | From | Vs the task | Who does the same (checked) | Code | Test |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | A test asserts the exact answer only where it sets the moment the budget ends. A test on real time asserts only money rules that hold in any order | grilling | beyond it | not checked upstream | — | — |
+| 2 | The settlement and store tests stay on real PostgreSQL | grilling, ADR 0012 | matches | not checked upstream | — | — |
+| 3 | No automatic test retries: a failed test gets its cause fixed | grilling | beyond it | none found in upstream's test configs | — | — |
+| 4 | "Does not depend on time" means 50 clean runs with a busy loop on every core; such a test passes under any load | grilling, task AC | sharpens it | not checked upstream | — | — |
+| 5 | A fixed list of 10–15 seeded defects, some the tests must newly catch: three such defects pass all 864 tests today | grilling, measured 2026-11-05 | beyond it | not checked upstream | — | — |
+
+## Not yet decided
+
+- What must be true after this work: for the developer, and for the client.
+- Whether automated mutation testing runs too, once or on a schedule.
+- How a test sets the moment the budget ends, which money rules get a real-time test, and where
+  those tests run. Both depend on the first point.
+- Whether the rewrite lands at once or in parts, and its order against the open PRs on `settle.ts`.
+
+## Out of scope
+
+- An in-memory store for tests (ADR 0012).
+- Automatic test retries (decision 3).
