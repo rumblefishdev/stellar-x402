@@ -8,9 +8,9 @@
  * self-issued SAC, the class USDC is in.
  *
  * Build the wasm first (see `spend-matrix.ts`), then:
- *   cd apps/facilitator && npx tsx scripts/front-run-probe.ts
+ *   cd apps/facilitator && npx tsx test/live/front-run-probe.ts
  *
- * The results, with every hash, go to `scripts/results/front-run-testnet.json`. Testnet only.
+ * The results, with every hash, go to `test/live/results/front-run-testnet.json`. Testnet only.
  */
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -30,11 +30,11 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import { failureCause } from "@stellar-x402/signer-pool";
-import { attribute } from "../src/spend/attribution.js";
+import { attribute } from "../../src/spend/attribution.js";
 
 const RPC_URL = "https://soroban-testnet.stellar.org";
 const server = new rpc.Server(RPC_URL);
-const WASM_DIR = new URL("../../../contracts/target/wasm32v1-none/release/", import.meta.url);
+const WASM_DIR = new URL("../../../../contracts/target/wasm32v1-none/release/", import.meta.url);
 const AMOUNT = 1_000n;
 const log = (message: string) => process.stderr.write(`[front-run] ${message}\n`);
 const addr = (address: string) => Address.fromString(address).toScVal();

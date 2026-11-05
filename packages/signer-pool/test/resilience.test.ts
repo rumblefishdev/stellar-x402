@@ -9,13 +9,13 @@ import {
   SettlementSubmitter,
   SimulationCheckError,
   checkFacilitatorBalance,
-  keypairSigner,
   readAccountEntry,
   type FallbackRpcOptions,
   type SorobanRpc,
   type SubmitterEvent,
   type SubmitterOptions,
 } from "../src/index.js";
+import { keypairSigner } from "./testing.js";
 import { FakeRpc, accountEntry, channels, facilitator, ledgerEntries } from "./fake-rpc.js";
 
 const PASSPHRASE = "Test SDF Network ; September 2015";

@@ -8,13 +8,13 @@
 // AddressV2 entry. Testnet RPC keeps about 7 days of history (`ledgerRetentionWindow`).
 //
 // Env: [RPC_URL] (default https://soroban-testnet.stellar.org)
-// Usage: tsx scripts/record-xdr-fixture.ts [<transaction hash>]
+// Usage: tsx test/live/record-xdr-fixture.ts [<transaction hash>]
 import { mkdirSync, writeFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 
 const RPC_URL = process.env.RPC_URL ?? "https://soroban-testnet.stellar.org";
 const DEFAULT_HASH = "b597301aceaceb406760fbc54dbcf25007bbb0083af5b71afe0b5a42f7647052";
-const OUT = new URL("../test/fixtures/protocol-29/", import.meta.url);
+const OUT = new URL("../fixtures/protocol-29/", import.meta.url);
 
 async function call<T>(method: string, params: unknown): Promise<T> {
   const res = await fetch(RPC_URL, {

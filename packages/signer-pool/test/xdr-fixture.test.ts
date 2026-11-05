@@ -9,7 +9,7 @@ import {
 } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
 
-// Recorded testnet XDR from protocol 29 (scripts/record-xdr-fixture.ts): a 0007 smoke-run
+// Recorded testnet XDR from protocol 29 (test/live/record-xdr-fixture.ts): a 0007 smoke-run
 // settlement in the delegated-bump shape, with the client's AddressV2 entry (CAP-71), and the
 // LedgerCloseMeta v2 of its ledger. It guards AD-14: we stay on @stellar/stellar-sdk 16.x and its
 // XDR accessor API, and that version must keep parsing what the network produces.
