@@ -1,9 +1,11 @@
-// The environment's config (`envs/<env>.json`), typed and checked before any construct exists, as
-// in the explorer's and the Prices API's `validateConfig`: every error at once, then one throw.
+// The environment's config (`envs/<env>.json`), typed and checked with zod before any construct
+// exists, as in the explorer's and the Prices API's `validateConfig`: every error at once, then one
+// throw.
 // Thresholds live here; names, namespaces and dimensions live in @stellar-x402/metrics-catalog.
 import { isStellarNetwork, type StellarNetwork } from "@stellar-x402/config";
 import { isDimValue } from "@stellar-x402/metrics-catalog";
 import { StrKey } from "@stellar/stellar-sdk";
+import { z } from "zod";
 
 /**
  * An alarm group is created whole or not at all (0027 decision 26): a group goes on once every
@@ -109,44 +111,6 @@ export interface EnvironmentConfig {
   readonly thresholds: Thresholds;
 }
 
-const NULLABLE: ReadonlySet<keyof Thresholds> = new Set([
-  "diskUsedPercent",
-  "memoryUsedPercent",
-  "logVolumeBytesPerHour",
-]);
-const PERCENT: ReadonlySet<keyof Thresholds> = new Set([
-  "auditDiskUsedPercent",
-  "diskUsedPercent",
-  "memoryUsedPercent",
-]);
-const INTEGER: ReadonlySet<keyof Thresholds> = new Set([
-  "uptimeFailingMinutes",
-  "http500Count",
-  "sequenceResyncCount",
-  "balanceLowStroops",
-  "balanceCriticalStroops",
-]);
-const THRESHOLD_KEYS: readonly (keyof Thresholds)[] = [
-  "uptimeFailingMinutes",
-  "rpcStalledSeconds",
-  "balanceStaleSeconds",
-  "pendingSeconds",
-  "channelHeldSeconds",
-  "http500Count",
-  "sequenceResyncCount",
-  "balanceLowStroops",
-  "balanceCriticalStroops",
-  "auditDiskUsedPercent",
-  "walStaleSeconds",
-  "backupAgeSeconds",
-  "snapshotAgeSeconds",
-  "certificateDaysLeft",
-  "credentialsAgeSeconds",
-  "diskUsedPercent",
-  "memoryUsedPercent",
-  "logVolumeBytesPerHour",
-];
-
 /** Roles Anywhere's longest session: a profile's `durationSeconds` stops at 43,200. */
 const MAX_SESSION_HOURS = 12;
 /** An alarm's evaluation range must fit in a day (CloudWatch, checked at deploy, not synth). */
@@ -156,133 +120,154 @@ const MAX_ALARM_MINUTES = 24 * 60;
 export const isAccountAddress = (v: unknown): v is string =>
   typeof v === "string" && StrKey.isValidEd25519PublicKey(v);
 
-const isSsmName = (v: unknown): boolean =>
-  typeof v === "string" && /^\/[\x21-\x7e]+$/.test(v) && v.length <= 2048;
+const SSM = "must be an absolute SSM parameter name";
+const ssmName = z
+  .string({ message: SSM })
+  .max(2048, SSM)
+  .regex(/^\/[\x21-\x7e]+$/, SSM);
+const dimValue = z
+  .string({ message: "must be a CloudWatch dimension value" })
+  .refine(isDimValue, "is no CloudWatch dimension value");
 
-/** Throws with every problem in `config`, or returns it typed. */
-export function validateConfig(config: EnvironmentConfig): EnvironmentConfig {
-  const errors: string[] = [];
-  const c = config as unknown as Record<string, unknown>;
+const POSITIVE = "must be a positive number";
+const positive = z.number({ message: POSITIVE }).finite(POSITIVE).positive(POSITIVE);
+const count = positive.int("must be an integer");
+const percent = positive.max(100, "is a percentage, at most 100");
 
-  if (typeof config.envName !== "string" || !/^[a-z][a-z0-9-]*$/.test(config.envName))
-    errors.push(`envName must be lowercase letters, digits and '-', got: ${String(c["envName"])}`);
-  if (typeof config.awsRegion !== "string" || !/^[a-z]{2}-[a-z]+-\d$/.test(config.awsRegion))
-    errors.push(`awsRegion must be a region like eu-central-1, got: ${String(c["awsRegion"])}`);
+const thresholds = z
+  .object({
+    uptimeFailingMinutes: count.max(MAX_ALARM_MINUTES, `must fit in a day (${MAX_ALARM_MINUTES})`),
+    rpcStalledSeconds: positive,
+    balanceStaleSeconds: positive,
+    pendingSeconds: positive,
+    channelHeldSeconds: positive,
+    http500Count: count,
+    sequenceResyncCount: count,
+    balanceLowStroops: count,
+    balanceCriticalStroops: count,
+    auditDiskUsedPercent: percent,
+    walStaleSeconds: positive,
+    backupAgeSeconds: positive,
+    snapshotAgeSeconds: positive,
+    certificateDaysLeft: positive,
+    credentialsAgeSeconds: positive,
+    // Measured before the group goes on; `null` until then.
+    diskUsedPercent: percent.nullable(),
+    memoryUsedPercent: percent.nullable(),
+    logVolumeBytesPerHour: positive.nullable(),
+  } satisfies Record<keyof Thresholds, z.ZodTypeAny>)
+  .strict();
 
-  if (!Array.isArray(config.networks) || config.networks.length === 0) {
-    errors.push("networks must list at least one CAIP-2 network");
-  } else {
-    for (const n of config.networks as readonly unknown[])
-      if (typeof n !== "string" || !isStellarNetwork(n))
-        errors.push(`networks: ${String(n)} is not one of STELLAR_NETWORKS`);
-    if (new Set(config.networks).size !== config.networks.length)
-      errors.push("networks lists a network twice");
-  }
+const LOWER = "must be lowercase letters, digits and '-'";
+const REGION = "must be a region like eu-central-1";
+const NETWORKS = "must list at least one CAIP-2 network";
+const CRT = "must be a .crt path inside infra/";
+const SESSION = `must be an integer from 1 to ${MAX_SESSION_HOURS}`;
+const HTTPS = "must be an https:// URL";
 
-  const logging = config.logging ?? ({} as EnvironmentConfig["logging"]);
-  if (
-    typeof logging.certificateCn !== "string" ||
-    !/^[a-z0-9][a-z0-9-]{0,63}$/.test(logging.certificateCn)
-  )
-    errors.push(
-      `logging.certificateCn must be lowercase letters, digits and '-', got: ${String(logging.certificateCn)}`,
-    );
-  if (
-    typeof logging.trustAnchorCertificate !== "string" ||
-    !/^[\w./-]+\.crt$/.test(logging.trustAnchorCertificate) ||
-    logging.trustAnchorCertificate.includes("..")
-  )
-    errors.push("logging.trustAnchorCertificate must be a .crt path inside infra/");
-  if (!isSsmName(logging.serverIpSsmParam))
-    errors.push("logging.serverIpSsmParam must be an absolute SSM parameter name");
-  if (
-    !Number.isInteger(logging.sessionHours) ||
-    logging.sessionHours < 1 ||
-    logging.sessionHours > MAX_SESSION_HOURS
-  )
-    errors.push(`logging.sessionHours must be an integer from 1 to ${MAX_SESSION_HOURS}`);
+const schema = z.object({
+  envName: z.string({ message: LOWER }).regex(/^[a-z][a-z0-9-]*$/, LOWER),
+  awsRegion: z.string({ message: REGION }).regex(/^[a-z]{2}-[a-z]+-\d$/, REGION),
+  networks: z
+    .array(z.custom<StellarNetwork>(isStellarNetwork, "is not one of STELLAR_NETWORKS"), {
+      message: NETWORKS,
+    })
+    .min(1, NETWORKS)
+    .refine((ns) => new Set(ns).size === ns.length, "lists a network twice"),
+  logging: z.object({
+    certificateCn: z.string({ message: LOWER }).regex(/^[a-z0-9][a-z0-9-]{0,63}$/, LOWER),
+    trustAnchorCertificate: z
+      .string({ message: CRT })
+      .regex(/^[\w./-]+\.crt$/, CRT)
+      .refine((p) => !p.includes(".."), CRT),
+    serverIpSsmParam: ssmName,
+    sessionHours: z
+      .number({ message: SESSION })
+      .int(SESSION)
+      .min(1, SESSION)
+      .max(MAX_SESSION_HOURS, SESSION),
+  }),
+  uptime: z.object({
+    url: z.string({ message: HTTPS }).refine((u) => {
+      try {
+        const url = new URL(u);
+        return url.protocol === "https:" && url.hostname.includes(".");
+      } catch {
+        return false;
+      }
+    }, HTTPS),
+  }),
+  // Each entry is checked against `networks` in crossChecks, where both are known.
+  feeAccounts: z.record(z.string(), z.unknown(), { message: "must map networks to addresses" }),
+  slack: z.object({ workspaceIdSsmParam: ssmName, channelIdSsmParam: ssmName }),
+  host: z.object({
+    diskMounts: z.array(dimValue, { message: "must be a list of the catalog's disk paths" }),
+    auditDiskMount: dimValue.nullable(),
+  }),
+  alarmGroups: z
+    .object(
+      Object.fromEntries(
+        ALARM_GROUPS.map((g) => [g, z.boolean({ message: "must be true or false" })]),
+      ) as Record<AlarmGroup, z.ZodBoolean>,
+    )
+    .strict(),
+  thresholds,
+});
 
-  let url: URL | undefined;
-  try {
-    url = new URL(config.uptime?.url);
-  } catch {
-    url = undefined;
-  }
-  if (!url || url.protocol !== "https:" || !url.hostname.includes("."))
-    errors.push(`uptime.url must be an https:// URL, got: ${String(config.uptime?.url)}`);
-
-  const fee = (config.feeAccounts ?? {}) as Record<string, unknown>;
-  for (const n of Array.isArray(config.networks) ? config.networks : [])
-    if (!isAccountAddress(fee[n]))
-      errors.push(
-        `feeAccounts.${n} must be the fee account's G... address, got: ${String(fee[n])}`,
+/** The checks across fields: each fee account, and a group whose threshold or series isn't known. */
+function crossChecks(c: z.infer<typeof schema>, ctx: z.RefinementCtx): void {
+  const fail = (path: string[], message: string) =>
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path, message });
+  for (const n of c.networks)
+    if (!isAccountAddress(c.feeAccounts[n]))
+      fail(
+        ["feeAccounts", n],
+        `must be the fee account's G... address, got: ${String(c.feeAccounts[n])}`,
       );
-  for (const n of Object.keys(fee))
-    if (!(config.networks ?? []).includes(n as StellarNetwork))
-      errors.push(`feeAccounts.${n} is not in networks`);
+  for (const n of Object.keys(c.feeAccounts))
+    if (!c.networks.includes(n as StellarNetwork)) fail(["feeAccounts", n], "is not in networks");
 
-  if (!isSsmName(config.slack?.workspaceIdSsmParam) || !isSsmName(config.slack?.channelIdSsmParam))
-    errors.push(
-      "slack must be { workspaceIdSsmParam, channelIdSsmParam } with absolute SSM parameter names",
-    );
-
-  const host = config.host ?? ({} as EnvironmentConfig["host"]);
-  if (!Array.isArray(host.diskMounts))
-    errors.push("host.diskMounts must be a list of the catalog's disk paths");
-  else
-    for (const m of host.diskMounts as readonly unknown[])
-      if (typeof m !== "string" || !isDimValue(m))
-        errors.push(`host.diskMounts: ${String(m)} is no CloudWatch dimension value`);
-  if (
-    host.auditDiskMount !== null &&
-    (typeof host.auditDiskMount !== "string" || !isDimValue(host.auditDiskMount))
-  )
-    errors.push("host.auditDiskMount must be null or a CloudWatch dimension value");
-
-  const groups = (config.alarmGroups ?? {}) as Record<string, unknown>;
-  for (const g of ALARM_GROUPS)
-    if (typeof groups[g] !== "boolean") errors.push(`alarmGroups.${g} must be true or false`);
-  for (const g of Object.keys(groups))
-    if (!(ALARM_GROUPS as readonly string[]).includes(g))
-      errors.push(`alarmGroups.${g} is not a group`);
-
-  const t = (config.thresholds ?? {}) as unknown as Record<string, unknown>;
-  for (const key of THRESHOLD_KEYS) {
-    const v = t[key];
-    if (v === null && NULLABLE.has(key)) continue;
-    if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) {
-      errors.push(
-        `thresholds.${key} must be a positive number${NULLABLE.has(key) ? " or null" : ""}`,
-      );
-      continue;
-    }
-    if (PERCENT.has(key) && v > 100) errors.push(`thresholds.${key} is a percentage, got: ${v}`);
-    if (INTEGER.has(key) && !Number.isInteger(v))
-      errors.push(`thresholds.${key} must be an integer, got: ${v}`);
-  }
-  for (const key of Object.keys(t))
-    if (!(THRESHOLD_KEYS as readonly string[]).includes(key))
-      errors.push(`thresholds.${key} is not a threshold`);
-  const th = config.thresholds;
-  if (th && th.uptimeFailingMinutes > MAX_ALARM_MINUTES)
-    errors.push(`thresholds.uptimeFailingMinutes must fit in a day (${MAX_ALARM_MINUTES})`);
-  if (th && th.balanceCriticalStroops >= th.balanceLowStroops)
-    errors.push("thresholds.balanceCriticalStroops must be below balanceLowStroops");
-
+  const t = c.thresholds;
+  if (t.balanceCriticalStroops >= t.balanceLowStroops)
+    fail(["thresholds", "balanceCriticalStroops"], "must be below balanceLowStroops");
   // A group whose threshold or series isn't known yet can't go on (decision 26).
-  const on = (g: AlarmGroup) => groups[g] === true;
-  if (on("disk") && (th?.diskUsedPercent == null || !host.diskMounts?.length))
-    errors.push("alarmGroups.disk needs thresholds.diskUsedPercent and host.diskMounts");
-  if (on("memory") && th?.memoryUsedPercent == null)
-    errors.push("alarmGroups.memory needs thresholds.memoryUsedPercent");
-  if (on("logVolume") && th?.logVolumeBytesPerHour == null)
-    errors.push("alarmGroups.logVolume needs thresholds.logVolumeBytesPerHour");
-  if (on("host") && host.auditDiskMount == null)
-    errors.push("alarmGroups.host needs host.auditDiskMount for audit-disk");
+  const on = c.alarmGroups;
+  if (on.disk && (t.diskUsedPercent === null || c.host.diskMounts.length === 0))
+    fail(["alarmGroups", "disk"], "needs thresholds.diskUsedPercent and host.diskMounts");
+  if (on.memory && t.memoryUsedPercent === null)
+    fail(["alarmGroups", "memory"], "needs thresholds.memoryUsedPercent");
+  if (on.logVolume && t.logVolumeBytesPerHour === null)
+    fail(["alarmGroups", "logVolume"], "needs thresholds.logVolumeBytesPerHour");
+  if (on.host && c.host.auditDiskMount === null)
+    fail(["alarmGroups", "host"], "needs host.auditDiskMount for audit-disk");
+}
 
-  if (errors.length > 0)
+/** What an unknown key is, by the object it sits in. */
+const UNKNOWN: Readonly<Record<string, string>> = {
+  alarmGroups: "a group",
+  thresholds: "a threshold",
+};
+
+function messages(error: z.ZodError): string[] {
+  return error.issues.flatMap((i) => {
+    const path = i.path.join(".");
+    if (i.code === z.ZodIssueCode.unrecognized_keys)
+      return i.keys.map((k) => `${path}.${k} is not ${UNKNOWN[path] ?? "a known key"}`);
+    return [`${path} ${i.message}`];
+  });
+}
+
+/**
+ * Throws with every problem in `config`, or returns it typed. The checks across fields run once
+ * every field has its type, so a config with a wrong type reports those first.
+ */
+export function validateConfig(config: EnvironmentConfig): EnvironmentConfig {
+  const result = schema.superRefine(crossChecks).safeParse(config);
+  if (!result.success) {
+    const envName = (config as { envName?: unknown } | undefined)?.envName;
     throw new Error(
-      `Invalid infra config (envs/${String(c["envName"])}.json):\n- ${errors.join("\n- ")}`,
+      `Invalid infra config (envs/${String(envName)}.json):\n- ${messages(result.error).join("\n- ")}`,
     );
+  }
   return config;
 }
