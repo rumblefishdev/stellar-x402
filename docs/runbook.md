@@ -680,7 +680,9 @@ it succeeded or not.
    our CSR instead. The certificate is public: commit it as
    `deploy/ansible/files/cloudwatch-agent-production.crt` by pull request to `deploy/production`.
    The playbook checks it (`deploy/scripts/check-agent-certificate.sh`) and that it is the key's
-   before it copies it.
+   before it copies it. Committed with #113: issued by `soroban-internal-ca-2026`, serial
+   `5A0C505BB66E988BA8A444759F678B0B`, valid until 2027-11-05 11:17:43 UTC, its public key the
+   CSR's.
 
 **The admin step,** as `deploy` with sudo, after the playbook run from that merge:
 
