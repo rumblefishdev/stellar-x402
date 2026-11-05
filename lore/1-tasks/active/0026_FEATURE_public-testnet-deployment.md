@@ -129,19 +129,23 @@ history:
     status: active
     who: stkrolikiewicz
     note: >
-      The first deploy. #119 merged develop at 17dbc45 (with 0091's #118 and #120) into
+      The first deploy. #119 merged develop at 49790a8 (with 0091's #118 and #120) into
       deploy/production as e577fe6 at 12:32 UTC, and the push started Deploy production (run
       41830217640) although the workflow isn't on main; the image job built
       sha256:a56db8b2… by 12:34. While the deploy job waited for the production environment, the
-      playbook from origin/deploy/production at e577fe6 changed two things, the hardened
-      compose.yaml and /etc/logrotate.d/x402-openbao; x402-db-testnet@ and x402-tunnel@ were
+      playbook ran, before the deploy rather than after it as the runbook then said; the runbook
+      now allows both. The playbook from origin/deploy/production at e577fe6 changed two things,
+      the hardened compose.yaml and /etc/logrotate.d/x402-openbao; x402-db-testnet@ and
+      x402-tunnel@ were
       restarted onto it, and docker inspect showed Postgres as 999:999, cloudflared as
       65532:65532 and OpenBao as openbao, each with drop [ALL], add [] and no-new-privileges. The
       GHCR package x402-facilitator was made public (an anonymous token lists its tags). karczuRF
       approved the deploy, which ran from 12:57:07 to 12:57:37 UTC. /health answers ready, signer
       ok and listed; /supported lists exact on stellar:testnet with fees sponsored and the signer
       GAVE5V5I…KKRP. Not yet: a /settle through OpenBao, the facilitator container's inspect, and
-      Run workflow (a rollback by digest), which needs the workflow on main.
+      Run workflow (a rollback by digest), which needs the workflow on main: #126 puts a stub
+      there. Making develop the default branch would remove that stub and deploy-board.yml's pin;
+      a repo setting for the team, not decided.
 ---
 
 # Public testnet deployment
