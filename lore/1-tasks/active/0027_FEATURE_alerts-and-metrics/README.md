@@ -340,6 +340,8 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     `seriesDims`. The wording changes, not the code: they are small pure functions over the
     catalog that the EMF builder, the alarms and the Lambdas must apply alike, and moving them
     would mean a second package or three copies. The catalog's header already said so.
+59. **`createRpcStallTracker` loses its unused `everyMs`** (akot, 2026-11-05; from Karol's
+    review of #112). No caller passed it; the tracker polls every `RPC_STALL_POLL_MS`.
 
 ## Acceptance Criteria
 
