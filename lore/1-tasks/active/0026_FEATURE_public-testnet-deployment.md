@@ -166,6 +166,24 @@ history:
       answers ready, signer ok and listed; /supported 200. docker inspect: facilitator node,
       Postgres 999:999, cloudflared 65532:65532 and OpenBao openbao, each with drop [ALL], add []
       and no-new-privileges; migrate-testnet's config shows ALL and no-new-privileges:true.
+  - date: "2026-11-05"
+    status: active
+    who: okarcz
+    note: >
+      Signing, seeds and logrotate checked on ch-prod-01, read-only. Karol's 0029 trial run
+      (upstream 8827cf1) settled 18 payments from 11:07 to 11:19 UTC: 22 settled lines in
+      x402@production's journal, three a pending answer and then success with the same hash on the
+      client's repeat. OpenBao's audit log has 37 transit/sign/stellar-testnet responses that day,
+      none with an error: a pair about 11 ms apart before each settlement (the channel's inner
+      transaction and the fee bump), and one at 12:16:17, the deploy's signer check. On Horizon
+      testnet, 17 of the 18 (c7b1bdfb… to 14ab0cc3…, ledgers 5570642 to 5570783; the first was cut
+      from the log excerpt) are successful fee bumps with fee_account GAVE5V5I…KKRP and a different
+      channel as each inner source. No Stellar secret (S and 55 base32 characters) in /srv, /etc,
+      /home, /root, /opt or /usr/local, in our four containers' env or in the facilitator's
+      journal; /var/lib/docker and the image weren't searched, and the key was made in OpenBao
+      with exportable=false. logrotate hasn't rotated audit.log yet: its state file shows
+      2026-11-05 00:00, the first sight of a config the playbook installed on 2026-11-04, so the
+      first rotation is due after 00:00 UTC on 2026-11-06.
 ---
 
 # Public testnet deployment
@@ -457,8 +475,8 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 
 - [x] Given the Hetzner server and Docker Compose of ADR 0011 (revised in 0039 and 0077), when a deploy runs, then a container image built from the repo is deployed to it as the ADR describes, and the service answers `/supported` at a public HTTPS URL
 - [x] Given a running instance, when a new version is deployed, then the old process stops before the new one starts; the process is long-lived and never scaled to zero (2026-11-05, the second deploy, run 42021731996: the old container was gone at 12:15:59 before the new one started at 12:15:59.7, healthy at 12:16:17)
-- [ ] Given the facilitator key, when the service is deployed, then it signs through the testnet OpenBao Transit key, the raw key never reaches the facilitator's process, the image or the logs, and it is a testnet-only key (ADR 0013)
+- [x] Given the facilitator key, when the service is deployed, then it signs through the testnet OpenBao Transit key, the raw key never reaches the facilitator's process, the image or the logs, and it is a testnet-only key (ADR 0013) (2026-11-05: 0029's 18 trial settlements signed through `transit/sign/stellar-testnet`, 0 errors in the audit log, fee bumps paid by `GAVE5V5I…KKRP` on testnet; no secret seed in the containers' env or the facilitator's journal; the key is `exportable=false`)
 - [x] Given `DATABASE_URL_FILE` or `RPC_URLS_FILE`, when the service starts, then it reads the value from that file, and with neither set it falls back to `DATABASE_URL` and `RPC_URLS`
 - [ ] Given the durable stores from 0022, when the service runs, then it uses them, and `docs/runbook.md` has the deploy and rollback steps
-- [ ] Given the deployed facilitator, when it settles, then it signs through OpenBao Transit over the unix socket, no secret seed is on the server outside OpenBao, the backup secret exists in AWS, and a restore drill from it has passed
+- [ ] Given the deployed facilitator, when it settles, then it signs through OpenBao Transit over the unix socket, no secret seed is on the server outside OpenBao, the backup secret exists in AWS, and a restore drill from it has passed (2026-11-05: signing over the socket, no seed in the server's files, and the backup secret since 2026-11-02 are shown; the restore drill is left, and it waits for the backups)
 - [ ] Given OpenBao's audit log on the server, when `logrotate` runs, then the file is renamed, OpenBao writes to a new `audit.log` and still signs, and old files past a year are removed (runbook, OpenBao)
