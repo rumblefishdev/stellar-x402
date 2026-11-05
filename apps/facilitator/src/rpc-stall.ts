@@ -11,7 +11,7 @@ export interface StallRpc {
 }
 
 export interface RpcStallTracker {
-  /** Reads now, then every `everyMs` until `stop()`. A second call does nothing. */
+  /** Reads now, then every `RPC_STALL_POLL_MS` until `stop()`. A second call does nothing. */
   start(): void;
   /** Ends the ticks; a read still under way lands unrecorded. */
   stop(): void;
@@ -21,7 +21,7 @@ export interface RpcStallTracker {
 
 /**
  * `rpc_stalled_seconds` (0027 AD-5): the time since the ledger sequence last changed, read every
- * `everyMs` through the shared `FallbackRpc`, so it measures what settlement sees; a failed read
+ * `RPC_STALL_POLL_MS` through the shared `FallbackRpc`, so it measures what settlement sees; a failed read
  * can move the active endpoint, which is accepted. The age is `now − lastChangeAt` at the read, so
  * a frozen endpoint, failing reads or a dead poller all show as a rising value. A different active
  * endpoint or a lower sequence (a lagging fallback, testnet's reset) starts a new baseline. Before
@@ -31,11 +31,9 @@ export interface RpcStallTracker {
 export function createRpcStallTracker(deps: {
   rpc: StallRpc;
   now: () => number;
-  everyMs?: number;
   schedule?: Scheduler;
 }): RpcStallTracker {
   const { rpc, now } = deps;
-  const everyMs = deps.everyMs ?? RPC_STALL_POLL_MS;
   const schedule = deps.schedule ?? unrefTimers;
   /** The last good read's sequence and the endpoint that served it. */
   let last: { sequence: number; endpoint: string } | undefined;
@@ -63,7 +61,7 @@ export function createRpcStallTracker(deps: {
 
   function tick() {
     if (!running) return;
-    timer = schedule.setTimeout(tick, everyMs);
+    timer = schedule.setTimeout(tick, RPC_STALL_POLL_MS);
     if (reading) return;
     reading = true;
     void read().finally(() => {

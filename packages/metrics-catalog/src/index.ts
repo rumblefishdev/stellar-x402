@@ -46,6 +46,12 @@ export interface MetricDef {
    * set is a log field and is not restricted.
    */
   readonly values?: Readonly<Record<string, readonly string[]>>;
+  /**
+   * The labels a writer may add as log fields only: in no set, so not billed and not restricted.
+   * With the sets' dims, their `when` keys and `values`, they are every label key the facilitator's
+   * port accepts for the metric, so a mistyped key doesn't compile (decision 57).
+   */
+  readonly fields?: readonly string[];
   readonly emit: Emit;
 }
 
@@ -69,6 +75,7 @@ export const CATALOG = [
     scope: "network",
     sets: [{ dims: ["result"] }],
     values: { result: ["success", "error", "other"] },
+    fields: ["reason", "replay"],
     emit: "aggregated",
   },
   {
@@ -79,6 +86,7 @@ export const CATALOG = [
     scope: "network",
     sets: [{ dims: ["stage"], when: { stage: ["pool"] } }],
     values: { stage: ["check", "pool", "other"] },
+    fields: ["reason"],
     emit: "eager-first",
   },
   {
@@ -106,6 +114,7 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
+    fields: ["state"],
     emit: "eager-first",
   },
   // The OpenBao signer holds one network's keys (openbao-signer.ts logs its `network`).
@@ -116,6 +125,7 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
+    fields: ["reason", "step"],
     emit: "eager-first",
   },
   // From the submitter's `onEvent` in main.ts: one pool per network.
@@ -142,6 +152,7 @@ export const CATALOG = [
         "other",
       ],
     },
+    fields: ["status"],
     emit: "aggregated",
   },
   {
@@ -169,6 +180,7 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
+    fields: ["signed"],
     emit: "aggregated",
   },
   {
@@ -178,6 +190,7 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
+    fields: ["state"],
     emit: "aggregated",
   },
   {
@@ -187,6 +200,7 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
+    fields: ["reason"],
     emit: "aggregated",
   },
   {
@@ -205,6 +219,7 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
+    fields: ["hook"],
     emit: "aggregated",
   },
   {
@@ -233,6 +248,7 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
+    fields: ["held"],
     emit: "aggregated",
   },
   // The pruner deletes from whole tables shared by every network (rate_limits, spend_*), not one
@@ -244,6 +260,7 @@ export const CATALOG = [
     unit: "Count",
     scope: "process",
     sets: PLAIN,
+    fields: ["table"],
     emit: "aggregated",
   },
   {
@@ -253,6 +270,7 @@ export const CATALOG = [
     unit: "Count",
     scope: "process",
     sets: PLAIN,
+    fields: ["stage", "origin"],
     emit: "aggregated",
   },
   {
@@ -262,6 +280,7 @@ export const CATALOG = [
     unit: "Count",
     scope: "process",
     sets: PLAIN,
+    fields: ["origin", "reason"],
     emit: "aggregated",
   },
   {
@@ -271,6 +290,7 @@ export const CATALOG = [
     unit: "Count",
     scope: "process",
     sets: PLAIN,
+    fields: ["origin"],
     emit: "aggregated",
   },
   {
@@ -280,6 +300,7 @@ export const CATALOG = [
     unit: "Count",
     scope: "process",
     sets: PLAIN,
+    fields: ["origin", "outcome"],
     emit: "aggregated",
   },
   {
@@ -289,6 +310,7 @@ export const CATALOG = [
     unit: "Count",
     scope: "process",
     sets: PLAIN,
+    fields: ["origin"],
     emit: "aggregated",
   },
   // An HTTP route's query check; `discoveryResources` takes a network only for its answer.
@@ -310,6 +332,7 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
+    fields: ["breaker"],
     emit: "eager-first",
   },
   // `payer` and `pay_to` write no metric: one buyer or seller near its budget is the budget
@@ -341,6 +364,7 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
+    fields: ["state"],
     emit: "eager-first",
   },
   {
@@ -350,6 +374,7 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
+    fields: ["op"],
     emit: "eager-first",
   },
   {
@@ -359,6 +384,7 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
+    fields: ["reason"],
     emit: "aggregated",
   },
   // The floor reads one network's fee account (balance-floor.ts).
@@ -416,6 +442,7 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
+    fields: ["channels", "busy"],
     emit: "aggregated",
   },
   {
@@ -434,6 +461,7 @@ export const CATALOG = [
     unit: "None",
     scope: "network",
     sets: PLAIN,
+    fields: ["rpc"],
     emit: "aggregated",
   },
   {
@@ -461,6 +489,7 @@ export const CATALOG = [
     unit: "None",
     scope: "network",
     sets: PLAIN,
+    fields: ["state"],
     emit: "aggregated",
   },
   // 0089: declared, emitter not yet on develop
@@ -649,6 +678,23 @@ export type MetricName = Entry["name"];
 export type CounterName = Extract<FacilitatorEntry, { kind: "counter" }>["name"];
 /** The facilitator's gauge names: what the `Metrics` port's `registerGauge` accepts. */
 export type GaugeName = Extract<FacilitatorEntry, { kind: "gauge" }>["name"];
+
+type SetKeys<S> =
+  | (S extends { dims: readonly (infer D)[] } ? D : never)
+  | (S extends { when: infer W } ? keyof W : never);
+type EntryKeys<E> =
+  | (E extends { sets: readonly (infer S)[] } ? SetKeys<S> : never)
+  | (E extends { values: infer V } ? keyof V : never)
+  | (E extends { fields: readonly (infer F)[] } ? F : never);
+/**
+ * The label keys a metric's writer may pass: its sets' dims and `when` keys, its `values` and its
+ * `fields`. `network` is never one: the port's `for()` adds it (decision 57).
+ */
+export type LabelKey<N extends MetricName> = Exclude<
+  EntryKeys<Extract<Entry, { name: N }>>,
+  "network"
+> &
+  string;
 
 type Scoped<K extends MetricKind, S extends Scope> = Extract<
   FacilitatorEntry,

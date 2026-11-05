@@ -49,7 +49,10 @@ Each `AD` names what it **Binds**, what it **Prevents**, and the **Rule**.
 - **Binds:** the facilitator (#112), the host probe (#113), the CDK (#114), the Lambdas (#115).
 - **Prevents:** names, dimensions and `network` values drifting between emitter and alarm.
 - **Rule:**
-  - `packages/metrics-catalog` holds only data and types. Its only dependency is
+  - `packages/metrics-catalog` holds data and types, plus the series rule over them
+    (`effectiveSets`, `whenHolds`, `isDimValue`, `seriesDims`): small pure functions that the
+    facilitator's EMF builder, the alarms (#114) and the Lambdas (#115) must all apply the same
+    way, so they live with the data rather than in three copies (decision 58). Its only dependency is
     `@stellar-x402/config`, so `network` values are the CAIP-2 strings from `STELLAR_NETWORKS`
     (`stellar:testnet`), never retyped.
   - It declares the `x402-facilitator`, `x402-host` and `x402-watch` namespaces and their metrics.
@@ -100,8 +103,9 @@ Each `AD` names what it **Binds**, what it **Prevents**, and the **Rule**.
     network-scoped name on the root writes no line (no valid set) and the writer logs
     `metric_issue` once; a process-scoped name on a child writes its line, with `network` only a
     log field.
-  - **Labels:** only `name` is typed against the catalog. `labels` stays a permissive record, and
-    `network` is reserved for `for()`.
+  - **Labels:** typed against the catalog too (decision 57): a metric's port takes only its sets'
+    dims and `when` keys, its `values` keys and its `fields` (log-only labels), so a mistyped key
+    doesn't compile; one with none takes no labels. `network` is reserved for `for()`.
   - **Test double:** `memoryMetrics()` itself takes every facilitator name, so a test can hand it
     to a part of either scope; its `for()` child is a plain `NetworkMetrics`, and the parts' types
     do the checking.
@@ -160,7 +164,8 @@ Each `AD` names what it **Binds**, what it **Prevents**, and the **Rule**.
 - **Rule:** an age gauge is `now − timestamp` at read time, so a dead source shows as a rising
   value. The sources:
   - **`settlement_oldest_open_seconds`:** the oldest open record's `createdAt`. `history_gone`
-    records are left out, computed at the end of each sweep, the recheck-skip branch included.
+    records are left out, computed right after each listing and again at the end of each sweep,
+    the recheck-skip branch included. No sample until a sweep has listed (decision 56).
   - **`rpc_stalled_seconds`:** the time since the ledger sequence last changed, read through the
     shared `FallbackRpc`. The poller's endpoint moves are accepted. The baseline resets when the
     active endpoint changes or the sequence drops (a lagging fallback, testnet's reset). A failed

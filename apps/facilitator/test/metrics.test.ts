@@ -53,20 +53,38 @@ describe("for({ network })", () => {
     const t = m.for({ network: TESTNET });
     t.increment("fee_charged_stroops", { state: "success" }, 100);
     t.increment("settlement_outcomes_total");
-    t.registerGauge("pool_queued", () => ({ value: 4, labels: { pool: "settle" } }));
+    t.registerGauge("pool_queued", () => ({ value: 4, labels: { channels: 3 } }));
     m.for({ network: PUBNET }).registerGauge("pool_queued", () => ({ value: 9 }));
 
     expect(m.value("fee_charged_stroops", { network: TESTNET, state: "success" })).toBe(100);
     expect(m.value("settlement_outcomes_total", { network: TESTNET })).toBe(1);
     // Each network's gauge is its own series, read by the merged labels.
-    expect(m.value("pool_queued", { network: TESTNET, pool: "settle" })).toBe(4);
+    expect(m.value("pool_queued", { network: TESTNET, channels: 3 })).toBe(4);
     expect(m.value("pool_queued", { network: PUBNET })).toBe(9);
+  });
+
+  test("label keys are typed against the catalog (decision 57)", () => {
+    const t = memoryMetrics().for({ network: TESTNET });
+    t.increment("spend_failure_attributed_total", { fault: "ours" });
+    // @ts-expect-error -- a mistyped key would match no set's `when`, and write no line.
+    t.increment("spend_failure_attributed_total", { faults: "ours" });
+    t.increment("settlement_outcomes_total", { result: "success", reason: "x", replay: "false" });
+    // @ts-expect-error -- a key the catalog doesn't declare, not even as a log field.
+    t.increment("settlement_outcomes_total", { result: "success", reasons: "x" });
+    t.increment("settlement_history_gone_total");
+    // @ts-expect-error -- a metric with no labels takes none.
+    t.increment("settlement_history_gone_total", { reason: "x" });
+    // @ts-expect-error -- a gauge's labels are checked too.
+    t.registerGauge("pool_queued", () => ({ value: 1, labels: { queued: 1 } }));
+    expect(true).toBe(true);
   });
 
   test("a child's network overrides a caller-supplied network label", () => {
     const m = memoryMetrics();
     const t = m.for({ network: TESTNET });
+    // @ts-expect-error -- `network` is reserved for `for()`; at run time the child's still wins.
     t.increment("fee_charged_stroops", { network: PUBNET, state: "success" });
+    // @ts-expect-error -- as above, for a gauge.
     t.registerGauge("pool_queued", () => ({ value: 2, labels: { network: PUBNET } }));
 
     expect(m.value("fee_charged_stroops", { network: TESTNET, state: "success" })).toBe(1);
