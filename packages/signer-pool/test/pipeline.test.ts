@@ -3,10 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   SettlementSubmitter,
   SimulationCheckError,
-  keypairSigner,
   type SubmitterEvent,
   type SubmitterOptions,
 } from "../src/index.js";
+import { keypairSigner } from "./testing.js";
 import { FakeRpc, channels, facilitator } from "./fake-rpc.js";
 
 const PASSPHRASE = "Test SDF Network ; September 2015";

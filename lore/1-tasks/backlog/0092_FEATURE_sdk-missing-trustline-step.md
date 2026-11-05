@@ -47,12 +47,12 @@ is the one missing.
   decision 10).
 - `apps/facilitator/src/settlement/trustline.ts` shows how to read the account and the asset from
   the SAC's `#13` event.
-- `packages/sdk` has no trustline handling yet.
+- `packages/sdk` doesn't exist yet: 0102 creates it with its first helper.
 
 ## Implementation
 
 - Bump the `@x402/*` packages to 2.29.0, and check whether `@x402/fetch` rewraps the error.
-- Catch `TrustlineMissingError` in `packages/sdk` and `packages/mcp`.
+- Catch `TrustlineMissingError` in `packages/mcp`, and in `packages/sdk` if 0102 has created it.
 - Throw an error that names the account, the asset and what to do; MCP gets a result of its own,
   not `insufficient_funds`.
 - Decide whether the SDK offers to add the trustline, or only reports it.

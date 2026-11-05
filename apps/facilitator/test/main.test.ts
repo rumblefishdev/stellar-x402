@@ -12,6 +12,7 @@ import {
   TransactionBuilder,
   nativeToScVal,
 } from "@stellar/stellar-sdk";
+import { EMF_LINE_PREFIX } from "@stellar-x402/metrics-catalog";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { MIGRATIONS, migrate } from "../src/adapters/postgres-schema.js";
 import { ConfigError, parseConfig } from "../src/config.js";
@@ -22,6 +23,38 @@ import { memoryMetrics } from "../src/metrics.js";
 import { testDatabase } from "./database.js";
 import { hardened, ledgerEntries, rpcStub } from "./rpc-stub.js";
 import { fakeOpenBao, signerEnv } from "./fake-openbao.js";
+
+type EmfModule = typeof import("../src/adapters/emf-metrics.js");
+type EmfWriter = ReturnType<EmfModule["emfMetrics"]>;
+/**
+ * Each `emfMetrics()` call's options, the writer it returned and the seeds `main()` gave that
+ * writer: `main()`'s seed and its issue logging are checked on them (0027).
+ */
+const emf = vi.hoisted(() => ({
+  options: [] as Parameters<EmfModule["emfMetrics"]>[0][],
+  writers: [] as EmfWriter[],
+  seeds: [] as Parameters<EmfWriter["seedZero"]>[0][],
+}));
+vi.mock("../src/adapters/emf-metrics.js", async (importActual) => {
+  const actual = await importActual<EmfModule>();
+  return {
+    ...actual,
+    emfMetrics: (opts: Parameters<EmfModule["emfMetrics"]>[0]) => {
+      emf.options.push(opts);
+      // Off stdout unless the test gives `main()` a sink: `LOG_LEVEL` quiets the logger only.
+      const writer = actual.emfMetrics({ write: () => {}, ...opts });
+      emf.writers.push(writer);
+      const seedZero = writer.seedZero;
+      return {
+        ...writer,
+        seedZero: (series: Parameters<EmfWriter["seedZero"]>[0]) => {
+          emf.seeds.push(series);
+          seedZero(series);
+        },
+      };
+    },
+  };
+});
 
 const db = testDatabase();
 const key = Keypair.random();
@@ -270,6 +303,25 @@ describe("main()", () => {
     }
   });
 
+  it("names the commit it was built from on /health (0029)", async () => {
+    const openbao = await fakeOpenBao(key);
+    const app = await main({
+      ...env,
+      ...signerEnv(facilitator, openbao.socketPath),
+      RPC_URLS: rpc.url,
+      PORT: "0",
+      LOG_LEVEL: "error",
+      GIT_COMMIT: "e577fe6a",
+    });
+    try {
+      const response = await fetch(`http://127.0.0.1:${app.port}/health`);
+      expect(await response.json()).toMatchObject({ commit: "e577fe6a" });
+    } finally {
+      await app.close();
+      openbao.close();
+    }
+  });
+
   it("starts and serves with OpenBao down, and reports the failed check on /health (0036)", async () => {
     const app = await main({
       ...env,
@@ -340,6 +392,104 @@ describe("main()", () => {
       await pool.end();
       await db.pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
     }
+  });
+
+  it("seeds settlement_sweeps_total for its network's listed sweeps, and nothing else (0027)", async () => {
+    emf.options.length = 0;
+    emf.seeds.length = 0;
+    const app = await main(
+      { ...env, RPC_URLS: rpc.url, PORT: "0", LOG_LEVEL: "error" },
+      { write: () => {} },
+    );
+    await app.close();
+    expect(emf.options).toHaveLength(1);
+    expect(emf.seeds).toEqual([
+      [
+        {
+          name: "settlement_sweeps_total",
+          labels: { network: "stellar:testnet", outcome: "listed" },
+        },
+      ],
+    ]);
+  });
+
+  it("writes no liveness seed for a start that fails, and stops the writer (0027 AD-4)", async () => {
+    emf.writers.length = 0;
+    emf.seeds.length = 0;
+    const lines: string[] = [];
+    const error = await main(
+      { ...env, CHANNELS: `${env.CHANNELS},${masterActive}`, RPC_URLS: rpc.url, PORT: "0" },
+      { write: (line) => void lines.push(line) },
+    ).catch((e: unknown) => e);
+    expect(String(error)).toContain(`${masterActive}: master-key-active`);
+    expect(emf.seeds).toEqual([]);
+    // A crash loop of short starts shows as missing data, so `facilitator-silent` fires: the
+    // writer is stopped, and a flush (a minute boundary would run one) writes nothing, not even
+    // a count that came after the error.
+    expect(emf.writers).toHaveLength(1);
+    emf.writers[0]!.increment("http_requests_total", { route: "/verify", status: 200 });
+    await emf.writers[0]!.flush();
+    expect(lines.filter((line) => line.startsWith(EMF_LINE_PREFIX))).toEqual([]);
+  });
+
+  it("logs each issue the writer reports as a metric_issue warning (0027)", async () => {
+    emf.options.length = 0;
+    const lines: string[] = [];
+    const app = await main(
+      { ...env, RPC_URLS: rpc.url, PORT: "0", LOG_LEVEL: "warn" },
+      { write: (line) => void lines.push(line) },
+    );
+    try {
+      emf.options[0]!.onIssue!({
+        kind: "unknown-value",
+        name: "settlement_sweeps_total",
+        dim: "outcome",
+        value: "bogus",
+      });
+      const logged = lines
+        .filter((line) => line.includes('"event":"metric_issue"'))
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(logged).toEqual([
+        expect.objectContaining({
+          level: "warn",
+          event: "metric_issue",
+          kind: "unknown-value",
+          name: "settlement_sweeps_total",
+          dim: "outcome",
+          value: "bogus",
+        }),
+      ]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("ends close() with the metrics' final flush, on the log's sink (0027)", async () => {
+    const lines: string[] = [];
+    const app = await main(
+      { ...env, RPC_URLS: rpc.url, PORT: "0", LOG_LEVEL: "info" },
+      { write: (line) => void lines.push(line) },
+    );
+    // The start sweep has listed, and the next one is an interval away: exactly one `listed`.
+    await app.reconciled;
+    await app.close();
+    // After the drain, the cataloger and the pruner: nothing writes once close() resolves.
+    const last = lines.at(-1)!;
+    expect(last.startsWith(EMF_LINE_PREFIX)).toBe(true);
+    // One line per write, as the log's.
+    expect(last.indexOf("\n")).toBe(last.length - 1);
+    // The seeded series, written in every window, so the flush always holds it. Summed over the
+    // windows (close() may fall in a later minute than the sweep), the one sweep that listed.
+    const seeds = lines
+      .filter((line) => line.startsWith(EMF_LINE_PREFIX))
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((line) => "settlement_sweeps_total" in line && line.outcome === "listed");
+    expect(seeds.at(-1)).toMatchObject({ network: "stellar:testnet", outcome: "listed" });
+    expect(seeds.reduce((sum, line) => sum + Number(line.settlement_sweeps_total), 0)).toBe(1);
+    // Found first: a missing `shutdown_started` (-1) would pass the order check on its own.
+    const shutdown = lines.findIndex((line) => line.includes('"event":"shutdown_started"'));
+    expect(shutdown).toBeGreaterThanOrEqual(0);
+    expect(lines.lastIndexOf(last)).toBeGreaterThan(shutdown);
   });
 
   it("serves /supported for the key it checked the channels against", async () => {

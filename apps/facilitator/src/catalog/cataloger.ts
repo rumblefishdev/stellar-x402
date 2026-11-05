@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import * as bazaarLib from "@stellar-x402/bazaar";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import type { Logger } from "../logger.js";
-import type { Metrics } from "../metrics.js";
+import type { ProcessMetrics } from "../metrics.js";
 import type {
   CatalogAttempt,
   CatalogAttemptStore,
@@ -25,7 +25,7 @@ export interface CatalogerDeps {
   /** Where the seller-check budgets are counted. */
   rateLimits: Pick<RateLimitStore, "hit">;
   logger: Logger;
-  metrics: Metrics;
+  metrics: ProcessMetrics;
   /** Injectable for fault-injection tests; the real package otherwise. */
   bazaar?: BazaarApi;
   /** A slower write counts as failed, so a hung store can't pile up writes or block `drain()`. */

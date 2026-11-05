@@ -42,10 +42,6 @@ const ATTEMPT_ORDER: Record<AttemptState, number> = {
   dead: 2,
 };
 
-/** Whether an attempt in `current` may move to `next`: only forward (0019 decision 7). */
-export const isAttemptForward = (current: AttemptState, next: AttemptState): boolean =>
-  ATTEMPT_ORDER[next] > ATTEMPT_ORDER[current];
-
 /** `ATTEMPT_ORDER` as a SQL expression over `column`; a null column is `stored`. */
 export const attemptRankSql = (column: string): string =>
   `CASE coalesce(${column}, 'stored') ${Object.entries(ATTEMPT_ORDER)

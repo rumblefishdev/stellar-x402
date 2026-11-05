@@ -591,12 +591,16 @@ describe("the signer (0036)", () => {
   it("reads the OpenBao settings, the AppRole's from files", () => {
     const config = parseConfig({
       ...minimal,
-      OPENBAO_ROLE_ID: undefined,
-      OPENBAO_SECRET_ID: undefined,
       OPENBAO_ROLE_ID_FILE: file("approle-role-id", "role\n"),
       OPENBAO_SECRET_ID_FILE: file("approle-secret-id", "secret-id\n"),
     });
     expect(config.signer).toEqual(SIGNER);
+  });
+
+  it.each(["OPENBAO_ROLE_ID", "OPENBAO_SECRET_ID"])("refuses a plain %s", (name) => {
+    const refused = [`${name} is read only from ${name}_FILE`];
+    expect(problems({ ...minimal, [name]: "plain" })).toEqual(refused);
+    expect(problems({ ...minimal, [name]: "plain", [`${name}_FILE`]: undefined })).toEqual(refused);
   });
 
   const leftover = "FACILITATOR_SECRET is no longer read: the key signs in OpenBao (ADR 0013)";

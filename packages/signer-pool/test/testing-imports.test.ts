@@ -3,8 +3,8 @@ import { ESLint } from "eslint";
 import { describe, expect, it } from "vitest";
 
 /**
- * The repo's lint rule that keeps `./testing` (`FakeRpc`) out of production code: it ships in
- * `dist`, so only lint stops `src` from importing it.
+ * The repo's lint rule that keeps `./testing` (`FakeRpc`) out of production code: only lint stops
+ * `src` from importing it.
  */
 const eslint = new ESLint({ cwd: fileURLToPath(new URL("../../..", import.meta.url)) });
 
@@ -29,7 +29,6 @@ describe("test helpers stay out of production code", () => {
 
   it.each([
     ['import { FakeRpc } from "@stellar-x402/signer-pool/testing";', "apps/facilitator/test/a.ts"],
-    ['export { FakeRpc } from "../test/fake-rpc.js";', "packages/signer-pool/src/testing.ts"],
     ['import { pool } from "./testing-pool.js";', "packages/signer-pool/src/a.ts"],
   ])("allows %s in %s", async (code, filePath) => {
     expect(await testingErrors(code, filePath)).toEqual([]);

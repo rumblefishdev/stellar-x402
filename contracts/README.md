@@ -8,7 +8,7 @@ Soroban contracts, in a Cargo workspace.
 - `hostile-token`: a SEP-41 token whose `transfer` misbehaves on demand (`set_mode`: 0 normal,
   1 without the payer's `require_auth`, 2 failing on odd ledgers after it, 3 failing after the
   ledger's first transfer), for the facilitator's testnet spend matrix
-  (`apps/facilitator/scripts/spend-matrix.ts`). **Testnet only, never deploy it elsewhere**:
+  (`apps/facilitator/test/live/spend-matrix.ts`). **Testnet only, never deploy it elsewhere**:
   anyone can mint it and anyone can set its mode.
 - `test-wallet`: a minimal custom account (one ed25519 key, `__check_auth`), the C-account payer
   of the same matrix. Testnet only: it checks no auth context.

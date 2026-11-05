@@ -112,6 +112,8 @@ const envSchema = z
     /** 0 lets the system pick a free port; the `listening` log line names it. */
     PORT: int(0, 65_535).default("4021"),
     LOG_LEVEL: oneOf(["debug", "info", "warn", "error"]).default("info"),
+    /** The commit the image was built from (its Dockerfile); unset on a local run. */
+    GIT_COMMIT: z.string().optional(),
     /**
      * Comma-separated, tried in order, at most 3: the pool and the ledger and fee-stats reads
      * move to the next on a failure and stay there. Upstream verify (one scheme per URL) fails over
@@ -144,7 +146,7 @@ const envSchema = z
     OPENBAO_KEY: z.string(),
     /** Pinned, so a rotated Transit key can't sign in place of the one on chain. */
     OPENBAO_KEY_VERSION: int(1),
-    /** The AppRole login; never logged. A deploy passes both as files (`_FILE`). */
+    /** The AppRole login; never logged. Set only as files (`_FILE`). */
     OPENBAO_ROLE_ID: z.string(),
     OPENBAO_SECRET_ID: z.string(),
     /** Refused on the field: zod skips a refine on the object while a required setting is missing. */
@@ -386,6 +388,7 @@ export interface Config {
   network: (typeof STELLAR_NETWORKS)[keyof typeof STELLAR_NETWORKS];
   port: number;
   logLevel: "debug" | "info" | "warn" | "error";
+  gitCommit?: string;
   rpcUrls: string[];
   /** The facilitator key in OpenBao Transit (0036); the AppRole is never logged. */
   signer: {
@@ -442,9 +445,11 @@ export class ConfigError extends Error {
 
 /**
  * Settings a deploy passes as a file, `<NAME>_FILE`: a Compose `file:` secret, so the value never
- * sits in `environment:`, which `docker inspect` shows (ADR 0011). Local runs set them plainly.
+ * sits in `environment:`, which `docker inspect` shows (ADR 0011). Local runs set the first two
+ * plainly; the AppRole login is a file everywhere, so one way of passing it runs (ADR 0013).
  */
 const FILE_SETTINGS = ["DATABASE_URL", "RPC_URLS", "OPENBAO_ROLE_ID", "OPENBAO_SECRET_ID"] as const;
+const FILE_ONLY_SETTINGS: readonly string[] = ["OPENBAO_ROLE_ID", "OPENBAO_SECRET_ID"];
 
 /** `env` with each {@link FILE_SETTINGS} entry read from its `_FILE`, where one is set. */
 function readFileSettings(
@@ -453,6 +458,10 @@ function readFileSettings(
   const read = { ...env };
   const problems: string[] = [];
   for (const name of FILE_SETTINGS) {
+    if (FILE_ONLY_SETTINGS.includes(name) && env[name]?.trim()) {
+      problems.push(`${name} is read only from ${name}_FILE`);
+      continue;
+    }
     const path = env[`${name}_FILE`]?.trim();
     if (!path) continue;
     // Refused, so a leftover plain value can't look like the one in use.
@@ -512,6 +521,7 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
     network: e.NETWORK,
     port: e.PORT,
     logLevel: e.LOG_LEVEL,
+    gitCommit: e.GIT_COMMIT,
     rpcUrls: e.RPC_URLS ?? [DEFAULT_TESTNET_RPC],
     signer: {
       address: e.FACILITATOR_ADDRESS,
@@ -561,7 +571,10 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
   };
 }
 
-/** The config of `pnpm migrate`: only `DATABASE_URL` (or its `_FILE`), which it requires. */
+/**
+ * The config of `pnpm migrate`: only `DATABASE_URL` (or its `_FILE`), which it requires. The other
+ * file settings are still checked, so a plain AppRole login stops it too.
+ */
 export function parseMigrateConfig(env: Record<string, string | undefined>): {
   databaseUrl: string;
 } {

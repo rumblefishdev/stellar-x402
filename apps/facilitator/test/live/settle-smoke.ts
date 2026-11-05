@@ -28,7 +28,7 @@
  *   DATABASE_URL        required: the facilitator's PostgreSQL, migrated (`pnpm migrate`); the
  *                       local one from `compose.yaml` is postgres://postgres:postgres@127.0.0.1:15432/postgres
  *
- *   cd apps/facilitator && npx tsx scripts/settle-smoke.ts
+ *   cd apps/facilitator && npx tsx test/live/settle-smoke.ts
  *
  * The facilitator's log lines go to stderr, so stdout carries only the result.
  */
@@ -46,8 +46,8 @@ import type { PaymentRequirements, SettleResponse, VerifyResponse } from "@x402/
 import { createEd25519Signer } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/client";
 import { Agent, fetch } from "undici";
-import { main } from "../src/main.js";
-import { fakeOpenBao, signerEnv } from "../test/fake-openbao.js";
+import { main } from "../../src/main.js";
+import { fakeOpenBao, signerEnv } from "../fake-openbao.js";
 
 const XLM_SAC_TESTNET = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 const RPC_URL = "https://soroban-testnet.stellar.org";

@@ -23,7 +23,7 @@
  *
  *   cd apps/facilitator
  *   CLIENT_SECRET=$(stellar keys show x402-verify-client) \
- *     PAY_TO=$(stellar keys address x402-verify-seller) npx tsx scripts/verify-smoke.ts
+ *     PAY_TO=$(stellar keys address x402-verify-seller) npx tsx test/live/verify-smoke.ts
  *
  * Nothing is submitted: `/verify` only simulates. The facilitators' log lines go to stderr, so
  * stdout carries only the result.
@@ -33,11 +33,11 @@ import type { PaymentRequirements, VerifyResponse } from "@x402/core/types";
 import { createEd25519Signer } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/client";
 import { Agent, setGlobalDispatcher } from "undici";
-import { parseConfig } from "../src/config.js";
-import { jsonLogger } from "../src/logger.js";
-import { UPSTREAM_TIMEOUT_MS, buildRpc, buildVerifier } from "../src/main.js";
-import { feeSettings } from "../src/settlement/fees.js";
-import { signerEnv } from "../test/fake-openbao.js";
+import { parseConfig } from "../../src/config.js";
+import { jsonLogger } from "../../src/logger.js";
+import { UPSTREAM_TIMEOUT_MS, buildRpc, buildVerifier } from "../../src/main.js";
+import { feeSettings } from "../../src/settlement/fees.js";
+import { signerEnv } from "../fake-openbao.js";
 
 const XLM_SAC_TESTNET = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 const network = "stellar:testnet";

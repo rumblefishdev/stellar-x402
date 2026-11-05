@@ -1,7 +1,7 @@
 import type { StellarNetwork } from "@stellar-x402/config";
 import type { Attempt, SubmitResult } from "@stellar-x402/signer-pool";
 import type { Logger } from "../logger.js";
-import type { Metrics } from "../metrics.js";
+import type { NetworkMetrics } from "../metrics.js";
 import {
   FINAL_SETTLEMENT_STATES,
   type AttemptUpdate,
@@ -17,7 +17,7 @@ export interface RecordsDeps {
   store: SettlementStore;
   hooks: Pick<SettlementHooks, "onFinal" | "onSuccess">;
   logger: Logger;
-  metrics: Metrics;
+  metrics: NetworkMetrics;
   now?: () => number;
 }
 
@@ -66,8 +66,21 @@ export function createRecords(deps: RecordsDeps) {
     }
   };
 
-  const onFinal = (record: SettlementRecord, origin: SettlementOrigin) =>
+  /**
+   * `fee_charged_stroops` (0027): a transaction that landed was charged its fee. Counted where
+   * `onFinal` runs, once for the write that made the record final (or for the sweep that found a
+   * write that threw final, decision 29), so a record two writers race to finish counts once, as
+   * the spend policy's `commit` does. A record with no fee (rejected, expired) adds nothing.
+   */
+  const charged = (state: SettlementRecord["state"], feeCharged: bigint | undefined) => {
+    if (feeCharged !== undefined)
+      metrics.increment("fee_charged_stroops", { state }, Number(feeCharged));
+  };
+
+  const onFinal = (record: SettlementRecord, origin: SettlementOrigin) => {
+    charged(record.state, record.feeCharged);
     runHook("onFinal", record.key, () => deps.hooks.onFinal(record, origin));
+  };
 
   const onSuccess = (record: SettlementRecord, origin: SettlementOrigin) =>
     runHook("onSuccess", record.key, () => deps.hooks.onSuccess(record, origin));
@@ -106,6 +119,8 @@ export function createRecords(deps: RecordsDeps) {
             ledger: update.ledger,
           });
           metrics.increment("settlement_landed_after_expired_total", { state: update.state });
+          // The write is lost, but the network charged the fee: no `onFinal` counts it.
+          charged(update.state, update.feeCharged);
         }
         if (current && update.attempts?.length)
           await store.markAttempts(key, update.attempts, now());
@@ -125,7 +140,8 @@ export function createRecords(deps: RecordsDeps) {
    * back to the record, so its hooks would never run. Reconciliation reads each, runs the hooks of
    * one it finds final, and leaves one it doesn't to the usual path (0019 decision 29). A writer in
    * this process takes the key out while its write runs, so the sweep doesn't run the hooks beside
-   * it, and keeps it out once the record is final (decision 35); a restart forgets it.
+   * it, and keeps it out once the record is final (decision 35), also when another writer put it
+   * back meanwhile; a restart forgets it.
    */
   const unconfirmed = new Set<SettlementKey>();
 
@@ -147,6 +163,10 @@ export function createRecords(deps: RecordsDeps) {
     }
     // Lost to another writer: an earlier write of ours may still be the one that committed.
     if (!record && listed) unconfirmed.add(key);
+    // Won: this compare-and-set moved the record from a non-final state, so no write that threw
+    // committed first, and none can commit after. A racing writer that threw and put the key back
+    // while this one ran would have the sweep run the hooks, and count the fee, a second time.
+    if (record) unconfirmed.delete(key);
     return record;
   };
 

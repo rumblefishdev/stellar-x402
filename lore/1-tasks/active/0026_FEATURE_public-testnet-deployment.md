@@ -125,6 +125,65 @@ history:
       exposes no TPM (no ACPI TPM2 or TCPA table, no SMBIOS type 43, no /dev/tpm*); most likely the
       Ryzen 9 3900's fTPM is off in the BIOS, which wasn't checked. The .env values
       (FACILITATOR_ADDRESS_TESTNET, CHANNELS_TESTNET) and the facilitator wait for #102.
+  - date: "2026-11-04"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      The first deploy. #119 merged develop at 49790a8 (with 0091's #118 and #120) into
+      deploy/production as e577fe6 at 12:32 UTC, and the push started Deploy production (run
+      41830217640) although the workflow isn't on main; the image job built
+      sha256:a56db8b2… by 12:34. While the deploy job waited for the production environment, the
+      playbook ran, before the deploy rather than after it as the runbook then said; the runbook
+      now allows both. The playbook from origin/deploy/production at e577fe6 changed two things,
+      the hardened compose.yaml and /etc/logrotate.d/x402-openbao; x402-db-testnet@ and
+      x402-tunnel@ were
+      restarted onto it, and docker inspect showed Postgres as 999:999, cloudflared as
+      65532:65532 and OpenBao as openbao, each with drop [ALL], add [] and no-new-privileges. The
+      GHCR package x402-facilitator was made public (an anonymous token lists its tags). karczuRF
+      approved the deploy, which ran from 12:57:07 to 12:57:37 UTC. /health answers ready, signer
+      ok and listed; /supported lists exact on stellar:testnet with fees sponsored and the signer
+      GAVE5V5I…KKRP. Not yet: a /settle through OpenBao, the facilitator container's inspect, and
+      Run workflow (a rollback by digest), which needs the workflow on main: #126 puts a stub
+      there. Making develop the default branch would remove that stub and deploy-board.yml's pin;
+      a repo setting for the team, not decided.
+  - date: "2026-11-05"
+    status: active
+    who: okarcz
+    note: >
+      okarcz takes over the server side from Stan: the second deploy and its checks, the no-seed,
+      logrotate and audit-log checks, the backups and the restore drill. Karol has 0029. #126
+      (main's stub, squashed) merged to main as 0e73532 and #125 to develop. The second deploy:
+      before it, the running facilitator had only OPENBAO_ROLE_ID_FILE and OPENBAO_SECRET_ID_FILE,
+      and no file under /srv/x402 set the plain names #121 refuses. Under deploy/ only the two
+      .env.example files had changed, which the playbook doesn't install, so no playbook run.
+      #132 merged develop at 1f7ece4 into deploy/production as 1df2055 at 11:46 UTC; the image job
+      built sha256:e6bfaa1a… by 11:48 (run 42021731996), Stan approved the deploy, which ran from
+      12:15:46 to 12:16:19 UTC. x402-deploy@production: the migration applied nothing, then
+      "service facilitator is not running" at 12:15:59 (the probe's first try, with the old
+      container already gone), the new one started at 12:15:59.7 and "deployed" at 12:16:17.
+      digest and digest.good are both e6bfaa1a…, GitHub's production deployment records it beside
+      a56db8b2…, and x402@, x402-db-testnet@, x402-tunnel@ and x402-openbao are active. /health
+      answers ready, signer ok and listed; /supported 200. docker inspect: facilitator node,
+      Postgres 999:999, cloudflared 65532:65532 and OpenBao openbao, each with drop [ALL], add []
+      and no-new-privileges; migrate-testnet's config shows ALL and no-new-privileges:true.
+  - date: "2026-11-05"
+    status: active
+    who: okarcz
+    note: >
+      Signing, seeds and logrotate checked on ch-prod-01, read-only. Karol's 0029 trial run
+      (upstream 8827cf1) settled 18 payments from 11:07 to 11:19 UTC: 22 settled lines in
+      x402@production's journal, three a pending answer and then success with the same hash on the
+      client's repeat. OpenBao's audit log has 37 transit/sign/stellar-testnet responses that day,
+      none with an error: a pair about 11 ms apart before each settlement (the channel's inner
+      transaction and the fee bump), and one at 12:16:17, the deploy's signer check. On Horizon
+      testnet, 17 of the 18 (c7b1bdfb… to 14ab0cc3…, ledgers 5570642 to 5570783; the first was cut
+      from the log excerpt) are successful fee bumps with fee_account GAVE5V5I…KKRP and a different
+      channel as each inner source. No Stellar secret (S and 55 base32 characters) in /srv, /etc,
+      /home, /root, /opt or /usr/local, in our four containers' env or in the facilitator's
+      journal; /var/lib/docker and the image weren't searched, and the key was made in OpenBao
+      with exportable=false. logrotate hasn't rotated audit.log yet: its state file shows
+      2026-11-05 00:00, the first sight of a config the playbook installed on 2026-11-04, so the
+      first rotation is due after 00:00 UTC on 2026-11-06.
 ---
 
 # Public testnet deployment
@@ -414,10 +473,10 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 
 ## Acceptance Criteria
 
-- [ ] Given the Hetzner server and Docker Compose of ADR 0011 (revised in 0039 and 0077), when a deploy runs, then a container image built from the repo is deployed to it as the ADR describes, and the service answers `/supported` at a public HTTPS URL
-- [ ] Given a running instance, when a new version is deployed, then the old process stops before the new one starts; the process is long-lived and never scaled to zero
-- [ ] Given the facilitator key, when the service is deployed, then it signs through the testnet OpenBao Transit key, the raw key never reaches the facilitator's process, the image or the logs, and it is a testnet-only key (ADR 0013)
+- [x] Given the Hetzner server and Docker Compose of ADR 0011 (revised in 0039 and 0077), when a deploy runs, then a container image built from the repo is deployed to it as the ADR describes, and the service answers `/supported` at a public HTTPS URL
+- [x] Given a running instance, when a new version is deployed, then the old process stops before the new one starts; the process is long-lived and never scaled to zero (2026-11-05, the second deploy, run 42021731996: the old container was gone at 12:15:59 before the new one started at 12:15:59.7, healthy at 12:16:17)
+- [x] Given the facilitator key, when the service is deployed, then it signs through the testnet OpenBao Transit key, the raw key never reaches the facilitator's process, the image or the logs, and it is a testnet-only key (ADR 0013) (2026-11-05: 0029's 18 trial settlements signed through `transit/sign/stellar-testnet`, 0 errors in the audit log, fee bumps paid by `GAVE5V5I…KKRP` on testnet; no secret seed in the containers' env or the facilitator's journal; the key is `exportable=false`)
 - [x] Given `DATABASE_URL_FILE` or `RPC_URLS_FILE`, when the service starts, then it reads the value from that file, and with neither set it falls back to `DATABASE_URL` and `RPC_URLS`
 - [ ] Given the durable stores from 0022, when the service runs, then it uses them, and `docs/runbook.md` has the deploy and rollback steps
-- [ ] Given the deployed facilitator, when it settles, then it signs through OpenBao Transit over the unix socket, no secret seed is on the server outside OpenBao, the backup secret exists in AWS, and a restore drill from it has passed
+- [ ] Given the deployed facilitator, when it settles, then it signs through OpenBao Transit over the unix socket, no secret seed is on the server outside OpenBao, the backup secret exists in AWS, and a restore drill from it has passed (2026-11-05: signing over the socket, no seed in the server's files, and the backup secret since 2026-11-02 are shown; the restore drill is left, and it waits for the backups)
 - [ ] Given OpenBao's audit log on the server, when `logrotate` runs, then the file is renamed, OpenBao writes to a new `audit.log` and still signs, and old files past a year are removed (runbook, OpenBao)

@@ -14,7 +14,7 @@
  * Env: DATABASE_URL (default: the compose database, schema `catalog_smoke`, recreated).
  * Fresh friendbot-funded keys; the facilitator pays the fees.
  *
- *   cd apps/facilitator && npx tsx scripts/catalog-smoke.ts
+ *   cd apps/facilitator && npx tsx test/live/catalog-smoke.ts
  *
  * The facilitator's log lines go to stderr, so stdout carries only the result.
  */
@@ -35,9 +35,9 @@ import { createEd25519Signer } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/client";
 import pg from "pg";
 import { Agent, fetch } from "undici";
-import { migrate } from "../src/adapters/postgres-schema.js";
-import { main } from "../src/main.js";
-import { fakeOpenBao, signerEnv } from "../test/fake-openbao.js";
+import { migrate } from "../../src/adapters/postgres-schema.js";
+import { main } from "../../src/main.js";
+import { fakeOpenBao, signerEnv } from "../fake-openbao.js";
 
 const XLM_SAC_TESTNET = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 const RPC_URL = "https://soroban-testnet.stellar.org";

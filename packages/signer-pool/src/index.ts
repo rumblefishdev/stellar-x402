@@ -30,7 +30,6 @@ export {
   type ChannelProblem,
   type CreateChannelsOptions,
 } from "./setup.js";
-export { keypairSigner } from "./signer.js";
 export {
   SubmitterStats,
   type RefusalReason,

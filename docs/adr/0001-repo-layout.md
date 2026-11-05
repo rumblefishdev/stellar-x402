@@ -13,7 +13,7 @@ the developer guide in `stellar/stellar-docs`.
 ## Decision
 
 - One pnpm monorepo, `stellar-x402`, in our GitHub org, Apache-2.0.
-- SDK helpers live in our own package, `packages/sdk`.
+- SDK helpers live in our own package, `packages/sdk`, created when its first helper exists.
 - The `UptoProxy` contract lives in `contracts/upto-proxy`. We offer it to upstream
   `contracts/stellar/` once the x402 Technical Steering Committee agrees.
 - Upstream work happens in forks: `x402-foundation/x402` for `scheme_upto_stellar.md` and the

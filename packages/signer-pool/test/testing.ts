@@ -4,10 +4,11 @@ import {
   SorobanDataBuilder,
   StrKey,
   Transaction,
+  TransactionBuilder,
   rpc,
   xdr,
 } from "@stellar/stellar-sdk";
-import type { SorobanRpc } from "./types.js";
+import type { SorobanRpc, TransactionSigner } from "../src/types.js";
 
 type SendScript =
   | "PENDING"
@@ -335,5 +336,17 @@ export function accountEntry(
     key: xdr.LedgerKey.account(new xdr.LedgerKeyAccount({ accountId })),
     val: xdr.LedgerEntryData.account(entry),
     lastModifiedLedgerSeq: 1,
+  };
+}
+
+/** A {@link TransactionSigner} backed by an in-memory key. */
+export function keypairSigner(keypair: Keypair): TransactionSigner {
+  return {
+    address: keypair.publicKey(),
+    async signTransaction(xdr, { networkPassphrase }) {
+      const tx = TransactionBuilder.fromXDR(xdr, networkPassphrase);
+      tx.sign(keypair);
+      return { signedTxXdr: tx.toXDR(), signerAddress: keypair.publicKey() };
+    },
   };
 }
