@@ -71,7 +71,6 @@ describe("call_paid_http after signing (fake seller, no money moves)", () => {
       paying({
         STELLAR_X402_SECRET_KEY: unfunded.secret(),
         STELLAR_X402_DAILY_BUDGET: PRICE,
-        STELLAR_X402_TIMEOUT_MS: "30000",
       }),
     );
     const first = await server.call("call_paid_http", httpArgs(weather()));
@@ -99,9 +98,7 @@ describe("call_paid_http after signing (fake seller, no money moves)", () => {
     drained = empty.secret();
     await friendbot(empty.publicKey());
     await openUsdcTrustline(empty);
-    const server = await startServer(
-      paying({ STELLAR_X402_SECRET_KEY: empty.secret(), STELLAR_X402_TIMEOUT_MS: "30000" }),
-    );
+    const server = await startServer(paying({ STELLAR_X402_SECRET_KEY: empty.secret() }));
     const answer = await server.call("call_paid_http", httpArgs(weather()));
     await server.close();
     row(

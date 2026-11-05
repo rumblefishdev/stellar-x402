@@ -91,9 +91,7 @@ describe("real payments on testnet (0.002 USDC)", () => {
     // A ledger closes about every 5 s: a payment b had wrongly sent would show by then.
     await new Promise((done) => setTimeout(done, 6_000));
     const afterB = await usdcBalance(keys.buyerPublic);
-    const z = await startServer(
-      paying({ STELLAR_X402_TIMEOUT_MS: "30000", STELLAR_X402_MAX_PER_CALL: "9999" }),
-    );
+    const z = await startServer(paying({ STELLAR_X402_MAX_PER_CALL: "9999" }));
     row(
       "E-22c",
       "per-call limit under the price",

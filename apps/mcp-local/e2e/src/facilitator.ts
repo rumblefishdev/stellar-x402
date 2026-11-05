@@ -1,77 +1,66 @@
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
-import { Account, Keypair, Networks, rpc } from "@stellar/stellar-sdk";
-import { buildCreateChannelsTx, readAccountEntry } from "@stellar-x402/signer-pool";
+import { Keypair, Networks, rpc } from "@stellar/stellar-sdk";
+import { buildCreateChannelsTx } from "@stellar-x402/signer-pool";
 import { fakeOpenBao, signerEnv } from "../../../facilitator/test/fake-openbao.js";
 import { friendbot } from "./horizon.js";
-import { freePort } from "./seller.js";
 
-const dist = (file: string) =>
-  fileURLToPath(new URL(`../../../facilitator/dist/${file}`, import.meta.url));
-const COMPOSE_DATABASE_URL = "postgres://postgres:postgres@127.0.0.1:15432/postgres";
-
-export interface Facilitator {
-  url: string;
-  stop(): void;
-}
+const SERVER = fileURLToPath(new URL("../../../facilitator/dist/server.js", import.meta.url));
 
 /**
  * Starts our facilitator, built, so the example seller's payments don't depend on a public service:
- * a fresh friendbot account pays the fees, and two fresh channels carry the settlements. Its key
- * signs through the fake OpenBao, which holds nothing but this run's testnet account.
+ * a fresh friendbot account pays the fees, and one fresh channel carries the settlements. Its key
+ * signs through the fake OpenBao, which holds nothing but this run's testnet account. Its log goes
+ * to stderr, so a refused or failed settlement shows its cause.
  */
-export async function startFacilitator(): Promise<Facilitator> {
+export async function startFacilitator(databaseUrl: string) {
   const key = Keypair.random();
   await friendbot(key.publicKey());
 
   const server = new rpc.Server("https://soroban-testnet.stellar.org");
-  const channels = [Keypair.random(), Keypair.random()];
-  const entry = await readAccountEntry(server, key.publicKey());
-  if (!entry) throw new Error("the facilitator's account does not exist");
+  const channel = Keypair.random();
   const setup = buildCreateChannelsTx({
-    funder: new Account(key.publicKey(), entry.seqNum().toString()),
+    funder: await server.getAccount(key.publicKey()),
     signer: key.publicKey(),
-    channels,
+    channels: [channel],
     networkPassphrase: Networks.TESTNET,
-    fee: 1000,
   });
-  setup.sign(key, ...channels);
-  const created = await server.pollTransaction((await server.sendTransaction(setup)).hash, {
-    attempts: 30,
-  });
+  setup.sign(key, channel);
+  const sent = await server.sendTransaction(setup);
+  if (sent.status !== "PENDING") throw new Error(`channel setup ${sent.status}`);
+  const created = await server.pollTransaction(sent.hash);
   if (created.status !== "SUCCESS") throw new Error(`channel setup ${created.status}`);
 
-  const DATABASE_URL = process.env.DATABASE_URL ?? COMPOSE_DATABASE_URL;
-  await promisify(execFile)(process.execPath, [dist("migrate.js")], {
-    env: { PATH: process.env.PATH!, DATABASE_URL },
-  });
-
   const openbao = await fakeOpenBao(key);
-  const port = await freePort();
-  const child = spawn(process.execPath, [dist("server.js")], {
+  const child = spawn(process.execPath, [SERVER], {
     env: {
       ...signerEnv(key.publicKey(), openbao.socketPath),
-      PATH: process.env.PATH!,
-      DATABASE_URL,
+      DATABASE_URL: databaseUrl,
       CLIENT_IP: "socket",
-      CHANNELS: channels.map((channel) => channel.publicKey()).join(","),
-      PORT: String(port),
+      CHANNELS: channel.publicKey(),
+      PORT: "0",
     },
   });
-  await new Promise<void>((resolve, reject) => {
+  const url = await new Promise<string>((resolve, reject) => {
     let output = "";
-    child.stdout.on("data", (chunk: Buffer) => {
+    const read = (chunk: Buffer) => {
+      process.stderr.write(chunk);
       output += chunk.toString();
-      if (output.includes('"event":"listening"')) resolve();
-    });
-    child.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));
+      const listening = /"event":"listening","port":(\d+)/.exec(output);
+      if (listening) resolve(`http://127.0.0.1:${listening[1]}`);
+    };
+    child.stdout.on("data", read);
+    child.stderr.on("data", read);
     child.on("exit", (code) => reject(new Error(`facilitator exited ${code}: ${output}`)));
   });
   return {
-    url: `http://127.0.0.1:${port}`,
-    stop() {
-      child.kill();
+    url,
+    async stop() {
+      if (child.exitCode === null) {
+        child.kill();
+        await once(child, "exit");
+      }
       openbao.close();
     },
   };

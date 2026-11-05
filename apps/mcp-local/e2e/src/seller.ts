@@ -7,7 +7,7 @@ const EXAMPLE_SELLER = fileURLToPath(
   new URL("../../../../examples/http-api/dist/index.js", import.meta.url),
 );
 
-export async function freePort(): Promise<number> {
+async function freePort(): Promise<number> {
   const server = createServer();
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
   const { port } = server.address() as { port: number };
