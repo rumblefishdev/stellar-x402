@@ -99,7 +99,14 @@ describe("validateConfig", () => {
       (c) => (m(c).alarmGroups.logVolume = true),
       /alarmGroups.logVolume/,
     ],
-    ["host on with no audit mount", (c) => (m(c).alarmGroups.host = true), /auditDiskMount/],
+    [
+      "host on with no audit mount",
+      (c) => {
+        m(c).alarmGroups.host = true;
+        m(c).host = { ...m(c).host, auditDiskMount: null };
+      },
+      /auditDiskMount/,
+    ],
     [
       "a network with no fee account",
       (c) => delete (m(c).feeAccounts as Partial<Record<string, string>>)["stellar:testnet"],

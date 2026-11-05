@@ -63,11 +63,18 @@ export function addCostSilenceAlarms(f: AlarmFactory, c: EnvironmentConfig): voi
       },
     });
 
+  // Both of the agent's series: an agent upgrade or config change that loses the disk series
+  // alone would otherwise go unseen, since `disk` keeps its state without data (#113).
   f.silence("telemetry-silent", {
     group: "host",
-    signal: { catalog: "mem_used_percent" },
+    signal: {
+      each: {
+        mem: { catalog: "mem_used_percent" },
+        disk: { catalog: "disk_used_percent", dims: { path: "/" } },
+      },
+    },
     description: {
-      what: "No memory reading from the server's CloudWatch agent for 15 minutes: the agent, its Roles Anywhere credentials or the server's way out is down, so no log or metric line arrives either.",
+      what: "No memory or disk reading from the server's CloudWatch agent for 15 minutes: the agent, its Roles Anywhere credentials or the server's way out is down, so no log or metric line arrives either; or its config lost one of the two series.",
       next: "On the server: systemctl status amazon-cloudwatch-agent and the credential helper's unit, then the certificate's expiry.",
       noData: "Breaching: silence is what this alarm is for.",
     },

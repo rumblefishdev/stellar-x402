@@ -20,7 +20,10 @@ export const ALARM_GROUPS = [
   "facilitator",
   /** `channel-held`, once 0089 emits its gauge. */
   "channelHeld",
-  /** The host probe's alarms and the agent's `telemetry-silent` and `audit-disk` (#113). */
+  /**
+   * The host probe's alarms, `facilitator-failed` from x402@'s stop hook, and the agent's
+   * `telemetry-silent` and `audit-disk` (#113).
+   */
   "host",
   /** `wal-failing`, `wal-stale` and `backup-age`, once pgBackRest runs (0026; decision 40). */
   "backups",
@@ -57,6 +60,8 @@ export interface Thresholds {
   readonly backupAgeSeconds: number;
   readonly snapshotAgeSeconds: number;
   readonly certificateDaysLeft: number;
+  /** `credentials-stale`: the agent's credentials file, written hourly by the signing helper. */
+  readonly credentialsAgeSeconds: number;
   /** Measured before the group goes on; `null` until then. */
   readonly diskUsedPercent: number | null;
   readonly memoryUsedPercent: number | null;
@@ -135,6 +140,7 @@ const THRESHOLD_KEYS: readonly (keyof Thresholds)[] = [
   "backupAgeSeconds",
   "snapshotAgeSeconds",
   "certificateDaysLeft",
+  "credentialsAgeSeconds",
   "diskUsedPercent",
   "memoryUsedPercent",
   "logVolumeBytesPerHour",
@@ -249,7 +255,7 @@ export function validateConfig(config: EnvironmentConfig): EnvironmentConfig {
 
   const host = config.host ?? ({} as EnvironmentConfig["host"]);
   if (!Array.isArray(host.diskMounts))
-    errors.push("host.diskMounts must be a list (empty until #113 names the mounts)");
+    errors.push("host.diskMounts must be a list of the catalog's disk paths");
   else
     for (const m of host.diskMounts as readonly unknown[])
       if (typeof m !== "string" || !isDimValue(m))

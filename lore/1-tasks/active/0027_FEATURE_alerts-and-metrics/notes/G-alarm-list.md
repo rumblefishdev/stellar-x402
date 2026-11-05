@@ -41,6 +41,10 @@ history:
     status: developing
     who: akot
     note: "From the whole-task review: the backup and snapshot alarms leave host for groups of their own (decision 40), and the balance alarms name the fee account and the top-up step (decision 41)."
+  - date: "2026-11-05"
+    status: developing
+    who: akot
+    note: "From #113's spine (decisions 43, 44, 46): facilitator-failed and credentials-stale in host, and telemetry-silent reads the disk series too."
 ---
 
 # The alarms 0027 builds
@@ -141,8 +145,10 @@ dimensions would cost about $15 a month at 50 channels, so we accept this.
 | `wal-stale` | `wal_last_archived_age_seconds` | Level, `Minimum`, 3 of 3 one-minute periods | The last archived segment older than 10 minutes | As above |
 | `backup-age` | `backup_age_seconds` | Level, `Minimum`, 3 of 3 one-minute periods | The last `pgbackrest backup` older than 26 hours, or none | As above |
 | `snapshot-age` | `snapshot_age_seconds` | Level, `Minimum`, 3 of 3 one-minute periods | The last OpenBao snapshot older than 26 hours, or none | As above |
+| `credentials-stale` | `credentials_age_seconds` | Level, `Minimum`, 3 of 3 one-minute periods | Above 7,500 s: the signing helper's hourly run failed twice, retries included, about 9.5 hours before its 12-hour keys run out (decision 46) | Ignore: `probe-silent` |
 | `certificate` | `certificate_days_left` | Level, `Maximum`, 1 of 1 one-hour period | Under 30 days left, or the check failing | As above |
 | `watchdog-restart` | `watchdog_restarts_total` | Event | 1 or more | Not breaching: a stopped watchdog leaves a hung facilitator to `uptime` |
+| `facilitator-failed` | `facilitator_failures_total`, from `x402@`'s `ExecStopPost` | Event | 1 or more: an end other than `success`, a crash, a failed start, a drain cut short, a `dockerd` crash, or the watchdog's kill of a hung process (with `watchdog-restart`). A crash after `ready` in cycles of a minute or more never reaches `StartLimitBurst` (decision 43) | Not breaching: `telemetry-silent`, since the probe doesn't write it |
 
 A failed host check, or a job that never ran, writes a value past its threshold
 ([G-metrics](G-metrics.md#host-namespace-x402-host)). So `wal-failing`, `wal-stale` and
@@ -156,7 +162,7 @@ with 0026, and in `host` they would keep the probe's other alarms off until then
 | `log-volume` | `AWS/Logs IncomingBytes` | Level | Measure: a flood of log lines, on the bill as on the disk | Ignore: `telemetry-silent` |
 | `emf-validation` | `AWS/Logs EMFValidationErrors` for the metrics log group | Event | 1 or more: CloudWatch rejected a line, so its metrics are gone: Event and Count alarms on them read OK, and Level ones keep their last state | Not breaching: written only when a line fails |
 | `emf-parsing` | `AWS/Logs EMFParsingErrors` for the metrics log group | Event | 1 or more: a line CloudWatch couldn't parse as EMF | As above |
-| `telemetry-silent` | `mem_used_percent` from the agent | Silence | 15 minutes: agent, credentials or egress | Breaching |
+| `telemetry-silent` | `mem_used_percent` and `disk_used_percent{path="/"}` from the agent: `MIN([FILL(mem, 0), FILL(disk, 0)])` | Silence | 15 minutes of either: agent, credentials or egress, or a config that lost one series (decision 44) | Breaching |
 | `facilitator-silent` | `settlement_sweeps_total{outcome:"listed"}`, per network, written every minute once the service has started, 0 included | Silence | 15 minutes. Fires beside `uptime` when the process is down, or when its start hangs or fails, a crash loop included: a start writes the point only once it has started | Breaching |
 | `gauges-silent` | The six facilitator gauges' `SampleCount`, and `channel_longest_hold_seconds`'s once `channelHeld` is on, per network, against the sweeps' | Metric math: `(MIN([FILL(g, 0), ...]) < 1) * (FILL(sweeps, 0) >= 1)` at 1, 3 of 3 five-minute periods, with an OK message | A gauge sent no point for 15 minutes while sweeps arrived: its read keeps throwing, and its Level alarm keeps its state (decision 28). Quiet when the whole process is down | Not breaching: the expression always has a value |
 | `probe-silent` | `host_probe_heartbeat` | Silence | 15 minutes | Breaching |

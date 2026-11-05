@@ -152,6 +152,34 @@ describe("shapes", () => {
     });
   });
 
+  test("Silence over several series fires when any one of them goes silent", () => {
+    const { f, alarms } = factory({ host: true });
+    f.silence("telemetry-silent", {
+      group: "host",
+      signal: {
+        each: {
+          mem: { catalog: "mem_used_percent" },
+          disk: { catalog: "disk_used_percent", dims: { path: "/" } },
+        },
+      },
+      description: text,
+    });
+    const p = alarms()[0]?.Properties as Record<string, unknown>;
+    const metrics = p["Metrics"] as {
+      Id: string;
+      Expression?: string;
+      MetricStat?: { Stat: string };
+    }[];
+    expect(metrics.find((m) => m.Expression)?.Expression).toBe(
+      "MIN([FILL(mem, 0), FILL(disk, 0)])",
+    );
+    expect(metrics.filter((m) => m.MetricStat).map((m) => [m.Id, m.MetricStat!.Stat])).toEqual([
+      ["mem", "SampleCount"],
+      ["disk", "SampleCount"],
+    ]);
+    expect(p).toMatchObject({ ComparisonOperator: "LessThanThreshold", Threshold: 1 });
+  });
+
   test("Silence: FILL(SampleCount, 0) < 1 in 3 of 3 five-minute periods, breaching", () => {
     const { f, alarms } = factory({ host: true });
     f.silence("probe-silent", {
