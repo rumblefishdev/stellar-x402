@@ -1,5 +1,5 @@
 import type { Logger } from "../logger.js";
-import type { Metrics } from "../metrics.js";
+import type { NetworkMetrics } from "../metrics.js";
 import type { BreakerBackoff, ScopeUsage, SpendScope, SpendStore } from "../ports/index.js";
 import type { BeforeSubmitResult, SettlementHooks } from "../settlement/hooks.js";
 import { SETTLE_REASONS } from "../settlement/settle.js";
@@ -66,7 +66,7 @@ export const BREAKERS = {
 type BreakerKind = "payer" | "pay_to" | "asset";
 
 /** A fault as the `fault` label, spelled like the other labels. */
-const FAULT_LABELS: Record<Fault, string> = {
+export const FAULT_LABELS: Record<Fault, string> = {
   payer: "payer",
   payTo: "pay_to",
   asset: "asset",
@@ -93,7 +93,7 @@ export function createSpendPolicy(deps: {
   floor: BalanceFloor;
   budgets: SpendBudgets;
   logger: Logger;
-  metrics: Metrics;
+  metrics: NetworkMetrics;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
 }): SpendPolicy {
@@ -330,7 +330,7 @@ export function verifyWithBreakers(
   deps: {
     policy: Pick<SpendPolicy, "breakerRefusal">;
     logger: Logger;
-    metrics: Metrics;
+    metrics: NetworkMetrics;
     now?: () => number;
   },
 ): Verify {

@@ -1,11 +1,12 @@
 import { STATUS_CODES } from "node:http";
 import { PaymentPayloadV2Schema, PaymentRequirementsV2Schema } from "@x402/core/schemas";
 import type { SupportedResponse, VerifyRequest } from "@x402/core/types";
+import { byName } from "@stellar-x402/metrics-catalog";
 import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
 import type { SignerState } from "../adapters/openbao-signer.js";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
-import type { Metrics } from "../metrics.js";
+import type { ProcessMetrics } from "../metrics.js";
 import type { Stores } from "../ports/index.js";
 import type { SettlementHooks } from "../settlement/hooks.js";
 import type { LeaseKeeper } from "../settlement/lease.js";
@@ -22,7 +23,7 @@ import { rateLimit } from "./rate-limit.js";
 export interface AppDeps {
   config: Config;
   logger: Logger;
-  metrics: Metrics;
+  metrics: ProcessMetrics;
   stores: Stores;
   verify: Verify;
   settle: Settle;
@@ -126,6 +127,50 @@ export function parsePaymentRequest(body: unknown): VerifyRequest | undefined {
 }
 
 /**
+ * The routes `http_requests_total` names, from its catalog entry (the only list of them); every
+ * other path is `other`. `/discovery` also counts its subpaths.
+ */
+const COUNTED_ROUTES: ReadonlySet<string> = new Set(
+  (byName("http_requests_total")?.values?.route ?? []).filter((r) => r !== "other"),
+);
+
+/**
+ * The `route` label of a request: a fixed value, never the raw path, so a scan of made-up paths
+ * adds no series. Express routes ignore case and a trailing slash, so the label does too. Read
+ * from `req.path`, as `req.route` isn't set for a 404 or a request a rate limit refused.
+ */
+export function routeLabel(path: string): string {
+  const p = path.toLowerCase().replace(/(.)\/$/, "$1");
+  if (COUNTED_ROUTES.has(p)) return p;
+  if (p.startsWith("/discovery/")) return "/discovery";
+  return "other";
+}
+
+/**
+ * Counts every answer as `http_requests_total{route,status}`, once, when its response closes.
+ * Mounted first, so it sees the 404s, the 429s, body-parser's 4xx, the lease's 503s and the error
+ * handler's 500s. A response that didn't finish is `aborted`: the client left first, or the
+ * connection was cut. That includes a route that threw after its headers went out, before its
+ * body ended: the error handler can't send a 500 then, Express destroys the socket, and the
+ * status that reads 200 was never answered in full. It counts as `aborted`, not 200 or 500, and
+ * the `http_error` log carries it.
+ */
+function countRequests(metrics: ProcessMetrics): RequestHandler {
+  return (req, res, next) => {
+    // Read now: inside `app.use("/discovery", …)` Express strips the prefix from `req.url`, and a
+    // 429 answered there, or a client that leaves there, closes the response before it is back.
+    const route = routeLabel(req.path);
+    res.once("close", () => {
+      metrics.increment("http_requests_total", {
+        route,
+        status: res.writableFinished ? String(res.statusCode) : "aborted",
+      });
+    });
+    next();
+  };
+}
+
+/**
  * The inbound HTTP adapter (AD-13). There is a body size limit and no CORS anywhere (spine "HTTP
  * hardening"). `/verify`, `/settle` and `/discovery/*` each have a rate limit (AD-11), applied
  * before the body is read, so a malformed or oversized request counts too; `/supported` has none.
@@ -146,6 +191,8 @@ export function createApp({
 }: AppDeps): Express {
   const app = express();
   app.disable("x-powered-by");
+  // Before everything else, so every answer is counted (process-scoped: no `network`).
+  app.use(countRequests(metrics));
   const limit = (route: string, budget: number) =>
     rateLimit({
       route,

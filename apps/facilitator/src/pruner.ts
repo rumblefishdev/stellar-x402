@@ -1,5 +1,5 @@
 import type { Logger } from "./logger.js";
-import type { Metrics } from "./metrics.js";
+import type { ProcessMetrics } from "./metrics.js";
 import type { RateLimitStore, SpendStore } from "./ports/index.js";
 
 const DAY_MS = 86_400_000;
@@ -24,7 +24,7 @@ export interface PrunerDeps {
   spendWindowMs: number;
   rateLimitWindowMs: number;
   logger: Logger;
-  metrics: Metrics;
+  metrics: ProcessMetrics;
   /** The app clock the cutoffs come from, as for every stored time. */
   now?: () => number;
   /** Elapsed time for the budget. */

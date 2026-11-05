@@ -12,6 +12,7 @@ import { getNetworkPassphrase, getUsdcAddress, type FacilitatorStellarSigner } f
 import { ExactStellarScheme } from "@x402/stellar/exact/facilitator";
 import type pg from "pg";
 import { Agent, setGlobalDispatcher } from "undici";
+import { emfMetrics } from "./adapters/emf-metrics.js";
 import { openBaoSigner, type OpenBaoSigner } from "./adapters/openbao-signer.js";
 import { MIGRATIONS, migrate, pendingMigrations } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
@@ -21,9 +22,10 @@ import type { Config } from "./config.js";
 import { createApp, type AppDeps } from "./http/app.js";
 import { supportedResponse } from "./http/supported.js";
 import { captureConsoleError, jsonLogger, rpcEndpointName, type Logger } from "./logger.js";
-import { memoryMetrics, type Metrics } from "./metrics.js";
+import { memoryMetrics, type NetworkMetrics, type ProcessMetrics } from "./metrics.js";
 import type { LeaseFence, SettlementStore } from "./ports/index.js";
 import { createPruner } from "./pruner.js";
+import { createRpcStallTracker, type RpcStallTracker } from "./rpc-stall.js";
 import { checkChannels } from "./settlement/channel-check.js";
 import { checkRpcNetworks } from "./settlement/network-check.js";
 import { atCurrentBid, feeSettings, type FeeSettings } from "./settlement/fees.js";
@@ -39,7 +41,7 @@ import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler, type Settle } from "./settl
 import { createTrustlineLookup } from "./settlement/trustline.js";
 import { failoverUpstream, type EndpointFailure } from "./settlement/upstream-failover.js";
 import { createAssetKinds } from "./spend/asset-kinds.js";
-import { createBalanceFloor } from "./spend/balance-floor.js";
+import { BALANCE_STALE_ALARM_MS, createBalanceFloor } from "./spend/balance-floor.js";
 import { createSpendPolicy, verifyWithBreakers } from "./spend/policy.js";
 import {
   UNEXPECTED_VERIFY_ERROR,
@@ -400,7 +402,7 @@ export function buildSettlement(
     store: SettlementStore;
     hooks: Pick<SettlementHooks, "beforeSubmit" | "onFinal" | "onSuccess">;
     logger: Logger;
-    metrics: Metrics;
+    metrics: NetworkMetrics;
     /** The facilitator key's signer. */
     signer: TransactionSigner;
     /** Tests pass the pool's `sleep`. */
@@ -475,7 +477,17 @@ export function buildSettlement(
     records,
     lease: deps.lease,
   });
-  const reconciliation = scheduleReconciliation({ reconciler, logger, network });
+  const reconciliation = scheduleReconciliation({ reconciler, logger, metrics, network });
+  // Gauges read at each sample, from memory only (0027 AD-5): `stats()` copies the pool's
+  // counters and load, and the reconciler's age is taken at the read.
+  metrics.registerGauge("pool_queued", () => {
+    const { queued, channels, busy } = submitter.stats();
+    return { value: queued, labels: { channels, busy } };
+  });
+  metrics.registerGauge("pool_quarantined", () => ({ value: submitter.stats().quarantined }));
+  metrics.registerGauge("settlement_oldest_open_seconds", () => ({
+    value: reconciler.oldestOpenSeconds(),
+  }));
   // Closing the pool first refuses every call that sent nothing, so their records close too.
   const drain = async () => {
     await submitter.close();
@@ -487,7 +499,13 @@ export function buildSettlement(
 /**
  * Every part `main()` serves, built from the config on the given stores: the cataloger, one RPC
  * and one fee configuration shared by `/verify`, `/settle` and the pool. `main()` passes the
- * PostgreSQL stores; tests pass their own `rpc`, `makeScheme` and pool `sleep`.
+ * PostgreSQL stores and the EMF writer; tests pass their own `rpc`, `makeScheme`, pool `sleep`
+ * and `metrics` (in memory by default).
+ *
+ * Metrics follow each one's catalog `scope` (0027 AD-3): every part of this network (settlement,
+ * records, reconciliation, the pool, the lease, the spend lane, the balance floor, the signer)
+ * writes through one child scoped to `config.network`; the cataloger, discovery and the HTTP app
+ * write through the root, as does the pruner `main()` builds on the returned `metrics`.
  */
 export function compose(
   config: Config,
@@ -497,27 +515,46 @@ export function compose(
     rpc?: SorobanRpc;
     seams?: UpstreamSeams;
     sleep?: (ms: number) => Promise<void>;
+    metrics?: ProcessMetrics;
   },
 ): {
   deps: AppDeps;
   cataloger: Cataloger;
-  metrics: Metrics;
+  /** The root: for the process-scoped parts `main()` builds. */
+  metrics: ProcessMetrics;
   rpc: FallbackRpc;
   signer: OpenBaoSigner;
+  /** Unstarted: `main()` starts it with the process and stops it before the final flush. */
+  rpcStall: RpcStallTracker;
 } {
   const { logger } = opts;
   const { stores } = opts;
-  // Cataloging plugs into `/settle` through `extensionResponses` and `onSuccess` (AD-8).
-  const metrics = memoryMetrics();
+  const root = opts.metrics ?? memoryMetrics();
+  // One child per network; a root write of a network-scoped metric would carry no `network`, so
+  // the root's type doesn't take one.
+  const metrics = root.for({ network: config.network });
+  // Cataloging plugs into `/settle` through `extensionResponses` and `onSuccess` (AD-8). The
+  // catalog's rows serve every network, so it writes through the root.
   const cataloger = createCataloger({
     store: stores.catalog,
     logger,
-    metrics,
+    metrics: root,
     listLocal: config.catalog.listLocal,
   });
   // One client for every RPC_URLS read and send, whose active URL upstream verify shares (AD-3).
   // A test's `rpc` serves every URL.
   const rpc = buildRpc(config, logger, opts.rpc && (() => opts.rpc!));
+  // 1 while calls are off `RPC_URLS[0]` (0027 AD-5). `active` is a plain read; `begin()` could
+  // start a probe. The label is the endpoint's name, as `buildRpc` names it, never its URL.
+  const primary = rpcEndpointName(config.rpcUrls[0]!, 0);
+  metrics.registerGauge("rpc_on_fallback", () => {
+    const active = rpc.active;
+    return { value: active === primary ? 0 : 1, labels: { rpc: active } };
+  });
+  // The time since the ledger sequence last changed, on the client settlement uses (0027 AD-5).
+  // The poll's own reads may move `active`; that is what settlement would see.
+  const rpcStall = createRpcStallTracker({ rpc, now: Date.now });
+  metrics.registerGauge("rpc_stalled_seconds", () => ({ value: rpcStall.stalledSeconds() }));
   // One fee configuration: `/verify` and `/settle` check with it, and the pool pays with it, so
   // they share one ceiling and one bid (AD-10).
   const fees = feeSettings(config.fees, rpc);
@@ -542,6 +579,18 @@ export function compose(
     logger,
     metrics,
   });
+  metrics.registerGauge("balance_reading_age_seconds", () => ({
+    value: floor.readingAgeMs() / 1000,
+  }));
+  // The `balance-stale` alarm fires above 300 s, the floor's bound at the default interval; with
+  // another bound it fires before `/settle` fails closed, or after.
+  if (floor.maxStaleMs !== BALANCE_STALE_ALARM_MS) {
+    logger.warn("balance_stale_threshold_mismatch", {
+      network: config.network,
+      maxStaleMs: floor.maxStaleMs,
+      alarmThresholdMs: BALANCE_STALE_ALARM_MS,
+    });
+  }
   const policy = createSpendPolicy({
     store: stores.spend,
     // USDC is the known asset (the high tier); every other token, SAC or wasm, gets the low one.
@@ -579,7 +628,8 @@ export function compose(
     deps: {
       config,
       logger,
-      metrics,
+      // The HTTP app and discovery: a route serves every network.
+      metrics: root,
       stores,
       verify: verifyWithBreakers(createVerifier(checks), { policy, logger, metrics }),
       settle,
@@ -592,14 +642,18 @@ export function compose(
       signerState: signer.state,
     },
     cataloger,
-    metrics,
+    metrics: root,
     rpc,
     signer,
+    rpcStall,
   };
 }
 
 export interface MainOptions {
-  /** Where the log lines go; stdout by default. The smoke scripts read them here. */
+  /**
+   * Where the log lines and the EMF metric lines go, each ending in a newline; stdout by default.
+   * The smoke scripts read them here.
+   */
   write?: (line: string) => void;
 }
 
@@ -616,6 +670,9 @@ export async function main(
   let pools:
     { main: pg.Pool; reserve: pg.Pool; rateLimits: pg.Pool; discovery: pg.Pool } | undefined;
   const endPools = () => Promise.all(Object.values(pools ?? {}).map((p) => p.end()));
+  let rpcStall: RpcStallTracker | undefined;
+  /** The EMF writer, for the catch: a start that failed stops it. */
+  let emf: ReturnType<typeof emfMetrics> | undefined;
   try {
     // stellar-sdk's RPC and Horizon clients use the global fetch with no timeout of their own, and
     // an upstream call cut off by its deadline can't be cancelled. undici's defaults would hold its
@@ -644,7 +701,20 @@ export async function main(
     // missing. Checked first, so a wrong URL is named instead of every channel.
     await checkRpcNetworks(config.rpcUrls, getNetworkPassphrase(config.network));
     const stores = postgresStores(pools.main, pools);
-    const { deps, cataloger, metrics, rpc, signer } = compose(config, { logger, stores });
+    // The EMF writer (0027 AD-4) on its own sink, never through the logger. Its timers start
+    // with the graph's gauges, so a startup that hangs still writes them; its liveness seed waits
+    // for `start()` below. On stdout by default, where each write is awaited by the final flush.
+    const { write } = opts;
+    const metrics = (emf = emfMetrics({
+      ...(write && { write: (line: string) => write(`${line}\n`) }),
+      onIssue: (issue) => logger.warn("metric_issue", { ...issue }),
+    }));
+    const composed = compose(config, { logger, stores, metrics });
+    const { deps, cataloger, rpc, signer } = composed;
+    // With the graph, like the writer's timers: an RPC that hangs the startup checks shows as a
+    // rising `rpc_stalled_seconds`.
+    rpcStall = composed.rpcStall;
+    rpcStall.start();
     // AD-12: the service starts only when no other key can move a channel. An RPC that doesn't
     // answer fails the check with its error. `compose()` only wires parts, so nothing has called
     // the RPC yet.
@@ -656,6 +726,11 @@ export async function main(
       restoreConsole();
       throw error;
     });
+    // The liveness point `facilitator-silent` reads, from the service's start on (AD-4): a start
+    // that hangs or fails, a crash loop of them included, writes none and shows as missing data.
+    metrics.seedZero([
+      { name: "settlement_sweeps_total", labels: { network: config.network, outcome: "listed" } },
+    ]);
     // Not awaited: the service starts and `/verify` answers without OpenBao; the outcome goes to
     // the log and `/health`'s `signer`, and a failed check tries again (0036 decision 4).
     void signer.check();
@@ -671,16 +746,24 @@ export async function main(
     pruner.start();
     // Catalog writes and a prune already under way finish before the process exits, and before
     // the pools end, even if closing the server fails; the pools end even if draining fails.
+    // The metrics' final flush comes last, after every part that counts, and is awaited:
+    // `server.ts` exits once this resolves, and a write to a stdout pipe is asynchronous.
     const closeOnce = async () => {
       signer.close();
       try {
-        await started.close();
-      } finally {
         try {
-          await Promise.all([cataloger.drain(), pruner.close()]);
+          await started.close();
         } finally {
-          await endPools();
+          try {
+            await Promise.all([cataloger.drain(), pruner.close()]);
+          } finally {
+            await endPools();
+          }
         }
+      } finally {
+        // Its last reading goes out with the final flush; no read starts after it.
+        rpcStall?.stop();
+        await metrics.close();
       }
     };
     let closing: Promise<void> | undefined;
@@ -703,6 +786,11 @@ export async function main(
     // Logged here, where an RPC URL is named as its `RPC_URLS` entry, never by its host
     // (ADR 0011); `server.ts` logs only a `ConfigError`, which comes before the logger.
     logger.error("startup_failed", { error });
+    // No final metrics flush: the writer stops with its open window unwritten, so a start that
+    // failed adds no point after the error. It wrote no seed either (above), so a crash loop
+    // shows as missing data. Eager-first lines are out already.
+    emf?.stop();
+    rpcStall?.stop();
     await endPools();
     throw error;
   }

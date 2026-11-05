@@ -51,6 +51,9 @@ importers:
       '@stellar-x402/mcp':
         specifier: workspace:*
         version: link:../../packages/mcp
+      '@stellar-x402/metrics-catalog':
+        specifier: workspace:*
+        version: link:../../packages/metrics-catalog
       '@stellar-x402/signer-pool':
         specifier: workspace:*
         version: link:../../packages/signer-pool
@@ -218,6 +221,12 @@ importers:
       zod:
         specifier: ^3.25.76
         version: 3.25.76
+
+  packages/metrics-catalog:
+    dependencies:
+      '@stellar-x402/config':
+        specifier: workspace:*
+        version: link:../config
 
   packages/seller-fetch:
     dependencies:

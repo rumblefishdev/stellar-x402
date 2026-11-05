@@ -1,6 +1,6 @@
 import * as bazaarLib from "@stellar-x402/bazaar";
 import type { Logger } from "../logger.js";
-import type { Metrics } from "../metrics.js";
+import type { ProcessMetrics } from "../metrics.js";
 import type {
   CatalogEntry,
   CatalogKey,
@@ -15,7 +15,7 @@ export type BazaarApi = Pick<typeof bazaarLib, "validate" | "normalize" | "toExt
 export interface CatalogerDeps {
   store: CatalogStore;
   logger: Logger;
-  metrics: Metrics;
+  metrics: ProcessMetrics;
   /** Injectable for fault-injection tests; the real package otherwise. */
   bazaar?: BazaarApi;
   /** A slower write counts as failed, so a hung store can't pile up writes or block `drain()`. */

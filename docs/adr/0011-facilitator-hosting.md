@@ -9,9 +9,11 @@
   process, independent of the lease; `/health` reports `listed` beside `ready`, and the deploy
   waits for both), 2026-10-28 (task 0076: one hostname and one facilitator service for both
   networks), 2026-11-02 (task 0027: the agent reads a file the unit writes, a Lambda probe
-  replaces Route 53, and 0027 builds the logging role) and 2026-11-03 (task 0027, from the PR
+  replaces Route 53, and 0027 builds the logging role), 2026-11-03 (task 0027, from the PR
   #111 review: every unit's output ships, the loss the log path accepts, the uptime alarm from
-  the first good deploy, the disk alarm to our channel, and certificate renewal in 0027)
+  the first good deploy, the disk alarm to our channel, and certificate renewal in 0027) and
+  2026-11-04 (task 0027 decisions 18 and 20: metric lines kept 30 days, no CPU metric) and
+  2026-11-05 (task 0027 decision 4 amended: every metric in the catalog is billed)
 - Revised: 2026-10-13. ECS Fargate became the company Hetzner server (task 0039); the first
   version is in git history and task 0014. 2026-10-21: the key moved to OpenBao (ADR 0013), and
   deploys, reboots, backups, alarms and downtime were worked out in the PR #24 review.
@@ -547,9 +549,10 @@ One request or one stop must never outlast the layer in front of it:
     line wraps ours, and EMF needs `_aws` at the root (task 0027's log path spike).
   - The agent keeps EMF lines and app lines in separate log groups. During an AWS outage it holds
     app lines back and drops the oldest metric lines once 20,000 wait, which CloudWatch would have
-    turned into metrics. Both use the Standard class: 30 days for app lines, 3 for metric lines.
-    Every line ships, the client IP in `rate_limited` too; that and the retention are looked at
-    again before mainnet (0038).
+    turned into metrics. Both use the Standard class and keep 30 days: a label that isn't a
+    dimension lives only as a field in the metric line, read with Logs Insights, and the weekly
+    fee review reads a week of it (0027 decision 18). Every line ships, the client IP in
+    `rate_limited` too; that and the retention are looked at again before mainnet (0038).
   - The files rotate with `logrotate` on its own timer, since they share a disk with ClickHouse,
     using `copytruncate`, as the units hold the files open. We accept two losses, tested locally
     in 0027. At each rotation, the lines the agent hadn't read yet: up to 250 ms, its poll, all
@@ -579,10 +582,11 @@ One request or one stop must never outlast the layer in front of it:
   - Namespace `x402-facilitator`.
   - Dimensions stay low-cardinality: `network`, route, outcome, event name.
   - Never payer or `payTo`: each dimension combination is a billed custom metric.
-  - Billed metrics are those with an alarm and the traffic picture (0027). Other labels stay
-    fields in the line, read with Logs Insights.
-- **Host metrics:** the CloudWatch agent on the server reports memory, CPU and free disk, since
-  ClickHouse shares the machine.
+  - Every metric in 0027's catalog is billed (decision 4 as amended). Labels that aren't
+    dimensions stay fields in the line, read with Logs Insights.
+- **Host metrics:** the CloudWatch agent on the server reports memory and disk use, since
+  ClickHouse shares the machine. No CPU: nothing alarms on it, and every metric written is
+  billed (0027 decisions 4 and 20).
 - **Alerts:** CloudWatch alarms go to an SNS topic, and Amazon Q Developer in chat applications
   (formerly AWS Chatbot) posts them to the team's Slack channel. 0027 defines them:
   - the five AD-18 conditions; the low-balance one fires below 25 XLM of spendable balance, and

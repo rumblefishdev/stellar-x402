@@ -31,6 +31,14 @@ history:
     status: active
     who: akot
     note: "Taken at the team meeting."
+  - date: "2026-11-04"
+    status: active
+    who: akot
+    note: "Decisions 18-20 after comparing with the Prices API and the explorer: metric lines kept 30 days, Level alarms ignore missing data, no CPU metric. Decisions 21-22 from #112's code: hooks and fee run once, scope checked by the compiler."
+  - date: "2026-11-05"
+    status: active
+    who: akot
+    note: "From the whole-task review of #111-#115: decision 4 amended (every catalog metric is billed), and the catalog names the disk's dimension `path`, as the CloudWatch agent writes it."
 ---
 
 # Alerts and metrics
@@ -61,7 +69,8 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
   - The adapter writes Embedded Metric Format lines to stdout. Dimensions stay low-cardinality
     (`network`, route, outcome, event name), never payer or `payTo`, and the adapter emits only
     listed fields. Check once that extraction works on the agent's path.
-  - The agent reports memory, CPU and free disk, since ClickHouse shares the machine.
+  - The agent reports memory and disk use, since ClickHouse shares the machine; no CPU
+    (decision 20).
   - Alarms go through SNS and Amazon Q Developer in chat applications to `stellar-x402-bot`
     (decision 12).
 - From 0014, changed by decision 5: uptime is a Lambda probe reading `/health`'s body every minute
@@ -130,6 +139,12 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
    alarm. The other labels stay fields in the log line, read with Logs Insights. AC 1 holds as
    written. A metric costs $0.30 a month only for hours it gets data. The table is
    [G-metrics](notes/G-metrics.md).
+   **Amended** (akot, 2026-11-05, from the whole-task review): every metric in the catalog is
+   billed, as #112's catalog already writes it. The 19 counters that were to stay log fields get
+   one set each: `network` alone, or no dimension on a process-scoped one. A line with no valid set
+   isn't written at all, so keeping them out of CloudWatch would need a log-only line in the
+   writer. They cost at most $5.70 a month with one network and $9.30 with two, less in practice
+   since the rare ones get data in few hours. An alarm or graph on one needs no code change.
 5. **Uptime and readiness come from one Lambda probe, not Route 53** (akot, 2026-11-02). A small
    function in eu-central-1 reads `/health` every minute through the public hostname, parses the
    JSON and publishes its `ready`; what `ready` means with two networks is 0077's (ADR 0011). A
@@ -196,8 +211,8 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     falls. The disk threshold is read against the first real numbers before it goes on. A disk
     alarm goes to our channel: the server's base setup is Stan's, and our WAL and logs are what
     fills the disk (Oskar's and Stan's reviews). Memory gets its threshold after a week of data.
-11. **Every log line ships** (akot, 2026-11-02): 30 days for app lines and 3 for metric lines,
-    which CloudWatch has already turned into metrics. Payers are on chain anyway, and the only
+11. **Every log line ships** (akot, 2026-11-02): 30 days for app lines, and for metric lines
+    since decision 18 (3 days before it). Payers are on chain anyway, and the only
     client IP is in `rate_limited`, which fires only past a limit and lets anyone with AWS access
     block an address at the edge without a shell on the server. The account is shared, so
     retention and the IP are looked at again before mainnet, with 0038; the threat model records
@@ -232,9 +247,13 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
 15. **A dimension can be billed for some of its values only** (2026-11-03, for decision 4). The
     adapter writes a dimension set only for the values with an alarm: `stage` for `pool`,
     `budget` for `asset`, `other` and `global`, `fault` for `ours`, `type` for `sequence-resync`,
-    `status` for `500`. The other values add no metric. HTTP metrics carry no `network`, since a
+    `status` for `500`. The other values write no line at all, so they are in no metric line
+    either; `stage: check` and a `payer` budget are in the app log, which logs each such event
+    (2026-11-05, from Karol's review of #112). HTTP metrics carry no `network`, since a
     route serves both networks after 0077. Host lines go to `x402-host` and the Lambdas' metrics to
-    `x402-watch`, apart from the facilitator's `x402-facilitator`.
+    `x402-watch`, apart from the facilitator's `x402-facilitator`. `disk_used_percent`'s dimension
+    is `path` (2026-11-05, from the whole-task review): that is the CloudWatch agent's name for the
+    mount point, and the agent can't rename a dimension, so the catalog takes its name.
 16. **`rpc_stalled_seconds` comes from a `getLatestLedger` read every 30 s** (2026-11-03). On a
     quiet server nothing else reads the RPC, so the gauge would stop moving exactly when it
     matters.
@@ -245,6 +264,47 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     300 s. A gauge, not `balance_read_failures_total`: a read that times out waits up to 10 s per
     RPC endpoint, so the failures in 5 minutes vary in number. The floor reads on a timer, so the
     gauge doesn't depend on traffic.
+18. **Metric lines are kept 30 days, like app lines** (akot, 2026-11-04; amends decision 11 and
+    ADR 0011's Logs). A label that isn't a dimension (`reason`, `state`, `type`) exists only as a
+    field in the metric line (decision 4), so 3 days would cut the Logs Insights view of the
+    traffic to 3 days, and the weekly fee review reads a week. The sibling projects keep every log
+    30 days (the Prices API's Lambdas) or 90 (the explorer's ECS tasks), and neither keeps metric
+    lines shorter. The two log groups stay, for their buffering during an AWS outage (ADR 0011).
+19. **A Level alarm keeps its state when data stops** (akot, 2026-11-04; changes the
+    "not breaching" #111 had for the Level rows, from Oskar's review). Under not breaching, a
+    process that dies with a Level alarm in ALARM turns it OK and posts a false recovery to Slack.
+    The Prices API hit this (seven tier alarms posted "recovered" for tiers still frozen when
+    their probe failed) and moved those alarms to `MISSING` and 1-of-2 evaluation. We take
+    `IGNORE` rather than `MISSING`: under `MISSING` an alarm with no data goes to
+    INSUFFICIENT_DATA and drops out of the weekly review's question of which alarms are in ALARM
+    (decision 12). The silence is covered by its own alarm, named in each row
+    (`facilitator-silent`, `probe-silent`, `telemetry-silent`, `watch-no-invocations`). Event and
+    Count alarms stay not breaching, since for them no data means nothing happened. `uptime`
+    stays breaching: its missing point counts as down (decision 5).
+20. **No CPU metric** (akot, 2026-11-04; amends the agent's metrics above and ADR 0011's Host
+    metrics). Nothing alarms on CPU, and decision 4 bills only what has an alarm (since its
+    amendment, everything written is billed, so a CPU metric would cost with nothing reading
+    it). The sibling projects don't collect it either: the explorer removed its CPU widgets (its task 0239), and
+    the Prices API watches only free disk on the same Hetzner host. The Prices API already alarms
+    on that host's free disk (`prices-<env>-ch-disk-free`); our `disk` alarm reads our mounts, and
+    its description names theirs.
+21. **#112 fixes the hooks running twice for one record** (akot, 2026-11-04). Counting
+    `fee_charged_stroops` in `onFinal` showed that 0019's hooks, the spend policy's `commit`
+    among them, could run twice for one record in two races. The sweep ran the hooks of a final
+    record that a writer had taken out of `unconfirmed` while it read; it now runs them only while
+    the key is still listed, since that writer either wins or puts it back. And a writer that won
+    kept a key that a racing writer, whose write threw, had put back, so the next sweep ran them
+    again; a write that wins now forgets the key. Fixed in #112 rather than a PR of its own, since
+    the fee metric needs it: one commit, `fix(lore-0027): run a final record's hooks and fee
+    once`, with a test for each race. It changes settlement behaviour, so #112's description
+    names it for review.
+22. **The compiler checks a metric's scope** (akot, 2026-11-04; changes the spine's AD-3). The
+    root is a `ProcessMetrics` that takes only the catalog's process-scoped names, and
+    `for({ network })` returns a `NetworkMetrics` that takes only network-scoped ones. Before, a
+    network-scoped metric written through the root wrote no line, and the notes planned a
+    `metric-issue` alarm on the writer's warn log to catch it; the in-memory double didn't check
+    scope, so no test would have. A wrong scope now doesn't compile, and the alarm is dropped.
+    The child no longer re-scopes with a second `for()`, which nothing used.
 
 ## Acceptance Criteria
 

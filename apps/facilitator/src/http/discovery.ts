@@ -3,7 +3,7 @@ import type { DiscoveryResourcesResponse } from "@x402/extensions/bazaar";
 import type { RequestHandler } from "express";
 import { z } from "zod";
 import type { Logger } from "../logger.js";
-import type { Metrics } from "../metrics.js";
+import type { ProcessMetrics } from "../metrics.js";
 import type { CatalogQuery, CatalogStore } from "../ports/index.js";
 
 /**
@@ -116,7 +116,7 @@ export function parseDiscoveryQuery(
 export function discoveryResources(
   catalog: CatalogStore,
   logger: Logger,
-  metrics: Metrics,
+  metrics: ProcessMetrics,
   served: StellarNetwork,
 ): RequestHandler {
   return async (req, res) => {
