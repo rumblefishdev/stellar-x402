@@ -20,6 +20,10 @@ history:
     status: developing
     who: akot
     note: "From the whole-task review: every metric is billed, as the catalog writes it (decision 4 amended), and the disk's dimension is `path`, the agent's name for it."
+  - date: "2026-11-05"
+    status: developing
+    who: akot
+    note: "For #113's spine: `facilitator_failures_total` and `credentials_age_seconds`, and `path` closed to `/`, the one mount."
 ---
 
 # The metrics 0027 emits
@@ -126,8 +130,7 @@ that never ran, writes a value past its alarm's threshold, so a broken check ala
 reading as healthy. The agent reports no CPU (decision 20). Its own metrics go to `x402-host` with
 the catalog's dimensions, not the agent's default `CWAgent` (#113). Every host metric is
 process-scoped: one host, no `network`.
-The ages are `Seconds`, the percentages `Percent`, `watchdog_restarts_total` `Count`, and the rest
-`None`.
+The ages are `Seconds`, the percentages `Percent`, the two counters `Count`, and the rest `None`.
 
 | Metric | Source | Alarm |
 | --- | --- | --- |
@@ -138,8 +141,10 @@ The ages are `Seconds`, the percentages `Percent`, `watchdog_restarts_total` `Co
 | `snapshot_age_seconds` | Since the last OpenBao snapshot | `snapshot-age` |
 | `certificate_days_left` | The Roles Anywhere certificate, negative after expiry | `certificate` |
 | `host_probe_heartbeat` | 1 on every run | `probe-silent` |
+| `credentials_age_seconds` | Since the signing helper last wrote the agent's credentials file (hourly); missing or empty counts as failed | `credentials-stale` |
 | `watchdog_restarts_total` | The watchdog, once per restart | `watchdog-restart` |
-| `mem_used_percent`, `disk_used_percent` per named mount | The agent. `disk_used_percent` carries `path`, the mount point, as the agent's disk plugin names it, open until #113 names the mounts | `memory`, `disk`, `audit-disk`, `telemetry-silent` |
+| `facilitator_failures_total` | `x402@`'s `ExecStopPost`, once per end other than `success`: a crash, a failed start, a drain cut short, a `dockerd` crash, the watchdog's kill of a hung process | `facilitator-failed` |
+| `mem_used_percent`, `disk_used_percent` | The agent. `disk_used_percent` carries `path`, the mount point, as the agent's disk plugin names it: only `/`, which holds everything of ours, OpenBao's audit volume too | `memory`, `disk`, `audit-disk`, `telemetry-silent` |
 
 ## Off the server, namespace `x402-watch`
 

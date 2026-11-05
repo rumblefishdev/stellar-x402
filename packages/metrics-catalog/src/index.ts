@@ -41,9 +41,9 @@ export interface MetricDef {
   readonly scope: Scope;
   readonly sets: readonly DimSet[];
   /**
-   * The closed values of each billed dim, `other` included: a value outside is written as
-   * `other`. Every facilitator dim is closed; a host dim #113 names later may stay open (absent).
-   * A label in no set is a log field and is not restricted.
+   * The closed values of each billed dim. A facilitator dim includes `other`, and a value outside
+   * is written as `other`; a host dim lists what the agent writes (the mount `/`). A label in no
+   * set is a log field and is not restricted.
    */
   readonly values?: Readonly<Record<string, readonly string[]>>;
   readonly emit: Emit;
@@ -539,9 +539,30 @@ export const CATALOG = [
     sets: PLAIN,
     emit: "aggregated",
   },
+  // Since the signing helper last wrote the agent's credentials file; it runs hourly.
+  {
+    namespace: HOST,
+    name: "credentials_age_seconds",
+    kind: "gauge",
+    unit: "Seconds",
+    scope: "process",
+    sets: PLAIN,
+    emit: "aggregated",
+  },
   {
     namespace: HOST,
     name: "watchdog_restarts_total",
+    kind: "counter",
+    unit: "Count",
+    scope: "process",
+    sets: PLAIN,
+    emit: "aggregated",
+  },
+  // An end of x402@<env> other than `success`, written by its ExecStopPost: a crash, a failed
+  // start, a drain cut short, a dockerd crash, the watchdog's kill of a hung process.
+  {
+    namespace: HOST,
+    name: "facilitator_failures_total",
     kind: "counter",
     unit: "Count",
     scope: "process",
@@ -558,7 +579,7 @@ export const CATALOG = [
     emit: "aggregated",
   },
   // `path` is the mount point, under the name the agent's disk plugin gives it: the agent can't
-  // rename a dimension. It stays open until #113 names the mounts.
+  // rename a dimension. One mount: `/` holds everything of ours, OpenBao's audit volume too.
   {
     namespace: HOST,
     name: "disk_used_percent",
@@ -566,6 +587,7 @@ export const CATALOG = [
     unit: "Percent",
     scope: "process",
     sets: [{ dims: ["path"] }],
+    values: { path: ["/"] },
     emit: "aggregated",
   },
 

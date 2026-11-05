@@ -136,11 +136,19 @@ describe("CATALOG", () => {
       }
   });
 
-  test("x402-host metrics are process-scoped; disk_used_percent keeps path open", () => {
+  test("every set dim of every metric has a closed values list", () => {
+    for (const m of ALL)
+      for (const set of setsOf(m))
+        for (const dim of set.dims) expect(m.values?.[dim], `${m.name}.${dim}`).toBeDefined();
+  });
+
+  test("x402-host metrics are process-scoped; disk_used_percent's path is the one mount, /", () => {
     for (const m of ALL.filter((x) => x.namespace === "x402-host")) expect(m.scope).toBe("process");
     const disk = def("disk_used_percent");
     expect(disk.sets).toEqual([{ dims: ["path"] }]);
-    expect(disk.values?.path).toBeUndefined();
+    expect(disk.values?.path).toEqual(["/"]);
+    expect(seriesDims("disk_used_percent", { path: "/" }).ok).toBe(true);
+    expect(seriesDims("disk_used_percent", { path: "/boot" }).ok).toBe(false);
   });
 
   test("x402-watch scopes", () => {
@@ -248,7 +256,9 @@ describe("CATALOG", () => {
       snapshot_age_seconds: [g, "Seconds", proc],
       certificate_days_left: [g, "None", proc],
       host_probe_heartbeat: [g, "None", proc],
+      credentials_age_seconds: [g, "Seconds", proc],
       watchdog_restarts_total: [c, "Count", proc],
+      facilitator_failures_total: [c, "Count", proc],
       mem_used_percent: [g, "Percent", proc],
       disk_used_percent: [g, "Percent", proc],
       ready: [g, "None", proc],
@@ -402,8 +412,9 @@ describe("seriesDims", () => {
     );
   });
 
-  test("an open dim takes any printable value, never an empty one", () => {
-    expect(seriesDims("disk_used_percent", { path: "/data" })).toEqual(ok("disk_used_percent"));
+  test("a host dim takes only its listed values, never an empty one", () => {
+    expect(seriesDims("disk_used_percent", { path: "/" })).toEqual(ok("disk_used_percent"));
+    expect(seriesDims("disk_used_percent", { path: "/data" })).toMatchObject({ ok: false });
     expect(seriesDims("disk_used_percent", { path: "" })).toMatchObject({ ok: false });
   });
 
