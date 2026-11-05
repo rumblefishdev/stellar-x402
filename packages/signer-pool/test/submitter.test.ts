@@ -156,6 +156,20 @@ describe("SettlementSubmitter", () => {
     expect((fake.sent.at(-1) as FeeBumpTransaction).innerTransaction.sequence).toBe("1002");
   });
 
+  it("carries why an included transaction failed", async () => {
+    const { fake, submitter } = setup({}, 1);
+    fake.failOnChain = true;
+    fake.failure = { opCode: "invokeHostFunctionTrapped" };
+    const res = await submitter.submit(call());
+    expect(res).toMatchObject({
+      status: "failed",
+      failure: { opCode: "invokeHostFunctionTrapped" },
+    });
+    // The default failed result holds no operation results.
+    fake.failure = undefined;
+    expect((await submitter.submit(call())).failure).toEqual({});
+  });
+
   it("expires a transaction that never lands and reuses its sequence number", async () => {
     const { fake, submitter } = setup({ timeoutSeconds: 20 }, 1);
     fake.stalled = true;

@@ -2,7 +2,7 @@
 id: "0087"
 title: "Confirm a settlement by its inner hash, so a rewrapped fee bump isn't recorded expired"
 type: BUG
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0006"]
 related_tasks: ["0073", "0019"]
@@ -14,6 +14,10 @@ history:
     who: okarcz
     note: >
       Spawned from 0073's PR #85 review (Adam): on develop already, raised as high priority.
+  - date: "2026-11-04"
+    status: active
+    who: okarcz
+    note: "Picked up by okarcz."
 ---
 
 # Confirm a settlement by its inner hash, so a rewrapped fee bump isn't recorded expired

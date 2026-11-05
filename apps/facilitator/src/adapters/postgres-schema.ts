@@ -173,6 +173,48 @@ ALTER TABLE settlement_hashes
     name: "0008_lease_token",
     sql: "ALTER TABLE leases ADD COLUMN token uuid NOT NULL UNIQUE DEFAULT gen_random_uuid();",
   },
+  {
+    // 0024: a released reservation keeps its row, so a `reserve` after its release is refused, and
+    // `spend_scopes` gains the columns the breaker windows count in. All nullable or defaulted, so
+    // the release before it keeps working. Locks in `reserve`'s order.
+    name: "0009_spend_budgets",
+    sql: `
+ALTER TABLE spend_reservations DROP CONSTRAINT spend_reservations_state_check;
+-- NOT VALID skips a scan of every row under the write lock: the CHECK it replaces implied it.
+ALTER TABLE spend_reservations
+  ADD CONSTRAINT spend_reservations_state_check
+  CHECK (state IN ('reserved', 'committed', 'released')) NOT VALID;
+ALTER TABLE spend_scopes
+  ADD COLUMN window_start bigint,
+  ADD COLUMN successes integer NOT NULL DEFAULT 0,
+  ADD COLUMN strikes integer NOT NULL DEFAULT 0,
+  ADD COLUMN last_opened_at bigint;
+`,
+  },
+  {
+    // 0024: why an included settlement failed (operation code, contract error, addresses), for the
+    // breakers to blame. Nullable, so the release before it keeps working.
+    name: "0010_settlement_failure",
+    sql: `ALTER TABLE settlements ADD COLUMN failure jsonb;`,
+  },
+  {
+    // 0024: the one non-final settlement of each (network, payer, asset), by key. `claim` takes
+    // the row and a move to a final state deletes it. A table of its own, not a unique index on
+    // `settlements`, whose build would hold the write lock too long on a large database. A new
+    // table, so the release before it keeps working: it never reads, writes or deletes these
+    // rows. A record that release ends leaves its row behind, and `claim` replaces a row whose
+    // record is final or missing, so such a row holds nothing up.
+    name: "0011_settlement_in_flight",
+    sql: `
+CREATE TABLE settlement_in_flight (
+  network text NOT NULL,
+  payer text NOT NULL,
+  asset text NOT NULL,
+  key text NOT NULL,
+  PRIMARY KEY (network, payer, asset)
+);
+`,
+  },
 ];
 
 /** Runs in one transaction with the transactional migrations next to it, as before 0067. */

@@ -1,8 +1,12 @@
 # x402's parts of the company Hetzner server (ADR 0011): the `x402` user, /srv/x402/production and
-# /srv/x402/openbao, the compose files and deploy.sh, the systemd units and their scripts, and
-# CI's deploy user with its forced command and one sudo rule. Never the server's base setup
-# (firewall, Docker's daemon.json, sshd, the admins), which the explorer's playbook owns. An admin
-# runs it from a reviewed commit; CI never does:
+# /srv/x402/openbao, the compose files and deploy.sh, the systemd units and their scripts, the
+# rotation of OpenBao's audit log, and CI's deploy user with its forced command and one sudo rule.
+# Never the server's base setup (firewall, Docker's daemon.json, sshd, the admins), which the
+# explorer's playbook owns. An admin runs it from a commit on `deploy/production`, which takes only
+# an approved pull request, never from `develop`, which takes pushes without one; CI never runs it
+# (runbook, The playbook):
+#   git status --short   # must print nothing
+#   git fetch origin && git switch --detach origin/deploy/production
 #   cd deploy/ansible
 #   ansible-playbook -i inventory.ini playbook.yaml --check --diff
 #   ansible-playbook -i inventory.ini playbook.yaml
@@ -138,6 +142,38 @@
         - x402-openbao-audit
       register: volume
       changed_when: volume.stdout != ""
+
+    # Where the audit volume's files sit on the host, for logrotate below.
+    - name: Docker's data root
+      ansible.builtin.command: docker info --format json
+      register: docker_info
+      changed_when: false
+      check_mode: false
+
+    # A request OpenBao can't log fails, so a full disk stops /settle (ADR 0013). After the rename,
+    # SIGHUP makes OpenBao open a new file under the old name; it's sent through the project, as the
+    # unit does, since a missed one leaves OpenBao on the renamed file. A year kept: the log is the
+    # only record of which token signed what, and a leak can come out months later.
+    - name: OpenBao's audit log, rotated daily
+      ansible.builtin.copy:
+        content: |
+          {{ (docker_info.stdout | from_json).DockerRootDir }}/volumes/x402-openbao-audit/_data/audit.log {
+            daily
+            rotate 365
+            maxage 365
+            compress
+            delaycompress
+            missingok
+            notifempty
+            nocreate
+            postrotate
+              /usr/bin/docker compose -f /srv/x402/openbao/compose.yaml kill -s HUP openbao > /dev/null
+            endscript
+          }
+        dest: /etc/logrotate.d/x402-openbao
+        owner: root
+        group: root
+        mode: "0644"
 
     - name: Reload systemd before enabling
       ansible.builtin.meta: flush_handlers

@@ -1,7 +1,8 @@
 # The production environment (ADR 0011, 0077): one facilitator for every network it serves (today
 # testnet), a database and a migration service per network, and the tunnel connector. Each service
 # has a systemd unit of its own (`deploy/systemd`), so none has a restart policy, and none
-# publishes a port. On the server this is /srv/x402/production/compose.yaml.
+# publishes a port. Each drops every capability and sets no-new-privileges, and runs as a user
+# other than root. On the server this is /srv/x402/production/compose.yaml.
 #
 #   FACILITATOR_IMAGE  the facilitator's image; `x402-compose` sets it from `digest`
 #   SECRETS_DIR        the decrypted credentials, /run/x402/production unless set (local runs)
@@ -12,6 +13,8 @@ services:
   facilitator:
     image: ${FACILITATOR_IMAGE:?set from digest by x402-compose}
     read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     mem_limit: 512m
     cpus: 1
     stop_grace_period: 180s
@@ -66,6 +69,8 @@ services:
     # Compose forwards.
     init: true
     read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     mem_limit: 512m
     environment:
       DATABASE_URL_FILE: /run/secrets/database-url.testnet
@@ -78,6 +83,13 @@ services:
 
   postgres-testnet:
     image: postgres:18@sha256:979bccfde35445db618c65107d27d08c6c21339d8dc3ad4c830c6633947be0e4
+    # Started as `postgres` (999), the entrypoint skips its root step (the chown and gosu) and
+    # reads the password secret, 0400 and owned by 999 (x402-creds), as its owner, so it needs no
+    # capability. A new volume gets /var/lib/postgresql from the image, already 999's. Run as root
+    # it would need CHOWN, SETUID, SETGID and DAC_READ_SEARCH, the last outside Docker's defaults.
+    user: "999:999"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     mem_limit: 1g
     shm_size: 256m
     stop_grace_period: 120s
@@ -96,6 +108,8 @@ services:
     image: cloudflare/cloudflared:2026.10.1@sha256:a15a3b50b8dabd57ac2090e9484c0247dba9dfa1f0df4d298d4317f9d69eb2d5
     command: [tunnel, run, --token-file, /run/secrets/tunnel-token]
     read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     mem_limit: 128m
     secrets:
       - tunnel-token

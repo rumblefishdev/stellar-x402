@@ -25,12 +25,18 @@ discovery routes. Design: [the M1 spine](../../docs/architecture/m1-spine.md) (A
   120), so size the set for such stalls next to the load: with two channels, two of them make
   every new `/settle` wait for a channel until its budget ends. No metric shows a held channel
   yet (0089).
-- `NETWORK=stellar:pubnet` refuses to start: `/settle` would spend there with no spend budgets
-  (0024) yet, and a deploy could reuse a channel left open (0090).
+- `NETWORK=stellar:pubnet` refuses to start until a deploy can't reuse a channel left open (0090),
+  pubnet's callers present an API key (0105), each key's settlements count in a fee budget of its
+  own (0107), a failing signer raises an alarm (0027) and the hot key's reach is decided again
+  (0048). The spend budgets bound the loss, but self-payments from many cheap addresses
+  can still use up the shared budgets for every seller (see "Shared budgets used up by
+  self-payments" below).
 
 ## Callers and rate limits
 
-Every route is open: no caller authenticates, and there are no API keys (task 0060). `/verify`
+Every route is open on testnet: no caller authenticates, and an API key is ignored. On pubnet
+`/verify` and `/settle` will require one, issued by our portal after Discord sign-in (0105, 0106;
+pubnet is refused until then). `/verify`
 and `/settle` send no CORS headers, so a browser page can't call them; a seller's server calls
 them for its buyers.
 
@@ -54,7 +60,8 @@ Every request counts, a malformed or oversized one too. `/supported` has no limi
   not these, bound the fees the facilitator pays.
 - **Sellers on Cloudflare Workers share one budget.** A Worker's request to another Cloudflare
   zone arrives with `CF-Connecting-IP: 2a06:98c0:3600::103` for every Worker, and sellers behind
-  one cloud NAT share its address the same way. A per-seller budget needs API keys (0060).
+  one cloud NAT share its address the same way. On testnet this stays so, since a key is ignored
+  there (0060); on pubnet a caller will be counted by its API key (0105).
 - **`CLIENT_IP` is required**, so it can't be forgotten behind the tunnel, where every client
   would share the tunnel's address and one budget. `cloudflare` reads `CF-Connecting-IP`, which
   Cloudflare sets on every request and refuses from a client; `socket` takes the connection's own
@@ -68,6 +75,154 @@ Every request counts, a malformed or oversized one too. `/supported` has no limi
 - **The counters live in the store** (`rate_limits`). A store error is a 500,
   logged. A client over its budget is answered from the process until its window ends, without a
   store write.
+
+## Spend budgets and breakers
+
+The facilitator pays every fee (AD-10), so `/settle` checks what each settlement may cost before
+it sends anything (AD-18, [ADR 0007](../../docs/adr/0007-fee-abuse-containment.md), task 0024).
+In order, after the claim:
+
+1. **The balance floor.** The fee account's spendable balance (its balance minus the reserve and
+   selling liabilities, which no fee can draw on) is read every `SPEND_BALANCE_INTERVAL_MS`.
+   Below `SPEND_FLOOR_STROOPS`, or before the first reading, `/settle` refuses with
+   `settle_exact_stellar_facilitator_underfunded`. A failed read keeps the last value, but only
+   for 10 intervals, at least 5 minutes: past that the floor fails closed, so about 5 minutes of
+   RPC trouble refuse every `/settle` with a funded account. The logs say
+   `facilitator_underfunded` (error) and `facilitator_funded` (info) on each crossing, and
+   `facilitator_balance_stale` (error) and `facilitator_balance_fresh` (info) when the reading
+   goes stale and when a read refreshes it.
+2. **The breakers.** The payer's, the `payTo`'s and, for a wasm token, the asset's.
+3. **The budgets.** The fee ceiling (`MAX_FEE_STROOPS`) is reserved against every budget that
+   applies, all or none. Once the record is final the reservation is lowered to the fee charged,
+   or released when nothing was charged.
+
+All of it lives in PostgreSQL (`spend_reservations`, `spend_scopes`), so every instance shares it.
+A store that doesn't answer within the settle budget refuses the settlement
+(`settle_exact_stellar_spend_store_unavailable`): it fails closed.
+
+### Limits
+
+Every budget sums the fees of one rolling window, `SPEND_WINDOW_MS` (24 h). A known asset is a
+configured SAC: USDC on its network. Every other token, a self-issued SAC as much as a wasm token,
+is an other asset: anyone can mint one, so it gets the low tier. This limits spend, not acceptance:
+any SEP-41 token still settles.
+
+| Setting                         | Default     | XLM | Budget                                                                                                |
+| ------------------------------- | ----------- | --- | ----------------------------------------------------------------------------------------------------- |
+| `SPEND_GLOBAL_STROOPS`          | 500 000 000 | 50  | every settlement                                                                                      |
+| `SPEND_PER_PAYER_STROOPS`       | 20 000 000  | 2   | one payer in the known assets together, and again in each other asset                                 |
+| `SPEND_PER_PAY_TO_STROOPS`      | 100 000 000 | 10  | one `payTo` in the known assets together, and again in each other asset                               |
+| `SPEND_PER_ASSET_STROOPS`       | 250 000 000 | 25  | one known asset                                                                                       |
+| `SPEND_PER_ASSET_OTHER_STROOPS` | 20 000 000  | 2   | one other asset                                                                                       |
+| `SPEND_TIER_OTHER_STROOPS`      | 100 000 000 | 10  | every other asset together, so junk tokens can't use up `global`                                      |
+| `SPEND_FLOOR_STROOPS`           | 50 000 000  | 5   | not a budget: `/settle` refuses while the fee account can spend less (ADR 0013)                       |
+| `SPEND_BALANCE_INTERVAL_MS`     | 30 000      |     | how often the fee account's balance is read; a reading 10 intervals old (at least 5 min) fails closed |
+| `SPEND_WINDOW_MS`               | 86 400 000  |     | the window of every budget                                                                            |
+
+Every stroops value is a whole number from 1 to the int64 maximum, and every budget is at least
+`MAX_FEE_STROOPS`: a settlement reserves the fee ceiling, so a smaller budget would refuse every
+payment, and the facilitator refuses to start with one. `global` stays below the
+100 XLM float less its 25 XLM alarm, so one window can't empty the fee account. The defaults are
+the same on testnet and at the pubnet start. `BREAKER_FAILURES` and `BREAKER_COOLDOWN_MS` are no
+longer read; a leftover one refuses to start, like `STORE`.
+
+### Breakers
+
+A breaker counts only failures the network included and charged, against whoever caused them.
+A SAC's code is the host's, so a SAC asset never has one. Refusals before the submit, timeouts,
+rejected and expired transactions count nowhere. Neither does a payment whose nonce was already
+used: someone holding the payload, the seller say, submitted it first. A C-account payer's breaker
+opens at once only when the failure is in its own contract (its `__check_auth`); its other
+failures, auth errors raised elsewhere included, take 3. The `payTo` is blamed only when a known
+asset's SAC refuses the transfer on the recipient's side; in another token whoever issued it could
+stage that, so the payer is blamed. Like the budgets, the payer's and the `payTo`'s breakers are
+keyed by tier: one for the known assets, one per other asset.
+
+| Breaker                            | Opens at                                                  | Window | First opening | Then | At most |
+| ---------------------------------- | --------------------------------------------------------- | ------ | ------------- | ---- | ------- |
+| payer (per known or other asset)   | 3 failures; 1 failure in a C-account payer's own contract | 1 h    | 1 h           | ×4   | 24 h    |
+| `payTo` (per known or other asset) | 3 failures                                                | 1 h    | 1 h           | ×4   | 24 h    |
+| wasm asset                         | 5 failures, and at least as many failures as successes    | 10 min | 10 min        | ×2   | 6 h     |
+
+After a breaker closes, the next failure it is blamed for opens it again at the next step. A day
+without an opening clears that. `/verify` refuses too while a breaker is open, so a seller doesn't
+serve a payment `/settle` would refuse. If the store can't be read there, `/verify` answers as if
+no breaker were open and logs `spend_store_failed`; `/settle` checks again. Budgets are not
+checked at `/verify`, since it spends nothing.
+
+The policy is fixed in code (`src/spend/policy.ts`), not config.
+
+### What a seller sees when a budget refuses
+
+`/settle` answers 200 with `success: false` and one of the reasons in "`/settle` answers": the
+payment is ended and nothing was sent. A spend reason names the narrowest budget that is full,
+never an address, an amount or a reset time. What to do:
+
+- `…_spend_limit_payer`: that buyer has used its budget for the window. Ask it to pay again later.
+- `…_spend_limit_pay_to`: your `payTo`'s budget in this asset is full. It counts the fees of
+  every payment to you, so other parties paying you, Sybil payers among them, can fill it as well
+  as your own traffic. Wait for the window to roll, or ask the operator for a higher limit; a
+  payment in another asset counts against a budget of its own.
+- `…_spend_limit_asset`, `…_spend_limit_other`: the asset, or all other tokens together, have.
+  Offer USDC, or another asset.
+- `…_spend_limit_global`: the facilitator has. Wait, or use another facilitator.
+- `…_breaker_open_*`: settlements for that payer, `payTo` or token failed on chain too often. The
+  breaker closes on its own later; until then, use another asset or wait.
+
+`…_spend_store_unavailable` and `…_facilitator_underfunded` are different: they are transient, so
+they don't end the payment. They answer `extra.retryable`, and the same payment, repeated as it
+is, settles once the store or the balance is back ("Nothing sent", under "`/settle` answers").
+
+The window rolls: a budget frees up as the oldest fees in it pass 24 h, not all at once.
+
+### Shared budgets used up by self-payments
+
+Per-payer and per-`payTo` budgets bound one address, but addresses are free. Someone who pays
+themself 1-unit USDC payments from many addresses (about 13 payers and 3 `payTo`s at the defaults)
+can fill `asset:USDC` in about 17,000 payments. Each payer has one payment in flight at a time,
+so 13 payers take about two hours; about 50 payers and 50 channels take half an hour. Every payment
+succeeds, so no breaker opens, and USDC is then refused for every seller until the window rolls.
+The loss stops at 25 XLM for USDC and 10 XLM for other tokens per window. That bounds the rate,
+not the sum: an attack kept up for under three days takes the float from 100 XLM to its 5 XLM floor,
+and `facilitator_underfunded` then refuses every payment until a top-up. This is accepted on
+testnet. On pubnet callers will present API keys with fee budgets of their own (0105, 0107): see
+the threat model, "Shared budget exhaustion by Sybil self-payments".
+
+The signal is `spend_budget_nearing` (warn, counted in `spend_budget_nearing_total{budget}`) at
+80 %. It fires for every budget; for this attack, watch `asset`, `other` and `global`. Then:
+
+1. Look at the settlements of the last hours: the `settled` log lines name each payer, and the
+   `settlements` table holds each payment's `payTo` and amount (`payment_requirements`). An attack
+   looks like many new payers paying few `payTo`s in 1-unit amounts. Real traffic looks like many
+   `payTo`s and the prices their resources ask.
+2. If it is real traffic, raise the budget (`SPEND_PER_ASSET_STROOPS`, or `SPEND_GLOBAL_STROOPS`)
+   and restart. A higher budget is a higher worst-case loss per window: keep `global` below the
+   float less its alarm, and top up the float to match.
+3. If it is an attack, raising the budget only raises what it costs us. Leave it: the window rolls
+   and the budget frees up once the payments stop. Tell sellers who ask to wait or use another
+   facilitator. If it goes on for more than a day, watch the float: at up to 35 XLM a day it
+   reaches ADR 0013's alarm at 25 XLM in about two days, and the floor in under three.
+
+### Metrics and logs
+
+Labels come from closed sets; addresses are in log lines only.
+
+- `spend_refused_total{reason}`: every refusal, by reason.
+- `spend_budget_nearing_total{budget}`, `budget` being `global`, `payer`, `pay_to`, `asset` or
+  `other`; log `spend_budget_nearing` with the scope, at most once per scope in 15 minutes.
+- log `spend_limit_reached` (info) with the settlement key and the budget's scope, for each
+  refusal by a budget.
+- `spend_breaker_opened_total{breaker}`; log `spend_breaker_opened` with the scope and its end.
+- `spend_failure_attributed_total{fault}`: `payer`, `pay_to`, `asset` or `ours`. Log
+  `spend_failure_ours` (warn) with the failure cause, for a failure charged to us, and
+  `spend_asset_kind_unconfirmed` (warn) for a failure blamed on a token whose kind couldn't be
+  read: it opens no asset breaker, since a SAC must never get one.
+- `spend_store_failures_total{op}` (`breaker`, `reserve`, `release`); log `spend_store_failed`.
+- `spend_commit_unmatched_total{state}`; log `spend_commit_unmatched` (error): a fee was paid that
+  counts against no budget.
+- `balance_read_failures_total`; log `balance_read_failed`. Logs `facilitator_underfunded`
+  (error) and `facilitator_funded` (info) when the balance crosses the floor, and
+  `facilitator_balance_stale` (error) and `facilitator_balance_fresh` (info), as above.
 
 ## The signer
 
@@ -97,7 +252,7 @@ Every request counts, a malformed or oversized one too. `/supported` has no limi
   each hash's attempt state and bounds; hashes written before it fall back to the auth entry's
   expiry. `0007_settlement_reopened` adds the reopen count: rows already there, and rows an older
   release writes during the deploy, get -1 and never reopen. This release can't claim a payment
-  on a database without it.
+  on a database without it. `0011_settlement_in_flight`: `/settle` can't claim a payment without it.
 - An online migration (ADR 0012) commits step by step, so `pnpm migrate` after a stopped or
   failed run continues from the next step. It logs `migration_step` after each step and
   `migration_backfill` every 50 backfill batches. A backfill writes about 1.2 GiB of WAL per
@@ -191,9 +346,20 @@ channel out until its record ends (0090).
 
 ## `/verify` answers
 
-`/verify` passes on upstream's `invalid_exact_stellar_*` reasons, plus the checks of its own. After
-upstream's `invalid_exact_stellar_payload_simulation_failed` it simulates once more, to name the
-one cause upstream drops:
+`/verify` passes on upstream's `invalid_exact_stellar_*` reasons, plus the checks of its own.
+
+While a breaker is open (task 0024, "Breakers" above), a payment every other check accepted gets
+`/settle`'s reason early, so a seller doesn't serve what `/settle` would refuse. `invalidMessage`
+says which breaker, with no address, amount or reset time:
+
+| `invalidReason`                            | meaning                                            | what to do                                   |
+| ------------------------------------------ | -------------------------------------------------- | -------------------------------------------- |
+| `settle_exact_stellar_breaker_open_payer`  | the payer's settlements failed on chain too often  | the buyer waits, or pays in another asset    |
+| `settle_exact_stellar_breaker_open_pay_to` | settlements to `payTo` failed on chain too often   | wait, and check what fails with the operator |
+| `settle_exact_stellar_breaker_open_asset`  | this token's settlements failed on chain too often | offer another asset                          |
+
+After upstream's `invalid_exact_stellar_payload_simulation_failed` it simulates once more, to
+name the one cause upstream drops:
 
 | `invalidReason`                                 | meaning                                                                     | what to do                                          |
 | ----------------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------- |
@@ -232,32 +398,43 @@ one may still be settling.
 Every later call with the same payment gets `settle_exact_stellar_already_settled`, so one payment
 unlocks one response.
 
-| `errorReason`                                        | `transaction`           | Meaning                                                                                         | What to do                                                                                |
-| ---------------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `settlement_pending`                                 | the hash, or empty      | sent, not final yet; empty: not signed yet, or the store couldn't say                           | repeat the same request (see below), or look the hash up                                  |
-| `settle_exact_stellar_already_settled`               | the hash                | settled; an earlier call already got this payment's success                                     | don't serve again for this payment                                                        |
-| `settle_exact_stellar_nonce_already_used`            | the stored hash, if any | this payer's nonce is already used by another payment, in whatever state                        | refuse: the payment isn't for this request                                                |
-| `settle_exact_stellar_timeout`                       | —                       | the settle budget ran out before anything was signed; nothing was or will be                    | repeat the same payment while `extra.retryable` (see below)                               |
-| `settle_exact_stellar_interrupted`                   | —                       | the facilitator restarted before anything was signed; nothing was or will be                    | repeat the same payment while `extra.retryable` (see below)                               |
-| `settle_exact_stellar_shutting_down`                 | an earlier hash, if any | the facilitator was stopping; nothing was applied, and nothing more will be sent                | repeat the same payment while `extra.retryable` (see below)                               |
-| `settle_exact_stellar_rpc_unavailable`               | an earlier hash, if any | no RPC endpoint answered (refused, failed or timed out)                                         | repeat the same payment while `extra.retryable` (see below)                               |
-| `settle_exact_stellar_no_channel_in_time`            | —                       | every channel was busy until the deadline                                                       | repeat the same payment while `extra.retryable` (see below)                               |
-| `settle_exact_stellar_no_channels`                   | —                       | every channel is out of the pool                                                                | repeat the same payment while `extra.retryable` (see below)                               |
-| `settle_exact_stellar_lease_lost`                    | an earlier hash, if any | this process lost the channel lease before it sent; another process holds it, or none does      | repeat the same payment while `extra.retryable` (see below)                               |
-| `settle_exact_stellar_transaction_signing_failed`    | an earlier hash, if any | the facilitator's key couldn't sign the transaction (OpenBao down, sealed or refusing)          | repeat the same payment while `extra.retryable` (see below)                               |
-| `settle_exact_stellar_fee_bump_signing_failed`       | an earlier hash, if any | the facilitator's key couldn't sign the fee bump                                                | repeat the same payment while `extra.retryable` (see below)                               |
-| `settle_exact_stellar_fee_exceeds_maximum`           | an earlier hash, if any | the network fee rose above the facilitator's ceiling                                            | after `extra.expirationLedger` (see below), sign a new payment                            |
-| `settle_exact_stellar_signature_expiration_too_soon` | an earlier hash, if any | the auth expires before the pool could land it                                                  | sign a new payment with a longer `maxTimeoutSeconds`, as below                            |
-| `settle_exact_stellar_simulation_failed`             | an earlier hash, if any | the settlement's simulation failed, e.g. the payer's balance                                    | check the payer, then sign a new payment as below                                         |
-| `settle_exact_stellar_unexpected_balance_changes`    | an earlier hash, if any | the transaction moves something other than the one payment                                      | refuse: the payment is malformed; any corrected one as below                              |
-| `settle_exact_stellar_record_write_failed`           | an earlier hash, if any | a new envelope wasn't sent: its hash couldn't be stored, or the budget ran out                  | sign a new payment after `extra.expirationLedger` (see below)                             |
-| a spend reason from the facilitator's limits         | —                       | the facilitator's spend limits refused it                                                       | sign a new payment as below, later; this one is ended                                     |
-| `settle_exact_stellar_refused`                       | —                       | the spend-limit check failed with an error of ours                                              | sign a new payment as below, and tell us                                                  |
-| `settle_exact_stellar_transaction_failed`            | the hash                | included in a ledger, but failed                                                                | sign a new payment after `extra.expirationLedger` (see below)                             |
-| `settle_exact_stellar_transaction_submission_failed` | the hash                | refused by the network before inclusion                                                         | sign a new payment after `extra.expirationLedger` (see below)                             |
-| `settle_exact_stellar_transaction_expired`           | the hash                | not included before its ledger bound, the payer's auth expiry; before 0073, its 60 s time bound | sign a new payment                                                                        |
-| `invalid_exact_stellar_*`, `invalid_network`         | —                       | the `/verify` checks, rerun by `/settle`, refused the payment                                   | fix the problem; for `invalid_exact_stellar_payload_fee_exceeds_maximum`, see notes below |
-| `unexpected_settle_error`                            | an earlier hash, if any | an error of ours after the claim                                                                | sign a new payment as below, and tell us                                                  |
+| `errorReason`                                        | `transaction`           | Meaning                                                                                              | What to do                                                                                  |
+| ---------------------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `settlement_pending`                                 | the hash, or empty      | sent, not final yet; empty: not signed yet, or the store couldn't say                                | repeat the same request (see below), or look the hash up                                    |
+| `settle_exact_stellar_already_settled`               | the hash                | settled; an earlier call already got this payment's success                                          | don't serve again for this payment                                                          |
+| `settle_exact_stellar_nonce_already_used`            | the stored hash, if any | this payer's nonce is already used by another payment, in whatever state                             | refuse: the payment isn't for this request                                                  |
+| `settle_exact_stellar_timeout`                       | —                       | the settle budget ran out before anything was signed; nothing was or will be                         | repeat the same payment while `extra.retryable` (see below)                                 |
+| `settle_exact_stellar_payer_busy`                    | —                       | another payment from this payer in this asset is settling; nothing was recorded for this one         | send the same payment again                                                                 |
+| `settle_exact_stellar_interrupted`                   | —                       | the facilitator restarted before anything was signed; nothing was or will be                         | repeat the same payment while `extra.retryable` (see below)                                 |
+| `settle_exact_stellar_shutting_down`                 | an earlier hash, if any | the facilitator was stopping; nothing was applied, and nothing more will be sent                     | repeat the same payment while `extra.retryable` (see below)                                 |
+| `settle_exact_stellar_rpc_unavailable`               | an earlier hash, if any | no RPC endpoint answered (refused, failed or timed out)                                              | repeat the same payment while `extra.retryable` (see below)                                 |
+| `settle_exact_stellar_no_channel_in_time`            | —                       | every channel was busy until the deadline                                                            | repeat the same payment while `extra.retryable` (see below)                                 |
+| `settle_exact_stellar_no_channels`                   | —                       | every channel is out of the pool                                                                     | repeat the same payment while `extra.retryable` (see below)                                 |
+| `settle_exact_stellar_lease_lost`                    | an earlier hash, if any | this process lost the channel lease before it sent; another process holds it, or none does           | repeat the same payment while `extra.retryable` (see below)                                 |
+| `settle_exact_stellar_transaction_signing_failed`    | an earlier hash, if any | the facilitator's key couldn't sign the transaction (OpenBao down, sealed or refusing)               | repeat the same payment while `extra.retryable` (see below)                                 |
+| `settle_exact_stellar_fee_bump_signing_failed`       | an earlier hash, if any | the facilitator's key couldn't sign the fee bump                                                     | repeat the same payment while `extra.retryable` (see below)                                 |
+| `settle_exact_stellar_fee_exceeds_maximum`           | an earlier hash, if any | the network fee rose above the facilitator's ceiling                                                 | after `extra.expirationLedger` (see below), sign a new payment                              |
+| `settle_exact_stellar_signature_expiration_too_soon` | an earlier hash, if any | the auth expires before the pool could land it                                                       | sign a new payment with a longer `maxTimeoutSeconds`, as below                              |
+| `settle_exact_stellar_simulation_failed`             | an earlier hash, if any | the settlement's simulation failed, e.g. the payer's balance                                         | check the payer, then sign a new payment as below                                           |
+| `settle_exact_stellar_unexpected_balance_changes`    | an earlier hash, if any | the transaction moves something other than the one payment                                           | refuse: the payment is malformed; any corrected one as below                                |
+| `settle_exact_stellar_payer_not_authorized`          | an earlier hash, if any | the payment's auth was never used by the token: its `transfer` doesn't require the payer's signature | sign a new payment in another asset, as below                                               |
+| `settle_exact_stellar_record_write_failed`           | an earlier hash, if any | a new envelope wasn't sent: its hash couldn't be stored, or the budget ran out                       | sign a new payment after `extra.expirationLedger` (see below)                               |
+| `settle_exact_stellar_spend_limit_payer`             | —                       | this payer used its fee budget for the window                                                        | the buyer waits, then signs a new payment as below                                          |
+| `settle_exact_stellar_spend_limit_pay_to`            | —                       | fees of payments to this `payTo`, whoever paid, filled its budget                                    | wait, or ask the operator for a higher limit; a new payment as below                        |
+| `settle_exact_stellar_spend_limit_asset`             | —                       | this asset used its fee budget for the window                                                        | sign a new payment in another asset, as below                                               |
+| `settle_exact_stellar_spend_limit_other`             | —                       | all tokens but the known ones used their shared fee budget                                           | sign a new payment in a known asset (USDC), as below                                        |
+| `settle_exact_stellar_spend_limit_global`            | —                       | the facilitator used its fee budget for the window                                                   | wait, or use another facilitator; a new payment as below                                    |
+| `settle_exact_stellar_breaker_open_payer`            | —                       | this payer's settlements failed on chain too often                                                   | the buyer waits, then signs a new payment as below                                          |
+| `settle_exact_stellar_breaker_open_pay_to`           | —                       | settlements to this `payTo` failed on chain too often                                                | wait, and check what fails with the operator                                                |
+| `settle_exact_stellar_breaker_open_asset`            | —                       | this token's settlements failed on chain too often                                                   | sign a new payment in another asset, as below                                               |
+| `settle_exact_stellar_spend_store_unavailable`       | —                       | the spend store didn't answer in time; nothing was sent                                              | repeat the same payment while `extra.retryable` (see below)                                 |
+| `settle_exact_stellar_facilitator_underfunded`       | —                       | the facilitator's fee account is below its floor, or its balance couldn't be read for minutes        | repeat the same payment later, while `extra.retryable` (see below); the operator tops it up |
+| `settle_exact_stellar_refused`                       | —                       | the spend check failed with an error of ours                                                         | sign a new payment as below, and tell us                                                    |
+| `settle_exact_stellar_transaction_failed`            | the hash                | included in a ledger, but failed                                                                     | sign a new payment after `extra.expirationLedger` (see below)                               |
+| `settle_exact_stellar_transaction_submission_failed` | the hash                | refused by the network before inclusion                                                              | sign a new payment after `extra.expirationLedger` (see below)                               |
+| `settle_exact_stellar_transaction_expired`           | the hash                | not included before its ledger bound, the payer's auth expiry; before 0073, its 60 s time bound      | sign a new payment                                                                          |
+| `invalid_exact_stellar_*`, `invalid_network`         | —                       | the `/verify` checks, rerun by `/settle`, refused the payment                                        | fix the problem; for `invalid_exact_stellar_payload_fee_exceeds_maximum`, see notes below   |
+| `unexpected_settle_error`                            | an earlier hash, if any | an error of ours after the claim                                                                     | sign a new payment as below, and tell us                                                    |
 
 "An earlier hash, if any": a refusal after a `txBadSeq` rebuild carries the last stored hash.
 `transaction` is the last stored hash; it may never have reached the network.
@@ -285,12 +462,15 @@ needs a new payment (a new nonce), but only once this one can't land ("Ended", b
   for a new signature only once it can't land), or past the last ledger the pool can bound.
   Upstream's own expiry check answers with it too, for one whose message names none of these,
   when our RPC is 3 or more ledgers behind the client's;
+- `…_payer_busy` recorded nothing: one payer's payments in one asset settle one at a time, and
+  this one waited for another until the budget ran out. Send the same payment again;
 - a spend refusal the store couldn't record leaves the payment claimed, so a repeat after the
   budget gets `…_timeout` instead of the spend reason.
 
 **Nothing sent** (task 0073). `…_timeout`, `…_interrupted`, `…_shutting_down`,
-`…_rpc_unavailable`, `…_no_channel_in_time`, `…_no_channels`, `…_lease_lost` (task 0071) and
-the two `…_signing_failed` (task 0036) with no `transaction` mean nothing was sent, but the
+`…_rpc_unavailable`, `…_no_channel_in_time`, `…_no_channels`, `…_lease_lost` (task 0071),
+the two `…_signing_failed` (task 0036), `…_spend_store_unavailable` and
+`…_facilitator_underfunded` (task 0024) with no `transaction` mean nothing was sent, but the
 payer's signed auth entry can still land until its expiration ledger, by
 whoever holds the payment. Signing a new payment then could charge the payer twice, so these
 answers carry `extra`:
@@ -358,7 +538,9 @@ The RPC keeps only a window of history (testnet's keeps 120960 ledgers, about 7 
 differ). A record claimed before the oldest ledger it keeps can't be told from one that never
 landed, so it stays open, is logged once as `settlement_history_gone` (counted in
 `settlement_history_gone_total`) and is checked again every 5 minutes: check its hashes on a
-block explorer or Horizon before acting on it.
+block explorer or Horizon before acting on it. It can't land again past its bound, so the sweep
+frees its payer's slot in that asset (task 0024): the payer's other payments in that asset settle
+as usual, and the record stays open for the operator.
 
 `settlement_landed_after_expired` (counted in `settlement_landed_after_expired_total` by `state`)
 reports a transaction found on chain after its record ended `expired`, with its hash and ledger. The

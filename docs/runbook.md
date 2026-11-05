@@ -42,11 +42,16 @@ curl -s https://x402-facilitator.sorobanscan.com/supported
 ## The playbook
 
 It puts x402's parts on the server and touches nothing else (`deploy/ansible/playbook.yaml`). Run
-it from a reviewed commit on `develop`, never from a working branch, since whoever runs it, and
-from which commit, is the boundary around production:
+it from a commit on `deploy/production`, never from `develop` or a working branch: root runs what
+it installs, so whoever runs it, and from which commit, is the boundary around production.
+`deploy/production` takes only an approved pull request with no bypass (Before the first deploy);
+`develop` takes pushes without a review. The first run from `deploy/production` comes after #119,
+the first promotion, merges: until then it is `f391494`, older than the server's files (the run
+before it was from `develop`, `e6774c8`), and would put those older files back.
 
 ```sh
-git fetch origin && git switch --detach origin/develop
+git status --short  # must print nothing: a local edit or new file would ride along unreviewed
+git fetch origin && git switch --detach origin/deploy/production
 cd deploy/ansible   # inventory.ini from inventory.ini.example, git-ignored
 ansible-playbook -i inventory.ini playbook.yaml --check --diff
 ansible-playbook -i inventory.ini playbook.yaml
@@ -55,6 +60,56 @@ ansible-playbook -i inventory.ini playbook.yaml
 It enables the units and starts only the watchdog's timer. A changed unit or compose file takes
 effect at that unit's next restart; a restart of `x402@production` drains it, so plan it like a
 deploy.
+
+**A change under `deploy/`** reaches the server in this order:
+
+1. The pull request to `deploy/production` merges. Its deploy starts at once, since the workflow
+   ignores only `lore/**`, `docs/**` and `**/*.md`, and runs with the files already on the
+   server, so a change under `deploy/` must still work with the old ones until step 3. When it
+   can't, for example a new credential the new image reads, split it into two pull requests: the
+   files first, written to work with the image that runs, through steps 1 to 3; then the image
+   change, as a plain deploy. A promotion carries everything waiting on `develop`, so the image
+   change stays off `develop` until the files' promotion has been through steps 1 to 3.
+2. Once that deploy has ended, the playbook from that merge, as above. Run during the deploy, it
+   would replace `deploy.sh` and the compose file under it. Wait for the workflow run, not the
+   unit: `x402-deploy@production` starts only after the image job and the SSH step, so right after
+   the merge it is still inactive and looks ended. The run can take as long as a migration:
+
+   ```sh
+   gh run list --branch deploy/production --workflow deploy-production.yml --limit 1
+   gh run watch <run id> --exit-status
+   ```
+
+3. A restart of each unit whose files changed. The production compose file is the facilitator's,
+   the databases' and the tunnel's: stop the facilitator first, which drains, so no settlement
+   loses its database or the tunnel mid-request, then restart the others and start it again.
+   OpenBao's compose file and `config.hcl` are `x402-openbao`'s alone.
+
+   ```sh
+   sudo systemctl stop x402@production
+   sudo systemctl restart x402-db-testnet@production x402-tunnel@production
+   sudo systemctl restart x402-openbao   # only when its files changed; here, /settle is down once
+   sudo systemctl start x402@production
+   ```
+
+   `x402@production` starts `digest.good`, so if step 1's deploy failed, the new image isn't
+   running yet: **Run workflow** on `deploy/production` again now.
+
+Then check that each container kept what its compose file drops (task 0091):
+
+```sh
+for p in x402-production x402-openbao; do  # one each: repeated label filters must all match
+  sudo docker ps -q --filter label=com.docker.compose.project=$p
+done | xargs -r sudo docker inspect --format \
+  '{{.Name}} user={{.Config.User}} drop={{.HostConfig.CapDrop}} add={{.HostConfig.CapAdd}} {{.HostConfig.SecurityOpt}}'
+sudo /usr/local/libexec/x402/x402-compose production --profile migrate config migrate-testnet \
+  | grep -A1 -E 'cap_drop|security_opt'
+```
+
+Each running container shows `drop=[ALL]`, `add=[]` and `[no-new-privileges:true]`, and Postgres
+`user=999:999`. `migrate-testnet` runs only during a deploy,
+so the second command reads its settings from the compose file instead: `ALL` and
+`no-new-privileges:true`.
 
 ## Credentials
 
@@ -125,7 +180,8 @@ ADR 0013's first upgrade (Not here yet).
   reviewers with "Prevent self-review" on, since a dispatched `digest` skips the pull request, and
   the secret `DEPLOY_HOST` (a variable would print the server's address in every run's public
   log) and the variable `DEPLOY_PORT`. `deploy/production` is protected: a pull request with an
-  approving review, no bypass.
+  approving review, approved after its last push by someone other than whoever made it (a push to
+  `develop` while a promotion is open lands in it), no bypass.
 - The repo's Actions settings: default workflow permissions read-only, and "Allow GitHub Actions
   to create and approve pull requests" off, so no workflow can approve its own way onto
   `deploy/production` (both were the other way on 2026-10-29).
@@ -135,6 +191,16 @@ ADR 0013's first upgrade (Not here yet).
 - Outbound 7844 over UDP and TCP allowed on the server (`cloudflared`).
 - Cloudflare: Browser Integrity Check off for the hostname, Bot Fight Mode off (0026).
 - The signer (0036), and the key's account and channels (OpenBao, step 6).
+- `/srv/x402/production/.env` with the key's address and its channels, from OpenBao's steps 4
+  and 6: public values, so a plain file, owned by `x402`, mode 0644, which the playbook leaves
+  alone. `compose.yaml` requires both: without them `x402@`, the deploy's `migrate-testnet` and
+  the `docker compose` commands here stop at interpolation.
+
+  ```sh
+  printf 'FACILITATOR_ADDRESS_TESTNET=%s\nCHANNELS_TESTNET=%s\n' ADDRESS CHANNELS |
+    ssh SERVER 'sudo install -o x402 -g x402 -m 0644 /dev/stdin /srv/x402/production/.env'
+  ```
+
 - After the first image is pushed: the GHCR package `x402-facilitator` made public, so the server
   pulls without a login.
 
@@ -303,7 +369,9 @@ deploy by hand on the server (Deploy, above).
      `sudo truncate -s 0 /var/lib/x402-deploy/.ssh/authorized_keys`.
   2. Make a new pair as in "Before the first deploy": the private half into `DEPLOY_SSH_KEY`, the
      public half into `deploy/ansible/files/deploy-production.pub` by pull request.
-  3. Once that is on `develop`, run the playbook before the next deploy: it writes the new key into
+  3. Once that is on `deploy/production`, run the playbook from it (The playbook, above), then
+     **Run workflow** on `deploy/production`: the merge's own deploy failed on the old key, and
+     nothing else starts one. The playbook writes the new key into
      `authorized_keys`, which then holds only that one. Record its fingerprint in task 0026's
      history.
 
@@ -321,7 +389,19 @@ cd /srv/x402/openbao && sudo docker compose exec openbao bao status
 
 It unseals itself at every start with the seal key `x402-openbao` decrypts. Its storage (Raft) and
 audit log are the volumes `x402-openbao-data` and `x402-openbao-audit`, made by the playbook. A
-request OpenBao can't write to the audit log fails, so a full disk stops `/settle`.
+request OpenBao can't write to the audit log fails, so a full disk stops `/settle`. The playbook's
+`/etc/logrotate.d/x402-openbao` rotates that log daily and keeps a year, compressed: `logrotate`
+renames the file, and SIGHUP makes OpenBao open a new one. About 5 MB a day at 1,000 settlements.
+After a playbook run that changes it, check one rotation by hand:
+
+```sh
+sudo logrotate -d /etc/logrotate.d/x402-openbao   # reads it, rotates nothing
+sudo logrotate -f /etc/logrotate.d/x402-openbao
+cd /srv/x402/openbao && sudo docker compose exec -T openbao ls -l /openbao/logs
+```
+
+A new `audit.log` that grows beside `audit.log.1`, and `signer: "ok"` in `/health` (What is
+where, above), mean OpenBao reopened it and still signs.
 
 **Setting it up,** once, after the playbook. The seal key and init's answer travel between the
 admin's machine and the server over SSH and never reach a disk, so they live only in the admin's
@@ -509,8 +589,8 @@ Then step 4 in this shell, without its `read`, and step 5 (`unset self` too).
 ## Not here yet
 
 - OpenBao's snapshots and restore drill, key rotation as an on-chain signer change, fee float
-  top-ups (0036, 0047).
-- Rotating OpenBao's audit log: nothing rotates it yet, and a full volume stops `/settle` (0026).
+  top-ups (0036, 0047). After a restore on the same server, restart the facilitator: a token newer
+  than the snapshot answers 403 until its hour ends, and a 403 doesn't make the signer log in again.
 - The key theft transaction (ADR 0013): no tool signs it and it has never run (0099).
 - A leaked token or secret ID, OpenBao upgrades and what `/settle` does meanwhile, and the weekly
   review after the mainnet deploy (0026, ADR 0013).

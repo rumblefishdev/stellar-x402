@@ -1,6 +1,11 @@
 import { Transaction, rpc } from "@stellar/stellar-sdk";
 import type { StellarNetwork } from "@stellar-x402/config";
-import { cannotLand, type SorobanRpc, type SubmitResult } from "@stellar-x402/signer-pool";
+import {
+  cannotLand,
+  failureCause,
+  type SorobanRpc,
+  type SubmitResult,
+} from "@stellar-x402/signer-pool";
 import { getNetworkPassphrase } from "@x402/stellar";
 import type { Logger } from "../logger.js";
 import type { Metrics } from "../metrics.js";
@@ -72,7 +77,7 @@ export function createReconciler(deps: ReconcilerDeps) {
         ledger: res.ledger,
         feeCharged: res.resultXdr.feeCharged().toBigInt(),
         ...(attempt.channel !== undefined && { channel: attempt.channel }),
-        ...(!success && { errorReason: SETTLE_REASONS.failed }),
+        ...(!success && { errorReason: SETTLE_REASONS.failed, failure: failureCause(res) }),
         attempts: [...others, { hash: attempt.hash, state: "landed" }],
       },
       "resolved",
@@ -203,8 +208,11 @@ export function createReconciler(deps: ReconcilerDeps) {
         if (!pastBound(record, attempt, res)) open++;
         else if (historyCovers(record, res)) dead.push({ hash: attempt.hash, state: "dead" });
         else {
-          // It may have landed before the RPC's history: an operator checks it (decision 22).
+          // It may have landed before the RPC's history: an operator checks it (decision 22). It
+          // can't land again past its bound, so free its payer and asset's slot (0024): held, it
+          // would answer every later payment of them `busy` for good.
           open++;
+          await store.freeInFlight(record.key);
           if (!historyGone.has(record.key)) {
             logger.warn("settlement_history_gone", {
               network,
@@ -305,7 +313,12 @@ export function createReconciler(deps: ReconcilerDeps) {
       record.key,
       result.status === "success"
         ? { state: "success", ...fields }
-        : { state: result.status, errorReason: SETTLE_REASONS[result.status], ...fields },
+        : {
+            state: result.status,
+            errorReason: SETTLE_REASONS[result.status],
+            ...(result.failure && { failure: result.failure }),
+            ...fields,
+          },
       "resolved",
     );
     if (result.status === "success" && won && finished) await markIfAnswered(finished);

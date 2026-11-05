@@ -13,6 +13,7 @@ import type { Reconciliation } from "../settlement/reconcile.js";
 import type { Settle } from "../settlement/settle.js";
 import { TRUSTLINE_REASONS } from "../settlement/trustline.js";
 import { FEE_EXCEEDS_MAXIMUM, type Verify, type VerifyTrace } from "../settlement/verify.js";
+import type { BalanceReader } from "../spend/balance-floor.js";
 import { discoveryResources } from "./discovery.js";
 import { EXTENSION_RESPONSES_HEADER, encodeExtensionResponses } from "./extension-responses.js";
 import { rateLimit } from "./rate-limit.js";
@@ -36,6 +37,11 @@ export interface AppDeps {
    * `/settle` answers 503; tests that pass no `lease` settle as if they held it.
    */
   lease?: LeaseKeeper;
+  /**
+   * The fee account's balance floor (0024), read from before the lease is taken until the
+   * server closes. `/settle` refuses below it, and before its first reading.
+   */
+  floor?: BalanceReader;
   /** Whether the process is shutting down (0025); `start()` sets it. */
   closing?: () => boolean;
   /**
