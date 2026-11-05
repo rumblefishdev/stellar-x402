@@ -453,8 +453,8 @@ the channels' reserves, about 130 XLM at launch (a 100 XLM float plus ~30 XLM of
 #### A bug in the facilitator leaks its memory or environment
 
 - **Attack:** A bug, a crash dump or a debugging session exposes what the facilitator holds.
-- **Mitigation:** The facilitator holds only an AppRole token allowed `transit/sign/<key>`, never the
-  key. The token expires within 1 hour.
+- **Mitigation:** The facilitator holds an AppRole token allowed `transit/sign/<key>` and the secret
+  ID that mints it, never the key. The token expires within 1 hour; the secret ID doesn't.
 - **Residual risk:** A leaked secret ID mints new tokens until it is destroyed (runbook, 0026). The
   theft alarm shows a changed signer or money leaving our accounts.
 
