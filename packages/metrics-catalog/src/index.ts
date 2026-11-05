@@ -557,14 +557,15 @@ export const CATALOG = [
     sets: PLAIN,
     emit: "aggregated",
   },
-  // `mount` stays open until #113 names the mounts.
+  // `path` is the mount point, under the name the agent's disk plugin gives it: the agent can't
+  // rename a dimension. It stays open until #113 names the mounts.
   {
     namespace: HOST,
     name: "disk_used_percent",
     kind: "gauge",
     unit: "Percent",
     scope: "process",
-    sets: [{ dims: ["mount"] }],
+    sets: [{ dims: ["path"] }],
     emit: "aggregated",
   },
 

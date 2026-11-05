@@ -136,11 +136,11 @@ describe("CATALOG", () => {
       }
   });
 
-  test("x402-host metrics are process-scoped; disk_used_percent keeps mount open", () => {
+  test("x402-host metrics are process-scoped; disk_used_percent keeps path open", () => {
     for (const m of ALL.filter((x) => x.namespace === "x402-host")) expect(m.scope).toBe("process");
     const disk = def("disk_used_percent");
-    expect(disk.sets).toEqual([{ dims: ["mount"] }]);
-    expect(disk.values?.mount).toBeUndefined();
+    expect(disk.sets).toEqual([{ dims: ["path"] }]);
+    expect(disk.values?.path).toBeUndefined();
   });
 
   test("x402-watch scopes", () => {
@@ -334,7 +334,7 @@ describe("effectiveSets", () => {
 
   test("a process-scoped metric keeps its sets as declared", () => {
     expect(effectiveSets(def("store_prune_failures_total"))).toEqual([{ dims: [] }]);
-    expect(effectiveSets(def("disk_used_percent"))).toEqual([{ dims: ["mount"] }]);
+    expect(effectiveSets(def("disk_used_percent"))).toEqual([{ dims: ["path"] }]);
   });
 
   test("http_requests_total has two sets, the second only for a 500", () => {
@@ -403,8 +403,8 @@ describe("seriesDims", () => {
   });
 
   test("an open dim takes any printable value, never an empty one", () => {
-    expect(seriesDims("disk_used_percent", { mount: "/data" })).toEqual(ok("disk_used_percent"));
-    expect(seriesDims("disk_used_percent", { mount: "" })).toMatchObject({ ok: false });
+    expect(seriesDims("disk_used_percent", { path: "/data" })).toEqual(ok("disk_used_percent"));
+    expect(seriesDims("disk_used_percent", { path: "" })).toMatchObject({ ok: false });
   });
 
   test("rejects an unknown name, with the reason", () => {

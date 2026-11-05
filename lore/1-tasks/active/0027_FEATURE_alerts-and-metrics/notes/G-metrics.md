@@ -16,15 +16,20 @@ history:
     status: developing
     who: akot
     note: "To the v2 spine and #112's code: scopes, CAIP-2 network values, dimension sets, fixed units, sampled gauges, the one zero seed, 0089's own PR, x402-host for the agent."
+  - date: "2026-11-05"
+    status: developing
+    who: akot
+    note: "From the whole-task review: every metric is billed, as the catalog writes it (decision 4 amended), and the disk's dimension is `path`, the agent's name for it."
 ---
 
 # The metrics 0027 emits
 
 Decision 4 as one table, which #112's catalog (`packages/metrics-catalog`) follows. Where the two
 differ, the catalog and the [spine](S-pr112-spine.md) win. The facilitator writes EMF lines to the
-namespace `x402-facilitator`. A billed metric carries the dimensions listed, plus `network` when it
-is network-scoped; "Yes" means `network` alone. A label not listed as billed stays a field in the
-line, read with Logs Insights. "Only for X" means that the line carries the dimension set for that
+namespace `x402-facilitator`. Every metric here is billed (decision 4 as amended on 2026-11-05).
+"Billed by" lists the dimensions a metric carries, plus `network` when it is network-scoped. "Yes"
+means `network` alone, or no dimension on a process-scoped metric. A label not listed as billed
+stays a field in the line, read with Logs Insights. "Only for X" means that the line carries the dimension set for that
 value only, so the other values add no metric.
 
 **Scope.** A network-scoped metric carries `network` in every set. Its value is the CAIP-2 string
@@ -59,18 +64,18 @@ metrics. A gauge that stops is silence, not a stale value. The only zero written
 | `settlement_landed_after_expired_total` | `records.ts` (0088) | Yes | `state` | `landed-after-expired` |
 | `signer_failures_total` | `openbao-signer.ts` (0036) | Yes | `reason`, `step` | `signer-failures` |
 | `pool_events_total` | The pool's `onEvent`, `main.ts` | Yes, and `type` only for `sequence-resync` | `type`, `status` on `resolved` | `pool-health` |
-| `settlement_uncertain_total` | `settle.ts` | No | | None |
-| `settlement_submit_failures_total` | `settle.ts` | No | | None |
-| `settlement_budget_exhausted_total` | `settle.ts` | No | `signed` | None |
-| `settlement_reconciled_total` | `reconcile.ts` | No | `state` | None |
-| `settlement_reopened_total` | `settle.ts` | No | `reason` | None |
-| `settlement_lease_fenced_total` | `settle.ts` | No | | None |
-| `settlement_hook_failures_total` | `records.ts` | No | `hook` | None |
-| `settlement_already_settled_total` | `settle.ts` | No | | None |
-| `settlement_nonce_reuse_total` | `settle.ts` | No | | None |
-| `lease_changes_total` | `lease.ts` | No | `held` | None |
-| `store_prune_failures_total` | `pruner.ts` | No | `table` | None |
-| `catalog_*_total` (5 metrics), `discovery_unknown_params_total` | `cataloger.ts`, `discovery.ts` | No | `stage`, `origin`, `reason`, `outcome` | None |
+| `settlement_uncertain_total` | `settle.ts` | Yes | | None |
+| `settlement_submit_failures_total` | `settle.ts` | Yes | | None |
+| `settlement_budget_exhausted_total` | `settle.ts` | Yes | `signed` | None |
+| `settlement_reconciled_total` | `reconcile.ts` | Yes | `state` | None |
+| `settlement_reopened_total` | `settle.ts` | Yes | `reason` | None |
+| `settlement_lease_fenced_total` | `settle.ts` | Yes | | None |
+| `settlement_hook_failures_total` | `records.ts` | Yes | `hook` | None |
+| `settlement_already_settled_total` | `settle.ts` | Yes | | None |
+| `settlement_nonce_reuse_total` | `settle.ts` | Yes | | None |
+| `lease_changes_total` | `lease.ts` | Yes | `held` | None |
+| `store_prune_failures_total` | `pruner.ts` | Yes | `table` | None |
+| `catalog_*_total` (5 metrics), `discovery_unknown_params_total` | `cataloger.ts`, `discovery.ts` | Yes | `stage`, `origin`, `reason`, `outcome` | None |
 
 ## Facilitator, from 0024 (#105)
 
@@ -81,8 +86,8 @@ metrics. A gauge that stops is silence, not a stale value. The only zero written
 | `spend_failure_attributed_total` | `spend/policy.ts` | `fault`, only for `ours` | `fault` | `failure-ours` |
 | `spend_commit_unmatched_total` | `spend/policy.ts` | Yes | `state` | `commit-unmatched` |
 | `spend_store_failures_total` | `spend/policy.ts` | Yes | `op` | `store-outage` |
-| `spend_refused_total` | `spend/policy.ts` | No | `reason` | None |
-| `balance_read_failures_total` | `spend/balance-floor.ts`: a failed read of the fee account | No | | None: `balance-stale` sees a reading that stays old |
+| `spend_refused_total` | `spend/policy.ts` | Yes | `reason` | None |
+| `balance_read_failures_total` | `spend/balance-floor.ts`: a failed read of the fee account | Yes | | None: `balance-stale` sees a reading that stays old |
 
 ## Facilitator, new in #112
 
@@ -131,7 +136,7 @@ The ages are `Seconds`, the percentages `Percent`, `watchdog_restarts_total` `Co
 | `certificate_days_left` | The Roles Anywhere certificate, negative after expiry | `certificate` |
 | `host_probe_heartbeat` | 1 on every run | `probe-silent` |
 | `watchdog_restarts_total` | The watchdog, once per restart | `watchdog-restart` |
-| `mem_used_percent`, `disk_used_percent` per named mount | The agent. `disk_used_percent` carries `mount`, open until #113 names the mounts | `memory`, `disk`, `audit-disk`, `telemetry-silent` |
+| `mem_used_percent`, `disk_used_percent` per named mount | The agent. `disk_used_percent` carries `path`, the mount point, as the agent's disk plugin names it, open until #113 names the mounts | `memory`, `disk`, `audit-disk`, `telemetry-silent` |
 
 ## Off the server, namespace `x402-watch`
 

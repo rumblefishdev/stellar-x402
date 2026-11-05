@@ -35,6 +35,10 @@ history:
     status: active
     who: akot
     note: "Decisions 18-20 after comparing with the Prices API and the explorer: metric lines kept 30 days, Level alarms ignore missing data, no CPU metric. Decisions 21-22 from #112's code: hooks and fee run once, scope checked by the compiler."
+  - date: "2026-11-05"
+    status: active
+    who: akot
+    note: "From the whole-task review of #111-#115: decision 4 amended (every catalog metric is billed), and the catalog names the disk's dimension `path`, as the CloudWatch agent writes it."
 ---
 
 # Alerts and metrics
@@ -135,6 +139,12 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
    alarm. The other labels stay fields in the log line, read with Logs Insights. AC 1 holds as
    written. A metric costs $0.30 a month only for hours it gets data. The table is
    [G-metrics](notes/G-metrics.md).
+   **Amended** (akot, 2026-11-05, from the whole-task review): every metric in the catalog is
+   billed, as #112's catalog already writes it. The 19 counters that were to stay log fields get
+   one set each: `network` alone, or no dimension on a process-scoped one. A line with no valid set
+   isn't written at all, so keeping them out of CloudWatch would need a log-only line in the
+   writer. They cost at most $5.70 a month with one network and $9.30 with two, less in practice
+   since the rare ones get data in few hours. An alarm or graph on one needs no code change.
 5. **Uptime and readiness come from one Lambda probe, not Route 53** (akot, 2026-11-02). A small
    function in eu-central-1 reads `/health` every minute through the public hostname, parses the
    JSON and publishes its `ready`; what `ready` means with two networks is 0077's (ADR 0011). A
@@ -239,7 +249,9 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     `budget` for `asset`, `other` and `global`, `fault` for `ours`, `type` for `sequence-resync`,
     `status` for `500`. The other values add no metric. HTTP metrics carry no `network`, since a
     route serves both networks after 0077. Host lines go to `x402-host` and the Lambdas' metrics to
-    `x402-watch`, apart from the facilitator's `x402-facilitator`.
+    `x402-watch`, apart from the facilitator's `x402-facilitator`. `disk_used_percent`'s dimension
+    is `path` (2026-11-05, from the whole-task review): that is the CloudWatch agent's name for the
+    mount point, and the agent can't rename a dimension, so the catalog takes its name.
 16. **`rpc_stalled_seconds` comes from a `getLatestLedger` read every 30 s** (2026-11-03). On a
     quiet server nothing else reads the RPC, so the gauge would stop moving exactly when it
     matters.

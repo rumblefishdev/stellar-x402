@@ -162,13 +162,13 @@ describe("emf builder", () => {
     expect(r.line).toBeUndefined();
     expect(r.issues).toEqual([{ kind: "no-valid-set", name: "http_requests_total" }]);
     // An open dimension: empty, over 1024 characters, or not printable is invalid too.
-    for (const mount of ["", "x".repeat(1025), "/var\n", "   "]) {
-      const d = emfLine(def("disk_used_percent"), 50, { mount }, T);
-      expect(d.line, JSON.stringify(mount)).toBeUndefined();
+    for (const path of ["", "x".repeat(1025), "/var\n", "   "]) {
+      const d = emfLine(def("disk_used_percent"), 50, { path }, T);
+      expect(d.line, JSON.stringify(path)).toBeUndefined();
       expect(d.issues).toEqual([{ kind: "no-valid-set", name: "disk_used_percent" }]);
     }
-    const ok = parsed("disk_used_percent", 50, { mount: "x".repeat(1024) }).o;
-    expect(directive(ok).Dimensions).toEqual([["mount"]]);
+    const ok = parsed("disk_used_percent", 50, { path: "x".repeat(1024) }).o;
+    expect(directive(ok).Dimensions).toEqual([["path"]]);
   });
 
   it("gauge with samples writes a Values array (<=100, finite only)", () => {
