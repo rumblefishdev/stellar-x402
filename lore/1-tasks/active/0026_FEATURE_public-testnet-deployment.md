@@ -220,6 +220,20 @@ history:
       Console rollback, which reverts the whole box. That path needs the main account; the normal
       restore reads the live repositories with u595862-sub3 and the backup secret. For ADR 0013,
       with the backups: this, and the read-only account's own directory (Stan).
+  - date: "2026-11-05"
+    status: active
+    who: okarcz
+    note: >
+      Borg's key mode decided, after a question to Stan: repokey, with borg key export in the
+      backup secret's borg_key_export. 0047's rule meant that the Storage Box alone must not
+      decrypt a backup, and a key locked by the passphrase keeps that, as pgBackRest's cipher-pass
+      does; the export covers a damaged key in the repository. Chosen over keyfile, whose only gain
+      is against someone with the box and not the passphrase, already stopped by a long random
+      passphrase and by OpenBao's own encryption of the Raft snapshot. From Stan: a passphrase
+      change replaces borg_passphrase and borg_key_export in one put-secret-value, since the
+      export is encrypted with it; and the restore drill imports the export into a local copy of
+      the repository, since the read-only account can't write to it. Both are in ADR 0013 and
+      this task's Implementation.
 ---
 
 # Public testnet deployment
@@ -469,9 +483,14 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   existing Hetzner Storage Box, keeping 14, set up like that box's other sub-account. Tell
   the team that owns the box that we depend on it. The job uses its own AppRole with a
   snapshot-only policy (`sys/storage/raft/snapshot`), its credential a systemd credential, over
-  the admin listener. A second, read-only sub-account on the same directory, its SSH key in the
-  backup secret, is what a restore uses. Decide the Borg mode (repokey or keyfile); in
-  keyfile mode `borg key export` goes into the backup secret.
+  the admin listener. A second, read-only sub-account, its SSH key in the backup secret, is what
+  a restore uses; its home is the repositories' directory, one below the write account's (ADR
+  0013). Borg runs in **repokey** mode, and `borg key export` goes into the backup secret's
+  `borg_key_export` anyway (okarcz with Stan, 2026-11-05): nothing on the Storage Box decrypts a
+  backup by itself, since the key there is locked by the passphrase, as pgBackRest's
+  `cipher-pass` is. The export is encrypted with the current passphrase, so a
+  `borg key change-passphrase` replaces `borg_passphrase` and `borg_key_export` together, in one
+  `put-secret-value`.
 - **Fee float** (ADR 0013): refill to 100 XLM, alarms at 25 and 10 XLM, no upper limit, the same
   numbers on testnet for now. The alarms come from 0027's off-server check, which publishes the
   spendable balance, so `checkFacilitatorBalance`'s `minSpendableStroops` isn't set (0027
@@ -482,7 +501,10 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
   its address (#102).
 - **Runbook** in `docs/runbook.md`:
   - **restore drill:** on a throwaway machine with no route to production, using only the backup
-    secret and the Storage Box: pull the newest snapshot, start OpenBao with the seal key and key
+    secret and the Storage Box: copy the Borg repository to the machine through the read-only
+    account and `borg key import` the secret's export into that copy (the read-only account
+    can't write to the repository, and this is the restore a damaged repository key needs),
+    pull the newest snapshot from the copy, start OpenBao with the seal key and key
     ID, init, restore (first without `-force`, then with it), regenerate a root token with the
     recovery key (legacy API), issue an AppRole login, check that the Transit public key equals the on-chain
     signer, check the CloudTrail event history for reads that weren't drills, destroy the machine,

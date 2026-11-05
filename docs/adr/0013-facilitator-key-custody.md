@@ -17,7 +17,9 @@
   check reads up to, statistics a forged point can't move, and the weekly review from the first
   deploy with the fee spend metric, from the PR #111 review); 2026-11-05 (the read-only Storage
   Box account's own directory, and the Storage Box's own snapshots, restored by a copy and never
-  a rollback, from Stan's setup of the box in task 0026)
+  a rollback, from Stan's setup of the box in task 0026); 2026-11-05 (Borg in repokey mode with
+  its key exported to the secret, changed with the passphrase, and the drill restoring through
+  a local copy, task 0026)
 - Supersedes: the key custody part of [ADR 0011](0011-facilitator-hosting.md) ("Keys, secrets and
   access": the SSM parameter for `FACILITATOR_SECRET` and the mainnet KMS key)
 
@@ -113,7 +115,11 @@
   1. the static seal key and its exact key ID (OpenBao refuses a key whose ID differs, and
      `-force` doesn't get round it), plus the previous pair for 14 days after a rotation;
   2. the recovery key, which regenerates a root token (it can't unseal or open a snapshot);
-  3. the Borg passphrase, plus `borg key export` output in keyfile mode;
+  3. the Borg passphrase and `borg key export` output. The repository is in repokey mode, so its
+     key is on the Storage Box too, but locked by the passphrase: nothing on the Storage Box
+     decrypts a backup by itself, as with pgBackRest's `cipher-pass`. The export covers a damaged
+     key in the repository. It is encrypted with the current passphrase, so a
+     `borg key change-passphrase` replaces both fields together, in one `put-secret-value`;
   4. the `seal "static"` stanza and the OpenBao version;
   5. the SSH key of a second, read-only Storage Box sub-account: the server's own key dies with
      the server. Its home is the repositories' directory (`/x402/data`), one below the write
@@ -140,7 +146,10 @@
 - **Init with one recovery share:** `bao operator init -recovery-shares=1 -recovery-threshold=1`,
   and the share goes into the secret.
 - **A restore drill proves the backup.** On a throwaway machine with no route to production, using
-  only the secret and the Storage Box: restore the newest snapshot, regenerate a root token (the
+  only the secret and the Storage Box: copy the Borg repository through the read-only account,
+  `borg key import` the secret's export into that copy (the account can't write to the
+  repository, and a damaged repository key would need this restore), restore the newest
+  snapshot from it, regenerate a root token (the
   legacy API, as below), issue
   an AppRole login, check that the Transit public key equals the on-chain signer, and check the
   CloudTrail event history for reads that weren't drills. Before mainnet (first on testnet), then
