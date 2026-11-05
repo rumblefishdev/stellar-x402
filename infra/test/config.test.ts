@@ -106,7 +106,10 @@ describe("validateConfig", () => {
     ["memory on with no threshold", (c) => (m(c).alarmGroups.memory = true), /alarmGroups.memory/],
     [
       "log volume on with no threshold",
-      (c) => (m(c).alarmGroups.logVolume = true),
+      (c) => {
+        m(c).alarmGroups.logVolume = true;
+        m(c).thresholds.logVolumeBytesPerHour = null;
+      },
       /alarmGroups.logVolume/,
     ],
     [
@@ -116,6 +119,11 @@ describe("validateConfig", () => {
         m(c).host = { ...m(c).host, auditDiskMount: null };
       },
       /auditDiskMount/,
+    ],
+    [
+      "host on without the log-volume ceiling",
+      (c) => (m(c).alarmGroups.host = true),
+      /alarmGroups.host needs alarmGroups.logVolume/,
     ],
     [
       "a network with no fee account",

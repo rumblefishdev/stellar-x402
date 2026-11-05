@@ -162,7 +162,7 @@ with 0026, and in `host` they would keep the probe's other alarms off until then
 
 | Alarm | Signal | Shape | Fires when | Missing data |
 | --- | --- | --- | --- | --- |
-| `log-volume` | `AWS/Logs IncomingBytes` | Level | Measure: a flood of log lines, on the bill as on the disk | Ignore: `telemetry-silent` |
+| `log-volume` | `AWS/Logs IncomingBytes`, per log group | Level | Above 200 MB in an hour: a coarse ceiling set before any measurement, tightened once the first weeks are read. On with `host` (#113), since an EMF line in our group can name any namespace of the shared account and create custom metrics without limit: this is the only bound on a flood's cost | Ignore: `telemetry-silent` |
 | `emf-validation` | `AWS/Logs EMFValidationErrors` for the metrics log group | Event | 1 or more: CloudWatch rejected a line, so its metrics are gone: Event alarms on them read OK, and Level ones keep their last state | Not breaching: written only when a line fails |
 | `emf-parsing` | `AWS/Logs EMFParsingErrors` for the metrics log group | Event | 1 or more: a line CloudWatch couldn't parse as EMF | As above |
 | `telemetry-silent` | `mem_used_percent` and `disk_used_percent{path="/"}` from the agent: `MIN([FILL(mem, 0), FILL(disk, 0)])` | Silence | 15 minutes of either: agent, credentials or egress, or a config that lost one series (decision 44) | Breaching |

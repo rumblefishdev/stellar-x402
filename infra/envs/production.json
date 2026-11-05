@@ -54,6 +54,6 @@
     "credentialsAgeSeconds": 7500,
     "diskUsedPercent": null,
     "memoryUsedPercent": null,
-    "logVolumeBytesPerHour": null
+    "logVolumeBytesPerHour": 200000000
   }
 }

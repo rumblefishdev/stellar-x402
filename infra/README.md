@@ -30,7 +30,13 @@ The `x402-host` condition binds `PutMetricData` only. An EMF line written with `
 `/x402/production/metrics` can name any namespace, `x402-watch` included, so the role doesn't
 guard the off-server alarms. Their statistics do, since a forged point can't hide a real one from
 `Minimum` (a balance, `ready`) or `Maximum` (a count), and so do the `AWS/Lambda` alarms on the
-Lambdas' silence (G-alarm-list, "Statistics").
+Lambdas' silence (G-alarm-list, "Statistics"). A forged point can still hold an alarm in ALARM, so
+#115's check also posts each theft finding to the topic itself (decision 64).
+
+The same path reaches the shared account's other namespaces, such as `SorobanBlockExplorer/Indexer`,
+which other projects alarm on, and EMF lines can create custom metrics there without limit. Their
+owners are told before `host` goes on (decision 65). `log-volume` is the ceiling: it goes on with
+`host`, and synth refuses `host` without it.
 
 ## Before the first deploy
 
@@ -85,7 +91,7 @@ exists with its actions off (decision 26).
 
 | Group         | Alarms                                                                                                                                         | On when                                                                                   |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `uptime`      | `uptime`                                                                                                                                       | The probe's `ready` has data, a few minutes after the Uptime stack's deploy (decision 37) |
+| `uptime`      | `uptime`, `uptime-flapping`                                                                                                                    | The probe's `ready` has data, a few minutes after the Uptime stack's deploy (decision 37) |
 | `telemetry`   | `emf-validation`, `emf-parsing`                                                                                                                | On                                                                                        |
 | `facilitator` | Availability and Settlement, `facilitator-silent`, `gauges-silent`                                                                             | The facilitator's metric lines reach CloudWatch (#113)                                    |
 | `channelHeld` | `channel-held`                                                                                                                                 | 0089 emits its gauge                                                                      |
@@ -94,7 +100,7 @@ exists with its actions off (decision 26).
 | `snapshots`   | `snapshot-age`                                                                                                                                 | OpenBao's daily snapshot has run (0026; decision 40)                                      |
 | `disk`        | `disk` per mount                                                                                                                               | A threshold read against the first numbers, `host.diskMounts` set                         |
 | `memory`      | `memory`                                                                                                                                       | A threshold after a week of data                                                          |
-| `logVolume`   | `log-volume` per log group                                                                                                                     | A measured threshold                                                                      |
+| `logVolume`   | `log-volume` per log group                                                                                                                     | With `host` (#113), at a coarse 200 MB an hour until measured (decision 65)               |
 | `watch`       | Money and security, `watch-errors`, `watch-no-invocations`                                                                                     | #115's off-server check runs as `x402-production-watch`                                   |
 
 To turn one on: `make check-series GROUP=<group>` until it passes, then set the flag (and any

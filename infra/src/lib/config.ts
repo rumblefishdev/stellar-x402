@@ -36,7 +36,10 @@ export const ALARM_GROUPS = [
   "disk",
   /** `memory`, after a week of data. */
   "memory",
-  /** `log-volume`, once its threshold is measured. */
+  /**
+   * `log-volume`, a coarse ceiling on each log group's bytes, on with `host` (#113): EMF lines can
+   * create custom metrics in any namespace, so it is the only bound on what a flood costs.
+   */
   "logVolume",
   /** The off-server check's alarms (`x402-watch` and its `AWS/Lambda` health), with #115. */
   "watch",
@@ -257,6 +260,10 @@ function crossChecks(c: z.infer<typeof schema>, ctx: z.RefinementCtx): void {
     fail(["alarmGroups", "logVolume"], "needs thresholds.logVolumeBytesPerHour");
   if (on.host && c.host.auditDiskMount === null)
     fail(["alarmGroups", "host"], "needs host.auditDiskMount for audit-disk");
+  // The cost ceiling goes on with #113's lines (Karol's review of #114, point 6): an EMF line can
+  // name any namespace and create custom metrics without limit, and only log-volume bounds it.
+  if (on.host && !on.logVolume)
+    fail(["alarmGroups", "host"], "needs alarmGroups.logVolume, the cost ceiling on our lines");
 }
 
 /** What an unknown key is, by the object it sits in. */
