@@ -1,0 +1,26 @@
+# Registers Deploy production's Run workflow on main, the default branch: GitHub offers it, and
+# `gh workflow run`, only for a workflow found here. The real workflow is deploy/production's own
+# file, which a push there and a dispatch with that ref run (docs/runbook.md, Rollback).
+#
+# A stub, not a copy: a dispatch from main runs this file, and a copy would end green without
+# deploying anything, so this one fails and says which ref to pick. Keep `name` and the inputs
+# the same as deploy/production's, since the form and `-f` take them from this file.
+name: Deploy production
+
+on:
+  workflow_dispatch:
+    inputs:
+      digest:
+        description: "An image digest to deploy instead of this commit's image, for a rollback (sha256:…)"
+        required: false
+        default: ""
+
+permissions: {}
+
+jobs:
+  ref:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: |
+          echo "::error::Run this from deploy/production: Use workflow from → deploy/production, or gh workflow run deploy-production.yml --ref deploy/production"
+          exit 1
