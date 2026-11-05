@@ -1,0 +1,14 @@
+# OpenBao's daily Raft snapshot to the Storage Box (ADR 0013, task 0026), started by
+# x402-openbao-snapshot.timer. Its output stays in the journal: `journalctl -u
+# x402-openbao-snapshot`. Success shows as the stamp 0027's probe reads, not as a log line.
+[Unit]
+Description=x402 OpenBao snapshot to the Storage Box
+Documentation=https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/runbook.md
+Wants=network-online.target
+After=network-online.target x402-openbao.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/x402/x402-openbao-snapshot
+# A snapshot is kilobytes; most of the time is SSH and Borg's prune and compact. Well under a day.
+TimeoutStartSec=30min

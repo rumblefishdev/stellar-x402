@@ -1,0 +1,80 @@
+#!/bin/bash
+# OpenBao's daily Raft snapshot, sent off the server to our Borg repository on the Storage Box
+# (ADR 0013, task 0026). Run as root by x402-openbao-snapshot.timer. It logs in with the
+# snapshot-only AppRole, saves a snapshot inside the container, copies it to a tmpfs on the host,
+# makes one Borg archive of it, prunes to 14 days and touches the stamp 0027's probe reads. A run
+# that fails anywhere leaves no stamp, and the snapshot-age alarm fires after 26 hours.
+#   x402-openbao-snapshot
+#   x402-openbao-snapshot borg ARGS...   any Borg command on that repository, for an admin: init,
+#                                        key export, list, check (runbook, OpenBao snapshots)
+#
+# The credentials, set up by the runbook (OpenBao snapshots), each a systemd credential in
+# /srv/x402/backup/creds: storage-box-ssh-key (the write sub-account's key), borg-passphrase,
+# snapshot-role-id and snapshot-secret-id (the AppRole x402-snapshot).
+set -euo pipefail
+
+# Overridable for a local run (runbook, OpenBao snapshots, Testing locally).
+: "${X402_OPENBAO_DIR:=/srv/x402/openbao}"
+: "${X402_STAMPS:=/var/lib/x402/last-ok}"
+: "${X402_KNOWN_HOSTS:=/etc/x402/storage-box.known_hosts}"
+: "${BORG_REPO:=ssh://u595862-sub2@u595862-sub2.your-storagebox.de:23/./data/openbao}"
+# The Borg the Storage Box runs for us, the same major version as the server's package: Hetzner
+# keeps several side by side.
+: "${BORG_REMOTE_PATH:=borg-1.2}"
+: "${BORG_BASE_DIR:=/var/lib/x402/borg}"
+run=/run/x402/backup
+export BORG_REPO BORG_REMOTE_PATH BORG_BASE_DIR
+
+# Borg's two, and the AppRole's only for a snapshot: an admin's `borg init` comes before it exists.
+creds=(storage-box-ssh-key borg-passphrase)
+[ "${1:-}" = borg ] || creds+=(snapshot-role-id snapshot-secret-id)
+if [ "${X402_CREDS_DIR:-}" ]; then
+  run=$X402_CREDS_DIR # a local run: plain files, no systemd-creds
+else
+  /usr/local/libexec/x402/x402-creds backup "${creds[@]/%/:0}"
+fi
+snap=$run/openbao.snap
+token=
+bao() { docker compose -f "$X402_OPENBAO_DIR/compose.yaml" exec -T -e BAO_TOKEN openbao bao "$@"; }
+cleanup() {
+  if [ "$token" ]; then BAO_TOKEN=$token bao token revoke -self > /dev/null 2>&1 || :; fi
+  docker compose -f "$X402_OPENBAO_DIR/compose.yaml" exec -T openbao rm -f /tmp/raft.snap > /dev/null 2>&1 || :
+  rm -f "$snap"
+  if [ -z "${X402_CREDS_DIR:-}" ]; then
+    for c in "${creds[@]}"; do rm -f "$run/$c"; done
+  fi
+}
+trap cleanup EXIT
+
+export BORG_PASSCOMMAND="cat $run/borg-passphrase"
+export BORG_RSH="ssh -i $run/storage-box-ssh-key -o IdentitiesOnly=yes -o BatchMode=yes \
+-o StrictHostKeyChecking=yes -o UserKnownHostsFile=$X402_KNOWN_HOSTS"
+
+if [ "${1:-}" = borg ]; then
+  shift
+  borg "$@"
+  exit
+fi
+
+# The login's JSON over stdin, so neither ID reaches a command line. Both are UUIDs.
+token=$(printf '{"role_id":"%s","secret_id":"%s"}' \
+  "$(cat "$run/snapshot-role-id")" "$(cat "$run/snapshot-secret-id")" |
+  BAO_TOKEN= bao write -field=token auth/approle/login -)
+export BAO_TOKEN=$token
+
+# Saved in the container's /tmp, a tmpfs, then copied to ours: a pipe straight into Borg would
+# leave an archive of a partial snapshot if the save failed halfway.
+bao operator raft snapshot save /tmp/raft.snap
+umask 077
+docker compose -f "$X402_OPENBAO_DIR/compose.yaml" exec -T openbao cat /tmp/raft.snap > "$snap"
+[ -s "$snap" ] || { echo "the snapshot is empty" >&2; exit 1; }
+gzip -t "$snap" || { echo "the snapshot isn't a whole gzip file" >&2; exit 1; }
+
+cd "$run"
+borg create --stats "::openbao-{utcnow:%Y-%m-%dT%H:%M:%SZ}" openbao.snap
+borg prune --glob-archives 'openbao-*' --keep-daily 14
+borg compact
+
+mkdir -p "$X402_STAMPS"
+touch "$X402_STAMPS/openbao-snapshot"
+echo "snapshot saved, $(stat -c %s "$snap") bytes"

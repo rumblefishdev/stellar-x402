@@ -59,6 +59,7 @@ describe("the timers", () => {
     ["x402-host-probe", "*-*-* *:*:30"],
     ["x402-logrotate", "*:00/10:20"],
     ["x402-cloudwatch-credentials", "hourly"],
+    ["x402-openbao-snapshot", "*-*-* 03:15:00"],
   ])("%s runs at %s, to the second, and its oneshot has a timeout", (name, calendar) => {
     const timer = unit(`${name}.timer`);
     expect(settings(timer, "OnCalendar")).toEqual([calendar]);
@@ -262,5 +263,71 @@ describe("the units' output", () => {
     expect(script).toContain(`say() { printf '%s\\n' "$*" || :; }`);
     expect(script).not.toMatch(/^\s*(echo|printf '%s\\n' "\$\w+" >&2)\b/m);
     expect(script.match(/\becho\b/g)).toBeNull();
+  });
+});
+
+// OpenBao's snapshot job against the probe, the playbook and ADR 0013 (task 0026).
+describe("the snapshot job", () => {
+  const script = read("libexec/x402-openbao-snapshot");
+  const playbook = read("ansible/playbook.yaml");
+  const defaultOf = (name: string) =>
+    script.match(new RegExp(`: "\\$\\{${name}:=([^}]+)\\}"`))?.[1];
+
+  test("touches the stamp the probe reads, as its last step", () => {
+    expect(defaultOf("X402_STAMPS")).toBe("/var/lib/x402/last-ok");
+    expect(read("libexec/x402-host-probe")).toContain(': "${X402_STAMPS:=/var/lib/x402/last-ok}"');
+    expect(read("libexec/x402-host-probe")).toContain("stamp_age openbao-snapshot");
+    const steps = [
+      "borg create ",
+      "borg prune ",
+      "borg compact",
+      'touch "$X402_STAMPS/openbao-snapshot"',
+    ];
+    const at = steps.map((s) => script.indexOf(s));
+    expect(
+      at.every((i) => i >= 0),
+      at.join(),
+    ).toBe(true);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+  });
+
+  test("fails on any step, and keeps both AppRole IDs off the command line", () => {
+    expect(script).toMatch(/^#!\/bin\/bash\n/);
+    expect(script).toContain("set -euo pipefail");
+    expect(script).toContain("auth/approle/login -)");
+    expect(script).not.toMatch(/role_id=\$|secret_id=\$/);
+  });
+
+  test("pins the Storage Box's host key where the playbook puts it", () => {
+    expect(defaultOf("X402_KNOWN_HOSTS")).toBe("/etc/x402/storage-box.known_hosts");
+    expect(playbook).toContain("dest: /etc/x402/storage-box.known_hosts");
+    expect(script).toContain(
+      "-o StrictHostKeyChecking=yes -o UserKnownHostsFile=$X402_KNOWN_HOSTS",
+    );
+    const pinned = read("ansible/files/storage-box.known_hosts")
+      .split("\n")
+      .filter((l) => l && !l.startsWith("#"));
+    expect(pinned).toHaveLength(1);
+    expect(pinned[0]).toMatch(/^\[u595862-sub2\.your-storagebox\.de\]:23 ssh-ed25519 \S+$/);
+  });
+
+  test("decrypts its credentials from the directory the playbook makes", () => {
+    expect(script).toContain("creds=(storage-box-ssh-key borg-passphrase)");
+    expect(script).toContain("creds+=(snapshot-role-id snapshot-secret-id)");
+    expect(script).toContain('x402-creds backup "${creds[@]/%/:0}"');
+    expect(playbook).toContain('{ path: /srv/x402/backup/creds, owner: root, mode: "0700" }');
+    expect(read("libexec/x402-creds")).toContain("src=/srv/x402/$1/creds");
+  });
+
+  test("keeps 14 daily archives (ADR 0013)", () => {
+    expect(script).toContain("--keep-daily 14");
+  });
+
+  test("the policy allows the snapshot and nothing else", () => {
+    const policy = read("openbao/x402-snapshot.hcl").replace(/^#.*\n/gm, "");
+    expect([...policy.matchAll(/^path "([^"]+)"/gm)].map((m) => m[1])).toEqual([
+      "sys/storage/raft/snapshot",
+    ]);
+    expect(policy).toContain('capabilities = ["read"]');
   });
 });
