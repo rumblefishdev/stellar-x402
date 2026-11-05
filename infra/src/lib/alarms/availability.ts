@@ -17,10 +17,30 @@ export function addAvailabilityAlarms(f: AlarmFactory, c: EnvironmentConfig): vo
     // A missing point counts as down (decision 5): a broken probe alarms rather than going quiet.
     missing: "breaching",
     description: {
-      what: `The facilitator was not ready to settle for ${t.uptimeFailingMinutes} minutes in a row, as the uptime probe reads ${c.uptime.url} through Cloudflare: the process is down or in a crash loop, it holds no lease, or the tunnel or Cloudflare is failing. A deploy's usual downtime stays under this window.`,
+      what: `The facilitator was not ready to settle for ${t.uptimeFailingMinutes} minutes in a row, as the uptime probe reads ${c.uptime.url} through Cloudflare: the process is down or in a crash loop that stays down that long, it holds no lease, or the tunnel or Cloudflare is failing. A deploy's usual downtime stays under this window; uptime-flapping covers a loop that comes up in between.`,
       next: `Open the URL, then on the server check x402@${c.envName} (systemctl status, journalctl) and the tunnel; the probe's own log names what it read.`,
       noData:
         "A missing point counts as down, so a probe that stops publishing fires this too: the probe, its schedule or eu-central-1 may be the fault.",
+    },
+  });
+
+  // A crash loop that comes up for a minute between restarts never gives uptime its run of 7
+  // (Karol's review of #114, point 4): count the failing minutes in a longer window instead.
+  f.level("uptime-flapping", {
+    group: "uptime",
+    signal: { catalog: "ready" },
+    statistic: "Minimum",
+    periodMinutes: 1,
+    periods: t.uptimeFlapWindowMinutes,
+    datapoints: t.uptimeFlapFailingMinutes,
+    comparison: "<",
+    threshold: 1,
+    missing: "breaching",
+    description: {
+      what: `The facilitator was not ready to settle in ${t.uptimeFlapFailingMinutes} of the last ${t.uptimeFlapWindowMinutes} minutes, as the uptime probe reads ${c.uptime.url}: it keeps going down and coming back, a crash loop, a lease that moves, or a tunnel that drops. One deploy stays under this count.`,
+      next: `On the server: journalctl -u x402@${c.envName} for the restarts and their exit, and facilitator-failed's messages; then the tunnel's log.`,
+      noData:
+        "A missing point counts as down, as for uptime, which fires too when the probe stops.",
     },
   });
 

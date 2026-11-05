@@ -46,6 +46,12 @@ export type AlarmGroup = (typeof ALARM_GROUPS)[number];
 export interface Thresholds {
   /** `uptime`: failing minutes in a row, above a deploy's worst downtime (ADR 0011). */
   readonly uptimeFailingMinutes: number;
+  /**
+   * `uptime-flapping`: failing minutes in the window that fire it though none of them run for
+   * `uptimeFailingMinutes`, so a crash loop that comes up between restarts is seen.
+   */
+  readonly uptimeFlapFailingMinutes: number;
+  readonly uptimeFlapWindowMinutes: number;
   readonly rpcStalledSeconds: number;
   /** Tied to the balance floor's `maxStaleMs` at its default interval (0027 decision 17). */
   readonly balanceStaleSeconds: number;
@@ -135,6 +141,11 @@ const percent = positive.max(100, "is a percentage, at most 100");
 const thresholds = z
   .object({
     uptimeFailingMinutes: count.max(MAX_ALARM_MINUTES, `must fit in a day (${MAX_ALARM_MINUTES})`),
+    uptimeFlapFailingMinutes: count,
+    uptimeFlapWindowMinutes: count.max(
+      MAX_ALARM_MINUTES,
+      `must fit in a day (${MAX_ALARM_MINUTES})`,
+    ),
     rpcStalledSeconds: positive,
     balanceStaleSeconds: positive,
     pendingSeconds: positive,
@@ -225,6 +236,15 @@ function crossChecks(c: z.infer<typeof schema>, ctx: z.RefinementCtx): void {
     if (!c.networks.includes(n as StellarNetwork)) fail(["feeAccounts", n], "is not in networks");
 
   const t = c.thresholds;
+  // Below uptime's run, a plain outage would fire uptime-flapping first; at the window, never.
+  if (
+    t.uptimeFlapFailingMinutes <= t.uptimeFailingMinutes ||
+    t.uptimeFlapFailingMinutes >= t.uptimeFlapWindowMinutes
+  )
+    fail(
+      ["thresholds", "uptimeFlapFailingMinutes"],
+      "must be above uptimeFailingMinutes and below uptimeFlapWindowMinutes",
+    );
   if (t.balanceCriticalStroops >= t.balanceLowStroops)
     fail(["thresholds", "balanceCriticalStroops"], "must be below balanceLowStroops");
   // A group whose threshold or series isn't known yet can't go on (decision 26).

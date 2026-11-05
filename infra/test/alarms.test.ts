@@ -74,8 +74,8 @@ describe("every alarm reads a series the catalog declares (AD-1)", () => {
 });
 
 describe("the Alarms template", () => {
-  test("has every alarm of the list once per network, 77 with two networks", () => {
-    expect(alarms).toHaveLength(77);
+  test("has every alarm of the list once per network, 78 with two networks", () => {
+    expect(alarms).toHaveLength(78);
     expect(new Set(byName.keys()).size).toBe(alarms.length);
   });
 
@@ -276,6 +276,7 @@ const OP = {
  */
 const LEVEL: Record<string, readonly [keyof typeof OP, number, string, number, number, number]> = {
   uptime: ["<", 1, "Minimum", 60, t.uptimeFailingMinutes, t.uptimeFailingMinutes],
+  "uptime-flapping": ["<", 1, "Minimum", 60, t.uptimeFlapFailingMinutes, t.uptimeFlapWindowMinutes],
   "rpc-stalled": [">", t.rpcStalledSeconds, "Maximum", 60, 5, 5],
   "balance-stale": [">", t.balanceStaleSeconds, "Maximum", 60, 1, 1],
   "balance-low": ["<", t.balanceLowStroops, "Minimum", 300, 1, 1],

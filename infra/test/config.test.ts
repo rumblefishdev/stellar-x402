@@ -83,6 +83,16 @@ describe("validateConfig", () => {
       /walStaleSeconds/,
     ],
     [
+      "a flap count at uptime's run",
+      (c) => (m(c).thresholds.uptimeFlapFailingMinutes = 7),
+      /uptimeFlapFailingMinutes/,
+    ],
+    [
+      "a flap count at its window",
+      (c) => (m(c).thresholds.uptimeFlapFailingMinutes = 30),
+      /uptimeFlapFailingMinutes/,
+    ],
+    [
       "critical not below low",
       (c) => (m(c).thresholds.balanceCriticalStroops = 250_000_000),
       /below balanceLow/,

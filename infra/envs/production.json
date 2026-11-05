@@ -37,6 +37,8 @@
   },
   "thresholds": {
     "uptimeFailingMinutes": 7,
+    "uptimeFlapFailingMinutes": 10,
+    "uptimeFlapWindowMinutes": 30,
     "rpcStalledSeconds": 120,
     "balanceStaleSeconds": 300,
     "pendingSeconds": 900,
