@@ -302,6 +302,7 @@ describe("CATALOG", () => {
     expect(def("spend_failure_attributed_total").sets).toEqual([
       { dims: ["fault"], when: { fault: ["ours"] } },
     ]);
+    expect(def("spend_breaker_opened_total").sets).toEqual([{ dims: ["breaker"] }]);
     expect(def("settlement_reconciled_total").sets).toEqual([
       { dims: [] },
       { dims: ["state"], when: { state: ["expired"] } },
@@ -316,6 +317,7 @@ describe("CATALOG", () => {
       "http_requests_total",
       "settlement_sweeps_total",
       "settlement_reconciled_total",
+      "spend_breaker_opened_total",
       "disk_used_percent",
     ];
     for (const m of ALL.filter((x) => !split.includes(x.name)))

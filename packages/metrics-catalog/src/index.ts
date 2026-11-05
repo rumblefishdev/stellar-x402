@@ -332,8 +332,11 @@ export const CATALOG = [
     kind: "counter",
     unit: "Count",
     scope: "network",
-    sets: PLAIN,
-    fields: ["breaker"],
+    // One series per kind, so payer breakers opened with fresh accounts don't hide a pay_to or
+    // an asset one behind an alarm already in ALARM (Karol's review of #114, point 7).
+    sets: [{ dims: ["breaker"] }],
+    // policy.ts BreakerKind.
+    values: { breaker: ["payer", "pay_to", "asset", "other"] },
     emit: "eager-first",
   },
   // `payer` and `pay_to` write no metric: one buyer or seller near its budget is the budget

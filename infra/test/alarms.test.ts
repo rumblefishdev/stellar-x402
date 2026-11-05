@@ -74,8 +74,8 @@ describe("every alarm reads a series the catalog declares (AD-1)", () => {
 });
 
 describe("the Alarms template", () => {
-  test("has every alarm of the list once per network, 78 with two networks", () => {
-    expect(alarms).toHaveLength(78);
+  test("has every alarm of the list once per network, 82 with two networks", () => {
+    expect(alarms).toHaveLength(82);
     expect(new Set(byName.keys()).size).toBe(alarms.length);
   });
 
@@ -159,8 +159,24 @@ describe("the Alarms template", () => {
     const perBase = new Map<string, string[]>();
     for (const r of records)
       if (r.network) perBase.set(r.base, [...(perBase.get(r.base) ?? []), r.network]);
+    // breaker-opened is one alarm per breaker kind on each network.
+    const per = (base: string) => (base === "breaker-opened" ? 3 : 1);
     for (const [base, nets] of perBase)
-      expect(nets.sort(), base).toEqual(["stellar:pubnet", "stellar:testnet"]);
+      expect(nets.sort(), base).toEqual(
+        ["stellar:pubnet", "stellar:testnet"].flatMap((n) => Array<string>(per(base)).fill(n)),
+      );
+  });
+
+  test("makes breaker-opened once per breaker kind, each on its own series", () => {
+    const testnet = records.filter(
+      (r) => r.base === "breaker-opened" && r.network === "stellar:testnet",
+    );
+    expect(testnet.map((r) => r.series[0]?.dims["breaker"])).toEqual(["payer", "pay_to", "asset"]);
+    expect(testnet.map((r) => r.alarmName)).toEqual([
+      "x402-production-breaker-opened-testnet-payer",
+      "x402-production-breaker-opened-testnet-pay-to",
+      "x402-production-breaker-opened-testnet-asset",
+    ]);
   });
 });
 

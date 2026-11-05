@@ -119,7 +119,7 @@ dimensions would cost about $15 a month at 50 channels, so we accept this.
 | `channel-held` | `channel_longest_hold_seconds` (0089) | Level, `Maximum`, 1 of 1 one-minute period | Above 300 s. A default channel holds up to about 426 s. 0027 owns this alarm; 0089 builds the gauge in its own PR, on #112's port, and the alarm goes on with that PR | Ignore: as above |
 | `queue-waiting` | `pool_queued` | Level, `Minimum`, 3 of 3 one-minute periods | Above 0 for 3 minutes: `/settle` is waiting for a channel. Reads the sampled `Values` | Ignore: as above |
 | `channel-quarantined` | `pool_quarantined` | Level, `Maximum`, 1 of 1 one-minute period | 1 or more; a restart puts the channels back | Ignore: as above |
-| `breaker-opened` | `spend_breaker_opened_total` | Event | Any breaker | Not breaching: `facilitator-silent` |
+| `breaker-opened` | `spend_breaker_opened_total`, one alarm per `breaker`: `payer`, `pay_to`, `asset` | Event | Any breaker of that kind. One series for all three let payer breakers opened with fresh accounts hold the alarm in ALARM, so a `pay_to` or `asset` one sent nothing | Not breaching: `facilitator-silent` |
 | `budget-nearing` | `spend_budget_nearing_total`: one series for `asset`, `other` and `global`, with no `budget` dimension | Event, 5-minute periods, N = 4, so its 15-minute repeat doesn't flap | Any. `global` alone can't reach 80% on the defaults | Not breaching: as above |
 | `store-outage` | `settlement_record_failures_total` plus `spend_store_failures_total`, by metric math | Event | 1 or more. The only alarm that stays metric math | Not breaching: as above |
 | `refused-after-verify` | `settlement_refused_after_verify_total` for `stage="pool"` | Event | 1 or more | Not breaching: as above |

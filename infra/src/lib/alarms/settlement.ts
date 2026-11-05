@@ -6,6 +6,13 @@ import type { AlarmFactory } from "./factory.js";
 const SILENT_LEVEL = "Keeps its state; facilitator-silent covers a stopped process.";
 const SILENT_EVENT = "Nothing happened; facilitator-silent covers a stopped process.";
 
+/** policy.ts BreakerKind, with what each one's opening means. */
+const BREAKERS = [
+  ["payer", "one payer's settlements"],
+  ["pay_to", "settlements to one seller"],
+  ["asset", "one wasm token's transfers"],
+] as const;
+
 export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
   const t = c.thresholds;
 
@@ -88,16 +95,20 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
       },
     });
 
-    f.event("breaker-opened", {
-      group: "facilitator",
-      network,
-      signal: { catalog: "spend_breaker_opened_total", dims: on },
-      description: {
-        what: `A spend breaker opened on ${network}: a payer, a seller, an asset or our own side failed past its limit, and its payments are refused for the cool-down (0024).`,
-        next: "Read spend_breaker_opened in the app logs for the scope, then the failures that tripped it.",
-        noData: SILENT_EVENT,
-      },
-    });
+    // One alarm per kind: an Event alarm stays in ALARM for its window, so one series for all
+    // three let payer breakers opened with fresh accounts hide a pay_to or asset one.
+    for (const [breaker, scope] of BREAKERS)
+      f.event("breaker-opened", {
+        group: "facilitator",
+        network,
+        qualifier: breaker.replace("_", "-"),
+        signal: { catalog: "spend_breaker_opened_total", dims: { network, breaker } },
+        description: {
+          what: `A ${breaker} spend breaker opened on ${network}: ${scope} failed on chain past its limit, and its payments are refused for the cool-down (0024).`,
+          next: "Read spend_breaker_opened in the app logs for the scope, then the failures that tripped it.",
+          noData: SILENT_EVENT,
+        },
+      });
 
     f.event("budget-nearing", {
       group: "facilitator",

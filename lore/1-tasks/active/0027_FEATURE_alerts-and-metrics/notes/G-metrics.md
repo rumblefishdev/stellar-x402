@@ -88,7 +88,7 @@ metrics. A gauge that stops is silence, not a stale value. The only zero written
 
 | Metric | Source | Billed by | Log fields | Alarm |
 | --- | --- | --- | --- | --- |
-| `spend_breaker_opened_total` | `spend/policy.ts` | Yes | `breaker` | `breaker-opened` |
+| `spend_breaker_opened_total` | `spend/policy.ts` | `breaker`: `payer`, `pay_to` or `asset` | | `breaker-opened`, one per kind |
 | `spend_budget_nearing_total` | `spend/policy.ts` | Yes, only for `budget` `asset`, `other` and `global`. The set has no `budget`, so the three share one series | `budget` (a `payer` budget is in the `spend_budget_nearing` log only) | `budget-nearing` |
 | `spend_failure_attributed_total` | `spend/policy.ts` | `fault`, only for `ours` | None: only `ours` writes a line | `failure-ours` |
 | `spend_commit_unmatched_total` | `spend/policy.ts` | Yes | `state` | `commit-unmatched` |
