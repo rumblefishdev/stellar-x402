@@ -270,6 +270,25 @@ describe("main()", () => {
     }
   });
 
+  it("names the commit it was built from on /health (0029)", async () => {
+    const openbao = await fakeOpenBao(key);
+    const app = await main({
+      ...env,
+      ...signerEnv(facilitator, openbao.socketPath),
+      RPC_URLS: rpc.url,
+      PORT: "0",
+      LOG_LEVEL: "error",
+      GIT_COMMIT: "e577fe6a",
+    });
+    try {
+      const response = await fetch(`http://127.0.0.1:${app.port}/health`);
+      expect(await response.json()).toMatchObject({ commit: "e577fe6a" });
+    } finally {
+      await app.close();
+      openbao.close();
+    }
+  });
+
   it("starts and serves with OpenBao down, and reports the failed check on /health (0036)", async () => {
     const app = await main({
       ...env,

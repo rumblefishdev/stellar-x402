@@ -67,7 +67,8 @@ One folder per run, `results/<date>-<facilitator host>/`, with two files:
 - `suite.json`: the suite's own `--output-json` file, copied byte for byte. It is what the
   unmodified x402 tests say: one row per scenario with its transaction hash.
 - `gate.json`: what the gate says about it: `suite.json`'s name and SHA-256, the upstream repo and
-  commit, the date, the facilitator URL and its signers, the command, when the run started and the
+  commit, the date, the facilitator URL, the commit its `/health` names (null when it names none)
+  and its signers, the command, when the run started and the
   last ledger closed before it, the suite's exit code, whether the gate passed and why not, and each transaction as the chain shows
   it (ledger, time, fee payer, call). Only runs against our facilitator are committed (task 0029);
   dry runs against a public facilitator stay out of git.
