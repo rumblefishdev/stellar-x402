@@ -1,0 +1,15 @@
+# OpenBao's snapshot once a day (ADR 0013). Persistent: a run missed while the server was down
+# runs at the next boot. Enabled by the playbook, started by the runbook's admin step once its
+# credentials and the Borg repository exist (runbook, OpenBao snapshots).
+[Unit]
+Description=x402 OpenBao snapshot, daily
+Documentation=https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/runbook.md
+
+[Timer]
+OnCalendar=*-*-* 03:15:00
+AccuracySec=1s
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

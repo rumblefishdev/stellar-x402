@@ -2,7 +2,8 @@
 # /srv/x402/openbao, the compose files and deploy.sh, the systemd units and their scripts, the
 # rotation of OpenBao's audit log, and CI's deploy user with its forced command and one sudo rule.
 # Since 0027: the CloudWatch agent and its Roles Anywhere signing helper, the files the units and
-# the host probe write under /var/log/x402, and their rotation.
+# the host probe write under /var/log/x402, and their rotation. Since 0026's backups: Borg and
+# OpenBao's daily snapshot to the Storage Box, with its pinned host key.
 # Never the server's base setup (firewall, Docker's daemon.json, sshd, the admins), which the
 # explorer's playbook owns. An admin runs it from a commit on `deploy/production`, which takes only
 # an approved pull request, never from `develop`, which takes pushes without one; CI never runs it
@@ -102,6 +103,13 @@
         name: [curl, openssl, logrotate]
         state: present
 
+    # OpenBao's snapshot job sends its archives with it (ADR 0013). Ubuntu's package: the Storage
+    # Box runs the same major version for us (the script's BORG_REMOTE_PATH).
+    - name: Borg, for OpenBao's snapshots
+      ansible.builtin.apt:
+        name: borgbackup
+        state: present
+
     # A running helper keeps the old binary until its next run.
     - name: IAM Roles Anywhere's signing helper
       ansible.builtin.get_url:
@@ -148,6 +156,9 @@
         - { path: "/srv/x402/{{ x402_environment }}/creds", owner: root, mode: "0700" }
         - { path: /srv/x402/openbao, owner: x402, mode: "0755" }
         - { path: /srv/x402/openbao/creds, owner: root, mode: "0700" }
+        # The backup jobs' credentials: the Storage Box key, Borg's passphrase, the snapshot AppRole.
+        - { path: /srv/x402/backup, owner: root, mode: "0700" }
+        - { path: /srv/x402/backup/creds, owner: root, mode: "0700" }
         - { path: /usr/local/libexec/x402, owner: root, mode: "0755" }
         - { path: /var/lib/x402-deploy/.ssh, owner: x402-deploy, mode: "0700" }
         # The agent's config, the rotation's and the signing helper's ARNs.
@@ -156,6 +167,8 @@
         # A backup or snapshot job touches its stamp here after it succeeds, as root (0026).
         - { path: /var/lib/x402, owner: root, mode: "0755" }
         - { path: /var/lib/x402/last-ok, owner: root, mode: "0755" }
+        # Borg's cache and the repository's last-seen state, so a swapped repository is noticed.
+        - { path: /var/lib/x402/borg, owner: root, mode: "0700" }
 
     # After the package, which creates the group, and before any unit that writes here is copied:
     # a reloaded unit opens its new files at its next stop or start. The units append, the agent
@@ -312,6 +325,17 @@
       loop:
         - compose.yaml
         - config.hcl
+        # The snapshot job's policy, which the runbook's admin step writes into OpenBao.
+        - x402-snapshot.hcl
+
+    # The Storage Box's host key, pinned: the snapshot job refuses any other (StrictHostKeyChecking).
+    - name: The Storage Box's host key
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/files/storage-box.known_hosts"
+        dest: /etc/x402/storage-box.known_hosts
+        owner: root
+        group: root
+        mode: "0644"
 
     # The only file the deploy user writes; the deploy unit reads it as root.
     - name: digest.next
@@ -451,4 +475,13 @@
       loop:
         - x402-host-probe.timer
         - x402-logrotate.timer
+      when: not (ansible_check_mode and units is changed)
+
+    # Enabled, not started: the runbook's admin step starts it once its credentials and the Borg
+    # repository exist (OpenBao snapshots). Until then the snapshot-age alarm already says it never
+    # ran. Not under --check while this run would add the unit.
+    - name: OpenBao's snapshot timer, enabled at boot
+      ansible.builtin.systemd_service:
+        name: x402-openbao-snapshot.timer
+        enabled: true
       when: not (ansible_check_mode and units is changed)
