@@ -95,7 +95,7 @@ Nothing: the grilling's frontier is empty (2026-10-30).
 | A | `buildCreateChannelsTx` with a funding account apart from the signer it adds, and a script that creates channels for a given key (row 15) | #100, merged |
 | A′ | the wiring that keeps behaviour: `config.signer` with the secret, the signer passed into `buildSettlement`, `facilitatorAddress`, `verifyOnlySigner` | #106, merged |
 | B | the Transit signer, its config, `/health`'s `signer`, the settle reasons, the compose variables and the tests (rows 2–14), stacked on A′ for AC 1 | #102, merged; rows 17–19, 22 and 25–26 too (#116 merged into it) |
-| C | the tests that aren't in `test/` or named `.test.ts` move there: five scripts to `test/live/`, `testing.ts` out of `src`; the rule goes into the repo's `CLAUDE.md`; `verifyOnlySigner`'s comment cites the lines that prove it; `keypairSigner`, with no production caller after D, moves to `./testing` | after #102 |
+| C | the tests that aren't in `test/` or named `.test.ts` move there: five scripts to `test/live/`, `testing.ts` out of `src`; the rule goes into the repo's `CLAUDE.md`; `verifyOnlySigner`'s comment cites the lines that prove it; `keypairSigner`, with no production caller after D, moves to `./testing` | #130 and #131 open; `verifyOnlySigner`'s comment already cites them |
 | D | the AppRole login only from files (row 27) | #121, merged |
 | E | the comments on a signing failure after a sent envelope (row 16) | #122, merged |
 
