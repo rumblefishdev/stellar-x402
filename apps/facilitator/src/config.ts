@@ -567,7 +567,10 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
   };
 }
 
-/** The config of `pnpm migrate`: only `DATABASE_URL` (or its `_FILE`), which it requires. */
+/**
+ * The config of `pnpm migrate`: only `DATABASE_URL` (or its `_FILE`), which it requires. The other
+ * file settings are still checked, so a plain AppRole login stops it too.
+ */
 export function parseMigrateConfig(env: Record<string, string | undefined>): {
   databaseUrl: string;
 } {

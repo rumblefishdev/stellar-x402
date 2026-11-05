@@ -598,9 +598,9 @@ describe("the signer (0036)", () => {
   });
 
   it.each(["OPENBAO_ROLE_ID", "OPENBAO_SECRET_ID"])("refuses a plain %s", (name) => {
-    expect(problems({ ...minimal, [name]: "plain" })).toEqual([
-      `${name} is read only from ${name}_FILE`,
-    ]);
+    const refused = [`${name} is read only from ${name}_FILE`];
+    expect(problems({ ...minimal, [name]: "plain" })).toEqual(refused);
+    expect(problems({ ...minimal, [name]: "plain", [`${name}_FILE`]: undefined })).toEqual(refused);
   });
 
   const leftover = "FACILITATOR_SECRET is no longer read: the key signs in OpenBao (ADR 0013)";
