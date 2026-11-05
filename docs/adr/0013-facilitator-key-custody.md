@@ -65,9 +65,9 @@
 - **The OpenBao key signs settlements only.** An ordinary wallet funds the fee account and creates
   the channels, writing the OpenBao key in as each channel's only signer; the channels' own fresh
   keys sign that, so no tool signs other transactions through OpenBao (0036). OpenBao doesn't
-  enforce this, since it signs any hash; the rule keeps the theft alarm free of exceptions, as any
-  other signature by this key is theft. The one exception is the move off a suspected stolen key,
-  below.
+  enforce this, since it signs any hash. The theft alarm reads the accounts, not signatures, so the
+  rule keeps it free of exceptions: no tool of ours changes these accounts' signers, and such a
+  change is theft. The one exception is the move off a suspected stolen key, below.
 - **A unix socket per network, and no network port.** OpenBao has one listener per network, each
   on a socket in its own volume, mounted only into that network's facilitator, plus an admin
   listener on loopback inside OpenBao's own container, which has no network: only root or the

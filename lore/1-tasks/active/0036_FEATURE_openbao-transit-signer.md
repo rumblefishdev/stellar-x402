@@ -132,10 +132,10 @@ Nothing: the grilling's frontier is empty (2026-10-30).
 
 ## Acceptance Criteria
 
-- [ ] Given an OpenBao Transit Ed25519 key, when it signs a testnet settlement through the pool, then the transaction is accepted on chain
-- [ ] Given the `openbao` signer mode, when the facilitator starts, then no secret seed is read from the environment or a file
-- [ ] Given OpenBao down, when the facilitator starts, then it starts and `/verify` answers
-- [ ] Given a configured address that isn't the Transit key's, when the first settlement signs, then it fails closed and nothing is submitted
-- [ ] Given a token past its TTL, when the next settlement signs, then the signer has logged in again without a restart
-- [ ] Given OpenBao down or sealed, when `/settle` is called, then it answers an error, no other key signs, and the failure is logged and counted
-- [ ] The added latency per settlement is measured and recorded
+- [x] Given an OpenBao Transit Ed25519 key, when it signs a testnet settlement through the pool, then the transaction is accepted on chain (`a0588081…` on testnet, ledger 5525638, successful on Horizon; run on #102's head `746300b`, not repeated)
+- [x] Given the `openbao` signer mode, when the facilitator starts, then no secret seed is read from the environment or a file (`config.test.ts` refuses a leftover `FACILITATOR_SECRET`; `src` holds that name only in the refusal)
+- [x] Given OpenBao down, when the facilitator starts, then it starts and `/verify` answers (`main.test.ts`, "starts and serves with OpenBao down")
+- [x] Given a configured address that isn't the Transit key's, when the first settlement signs, then it fails closed and nothing is submitted (`settle-pool.test.ts`, "signing with another key", and `openbao-signer.openbao.test.ts` on a real OpenBao)
+- [x] Given a token past its TTL, when the next settlement signs, then the signer has logged in again without a restart (`openbao-signer.openbao.test.ts`, "again once its token has expired")
+- [x] Given OpenBao down or sealed, when `/settle` is called, then it answers an error, no other key signs, and the failure is logged and counted (`settle-pool.test.ts`, "OpenBao is sealed"; `openbao-signer.test.ts`, `signer_failed` and `signer_failures_total`)
+- [x] The added latency per settlement is measured and recorded (two signatures over a unix socket, OpenBao 2.7.2 in Docker at `--cpus=0.5`, 5 × 1,000 pairs: p50 0.60–0.76 ms, p99 44–49 ms, max 124 ms; #102)
