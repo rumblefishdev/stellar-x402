@@ -45,6 +45,10 @@ history:
     status: developing
     who: akot
     note: "From #113's spine (decisions 43, 44, 46): facilitator-failed and credentials-stale in host, and telemetry-silent reads the disk series too."
+  - date: "2026-11-05"
+    status: developing
+    who: akot
+    note: "Karol's review of #114 (decisions 60-67): settlement-expired, submit-failed, hook-failures, uptime-flapping, http-500 at 1, breaker-opened per kind, theft findings straight to SNS from #115, the log-volume ceiling with host, the Count shape folded into Event."
 ---
 
 # The alarms 0027 builds
@@ -109,13 +113,16 @@ From the off-server check, every 5 minutes, so they fire with the server down. B
 
 `account-state` and `account-effects` are one alarm each across all accounts. While a rotation or a
 channel setup holds one in ALARM, a theft on another account sends nothing new. Per-account
-dimensions would cost about $15 a month at 50 channels, so we accept this.
+dimensions would cost about $15 a month at 50 channels, so we accept this. Root on the server can
+hold either in ALARM the same way with a forged point every 15 minutes, so #115's check also posts
+each finding to the topic itself, one message per finding; the two alarms stay as the backstop for
+a check that can't publish (decision 64).
 
 ## Settlement
 
 | Alarm | Signal | Shape | Fires when | Missing data |
 | --- | --- | --- | --- | --- |
-| `pending` | `settlement_oldest_open_seconds` | Level, `Maximum`, 3 of 3 one-minute periods | Above 900 s: past the 750 s a record can last at the cap. The age is computed at the read, from the oldest record the latest sweep left open. A sweep that hangs after one that ended with nothing open reads 0 for as long as it hangs: `sweeps-stopped` catches a hung sweep after 5 minutes, not `pending`. `history_gone` records are left out, but that set is in memory: after a restart a record counts again until a sweep reads its history, so while that read fails `pending` can fire on it | Ignore: `facilitator-silent` |
+| `pending` | `settlement_oldest_open_seconds` | Level, `Maximum`, 3 of 3 one-minute periods | Above 900 s: past the 750 s a record can last at the cap. The age is computed at the read, from the oldest record the latest sweep left open. A sweep that hangs after one that ended with nothing open reads 0 for as long as it hangs: `sweeps-stopped` catches a hung sweep after 5 minutes, not `pending`. Before a process's first listing there is no point (decision 56), so it keeps its state; if the listing keeps failing, `sweeps-stopped` fires after 5 minutes and `gauges-silent` after 15. `history_gone` records are left out, but that set is in memory: after a restart a record counts again until a sweep reads its history, so while that read fails `pending` can fire on it | Ignore: `facilitator-silent` |
 | `channel-held` | `channel_longest_hold_seconds` (0089) | Level, `Maximum`, 1 of 1 one-minute period | Above 300 s. A default channel holds up to about 426 s. 0027 owns this alarm; 0089 builds the gauge in its own PR, on #112's port, and the alarm goes on with that PR | Ignore: as above |
 | `queue-waiting` | `pool_queued` | Level, `Minimum`, 3 of 3 one-minute periods | Above 0 for 3 minutes: `/settle` is waiting for a channel. Reads the sampled `Values` | Ignore: as above |
 | `channel-quarantined` | `pool_quarantined` | Level, `Maximum`, 1 of 1 one-minute period | 1 or more; a restart puts the channels back | Ignore: as above |
@@ -214,3 +221,5 @@ fields from it, and the weekly fee review needs a week of it.
 - The `channel-held` alarm, until 0089's PR.
 - An external dead-man's switch for a host outside AWS, which the sibling projects recommend:
   decide before mainnet, with 0038.
+- A watch for a coming protocol upgrade, which the explorer has after a 16-hour stall at one: it
+  reads the validators' votes, not a metric we have. Decide before mainnet, with 0038 (decision 66).

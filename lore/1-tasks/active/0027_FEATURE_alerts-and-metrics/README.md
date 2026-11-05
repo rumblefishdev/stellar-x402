@@ -479,6 +479,47 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
 59. **`createRpcStallTracker` loses its unused `everyMs`** (akot, 2026-11-05; from Karol's
     review of #112). No caller passed it; the tracker polls every `RPC_STALL_POLL_MS`.
 
+60. **A failed settlement reaches an alarm** (2026-11-05, from Karol's review of #114, point 1). An
+    `expired` record, an `unexpected_settle_error` answered with status 200, and a hook that threw
+    reached none: `failure-ours` needs a fee, `pending` a record past 750 s, `http-500` a 500.
+    `settlement-expired` (`settlement_reconciled_total` for `state="expired"`), `submit-failed` and
+    `hook-failures` are Event alarms on counters the facilitator already wrote; the three become
+    eager-first, and `settlement_reconciled_total` bills `state` for `expired` only.
+61. **`http-500` fires on the first error** (2026-11-05, point 3). 5 in 5 minutes let 4 errors pass,
+    while `onError` takes anything it doesn't know as ours. It is the plain Event shape, which
+    sends one message per burst. `http_requests_total` stays aggregated: making it eager-first
+    would write a line per route and status, and a crash after a 500 fires `facilitator-failed`.
+62. **`uptime-flapping`, 10 failing minutes of 30** (2026-11-05, point 4). `uptime` needs 7 in a
+    row, so a loop that comes up for a minute between restarts (`0 0 0 0 0 0 1`) never fired it.
+    Same series, same missing-data rule, in the `uptime` group. One deploy stays under 10; synth
+    refuses a count at `uptime`'s run or at the window.
+63. **`breaker-opened` per breaker kind** (2026-11-05, point 7). An Event alarm stays in ALARM for
+    its window, so one series let payer breakers opened with fresh accounts hide a `pay_to` or
+    `asset` one. The catalog bills `breaker`: 3 series per network instead of 1, $0.60 a month
+    more per network.
+64. **#115 posts each theft finding to the topic itself** (2026-11-05, point 5). Root on the server
+    can write a forged `account_effects_unexpected` point every 15 minutes and hold the alarm in
+    ALARM, and CloudWatch notifies only on a change, so a real theft would send nothing. The
+    off-server check publishes each finding (account, effect or signer change, transaction) to
+    `x402-<env>-alarms` straight from AWS, one message per finding, deduplicated by its cursor;
+    `account-effects` and `account-state` stay as the backstop for a check that can't publish.
+    Its role gets `sns:Publish` on that topic only. #115 builds it.
+65. **The log path reaches other projects' namespaces; `log-volume` is the ceiling** (2026-11-05,
+    point 6). An EMF line in our metrics group can name any namespace of the shared account, such
+    as `SorobanBlockExplorer/Indexer`, which the explorer alarms on, and create custom metrics
+    without limit. No IAM condition covers an EMF namespace. The explorer's and the Prices API's
+    owners are told before `host` goes on. `log-volume` gets a coarse 200 MB an hour per group,
+    set before any measurement, and synth refuses `host` without it.
+66. **No protocol-upgrade watch in 0027** (2026-11-05, point 2). The explorer has one after a
+    16-hour stall at an upgrade. For the facilitator an upgrade is mostly an SDK update; a watch
+    reads the validators' votes, not a metric we have. It is named in G-alarm-list's Deferred, to decide with 0038 before
+    mainnet.
+67. **Three cuts in `infra/`** (2026-11-05, point 8). The Count shape was `event()` with 5-minute
+    periods, N = 3 and a threshold, so it went; `pool-health` is that Event. The fee account's
+    check is `StrKey.isValidEd25519PublicKey`, as in the facilitator's config, not 30 lines of
+    base32 and CRC16. The config is a zod schema, as in the facilitator and the MCP packages,
+    with the same messages and every field's problem at once.
+
 ## Acceptance Criteria
 
 - [ ] Given the running facilitator, when it serves traffic, then pool `onEvent` events, per-route request counts and settle outcomes are exported as metrics

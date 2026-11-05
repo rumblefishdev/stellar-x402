@@ -2,7 +2,8 @@
 // they fire with the server down. Built here, in the `watch` group, which goes on with #115's
 // Lambda (decision 23). Root on the server can write into `x402-watch` too, so each alarm takes
 // the statistic a forged point can't hide a real one behind: `Minimum` for a balance, `Maximum`
-// for a count (G-alarm-list, "Statistics").
+// for a count (G-alarm-list, "Statistics"). A forged point can still hold a theft alarm in ALARM,
+// so #115's check posts each finding to the topic itself and these are its backstop (decision 64).
 import type { EnvironmentConfig } from "../config.js";
 import { names } from "../names.js";
 import type { AlarmFactory } from "./factory.js";
