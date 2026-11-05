@@ -2,10 +2,10 @@
 id: "0091"
 title: "Drop the containers' capabilities and run the playbook from a protected branch before the signer lands"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0011"]
-related_tasks: ["0026", "0036"]
+related_tasks: ["0026", "0036", "0115"]
 tags: [deploy, security, priority-medium, effort-small, platform]
 links: []
 history:
@@ -17,6 +17,25 @@ history:
     status: active
     who: okarcz
     note: "Picked up by okarcz."
+  - date: "2026-11-05"
+    status: active
+    who: okarcz
+    note: >
+      Before Closing steps 1 to 6 done on ch-prod-01. #119 was the first deploy (2026-11-04, its
+      playbook run gave the hardened compose file and the restarts; 0026's entry). #132 was the
+      second, through deploy.sh and x402-deploy (run 42021731996, sha256:e6bfaa1a…): the
+      migration applied nothing, the facilitator restarted healthy, and the runbook's docker
+      inspect showed all four containers hardened, the facilitator's for the first time. No
+      playbook run for #132: only the .env.example files changed under deploy/. Criterion 1
+      ticked; criterion 2 waits on the reboot (decision 3).
+  - date: "2026-11-05"
+    status: completed
+    who: okarcz
+    note: >
+      Closed. Code in #118 (17dbc45), on the server since #119. Criteria 1 to 4 met: 1 and
+      2 on ch-prod-01 after the second deploy, with the reboot in criterion 2 deferred to 0115
+      (decision 3, not now: the server is shared with soroban-explorer and prices-api). 17
+      decisions, CI's production-postgres job added.
 ---
 
 # Drop the containers' capabilities and run the playbook from a protected branch before the signer lands
@@ -54,14 +73,20 @@ installs what root runs on the shared server, comes from `develop`, which has no
 
 ## Acceptance Criteria
 
-- [ ] Given the running services, when `docker inspect` reads them, then each shows its dropped
-      capabilities and `no-new-privileges` (passed locally on 2026-11-03; on the server after the
-      merge, with the runbook's check)
-- [ ] Given those settings, when a fresh database starts, a migration runs, a deploy restarts the
+- [x] Given the running services, when `docker inspect` reads them, then each shows its dropped
+      capabilities and `no-new-privileges` (passed locally on 2026-11-03; on ch-prod-01 on
+      2026-11-05 after the second deploy, with the runbook's check: facilitator `node`, Postgres
+      `999:999`, cloudflared `65532:65532` and OpenBao `openbao`, each `drop=[ALL]`, `add=[]` and
+      `no-new-privileges:true`; `migrate-testnet`'s config shows `ALL` and
+      `no-new-privileges:true`)
+- [x] Given those settings, when a fresh database starts, a migration runs, a deploy restarts the
       facilitator and the server reboots, then all of them still work (passed locally on
       2026-11-03 with plain Compose: a new database, a migration and a container restart;
-      Postgres as 999 with its secret at `x402-creds`' owner and mode on 2026-11-04. Not yet: the
-      deploy path (`deploy.sh`, `x402@.service`) and the reboot, decision 3)
+      Postgres as 999 with its secret at `x402-creds`' owner and mode on 2026-11-04. On ch-prod-01
+      on 2026-11-05: Postgres as 999 on the server's own volume, `x402-db-testnet@production`
+      active; the second deploy through `deploy.sh` and `x402-deploy` (run 42021731996) ran
+      `migrate-testnet` and restarted the facilitator healthy, `/health` ready, signer ok and
+      listed, `/supported` 200. The reboot is deferred to 0115, decision 3)
 - [x] Given the runbook, when an admin follows it, then the playbook comes from a commit on
       `deploy/production`
 - [x] Given a change under `deploy/`, when it ships, then the runbook gives the order of the
@@ -153,7 +178,9 @@ installs what root runs on the shared server, comes from `develop`, which has no
    The playbook must come from `deploy/production`, so the merge comes first, and its deploy runs
    with the old files; a change must work with them until the restart.
 3. **Test locally only for now** (okarcz, 2026-11-03): no run on the server or a VM. The reboot
-   stays in the criteria; okarcz decides how to test it before review.
+   stays in the criteria; okarcz decides how to test it before review. Decided on 2026-11-05:
+   the reboot goes to 0115, in a window agreed with the team that runs soroban-explorer and
+   prices-api, since it stops their services too; 0091 closes without it.
 4. **The out-of-date context is fixed in this task's PR** (okarcz, 2026-11-03).
 
 ### Emerged
@@ -243,3 +270,11 @@ The code is merged; criteria 1 and 2 need the server. In this order (runbook, Th
 
 Then tick criteria 1 and 2 with the date and what was run, add the history entry, and close the
 task with `promote-task`.
+
+Done on 2026-11-05: steps 1 to 6 on ch-prod-01, the reboot deferred to 0115.
+
+## Future Work
+
+- The reboot of ch-prod-01 in an agreed window: 0115.
+- The facilitator and `migrate-testnet` under the production compose file still aren't started by
+  CI (Review, 2026-11-03); Postgres is, by decision 17.
