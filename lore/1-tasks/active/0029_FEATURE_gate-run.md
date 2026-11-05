@@ -61,15 +61,20 @@ As a reviewer of the grant, I want e2e results with real settled transaction has
 | 2 | `/health` reports the running commit as `commit`, set when the image is built; the gate saves it | the owner's decision, 2026-11-05 | as the task says: the facilitator exposes its version | upstream's e2e facilitator has `version` in `/health` (`e2e/facilitators/typescript/index.ts:1215@8827cf1`) |
 | 5 | One results folder per environment, overwritten, with git holding the history: `conformance/results/testnet-hosted/`; local runs are ignored by git (changes ADR 0009) | the owner's decision, 2026-11-05 | beyond it | upstream keeps CI artifacts only; no standard |
 | 6 | The gate fails a run whose facilitator names no commit, and one whose own code has uncommitted changes, and saves its commit | the owner's decisions, 2026-11-05 | as the task's version criterion, and beyond it | no standard |
+| 7 | The proxy forwards the facilitator's response headers | the owner's decision, 2026-11-05 | beyond it | no standard |
+| 8 | On testnet gateway.fm's RPC comes first and SDF's second, once a measurement from the server agrees | the owner's decision, 2026-11-05; measured from one machine, 25 calls each | beyond it | no standard |
 
 ## Not yet decided
 
+- Whether the gate keeps its checks beyond the suite's own result, or becomes a short script around it. The questions below it depend on this.
 - How often the gate runs, and how the pin moves.
 - Whether the gate requires the pin's exact number of scenarios.
 - Whether the gate saves the forwarded calls, and counts them.
 - Whether the gate saves each signed envelope.
-- Whether the proxy forwards response headers.
-- Which testnet RPC comes first. Measured 2026-11-05 from one machine, 25 calls each: SDF's median 0.3 to 6 s, gateway.fm's 0.1 s. Not measured from the server.
+
+## Out of scope
+
+- End-to-end tests of refusals against the deployed facilitator: the project's full end-to-end suite comes later (the owner, 2026-11-05).
 
 ## Implementation
 
