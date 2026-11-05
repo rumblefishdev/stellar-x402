@@ -1,7 +1,7 @@
 // The Tranche 1 gate (ADR 0009): the unmodified x402 e2e suite, pinned, runs every Stellar `exact`
 // scenario against the facilitator at GATE_FACILITATOR_URL through the proxy in
 // `conformance/external-proxy/`, and the run is saved with the pin and the transaction hashes.
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import {
@@ -20,8 +20,14 @@ import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import { Keypair, rpc } from "@stellar/stellar-sdk";
 import { checkSettlement, readSettlement, type Settlement } from "./onchain.js";
-import { UPSTREAM_COMMIT, UPSTREAM_REPO, assertClean, prepare } from "./upstream.js";
-import { judge, type SuiteRun } from "./verdict.js";
+import {
+  UPSTREAM_COMMIT,
+  UPSTREAM_REPO,
+  UPSTREAM_SCENARIOS,
+  assertClean,
+  prepare,
+} from "./upstream.js";
+import { judge, judgeCoverage, type SuiteRun } from "./verdict.js";
 
 const conformance = fileURLToPath(new URL("..", import.meta.url));
 const root = join(conformance, "..");
@@ -94,6 +100,7 @@ cpSync(
 assertClean(checkout);
 
 const suiteJson = join(checkout, "gate-results.json");
+const callsFile = join(checkout, "gate-calls.log");
 const filters = [
   "test",
   "--testnet",
@@ -116,6 +123,7 @@ suite = spawn("pnpm", args, {
   env: {
     ...process.env,
     GATE_FACILITATOR_URL: facilitatorUrl,
+    GATE_CALLS_FILE: callsFile,
     CLIENT_STELLAR_PRIVATE_KEY: accounts.E2E_BUYER_SECRET,
     SERVER_STELLAR_ADDRESS: accounts.E2E_SELLER_PUBLIC,
     // The suite will not start without it, even for an external facilitator; the proxy ignores it.
@@ -129,6 +137,19 @@ const run = existsSync(suiteJson)
   ? (JSON.parse(readFileSync(suiteJson, "utf8")) as SuiteRun)
   : undefined;
 const problems = judge(run, suiteExitCode);
+const calls = existsSync(callsFile) ? readFileSync(callsFile, "utf8") : "";
+if (run) problems.push(...judgeCoverage(run, calls.split("\n"), UPSTREAM_SCENARIOS));
+if (!facilitatorCommit) problems.push("the facilitator names no commit on /health");
+// A run of record says which gate judged it, so that code must be the commit it names.
+const gateCommit = execFileSync("git", ["rev-parse", "HEAD"], {
+  cwd: conformance,
+  encoding: "utf8",
+}).trim();
+const gateChanges = execFileSync("git", ["status", "--porcelain", "--", "src", "external-proxy"], {
+  cwd: conformance,
+  encoding: "utf8",
+}).trim();
+if (gateChanges) problems.push(`the gate has uncommitted changes:\n${gateChanges}`);
 
 // The suite reports a hash; the chain says what it paid. Every Stellar route costs $0.001, 10000
 // units of testnet USDC (7 decimals), at the pinned commit (e2e/config/mechanisms_stellar.json,
@@ -178,10 +199,12 @@ if (run) {
   );
   mkdirSync(folder, { recursive: true });
   copyFileSync(suiteJson, join(folder, "suite.json"));
+  writeFileSync(join(folder, "calls.log"), calls);
   const record = {
     suiteFile: "suite.json",
     suiteSha256: createHash("sha256").update(readFileSync(suiteJson)).digest("hex"),
     upstream: { repo: UPSTREAM_REPO, commit: UPSTREAM_COMMIT },
+    gateCommit,
     date,
     facilitatorUrl,
     facilitatorCommit,

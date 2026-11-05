@@ -35,12 +35,14 @@ The suite kills whatever listens on ports 4022–4060 before it starts.
    the pinned commit.
 5. Runs every Stellar `exact` scenario: each canonical TypeScript client and server, HTTP and MCP,
    both routes (`/exact/stellar`, and `/exact/stellar/upfront`, which settles before serving).
-6. Fails unless the suite exited 0, every scenario passed with a hash and no two report the same
-   hash. Reads every hash from Stellar RPC and fails unless each succeeded as one `transfer` of
+6. Fails unless the suite exited 0, all 18 scenarios passed with a hash, no two report the same
+   hash, and the proxy saw the facilitator answer 200 to a `/verify` per `authorization` scenario
+   and a `/settle` per scenario. Fails too if the facilitator names no commit on `/health` or the
+   gate has uncommitted changes. Reads every hash from Stellar RPC and fails unless each succeeded as one `transfer` of
    0.001 testnet USDC from the buyer to the seller, its fee paid by one of the facilitator's
    signers, in a ledger after the last one RPC had closed before the suite started (ledgers, not
    the local clock). A hash RPC cannot answer for is a failure too. Saves the run either way,
-   unless interrupted (Ctrl+C, `kill`, a closed terminal); the temporary folder is deleted then
+   unless the suite wrote no results or the run is interrupted (Ctrl+C, `kill`, a closed terminal); the temporary folder is deleted then
    too.
 
 The gate runs as one Node process (`node --import tsx`), not under the `tsx` command: that
@@ -52,7 +54,9 @@ step at once; one sent to the gate's process alone takes effect after the build.
 before the gate has finished deleting the folder.
 
 The proxy (`external-proxy/proxy.mjs`) answers the suite's `/health` and `/close` itself and
-forwards `/verify`, `/settle` and `/supported` to `GATE_FACILITATOR_URL` unchanged. It uses Node
+forwards `/verify`, `/settle` and `/supported` to `GATE_FACILITATOR_URL`: the method, path and body
+as sent, and the answer's status, body and headers, without those describing the connection or the
+raw bytes. It writes one line per forwarded call to `GATE_CALLS_FILE`. It uses Node
 built-ins only, because nothing is installed for it inside the suite.
 
 ## What it spends
@@ -62,15 +66,17 @@ the fees.
 
 ## Results
 
-One folder per run, `results/<date>-<facilitator host>/`, with two files:
+One folder per run, `results/<date>-<facilitator host>/`, with three files:
 
 - `suite.json`: the suite's own `--output-json` file, copied byte for byte. It is what the
   unmodified x402 tests say: one row per scenario with its transaction hash.
+- `calls.log`: one line per call the proxy forwarded, with its status and time. The 9 `upfront`
+  scenarios settle without a `/verify`, as the suite's `upfront` flow does.
 - `gate.json`: what the gate says about it: `suite.json`'s name and SHA-256, the upstream repo and
-  commit, the date, the facilitator URL, the commit its `/health` names (null when it names none)
+  commit, the gate's commit, the date, the facilitator URL, the commit its `/health` names (null when it names none)
   and its signers, the command, when the run started and the
   last ledger closed before it, the suite's exit code, whether the gate passed and why not, and each transaction as the chain shows
-  it (ledger, time, fee payer, call). Only runs against our facilitator are committed (task 0029);
+  it (ledger, time, fee payer, call, signed envelope). Only runs against our facilitator are committed (task 0029);
   dry runs against a public facilitator stay out of git.
 
 The suite's Bazaar check (`--extensions=bazaar`) is not run: it also calls `/discovery/search`,

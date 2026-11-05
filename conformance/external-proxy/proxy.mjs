@@ -2,10 +2,14 @@
 // answers the suite's /health and /close itself and forwards the payment calls to
 // GATE_FACILITATOR_URL unchanged. The suite copies only this folder into its checkout, so it uses
 // Node built-ins only.
+import { appendFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { text } from "node:stream/consumers";
 
 const target = process.env.GATE_FACILITATOR_URL;
+// The gate's proof that the suite's calls reached the facilitator: the suite hides this process's
+// output unless it runs verbose.
+const callsFile = process.env.GATE_CALLS_FILE;
 const port = Number(process.env.PORT);
 if (!target || !port) {
   console.error("GATE_FACILITATOR_URL and PORT must be set");
@@ -13,6 +17,14 @@ if (!target || !port) {
 }
 
 const forwarded = new Set(["POST /verify", "POST /settle", "GET /supported"]);
+// These describe the connection or the raw bytes, and fetch has already decoded the body.
+const notForwarded = new Set([
+  "connection",
+  "content-encoding",
+  "content-length",
+  "keep-alive",
+  "transfer-encoding",
+]);
 
 function send(res, status, body) {
   res.writeHead(status, { "content-type": "application/json" });
@@ -37,9 +49,11 @@ const server = createServer(async (req, res) => {
       body,
     });
     const answerBody = await answer.text();
-    console.log(`${route} -> ${answer.status} in ${Date.now() - started} ms`);
-    const type = answer.headers.get("content-type");
-    res.writeHead(answer.status, type ? { "content-type": type } : {});
+    const call = `${route} -> ${answer.status} in ${Date.now() - started} ms`;
+    console.log(call);
+    if (callsFile) appendFileSync(callsFile, `${call}\n`);
+    const headers = [...answer.headers].filter(([name]) => !notForwarded.has(name));
+    res.writeHead(answer.status, Object.fromEntries(headers));
     res.end(answerBody);
   } catch (error) {
     // The suite sees a 502; the cause goes to stderr.

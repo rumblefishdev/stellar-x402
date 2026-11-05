@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { judge, type SuiteResult } from "../src/verdict.js";
+import { judge, judgeCoverage, type SuiteResult } from "../src/verdict.js";
 
 const settled: SuiteResult = {
   testNumber: 1,
@@ -79,6 +79,40 @@ describe("judge", () => {
     expect(judge(suiteRun([settled, noHash, failed]), 0)).toEqual([
       "#2 typescript/http/fetch -> typescript/http/express /exact/stellar passed without a transaction hash",
       "#3 typescript/http/fetch -> typescript/http/express /exact/stellar failed: boom",
+    ]);
+  });
+});
+
+describe("judgeCoverage", () => {
+  const verifies = { ...settled, paymentFlow: "authorization" };
+  const upfront = { ...settled, testNumber: 2, paymentFlow: "upfront" };
+  const calls = [
+    "GET /supported -> 200 in 40 ms",
+    "POST /verify -> 200 in 300 ms",
+    "POST /settle -> 200 in 6000 ms",
+    "POST /settle -> 200 in 6000 ms",
+  ];
+
+  it("passes when every expected scenario ran and reached the facilitator", () => {
+    expect(judgeCoverage(suiteRun([verifies, upfront]), calls, 2)).toEqual([]);
+  });
+
+  it("fails a run with fewer scenarios than the pin holds, each of them good", () => {
+    expect(judgeCoverage(suiteRun([verifies]), calls.slice(0, 3), 18)).toEqual([
+      "the suite ran 1 scenarios, the pinned commit holds 18",
+    ]);
+  });
+
+  it("fails when a scenario that verifies never called /verify", () => {
+    const none = calls.filter((call) => !call.startsWith("POST /verify"));
+    expect(judgeCoverage(suiteRun([verifies, upfront]), none, 2)).toEqual([
+      "the facilitator answered 200 to 0 /verify calls, 1 scenarios verify",
+    ]);
+  });
+
+  it("fails when /settle reached the facilitator fewer times than scenarios settled", () => {
+    expect(judgeCoverage(suiteRun([verifies, upfront]), calls.slice(0, 3), 2)).toEqual([
+      "the facilitator answered 200 to 1 /settle calls, 2 scenarios settled",
     ]);
   });
 });
