@@ -14,6 +14,11 @@ history:
     who: okarcz
     note: >
       Spawned from 0073's PR #85 review (Stan's question on the drain): needed before pubnet.
+  - date: "2026-11-05"
+    status: backlog
+    who: karolkow
+    note: >
+      Added the question of what this leaves the rebuild after `txBadSeq` for.
 ---
 
 # After a deploy, don't send on a channel the last process left a transaction open on
@@ -35,6 +40,11 @@ narrow its message (`config.ts`, 0071 decision 14).
   a hash with a ledger bound not yet passed (the store holds both).
 - A test across two processes: the second sends nothing on the held channel until the record
   ends, and uses the other channels meanwhile.
+- Answer once this works: is the rebuild after `txBadSeq` still needed, and with it several hashes
+  on one settlement record? The rebuild is the only source of a second hash. ADR 0003's load
+  runs counted 0 sequence errors with one process, so this deploy overlap may be the only case
+  left.
+  Count `txBadSeq` in production first; if the rebuild has no case left, propose removing it.
 
 ## Acceptance Criteria
 

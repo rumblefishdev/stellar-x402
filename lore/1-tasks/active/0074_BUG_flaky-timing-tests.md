@@ -115,6 +115,19 @@ production code.
   - `settle-pool.test.ts:295`'s local failures may come from #102's real socket call under
     `AbortSignal.timeout`, which `storeIdle` can't see (assumption; no run without #102).
 
+- Measured 2026-11-04 on `develop` `4ec5a72`, `settle` and `settle-pool`, 3 runs side by side, a busy
+  loop on each of 10 cores: 6 of 12 runs failed, 9 failures on 4 tests. Three of the 4 aren't in the
+  entries above: a 50 ms sleep before counting a wait's reads, and that test's call left running,
+  which timed out the next test.
+  - With #129 (tests wait for the step, not a fixed time): 1 of 30 runs failed. Not random, far
+    harsher than CI, and 30 runs can't show rare failures.
+  - **Open:** on the fake clock, a test that waits for its hash to be stored can hang until the test
+    times out ("gives the success to the retry…" once in 30; "drains a submission…" 6 of 57, now on a
+    real budget). Cause not found. With a log loop running beside it, 0 of 21 hung.
+  - A real 1 s budget in "never says sign a new payment…" made it answer `success` in 16 of 30 runs,
+    where 100 ms did in 5 of 30. Its first call running out of budget before the claim explains the
+    100 ms case (derived), not the 1 s one (open). #129 moves its clock by hand.
+
 ## Acceptance Criteria
 
 - [ ] Each failure's cause is named with evidence (a reproduction before and after the fix)

@@ -2,7 +2,7 @@
 id: "0029"
 title: "Gate run against our testnet facilitator"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0009"]
 related_tasks: ["0012", "0028", "0026", "0009", "0020", "0059"]
@@ -15,6 +15,12 @@ history:
     status: backlog
     who: claude
     note: "Created by 0012 from M1 Story 3.2 (Platform lane)."
+  - date: "2026-11-05"
+    status: active
+    who: karolkow
+    note: >
+      Started now that the facilitator is deployed. A trial run at the old pin failed all 18
+      scenarios; at upstream 8827cf1 all 18 settled through the deployed facilitator.
 ---
 
 # Gate run against our testnet facilitator
@@ -47,6 +53,13 @@ As a reviewer of the grant, I want e2e results with real settled transaction has
   misses its own; run it against a catalog under 100 entries.
 - From the 0028 review: the first criterion says "verify → settle" for each scenario, but the 9 `upfront` scenarios settle without a `/verify` (answered in 0028); reword it before starting.
 
+## Decisions so far
+
+| # | What is done | From | Vs the task | Who does the same (checked) |
+| --- | --- | --- | --- | --- |
+| 1 | The pin moves from `10b2d06` to `8827cf1` | measured: testnet is on protocol 30 (`getVersionInfo`); `getLatestLedger` fails on stellar-sdk 16.3.0, the old pin's, and works on 16.4.1; 18 of 18 scenarios failed at the old pin, 18 of 18 passed at the new one (one run each, 2026-11-05) | settles the open bump | upstream requires `^16.4.1` at `8827cf1`; [Stellar's Protocol 30 guide](https://stellar.org/blog/developers/bell-protocol-30-upgrade-guide) says to upgrade the SDK |
+| 2 | `/health` reports the running commit as `commit`, set when the image is built; the gate saves it | the owner's decision, 2026-11-05 | as the task says: the facilitator exposes its version | upstream's e2e facilitator has `version` in `/health` (`e2e/facilitators/typescript/index.ts:1215@8827cf1`) |
+
 ## Implementation
 
 - Run the 0028 harness against the deployed facilitator.
@@ -54,7 +67,7 @@ As a reviewer of the grant, I want e2e results with real settled transaction has
 
 ## Acceptance Criteria
 
-- [ ] Given our facilitator deployed at its public URL (0026), when the gate runs, then the canonical client completes `exact` verify → settle for each Stellar scenario and every run records a real transaction hash
+- [ ] Given our facilitator deployed at its public URL (0026), when the gate runs, then the canonical client settles `exact` for each Stellar scenario (the 9 `upfront` ones without a `/verify`) and every run records a real transaction hash
 - [ ] Given a finished run, when results are saved, then `conformance/results/` gets the run JSON with the upstream commit, the date, our facilitator version and the transaction hashes
 - [ ] Given a failing scenario, when it is analysed, then a backlog task is created for the owning lane
 - [ ] Given the finished T1 build, including Bazaar and spend budgets, when the gate reruns, then it passes and the final results are committed

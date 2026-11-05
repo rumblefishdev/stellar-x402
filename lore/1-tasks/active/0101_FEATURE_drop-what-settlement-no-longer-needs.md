@@ -35,7 +35,7 @@ Figures are from `origin/develop` on 2026-11-03. Work each item from what is tru
 
 ## Implementation
 
-1. **`[structure only]`, ~50 min. Packages with no importer.** Delete `packages/sdk` (8 lines of
+1. **Merged in #123. `[structure only]`, ~50 min. Packages with no importer.** Delete `packages/sdk` (8 lines of
    empty exports), the two `package.json` edges from `bazaar` and `signer-pool` to `config`, and
    `isAttemptForward` in `adapters/rules.ts`, which no commit on `develop` ever called. Reword
    `README.md`, ADR 0001 and task 0092, which name `packages/sdk`. 0102 keeps the RFP's SDK visible.

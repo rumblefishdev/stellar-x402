@@ -1,11 +1,7 @@
 import { Address, FeeBumpTransaction, StrKey, xdr, type rpc } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
-import {
-  SettlementSubmitter,
-  keypairSigner,
-  type SubmitterEvent,
-  type SubmitterOptions,
-} from "../src/index.js";
+import { SettlementSubmitter, type SubmitterEvent, type SubmitterOptions } from "../src/index.js";
+import { keypairSigner } from "./testing.js";
 import { FakeRpc, channels, facilitator } from "./fake-rpc.js";
 
 const PASSPHRASE = "Test SDF Network ; September 2015";

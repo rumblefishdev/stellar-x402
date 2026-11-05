@@ -36,10 +36,10 @@
  * The wasm files must be built first (no stellar-cli needed):
  *   cd contracts && SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1 cargo build --release \
  *     --target wasm32v1-none -p test-token -p hostile-token -p test-wallet
- *   cd apps/facilitator && npx tsx scripts/spend-matrix.ts
+ *   cd apps/facilitator && npx tsx test/live/spend-matrix.ts
  *
  * Every account, contract, channel and schema is new each run. The results, with every hash, go
- * to `scripts/results/spend-matrix-testnet.json`; log lines go to stderr. Testnet only.
+ * to `test/live/results/spend-matrix-testnet.json`; log lines go to stderr. Testnet only.
  */
 import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -63,10 +63,10 @@ import type { PaymentRequirements, SettleResponse, VerifyResponse } from "@x402/
 import { createEd25519Signer, getUsdcAddress } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/client";
 import { Agent, fetch } from "undici";
-import { createPool } from "../src/adapters/postgres.js";
-import { migrate } from "../src/adapters/postgres-schema.js";
-import { main } from "../src/main.js";
-import { fakeOpenBao, signerEnv } from "../test/fake-openbao.js";
+import { createPool } from "../../src/adapters/postgres.js";
+import { migrate } from "../../src/adapters/postgres-schema.js";
+import { main } from "../../src/main.js";
+import { fakeOpenBao, signerEnv } from "../fake-openbao.js";
 
 const network = "stellar:testnet";
 const RPC_URL = "https://soroban-testnet.stellar.org";
@@ -88,7 +88,7 @@ const MODE_FAIL_ON_ODD_LEDGER = 2;
 const MODE_ONE_PER_LEDGER = 3;
 const FAILED = "settle_exact_stellar_transaction_failed";
 const BREAKER_OPEN_ASSET = "settle_exact_stellar_breaker_open_asset";
-const WASM_DIR = new URL("../../../contracts/target/wasm32v1-none/release/", import.meta.url);
+const WASM_DIR = new URL("../../../../contracts/target/wasm32v1-none/release/", import.meta.url);
 
 /** The script's own HTTP client: `main()`'s global one gives up after 10 s without headers. */
 const http = new Agent({ headersTimeout: 120_000 });

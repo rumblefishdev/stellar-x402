@@ -1,7 +1,7 @@
 import { Address, Keypair, StrKey, nativeToScVal, rpc, xdr } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
 import { failureCause } from "../src/index.js";
-import { failedResult, type InvokeHostFunctionFailure } from "../src/testing.js";
+import { failedResult, type InvokeHostFunctionFailure } from "./testing.js";
 
 const SAC = StrKey.encodeContract(Buffer.alloc(32, 9));
 const payer = Keypair.random().publicKey();

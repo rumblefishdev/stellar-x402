@@ -13,10 +13,9 @@ export default defineConfig([
   js.configs.recommended,
   tseslint.configs.recommended,
   {
-    // `<package>/testing` subpaths hold test helpers (e.g. `FakeRpc`); they ship in `dist` but
-    // must never reach production code, by package subpath or by relative path.
+    // `<package>/testing` subpaths hold test helpers (e.g. `FakeRpc`); they must never reach
+    // production code, by package subpath or by relative path.
     files: ["apps/*/src/**/*.ts", "packages/*/src/**/*.ts"],
-    ignores: ["packages/*/src/testing.ts"],
     rules: {
       "no-restricted-imports": [
         "error",
