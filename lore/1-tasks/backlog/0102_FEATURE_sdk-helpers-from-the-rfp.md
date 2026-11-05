@@ -21,15 +21,15 @@ history:
 
 ## Summary
 
-The RFP (`docs/rfp/07-x402-facilitator-bazaar.md:20,121,124`, architecture §7) requires SDK helpers
-and examples. `docs/planning/m1-epics.md:40-42` puts them outside T1, and no task builds them.
+The RFP (`docs/rfp/07-x402-facilitator-bazaar.md:20,121`, architecture §7) requires SDK helpers.
+`docs/planning/m1-epics.md:40-42` puts them outside T1, and no other task builds them. The RFP's two
+examples belong to 0041.
 
 ## Implementation
 
 - Create `packages/sdk` (ADR 0001) when its first helper exists.
-- Read the RFP's list before planning: which helpers, for which party, and whether `examples/http-api`
-  already covers one of the two examples.
+- Read the RFP's list before planning: which helpers, and for which party.
 
 ## Acceptance Criteria
 
-- [ ] Every SDK helper and example the RFP names exists, or the owner has dropped it in writing
+- [ ] Every SDK helper the RFP names exists, or the owner has dropped it in writing
