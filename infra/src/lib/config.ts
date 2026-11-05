@@ -51,8 +51,6 @@ export interface Thresholds {
   readonly balanceStaleSeconds: number;
   readonly pendingSeconds: number;
   readonly channelHeldSeconds: number;
-  /** `http-500`: answers in 5 minutes. */
-  readonly http500Count: number;
   /** `pool-health`: `sequence-resync` events in 5 minutes. */
   readonly sequenceResyncCount: number;
   /** `balance-low` and `balance-critical`, in stroops (0027 decision 7). */
@@ -141,7 +139,6 @@ const thresholds = z
     balanceStaleSeconds: positive,
     pendingSeconds: positive,
     channelHeldSeconds: positive,
-    http500Count: count,
     sequenceResyncCount: count,
     balanceLowStroops: count,
     balanceCriticalStroops: count,

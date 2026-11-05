@@ -76,7 +76,7 @@ describe("validateConfig", () => {
     ],
     ["a zero threshold", (c) => (m(c).thresholds.pendingSeconds = 0), /pendingSeconds/],
     ["a percentage over 100", (c) => (m(c).thresholds.auditDiskUsedPercent = 101), /percentage/],
-    ["a fractional count", (c) => (m(c).thresholds.http500Count = 2.5), /integer/],
+    ["a fractional count", (c) => (m(c).thresholds.sequenceResyncCount = 2.5), /integer/],
     [
       "a null threshold that has no measure step",
       (c) => (m(c).thresholds.walStaleSeconds = null as never),

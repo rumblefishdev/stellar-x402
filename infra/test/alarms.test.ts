@@ -304,7 +304,6 @@ const LEVEL: Record<string, readonly [keyof typeof OP, number, string, number, n
 
 /** Each Event alarm's threshold other than 1, which the list writes as "at N or more". */
 const EVENT_THRESHOLD: Record<string, number> = {
-  "http-500": t.http500Count,
   "pool-health": t.sequenceResyncCount,
 };
 

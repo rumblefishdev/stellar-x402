@@ -9,14 +9,13 @@ const SILENT_EVENT = "Nothing happened; facilitator-silent covers a stopped proc
 export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
   const t = c.thresholds;
 
+  // On the first one (Karol's review of #114, point 3): `onError` takes anything unknown as ours,
+  // and an Event alarm still sends one message per burst, not one per error.
   f.event("http-500", {
     group: "facilitator",
     signal: { catalog: "http_requests_total", dims: { status: "500" } },
-    periodMinutes: 5,
-    periods: 3,
-    threshold: t.http500Count,
     description: {
-      what: `The facilitator answered with status 500 at least ${t.http500Count} times in 5 minutes, across every route and network. A lease or drain 503 isn't counted.`,
+      what: "The facilitator answered with status 500, across every route and network: an error it doesn't classify, so it treats it as ours. A burst sends one message. A lease or drain 503 isn't counted.",
       next: `Read the error lines around that time in /x402/${c.envName}/app with Logs Insights.`,
       noData: SILENT_EVENT,
     },

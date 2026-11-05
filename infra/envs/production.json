@@ -41,7 +41,6 @@
     "balanceStaleSeconds": 300,
     "pendingSeconds": 900,
     "channelHeldSeconds": 300,
-    "http500Count": 5,
     "sequenceResyncCount": 5,
     "balanceLowStroops": 250000000,
     "balanceCriticalStroops": 100000000,
