@@ -234,6 +234,30 @@ history:
       export is encrypted with it; and the restore drill imports the export into a local copy of
       the repository, since the read-only account can't write to it. Both are in ADR 0013 and
       this task's Implementation.
+  - date: "2026-11-05"
+    status: active
+    who: okarcz
+    note: >
+      The backups split into two pull requests, OpenBao's snapshots first (okarcz): host only, no
+      facilitator restart, and the signing key is the bigger loss. pgBackRest follows, its WAL
+      copied by archive_command into a volume the host pushes from with a .path unit (okarcz,
+      Stan's #24 pattern). Each is tested by a local round trip, not a CI job (okarcz). The first,
+      on lore-0026-openbao-snapshots: x402-openbao-snapshot (bash, set -euo pipefail) logs in with
+      the AppRole x402-snapshot (policy read on sys/storage/raft/snapshot, token_ttl 5m), the IDs
+      as JSON over stdin; saves the snapshot in the container's /tmp, copies it to /run/x402/backup
+      and checks it is a whole gzip before one borg create, so a failed save leaves no archive;
+      prunes to 14 daily, compacts and touches /var/lib/x402/last-ok/openbao-snapshot, 0027's
+      stamp. Its "borg ARGS" mode runs any Borg command for an admin with the same credentials.
+      The timer runs daily at 03:15 UTC (15 min random delay, Persistent); the playbook installs
+      borgbackup, the script, units, policy and the pinned known_hosts, and enables the timer
+      without starting it. Logs stay in the journal. Local round trip on 2026-11-05, Ubuntu 24.04's
+      Borg 1.2.8 in containers and a stand-in box over SSH on port 23: init and key export through
+      the admin mode, a snapshot run, the snapshot token refused on the Transit key, a failed run
+      with OpenBao stopped left the stamp unchanged, and a fresh OpenBao restored from a copy of
+      the repository whose key was removed and imported from the export held the same Transit
+      key. Deploy tests 92 (+7), each new one failed by a mutant. ch-prod-01 runs Ubuntu 24.04.3
+      with borgbackup 1.2.8-1 already installed (the explorer's), the version tested and the
+      box's borg-1.2; our job keeps its own BORG_BASE_DIR. The runbook's setup is still to run.
   - date: "2026-11-06"
     status: active
     who: okarcz
