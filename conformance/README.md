@@ -45,11 +45,11 @@ The suite kills whatever listens on ports 4022–4060 before it starts.
 
 The gate runs as one Node process (`node --import tsx`), not under the `tsx` command: that
 wrapper kills its child outright when the child does not answer a signal within ~30 ms, and the
-gate cannot while it waits for a build step or the suite, so its temporary folder stayed behind.
-A signal sent to the whole process group (Ctrl+C, a closed terminal) stops the running step at
-once. One sent to the gate's process alone takes effect at the gate's next wait on the network:
-after the whole build, or after the whole suite, its payments made and the run not saved. `pnpm`
-returns before the gate has finished deleting the folder.
+gate cannot while it waits for a build step, so its temporary folder stayed behind. During the
+suite any signal to the gate stops the suite, which runs in a process group of its own, the run not
+saved. During a build, a signal to the whole process group (Ctrl+C, a closed terminal) stops the
+step at once; one sent to the gate's process alone takes effect after the build. `pnpm` returns
+before the gate has finished deleting the folder.
 
 The proxy (`external-proxy/proxy.mjs`) answers the suite's `/health` and `/close` itself and
 forwards `/verify`, `/settle` and `/supported` to `GATE_FACILITATOR_URL` unchanged. It uses Node

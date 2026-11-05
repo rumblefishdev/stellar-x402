@@ -1,8 +1,9 @@
 // The Tranche 1 gate (ADR 0009): the unmodified x402 e2e suite, pinned, runs every Stellar `exact`
 // scenario against the facilitator at GATE_FACILITATOR_URL through the proxy in
 // `conformance/external-proxy/`, and the run is saved with the pin and the transaction hashes.
-import { spawnSync } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
+import { once } from "node:events";
 import {
   copyFileSync,
   cpSync,
@@ -68,7 +69,13 @@ console.log(`Facilitator commit: ${facilitatorCommit}`);
 // $TMPDIR on macOS names a per-user folder. Its real path, as stack traces print it (macOS links
 // /tmp to /private/tmp).
 const checkout = realpathSync(mkdtempSync("/tmp/x402-gate-"));
-process.on("exit", () => rmSync(checkout, { recursive: true, force: true }));
+let suite: ChildProcess | undefined;
+process.on("exit", () => {
+  // A suite left running would go on paying from a folder that is gone. The whole group: pnpm
+  // doesn't stop its children when it is stopped (measured, servers still up 15 s after).
+  if (suite?.pid) process.kill(-suite.pid);
+  rmSync(checkout, { recursive: true, force: true });
+});
 // Node exits on these signals without emitting "exit"; exiting here runs the cleanup above. The
 // handlers stay for every signal: a second one (Ctrl+C again, or pnpm passing it on) during the
 // cleanup would otherwise kill the gate halfway through it.
@@ -100,9 +107,12 @@ const chain = new rpc.Server("https://soroban-testnet.stellar.org");
 const ledgerBeforeRun = (await chain.getLatestLedger()).sequence;
 console.log(`$ pnpm ${args.join(" ")}   (in ${e2e})`);
 const startedAt = Math.floor(Date.now() / 1000);
-const suite = spawnSync("pnpm", args, {
+// Not spawnSync: a process blocked for a whole run can't see RPC close its idle connection, and the
+// first read after the run fails on that dead connection.
+suite = spawn("pnpm", args, {
   cwd: e2e,
   stdio: "inherit",
+  detached: true,
   env: {
     ...process.env,
     GATE_FACILITATOR_URL: facilitatorUrl,
@@ -112,12 +122,13 @@ const suite = spawnSync("pnpm", args, {
     FACILITATOR_STELLAR_PRIVATE_KEY: "unused-by-the-gate-proxy",
   },
 });
-if (suite.error) throw suite.error;
+const [suiteExitCode] = (await once(suite, "close")) as [number | null];
+suite = undefined;
 
 const run = existsSync(suiteJson)
   ? (JSON.parse(readFileSync(suiteJson, "utf8")) as SuiteRun)
   : undefined;
-const problems = judge(run, suite.status);
+const problems = judge(run, suiteExitCode);
 
 // The suite reports a hash; the chain says what it paid. Every Stellar route costs $0.001, 10000
 // units of testnet USDC (7 decimals), at the pinned commit (e2e/config/mechanisms_stellar.json,
@@ -178,7 +189,7 @@ if (run) {
     signers: stellarSigners,
     startedAt: new Date(startedAt * 1000).toISOString(),
     ledgerBeforeRun,
-    suiteExitCode: suite.status,
+    suiteExitCode,
     passed: problems.length === 0,
     problems,
     settlements,
