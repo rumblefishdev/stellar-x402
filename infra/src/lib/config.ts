@@ -3,6 +3,7 @@
 // Thresholds live here; names, namespaces and dimensions live in @stellar-x402/metrics-catalog.
 import { isStellarNetwork, type StellarNetwork } from "@stellar-x402/config";
 import { isDimValue } from "@stellar-x402/metrics-catalog";
+import { StrKey } from "@stellar/stellar-sdk";
 
 /**
  * An alarm group is created whole or not at all (0027 decision 26): a group goes on once every
@@ -151,37 +152,9 @@ const MAX_SESSION_HOURS = 12;
 /** An alarm's evaluation range must fit in a day (CloudWatch, checked at deploy, not synth). */
 const MAX_ALARM_MINUTES = 24 * 60;
 
-const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-/** StrKey's version byte for an ed25519 public key, the `G` of an account address. */
-const ACCOUNT_VERSION = 6 << 3;
-
-/**
- * A Stellar account address with a valid checksum: 56 base32 characters that decode to the version
- * byte, 32 bytes of key and a little-endian CRC16-XModem over the first 33 (SEP-23). No SDK, so
- * infra stays two dependencies from the catalog.
- */
-export function isAccountAddress(v: unknown): v is string {
-  if (typeof v !== "string" || !/^G[A-Z2-7]{55}$/.test(v)) return false;
-  const bytes: number[] = [];
-  let bits = 0;
-  let acc = 0;
-  for (const ch of v) {
-    acc = (acc << 5) | BASE32.indexOf(ch);
-    bits += 5;
-    if (bits >= 8) {
-      bits -= 8;
-      bytes.push((acc >> bits) & 0xff);
-    }
-  }
-  if (bytes.length !== 35 || bytes[0] !== ACCOUNT_VERSION) return false;
-  let crc = 0;
-  for (const b of bytes.slice(0, 33)) {
-    crc ^= b << 8;
-    for (let i = 0; i < 8; i++)
-      crc = crc & 0x8000 ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff;
-  }
-  return bytes[33] === (crc & 0xff) && bytes[34] === crc >> 8;
-}
+/** A Stellar account address (`G...`) whose checksum holds (SEP-23), as the facilitator checks. */
+export const isAccountAddress = (v: unknown): v is string =>
+  typeof v === "string" && StrKey.isValidEd25519PublicKey(v);
 
 const isSsmName = (v: unknown): boolean =>
   typeof v === "string" && /^\/[\x21-\x7e]+$/.test(v) && v.length <= 2048;
