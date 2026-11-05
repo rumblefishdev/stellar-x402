@@ -206,6 +206,20 @@ history:
       sub3's keys, belongs to sub2, so a compromised server could change them, as it could delete
       the backups; Storage Box snapshots were asked about for that. pgBackRest runs on the host
       (okarcz), and Borg's key mode is still to decide.
+  - date: "2026-11-05"
+    status: active
+    who: okarcz
+    note: >
+      Storage Box snapshots, which answer the data/.ssh point above. Stan turned on BX21's
+      automatic snapshots: daily, 7 kept (BX21 has 20 slots), raised to 14 if space allows; he
+      checks the space after the explorer's weekly Borg prune and compact on Monday. .zfs is
+      read-only and only the Hetzner Console or API deletes a snapshot, so the write key on
+      ch-prod-01 can't touch them: a server that is taken over can wipe the live repositories, not
+      the last 7 days. A snapshot covers the whole box, the explorer's ClickHouse backups too, so
+      a restore from one copies our files from .zfs/snapshot with the box's main account, never a
+      Console rollback, which reverts the whole box. That path needs the main account; the normal
+      restore reads the live repositories with u595862-sub3 and the backup secret. For ADR 0013,
+      with the backups: this, and the read-only account's own directory (Stan).
 ---
 
 # Public testnet deployment
