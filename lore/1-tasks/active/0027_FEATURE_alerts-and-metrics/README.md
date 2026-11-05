@@ -316,6 +316,15 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     committed. Once no write is in flight the win is forgotten, so a reopened record's write
     (0073) that throws is listed as before. A test races a write that throws a moment late with
     one that commits, 200 times on PostgreSQL: before the fix the fee was counted twice by run 3.
+56. **The oldest open age has no sample until a sweep has listed** (akot, 2026-11-05; from
+    Karol's review of #112). It was set at the end of a sweep and read 0 before the first one, so
+    after a restart with the store failing, a 2-hour-old record read 0 for as long as the listing
+    failed, and `pending` (a Level alarm) would turn OK at the wrong moment. A gauge read may now
+    return no value, which writes no sample and reports no issue; the age has none until a sweep
+    lists, so `pending` keeps its state through the gap (decision 19), and `sweeps-stopped`
+    covers a listing that keeps failing. It is also set right after `listNonFinal`, from what was
+    listed, so a first sweep stuck on the RPC already shows the backlog, and again at the end
+    from what the sweep left open.
 
 ## Acceptance Criteria
 

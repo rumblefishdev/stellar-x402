@@ -172,10 +172,21 @@ export function createReconciler(deps: ReconcilerDeps) {
 
   /**
    * The `createdAt` of the oldest record the latest listing left open, `history_gone` ones left
-   * out (an operator owns them). Set at the end of each sweep that listed; one that couldn't list
-   * keeps it, so the age it feeds keeps rising (0027 AD-5).
+   * out (an operator owns them): `null` with none, `undefined` before the first listing. Set
+   * right after each listing, from what it listed, and again at the end of the sweep, from what
+   * it left open; a sweep that couldn't list keeps it, so the age it feeds keeps rising (0027
+   * AD-5, decision 56).
    */
-  let oldestOpenCreatedAt: number | undefined;
+  let oldestOpenCreatedAt: number | null | undefined;
+
+  const oldestOf = (listed: readonly SettlementRecord[]): number | null => {
+    let oldest: number | null = null;
+    for (const record of listed) {
+      if (historyGone.has(record.key)) continue;
+      if (oldest === null || record.createdAt < oldest) oldest = record.createdAt;
+    }
+    return oldest;
+  };
 
   const pastBound = (
     record: SettlementRecord,
@@ -270,6 +281,8 @@ export function createReconciler(deps: ReconcilerDeps) {
     await runLostHooks();
     await retryMarks();
     const queue = await store.listNonFinal(network);
+    // Before any record is read, so a first sweep stuck on the RPC already shows the backlog.
+    oldestOpenCreatedAt = oldestOf(queue);
     onListed?.();
     /** Listed records this sweep left non-final; the history_gone ones are filtered out below. */
     const open: SettlementRecord[] = [];
@@ -302,12 +315,7 @@ export function createReconciler(deps: ReconcilerDeps) {
     await Promise.all(Array.from({ length: CONCURRENCY }, worker));
     // At the end, so both the pass that found a record's history gone and the skip above leave it
     // out.
-    let oldest: number | undefined;
-    for (const record of open) {
-      if (historyGone.has(record.key)) continue;
-      if (oldest === undefined || record.createdAt < oldest) oldest = record.createdAt;
-    }
-    oldestOpenCreatedAt = oldest;
+    oldestOpenCreatedAt = oldestOf(open);
     // Only a sweep that changed or failed something: one runs every few seconds.
     if (report.open < Object.values(report).reduce((sum, n) => sum + n, 0))
       logger.info("reconcile_finished", { network, ...report });
@@ -347,11 +355,16 @@ export function createReconciler(deps: ReconcilerDeps) {
   /**
    * `settlement_oldest_open_seconds` (0027 AD-5): the age of the oldest record the latest listing
    * left open, at the time of the read, so a record a stuck or failing sweep leaves open shows as a
-   * rising value; 0 with none. A sweep that hangs or fails after one that left nothing open reads
-   * 0 meanwhile: `sweeps-stopped` covers it (G-alarm-list). Memory only.
+   * rising value; 0 with none. `undefined`, so no sample, until a sweep has listed: after a
+   * restart a 0 would read as nothing open while a record is (decision 56). A sweep that hangs or
+   * fails after one that left nothing open reads 0 meanwhile: `sweeps-stopped` covers it
+   * (G-alarm-list). Memory only.
    */
-  const oldestOpenSeconds = (): number =>
-    oldestOpenCreatedAt === undefined ? 0 : Math.max(0, (now() - oldestOpenCreatedAt) / 1000);
+  const oldestOpenSeconds = (): number | undefined => {
+    if (oldestOpenCreatedAt === undefined) return undefined;
+    if (oldestOpenCreatedAt === null) return 0;
+    return Math.max(0, (now() - oldestOpenCreatedAt) / 1000);
+  };
 
   return { sweep, resolved, oldestOpenSeconds };
 }

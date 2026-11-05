@@ -10,7 +10,8 @@ import type {
 
 export type Labels = Record<string, string | number | boolean | bigint>;
 
-export type GaugeRead = () => { value: number; labels?: Labels };
+/** A gauge's read at a sample; `undefined` writes no sample this time (no value yet). */
+export type GaugeRead = () => { value: number; labels?: Labels } | undefined;
 
 /**
  * The root, for the parts that serve every network (the HTTP app, discovery, the cataloger, the
@@ -58,7 +59,7 @@ export function scoped(writer: MetricsWriter, network: Network): NetworkMetrics 
     registerGauge(name, read) {
       writer.registerGauge(name, () => {
         const r = read();
-        return { ...r, labels: { ...r.labels, network } };
+        return r && { ...r, labels: { ...r.labels, network } };
       });
     },
   };
@@ -74,9 +75,11 @@ export function memoryMetrics(): MetricsWriter & {
   for(scope: { network: Network }): NetworkMetrics;
   /**
    * A counter's sum for exactly these labels. A gauge's value: with no labels, the last one
-   * registered under the name; with labels, the one whose (merged) labels match exactly.
+   * registered under the name; with labels, the one whose (merged) labels match exactly;
+   * `undefined` for a gauge with no value yet.
    */
-  value(name: CounterName | GaugeName, labels?: Labels): number;
+  value(name: CounterName, labels?: Labels): number;
+  value(name: GaugeName, labels?: Labels): number | undefined;
 } {
   const counts = new Map<string, number>();
   const gauges = new Map<string, GaugeRead[]>();
@@ -93,18 +96,21 @@ export function memoryMetrics(): MetricsWriter & {
   return {
     ...root,
     for: (scope) => scoped(root, scope.network),
-    value(name, labels) {
+    value: ((name: CounterName | GaugeName, labels?: Labels): number | undefined => {
       const reads = gauges.get(name);
       if (reads) {
-        if (!labels) return reads[reads.length - 1]!().value;
+        if (!labels) return reads[reads.length - 1]!()?.value;
         const want = id(name, labels);
         for (const read of [...reads].reverse()) {
           const r = read();
-          if (id(name, r.labels) === want) return r.value;
+          if (r && id(name, r.labels) === want) return r.value;
         }
         return 0;
       }
       return counts.get(id(name, labels)) ?? 0;
+    }) as {
+      (name: CounterName, labels?: Labels): number;
+      (name: GaugeName, labels?: Labels): number | undefined;
     },
   };
 }

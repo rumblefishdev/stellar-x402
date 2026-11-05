@@ -160,7 +160,8 @@ Each `AD` names what it **Binds**, what it **Prevents**, and the **Rule**.
 - **Rule:** an age gauge is `now − timestamp` at read time, so a dead source shows as a rising
   value. The sources:
   - **`settlement_oldest_open_seconds`:** the oldest open record's `createdAt`. `history_gone`
-    records are left out, computed at the end of each sweep, the recheck-skip branch included.
+    records are left out, computed right after each listing and again at the end of each sweep,
+    the recheck-skip branch included. No sample until a sweep has listed (decision 56).
   - **`rpc_stalled_seconds`:** the time since the ledger sequence last changed, read through the
     shared `FallbackRpc`. The poller's endpoint moves are accepted. The baseline resets when the
     active endpoint changes or the sequence drops (a lagging fallback, testnet's reset). A failed
