@@ -54,8 +54,9 @@ Figures are from `origin/develop` on 2026-11-03. Work each item from what is tru
    `settle.ts` switches to `payerExpiration`; `authExpiration` and `fallbackLedger` go. First check
    on production that `SELECT count(*) FROM settlement_hashes WHERE max_ledger IS NULL` returns 0.
    If it doesn't, drop this item.
-6. **`[refactor]`, ~30 min, after #105. One `resultUpdate(result)`.** `settle.ts` and `reconcile.ts`
-   build the same update from a pool result, and #105 adds a line to both.
+6. **In #135. `[refactor]`, ~1 h. One `resultUpdate(result)`.** `settle.ts` and `reconcile.ts` build
+   the same update from a pool result, under two rules for a ledger or a fee the result doesn't
+   have. #105's `failure` line stays outside the function: it belongs to non-success results only.
 
 ## Decisions so far
 
@@ -66,6 +67,7 @@ Figures are from `origin/develop` on 2026-11-03. Work each item from what is tru
 | 3 | Delete `isAttemptForward`: only the memory store's branch called it, 0064 dropped that store, and `attemptRankSql` holds the order | task item | matches | `adapters/rules.ts` | CI steps, assertions unchanged |
 | 4 | ADR 0001 says `packages/sdk` is created when its first helper exists | task item | matches | `docs/adr/0001-repo-layout.md` | none, wording |
 | 5 | Keep `examples/mcp-metered`, without its dependency on `packages/sdk`: it records the idea of a second example, and 0041 hasn't chosen one | owner | changes it | `examples/mcp-metered/package.json` | CI steps, assertions unchanged |
+| 6 | One `resultUpdate` for both writes of a pool result, with one rule: a ledger or a fee the result doesn't have is left out. The stored result doesn't change, because a non-final record holds neither value. Clearing is the wrong rule to keep: a final record without a fee releases its budget reservation | owner | matches | `settlement/records.ts`, `settle.ts`, `reconcile.ts` | `records.test.ts`, other assertions unchanged |
 
 ## PR split
 
