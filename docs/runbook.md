@@ -62,13 +62,14 @@ deploy.
 
 **A change under `deploy/`** reaches the server in this order:
 
-1. The pull request to `deploy/production` merges. Its deploy starts at once, since the workflow
-   ignores only `lore/**`, `docs/**` and `**/*.md`, and runs with the files already on the
-   server, so a change under `deploy/` must still work with the old ones until step 3. When it
-   can't, for example a new credential the new image reads, split it into two pull requests: the
-   files first, written to work with the image that runs, through steps 1 to 3; then the image
-   change, as a plain deploy. A promotion carries everything waiting on `develop`, so the image
-   change stays off `develop` until the files' promotion has been through steps 1 to 3.
+1. The pull request to `deploy/production` merges. Its image job starts at once, since the
+   workflow ignores only `lore/**`, `docs/**` and `**/*.md`; its `deploy` job then waits for the
+   production environment's approval. Approved before step 2, it runs with the files already on
+   the server, so a change under `deploy/` must still work with the old ones until step 3. When
+   it can't, for example a new credential the new image reads, split it into two pull requests:
+   the files first, written to work with the image that runs, through steps 1 to 3; then the
+   image change, as a plain deploy. A promotion carries everything waiting on `develop`, so the
+   image change stays off `develop` until the files' promotion has been through steps 1 to 3.
 2. The playbook from that merge, as above, at one of two times. Before approving the `deploy` job,
    which waits for the production environment: run step 3 too, and approve only once both have
    ended, so the deploy starts the new image on the new files (2026-11-04). Or once that deploy
@@ -94,8 +95,9 @@ deploy.
    sudo systemctl start x402@production
    ```
 
-   `x402@production` starts `digest.good`, so if step 1's deploy failed, the new image isn't
-   running yet: **Run workflow** on `deploy/production` again now.
+   `x402@production` starts `digest.good`, so the new image isn't running yet. If step 2 ran
+   before the approval, approve the waiting `deploy` job now. If step 1's deploy failed,
+   **Run workflow** on `deploy/production` again now.
 
 Then check that each container kept what its compose file drops (task 0091):
 
