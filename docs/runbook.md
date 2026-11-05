@@ -593,10 +593,49 @@ for a in $(bao list -format=json auth/token/accessors </dev/null | self=$self py
 
 Then step 4 in this shell, without its `read`, and step 5 (`unset self` too).
 
+## Topping up the fee account
+
+`balance-low` (below 25 XLM, about 5 days of settlements) and `balance-critical` (below 10 XLM,
+about a day) name the network and the fee account, from `infra/envs/production.json`'s
+`feeAccounts` (0027). At 5 XLM 0024's floor stops settlement. Top-ups are by hand, never from a key
+on the server (ADR 0013).
+
+**Testnet.** Friendbot only creates accounts, so a one-off account it funds with 10,000 XLM is
+merged into the fee account, which moves its whole balance and deletes it. From
+`packages/signer-pool` on the admin's machine, with the address from the alarm:
+
+```sh
+export TOPUP_SECRET=$(node -e 'console.log(require("@stellar/stellar-sdk").Keypair.random().secret())')
+topup=$(node -e 'console.log(require("@stellar/stellar-sdk").Keypair.fromSecret(process.env.TOPUP_SECRET).publicKey())')
+curl -sf "https://friendbot.stellar.org?addr=$topup" >/dev/null && echo funded
+node -e '
+const s = require("@stellar/stellar-sdk");
+const kp = s.Keypair.fromSecret(process.env.TOPUP_SECRET);
+const horizon = new s.Horizon.Server("https://horizon-testnet.stellar.org");
+horizon.loadAccount(kp.publicKey()).then((a) => {
+  const tx = new s.TransactionBuilder(a, { fee: s.BASE_FEE, networkPassphrase: s.Networks.TESTNET })
+    .addOperation(s.Operation.accountMerge({ destination: process.argv[1] }))
+    .setTimeout(60)
+    .build();
+  tx.sign(kp);
+  return horizon.submitTransaction(tx);
+}).then((r) => console.log("merged", r.hash));
+' ADDRESS
+unset TOPUP_SECRET topup
+```
+
+The merge reaches the fee account as `account_credited` alone, which `account-effects` lets
+through, and the balance alarm reads OK at the off-server check's next run. Tried on 2026-11-05
+between two one-off accounts: 9,999.99999 XLM arrived. If the fee account is gone, after
+testnet's reset, Friendbot creates it again (OpenBao, step 6).
+
+**Mainnet.** A withdrawal from the company's exchange account to the fee account. Who makes it,
+and a backup person, are named before mainnet (ADR 0013, 0026).
+
 ## Not here yet
 
-- OpenBao's snapshots and restore drill, key rotation as an on-chain signer change, fee float
-  top-ups (0036, 0047). After a restore on the same server, restart the facilitator: a token newer
+- OpenBao's snapshots and restore drill, key rotation as an on-chain signer change, mainnet's
+  fee float top-ups (0036, 0047). After a restore on the same server, restart the facilitator: a token newer
   than the snapshot answers 403 until its hour ends, and a 403 doesn't make the signer log in again.
 - The key theft transaction (ADR 0013): no tool signs it and it has never run (0099).
 - A leaked token or secret ID, OpenBao upgrades and what `/settle` does meanwhile, and the weekly

@@ -171,7 +171,7 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
-    emit: "aggregated",
+    emit: "eager-first",
   },
   {
     namespace: FAC,
@@ -189,9 +189,10 @@ export const CATALOG = [
     kind: "counter",
     unit: "Count",
     scope: "network",
-    sets: PLAIN,
-    fields: ["state"],
-    emit: "aggregated",
+    // `state` only for `expired`: a payment that never landed, which `settlement-expired` reads.
+    sets: [{ dims: [] }, { dims: ["state"], when: { state: ["expired"] } }],
+    values: { state: ["rejected", "success", "failed", "expired", "other"] },
+    emit: "eager-first",
   },
   {
     namespace: FAC,
@@ -220,7 +221,7 @@ export const CATALOG = [
     scope: "network",
     sets: PLAIN,
     fields: ["hook"],
-    emit: "aggregated",
+    emit: "eager-first",
   },
   {
     namespace: FAC,
@@ -331,8 +332,11 @@ export const CATALOG = [
     kind: "counter",
     unit: "Count",
     scope: "network",
-    sets: PLAIN,
-    fields: ["breaker"],
+    // One series per kind, so payer breakers opened with fresh accounts don't hide a pay_to or
+    // an asset one behind an alarm already in ALARM (Karol's review of #114, point 7).
+    sets: [{ dims: ["breaker"] }],
+    // policy.ts BreakerKind.
+    values: { breaker: ["payer", "pay_to", "asset", "other"] },
     emit: "eager-first",
   },
   // `payer` and `pay_to` write no metric: one buyer or seller near its budget is the budget
