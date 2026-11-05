@@ -413,6 +413,38 @@ describe("main()", () => {
     expect(lines.filter((line) => line.startsWith(EMF_LINE_PREFIX))).toEqual([]);
   });
 
+  it("logs each issue the writer reports as a metric_issue warning (0027)", async () => {
+    emf.options.length = 0;
+    const lines: string[] = [];
+    const app = await main(
+      { ...env, RPC_URLS: rpc.url, PORT: "0", LOG_LEVEL: "warn" },
+      { write: (line) => void lines.push(line) },
+    );
+    try {
+      emf.options[0]!.onIssue!({
+        kind: "unknown-value",
+        name: "settlement_sweeps_total",
+        dim: "outcome",
+        value: "bogus",
+      });
+      const logged = lines
+        .filter((line) => line.includes('"event":"metric_issue"'))
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(logged).toEqual([
+        expect.objectContaining({
+          level: "warn",
+          event: "metric_issue",
+          kind: "unknown-value",
+          name: "settlement_sweeps_total",
+          dim: "outcome",
+          value: "bogus",
+        }),
+      ]);
+    } finally {
+      await app.close();
+    }
+  });
+
   it("ends close() with the metrics' final flush, on the log's sink (0027)", async () => {
     const lines: string[] = [];
     const app = await main(

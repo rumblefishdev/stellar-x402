@@ -66,7 +66,7 @@ export const BREAKERS = {
 type BreakerKind = "payer" | "pay_to" | "asset";
 
 /** A fault as the `fault` label, spelled like the other labels. */
-const FAULT_LABELS: Record<Fault, string> = {
+export const FAULT_LABELS: Record<Fault, string> = {
   payer: "payer",
   payTo: "pay_to",
   asset: "asset",
