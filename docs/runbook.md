@@ -8,34 +8,37 @@ admin with `sudo`; the admins are the explorer's (`soroban-block-explorer`'s
 
 ## What is where
 
-| Where                               | What                                                               |
-| ----------------------------------- | ------------------------------------------------------------------ |
-| `/srv/x402/production/compose.yaml` | the Compose project `x402-production`                              |
-| `/srv/x402/production/deploy.sh`    | the deploy key's forced command                                    |
-| `/srv/x402/production/digest`       | the image `x402@production` runs; `digest.good` the last ready one |
-| `/srv/x402/production/digest.next`  | the digest a deploy is installing, the deploy user's only file     |
-| `/srv/x402/production/creds/*.cred` | the credentials, encrypted with the host key                       |
-| `/run/x402/production/`             | the credentials decrypted for the containers (tmpfs)               |
-| `/srv/x402/openbao/`                | OpenBao's Compose project `x402-openbao`, its config and seal key  |
-| `/run/x402/openbao/`                | the decrypted seal key; the recovery key for a moment (tmpfs)      |
-| `/usr/local/libexec/x402/`          | the units' scripts (`deploy/libexec`)                              |
-| `/etc/systemd/system/x402*`         | the units (`deploy/systemd`)                                       |
-| `/etc/x402/`                        | the CloudWatch agent's config, the rotation's, the helper's ARNs   |
-| `/var/log/x402/`                    | the files the CloudWatch agent ships (The CloudWatch agent)        |
-| `/var/lib/x402/last-ok/`            | the stamps a backup or snapshot job touches after it succeeds      |
+| Where                               | What                                                                                                |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `/srv/x402/production/compose.yaml` | the Compose project `x402-production`                                                               |
+| `/srv/x402/production/deploy.sh`    | the deploy key's forced command                                                                     |
+| `/srv/x402/production/digest`       | the image `x402@production` runs; `digest.good` the last ready one                                  |
+| `/srv/x402/production/digest.next`  | the digest a deploy is installing, the deploy user's only file                                      |
+| `/srv/x402/production/creds/*.cred` | the credentials, encrypted with the host key                                                        |
+| `/run/x402/production/`             | the credentials decrypted for the containers (tmpfs)                                                |
+| `/srv/x402/openbao/`                | OpenBao's Compose project `x402-openbao`, its config and seal key                                   |
+| `/run/x402/openbao/`                | the decrypted seal key; the recovery key for a moment (tmpfs)                                       |
+| `/usr/local/libexec/x402/`          | the units' scripts (`deploy/libexec`)                                                               |
+| `/etc/systemd/system/x402*`         | the units (`deploy/systemd`)                                                                        |
+| `/etc/x402/`                        | the CloudWatch agent's config, the rotation's, the helper's ARNs, the Storage Box's pinned host key |
+| `/srv/x402/backup/creds/*.cred`     | the backup jobs' credentials (OpenBao snapshots)                                                    |
+| `/var/lib/x402/borg/`               | Borg's cache and the repository's last-seen state                                                   |
+| `/var/log/x402/`                    | the files the CloudWatch agent ships (The CloudWatch agent)                                         |
+| `/var/lib/x402/last-ok/`            | the stamps a backup or snapshot job touches after it succeeds                                       |
 
-| Unit                                | Runs                                            |
-| ----------------------------------- | ----------------------------------------------- |
-| `x402@production`                   | the facilitator                                 |
-| `x402-db-testnet@production`        | testnet's PostgreSQL                            |
-| `x402-tunnel@production`            | `cloudflared`                                   |
-| `x402-openbao`                      | OpenBao, the signer of every network            |
-| `x402-deploy@production`            | a deploy (a oneshot, started by `deploy.sh`)    |
-| `x402-watchdog@production.timer`    | every 30 s, restarts an `unhealthy` facilitator |
-| `amazon-cloudwatch-agent`           | the CloudWatch agent, as `cwagent`              |
-| `x402-cloudwatch-credentials.timer` | every hour, the agent's 12-hour AWS keys        |
-| `x402-host-probe.timer`             | every minute, the host's signals as metrics     |
-| `x402-logrotate.timer`              | every 10 minutes, rotates `/var/log/x402`       |
+| Unit                                | Runs                                                      |
+| ----------------------------------- | --------------------------------------------------------- |
+| `x402@production`                   | the facilitator                                           |
+| `x402-db-testnet@production`        | testnet's PostgreSQL                                      |
+| `x402-tunnel@production`            | `cloudflared`                                             |
+| `x402-openbao`                      | OpenBao, the signer of every network                      |
+| `x402-deploy@production`            | a deploy (a oneshot, started by `deploy.sh`)              |
+| `x402-watchdog@production.timer`    | every 30 s, restarts an `unhealthy` facilitator           |
+| `amazon-cloudwatch-agent`           | the CloudWatch agent, as `cwagent`                        |
+| `x402-cloudwatch-credentials.timer` | every hour, the agent's 12-hour AWS keys                  |
+| `x402-host-probe.timer`             | every minute, the host's signals as metrics               |
+| `x402-logrotate.timer`              | every 10 minutes, rotates `/var/log/x402`                 |
+| `x402-openbao-snapshot.timer`       | daily at 03:15 UTC, OpenBao's snapshot to the Storage Box |
 
 Status at a glance:
 
@@ -141,6 +144,10 @@ Encrypted systemd credentials in `/srv/x402/production/creds/` (OpenBao's in
 | `postgres-password.testnet` | `postgres-testnet`             | `x402-db-testnet@`  |
 | `tunnel-token`              | `cloudflared`                  | `x402-tunnel@`      |
 | `seal-key`                  | `openbao`                      | `x402-openbao`      |
+| `storage-box-ssh-key`       | Borg (the write sub-account)   | the snapshot job    |
+| `borg-passphrase`           | Borg                           | the snapshot job    |
+| `snapshot-role-id`          | the snapshot job's login       | the snapshot job    |
+| `snapshot-secret-id`        | the snapshot job's login       | the snapshot job    |
 
 Write one without the value reaching the disk, the shell history or the screen:
 
@@ -469,7 +476,7 @@ Then step 1 again, which writes a new `seal-key.cred`.
 3. The backup secret `x402/production/openbao-backup`, as ADR 0013 makes it, from the root of this
    repo (`AWS_PROFILE=soroban-admin`). The JSON goes over stdin, so it never reaches a disk. The
    previous seal key's pair stays empty until a rotation, and the Borg and Storage Box fields until
-   the snapshots (Not here yet).
+   the snapshots (OpenBao snapshots).
 
    ```sh
    backup=$(seal_key=$seal_key recovery_key=$(printf %s "$init" | jq -r '.recovery_keys_b64[0]') \
@@ -613,6 +620,152 @@ for a in $(bao list -format=json auth/token/accessors </dev/null | self=$self py
 ```
 
 Then step 4 in this shell, without its `read`, and step 5 (`unset self` too).
+
+## OpenBao snapshots
+
+Once a day `x402-openbao-snapshot.timer` saves a Raft snapshot and sends it to our Borg repository
+on the Storage Box ([ADR 0013](adr/0013-facilitator-key-custody.md), task 0026). It logs in with
+the AppRole `x402-snapshot`, whose policy allows only `sys/storage/raft/snapshot`, keeps 14 daily
+archives and touches `/var/lib/x402/last-ok/openbao-snapshot` when every step passed. 0027's
+`snapshot-age` alarm reads that stamp. Its output is in `journalctl -u x402-openbao-snapshot`.
+
+| Storage Box (BX21 `ch-prod-01-backup`, port 23) | Home         | Use                                   |
+| ----------------------------------------------- | ------------ | ------------------------------------- |
+| `u595862-sub2`, reachable only from the server  | `/x402`      | writes: the snapshots, `data/openbao` |
+| `u595862-sub3`, reachable from outside          | `/x402/data` | reads only: a restore, its key in AWS |
+
+The box's host key is pinned in `deploy/ansible/files/storage-box.known_hosts`
+(`SHA256:XqONwb1S0zuj5A1CDxpOSuD2hnAArV1A3wKY7Z3sdgM`). The box takes its own daily snapshots too,
+which our keys can't delete. A restore from one copies our directory out of `.zfs/snapshot` with
+the box's main account, never a rollback in the Console, which reverts the whole box.
+
+**Borg runs in repokey mode:** the repository's key is on the box, locked by the passphrase, and
+`borg key export` is in the backup secret too, so a damaged key in the repository can be replaced.
+Nothing on the box decrypts a snapshot by itself.
+
+`x402-openbao-snapshot borg ARGS` runs any Borg command on the repository with the job's
+credentials, host key and settings, and removes the decrypted files after:
+
+```sh
+sudo /usr/local/libexec/x402/x402-openbao-snapshot borg list
+sudo /usr/local/libexec/x402/x402-openbao-snapshot borg check --repository-only
+```
+
+### Setting it up
+
+Once, after a playbook run with this job (it installs Borg, the script, the policy file and the
+host key, and enables the timer without starting it).
+
+1. **The Storage Box key**, made on the server on 2026-11-05, its private half only in this
+   credential (0026's history has its fingerprint). Again, in a root shell:
+
+   ```sh
+   umask 077; t=$(mktemp -d /run/x402-keygen.XXXXXX)
+   ssh-keygen -q -t ed25519 -N '' -C 'x402-backup@ch-prod-01 (u595862-sub2)' -f "$t/key"
+   systemd-creds encrypt --with-key=host --name=storage-box-ssh-key "$t/key" /srv/x402/backup/creds/storage-box-ssh-key.cred
+   cat "$t/key.pub"; shred -u "$t/key"; rm -rf "$t"
+   ```
+
+   The public half goes to whoever holds the box's main account, for `/x402/.ssh/authorized_keys`.
+
+2. **Borg on both ends.** The box keeps several Borg versions for us; the script asks for
+   `borg-1.2` (`BORG_REMOTE_PATH`), whose major version must be the server's package's:
+
+   ```sh
+   borg --version   # 1.2.x; for another major, change BORG_REMOTE_PATH by pull request first
+   ```
+
+   Step 3's `borg init` is the first call to the box, so it fails there if the box lacks it.
+
+3. **The passphrase and the repository,** from the admin's machine at the root of this repo. The
+   passphrase lives in this subshell's memory, then only in the credential and the backup secret.
+   The export and the passphrase go into AWS in one `put-secret-value`, since the export is
+   encrypted with the passphrase. Nothing changes the secret unless every other field stays the
+   same.
+
+   ```sh
+   (
+   set -eu
+   export AWS_PROFILE=soroban-admin AWS_REGION=eu-central-1
+   id=x402/production/openbao-backup
+   pass=$(openssl rand -base64 32 | tr -d '\n')
+   printf %s "$pass" | ssh SERVER 'sudo systemd-creds encrypt --with-key=host --name=borg-passphrase - /srv/x402/backup/creds/borg-passphrase.cred'
+   ssh SERVER 'sudo /usr/local/libexec/x402/x402-openbao-snapshot borg init -e repokey-blake2'
+   export_=$(ssh SERVER 'sudo /usr/local/libexec/x402/x402-openbao-snapshot borg key export :: -')
+   [ "${export_#BORG_KEY }" != "$export_" ] || { echo "no key export"; exit 1; }
+   cur=$(aws secretsmanager get-secret-value --secret-id $id --query SecretString --output text)
+   new=$(printf %s "$cur" | p=$pass e=$export_ jq -c '.borg_passphrase = env.p | .borg_key_export = env.e | .updated = (now | todate)')
+   strip='del(.borg_passphrase, .borg_key_export, .updated)'
+   [ "$(printf %s "$cur" | jq -S "$strip")" = "$(printf %s "$new" | jq -S "$strip")" ] || { echo "other fields changed"; exit 1; }
+   printf %s "$new" | aws secretsmanager put-secret-value --secret-id $id --secret-string file:///dev/stdin --query VersionId --output text
+   [ "$(aws secretsmanager get-secret-value --secret-id $id --query SecretString --output text)" = "$new" ] && echo "secret: read back the same"
+   )
+   ```
+
+   If it stopped after `borg init`, the repository is still empty: delete it and run step 3
+   again (`sudo /usr/local/libexec/x402/x402-openbao-snapshot borg delete ::`, which asks for
+   `YES`).
+
+4. **The AppRole,** in a root shell with a root token (A new root token, above):
+
+   ```sh
+   bao policy write x402-snapshot - < /srv/x402/openbao/x402-snapshot.hcl
+   bao write auth/approle/role/x402-snapshot token_policies=x402-snapshot token_ttl=5m token_max_ttl=5m
+   v=$(bao read -field=role_id auth/approle/role/x402-snapshot/role-id) && [ -n "$v" ] &&
+     printf %s "$v" | systemd-creds encrypt --with-key=host --name=snapshot-role-id - \
+       /srv/x402/backup/creds/snapshot-role-id.cred
+   v=$(bao write -f -field=secret_id auth/approle/role/x402-snapshot/secret-id) && [ -n "$v" ] &&
+     printf %s "$v" | systemd-creds encrypt --with-key=host --name=snapshot-secret-id - \
+       /srv/x402/backup/creds/snapshot-secret-id.cred
+   unset v
+   ```
+
+   Then step 5 of OpenBao's setup: revoke the root token and leave the shell.
+
+5. **The first run,** then the timer:
+
+   ```sh
+   sudo systemctl start x402-openbao-snapshot.service
+   journalctl -u x402-openbao-snapshot -n 30 --no-pager   # "snapshot saved, … bytes"
+   sudo /usr/local/libexec/x402/x402-openbao-snapshot borg list
+   ls -l /var/lib/x402/last-ok/openbao-snapshot
+   sudo systemctl start x402-openbao-snapshot.timer
+   systemctl list-timers x402-openbao-snapshot.timer
+   ```
+
+### Changing Borg's passphrase
+
+The export is encrypted with the passphrase, so both fields of the backup secret change together.
+Do it between two runs: until the credential holds the new passphrase, a run fails, and its alarm
+fires a day later.
+
+```sh
+(
+set -eu
+export AWS_PROFILE=soroban-admin AWS_REGION=eu-central-1
+id=x402/production/openbao-backup
+pass=$(openssl rand -base64 32 | tr -d '\n')
+printf %s "$pass" | ssh SERVER 'sudo sh -c "BORG_NEW_PASSPHRASE=\$(cat) /usr/local/libexec/x402/x402-openbao-snapshot borg key change-passphrase ::"'
+printf %s "$pass" | ssh SERVER 'sudo systemd-creds encrypt --with-key=host --name=borg-passphrase - /srv/x402/backup/creds/borg-passphrase.cred'
+export_=$(ssh SERVER 'sudo /usr/local/libexec/x402/x402-openbao-snapshot borg key export :: -')
+cur=$(aws secretsmanager get-secret-value --secret-id $id --query SecretString --output text)
+new=$(printf %s "$cur" | p=$pass e=$export_ jq -c '.borg_passphrase = env.p | .borg_key_export = env.e | .updated = (now | todate)')
+printf %s "$new" | aws secretsmanager put-secret-value --secret-id $id --secret-string file:///dev/stdin --query VersionId --output text
+)
+```
+
+Then `sudo systemctl start x402-openbao-snapshot.service` to check, and the restore drill when it
+is next due.
+
+### Testing locally
+
+The script takes its paths from the environment, so it runs against a throwaway OpenBao and a
+container standing in for the box: `X402_CREDS_DIR` (plain files instead of credentials, left in
+place), `X402_OPENBAO_DIR` (a copy of `deploy/openbao` with its own volume names),
+`X402_STAMPS`, `X402_KNOWN_HOSTS`, `BORG_REPO`, `BORG_REMOTE_PATH` and `BORG_BASE_DIR`. 0026's
+implementation notes have the run of 2026-11-05: a snapshot, the restore of it into a second
+OpenBao through a copy of the repository with its key imported from the export, and the same
+Transit key after it.
 
 ## Topping up the fee account
 
@@ -773,7 +926,7 @@ pin.
 
 ## Not here yet
 
-- OpenBao's snapshots and restore drill, key rotation as an on-chain signer change, mainnet's
+- OpenBao's restore drill, key rotation as an on-chain signer change, mainnet's
   fee float top-ups (0036, 0047). After a restore on the same server, restart the facilitator: a token newer
   than the snapshot answers 403 until its hour ends, and a 403 doesn't make the signer log in again.
 - The key theft transaction (ADR 0013): no tool signs it and it has never run (0099).
