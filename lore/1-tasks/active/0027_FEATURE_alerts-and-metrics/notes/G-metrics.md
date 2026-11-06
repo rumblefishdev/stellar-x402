@@ -69,6 +69,7 @@ metrics. A gauge that stops is silence, not a stale value. The only zero written
 | `settlement_record_failures_total` | `records.ts` | Yes | | `store-outage` |
 | `settlement_history_gone_total` | `reconcile.ts` | Yes | | `history-gone` |
 | `settlement_landed_after_expired_total` | `records.ts` (0088) | Yes | `state` | `landed-after-expired` |
+| `settlement_rewrapped_total` | `records.ts` (0087): our inner transaction landed under another envelope | Yes | `state`, and `transaction`, `ours`, `feeSource` in the `settlement_rewrapped` log | None |
 | `signer_failures_total` | `openbao-signer.ts` (0036) | Yes | `reason`, `step` | `signer-failures` |
 | `pool_events_total` | The pool's `onEvent`, `main.ts` | Yes, and `type` only for `sequence-resync` | `type`, `status` on `resolved` | `pool-health` |
 | `settlement_uncertain_total` | `settle.ts` | Yes | | None |
