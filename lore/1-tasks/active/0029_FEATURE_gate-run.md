@@ -71,7 +71,7 @@ As a reviewer of the grant, I want e2e results with real settled transaction has
 | 13 | No fixed scenario count: the gate takes the scenarios the suite selects, which records each one, a server that fails to start as failed (`e2e/test.ts:1783-1795@8827cf1`) | the owner's decision, 2026-11-06 | as the task says | no standard |
 | 14 | The gate fails a hash that two scenarios report | the owner's decision, 2026-11-06 | as the task says | no standard |
 | 15 | No file of forwarded calls: the settlements are proven on chain (rows 11 and 14), and the suite's `-v` shows the calls when debugging | the owner's decision, 2026-11-06 | as the task says | no standard |
-| 16 | A weekly workflow opens an issue when upstream main changes one of the three files the suite rests on (the x402 spec, the Stellar `exact` scheme, the suite's Stellar routes) since the pin | the owner's decision, 2026-11-06 | beyond it (RFP: track spec evolution) | no standard |
+| 16 | The off-server check's Lambda (0027) compares, on the hour, the three upstream files the suite rests on (the x402 spec, the Stellar `exact` scheme, the suite's Stellar routes) at the gate's pin with upstream main, and the `upstream-changed` alarm fires to the team's alarm channel while one differs; it replaces the weekly issue | the owner's decision, 2026-11-06 | beyond it (RFP: track spec evolution) | no standard |
 
 ## Not yet decided
 
