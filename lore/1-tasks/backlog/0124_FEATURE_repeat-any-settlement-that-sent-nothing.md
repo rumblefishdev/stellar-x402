@@ -55,6 +55,13 @@ as today.
 - Whether 0086 is closed as superseded: its first criterion asks that a payment refused for its
   fee never settles through the facilitator, which row 2 reverses.
 
+## Out of scope
+
+- A database row for a refusal before the claim (the owner, 2026-11-06): the `verified` and
+  `settled` log lines already keep every refusal with its reason and payer, 30 days in CloudWatch
+  (ADR 0011). A row in `settlements` at that point would take the payer's in-flight slot and let
+  anyone holding the payload write rows.
+
 ## Implementation
 
 - `reopenable()` drops the `UNSENT_REASONS` check; `store.reopen()` drops its reason filter. The
