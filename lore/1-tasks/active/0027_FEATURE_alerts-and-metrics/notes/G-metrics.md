@@ -150,8 +150,8 @@ The ages are `Seconds`, the percentages `Percent`, the two counters `Count`, and
 ## Off the server, namespace `x402-watch`
 
 Published with `PutMetricData` by two Lambdas. `spendable_stroops`, `account_state_mismatches` and
-`account_effects_unexpected` are network-scoped. `ready` and `backup_secret_reads` are
-process-scoped: one probe, one AWS account. `ready` and `spendable_stroops` are `None`, the rest
+`account_effects_unexpected` are network-scoped. `ready`, `backup_secret_reads` and
+`upstream_files_changed` are process-scoped: one probe, one AWS account. `ready` and `spendable_stroops` are `None`, the rest
 `Count`.
 
 | Metric | Source | Alarm statistic | Alarm |
@@ -161,6 +161,7 @@ process-scoped: one probe, one AWS account. `ready` and `spendable_stroops` are 
 | `account_state_mismatches` | The check: accounts whose signers or thresholds differ from the declared set, or that are gone | `Maximum` | `account-state` |
 | `account_effects_unexpected` | The check: effects other than the allowed two, since the cursor | `Maximum` | `account-effects` |
 | `backup_secret_reads` | The check: `GetSecretValue` events not counted before | `Maximum` | `backup-secret-read` |
+| `upstream_files_changed` | The check, on the hour: upstream x402 files the conformance gate rests on that differ from its pin (task 0029) | `Maximum` | `upstream-changed` |
 
 The statistics are the ones a forged point can't hide a real one behind
 ([G-alarm-list](G-alarm-list.md#statistics)).

@@ -74,8 +74,8 @@ describe("every alarm reads a series the catalog declares (AD-1)", () => {
 });
 
 describe("the Alarms template", () => {
-  test("has every alarm of the list once per network, 82 with two networks", () => {
-    expect(alarms).toHaveLength(82);
+  test("has every alarm of the list once per network, 83 with two networks", () => {
+    expect(alarms).toHaveLength(83);
     expect(new Set(byName.keys()).size).toBe(alarms.length);
   });
 
@@ -161,6 +161,7 @@ describe("the Alarms template", () => {
     expect(bases("watch")).toEqual([
       "balance-critical",
       "balance-low",
+      "upstream-changed",
       "watch-errors",
       "watch-no-invocations",
     ]);
@@ -251,6 +252,7 @@ test("production as committed makes only the groups that are on", () => {
     "x402-production-balance-low-testnet",
     "x402-production-emf-parsing",
     "x402-production-emf-validation",
+    "x402-production-upstream-changed",
     "x402-production-uptime",
     "x402-production-uptime-flapping",
     "x402-production-watch-errors",
@@ -339,6 +341,7 @@ const LEVEL: Record<string, readonly [keyof typeof OP, number, string, number, n
   "log-volume": [">", t.logVolumeBytesPerHour!, "Sum", 3600, 1, 1],
   "gauges-silent": [">=", 1, "SampleCount", 300, 3, 3],
   "watch-errors": [">=", 1, "Sum", 300, 2, 3],
+  "upstream-changed": [">=", 1, "Maximum", 3600, 1, 1],
 };
 
 /** Each Event alarm's threshold other than 1, which the list writes as "at N or more". */

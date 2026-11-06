@@ -120,6 +120,16 @@ hold either in ALARM the same way with a forged point every 15 minutes, so #115'
 each finding to the topic itself, one message per finding; the two alarms stay as the backstop for
 a check that can't publish (decision 64).
 
+## Upstream
+
+From the off-server check, once an hour (task 0029). It reads the gate's pin from this repo's
+`develop` and compares three upstream x402 files there with upstream `main`: the x402 spec, the
+Stellar `exact` scheme and the suite's Stellar routes. It is in the `watch` group.
+
+| Alarm | Signal | Shape | Fires when | Missing data |
+| --- | --- | --- | --- | --- |
+| `upstream-changed` | `upstream_files_changed` | Level, `Maximum`, 1 of 1 one-hour period | One of the three files differs from the pin; it clears once the pin moves | Ignore: `watch-errors`, `watch-no-invocations` |
+
 ## Settlement
 
 | Alarm | Signal | Shape | Fires when | Missing data |
