@@ -49,6 +49,7 @@ as today.
 | 1 | A record that ended with nothing sent reopens by default, also for a reason nobody listed | owner, 2026-11-06 | matches | upstream Stellar `exact`: no record, any unsent payment is sent again | | |
 | 2 | No refusal without a send ends a payment for good: budgets, breakers, fee, simulation, hook errors, `unexpected_settle_error` included | owner, 2026-11-06 | changes 0024 decision 35 | upstream Stellar `exact`, as row 1 | | |
 | 3 | `extra.retryable` says whether a repeat can succeed, per reason: `false` for a refusal the same payload always gets (`…_unexpected_balance_changes`, `…_payer_not_authorized`, `…_unsupported_credential`, `…_signature_expiration_too_soon`) and for a spend budget, whose 24 h window outlasts the auth entry; the payload still reopens | owner, 2026-11-06, after a devil's-advocate review | beyond it | x402-foundation/x402 Stellar `exact` sets `retryable` only on `TRY_AGAIN_LATER` (`typescript/packages/mechanisms/stellar/src/exact/facilitator/scheme.ts:353-368`@6a773db; not in `@x402/stellar` 2.28.0) | | |
+| 4 | A refusal from the checks before the claim, which leaves no record, answers `extra.expirationLedger` and "don't sign a new payment before it", as an ended record does; `retryable` follows decision 3 | owner, 2026-11-06, after a devil's-advocate review | beyond it; closes 0086's scenario at its cause | | | |
 
 ## Not yet decided
 
@@ -67,6 +68,8 @@ as today.
 - `reopenable()` drops the `UNSENT_REASONS` check; `store.reopen()` drops its reason filter. The
   reopen still runs the full `/settle` check first (0073 decision 13) and passes the hooks again,
   so a budget still spent or a breaker still open refuses again.
+- `withRetry` no longer needs a key: a refusal from the checks gets the expiration ledger too
+  (decision 4).
 - Every such ending answers `extra.retryable` and `expirationLedger`, as the unsent answers do
   now, with `retryable` set by decision 3. Update the facilitator README's settle answers and 0024 decision 35.
 
@@ -81,3 +84,6 @@ as today.
 - [ ] Given a record with a hash, when the identical payload returns, then it doesn't reopen
 - [ ] Given a reopen after a budget refusal, when the budget is still spent, then it is refused
       again with the same reason
+- [ ] Given a refusal from the checks before the claim, e.g.
+      `invalid_exact_stellar_payload_fee_exceeds_maximum`, when the client reads the answer, then
+      it carries `extra.expirationLedger` and never says to sign a new payment before it
