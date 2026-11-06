@@ -1,0 +1,78 @@
+{
+  "agent": {
+    "region": "eu-central-1",
+    "run_as_user": "cwagent",
+    "omit_hostname": true,
+    "use_dualstack_endpoint": false,
+    "metrics_collection_interval": 60
+  },
+  "logs": {
+    "force_flush_interval": 5,
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/var/log/x402/production/facilitator.log",
+            "log_group_name": "/x402/production/app",
+            "log_stream_name": "facilitator",
+            "multi_line_start_pattern": "^",
+            "filters": [{ "type": "exclude", "expression": "^\\{\"_aws\":" }]
+          },
+          {
+            "file_path": "/var/log/x402/production/emf/facilitator.log",
+            "log_group_name": "/x402/production/metrics",
+            "log_stream_name": "facilitator",
+            "multi_line_start_pattern": "^",
+            "filters": [{ "type": "include", "expression": "^\\{\"_aws\":" }]
+          },
+          {
+            "file_path": "/var/log/x402/production/facilitator.err.log",
+            "log_group_name": "/x402/production/app",
+            "log_stream_name": "facilitator-stderr"
+          },
+          {
+            "file_path": "/var/log/x402/production/postgres-testnet.log",
+            "log_group_name": "/x402/production/app",
+            "log_stream_name": "postgres-testnet"
+          },
+          {
+            "file_path": "/var/log/x402/production/cloudflared.log",
+            "log_group_name": "/x402/production/app",
+            "log_stream_name": "cloudflared"
+          },
+          {
+            "file_path": "/var/log/x402/production/deploy.log",
+            "log_group_name": "/x402/production/app",
+            "log_stream_name": "deploy"
+          },
+          {
+            "file_path": "/var/log/x402/openbao/openbao.log",
+            "log_group_name": "/x402/production/app",
+            "log_stream_name": "openbao"
+          },
+          {
+            "file_path": "/var/log/x402/host/metrics.log",
+            "log_group_name": "/x402/production/metrics",
+            "log_stream_name": "host",
+            "multi_line_start_pattern": "^",
+            "filters": [{ "type": "include", "expression": "^\\{\"_aws\":" }]
+          }
+        ]
+      }
+    }
+  },
+  "metrics": {
+    "namespace": "x402-host",
+    "aggregation_dimensions": [["path"]],
+    "metrics_collected": {
+      "mem": {
+        "measurement": ["used_percent"]
+      },
+      "disk": {
+        "resources": ["/"],
+        "measurement": ["used_percent"],
+        "drop_original_metrics": ["disk_used_percent"]
+      }
+    }
+  }
+}

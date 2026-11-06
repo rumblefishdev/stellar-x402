@@ -1,0 +1,14 @@
+# One run of the host probe (lore 0027 decision 10), started by x402-host-probe.timer: OpenBao,
+# WAL archiving, the backup and snapshot stamps, the certificate and the agent's credentials, as
+# EMF lines in /var/log/x402/host/metrics.log. Root: it reads Docker and testnet's socket. It
+# writes its own file, so its stderr stays in the journal.
+[Unit]
+Description=x402 host probe
+Documentation=https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/adr/0011-facilitator-hosting.md
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/x402/x402-host-probe
+# Its checks take 30 s at most; a run never overlaps the next minute's.
+TimeoutStartSec=50

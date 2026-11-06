@@ -215,6 +215,14 @@ CREATE TABLE settlement_in_flight (
 );
 `,
   },
+  {
+    // 0087: the inner transaction's hash next to each fee bump's, so a sweep can find our inner
+    // transaction under someone else's fee bump before it calls our hash dead. Nullable, so the
+    // release before it keeps working: a hash it stores has none and is resolved by its own hash
+    // alone, as before. A row a rewrap adds copies its inner hash from ours.
+    name: "0012_settlement_inner_hash",
+    sql: "ALTER TABLE settlement_hashes ADD COLUMN inner_hash text;",
+  },
 ];
 
 /** Runs in one transaction with the transactional migrations next to it, as before 0067. */

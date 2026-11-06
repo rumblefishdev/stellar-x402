@@ -199,6 +199,8 @@ export function emfMetrics(
       let labels: Labels;
       try {
         const r = read();
+        // No value yet (a reconciler that hasn't listed): no sample, and nothing to report.
+        if (r === undefined) continue;
         value = typeof r.value === "bigint" ? Number(r.value) : r.value;
         labels = { ...r.labels };
       } catch {

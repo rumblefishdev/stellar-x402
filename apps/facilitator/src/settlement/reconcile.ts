@@ -3,6 +3,7 @@ import type { StellarNetwork } from "@stellar-x402/config";
 import {
   cannotLand,
   failureCause,
+  rewrappedOutcome,
   type SorobanRpc,
   type SubmitResult,
 } from "@stellar-x402/signer-pool";
@@ -68,20 +69,42 @@ export function createReconciler(deps: ReconcilerDeps) {
     attempt: SettlementAttempt,
     res: rpc.Api.GetSuccessfulTransactionResponse | rpc.Api.GetFailedTransactionResponse,
     others: AttemptUpdate[],
+    byInnerHash = false,
   ): Promise<Outcome> => {
     const success = res.status === rpc.Api.GetTransactionStatus.SUCCESS;
+    const state = success ? "success" : "failed";
+    // Found by the inner hash: another envelope of ours may have landed (0087). Ours is then dead,
+    // theirs is added as the hash that landed, and their fee account paid.
+    const found = byInnerHash
+      ? rewrappedOutcome(res, attempt.hash, getNetworkPassphrase(network))
+      : undefined;
+    const rewrap = found?.rewrap;
+    const channel = attempt.channel !== undefined && { channel: attempt.channel };
     const { record: finished, won } = await records.finish(
       record.key,
       {
-        state: success ? "success" : "failed",
+        state,
         ledger: res.ledger,
-        feeCharged: res.resultXdr.feeCharged().toBigInt(),
-        ...(attempt.channel !== undefined && { channel: attempt.channel }),
+        feeCharged: found?.feeCharged ?? res.resultXdr.feeCharged().toBigInt(),
+        ...channel,
         ...(!success && { errorReason: SETTLE_REASONS.failed, failure: failureCause(res) }),
-        attempts: [...others, { hash: attempt.hash, state: "landed" }],
+        attempts: rewrap
+          ? [
+              ...others,
+              { hash: attempt.hash, state: "dead" },
+              { hash: found.hash!, state: "landed", rewrapOf: attempt.hash, ...channel },
+            ]
+          : [...others, { hash: attempt.hash, state: "landed" }],
       },
       "resolved",
     );
+    if (rewrap && won)
+      records.rewrapped(record.key, {
+        ours: attempt.hash,
+        landed: found.hash!,
+        feeSource: rewrap.feeSource,
+        state,
+      });
     if (!won) return "open";
     if (success && finished) await markIfAnswered(finished);
     return success ? "success" : "failed";
@@ -172,10 +195,21 @@ export function createReconciler(deps: ReconcilerDeps) {
 
   /**
    * The `createdAt` of the oldest record the latest listing left open, `history_gone` ones left
-   * out (an operator owns them). Set at the end of each sweep that listed; one that couldn't list
-   * keeps it, so the age it feeds keeps rising (0027 AD-5).
+   * out (an operator owns them): `null` with none, `undefined` before the first listing. Set
+   * right after each listing, from what it listed, and again at the end of the sweep, from what
+   * it left open; a sweep that couldn't list keeps it, so the age it feeds keeps rising (0027
+   * AD-5, decision 56).
    */
-  let oldestOpenCreatedAt: number | undefined;
+  let oldestOpenCreatedAt: number | null | undefined;
+
+  const oldestOf = (listed: readonly SettlementRecord[]): number | null => {
+    let oldest: number | null = null;
+    for (const record of listed) {
+      if (historyGone.has(record.key)) continue;
+      if (oldest === null || record.createdAt < oldest) oldest = record.createdAt;
+    }
+    return oldest;
+  };
 
   const pastBound = (
     record: SettlementRecord,
@@ -215,8 +249,22 @@ export function createReconciler(deps: ReconcilerDeps) {
       const res = await deps.rpc.getTransaction(attempt.hash);
       if (res.status === rpc.Api.GetTransactionStatus.NOT_FOUND) {
         if (!pastBound(record, attempt, res)) open++;
-        else if (historyCovers(record, res)) dead.push({ hash: attempt.hash, state: "dead" });
-        else {
+        else if (historyCovers(record, res)) {
+          // Ours never landed, but someone else's fee bump of its inner transaction may have
+          // (0087). A hash stored before the inner one was kept is resolved by itself alone.
+          if (attempt.innerHash !== undefined) {
+            const inner = await deps.rpc.getTransaction(attempt.innerHash);
+            if (inner.status !== rpc.Api.GetTransactionStatus.NOT_FOUND)
+              return land(record, attempt, inner, dead, true);
+            // The same rule as for our own hash: a node behind the bound, or without the
+            // history, may not have seen theirs land, so the attempt stays open.
+            if (!pastBound(record, attempt, inner) || !historyCovers(record, inner)) {
+              open++;
+              continue;
+            }
+          }
+          dead.push({ hash: attempt.hash, state: "dead" });
+        } else {
           // It may have landed before the RPC's history: an operator checks it (decision 22). It
           // can't land again past its bound, so free its payer and asset's slot (0024): held, it
           // would answer every later payment of them `busy` for good.
@@ -227,6 +275,8 @@ export function createReconciler(deps: ReconcilerDeps) {
               network,
               settlementKey: record.key,
               transaction: attempt.hash,
+              // Someone else's fee bump of it lands under another hash, found by this one (0087).
+              ...(attempt.innerHash !== undefined && { innerHash: attempt.innerHash }),
               oldestLedger: res.oldestLedger,
             });
             metrics.increment("settlement_history_gone_total");
@@ -270,6 +320,8 @@ export function createReconciler(deps: ReconcilerDeps) {
     await runLostHooks();
     await retryMarks();
     const queue = await store.listNonFinal(network);
+    // Before any record is read, so a first sweep stuck on the RPC already shows the backlog.
+    oldestOpenCreatedAt = oldestOf(queue);
     onListed?.();
     /** Listed records this sweep left non-final; the history_gone ones are filtered out below. */
     const open: SettlementRecord[] = [];
@@ -302,12 +354,7 @@ export function createReconciler(deps: ReconcilerDeps) {
     await Promise.all(Array.from({ length: CONCURRENCY }, worker));
     // At the end, so both the pass that found a record's history gone and the skip above leave it
     // out.
-    let oldest: number | undefined;
-    for (const record of open) {
-      if (historyGone.has(record.key)) continue;
-      if (oldest === undefined || record.createdAt < oldest) oldest = record.createdAt;
-    }
-    oldestOpenCreatedAt = oldest;
+    oldestOpenCreatedAt = oldestOf(open);
     // Only a sweep that changed or failed something: one runs every few seconds.
     if (report.open < Object.values(report).reduce((sum, n) => sum + n, 0))
       logger.info("reconcile_finished", { network, ...report });
@@ -320,7 +367,8 @@ export function createReconciler(deps: ReconcilerDeps) {
    */
   const resolved = async (result: SubmitResult): Promise<void> => {
     if (!result.hash || result.status === "pending") return;
-    const record = await store.findByHash(result.hash);
+    // A rewrap's hash is someone else's, not stored yet: the record has ours (0087).
+    const record = await store.findByHash(result.rewrap?.of ?? result.hash);
     if (!record) return;
     const fields = resultUpdate(result);
     const { record: finished, won } = await records.finish(
@@ -335,17 +383,29 @@ export function createReconciler(deps: ReconcilerDeps) {
           },
       "resolved",
     );
+    if (result.rewrap && won)
+      records.rewrapped(record.key, {
+        ours: result.rewrap.of,
+        landed: result.hash,
+        feeSource: result.rewrap.feeSource,
+        state: result.status === "success" ? "success" : "failed",
+      });
     if (result.status === "success" && won && finished) await markIfAnswered(finished);
   };
 
   /**
    * `settlement_oldest_open_seconds` (0027 AD-5): the age of the oldest record the latest listing
    * left open, at the time of the read, so a record a stuck or failing sweep leaves open shows as a
-   * rising value; 0 with none. A sweep that hangs or fails after one that left nothing open reads
-   * 0 meanwhile: `sweeps-stopped` covers it (G-alarm-list). Memory only.
+   * rising value; 0 with none. `undefined`, so no sample, until a sweep has listed: after a
+   * restart a 0 would read as nothing open while a record is (decision 56). A sweep that hangs or
+   * fails after one that left nothing open reads 0 meanwhile: `sweeps-stopped` covers it
+   * (G-alarm-list). Memory only.
    */
-  const oldestOpenSeconds = (): number =>
-    oldestOpenCreatedAt === undefined ? 0 : Math.max(0, (now() - oldestOpenCreatedAt) / 1000);
+  const oldestOpenSeconds = (): number | undefined => {
+    if (oldestOpenCreatedAt === undefined) return undefined;
+    if (oldestOpenCreatedAt === null) return 0;
+    return Math.max(0, (now() - oldestOpenCreatedAt) / 1000);
+  };
 
   return { sweep, resolved, oldestOpenSeconds };
 }

@@ -1,4 +1,13 @@
-import { Address, FeeBumpTransaction, Keypair, StrKey, rpc, xdr } from "@stellar/stellar-sdk";
+import {
+  Address,
+  FeeBumpTransaction,
+  Keypair,
+  StrKey,
+  Transaction,
+  TransactionBuilder,
+  rpc,
+  xdr,
+} from "@stellar/stellar-sdk";
 import { describe, expect, it, vi } from "vitest";
 import {
   NOT_FOUND_MARGIN_LEDGERS,
@@ -502,7 +511,8 @@ describe("maxLedger", () => {
     const getTransaction = fake.getTransaction.bind(fake);
     fake.getTransaction = async (hash) => {
       const res = await getTransaction(hash);
-      reads.push(res.latestLedger);
+      // Our fee bump's reads only: one by the inner hash follows the last (0087).
+      if (hash === fake.sent[0]?.hash().toString("hex")) reads.push(res.latestLedger);
       return res;
     };
     const res = await submitter.submit(call(), { maxLedger: start + 3 });
@@ -744,5 +754,201 @@ describe("a signer that fails", () => {
     expect(error).toMatchObject({ stage, message: "OpenBao is sealed" });
     expect(fake.sent).toHaveLength(0);
     expect(submitter.stats()).toMatchObject({ busy: 0, refused: { signing: 1 } });
+  });
+});
+
+describe("our inner transaction under another envelope (0087)", () => {
+  const rival = Keypair.random();
+
+  /**
+   * A stalled network, so our fee bump never lands; `landed` decides what a read by the inner
+   * hash finds once ours is past its bound. Each read's hash is recorded.
+   */
+  function stalledWith(
+    landed: (ours: FeeBumpTransaction) => FeeBumpTransaction | Transaction | undefined,
+    opts: { throwsFirst?: boolean; status?: "SUCCESS" | "FAILED" } = {},
+  ) {
+    const { fake, submitter } = setup({ timeoutSeconds: 600 });
+    fake.stalled = true;
+    const reads: string[] = [];
+    let throws = opts.throwsFirst ? 1 : 0;
+    const getTransaction = fake.getTransaction.bind(fake);
+    fake.getTransaction = async (hash) => {
+      reads.push(hash);
+      const ours = fake.sent.at(-1) as FeeBumpTransaction | undefined;
+      if (!ours || hash !== ours.innerTransaction.hash().toString("hex"))
+        return getTransaction(hash);
+      if (throws-- > 0) throw new Error("fetch failed");
+      const tx = landed(ours);
+      const res = await getTransaction(hash);
+      if (!tx) return res;
+      const failed = opts.status === "FAILED";
+      return {
+        ...res,
+        status: failed ? rpc.Api.GetTransactionStatus.FAILED : rpc.Api.GetTransactionStatus.SUCCESS,
+        ledger: fake.ledger - 1,
+        envelopeXdr: tx.toEnvelope(),
+        resultXdr: xdr.TransactionResult.fromXDR(
+          new xdr.TransactionResult({
+            feeCharged: xdr.Int64.fromString("410000"),
+            result: failed
+              ? xdr.TransactionResultResult.txFailed([])
+              : xdr.TransactionResultResult.txSuccess([]),
+            ext: new xdr.TransactionResultExt(0),
+          }).toXDR(),
+        ),
+      } as rpc.Api.GetTransactionResponse;
+    };
+    return { fake, submitter, reads };
+  }
+
+  /** Someone else's fee bump of our inner transaction, at ten times our fee. */
+  const rewrap = (ours: FeeBumpTransaction) => {
+    const bump = TransactionBuilder.buildFeeBumpTransaction(
+      rival,
+      String(Number(ours.fee) * 10),
+      ours.innerTransaction,
+      PASSPHRASE,
+    );
+    bump.sign(rival);
+    return bump;
+  };
+
+  it("hands onSigned the inner transaction's hash", async () => {
+    const { fake, submitter } = setup();
+    const given: (string | undefined)[] = [];
+    await submitter.submit(call(), { onSigned: (_, __, inner) => void given.push(inner) });
+    const sent = fake.sent[0] as FeeBumpTransaction;
+    expect(given).toEqual([sent.innerTransaction.hash().toString("hex")]);
+  });
+
+  it("ends success under the hash that landed, charged nothing, when another fee bump carried it", async () => {
+    const { fake, submitter } = stalledWith(rewrap);
+    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 3 });
+    const ours = fake.sent[0] as FeeBumpTransaction;
+    const theirs = rewrap(ours).hash().toString("hex");
+    expect(res).toMatchObject({
+      status: "success",
+      hash: theirs,
+      feeCharged: 0n,
+      rewrap: { of: ours.hash().toString("hex"), feeSource: rival.publicKey() },
+    });
+    // Our own envelope stays the attempt: it is what `onSigned` stored.
+    expect(res.attempts.at(-1)?.hash).toBe(ours.hash().toString("hex"));
+  });
+
+  it("reads the inner hash only once ours can no longer land, and still expires when it isn't there", async () => {
+    const { fake, submitter, reads } = stalledWith(() => undefined);
+    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 3 });
+    expect(res.status).toBe("expired");
+    const ours = fake.sent[0] as FeeBumpTransaction;
+    const inner = ours.innerTransaction.hash().toString("hex");
+    // Every read before the last pair asked for our fee bump; the inner hash only at the end.
+    expect(reads.filter((h) => h === inner)).toHaveLength(1);
+    expect(reads.at(-1)).toBe(inner);
+    expect(res.rewrap).toBeUndefined();
+  });
+
+  it("reads again on the next ledger when the read by inner hash fails", async () => {
+    const { fake, submitter } = stalledWith(rewrap, { throwsFirst: true });
+    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 3 });
+    expect(res.status).toBe("success");
+  });
+
+  it("lands our own fee bump found by the inner hash as ours: no rewrap, its fee kept", async () => {
+    const { fake, submitter } = stalledWith((ours) => ours);
+    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 3 });
+    const ours = fake.sent[0] as FeeBumpTransaction;
+    expect(res).toMatchObject({
+      status: "success",
+      hash: ours.hash().toString("hex"),
+      feeCharged: 410000n,
+    });
+    expect(res.rewrap).toBeUndefined();
+  });
+
+  it("waits a ledger when the inner read comes from a node behind the bound", async () => {
+    const { fake, submitter } = setup({ timeoutSeconds: 600 });
+    fake.stalled = true;
+    const maxLedger = fake.ledger + 3;
+    const getTransaction = fake.getTransaction.bind(fake);
+    let behind = true;
+    fake.getTransaction = async (hash) => {
+      const ours = fake.sent.at(-1) as FeeBumpTransaction | undefined;
+      const res = await getTransaction(hash);
+      if (!ours || hash !== ours.innerTransaction.hash().toString("hex")) return res;
+      if (behind) {
+        behind = false;
+        // A node that hasn't reached the bound yet: its NOT_FOUND says nothing.
+        return { ...res, latestLedger: maxLedger - 1 } as typeof res;
+      }
+      const bump = rewrap(ours);
+      return {
+        ...res,
+        status: rpc.Api.GetTransactionStatus.SUCCESS,
+        ledger: maxLedger,
+        envelopeXdr: bump.toEnvelope(),
+        resultXdr: new xdr.TransactionResult({
+          feeCharged: xdr.Int64.fromString("410000"),
+          result: xdr.TransactionResultResult.txSuccess([]),
+          ext: new xdr.TransactionResultExt(0),
+        }),
+      } as rpc.Api.GetTransactionResponse;
+    };
+    const res = await submitter.submit(call(), { maxLedger });
+    expect(res).toMatchObject({ status: "success", feeCharged: 0n });
+    expect(behind).toBe(false);
+  });
+
+  it("ends pending when the inner read comes from a node whose history starts after the envelope", async () => {
+    const { fake, submitter } = setup({ timeoutSeconds: 600 });
+    fake.stalled = true;
+    let simLedger = 0;
+    const simulate = fake.simulateTransaction.bind(fake);
+    fake.simulateTransaction = async (...a) => {
+      const res = await simulate(...a);
+      simLedger = res.latestLedger;
+      return res;
+    };
+    const getTransaction = fake.getTransaction.bind(fake);
+    let innerReads = 0;
+    fake.getTransaction = async (hash) => {
+      const ours = fake.sent.at(-1) as FeeBumpTransaction | undefined;
+      const res = await getTransaction(hash);
+      if (!ours || hash !== ours.innerTransaction.hash().toString("hex")) return res;
+      innerReads += 1;
+      // Another node than the first read's (a `FallbackRpc` switch): past the bound, but its
+      // history starts after the envelope was built, so its NOT_FOUND can't rule a rewrap out.
+      return { ...res, oldestLedger: simLedger + 1 } as typeof res;
+    };
+    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 3 });
+    expect(innerReads).toBe(1);
+    expect(res.status).toBe("pending");
+    expect(res.rewrap).toBeUndefined();
+  });
+
+  it("ends failed under their hash when their fee bump landed and failed", async () => {
+    const { fake, submitter } = stalledWith(rewrap, { status: "FAILED" });
+    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 3 });
+    const ours = fake.sent[0] as FeeBumpTransaction;
+    expect(res).toMatchObject({
+      status: "failed",
+      hash: rewrap(ours).hash().toString("hex"),
+      feeCharged: 0n,
+      errorCode: "txFailed",
+      rewrap: { of: ours.hash().toString("hex"), feeSource: rival.publicKey() },
+    });
+  });
+
+  it("keeps the fee charged when the inner transaction landed bare: the channel paid it", async () => {
+    const { fake, submitter } = stalledWith((ours) => ours.innerTransaction);
+    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 3 });
+    const ours = fake.sent[0] as FeeBumpTransaction;
+    expect(res).toMatchObject({
+      status: "success",
+      hash: ours.innerTransaction.hash().toString("hex"),
+      feeCharged: 410000n,
+      rewrap: { of: ours.hash().toString("hex"), feeSource: ours.innerTransaction.source },
+    });
   });
 });

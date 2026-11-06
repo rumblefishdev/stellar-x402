@@ -3,8 +3,11 @@ packages:
   - packages/*
   - examples/*
   - conformance
+  # The server's units, scripts and agent config, tested against the metric catalog (0027).
+  - deploy
   - contracts/upto-proxy/e2e
   - apps/mcp-local/e2e
+  - infra
 
 # `pnpm deploy` (the facilitator's image) copies workspace packages into its output.
 injectWorkspacePackages: true

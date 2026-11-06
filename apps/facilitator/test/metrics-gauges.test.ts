@@ -94,10 +94,12 @@ describe("gauge registration", () => {
         gauges.filter((g) => g.name === name),
         name,
       ).toHaveLength(1);
-      expect(read(name).labels).toMatchObject({ network });
+      // The oldest open age has no value before the first listing (below).
+      if (name !== "settlement_oldest_open_seconds")
+        expect(read(name)!.labels).toMatchObject({ network });
     }
-    // No sweep has listed the records yet.
-    expect(read("settlement_oldest_open_seconds").value).toBe(0);
+    // No sweep has listed the records yet: no sample, rather than a 0 that reads as nothing open.
+    expect(read("settlement_oldest_open_seconds")).toBeUndefined();
   });
 });
 
@@ -106,12 +108,12 @@ describe("rpc_stalled_seconds and balance_reading_age_seconds", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const { read, fake, rpcStall } = composed();
     const calls = { ...fake.calls };
-    expect(read("rpc_stalled_seconds").value).toBe(0);
-    expect(read("balance_reading_age_seconds").value).toBe(0);
+    expect(read("rpc_stalled_seconds")!.value).toBe(0);
+    expect(read("balance_reading_age_seconds")!.value).toBe(0);
     // Neither has read yet: both ages count from their start, here their creation.
     vi.setSystemTime(Date.now() + 90_000);
-    expect(read("rpc_stalled_seconds").value).toBe(90);
-    expect(read("balance_reading_age_seconds").value).toBe(90);
+    expect(read("rpc_stalled_seconds")!.value).toBe(90);
+    expect(read("balance_reading_age_seconds")!.value).toBe(90);
     expect(fake.calls).toEqual(calls);
     rpcStall.stop();
   });
@@ -188,7 +190,7 @@ describe("rpc_on_fallback", () => {
     read("rpc_on_fallback");
     await Promise.resolve();
     expect(fake.calls.getLatestLedger ?? 0).toBe(ledgers);
-    expect(read("rpc_on_fallback").value).toBe(1);
+    expect(read("rpc_on_fallback")!.value).toBe(1);
 
     // A call starts the probe, which finds the first endpoint caught up.
     shared.begin();
@@ -196,7 +198,7 @@ describe("rpc_on_fallback", () => {
     const back = read("rpc_on_fallback");
     expect(back).toEqual({ value: 0, labels: { rpc: name(0), network } });
     // The label is the endpoint's name, never its URL (ADR 0011).
-    expect(JSON.stringify(back.labels)).not.toContain("https://");
+    expect(JSON.stringify(back?.labels)).not.toContain("https://");
   });
 });
 
@@ -274,7 +276,7 @@ describe("settlement_oldest_open_seconds", () => {
     const { store, reconciler, answers, hold, advance } = setup();
     const A = "a".repeat(64);
     await signed(store, "1", A, 120_000);
-    expect(reconciler.oldestOpenSeconds()).toBe(0);
+    expect(reconciler.oldestOpenSeconds()).toBeUndefined();
 
     await reconciler.sweep();
     expect(reconciler.oldestOpenSeconds()).toBe(120);
@@ -301,6 +303,25 @@ describe("settlement_oldest_open_seconds", () => {
     answers.set(A, landed());
     await reconciler.sweep();
     expect(reconciler.oldestOpenSeconds()).toBe(0);
+  });
+
+  test("has no value until the first listing, and one as soon as a sweep has listed", async () => {
+    const { store, reconciler, hold, advance } = setup();
+    const A = "a".repeat(64);
+    await signed(store, "1", A, 2 * 60 * 60_000);
+    // After a restart, a sweep that can't list leaves it without a value, not 0.
+    vi.spyOn(store, "listNonFinal").mockRejectedValueOnce(new Error("store down"));
+    await expect(reconciler.sweep()).rejects.toThrow("store down");
+    expect(reconciler.oldestOpenSeconds()).toBeUndefined();
+    // The first sweep that lists sets it before it reads a record, so a stuck RPC doesn't hide it.
+    const release = hold();
+    const stuck = reconciler.sweep();
+    await vi.waitFor(() => expect(reconciler.oldestOpenSeconds()).toBe(7_200));
+    advance(60_000);
+    expect(reconciler.oldestOpenSeconds()).toBe(7_260);
+    release();
+    await stuck;
+    expect(reconciler.oldestOpenSeconds()).toBe(7_260);
   });
 
   test("history_gone records are excluded, including via the recheck-skip branch", async () => {

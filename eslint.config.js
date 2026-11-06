@@ -9,6 +9,7 @@ export default defineConfig([
     "**/.turbo/",
     "**/coverage/",
     "contracts/target/",
+    "**/cdk.out/",
   ]),
   js.configs.recommended,
   tseslint.configs.recommended,
@@ -42,6 +43,13 @@ export default defineConfig([
   {
     files: ["tools/scripts/**/*.mjs"],
     languageOptions: { globals: { console: "readonly", process: "readonly" } },
+  },
+  {
+    // Lambda handlers run as plain ES modules on the Node.js runtime (infra/, task 0027).
+    files: ["infra/lambdas/**/*.mjs"],
+    languageOptions: {
+      globals: { console: "readonly", process: "readonly", AbortSignal: "readonly" },
+    },
   },
   {
     files: ["conformance/external-proxy/*.mjs"],

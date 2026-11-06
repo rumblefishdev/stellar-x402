@@ -23,7 +23,7 @@ import {
 } from "../src/index.js";
 
 /** The facilitator metrics an Event-shape alarm reads (G-alarm-list), written eager-first. */
-const TEN = [
+const EVENT_METRICS = [
   "spend_breaker_opened_total",
   "spend_budget_nearing_total",
   "settlement_record_failures_total",
@@ -34,6 +34,9 @@ const TEN = [
   "signer_failures_total",
   "spend_failure_attributed_total",
   "spend_commit_unmatched_total",
+  "settlement_reconciled_total",
+  "settlement_submit_failures_total",
+  "settlement_hook_failures_total",
 ];
 
 const ALL: readonly MetricDef[] = CATALOG;
@@ -164,8 +167,8 @@ describe("CATALOG", () => {
     });
   });
 
-  test("emit is eager-first for exactly the 10 Event-alarm metrics", () => {
-    expect(eagerNames).toEqual(new Set(TEN));
+  test("emit is eager-first for exactly the Event-alarm metrics", () => {
+    expect(eagerNames).toEqual(new Set(EVENT_METRICS));
     for (const m of ALL) expect(["eager-first", "aggregated"]).toContain(m.emit);
   });
 
@@ -181,8 +184,22 @@ describe("CATALOG", () => {
       const keys = [
         ...setsOf(m).flatMap((s) => [...s.dims, ...Object.keys(s.when ?? {})]),
         ...Object.keys(m.values ?? {}),
+        ...(m.fields ?? []),
       ];
       for (const k of keys) expect(["payer", "payTo", "pay_to"], m.name).not.toContain(k);
+    }
+  });
+
+  test("a log field is in no set and no values list, and never network (decision 57)", () => {
+    for (const m of ALL) {
+      const billed = new Set([
+        ...setsOf(m).flatMap((s) => [...s.dims, ...Object.keys(s.when ?? {})]),
+        ...Object.keys(m.values ?? {}),
+        "network",
+      ]);
+      for (const field of m.fields ?? [])
+        expect(billed.has(field), `${m.name}.${field}`).toBe(false);
+      expect(new Set(m.fields ?? []).size, m.name).toBe((m.fields ?? []).length);
     }
   });
 
@@ -207,6 +224,7 @@ describe("CATALOG", () => {
       "settlement_record_failures_total",
       "settlement_history_gone_total",
       "settlement_landed_after_expired_total",
+      "settlement_rewrapped_total",
       "signer_failures_total",
       "pool_events_total",
       "settlement_uncertain_total",
@@ -285,6 +303,11 @@ describe("CATALOG", () => {
     expect(def("spend_failure_attributed_total").sets).toEqual([
       { dims: ["fault"], when: { fault: ["ours"] } },
     ]);
+    expect(def("spend_breaker_opened_total").sets).toEqual([{ dims: ["breaker"] }]);
+    expect(def("settlement_reconciled_total").sets).toEqual([
+      { dims: [] },
+      { dims: ["state"], when: { state: ["expired"] } },
+    ]);
     // Every other metric is one plain set.
     const split = [
       "settlement_outcomes_total",
@@ -294,6 +317,8 @@ describe("CATALOG", () => {
       "spend_failure_attributed_total",
       "http_requests_total",
       "settlement_sweeps_total",
+      "settlement_reconciled_total",
+      "spend_breaker_opened_total",
       "disk_used_percent",
     ];
     for (const m of ALL.filter((x) => !split.includes(x.name)))

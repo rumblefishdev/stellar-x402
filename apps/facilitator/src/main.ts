@@ -485,9 +485,10 @@ export function buildSettlement(
     return { value: queued, labels: { channels, busy } };
   });
   metrics.registerGauge("pool_quarantined", () => ({ value: submitter.stats().quarantined }));
-  metrics.registerGauge("settlement_oldest_open_seconds", () => ({
-    value: reconciler.oldestOpenSeconds(),
-  }));
+  metrics.registerGauge("settlement_oldest_open_seconds", () => {
+    const value = reconciler.oldestOpenSeconds();
+    return value === undefined ? undefined : { value };
+  });
   // Closing the pool first refuses every call that sent nothing, so their records close too.
   const drain = async () => {
     await submitter.close();

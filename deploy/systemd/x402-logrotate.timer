@@ -1,0 +1,12 @@
+# The rotation every 10 minutes, at :20 past (lore 0027 decision 45): a flood stays bounded on a
+# disk ClickHouse shares, and no rotation falls on the facilitator's EMF flush at :00.
+[Unit]
+Description=x402 log rotation, every 10 minutes
+Documentation=https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/runbook.md
+
+[Timer]
+OnCalendar=*:00/10:20
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

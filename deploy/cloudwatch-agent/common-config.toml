@@ -1,0 +1,7 @@
+# The CloudWatch agent's credentials (lore 0027 decision 46): static keys that
+# x402-cloudwatch-credentials.service writes every hour with `aws_signing_helper update --once`,
+# under the profile an on-premises agent reads by default. The playbook installs this file as
+# /opt/aws/amazon-cloudwatch-agent/etc/common-config.toml, the only path the agent reads it from.
+[credentials]
+  shared_credential_profile = "AmazonCloudWatchAgent"
+  shared_credential_file = "/run/x402-cloudwatch/credentials"

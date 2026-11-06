@@ -6,6 +6,9 @@
 #   x402-deploy <environment>           the unit's ExecStart
 #   x402-deploy <environment> stopped   its ExecStopPost, after any end
 set -eu
+# Its output goes to /var/log/x402/<env>/deploy.log (0027 decision 1). Under set -e a failed write,
+# a full disk, would end the script before a rollback, so every message goes through this.
+say() { printf '%s\n' "$*" || :; }
 env=$1
 repo=ghcr.io/rumblefishdev/x402-facilitator
 run=/run/x402/$env
@@ -31,7 +34,7 @@ if [ "${2:-}" = stopped ]; then
   # end on the last good image, written before the restart since x402-compose reads `digest` at
   # ExecStart. After a success or the script's own rollback, digest is good and nothing happens.
   if [ "${SERVICE_RESULT:-}" != success ] && [ -s digest.good ] && ! cmp -s digest digest.good; then
-    echo "the deploy ended with ${SERVICE_RESULT:-no result}; back to digest.good" >&2
+    say "the deploy ended with ${SERVICE_RESULT:-no result}; back to digest.good" >&2
     cp digest.good digest.tmp && mv digest.tmp digest
     restart --no-block
   fi
@@ -49,7 +52,7 @@ docker pull --quiet "$repo@$new"
 # fails this deploy here, before anything stops, instead of it waiting for that run's lock.
 docker rm "$migrate" > /dev/null 2>&1 || true
 if docker container inspect "$migrate" > /dev/null 2>&1; then
-  echo "$migrate is running; deploy once it ends" >&2
+  say "$migrate is running; deploy once it ends" >&2
   exit 1
 fi
 touch "$run/migrating"
@@ -74,13 +77,13 @@ if started; then
   docker image ls --digests --format '{{.Digest}}' "$repo" | while read -r digest; do
     case $digest in "$new" | "$good") ;; *) docker image rm "$repo@$digest" > /dev/null || true ;; esac
   done
-  echo "deployed $new"
+  say "deployed $new"
   exit 0
 fi
 
-echo "$new isn't ready, listed and signing after 120 s (signing also fails with OpenBao down); back to ${good:-nothing, the first deploy}" >&2
+say "$new isn't ready, listed and signing after 120 s (signing also fails with OpenBao down); back to ${good:-nothing, the first deploy}" >&2
 if [ -n "$good" ]; then
   printf '%s\n' "$good" > digest.tmp && mv digest.tmp digest
-  restart || echo "x402@$env didn't start on $good" >&2
+  restart || say "x402@$env didn't start on $good" >&2
 fi
 exit 1
