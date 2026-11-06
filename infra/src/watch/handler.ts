@@ -29,16 +29,21 @@ export interface HandlerDeps {
   readonly now?: () => Date;
 }
 
-/** The Lambda handler: reads its targets once, at the start, then runs the balance section. */
+/**
+ * The Lambda handler: reads its targets and builds one RPC client per URL once, at the start, so
+ * a warm container reuses its connections; then each run reads the balance section.
+ */
 export function createHandler(
   deps: HandlerDeps,
 ): (event?: WatchEvent | null) => Promise<BalanceResult[]> {
   const targets = parseTargets(deps.env[TARGETS_ENV]);
+  const build = deps.rpcFor ?? stellarRpc;
+  const clients = new Map(targets.map((t) => [t.rpcUrl, build(t.rpcUrl)]));
   const now = deps.now ?? (() => new Date());
   return (event) =>
     runBalance({
       targets,
-      rpcFor: deps.rpcFor ?? stellarRpc,
+      rpcFor: (url) => clients.get(url) ?? build(url),
       publish: deps.publish,
       log: deps.log ?? ((line) => console.log(JSON.stringify(line))),
       at: scheduledAt(event, now),

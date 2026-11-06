@@ -165,6 +165,24 @@ describe("runBalance", () => {
     expect(JSON.stringify(h.logs)).not.toContain("key-abc123");
   });
 
+  test("masks the URL in the form a client writes it back, its path and its query too", async () => {
+    const keyed: WatchTarget = {
+      ...pubnet,
+      rpcUrl: "HTTPS://RPC.Example.com:443/key-abc123?k=s3cr3t",
+    };
+    const leaky = {
+      getLedgerEntries: async () => {
+        throw new Error(
+          "GET https://rpc.example.com/key-abc123?k=s3cr3t failed; path /key-abc123, query ?k=s3cr3t",
+        );
+      },
+    };
+    const h = harness({ [keyed.rpcUrl]: leaky as unknown as FakeRpc });
+    await expect(runBalance(h.deps([keyed]))).rejects.toThrow(/rpc\(stellar:pubnet\)/);
+    const logged = JSON.stringify(h.logs);
+    expect(logged).not.toMatch(/key-abc123|s3cr3t/);
+  });
+
   test("throws when the publish fails, so the run counts as an error", async () => {
     const h = harness({ [testnet.rpcUrl]: rpcWith(TESTNET_FEE, 1_010_000_000n) });
     const deps = {

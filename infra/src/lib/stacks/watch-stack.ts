@@ -11,7 +11,7 @@ import * as logs from "aws-cdk-lib/aws-logs";
 import * as scheduler from "aws-cdk-lib/aws-scheduler";
 import * as targets from "aws-cdk-lib/aws-scheduler-targets";
 import type { Construct } from "constructs";
-import { NAMESPACE } from "../../watch/balance.js";
+import { NAMESPACE } from "../../watch/metric.js";
 import { TARGETS_ENV } from "../../watch/targets.js";
 import type { EnvironmentConfig } from "../config.js";
 import { INFRA_ROOT, names } from "../names.js";

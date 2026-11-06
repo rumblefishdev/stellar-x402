@@ -72,7 +72,11 @@ describe("the watch bundle", () => {
     );
     expect(result).toEqual({
       handler: "function",
-      error: expect.stringMatching(/^balance not read on stellar:testnet/),
+      // The network's own refusal, not any error: a dynamic `require` that throws inside the
+      // read would also reject the run, with "Dynamic require of ... is not supported".
+      error: expect.stringMatching(
+        /^balance not read on stellar:testnet \(\w+: .*(fetch failed|ECONNREFUSED)/,
+      ),
       sent: 0,
     });
   });

@@ -47,8 +47,21 @@ describe("createHandler", () => {
     expect(published[0]?.MetricData[0]?.Timestamp).toEqual(new Date("2026-11-06T09:40:00Z"));
   });
 
-  test("reads each target through an RPC for its own URL", async () => {
-    const { asked } = await run({});
+  test("reads each target through an RPC for its own URL, built once for every run", async () => {
+    const rpc = new FakeRpc({ [FEE]: 1n });
+    rpc.balances.set(FEE, 1_010_000_000n);
+    const asked: string[] = [];
+    const handler = createHandler({
+      env,
+      rpcFor: (url) => {
+        asked.push(url);
+        return rpc;
+      },
+      publish: async () => {},
+      log: () => {},
+    });
+    await handler({});
+    await handler({});
     expect(asked).toEqual([RPC]);
   });
 
