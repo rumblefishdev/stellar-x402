@@ -234,6 +234,18 @@ history:
       export is encrypted with it; and the restore drill imports the export into a local copy of
       the repository, since the read-only account can't write to it. Both are in ADR 0013 and
       this task's Implementation.
+  - date: "2026-11-06"
+    status: active
+    who: okarcz
+    note: >
+      logrotate checked on ch-prod-01. The first rotation ran at 00:00:15 UTC: audit.log.1
+      (587128 B, last entry 2026-11-05T15:22:07Z) and a new audit.log made by OpenBao on the
+      postrotate SIGHUP (owner OpenBao's user, mode 0600, config nocreate), empty since nothing
+      reached OpenBao overnight. systemctl restart x402@production at 08:16:02 (same digest
+      e6bfaa1a…, nothing else restarted): audit.log's first entry 08:16:16.225, one AppRole login
+      and one transit/sign each with request and response, the facilitator's signer_checked at
+      08:16:16.279 and no signer_failed, /health ready, signer ok and listed at 08:16:19. The
+      server's x402@ unit predates 0027 (journald, no stop hook) until the next playbook run.
 ---
 
 # Public testnet deployment
@@ -537,4 +549,4 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 - [x] Given `DATABASE_URL_FILE` or `RPC_URLS_FILE`, when the service starts, then it reads the value from that file, and with neither set it falls back to `DATABASE_URL` and `RPC_URLS`
 - [ ] Given the durable stores from 0022, when the service runs, then it uses them, and `docs/runbook.md` has the deploy and rollback steps
 - [ ] Given the deployed facilitator, when it settles, then it signs through OpenBao Transit over the unix socket, no secret seed is on the server outside OpenBao, the backup secret exists in AWS, and a restore drill from it has passed (2026-11-05: signing over the socket, no seed in the server's files, and the backup secret since 2026-11-02 are shown; the restore drill is left, and it waits for the backups)
-- [ ] Given OpenBao's audit log on the server, when `logrotate` runs, then the file is renamed, OpenBao writes to a new `audit.log` and still signs, and old files past a year are removed (runbook, OpenBao)
+- [x] Given OpenBao's audit log on the server, when `logrotate` runs, then the file is renamed, OpenBao writes to a new `audit.log` and still signs, and old files past a year are removed (runbook, OpenBao) (2026-11-06: rotated at 00:00:15 UTC; OpenBao made the new `audit.log` on the SIGHUP (`nocreate`); after a facilitator restart at 08:16:02 its first entry is 08:16:16, the signer check's AppRole login and `transit/sign`, logged `signer_checked` at 08:16:16.279, and `/health` `signer: ok`; removal past a year rests on `rotate 365` and `maxage 365`)
