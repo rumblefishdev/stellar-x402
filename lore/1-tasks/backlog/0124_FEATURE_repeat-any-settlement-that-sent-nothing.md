@@ -52,15 +52,16 @@ as today.
 
 ## Not yet decided
 
-- Whether a refusal from the checks before the claim (no record) answers `extra.expirationLedger`
-  and "don't sign a new payment before it". Chosen on 2026-11-06, then reopened by the owner the
-  same day. With the defaults (`MAX_FEE_STROOPS` 250,000, a bid of at most 10,000 counted twice)
-  a fee refusal comes from restore rent, not from a fee spike.
 - Whether 0086 is closed as superseded: its first criterion asks that a payment refused for its
   fee never settles through the facilitator, which row 2 reverses.
 
 ## Out of scope
 
+- An `expirationLedger` on a refusal from the checks before the claim (the owner, 2026-11-06):
+  with the defaults (`MAX_FEE_STROOPS` 250,000, a bid of at most 10,000 counted twice, a settlement
+  about 10,500) a fee refusal comes from restore rent, which waiting doesn't remove. A second
+  payment lands only if the seller asks for a new signature, someone restores the entries, and
+  both are sent within the auth entry's life: not seen in any data.
 - A database row for a refusal before the claim (the owner, 2026-11-06): the `verified` and
   `settled` log lines already keep every refusal with its reason and payer, 30 days in CloudWatch
   (ADR 0011). A row in `settlements` at that point would take the payer's in-flight slot and let
