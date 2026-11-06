@@ -1,7 +1,7 @@
 # ADR 0003: Settle each payment as its own transaction through a channel-account pool
 
 - Status: accepted
-- Date: 2026-10-07
+- Date: 2026-10-07, amended 2026-11-06 (the network's raised ledger limits)
 
 ## Context
 
@@ -20,10 +20,15 @@ how fast it can do that:
 - **One Soroban operation per transaction.** A contract call can't share a transaction with
   other operations, so in x402 one payment is one transaction. The Stellar `exact` spec also
   requires a single `transfer` per transaction and one hash per payment.
-- **A network-wide byte ceiling.** Soroban takes 266,240 B of transactions per ledger. An `upto`
-  settlement is 2,516 B, so at most about 105 fit in a ledger (about 219 for `exact`), for the
-  whole network.
-- **Shared space on mainnet.** On 2026-10-06 mainnet used about 81% of that budget, about 98% of
+- **A network-wide ceiling.** Since 2026-10-22 (mainnet ledger 65,080,525; testnet since
+  2026-10-14) Soroban takes 864,000 B of transactions and 2,000 read and 2,000 written entries per
+  ledger. A fee bump's wrapper doesn't count against the bytes. An `exact` settlement is 1,084 B
+  inside the wrapper and reads and writes 3 entries; an `upto` one is 2,388 B and writes 5. So at
+  most about 666 `exact` (bound by entries) or 361 `upto` (bound by bytes) fit in a ledger, for the
+  whole network. Limits read 2026-11-05; sizes measured on testnet 2026-10-22; the instruction
+  limit not re-read. Before 2026-10-22 the byte limit was 266,240 B.
+- **Shared space on mainnet.** On 2026-10-06, before the limits were raised, mainnet used about
+  81% of the 266,240 B budget, about 98% of
   it KALE bots bidding 100–200 stroops. At a 200-stroop bid about 20 `upto` settlements per
   ledger were free on average, 13 at the median.
 - **License.** The existing channel implementation is AGPL, so the pool must be our own
@@ -98,8 +103,9 @@ accounts (`packages/signer-pool`).
 
 ## Consequences
 
-- Throughput is bounded by our share of the network's Soroban space: at most about 105 `upto` or
-  219 `exact` per ledger, and today about 20 `upto` at a 200-stroop bid. Going past that needs
+- Throughput is bounded by our share of the network's Soroban space: at most about 361 `upto` or
+  666 `exact` per ledger, and on 2026-10-06, before the limits were raised, about 20 `upto` at a
+  200-stroop bid. Going past that needs
   B2.
 - The pool costs 1.5 XLM of reserve per channel, and setup transactions create at most 19
   channels each (20-signature limit).
