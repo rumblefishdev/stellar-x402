@@ -67,13 +67,13 @@ As a reviewer of the grant, I want e2e results with real settled transaction has
 | 10 | Every passed scenario must carry a transaction hash | the owner's decision, 2026-11-06 | as the task says | no standard |
 | 11 | The gate keeps reading each transaction from the chain: status, transfer, fee payer, ledger | the owner's decision, 2026-11-06 | as the task says | no standard |
 | 12 | The gate saves each signed envelope | the owner's decision, 2026-11-06 | beyond it | no standard |
+| 13 | No fixed scenario count: the gate takes the scenarios the suite selects, which records each one, a server that fails to start as failed (`e2e/test.ts:1783-1795@8827cf1`) | the owner's decision, 2026-11-06 | as the task says | no standard |
+| 14 | The gate fails a hash that two scenarios report | the owner's decision, 2026-11-06 | as the task says | no standard |
 
 ## Not yet decided
 
 - How often the gate runs, and how the pin moves.
-- Whether the gate requires the pin's exact number of scenarios.
 - Whether the gate saves the forwarded calls, and counts them.
-- Whether the gate fails a hash two scenarios report.
 
 ## Out of scope
 
