@@ -5,7 +5,7 @@ type: FEATURE
 status: active
 milestone: 1
 related_adr: ["0011", "0012", "0013"]
-related_tasks: ["0012", "0014", "0022", "0017", "0020", "0013", "0039", "0036", "0047", "0099", "0100"]
+related_tasks: ["0012", "0014", "0022", "0017", "0020", "0013", "0039", "0036", "0047", "0099", "0100", "0118"]
 tags: [facilitator, deploy, priority-high, effort-medium, platform]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -289,6 +289,20 @@ history:
       owners know we depend on it: Stan, who holds its main account, made our two sub-accounts on
       2026-11-05. Left to the team: how the repository is checked between restore drills
       (Summary).
+  - date: "2026-11-06"
+    status: active
+    who: okarcz
+    note: >
+      Stan's review of #140 (1 blocking, 6 non-blocking), all taken as he suggested. The runbook's
+      first-run step ends by turning on the snapshots alarm group (check-series, the flag by pull
+      request, deploy, fire-test), since production.json still has it off. Setup step 3 refuses
+      when a passphrase is stored and removes the one it wrote if borg init finds a repository
+      already there; the path for an existing repository comes with the restore drill. The
+      passphrase change runs borg list before deleting the old passphrase. The service retries a
+      failed run after 20 minutes (Restart=on-failure), and the timer runs at 03:15 UTC whatever the
+      host's zone. Deploy tests 109 (+1), the retry and the UTC each failed by a mutant. The
+      repository check was decided by the team on Slack (Summary), now backlog task 0118. A shared
+      /run/x402/backup between this job and pgBackRest's is for the pgBackRest PR.
 ---
 
 # Public testnet deployment
@@ -299,12 +313,14 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 
 **Story:** [M1 Story 2.5](../../../docs/planning/m1-epics.md#story-25-public-testnet-deployment) · **Lane:** Platform · **Covers:** FR21 prerequisite; NFR4, NFR9
 
-**Open decision (2026-11-06, the team):** how the Borg repository of OpenBao's snapshots is
+**Decision (2026-11-06, the team on Slack):** how the Borg repository of OpenBao's snapshots is
 checked between the quarterly restore drills. The daily job never reads old chunks back, and
 deduplication makes every later archive reuse them, so a damaged chunk breaks each archive after it
-while the stamp stays fresh. The options: `borg check --verify-data` (decrypts every chunk, seconds
-at our size) in the weekly review; `--repository-only` (on-disk checksums only) in the weekly
-review; a weekly timer with its own stamp and a 0027 alarm; or nothing until the drill.
+while the stamp stays fresh. The options were: `borg check --verify-data` (decrypts every chunk,
+seconds at our size) in the weekly review; `--repository-only` (on-disk checksums only) in the
+weekly review; a weekly timer with its own stamp and a 0027 alarm; or nothing until the drill.
+Chosen: the weekly timer with `--verify-data`, its own stamp and a 0027 alarm, done after the
+CloudWatch change, as backlog task 0118.
 
 ## Context
 
