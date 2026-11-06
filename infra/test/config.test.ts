@@ -170,6 +170,11 @@ describe("validateConfig", () => {
       /watch.rpcUrls.stellar:testnet/,
     ],
     [
+      "an RPC with no dotted host",
+      (c) => ((m(c).watch.rpcUrls as Record<string, string>)["stellar:testnet"] = "https://x"),
+      /watch.rpcUrls.stellar:testnet/,
+    ],
+    [
       "an RPC for a network not served",
       (c) =>
         ((m(c).watch.rpcUrls as Record<string, string>)["stellar:pubnet"] =

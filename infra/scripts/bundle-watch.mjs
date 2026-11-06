@@ -1,7 +1,8 @@
 // Bundles the off-server check into one ES module for `Code.fromAsset` (0027, #115): the handler,
 // signer-pool's balance check and stellar-sdk. Run by `build`, after tsc, so synth stays offline
 // and never bundles, as the uptime probe's plain modules don't. `@aws-sdk/*` comes with the
-// Lambda runtime.
+// Lambda runtime. The bundle calls no `require`, so it needs no `createRequire` banner;
+// test/watch-bundle.test.ts loads it in plain Node to keep that true.
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { build } from "esbuild";
@@ -19,10 +20,6 @@ await build({
   target: "node22",
   format: "esm",
   external: ["@aws-sdk/*"],
-  // stellar-sdk's CommonJS dependencies call require(); an ES module has none of its own.
-  banner: {
-    js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
-  },
   minify: true,
   legalComments: "none",
   logLevel: "warning",

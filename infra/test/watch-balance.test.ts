@@ -202,6 +202,14 @@ describe("parseTargets", () => {
     expect(() => parseTargets(raw)).toThrow(message);
   });
 
+  test("takes URLs by the config's rule, isHttpsUrl, so the two can't disagree", () => {
+    const upper = { ...testnet, rpcUrl: "HTTPS://soroban-testnet.stellar.org" };
+    expect(parseTargets(JSON.stringify([upper]))).toEqual([upper]);
+    expect(() => parseTargets(JSON.stringify([{ ...testnet, rpcUrl: "https://x" }]))).toThrow(
+      /https/,
+    );
+  });
+
   test("keeps the network type", () => {
     const network: StellarNetwork = parseTargets(ok)[0]!.network;
     expect(network).toBe("stellar:testnet");

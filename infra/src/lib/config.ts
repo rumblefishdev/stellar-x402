@@ -6,6 +6,7 @@ import { isStellarNetwork, type StellarNetwork } from "@stellar-x402/config";
 import { isDimValue } from "@stellar-x402/metrics-catalog";
 import { StrKey } from "@stellar/stellar-sdk";
 import { z } from "zod";
+import { isHttpsUrl } from "./https-url.js";
 
 /**
  * An alarm group is created whole or not at all (0027 decision 26): a group goes on once every
@@ -115,7 +116,8 @@ export interface EnvironmentConfig {
   readonly watch: {
     /**
      * The RPC the off-server check reads each network's fee account through: one per served
-     * network, https only. A provider's key never goes here (a public repo); it would come from SSM.
+     * network, https only. A provider's key never goes here (a public repo); it would come from
+     * SSM.
      */
     readonly rpcUrls: Readonly<Partial<Record<StellarNetwork, string>>>;
   };
@@ -191,16 +193,6 @@ const NETWORKS = "must list at least one CAIP-2 network";
 const CRT = "must be a .crt path inside infra/";
 const SESSION = `must be an integer from 1 to ${MAX_SESSION_HOURS}`;
 const HTTPS = "must be an https:// URL";
-
-function isHttpsUrl(u: unknown): boolean {
-  if (typeof u !== "string") return false;
-  try {
-    const url = new URL(u);
-    return url.protocol === "https:" && url.hostname.includes(".");
-  } catch {
-    return false;
-  }
-}
 
 const schema = z.object({
   envName: z.string({ message: LOWER }).regex(/^[a-z][a-z0-9-]*$/, LOWER),

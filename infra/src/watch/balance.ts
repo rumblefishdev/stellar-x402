@@ -69,7 +69,7 @@ function describeError(error: unknown, target: WatchTarget): string {
   return text.split(target.rpcUrl).join(`rpc(${target.network})`);
 }
 
-/** The `PutMetricData` input for the networks that were read: one point each, the catalog's unit. */
+/** The `PutMetricData` input for the networks read: one point each, in the catalog's unit. */
 export function balanceMetricData(
   readings: readonly { network: StellarNetwork; spendableStroops: bigint }[],
   at: Date,

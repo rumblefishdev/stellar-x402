@@ -2,6 +2,7 @@
 // variable, built from the infra config at synth and checked again at the Lambda's start.
 import { isStellarNetwork } from "@stellar-x402/config";
 import { StrKey } from "@stellar/stellar-sdk";
+import { isHttpsUrl } from "../lib/https-url.js";
 import type { WatchTarget } from "./balance.js";
 
 export const TARGETS_ENV = "WATCH_TARGETS";
@@ -18,8 +19,7 @@ export function parseTargets(raw: string | undefined): WatchTarget[] {
       throw new Error(`${TARGETS_ENV}[${i}].network is not known`);
     if (typeof feeAccount !== "string" || !StrKey.isValidEd25519PublicKey(feeAccount))
       throw new Error(`${TARGETS_ENV}[${i}].feeAccount is not a G... address`);
-    if (typeof rpcUrl !== "string" || !rpcUrl.startsWith("https://"))
-      throw new Error(`${TARGETS_ENV}[${i}].rpcUrl must be an https:// URL`);
+    if (!isHttpsUrl(rpcUrl)) throw new Error(`${TARGETS_ENV}[${i}].rpcUrl must be an https:// URL`);
     return { network, feeAccount, rpcUrl };
   });
 }
