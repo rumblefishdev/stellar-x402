@@ -132,4 +132,5 @@ record ends `…_transaction_expired` ("sign a new payment") for a payment that 
 
 2026-11-04, four layers (full mode): no decision, 7 patches applied, 1 deferred, 15 rejected.
 Deferred: 0027's metrics and alarm lists don't name `settlement_rewrapped_total` (a warning, not an
-alarm, decision 5), a note for 0027.
+alarm, decision 5), a note for 0027. Since done: `528c7c52` added it to the metrics catalog and
+0027's `G-metrics.md`.

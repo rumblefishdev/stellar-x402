@@ -958,7 +958,13 @@ export class SettlementSubmitter {
           channel.sequence = txSequence;
           return { ...base, ...rewrappedOutcome(rewrapped, hash, this.passphrase) };
         }
-        // The same rule as for ours: a node behind the bound may not have seen theirs land.
+        // The same rules as for ours: a node behind the bound may not have seen theirs land, and
+        // one whose history starts after the envelope was built can't tell (0088). `FallbackRpc`
+        // may send this read to another node than the first.
+        if (rewrapped.oldestLedger > simLedger) {
+          channel.sequence = undefined;
+          return { ...base, status: "pending", hash };
+        }
         if (!cannotLand(rewrapped, { maxTime, maxLedger })) continue;
         // After an uncertain send the cached sequence may be stale, and re-reading it is now safe.
         if (uncertain) channel.sequence = undefined;
