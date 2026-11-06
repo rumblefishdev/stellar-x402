@@ -48,7 +48,7 @@ Figures are from `origin/develop` on 2026-11-03. Work each item from what is tru
    which have no outside reader.
 3. **`[refactor]`, ~1 h. Attempts as a plain property on the error.** Delete the `WeakMap` behind
    `attemptsOf` and the three `vi.mock`s of the package that exist because of it.
-4. **In #146. `[structure only]`, ~1.5 h. What in `main.ts` isn't wiring.** Move `start()` to its own file,
+4. **Merged in #146. `[structure only]`, ~1.5 h. What in `main.ts` isn't wiring.** Move `start()` to its own file,
    and `failureReason`, `upstreamDeadlineMs` and `buildUpstream` beside `upstream-failover.ts`.
 5. **Changes behaviour on old records, ~1.5 h, after #110. One reader of the auth expiry.**
    `settle.ts` switches to `payerExpiration`; `authExpiration` and `fallbackLedger` go. First check
