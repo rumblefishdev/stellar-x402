@@ -50,7 +50,9 @@ facilitator roles, so we don't contribute new fixtures.
      never reads the chain, so a replayed hash would pass it. The signer check trusts the
      facilitator's own `/supported`: a facilitator that relays to another and lists that one's
      fee payer as its signer still passes.
-- **The evidence is committed.** Each run is a folder in `conformance/results/`: the suite's own
+- **The evidence is committed.** Each kind of facilitator has one folder in `conformance/results/`,
+  overwritten by each run, so git holds the earlier runs (`testnet-hosted/`; `testnet-local/` stays
+  out of git; task 0029). It holds the suite's own
   JSON unchanged (`suite.json`), and the gate's verdict on it (`gate.json`) with the pinned upstream
   commit, the settled transaction hashes as the chain shows them, and `suite.json`'s SHA-256.
 - **Nothing is pushed** to `x402-foundation/x402` or to our fork of it during M1.
