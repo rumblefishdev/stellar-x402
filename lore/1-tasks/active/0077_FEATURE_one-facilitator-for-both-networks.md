@@ -89,15 +89,22 @@ code assume one process per network. This task reworks both.
 
 ## Open Questions
 
-- One process holding both networks' signing access: ADR 0011 states it (PR A); ADR 0013's
-  reasons for a socket per facilitator are weighed in PR B.
+For PR C (ADR 0012 lists them):
+
+- **Which database holds the catalog.** `/discovery/resources` without a `network` filter lists
+  both networks, with an exact `total` and an `offset` up to 1 000 000, but each network's entries
+  are in its own database. Merging two queries costs `offset + limit` rows from each; one database
+  for the catalog keeps a testnet reset from wiping testnet's listings.
+- **Which database holds the IP rate limiter's counters.** They are counted before the request's
+  network is known, and `/supported` and `/discovery/*` may carry none.
 
 ## Decided
 
 - **A database per network** (Stan, 2026-10-28). The process opens one store per network, beside
-  that network's pool, key and RPC endpoints, so the schema stays as it is: none of the 8 tables
-  in `apps/facilitator/src/adapters/postgres-schema.ts` records a network. A testnet reset wipes
-  only testnet's database, and backups, restores and migrations stay per network.
+  that network's pool, key and RPC endpoints, so the schema stays as it is: in
+  `apps/facilitator/src/adapters/postgres-schema.ts` the settlement and catalog tables record the
+  network, but the lease, rate-limit and spend tables don't (corrected in PR B). A testnet reset
+  wipes only testnet's database, and backups, restores and migrations stay per network.
 - **One environment, `production`** (Stan, 2026-10-28), serving testnet now and mainnet later; a
   staging environment maybe later. Deploys go straight to production from `deploy/production`,
   with no promotion step; how deploys stay safe once mainnet joins is a question in 0038.
@@ -136,10 +143,25 @@ code assume one process per network. This task reworks both.
    `/run/x402/production/` and nothing is renamed (Oskar's review of #79).
 9. **`ready` is today's one network's lease;** what readiness means with a lease per network is
    decided with the code in PR C (Oskar's review of #79).
+10. **A lease per network** (PR B, spine AD-17): the process takes each served network's channel
+    lease through that network's store, and without a network's lease it doesn't serve `/settle`
+    for that network. What `ready` reports stays with PR C (decision 9).
+11. **Spend budgets per network** (PR B, spine AD-18, ADR 0012): each network's budgets live in
+    its own store and count only the fees its own fee account pays, so the global budget is per
+    network.
+12. **The per-network keys, policies, AppRoles and sockets stay** (PR B, ADR 0013). One process
+    holds both, so a break-in on it signs for both networks; testnet's code paths now run beside
+    mainnet's key. The separate ones still keep a leaked token or secret ID, a rotation and the
+    audit log to one network, and keep a later split into a process per network free. One socket
+    and AppRole for both was rejected.
+13. **`/supported` per network served** (PR B, spine AD-13): an `exact` kind per network, and
+    under `stellar:*` each network's facilitator key, since upstream keys `signers` by CAIP
+    family.
 
 ## Acceptance Criteria
 
-- [ ] ADR 0011, 0012, 0013, 0004 and the spine describe one facilitator service for both networks
+- [x] ADR 0011, 0012, 0013, 0004 and the spine describe one facilitator service for both networks
+      (PR A: ADR 0011; PR B: the rest)
 - [x] 0026, 0027 and 0038 match (PR A; 0027 needed no change)
 - [ ] The facilitator serves `stellar:testnet` and `stellar:pubnet` from one process, each with its
       own channel pool, key and RPC endpoints, and `/supported` lists both
