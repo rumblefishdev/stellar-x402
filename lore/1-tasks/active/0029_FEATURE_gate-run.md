@@ -69,11 +69,11 @@ As a reviewer of the grant, I want e2e results with real settled transaction has
 | 12 | The gate saves each signed envelope | the owner's decision, 2026-11-06 | beyond it | no standard |
 | 13 | No fixed scenario count: the gate takes the scenarios the suite selects, which records each one, a server that fails to start as failed (`e2e/test.ts:1783-1795@8827cf1`) | the owner's decision, 2026-11-06 | as the task says | no standard |
 | 14 | The gate fails a hash that two scenarios report | the owner's decision, 2026-11-06 | as the task says | no standard |
+| 15 | No file of forwarded calls: the settlements are proven on chain (rows 11 and 14), and the suite's `-v` shows the calls when debugging | the owner's decision, 2026-11-06 | as the task says | no standard |
 
 ## Not yet decided
 
 - How often the gate runs, and how the pin moves.
-- Whether the gate saves the forwarded calls, and counts them.
 
 ## Out of scope
 
