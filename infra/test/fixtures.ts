@@ -34,6 +34,7 @@ export function allOn(): EnvironmentConfig {
       "stellar:pubnet": "GCW5TAO7CB6FDNXLMZJZHQKKKGDBEAXMOGGYO2MCI2WXMKNGFWLLG7VY",
     },
     watch: {
+      ...base.watch,
       rpcUrls: { ...base.watch.rpcUrls, "stellar:pubnet": "https://rpc.example.com/pubnet" },
     },
     // The one mount the agent writes (the catalog's `path`), OpenBao's audit volume on it too.

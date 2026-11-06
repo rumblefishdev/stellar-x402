@@ -53,6 +53,11 @@ export const ALARM_GROUPS = [
    * alarms, which M1 needs, go on first.
    */
   "watchSecurity",
+  /**
+   * `protocol-changed` and `protocol-upgrade-coming`, from the check's protocol section, once its
+   * two series have data (decision 70).
+   */
+  "protocol",
 ] as const;
 export type AlarmGroup = (typeof ALARM_GROUPS)[number];
 
@@ -120,6 +125,14 @@ export interface EnvironmentConfig {
      * SSM.
      */
     readonly rpcUrls: Readonly<Partial<Record<StellarNetwork, string>>>;
+    /**
+     * The networks whose protocol the check reads, served or not, so an upgrade on mainnet is
+     * seen before we serve it (decision 70): Horizon's root URL, and the protocol version we run
+     * against. Raise `expected` in a PR once an upgrade is checked.
+     */
+    readonly protocol: Readonly<
+      Partial<Record<StellarNetwork, { readonly horizonUrl: string; readonly expected: number }>>
+    >;
   };
   readonly slack: {
     /** SSM parameter names (plain String): the IDs stay out of this public repo. */
@@ -224,6 +237,16 @@ const schema = z.object({
   // Each entry is checked against `networks` in crossChecks.
   watch: z.object({
     rpcUrls: z.record(z.string(), z.unknown(), { message: "must map networks to URLs" }),
+    protocol: z.record(
+      z.custom<StellarNetwork>(isStellarNetwork, "is not one of STELLAR_NETWORKS"),
+      z
+        .object({
+          horizonUrl: z.string({ message: HTTPS }).refine(isHttpsUrl, HTTPS),
+          expected: count,
+        })
+        .strict(),
+      { message: "must map networks to their Horizon and protocol version" },
+    ),
   }),
   slack: z.object({ workspaceIdSsmParam: ssmName, channelIdSsmParam: ssmName }),
   host: z.object({
@@ -259,6 +282,9 @@ function crossChecks(c: z.infer<typeof schema>, ctx: z.RefinementCtx): void {
   for (const n of Object.keys(c.watch.rpcUrls))
     if (!c.networks.includes(n as StellarNetwork))
       fail(["watch", "rpcUrls", n], "is not in networks");
+
+  if (c.alarmGroups.protocol && Object.keys(c.watch.protocol).length === 0)
+    fail(["alarmGroups", "protocol"], "needs watch.protocol, the networks it reads");
 
   const t = c.thresholds;
   // Below uptime's run, a plain outage would fire uptime-flapping first; at the window, never.

@@ -4,6 +4,7 @@ import { isStellarNetwork } from "@stellar-x402/config";
 import { StrKey } from "@stellar/stellar-sdk";
 import { isHttpsUrl } from "../lib/https-url.js";
 import type { WatchTarget } from "./balance.js";
+import type { ProtocolTarget } from "./protocol.js";
 
 export const TARGETS_ENV = "WATCH_TARGETS";
 
@@ -21,5 +22,22 @@ export function parseTargets(raw: string | undefined): WatchTarget[] {
       throw new Error(`${TARGETS_ENV}[${i}].feeAccount is not a G... address`);
     if (!isHttpsUrl(rpcUrl)) throw new Error(`${TARGETS_ENV}[${i}].rpcUrl must be an https:// URL`);
     return { network, feeAccount, rpcUrl };
+  });
+}
+
+export const PROTOCOL_ENV = "WATCH_PROTOCOL";
+
+/** Parses `WATCH_PROTOCOL`: the networks whose protocol the check reads, possibly none. */
+export function parseProtocolTargets(raw: string | undefined): ProtocolTarget[] {
+  if (raw === undefined || raw === "") return [];
+  const value: unknown = JSON.parse(raw);
+  if (!Array.isArray(value)) throw new Error(`${PROTOCOL_ENV} must be a list`);
+  return value.map((t: unknown, i) => {
+    const { network, horizonUrl } = (t ?? {}) as Record<string, unknown>;
+    if (typeof network !== "string" || !isStellarNetwork(network))
+      throw new Error(`${PROTOCOL_ENV}[${i}].network is not known`);
+    if (!isHttpsUrl(horizonUrl))
+      throw new Error(`${PROTOCOL_ENV}[${i}].horizonUrl must be an https:// URL`);
+    return { network, horizonUrl };
   });
 }
