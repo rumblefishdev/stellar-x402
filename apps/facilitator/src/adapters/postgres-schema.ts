@@ -155,6 +155,36 @@ ALTER TABLE settlement_hashes
 `,
   },
   {
+    // 0063: a listing comes from the seller's own 402, so writes are ordered by when the check
+    // that read it started; nullable, so the release before it keeps working, and a null reads as
+    // 0. Every attempt to change a listing is a row, pruned after 30 days; the pruner deletes by
+    // `at`.
+    name: "0006_catalog_seller_check",
+    sql: `
+ALTER TABLE catalog ADD COLUMN checked_at bigint;
+CREATE TABLE catalog_attempts (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  at bigint NOT NULL,
+  network text NOT NULL,
+  pay_to text NOT NULL,
+  method text,
+  resource_url text,
+  url text,
+  payer text NOT NULL,
+  transaction text,
+  stage text NOT NULL CHECK (stage IN ('payment', 'seller')),
+  outcome text NOT NULL,
+  reason text,
+  detail text,
+  field_bytes integer,
+  content_hash text,
+  copy jsonb,
+  answer jsonb
+);
+CREATE INDEX catalog_attempts_at ON catalog_attempts (at);
+`,
+  },
+  {
     // 0073: how many times a record nothing was sent for was reopened by the identical payload
     // (decisions 5, 14). -1 for the rows already there and for the ones a release before 0073
     // still inserts during the deploy, which leaves the column out: their answer was "sign a new

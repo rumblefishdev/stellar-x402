@@ -3,7 +3,7 @@ import type { SorobanRpc, SubmitterEvent } from "@stellar-x402/signer-pool";
 import { FakeRpc } from "@stellar-x402/signer-pool/testing";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import { getUsdcAddress } from "@x402/stellar";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { openBaoSigner } from "../src/adapters/openbao-signer.js";
 import { parseConfig, type Env } from "../src/config.js";
 import { jsonLogger, rpcEndpointName } from "../src/logger.js";
@@ -26,6 +26,7 @@ import { BREAKERS } from "../src/spend/policy.js";
 import { testDatabase } from "./database.js";
 import { transferPayload, usedNonces } from "./payment.js";
 import { holdLease, settlement } from "./port-contracts.js";
+import { startSeller } from "./seller.js";
 import { fakeOpenBao, signerEnv } from "./fake-openbao.js";
 
 /**
@@ -565,9 +566,23 @@ describe("main()'s composition (compose)", () => {
   }
 
   it("writes a settle's settlement_outcomes_total with network and result, and no issue (0027)", async () => {
+    const seller = await startSeller((url) => ({
+      x402Version: 2,
+      resource: { url },
+      accepts: [requirements],
+      extensions: { bazaar },
+    }));
+    onTestFinished(() => void seller.server.close());
     const emf = capturedEmf();
-    const { deps, cataloger, fake } = await composed({}, { metrics: emf.metrics });
-    const settled = await deps.settle(payload(fake.ledger + 30, { bazaar }), requirements);
+    const { deps, cataloger, fake } = await composed(
+      { CATALOG_LIST_LOCAL: "true" },
+      { metrics: emf.metrics },
+    );
+    const local = {
+      ...payload(fake.ledger + 30, { bazaar }),
+      resource: { url: `${seller.url}/users/42` },
+    } as PaymentPayload;
+    const settled = await deps.settle(local, requirements);
     expect(settled.response).toMatchObject({ success: true });
     settled.afterResponse!();
     await cataloger.drain();
@@ -583,20 +598,39 @@ describe("main()'s composition (compose)", () => {
     // A network-scoped metric written through the root would write no line and report
     // `no-valid-set`; the catalog's line, process-scoped, carries no `network`.
     expect(emf.issues).toEqual([]);
-    const [upsert] = emf.linesFor("catalog_upserts_total");
-    expect(upsert).toBeDefined();
-    expect(upsert).not.toHaveProperty("network");
+    const [attempt] = emf.linesFor("catalog_attempts_total");
+    expect(attempt).toMatchObject({
+      origin: "settle",
+      stage: "seller",
+      outcome: "refreshed",
+      reason: "inserted",
+    });
+    expect(attempt).not.toHaveProperty("network");
     expect(emf.linesFor("lease_changes_total")[0]).toMatchObject({ network: "stellar:testnet" });
   });
 
   it("gives the network-scoped parts one network child and discovery and HTTP the root (0027)", async () => {
+    const seller = await startSeller((url) => ({
+      x402Version: 2,
+      resource: { url },
+      accepts: [requirements],
+      extensions: { bazaar },
+    }));
+    onTestFinished(() => void seller.server.close());
     const root = memoryMetrics();
     const scope = vi.spyOn(root, "for");
-    const { deps, cataloger, metrics, fake } = await composed({}, { metrics: root });
+    const { deps, cataloger, metrics, fake } = await composed(
+      { CATALOG_LIST_LOCAL: "true" },
+      { metrics: root },
+    );
     expect(scope.mock.calls).toEqual([[{ network: "stellar:testnet" }]]);
     expect(metrics).toBe(root);
     expect(deps.metrics).toBe(root);
-    const settled = await deps.settle(payload(fake.ledger + 30, { bazaar }), requirements);
+    const local = {
+      ...payload(fake.ledger + 30, { bazaar }),
+      resource: { url: `${seller.url}/users/42` },
+    } as PaymentPayload;
+    const settled = await deps.settle(local, requirements);
     expect(settled.response).toMatchObject({ success: true });
     settled.afterResponse!();
     await cataloger.drain();
@@ -606,7 +640,14 @@ describe("main()'s composition (compose)", () => {
     );
     expect(root.value("settlement_outcomes_total", labels)).toBe(0);
     expect(root.value("lease_changes_total", { held: "true", network: "stellar:testnet" })).toBe(1);
-    expect(root.value("catalog_upserts_total", { origin: "settle", outcome: "inserted" })).toBe(1);
+    expect(
+      root.value("catalog_attempts_total", {
+        origin: "settle",
+        stage: "seller",
+        outcome: "refreshed",
+        reason: "inserted",
+      }),
+    ).toBe(1);
   });
 
   it("counts in memory without opts.metrics", async () => {
@@ -645,35 +686,37 @@ describe("main()'s composition (compose)", () => {
     expect(fake.sent).toHaveLength(0);
   });
 
-  it("gives a success the cataloger's header, and catalogs it after the response", async () => {
-    const { deps, cataloger, fake } = await composed();
-    const settled = await deps.settle(payload(fake.ledger + 30, { bazaar }), requirements);
-    expect(settled.response).toMatchObject({ success: true });
-    expect(deps.extensionResponses(settled.record!)).toEqual({ bazaar: { status: "processing" } });
-    settled.afterResponse!();
-    await cataloger.drain();
-    const { items } = await deps.stores.catalog.list({ limit: 10, offset: 0 });
-    expect(items).toHaveLength(1);
-  });
-
   it.each([
     [{}, { status: "rejected", rejectedReason: "resource_not_public" }, 0],
     [{ CATALOG_LIST_LOCAL: "true" }, { status: "processing" }, 1],
   ] as const)(
-    "settles a localhost resource and lists it only with %j (0054)",
+    "settles a local resource and lists it from the seller's 402 only with %j (0054, 0063)",
     async (env, header, listed) => {
-      const { deps, cataloger, fake } = await composed(env);
-      const local = {
-        ...payload(fake.ledger + 30, { bazaar }),
-        resource: { url: "http://localhost:4022/users/42" },
-      } as PaymentPayload;
-      const settled = await deps.settle(local, requirements);
-      expect(settled.response).toMatchObject({ success: true });
-      expect(deps.extensionResponses(settled.record!)).toEqual({ bazaar: header });
-      settled.afterResponse!();
-      await cataloger.drain();
-      const { items } = await deps.stores.catalog.list({ limit: 10, offset: 0 });
-      expect(items).toHaveLength(listed);
+      const seller = await startSeller((url) => ({
+        x402Version: 2,
+        resource: { url },
+        accepts: [requirements],
+        extensions: { bazaar },
+      }));
+      try {
+        const { deps, cataloger, fake } = await composed(env);
+        const local = {
+          ...payload(fake.ledger + 30, { bazaar }),
+          resource: { url: `${seller.url}/users/42` },
+        } as PaymentPayload;
+        const settled = await deps.settle(local, requirements);
+        expect(settled.response).toMatchObject({ success: true });
+        expect(deps.extensionResponses(settled.record!)).toEqual({ bazaar: header });
+        // The header came before any request to the seller.
+        expect(seller.requests).toEqual([]);
+        settled.afterResponse!();
+        await cataloger.drain();
+        const { items } = await deps.stores.catalog.list({ limit: 10, offset: 0 });
+        expect(items).toHaveLength(listed);
+        expect(seller.requests).toHaveLength(listed);
+      } finally {
+        seller.server.close();
+      }
     },
   );
 
