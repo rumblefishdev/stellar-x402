@@ -85,6 +85,3 @@ as today.
 - [ ] Given a record with a hash, when the identical payload returns, then it doesn't reopen
 - [ ] Given a reopen after a budget refusal, when the budget is still spent, then it is refused
       again with the same reason
-- [ ] Given a refusal from the checks before the claim, e.g.
-      `invalid_exact_stellar_payload_fee_exceeds_maximum`, when the client reads the answer, then
-      it carries `extra.expirationLedger` and never says to sign a new payment before it
