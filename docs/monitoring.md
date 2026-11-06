@@ -17,16 +17,18 @@ PR (decision 68).
 
 ## The alarms that are on
 
-| Alarm                  | Group       | On since             | Fired on purpose                                                                                  |
-| ---------------------- | ----------- | -------------------- | ------------------------------------------------------------------------------------------------- |
-| `emf-validation`       | `telemetry` | 2026-11-06           | `make fire-test` (delivery test, seen): 08:39:50 and 11:18:30 UTC                                 |
-| `emf-parsing`          | `telemetry` | 2026-11-06           | Not yet                                                                                           |
-| `uptime`               | `uptime`    | 2026-11-06 11:16 UTC | Not yet                                                                                           |
-| `uptime-flapping`      | `uptime`    | 2026-11-06 11:16 UTC | Not yet                                                                                           |
-| `balance-low`          | `watch`     | 2026-11-06 11:16 UTC | 2026-11-06, a fake point ([Drills](#drills)): ALARM 11:20:10, OK 11:25:10 UTC, both seen in Slack |
-| `balance-critical`     | `watch`     | 2026-11-06 11:16 UTC | 2026-11-06, the same fake point: ALARM 11:20:35, OK 11:25:35 UTC, both seen in Slack              |
-| `watch-errors`         | `watch`     | 2026-11-06 11:16 UTC | Not yet                                                                                           |
-| `watch-no-invocations` | `watch`     | 2026-11-06 11:16 UTC | Not yet                                                                                           |
+| Alarm                     | Group       | On since                  | Fired on purpose                                                                                  |
+| ------------------------- | ----------- | ------------------------- | ------------------------------------------------------------------------------------------------- |
+| `emf-validation`          | `telemetry` | 2026-11-06                | `make fire-test` (delivery test, seen): 08:39:50 and 11:18:30 UTC                                 |
+| `emf-parsing`             | `telemetry` | 2026-11-06                | Not yet                                                                                           |
+| `uptime`                  | `uptime`    | 2026-11-06 11:16 UTC      | Not yet                                                                                           |
+| `uptime-flapping`         | `uptime`    | 2026-11-06 11:16 UTC      | Not yet                                                                                           |
+| `balance-low`             | `watch`     | 2026-11-06 11:16 UTC      | 2026-11-06, a fake point ([Drills](#drills)): ALARM 11:20:10, OK 11:25:10 UTC, both seen in Slack |
+| `balance-critical`        | `watch`     | 2026-11-06 11:16 UTC      | 2026-11-06, the same fake point: ALARM 11:20:35, OK 11:25:35 UTC, both seen in Slack              |
+| `watch-errors`            | `watch`     | 2026-11-06 11:16 UTC      | Not yet                                                                                           |
+| `watch-no-invocations`    | `watch`     | 2026-11-06 11:16 UTC      | Not yet                                                                                           |
+| `protocol-changed`        | `protocol`  | With #145's Alarms deploy | Not yet                                                                                           |
+| `protocol-upgrade-coming` | `protocol`  | With #145's Alarms deploy | Expected on the deploy itself: mainnet's Core supports 30 (`supported` 29)                        |
 
 A network-scoped alarm has the network at the end of its name (`balance-low-testnet`). AWS
 commands below use the `stellar` SSO profile (`aws sso login --profile stellar`) and
