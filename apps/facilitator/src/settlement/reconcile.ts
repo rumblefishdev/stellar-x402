@@ -200,9 +200,6 @@ export function createReconciler(deps: ReconcilerDeps) {
     return oldest;
   };
 
-  const pastBound = (attempt: SettlementAttempt, res: rpc.Api.GetMissingTransactionResponse) =>
-    cannotLand(res, { maxTime: attempt.maxTime, maxLedger: attempt.maxLedger });
-
   const resolveRecord = async (record: SettlementRecord): Promise<Outcome> => {
     if (record.hashes.length === 0) {
       if (record.state !== "claimed") return "open";
@@ -230,7 +227,7 @@ export function createReconciler(deps: ReconcilerDeps) {
       if (attempt.state === "dead") continue;
       const res = await deps.rpc.getTransaction(attempt.hash);
       if (res.status === rpc.Api.GetTransactionStatus.NOT_FOUND) {
-        if (!pastBound(attempt, res)) open++;
+        if (!cannotLand(res, attempt)) open++;
         else if (historyCovers(record, res)) {
           // Ours never landed, but someone else's fee bump of its inner transaction may have
           // (0087). A hash stored before the inner one was kept is resolved by itself alone.
@@ -240,7 +237,7 @@ export function createReconciler(deps: ReconcilerDeps) {
               return land(record, attempt, inner, dead, true);
             // The same rule as for our own hash: a node behind the bound, or without the
             // history, may not have seen theirs land, so the attempt stays open.
-            if (!pastBound(attempt, inner) || !historyCovers(record, inner)) {
+            if (!cannotLand(inner, attempt) || !historyCovers(record, inner)) {
               open++;
               continue;
             }

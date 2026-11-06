@@ -692,6 +692,16 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
         ).toBe(0);
       });
 
+      it("gives the hash that landed in place of an attempt that attempt's bounds (0101)", async () => {
+        // Theirs wraps our inner transaction, so it can land only while ours could.
+        await store.addHash(key, "h1", LEASE, 2_000, { maxTime: 1_700, maxLedger: 9 });
+        await store.markAttempts(key, [{ hash: "r1", state: "landed", rewrapOf: "h1" }], 3_000);
+        expect((await store.attempts(key)).find((a) => a.hash === "r1")).toMatchObject({
+          maxTime: 1_700,
+          maxLedger: 9,
+        });
+      });
+
       it("adds no landed hash in place of an attempt the record doesn't have (0087)", async () => {
         const k2 = settlement("2").key;
         await store.claim(settlement("2"));

@@ -224,15 +224,18 @@ function toAttempt(row: AttemptRow): SettlementAttempt {
  * Moves the named attempts of `$1` forward, each on its own, and stamps `$2`; `$3` is the updates
  * as JSON. The rank comparison drops an update that isn't ahead, so concurrent writers can only
  * move an attempt on. An update with `rewrap_of` adds its hash after the record's others, with
- * that attempt's inner hash (0087); the `UPDATE`'s snapshot doesn't see the row, so it doesn't
+ * that attempt's inner hash (0087) and bounds: it wraps the same inner transaction, so it can land
+ * only while that attempt could (0101). The `UPDATE`'s snapshot doesn't see the row, so it doesn't
  * move it too. Returns one row per attempt moved or added.
  */
 const MARK_ATTEMPTS = `WITH u AS (
     SELECT * FROM jsonb_to_recordset($3::jsonb)
       AS u(hash text, state text, channel text, error_code text, rewrap_of text)
   ), added AS (
-    INSERT INTO settlement_hashes (hash, key, state, channel, error_code, inner_hash, updated_at)
-    SELECT u.hash, h.key, u.state, coalesce(u.channel, h.channel), u.error_code, h.inner_hash, $2
+    INSERT INTO settlement_hashes
+      (hash, key, state, channel, error_code, inner_hash, max_time, max_ledger, updated_at)
+    SELECT u.hash, h.key, u.state, coalesce(u.channel, h.channel), u.error_code, h.inner_hash,
+      h.max_time, h.max_ledger, $2
     FROM u JOIN settlement_hashes h ON h.hash = u.rewrap_of AND h.key = $1
     ON CONFLICT (hash) DO NOTHING
     RETURNING hash
