@@ -63,6 +63,10 @@ history:
     status: active
     who: akot
     note: "#115 and its fix #141 merged and deployed: Watch, then Alarms at 11:16 UTC (uptime and watch groups on). balance-low and balance-critical fired with a fake 5 XLM spendable_stroops point: ALARM 11:20:10 and 11:20:35, OK 11:25:10 and 11:25:35 UTC, all four seen in Slack (docs/monitoring.md, Drills). M1's low-balance alarm is done; budget, breaker, quarantine and pending wait on #137."
+  - date: "2026-11-06"
+    status: active
+    who: akot
+    note: "Decision 70 replaces 66: the watch Lambda reads each network's protocol from Horizon (testnet 30/30, mainnet 29 with Core on 30 on 2026-11-06), with protocol-changed and protocol-upgrade-coming in a protocol group."
 ---
 
 # Alerts and metrics
@@ -605,7 +609,7 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
 66. **No protocol-upgrade watch in 0027** (2026-11-05, point 2). The explorer has one after a
     16-hour stall at an upgrade. For the facilitator an upgrade is mostly an SDK update; a watch
     reads the validators' votes, not a metric we have. It is named in G-alarm-list's Deferred, to decide with 0038 before
-    mainnet.
+    mainnet. Replaced by decision 70 on 2026-11-06.
 67. **Three cuts in `infra/`** (2026-11-05, point 8). The Count shape was `event()` with 5-minute
     periods, N = 3 and a threshold, so it went; `pool-health` is that Event. The fee account's
     check is `StrKey.isValidEd25519PublicKey`, as in the facilitator's config, not 30 lines of
@@ -640,6 +644,19 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     Before `stellar:pubnet` joins `networks` (from Oskar's review of #115): a provider's keyed
     URL comes from an SSM parameter, the role gets `ssm:GetParameter` on it, and errors are masked
     by the URL's host and path, not only by an exact copy of it.
+70. **The check watches each network's protocol** (akot, 2026-11-06; replaces decision 66). On
+    2026-11-03 testnet moved to protocol 30 and an older SDK stopped reading its ledgers, found
+    only by a chance test, and on 2026-11-06 mainnet ran 29 with its Stellar Core supporting 30.
+    The watch Lambda's protocol section reads Horizon's root every 5 minutes for each network in
+    `watch.protocol`, testnet and mainnet, served or not, and publishes `protocol_version` and
+    `protocol_supported_version`. Horizon, not RPC: it gives both versions, and mainnet has a
+    public Horizon and no RPC of ours yet. The version we run against is each alarm's threshold
+    (`watch.protocol.<network>.expected`), raised in a PR once an upgrade is checked:
+    `protocol-changed` fires when the network runs above it, `protocol-upgrade-coming` when its
+    Core supports a version above it, which on mainnet is at once, the warning we want. Both are
+    Level alarms with `Maximum`, in a `protocol` group of their own. The validators' votes, which
+    the explorer reads, would give the date; Core's supported version gives the readiness, which
+    is enough to test the SDK in time.
 
 ## Acceptance Criteria
 
