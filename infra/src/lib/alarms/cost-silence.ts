@@ -44,7 +44,7 @@ export function addCostSilenceAlarms(f: AlarmFactory, c: EnvironmentConfig): voi
         threshold: t.logVolumeBytesPerHour,
         description: {
           what: `${group} took over ${t.logVolumeBytesPerHour} bytes in an hour: a flood of lines, on the bill and on the server's disk.`,
-          next: "Find the line that repeats with Logs Insights (stats count() by msg), and its cause.",
+          next: "Find the line that repeats with Logs Insights (stats count() by event), and its cause.",
           noData: "Keeps its state; telemetry-silent covers a stopped agent.",
         },
       });
