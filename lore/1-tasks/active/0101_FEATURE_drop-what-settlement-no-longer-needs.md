@@ -54,7 +54,7 @@ Figures are from `origin/develop` on 2026-11-03. Work each item from what is tru
    `settle.ts` switches to `payerExpiration`; `authExpiration` and `fallbackLedger` go. First check
    on production that `SELECT count(*) FROM settlement_hashes WHERE max_ledger IS NULL` returns 0.
    If it doesn't, drop this item.
-6. **In #135. `[refactor]`, ~1 h. One `resultUpdate(result)`.** `settle.ts` and `reconcile.ts` build
+6. **Merged in #135. `[refactor]`, ~1 h. One `resultUpdate(result)`.** `settle.ts` and `reconcile.ts` build
    the same update from a pool result, under two rules for a ledger or a fee the result doesn't
    have. #105's `failure` line stays outside the function: it belongs to non-success results only.
 
