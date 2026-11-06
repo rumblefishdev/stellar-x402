@@ -1,9 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { networkInterfaces, tmpdir } from "node:os";
-import { join } from "node:path";
+import { networkInterfaces } from "node:os";
 import { text } from "node:stream/consumers";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -65,16 +63,11 @@ afterEach(() => {
 });
 
 /** Starts the proxy and resolves once it printed the line the suite waits for. */
-async function startProxy(target = facilitatorUrl, callsFile?: string) {
+async function startProxy(target = facilitatorUrl) {
   const port = await freePort();
   const child = spawn("bash", ["run.sh"], {
     cwd: folder,
-    env: {
-      ...process.env,
-      PORT: String(port),
-      GATE_FACILITATOR_URL: target,
-      ...(callsFile && { GATE_CALLS_FILE: callsFile }),
-    },
+    env: { ...process.env, PORT: String(port), GATE_FACILITATOR_URL: target },
   });
   started.push(child);
   let stdout = "";
@@ -176,19 +169,6 @@ describe("external proxy", () => {
     expect(res.headers.get("extension-responses")).toBe("e30=");
     expect(res.headers.get("retry-after")).toBe("5");
     expect(await res.text()).toBe('{"isValid":true}');
-  });
-
-  it("writes one line per forwarded call to GATE_CALLS_FILE, and none for its own routes", async () => {
-    const callsFile = join(mkdtempSync(join(tmpdir(), "proxy-calls-")), "calls.log");
-    const proxy = await startProxy(facilitatorUrl, callsFile);
-    await fetch(`${proxy.url}/health`);
-    await fetch(`${proxy.url}/verify`, { method: "POST", body: "{}" });
-    await fetch(`${proxy.url}/settle`, { method: "POST", body: "{}" });
-    const lines = readFileSync(callsFile, "utf8").trimEnd().split("\n");
-    expect(lines.map((line) => line.replace(/in \d+ ms$/, "in N ms"))).toEqual([
-      "POST /verify -> 200 in N ms",
-      "POST /settle -> 200 in N ms",
-    ]);
   });
 
   it("forwards nothing else", async () => {

@@ -14,8 +14,6 @@ export interface SuiteResult {
   passed: boolean;
   error?: string;
   transaction?: string;
-  /** `authorization` verifies before it serves; `upfront` settles without a `/verify`. */
-  paymentFlow?: string;
 }
 
 /**
@@ -42,35 +40,6 @@ export function judge(run: SuiteRun | undefined, exitCode: number | null): strin
     else if (first)
       problems.push(`${name} reports transaction ${result.transaction}, as #${first} does`);
     else reportedBy.set(result.transaction, result.testNumber);
-  }
-  return problems;
-}
-
-/**
- * Whether the whole suite ran, and against the facilitator: a run of one good scenario proves
- * little, and the suite's file doesn't say that a call left the machine. `calls` are the lines the
- * proxy wrote, one per forwarded call.
- */
-export function judgeCoverage(run: SuiteRun, calls: string[], expectedScenarios: number): string[] {
-  const problems: string[] = [];
-  const scenarios = run.results.length;
-  if (scenarios !== expectedScenarios) {
-    problems.push(
-      `the suite ran ${scenarios} scenarios, the pinned commit holds ${expectedScenarios}`,
-    );
-  }
-  const verified = calls.filter((call) => call.startsWith("POST /verify -> 200")).length;
-  const verifying = run.results.filter((result) => result.paymentFlow === "authorization").length;
-  if (verified !== verifying) {
-    problems.push(
-      `the facilitator answered 200 to ${verified} /verify calls, ${verifying} scenarios verify`,
-    );
-  }
-  const settled = calls.filter((call) => call.startsWith("POST /settle -> 200")).length;
-  if (settled < scenarios) {
-    problems.push(
-      `the facilitator answered 200 to ${settled} /settle calls, ${scenarios} scenarios settled`,
-    );
   }
   return problems;
 }

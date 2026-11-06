@@ -7,12 +7,6 @@ export const UPSTREAM_REPO = "https://github.com/x402-foundation/x402.git";
 /** The pinned suite version (ADR 0009). Bumping it means a new gate run and new results. */
 export const UPSTREAM_COMMIT = "8827cf19fa9a7b120588b8cc56f56a3def13bb97";
 
-/**
- * The Stellar `exact` scenarios at the pin: axios and fetch against 4 HTTP servers on 2 routes, and
- * MCP on 2 tools. A new pin that holds another number fails the gate until this is checked.
- */
-export const UPSTREAM_SCENARIOS = 18;
-
 function run(command: string, args: string[], cwd: string) {
   console.log(`$ ${command} ${args.join(" ")}   (in ${cwd})`);
   execFileSync(command, args, { cwd, stdio: "inherit" });

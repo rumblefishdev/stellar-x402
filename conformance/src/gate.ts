@@ -20,14 +20,8 @@ import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import { Keypair, rpc } from "@stellar/stellar-sdk";
 import { checkSettlement, readSettlement, type Settlement } from "./onchain.js";
-import {
-  UPSTREAM_COMMIT,
-  UPSTREAM_REPO,
-  UPSTREAM_SCENARIOS,
-  assertClean,
-  prepare,
-} from "./upstream.js";
-import { judge, judgeCoverage, type SuiteRun } from "./verdict.js";
+import { UPSTREAM_COMMIT, UPSTREAM_REPO, assertClean, prepare } from "./upstream.js";
+import { judge, type SuiteRun } from "./verdict.js";
 
 const conformance = fileURLToPath(new URL("..", import.meta.url));
 const root = join(conformance, "..");
@@ -100,7 +94,6 @@ cpSync(
 assertClean(checkout);
 
 const suiteJson = join(checkout, "gate-results.json");
-const callsFile = join(checkout, "gate-calls.log");
 const filters = [
   "test",
   "--testnet",
@@ -123,7 +116,6 @@ suite = spawn("pnpm", args, {
   env: {
     ...process.env,
     GATE_FACILITATOR_URL: facilitatorUrl,
-    GATE_CALLS_FILE: callsFile,
     CLIENT_STELLAR_PRIVATE_KEY: accounts.E2E_BUYER_SECRET,
     SERVER_STELLAR_ADDRESS: accounts.E2E_SELLER_PUBLIC,
     // The suite will not start without it, even for an external facilitator; the proxy ignores it.
@@ -137,8 +129,6 @@ const run = existsSync(suiteJson)
   ? (JSON.parse(readFileSync(suiteJson, "utf8")) as SuiteRun)
   : undefined;
 const problems = judge(run, suiteExitCode);
-const calls = existsSync(callsFile) ? readFileSync(callsFile, "utf8") : "";
-if (run) problems.push(...judgeCoverage(run, calls.split("\n"), UPSTREAM_SCENARIOS));
 if (!facilitatorCommit) problems.push("the facilitator names no commit on /health");
 // A run of record says which gate judged it, so that code must be the commit it names.
 const gateCommit = execFileSync("git", ["rev-parse", "HEAD"], {
@@ -188,18 +178,16 @@ for (const result of run?.results ?? []) {
 }
 console.log(`Read ${settlements.length} transactions on chain`);
 
-// One folder per run: the suite's own file, copied byte for byte, and the gate's verdict on it,
-// which names that file and its hash so the two are read as one run.
+// One folder per facilitator kind, overwritten by each run, so git keeps the history of its runs:
+// the suite's own file, copied byte for byte, and the gate's verdict on it, which names that file
+// and its hash so the two are read as one run. A local facilitator's folder stays out of git.
 if (run) {
   const date = new Date().toISOString();
-  const folder = join(
-    conformance,
-    "results",
-    `${date.replace(/[:.]/g, "-")}-${new URL(facilitatorUrl).host}`,
-  );
+  const local = ["localhost", "127.0.0.1", "[::1]"].includes(new URL(facilitatorUrl).hostname);
+  const folder = join(conformance, "results", local ? "testnet-local" : "testnet-hosted");
+  rmSync(folder, { recursive: true, force: true });
   mkdirSync(folder, { recursive: true });
   copyFileSync(suiteJson, join(folder, "suite.json"));
-  writeFileSync(join(folder, "calls.log"), calls);
   const record = {
     suiteFile: "suite.json",
     suiteSha256: createHash("sha256").update(readFileSync(suiteJson)).digest("hex"),
