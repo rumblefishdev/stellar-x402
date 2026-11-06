@@ -1,32 +1,30 @@
-import { once } from "node:events";
-import type { AddressInfo } from "node:net";
 import { rpc as stellarRpc } from "@stellar/stellar-sdk";
 import {
   FallbackRpc,
-  RpcTimeoutError,
   SettlementSubmitter,
   type SorobanRpc,
   type TransactionSigner,
 } from "@stellar-x402/signer-pool";
 import { getNetworkPassphrase, getUsdcAddress, type FacilitatorStellarSigner } from "@x402/stellar";
-import { ExactStellarScheme } from "@x402/stellar/exact/facilitator";
 import type pg from "pg";
 import { Agent, setGlobalDispatcher } from "undici";
+import { emfMetrics } from "./adapters/emf-metrics.js";
 import { openBaoSigner, type OpenBaoSigner } from "./adapters/openbao-signer.js";
 import { MIGRATIONS, migrate, pendingMigrations } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
 import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
 import { parseConfig, parseMigrateConfig } from "./config.js";
 import type { Config } from "./config.js";
-import { createApp, type AppDeps } from "./http/app.js";
+import type { AppDeps } from "./http/app.js";
 import { supportedResponse } from "./http/supported.js";
 import { captureConsoleError, jsonLogger, rpcEndpointName, type Logger } from "./logger.js";
-import { memoryMetrics, type Metrics } from "./metrics.js";
+import { memoryMetrics, type NetworkMetrics, type ProcessMetrics } from "./metrics.js";
 import type { LeaseFence, SettlementStore } from "./ports/index.js";
 import { createPruner } from "./pruner.js";
+import { createRpcStallTracker, type RpcStallTracker } from "./rpc-stall.js";
 import { checkChannels } from "./settlement/channel-check.js";
 import { checkRpcNetworks } from "./settlement/network-check.js";
-import { atCurrentBid, feeSettings, type FeeSettings } from "./settlement/fees.js";
+import { feeSettings, type FeeSettings } from "./settlement/fees.js";
 import type { SettlementHooks } from "./settlement/hooks.js";
 import {
   createReconciler,
@@ -37,150 +35,23 @@ import { createLeaseKeeper } from "./settlement/lease.js";
 import { createRecords } from "./settlement/records.js";
 import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler, type Settle } from "./settlement/settle.js";
 import { createTrustlineLookup } from "./settlement/trustline.js";
-import { failoverUpstream, type EndpointFailure } from "./settlement/upstream-failover.js";
-import { createAssetKinds } from "./spend/asset-kinds.js";
-import { createBalanceFloor } from "./spend/balance-floor.js";
-import { createSpendPolicy, verifyWithBreakers } from "./spend/policy.js";
 import {
-  UNEXPECTED_VERIFY_ERROR,
-  UpstreamTimeoutError,
+  UPSTREAM_TIMEOUT_MS,
+  buildUpstream,
+  failureReason,
+  type UpstreamSeams,
+} from "./settlement/upstream.js";
+import { createAssetKinds } from "./spend/asset-kinds.js";
+import { BALANCE_STALE_ALARM_MS, createBalanceFloor } from "./spend/balance-floor.js";
+import { createSpendPolicy, verifyWithBreakers } from "./spend/policy.js";
+import { start } from "./start.js";
+import {
   createChecker,
   createVerifier,
   type Check,
-  type UpstreamVerifier,
   type VerifierDeps,
   type Verify,
 } from "./settlement/verify.js";
-
-export interface Started {
-  port: number;
-  close(): Promise<void>;
-}
-
-/**
- * How long `close()` waits for the drain after SIGTERM (0025 decision 11): Docker kills the
- * container at 180 s, which leaves 30 s for the cataloger, the pruner and the pools.
- */
-export const SHUTDOWN_DEADLINE_MS = 150_000;
-
-/**
- * How long requests still open after the drain may take before their connections are cut, within
- * the deadline: a `/verify` on one RPC URL fits, and a stalled client no longer holds the process
- * past it (0025 decision 23).
- */
-export const SHUTDOWN_GRACE_MS = 15_000;
-
-/**
- * How long an idle connection stays open: above `cloudflared`'s 90 s idle keep-alive, so the
- * server never closes a connection the tunnel is about to reuse, which it would answer with a 502
- * (ADR 0011). The header wait sits above it.
- */
-export const KEEP_ALIVE_TIMEOUT_MS = 125_000;
-
-/** Starts the HTTP server on the graph `deps`. Tests call it with their own config and stores. */
-export async function start(
-  deps: AppDeps,
-  opts: { shutdownDeadlineMs?: number; shutdownGraceMs?: number } = {},
-): Promise<Started> {
-  const { shutdownDeadlineMs = SHUTDOWN_DEADLINE_MS, shutdownGraceMs = SHUTDOWN_GRACE_MS } = opts;
-  let closing = false;
-  const server = createApp({ ...deps, closing: () => closing }).listen(deps.config.port);
-  server.keepAliveTimeout = KEEP_ALIVE_TIMEOUT_MS;
-  server.headersTimeout = KEEP_ALIVE_TIMEOUT_MS + 1_000;
-  await once(server, "listening");
-  // The first balance reading comes before the lease, so `/settle` isn't refused for want of one
-  // once it can serve. A failed read is logged, and the floor fails closed until one succeeds.
-  await deps.floor?.start();
-  // After listening, so `/verify` and `/supported` answer meanwhile. Sweeps run with or without the lease (0019
-  // decision 37); `/settle` serves beside them (0019 decision 27) once the lease is held, and the
-  // keeper keeps trying when it isn't (0025 decision 1).
-  await deps.lease?.start();
-  deps.reconciliation?.start();
-  const { port } = server.address() as AddressInfo;
-  deps.logger.info("listening", {
-    port,
-    network: deps.config.network,
-    channels: deps.config.channels.length,
-  });
-  return {
-    port,
-    // The shutdown (0025): `/settle` answers 503 at once, the pool refuses every call that sent
-    // nothing, and calls already sent run on while the keeper keeps renewing the lease (decision
-    // 10). Once they and their record writes are done nothing can send, so the lease is given up
-    // and the next process takes over within one attempt (decision 23). Until then the server
-    // listens, so a new `/settle` still gets its 503 rather than a refused connection. Then it
-    // closes: open requests get the grace, their connections are cut, and a sweep under way is
-    // waited for, as sweeps need no lease (0019 decision 37). Past the deadline the open
-    // connections are cut, and a drain still under way leaves the lease to its TTL (decision 11).
-    // A transaction still unresolved can stay valid past that, until its payer's auth expires
-    // (0073): the next process's sends on its channel may then fail with `txBadSeq` and rebuild.
-    close: async () => {
-      closing = true;
-      const begun = Date.now();
-      deps.logger.info("shutdown_started", { network: deps.config.network });
-      // No new sweep starts; one under way is drained like the submissions, so its writes don't
-      // reach the pools `main()` ends next.
-      const swept = deps.reconciliation?.close();
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      let grace: ReturnType<typeof setTimeout> | undefined;
-      const deadline = new Promise<"deadline">((resolve) => {
-        timer = setTimeout(() => resolve("deadline"), shutdownDeadlineMs);
-        timer.unref();
-      });
-      const drained = (async () => {
-        await deps.drain?.();
-        return "drained" as const;
-      })();
-      let closed: Promise<void> | undefined;
-      try {
-        if ((await Promise.race([drained, deadline])) === "drained") {
-          deps.logger.info("shutdown_drained", { ms: Date.now() - begun });
-          await deps.lease?.release();
-          closed = new Promise<void>((resolve, reject) =>
-            server.close((e) => (e ? reject(e) : resolve())),
-          );
-          server.closeIdleConnections();
-          const graced = new Promise<void>((resolve) => {
-            grace = setTimeout(resolve, shutdownGraceMs);
-            grace.unref();
-          });
-          await Promise.race([closed, graced, deadline]);
-          server.closeAllConnections();
-          const done = Promise.all([closed, swept]).then(() => "closed" as const);
-          if ((await Promise.race([done, deadline])) === "closed") return;
-          // Only a sweep is still under way: its record writes may fail once the pools end.
-          deps.logger.warn("shutdown_deadline", { ms: Date.now() - begun, drained: true });
-          return;
-        }
-        deps.logger.warn("shutdown_deadline", { ms: Date.now() - begun, drained: false });
-        server.close();
-        server.closeAllConnections();
-        await deps.lease?.close();
-      } catch (error) {
-        // The server failed to close; if the drain didn't end either, the lease waits out its TTL.
-        await deps.lease?.close();
-        throw error;
-      } finally {
-        clearTimeout(timer);
-        clearTimeout(grace);
-        deps.floor?.stop();
-        // Past the deadline the drain may still fail, or the late `server.close()` may.
-        drained.catch(() => {});
-        closed?.catch(() => {});
-      }
-    },
-  };
-}
-
-/**
- * How long upstream `verify()` may take on one RPC URL, the same as `FallbackRpc`'s timeout, which
- * `main()` sets to it. The fee-stats bid is read before it starts (AD-10), so it covers the
- * upstream call alone. Also the bound of each probe read and of undici's header and body waits.
- */
-export const UPSTREAM_TIMEOUT_MS = 10_000;
-
-/** Slack on the whole upstream call's deadline, so the last URL's own deadline fires first. */
-export const UPSTREAM_DEADLINE_SLACK_MS = 1_000;
 
 /** How often the shared `FallbackRpc` probes `RPC_URLS[0]` while calls are off it (AD-3). */
 export const PRIMARY_PROBE_INTERVAL_MS = 60_000;
@@ -190,44 +61,6 @@ export const FAILBACK_MAX_LAG_LEDGERS = 2;
 
 /** The statement timeout of the public listings' pool, against the other pools' 10 s. */
 export const DISCOVERY_STATEMENT_TIMEOUT_MS = 2_000;
-
-/**
- * The deadline of the whole upstream call (AD-3): `timeoutMs` (10 s) for each of `urls` RPC URLs,
- * plus, with fee-stats bids, the bid read before them, which `FallbackRpc` bounds at 10 s per URL,
- * plus 1 s of slack. The AD-22 ledger read and the trustline lookup after it are not included.
- */
-export function upstreamDeadlineMs(
-  urls: number,
-  feeStats: boolean,
-  timeoutMs = UPSTREAM_TIMEOUT_MS,
-): number {
-  return (timeoutMs + (feeStats ? UPSTREAM_TIMEOUT_MS : 0)) * urls + UPSTREAM_DEADLINE_SLACK_MS;
-}
-
-/** What `buildUpstream` passes to `ExactStellarScheme`, besides the facilitator's signer. */
-export type SchemeOptions = NonNullable<ConstructorParameters<typeof ExactStellarScheme>[1]>;
-
-export type MakeScheme = (
-  signer: FacilitatorStellarSigner,
-  options: SchemeOptions,
-) => UpstreamVerifier;
-
-/**
- * Test seams of {@link buildUpstream}: the scheme per URL, and how long one URL may take
- * (`UPSTREAM_TIMEOUT_MS` by default), so a hung URL needn't cost a test 10 s.
- */
-export interface UpstreamSeams {
-  makeScheme?: MakeScheme;
-  timeoutMs?: number;
-}
-
-/** A short, URL-free reason for the logs: an error's message can carry an RPC URL. */
-export function failureReason(failure: EndpointFailure | { error: unknown }): string {
-  if ("answer" in failure) return UNEXPECTED_VERIFY_ERROR;
-  const { error } = failure;
-  if (error instanceof UpstreamTimeoutError || error instanceof RpcTimeoutError) return "timeout";
-  return error instanceof Error ? `error:${error.name}` : "error";
-}
 
 /**
  * The one RPC client over `RPC_URLS` (AD-3): the pool, the AD-22 ledger read and the fee-stats bid
@@ -267,57 +100,6 @@ export function buildRpc(
         }),
     },
   );
-}
-
-/**
- * Upstream verify from the config, with its deadline (AD-3, AD-10): one `ExactStellarScheme` per
- * `RPC_URLS` entry, with the fee ceiling and the fee a settlement pays at the shared bid, read once
- * per call, behind `failoverUpstream`, which starts each call on `active`'s URL (the shared
- * {@link buildRpc}) and reports a throw or a timeout there. Logs `rpc_exhausted` (warn, with
- * `component: "verify"`, the network and `RPC_URLS[i]#…` names) when every URL failed; switches
- * are `active`'s to log.
- * The two belong together: spread both into `VerifierDeps`, or the deadline falls back to 10 s and
- * cuts off the second URL.
- */
-export function buildUpstream(
-  config: Config,
-  fees: FeeSettings,
-  logger: Pick<Logger, "warn">,
-  facilitator: FacilitatorStellarSigner,
-  active: Pick<FallbackRpc, "begin" | "markFailed">,
-  seams: UpstreamSeams = {},
-): Pick<VerifierDeps, "upstream" | "upstreamTimeoutMs"> {
-  const {
-    makeScheme = (signer, options) => new ExactStellarScheme([signer], options),
-    timeoutMs = UPSTREAM_TIMEOUT_MS,
-  } = seams;
-  // `RPC_URLS[i]#<fingerprint>`, as everywhere else in the logs (ADR 0011, 0009 decision 47).
-  const name = (i: number) => rpcEndpointName(config.rpcUrls[i]!, i);
-  // Upstream reads one RPC URL, so there is one scheme per URL, in `RPC_URLS` order: the order of
-  // `active`'s endpoints.
-  const endpoints = atCurrentBid(fees.inclusionFee, (inclusionFeeStroops) =>
-    config.rpcUrls.map((url, i) => ({
-      name: name(i),
-      verifier: makeScheme(facilitator, {
-        rpcConfig: { url },
-        maxTransactionFeeStroops: fees.maxFeeStroops,
-        inclusionFeeStroops,
-      }),
-    })),
-  );
-  return {
-    upstream: failoverUpstream(endpoints, {
-      timeoutMs,
-      active,
-      onExhausted: (tried) =>
-        logger.warn("rpc_exhausted", {
-          component: "verify",
-          network: config.network,
-          tried: tried.map((t) => ({ rpc: t.name, reason: failureReason(t.failure) })),
-        }),
-    }),
-    upstreamTimeoutMs: upstreamDeadlineMs(config.rpcUrls.length, fees.feeStats, timeoutMs),
-  };
 }
 
 /**
@@ -400,7 +182,7 @@ export function buildSettlement(
     store: SettlementStore;
     hooks: Pick<SettlementHooks, "beforeSubmit" | "onFinal" | "onSuccess">;
     logger: Logger;
-    metrics: Metrics;
+    metrics: NetworkMetrics;
     /** The facilitator key's signer. */
     signer: TransactionSigner;
     /** Tests pass the pool's `sleep`. */
@@ -475,7 +257,18 @@ export function buildSettlement(
     records,
     lease: deps.lease,
   });
-  const reconciliation = scheduleReconciliation({ reconciler, logger, network });
+  const reconciliation = scheduleReconciliation({ reconciler, logger, metrics, network });
+  // Gauges read at each sample, from memory only (0027 AD-5): `stats()` copies the pool's
+  // counters and load, and the reconciler's age is taken at the read.
+  metrics.registerGauge("pool_queued", () => {
+    const { queued, channels, busy } = submitter.stats();
+    return { value: queued, labels: { channels, busy } };
+  });
+  metrics.registerGauge("pool_quarantined", () => ({ value: submitter.stats().quarantined }));
+  metrics.registerGauge("settlement_oldest_open_seconds", () => {
+    const value = reconciler.oldestOpenSeconds();
+    return value === undefined ? undefined : { value };
+  });
   // Closing the pool first refuses every call that sent nothing, so their records close too.
   const drain = async () => {
     await submitter.close();
@@ -487,7 +280,13 @@ export function buildSettlement(
 /**
  * Every part `main()` serves, built from the config on the given stores: the cataloger, one RPC
  * and one fee configuration shared by `/verify`, `/settle` and the pool. `main()` passes the
- * PostgreSQL stores; tests pass their own `rpc`, `makeScheme` and pool `sleep`.
+ * PostgreSQL stores and the EMF writer; tests pass their own `rpc`, `makeScheme`, pool `sleep`
+ * and `metrics` (in memory by default).
+ *
+ * Metrics follow each one's catalog `scope` (0027 AD-3): every part of this network (settlement,
+ * records, reconciliation, the pool, the lease, the spend lane, the balance floor, the signer)
+ * writes through one child scoped to `config.network`; the cataloger, discovery and the HTTP app
+ * write through the root, as does the pruner `main()` builds on the returned `metrics`.
  */
 export function compose(
   config: Config,
@@ -497,27 +296,46 @@ export function compose(
     rpc?: SorobanRpc;
     seams?: UpstreamSeams;
     sleep?: (ms: number) => Promise<void>;
+    metrics?: ProcessMetrics;
   },
 ): {
   deps: AppDeps;
   cataloger: Cataloger;
-  metrics: Metrics;
+  /** The root: for the process-scoped parts `main()` builds. */
+  metrics: ProcessMetrics;
   rpc: FallbackRpc;
   signer: OpenBaoSigner;
+  /** Unstarted: `main()` starts it with the process and stops it before the final flush. */
+  rpcStall: RpcStallTracker;
 } {
   const { logger } = opts;
   const { stores } = opts;
-  // Cataloging plugs into `/settle` through `extensionResponses` and `onSuccess` (AD-8).
-  const metrics = memoryMetrics();
+  const root = opts.metrics ?? memoryMetrics();
+  // One child per network; a root write of a network-scoped metric would carry no `network`, so
+  // the root's type doesn't take one.
+  const metrics = root.for({ network: config.network });
+  // Cataloging plugs into `/settle` through `extensionResponses` and `onSuccess` (AD-8). The
+  // catalog's rows serve every network, so it writes through the root.
   const cataloger = createCataloger({
     store: stores.catalog,
     logger,
-    metrics,
+    metrics: root,
     listLocal: config.catalog.listLocal,
   });
   // One client for every RPC_URLS read and send, whose active URL upstream verify shares (AD-3).
   // A test's `rpc` serves every URL.
   const rpc = buildRpc(config, logger, opts.rpc && (() => opts.rpc!));
+  // 1 while calls are off `RPC_URLS[0]` (0027 AD-5). `active` is a plain read; `begin()` could
+  // start a probe. The label is the endpoint's name, as `buildRpc` names it, never its URL.
+  const primary = rpcEndpointName(config.rpcUrls[0]!, 0);
+  metrics.registerGauge("rpc_on_fallback", () => {
+    const active = rpc.active;
+    return { value: active === primary ? 0 : 1, labels: { rpc: active } };
+  });
+  // The time since the ledger sequence last changed, on the client settlement uses (0027 AD-5).
+  // The poll's own reads may move `active`; that is what settlement would see.
+  const rpcStall = createRpcStallTracker({ rpc, now: Date.now });
+  metrics.registerGauge("rpc_stalled_seconds", () => ({ value: rpcStall.stalledSeconds() }));
   // One fee configuration: `/verify` and `/settle` check with it, and the pool pays with it, so
   // they share one ceiling and one bid (AD-10).
   const fees = feeSettings(config.fees, rpc);
@@ -542,6 +360,18 @@ export function compose(
     logger,
     metrics,
   });
+  metrics.registerGauge("balance_reading_age_seconds", () => ({
+    value: floor.readingAgeMs() / 1000,
+  }));
+  // The `balance-stale` alarm fires above 300 s, the floor's bound at the default interval; with
+  // another bound it fires before `/settle` fails closed, or after.
+  if (floor.maxStaleMs !== BALANCE_STALE_ALARM_MS) {
+    logger.warn("balance_stale_threshold_mismatch", {
+      network: config.network,
+      maxStaleMs: floor.maxStaleMs,
+      alarmThresholdMs: BALANCE_STALE_ALARM_MS,
+    });
+  }
   const policy = createSpendPolicy({
     store: stores.spend,
     // USDC is the known asset (the high tier); every other token, SAC or wasm, gets the low one.
@@ -579,7 +409,8 @@ export function compose(
     deps: {
       config,
       logger,
-      metrics,
+      // The HTTP app and discovery: a route serves every network.
+      metrics: root,
       stores,
       verify: verifyWithBreakers(createVerifier(checks), { policy, logger, metrics }),
       settle,
@@ -592,14 +423,18 @@ export function compose(
       signerState: signer.state,
     },
     cataloger,
-    metrics,
+    metrics: root,
     rpc,
     signer,
+    rpcStall,
   };
 }
 
 export interface MainOptions {
-  /** Where the log lines go; stdout by default. The smoke scripts read them here. */
+  /**
+   * Where the log lines and the EMF metric lines go, each ending in a newline; stdout by default.
+   * The smoke scripts read them here.
+   */
   write?: (line: string) => void;
 }
 
@@ -616,6 +451,9 @@ export async function main(
   let pools:
     { main: pg.Pool; reserve: pg.Pool; rateLimits: pg.Pool; discovery: pg.Pool } | undefined;
   const endPools = () => Promise.all(Object.values(pools ?? {}).map((p) => p.end()));
+  let rpcStall: RpcStallTracker | undefined;
+  /** The EMF writer, for the catch: a start that failed stops it. */
+  let emf: ReturnType<typeof emfMetrics> | undefined;
   try {
     // stellar-sdk's RPC and Horizon clients use the global fetch with no timeout of their own, and
     // an upstream call cut off by its deadline can't be cancelled. undici's defaults would hold its
@@ -644,7 +482,20 @@ export async function main(
     // missing. Checked first, so a wrong URL is named instead of every channel.
     await checkRpcNetworks(config.rpcUrls, getNetworkPassphrase(config.network));
     const stores = postgresStores(pools.main, pools);
-    const { deps, cataloger, metrics, rpc, signer } = compose(config, { logger, stores });
+    // The EMF writer (0027 AD-4) on its own sink, never through the logger. Its timers start
+    // with the graph's gauges, so a startup that hangs still writes them; its liveness seed waits
+    // for `start()` below. On stdout by default, where each write is awaited by the final flush.
+    const { write } = opts;
+    const metrics = (emf = emfMetrics({
+      ...(write && { write: (line: string) => write(`${line}\n`) }),
+      onIssue: (issue) => logger.warn("metric_issue", { ...issue }),
+    }));
+    const composed = compose(config, { logger, stores, metrics });
+    const { deps, cataloger, rpc, signer } = composed;
+    // With the graph, like the writer's timers: an RPC that hangs the startup checks shows as a
+    // rising `rpc_stalled_seconds`.
+    rpcStall = composed.rpcStall;
+    rpcStall.start();
     // AD-12: the service starts only when no other key can move a channel. An RPC that doesn't
     // answer fails the check with its error. `compose()` only wires parts, so nothing has called
     // the RPC yet.
@@ -656,6 +507,11 @@ export async function main(
       restoreConsole();
       throw error;
     });
+    // The liveness point `facilitator-silent` reads, from the service's start on (AD-4): a start
+    // that hangs or fails, a crash loop of them included, writes none and shows as missing data.
+    metrics.seedZero([
+      { name: "settlement_sweeps_total", labels: { network: config.network, outcome: "listed" } },
+    ]);
     // Not awaited: the service starts and `/verify` answers without OpenBao; the outcome goes to
     // the log and `/health`'s `signer`, and a failed check tries again (0036 decision 4).
     void signer.check();
@@ -671,16 +527,24 @@ export async function main(
     pruner.start();
     // Catalog writes and a prune already under way finish before the process exits, and before
     // the pools end, even if closing the server fails; the pools end even if draining fails.
+    // The metrics' final flush comes last, after every part that counts, and is awaited:
+    // `server.ts` exits once this resolves, and a write to a stdout pipe is asynchronous.
     const closeOnce = async () => {
       signer.close();
       try {
-        await started.close();
-      } finally {
         try {
-          await Promise.all([cataloger.drain(), pruner.close()]);
+          await started.close();
         } finally {
-          await endPools();
+          try {
+            await Promise.all([cataloger.drain(), pruner.close()]);
+          } finally {
+            await endPools();
+          }
         }
+      } finally {
+        // Its last reading goes out with the final flush; no read starts after it.
+        rpcStall?.stop();
+        await metrics.close();
       }
     };
     let closing: Promise<void> | undefined;
@@ -703,6 +567,11 @@ export async function main(
     // Logged here, where an RPC URL is named as its `RPC_URLS` entry, never by its host
     // (ADR 0011); `server.ts` logs only a `ConfigError`, which comes before the logger.
     logger.error("startup_failed", { error });
+    // No final metrics flush: the writer stops with its open window unwritten, so a start that
+    // failed adds no point after the error. It wrote no seed either (above), so a crash loop
+    // shows as missing data. Eager-first lines are out already.
+    emf?.stop();
+    rpcStall?.stop();
     await endPools();
     throw error;
   }

@@ -112,6 +112,8 @@ const envSchema = z
     /** 0 lets the system pick a free port; the `listening` log line names it. */
     PORT: int(0, 65_535).default("4021"),
     LOG_LEVEL: oneOf(["debug", "info", "warn", "error"]).default("info"),
+    /** The commit the image was built from (its Dockerfile); unset on a local run. */
+    GIT_COMMIT: z.string().optional(),
     /**
      * Comma-separated, tried in order, at most 3: the pool and the ledger and fee-stats reads
      * move to the next on a failure and stay there. Upstream verify (one scheme per URL) fails over
@@ -386,6 +388,7 @@ export interface Config {
   network: (typeof STELLAR_NETWORKS)[keyof typeof STELLAR_NETWORKS];
   port: number;
   logLevel: "debug" | "info" | "warn" | "error";
+  gitCommit?: string;
   rpcUrls: string[];
   /** The facilitator key in OpenBao Transit (0036); the AppRole is never logged. */
   signer: {
@@ -518,6 +521,7 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
     network: e.NETWORK,
     port: e.PORT,
     logLevel: e.LOG_LEVEL,
+    gitCommit: e.GIT_COMMIT,
     rpcUrls: e.RPC_URLS ?? [DEFAULT_TESTNET_RPC],
     signer: {
       address: e.FACILITATOR_ADDRESS,

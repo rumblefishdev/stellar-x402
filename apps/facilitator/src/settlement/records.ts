@@ -1,7 +1,7 @@
 import type { StellarNetwork } from "@stellar-x402/config";
 import type { Attempt, SubmitResult } from "@stellar-x402/signer-pool";
 import type { Logger } from "../logger.js";
-import type { Metrics } from "../metrics.js";
+import type { NetworkMetrics } from "../metrics.js";
 import {
   FINAL_SETTLEMENT_STATES,
   type AttemptUpdate,
@@ -17,7 +17,7 @@ export interface RecordsDeps {
   store: SettlementStore;
   hooks: Pick<SettlementHooks, "onFinal" | "onSuccess">;
   logger: Logger;
-  metrics: Metrics;
+  metrics: NetworkMetrics;
   now?: () => number;
 }
 
@@ -66,8 +66,43 @@ export function createRecords(deps: RecordsDeps) {
     }
   };
 
-  const onFinal = (record: SettlementRecord, origin: SettlementOrigin) =>
+  /**
+   * `fee_charged_stroops` (0027): a transaction that landed was charged its fee. Counted where
+   * `onFinal` runs, once for the write that made the record final (or for the sweep that found a
+   * write that threw final, decision 29), so a record two writers race to finish counts once, as
+   * the spend policy's `commit` does. A record with no fee (rejected, expired) adds nothing.
+   */
+  const charged = (state: SettlementRecord["state"], feeCharged: bigint | undefined) => {
+    if (feeCharged !== undefined)
+      metrics.increment("fee_charged_stroops", { state }, Number(feeCharged));
+  };
+
+  /**
+   * Our inner transaction landed under another envelope than ours (0087): someone else's fee bump
+   * of it at ten times our fee, or the inner transaction sent bare. The payer paid what they
+   * signed, and their fee account paid the fee, so it costs nothing, but it isn't our envelope:
+   * a warning, counted, with the account that paid. Logged by the write that made the record
+   * final, so a rewrap the pool and a sweep both see is logged once.
+   */
+  const rewrapped = (
+    key: SettlementKey,
+    seen: { ours: string; landed: string; feeSource: string; state: "success" | "failed" },
+  ) => {
+    logger.warn("settlement_rewrapped", {
+      network,
+      settlementKey: key,
+      transaction: seen.landed,
+      ours: seen.ours,
+      feeSource: seen.feeSource,
+      state: seen.state,
+    });
+    metrics.increment("settlement_rewrapped_total", { state: seen.state });
+  };
+
+  const onFinal = (record: SettlementRecord, origin: SettlementOrigin) => {
+    charged(record.state, record.feeCharged);
     runHook("onFinal", record.key, () => deps.hooks.onFinal(record, origin));
+  };
 
   const onSuccess = (record: SettlementRecord, origin: SettlementOrigin) =>
     runHook("onSuccess", record.key, () => deps.hooks.onSuccess(record, origin));
@@ -106,6 +141,8 @@ export function createRecords(deps: RecordsDeps) {
             ledger: update.ledger,
           });
           metrics.increment("settlement_landed_after_expired_total", { state: update.state });
+          // The write is lost, but the network charged the fee: no `onFinal` counts it.
+          charged(update.state, update.feeCharged);
         }
         if (current && update.attempts?.length)
           await store.markAttempts(key, update.attempts, now());
@@ -125,9 +162,20 @@ export function createRecords(deps: RecordsDeps) {
    * back to the record, so its hooks would never run. Reconciliation reads each, runs the hooks of
    * one it finds final, and leaves one it doesn't to the usual path (0019 decision 29). A writer in
    * this process takes the key out while its write runs, so the sweep doesn't run the hooks beside
-   * it, and keeps it out once the record is final (decision 35); a restart forgets it.
+   * it, and keeps it out once the record is final (decision 35), also when another writer put it
+   * back meanwhile; a restart forgets it.
    */
   const unconfirmed = new Set<SettlementKey>();
+  /** How many final writes per key are running now, in this process. */
+  const inFlight = new Map<SettlementKey, number>();
+  /**
+   * Keys a final write in this process won while others were still running (0027 decision 55).
+   * A win moves the record from a non-final state, so a racing write that throws or loses after it
+   * can't be the one that committed, and must not put the key back: the sweep would run the hooks,
+   * and count the fee, a second time. Forgotten once the last write for the key ends, so a
+   * reopened record's later write (0073) is listed as before.
+   */
+  const won = new Set<SettlementKey>();
 
   /**
    * Runs `write`, one store write that may make the record final, keeping track of it for the
@@ -138,16 +186,33 @@ export function createRecords(deps: RecordsDeps) {
     write: () => Promise<SettlementRecord | undefined>,
   ) => {
     const listed = unconfirmed.delete(key);
-    let record: SettlementRecord | undefined;
+    inFlight.set(key, (inFlight.get(key) ?? 0) + 1);
     try {
-      record = await write();
-    } catch (error) {
-      unconfirmed.add(key);
-      throw error;
+      let record: SettlementRecord | undefined;
+      try {
+        record = await write();
+      } catch (error) {
+        if (!won.has(key)) unconfirmed.add(key);
+        throw error;
+      }
+      if (record) {
+        // Won: this compare-and-set moved the record from a non-final state, so no write that
+        // threw committed first, and none can commit after.
+        won.add(key);
+        unconfirmed.delete(key);
+      } else if (listed && !won.has(key)) {
+        // Lost, and not to a writer here: an earlier write of ours may be the one that committed.
+        unconfirmed.add(key);
+      }
+      return record;
+    } finally {
+      const left = (inFlight.get(key) ?? 1) - 1;
+      if (left > 0) inFlight.set(key, left);
+      else {
+        inFlight.delete(key);
+        won.delete(key);
+      }
     }
-    // Lost to another writer: an earlier write of ours may still be the one that committed.
-    if (!record && listed) unconfirmed.add(key);
-    return record;
   };
 
   /** {@link advance}, then `onFinal` once for the writer that made the record final. */
@@ -179,6 +244,7 @@ export function createRecords(deps: RecordsDeps) {
   return {
     hookFailed,
     recordFailed,
+    rewrapped,
     onFinal,
     onSuccess,
     advance,
@@ -197,13 +263,29 @@ export type Records = ReturnType<typeof createRecords>;
  * the error `submit()` rejected with. Every attempt before the last was refused with `txBadSeq`:
  * only that makes the pool rebuild. The last one is `landed` once in a ledger, `dead` once
  * refused or past its bounds, and otherwise `sent` or `unknown` as the pool saw the send; one the
- * pool never sent is `dead`, since nothing else holds the envelope.
+ * pool never sent is `dead`, since nothing else holds the envelope. When another envelope of the
+ * last one's inner transaction landed (0087), the last is `dead` and that envelope's hash is
+ * added after it as `landed`.
  */
 export function attemptUpdates(
   attempts: readonly Attempt[],
-  outcome: Pick<SubmitResult, "status" | "channel" | "errorCode"> | { error: unknown },
+  outcome:
+    Pick<SubmitResult, "status" | "channel" | "errorCode" | "hash" | "rewrap"> | { error: unknown },
 ): AttemptUpdate[] {
   const channel = "status" in outcome ? outcome.channel : undefined;
+  if ("status" in outcome && outcome.rewrap && outcome.hash) {
+    // Ours ends as one past its bounds would; a result code is the other envelope's, not ours.
+    const ours = { status: "expired", channel: outcome.channel } as const;
+    return [
+      ...attemptUpdates(attempts, ours),
+      {
+        hash: outcome.hash,
+        state: "landed",
+        rewrapOf: outcome.rewrap.of,
+        ...(channel !== undefined && { channel }),
+      },
+    ];
+  }
   const at = (hash: string, update: Omit<AttemptUpdate, "hash">): AttemptUpdate => ({
     hash,
     ...update,
@@ -229,4 +311,18 @@ export function attemptUpdates(
     if (attempt.sent === "no") return at(attempt.hash, { state: "dead" });
     return at(attempt.hash, { state: attempt.sent === "yes" ? "sent" : "unknown" });
   });
+}
+
+/**
+ * What a pool's result writes on its record, in every state. A ledger or a fee the result doesn't
+ * have is left out, because a field given as `undefined` clears the column, and a record without a
+ * fee releases its budget reservation instead of committing it.
+ */
+export function resultUpdate(result: SubmitResult) {
+  return {
+    ...(result.ledger !== undefined && { ledger: result.ledger }),
+    ...(result.feeCharged !== undefined && { feeCharged: result.feeCharged }),
+    channel: result.channel,
+    attempts: attemptUpdates(result.attempts, result),
+  };
 }

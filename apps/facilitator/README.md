@@ -538,9 +538,17 @@ The RPC keeps only a window of history (testnet's keeps 120960 ledgers, about 7 
 differ). A record claimed before the oldest ledger it keeps can't be told from one that never
 landed, so it stays open, is logged once as `settlement_history_gone` (counted in
 `settlement_history_gone_total`) and is checked again every 5 minutes: check its hashes on a
-block explorer or Horizon before acting on it. It can't land again past its bound, so the sweep
-frees its payer's slot in that asset (task 0024): the payer's other payments in that asset settle
-as usual, and the record stays open for the operator.
+block explorer or Horizon before acting on it, and its `innerHash` when the line has one, since
+someone else's fee bump of it lands under another hash (task 0087). It can't land again past its
+bound, so the sweep frees its payer's slot in that asset (task 0024): the payer's other payments
+in that asset settle as usual, and the record stays open for the operator.
+
+`settlement_rewrapped` (a warning, counted in `settlement_rewrapped_total` by `state`) reports a
+payment that landed under another envelope than ours (task 0087): someone else's fee bump of our
+inner transaction, at ten times our fee, or the inner transaction sent bare. It names the hash that
+landed (`transaction`), ours, and `feeSource`, the account that paid. The record ends `success` or
+`failed` under their hash, with fee 0 under their fee bump. The payer paid what they signed, so no
+action is needed; many of them would mean someone is outbidding our fee bumps.
 
 `settlement_landed_after_expired` (counted in `settlement_landed_after_expired_total` by `state`)
 reports a transaction found on chain after its record ended `expired`, with its hash and ledger. The

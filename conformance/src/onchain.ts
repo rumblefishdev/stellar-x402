@@ -34,6 +34,8 @@ export interface Settlement {
   feePayer?: string;
   /** `fn from -> to amount of asset`; absent when the transaction is not one contract call. */
   call?: string;
+  /** The signed transaction: its hash and signatures can be checked after a testnet reset. */
+  envelopeXdr?: string;
 }
 
 /** Reads what RPC `getTransaction` returned for a transaction that is on chain. */
@@ -48,7 +50,7 @@ export function readSettlement(
   const tx = TransactionBuilder.fromXDR(envelopeXdr, Networks.TESTNET);
   const inner = tx instanceof FeeBumpTransaction ? tx.innerTransaction : tx;
   const feePayer = tx instanceof FeeBumpTransaction ? tx.feeSource : tx.source;
-  const read = { transaction, status, ledger, createdAt, feePayer };
+  const read = { transaction, status, ledger, createdAt, feePayer, envelopeXdr };
 
   const op = inner.operations[0];
   if (

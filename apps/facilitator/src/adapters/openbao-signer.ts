@@ -3,7 +3,7 @@ import { Keypair, TransactionBuilder } from "@stellar/stellar-sdk";
 import type { TransactionSigner } from "@stellar-x402/signer-pool";
 import { Agent, request } from "undici";
 import type { Logger } from "../logger.js";
-import type { Metrics } from "../metrics.js";
+import type { NetworkMetrics } from "../metrics.js";
 
 /**
  * The facilitator key held in OpenBao's Transit engine (ADR 0013, task 0036): the signer sends a
@@ -68,7 +68,7 @@ interface OpenBaoSignerOptions {
   secretId: string;
   network: string;
   logger: Pick<Logger, "info" | "error">;
-  metrics: Metrics;
+  metrics: NetworkMetrics;
   /** Test seam: the clock tokens expire by. */
   now?: () => number;
   /** Test seam: {@link CHECK_RETRY_MS}. */

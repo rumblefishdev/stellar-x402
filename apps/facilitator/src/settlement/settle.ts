@@ -29,7 +29,7 @@ import {
 import type { PaymentPayload, PaymentRequirements, SettleResponse } from "@x402/core/types";
 import { getNetworkPassphrase } from "@x402/stellar";
 import type { Logger } from "../logger.js";
-import type { Metrics } from "../metrics.js";
+import type { LabelsOf, NetworkMetrics } from "../metrics.js";
 import {
   LeaseFencedError,
   type ClaimResult,
@@ -43,6 +43,7 @@ import {
   attemptUpdates,
   createRecords,
   isFinalRecord as isFinal,
+  resultUpdate,
   type Records,
 } from "./records.js";
 import {
@@ -250,7 +251,7 @@ export interface SettlerDeps {
   submitter: Submitter;
   hooks: Pick<SettlementHooks, "beforeSubmit" | "onFinal" | "onSuccess">;
   logger: Logger;
-  metrics: Metrics;
+  metrics: NetworkMetrics;
   /** Passed to `beforeSubmit` as the most the facilitator can pay for this settlement. */
   maxFeeStroops: bigint;
   /** How long a repeat call waits for a signed record to turn final (AD-6). */
@@ -641,7 +642,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
             amount: BigInt(requirements.amount),
             nonce: verified.nonce,
           }),
-          onSigned: async (hash, bounds) => {
+          onSigned: async (hash, bounds, innerHash) => {
             // After the budget answer nothing new is signed: the answer named the last hash, and
             // a rebuild's would land under another.
             if (call.budgetOver) throw new Error("the settle budget ran out");
@@ -655,7 +656,15 @@ export function createSettler(deps: SettlerDeps): Settle & {
             // Only under the lease's current token: a takeover since refuses it (0071).
             let added: boolean;
             try {
-              added = await store.addHash(key, hash, lease, now(), bounds, claimed.reopened);
+              added = await store.addHash(
+                key,
+                hash,
+                lease,
+                now(),
+                bounds,
+                claimed.reopened,
+                innerHash,
+              );
             } catch (error) {
               if (error instanceof LeaseFencedError) {
                 logger.warn("settlement_lease_fenced", {
@@ -725,15 +734,26 @@ export function createSettler(deps: SettlerDeps): Settle & {
         flagDrift(key, errorReason, "pool");
         return await finish(key, { state: "rejected", errorReason, attempts }, call.origin, own);
       }
-      const fields = {
-        channel: result.channel,
-        ledger: result.ledger,
-        feeCharged: result.feeCharged,
-        attempts: attemptUpdates(result.attempts, result),
+      const fields = resultUpdate(result);
+      // Logged by the write that made the record final, as reconciliation does (0087).
+      const noteRewrap = <T extends { won: boolean }>(settled: T): T => {
+        if (
+          settled.won &&
+          result?.rewrap &&
+          result.hash &&
+          (result.status === "success" || result.status === "failed")
+        )
+          records.rewrapped(key, {
+            ours: result.rewrap.of,
+            landed: result.hash,
+            feeSource: result.rewrap.feeSource,
+            state: result.status,
+          });
+        return settled;
       };
       switch (result.status) {
         case "success":
-          return await finish(key, { state: "success", ...fields }, call.origin, own);
+          return noteRewrap(await finish(key, { state: "success", ...fields }, call.origin, own));
         case "pending":
           // The pool's `resolved` event or a sweep finishes the record (0019, 0088).
           return {
@@ -743,16 +763,18 @@ export function createSettler(deps: SettlerDeps): Settle & {
             origin: call.origin,
           };
         default:
-          return await finish(
-            key,
-            {
-              state: result.status,
-              errorReason: SETTLE_REASONS[result.status],
-              ...(result.failure && { failure: result.failure }),
-              ...fields,
-            },
-            call.origin,
-            own,
+          return noteRewrap(
+            await finish(
+              key,
+              {
+                state: result.status,
+                errorReason: SETTLE_REASONS[result.status],
+                ...(result.failure && { failure: result.failure }),
+                ...fields,
+              },
+              call.origin,
+              own,
+            ),
           );
       }
     } catch (error) {
@@ -985,7 +1007,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
           errorReason: reopening.errorReason,
           reopened: reopened.reopened,
         });
-        metrics.increment("settlement_reopened_total", { reason: reopening.errorReason ?? "" });
+        metrics.increment("settlement_reopened_total", reopenedLabels(reopening.errorReason));
         return { claimed: true, record: reopened };
       }
       // A reopen that lost (another call reopened it first, or the record moved on) is a repeat.
@@ -1132,7 +1154,9 @@ export function createSettler(deps: SettlerDeps): Settle & {
       validOnce,
     );
     const { response } = settled;
+    // `result` is the only dimension; `reason` and `replay` are log fields of the line.
     metrics.increment("settlement_outcomes_total", {
+      result: response.success ? "success" : "error",
       reason: response.success ? "success" : (response.errorReason ?? SETTLE_REASONS.unexpected),
       replay: String(settled.replay ?? false),
     });
@@ -1175,6 +1199,11 @@ function transferFrom(transaction: Transaction): string | undefined {
   const from: unknown = scValToNative(operation.func.invokeContract().args()[0]!);
   return typeof from === "string" ? from : undefined;
 }
+
+/** `settlement_reopened_total`'s labels: `reason`, a log field, only when it isn't empty (0027). */
+export const reopenedLabels = (
+  errorReason: string | undefined,
+): LabelsOf<"settlement_reopened_total"> => (errorReason ? { reason: errorReason } : {});
 
 /** A record claimed before 0073 (`reopened` -1) never reopens (0073 decision 25). */
 function reopenable(record: SettlementRecord, fingerprint: string): boolean {

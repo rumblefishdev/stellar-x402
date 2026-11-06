@@ -9,6 +9,9 @@ After=docker.service x402-db-testnet@%i.service
 
 [Service]
 Type=oneshot
+# The deploy's and its migration's output, in order, for the CloudWatch agent (0027 decision 1).
+StandardOutput=append:/var/log/x402/%i/deploy.log
+StandardError=inherit
 ExecStart=/usr/local/libexec/x402/x402-deploy %i
 # After any end: removes the marker, stops this deploy's migration, and unless the deploy
 # succeeded, puts the facilitator back on digest.good.

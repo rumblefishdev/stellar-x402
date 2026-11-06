@@ -85,6 +85,20 @@ export interface SubmitResult {
   errorCode?: string;
   /** Why an included transaction failed; set only with `failed`, and empty when unreadable. */
   failure?: FailureCause;
-  /** Every attempt of this submission, in order; the last one is `hash`. */
+  /**
+   * Set when another envelope of our inner transaction landed (0087): someone else's fee bump of
+   * it, or the inner transaction sent bare. `hash` is then that envelope's, and `feeCharged` 0
+   * under their fee bump, since their fee account paid.
+   */
+  rewrap?: Rewrap;
+  /** Every attempt of this submission, in order; the last one is `hash`, or `rewrap.of`. */
   attempts: Attempt[];
+}
+
+/** The envelope of our inner transaction that landed under another hash than ours. */
+export interface Rewrap {
+  /** Our fee bump's hash, the last attempt; it never landed. */
+  of: string;
+  /** The account that paid the fee: the other fee bump's fee source, or the channel when bare. */
+  feeSource: string;
 }

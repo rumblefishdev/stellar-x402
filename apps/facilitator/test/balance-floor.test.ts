@@ -174,6 +174,43 @@ describe("createBalanceFloor", () => {
     expect(events()).toEqual(["facilitator_underfunded"]);
   });
 
+  it("readingAgeMs is pure (no log) and counts from start before the first good read", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const clock = { now: 1_000 };
+    const { rpc, floor, events } = setup(30_000, { now: () => clock.now });
+    // Before `start()`, from the floor's creation.
+    clock.now = 4_000;
+    expect(floor.readingAgeMs()).toBe(3_000);
+
+    // From `start()` while no read has succeeded.
+    rpc.fail = true;
+    clock.now = 10_000;
+    await floor.start();
+    clock.now += 400_000;
+    expect(floor.readingAgeMs()).toBe(400_000);
+
+    // A good read: the age counts from it, and rises at the read.
+    rpc.fail = false;
+    rpc.balance = 2n * FLOOR;
+    await floor.runOnce();
+    expect(floor.readingAgeMs()).toBe(0);
+    clock.now += 301_000;
+    const logged = events();
+    for (let i = 0; i < 3; i++) expect(floor.readingAgeMs()).toBe(301_000);
+    // Past `maxStaleMs`, and still nothing logged: only `below()` logs the stale reading.
+    expect(events()).toEqual(logged);
+    expect(floor.below()).toBe(true);
+    expect(events()).toEqual([...logged, "facilitator_balance_stale"]);
+    floor.stop();
+  });
+
+  it("exposes maxStaleMs: ten intervals, at least 300 s, or the one given", () => {
+    expect(setup(30_000).floor.maxStaleMs).toBe(300_000);
+    expect(setup(1_000).floor.maxStaleMs).toBe(300_000);
+    expect(setup(60_000).floor.maxStaleMs).toBe(600_000);
+    expect(setup(1_000, { maxStaleMs: 10_000 }).floor.maxStaleMs).toBe(10_000);
+  });
+
   it("reads at start, then every interval until stopped", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const { rpc, floor } = setup(1_000);

@@ -59,6 +59,27 @@ As a reviewer of the grant, I want e2e results with real settled transaction has
 | --- | --- | --- | --- | --- |
 | 1 | The pin moves from `10b2d06` to `8827cf1` | measured: testnet is on protocol 30 (`getVersionInfo`); `getLatestLedger` fails on stellar-sdk 16.3.0, the old pin's, and works on 16.4.1; 18 of 18 scenarios failed at the old pin, 18 of 18 passed at the new one (one run each, 2026-11-05) | settles the open bump | upstream requires `^16.4.1` at `8827cf1`; [Stellar's Protocol 30 guide](https://stellar.org/blog/developers/bell-protocol-30-upgrade-guide) says to upgrade the SDK |
 | 2 | `/health` reports the running commit as `commit`, set when the image is built; the gate saves it | the owner's decision, 2026-11-05 | as the task says: the facilitator exposes its version | upstream's e2e facilitator has `version` in `/health` (`e2e/facilitators/typescript/index.ts:1215@8827cf1`) |
+| 3 | The gate waits for the suite without blocking its process, and a signal to the gate stops the suite's whole process group | measured: after 780 s under `spawnSync` the first RPC read fails with `fetch failed` and the second works; after 780 s of plain waiting it works, and a new `rpc.Server` doesn't help (one process each). Two real runs failed so on their first read; two runs after the fix read all 18 | beyond it: needed for a passing run | no standard |
+| 5 | One results folder per environment, overwritten, with git holding the history: `conformance/results/testnet-hosted/`; local runs are ignored by git (changes ADR 0009) | the owner's decision, 2026-11-05 | beyond it | upstream keeps CI artifacts only; no standard |
+| 6 | The gate fails a run whose facilitator names no commit, and one whose own code has uncommitted changes, and saves its commit | the owner's decisions, 2026-11-05 | as the task's version criterion, and beyond it | no standard |
+| 7 | The proxy forwards the facilitator's response headers | the owner's decision, 2026-11-05 | beyond it | no standard |
+| 8 | On testnet gateway.fm's RPC comes first and SDF's second, once a measurement from the server agrees | the owner's decision, 2026-11-05; measured from one machine, 25 calls each | beyond it | no standard |
+| 9 | The gate runs all 18 scenarios, not the suite's `--min` sample | the owner's decision, 2026-11-06 | as the task says | upstream's CI runs `--min` (`.github/workflows/e2e_tests.yml@8827cf1`) |
+| 10 | Every passed scenario must carry a transaction hash | the owner's decision, 2026-11-06 | as the task says | no standard |
+| 11 | The gate keeps reading each transaction from the chain: status, transfer, fee payer, ledger | the owner's decision, 2026-11-06 | as the task says | no standard |
+| 12 | The gate saves each signed envelope | the owner's decision, 2026-11-06 | beyond it | no standard |
+| 13 | No fixed scenario count: the gate takes the scenarios the suite selects, which records each one, a server that fails to start as failed (`e2e/test.ts:1783-1795@8827cf1`) | the owner's decision, 2026-11-06 | as the task says | no standard |
+| 14 | The gate fails a hash that two scenarios report | the owner's decision, 2026-11-06 | as the task says | no standard |
+| 15 | No file of forwarded calls: the settlements are proven on chain (rows 11 and 14), and the suite's `-v` shows the calls when debugging | the owner's decision, 2026-11-06 | as the task says | no standard |
+| 16 | A weekly workflow opens an issue when upstream main changes one of the three files the suite rests on (the x402 spec, the Stellar `exact` scheme, the suite's Stellar routes) since the pin | the owner's decision, 2026-11-06 | beyond it (RFP: track spec evolution) | no standard |
+
+## Not yet decided
+
+- How often the gate runs.
+
+## Out of scope
+
+- End-to-end tests of refusals against the deployed facilitator: task 0116, the project's full end-to-end suite.
 
 ## Implementation
 

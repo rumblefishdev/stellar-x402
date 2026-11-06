@@ -23,6 +23,7 @@ import {
 } from "../src/settlement/reconcile.js";
 import { createRecords } from "../src/settlement/records.js";
 import { SETTLE_REASONS } from "../src/settlement/settle.js";
+import type { SubmitResult } from "@stellar-x402/signer-pool";
 import { failedResult } from "@stellar-x402/signer-pool/testing";
 import { holdLease, settlement } from "./port-contracts.js";
 import { testDatabase } from "./database.js";
@@ -96,6 +97,37 @@ const missing = (latestLedger: number, latestLedgerCloseTime = 0, oldestLedgerCl
     oldestLedger: 1,
     oldestLedgerCloseTime,
   }) as unknown as rpc.Api.GetTransactionResponse;
+
+/**
+ * Our inner transaction, and someone else's fee bump of it (0087): the answer a read by the inner
+ * hash gets once theirs landed.
+ */
+function rewrapped(status: "SUCCESS" | "FAILED" = "SUCCESS") {
+  const channel = Keypair.random();
+  const inner = new TransactionBuilder(new Account(channel.publicKey(), "1"), {
+    fee: "100",
+    networkPassphrase: Networks.TESTNET,
+  })
+    .addOperation(Operation.bumpSequence({ bumpTo: "2" }))
+    .setTimeout(0)
+    .build();
+  inner.sign(channel);
+  const rival = Keypair.random();
+  const bump = TransactionBuilder.buildFeeBumpTransaction(rival, "2000", inner, Networks.TESTNET);
+  bump.sign(rival);
+  const answer = {
+    ...(landed(status) as object),
+    // A real result for a failure: the outcome reads its code too.
+    ...(status === "FAILED" && { resultXdr: failedResult("invokeHostFunctionTrapped") }),
+    envelopeXdr: bump.toEnvelope(),
+  } as unknown as rpc.Api.GetTransactionResponse;
+  return {
+    innerHash: inner.hash().toString("hex"),
+    theirs: bump.hash().toString("hex"),
+    feeSource: rival.publicKey(),
+    answer,
+  };
+}
 
 function setup(answers: Record<string, rpc.Api.GetTransactionResponse | Error> = {}) {
   const store = db.stores().settlements;
@@ -326,6 +358,140 @@ describe("createReconciler", () => {
       expect((await store.get(key))?.state).toBe("expired");
     });
 
+    describe("our inner transaction under someone else's fee bump (0087)", () => {
+      /** A record whose one hash, `A`, is past its bounds and was stored with its inner hash. */
+      async function rewrapSetup(innerAnswer?: rpc.Api.GetTransactionResponse) {
+        const found = rewrapped();
+        const answers = { [A]: missing(4_013), [found.innerHash]: innerAnswer ?? found.answer };
+        const env = setup(answers);
+        const key = await claimed(env.store);
+        await env.store.addHash(
+          key,
+          A,
+          await holdLease(env.store),
+          NOW,
+          { maxTime: 2_000, maxLedger: 4_010 },
+          undefined,
+          found.innerHash,
+        );
+        return { ...env, key, found };
+      }
+
+      it("finishes success under their hash, charged nothing, and logs who paid", async () => {
+        const { store, reconciler, key, found, lines, metrics } = await rewrapSetup();
+        expect(await reconciler.sweep()).toMatchObject({ success: 1 });
+        expect(await store.get(key)).toMatchObject({
+          state: "success",
+          feeCharged: 0n,
+          hashes: [A, found.theirs],
+        });
+        expect((await store.attempts(key)).map((a) => [a.hash, a.state, a.innerHash])).toEqual([
+          [A, "dead", found.innerHash],
+          [found.theirs, "landed", found.innerHash],
+        ]);
+        const logged = lines
+          .filter((line) => line.includes('"settlement_rewrapped"'))
+          .map((line) => JSON.parse(line) as Record<string, unknown>);
+        expect(logged).toEqual([
+          expect.objectContaining({
+            level: "warn",
+            transaction: found.theirs,
+            ours: A,
+            feeSource: found.feeSource,
+            state: "success",
+          }),
+        ]);
+        expect(metrics.value("settlement_rewrapped_total", { state: "success" })).toBe(1);
+      });
+
+      it("finishes failed under their hash when their fee bump landed and failed", async () => {
+        const found = rewrapped("FAILED");
+        const { store, reconciler, lines, metrics } = setup({
+          [A]: missing(4_013),
+          [found.innerHash]: found.answer,
+        });
+        const key = await claimed(store);
+        await store.addHash(
+          key,
+          A,
+          await holdLease(store),
+          NOW,
+          { maxTime: 2_000, maxLedger: 4_010 },
+          undefined,
+          found.innerHash,
+        );
+        expect(await reconciler.sweep()).toMatchObject({ failed: 1 });
+        expect(await store.get(key)).toMatchObject({
+          state: "failed",
+          errorReason: SETTLE_REASONS.failed,
+          feeCharged: 0n,
+          hashes: [A, found.theirs],
+        });
+        expect((await store.attempts(key)).map((a) => a.state)).toEqual(["dead", "landed"]);
+        expect(lines.filter((line) => line.includes('"settlement_rewrapped"'))).toHaveLength(1);
+        expect(metrics.value("settlement_rewrapped_total", { state: "failed" })).toBe(1);
+      });
+
+      it("lands our own fee bump found by the inner hash as ours, with its fee", async () => {
+        // A read by our hash that raced its landing, then one by the inner hash that found it.
+        const found = rewrapped();
+        const ours = found.theirs;
+        const { store, reconciler, lines } = setup({
+          [ours]: missing(4_013),
+          [found.innerHash]: found.answer,
+        });
+        const key = await claimed(store);
+        await store.addHash(
+          key,
+          ours,
+          await holdLease(store),
+          NOW,
+          { maxTime: 2_000, maxLedger: 4_010 },
+          undefined,
+          found.innerHash,
+        );
+        expect(await reconciler.sweep()).toMatchObject({ success: 1 });
+        expect(await store.get(key)).toMatchObject({
+          state: "success",
+          feeCharged: 41_000n,
+          hashes: [ours],
+        });
+        expect((await store.attempts(key)).map((a) => a.state)).toEqual(["landed"]);
+        expect(lines.some((line) => line.includes('"settlement_rewrapped"'))).toBe(false);
+      });
+
+      it("keeps it open when the inner read comes from a node behind the bound", async () => {
+        const { store, reconciler, key } = await rewrapSetup(missing(4_012));
+        expect(await reconciler.sweep()).toMatchObject({ open: 1 });
+        expect((await store.get(key))?.state).toBe("signed");
+        expect((await store.attempts(key))[0]?.state).toBe("stored");
+      });
+
+      it("expires it when nothing is found by the inner hash either", async () => {
+        const { store, reconciler, key, found, getTransaction } = await rewrapSetup(missing(4_013));
+        expect(await reconciler.sweep()).toMatchObject({ expired: 1 });
+        expect((await store.get(key))?.state).toBe("expired");
+        expect(getTransaction.mock.calls.map(([hash]) => hash)).toEqual([A, found.innerHash]);
+      });
+
+      it("reads by the inner hash only once ours can no longer land", async () => {
+        const { store, reconciler, key, getTransaction } = await rewrapSetup();
+        const answers = { [A]: missing(4_012) };
+        getTransaction.mockImplementation(async (hash: string) => answers[hash] ?? missing(1));
+        expect(await reconciler.sweep()).toMatchObject({ open: 1 });
+        expect((await store.get(key))?.state).toBe("signed");
+        expect(getTransaction.mock.calls.map(([hash]) => hash)).toEqual([A]);
+      });
+
+      it("resolves a hash stored without its inner hash by its own hash alone, as before", async () => {
+        const { store, reconciler, getTransaction } = setup({ [A]: missing(4_013) });
+        const key = await signed(store, [A]);
+        expect(await reconciler.sweep()).toMatchObject({ expired: 1 });
+        expect((await store.get(key))?.state).toBe("expired");
+        expect(getTransaction.mock.calls.map(([hash]) => hash)).toEqual([A]);
+      });
+    });
+
     it("expires a record only once every hash is dead (decision 5)", async () => {
       const answers = { [A]: missing(4_013), [B]: missing(4_013) };
       const { store, reconciler } = setup(answers);
@@ -461,7 +627,7 @@ describe("createReconciler", () => {
 
   describe("writes that threw (decision 29)", () => {
     it("runs the hooks of a final write that committed but threw, once", async () => {
-      const { store, hooks, reconciler } = setup({ [A]: landed("SUCCESS") });
+      const { store, hooks, reconciler, metrics } = setup({ [A]: landed("SUCCESS") });
       const key = await signed(store, [A]);
       const transition = store.transition.bind(store);
       vi.spyOn(store, "transition").mockImplementationOnce(async (...args) => {
@@ -479,6 +645,194 @@ describe("createReconciler", () => {
         "resolved",
       );
       expect(hooks.onSuccess).toHaveBeenCalledTimes(1);
+      // Its fee too, once, with the hooks that confirm it (0027).
+      expect(metrics.value("fee_charged_stroops", { state: "success" })).toBe(41_000);
+    });
+
+    it("runs the hooks once when a writer that lost takes the key out while the sweep reads it", async () => {
+      const { store, hooks, records, reconciler, metrics } = setup({ [A]: landed("SUCCESS") });
+      const key = await signed(store, [A]);
+      const transition = store.transition.bind(store);
+      vi.spyOn(store, "transition").mockImplementationOnce(async (...args) => {
+        await transition(...args);
+        throw new Error("connection lost after commit");
+      });
+      expect(await reconciler.sweep()).toMatchObject({ errors: 1 });
+      expect(records.unconfirmed.has(key)).toBe(true);
+      // The next sweep listed the key; while it reads the record, a writer that read it before the
+      // commit takes the key out, and its compare-and-set from `signed` loses and puts it back.
+      let writer: Promise<unknown> | undefined;
+      const get = store.get.bind(store);
+      vi.spyOn(store, "get").mockImplementationOnce(async (k) => {
+        const record = await get(k);
+        writer = records.finalWrite(key, () =>
+          transition(key, "signed", { state: "success", updatedAt: NOW }),
+        );
+        return record;
+      });
+      await reconciler.sweep();
+      expect(await writer).toBeUndefined();
+      expect(records.unconfirmed.has(key)).toBe(true);
+      await reconciler.sweep();
+      await reconciler.sweep();
+      expect(records.unconfirmed.has(key)).toBe(false);
+      expect(hooks.onFinal).toHaveBeenCalledTimes(1);
+      expect(hooks.onSuccess).toHaveBeenCalledTimes(1);
+      expect(metrics.value("fee_charged_stroops", { state: "success" })).toBe(41_000);
+    });
+
+    it("forgets the key when a final write wins after a racing one threw without committing", async () => {
+      const { store, hooks, records, reconciler, metrics } = setup();
+      const key = await signed(store, [A]);
+      // Writer 1 takes the key out (it isn't listed), then its write fails without committing.
+      let fail!: () => void;
+      const failing = new Promise<void>((r) => (fail = r));
+      const writer1 = records.finalWrite(key, async () => {
+        await failing;
+        throw new Error("store down");
+      });
+      // Writer 2 enters while writer 1 is out, so it finds the key unlisted; its commit lands
+      // after writer 1 has put the key back.
+      const transition = store.transition.bind(store);
+      let commit!: () => void;
+      const committing = new Promise<void>((r) => (commit = r));
+      const entered = vi.spyOn(store, "transition").mockImplementationOnce(async (...args) => {
+        await committing;
+        return transition(...args);
+      });
+      const writer2 = records.finish(
+        key,
+        { state: "success", ledger: 4_000, feeCharged: 41_000n },
+        "settle",
+      );
+      await vi.waitFor(() => expect(entered).toHaveBeenCalled());
+      fail();
+      await expect(writer1).rejects.toThrow("store down");
+      expect(records.unconfirmed.has(key)).toBe(true);
+      commit();
+      expect(await writer2).toMatchObject({ won: true });
+      // Writer 2 ran the hooks; no sweep runs them again.
+      expect(records.unconfirmed.has(key)).toBe(false);
+      await reconciler.sweep();
+      await reconciler.sweep();
+      expect(hooks.onFinal).toHaveBeenCalledTimes(1);
+      // finish() runs onFinal only; the writer's caller runs onSuccess, and no sweep may run it.
+      expect(hooks.onSuccess).not.toHaveBeenCalled();
+      expect(metrics.value("fee_charged_stroops", { state: "success" })).toBe(41_000);
+    });
+
+    it("keeps the key out when a racing write throws after another writer won and returned", async () => {
+      const { store, hooks, records, reconciler, metrics } = setup();
+      const key = await signed(store, [A]);
+      // Writer 1 takes the key out, and its write hangs.
+      let fail!: () => void;
+      const failing = new Promise<void>((r) => (fail = r));
+      const writer1 = records.finalWrite(key, async () => {
+        await failing;
+        throw new Error("store down");
+      });
+      // Writer 2 wins and returns first, so it ran the hooks and counted the fee.
+      expect(
+        await records.finish(
+          key,
+          { state: "success", ledger: 4_000, feeCharged: 41_000n },
+          "settle",
+        ),
+      ).toMatchObject({ won: true });
+      // Writer 1 throws only now: it can't have committed, since writer 2 moved the record from a
+      // non-final state, so it must not put the key back for a sweep to run the hooks again.
+      fail();
+      await expect(writer1).rejects.toThrow("store down");
+      expect(records.unconfirmed.has(key)).toBe(false);
+      await reconciler.sweep();
+      await reconciler.sweep();
+      expect(hooks.onFinal).toHaveBeenCalledTimes(1);
+      expect(metrics.value("fee_charged_stroops", { state: "success" })).toBe(41_000);
+    });
+
+    it("keeps the key out when a racing write loses after another writer won and returned", async () => {
+      const { store, hooks, records, reconciler, metrics } = setup();
+      const key = await signed(store, [A]);
+      // An earlier write threw without committing, so the key is listed.
+      vi.spyOn(store, "transition").mockRejectedValueOnce(new Error("store down"));
+      await expect(
+        records.finish(key, { state: "success", ledger: 4_000, feeCharged: 41_000n }, "settle"),
+      ).rejects.toThrow("store down");
+      expect(records.unconfirmed.has(key)).toBe(true);
+      // Writer 1 takes the listed key out, and its compare-and-set from `signed` hangs.
+      const transition = store.transition.bind(store);
+      let lose!: () => void;
+      const losing = new Promise<void>((r) => (lose = r));
+      const writer1 = records.finalWrite(key, async () => {
+        await losing;
+        return transition(key, "signed", { state: "success", updatedAt: NOW });
+      });
+      // Writer 2 wins and returns first.
+      expect(
+        await records.finish(
+          key,
+          { state: "success", ledger: 4_000, feeCharged: 41_000n },
+          "settle",
+        ),
+      ).toMatchObject({ won: true });
+      // Writer 1 loses to writer 2's record, not to the earlier write: no key goes back.
+      lose();
+      expect(await writer1).toBeUndefined();
+      expect(records.unconfirmed.has(key)).toBe(false);
+      await reconciler.sweep();
+      await reconciler.sweep();
+      expect(hooks.onFinal).toHaveBeenCalledTimes(1);
+      expect(metrics.value("fee_charged_stroops", { state: "success" })).toBe(41_000);
+    });
+
+    it("runs the hooks once when a write that throws races a winning one on PostgreSQL, 200 times", async () => {
+      let twice = 0;
+      for (let run = 0; run < 200; run++) {
+        await db.empty();
+        const { store, hooks, records, reconciler, metrics } = setup({ [A]: landed("SUCCESS") });
+        const key = await signed(store, [A]);
+        // One of the two writes fails without committing, a moment later, as a dropped connection
+        // does; the other goes to PostgreSQL. Whichever returns first, the hooks run once.
+        const transition = store.transition.bind(store);
+        vi.spyOn(store, "transition").mockImplementationOnce(async () => {
+          await new Promise((resolve) => setTimeout(resolve, run % 4));
+          throw new Error("store down");
+        });
+        const update = { state: "success" as const, ledger: 4_000, feeCharged: 41_000n };
+        const results = await Promise.allSettled([
+          records.finish(key, update, "settle"),
+          records.finish(key, update, "resolved"),
+        ]);
+        vi.mocked(store.transition).mockImplementation(transition);
+        expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+        await reconciler.sweep();
+        await reconciler.sweep();
+        if (hooks.onFinal.mock.calls.length !== 1) twice++;
+        expect(metrics.value("fee_charged_stroops", { state: "success" }), `run ${run}`).toBe(
+          41_000,
+        );
+      }
+      expect(twice).toBe(0);
+    }, 120_000);
+
+    it("lists the key again for a later claim's write that throws, once the race is over", async () => {
+      const { store, records } = setup();
+      const key = await signed(store, [A]);
+      expect(
+        await records.finish(
+          key,
+          { state: "success", ledger: 4_000, feeCharged: 41_000n },
+          "settle",
+        ),
+      ).toMatchObject({ won: true });
+      // With no writer in flight, a win is forgotten: a reopened record's write (0073) that throws
+      // may have committed, so it is listed as before.
+      await expect(
+        records.finalWrite(key, async () => {
+          throw new Error("store down");
+        }),
+      ).rejects.toThrow("store down");
+      expect(records.unconfirmed.has(key)).toBe(true);
     });
 
     it("leaves one that didn't commit to the writer that finishes it, so its hooks run once", async () => {
@@ -534,6 +888,9 @@ describe("createReconciler", () => {
         expect(reports).toHaveLength(1);
         expect(reports[0]).toMatchObject({ state: status, transaction: A, ledger: 4_010 });
         expect(metrics.value("settlement_landed_after_expired_total", { state: status })).toBe(1);
+        // The fee was charged although the write is lost (0027); the expiry charged nothing.
+        expect(metrics.value("fee_charged_stroops", { state: status })).toBe(41_000);
+        expect(metrics.value("fee_charged_stroops", { state: "expired" })).toBe(0);
       },
     );
 
@@ -578,6 +935,31 @@ describe("createReconciler", () => {
       expect(hooks.onSuccess).toHaveBeenCalledWith(expect.objectContaining({ key }), "resolved");
     });
 
+    it("finishes a pending record by our hash when the pool found theirs landed (0087)", async () => {
+      const { store, reconciler, lines } = setup();
+      const key = await signed(store, [A]);
+      await store.transition(key, "signed", { state: "pending", updatedAt: NOW });
+      await reconciler.resolved({
+        status: "success",
+        hash: B,
+        channel: "GCHANNEL",
+        ledger: 4_001,
+        feeCharged: 0n,
+        rewrap: { of: A, feeSource: "GRIVAL" },
+        attempts: [{ hash: A, sent: "yes" }],
+      });
+      expect(await store.get(key)).toMatchObject({
+        state: "success",
+        feeCharged: 0n,
+        hashes: [A, B],
+      });
+      expect((await store.attempts(key)).map((a) => [a.hash, a.state])).toEqual([
+        [A, "dead"],
+        [B, "landed"],
+      ]);
+      expect(lines.filter((line) => line.includes('"settlement_rewrapped"'))).toHaveLength(1);
+    });
+
     it("keeps the failure cause of a pending record that failed", async () => {
       const { store, reconciler } = setup();
       const key = await signed(store, [A]);
@@ -614,6 +996,65 @@ describe("createReconciler", () => {
       });
     });
   });
+
+  describe("fee_charged_stroops (0027)", () => {
+    const pool = (feeCharged: bigint): SubmitResult => ({
+      status: "success",
+      hash: A,
+      channel: "GCHANNEL",
+      ledger: 4_001,
+      feeCharged,
+      attempts: [{ hash: A, sent: "yes" }],
+    });
+
+    it("adds a landed transaction's fee once, for a success and a failure alike", async () => {
+      const { store, reconciler, metrics } = setup({
+        [A]: landed("SUCCESS"),
+        [B]: landed("FAILED"),
+      });
+      await signed(store, [A]);
+      await signed(store, [B], undefined, "2");
+      expect(await reconciler.sweep()).toMatchObject({ success: 1, failed: 1 });
+      await reconciler.sweep();
+      expect(metrics.value("fee_charged_stroops", { state: "success" })).toBe(41_000);
+      expect(metrics.value("fee_charged_stroops", { state: "failed" })).toBe(41_000);
+    });
+
+    it("counts a record the pool's event and a sweep both finish once, for the write that won", async () => {
+      const { store, reconciler, metrics } = setup({ [A]: landed("SUCCESS") });
+      const key = await signed(store, [A]);
+      const list = store.listNonFinal.bind(store);
+      store.listNonFinal = async (n) => {
+        const listed = await list(n);
+        // The pool's event finishes the record between the sweep's listing and its write.
+        await reconciler.resolved(pool(40_000n));
+        return listed;
+      };
+      expect(await reconciler.sweep()).toMatchObject({ success: 0, open: 1 });
+      expect((await store.get(key))?.feeCharged).toBe(40_000n);
+      // A late event for the same hash finds the record final too.
+      await reconciler.resolved(pool(40_000n));
+      expect(metrics.value("fee_charged_stroops", { state: "success" })).toBe(40_000);
+    });
+
+    it("adds nothing for an event after a sweep finished the record", async () => {
+      const { store, reconciler, metrics } = setup({ [A]: landed("SUCCESS") });
+      await signed(store, [A]);
+      expect(await reconciler.sweep()).toMatchObject({ success: 1 });
+      await reconciler.resolved(pool(40_000n));
+      expect(metrics.value("fee_charged_stroops", { state: "success" })).toBe(41_000);
+    });
+
+    it("adds nothing for a record closed without a landing", async () => {
+      const { store, reconciler, metrics, advance } = setup({ [A]: missing(4_013) });
+      await claimed(store, "2");
+      await signed(store, [A]);
+      advance(BUDGET_MS + 5_001);
+      expect(await reconciler.sweep()).toMatchObject({ rejected: 1, expired: 1 });
+      expect(metrics.value("fee_charged_stroops", { state: "rejected" })).toBe(0);
+      expect(metrics.value("fee_charged_stroops", { state: "expired" })).toBe(0);
+    });
+  });
 });
 
 describe("scheduleReconciliation (decision 27)", () => {
@@ -624,6 +1065,7 @@ describe("scheduleReconciliation (decision 27)", () => {
     const schedule = scheduleReconciliation({
       reconciler: t.reconciler,
       logger: jsonLogger("warn", (line) => lines.push(line)),
+      metrics: t.metrics,
       network,
     });
     return { ...t, sweep, schedule, lines };
@@ -723,6 +1165,48 @@ describe("scheduleReconciliation (decision 27)", () => {
     expect(schedule.listed()).toBe(true);
     release();
     await schedule.reconciled;
+    schedule.close();
+  });
+
+  it("counts listed once per sweep, at the listing, even when the sweep then fails on its records (0027)", async () => {
+    vi.useFakeTimers();
+    const t = setup();
+    await signed(t.store, [A]);
+    await signed(t.store, [B], undefined, "2");
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    t.getTransaction.mockImplementation(async () => {
+      await gate;
+      throw new Error("rpc down");
+    });
+    const { schedule, sweep, metrics } = scheduled(t);
+    const sweeps = (outcome: string) => metrics.value("settlement_sweeps_total", { outcome });
+    schedule.start();
+    await vi.waitFor(() => expect(t.getTransaction).toHaveBeenCalledTimes(2));
+    // Before any record is checked: a long sweep doesn't read as one that stopped.
+    expect(sweeps("listed")).toBe(1);
+    release();
+    await schedule.reconciled;
+    await expect(sweep.mock.results[0]?.value).resolves.toMatchObject({ errors: 2 });
+    expect(sweeps("listed")).toBe(1);
+    expect(sweeps("failed")).toBe(0);
+    await vi.advanceTimersByTimeAsync(SWEEP_INTERVAL_MS);
+    await sweep.mock.results.at(-1)?.value;
+    expect(sweeps("listed")).toBe(2);
+    schedule.close();
+  });
+
+  it("counts failed once for a sweep that can't list the records (0027)", async () => {
+    vi.useFakeTimers();
+    const t = setup();
+    t.store.listNonFinal = async () => {
+      throw new Error("store down");
+    };
+    const { schedule, metrics } = scheduled(t);
+    schedule.start();
+    await schedule.reconciled;
+    expect(metrics.value("settlement_sweeps_total", { outcome: "failed" })).toBe(1);
+    expect(metrics.value("settlement_sweeps_total", { outcome: "listed" })).toBe(0);
     schedule.close();
   });
 

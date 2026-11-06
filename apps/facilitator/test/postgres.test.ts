@@ -37,6 +37,16 @@ import {
 import { hardened, rpcStub } from "./rpc-stub.js";
 import { signerEnv } from "./fake-openbao.js";
 
+// `main()`'s EMF lines off stdout: `LOG_LEVEL` quiets the logger only.
+vi.mock("../src/adapters/emf-metrics.js", async (importActual) => {
+  const actual = await importActual<typeof import("../src/adapters/emf-metrics.js")>();
+  return {
+    ...actual,
+    emfMetrics: (opts: Parameters<typeof actual.emfMetrics>[0]) =>
+      actual.emfMetrics({ write: () => {}, ...opts }),
+  };
+});
+
 // `main()` checks its channel at startup, on the RPC it builds from `RPC_URLS`.
 const bootSecret = Keypair.random().secret();
 const bootChannel = Keypair.random().publicKey();
@@ -944,6 +954,7 @@ describe("PostgreSQL stores", () => {
           "0009_spend_budgets",
           "0010_settlement_failure",
           "0011_settlement_in_flight",
+          "0012_settlement_inner_hash",
         ]);
         expect(await typeIndex(old), built).toBe(1);
       } finally {
@@ -973,6 +984,7 @@ describe("PostgreSQL stores", () => {
         "0009_spend_budgets",
         "0010_settlement_failure",
         "0011_settlement_in_flight",
+        "0012_settlement_inner_hash",
       ]);
       const { rows } = await old.query(
         "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",

@@ -661,6 +661,62 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
         ]);
       });
 
+      it("keeps each hash's inner hash, none for one stored without (0087)", async () => {
+        await store.addHash(key, "h1", LEASE, 2_000, { maxLedger: 9 }, undefined, "i1");
+        await store.addHash(key, "h2", LEASE, 3_000);
+        expect((await store.attempts(key)).map((a) => a.innerHash)).toEqual(["i1", undefined]);
+      });
+
+      it("adds the hash that landed in place of an attempt, last, with its inner hash (0087)", async () => {
+        await store.addHash(key, "h1", LEASE, 2_000, undefined, undefined, "i1");
+        expect(
+          await store.markAttempts(
+            key,
+            [
+              { hash: "h1", state: "dead" },
+              { hash: "r1", state: "landed", rewrapOf: "h1", channel: "GCHANNEL" },
+            ],
+            3_000,
+          ),
+        ).toBe(2);
+        expect(await store.attempts(key)).toEqual([
+          { hash: "h1", state: "dead", innerHash: "i1", updatedAt: 3_000 },
+          { hash: "r1", state: "landed", channel: "GCHANNEL", innerHash: "i1", updatedAt: 3_000 },
+        ]);
+        // The record's last hash is the one that landed, and it finds the record.
+        expect((await store.get(key))?.hashes).toEqual(["h1", "r1"]);
+        expect((await store.findByHash("r1"))?.key).toBe(key);
+        // Repeated, it adds nothing.
+        expect(
+          await store.markAttempts(key, [{ hash: "r1", state: "landed", rewrapOf: "h1" }], 4_000),
+        ).toBe(0);
+      });
+
+      it("adds no landed hash in place of an attempt the record doesn't have (0087)", async () => {
+        const k2 = settlement("2").key;
+        await store.claim(settlement("2"));
+        await store.addHash(k2, "h9", LEASE, 2_000, undefined, undefined, "i9");
+        expect(
+          await store.markAttempts(key, [{ hash: "r9", state: "landed", rewrapOf: "h9" }], 3_000),
+        ).toBe(0);
+        expect(await store.findByHash("r9")).toBeUndefined();
+      });
+
+      it("adds a rewrap's landed hash with a transition to success (0087)", async () => {
+        await store.addHash(key, "h1", LEASE, 2_000, undefined, undefined, "i1");
+        const moved = await store.transition(key, "signed", {
+          state: "success",
+          ledger: 7,
+          feeCharged: 0n,
+          updatedAt: 3_000,
+          attempts: [
+            { hash: "h1", state: "dead" },
+            { hash: "r1", state: "landed", rewrapOf: "h1" },
+          ],
+        });
+        expect(moved).toMatchObject({ state: "success", hashes: ["h1", "r1"], feeCharged: 0n });
+      });
+
       it("never moves another record's attempt", async () => {
         const k2 = settlement("2").key;
         await store.claim(settlement("2"));

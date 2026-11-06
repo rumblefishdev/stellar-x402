@@ -3,6 +3,7 @@ node_modules/
 
 # Build output
 dist/
+cdk.out/
 *.tsbuildinfo
 .turbo/
 coverage/
@@ -55,3 +56,6 @@ _bmad-output/
 
 # Ansible: the real inventory
 deploy/ansible/inventory.ini
+
+# A conformance run against a facilitator on this machine (task 0029).
+conformance/results/testnet-local/

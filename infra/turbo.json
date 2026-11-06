@@ -1,0 +1,10 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "test": {
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/lore/1-tasks/*/0027_*/notes/G-alarm-list.md"],
+      "dependsOn": ["^build", "build"]
+    }
+  }
+}

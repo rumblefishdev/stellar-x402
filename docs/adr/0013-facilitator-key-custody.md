@@ -15,7 +15,11 @@
   theft alarm reads the accounts instead of our hashes, a second balance alarm, and an alarm on
   reads of the backup secret, from task 0027); 2026-11-03 (the effects anyone can cause, where the
   check reads up to, statistics a forged point can't move, and the weekly review from the first
-  deploy with the fee spend metric, from the PR #111 review)
+  deploy with the fee spend metric, from the PR #111 review); 2026-11-05 (the read-only Storage
+  Box account's own directory, and the Storage Box's own snapshots, restored by a copy and never
+  a rollback, from Stan's setup of the box in task 0026); 2026-11-05 (Borg in repokey mode with
+  its key exported to the secret, changed with the passphrase, and the drill restoring through
+  a local copy, task 0026)
 - Supersedes: the key custody part of [ADR 0011](0011-facilitator-hosting.md) ("Keys, secrets and
   access": the SSM parameter for `FACILITATOR_SECRET` and the mainnet KMS key)
 
@@ -98,16 +102,29 @@
   by OpenBao, and the Borg repository is encrypted too. The snapshot job has its own AppRole and
   a snapshot-only policy (`sys/storage/raft/snapshot`), its credential a systemd credential, and
   uses the admin listener.
+- **The Storage Box keeps its own snapshots.** Daily, keeping 7 (14 if the space allows), in the
+  box's `.zfs`, which is read-only; only the Hetzner Console or API deletes one. The server's
+  write key can wipe the live repositories, and change the read-only account's keys, which sit
+  under its home (below), but not the last 7 days. A snapshot covers the whole box, the other
+  projects' backups too, so a restore from one copies our directory out of `.zfs/snapshot` with
+  the box's main account. Never a rollback in the Console: it reverts the whole box. The normal
+  restore doesn't need this: it reads the live repositories with the read-only account.
 - **The backup set is kept in AWS Secrets Manager, apart from the snapshots.** A restore on a new
   server needs five items, all of which are lost with the server
   ([R-unseal-key-backup](../../lore/1-tasks/archive/0047_RESEARCH_hetzner-key-custody/notes/R-unseal-key-backup.md)):
   1. the static seal key and its exact key ID (OpenBao refuses a key whose ID differs, and
      `-force` doesn't get round it), plus the previous pair for 14 days after a rotation;
   2. the recovery key, which regenerates a root token (it can't unseal or open a snapshot);
-  3. the Borg passphrase, plus `borg key export` output in keyfile mode;
+  3. the Borg passphrase and `borg key export` output. The repository is in repokey mode, so its
+     key is on the Storage Box too, but locked by the passphrase: nothing on the Storage Box
+     decrypts a backup by itself, as with pgBackRest's `cipher-pass`. The export covers a damaged
+     key in the repository. It is encrypted with the current passphrase, so a
+     `borg key change-passphrase` replaces both fields together, in one `put-secret-value`;
   4. the `seal "static"` stanza and the OpenBao version;
-  5. the SSH key of a second, read-only Storage Box sub-account on the same directory: the
-     server's own key dies with the server.
+  5. the SSH key of a second, read-only Storage Box sub-account: the server's own key dies with
+     the server. Its home is the repositories' directory (`/x402/data`), one below the write
+     account's (`/x402`), not the same one: a sub-account's `authorized_keys` lives in its home,
+     so a shared home would let either account's key log in as the other.
 - **One secret, `x402/production/openbao-backup`,** in `eu-central-1`, in the AWS account that
   soroban-explorer and prices-api share. One server runs both networks, so one OpenBao and one
   secret. It is one JSON (`seal_key_hex`, `seal_key_id`, `seal_key_sha256`,
@@ -129,7 +146,10 @@
 - **Init with one recovery share:** `bao operator init -recovery-shares=1 -recovery-threshold=1`,
   and the share goes into the secret.
 - **A restore drill proves the backup.** On a throwaway machine with no route to production, using
-  only the secret and the Storage Box: restore the newest snapshot, regenerate a root token (the
+  only the secret and the Storage Box: copy the Borg repository through the read-only account,
+  `borg key import` the secret's export into that copy (the account can't write to the
+  repository, and a damaged repository key would need this restore), restore the newest
+  snapshot from it, regenerate a root token (the
   legacy API, as below), issue
   an AppRole login, check that the Transit public key equals the on-chain signer, and check the
   CloudTrail event history for reads that weren't drills. Before mainnet (first on testnet), then
