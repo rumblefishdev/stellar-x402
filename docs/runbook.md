@@ -716,9 +716,12 @@ a run the timer starts after a reboot is skipped).
    set -eu
    export AWS_PROFILE=soroban-admin AWS_REGION=eu-central-1
    id=x402/production/openbao-backup
+   cred=/srv/x402/backup/creds/borg-passphrase.cred
+   ssh SERVER "sudo test ! -e $cred" || { echo "a passphrase is already stored: this step is done"; exit 1; }
    pass=$(openssl rand -base64 32 | tr -d '\n')
-   printf %s "$pass" | ssh SERVER 'sudo systemd-creds encrypt --with-key=host --name=borg-passphrase - /srv/x402/backup/creds/borg-passphrase.cred'
-   ssh SERVER 'sudo /usr/local/libexec/x402/x402-openbao-snapshot borg init -e repokey-blake2'
+   printf %s "$pass" | ssh SERVER "sudo systemd-creds encrypt --with-key=host --name=borg-passphrase - $cred"
+   ssh SERVER 'sudo /usr/local/libexec/x402/x402-openbao-snapshot borg init -e repokey-blake2' ||
+     { ssh SERVER "sudo rm $cred"; echo "borg init refused (a repository already there?): passphrase removed"; exit 1; }
    export_=$(ssh SERVER 'sudo /usr/local/libexec/x402/x402-openbao-snapshot borg key export :: -')
    [ "${export_#BORG_KEY }" != "$export_" ] || { echo "no key export"; exit 1; }
    cur=$(aws secretsmanager get-secret-value --secret-id $id --query SecretString --output text)
@@ -730,9 +733,13 @@ a run the timer starts after a reboot is skipped).
    )
    ```
 
-   If it stopped after `borg init`, the repository is still empty: delete it and run step 3
-   again (`sudo /usr/local/libexec/x402/x402-openbao-snapshot borg delete ::`, which asks for
-   `YES`).
+   The step refuses to run twice: a stored passphrase stops it before anything is written, and a
+   `borg init` that finds a repository already on the box removes the passphrase it just stored,
+   so the job is never left with one that opens nothing. A rebuilt server with the repository
+   still on the box takes the secret's `borg_passphrase` instead; that path comes with the restore
+   drill. If it stopped after `borg init`, the repository is still empty: delete it and the
+   credential, then run step 3 again (`sudo /usr/local/libexec/x402/x402-openbao-snapshot borg
+   delete ::`, which asks for `YES`, then `sudo rm /srv/x402/backup/creds/borg-passphrase.cred`).
 
 4. **The AppRole,** in a root shell with a root token (A new root token, above):
 
@@ -762,6 +769,16 @@ a run the timer starts after a reboot is skipped).
    systemctl list-timers x402-openbao-snapshot.timer
    ```
 
+   Then the `snapshots` alarm group goes on (`infra/README.md`), so a run that fails every night
+   alerts instead of showing only in the journal. From `infra/`:
+
+   ```sh
+   make check-series GROUP=snapshots   # until it passes: the stamp's age has reached CloudWatch
+   # then "snapshots": true in infra/envs/production.json, by pull request
+   make deploy-production-alarms
+   make fire-test
+   ```
+
 ### Changing Borg's passphrase
 
 The export is encrypted with the passphrase, so both fields of the backup secret change together.
@@ -787,6 +804,7 @@ strip='del(.borg_passphrase, .borg_key_export, .updated)'
 [ "$(printf %s "$cur" | jq -S "$strip")" = "$(printf %s "$new" | jq -S "$strip")" ] || { echo "other fields changed"; exit 1; }
 printf %s "$new" | aws secretsmanager put-secret-value --secret-id $id --secret-string file:///dev/stdin --query VersionId --output text
 [ "$(aws secretsmanager get-secret-value --secret-id $id --query SecretString --output text)" = "$new" ] && echo "secret: read back the same"
+ssh SERVER 'sudo /usr/local/libexec/x402/x402-openbao-snapshot borg list --last 1'   # the new passphrase opens the repository
 ssh SERVER "sudo rm $c/borg-passphrase.old.cred && sudo systemctl start x402-openbao-snapshot.service x402-openbao-snapshot.timer"
 )
 ```
