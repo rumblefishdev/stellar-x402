@@ -90,9 +90,15 @@ probe now and then, a lease that moves, or a tunnel that drops.
 ## The off-server check
 
 The Watch stack's Lambda, `x402-production-watch`, runs every 5 minutes in AWS, so it works while
-the server is down (ADR 0013). It reads each network's fee account through RPC with
-`checkFacilitatorBalance` and publishes `spendable_stroops` to `x402-watch`. A network it can't
-read publishes nothing, so the balance alarms keep their state and `watch-errors` fires instead.
+the server is down (ADR 0013). It has two sections, run at once:
+
+- **balance:** each served network's fee account through RPC with `checkFacilitatorBalance`,
+  published as `spendable_stroops`;
+- **protocol:** Horizon's root for each network in `watch.protocol` (testnet and mainnet), served
+  or not, published as `protocol_version` and `protocol_supported_version`.
+
+A network a section can't read publishes nothing, so its alarms keep their state and
+`watch-errors` fires instead; the other section still publishes.
 
 Its log, and a run by hand:
 
@@ -102,8 +108,8 @@ aws lambda invoke --function-name x402-production-watch --payload '{}' \
   --cli-binary-format raw-in-base64-out --profile stellar --region eu-central-1 /dev/stdout
 ```
 
-Each run logs `watch_balance` with the spendable balance in stroops, or `watch_section_failed`
-with the network and the error.
+Each run logs `watch_balance` with the spendable balance in stroops and `watch_protocol` with
+both versions, or `watch_section_failed` with the section, the network and the error.
 
 ### balance-low
 
@@ -145,6 +151,36 @@ The check hasn't run for 15 minutes, so the balance alarms see nothing.
 2. The function: it exists, and its `Throttles` metric is 0 (it is limited to one run at a time).
 3. If the Watch stack was deleted or never deployed, deploy it (`make deploy-production-watch` in
    `infra/`). On a fresh account, deploy Watch before Alarms ([infra/README.md](../infra/README.md)).
+
+## Protocol
+
+The check reads each network's protocol from Horizon (`current_protocol_version`, and
+`core_supported_protocol_version`, the highest version the network's Stellar Core runs). The
+version we run against is each alarm's threshold: `watch.protocol.<network>.expected` in
+`infra/envs/production.json`, 30 for testnet and 29 for mainnet on 2026-11-06. On 2026-11-03
+testnet moved to 30 and an older SDK stopped reading its ledgers, which no alarm saw.
+
+### protocol-changed
+
+The network now runs a protocol above the version we run against: it upgraded.
+
+1. Check that the facilitator still works on that network: `/health`, and a payment through
+   `/verify` and `/settle` on testnet.
+2. Check that `@stellar/stellar-sdk` and the RPC support the new version (their release notes);
+   upgrade the SDK if they don't.
+3. Raise `expected` for that network to the new version in a PR, merge it and deploy the alarms
+   (`make deploy-production-alarms` in `infra/`). Both protocol alarms go back to OK.
+
+### protocol-upgrade-coming
+
+The network's Stellar Core supports a protocol above the version we run against: the validators
+can vote the upgrade at any time. Mainnet was in this state on 2026-11-06 (29, Core supporting 30).
+
+1. Find the upgrade's date in Stellar's announcements (the network's upgrade schedule).
+2. Before it reaches a network we serve, test the SDK and the RPC against the new version on
+   testnet, which usually upgrades weeks earlier.
+3. After the upgrade, `protocol-changed` fires too; raising `expected` as there puts both back to
+   OK.
 
 ## Drills
 
