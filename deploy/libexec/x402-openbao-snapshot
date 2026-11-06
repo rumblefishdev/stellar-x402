@@ -4,6 +4,7 @@
 # snapshot-only AppRole, saves a snapshot inside the container, copies it to a tmpfs on the host,
 # makes one Borg archive of it, prunes to 14 days and touches the stamp 0027's probe reads. A run
 # that fails anywhere leaves no stamp, and the snapshot-age alarm fires after 26 hours.
+# Overridable for a test or a local run: X402_LOCK, X402_LOCK_WAIT and the paths below.
 #   x402-openbao-snapshot
 #   x402-openbao-snapshot borg ARGS...   any Borg command on that repository, for an admin: init,
 #                                        key export, list, check (runbook, OpenBao snapshots)
@@ -22,17 +23,21 @@ set -euo pipefail
 # keeps several side by side.
 : "${BORG_REMOTE_PATH:=borg-1.2}"
 : "${BORG_BASE_DIR:=/var/lib/x402/borg}"
+: "${X402_LOCK:=/run/lock/x402-openbao-snapshot}"
+: "${X402_LOCK_WAIT:=600}"
 run=/run/x402/backup
 export BORG_REPO BORG_REMOTE_PATH BORG_BASE_DIR
+
+# One run at a time, the timer's and an admin's `borg` alike: they share the decrypted files, the
+# snapshot and the container's /tmp/raft.snap, which each run's cleanup deletes. An admin's call
+# during the night's run waits for it.
+exec 9> "$X402_LOCK"
+flock -w "$X402_LOCK_WAIT" 9 || { echo "another snapshot run holds $X402_LOCK" >&2; exit 1; }
 
 # Borg's two, and the AppRole's only for a snapshot: an admin's `borg init` comes before it exists.
 creds=(storage-box-ssh-key borg-passphrase)
 [ "${1:-}" = borg ] || creds+=(snapshot-role-id snapshot-secret-id)
-if [ "${X402_CREDS_DIR:-}" ]; then
-  run=$X402_CREDS_DIR # a local run: plain files, no systemd-creds
-else
-  /usr/local/libexec/x402/x402-creds backup "${creds[@]/%/:0}"
-fi
+[ "${X402_CREDS_DIR:-}" ] && run=$X402_CREDS_DIR # a local run: plain files, no systemd-creds
 snap=$run/openbao.snap
 token=
 bao() { docker compose -f "$X402_OPENBAO_DIR/compose.yaml" exec -T -e BAO_TOKEN openbao bao "$@"; }
@@ -44,7 +49,9 @@ cleanup() {
     for c in "${creds[@]}"; do rm -f "$run/$c"; done
   fi
 }
+# Before the decrypt: one that fails halfway leaves no file it already wrote.
 trap cleanup EXIT
+[ "${X402_CREDS_DIR:-}" ] || /usr/local/libexec/x402/x402-creds backup "${creds[@]/%/:0}"
 
 export BORG_PASSCOMMAND="cat $run/borg-passphrase"
 export BORG_RSH="ssh -i $run/storage-box-ssh-key -o IdentitiesOnly=yes -o BatchMode=yes \
@@ -55,6 +62,15 @@ if [ "${1:-}" = borg ]; then
   borg "$@"
   exit
 fi
+
+# A run missed while the server was down starts at boot with OpenBao, which may still be unsealing
+# or electing itself Raft's leader: wait up to 5 minutes for it. `bao status` exits 2 while sealed,
+# and says is_self once this node is the active one.
+for i in $(seq 60); do
+  bao status -format=json 2> /dev/null | grep -q '"is_self": true' && break
+  [ "$i" -lt 60 ] || { echo "OpenBao isn't unsealed and active after 5 minutes" >&2; exit 1; }
+  sleep 5
+done
 
 # The login's JSON over stdin, so neither ID reaches a command line. Both are UUIDs.
 token=$(printf '{"role_id":"%s","secret_id":"%s"}' \

@@ -6,6 +6,9 @@ Description=x402 OpenBao snapshot to the Storage Box
 Documentation=https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/runbook.md
 Wants=network-online.target
 After=network-online.target x402-openbao.service
+# The playbook enables the timer, and an enabled timer also starts at the next boot: until the
+# runbook's admin step has made the AppRole's credential, a run is skipped instead of failing.
+ConditionPathExists=/srv/x402/backup/creds/snapshot-secret-id.cred
 
 [Service]
 Type=oneshot
