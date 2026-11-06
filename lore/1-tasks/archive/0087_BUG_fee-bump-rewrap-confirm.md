@@ -2,7 +2,7 @@
 id: "0087"
 title: "Confirm a settlement by its inner hash, so a rewrapped fee bump isn't recorded expired"
 type: BUG
-status: active
+status: completed
 milestone: 1
 related_adr: ["0006"]
 related_tasks: ["0073", "0019"]
@@ -18,6 +18,15 @@ history:
     status: active
     who: okarcz
     note: "Picked up by okarcz."
+  - date: "2026-11-06"
+    status: completed
+    who: okarcz
+    note: >
+      Closed. #128 merged (rebase, bf52c1b4). The criterion is met by unit tests with a real
+      fee-bump envelope; no rewrap was run on the network, since a smoke run can't make a rival
+      fee bump replace ours. Adam's review added the history check on the inner read (decision
+      9). 24 new tests in all (pool 9, store contract 4, reconcile 8, settle 3); facilitator 969,
+      pool 188. 9 decisions, no follow-up tasks.
 ---
 
 # Confirm a settlement by its inner hash, so a rewrapped fee bump isn't recorded expired
@@ -88,6 +97,10 @@ record ends `…_transaction_expired` ("sign a new payment") for a payment that 
   bump found by the inner hash, a node behind the bound, a failed rewrap), reconcile 3, settle 2;
   each fix, turned off, fails its test. Facilitator 874, pool 188.
 - ADR 0006 (date line, attempts bullet) and spine AD-22 say the rewrap case is covered.
+- After Adam's review of #128 (`b031fc66`): in `confirm()`, the inner read's `NOT_FOUND` from a
+  node whose history starts after the envelope was built (`oldestLedger > simLedger`) answers
+  `pending` and frees the cached sequence, before the `cannotLand` check. One more pool test;
+  without the fix it ends `expired`.
 
 ## Issues Encountered
 
@@ -127,6 +140,11 @@ record ends `…_transaction_expired` ("sign a new payment") for a payment that 
    channel, our account, paid it.
 8. **`onSigned`'s inner hash is optional in the type**: the pool always passes it, and the test
    stand-ins that call it with two arguments keep working.
+9. **The inner read follows the history rule too** (okarcz, 2026-11-06, Adam's suggestion in the
+   #128 review): `FallbackRpc` may send it to another node than the first read, and a node whose
+   history starts after the envelope was built can't rule a rewrap out. It answers `pending`, as
+   for our own hash, and reconciliation (`historyCovers`) finishes the record. Chosen over
+   waiting a ledger and reading again, which helps only if the next read reaches another node.
 
 ## Review
 
@@ -134,3 +152,7 @@ record ends `…_transaction_expired` ("sign a new payment") for a payment that 
 Deferred: 0027's metrics and alarm lists don't name `settlement_rewrapped_total` (a warning, not an
 alarm, decision 5), a note for 0027. Since done: `528c7c52` added it to the metrics catalog and
 0027's `G-metrics.md`.
+
+2026-11-06, Adam on #128: the inner read lacked the history check (decision 9, fixed in
+`b031fc66`), and the `records.ts` comment still said a rewrap is logged twice (it is logged once,
+by the write that made the record final, since `6a706edd`). Both fixed before the merge.
