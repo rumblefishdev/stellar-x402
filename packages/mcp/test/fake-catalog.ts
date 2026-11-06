@@ -98,7 +98,9 @@ function filter(items: DiscoveryResource[], query: URLSearchParams): DiscoveryRe
   const matching = items.filter(
     (item) =>
       want("type", item.type) &&
-      item.accepts.some((a) => want("payTo", a.payTo) && want("network", a.network)) &&
+      item.accepts.some(
+        (a) => want("payTo", a.payTo) && want("network", a.network) && want("scheme", a.scheme),
+      ) &&
       // Same rule as the facilitator's catalog store: an own key with a value.
       (!query.has("extensions") ||
         (item.extensions?.[query.get("extensions")!] !== undefined &&

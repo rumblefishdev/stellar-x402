@@ -24,6 +24,12 @@ history:
     note: >
       Added: make the red e2e suite pass, with its own facilitator and its own time limit. Found in
       the review of 0111's PR #124.
+  - date: "2026-11-06"
+    status: active
+    who: karolkow
+    note: >
+      Added: `list_resources` takes the Bazaar spec's `scheme` filter, which its strict input
+      refused. Found in an audit of the repo.
 ---
 
 # Simplify the MCP server after 0037, tidy its e2e suite and move the tool schemas out of server.ts
@@ -47,6 +53,9 @@ is committed, and the tool schemas still living in the composition root.
   committed or git-ignored with the evidence kept in the PR and task (W442, open).
 - Move the input and output schemas of `get_resource` and `call_paid_http` to `preview.ts` and
   `pay.ts`, as `list_resources`' already live in `catalog.ts`; `server.ts` only registers (W299 A).
+- `list_resources` takes the `scheme` filter that the Bazaar spec and upstream's
+  `ListDiscoveryResourcesParams` define and our `/discovery/resources` already accepts. Its strict
+  input refused it, so an agent couldn't ask for `upto` listings only.
 
 ## Simplification (review 2026-10-15, W477 A)
 
