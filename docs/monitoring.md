@@ -17,16 +17,16 @@ PR (decision 68).
 
 ## The alarms that are on
 
-| Alarm                  | Group       | On since   | Fired on purpose                                                |
-| ---------------------- | ----------- | ---------- | --------------------------------------------------------------- |
-| `emf-validation`       | `telemetry` | 2026-11-06 | 2026-11-06 08:39:50 UTC, `make fire-test` (delivery test, seen) |
-| `emf-parsing`          | `telemetry` | 2026-11-06 | Not yet                                                         |
-| `uptime`               | `uptime`    | #115       | Not yet                                                         |
-| `uptime-flapping`      | `uptime`    | #115       | Not yet                                                         |
-| `balance-low`          | `watch`     | #115       | Not yet                                                         |
-| `balance-critical`     | `watch`     | #115       | Not yet                                                         |
-| `watch-errors`         | `watch`     | #115       | Not yet                                                         |
-| `watch-no-invocations` | `watch`     | #115       | Not yet                                                         |
+| Alarm                  | Group       | On since             | Fired on purpose                                                                                  |
+| ---------------------- | ----------- | -------------------- | ------------------------------------------------------------------------------------------------- |
+| `emf-validation`       | `telemetry` | 2026-11-06           | `make fire-test` (delivery test, seen): 08:39:50 and 11:18:30 UTC                                 |
+| `emf-parsing`          | `telemetry` | 2026-11-06           | Not yet                                                                                           |
+| `uptime`               | `uptime`    | 2026-11-06 11:16 UTC | Not yet                                                                                           |
+| `uptime-flapping`      | `uptime`    | 2026-11-06 11:16 UTC | Not yet                                                                                           |
+| `balance-low`          | `watch`     | 2026-11-06 11:16 UTC | 2026-11-06, a fake point ([Drills](#drills)): ALARM 11:20:10, OK 11:25:10 UTC, both seen in Slack |
+| `balance-critical`     | `watch`     | 2026-11-06 11:16 UTC | 2026-11-06, the same fake point: ALARM 11:20:35, OK 11:25:35 UTC, both seen in Slack              |
+| `watch-errors`         | `watch`     | 2026-11-06 11:16 UTC | Not yet                                                                                           |
+| `watch-no-invocations` | `watch`     | 2026-11-06 11:16 UTC | Not yet                                                                                           |
 
 A network-scoped alarm has the network at the end of its name (`balance-low-testnet`). AWS
 commands below use the `stellar` SSO profile (`aws sso login --profile stellar`) and
@@ -145,3 +145,26 @@ The check hasn't run for 15 minutes, so the balance alarms see nothing.
 2. The function: it exists, and its `Throttles` metric is 0 (it is limited to one run at a time).
 3. If the Watch stack was deleted or never deployed, deploy it (`make deploy-production-watch` in
    `infra/`). On a fresh account, deploy Watch before Alarms ([infra/README.md](../infra/README.md)).
+
+## Drills
+
+What each alarm fired on purpose took, so it can be done again. Times are UTC.
+
+### 2026-11-06: the balance alarms
+
+- **How:** one fake `spendable_stroops` point of 50,000,000 stroops (5 XLM), below both
+  thresholds, written by hand at 11:19:01 with the `stellar` SSO profile:
+
+  ```sh
+  aws cloudwatch put-metric-data --region eu-central-1 --namespace x402-watch --metric-data \
+    '[{"MetricName":"spendable_stroops","Dimensions":[{"Name":"network","Value":"stellar:testnet"}],"Value":50000000,"Unit":"None"}]'
+  ```
+
+- **What happened:** `Minimum` over the 11:15 period read 5 XLM. `balance-low-testnet` went to
+  ALARM at 11:20:10 and `balance-critical-testnet` at 11:20:35; the check's next real point
+  (99,988,728,192 stroops) put both back to OK at 11:25:10 and 11:25:35. Slack showed the four
+  messages, each naming the fee account and the top-up step, in `#stellar-x402-bot`.
+- **What it shows:** the alarms' thresholds, statistic and path to Slack. Not the check's own read
+  of a low balance, which `test/watch-balance.test.ts` covers against a faked RPC.
+- **After the deploy:** each new alarm also sent one OK message when it first read data (11:17 to
+  11:18). That is the deploy, not a fault.

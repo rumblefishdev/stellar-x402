@@ -59,6 +59,10 @@ history:
     status: active
     who: akot
     note: "check-series passed for uptime (08:41 UTC, the probe's ready) and for watch (about 09:45 UTC, after the Watch stack's deploy at 09:36 UTC: spendable_stroops, AWS/Lambda Errors and Invocations), so #115 turns both groups on (decisions 26, 37). Oskar's review of #115: docs/monitoring.md sections for the 8 alarms that are on, the handler's logic and the bundle tested, one URL rule, Watch before Alarms on a fresh account; decisions 2, 23 and 64 amended by 68."
+  - date: "2026-11-06"
+    status: active
+    who: akot
+    note: "#115 and its fix #141 merged and deployed: Watch, then Alarms at 11:16 UTC (uptime and watch groups on). balance-low and balance-critical fired with a fake 5 XLM spendable_stroops point: ALARM 11:20:10 and 11:20:35, OK 11:25:10 and 11:25:35 UTC, all four seen in Slack (docs/monitoring.md, Drills). M1's low-balance alarm is done; budget, breaker, quarantine and pending wait on #137."
 ---
 
 # Alerts and metrics
