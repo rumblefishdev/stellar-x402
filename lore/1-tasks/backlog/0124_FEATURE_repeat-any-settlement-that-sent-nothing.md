@@ -48,7 +48,7 @@ as today.
 |---|---|---|---|---|---|---|
 | 1 | A record that ended with nothing sent reopens by default, also for a reason nobody listed | owner, 2026-11-06 | matches | upstream Stellar `exact`: no record, any unsent payment is sent again | | |
 | 2 | No refusal without a send ends a payment for good: budgets, breakers, fee, simulation, hook errors, `unexpected_settle_error` included | owner, 2026-11-06 | changes 0024 decision 35 | upstream Stellar `exact`, as row 1 | | |
-| 3 | `extra.retryable` says whether a repeat can succeed, per reason: `false` for a refusal the same payload always gets (`…_unexpected_balance_changes`, `…_payer_not_authorized`, `…_unsupported_credential`, `…_signature_expiration_too_soon`) and for a spend budget, whose 24 h window outlasts the auth entry; the payload still reopens | owner, 2026-11-06, after a devil's-advocate review | beyond it | upstream Stellar `exact` sets `retryable` only on `TRY_AGAIN_LATER` (`exact/facilitator/index.mjs`) | | |
+| 3 | `extra.retryable` says whether a repeat can succeed, per reason: `false` for a refusal the same payload always gets (`…_unexpected_balance_changes`, `…_payer_not_authorized`, `…_unsupported_credential`, `…_signature_expiration_too_soon`) and for a spend budget, whose 24 h window outlasts the auth entry; the payload still reopens | owner, 2026-11-06, after a devil's-advocate review | beyond it | x402-foundation/x402 Stellar `exact` sets `retryable` only on `TRY_AGAIN_LATER` (`typescript/packages/mechanisms/stellar/src/exact/facilitator/scheme.ts:353-368`@6a773db; not in `@x402/stellar` 2.28.0) | | |
 
 ## Not yet decided
 
