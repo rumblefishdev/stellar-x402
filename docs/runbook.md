@@ -738,8 +738,12 @@ a run the timer starts after a reboot is skipped).
    so the job is never left with one that opens nothing. A rebuilt server with the repository
    still on the box takes the secret's `borg_passphrase` instead; that path comes with the restore
    drill. If it stopped after `borg init`, the repository is still empty: delete it and the
-   credential, then run step 3 again (`sudo /usr/local/libexec/x402/x402-openbao-snapshot borg
-   delete ::`, which asks for `YES`, then `sudo rm /srv/x402/backup/creds/borg-passphrase.cred`).
+   credential, then run step 3 again:
+
+   ```sh
+   sudo /usr/local/libexec/x402/x402-openbao-snapshot borg delete ::   # asks for YES
+   sudo rm /srv/x402/backup/creds/borg-passphrase.cred
+   ```
 
 4. **The AppRole,** in a root shell with a root token (A new root token, above):
 
