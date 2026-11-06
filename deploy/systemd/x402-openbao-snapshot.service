@@ -15,3 +15,8 @@ Type=oneshot
 ExecStart=/usr/local/libexec/x402/x402-openbao-snapshot
 # A snapshot is kilobytes; most of the time is SSH and Borg's prune and compact. Well under a day.
 TimeoutStartSec=30min
+# One run a day against a 26-hour alarm: a box or network blip at night is retried the same
+# night instead of costing a day's snapshot. A retry that meets a run still holding the lock
+# fails at once and tries again later.
+Restart=on-failure
+RestartSec=20min
