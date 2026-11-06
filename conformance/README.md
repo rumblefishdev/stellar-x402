@@ -58,6 +58,13 @@ as sent, and the answer's status, body and headers, without those describing the
 raw bytes. It uses Node
 built-ins only, because nothing is installed for it inside the suite.
 
+## Upstream changes
+
+Every Monday `.github/workflows/upstream-watch.yml` runs `upstream-watch.sh`, which compares three
+upstream files at the pin with upstream `main`: the x402 spec, the Stellar `exact` scheme and the
+suite's list of Stellar routes. A change opens one issue. Run it by hand with
+`bash conformance/upstream-watch.sh`. Bumping the pin moves the comparison with it.
+
 ## What it spends
 
 One payment of 0.001 testnet USDC per scenario, from the buyer to the seller; the facilitator pays
