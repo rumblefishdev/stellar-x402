@@ -56,15 +56,13 @@ export function createHandler(deps: HandlerDeps): (event?: WatchEvent | null) =>
         log,
         at,
       }),
-      protocolTargets.length === 0
-        ? Promise.resolve()
-        : runProtocol({
-            targets: protocolTargets,
-            fetch: deps.fetch ?? ((url, init) => globalThis.fetch(url, init)),
-            publish: deps.publish,
-            log,
-            at,
-          }),
+      runProtocol({
+        targets: protocolTargets,
+        fetch: deps.fetch ?? ((url, init) => globalThis.fetch(url, init)),
+        publish: deps.publish,
+        log,
+        at,
+      }),
     ]);
     const failed = sections.flatMap((s) =>
       s.status === "rejected" ? [String((s.reason as Error)?.message ?? s.reason)] : [],

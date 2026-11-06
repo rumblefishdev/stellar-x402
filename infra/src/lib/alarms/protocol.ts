@@ -11,21 +11,22 @@ const NO_DATA = "Keeps its state; watch-errors and watch-no-invocations cover th
 export function addProtocolAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
   for (const [key, watched] of Object.entries(c.watch.protocol)) {
     const network = key as keyof typeof c.watch.protocol;
-    const { expected } = watched!;
-    const raise = `then raise watch.protocol's expected for ${network} to the new version in infra/envs/${c.envName}.json in a PR and deploy the alarms`;
+    const { expected, supported } = watched!;
+    const config = `watch.protocol in infra/envs/${c.envName}.json`;
 
     f.level("protocol-changed", {
       group: "protocol",
       network,
       signal: { catalog: "protocol_version", dims: { network } },
       statistic: "Maximum",
+      // 2 of 2: a Horizon node behind the balancer that lags shows the old version once.
       periodMinutes: 5,
-      periods: 1,
+      periods: 2,
       comparison: ">",
       threshold: expected,
       description: {
-        what: `${network}'s ledger protocol is above ${expected}, the version we run against: the network upgraded. On 2026-11-03 testnet's move to 30 left an older SDK unable to read ledgers.`,
-        next: `Check that /verify and /settle still work on ${network} and that @stellar/stellar-sdk and the RPC support the new version; ${raise}.`,
+        what: `${network}'s ledger protocol is above ${expected}, the version we have checked: the network upgraded. On 2026-11-03 testnet's move to 30 left an older SDK unable to read ledgers.`,
+        next: `Check that /verify and /settle still work on ${network} and that @stellar/stellar-sdk and the RPC support the new version; then raise expected for ${network} in ${config} in a PR and deploy the alarms.`,
         noData: NO_DATA,
       },
     });
@@ -35,13 +36,14 @@ export function addProtocolAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
       network,
       signal: { catalog: "protocol_supported_version", dims: { network } },
       statistic: "Maximum",
+      // 2 of 2: during a rolling Core upgrade, Horizon nodes behind the balancer differ.
       periodMinutes: 5,
-      periods: 1,
+      periods: 2,
       comparison: ">",
-      threshold: expected,
+      threshold: supported,
       description: {
-        what: `Stellar Core on ${network} supports a protocol above ${expected}, the version we run against: the validators can vote the upgrade at any time.`,
-        next: `Find the upgrade's date in Stellar's announcements, and test the SDK and the RPC against the new version on testnet before it reaches ${network}. After the upgrade, protocol-changed fires too; ${raise}, which puts both back to OK.`,
+        what: `Stellar Core on ${network} supports a protocol above ${supported}, the highest we know of: the validators can vote an upgrade at any time.`,
+        next: `Find the upgrade's date in Stellar's announcements and plan a test of the SDK and the RPC against the new version on testnet before it reaches ${network}; then raise supported for ${network} in ${config} in a PR. protocol-changed fires on the upgrade itself.`,
         noData: NO_DATA,
       },
     });

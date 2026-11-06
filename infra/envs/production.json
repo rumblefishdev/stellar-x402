@@ -21,11 +21,13 @@
     "protocol": {
       "stellar:testnet": {
         "horizonUrl": "https://horizon-testnet.stellar.org",
-        "expected": 30
+        "expected": 30,
+        "supported": 30
       },
       "stellar:pubnet": {
         "horizonUrl": "https://horizon.stellar.org",
-        "expected": 29
+        "expected": 29,
+        "supported": 29
       }
     }
   },

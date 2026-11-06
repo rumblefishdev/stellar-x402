@@ -44,8 +44,13 @@ describe("envs/production.json", () => {
 
   test("reads the protocol of testnet and mainnet, at the versions of 2026-11-06 (decision 70)", () => {
     expect(production().watch.protocol).toEqual({
-      "stellar:testnet": { horizonUrl: "https://horizon-testnet.stellar.org", expected: 30 },
-      "stellar:pubnet": { horizonUrl: "https://horizon.stellar.org", expected: 29 },
+      "stellar:testnet": {
+        horizonUrl: "https://horizon-testnet.stellar.org",
+        expected: 30,
+        supported: 30,
+      },
+      // Core supported 30 on 2026-11-06: upgrade-coming fires once the group goes on.
+      "stellar:pubnet": { horizonUrl: "https://horizon.stellar.org", expected: 29, supported: 29 },
     });
   });
 
@@ -185,6 +190,11 @@ describe("validateConfig", () => {
       "a protocol version that isn't an integer",
       (c) => ((m(c).watch.protocol["stellar:testnet"] as { expected: number }).expected = 30.5),
       /watch.protocol.stellar:testnet.expected/,
+    ],
+    [
+      "a supported version below the running one",
+      (c) => ((m(c).watch.protocol["stellar:testnet"] as { supported: number }).supported = 29),
+      /watch.protocol.stellar:testnet.supported must be at least expected/,
     ],
     [
       "a plain-http Horizon",
