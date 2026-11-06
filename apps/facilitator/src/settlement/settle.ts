@@ -43,6 +43,7 @@ import {
   attemptUpdates,
   createRecords,
   isFinalRecord as isFinal,
+  resultUpdate,
   type Records,
 } from "./records.js";
 import {
@@ -733,12 +734,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
         flagDrift(key, errorReason, "pool");
         return await finish(key, { state: "rejected", errorReason, attempts }, call.origin, own);
       }
-      const fields = {
-        channel: result.channel,
-        ledger: result.ledger,
-        feeCharged: result.feeCharged,
-        attempts: attemptUpdates(result.attempts, result),
-      };
+      const fields = resultUpdate(result);
       // Logged by the write that made the record final, as reconciliation does (0087).
       const noteRewrap = <T extends { won: boolean }>(settled: T): T => {
         if (

@@ -312,3 +312,17 @@ export function attemptUpdates(
     return at(attempt.hash, { state: attempt.sent === "yes" ? "sent" : "unknown" });
   });
 }
+
+/**
+ * What a pool's result writes on its record, in every state. A ledger or a fee the result doesn't
+ * have is left out, because a field given as `undefined` clears the column, and a record without a
+ * fee releases its budget reservation instead of committing it.
+ */
+export function resultUpdate(result: SubmitResult) {
+  return {
+    ...(result.ledger !== undefined && { ledger: result.ledger }),
+    ...(result.feeCharged !== undefined && { feeCharged: result.feeCharged }),
+    channel: result.channel,
+    attempts: attemptUpdates(result.attempts, result),
+  };
+}

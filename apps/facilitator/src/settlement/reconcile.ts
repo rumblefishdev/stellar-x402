@@ -16,7 +16,7 @@ import type {
   SettlementRecord,
   SettlementStore,
 } from "../ports/index.js";
-import { attemptUpdates, isFinalRecord, type Records } from "./records.js";
+import { isFinalRecord, resultUpdate, type Records } from "./records.js";
 import { SETTLE_REASONS } from "./settle.js";
 import { authExpiration } from "./verify.js";
 
@@ -370,13 +370,7 @@ export function createReconciler(deps: ReconcilerDeps) {
     // A rewrap's hash is someone else's, not stored yet: the record has ours (0087).
     const record = await store.findByHash(result.rewrap?.of ?? result.hash);
     if (!record) return;
-    const attempts = attemptUpdates(result.attempts, result);
-    const fields = {
-      ...(result.ledger !== undefined && { ledger: result.ledger }),
-      ...(result.feeCharged !== undefined && { feeCharged: result.feeCharged }),
-      channel: result.channel,
-      attempts,
-    };
+    const fields = resultUpdate(result);
     const { record: finished, won } = await records.finish(
       record.key,
       result.status === "success"

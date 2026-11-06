@@ -2995,6 +2995,23 @@ describe("attempt states (0019 decision 7)", () => {
   });
 });
 
+describe("a pool result without a ledger or a fee (0101)", () => {
+  // The pool sets both only on a transaction that landed; `pending` and `expired` carry neither.
+  for (const status of ["pending", "expired"] as const)
+    it(`writes neither for a result that is ${status}, so a write can't clear them`, async () => {
+      const { settle, store } = setup(async (opts) => {
+        await opts.onSigned?.(HASH, BOUNDS);
+        return { ...result(status), feeCharged: undefined };
+      });
+      const transition = vi.spyOn(store, "transition");
+      await settle(payload(), requirements);
+      const update = transition.mock.calls.find(([, , update]) => update.state === status)?.[2];
+      expect(update).toBeDefined();
+      expect(update).not.toHaveProperty("ledger");
+      expect(update).not.toHaveProperty("feeCharged");
+    });
+});
+
 describe("with reconciliation (0019)", () => {
   /** A settler and a reconciler sharing one store and one `records`, as `buildSettlement` builds. */
   function shared(
