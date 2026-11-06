@@ -75,8 +75,12 @@ make check-emf-disabled         # once, when the alarms first go on
 make telemetry-arns             # what the server's credential helper is started with
 ```
 
-Every deploy is agreed separately: the account is shared. After a deliberate delete of the Telemetry stack, its log
-groups stay, and a new deploy fails on them until they are imported (`cdk import`) or deleted. Read the diff for removals too:
+Every deploy is agreed separately: the account is shared. On a fresh account or a rebuild,
+deploy Watch first, then `make check-series GROUP=watch`, then Alarms: `--all` may create the
+alarms before the check has run, and `watch-no-invocations` pages on missing data.
+
+After a deliberate delete of the Telemetry stack, its log groups stay, and a new deploy fails on
+them until they are imported (`cdk import`) or deleted. Read the diff for removals too:
 `--require-approval broadening` stops only on IAM widening.
 
 **The delivery test** (decision 12, ADR 0011): a deploy of the alarms is done only when a person

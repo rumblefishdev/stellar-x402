@@ -1,10 +1,11 @@
 // G-alarm-list, "Money and security": the off-server check's metrics (#115), every 5 minutes, so
 // they fire with the server down. Built here (decision 23): the balance alarms and the check's
 // health in `watch`, which goes on once its Lambda publishes, and the theft and secret-read
-// alarms in `watchSecurity`, which goes on once their sections do (decision 68). Root on the server can write into `x402-watch` too, so each alarm takes
-// the statistic a forged point can't hide a real one behind: `Minimum` for a balance, `Maximum`
-// for a count (G-alarm-list, "Statistics"). A forged point can still hold a theft alarm in ALARM,
-// so #115's check posts each finding to the topic itself and these are its backstop (decision 64).
+// alarms in `watchSecurity`, which goes on once their sections do (decision 68). Root on the
+// server can write into `x402-watch` too, so each alarm takes the statistic a forged point can't
+// hide a real one behind: `Minimum` for a balance, `Maximum` for a count (G-alarm-list,
+// "Statistics"). A forged point can still hold a theft alarm in ALARM, so the check's theft
+// section posts each finding to the topic itself and these are its backstop (decision 64).
 import type { EnvironmentConfig } from "../config.js";
 import { names } from "../names.js";
 import type { AlarmFactory } from "./factory.js";

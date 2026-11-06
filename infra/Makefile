@@ -38,6 +38,9 @@ synth-production: build
 diff-production: build
 	$(CDK) diff --strict
 
+# On a fresh account or a rebuild, deploy Watch first, wait for `make check-series GROUP=watch`,
+# then Alarms: no stack depends on another, so --all may create the alarms before the check runs,
+# and watch-no-invocations treats missing data as breaching (it would page until the first run).
 # A deploy of all stacks ships every pending change, a parked one too (the explorer's 0312
 # "stowaway"), so the full diff is printed first, into the same output. --require-approval
 # broadening stops on IAM widening only: read the diff for removals too (the Prices API's 0157).
