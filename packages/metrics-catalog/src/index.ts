@@ -684,6 +684,16 @@ export const CATALOG = [
     sets: PLAIN,
     emit: "aggregated",
   },
+  // Upstream x402 files the conformance gate's suite rests on that differ from its pin (task 0029).
+  {
+    namespace: WATCH,
+    name: "upstream_files_changed",
+    kind: "gauge",
+    unit: "Count",
+    scope: "process",
+    sets: PLAIN,
+    emit: "aggregated",
+  },
 ] as const satisfies readonly MetricDef[];
 
 type Entry = (typeof CATALOG)[number];

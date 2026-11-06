@@ -110,7 +110,7 @@ export function addMoneyAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
     comparison: ">=",
     threshold: 1,
     description: {
-      what: "The off-server check failed in 2 of its last 3 runs: a section it runs was not published. Today it runs the balance section only; the theft and secret-read sections come later (decision 68).",
+      what: "The off-server check failed in 2 of its last 3 runs: a section it runs was not published. Today it runs the balance section, and the upstream section on the hour (task 0029); the theft and secret-read sections come later (decision 68).",
       next: `Read the ${n.watchFunction} log for the section that threw; the others published before it.`,
       noData: "Keeps its state; watch-no-invocations covers runs that don't happen.",
     },
