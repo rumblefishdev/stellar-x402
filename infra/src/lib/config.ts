@@ -6,6 +6,7 @@ import { isStellarNetwork, type StellarNetwork } from "@stellar-x402/config";
 import { isDimValue } from "@stellar-x402/metrics-catalog";
 import { StrKey } from "@stellar/stellar-sdk";
 import { z } from "zod";
+import { isHttpsUrl } from "./https-url.js";
 
 /**
  * An alarm group is created whole or not at all (0027 decision 26): a group goes on once every
@@ -41,8 +42,17 @@ export const ALARM_GROUPS = [
    * create custom metrics in any namespace, so it is the only bound on what a flood costs.
    */
   "logVolume",
-  /** The off-server check's alarms (`x402-watch` and its `AWS/Lambda` health), with #115. */
+  /**
+   * The off-server check's balance alarms and its own `AWS/Lambda` health, once the Watch stack's
+   * Lambda publishes `spendable_stroops` (#115).
+   */
   "watch",
+  /**
+   * The check's theft and secret-read alarms (`account-state`, `account-effects`,
+   * `backup-secret-read`), once its sections for them publish. Apart from `watch` so the balance
+   * alarms, which M1 needs, go on first.
+   */
+  "watchSecurity",
 ] as const;
 export type AlarmGroup = (typeof ALARM_GROUPS)[number];
 
@@ -103,6 +113,14 @@ export interface EnvironmentConfig {
    * `/supported` lists it as the signer; checked here so a typo can't send a top-up elsewhere.
    */
   readonly feeAccounts: Readonly<Partial<Record<StellarNetwork, string>>>;
+  readonly watch: {
+    /**
+     * The RPC the off-server check reads each network's fee account through: one per served
+     * network, https only. A provider's key never goes here (a public repo); it would come from
+     * SSM.
+     */
+    readonly rpcUrls: Readonly<Partial<Record<StellarNetwork, string>>>;
+  };
   readonly slack: {
     /** SSM parameter names (plain String): the IDs stay out of this public repo. */
     readonly workspaceIdSsmParam: string;
@@ -199,17 +217,14 @@ const schema = z.object({
       .max(MAX_SESSION_HOURS, SESSION),
   }),
   uptime: z.object({
-    url: z.string({ message: HTTPS }).refine((u) => {
-      try {
-        const url = new URL(u);
-        return url.protocol === "https:" && url.hostname.includes(".");
-      } catch {
-        return false;
-      }
-    }, HTTPS),
+    url: z.string({ message: HTTPS }).refine(isHttpsUrl, HTTPS),
   }),
   // Each entry is checked against `networks` in crossChecks, where both are known.
   feeAccounts: z.record(z.string(), z.unknown(), { message: "must map networks to addresses" }),
+  // Each entry is checked against `networks` in crossChecks.
+  watch: z.object({
+    rpcUrls: z.record(z.string(), z.unknown(), { message: "must map networks to URLs" }),
+  }),
   slack: z.object({ workspaceIdSsmParam: ssmName, channelIdSsmParam: ssmName }),
   host: z.object({
     diskMounts: z.array(dimValue, { message: "must be a list of the catalog's disk paths" }),
@@ -237,6 +252,13 @@ function crossChecks(c: z.infer<typeof schema>, ctx: z.RefinementCtx): void {
       );
   for (const n of Object.keys(c.feeAccounts))
     if (!c.networks.includes(n as StellarNetwork)) fail(["feeAccounts", n], "is not in networks");
+
+  for (const n of c.networks)
+    if (!isHttpsUrl(c.watch.rpcUrls[n]))
+      fail(["watch", "rpcUrls", n], `${HTTPS}, the RPC the off-server check reads`);
+  for (const n of Object.keys(c.watch.rpcUrls))
+    if (!c.networks.includes(n as StellarNetwork))
+      fail(["watch", "rpcUrls", n], "is not in networks");
 
   const t = c.thresholds;
   // Below uptime's run, a plain outage would fire uptime-flapping first; at the window, never.

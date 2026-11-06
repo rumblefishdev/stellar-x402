@@ -1,9 +1,11 @@
 // G-alarm-list, "Money and security": the off-server check's metrics (#115), every 5 minutes, so
-// they fire with the server down. Built here, in the `watch` group, which goes on with #115's
-// Lambda (decision 23). Root on the server can write into `x402-watch` too, so each alarm takes
-// the statistic a forged point can't hide a real one behind: `Minimum` for a balance, `Maximum`
-// for a count (G-alarm-list, "Statistics"). A forged point can still hold a theft alarm in ALARM,
-// so #115's check posts each finding to the topic itself and these are its backstop (decision 64).
+// they fire with the server down. Built here (decision 23): the balance alarms and the check's
+// health in `watch`, which goes on once its Lambda publishes, and the theft and secret-read
+// alarms in `watchSecurity`, which goes on once their sections do (decision 68). Root on the
+// server can write into `x402-watch` too, so each alarm takes the statistic a forged point can't
+// hide a real one behind: `Minimum` for a balance, `Maximum` for a count (G-alarm-list,
+// "Statistics"). A forged point can still hold a theft alarm in ALARM, so the check's theft
+// section posts each finding to the topic itself and these are its backstop (decision 64).
 import type { EnvironmentConfig } from "../config.js";
 import { names } from "../names.js";
 import type { AlarmFactory } from "./factory.js";
@@ -53,7 +55,7 @@ export function addMoneyAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
     });
 
     f.level("account-state", {
-      group: "watch",
+      group: "watchSecurity",
       network,
       signal: { catalog: "account_state_mismatches", dims: { network } },
       statistic: "Maximum",
@@ -69,7 +71,7 @@ export function addMoneyAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
     });
 
     f.event("account-effects", {
-      group: "watch",
+      group: "watchSecurity",
       network,
       signal: { catalog: "account_effects_unexpected", dims: { network } },
       statistic: "Maximum",
@@ -85,7 +87,7 @@ export function addMoneyAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
   }
 
   f.event("backup-secret-read", {
-    group: "watch",
+    group: "watchSecurity",
     signal: { catalog: "backup_secret_reads" },
     statistic: "Maximum",
     periodMinutes: 5,
@@ -108,7 +110,7 @@ export function addMoneyAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
     comparison: ">=",
     threshold: 1,
     description: {
-      what: "The off-server check failed in 2 of its last 3 runs: a balance, an account check or the secret reads were not published.",
+      what: "The off-server check failed in 2 of its last 3 runs: a section it runs was not published. Today it runs the balance section only; the theft and secret-read sections come later (decision 68).",
       next: `Read the ${n.watchFunction} log for the section that threw; the others published before it.`,
       noData: "Keeps its state; watch-no-invocations covers runs that don't happen.",
     },
@@ -118,7 +120,7 @@ export function addMoneyAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
     group: "watch",
     signal: { aws: "AWS/Lambda", metric: "Invocations", dims: { FunctionName: n.watchFunction } },
     description: {
-      what: "The off-server check has not run for 15 minutes, so the balance, theft and secret-read alarms see nothing.",
+      what: "The off-server check has not run for 15 minutes, so the alarms on its metrics see nothing: the balance alarms today, and the theft and secret-read ones once those sections run (decision 68).",
       next: `Check ${n.watchFunction} and its schedule in the Watch stack.`,
       noData: "Breaching: no runs is what this alarm is for.",
     },

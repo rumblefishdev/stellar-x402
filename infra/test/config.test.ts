@@ -23,16 +23,22 @@ describe("envs/production.json", () => {
     expect(production().networks).toEqual(["stellar:testnet"]);
   });
 
-  test("starts with the EMF error alarms on, the rest off until their series exist (26, 37)", () => {
+  test("has on only the groups whose series have data: EMF errors, uptime, the balance (26, 37)", () => {
     const on = Object.entries(production().alarmGroups)
       .filter(([, v]) => v)
       .map(([g]) => g);
-    expect(on).toEqual(["telemetry"]);
+    expect(on).toEqual(["uptime", "telemetry", "watch"]);
   });
 
   test("names the fee account /supported shows as the signer", () => {
     expect(production().feeAccounts).toEqual({
       "stellar:testnet": "GAVE5V5IOMNNBOZXGZSQOP447L2QLCG6ELIIPO6CFJLGZVY4YIK3KKRP",
+    });
+  });
+
+  test("reads testnet's fee account through SDF's public RPC", () => {
+    expect(production().watch.rpcUrls).toEqual({
+      "stellar:testnet": "https://soroban-testnet.stellar.org",
     });
   });
 
@@ -150,6 +156,30 @@ describe("validateConfig", () => {
         ((m(c).feeAccounts as Record<string, string>)["stellar:pubnet"] =
           "GCW5TAO7CB6FDNXLMZJZHQKKKGDBEAXMOGGYO2MCI2WXMKNGFWLLG7VY"),
       /feeAccounts.stellar:pubnet is not in networks/,
+    ],
+    [
+      "a network with no RPC for the off-server check",
+      (c) => delete (m(c).watch.rpcUrls as Partial<Record<string, string>>)["stellar:testnet"],
+      /watch.rpcUrls.stellar:testnet must be an https/,
+    ],
+    [
+      "a plain-http RPC",
+      (c) =>
+        ((m(c).watch.rpcUrls as Record<string, string>)["stellar:testnet"] =
+          "http://soroban-testnet.stellar.org"),
+      /watch.rpcUrls.stellar:testnet/,
+    ],
+    [
+      "an RPC with no dotted host",
+      (c) => ((m(c).watch.rpcUrls as Record<string, string>)["stellar:testnet"] = "https://x"),
+      /watch.rpcUrls.stellar:testnet/,
+    ],
+    [
+      "an RPC for a network not served",
+      (c) =>
+        ((m(c).watch.rpcUrls as Record<string, string>)["stellar:pubnet"] =
+          "https://rpc.example.com"),
+      /watch.rpcUrls.stellar:pubnet is not in networks/,
     ],
   ])("refuses %s", (_, change, message) => {
     expect(invalid(change)).toThrow(message);
