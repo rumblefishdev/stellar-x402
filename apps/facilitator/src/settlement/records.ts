@@ -81,8 +81,8 @@ export function createRecords(deps: RecordsDeps) {
    * Our inner transaction landed under another envelope than ours (0087): someone else's fee bump
    * of it at ten times our fee, or the inner transaction sent bare. The payer paid what they
    * signed, and their fee account paid the fee, so it costs nothing, but it isn't our envelope:
-   * a warning, counted, with the account that paid. Logged by whichever writer found it, so a
-   * rewrap the pool and a sweep both see is logged twice.
+   * a warning, counted, with the account that paid. Logged by the write that made the record
+   * final, so a rewrap the pool and a sweep both see is logged once.
    */
   const rewrapped = (
     key: SettlementKey,

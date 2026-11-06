@@ -900,6 +900,33 @@ describe("our inner transaction under another envelope (0087)", () => {
     expect(behind).toBe(false);
   });
 
+  it("ends pending when the inner read comes from a node whose history starts after the envelope", async () => {
+    const { fake, submitter } = setup({ timeoutSeconds: 600 });
+    fake.stalled = true;
+    let simLedger = 0;
+    const simulate = fake.simulateTransaction.bind(fake);
+    fake.simulateTransaction = async (...a) => {
+      const res = await simulate(...a);
+      simLedger = res.latestLedger;
+      return res;
+    };
+    const getTransaction = fake.getTransaction.bind(fake);
+    let innerReads = 0;
+    fake.getTransaction = async (hash) => {
+      const ours = fake.sent.at(-1) as FeeBumpTransaction | undefined;
+      const res = await getTransaction(hash);
+      if (!ours || hash !== ours.innerTransaction.hash().toString("hex")) return res;
+      innerReads += 1;
+      // Another node than the first read's (a `FallbackRpc` switch): past the bound, but its
+      // history starts after the envelope was built, so its NOT_FOUND can't rule a rewrap out.
+      return { ...res, oldestLedger: simLedger + 1 } as typeof res;
+    };
+    const res = await submitter.submit(call(), { maxLedger: fake.ledger + 3 });
+    expect(innerReads).toBe(1);
+    expect(res.status).toBe("pending");
+    expect(res.rewrap).toBeUndefined();
+  });
+
   it("ends failed under their hash when their fee bump landed and failed", async () => {
     const { fake, submitter } = stalledWith(rewrap, { status: "FAILED" });
     const res = await submitter.submit(call(), { maxLedger: fake.ledger + 3 });
