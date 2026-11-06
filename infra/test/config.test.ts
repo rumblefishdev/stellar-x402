@@ -23,11 +23,11 @@ describe("envs/production.json", () => {
     expect(production().networks).toEqual(["stellar:testnet"]);
   });
 
-  test("starts with the EMF error alarms on, the rest off until their series exist (26, 37)", () => {
+  test("has on only the groups whose series have data: EMF errors, uptime, the balance (26, 37)", () => {
     const on = Object.entries(production().alarmGroups)
       .filter(([, v]) => v)
       .map(([g]) => g);
-    expect(on).toEqual(["telemetry"]);
+    expect(on).toEqual(["uptime", "telemetry", "watch"]);
   });
 
   test("names the fee account /supported shows as the signer", () => {

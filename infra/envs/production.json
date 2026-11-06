@@ -28,7 +28,7 @@
     "auditDiskMount": "/"
   },
   "alarmGroups": {
-    "uptime": false,
+    "uptime": true,
     "telemetry": true,
     "facilitator": false,
     "channelHeld": false,
@@ -38,7 +38,7 @@
     "disk": false,
     "memory": false,
     "logVolume": false,
-    "watch": false,
+    "watch": true,
     "watchSecurity": false
   },
   "thresholds": {

@@ -247,8 +247,14 @@ test("no stack imports from another (decision 27)", () => {
 test("production as committed makes only the groups that are on", () => {
   const prod = synth(production());
   expect(prod.x.alarms.alarms.records.map((r) => r.alarmName).sort()).toEqual([
+    "x402-production-balance-critical-testnet",
+    "x402-production-balance-low-testnet",
     "x402-production-emf-parsing",
     "x402-production-emf-validation",
+    "x402-production-uptime",
+    "x402-production-uptime-flapping",
+    "x402-production-watch-errors",
+    "x402-production-watch-no-invocations",
   ]);
 });
 
