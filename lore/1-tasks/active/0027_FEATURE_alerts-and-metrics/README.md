@@ -67,6 +67,10 @@ history:
     status: active
     who: akot
     note: "Decision 70 replaces 66: the watch Lambda reads each network's protocol from Horizon (testnet 30/30, mainnet 29 with Core on 30 on 2026-11-06), with protocol-changed and protocol-upgrade-coming in a protocol group."
+  - date: "2026-11-06"
+    status: active
+    who: akot
+    note: "Watch stack deployed from #145's branch at 12:59 UTC: the Lambda reads Horizon (pubnet 29/30, testnet 30/30) beside the balance. check-series passed for protocol at 12:59 UTC (4 series), so #145 turns the group on (decisions 26, 70); the Alarms deploy waits for the merge."
 ---
 
 # Alerts and metrics

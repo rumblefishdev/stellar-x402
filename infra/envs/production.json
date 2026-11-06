@@ -52,7 +52,7 @@
     "logVolume": false,
     "watch": true,
     "watchSecurity": false,
-    "protocol": false
+    "protocol": true
   },
   "thresholds": {
     "uptimeFailingMinutes": 7,
