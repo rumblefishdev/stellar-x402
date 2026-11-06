@@ -650,11 +650,14 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     The watch Lambda's protocol section reads Horizon's root every 5 minutes for each network in
     `watch.protocol`, testnet and mainnet, served or not, and publishes `protocol_version` and
     `protocol_supported_version`. Horizon, not RPC: it gives both versions, and mainnet has a
-    public Horizon and no RPC of ours yet. The version we run against is each alarm's threshold
-    (`watch.protocol.<network>.expected`), raised in a PR once an upgrade is checked:
-    `protocol-changed` fires when the network runs above it, `protocol-upgrade-coming` when its
-    Core supports a version above it, which on mainnet is at once, the warning we want. Both are
-    Level alarms with `Maximum`, in a `protocol` group of their own. The validators' votes, which
+    public Horizon and no RPC of ours yet. Each alarm has its own threshold per network, raised
+    in a PR once acted on, so raising one never silences the other: `protocol-changed` fires when
+    the network runs above `expected`, the version we have checked, and
+    `protocol-upgrade-coming` when its Core supports a version above `supported`, the highest we
+    know of, which on mainnet is at once, the warning we want. Both are Level alarms with
+    `Maximum` over 2 of 2 five-minute periods (Horizon nodes differ during a rolling upgrade), in
+    a `protocol` group of their own. A Horizon that fails for 2 of 3 runs fires `watch-errors`,
+    mainnet's too: a dead protocol section must show. The validators' votes, which
     the explorer reads, would give the date; Core's supported version gives the readiness, which
     is enough to test the SDK in time.
 
