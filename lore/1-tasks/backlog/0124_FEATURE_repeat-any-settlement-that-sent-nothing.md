@@ -35,8 +35,10 @@ as today.
   needed a store operation the port didn't have), 0073 decision 20 (out of that task's scope) and
   0024 decision 35 (a budget or breaker refusal is "a deliberate wait"). No reason found that
   protects money: the payer pays at most once, since the auth entry's nonce is used once on chain.
-- Since 0082 every ended answer says to sign again only after `extra.expirationLedger`, so a
-  repeat of the same payload is the only way to pay before then.
+- Since 0082 every answer that ended a record says to sign again only after
+  `extra.expirationLedger`, so a repeat of the same payload is the only way to pay before then. A
+  refusal from the checks before the claim has no record and gets neither field (`withRetry`
+  needs a key), though the README says the same payment may be sent again.
 - Upstream's Stellar `exact` facilitator keeps no record, so any payment that wasn't sent can be
   sent again (`@x402/stellar` 2.28.0 `exact/facilitator/index.mjs`).
 
