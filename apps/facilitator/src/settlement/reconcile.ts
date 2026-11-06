@@ -1,4 +1,4 @@
-import { rpc } from "@stellar/stellar-sdk";
+import { Transaction, rpc } from "@stellar/stellar-sdk";
 import type { StellarNetwork } from "@stellar-x402/config";
 import {
   cannotLand,
@@ -18,6 +18,7 @@ import type {
 } from "../ports/index.js";
 import { isFinalRecord, resultUpdate, type Records } from "./records.js";
 import { SETTLE_REASONS } from "./settle.js";
+import { payerExpiration } from "./verify.js";
 
 export interface ReconcilerDeps {
   network: StellarNetwork;
@@ -169,6 +170,22 @@ export function createReconciler(deps: ReconcilerDeps) {
   };
 
   /**
+   * The ledger bound of a hash stored without one: the payer's auth expiry, past which no envelope
+   * of this payment can land, ours or someone else's fee bump of it (0087).
+   */
+  const fallbackLedger = (record: SettlementRecord): number | undefined => {
+    try {
+      const { transaction } = record.paymentPayload.payload as { transaction: string };
+      return payerExpiration(
+        new Transaction(transaction, getNetworkPassphrase(network)),
+        record.payer,
+      );
+    } catch {
+      return undefined;
+    }
+  };
+
+  /**
    * Whether the RPC's history reaches back to the record's claim: only then does `NOT_FOUND` say a
    * hash never landed. RPC keeps a window of ledgers (testnet's reports 120960, about 7 days;
    * other providers differ), so after a longer outage a landed hash is `NOT_FOUND` too.
@@ -200,6 +217,16 @@ export function createReconciler(deps: ReconcilerDeps) {
     return oldest;
   };
 
+  const pastBound = (
+    record: SettlementRecord,
+    attempt: SettlementAttempt,
+    res: rpc.Api.GetMissingTransactionResponse,
+  ) =>
+    cannotLand(res, {
+      maxTime: attempt.maxTime,
+      maxLedger: attempt.maxLedger ?? fallbackLedger(record),
+    });
+
   const resolveRecord = async (record: SettlementRecord): Promise<Outcome> => {
     if (record.hashes.length === 0) {
       if (record.state !== "claimed") return "open";
@@ -227,7 +254,7 @@ export function createReconciler(deps: ReconcilerDeps) {
       if (attempt.state === "dead") continue;
       const res = await deps.rpc.getTransaction(attempt.hash);
       if (res.status === rpc.Api.GetTransactionStatus.NOT_FOUND) {
-        if (!cannotLand(res, attempt)) open++;
+        if (!pastBound(record, attempt, res)) open++;
         else if (historyCovers(record, res)) {
           // Ours never landed, but someone else's fee bump of its inner transaction may have
           // (0087). A hash stored before the inner one was kept is resolved by itself alone.
@@ -237,7 +264,7 @@ export function createReconciler(deps: ReconcilerDeps) {
               return land(record, attempt, inner, dead, true);
             // The same rule as for our own hash: a node behind the bound, or without the
             // history, may not have seen theirs land, so the attempt stays open.
-            if (!cannotLand(inner, attempt) || !historyCovers(record, inner)) {
+            if (!pastBound(record, attempt, inner) || !historyCovers(record, inner)) {
               open++;
               continue;
             }
