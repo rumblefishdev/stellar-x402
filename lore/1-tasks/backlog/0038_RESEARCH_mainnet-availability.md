@@ -37,6 +37,10 @@ history:
     status: backlog
     who: stkrolikiewicz
     note: "0077: one facilitator for both networks in a production environment. Deploy safety once mainnet joins (staging or stricter rules), the memory limit and the shared uptime check are questions here; the mainnet tunnel and the digest check in a mainnet deploy.sh are gone."
+  - date: "2026-11-06"
+    status: backlog
+    who: karolkow
+    note: "Names the missing next step: a task that brings mainnet up once this decides the setup."
 ---
 
 # Decide the mainnet availability setup on the Hetzner server
@@ -103,6 +107,8 @@ remove, and how deploys stay safe once every one of them reaches mainnet.
   - extend the 0025 lease to channel sets;
   - run a deploy on testnet with two containers while payments flow.
 - Decide the hardware-fault plan and edge rate limiting.
+- Once decided, propose the task that brings mainnet up: its key, channel accounts, config and
+  first deploy. No task holds that step yet.
 
 ## Acceptance Criteria
 
