@@ -10,6 +10,7 @@
 import type { StellarNetwork } from "@stellar-x402/config";
 import { type SorobanRpc, checkFacilitatorBalance } from "@stellar-x402/signer-pool";
 
+import { describeError } from "./errors.js";
 import { METRIC, NAMESPACE, UNIT } from "./metric.js";
 
 export { METRIC, NAMESPACE, UNIT };
@@ -58,37 +59,6 @@ function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
 }
 
-/**
- * The forms of the RPC's URL an error can quote: as configured, as `new URL` writes it back (a
- * client prints that one: lower-case scheme and host, a default port dropped), and its path and
- * query alone, where a provider's key sits. Longest first, so a whole URL goes before its parts.
- */
-function urlForms(rpcUrl: string): string[] {
-  const forms = new Set([rpcUrl]);
-  try {
-    const u = new URL(rpcUrl);
-    forms.add(u.href);
-    forms.add(`${u.host}${u.pathname}${u.search}`);
-    if (u.pathname.length > 1) forms.add(u.pathname);
-    if (u.search) forms.add(u.search);
-  } catch {
-    // parseTargets refuses a URL that doesn't parse.
-  }
-  return [...forms].sort((a, b) => b.length - a.length);
-}
-
-/**
- * An error's text without the RPC's URL: a provider's key can sit in it on mainnet (0009's
- * endpoint naming), and the log names the network instead.
- */
-function describeError(error: unknown, target: WatchTarget): string {
-  const e = error as { name?: string; message?: string } | undefined;
-  let text = `${e?.name ?? "Error"}: ${e?.message ?? String(error)}`;
-  for (const form of urlForms(target.rpcUrl))
-    text = text.split(form).join(`rpc(${target.network})`);
-  return text;
-}
-
 /** The `PutMetricData` input for the networks read: one point each, in the catalog's unit. */
 export function balanceMetricData(
   readings: readonly { network: StellarNetwork; spendableStroops: bigint }[],
@@ -133,7 +103,7 @@ export async function runBalance(deps: BalanceDeps): Promise<BalanceResult[]> {
         });
         return { network: target.network, ok: true, spendableStroops: report.spendableStroops };
       } catch (error) {
-        const text = describeError(error, target);
+        const text = describeError(error, target.rpcUrl, `rpc(${target.network})`);
         deps.log({
           msg: "watch_section_failed",
           section: "balance",

@@ -42,6 +42,13 @@ describe("envs/production.json", () => {
     });
   });
 
+  test("reads the protocol of testnet and mainnet, at the versions of 2026-11-06 (decision 70)", () => {
+    expect(production().watch.protocol).toEqual({
+      "stellar:testnet": { horizonUrl: "https://horizon-testnet.stellar.org", expected: 30 },
+      "stellar:pubnet": { horizonUrl: "https://horizon.stellar.org", expected: 29 },
+    });
+  });
+
   test("names every group", () => {
     expect(Object.keys(production().alarmGroups).sort()).toEqual([...ALARM_GROUPS].sort());
   });
@@ -173,6 +180,26 @@ describe("validateConfig", () => {
       "an RPC with no dotted host",
       (c) => ((m(c).watch.rpcUrls as Record<string, string>)["stellar:testnet"] = "https://x"),
       /watch.rpcUrls.stellar:testnet/,
+    ],
+    [
+      "a protocol version that isn't an integer",
+      (c) => ((m(c).watch.protocol["stellar:testnet"] as { expected: number }).expected = 30.5),
+      /watch.protocol.stellar:testnet.expected/,
+    ],
+    [
+      "a plain-http Horizon",
+      (c) =>
+        ((m(c).watch.protocol["stellar:pubnet"] as { horizonUrl: string }).horizonUrl =
+          "http://horizon.stellar.org"),
+      /watch.protocol.stellar:pubnet.horizonUrl/,
+    ],
+    [
+      "the protocol group with no network to read",
+      (c) => {
+        m(c).watch.protocol = {};
+        m(c).alarmGroups.protocol = true;
+      },
+      /alarmGroups.protocol needs watch.protocol/,
     ],
     [
       "an RPC for a network not served",

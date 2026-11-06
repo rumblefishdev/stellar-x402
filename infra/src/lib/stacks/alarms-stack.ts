@@ -11,6 +11,7 @@ import { addCostSilenceAlarms } from "../alarms/cost-silence.js";
 import { AlarmFactory } from "../alarms/factory.js";
 import { addHostAlarms } from "../alarms/host.js";
 import { addMoneyAlarms } from "../alarms/money.js";
+import { addProtocolAlarms } from "../alarms/protocol.js";
 import { addSettlementAlarms } from "../alarms/settlement.js";
 import type { EnvironmentConfig } from "../config.js";
 import { names } from "../names.js";
@@ -68,6 +69,7 @@ export class AlarmsStack extends cdk.Stack {
     });
     addAvailabilityAlarms(this.alarms, config);
     addMoneyAlarms(this.alarms, config);
+    addProtocolAlarms(this.alarms, config);
     addSettlementAlarms(this.alarms, config);
     addHostAlarms(this.alarms, config);
     addCostSilenceAlarms(this.alarms, config);
