@@ -7,20 +7,15 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { openBaoSigner } from "../src/adapters/openbao-signer.js";
 import { parseConfig, type Env } from "../src/config.js";
 import { jsonLogger, rpcEndpointName } from "../src/logger.js";
-import {
-  buildChecks,
-  buildRpc,
-  buildSettlement,
-  compose,
-  start,
-  type UpstreamSeams,
-} from "../src/main.js";
+import { buildChecks, buildRpc, buildSettlement, compose } from "../src/main.js";
 import type { BuildIssue } from "../src/adapters/emf.js";
 import { emfMetrics } from "../src/adapters/emf-metrics.js";
 import { memoryMetrics, type ProcessMetrics } from "../src/metrics.js";
 import type { LeaseFence, SettlementStore, SpendScope } from "../src/ports/index.js";
 import { feeSettings } from "../src/settlement/fees.js";
 import { SETTLE_REASONS, keyOf } from "../src/settlement/settle.js";
+import type { UpstreamSeams } from "../src/settlement/upstream.js";
+import { start } from "../src/start.js";
 import { payerScope } from "../src/spend/limits.js";
 import { BREAKERS } from "../src/spend/policy.js";
 import { testDatabase } from "./database.js";

@@ -8,7 +8,7 @@ import { parseConfig } from "../src/config.js";
 import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
 import { MAX_BODY_DEPTH, NO_LEASE_RETRY_AFTER_S } from "../src/http/app.js";
-import { start, type Started } from "../src/main.js";
+import { start, type Started } from "../src/start.js";
 import { memoryMetrics } from "../src/metrics.js";
 import type { SettlementRecord } from "../src/ports/index.js";
 import { PAYTO_TRUSTLINE_REASON } from "../src/settlement/trustline.js";
