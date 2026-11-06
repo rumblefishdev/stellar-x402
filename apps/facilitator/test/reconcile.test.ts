@@ -40,7 +40,7 @@ const A = "a".repeat(64);
 const B = "b".repeat(64);
 const AUTH_EXPIRY = 5_000;
 
-/** A payload whose auth entry expires at `AUTH_EXPIRY`, the bound of a hash stored without one. */
+/** A payload whose auth entry expires at `AUTH_EXPIRY`. */
 function payloadWithAuth(): PaymentPayload {
   const payer = Keypair.random().publicKey();
   const asset = StrKey.encodeContract(Buffer.alloc(32, 7));
@@ -578,23 +578,16 @@ describe("createReconciler", () => {
       expect((await store.attempts(key)).map((a) => a.state)).toEqual(["dead", "landed"]);
     });
 
-    it("falls back to the auth entry's expiry for a hash stored without bounds (decision 6)", async () => {
-      const answers = { [A]: missing(AUTH_EXPIRY - 1) };
+    it("ends a hash only by its own bounds, not by the payload's auth expiry (0101)", async () => {
+      // Every hash gets its bounds when it is stored; a hash without them predates 0005, and no
+      // database a release has run on holds one.
+      const answers = { [A]: missing(AUTH_EXPIRY + 3) };
       const { store, reconciler } = setup(answers);
       const s = { ...settlement("1"), paymentPayload: payloadWithAuth(), createdAt: NOW };
       await store.claim(s);
       await store.addHash(s.key, A, await holdLease(store), NOW);
       await reconciler.sweep();
       expect((await store.get(s.key))?.state).toBe("signed");
-      answers[A] = missing(AUTH_EXPIRY);
-      await reconciler.sweep();
-      expect((await store.get(s.key))?.state).toBe("signed");
-      answers[A] = missing(AUTH_EXPIRY + 2);
-      await reconciler.sweep();
-      expect((await store.get(s.key))?.state).toBe("signed");
-      answers[A] = missing(AUTH_EXPIRY + 3);
-      await reconciler.sweep();
-      expect((await store.get(s.key))?.state).toBe("expired");
     });
 
     it("counts a record whose RPC call fails, leaves it, and goes on with the others", async () => {
