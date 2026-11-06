@@ -479,8 +479,8 @@
 
     # Enabled, not started: the runbook's admin step starts it once its credentials and the Borg
     # repository exist (OpenBao snapshots). A reboot before that starts it too, and the service's
-    # ConditionPathExists skips each run. Until then the snapshot-age alarm already says it never
-    # ran. Not under --check while this run would add the unit.
+    # ConditionPathExists skips each run. The snapshot-age alarm goes on at the end of that step,
+    # after the first stamp. Not under --check while this run would add the unit.
     - name: OpenBao's snapshot timer, enabled at boot
       ansible.builtin.systemd_service:
         name: x402-openbao-snapshot.timer
