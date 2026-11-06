@@ -120,6 +120,18 @@ hold either in ALARM the same way with a forged point every 15 minutes, so #115'
 each finding to the topic itself, one message per finding; the two alarms stay as the backstop for
 a check that can't publish (decision 64).
 
+## Protocol
+
+From the off-server check's protocol section, every 5 minutes, for each network in
+`watch.protocol` (testnet and mainnet), served or not, so an upgrade is seen before it reaches a
+network we serve. The version we run against is the alarms' threshold, set per network in the
+infra config and raised in a PR once an upgrade is checked. In the `protocol` group (decision 70).
+
+| Alarm | Signal | Shape | Fires when | Missing data |
+| --- | --- | --- | --- | --- |
+| `protocol-changed` | `protocol_version` | Level, `Maximum`, 1 of 1 five-minute period | Above the version we run against: the network upgraded. On 2026-11-03 testnet's move to 30 left an older SDK unable to read ledgers, found only by chance | Ignore: `watch-errors`, `watch-no-invocations` |
+| `protocol-upgrade-coming` | `protocol_supported_version` | Level, `Maximum`, 1 of 1 five-minute period | Stellar Core supports a version above it: the validators can vote the upgrade at any time. On 2026-11-06 mainnet ran 29 with Core supporting 30 | As above |
+
 ## Settlement
 
 | Alarm | Signal | Shape | Fires when | Missing data |
@@ -223,5 +235,3 @@ fields from it, and the weekly fee review needs a week of it.
 - The `channel-held` alarm, until 0089's PR.
 - An external dead-man's switch for a host outside AWS, which the sibling projects recommend:
   decide before mainnet, with 0038.
-- A watch for a coming protocol upgrade, which the explorer has after a 16-hour stall at one: it
-  reads the validators' votes, not a metric we have. Decide before mainnet, with 0038 (decision 66).
