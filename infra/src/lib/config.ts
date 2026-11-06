@@ -127,11 +127,18 @@ export interface EnvironmentConfig {
     readonly rpcUrls: Readonly<Partial<Record<StellarNetwork, string>>>;
     /**
      * The networks whose protocol the check reads, served or not, so an upgrade on mainnet is
-     * seen before we serve it (decision 70): Horizon's root URL, and the protocol version we run
-     * against. Raise `expected` in a PR once an upgrade is checked.
+     * seen before we serve it (decision 70): Horizon's root URL, the protocol the network runs
+     * that we have checked (`expected`, `protocol-changed`'s threshold), and the highest version
+     * its Stellar Core supports that we know of (`supported`, `protocol-upgrade-coming`'s). Each
+     * is raised in a PR once acted on, so each alarm re-arms for the next version on its own.
      */
     readonly protocol: Readonly<
-      Partial<Record<StellarNetwork, { readonly horizonUrl: string; readonly expected: number }>>
+      Partial<
+        Record<
+          StellarNetwork,
+          { readonly horizonUrl: string; readonly expected: number; readonly supported: number }
+        >
+      >
     >;
   };
   readonly slack: {
@@ -243,6 +250,7 @@ const schema = z.object({
         .object({
           horizonUrl: z.string({ message: HTTPS }).refine(isHttpsUrl, HTTPS),
           expected: count,
+          supported: count,
         })
         .strict(),
       { message: "must map networks to their Horizon and protocol version" },
@@ -283,6 +291,12 @@ function crossChecks(c: z.infer<typeof schema>, ctx: z.RefinementCtx): void {
     if (!c.networks.includes(n as StellarNetwork))
       fail(["watch", "rpcUrls", n], "is not in networks");
 
+  for (const [n, p] of Object.entries(c.watch.protocol))
+    if (p && p.supported < p.expected)
+      fail(
+        ["watch", "protocol", n, "supported"],
+        "must be at least expected: Core runs the protocol",
+      );
   if (c.alarmGroups.protocol && Object.keys(c.watch.protocol).length === 0)
     fail(["alarmGroups", "protocol"], "needs watch.protocol, the networks it reads");
 

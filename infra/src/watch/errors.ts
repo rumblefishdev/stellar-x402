@@ -3,8 +3,8 @@
 
 /**
  * The forms of an endpoint's URL an error can quote: as configured, as `new URL` writes it back (a
- * client prints that one: lower-case scheme and host, a default port dropped), and its path and
- * query alone, where a provider's key sits. Longest first, so a whole URL goes before its parts.
+ * client prints that one: lower-case scheme and host, a default port dropped), and its host, path
+ * and query alone, where a provider's key sits. Longest first, so a whole URL goes before its parts.
  */
 function urlForms(url: string): string[] {
   const forms = new Set([url]);
@@ -12,6 +12,9 @@ function urlForms(url: string): string[] {
     const u = new URL(url);
     forms.add(u.href);
     forms.add(`${u.host}${u.pathname}${u.search}`);
+    // A DNS or TLS error quotes the host alone, where a key can sit in a subdomain.
+    forms.add(u.host);
+    forms.add(u.hostname);
     if (u.pathname.length > 1) forms.add(u.pathname);
     if (u.search) forms.add(u.search);
   } catch {

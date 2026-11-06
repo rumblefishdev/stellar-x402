@@ -326,6 +326,8 @@ const OP = {
 /** A threshold set per network, from `watch.protocol` (decision 70). */
 const expectedProtocol = (network: StellarNetwork | undefined) =>
   allOn().watch.protocol[network!]!.expected;
+const supportedProtocol = (network: StellarNetwork | undefined) =>
+  allOn().watch.protocol[network!]!.supported;
 
 const LEVEL: Record<
   string,
@@ -364,8 +366,8 @@ const LEVEL: Record<
   "log-volume": [">", t.logVolumeBytesPerHour!, "Sum", 3600, 1, 1],
   "gauges-silent": [">=", 1, "SampleCount", 300, 3, 3],
   "watch-errors": [">=", 1, "Sum", 300, 2, 3],
-  "protocol-changed": [">", expectedProtocol, "Maximum", 300, 1, 1],
-  "protocol-upgrade-coming": [">", expectedProtocol, "Maximum", 300, 1, 1],
+  "protocol-changed": [">", expectedProtocol, "Maximum", 300, 2, 2],
+  "protocol-upgrade-coming": [">", supportedProtocol, "Maximum", 300, 2, 2],
 };
 
 /** Each Event alarm's threshold other than 1, which the list writes as "at N or more". */

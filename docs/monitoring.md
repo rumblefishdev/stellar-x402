@@ -133,16 +133,20 @@ no one on the team made as a theft of the facilitator key (ADR 0013).
 
 ### watch-errors
 
-The check failed in 2 of its last 3 runs, so a balance was not published. The balance alarms keep
-their last state meanwhile.
+The check failed in 2 of its last 3 runs, so a section was not published: the balance (read
+through the RPC) or the protocol (read from Horizon). That section's alarms keep their last state
+meanwhile; the other section still published.
 
-1. Read the log for `watch_section_failed`: it names the network and the error. The RPC's URL is
-   left out of the error and shown as `rpc(<network>)`.
+1. Read the log for `watch_section_failed`: it names the section, the network and the error.
+   Endpoint URLs are left out and shown as `rpc(<network>)` or `horizon(<network>)`.
 2. `no answer in 30000 ms` or a connection error: the RPC (`watch.rpcUrls` in
    `infra/envs/production.json`) is down or slow. Testnet's is SDF's public one.
 3. `Account not found`: the fee account doesn't exist. On testnet that follows testnet's reset;
    Friendbot creates it again ([OpenBao](runbook.md#openbao), step 6).
 4. `AccessDenied` on `PutMetricData`: the function's role changed; redeploy the Watch stack.
+5. The protocol section: `status 5xx`, a timeout or `no protocol versions` means that network's
+   Horizon (`watch.protocol` in the infra config) is down or answering something else; mainnet's
+   counts too, though we don't serve it yet. Check it in a browser; it usually passes by itself.
 
 ### watch-no-invocations
 
@@ -158,9 +162,11 @@ The check hasn't run for 15 minutes, so the balance alarms see nothing.
 
 The check reads each network's protocol from Horizon (`current_protocol_version`, and
 `core_supported_protocol_version`, the highest version the network's Stellar Core runs). The
-version we run against is each alarm's threshold: `watch.protocol.<network>.expected` in
-`infra/envs/production.json`, 30 for testnet and 29 for mainnet on 2026-11-06. On 2026-11-03
-testnet moved to 30 and an older SDK stopped reading its ledgers, which no alarm saw.
+alarms compare them with two numbers per network in `watch.protocol` in
+`infra/envs/production.json`: `expected`, the protocol we have checked the facilitator against,
+and `supported`, the highest Core version we know of. On 2026-11-06 both were 30 for testnet and
+29 for mainnet, whose Core already supported 30. On 2026-11-03 testnet moved to 30 and an older
+SDK stopped reading its ledgers, which no alarm saw.
 
 ### protocol-changed
 
@@ -171,7 +177,8 @@ The network now runs a protocol above the version we run against: it upgraded.
 2. Check that `@stellar/stellar-sdk` and the RPC support the new version (their release notes);
    upgrade the SDK if they don't.
 3. Raise `expected` for that network to the new version in a PR, merge it and deploy the alarms
-   (`make deploy-production-alarms` in `infra/`). Both protocol alarms go back to OK.
+   (`make deploy-production-alarms` in `infra/`). The alarm goes back to OK and re-arms for the
+   next version.
 
 ### protocol-upgrade-coming
 
@@ -179,10 +186,10 @@ The network's Stellar Core supports a protocol above the version we run against:
 can vote the upgrade at any time. Mainnet was in this state on 2026-11-06 (29, Core supporting 30).
 
 1. Find the upgrade's date in Stellar's announcements (the network's upgrade schedule).
-2. Before it reaches a network we serve, test the SDK and the RPC against the new version on
-   testnet, which usually upgrades weeks earlier.
-3. After the upgrade, `protocol-changed` fires too; raising `expected` as there puts both back to
-   OK.
+2. Plan a test of the SDK and the RPC against the new version on testnet, which usually upgrades
+   weeks earlier, before it reaches a network we serve.
+3. Raise `supported` for that network to the new version in a PR and deploy the alarms: this one
+   goes back to OK. `protocol-changed` fires on the upgrade itself, with its own `expected`.
 
 ## Drills
 

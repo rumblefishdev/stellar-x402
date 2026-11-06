@@ -124,13 +124,15 @@ a check that can't publish (decision 64).
 
 From the off-server check's protocol section, every 5 minutes, for each network in
 `watch.protocol` (testnet and mainnet), served or not, so an upgrade is seen before it reaches a
-network we serve. The version we run against is the alarms' threshold, set per network in the
-infra config and raised in a PR once an upgrade is checked. In the `protocol` group (decision 70).
+network we serve. Each alarm has its own threshold per network in the infra config: `expected`,
+the protocol we have checked, and `supported`, the highest Core version we know of. Each is raised
+in a PR once acted on, so each re-arms for the next version on its own. In the `protocol` group
+(decision 70).
 
 | Alarm | Signal | Shape | Fires when | Missing data |
 | --- | --- | --- | --- | --- |
-| `protocol-changed` | `protocol_version` | Level, `Maximum`, 1 of 1 five-minute period | Above the version we run against: the network upgraded. On 2026-11-03 testnet's move to 30 left an older SDK unable to read ledgers, found only by chance | Ignore: `watch-errors`, `watch-no-invocations` |
-| `protocol-upgrade-coming` | `protocol_supported_version` | Level, `Maximum`, 1 of 1 five-minute period | Stellar Core supports a version above it: the validators can vote the upgrade at any time. On 2026-11-06 mainnet ran 29 with Core supporting 30 | As above |
+| `protocol-changed` | `protocol_version` | Level, `Maximum`, 2 of 2 five-minute periods | Above `expected`: the network upgraded. On 2026-11-03 testnet's move to 30 left an older SDK unable to read ledgers, found only by chance | Ignore: `watch-errors`, `watch-no-invocations` |
+| `protocol-upgrade-coming` | `protocol_supported_version` | Level, `Maximum`, 2 of 2 five-minute periods | Stellar Core supports a version above `supported`: the validators can vote the upgrade at any time. On 2026-11-06 mainnet ran 29 with Core supporting 30. Two periods, since Horizon nodes behind the balancer differ during a rolling upgrade | As above |
 
 ## Settlement
 
