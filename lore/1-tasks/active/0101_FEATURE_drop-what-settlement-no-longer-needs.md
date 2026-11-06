@@ -50,7 +50,7 @@ Figures are from `origin/develop` on 2026-11-03. Work each item from what is tru
    `attemptsOf` and the three `vi.mock`s of the package that exist because of it.
 4. **Merged in #146. `[structure only]`, ~1.5 h. What in `main.ts` isn't wiring.** Move `start()` to its own file,
    and `failureReason`, `upstreamDeadlineMs` and `buildUpstream` beside `upstream-failover.ts`.
-5. **In #147. `[refactor]`, ~1 h. One reader of the auth expiry.** `settle.ts` already read
+5. **Merged in #147. `[refactor]`, ~1 h. One reader of the auth expiry.** `settle.ts` already read
    `payerExpiration`; `verify.ts` and reconciliation's `fallbackLedger` switch to it, and
    `authExpiration` goes. `fallbackLedger` stays: someone else's fee bump of ours (0087) is stored
    without bounds, so it isn't only for rows before migration 0005.
