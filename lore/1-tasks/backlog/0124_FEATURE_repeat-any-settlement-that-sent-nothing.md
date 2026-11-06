@@ -48,6 +48,7 @@ as today.
 |---|---|---|---|---|---|---|
 | 1 | A record that ended with nothing sent reopens by default, also for a reason nobody listed | owner, 2026-11-06 | matches | upstream Stellar `exact`: no record, any unsent payment is sent again | | |
 | 2 | No refusal without a send ends a payment for good: budgets, breakers, fee, simulation, hook errors, `unexpected_settle_error` included | owner, 2026-11-06 | changes 0024 decision 35 | upstream Stellar `exact`, as row 1 | | |
+| 3 | `extra.retryable` says whether a repeat can succeed, per reason: `false` for a refusal the same payload always gets (`…_unexpected_balance_changes`, `…_payer_not_authorized`, `…_unsupported_credential`, `…_signature_expiration_too_soon`) and for a spend budget, whose 24 h window outlasts the auth entry; the payload still reopens | owner, 2026-11-06, after a devil's-advocate review | beyond it | upstream Stellar `exact` sets `retryable` only on `TRY_AGAIN_LATER` (`exact/facilitator/index.mjs`) | | |
 
 ## Not yet decided
 
@@ -60,15 +61,16 @@ as today.
   reopen still runs the full `/settle` check first (0073 decision 13) and passes the hooks again,
   so a budget still spent or a breaker still open refuses again.
 - Every such ending answers `extra.retryable` and `expirationLedger`, as the unsent answers do
-  now. Update the facilitator README's settle answers and 0024 decision 35.
+  now, with `retryable` set by decision 3. Update the facilitator README's settle answers and 0024 decision 35.
 
 ## Acceptance Criteria
 
 - [ ] Given a record ended `rejected` with no hash and any `errorReason`, including one not
       defined today, when the identical payload returns while its auth entry has 2 or more ledgers
       left, then it settles once
-- [ ] Given such an ending, when the client reads the answer, then it says to repeat the same
-      payment until the expiration ledger, never to sign a new one before it
+- [ ] Given such an ending, when the client reads the answer, then it never says to sign a new
+      payment before the expiration ledger, and says to repeat the same one only when a repeat
+      can succeed (decision 3)
 - [ ] Given a record with a hash, when the identical payload returns, then it doesn't reopen
 - [ ] Given a reopen after a budget refusal, when the budget is still spent, then it is refused
       again with the same reason
