@@ -86,9 +86,15 @@ As a reviewer of the grant, I want e2e results with real settled transaction has
 - Run the 0028 harness against the deployed facilitator.
 - Commit results; triage failures into lane tasks; rerun on the final build.
 
+## Run of record
+
+2026-11-06, 13:31 UTC, `conformance/results/testnet-hosted/`: 18 of 18 scenarios passed, each
+settled on chain with the facilitator's signer as fee payer. Upstream `8827cf1`, facilitator
+`68e778e`, gate `a2fdfb0`. The final run on the finished T1 build is still to come.
+
 ## Acceptance Criteria
 
-- [ ] Given our facilitator deployed at its public URL (0026), when the gate runs, then the canonical client settles `exact` for each Stellar scenario (the 9 `upfront` ones without a `/verify`) and every run records a real transaction hash
-- [ ] Given a finished run, when results are saved, then `conformance/results/` gets the run JSON with the upstream commit, the date, our facilitator version and the transaction hashes
-- [ ] Given a failing scenario, when it is analysed, then a backlog task is created for the owning lane
+- [x] Given our facilitator deployed at its public URL (0026), when the gate runs, then the canonical client settles `exact` for each Stellar scenario (the 9 `upfront` ones without a `/verify`) and every run records a real transaction hash
+- [x] Given a finished run, when results are saved, then `conformance/results/` gets the run JSON with the upstream commit, the date, our facilitator version and the transaction hashes
+- [x] Given a failing scenario, when it is analysed, then a backlog task is created for the owning lane (no scenario failed in the run of record)
 - [ ] Given the finished T1 build, including Bazaar and spend budgets, when the gate reruns, then it passes and the final results are committed
