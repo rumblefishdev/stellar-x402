@@ -7,7 +7,7 @@ Description=x402 OpenBao snapshot, daily
 Documentation=https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/runbook.md
 
 [Timer]
-OnCalendar=*-*-* 03:15:00
+OnCalendar=*-*-* 03:15:00 UTC
 AccuracySec=1s
 RandomizedDelaySec=15min
 Persistent=true

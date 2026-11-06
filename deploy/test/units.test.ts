@@ -59,7 +59,7 @@ describe("the timers", () => {
     ["x402-host-probe", "*-*-* *:*:30"],
     ["x402-logrotate", "*:00/10:20"],
     ["x402-cloudwatch-credentials", "hourly"],
-    ["x402-openbao-snapshot", "*-*-* 03:15:00"],
+    ["x402-openbao-snapshot", "*-*-* 03:15:00 UTC"],
   ])("%s runs at %s, to the second, and its oneshot has a timeout", (name, calendar) => {
     const timer = unit(`${name}.timer`);
     expect(settings(timer, "OnCalendar")).toEqual([calendar]);
@@ -289,6 +289,12 @@ describe("the snapshot job", () => {
       at.join(),
     ).toBe(true);
     expect([...at].sort((a, b) => a - b)).toEqual(at);
+  });
+
+  test("retries a failed run the same night, well inside the 26-hour alarm", () => {
+    const service = unit("x402-openbao-snapshot.service");
+    expect(settings(service, "Restart")).toEqual(["on-failure"]);
+    expect(settings(service, "RestartSec")).toEqual(["20min"]);
   });
 
   test("fails on any step, and keeps both AppRole IDs off the command line", () => {
