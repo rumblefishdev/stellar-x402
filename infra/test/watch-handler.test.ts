@@ -65,6 +65,20 @@ describe("createHandler", () => {
     expect(asked).toEqual([RPC]);
   });
 
+  test("resolves to nothing the runtime can't serialize: a result with bigints failed every run", async () => {
+    const rpc = new FakeRpc({ [FEE]: 1n });
+    rpc.balances.set(FEE, 1_010_000_000n);
+    const handler = createHandler({
+      env,
+      rpcFor: () => rpc,
+      publish: async () => {},
+      log: () => {},
+    });
+    const result = await handler({});
+    expect(result).toBeUndefined();
+    expect(() => JSON.stringify(result)).not.toThrow();
+  });
+
   test("refuses to start without its targets", () => {
     expect(() => createHandler({ env: {}, publish: async () => {} })).toThrow(/WATCH_TARGETS/);
   });
