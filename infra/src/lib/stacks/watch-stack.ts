@@ -12,7 +12,7 @@ import * as scheduler from "aws-cdk-lib/aws-scheduler";
 import * as targets from "aws-cdk-lib/aws-scheduler-targets";
 import type { Construct } from "constructs";
 import { NAMESPACE } from "../../watch/metric.js";
-import { TARGETS_ENV } from "../../watch/targets.js";
+import { PROTOCOL_ENV, TARGETS_ENV } from "../../watch/targets.js";
 import type { EnvironmentConfig } from "../config.js";
 import { INFRA_ROOT, names } from "../names.js";
 
@@ -40,7 +40,7 @@ export class WatchStack extends cdk.Stack {
 
     const fn = new lambda.Function(this, "Watch", {
       functionName,
-      description: `Reads the fee accounts every 5 minutes and publishes to ${NAMESPACE} (task 0027)`,
+      description: `Reads the fee accounts and the networks' protocol every 5 minutes, publishes to ${NAMESPACE} (task 0027)`,
       runtime: lambda.Runtime.NODEJS_22_X,
       architecture: lambda.Architecture.ARM_64,
       handler: "index.handler",
@@ -55,7 +55,16 @@ export class WatchStack extends cdk.Stack {
       // `watch-errors`, and a run queued past its slot would stamp an old time.
       retryAttempts: 0,
       maxEventAge: cdk.Duration.seconds(60),
-      environment: { [TARGETS_ENV]: JSON.stringify(watchTargets) },
+      environment: {
+        [TARGETS_ENV]: JSON.stringify(watchTargets),
+        // Every network in watch.protocol, served or not (decision 70).
+        [PROTOCOL_ENV]: JSON.stringify(
+          Object.entries(config.watch.protocol).map(([network, p]) => ({
+            network,
+            horizonUrl: p!.horizonUrl,
+          })),
+        ),
+      },
       logGroup: new logs.LogGroup(this, "WatchLogGroup", {
         logGroupName: `/aws/lambda/${functionName}`,
         retention: logs.RetentionDays.ONE_MONTH,
