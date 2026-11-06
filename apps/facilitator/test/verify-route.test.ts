@@ -6,7 +6,7 @@ import { parseConfig } from "../src/config.js";
 import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
-import { start, type Started } from "../src/main.js";
+import { start, type Started } from "../src/start.js";
 import { PAYTO_TRUSTLINE_REASON } from "../src/settlement/trustline.js";
 import type { Verify } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";

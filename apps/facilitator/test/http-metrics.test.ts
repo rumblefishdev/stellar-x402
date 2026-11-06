@@ -5,7 +5,7 @@ import { parseConfig } from "../src/config.js";
 import { routeLabel } from "../src/http/app.js";
 import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
-import { start, type Started } from "../src/main.js";
+import { start, type Started } from "../src/start.js";
 import { memoryMetrics, type Labels } from "../src/metrics.js";
 import type { Stores } from "../src/ports/index.js";
 import type { LeaseKeeper } from "../src/settlement/lease.js";

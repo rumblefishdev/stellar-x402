@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseConfig } from "../src/config.js";
 import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
-import { start, type Started } from "../src/main.js";
+import { start, type Started } from "../src/start.js";
 import { rateLimit } from "../src/http/rate-limit.js";
 import { memoryMetrics } from "../src/metrics.js";
 import type { RateLimitStore, Stores } from "../src/ports/index.js";

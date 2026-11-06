@@ -35,7 +35,8 @@ import { ExactStellarScheme } from "@x402/stellar/exact/client";
 import { Agent, setGlobalDispatcher } from "undici";
 import { parseConfig } from "../../src/config.js";
 import { jsonLogger } from "../../src/logger.js";
-import { UPSTREAM_TIMEOUT_MS, buildRpc, buildVerifier } from "../../src/main.js";
+import { buildRpc, buildVerifier } from "../../src/main.js";
+import { UPSTREAM_TIMEOUT_MS } from "../../src/settlement/upstream.js";
 import { feeSettings } from "../../src/settlement/fees.js";
 import { signerEnv } from "../fake-openbao.js";
 
