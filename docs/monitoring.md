@@ -29,38 +29,38 @@ PR (decision 68).
 | `watch-no-invocations`    | `watch`       | 2026-11-06 11:16 UTC      | Not yet                                                                                           |
 | `protocol-changed`        | `protocol`    | With #145's Alarms deploy | Not yet                                                                                           |
 | `protocol-upgrade-coming` | `protocol`    | With #145's Alarms deploy | Not yet                                                                                           |
-| `facilitator-silent`      | `facilitator` | #NNN                      | Not yet                                                                                           |
-| `gauges-silent`           | `facilitator` | #NNN                      | Not yet                                                                                           |
-| `http-500`                | `facilitator` | #NNN                      | Not yet                                                                                           |
-| `rpc-stalled`             | `facilitator` | #NNN                      | Not yet                                                                                           |
-| `rpc-on-fallback`         | `facilitator` | #NNN                      | Not yet                                                                                           |
-| `balance-stale`           | `facilitator` | #NNN                      | Not yet                                                                                           |
-| `pending`                 | `facilitator` | #NNN                      | Not yet                                                                                           |
-| `sweeps-stopped`          | `facilitator` | #NNN                      | Not yet                                                                                           |
-| `settlement-expired`      | `facilitator` | #NNN                      | Not yet                                                                                           |
-| `landed-after-expired`    | `facilitator` | #NNN                      | Not yet                                                                                           |
-| `history-gone`            | `facilitator` | #NNN                      | Not yet                                                                                           |
-| `submit-failed`           | `facilitator` | #NNN                      | Not yet                                                                                           |
-| `refused-after-verify`    | `facilitator` | #NNN                      | Not yet                                                                                           |
-| `failure-ours`            | `facilitator` | #NNN                      | Not yet                                                                                           |
-| `signer-failures`         | `facilitator` | #NNN                      | Not yet                                                                                           |
-| `store-outage`            | `facilitator` | #NNN                      | Not yet                                                                                           |
-| `hook-failures`           | `facilitator` | #NNN                      | Not yet                                                                                           |
-| `queue-waiting`           | `facilitator` | #NNN                      | Not yet                                                                                           |
-| `channel-quarantined`     | `facilitator` | #NNN                      | Not yet                                                                                           |
-| `pool-health`             | `facilitator` | #NNN                      | Not yet                                                                                           |
-| `breaker-opened`          | `facilitator` | #NNN                      | Not yet                                                                                           |
-| `budget-nearing`          | `facilitator` | #NNN                      | Not yet                                                                                           |
-| `commit-unmatched`        | `facilitator` | #NNN                      | Not yet                                                                                           |
-| `openbao-down`            | `host`        | #NNN                      | Not yet                                                                                           |
-| `audit-disk`              | `host`        | #NNN                      | Not yet                                                                                           |
-| `facilitator-failed`      | `host`        | #NNN                      | Not yet                                                                                           |
-| `watchdog-restart`        | `host`        | #NNN                      | Not yet                                                                                           |
-| `probe-silent`            | `host`        | #NNN                      | Not yet                                                                                           |
-| `telemetry-silent`        | `host`        | #NNN                      | Not yet                                                                                           |
-| `credentials-stale`       | `host`        | #NNN                      | Not yet                                                                                           |
-| `certificate`             | `host`        | #NNN                      | Not yet                                                                                           |
-| `log-volume`              | `logVolume`   | #NNN                      | Not yet                                                                                           |
+| `facilitator-silent`      | `facilitator` | #150                      | Not yet                                                                                           |
+| `gauges-silent`           | `facilitator` | #150                      | Not yet                                                                                           |
+| `http-500`                | `facilitator` | #150                      | Not yet                                                                                           |
+| `rpc-stalled`             | `facilitator` | #150                      | Not yet                                                                                           |
+| `rpc-on-fallback`         | `facilitator` | #150                      | Not yet                                                                                           |
+| `balance-stale`           | `facilitator` | #150                      | Not yet                                                                                           |
+| `pending`                 | `facilitator` | #150                      | Not yet                                                                                           |
+| `sweeps-stopped`          | `facilitator` | #150                      | Not yet                                                                                           |
+| `settlement-expired`      | `facilitator` | #150                      | Not yet                                                                                           |
+| `landed-after-expired`    | `facilitator` | #150                      | Not yet                                                                                           |
+| `history-gone`            | `facilitator` | #150                      | Not yet                                                                                           |
+| `submit-failed`           | `facilitator` | #150                      | Not yet                                                                                           |
+| `refused-after-verify`    | `facilitator` | #150                      | Not yet                                                                                           |
+| `failure-ours`            | `facilitator` | #150                      | Not yet                                                                                           |
+| `signer-failures`         | `facilitator` | #150                      | Not yet                                                                                           |
+| `store-outage`            | `facilitator` | #150                      | Not yet                                                                                           |
+| `hook-failures`           | `facilitator` | #150                      | Not yet                                                                                           |
+| `queue-waiting`           | `facilitator` | #150                      | Not yet                                                                                           |
+| `channel-quarantined`     | `facilitator` | #150                      | Not yet                                                                                           |
+| `pool-health`             | `facilitator` | #150                      | Not yet                                                                                           |
+| `breaker-opened`          | `facilitator` | #150                      | Not yet                                                                                           |
+| `budget-nearing`          | `facilitator` | #150                      | Not yet                                                                                           |
+| `commit-unmatched`        | `facilitator` | #150                      | Not yet                                                                                           |
+| `openbao-down`            | `host`        | #150                      | Not yet                                                                                           |
+| `audit-disk`              | `host`        | #150                      | Not yet                                                                                           |
+| `facilitator-failed`      | `host`        | #150                      | Not yet                                                                                           |
+| `watchdog-restart`        | `host`        | #150                      | Not yet                                                                                           |
+| `probe-silent`            | `host`        | #150                      | Not yet                                                                                           |
+| `telemetry-silent`        | `host`        | #150                      | Not yet                                                                                           |
+| `credentials-stale`       | `host`        | #150                      | Not yet                                                                                           |
+| `certificate`             | `host`        | #150                      | Not yet                                                                                           |
+| `log-volume`              | `logVolume`   | #150                      | Not yet                                                                                           |
 
 A network-scoped alarm has the network at the end of its name (`balance-low-testnet`), and
 `breaker-opened` its kind after the network (`breaker-opened-testnet-payer`). AWS commands below use the
