@@ -17,6 +17,18 @@
   "watch": {
     "rpcUrls": {
       "stellar:testnet": "https://soroban-testnet.stellar.org"
+    },
+    "protocol": {
+      "stellar:testnet": {
+        "horizonUrl": "https://horizon-testnet.stellar.org",
+        "expected": 30,
+        "supported": 30
+      },
+      "stellar:pubnet": {
+        "horizonUrl": "https://horizon.stellar.org",
+        "expected": 29,
+        "supported": 29
+      }
     }
   },
   "slack": {
@@ -39,7 +51,8 @@
     "memory": false,
     "logVolume": false,
     "watch": true,
-    "watchSecurity": false
+    "watchSecurity": false,
+    "protocol": true
   },
   "thresholds": {
     "uptimeFailingMinutes": 7,

@@ -59,6 +59,18 @@ history:
     status: active
     who: akot
     note: "check-series passed for uptime (08:41 UTC, the probe's ready) and for watch (about 09:45 UTC, after the Watch stack's deploy at 09:36 UTC: spendable_stroops, AWS/Lambda Errors and Invocations), so #115 turns both groups on (decisions 26, 37). Oskar's review of #115: docs/monitoring.md sections for the 8 alarms that are on, the handler's logic and the bundle tested, one URL rule, Watch before Alarms on a fresh account; decisions 2, 23 and 64 amended by 68."
+  - date: "2026-11-06"
+    status: active
+    who: akot
+    note: "#115 and its fix #141 merged and deployed: Watch, then Alarms at 11:16 UTC (uptime and watch groups on). balance-low and balance-critical fired with a fake 5 XLM spendable_stroops point: ALARM 11:20:10 and 11:20:35, OK 11:25:10 and 11:25:35 UTC, all four seen in Slack (docs/monitoring.md, Drills). M1's low-balance alarm is done; budget, breaker, quarantine and pending wait on #137."
+  - date: "2026-11-06"
+    status: active
+    who: akot
+    note: "Decision 70 replaces 66: the watch Lambda reads each network's protocol from Horizon (testnet 30/30, mainnet 29 with Core on 30 on 2026-11-06), with protocol-changed and protocol-upgrade-coming in a protocol group."
+  - date: "2026-11-06"
+    status: active
+    who: akot
+    note: "Watch stack deployed from #145's branch at 12:59 UTC: the Lambda reads Horizon (pubnet 29/30, testnet 30/30) beside the balance. check-series passed for protocol at 12:59 UTC (4 series), so #145 turns the group on (decisions 26, 70); the Alarms deploy waits for the merge."
 ---
 
 # Alerts and metrics
@@ -601,7 +613,7 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
 66. **No protocol-upgrade watch in 0027** (2026-11-05, point 2). The explorer has one after a
     16-hour stall at an upgrade. For the facilitator an upgrade is mostly an SDK update; a watch
     reads the validators' votes, not a metric we have. It is named in G-alarm-list's Deferred, to decide with 0038 before
-    mainnet.
+    mainnet. Replaced by decision 70 on 2026-11-06.
 67. **Three cuts in `infra/`** (2026-11-05, point 8). The Count shape was `event()` with 5-minute
     periods, N = 3 and a threshold, so it went; `pool-health` is that Event. The fee account's
     check is `StrKey.isValidEd25519PublicKey`, as in the facilitator's config, not 30 lines of
@@ -636,6 +648,22 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     Before `stellar:pubnet` joins `networks` (from Oskar's review of #115): a provider's keyed
     URL comes from an SSM parameter, the role gets `ssm:GetParameter` on it, and errors are masked
     by the URL's host and path, not only by an exact copy of it.
+70. **The check watches each network's protocol** (akot, 2026-11-06; replaces decision 66). On
+    2026-11-03 testnet moved to protocol 30 and an older SDK stopped reading its ledgers, found
+    only by a chance test, and on 2026-11-06 mainnet ran 29 with its Stellar Core supporting 30.
+    The watch Lambda's protocol section reads Horizon's root every 5 minutes for each network in
+    `watch.protocol`, testnet and mainnet, served or not, and publishes `protocol_version` and
+    `protocol_supported_version`. Horizon, not RPC: it gives both versions, and mainnet has a
+    public Horizon and no RPC of ours yet. Each alarm has its own threshold per network, raised
+    in a PR once acted on, so raising one never silences the other: `protocol-changed` fires when
+    the network runs above `expected`, the version we have checked, and
+    `protocol-upgrade-coming` when its Core supports a version above `supported`, the highest we
+    know of, which on mainnet is at once, the warning we want. Both are Level alarms with
+    `Maximum` over 2 of 2 five-minute periods (Horizon nodes differ during a rolling upgrade), in
+    a `protocol` group of their own. A Horizon that fails for 2 of 3 runs fires `watch-errors`,
+    mainnet's too: a dead protocol section must show. The validators' votes, which
+    the explorer reads, would give the date; Core's supported version gives the readiness, which
+    is enough to test the SDK in time.
 
 ## Acceptance Criteria
 

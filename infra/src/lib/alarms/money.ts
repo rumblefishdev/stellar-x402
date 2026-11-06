@@ -110,8 +110,8 @@ export function addMoneyAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
     comparison: ">=",
     threshold: 1,
     description: {
-      what: "The off-server check failed in 2 of its last 3 runs: a section it runs was not published. Today it runs the balance section only; the theft and secret-read sections come later (decision 68).",
-      next: `Read the ${n.watchFunction} log for the section that threw; the others published before it.`,
+      what: "The off-server check failed in 2 of its last 3 runs: a section was not published, the balance (its RPC) or the protocol (Horizon). The theft and secret-read sections come later (decision 68).",
+      next: `Read the ${n.watchFunction} log for watch_section_failed: it names the section and the network; the other section still published.`,
       noData: "Keeps its state; watch-no-invocations covers runs that don't happen.",
     },
   });
@@ -120,7 +120,7 @@ export function addMoneyAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
     group: "watch",
     signal: { aws: "AWS/Lambda", metric: "Invocations", dims: { FunctionName: n.watchFunction } },
     description: {
-      what: "The off-server check has not run for 15 minutes, so the alarms on its metrics see nothing: the balance alarms today, and the theft and secret-read ones once those sections run (decision 68).",
+      what: "The off-server check has not run for 15 minutes, so the alarms on its metrics see nothing: the balance and protocol alarms today, and the theft and secret-read ones once those sections run (decision 68).",
       next: `Check ${n.watchFunction} and its schedule in the Watch stack.`,
       noData: "Breaching: no runs is what this alarm is for.",
     },

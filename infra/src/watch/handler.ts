@@ -2,7 +2,8 @@
 // with fakes: lambdas/watch/index.mjs only builds the CloudWatch client and passes it in.
 import { rpc } from "@stellar/stellar-sdk";
 import { type BalanceDeps, runBalance } from "./balance.js";
-import { TARGETS_ENV, parseTargets } from "./targets.js";
+import { runProtocol } from "./protocol.js";
+import { PROTOCOL_ENV, TARGETS_ENV, parseProtocolTargets, parseTargets } from "./targets.js";
 
 /** The schedule's input (watch-stack.ts): its scheduled time, `<aws.scheduler.scheduled-time>`. */
 export interface WatchEvent {
@@ -26,27 +27,46 @@ export interface HandlerDeps {
   readonly publish: BalanceDeps["publish"];
   readonly log?: BalanceDeps["log"];
   readonly rpcFor?: BalanceDeps["rpcFor"];
+  /** Horizon's root, for the protocol section; `globalThis.fetch` by default. */
+  readonly fetch?: (url: string, init: RequestInit) => Promise<Response>;
   readonly now?: () => Date;
 }
 
 /**
  * The Lambda handler: reads its targets and builds one RPC client per URL once, at the start, so
- * a warm container reuses its connections; then each run reads the balance section. It resolves
- * to nothing: the runtime serializes a handler's result as JSON, and the section's results hold
+ * a warm container reuses its connections. Each run reads both sections at once; one that fails
+ * doesn't stop the other from publishing, and the run then throws for `watch-errors`. It resolves
+ * to nothing: the runtime serializes a handler's result as JSON, and the sections' results hold
  * bigints, so returning them failed every run with "Unable to stringify response body".
  */
 export function createHandler(deps: HandlerDeps): (event?: WatchEvent | null) => Promise<void> {
   const targets = parseTargets(deps.env[TARGETS_ENV]);
+  const protocolTargets = parseProtocolTargets(deps.env[PROTOCOL_ENV]);
   const build = deps.rpcFor ?? stellarRpc;
   const clients = new Map(targets.map((t) => [t.rpcUrl, build(t.rpcUrl)]));
   const now = deps.now ?? (() => new Date());
+  const log = deps.log ?? ((line: Record<string, unknown>) => console.log(JSON.stringify(line)));
   return async (event) => {
-    await runBalance({
-      targets,
-      rpcFor: (url) => clients.get(url) ?? build(url),
-      publish: deps.publish,
-      log: deps.log ?? ((line) => console.log(JSON.stringify(line))),
-      at: scheduledAt(event, now),
-    });
+    const at = scheduledAt(event, now);
+    const sections = await Promise.allSettled([
+      runBalance({
+        targets,
+        rpcFor: (url) => clients.get(url) ?? build(url),
+        publish: deps.publish,
+        log,
+        at,
+      }),
+      runProtocol({
+        targets: protocolTargets,
+        fetch: deps.fetch ?? ((url, init) => globalThis.fetch(url, init)),
+        publish: deps.publish,
+        log,
+        at,
+      }),
+    ]);
+    const failed = sections.flatMap((s) =>
+      s.status === "rejected" ? [String((s.reason as Error)?.message ?? s.reason)] : [],
+    );
+    if (failed.length > 0) throw new Error(failed.join("; "));
   };
 }
