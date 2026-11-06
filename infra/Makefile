@@ -1,4 +1,4 @@
-# The AWS side of stellar-x402 (task 0027): three stacks, deployed by hand with SSO (decision 3).
+# The AWS side of stellar-x402 (task 0027): four stacks, deployed by hand with SSO (decision 3).
 # No workflow holds AWS credentials. Every deploy is agreed first: the account is shared.
 #
 #   aws sso login --profile stellar && export AWS_PROFILE=stellar
@@ -15,6 +15,7 @@ CDK := pnpm exec cdk --app "$(PRODUCTION_APP)"
 	diff-production-telemetry deploy-production-telemetry \
 	diff-production-uptime deploy-production-uptime \
 	diff-production-alarms deploy-production-alarms \
+	diff-production-watch deploy-production-watch \
 	fire-test check-series check-emf-disabled telemetry-arns
 
 # The catalog and the config package first: turbo builds what infra imports.
@@ -37,6 +38,9 @@ synth-production: build
 diff-production: build
 	$(CDK) diff --strict
 
+# On a fresh account or a rebuild, deploy Watch first, wait for `make check-series GROUP=watch`,
+# then Alarms: no stack depends on another, so --all may create the alarms before the check runs,
+# and watch-no-invocations treats missing data as breaching (it would page until the first run).
 # A deploy of all stacks ships every pending change, a parked one too (the explorer's 0312
 # "stowaway"), so the full diff is printed first, into the same output. --require-approval
 # broadening stops on IAM widening only: read the diff for removals too (the Prices API's 0157).
@@ -69,6 +73,13 @@ deploy-production-alarms: build
 	$(CDK) diff --strict $(PREFIX)-Alarms
 	$(CDK) deploy $(PREFIX)-Alarms --exclusively --require-approval broadening
 	@echo "Now: make fire-test, and wait for a person to see it in #stellar-x402-bot."
+
+diff-production-watch: build
+	$(CDK) diff --strict $(PREFIX)-Watch
+
+deploy-production-watch: build
+	$(CDK) diff --strict $(PREFIX)-Watch
+	$(CDK) deploy $(PREFIX)-Watch --exclusively --require-approval broadening
 
 # The delivery test, after every deploy of the alarms (ADR 0011, decision 12): done only when a
 # person sees the message in Slack. The default alarm reads a metric written only on a failure,

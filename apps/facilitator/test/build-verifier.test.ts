@@ -22,18 +22,20 @@ import { createEd25519Signer } from "@x402/stellar";
 import {
   FAILBACK_MAX_LAG_LEDGERS,
   PRIMARY_PROBE_INTERVAL_MS,
-  UPSTREAM_TIMEOUT_MS,
   buildChecks,
   buildRpc,
-  buildUpstream,
   buildVerifier,
   settleCheck,
-  upstreamDeadlineMs,
-  type SchemeOptions,
 } from "../src/main.js";
 import { rpcEndpointName } from "../src/logger.js";
 import { feeSettings, type FeeSettings } from "../src/settlement/fees.js";
 import { PAYTO_TRUSTLINE_REASON } from "../src/settlement/trustline.js";
+import {
+  UPSTREAM_TIMEOUT_MS,
+  buildUpstream,
+  upstreamDeadlineMs,
+  type SchemeOptions,
+} from "../src/settlement/upstream.js";
 import {
   CHANNEL_ACCOUNT_REASON,
   MUXED_FACILITATOR_REASON,

@@ -5,7 +5,7 @@ type: FEATURE
 status: active
 milestone: 1
 related_adr: ["0011", "0012", "0013"]
-related_tasks: ["0012", "0014", "0022", "0017", "0020", "0013", "0039", "0036", "0047", "0099", "0100"]
+related_tasks: ["0012", "0014", "0022", "0017", "0020", "0013", "0039", "0036", "0047", "0099", "0100", "0118"]
 tags: [facilitator, deploy, priority-high, effort-medium, platform]
 links:
   - ../../../docs/planning/m1-epics.md
@@ -234,6 +234,75 @@ history:
       export is encrypted with it; and the restore drill imports the export into a local copy of
       the repository, since the read-only account can't write to it. Both are in ADR 0013 and
       this task's Implementation.
+  - date: "2026-11-05"
+    status: active
+    who: okarcz
+    note: >
+      The backups split into two pull requests, OpenBao's snapshots first (okarcz): host only, no
+      facilitator restart, and the signing key is the bigger loss. pgBackRest follows, its WAL
+      copied by archive_command into a volume the host pushes from with a .path unit (okarcz,
+      Stan's #24 pattern). Each is tested by a local round trip, not a CI job (okarcz). The first,
+      on lore-0026-openbao-snapshots: x402-openbao-snapshot (bash, set -euo pipefail) logs in with
+      the AppRole x402-snapshot (policy read on sys/storage/raft/snapshot, token_ttl 5m), the IDs
+      as JSON over stdin; saves the snapshot in the container's /tmp, copies it to /run/x402/backup
+      and checks it is a whole gzip before one borg create, so a failed save leaves no archive;
+      prunes to 14 daily, compacts and touches /var/lib/x402/last-ok/openbao-snapshot, 0027's
+      stamp. Its "borg ARGS" mode runs any Borg command for an admin with the same credentials.
+      The timer runs daily at 03:15 UTC (15 min random delay, Persistent); the playbook installs
+      borgbackup, the script, units, policy and the pinned known_hosts, and enables the timer
+      without starting it. Logs stay in the journal. Local round trip on 2026-11-05, Ubuntu 24.04's
+      Borg 1.2.8 in containers and a stand-in box over SSH on port 23: init and key export through
+      the admin mode, a snapshot run, the snapshot token refused on the Transit key, a failed run
+      with OpenBao stopped left the stamp unchanged, and a fresh OpenBao restored from a copy of
+      the repository whose key was removed and imported from the export held the same Transit
+      key. Deploy tests 92 (+7), each new one failed by a mutant. ch-prod-01 runs Ubuntu 24.04.3
+      with borgbackup 1.2.8-1 already installed (the explorer's), the version tested and the
+      box's borg-1.2; our job keeps its own BORG_BASE_DIR. The runbook's setup is still to run.
+  - date: "2026-11-06"
+    status: active
+    who: okarcz
+    note: >
+      logrotate checked on ch-prod-01. The first rotation ran at 00:00:15 UTC: audit.log.1
+      (587128 B, last entry 2026-11-05T15:22:07Z) and a new audit.log made by OpenBao on the
+      postrotate SIGHUP (owner OpenBao's user, mode 0600, config nocreate), empty since nothing
+      reached OpenBao overnight. systemctl restart x402@production at 08:16:02 (same digest
+      e6bfaa1a…, nothing else restarted): audit.log's first entry 08:16:16.225, one AppRole login
+      and one transit/sign each with request and response, the facilitator's signer_checked at
+      08:16:16.279 and no signer_failed, /health ready, signer ok and listed at 08:16:19. The
+      server's x402@ unit predates 0027 (journald, no stop hook) until the next playbook run.
+  - date: "2026-11-06"
+    status: active
+    who: okarcz
+    note: >
+      Review of #140 (four reviewers, 5 decisions, 8 patches, 6 rejected), all applied. The script
+      now holds a lock for the whole run, so an admin's borg call can't delete the night's files;
+      sets its cleanup trap before the decrypt; and waits up to 5 minutes for OpenBao to be
+      unsealed and active (bao status is_self, checked on OpenBao 2.7.2) before it logs in, for
+      the run a timer catches up at boot. The service skips a run until the AppRole's credential
+      exists, since an enabled timer starts after any reboot. New deploy/test/openbao-snapshot
+      test runs the real script with fake docker, borg and sleep (the stamp only after create,
+      prune and compact; none on an empty or partial snapshot or any failed step; the cleanup;
+      the unseal wait; borg mode; the lock), each case failed by a mutant; deploy tests 108
+      (+16). The runbook's passphrase change stores the new passphrase on the server before the
+      repository changes, stops the timer, has setup's guards and says how to recover from each
+      step; it also documents the read-only account's key and both keys' fingerprints. The box's
+      owners know we depend on it: Stan, who holds its main account, made our two sub-accounts on
+      2026-11-05. Left to the team: how the repository is checked between restore drills
+      (Summary).
+  - date: "2026-11-06"
+    status: active
+    who: okarcz
+    note: >
+      Stan's review of #140 (1 blocking, 6 non-blocking), all taken as he suggested. The runbook's
+      first-run step ends by turning on the snapshots alarm group (check-series, the flag by pull
+      request, deploy, fire-test), since production.json still has it off. Setup step 3 refuses
+      when a passphrase is stored and removes the one it wrote if borg init finds a repository
+      already there; the path for an existing repository comes with the restore drill. The
+      passphrase change runs borg list before deleting the old passphrase. The service retries a
+      failed run after 20 minutes (Restart=on-failure), and the timer runs at 03:15 UTC whatever the
+      host's zone. Deploy tests 109 (+1), the retry and the UTC each failed by a mutant. The
+      repository check was decided by the team on Slack (Summary), now backlog task 0118. A shared
+      /run/x402/backup between this job and pgBackRest's is for the pgBackRest PR.
 ---
 
 # Public testnet deployment
@@ -243,6 +312,15 @@ history:
 As a anyone integrating with or testing the facilitator, including the gate, I want the facilitator at a public HTTPS testnet URL, so that the e2e proxy and real resource servers can reach it.
 
 **Story:** [M1 Story 2.5](../../../docs/planning/m1-epics.md#story-25-public-testnet-deployment) · **Lane:** Platform · **Covers:** FR21 prerequisite; NFR4, NFR9
+
+**Decision (2026-11-06, the team on Slack):** how the Borg repository of OpenBao's snapshots is
+checked between the quarterly restore drills. The daily job never reads old chunks back, and
+deduplication makes every later archive reuse them, so a damaged chunk breaks each archive after it
+while the stamp stays fresh. The options were: `borg check --verify-data` (decrypts every chunk,
+seconds at our size) in the weekly review; `--repository-only` (on-disk checksums only) in the
+weekly review; a weekly timer with its own stamp and a 0027 alarm; or nothing until the drill.
+Chosen: the weekly timer with `--verify-data`, its own stamp and a 0027 alarm, done after the
+CloudWatch change, as backlog task 0118.
 
 ## Context
 
@@ -537,4 +615,4 @@ As a anyone integrating with or testing the facilitator, including the gate, I w
 - [x] Given `DATABASE_URL_FILE` or `RPC_URLS_FILE`, when the service starts, then it reads the value from that file, and with neither set it falls back to `DATABASE_URL` and `RPC_URLS`
 - [ ] Given the durable stores from 0022, when the service runs, then it uses them, and `docs/runbook.md` has the deploy and rollback steps
 - [ ] Given the deployed facilitator, when it settles, then it signs through OpenBao Transit over the unix socket, no secret seed is on the server outside OpenBao, the backup secret exists in AWS, and a restore drill from it has passed (2026-11-05: signing over the socket, no seed in the server's files, and the backup secret since 2026-11-02 are shown; the restore drill is left, and it waits for the backups)
-- [ ] Given OpenBao's audit log on the server, when `logrotate` runs, then the file is renamed, OpenBao writes to a new `audit.log` and still signs, and old files past a year are removed (runbook, OpenBao)
+- [x] Given OpenBao's audit log on the server, when `logrotate` runs, then the file is renamed, OpenBao writes to a new `audit.log` and still signs, and old files past a year are removed (runbook, OpenBao) (2026-11-06: rotated at 00:00:15 UTC; OpenBao made the new `audit.log` on the SIGHUP (`nocreate`); after a facilitator restart at 08:16:02 its first entry is 08:16:16, the signer check's AppRole login and `transit/sign`, logged `signer_checked` at 08:16:16.279, and `/health` `signer: ok`; removal past a year rests on `rotate 365` and `maxage 365`)

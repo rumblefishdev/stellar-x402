@@ -69,6 +69,7 @@ describe("readSettlement", () => {
       createdAt: 1_792_150_100,
       feePayer: "GC5OLUZ4WANPN6VT7YGTK2SRMZG762KOVKJXHWIO4K57UBASO2FMNRET",
       call: transfer,
+      envelopeXdr: envelope,
     });
   });
 

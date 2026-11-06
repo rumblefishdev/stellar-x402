@@ -1,8 +1,38 @@
 import { describe, expect, it } from "vitest";
-import { attemptUpdates } from "../src/settlement/records.js";
+import { attemptUpdates, resultUpdate } from "../src/settlement/records.js";
 
 const A = "a".repeat(64);
 const B = "b".repeat(64);
+
+describe("resultUpdate (0101)", () => {
+  it("carries the ledger and the fee of a transaction that landed", () => {
+    const update = resultUpdate({
+      status: "success",
+      hash: A,
+      channel: "GC",
+      ledger: 7,
+      feeCharged: 100n,
+      attempts: [{ hash: A, sent: "yes" }],
+    });
+    expect(update).toEqual({
+      channel: "GC",
+      ledger: 7,
+      feeCharged: 100n,
+      attempts: [{ hash: A, state: "landed", channel: "GC" }],
+    });
+  });
+
+  it("leaves out a ledger and a fee the result doesn't have, so a write can't clear them", () => {
+    const update = resultUpdate({
+      status: "rejected",
+      hash: A,
+      channel: "GC",
+      attempts: [{ hash: A, sent: "yes" }],
+    });
+    expect(update).not.toHaveProperty("ledger");
+    expect(update).not.toHaveProperty("feeCharged");
+  });
+});
 
 describe("attemptUpdates (0019 decision 7)", () => {
   it("marks every attempt before the last dead with txBadSeq, and the landed one landed", () => {

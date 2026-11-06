@@ -405,6 +405,82 @@ describe("createSettler", () => {
     );
   });
 
+  it("answers and stores the hash that landed when someone else's fee bump carried ours (0087)", async () => {
+    const THEIRS = "d".repeat(64);
+    const { settle, store, lines, metrics } = setup(async (opts) => {
+      await opts.onSigned?.(HASH, BOUNDS, "e".repeat(64));
+      return {
+        ...result("success", THEIRS),
+        feeCharged: 0n,
+        rewrap: { of: HASH, feeSource: "GRIVAL" },
+        attempts: [{ hash: HASH, sent: "yes" }],
+      };
+    });
+    const settled = await settle(payload(), requirements);
+    expect(settled.response).toEqual({ success: true, transaction: THEIRS, network, payer });
+    expect(await store.get(key)).toMatchObject({
+      state: "success",
+      feeCharged: 0n,
+      hashes: [HASH, THEIRS],
+    });
+    expect((await store.attempts(key)).map((a) => [a.hash, a.state, a.innerHash])).toEqual([
+      [HASH, "dead", "e".repeat(64)],
+      [THEIRS, "landed", "e".repeat(64)],
+    ]);
+    expect(lines.filter((line) => line.includes('"settlement_rewrapped"'))).toHaveLength(1);
+    expect(metrics.value("settlement_rewrapped_total", { state: "success" })).toBe(1);
+    // A repeat answers with it too.
+    const repeat = await settle(payload(), requirements);
+    expect(repeat.response).toMatchObject({ transaction: THEIRS });
+  });
+
+  it("records a rewrap that landed and failed as failed under their hash, logged once (0087)", async () => {
+    const THEIRS = "d".repeat(64);
+    const { settle, store, lines, metrics } = setup(async (opts) => {
+      await opts.onSigned?.(HASH, BOUNDS, "e".repeat(64));
+      return {
+        ...result("failed", THEIRS),
+        feeCharged: 0n,
+        rewrap: { of: HASH, feeSource: "GRIVAL" },
+        attempts: [{ hash: HASH, sent: "yes" }],
+      };
+    });
+    await settle(payload(), requirements);
+    expect(await store.get(key)).toMatchObject({
+      state: "failed",
+      feeCharged: 0n,
+      hashes: [HASH, THEIRS],
+    });
+    expect(lines.filter((line) => line.includes('"settlement_rewrapped"'))).toHaveLength(1);
+    expect(metrics.value("settlement_rewrapped_total", { state: "failed" })).toBe(1);
+  });
+
+  it("doesn't log a rewrap whose record another writer finished first (0087)", async () => {
+    const THEIRS = "d".repeat(64);
+    const { settle, store, lines } = setup(async (opts) => {
+      await opts.onSigned?.(HASH, BOUNDS, "e".repeat(64));
+      // A sweep finished it meanwhile, and logged it then.
+      await store.transition(key, "signed", {
+        state: "success",
+        feeCharged: 0n,
+        updatedAt: Date.now(),
+        attempts: [
+          { hash: HASH, state: "dead" },
+          { hash: THEIRS, state: "landed", rewrapOf: HASH },
+        ],
+      });
+      return {
+        ...result("success", THEIRS),
+        feeCharged: 0n,
+        rewrap: { of: HASH, feeSource: "GRIVAL" },
+        attempts: [{ hash: HASH, sent: "yes" }],
+      };
+    });
+    await settle(payload(), requirements);
+    expect((await store.get(key))?.state).toBe("success");
+    expect(lines.some((line) => line.includes('"settlement_rewrapped"'))).toBe(false);
+  });
+
   it("submits once for concurrent calls with one settlement key, and answers success once, to whichever marks it", async () => {
     // A repeat may mark the success before the submitting call does (see `respond`).
     const { settle, submit, hooks, metrics } = setup(async (opts) => {
@@ -2917,6 +2993,23 @@ describe("attempt states (0019 decision 7)", () => {
     expect(lines.some((line) => line.includes('"settlement_record_failed"'))).toBe(false);
     expect(metrics.value("settlement_record_failures_total")).toBe(0);
   });
+});
+
+describe("a pool result without a ledger or a fee (0101)", () => {
+  // The pool sets both only on a transaction that landed; `pending` and `expired` carry neither.
+  for (const status of ["pending", "expired"] as const)
+    it(`writes neither for a result that is ${status}, so a write can't clear them`, async () => {
+      const { settle, store } = setup(async (opts) => {
+        await opts.onSigned?.(HASH, BOUNDS);
+        return { ...result(status), feeCharged: undefined };
+      });
+      const transition = vi.spyOn(store, "transition");
+      await settle(payload(), requirements);
+      const update = transition.mock.calls.find(([, , update]) => update.state === status)?.[2];
+      expect(update).toBeDefined();
+      expect(update).not.toHaveProperty("ledger");
+      expect(update).not.toHaveProperty("feeCharged");
+    });
 });
 
 describe("with reconciliation (0019)", () => {

@@ -77,6 +77,28 @@ export function createRecords(deps: RecordsDeps) {
       metrics.increment("fee_charged_stroops", { state }, Number(feeCharged));
   };
 
+  /**
+   * Our inner transaction landed under another envelope than ours (0087): someone else's fee bump
+   * of it at ten times our fee, or the inner transaction sent bare. The payer paid what they
+   * signed, and their fee account paid the fee, so it costs nothing, but it isn't our envelope:
+   * a warning, counted, with the account that paid. Logged by the write that made the record
+   * final, so a rewrap the pool and a sweep both see is logged once.
+   */
+  const rewrapped = (
+    key: SettlementKey,
+    seen: { ours: string; landed: string; feeSource: string; state: "success" | "failed" },
+  ) => {
+    logger.warn("settlement_rewrapped", {
+      network,
+      settlementKey: key,
+      transaction: seen.landed,
+      ours: seen.ours,
+      feeSource: seen.feeSource,
+      state: seen.state,
+    });
+    metrics.increment("settlement_rewrapped_total", { state: seen.state });
+  };
+
   const onFinal = (record: SettlementRecord, origin: SettlementOrigin) => {
     charged(record.state, record.feeCharged);
     runHook("onFinal", record.key, () => deps.hooks.onFinal(record, origin));
@@ -222,6 +244,7 @@ export function createRecords(deps: RecordsDeps) {
   return {
     hookFailed,
     recordFailed,
+    rewrapped,
     onFinal,
     onSuccess,
     advance,
@@ -240,13 +263,29 @@ export type Records = ReturnType<typeof createRecords>;
  * the error `submit()` rejected with. Every attempt before the last was refused with `txBadSeq`:
  * only that makes the pool rebuild. The last one is `landed` once in a ledger, `dead` once
  * refused or past its bounds, and otherwise `sent` or `unknown` as the pool saw the send; one the
- * pool never sent is `dead`, since nothing else holds the envelope.
+ * pool never sent is `dead`, since nothing else holds the envelope. When another envelope of the
+ * last one's inner transaction landed (0087), the last is `dead` and that envelope's hash is
+ * added after it as `landed`.
  */
 export function attemptUpdates(
   attempts: readonly Attempt[],
-  outcome: Pick<SubmitResult, "status" | "channel" | "errorCode"> | { error: unknown },
+  outcome:
+    Pick<SubmitResult, "status" | "channel" | "errorCode" | "hash" | "rewrap"> | { error: unknown },
 ): AttemptUpdate[] {
   const channel = "status" in outcome ? outcome.channel : undefined;
+  if ("status" in outcome && outcome.rewrap && outcome.hash) {
+    // Ours ends as one past its bounds would; a result code is the other envelope's, not ours.
+    const ours = { status: "expired", channel: outcome.channel } as const;
+    return [
+      ...attemptUpdates(attempts, ours),
+      {
+        hash: outcome.hash,
+        state: "landed",
+        rewrapOf: outcome.rewrap.of,
+        ...(channel !== undefined && { channel }),
+      },
+    ];
+  }
   const at = (hash: string, update: Omit<AttemptUpdate, "hash">): AttemptUpdate => ({
     hash,
     ...update,
@@ -272,4 +311,18 @@ export function attemptUpdates(
     if (attempt.sent === "no") return at(attempt.hash, { state: "dead" });
     return at(attempt.hash, { state: attempt.sent === "yes" ? "sent" : "unknown" });
   });
+}
+
+/**
+ * What a pool's result writes on its record, in every state. A ledger or a fee the result doesn't
+ * have is left out, because a field given as `undefined` clears the column, and a record without a
+ * fee releases its budget reservation instead of committing it.
+ */
+export function resultUpdate(result: SubmitResult) {
+  return {
+    ...(result.ledger !== undefined && { ledger: result.ledger }),
+    ...(result.feeCharged !== undefined && { feeCharged: result.feeCharged }),
+    channel: result.channel,
+    attempts: attemptUpdates(result.attempts, result),
+  };
 }

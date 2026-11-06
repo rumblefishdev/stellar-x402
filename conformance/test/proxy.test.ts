@@ -18,7 +18,13 @@ interface Seen {
 
 /** A facilitator stand-in that records each request and answers what `answer` says. */
 let seen: Seen[] = [];
-const valid = { status: 200, contentType: "application/json", body: '{"isValid":true}' };
+interface Answer {
+  status: number;
+  contentType: string;
+  body: string;
+  headers?: Record<string, string>;
+}
+const valid: Answer = { status: 200, contentType: "application/json", body: '{"isValid":true}' };
 let answer = valid;
 let facilitator: Server;
 let facilitatorUrl: string;
@@ -27,7 +33,10 @@ beforeAll(async () => {
   facilitator = createServer(async (req, res) => {
     const body = await text(req);
     seen.push({ method: req.method, url: req.url, contentType: req.headers["content-type"], body });
-    res.writeHead(answer.status, answer.contentType ? { "content-type": answer.contentType } : {});
+    res.writeHead(answer.status, {
+      ...(answer.contentType && { "content-type": answer.contentType }),
+      ...answer.headers,
+    });
     res.end(answer.body);
   });
   await new Promise<void>((resolve) => facilitator.listen(0, "127.0.0.1", resolve));
@@ -148,6 +157,18 @@ describe("external proxy", () => {
     const res = await fetch(`${proxy.url}/supported`);
     expect(await res.text()).toBe('{"kinds":[]}');
     expect(seen.map((request) => `${request.method} ${request.url}`)).toEqual(["GET /supported"]);
+  });
+
+  it("passes the facilitator's response headers through", async () => {
+    answer = {
+      ...valid,
+      headers: { "extension-responses": "e30=", "retry-after": "5" },
+    };
+    const proxy = await startProxy();
+    const res = await fetch(`${proxy.url}/settle`, { method: "POST", body: "{}" });
+    expect(res.headers.get("extension-responses")).toBe("e30=");
+    expect(res.headers.get("retry-after")).toBe("5");
+    expect(await res.text()).toBe('{"isValid":true}');
   });
 
   it("forwards nothing else", async () => {

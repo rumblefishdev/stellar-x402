@@ -133,6 +133,14 @@ describe("the playbook", () => {
       `x402-watchdog@${ENV}.timer`,
     ]);
   });
+
+  // Started by the runbook's admin step only; without the enable, a reboot would drop it.
+  test("enables OpenBao's snapshot timer without starting it", () => {
+    const t = task("OpenBao's snapshot timer, enabled at boot");
+    expect(t).toContain("name: x402-openbao-snapshot.timer");
+    expect(t).toContain("enabled: true");
+    expect(t).not.toMatch(/state:/);
+  });
 });
 
 describe("check-agent-certificate.sh", () => {

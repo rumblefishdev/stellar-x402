@@ -100,8 +100,10 @@ aggregates an array as samples is unverified: verify it at the first deploy.
 
 ## Money and security
 
-From the off-server check, every 5 minutes, so they fire with the server down. Built in #114 in the
-`watch` group, which stays off until #115's Lambda runs (decision 23).
+From the off-server check, every 5 minutes, so they fire with the server down. Built in #114. The
+balance alarms and the check's health are the `watch` group, on once #115's Lambda publishes;
+`account-state`, `account-effects` and `backup-secret-read` are `watchSecurity`, on once their
+sections do (decision 68).
 
 | Alarm | Signal | Shape | Fires when | Missing data |
 | --- | --- | --- | --- | --- |

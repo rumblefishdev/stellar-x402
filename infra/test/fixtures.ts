@@ -33,6 +33,9 @@ export function allOn(): EnvironmentConfig {
       // A random key, for the template only: no account on pubnet is ours yet.
       "stellar:pubnet": "GCW5TAO7CB6FDNXLMZJZHQKKKGDBEAXMOGGYO2MCI2WXMKNGFWLLG7VY",
     },
+    watch: {
+      rpcUrls: { ...base.watch.rpcUrls, "stellar:pubnet": "https://rpc.example.com/pubnet" },
+    },
     // The one mount the agent writes (the catalog's `path`), OpenBao's audit volume on it too.
     host: { diskMounts: ["/"], auditDiskMount: "/" },
     thresholds: {
@@ -52,5 +55,6 @@ export function synth(config: EnvironmentConfig) {
   const alarms = json(x.alarms);
   const uptime = json(x.uptime);
   const telemetry = json(x.telemetry);
-  return { x, alarms, uptime, telemetry, all: [alarms, uptime, telemetry] };
+  const watch = json(x.watch);
+  return { x, alarms, uptime, telemetry, watch, all: [alarms, uptime, telemetry, watch] };
 }

@@ -51,6 +51,14 @@ history:
     status: active
     who: akot
     note: "Decisions 42-54 for #113, the server side, from its spine (notes/S-pr113-spine.md): a counter for failed ends of x402@, the agent's two host series, one file per unit, an hourly signing helper, OpenBao on its socket, stamp files, `/` as the one mount, the restart window, the Docker CE spike."
+  - date: "2026-11-06"
+    status: active
+    who: akot
+    note: "Uptime and Alarms stacks deployed, delivery test seen in Slack (AC 14). Decisions 68-69: #115 ships the balance section first for M1 (the watch group split), bundled by esbuild in infra's build; GSD and BMAD reviewed #115's open choices."
+  - date: "2026-11-06"
+    status: active
+    who: akot
+    note: "check-series passed for uptime (08:41 UTC, the probe's ready) and for watch (about 09:45 UTC, after the Watch stack's deploy at 09:36 UTC: spendable_stroops, AWS/Lambda Errors and Invocations), so #115 turns both groups on (decisions 26, 37). Oskar's review of #115: docs/monitoring.md sections for the 8 alarms that are on, the handler's logic and the bundle tested, one URL rule, Watch before Alarms on a fresh account; decisions 2, 23 and 64 amended by 68."
 ---
 
 # Alerts and metrics
@@ -72,7 +80,9 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
   The alarms, each with its shape and missing-data rule: [the alarm list](notes/G-alarm-list.md).
 - Five PRs (decision 2): #111 the decisions and ADRs; #112 the adapter and the facilitator's
   signals; #113 log shipping, the agent and the host probe; #114 the alarms, Slack and the uptime
-  probe in CDK; #115 the off-server check and `docs/monitoring.md`.
+  probe in CDK; #115 the off-server check's balance section and `docs/monitoring.md`'s sections
+  for the alarms it turns on. Decision 68 moves the rest to two more PRs: the theft and
+  secret-read sections, and the closing docs.
 - From 0039 ([ADR 0011](../../../../docs/adr/0011-facilitator-hosting.md), revised): the backend
   is CloudWatch, fed from the Hetzner server.
   - Each of our units appends its output to a file (decision 1), and the CloudWatch agent sends
@@ -141,7 +151,8 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
    turns off. ADR 0011's Logs section changes with it.
 2. **Five PRs** (akot, 2026-11-02): decisions and ADRs, the metrics adapter, the server side, the
    alarms in CDK, and the off-server check with the closing docs. Each opens as a draft that
-   describes its scope, and the code follows once the decisions are agreed.
+   describes its scope, and the code follows once the decisions are agreed. Amended by decision
+   68: the off-server check and the closing docs are now three PRs.
 3. **The alarms are CDK in `infra/`, deployed by hand** (akot, 2026-11-02): TypeScript, as in the
    explorer and the Prices API, with the account's existing default bootstrap in eu-central-1.
    An operator deploys with SSO. No workflow has AWS credentials, and 0014's own qualifier went
@@ -323,7 +334,8 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     a group that stays off until #115's Lambda runs (decision 26). #115 adds the Lambda and
     `docs/monitoring.md`; the Lambda is named `x402-production-watch`, since the two `watch-*`
     alarms read `AWS/Lambda` by that name. One PR holds the whole list and the one alarm helper,
-    and an alarm still goes on only with its signal (the spine's AD-6).
+    and an alarm still goes on only with its signal (the spine's AD-6). Amended by decision 68:
+    the group is split, and `docs/monitoring.md` grows with the PRs that turn groups on.
 24. **One environment file and fixed names** (akot, 2026-11-04). `infra/envs/production.json` is
     `x402@production`. Its `networks` (`["stellar:testnet"]` today) decides which `network` values
     the network-scoped alarms get. Stacks are `X402-production-<Stack>`. Alarms are
@@ -578,7 +590,8 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     off-server check publishes each finding (account, effect or signer change, transaction) to
     `x402-<env>-alarms` straight from AWS, one message per finding, deduplicated by its cursor;
     `account-effects` and `account-state` stay as the backstop for a check that can't publish.
-    Its role gets `sns:Publish` on that topic only. #115 builds it.
+    Its role gets `sns:Publish` on that topic only. The theft PR after #115 builds it (decision
+    68).
 65. **The log path reaches other projects' namespaces; `log-volume` is the ceiling** (2026-11-05,
     point 6). An EMF line in our metrics group can name any namespace of the shared account, such
     as `SorobanBlockExplorer/Indexer`, which the explorer alarms on, and create custom metrics
@@ -594,6 +607,35 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     check is `StrKey.isValidEd25519PublicKey`, as in the facilitator's config, not 30 lines of
     base32 and CRC16. The config is a zod schema, as in the facilitator and the MCP packages,
     with the same messages and every field's problem at once.
+68. **The balance alarms go on before the theft ones** (akot, 2026-11-06). M1's story 2.6 needs
+    the low-balance alarm; the theft and secret-read sections need more design (the declared
+    channel set, the read points, SNS findings). #115 builds the Watch stack with its balance
+    section only, and the `watch` group splits: `watch` keeps `balance-low`, `balance-critical`,
+    `watch-errors` and `watch-no-invocations`, and `watchSecurity` takes `account-state`,
+    `account-effects` and `backup-secret-read`, which go on with their sections in the next PR.
+    As with decision 40, one group per job that has to run first. This amends decisions 2, 23
+    and 64, and the PRs after #115 are:
+    - **#115:** the Watch stack with its balance section, the `uptime` and `watch` groups on, and
+      a `docs/monitoring.md` section for each alarm that is on, since every alarm's description
+      points there (`factory.ts`);
+    - **the facilitator PR:** the `facilitator` group on after #137's deploy, with its sections;
+    - **the theft PR:** the theft and secret-read sections, each finding to SNS (decision 64), and
+      `watchSecurity` on;
+    - **the closing PR:** every metric and alarm in `docs/monitoring.md`, the uptime figure, and
+      each alarm fired once on purpose.
+69. **The check is bundled in infra's `build`, not by `NodejsFunction`** (akot, 2026-11-06; a BMAD
+    architecture spine and GSD advisors reviewed #115's open choices apart, then reconciled).
+    esbuild, an explicit devDependency, bundles `lambdas/watch/index.mjs` with signer-pool's
+    `checkFacilitatorBalance` and stellar-sdk into `dist/lambdas/watch/` (350 KB); `@aws-sdk/*`
+    comes with the runtime. Synth stays offline and never bundles, as with the probe's plain
+    modules; `NodejsFunction` in this pnpm workspace looks for esbuild through `pnpm exec` at the
+    root and falls back to Docker. infra's tests run after its `build`. The balance comes from
+    RPC (`getLedgerEntries`), the formula the floor uses (decision 7); the RPC URL per network is
+    in `infra/envs/production.json` (`watch.rpcUrls`), and a failed read publishes nothing, never
+    0. One run at a time, no retries, on the clock every 5 minutes with the scheduled time.
+    Before `stellar:pubnet` joins `networks` (from Oskar's review of #115): a provider's keyed
+    URL comes from an SSM parameter, the role gets `ssm:GetParameter` on it, and errors are masked
+    by the URL's host and path, not only by an exact copy of it.
 
 ## Acceptance Criteria
 
@@ -610,7 +652,7 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
 - [ ] Given OpenBao down or sealed, WAL archiving stuck, a backup or snapshot older than 26 hours, or the certificate under 30 days from expiry, when the condition holds, then an alarm fires, and a check that fails or a job that never ran fires it too (ADR 0011, 0013)
 - [ ] Given the server's disks, OpenBao's audit volume or its memory past their thresholds, when the agent reports them, then an alarm fires (ADR 0011, 0013)
 - [ ] Given the agent, the host probe or the off-server check stopped, when the alarm window passes, then an alarm fires
-- [ ] Given a deploy of the alarm stack, when it ends, then a test alarm has reached Slack and a person has seen it
+- [x] Given a deploy of the alarm stack, when it ends, then a test alarm has reached Slack and a person has seen it (2026-11-06: `emf-validation` by `make fire-test` at 08:39:50 UTC, seen in `#stellar-x402-bot`)
 - [ ] Given a line from the facilitator on the agent's path, when it reaches CloudWatch, then its metrics exist, checked once on the real path (ADR 0011)
 - [ ] Given every alarm in the alarm list, when this story is done, then each has fired once on purpose, on testnet or with a fake, and `docs/monitoring.md` says how and when
 - [ ] Given `docs/monitoring.md`, when this story is done, then it lists every metric and alert

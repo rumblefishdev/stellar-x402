@@ -13,6 +13,14 @@ if (!target || !port) {
 }
 
 const forwarded = new Set(["POST /verify", "POST /settle", "GET /supported"]);
+// These describe the connection or the raw bytes, and fetch has already decoded the body.
+const notForwarded = new Set([
+  "connection",
+  "content-encoding",
+  "content-length",
+  "keep-alive",
+  "transfer-encoding",
+]);
 
 function send(res, status, body) {
   res.writeHead(status, { "content-type": "application/json" });
@@ -38,8 +46,8 @@ const server = createServer(async (req, res) => {
     });
     const answerBody = await answer.text();
     console.log(`${route} -> ${answer.status} in ${Date.now() - started} ms`);
-    const type = answer.headers.get("content-type");
-    res.writeHead(answer.status, type ? { "content-type": type } : {});
+    const headers = [...answer.headers].filter(([name]) => !notForwarded.has(name));
+    res.writeHead(answer.status, Object.fromEntries(headers));
     res.end(answerBody);
   } catch (error) {
     // The suite sees a 502; the cause goes to stderr.

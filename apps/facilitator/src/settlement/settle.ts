@@ -43,6 +43,7 @@ import {
   attemptUpdates,
   createRecords,
   isFinalRecord as isFinal,
+  resultUpdate,
   type Records,
 } from "./records.js";
 import {
@@ -641,7 +642,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
             amount: BigInt(requirements.amount),
             nonce: verified.nonce,
           }),
-          onSigned: async (hash, bounds) => {
+          onSigned: async (hash, bounds, innerHash) => {
             // After the budget answer nothing new is signed: the answer named the last hash, and
             // a rebuild's would land under another.
             if (call.budgetOver) throw new Error("the settle budget ran out");
@@ -655,7 +656,15 @@ export function createSettler(deps: SettlerDeps): Settle & {
             // Only under the lease's current token: a takeover since refuses it (0071).
             let added: boolean;
             try {
-              added = await store.addHash(key, hash, lease, now(), bounds, claimed.reopened);
+              added = await store.addHash(
+                key,
+                hash,
+                lease,
+                now(),
+                bounds,
+                claimed.reopened,
+                innerHash,
+              );
             } catch (error) {
               if (error instanceof LeaseFencedError) {
                 logger.warn("settlement_lease_fenced", {
@@ -725,15 +734,26 @@ export function createSettler(deps: SettlerDeps): Settle & {
         flagDrift(key, errorReason, "pool");
         return await finish(key, { state: "rejected", errorReason, attempts }, call.origin, own);
       }
-      const fields = {
-        channel: result.channel,
-        ledger: result.ledger,
-        feeCharged: result.feeCharged,
-        attempts: attemptUpdates(result.attempts, result),
+      const fields = resultUpdate(result);
+      // Logged by the write that made the record final, as reconciliation does (0087).
+      const noteRewrap = <T extends { won: boolean }>(settled: T): T => {
+        if (
+          settled.won &&
+          result?.rewrap &&
+          result.hash &&
+          (result.status === "success" || result.status === "failed")
+        )
+          records.rewrapped(key, {
+            ours: result.rewrap.of,
+            landed: result.hash,
+            feeSource: result.rewrap.feeSource,
+            state: result.status,
+          });
+        return settled;
       };
       switch (result.status) {
         case "success":
-          return await finish(key, { state: "success", ...fields }, call.origin, own);
+          return noteRewrap(await finish(key, { state: "success", ...fields }, call.origin, own));
         case "pending":
           // The pool's `resolved` event or a sweep finishes the record (0019, 0088).
           return {
@@ -743,16 +763,18 @@ export function createSettler(deps: SettlerDeps): Settle & {
             origin: call.origin,
           };
         default:
-          return await finish(
-            key,
-            {
-              state: result.status,
-              errorReason: SETTLE_REASONS[result.status],
-              ...(result.failure && { failure: result.failure }),
-              ...fields,
-            },
-            call.origin,
-            own,
+          return noteRewrap(
+            await finish(
+              key,
+              {
+                state: result.status,
+                errorReason: SETTLE_REASONS[result.status],
+                ...(result.failure && { failure: result.failure }),
+                ...fields,
+              },
+              call.origin,
+              own,
+            ),
           );
       }
     } catch (error) {

@@ -11,7 +11,10 @@ export function alwaysWritten(s: SeriesRef): boolean {
   if (s.namespace === "AWS/Logs") return s.metricName === "IncomingBytes";
   // The only zero the facilitator writes (the spine's AD-4).
   if (s.metricName === "settlement_sweeps_total") return s.dims["outcome"] === "listed";
-  // The two Lambdas publish every metric on every run, 0 included (#115 is held to it).
+  // The two Lambdas publish each metric of a section that read in full on every run, 0 included
+  // (decision 39). A section whose read failed publishes nothing, never a 0 that would read as an
+  // empty account or no theft, so a missing series means a broken path or a failing read, and
+  // the group stays off.
   if (s.namespace === "x402-watch") return true;
   return byName(s.metricName)?.kind === "gauge";
 }
