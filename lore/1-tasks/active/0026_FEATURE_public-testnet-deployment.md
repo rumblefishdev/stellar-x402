@@ -270,6 +270,25 @@ history:
       and one transit/sign each with request and response, the facilitator's signer_checked at
       08:16:16.279 and no signer_failed, /health ready, signer ok and listed at 08:16:19. The
       server's x402@ unit predates 0027 (journald, no stop hook) until the next playbook run.
+  - date: "2026-11-06"
+    status: active
+    who: okarcz
+    note: >
+      Review of #140 (four reviewers, 5 decisions, 8 patches, 6 rejected), all applied. The script
+      now holds a lock for the whole run, so an admin's borg call can't delete the night's files;
+      sets its cleanup trap before the decrypt; and waits up to 5 minutes for OpenBao to be
+      unsealed and active (bao status is_self, checked on OpenBao 2.7.2) before it logs in, for
+      the run a timer catches up at boot. The service skips a run until the AppRole's credential
+      exists, since an enabled timer starts after any reboot. New deploy/test/openbao-snapshot
+      test runs the real script with fake docker, borg and sleep (the stamp only after create,
+      prune and compact; none on an empty or partial snapshot or any failed step; the cleanup;
+      the unseal wait; borg mode; the lock), each case failed by a mutant; deploy tests 108
+      (+16). The runbook's passphrase change stores the new passphrase on the server before the
+      repository changes, stops the timer, has setup's guards and says how to recover from each
+      step; it also documents the read-only account's key and both keys' fingerprints. The box's
+      owners know we depend on it: Stan, who holds its main account, made our two sub-accounts on
+      2026-11-05. Left to the team: how the repository is checked between restore drills
+      (Summary).
 ---
 
 # Public testnet deployment
@@ -279,6 +298,13 @@ history:
 As a anyone integrating with or testing the facilitator, including the gate, I want the facilitator at a public HTTPS testnet URL, so that the e2e proxy and real resource servers can reach it.
 
 **Story:** [M1 Story 2.5](../../../docs/planning/m1-epics.md#story-25-public-testnet-deployment) · **Lane:** Platform · **Covers:** FR21 prerequisite; NFR4, NFR9
+
+**Open decision (2026-11-06, the team):** how the Borg repository of OpenBao's snapshots is
+checked between the quarterly restore drills. The daily job never reads old chunks back, and
+deduplication makes every later archive reuse them, so a damaged chunk breaks each archive after it
+while the stamp stays fresh. The options: `borg check --verify-data` (decrypts every chunk, seconds
+at our size) in the weekly review; `--repository-only` (on-disk checksums only) in the weekly
+review; a weekly timer with its own stamp and a 0027 alarm; or nothing until the drill.
 
 ## Context
 
