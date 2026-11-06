@@ -71,6 +71,10 @@ history:
     status: active
     who: akot
     note: "Watch stack deployed from #145's branch at 12:59 UTC: the Lambda reads Horizon (pubnet 29/30, testnet 30/30) beside the balance. check-series passed for protocol at 12:59 UTC (4 series), so #145 turns the group on (decisions 26, 70); the Alarms deploy waits for the merge."
+  - date: "2026-11-06"
+    status: active
+    who: okarcz
+    note: "#113's server side is live after the third deploy (#137, 68e778e3): the playbook, the agent's admin step (agent as cwagent, credentials refreshed) and the restart window (13:59:56 UTC, 4.7 s), after which all five app streams and the facilitator's and host's metric streams arrive. check-series passed for facilitator (7 of 7 continuous series), host (6 of 6) and logVolume (2 of 2), so the alarm-groups PR turns the three on (decision 26): 34 alarms, each with a docs/monitoring.md section, and the page now points at the log files instead of the journal. log-volume's text names the logs' event field, not msg. The explorer team is told before host goes on (decision 65)."
   - date: "2026-11-09"
     status: active
     who: okarcz
