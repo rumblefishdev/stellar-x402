@@ -18,7 +18,7 @@ import type {
 } from "../ports/index.js";
 import { isFinalRecord, resultUpdate, type Records } from "./records.js";
 import { SETTLE_REASONS } from "./settle.js";
-import { authExpiration } from "./verify.js";
+import { payerExpiration } from "./verify.js";
 
 export interface ReconcilerDeps {
   network: StellarNetwork;
@@ -169,11 +169,17 @@ export function createReconciler(deps: ReconcilerDeps) {
     }
   };
 
-  /** The ledger bound of a hash stored without one (before 0005): the auth entry's expiry. */
+  /**
+   * The ledger bound of a hash stored without one: the payer's auth expiry, past which no envelope
+   * of this payment can land, ours or someone else's fee bump of it (0087).
+   */
   const fallbackLedger = (record: SettlementRecord): number | undefined => {
     try {
       const { transaction } = record.paymentPayload.payload as { transaction: string };
-      return authExpiration(new Transaction(transaction, getNetworkPassphrase(network)));
+      return payerExpiration(
+        new Transaction(transaction, getNetworkPassphrase(network)),
+        record.payer,
+      );
     } catch {
       return undefined;
     }
