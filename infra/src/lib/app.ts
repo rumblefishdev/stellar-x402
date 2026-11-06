@@ -5,12 +5,14 @@ import { stackPrefix } from "./names.js";
 import { AlarmsStack } from "./stacks/alarms-stack.js";
 import { TelemetryStack } from "./stacks/telemetry-stack.js";
 import { UptimeStack } from "./stacks/uptime-stack.js";
+import { WatchStack } from "./stacks/watch-stack.js";
 
 export interface X402App {
   readonly app: cdk.App;
   readonly alarms: AlarmsStack;
   readonly uptime: UptimeStack;
   readonly telemetry: TelemetryStack;
+  readonly watch: WatchStack;
 }
 
 export function createApp(config: EnvironmentConfig, app = new cdk.App()): X402App {
@@ -29,5 +31,6 @@ export function createApp(config: EnvironmentConfig, app = new cdk.App()): X402A
     alarms: new AlarmsStack(app, `${prefix}-Alarms`, props("Alarms")),
     uptime: new UptimeStack(app, `${prefix}-Uptime`, props("Uptime")),
     telemetry: new TelemetryStack(app, `${prefix}-Telemetry`, props("Telemetry")),
+    watch: new WatchStack(app, `${prefix}-Watch`, props("Watch")),
   };
 }

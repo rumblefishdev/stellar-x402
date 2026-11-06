@@ -155,6 +155,22 @@ describe("the Alarms template", () => {
     ]);
   });
 
+  test("keeps the balance alarms and the check's health apart from theft and secret reads (68)", () => {
+    const bases = (g: string) =>
+      [...new Set(records.filter((r) => r.group === g).map((r) => r.base))].sort();
+    expect(bases("watch")).toEqual([
+      "balance-critical",
+      "balance-low",
+      "watch-errors",
+      "watch-no-invocations",
+    ]);
+    expect(bases("watchSecurity")).toEqual([
+      "account-effects",
+      "account-state",
+      "backup-secret-read",
+    ]);
+  });
+
   test("makes a network-scoped alarm once per configured network", () => {
     const perBase = new Map<string, string[]>();
     for (const r of records)

@@ -36,6 +36,12 @@ describe("envs/production.json", () => {
     });
   });
 
+  test("reads testnet's fee account through SDF's public RPC", () => {
+    expect(production().watch.rpcUrls).toEqual({
+      "stellar:testnet": "https://soroban-testnet.stellar.org",
+    });
+  });
+
   test("names every group", () => {
     expect(Object.keys(production().alarmGroups).sort()).toEqual([...ALARM_GROUPS].sort());
   });
@@ -150,6 +156,25 @@ describe("validateConfig", () => {
         ((m(c).feeAccounts as Record<string, string>)["stellar:pubnet"] =
           "GCW5TAO7CB6FDNXLMZJZHQKKKGDBEAXMOGGYO2MCI2WXMKNGFWLLG7VY"),
       /feeAccounts.stellar:pubnet is not in networks/,
+    ],
+    [
+      "a network with no RPC for the off-server check",
+      (c) => delete (m(c).watch.rpcUrls as Partial<Record<string, string>>)["stellar:testnet"],
+      /watch.rpcUrls.stellar:testnet must be an https/,
+    ],
+    [
+      "a plain-http RPC",
+      (c) =>
+        ((m(c).watch.rpcUrls as Record<string, string>)["stellar:testnet"] =
+          "http://soroban-testnet.stellar.org"),
+      /watch.rpcUrls.stellar:testnet/,
+    ],
+    [
+      "an RPC for a network not served",
+      (c) =>
+        ((m(c).watch.rpcUrls as Record<string, string>)["stellar:pubnet"] =
+          "https://rpc.example.com"),
+      /watch.rpcUrls.stellar:pubnet is not in networks/,
     ],
   ])("refuses %s", (_, change, message) => {
     expect(invalid(change)).toThrow(message);

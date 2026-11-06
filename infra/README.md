@@ -1,9 +1,9 @@
 # infra
 
 The facilitator's AWS side, in CDK (task 0027): the logging role the server's CloudWatch agent
-assumes, the alarms and their path to Slack, and the uptime probe. Everything is in
-`eu-central-1` on the team's shared account, deployed by hand with SSO; no workflow holds AWS
-credentials (0027 decision 3). The account's existing default bootstrap is used.
+assumes, the alarms and their path to Slack, the uptime probe, and the off-server check.
+Everything is in `eu-central-1` on the team's shared account, deployed by hand with SSO; no
+workflow holds AWS credentials (0027 decision 3). The account's existing default bootstrap is used.
 
 The alarms are listed, with the reasoning behind each shape, in
 [the alarm list](../lore/1-tasks/active/0027_FEATURE_alerts-and-metrics/notes/G-alarm-list.md);
@@ -21,6 +21,7 @@ by name, so each one deploys alone.
 | `X402-production-Telemetry` | IAM Roles Anywhere trust anchor (the ClickHouse project's client CA), profile, the logging role, `/x402/production/app` and `/x402/production/metrics` (30 days, kept on a stack delete, not on a failed create's rollback) | Rarely: IAM on a shared account |
 | `X402-production-Alarms`    | SNS topic `x402-production-alarms`, Amazon Q Developer (Chatbot) to `#stellar-x402-bot`, the alarms of the groups that are on                                                                                               | Thresholds, groups going on     |
 | `X402-production-Uptime`    | `x402-production-uptime-probe`: reads `/health` every minute, publishes `ready` to `x402-watch`                                                                                                                             | The probe's code                |
+| `X402-production-Watch`     | `x402-production-watch`: every 5 minutes reads each network's fee account through RPC with `checkFacilitatorBalance` and publishes `spendable_stroops` to `x402-watch`; the theft and secret-read sections follow           | The check's code, the RPC URLs  |
 
 The logging role trusts only `CN=x402-cloudwatch-agent-production` from that CA, and only on
 our trust anchor. It can only create streams in and write to the two log groups, and put metrics
@@ -67,7 +68,7 @@ From `infra/`:
 make synth-production           # no AWS access needed
 make diff-production            # all stacks, --strict
 make deploy-production          # prints the full diff, then deploys all stacks
-make deploy-production-alarms   # one stack: -telemetry, -uptime, -alarms (diff first, --exclusively)
+make deploy-production-alarms   # one stack: -telemetry, -uptime, -alarms, -watch (diff first, --exclusively)
 make fire-test                  # the delivery test, after every deploy of the alarms
 make check-series GROUP=host    # before a group goes on
 make check-emf-disabled         # once, when the alarms first go on
@@ -89,19 +90,20 @@ is in `us-east-1`, `/aws/chatbot/x402-production-alarms`.
 A group in `envs/production.json`'s `alarmGroups` is either absent or on with its actions; no alarm
 exists with its actions off (decision 26).
 
-| Group         | Alarms                                                                                                                                         | On when                                                                                   |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `uptime`      | `uptime`, `uptime-flapping`                                                                                                                    | The probe's `ready` has data, a few minutes after the Uptime stack's deploy (decision 37) |
-| `telemetry`   | `emf-validation`, `emf-parsing`                                                                                                                | On                                                                                        |
-| `facilitator` | Availability and Settlement, `facilitator-silent`, `gauges-silent`                                                                             | The facilitator's metric lines reach CloudWatch (#113)                                    |
-| `channelHeld` | `channel-held`                                                                                                                                 | 0089 emits its gauge                                                                      |
-| `host`        | `openbao-down`, `certificate`, `credentials-stale`, `watchdog-restart`, `facilitator-failed`, `probe-silent`, `telemetry-silent`, `audit-disk` | #113's probe and agent run, after its restart window                                      |
-| `backups`     | `wal-failing`, `wal-stale`, `backup-age`                                                                                                       | pgBackRest archives WAL and has made a backup (0026; decision 40)                         |
-| `snapshots`   | `snapshot-age`                                                                                                                                 | OpenBao's daily snapshot has run (0026; decision 40)                                      |
-| `disk`        | `disk` per mount                                                                                                                               | A threshold read against the first numbers, `host.diskMounts` set                         |
-| `memory`      | `memory`                                                                                                                                       | A threshold after a week of data                                                          |
-| `logVolume`   | `log-volume` per log group                                                                                                                     | With `host` (#113), at a coarse 200 MB an hour until measured (decision 65)               |
-| `watch`       | Money and security, `watch-errors`, `watch-no-invocations`                                                                                     | #115's off-server check runs as `x402-production-watch`                                   |
+| Group           | Alarms                                                                                                                                         | On when                                                                                   |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `uptime`        | `uptime`, `uptime-flapping`                                                                                                                    | The probe's `ready` has data, a few minutes after the Uptime stack's deploy (decision 37) |
+| `telemetry`     | `emf-validation`, `emf-parsing`                                                                                                                | On                                                                                        |
+| `facilitator`   | Availability and Settlement, `facilitator-silent`, `gauges-silent`                                                                             | The facilitator's metric lines reach CloudWatch (#113)                                    |
+| `channelHeld`   | `channel-held`                                                                                                                                 | 0089 emits its gauge                                                                      |
+| `host`          | `openbao-down`, `certificate`, `credentials-stale`, `watchdog-restart`, `facilitator-failed`, `probe-silent`, `telemetry-silent`, `audit-disk` | #113's probe and agent run, after its restart window                                      |
+| `backups`       | `wal-failing`, `wal-stale`, `backup-age`                                                                                                       | pgBackRest archives WAL and has made a backup (0026; decision 40)                         |
+| `snapshots`     | `snapshot-age`                                                                                                                                 | OpenBao's daily snapshot has run (0026; decision 40)                                      |
+| `disk`          | `disk` per mount                                                                                                                               | A threshold read against the first numbers, `host.diskMounts` set                         |
+| `memory`        | `memory`                                                                                                                                       | A threshold after a week of data                                                          |
+| `logVolume`     | `log-volume` per log group                                                                                                                     | With `host` (#113), at a coarse 200 MB an hour until measured (decision 65)               |
+| `watch`         | `balance-low`, `balance-critical`, `watch-errors`, `watch-no-invocations`                                                                      | The Watch stack's Lambda publishes `spendable_stroops` (#115)                             |
+| `watchSecurity` | `account-state`, `account-effects`, `backup-secret-read`                                                                                       | The check's theft and secret-read sections publish (decision 68)                          |
 
 To turn one on: `make check-series GROUP=<group>` until it passes, then set the flag (and any
 threshold it needs; synth refuses a group without one), `make deploy-production-alarms`, and
@@ -123,7 +125,12 @@ with every group on, and checks:
   messages only on Level and Silence alarms, no CPU or `metric-issue` alarm;
 - the role's trust policy and permissions, the log groups' retention, Chatbot's logging, no
   topic policy, no stack importing from another;
-- the probe against a faked `fetch`.
+- the probe against a faked `fetch`, and the check's balance section against a faked RPC;
+- the Watch stack's function, schedule and permissions.
+
+`build` bundles the check (`scripts/bundle-watch.mjs`, esbuild) into `dist/lambdas/watch/`, with
+signer-pool's `checkFacilitatorBalance` and stellar-sdk; `@aws-sdk/*` comes with the Lambda
+runtime. Synth never bundles, so the tests run after `build` (`turbo.json`).
 
 ## Not checked before a deploy
 

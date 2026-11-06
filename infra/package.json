@@ -2,11 +2,11 @@
   "name": "@stellar-x402/infra",
   "version": "0.0.0",
   "private": true,
-  "description": "CDK for the facilitator's AWS side: logging role, alarms, uptime probe",
+  "description": "CDK for the facilitator's AWS side: logging role, alarms, uptime probe, off-server check",
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node scripts/bundle-watch.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
     "clean": "rm -rf dist cdk.out .turbo"
@@ -14,12 +14,14 @@
   "dependencies": {
     "@stellar-x402/config": "workspace:*",
     "@stellar-x402/metrics-catalog": "workspace:*",
+    "@stellar-x402/signer-pool": "workspace:*",
     "@stellar/stellar-sdk": "^16.3.0",
     "aws-cdk-lib": "^2.245.0",
     "constructs": "^10.6.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "aws-cdk": "^2.1114.1"
+    "aws-cdk": "^2.1114.1",
+    "esbuild": "0.28.2"
   }
 }

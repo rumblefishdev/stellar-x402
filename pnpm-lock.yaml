@@ -198,6 +198,9 @@ importers:
       '@stellar-x402/metrics-catalog':
         specifier: workspace:*
         version: link:../packages/metrics-catalog
+      '@stellar-x402/signer-pool':
+        specifier: workspace:*
+        version: link:../packages/signer-pool
       '@stellar/stellar-sdk':
         specifier: ^16.3.0
         version: 16.4.1
@@ -214,6 +217,9 @@ importers:
       aws-cdk:
         specifier: ^2.1114.1
         version: 2.1147.0
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
 
   packages/bazaar:
     dependencies:
