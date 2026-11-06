@@ -30,14 +30,14 @@
   "alarmGroups": {
     "uptime": true,
     "telemetry": true,
-    "facilitator": false,
+    "facilitator": true,
     "channelHeld": false,
-    "host": false,
+    "host": true,
     "backups": false,
     "snapshots": false,
     "disk": false,
     "memory": false,
-    "logVolume": false,
+    "logVolume": true,
     "watch": true,
     "watchSecurity": false
   },

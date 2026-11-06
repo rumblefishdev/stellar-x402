@@ -59,6 +59,10 @@ history:
     status: active
     who: akot
     note: "check-series passed for uptime (08:41 UTC, the probe's ready) and for watch (about 09:45 UTC, after the Watch stack's deploy at 09:36 UTC: spendable_stroops, AWS/Lambda Errors and Invocations), so #115 turns both groups on (decisions 26, 37). Oskar's review of #115: docs/monitoring.md sections for the 8 alarms that are on, the handler's logic and the bundle tested, one URL rule, Watch before Alarms on a fresh account; decisions 2, 23 and 64 amended by 68."
+  - date: "2026-11-06"
+    status: active
+    who: okarcz
+    note: "#113's server side is live after the third deploy (#137, 68e778e3): the playbook, the agent's admin step (agent as cwagent, credentials refreshed) and the restart window (13:59:56 UTC, 4.7 s), after which all five app streams and the facilitator's and host's metric streams arrive. check-series passed for facilitator (7 of 7 continuous series), host (6 of 6) and logVolume (2 of 2), so the alarm-groups PR turns the three on (decision 26): 34 alarms, each with a docs/monitoring.md section, and the page now points at the log files instead of the journal. log-volume's text names the logs' event field, not msg. The explorer team is told before host goes on (decision 65)."
 ---
 
 # Alerts and metrics

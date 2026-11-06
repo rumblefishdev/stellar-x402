@@ -23,11 +23,11 @@ describe("envs/production.json", () => {
     expect(production().networks).toEqual(["stellar:testnet"]);
   });
 
-  test("has on only the groups whose series have data: EMF errors, uptime, the balance (26, 37)", () => {
+  test("has on only the groups whose series have data: EMF errors, uptime, the facilitator, the host, log volume, the balance (26, 37)", () => {
     const on = Object.entries(production().alarmGroups)
       .filter(([, v]) => v)
       .map(([g]) => g);
-    expect(on).toEqual(["uptime", "telemetry", "watch"]);
+    expect(on).toEqual(["uptime", "telemetry", "facilitator", "host", "logVolume", "watch"]);
   });
 
   test("names the fee account /supported shows as the signer", () => {
@@ -128,7 +128,10 @@ describe("validateConfig", () => {
     ],
     [
       "host on without the log-volume ceiling",
-      (c) => (m(c).alarmGroups.host = true),
+      (c) => {
+        m(c).alarmGroups.host = true;
+        m(c).alarmGroups.logVolume = false;
+      },
       /alarmGroups.host needs alarmGroups.logVolume/,
     ],
     [
