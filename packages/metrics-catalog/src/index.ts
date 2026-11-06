@@ -117,6 +117,18 @@ export const CATALOG = [
     fields: ["state"],
     emit: "eager-first",
   },
+  // 0087: our inner transaction landed under someone else's fee bump, or bare. Free for us, a
+  // warning only: no alarm.
+  {
+    namespace: FAC,
+    name: "settlement_rewrapped_total",
+    kind: "counter",
+    unit: "Count",
+    scope: "network",
+    sets: PLAIN,
+    fields: ["state"],
+    emit: "aggregated",
+  },
   // The OpenBao signer holds one network's keys (openbao-signer.ts logs its `network`).
   {
     namespace: FAC,
