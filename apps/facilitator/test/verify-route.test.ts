@@ -1,4 +1,5 @@
 import { Keypair } from "@stellar/stellar-sdk";
+import { RpcTimeoutError, RpcUnavailableError } from "@stellar-x402/signer-pool";
 import type { PaymentRequirements, VerifyResponse } from "@x402/core/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { MAX_BODY_DEPTH } from "../src/http/app.js";
@@ -8,7 +9,7 @@ import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import { start, type Started } from "../src/start.js";
 import { PAYTO_TRUSTLINE_REASON } from "../src/settlement/trustline.js";
-import type { Verify } from "../src/settlement/verify.js";
+import { UpstreamTimeoutError, type Verify } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
 import { bazaarExtensions, depthOf } from "./payment.js";
 import { signerEnv } from "./fake-openbao.js";
@@ -233,9 +234,26 @@ describe("POST /verify", () => {
   });
 
   it("answers 500 and logs the error when verification throws", async () => {
-    verify.mockRejectedValueOnce(new Error("rpc down"));
+    verify.mockRejectedValueOnce(new Error("a bug"));
     const response = await post(request);
     expect([response.status, await response.json()]).toEqual([500, { error: "internal_error" }]);
     expect(lines.join("")).toContain("http_error");
+  });
+
+  it.each([
+    new UpstreamTimeoutError("upstream verify gave no answer within 10000 ms"),
+    new RpcTimeoutError("getLatestLedger gave no answer"),
+    new RpcUnavailableError("every endpoint failed"),
+  ])("answers 503 rpc_unavailable when the RPC gave no answer: $name", async (error) => {
+    lines.length = 0;
+    verify.mockRejectedValueOnce(error);
+    const response = await post(request);
+    expect([response.status, response.headers.get("retry-after"), await response.json()]).toEqual([
+      503,
+      "5",
+      { error: "rpc_unavailable" },
+    ]);
+    expect(lines.join("")).toContain("verify_rpc_unavailable");
+    expect(lines.join("")).not.toContain("http_error");
   });
 });
