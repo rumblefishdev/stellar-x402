@@ -2,7 +2,7 @@
 id: "0029"
 title: "Gate run against our testnet facilitator"
 type: FEATURE
-status: completed
+status: active
 milestone: 1
 related_adr: ["0009"]
 related_tasks: ["0012", "0028", "0026", "0009", "0020", "0059"]
@@ -29,6 +29,13 @@ history:
       facilitator 68e778e (#148). The gate fixed and simplified (#133, #138), another
       facilitator's dry run removed (#139). The final run on the T1 build and the conformance
       report moved to 0119; the upstream change alarm (#149) is still open.
+  - date: "2026-11-09"
+    status: active
+    who: karolkow
+    note: >
+      Reopened for its last criterion: the rerun on the finished T1 build, with the conformance
+      report written from it, both before the M1 handover. 0119, which held them, is folded back
+      in and removed.
 ---
 
 # Gate run against our testnet facilitator
@@ -83,7 +90,7 @@ As a reviewer of the grant, I want e2e results with real settled transaction has
 
 ## Not yet decided
 
-- How often the gate runs after T1: moved to 0119.
+- How often the gate runs after T1.
 
 ## Out of scope
 
@@ -125,14 +132,25 @@ settled on chain with the facilitator's signer as fee payer. Upstream `8827cf1`,
 
 ## Future Work
 
-- 0119: the final gate run on the T1 build and the conformance report.
 - 0116: the project's full end-to-end suite, with refusals.
 - #149: the upstream change alarm; it needs a review, a merge and two infra deploys (0119 checks
   it first).
+
+## Before the M1 handover
+
+- After the last deploy before the M1 handover: rerun the gate and commit `results/testnet-hosted/`.
+- Write the conformance report from that run: what ran and against which commits, each scenario
+  with its transaction hash, and what the suite doesn't cover (one good payment per scenario, no
+  refusals, no Bazaar check).
+- First: the `upstream-changed` alarm (#149) merged and deployed (`make deploy-production-watch`,
+  `make check-series GROUP=watch`, `make deploy-production-alarms` in `infra/`).
+- The testnet reset of 2026-12-16 (developers.stellar.org, Networks) removes the transactions from
+  the network: the grant's final handover needs a fresh run and the report's table refreshed.
 
 ## Acceptance Criteria
 
 - [x] Given our facilitator deployed at its public URL (0026), when the gate runs, then the canonical client settles `exact` for each Stellar scenario (the 9 `upfront` ones without a `/verify`) and every run records a real transaction hash
 - [x] Given a finished run, when results are saved, then `conformance/results/` gets the run JSON with the upstream commit, the date, our facilitator version and the transaction hashes
 - [x] Given a failing scenario, when it is analysed, then a backlog task is created for the owning lane (no scenario failed in the run of record)
-- [x] Given the finished T1 build, including Bazaar and spend budgets, when the gate reruns, then it passes and the final results are committed (moved to 0119, with the conformance report)
+- [ ] Given the finished T1 build, including Bazaar and spend budgets, when the gate reruns, then it passes and the final results are committed
+- [ ] Given the final results, when the conformance report is written, then it lists the e2e results and the settled transaction hashes, with the upstream and facilitator commits (RFP, expected deliverables)
