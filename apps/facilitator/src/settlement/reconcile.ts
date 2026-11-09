@@ -28,7 +28,11 @@ export interface ReconcilerDeps {
   records: Records;
   logger: Logger;
   metrics: NetworkMetrics;
-  /** `SETTLE_BUDGET_MS`: past it plus `MARGIN_MS`, no call adds a hash to a claim. */
+  /**
+   * `SETTLE_BUDGET_MS`: past it plus `MARGIN_MS`, the call that claimed has stopped signing for its
+   * claim. The time alone keeps no hash out: a write sent just before the budget can reach the
+   * store after it. What does is `addHash`'s state check, which refuses a closed record.
+   */
   budgetMs: number;
   now?: () => number;
 }

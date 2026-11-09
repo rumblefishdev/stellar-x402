@@ -245,6 +245,13 @@ facilitator serves, then restarts `x402@production` on the new image and waits u
 `sudo tail -F /var/log/x402/production/deploy.log`; `journalctl -u x402-deploy@production` has only
 its start and end.
 
+A deploy that lowers `SETTLE_BUDGET_MS` makes the new process close the old process's live claims
+early. A sweep closes a claim with no hash at its start plus its own budget plus 5 s, and a repeat
+at its start plus the budget, each with its own process's budget. Those buyers get
+`settle_exact_stellar_interrupted` with `extra.retryable`, and repeating the same payment settles
+it. Expect one round of such answers. No money moves for a closed claim: the store refuses its
+hash.
+
 ## Rollback
 
 - **Automatic:** a new image that isn't `ready`, `listed` and `signer` ok in 120 s is replaced by
