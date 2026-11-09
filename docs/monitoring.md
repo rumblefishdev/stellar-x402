@@ -19,7 +19,7 @@ PR (decision 68).
 
 | Alarm                  | Group       | On since             | Fired on purpose                                                                                  |
 | ---------------------- | ----------- | -------------------- | ------------------------------------------------------------------------------------------------- |
-| `emf-validation`       | `telemetry` | 2026-11-06           | `make fire-test` (delivery test, seen): 08:39:50 and 11:18:30 UTC                                 |
+| `emf-validation`       | `telemetry` | 2026-11-06           | `make fire-test` after each Alarms deploy (delivery test, seen): 08:39:50 and 11:18:30 UTC        |
 | `emf-parsing`          | `telemetry` | 2026-11-06           | Not yet                                                                                           |
 | `uptime`               | `uptime`    | 2026-11-06 11:16 UTC | Not yet                                                                                           |
 | `uptime-flapping`      | `uptime`    | 2026-11-06 11:16 UTC | Not yet                                                                                           |
@@ -49,7 +49,9 @@ the other alarms can't be trusted until it's fixed.
    returns to OK at its next evaluation and sends no OK message.
 
 `make fire-test` (in `infra/`) sets this alarm to ALARM after every deploy of the alarms, to check
-that messages reach Slack. That message says "Delivery test" and needs no action.
+that messages reach Slack. That message says "Delivery test" and needs no action. A deploy that
+adds alarms also sends one OK message from each new alarm when it first reads data; that is the
+deploy, not a fault.
 
 ### emf-parsing
 
@@ -148,15 +150,22 @@ The check hasn't run for 15 minutes, so the balance alarms see nothing.
 
 ## Drills
 
-What each alarm fired on purpose took, so it can be done again. Times are UTC.
+How an alarm was fired on purpose, so it can be done again. Times are UTC. The delivery test
+(`make fire-test`) is under [emf-validation](#emf-validation).
 
 ### 2026-11-06: the balance alarms
 
+- **Before:** say in `#stellar-x402-bot` that a drill is starting, so no one tops up or reads
+  `balance-critical` as a theft. Check that the latest real `spendable_stroops` is above 25 XLM
+  (250,000,000 stroops), or the next real point won't clear the alarms, and that `watch-errors`
+  and `watch-no-invocations` are OK: without the check's next point both alarms stay in ALARM.
+  Write the fake point for `stellar:testnet` only, never for a pubnet network.
 - **How:** one fake `spendable_stroops` point of 50,000,000 stroops (5 XLM), below both
-  thresholds, written by hand at 11:19:01 with the `stellar` SSO profile:
+  thresholds (25 and 10 XLM), written by hand at 11:19:01 with the `stellar` SSO profile:
 
   ```sh
-  aws cloudwatch put-metric-data --region eu-central-1 --namespace x402-watch --metric-data \
+  aws cloudwatch put-metric-data --profile stellar --region eu-central-1 --namespace x402-watch \
+    --metric-data \
     '[{"MetricName":"spendable_stroops","Dimensions":[{"Name":"network","Value":"stellar:testnet"}],"Value":50000000,"Unit":"None"}]'
   ```
 
@@ -165,6 +174,9 @@ What each alarm fired on purpose took, so it can be done again. Times are UTC.
   (99,988,728,192 stroops) put both back to OK at 11:25:10 and 11:25:35. Slack showed the four
   messages, each naming the fee account and the top-up step, in `#stellar-x402-bot`.
 - **What it shows:** the alarms' thresholds, statistic and path to Slack. Not the check's own read
-  of a low balance, which `test/watch-balance.test.ts` covers against a faked RPC.
-- **After the deploy:** each new alarm also sent one OK message when it first read data (11:17 to
-  11:18). That is the deploy, not a fault.
+  of a low balance, which
+  [infra/test/watch-balance.test.ts](../infra/test/watch-balance.test.ts) covers against a faked
+  RPC.
+- **In the metric's history:** CloudWatch can't delete the fake point, so `spendable_stroops` for
+  `stellar:testnet` reads a 5 XLM minimum at 11:15 to 11:20 on 2026-11-06. It is the drill's, not a
+  real balance.
