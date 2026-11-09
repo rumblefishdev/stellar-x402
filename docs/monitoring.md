@@ -11,64 +11,81 @@ channel `#stellar-x402-bot`. Every alarm's description ends with `Runbook: docs/
   [the alarm list](../lore/1-tasks/active/0027_FEATURE_alerts-and-metrics/notes/G-alarm-list.md).
 - The stacks and the alarm groups: [infra/README.md](../infra/README.md).
 
-This page covers the alarms that are on. Each group's section lands with the PR that turns the
-group on. The full list of every metric and alarm, and the uptime figure, come with 0027's closing
-PR (decision 68).
+This page has every alarm: a section for each one that is on, and the [alarms that are off](#the-alarms-that-are-off)
+with the task that turns each on. [Every metric](#every-metric) lists the catalog's metrics and
+the alarms that read them. The [uptime figure](#the-uptime-figure) is under Uptime.
 
 ## The alarms that are on
 
-| Alarm                     | Group         | On since                    | Fired on purpose                                                                                                               |
-| ------------------------- | ------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `emf-validation`          | `telemetry`   | 2026-11-06                  | `make fire-test` after each Alarms deploy (delivery test, seen): 2026-11-06 08:39:50 and 11:18:30, 2026-11-09 12:22:01 UTC     |
-| `emf-parsing`             | `telemetry`   | 2026-11-06                  | Not fired: `AWS/Logs` takes no hand-written point ([Drills](#drills))                                                          |
-| `uptime`                  | `uptime`      | 2026-11-06 11:16 UTC        | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:34:24, OK 13:48:24 UTC                                               |
-| `uptime-flapping`         | `uptime`      | 2026-11-06 11:16 UTC        | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:37:34, OK 14:08:34 UTC                                               |
-| `balance-low`             | `watch`       | 2026-11-06 11:16 UTC        | 2026-11-06, a fake point ([Drills](#drills)): ALARM 11:20:10, OK 11:25:10 UTC, both seen in Slack                              |
-| `balance-critical`        | `watch`       | 2026-11-06 11:16 UTC        | 2026-11-06, the same fake point: ALARM 11:20:35, OK 11:25:35 UTC, both seen in Slack                                           |
-| `watch-errors`            | `watch`       | 2026-11-06 11:16 UTC        | Not fired: `AWS/Lambda` takes no hand-written point ([Drills](#drills))                                                        |
-| `watch-no-invocations`    | `watch`       | 2026-11-06 11:16 UTC        | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:41:52, OK 13:51:52 UTC                                               |
-| `protocol-changed`        | `protocol`    | 2026-11-09 12:19 UTC        | 2026-11-09, fake points for both networks ([Drills](#drills)): ALARM 13:55:22, OK 13:59:22 UTC                                 |
-| `protocol-upgrade-coming` | `protocol`    | 2026-11-09 12:19 UTC        | 2026-11-09, fake points for both networks ([Drills](#drills)): ALARM 13:55:15–13:55:52, OK 13:59:15–13:59:52 UTC               |
-| `facilitator-silent`      | `facilitator` | 2026-11-09 12:19 UTC        | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:42:49, OK 13:47:49 UTC                                               |
-| `gauges-silent`           | `facilitator` | 2026-11-09 12:19 UTC        | Not fired: it needs gauges missing while sweeps run ([Drills](#drills))                                                        |
-| `http-500`                | `facilitator` | 2026-11-09 12:19 UTC        | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:00, OK 14:09:00 UTC                                                  |
-| `rpc-stalled`             | `facilitator` | 2026-11-09 12:19 UTC        | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:33:26, OK 13:47:26 UTC                                |
-| `rpc-on-fallback`         | `facilitator` | 2026-11-09 12:19 UTC        | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:43:00, OK 13:48:00 UTC                                |
-| `balance-stale`           | `facilitator` | 2026-11-09 12:19 UTC        | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:29:38, OK 13:47:38 UTC                                |
-| `pending`                 | `facilitator` | 2026-11-09 12:19 UTC        | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:31:12, OK 13:47:12 UTC                                |
-| `sweeps-stopped`          | `facilitator` | 2026-11-09 12:19 UTC        | Not fired: it needs sweeps that run but list nothing ([Drills](#drills))                                                       |
-| `settlement-expired`      | `facilitator` | 2026-11-09 12:19 UTC        | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:29, OK 14:09:29 UTC                                                  |
-| `landed-after-expired`    | `facilitator` | 2026-11-09 12:19 UTC        | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:15, OK 14:09:15 UTC                                                  |
-| `history-gone`            | `facilitator` | 2026-11-09 12:19 UTC        | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:33, OK 14:09:33 UTC                                                  |
-| `submit-failed`           | `facilitator` | 2026-11-09 12:19 UTC        | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:43, OK 14:09:43 UTC                                                  |
-| `refused-after-verify`    | `facilitator` | 2026-11-09 12:19 UTC        | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:58, OK 14:09:58 UTC                                                  |
-| `failure-ours`            | `facilitator` | 2026-11-09 12:19 UTC        | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:42, OK 14:09:42 UTC                                                  |
-| `signer-failures`         | `facilitator` | 2026-11-09 12:19 UTC        | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:34, OK 14:09:34 UTC                                                  |
-| `store-outage`            | `facilitator` | 2026-11-09 12:19 UTC        | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:05, OK 14:04:05 UTC                                                  |
-| `hook-failures`           | `facilitator` | 2026-11-09 12:19 UTC        | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:37, OK 14:09:37 UTC                                                  |
-| `queue-waiting`           | `facilitator` | 2026-11-09 12:19 UTC        | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:31:42, OK 13:47:42 UTC                                |
-| `channel-quarantined`     | `facilitator` | 2026-11-09 12:19 UTC        | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:29:22, OK 13:47:22 UTC                                |
-| `pool-health`             | `facilitator` | 2026-11-09 12:19 UTC        | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:30, OK 14:14:30 UTC                                                  |
-| `breaker-opened`          | `facilitator` | 2026-11-09 12:19 UTC        | 2026-11-09, a fake point for each kind ([Drills](#drills)): ALARM 13:49:05–13:49:17, OK 14:09:05–14:09:17 UTC                  |
-| `budget-nearing`          | `facilitator` | 2026-11-09 12:19 UTC        | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:31, OK 14:19:31 UTC                                                  |
-| `commit-unmatched`        | `facilitator` | 2026-11-09 12:19 UTC        | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:50, OK 14:09:50 UTC                                                  |
-| `openbao-down`            | `host`        | 2026-11-09 12:19 UTC        | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:31:24, OK 13:46:24 UTC                                |
-| `disk`                    | `disk`        | With the next Alarms deploy | Not yet                                                                                                                        |
-| `audit-disk`              | `host`        | 2026-11-09 12:19 UTC        | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:39:32, OK 13:49:32 UTC                                |
-| `facilitator-failed`      | `host`        | 2026-11-09 12:19 UTC        | 2026-11-09, for real: the stop window's own stop (exit 130, fixed by #163), ALARM 13:46:53; then a fake point; OK 14:09:53 UTC |
-| `watchdog-restart`        | `host`        | 2026-11-09 12:19 UTC        | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:09, OK 14:09:09 UTC                                                  |
-| `probe-silent`            | `host`        | 2026-11-09 12:19 UTC        | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:42:31, OK 13:46:31 UTC                                               |
-| `telemetry-silent`        | `host`        | 2026-11-09 12:19 UTC        | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:40:23, OK 13:48:23 UTC                                               |
-| `credentials-stale`       | `host`        | 2026-11-09 12:19 UTC        | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:31:13, OK 13:46:13 UTC                                |
-| `certificate`             | `host`        | 2026-11-09 12:19 UTC        | Not fired: every hour holds the real days left ([Drills](#drills))                                                             |
-| `log-volume`              | `logVolume`   | 2026-11-09 12:19 UTC        | Not fired: `AWS/Logs` takes no hand-written point ([Drills](#drills))                                                          |
-| `memory`                  | `memory`      | With the next Alarms deploy | Not yet                                                                                                                        |
+| Alarm                     | Group         | On since             | Fired on purpose                                                                                                                        |
+| ------------------------- | ------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `emf-validation`          | `telemetry`   | 2026-11-06           | `make fire-test` after each Alarms deploy (delivery test, seen): 2026-11-06 08:39:50 and 11:18:30, 2026-11-09 12:22:01 and 15:13:28 UTC |
+| `emf-parsing`             | `telemetry`   | 2026-11-06           | Not fired: `AWS/Logs` takes no hand-written point ([Drills](#drills))                                                                   |
+| `uptime`                  | `uptime`      | 2026-11-06 11:16 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:34:24, OK 13:48:24 UTC                                                        |
+| `uptime-flapping`         | `uptime`      | 2026-11-06 11:16 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:37:34, OK 14:08:34 UTC                                                        |
+| `balance-low`             | `watch`       | 2026-11-06 11:16 UTC | 2026-11-06, a fake point ([Drills](#drills)): ALARM 11:20:10, OK 11:25:10 UTC, both seen in Slack                                       |
+| `balance-critical`        | `watch`       | 2026-11-06 11:16 UTC | 2026-11-06, the same fake point: ALARM 11:20:35, OK 11:25:35 UTC, both seen in Slack                                                    |
+| `watch-errors`            | `watch`       | 2026-11-06 11:16 UTC | Not fired: `AWS/Lambda` takes no hand-written point ([Drills](#drills))                                                                 |
+| `watch-no-invocations`    | `watch`       | 2026-11-06 11:16 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:41:52, OK 13:51:52 UTC                                                        |
+| `protocol-changed`        | `protocol`    | 2026-11-09 12:19 UTC | 2026-11-09, fake points for both networks ([Drills](#drills)): ALARM 13:55:22, OK 13:59:22 UTC                                          |
+| `protocol-upgrade-coming` | `protocol`    | 2026-11-09 12:19 UTC | 2026-11-09, fake points for both networks ([Drills](#drills)): ALARM 13:55:15–13:55:52, OK 13:59:15–13:59:52 UTC                        |
+| `facilitator-silent`      | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:42:49, OK 13:47:49 UTC                                                        |
+| `gauges-silent`           | `facilitator` | 2026-11-09 12:19 UTC | Not fired: it needs gauges missing while sweeps run ([Drills](#drills))                                                                 |
+| `http-500`                | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:00, OK 14:09:00 UTC                                                           |
+| `rpc-stalled`             | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:33:26, OK 13:47:26 UTC                                         |
+| `rpc-on-fallback`         | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:43:00, OK 13:48:00 UTC                                         |
+| `balance-stale`           | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:29:38, OK 13:47:38 UTC                                         |
+| `pending`                 | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:31:12, OK 13:47:12 UTC                                         |
+| `sweeps-stopped`          | `facilitator` | 2026-11-09 12:19 UTC | Not fired: it needs sweeps that run but list nothing ([Drills](#drills))                                                                |
+| `settlement-expired`      | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:29, OK 14:09:29 UTC                                                           |
+| `landed-after-expired`    | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:15, OK 14:09:15 UTC                                                           |
+| `history-gone`            | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:33, OK 14:09:33 UTC                                                           |
+| `submit-failed`           | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:43, OK 14:09:43 UTC                                                           |
+| `refused-after-verify`    | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:58, OK 14:09:58 UTC                                                           |
+| `failure-ours`            | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:42, OK 14:09:42 UTC                                                           |
+| `signer-failures`         | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:34, OK 14:09:34 UTC                                                           |
+| `store-outage`            | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:05, OK 14:04:05 UTC                                                           |
+| `hook-failures`           | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:37, OK 14:09:37 UTC                                                           |
+| `queue-waiting`           | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:31:42, OK 13:47:42 UTC                                         |
+| `channel-quarantined`     | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:29:22, OK 13:47:22 UTC                                         |
+| `pool-health`             | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:30, OK 14:14:30 UTC                                                           |
+| `breaker-opened`          | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point for each kind ([Drills](#drills)): ALARM 13:49:05–13:49:17, OK 14:09:05–14:09:17 UTC                           |
+| `budget-nearing`          | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:31, OK 14:19:31 UTC                                                           |
+| `commit-unmatched`        | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:50, OK 14:09:50 UTC                                                           |
+| `openbao-down`            | `host`        | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:31:24, OK 13:46:24 UTC                                         |
+| `disk`                    | `disk`        | 2026-11-09 15:11 UTC | 2026-11-09, fake points at 85% ([Drills](#drills)): ALARM 15:26:16, OK 15:36:16 UTC; `audit-disk` (90%) stayed OK                       |
+| `audit-disk`              | `host`        | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:39:32, OK 13:49:32 UTC                                         |
+| `facilitator-failed`      | `host`        | 2026-11-09 12:19 UTC | 2026-11-09, for real: the stop window's own stop (exit 130, fixed by #163), ALARM 13:46:53; then a fake point; OK 14:09:53 UTC          |
+| `watchdog-restart`        | `host`        | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:09, OK 14:09:09 UTC                                                           |
+| `probe-silent`            | `host`        | 2026-11-09 12:19 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:42:31, OK 13:46:31 UTC                                                        |
+| `telemetry-silent`        | `host`        | 2026-11-09 12:19 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:40:23, OK 13:48:23 UTC                                                        |
+| `credentials-stale`       | `host`        | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:31:13, OK 13:46:13 UTC                                         |
+| `certificate`             | `host`        | 2026-11-09 12:19 UTC | Not fired: every hour holds the real days left ([Drills](#drills))                                                                      |
+| `log-volume`              | `logVolume`   | 2026-11-09 12:19 UTC | Not fired: `AWS/Logs` takes no hand-written point ([Drills](#drills))                                                                   |
+| `memory`                  | `memory`      | 2026-11-09 15:11 UTC | Not fired: a `Minimum` alarm can't be faked while the agent writes real samples ([Drills](#drills))                                     |
 
 A network-scoped alarm has the network at the end of its name (`balance-low-testnet`), and
 `breaker-opened` its kind after the network (`breaker-opened-testnet-payer`). `log-volume` ends in
 its log group (`log-volume-app`, `log-volume-metrics`). `http-500` and the server's alarms carry
 no network. AWS commands below use the `stellar` SSO profile (`aws sso login --profile stellar`)
 and `--region eu-central-1`.
+
+## The alarms that are off
+
+Built in `infra/` and defined in the alarm list, but their group is off in
+`infra/envs/production.json` until what they read exists. Each gets its section here, and is fired
+once, by the task that turns it on.
+
+| Alarm                | Group           | Turned on by                                                                           |
+| -------------------- | --------------- | -------------------------------------------------------------------------------------- |
+| `account-effects`    | `watchSecurity` | 0127, the theft section                                                                |
+| `account-state`      | `watchSecurity` | 0127, the theft section                                                                |
+| `backup-age`         | `backups`       | 0026, once the first pgBackRest backup is made                                         |
+| `backup-secret-read` | `watchSecurity` | 0127, the secret-read section, once 0026 creates the backup secret                     |
+| `channel-held`       | `channelHeld`   | 0089 builds `channel_longest_hold_seconds`; 0027 owns the alarm (alarm list, Deferred) |
+| `snapshot-age`       | `snapshots`     | 0026, once OpenBao's daily snapshot has run                                            |
+| `wal-failing`        | `backups`       | 0026, once pgBackRest archives WAL (its decision-71 criterion)                         |
+| `wal-stale`          | `backups`       | 0026, as above                                                                         |
 
 **The logs.** The facilitator, the tunnel, Postgres, OpenBao and the deploy write their output to
 files under `/var/log/x402/` on the server, and the CloudWatch agent ships them ([runbook, The CloudWatch agent](runbook.md#the-cloudwatch-agent)):
@@ -120,6 +137,22 @@ The uptime probe, a Lambda in the Uptime stack, reads
 `https://x402-facilitator.sorobanscan.com/health` through Cloudflare every minute and publishes
 `ready` (1 or 0) to `x402-watch`. Its log is `/aws/lambda/x402-production-uptime-probe`, and each
 line says what it read (`reason`).
+
+### The uptime figure
+
+A minute counts as up only when the probe read `ready` (decision 5; a missing point counts as
+down). From `uptime`'s start, 2026-11-06 11:16 UTC, to 2026-11-09 15:33 UTC: 4,557 of 4,577
+minutes, **99.56%**. All 20 down minutes are the drill's planned stop (13:27 to 13:46 on
+2026-11-09); without it, 100%: the 2026-11-06 13:09 deploy lost no minute. To read it again
+(`Minimum` of `ready` per minute; count the minutes at 1 over all minutes in the window):
+
+```sh
+aws cloudwatch get-metric-statistics --region eu-central-1 --namespace x402-watch \
+  --metric-name ready --period 60 --statistics Minimum \
+  --start-time 2026-11-06T11:16:00Z --end-time 2026-11-07T11:16:00Z
+```
+
+One call returns at most 1,440 points, so read a day at a time.
 
 ### uptime
 
@@ -622,6 +655,84 @@ of them run it. Mainnet was in this state on 2026-11-06 (29, Core supporting 30)
 3. Raise `supported` for that network to the new version in a PR and deploy the alarms: this one
    goes back to OK. `protocol-changed` fires on the upgrade itself, with its own `expected`.
 
+## Every metric
+
+Every metric in [`@stellar-x402/metrics-catalog`](../packages/metrics-catalog/src/index.ts), then
+the AWS metrics the alarms read. What each one measures and where it comes from is in
+[G-metrics](../lore/1-tasks/active/0027_FEATURE_alerts-and-metrics/notes/G-metrics.md). A dimension
+set marked "only" is written for those values alone; "none" is a series with no dimension. A metric with no alarm is read in Logs Insights or in
+the weekly review. `infra/test/alarms.test.ts` fails when the catalog gains a metric this table
+lacks.
+
+| Metric                                  | Namespace          | Kind, unit     | Dimensions                                               | Alarms                                                                                                        |
+| --------------------------------------- | ------------------ | -------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `settlement_outcomes_total`             | `x402-facilitator` | counter, Count | `network`, `result`                                      | none                                                                                                          |
+| `settlement_refused_after_verify_total` | `x402-facilitator` | counter, Count | `network`, `stage` (stage pool only)                     | [refused-after-verify](#refused-after-verify)                                                                 |
+| `settlement_record_failures_total`      | `x402-facilitator` | counter, Count | `network`                                                | [store-outage](#store-outage)                                                                                 |
+| `settlement_history_gone_total`         | `x402-facilitator` | counter, Count | `network`                                                | [history-gone](#history-gone)                                                                                 |
+| `settlement_landed_after_expired_total` | `x402-facilitator` | counter, Count | `network`                                                | [landed-after-expired](#landed-after-expired)                                                                 |
+| `settlement_rewrapped_total`            | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
+| `signer_failures_total`                 | `x402-facilitator` | counter, Count | `network`                                                | [signer-failures](#signer-failures)                                                                           |
+| `pool_events_total`                     | `x402-facilitator` | counter, Count | `network`; `network`, `type` (type sequence-resync only) | [pool-health](#pool-health)                                                                                   |
+| `settlement_uncertain_total`            | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
+| `settlement_submit_failures_total`      | `x402-facilitator` | counter, Count | `network`                                                | [submit-failed](#submit-failed)                                                                               |
+| `settlement_budget_exhausted_total`     | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
+| `settlement_reconciled_total`           | `x402-facilitator` | counter, Count | `network`; `network`, `state` (state expired only)       | [settlement-expired](#settlement-expired)                                                                     |
+| `settlement_reopened_total`             | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
+| `settlement_lease_fenced_total`         | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
+| `settlement_hook_failures_total`        | `x402-facilitator` | counter, Count | `network`                                                | [hook-failures](#hook-failures)                                                                               |
+| `settlement_already_settled_total`      | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
+| `settlement_nonce_reuse_total`          | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
+| `lease_changes_total`                   | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
+| `store_prune_failures_total`            | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
+| `catalog_internal_errors_total`         | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
+| `catalog_attempts_total`                | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
+| `catalog_upsert_failures_total`         | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
+| `catalog_attempt_write_failures_total`  | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
+| `catalog_route_template_ignored_total`  | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
+| `discovery_unknown_params_total`        | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
+| `spend_breaker_opened_total`            | `x402-facilitator` | counter, Count | `network`, `breaker`                                     | [breaker-opened](#breaker-opened)                                                                             |
+| `spend_budget_nearing_total`            | `x402-facilitator` | counter, Count | `network` (budget asset/other/global only)               | [budget-nearing](#budget-nearing)                                                                             |
+| `spend_failure_attributed_total`        | `x402-facilitator` | counter, Count | `network`, `fault` (fault ours only)                     | [failure-ours](#failure-ours)                                                                                 |
+| `spend_commit_unmatched_total`          | `x402-facilitator` | counter, Count | `network`                                                | [commit-unmatched](#commit-unmatched)                                                                         |
+| `spend_store_failures_total`            | `x402-facilitator` | counter, Count | `network`                                                | [store-outage](#store-outage)                                                                                 |
+| `spend_refused_total`                   | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
+| `balance_read_failures_total`           | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
+| `http_requests_total`                   | `x402-facilitator` | counter, Count | `route`; `status` (status 500 only)                      | [http-500](#http-500)                                                                                         |
+| `settlement_sweeps_total`               | `x402-facilitator` | counter, Count | `network`, `outcome`                                     | [facilitator-silent](#facilitator-silent), [gauges-silent](#gauges-silent), [sweeps-stopped](#sweeps-stopped) |
+| `settlement_oldest_open_seconds`        | `x402-facilitator` | gauge, Seconds | `network`                                                | [gauges-silent](#gauges-silent), [pending](#pending)                                                          |
+| `pool_queued`                           | `x402-facilitator` | gauge, Count   | `network`                                                | [gauges-silent](#gauges-silent), [queue-waiting](#queue-waiting)                                              |
+| `pool_quarantined`                      | `x402-facilitator` | gauge, Count   | `network`                                                | [channel-quarantined](#channel-quarantined), [gauges-silent](#gauges-silent)                                  |
+| `rpc_on_fallback`                       | `x402-facilitator` | gauge, None    | `network`                                                | [gauges-silent](#gauges-silent), [rpc-on-fallback](#rpc-on-fallback)                                          |
+| `rpc_stalled_seconds`                   | `x402-facilitator` | gauge, Seconds | `network`                                                | [gauges-silent](#gauges-silent), [rpc-stalled](#rpc-stalled)                                                  |
+| `balance_reading_age_seconds`           | `x402-facilitator` | gauge, Seconds | `network`                                                | [balance-stale](#balance-stale), [gauges-silent](#gauges-silent)                                              |
+| `fee_charged_stroops`                   | `x402-facilitator` | counter, None  | `network`                                                | none                                                                                                          |
+| `channel_longest_hold_seconds`          | `x402-facilitator` | gauge, Seconds | `network`                                                | `channel-held` (off), [gauges-silent](#gauges-silent)                                                         |
+| `openbao_up`                            | `x402-host`        | gauge, None    | none                                                     | [openbao-down](#openbao-down)                                                                                 |
+| `wal_failing`                           | `x402-host`        | gauge, None    | none                                                     | `wal-failing` (off)                                                                                           |
+| `wal_last_archived_age_seconds`         | `x402-host`        | gauge, Seconds | none                                                     | `wal-stale` (off)                                                                                             |
+| `backup_age_seconds`                    | `x402-host`        | gauge, Seconds | none                                                     | `backup-age` (off)                                                                                            |
+| `snapshot_age_seconds`                  | `x402-host`        | gauge, Seconds | none                                                     | `snapshot-age` (off)                                                                                          |
+| `certificate_days_left`                 | `x402-host`        | gauge, None    | none                                                     | [certificate](#certificate)                                                                                   |
+| `host_probe_heartbeat`                  | `x402-host`        | gauge, None    | none                                                     | [probe-silent](#probe-silent)                                                                                 |
+| `credentials_age_seconds`               | `x402-host`        | gauge, Seconds | none                                                     | [credentials-stale](#credentials-stale)                                                                       |
+| `watchdog_restarts_total`               | `x402-host`        | counter, Count | none                                                     | [watchdog-restart](#watchdog-restart)                                                                         |
+| `facilitator_failures_total`            | `x402-host`        | counter, Count | none                                                     | [facilitator-failed](#facilitator-failed)                                                                     |
+| `mem_used_percent`                      | `x402-host`        | gauge, Percent | none                                                     | [memory](#memory), [telemetry-silent](#telemetry-silent)                                                      |
+| `disk_used_percent`                     | `x402-host`        | gauge, Percent | `path`                                                   | [audit-disk](#audit-disk), [disk](#disk), [telemetry-silent](#telemetry-silent)                               |
+| `ready`                                 | `x402-watch`       | gauge, None    | none                                                     | [uptime](#uptime), [uptime-flapping](#uptime-flapping)                                                        |
+| `spendable_stroops`                     | `x402-watch`       | gauge, None    | `network`                                                | [balance-critical](#balance-critical), [balance-low](#balance-low)                                            |
+| `protocol_version`                      | `x402-watch`       | gauge, None    | `network`                                                | [protocol-changed](#protocol-changed)                                                                         |
+| `protocol_supported_version`            | `x402-watch`       | gauge, None    | `network`                                                | [protocol-upgrade-coming](#protocol-upgrade-coming)                                                           |
+| `account_state_mismatches`              | `x402-watch`       | gauge, Count   | `network`                                                | `account-state` (off)                                                                                         |
+| `account_effects_unexpected`            | `x402-watch`       | counter, Count | `network`                                                | `account-effects` (off)                                                                                       |
+| `backup_secret_reads`                   | `x402-watch`       | counter, Count | none                                                     | `backup-secret-read` (off)                                                                                    |
+| `Errors`                                | `AWS/Lambda`       | AWS's own      | `FunctionName` `x402-production-watch`                   | [watch-errors](#watch-errors)                                                                                 |
+| `Invocations`                           | `AWS/Lambda`       | AWS's own      | `FunctionName` `x402-production-watch`                   | [watch-no-invocations](#watch-no-invocations)                                                                 |
+| `EMFParsingErrors`                      | `AWS/Logs`         | AWS's own      | `LogGroupName` `/x402/production/metrics`                | [emf-parsing](#emf-parsing)                                                                                   |
+| `EMFValidationErrors`                   | `AWS/Logs`         | AWS's own      | `LogGroupName` `/x402/production/metrics`                | [emf-validation](#emf-validation)                                                                             |
+| `IncomingBytes`                         | `AWS/Logs`         | AWS's own      | `LogGroupName`, each of our log groups                   | [log-volume](#log-volume)                                                                                     |
+
 ## Drills
 
 How an alarm was fired on purpose, so it can be done again. Times are UTC. The delivery test
@@ -709,3 +820,17 @@ reset-failed x402@production`, the agent, the credentials timer and the probe ti
   the probe's real days left.
 - **In the metrics' history:** CloudWatch can't delete a point. The values above, from 13:28 to
   13:55 on 2026-11-09, are the drill's, not real readings.
+
+### 2026-11-09: the disk alarm
+
+- **After the deploy** that turned `disk` (80%) and `memory` (90%) on and raised `audit-disk` to 90%
+  (15:11:44 UTC, decision 73): `make fire-test` at 15:13:28, seen in Slack; each new alarm sent one
+  OK when it first read data (15:13).
+- **How:** one fake `disk_used_percent` point of 85% on `/` a minute, 15:15:46 to 15:30:03, with
+  the admin SSO profile: above `disk`'s 80%, below `audit-disk`'s 90%.
+- **What happened:** `disk-root` went to ALARM at 15:26:16, after 3 five-minute periods above 80%,
+  and back to OK at 15:36:16 on the real 60%. `audit-disk` stayed OK: the warning comes first.
+- **Not fired: `memory`.** It takes the `Minimum` of every sample, and the agent writes a real one
+  (about 3%) every minute, so a fake point can't move it without stopping the agent again.
+- **In the metrics' history:** `disk_used_percent` for `/` reads 85% from 15:15 to 15:30 on
+  2026-11-09: the drill's, not a real reading.
