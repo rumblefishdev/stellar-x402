@@ -133,8 +133,7 @@ settled on chain with the facilitator's signer as fee payer. Upstream `8827cf1`,
 ## Future Work
 
 - 0116: the project's full end-to-end suite, with refusals.
-- #149: the upstream change alarm; it needs a review, a merge and two infra deploys (0119 checks
-  it first).
+- #149: the upstream change alarm; it needs a review, a merge and two infra deploys (checked before the rerun).
 
 ## Before the M1 handover
 
