@@ -53,6 +53,7 @@ PR (decision 68).
 | `budget-nearing`          | `facilitator` | 2026-11-09 12:19 UTC        | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:31, OK 14:19:31 UTC                                                  |
 | `commit-unmatched`        | `facilitator` | 2026-11-09 12:19 UTC        | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:50, OK 14:09:50 UTC                                                  |
 | `openbao-down`            | `host`        | 2026-11-09 12:19 UTC        | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:31:24, OK 13:46:24 UTC                                |
+| `disk`                    | `disk`        | With the next Alarms deploy | Not yet                                                                                                                        |
 | `audit-disk`              | `host`        | 2026-11-09 12:19 UTC        | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:39:32, OK 13:49:32 UTC                                |
 | `facilitator-failed`      | `host`        | 2026-11-09 12:19 UTC        | 2026-11-09, for real: the stop window's own stop (exit 130, fixed by #163), ALARM 13:46:53; then a fake point; OK 14:09:53 UTC |
 | `watchdog-restart`        | `host`        | 2026-11-09 12:19 UTC        | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:09, OK 14:09:09 UTC                                                  |
@@ -479,9 +480,21 @@ facilitator can't sign, so settlement stops. A signature that fails while OpenBa
 1. `systemctl status x402-openbao` and `/var/log/x402/openbao/openbao.log`.
 2. Unseal or restart it as the [runbook's OpenBao section](runbook.md#openbao) says.
 
+### disk
+
+The server's `/` is over 80% used for 15 minutes. It is shared with ClickHouse and Postgres, and
+holds OpenBao's audit volume: at 90% [audit-disk](#audit-disk) fires, the last call before
+signing stops. At 80% about 334 GB of 1.67 TB is left, days at any rate seen so far.
+
+1. `df -h /`, then what is ours:
+   `sudo du -sh /var/log/x402 /var/lib/docker/volumes/x402-* 2>/dev/null | sort -h`, and the
+   images (`sudo docker system df`). The WAL archive and pgBackRest's repository come with 0026.
+2. Free what is ours; tell the ClickHouse project's owners if their data is what grew (the Prices
+   API watches it as `prices-production-ch-disk-free`).
+
 ### audit-disk
 
-OpenBao's audit volume, on `/`, is 80% used or more. The disk is shared with ClickHouse and
+OpenBao's audit volume, on `/`, is 90% used or more: [disk](#disk) warned at 80%. The disk is shared with ClickHouse and
 Postgres; when it fills, OpenBao refuses the requests it can't audit, and signing stops (ADR 0013).
 
 1. Check that the audit log rotates ([runbook, OpenBao](runbook.md#openbao)): `audit.log.1`

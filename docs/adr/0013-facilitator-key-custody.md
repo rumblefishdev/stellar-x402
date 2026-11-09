@@ -18,7 +18,10 @@
   Box account's own directory, and the Storage Box's own snapshots, restored by a copy and never
   a rollback, from Stan's setup of the box in task 0026); 2026-11-05 (Borg in repokey mode with
   its key exported to the secret, changed with the passphrase, and the drill restoring through
-  a local copy, task 0026)
+  a local copy, task 0026); 2026-11-09 (the audit log disk alarm at 90%, after the server's disk
+  alarm at 80%: on the server the audit volume shares `/` with everything else, so the two
+  thresholds give a warning and then a last call instead of one doubled message; task 0027
+  decision 73)
 - Supersedes: the key custody part of [ADR 0011](0011-facilitator-hosting.md) ("Keys, secrets and
   access": the SSM parameter for `FACILITATOR_SECRET` and the mainnet KMS key)
 
@@ -176,8 +179,9 @@
   with `bao write` inside the container. Only root or the `docker` group on the host reaches that
   listener, and both already reach the key. Admin is through SSH on the server, over that
   listener; no web UI, no remote admin.
-- **The audit log** goes to a file on its own volume, rotated, with an alarm at 80% disk: OpenBao
-  stops signing when it can't write it.
+- **The audit log** goes to a file on its own volume, rotated, with an alarm at 90% disk, after
+  the server's disk alarm at 80% (amended 2026-11-09): OpenBao stops signing when it can't write
+  it.
 - **Alarms** (0027):
   - OpenBao sealed or down, or signing failing;
   - **theft:** any signer or threshold change on the fee account or a channel, and any Horizon
@@ -198,7 +202,7 @@
     with the network, the balance, the address and the top-up step, from the same check;
   - a read of the backup secret, from the CloudTrail event history, which needs no trail. A drill
     fires it too;
-  - the audit log disk at 80%.
+  - the audit log disk at 90%, after the server's disk alarm at 80% (amended 2026-11-09).
 - **The fee float is 100 XLM, with the alarm at 25 XLM, and no upper limit.** That is about 24,000
   typical `exact` settlements (~41,200 stroops each, ADR 0003), and about 5 days to act after the
   alarm at 1,000 settlements a day, before 0024's floor stops settlement at 5 XLM. Testnet uses the same numbers for now.

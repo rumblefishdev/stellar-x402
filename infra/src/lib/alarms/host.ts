@@ -62,7 +62,8 @@ export function addHostAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
       statistic: "Maximum",
       periodMinutes: 5,
       periods: 3,
-      // "At 80%" (ADR 0013).
+      // 90%, with `disk` at 80% on the same mount as the warning before it (ADR 0013, amended
+      // 2026-11-09; 0027 decision 73).
       comparison: ">=",
       threshold: t.auditDiskUsedPercent,
       description: {

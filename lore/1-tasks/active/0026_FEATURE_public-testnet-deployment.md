@@ -560,7 +560,7 @@ CloudWatch change, as backlog task 0118.
   `disable_unauthed_generate_root_endpoints=false`); no UI.
 - **Audit log:** a file on its own volume, rotated daily by the playbook's
   `/etc/logrotate.d/x402-openbao` (a year, compressed; SIGHUP makes OpenBao reopen it); alarm at
-  80% disk (0027).
+  90% disk, after the server's disk alarm at 80% (0027 decision 73).
 - **Snapshots:** daily Raft snapshots to our own sub-account and Borg repository on the company's
   existing Hetzner Storage Box, keeping 14, set up like that box's other sub-account. Tell
   the team that owns the box that we depend on it. The job uses its own AppRole with a
