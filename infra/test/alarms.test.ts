@@ -311,6 +311,7 @@ test("production as committed makes only the groups that are on", () => {
     "x402-production-telemetry-silent",
     "x402-production-uptime",
     "x402-production-uptime-flapping",
+    "x402-production-verify-rpc-unavailable",
     "x402-production-watch-errors",
     "x402-production-watch-no-invocations",
     "x402-production-watchdog-restart",
