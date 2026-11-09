@@ -288,7 +288,7 @@ export const CATALOG = [
   },
   {
     namespace: FAC,
-    name: "catalog_rejections_total",
+    name: "catalog_attempts_total",
     kind: "counter",
     unit: "Count",
     scope: "process",
@@ -308,7 +308,7 @@ export const CATALOG = [
   },
   {
     namespace: FAC,
-    name: "catalog_upserts_total",
+    name: "catalog_attempt_write_failures_total",
     kind: "counter",
     unit: "Count",
     scope: "process",
