@@ -50,10 +50,10 @@ Figures are from `origin/develop` on 2026-11-03. Work each item from what is tru
    `attemptsOf` and the three `vi.mock`s of the package that exist because of it.
 4. **Merged in #146. `[structure only]`, ~1.5 h. What in `main.ts` isn't wiring.** Move `start()` to its own file,
    and `failureReason`, `upstreamDeadlineMs` and `buildUpstream` beside `upstream-failover.ts`.
-5. **In #147. Changes behaviour on old records, ~1 h. One reader of the auth expiry.** `settle.ts`
-   already read `payerExpiration`; `verify.ts` switches to it, and `authExpiration` and
-   `fallbackLedger` go. The production check isn't needed: production holds no settlement data yet,
-   and its first release already ran migration 0005.
+5. **Merged in #147. `[refactor]`, ~1 h. One reader of the auth expiry.** `settle.ts` already read
+   `payerExpiration`; `verify.ts` and reconciliation's `fallbackLedger` switch to it, and
+   `authExpiration` goes. `fallbackLedger` stays: someone else's fee bump of ours (0087) is stored
+   without bounds, so it isn't only for rows before migration 0005.
 6. **Merged in #135. `[refactor]`, ~1 h. One `resultUpdate(result)`.** `settle.ts` and `reconcile.ts` build
    the same update from a pool result, under two rules for a ledger or a fee the result doesn't
    have. #105's `failure` line stays outside the function: it belongs to non-success results only.
@@ -68,7 +68,7 @@ Figures are from `origin/develop` on 2026-11-03. Work each item from what is tru
 | 4 | ADR 0001 says `packages/sdk` is created when its first helper exists | task item | matches | `docs/adr/0001-repo-layout.md` | none, wording |
 | 5 | Keep `examples/mcp-metered`, without its dependency on `packages/sdk`: it records the idea of a second example, and 0041 hasn't chosen one | owner | changes it | `examples/mcp-metered/package.json` | CI steps, assertions unchanged |
 | 6 | One `resultUpdate` for both writes of a pool result, with one rule: a ledger or a fee the result doesn't have is left out. The stored result doesn't change, because a non-final record holds neither value. Clearing is the wrong rule to keep: a final record without a fee releases its budget reservation | owner | matches | `settlement/records.ts`, `settle.ts`, `reconcile.ts` | `records.test.ts`, other assertions unchanged |
-| 7 | Drop the auth-expiry fallback for a hash stored without bounds without querying production: it holds no settlement data yet (owner, 2026-11-06), every release on it ran migration 0005 first (#119, 2026-11-04), and every hash has got its bounds since | owner | changes it | `settlement/verify.ts`, `reconcile.ts` | `reconcile.test.ts`: a hash ends by its own bounds only |
+| 7 | Keep the fallback for a hash stored without bounds, read through `payerExpiration` for the record's payer: the payer's auth expiry is the one deadline every envelope of the payment shares, and someone else's fee bump of ours (0087) is stored without bounds. No production query: nothing changes for stored rows | owner | changes it | `settlement/verify.ts`, `reconcile.ts` | `reconcile.test.ts`: the fallback, with the payload of the record's payer |
 
 ## PR split
 

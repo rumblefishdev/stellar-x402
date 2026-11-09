@@ -244,10 +244,15 @@ export function createChecker(deps: VerifierDeps): Check {
       return { response };
     }
     // `/settle` keys the settlement on this nonce; `/verify` must not accept what it can't settle.
-    // Another address's entry would stand in for the payer's in the expiry checks below, which
-    // read the earliest one (0073 decision 21).
+    // The payload carries the payer's entry alone (0073 decision 21), and the expiry checks below
+    // read that entry's expiry, the one `/settle` reads too.
     const nonce = payerNonce({ transaction, payer: upstream.payer });
-    if (nonce === undefined || hasOtherAddressAuth(transaction, upstream.payer)) {
+    const expiration = payerExpiration(transaction, upstream.payer);
+    if (
+      nonce === undefined ||
+      expiration === undefined ||
+      hasOtherAddressAuth(transaction, upstream.payer)
+    ) {
       return {
         response: invalid(
           PAYER_AUTH_REASON,
@@ -257,7 +262,6 @@ export function createChecker(deps: VerifierDeps): Check {
       };
     }
 
-    const expiration = authExpiration(transaction);
     const current = await deps.latestLedger();
     if (expiration - current < deps.minValidityLedgers) {
       // A client signs for about this many ledgers, and some pass before `/verify`.
@@ -433,24 +437,6 @@ function hasOtherAddressAuth(transaction: Transaction, payer: string): boolean {
         return credentials !== undefined && addressOf(credentials.address()) !== payer;
       }),
   );
-}
-
-/**
- * The earliest `signatureExpirationLedger` of the payload's address-credential auth entries: the
- * payer's, once the checks refused any other (0073 decision 21).
- */
-export function authExpiration(transaction: Transaction): number {
-  let earliest = Number.POSITIVE_INFINITY;
-  for (const operation of transaction.operations) {
-    if (operation.type !== "invokeHostFunction") continue;
-    for (const entry of operation.auth ?? []) {
-      const credentials = getAddressCredentials(entry.credentials());
-      if (credentials) earliest = Math.min(earliest, credentials.signatureExpirationLedger());
-    }
-  }
-  // Upstream rejects a payload without address-credential auth entries.
-  if (earliest === Number.POSITIVE_INFINITY) throw new Error("the payload has no auth entries");
-  return earliest;
 }
 
 /** Whether the payload's transaction decodes as a V0 envelope; anything else is upstream's. */

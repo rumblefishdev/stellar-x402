@@ -39,6 +39,12 @@ does both once that build is deployed.
 - The suite's Bazaar check (`--extensions=bazaar`) needs `/discovery/search`, which comes after T1
   (ADR 0009); say in the report that it did not run.
 
+## Before the run
+
+- The `upstream-changed` alarm (#149, from 0029) is merged and deployed: `make deploy-production-watch`,
+  then `make check-series GROUP=watch`, then `make deploy-production-alarms` (`infra/Makefile`).
+- Decide how often the gate runs after T1 (0029 left it open).
+
 ## Implementation
 
 - Rerun the gate on the deployed T1 build; commit `results/testnet-hosted/`.

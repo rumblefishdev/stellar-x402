@@ -31,6 +31,12 @@ history:
     note: >
       0009 is done; still parked on 0026, since the delays come from our facilitator running in
       public.
+  - date: "2026-11-06"
+    status: backlog
+    who: karolkow
+    note: >
+      Shape chosen: the buyer reads its own nonce on chain (the `check_payment` row below).
+      Unblocked from 0026: the chain decides, whatever the delays. Waits for its grilling round.
 ---
 
 # Find the settlement on chain when a paid MCP call ends as payment_unknown
@@ -91,6 +97,32 @@ word (W444 A, W446 A); a seller-reported hash is checked against our nonce (W435
 journal (W447 A); no budget guards against a refusing seller (W448 A). Upstream ideas (a
 request-bound nonce, receipts with a response hash, `auth-capture` for Stellar) are not part of
 this task (W450).
+
+## Decided 2026-11-06
+
+Picked over three others, after a review of where the project uses time (wall clock or ledger
+numbers):
+
+- **Chosen:** the buyer finds the outcome of a sent payment on chain, by its own nonce. Waits on
+  other servers stay in seconds: a server that doesn't answer gives no ledger number.
+- **Rejected:** counting every limit in ledgers (a hung server and a halted network never end the
+  wait); changing nothing (the tool says "do not pay again without checking" and offers no way to
+  check); a seller that hands out the purchased response later, by the nonce (needs sellers to
+  store or rebuild answers; a direction of its own).
+
+Facts the round rests on, to check in the grilling:
+
+- Expiry makes the outcome final, not negative: "may pay again" needs the expiry ledger closed AND
+  the nonce absent. A signature is refused only when the ledger is above
+  `signatureExpirationLedger` (`rs-soroban-env` auth), so `latest == expiration` isn't dead yet.
+- An absent nonce means nothing once the entry's TTL ran out (the later of the expiry and the
+  minimum temporary TTL, above): the tool needs the signing ledger to refuse a verdict past it.
+- The 300 s cap checks the seller's `maxTimeoutSeconds`, not the ledger signed
+  (`packages/mcp/src/pay.ts:125`); upstream signs from the RPC's latest ledger and Horizon's mean
+  ledger time, so the signed window can be longer. Decoding the payload for the nonce also gives
+  the signed expiry to check before sending.
+- Cheapest test, ~15 min on testnet: pay once and sign one entry that is never sent; read both
+  nonce keys at the expiry ledger, one after and thirteen after.
 
 ## Acceptance Criteria
 

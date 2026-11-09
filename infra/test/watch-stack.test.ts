@@ -27,6 +27,14 @@ describe("the Watch stack", () => {
     ]);
   });
 
+  test("hands it every network in watch.protocol, served or not", () => {
+    const env = (fn?.["Environment"] as { Variables: Record<string, string> }).Variables;
+    expect(JSON.parse(env["WATCH_PROTOCOL"]!)).toEqual([
+      { network: "stellar:testnet", horizonUrl: "https://horizon-testnet.stellar.org" },
+      { network: "stellar:pubnet", horizonUrl: "https://horizon.stellar.org" },
+    ]);
+  });
+
   test("reads every served network", () => {
     const { watch: both } = synth(allOn());
     const f = ofType(both, "AWS::Lambda::Function")[0]?.Properties;

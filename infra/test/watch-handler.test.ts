@@ -79,6 +79,57 @@ describe("createHandler", () => {
     expect(() => JSON.stringify(result)).not.toThrow();
   });
 
+  test("runs the protocol section beside the balance, and one failing doesn't stop the other", async () => {
+    const rpc = new FakeRpc({ [FEE]: 1n });
+    rpc.balances.set(FEE, 1_010_000_000n);
+    const published: PutMetricDataInput[] = [];
+    const handler = createHandler({
+      env: {
+        ...env,
+        WATCH_PROTOCOL: JSON.stringify([
+          { network: "stellar:pubnet", horizonUrl: "https://horizon.stellar.org" },
+        ]),
+      },
+      rpcFor: () => rpc,
+      // Horizon is down: the protocol section fails, the balance still publishes.
+      fetch: async () => new Response("bad gateway", { status: 502 }),
+      publish: async (input) => {
+        published.push(input);
+      },
+      log: () => {},
+    });
+    await expect(handler({})).rejects.toThrow(/protocol not read on stellar:pubnet/);
+    expect(published.flatMap((p) => p.MetricData.map((d) => d.MetricName))).toEqual([
+      "spendable_stroops",
+    ]);
+  });
+
+  test("still publishes the protocol when the balance section fails", async () => {
+    // No such account: the balance section fails, Horizon answers.
+    const rpc = new FakeRpc({});
+    const published: PutMetricDataInput[] = [];
+    const handler = createHandler({
+      env: {
+        ...env,
+        WATCH_PROTOCOL: JSON.stringify([
+          { network: "stellar:pubnet", horizonUrl: "https://horizon.stellar.org" },
+        ]),
+      },
+      rpcFor: () => rpc,
+      fetch: async () =>
+        Response.json({ current_protocol_version: 29, core_supported_protocol_version: 30 }),
+      publish: async (input) => {
+        published.push(input);
+      },
+      log: () => {},
+    });
+    await expect(handler({})).rejects.toThrow(/balance not read on stellar:testnet/);
+    expect(published.flatMap((p) => p.MetricData.map((d) => d.MetricName))).toEqual([
+      "protocol_version",
+      "protocol_supported_version",
+    ]);
+  });
+
   test("refuses to start without its targets", () => {
     expect(() => createHandler({ env: {}, publish: async () => {} })).toThrow(/WATCH_TARGETS/);
   });

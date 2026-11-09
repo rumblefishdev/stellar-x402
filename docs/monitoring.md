@@ -17,16 +17,18 @@ PR (decision 68).
 
 ## The alarms that are on
 
-| Alarm                  | Group       | On since   | Fired on purpose                                                |
-| ---------------------- | ----------- | ---------- | --------------------------------------------------------------- |
-| `emf-validation`       | `telemetry` | 2026-11-06 | 2026-11-06 08:39:50 UTC, `make fire-test` (delivery test, seen) |
-| `emf-parsing`          | `telemetry` | 2026-11-06 | Not yet                                                         |
-| `uptime`               | `uptime`    | #115       | Not yet                                                         |
-| `uptime-flapping`      | `uptime`    | #115       | Not yet                                                         |
-| `balance-low`          | `watch`     | #115       | Not yet                                                         |
-| `balance-critical`     | `watch`     | #115       | Not yet                                                         |
-| `watch-errors`         | `watch`     | #115       | Not yet                                                         |
-| `watch-no-invocations` | `watch`     | #115       | Not yet                                                         |
+| Alarm                     | Group       | On since                  | Fired on purpose                                                                                  |
+| ------------------------- | ----------- | ------------------------- | ------------------------------------------------------------------------------------------------- |
+| `emf-validation`          | `telemetry` | 2026-11-06                | `make fire-test` after each Alarms deploy (delivery test, seen): 08:39:50 and 11:18:30 UTC        |
+| `emf-parsing`             | `telemetry` | 2026-11-06                | Not yet                                                                                           |
+| `uptime`                  | `uptime`    | 2026-11-06 11:16 UTC      | Not yet                                                                                           |
+| `uptime-flapping`         | `uptime`    | 2026-11-06 11:16 UTC      | Not yet                                                                                           |
+| `balance-low`             | `watch`     | 2026-11-06 11:16 UTC      | 2026-11-06, a fake point ([Drills](#drills)): ALARM 11:20:10, OK 11:25:10 UTC, both seen in Slack |
+| `balance-critical`        | `watch`     | 2026-11-06 11:16 UTC      | 2026-11-06, the same fake point: ALARM 11:20:35, OK 11:25:35 UTC, both seen in Slack              |
+| `watch-errors`            | `watch`     | 2026-11-06 11:16 UTC      | Not yet                                                                                           |
+| `watch-no-invocations`    | `watch`     | 2026-11-06 11:16 UTC      | Not yet                                                                                           |
+| `protocol-changed`        | `protocol`  | With #145's Alarms deploy | Not yet                                                                                           |
+| `protocol-upgrade-coming` | `protocol`  | With #145's Alarms deploy | Not yet                                                                                           |
 
 A network-scoped alarm has the network at the end of its name (`balance-low-testnet`). AWS
 commands below use the `stellar` SSO profile (`aws sso login --profile stellar`) and
@@ -49,7 +51,9 @@ the other alarms can't be trusted until it's fixed.
    returns to OK at its next evaluation and sends no OK message.
 
 `make fire-test` (in `infra/`) sets this alarm to ALARM after every deploy of the alarms, to check
-that messages reach Slack. That message says "Delivery test" and needs no action.
+that messages reach Slack. That message says "Delivery test" and needs no action. A deploy that
+adds alarms also sends one OK message from each new alarm when it first reads data; that is the
+deploy, not a fault.
 
 ### emf-parsing
 
@@ -90,9 +94,15 @@ probe now and then, a lease that moves, or a tunnel that drops.
 ## The off-server check
 
 The Watch stack's Lambda, `x402-production-watch`, runs every 5 minutes in AWS, so it works while
-the server is down (ADR 0013). It reads each network's fee account through RPC with
-`checkFacilitatorBalance` and publishes `spendable_stroops` to `x402-watch`. A network it can't
-read publishes nothing, so the balance alarms keep their state and `watch-errors` fires instead.
+the server is down (ADR 0013). It has two sections, run at once:
+
+- **balance:** each served network's fee account through RPC with `checkFacilitatorBalance`,
+  published as `spendable_stroops`;
+- **protocol:** Horizon's root for each network in `watch.protocol` (testnet and mainnet), served
+  or not, published as `protocol_version` and `protocol_supported_version`.
+
+A network a section can't read publishes nothing, so its alarms keep their state and
+`watch-errors` fires instead; the other section still publishes.
 
 Its log, and a run by hand:
 
@@ -102,8 +112,8 @@ aws lambda invoke --function-name x402-production-watch --payload '{}' \
   --cli-binary-format raw-in-base64-out --profile stellar --region eu-central-1 /dev/stdout
 ```
 
-Each run logs `watch_balance` with the spendable balance in stroops, or `watch_section_failed`
-with the network and the error.
+Each run logs `watch_balance` with the spendable balance in stroops and `watch_protocol` with
+both versions, or `watch_section_failed` with the section, the network and the error.
 
 ### balance-low
 
@@ -125,23 +135,101 @@ no one on the team made as a theft of the facilitator key (ADR 0013).
 
 ### watch-errors
 
-The check failed in 2 of its last 3 runs, so a balance was not published. The balance alarms keep
-their last state meanwhile.
+The check failed in 2 of its last 3 runs, so a section was not published: the balance (read
+through the RPC) or the protocol (read from Horizon). That section's alarms keep their last state
+meanwhile; the other section still published.
 
-1. Read the log for `watch_section_failed`: it names the network and the error. The RPC's URL is
-   left out of the error and shown as `rpc(<network>)`.
+1. Read the log for `watch_section_failed`: it names the section, the network and the error.
+   Endpoint URLs are left out and shown as `rpc(<network>)` or `horizon(<network>)`.
 2. `no answer in 30000 ms` or a connection error: the RPC (`watch.rpcUrls` in
    `infra/envs/production.json`) is down or slow. Testnet's is SDF's public one.
 3. `Account not found`: the fee account doesn't exist. On testnet that follows testnet's reset;
    Friendbot creates it again ([OpenBao](runbook.md#openbao), step 6).
 4. `AccessDenied` on `PutMetricData`: the function's role changed; redeploy the Watch stack.
+5. The protocol section: `status 5xx`, a timeout or `no protocol versions` means that network's
+   Horizon (`watch.protocol` in the infra config) is down or answering something else; mainnet's
+   counts too, though we don't serve it yet. Check it in a browser; it usually passes by itself.
+
+While this alarm stays in ALARM, a failure of the other section sends no new message: both share
+it. Read the log for every `watch_section_failed` until it is back to OK, not only the first one.
 
 ### watch-no-invocations
 
-The check hasn't run for 15 minutes, so the balance alarms see nothing.
+The check hasn't run for 15 minutes, so the balance and protocol alarms see nothing.
 
 1. The schedule: `aws scheduler get-schedule --name x402-production-watch` (state `ENABLED`,
    `cron(0/5 * * * ? *)`).
 2. The function: it exists, and its `Throttles` metric is 0 (it is limited to one run at a time).
 3. If the Watch stack was deleted or never deployed, deploy it (`make deploy-production-watch` in
    `infra/`). On a fresh account, deploy Watch before Alarms ([infra/README.md](../infra/README.md)).
+
+## Protocol
+
+The check reads each network's protocol from Horizon (`current_protocol_version`, and
+`core_supported_protocol_version`, the highest version the Stellar Core behind that Horizon
+supports: SDF's Horizon fleet, so an upgraded Core build there, not the validators' vote). The
+alarms compare them with two numbers per network in `watch.protocol` in
+`infra/envs/production.json`: `expected`, the protocol we have checked the facilitator against,
+and `supported`, the highest Core version we have checked the SDK and the RPC against.
+`supported` is never below `expected`. On 2026-11-09 testnet was 30/30 and mainnet 29/30: mainnet
+runs 29, its Core supports 30, and testnet has run 30 since 2026-11-03, when an older SDK stopped
+reading its ledgers, which no alarm saw (task 0111 moved the SDK to 16.4.1).
+
+### protocol-changed
+
+The network now runs a protocol above the version we run against: it upgraded.
+
+1. On a network we serve (testnet today), check that the facilitator still works: `/health`, and
+   a payment through `/verify` and `/settle`. On one we don't serve yet (mainnet), skip this step.
+2. Check that `@stellar/stellar-sdk` and the RPC support the new version (their release notes);
+   upgrade the SDK if they don't.
+3. Raise `expected` for that network to the new version in a PR, and `supported` with it if it is
+   lower (the config refuses `supported` below `expected`); merge it and deploy the alarms
+   (`make deploy-production-alarms` in `infra/`). The alarm goes back to OK and re-arms for the
+   next version.
+
+### protocol-upgrade-coming
+
+The Stellar Core behind the network's Horizon supports a protocol above `supported`, the highest
+we have checked: SDF has upgraded its Core, and the validators can vote the upgrade once enough
+of them run it. Mainnet was in this state on 2026-11-06 (29, Core supporting 30), before
+`supported` was set to 30, the version testnet already runs.
+
+1. Find the upgrade's date in Stellar's announcements (the network's upgrade schedule).
+2. Plan a test of the SDK and the RPC against the new version on testnet, which usually upgrades
+   weeks earlier, before it reaches a network we serve.
+3. Raise `supported` for that network to the new version in a PR and deploy the alarms: this one
+   goes back to OK. `protocol-changed` fires on the upgrade itself, with its own `expected`.
+
+## Drills
+
+How an alarm was fired on purpose, so it can be done again. Times are UTC. The delivery test
+(`make fire-test`) is under [emf-validation](#emf-validation).
+
+### 2026-11-06: the balance alarms
+
+- **Before:** say in `#stellar-x402-bot` that a drill is starting, so no one tops up or reads
+  `balance-critical` as a theft. Check that the latest real `spendable_stroops` is above 25 XLM
+  (250,000,000 stroops), or the next real point won't clear the alarms, and that `watch-errors`
+  and `watch-no-invocations` are OK: without the check's next point both alarms stay in ALARM.
+  Write the fake point for `stellar:testnet` only, never for a pubnet network.
+- **How:** one fake `spendable_stroops` point of 50,000,000 stroops (5 XLM), below both
+  thresholds (25 and 10 XLM), written by hand at 11:19:01 with the `stellar` SSO profile:
+
+  ```sh
+  aws cloudwatch put-metric-data --profile stellar --region eu-central-1 --namespace x402-watch \
+    --metric-data \
+    '[{"MetricName":"spendable_stroops","Dimensions":[{"Name":"network","Value":"stellar:testnet"}],"Value":50000000,"Unit":"None"}]'
+  ```
+
+- **What happened:** `Minimum` over the 11:15 period read 5 XLM. `balance-low-testnet` went to
+  ALARM at 11:20:10 and `balance-critical-testnet` at 11:20:35; the check's next real point
+  (99,988,728,192 stroops) put both back to OK at 11:25:10 and 11:25:35. Slack showed the four
+  messages, each naming the fee account and the top-up step, in `#stellar-x402-bot`.
+- **What it shows:** the alarms' thresholds, statistic and path to Slack. Not the check's own read
+  of a low balance, which
+  [infra/test/watch-balance.test.ts](../infra/test/watch-balance.test.ts) covers against a faked
+  RPC.
+- **In the metric's history:** CloudWatch can't delete the fake point, so `spendable_stroops` for
+  `stellar:testnet` reads a 5 XLM minimum at 11:15 to 11:20 on 2026-11-06. It is the drill's, not a
+  real balance.
