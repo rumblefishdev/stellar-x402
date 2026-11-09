@@ -42,8 +42,7 @@ the failure itself is in `settlement_outcomes_total` and the database.
 **Scope.** A network-scoped metric carries `network` in every set. Its value is the CAIP-2 string
 from `STELLAR_NETWORKS` (`stellar:testnet`, `stellar:pubnet`), never retyped. A process-scoped
 metric never carries it. Every facilitator metric is network-scoped except `http_requests_total`,
-`store_prune_failures_total`, the five `catalog_*_total`, `verify_rpc_unavailable_total` and
-`discovery_unknown_params_total`. Those
+`store_prune_failures_total`, the five `catalog_*_total` and `discovery_unknown_params_total`. Those
 serve every network: a route once 0077 lands, and tables shared by both networks.
 
 **Units** are fixed for a metric's life, and alarms omit `Unit`, since a mismatch leaves an alarm
@@ -85,7 +84,6 @@ metrics. A gauge that stops is silence, not a stale value. The only zero written
 | `lease_changes_total` | `lease.ts` | Yes | `held` | None |
 | `store_prune_failures_total` | `pruner.ts` | Yes | `table` | None |
 | `catalog_*_total` (5 metrics), `discovery_unknown_params_total` | `cataloger.ts`, `discovery.ts` | Yes | `stage`, `origin`, `reason`, `outcome` | None |
-| `verify_rpc_unavailable_total` | `http/app.ts` | Yes |  | `verify-rpc-unavailable` |
 
 ## Facilitator, from 0024 (#105)
 
@@ -103,7 +101,7 @@ metrics. A gauge that stops is silence, not a stale value. The only zero written
 
 | Metric | Source | Billed by | Log fields | Alarm |
 | --- | --- | --- | --- | --- |
-| `http_requests_total` | Every HTTP answer Express sees, when its response closes | Two sets: `[route]` (`/verify`, `/settle`, `/supported`, `/health`, `/discovery`, `other`), and `[status]`, only for `500` | `status` | `http-500` |
+| `http_requests_total` | Every HTTP answer Express sees, when its response closes | Three sets: `[route]` (`/verify`, `/settle`, `/supported`, `/health`, `/discovery`, `other`), `[status]`, only for `500`, and `[route, status]`, only for `/verify` and `503` | `status` | `http-500`, `verify-rpc-unavailable` |
 | `settlement_sweeps_total` | Each sweep, `reconcile.ts`: `listed` once it has listed the records, `failed` when it rejects. Only `listed` is written as 0 | `outcome`: `listed` or `failed` | | `sweeps-stopped`, `facilitator-silent` |
 | `settlement_oldest_open_seconds` | Gauge, computed at the read: the age of the oldest record the latest sweep left open, `history_gone` ones left out; 0 with none; set right after the listing too; no sample until a sweep has listed, so a restart doesn't read 0 (decision 56) | Yes | | `pending` |
 | `pool_queued` | Gauge from the pool's stats | Yes | `channels`, `busy` | `queue-waiting` |

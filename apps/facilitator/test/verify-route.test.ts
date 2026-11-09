@@ -246,9 +246,9 @@ describe("POST /verify", () => {
     new RpcUnavailableError("every endpoint failed"),
   ])("answers 503 rpc_unavailable when the RPC gave no answer: $name", async (error) => {
     verify.mockRejectedValueOnce(error);
-    const before = metrics.value("verify_rpc_unavailable_total");
+    const counted = { route: "/verify", status: "503" };
+    const before = metrics.value("http_requests_total", counted);
     const response = await post(request);
-    expect(metrics.value("verify_rpc_unavailable_total")).toBe(before + 1);
     expect([response.status, response.headers.get("retry-after"), await response.json()]).toEqual([
       503,
       `${RPC_UNAVAILABLE_RETRY_AFTER_S}`,
@@ -256,5 +256,7 @@ describe("POST /verify", () => {
     ]);
     expect(lines.join("")).toContain("verify_rpc_unavailable");
     expect(lines.join("")).not.toContain("http_error");
+    // Counted when the response closes, which can come just after the client read it.
+    await vi.waitFor(() => expect(metrics.value("http_requests_total", counted)).toBe(before + 1));
   });
 });

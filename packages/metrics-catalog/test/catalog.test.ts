@@ -95,10 +95,14 @@ describe("CATALOG", () => {
     }
   });
 
-  test("http_requests_total: sets [route] and [status] when status=500, scope process", () => {
+  test("http_requests_total: sets [route], [status] for a 500 and [route, status] for /verify's 503, scope process", () => {
     const m = def("http_requests_total");
     expect(m.scope).toBe("process");
-    expect(m.sets).toEqual([{ dims: ["route"] }, { dims: ["status"], when: { status: ["500"] } }]);
+    expect(m.sets).toEqual([
+      { dims: ["route"] },
+      { dims: ["status"], when: { status: ["500"] } },
+      { dims: ["route", "status"], when: { route: ["/verify"], status: ["503"] } },
+    ]);
     expect(m.values?.route).toEqual([
       "/verify",
       "/settle",
@@ -256,7 +260,6 @@ describe("CATALOG", () => {
       "catalog_upsert_failures_total",
       "catalog_attempt_write_failures_total",
       "catalog_route_template_ignored_total",
-      "verify_rpc_unavailable_total",
       "discovery_unknown_params_total",
     ];
     const expected: Record<string, [string, string, string]> = {
@@ -341,7 +344,6 @@ describe("scope-split name types", () => {
       | "catalog_upsert_failures_total"
       | "catalog_attempt_write_failures_total"
       | "catalog_route_template_ignored_total"
-      | "verify_rpc_unavailable_total"
       | "discovery_unknown_params_total"
     >();
     expectTypeOf<NetworkGaugeName>().toEqualTypeOf<
@@ -378,10 +380,11 @@ describe("effectiveSets", () => {
     expect(effectiveSets(def("disk_used_percent"))).toEqual([{ dims: ["path"] }]);
   });
 
-  test("http_requests_total has two sets, the second only for a 500", () => {
+  test("http_requests_total has three sets, the second only for a 500, the third for /verify's 503", () => {
     expect(effectiveSets(def("http_requests_total"))).toEqual([
       { dims: ["route"] },
       { dims: ["status"], when: { status: ["500"] } },
+      { dims: ["route", "status"], when: { route: ["/verify"], status: ["503"] } },
     ]);
   });
 });

@@ -246,7 +246,6 @@ export function createApp({
       const noAnswer =
         error instanceof UpstreamTimeoutError || error instanceof RpcUnavailableError;
       if (!noAnswer) throw error;
-      metrics.increment("verify_rpc_unavailable_total");
       logger.warn("verify_rpc_unavailable", {
         network: request.paymentRequirements.network,
         error,

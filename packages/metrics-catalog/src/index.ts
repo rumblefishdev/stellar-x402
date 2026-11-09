@@ -326,17 +326,6 @@ export const CATALOG = [
     fields: ["origin"],
     emit: "aggregated",
   },
-  // `/verify`'s 503 `rpc_unavailable`: the `http-500` alarm counts 500 only, and a lease or drain
-  // 503 on `/settle` is routine, so this one has a counter of its own.
-  {
-    namespace: FAC,
-    name: "verify_rpc_unavailable_total",
-    kind: "counter",
-    unit: "Count",
-    scope: "process",
-    sets: PLAIN,
-    emit: "aggregated",
-  },
   // An HTTP route's query check; `discoveryResources` takes a network only for its answer.
   {
     namespace: FAC,
@@ -433,7 +422,13 @@ export const CATALOG = [
     kind: "counter",
     unit: "Count",
     scope: "process",
-    sets: [{ dims: ["route"] }, { dims: ["status"], when: { status: ["500"] } }],
+    // `/verify`'s 503 is its RPC giving no answer, with an alarm of its own; a lease or drain 503
+    // on `/settle` is routine on every deploy, so only `/verify`'s gets the set.
+    sets: [
+      { dims: ["route"] },
+      { dims: ["status"], when: { status: ["500"] } },
+      { dims: ["route", "status"], when: { route: ["/verify"], status: ["503"] } },
+    ],
     values: {
       route: ["/verify", "/settle", "/supported", "/health", "/discovery", "other"],
       // What http/app.ts and rate-limit.ts answer (400, 413 and 415 from body-parser, 304 from
