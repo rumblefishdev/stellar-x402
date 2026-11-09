@@ -170,13 +170,14 @@ production code.
 | 6 | Stryker runs on `settle.ts` before and after the test rewrite, on a local copy; the PR's evidence compares the two. Nothing of it enters the repo | grilling, measured 2026-11-09 | beyond it | not checked upstream | — | — |
 | 7 | The four money-path gaps the mutation run found (`settle.ts:1127`, `:1141`, `:1104`, `:1043`) get tests in this task, on the seeded-defect list; a test that shows a real bug gets its fix in a PR of its own | grilling, measured 2026-11-09 | beyond it | not checked upstream | — | — |
 | 8 | `review-2-answers.test.ts` A3 (a real 300 ms budget) and `testing-imports.test.ts` (over vitest's 5 s test timeout) are in this task, so "CI on develop is green" is reachable | grilling, measured 2026-11-09 | sharpens it | not checked upstream | — | — |
+| 9 | This task changes test files only; the settlement code stays as it is | grilling | matches ("fixed in the test") | not checked upstream | — | — |
+| 10 | A test helper refuses a real budget under 5 s unless the test sets the moment it ends; 5 s is an assumption, above the longest store delay measured under load (under 3 s) | grilling | beyond it | none found upstream | — | — |
+| 11 | After the tests, a one-day trial on its own branch of one writer for the settlement record after it is created; its measured cost decides whether the rebuild goes on | grilling | beyond it | not checked upstream | — | — |
 
 ## Not yet decided
 
-- What must be true after this work: for the developer, and for the client.
-- How a test sets the moment the budget ends, which money rules get a real-time test, and where
-  those tests run. Both depend on the first point.
-- Whether the rewrite lands at once or in parts, and its order against the open PRs on `settle.ts`.
+- Nothing open. How a test ends its budget and how the work splits into PRs follow the code and
+  show in the PR report.
 
 ## Out of scope
 
