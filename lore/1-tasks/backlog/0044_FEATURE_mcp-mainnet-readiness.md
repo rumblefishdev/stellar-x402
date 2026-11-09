@@ -71,6 +71,13 @@ is decided with the owner (options and a recommendation) before it is built.
   idempotency key, so a retried call cannot pay twice.
 - **A daily limit enforced on chain** by a smart wallet, which a compromised server process cannot
   exceed (agentpay-mcp; its contract enforcement not yet confirmed).
+  Measured 2026-11-09 on testnet: our facilitator refuses a payment from an OpenZeppelin smart account
+  with the spending-limit policy, also one under the limit. Its verify runs upstream `@x402/stellar`,
+  which rejects any simulation event that is not a `transfer`, while the spec forbids only other
+  balance changes (x402-foundation/x402#3352, #3764; fix in PR #3399, open). The upstream client
+  cannot sign for a contract-account payer either (#3158; fix in PR #3860, open). Such a payment
+  simulated at 467,344 stroops of fee, above our `MAX_FEE_STROOPS` default of 250,000. A plain contract
+  account without a policy settled. On pubnet no spending-limit policy ran in the 7 days to 2026-11-09.
 - **A cap on `STELLAR_X402_TIMEOUT_MS`:** today any value is accepted, also one past the MCP
   client's 60 s.
 
