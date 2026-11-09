@@ -275,7 +275,10 @@ are refused. A burst sends one message.
 
 1. In Logs Insights on `/x402/production/app`, the `verify_rpc_unavailable` and `rpc_exhausted`
    lines around that time: `rpc_exhausted` names each `RPC_URLS[i]#fingerprint` and why it failed.
-2. Fix the endpoint, or reorder `RPC_URLS` ([runbook, Credentials](runbook.md#credentials)).
+2. If every URL timed out and `rpc-stalled` stays quiet, the ledger still moves: check Horizon
+   (`horizon.stellar.org` or `horizon-testnet.stellar.org`). Upstream's verify reads it on every
+   payment, with no timeout of its own, so a hung Horizon times out every RPC URL.
+3. Otherwise fix the endpoint, or reorder `RPC_URLS` ([runbook, Credentials](runbook.md#credentials)).
 
 ### rpc-stalled
 
