@@ -256,6 +256,7 @@ describe("CATALOG", () => {
       "catalog_upsert_failures_total",
       "catalog_attempt_write_failures_total",
       "catalog_route_template_ignored_total",
+      "verify_rpc_unavailable_total",
       "discovery_unknown_params_total",
     ];
     const expected: Record<string, [string, string, string]> = {
@@ -340,6 +341,7 @@ describe("scope-split name types", () => {
       | "catalog_upsert_failures_total"
       | "catalog_attempt_write_failures_total"
       | "catalog_route_template_ignored_total"
+      | "verify_rpc_unavailable_total"
       | "discovery_unknown_params_total"
     >();
     expectTypeOf<NetworkGaugeName>().toEqualTypeOf<

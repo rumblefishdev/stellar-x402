@@ -326,6 +326,17 @@ export const CATALOG = [
     fields: ["origin"],
     emit: "aggregated",
   },
+  // `/verify`'s 503 `rpc_unavailable`: the `http-500` alarm counts 500 only, and a lease or drain
+  // 503 on `/settle` is routine, so this one has a counter of its own.
+  {
+    namespace: FAC,
+    name: "verify_rpc_unavailable_total",
+    kind: "counter",
+    unit: "Count",
+    scope: "process",
+    sets: PLAIN,
+    emit: "aggregated",
+  },
   // An HTTP route's query check; `discoveryResources` takes a network only for its answer.
   {
     namespace: FAC,

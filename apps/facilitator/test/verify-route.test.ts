@@ -35,6 +35,7 @@ describe("POST /verify", () => {
   const db = testDatabase();
   const lines: string[] = [];
   const verify = vi.fn<Verify>();
+  const metrics = memoryMetrics();
   let app: Started;
   let url: string;
 
@@ -50,7 +51,7 @@ describe("POST /verify", () => {
     app = await start({
       config,
       logger,
-      metrics: memoryMetrics(),
+      metrics,
       stores: db.stores(),
       verify,
       settle: async () => {
@@ -245,7 +246,9 @@ describe("POST /verify", () => {
     new RpcUnavailableError("every endpoint failed"),
   ])("answers 503 rpc_unavailable when the RPC gave no answer: $name", async (error) => {
     verify.mockRejectedValueOnce(error);
+    const before = metrics.value("verify_rpc_unavailable_total");
     const response = await post(request);
+    expect(metrics.value("verify_rpc_unavailable_total")).toBe(before + 1);
     expect([response.status, response.headers.get("retry-after"), await response.json()]).toEqual([
       503,
       `${RPC_UNAVAILABLE_RETRY_AFTER_S}`,
