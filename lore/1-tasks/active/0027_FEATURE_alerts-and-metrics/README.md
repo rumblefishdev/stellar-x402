@@ -5,7 +5,7 @@ type: FEATURE
 status: active
 milestone: 1
 related_adr: ["0007", "0011", "0013"]
-related_tasks: ["0012", "0014", "0024", "0026", "0020", "0009", "0045", "0049", "0039", "0036", "0038", "0048", "0077", "0089", "0109", "0110", "0125"]
+related_tasks: ["0012", "0014", "0024", "0026", "0020", "0009", "0045", "0049", "0039", "0036", "0038", "0048", "0077", "0089", "0109", "0110", "0125", "0127"]
 tags: [facilitator, operations, monitoring, priority-medium, effort-large, platform]
 links:
   - ../../../../docs/planning/m1-epics.md
@@ -91,6 +91,10 @@ history:
     status: active
     who: okarcz
     note: "Alarms deployed at 12:19 UTC from develop 1b4229bb (#145 and #150): 39 new alarms (facilitator 25, host 8, logVolume 2, protocol 4), 47 in all. Before it: check-series passed for protocol, facilitator, host and logVolume; every new Level alarm's signal read inside its threshold; the diff added 39 alarms and changed 4 descriptions, nothing removed, no IAM. Watch needed no deploy: Adam's 2026-11-06 12:58 deploy of #145's protocol section matches develop (only CDKMetadata differs). After it: no alarm in ALARM; make fire-test at 12:22:01 UTC, SNS action succeeded, seen in Slack; the gauges' Values arrays aggregate as samples (SampleCount 6 a minute for pool_queued and rpc_on_fallback)."
+  - date: "2026-11-09"
+    status: active
+    who: okarcz
+    note: "Adam handed 0027 over to close. Decision 71: the theft PR and criteria 6, 7 and 9 move to 0127; the backups and snapshots groups and criterion 11's WAL, backup and snapshot ages move to 0026; the drills plan for the 47 live alarms (one 20-minute stop window, fake points, gauges-silent and sweeps-stopped left out)."
 ---
 
 # Alerts and metrics
@@ -114,7 +118,7 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
   signals; #113 log shipping, the agent and the host probe; #114 the alarms, Slack and the uptime
   probe in CDK; #115 the off-server check's balance section and `docs/monitoring.md`'s sections
   for the alarms it turns on. Decision 68 moves the rest to two more PRs: the theft and
-  secret-read sections, and the closing docs.
+  secret-read sections, and the closing docs. Decision 71 moves the theft PR to 0127.
 - From 0039 ([ADR 0011](../../../../docs/adr/0011-facilitator-hosting.md), revised): the backend
   is CloudWatch, fed from the Hetzner server.
   - Each of our units appends its output to a file (decision 1), and the CloudWatch agent sends
@@ -686,6 +690,25 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     mainnet's too: a dead protocol section must show. The validators' votes, which
     the explorer reads, would give the date; Core's supported version gives the readiness, which
     is enough to test the SDK in time.
+71. **0027 closes on the alarms that are live** (okarcz, 2026-11-09, after Adam handed 0027 over).
+    Three parts wait on work outside 0027, so they leave it:
+    - **the theft PR** (decision 68) moves to 0127, with criteria 6, 7 and 9: its design is still
+      open, and the 47 live alarms shouldn't wait on it;
+    - **the `backups` and `snapshots` groups** move to 0026, which turns each on once its job runs
+      (check-series, the flag, the deploy, one firing), with criterion 11's WAL and backup and
+      snapshot ages. Today `wal_failing` reads 1 and both ages read the "none" value, so neither
+      group can go on before 0026's jobs;
+    - **`channel-held`** stays deferred to 0089.
+
+    The drills for the alarms that are on: one announced window of about 20 minutes with the
+    facilitator, the host probe, the Watch schedule and the CloudWatch agent stopped together
+    fires `uptime`, `uptime-flapping`, `facilitator-silent`, `probe-silent`, `telemetry-silent`
+    and `watch-no-invocations` (the agent's stop silences the probe's and the facilitator's lines
+    too, which Drills says). A fake point, as the balance drill did, fires each counter and
+    gauge, `facilitator-failed` and `watchdog-restart` included. `gauges-silent` and
+    `sweeps-stopped` fire only on a partly broken process, which neither a stop nor a fake point
+    can cause, so they are left out and Drills says why. `disk` goes on at 80%, `memory` after a
+    week of data (2026-11-13). The closing PR then records it all (decision 68).
 
 ## Acceptance Criteria
 
@@ -694,12 +717,12 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
 - [ ] Given a process that stays not ready to settle (no lease) longer than the alarm window, when the alarm evaluates, then it fires (ADR 0011)
 - [ ] Given the public URL unreachable, or a process in a crash loop, for 7 minutes in a row, when the uptime probe reads `/health`, then the uptime alarm fires, a deploy within its usual downtime doesn't fire it, and before the first good deploy it sends nothing (ADR 0011)
 - [ ] Given a process whose sweeps don't list the records (or don't run) for longer than the alarm window, when the alarm evaluates, then it fires (ADR 0011, 0019 decision 36)
-- [ ] Given a signer or threshold change on the fee account or a channel, or an effect on them other than a credit or a claimable balance naming them, when the off-server check runs, then an alarm fires, with the server down too (ADR 0013)
-- [ ] Given the off-server check down or failing for any time, when it next succeeds, then it has read every effect and secret read since its last full read, and a partial read moved neither read point
+- [ ] Given a signer or threshold change on the fee account or a channel, or an effect on them other than a credit or a claimable balance naming them, when the off-server check runs, then an alarm fires, with the server down too (ADR 0013) (moved to 0127, decision 71)
+- [ ] Given the off-server check down or failing for any time, when it next succeeds, then it has read every effect and secret read since its last full read, and a partial read moved neither read point (moved to 0127, decision 71)
 - [x] Given the fee account's spendable balance below 25 XLM and below 10 XLM, when the off-server check runs, then an alarm fires each time (ADR 0013) (2026-11-06: a fake 5 XLM `spendable_stroops` point fired `balance-low-testnet` and `balance-critical-testnet`, ALARM 11:20:10 and 11:20:35 UTC, seen in `#stellar-x402-bot`, `docs/monitoring.md` Drills; the check's own read of a low balance is covered by `infra/test/watch-balance.test.ts`)
-- [ ] Given a read of the backup secret, when the off-server check runs, then an alarm fires (ADR 0013)
+- [ ] Given a read of the backup secret, when the off-server check runs, then an alarm fires (ADR 0013) (moved to 0127, decision 71)
 - [ ] Given OpenBao not giving a usable signature (sealed, denied, a wrong key), when the facilitator signs or runs its check, then an alarm fires on the first failure (ADR 0013)
-- [ ] Given OpenBao down or sealed, WAL archiving stuck, a backup or snapshot older than 26 hours, or the certificate under 30 days from expiry, when the condition holds, then an alarm fires, and a check that fails or a job that never ran fires it too (ADR 0011, 0013)
+- [ ] Given OpenBao down or sealed, WAL archiving stuck, a backup or snapshot older than 26 hours, or the certificate under 30 days from expiry, when the condition holds, then an alarm fires, and a check that fails or a job that never ran fires it too (ADR 0011, 0013) (WAL archiving and the backup and snapshot ages: moved to 0026, decision 71)
 - [ ] Given the server's disks, OpenBao's audit volume or its memory past their thresholds, when the agent reports them, then an alarm fires (ADR 0011, 0013)
 - [ ] Given the agent, the host probe or the off-server check stopped, when the alarm window passes, then an alarm fires
 - [x] Given a deploy of the alarm stack, when it ends, then a test alarm has reached Slack and a person has seen it (2026-11-06: `emf-validation` by `make fire-test` at 08:39:50 UTC, seen in `#stellar-x402-bot`)
@@ -707,8 +730,7 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
 - [ ] Given every alarm in the alarm list, when this story is done, then each has fired once on purpose, on testnet or with a fake, and `docs/monitoring.md` says how and when
 - [ ] Given `docs/monitoring.md`, when this story is done, then it lists every metric and alert
 
-**What the criteria wait on:** the spend metrics and their alarms (budget, breaker,
-`failure-ours`, `commit-unmatched`, `balance-stale`) on 0024 (#105); the not-ready, uptime, host
-and real-path criteria on 0026's server and first deploy; the backup-secret read on 0026 creating
-the secret; `channel-held` on 0089's gauge; `disk` and `memory` on their first numbers. 0036's
-signer is on develop.
+**What the criteria wait on:** the drills, for every alarm that is on (the plan is in decision
+71); `disk` and `memory` on their first numbers. The theft and secret-read criteria are 0127's,
+the `backups` and `snapshots` groups 0026's, and `channel-held` waits on 0089's gauge (alarm list,
+Deferred).
