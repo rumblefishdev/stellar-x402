@@ -1,5 +1,5 @@
 ---
-id: "0120"
+id: "0123"
 title: "Fix what the review of the third promotion (#137) found"
 type: BUG
 status: active
