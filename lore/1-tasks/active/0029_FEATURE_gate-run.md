@@ -89,11 +89,11 @@ As a reviewer of the grant, I want e2e results with real settled transaction has
 | 16 | The off-server check's Lambda (0027) compares, once a day, the upstream files the suite rests on (the x402 spec, the Stellar `exact` scheme, the suite's Stellar routes) and the discovery spec (`specs/extensions/bazaar.md`) at the gate's pin with upstream main, and the `upstream-changed` alarm fires to the team's alarm channel while one differs; it replaces the weekly issue | the owner's decision, 2026-11-06; daily and the discovery spec, 2026-11-09 after the #149 review | beyond it (RFP: track spec evolution, `docs/rfp/07-x402-facilitator-bazaar.md:66`, the discovery spec) | no standard |
 | 17 | A daily read that fails pages: `upstream-silent` fires when the check published no point for two days; `watch-errors` (2 of 3 five-minute runs) never sees a once-a-day failure | agent, from row 16 (daily) and the rule that failures are loud | beyond it | no standard |
 | 18 | One 30 s deadline covers the whole section, and its files are read at once after the pin, so a slow GitHub ends it inside the Lambda's 60 s and logs `watch_section_failed` | agent, from the #149 review | beyond it | no standard |
+| 19 | `upstream-changed` stays one alarm against the pin: one message on the first change, back to OK once the pin moves; a later change while it is in ALARM sends none, and the daily `watch_upstream` log line lists every file that differs | the owner's decision, 2026-11-09 | beyond it | no standard |
 
 ## Not yet decided
 
 - How often the gate runs after T1.
-- Whether `upstream-changed` sends one message per upstream change: once in ALARM, a later change sends none.
 
 ## Out of scope
 
