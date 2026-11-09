@@ -133,6 +133,17 @@ production code.
     where 100 ms did in 5 of 30. Its first call running out of budget before the claim explains the
     100 ms case (derived), not the 1 s one (open). #129 moves its clock by hand.
 
+- Measured 2026-11-09 on `develop` `51a73e2`, Stryker 10.1.1 on `settle.ts` only, 6 runners, 30 min, a
+  loaded machine (load average about 50 on 10 cores, another suite running): 872 mutants, 700 killed,
+  82 timed out, 74 survived, 16 not covered by any test. Of the 90 left, 26 change only a log line, a
+  metric label or an error message. Among the rest: a client that left still has its success marked
+  answered (`:1127`), a late result calls `onSuccess` though it is not a success (`:1141`), the
+  `beforeSubmit` refusal writes without its claim guard (`:1104`), and a `payer_busy` wait does not
+  wait for the other payment (`:1043`). A test that fails on timing marks a mutant killed, so the
+  killed count may be high (not measured).
+- On the same commit, with no mutants, `review-2-answers.test.ts` A3 failed in 1 of 2 full runs and
+  passed 8 of 8 runs of its file alone.
+
 ## Acceptance Criteria
 
 - [ ] Each failure's cause is named with evidence (a reproduction before and after the fix)
