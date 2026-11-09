@@ -350,7 +350,7 @@ channel out until its record ends (0090).
 
 When the RPC gives no answer, `/verify` answers `503 {"error":"rpc_unavailable"}` with
 `Retry-After: 5`, logged as `verify_rpc_unavailable`: upstream's call passed its 10 s on every
-`RPC_URLS` entry, or one of the facilitator's own RPC reads failed on every URL. The payment wasn't
+`RPC_URLS` entry, or the facilitator's own ledger read failed on every URL. The payment wasn't
 judged, so the same request may be sent again. Upstream's `unexpected_verify_error` stays a 500:
 it doesn't say whether the RPC failed.
 

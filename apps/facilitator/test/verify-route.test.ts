@@ -1,8 +1,8 @@
 import { Keypair } from "@stellar/stellar-sdk";
-import { RpcTimeoutError, RpcUnavailableError } from "@stellar-x402/signer-pool";
+import { RpcUnavailableError } from "@stellar-x402/signer-pool";
 import type { PaymentRequirements, VerifyResponse } from "@x402/core/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { MAX_BODY_DEPTH } from "../src/http/app.js";
+import { MAX_BODY_DEPTH, RPC_UNAVAILABLE_RETRY_AFTER_S } from "../src/http/app.js";
 import { parseConfig } from "../src/config.js";
 import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
@@ -242,15 +242,13 @@ describe("POST /verify", () => {
 
   it.each([
     new UpstreamTimeoutError("upstream verify gave no answer within 10000 ms"),
-    new RpcTimeoutError("getLatestLedger gave no answer"),
     new RpcUnavailableError("every endpoint failed"),
   ])("answers 503 rpc_unavailable when the RPC gave no answer: $name", async (error) => {
-    lines.length = 0;
     verify.mockRejectedValueOnce(error);
     const response = await post(request);
     expect([response.status, response.headers.get("retry-after"), await response.json()]).toEqual([
       503,
-      "5",
+      `${RPC_UNAVAILABLE_RETRY_AFTER_S}`,
       { error: "rpc_unavailable" },
     ]);
     expect(lines.join("")).toContain("verify_rpc_unavailable");

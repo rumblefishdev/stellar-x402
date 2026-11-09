@@ -2,7 +2,7 @@ import { STATUS_CODES } from "node:http";
 import { PaymentPayloadV2Schema, PaymentRequirementsV2Schema } from "@x402/core/schemas";
 import type { SupportedResponse, VerifyRequest, VerifyResponse } from "@x402/core/types";
 import { byName } from "@stellar-x402/metrics-catalog";
-import { RpcTimeoutError, RpcUnavailableError } from "@stellar-x402/signer-pool";
+import { RpcUnavailableError } from "@stellar-x402/signer-pool";
 import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
 import type { SignerState } from "../adapters/openbao-signer.js";
 import type { Config } from "../config.js";
@@ -65,7 +65,8 @@ export const NO_LEASE_RETRY_AFTER_S = 5;
 
 /**
  * How long a seller should wait before it sends the same `/verify` again after the RPC gave no
- * answer: one ledger, the shortest time in which the network can say anything new.
+ * answer: one ledger. No measurement of how fast an RPC recovers sets it; it only asks a seller not
+ * to retry at once.
  */
 export const RPC_UNAVAILABLE_RETRY_AFTER_S = 5;
 
@@ -241,10 +242,9 @@ export function createApp({
     try {
       response = await verify(request.paymentPayload, request.paymentRequirements, trace);
     } catch (error) {
+      // `FallbackRpc` turns its own timeouts into `RpcUnavailableError` once every URL failed.
       const noAnswer =
-        error instanceof UpstreamTimeoutError ||
-        error instanceof RpcTimeoutError ||
-        error instanceof RpcUnavailableError;
+        error instanceof UpstreamTimeoutError || error instanceof RpcUnavailableError;
       if (!noAnswer) throw error;
       logger.warn("verify_rpc_unavailable", {
         network: request.paymentRequirements.network,
