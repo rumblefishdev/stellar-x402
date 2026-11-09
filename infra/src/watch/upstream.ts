@@ -34,8 +34,22 @@ export async function fetchText(url: string): Promise<string> {
   return answer.text();
 }
 
-/** One run of the section: the files that changed since the pin, published as their count. */
+/**
+ * One run of the section: the files that changed since the pin, published as their count. A read
+ * that fails publishes nothing, is logged as `watch_section_failed` like the other sections, and
+ * throws, so the run counts in `watch-errors`.
+ */
 export async function runUpstream(deps: UpstreamDeps): Promise<string[]> {
+  try {
+    return await compare(deps);
+  } catch (error) {
+    const text = error instanceof Error ? error.message : String(error);
+    deps.log({ msg: "watch_section_failed", section: "upstream", error: text });
+    throw new Error(`upstream not read (${text})`, { cause: error });
+  }
+}
+
+async function compare(deps: UpstreamDeps): Promise<string[]> {
   const pins = (await deps.fetchText(OUR_PIN_URL)).match(/[0-9a-f]{40}/g) ?? [];
   if (pins.length !== 1)
     throw new Error(`expected one commit in ${OUR_PIN_URL}, found ${pins.length}`);

@@ -288,7 +288,7 @@ export const CATALOG = [
   },
   {
     namespace: FAC,
-    name: "catalog_rejections_total",
+    name: "catalog_attempts_total",
     kind: "counter",
     unit: "Count",
     scope: "process",
@@ -308,7 +308,7 @@ export const CATALOG = [
   },
   {
     namespace: FAC,
-    name: "catalog_upserts_total",
+    name: "catalog_attempt_write_failures_total",
     kind: "counter",
     unit: "Count",
     scope: "process",
@@ -649,6 +649,26 @@ export const CATALOG = [
   {
     namespace: WATCH,
     name: "spendable_stroops",
+    kind: "gauge",
+    unit: "None",
+    scope: "network",
+    sets: PLAIN,
+    emit: "aggregated",
+  },
+  // The network's ledger protocol and the highest one the Stellar Core behind its Horizon
+  // supports, from Horizon's root, so a coming upgrade and a done one both show (0027 decision 70).
+  {
+    namespace: WATCH,
+    name: "protocol_version",
+    kind: "gauge",
+    unit: "None",
+    scope: "network",
+    sets: PLAIN,
+    emit: "aggregated",
+  },
+  {
+    namespace: WATCH,
+    name: "protocol_supported_version",
     kind: "gauge",
     unit: "None",
     scope: "network",

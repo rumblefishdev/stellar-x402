@@ -3,6 +3,7 @@
 // lore 0027 notes/G-alarm-list.md, read from the note itself so the two can't drift apart).
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import type { StellarNetwork } from "@stellar-x402/config";
 import { type MetricName, seriesDims } from "@stellar-x402/metrics-catalog";
 import { describe, expect, test } from "vitest";
 import { AWS_METRICS, type AlarmRecord } from "../src/lib/alarms/factory.js";
@@ -74,8 +75,8 @@ describe("every alarm reads a series the catalog declares (AD-1)", () => {
 });
 
 describe("the Alarms template", () => {
-  test("has every alarm of the list once per network, 83 with two networks", () => {
-    expect(alarms).toHaveLength(83);
+  test("has every alarm of the list once per network, 87 with two networks", () => {
+    expect(alarms).toHaveLength(87);
     expect(new Set(byName.keys()).size).toBe(alarms.length);
   });
 
@@ -172,6 +173,16 @@ describe("the Alarms template", () => {
     ]);
   });
 
+  test("puts the protocol alarms in their own group, one pair per network read (70)", () => {
+    const protocol = records.filter((r) => r.group === "protocol");
+    expect(protocol.map((r) => r.alarmName).sort()).toEqual([
+      "x402-production-protocol-changed-pubnet",
+      "x402-production-protocol-changed-testnet",
+      "x402-production-protocol-upgrade-coming-pubnet",
+      "x402-production-protocol-upgrade-coming-testnet",
+    ]);
+  });
+
   test("makes a network-scoped alarm once per configured network", () => {
     const perBase = new Map<string, string[]>();
     for (const r of records)
@@ -252,6 +263,10 @@ test("production as committed makes only the groups that are on", () => {
     "x402-production-balance-low-testnet",
     "x402-production-emf-parsing",
     "x402-production-emf-validation",
+    "x402-production-protocol-changed-pubnet",
+    "x402-production-protocol-changed-testnet",
+    "x402-production-protocol-upgrade-coming-pubnet",
+    "x402-production-protocol-upgrade-coming-testnet",
     "x402-production-upstream-changed",
     "x402-production-uptime",
     "x402-production-uptime-flapping",
@@ -314,7 +329,23 @@ const OP = {
  * "M of N", by hand: the list's "Fires when" column is prose, and `memory` and `log-volume` say only
  * "Level" (decision 34). Thresholds come from the config the template is built from.
  */
-const LEVEL: Record<string, readonly [keyof typeof OP, number, string, number, number, number]> = {
+/** A threshold set per network, from `watch.protocol` (decision 70). */
+const expectedProtocol = (network: StellarNetwork | undefined) =>
+  allOn().watch.protocol[network!]!.expected;
+const supportedProtocol = (network: StellarNetwork | undefined) =>
+  allOn().watch.protocol[network!]!.supported;
+
+const LEVEL: Record<
+  string,
+  readonly [
+    keyof typeof OP,
+    number | ((network: StellarNetwork | undefined) => number),
+    string,
+    number,
+    number,
+    number,
+  ]
+> = {
   uptime: ["<", 1, "Minimum", 60, t.uptimeFailingMinutes, t.uptimeFailingMinutes],
   "uptime-flapping": ["<", 1, "Minimum", 60, t.uptimeFlapFailingMinutes, t.uptimeFlapWindowMinutes],
   "rpc-stalled": [">", t.rpcStalledSeconds, "Maximum", 60, 5, 5],
@@ -341,6 +372,8 @@ const LEVEL: Record<string, readonly [keyof typeof OP, number, string, number, n
   "log-volume": [">", t.logVolumeBytesPerHour!, "Sum", 3600, 1, 1],
   "gauges-silent": [">=", 1, "SampleCount", 300, 3, 3],
   "watch-errors": [">=", 1, "Sum", 300, 2, 3],
+  "protocol-changed": [">", expectedProtocol, "Maximum", 300, 2, 2],
+  "protocol-upgrade-coming": [">", supportedProtocol, "Maximum", 300, 2, 2],
   "upstream-changed": [">=", 1, "Maximum", 3600, 1, 1],
 };
 
@@ -416,7 +449,13 @@ describe("each alarm matches its row in G-alarm-list", () => {
           statistic: statOf(p),
           period: periodOf(p),
           window: [p["DatapointsToAlarm"], p["EvaluationPeriods"]],
-        }).toEqual({ comparison: OP[op], threshold, statistic, period, window: [m, n] });
+        }).toEqual({
+          comparison: OP[op],
+          threshold: typeof threshold === "function" ? threshold(r.network) : threshold,
+          statistic,
+          period,
+          window: [m, n],
+        });
       } else {
         throw new Error(`${base}: shape "${row.shape}" not understood`);
       }

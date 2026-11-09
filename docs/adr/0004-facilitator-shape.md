@@ -1,9 +1,10 @@
 # ADR 0004: One facilitator service; upstream verifies, we settle
 
 - Status: accepted
-- Date: 2026-10-07, amended 2026-10-14 (task 0018: the checks around upstream verify) and
+- Date: 2026-10-07, amended 2026-10-14 (task 0018: the checks around upstream verify),
   2026-10-16 (task 0009: the one-payer-entry and credential checks; repeats answered from the
-  record) and 2026-10-26 (task 0064: the tests run on PostgreSQL, with no in-memory fakes)
+  record), 2026-10-26 (task 0064: the tests run on PostgreSQL, with no in-memory fakes) and
+  2026-11-06 (the real reason the thin wrapper is rejected)
 
 ## Context
 
@@ -54,8 +55,19 @@ reimplement verify and settle.
 
 - **The pool would otherwise ship unused.** It is a funded Tranche 1 line item, so the gate's
   settled transaction should come from it.
-- **Thin wrapper rejected.** Wrapping upstream's `settle()` would bypass the pool, contradict
-  ADR 0003, and turn timeouts into failures instead of `settlement_pending`.
+- **Thin wrapper rejected.** Upstream's `settle()` does take several source accounts and a
+  fee-bump signer (`@x402/stellar` 2.28 `exact/facilitator`), but it can't settle through a pool
+  safely:
+  - its default signer choice is round-robin with no check that an account is free, so two
+    settlements at once can get the same account and one of them fails;
+  - a `sendTransaction` that throws, or polling that runs out, ends as a failure, the first with no
+    hash, though the transaction may still land, and the client then signs and pays again;
+  - it has no `settlement_pending` answer.
+
+  A testnet run on 2026-10-20 showed the first two: 5 of 10 and 5 of 20 concurrent settlements
+  landed through round-robin, and two transactions reported failed landed (`bf908925…`,
+  `8e7b9e6a…`). Upstream's `main` still has both paths (`scheme.ts`, 2026-10-22).
+
 - **Verification stays with upstream.** Reusing its `verify()` keeps us in step with
   `scheme_exact_stellar.md` as it changes, and keeps the RFP's "build on existing tooling".
 - **One service fits Tranche 1.** The RFP architecture already describes one facilitator
@@ -65,8 +77,8 @@ reimplement verify and settle.
 
 ## Alternatives considered
 
-- **Thin wrapper around upstream `ExactStellarScheme`.** Fastest way to the gate, but it
-  bypasses the pool (ADR 0003) and has no `pending` path. Rejected.
+- **Thin wrapper around upstream `ExactStellarScheme`.** Fastest way to the gate, but it can
+  answer failed for a payment that lands and has no `pending` path (see Rationale). Rejected.
 - **Upstream wrapper now, pool later.** Reopens ADR 0003 and delivers the pool unused in
   Tranche 1. Rejected.
 - **Separate services** (for example Bazaar in its own process). No current need; it adds

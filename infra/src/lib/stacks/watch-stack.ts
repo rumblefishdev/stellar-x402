@@ -1,8 +1,9 @@
 // The off-server check (0027 decisions 7 and 27, ADR 0013): a Lambda in this account, every 5
 // minutes, so it reads the fee account while the server is down, and root on the server can't
-// stop it. It runs the balance section, and on the hour the upstream section (task 0029); the theft
-// and secret-read sections follow. The
-// alarms that read it are in the Alarms stack and find the function and the metric by name.
+// stop it. It has a balance and a protocol section (decision 70), and on the hour
+// an upstream section (task 0029); the theft and secret-read
+// sections follow. The alarms that read it are in the Alarms stack and find the function and the
+// metric by name.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import * as cdk from "aws-cdk-lib";
@@ -13,7 +14,7 @@ import * as scheduler from "aws-cdk-lib/aws-scheduler";
 import * as targets from "aws-cdk-lib/aws-scheduler-targets";
 import type { Construct } from "constructs";
 import { NAMESPACE } from "../../watch/metric.js";
-import { TARGETS_ENV } from "../../watch/targets.js";
+import { PROTOCOL_ENV, TARGETS_ENV } from "../../watch/targets.js";
 import type { EnvironmentConfig } from "../config.js";
 import { INFRA_ROOT, names } from "../names.js";
 
@@ -41,7 +42,7 @@ export class WatchStack extends cdk.Stack {
 
     const fn = new lambda.Function(this, "Watch", {
       functionName,
-      description: `Reads the fee accounts every 5 minutes, and upstream x402 hourly, into ${NAMESPACE}`,
+      description: `Reads the fee accounts and the networks' protocol every 5 minutes, and upstream x402 hourly, into ${NAMESPACE}`,
       runtime: lambda.Runtime.NODEJS_22_X,
       architecture: lambda.Architecture.ARM_64,
       handler: "index.handler",
@@ -56,7 +57,16 @@ export class WatchStack extends cdk.Stack {
       // `watch-errors`, and a run queued past its slot would stamp an old time.
       retryAttempts: 0,
       maxEventAge: cdk.Duration.seconds(60),
-      environment: { [TARGETS_ENV]: JSON.stringify(watchTargets) },
+      environment: {
+        [TARGETS_ENV]: JSON.stringify(watchTargets),
+        // Every network in watch.protocol, served or not (decision 70).
+        [PROTOCOL_ENV]: JSON.stringify(
+          Object.entries(config.watch.protocol).map(([network, p]) => ({
+            network,
+            horizonUrl: p!.horizonUrl,
+          })),
+        ),
+      },
       logGroup: new logs.LogGroup(this, "WatchLogGroup", {
         logGroupName: `/aws/lambda/${functionName}`,
         retention: logs.RetentionDays.ONE_MONTH,

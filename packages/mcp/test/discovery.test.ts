@@ -98,6 +98,8 @@ describe("list_resources", () => {
     [{ extensions: "bazaar" }, 4],
     [{ extensions: "constructor" }, 0],
     [{ type: "mcp", network: "stellar:pubnet" }, 0],
+    [{ scheme: "exact" }, 5],
+    [{ scheme: "upto" }, 0],
     [{ limit: 1, offset: 1 }, 1],
   ])(
     "passes the filters %j to the catalog and returns only matching entries",

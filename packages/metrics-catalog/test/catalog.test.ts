@@ -161,6 +161,8 @@ describe("CATALOG", () => {
     expect(scopes).toEqual({
       ready: "process",
       spendable_stroops: "network",
+      protocol_version: "network",
+      protocol_supported_version: "network",
       account_state_mismatches: "network",
       account_effects_unexpected: "network",
       backup_secret_reads: "process",
@@ -251,9 +253,9 @@ describe("CATALOG", () => {
       "http_requests_total",
       "store_prune_failures_total",
       "catalog_internal_errors_total",
-      "catalog_rejections_total",
+      "catalog_attempts_total",
       "catalog_upsert_failures_total",
-      "catalog_upserts_total",
+      "catalog_attempt_write_failures_total",
       "catalog_route_template_ignored_total",
       "discovery_unknown_params_total",
     ];
@@ -282,6 +284,8 @@ describe("CATALOG", () => {
       disk_used_percent: [g, "Percent", proc],
       ready: [g, "None", proc],
       spendable_stroops: [g, "None", net],
+      protocol_version: [g, "None", net],
+      protocol_supported_version: [g, "None", net],
       account_state_mismatches: [g, "Count", net],
       account_effects_unexpected: [c, "Count", net],
       backup_secret_reads: [c, "Count", proc],
@@ -334,9 +338,9 @@ describe("scope-split name types", () => {
       | "http_requests_total"
       | "store_prune_failures_total"
       | "catalog_internal_errors_total"
-      | "catalog_rejections_total"
+      | "catalog_attempts_total"
       | "catalog_upsert_failures_total"
-      | "catalog_upserts_total"
+      | "catalog_attempt_write_failures_total"
       | "catalog_route_template_ignored_total"
       | "discovery_unknown_params_total"
     >();

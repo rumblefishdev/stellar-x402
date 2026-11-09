@@ -2,7 +2,7 @@
 id: "0029"
 title: "Gate run against our testnet facilitator"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0009"]
 related_tasks: ["0012", "0028", "0026", "0009", "0020", "0059"]
@@ -21,6 +21,14 @@ history:
     note: >
       Started now that the facilitator is deployed. A trial run at the old pin failed all 18
       scenarios; at upstream 8827cf1 all 18 settled through the deployed facilitator.
+  - date: "2026-11-09"
+    status: completed
+    who: karolkow
+    note: >
+      Run of record on the deployed testnet facilitator: 18 of 18 scenarios, upstream 8827cf1,
+      facilitator 68e778e (#148). The gate fixed and simplified (#133, #138), another
+      facilitator's dry run removed (#139). The final run on the T1 build and the conformance
+      report moved to 0119; the upstream change alarm (#149) is still open.
 ---
 
 # Gate run against our testnet facilitator
@@ -71,11 +79,11 @@ As a reviewer of the grant, I want e2e results with real settled transaction has
 | 13 | No fixed scenario count: the gate takes the scenarios the suite selects, which records each one, a server that fails to start as failed (`e2e/test.ts:1783-1795@8827cf1`) | the owner's decision, 2026-11-06 | as the task says | no standard |
 | 14 | The gate fails a hash that two scenarios report | the owner's decision, 2026-11-06 | as the task says | no standard |
 | 15 | No file of forwarded calls: the settlements are proven on chain (rows 11 and 14), and the suite's `-v` shows the calls when debugging | the owner's decision, 2026-11-06 | as the task says | no standard |
-| 16 | A weekly workflow opens an issue when upstream main changes one of the three files the suite rests on (the x402 spec, the Stellar `exact` scheme, the suite's Stellar routes) since the pin | the owner's decision, 2026-11-06 | beyond it (RFP: track spec evolution) | no standard |
+| 16 | The off-server check's Lambda (0027) compares, on the hour, the three upstream files the suite rests on (the x402 spec, the Stellar `exact` scheme, the suite's Stellar routes) at the gate's pin with upstream main, and the `upstream-changed` alarm fires to the team's alarm channel while one differs; it replaces the weekly issue | the owner's decision, 2026-11-06 | beyond it (RFP: track spec evolution) | no standard |
 
 ## Not yet decided
 
-- How often the gate runs.
+- How often the gate runs after T1: moved to 0119.
 
 ## Out of scope
 
@@ -86,9 +94,45 @@ As a reviewer of the grant, I want e2e results with real settled transaction has
 - Run the 0028 harness against the deployed facilitator.
 - Commit results; triage failures into lane tasks; rerun on the final build.
 
+## Run of record
+
+2026-11-06, 13:31 UTC, `conformance/results/testnet-hosted/`: 18 of 18 scenarios passed, each
+settled on chain with the facilitator's signer as fee payer. Upstream `8827cf1`, facilitator
+`68e778e`, gate `a2fdfb0`. The final run on the finished T1 build is still to come.
+
+## Implementation Notes
+
+- #133: `/health` names the image's commit (`GIT_COMMIT`), the gate saves it, and the pin moved from
+  `10b2d06` to `8827cf1`.
+- #138: the gate waits for the suite without blocking its process, stops the suite's process group
+  on a signal, fails a run with no facilitator commit or with uncommitted gate code, saves each
+  signed envelope and its own commit, the proxy forwards response headers, and each run overwrites
+  `results/testnet-hosted/` (`testnet-local/` is ignored by git).
+- #139: another facilitator's dry run removed from `conformance/results/`.
+- #148: the run of record.
+- #149 (open): the `upstream-changed` alarm in the off-server check (decision 16).
+
+## Issues Encountered
+
+- **Testnet moved to protocol 30 on 2026-11-03.** The old pin's stellar-sdk 16.3.0 can't read its
+  ledgers, so all 18 scenarios failed; the pin moved to `8827cf1` (stellar-sdk 16.4.1).
+- **The gate failed good runs.** Under `spawnSync` the gate's process couldn't see RPC close its
+  idle connection during a 13-minute suite, and its first chain read failed. Measured: 780 s of
+  `spawnSync` failed the first read, 780 s of plain waiting didn't. Fixed in #138.
+- **SDF's testnet RPC is slow since about 2026-11-02:** median 0.3–6 s and up to 9.5 s from one
+  machine, against 0.1–0.2 s for gateway.fm. That made the suite take 13 minutes instead of 5.
+  Which RPC the server uses first is 0026's.
+
+## Future Work
+
+- 0119: the final gate run on the T1 build and the conformance report.
+- 0116: the project's full end-to-end suite, with refusals.
+- #149: the upstream change alarm; it needs a review, a merge and two infra deploys (0119 checks
+  it first).
+
 ## Acceptance Criteria
 
-- [ ] Given our facilitator deployed at its public URL (0026), when the gate runs, then the canonical client settles `exact` for each Stellar scenario (the 9 `upfront` ones without a `/verify`) and every run records a real transaction hash
-- [ ] Given a finished run, when results are saved, then `conformance/results/` gets the run JSON with the upstream commit, the date, our facilitator version and the transaction hashes
-- [ ] Given a failing scenario, when it is analysed, then a backlog task is created for the owning lane
-- [ ] Given the finished T1 build, including Bazaar and spend budgets, when the gate reruns, then it passes and the final results are committed
+- [x] Given our facilitator deployed at its public URL (0026), when the gate runs, then the canonical client settles `exact` for each Stellar scenario (the 9 `upfront` ones without a `/verify`) and every run records a real transaction hash
+- [x] Given a finished run, when results are saved, then `conformance/results/` gets the run JSON with the upstream commit, the date, our facilitator version and the transaction hashes
+- [x] Given a failing scenario, when it is analysed, then a backlog task is created for the owning lane (no scenario failed in the run of record)
+- [x] Given the finished T1 build, including Bazaar and spend budgets, when the gate reruns, then it passes and the final results are committed (moved to 0119, with the conformance report)
