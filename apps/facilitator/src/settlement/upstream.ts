@@ -19,6 +19,13 @@ import {
  */
 export const UPSTREAM_TIMEOUT_MS = 10_000;
 
+/**
+ * How long upstream's Horizon read of the ledger time may wait for headers or body data: Horizon
+ * answers in under 1 s (0.46 to 0.73 s, 30 calls on testnet, 2026-11-05), and upstream falls back
+ * to 5 s a ledger when the read fails, so a hung Horizon costs a payment 2 s, not every RPC URL.
+ */
+export const HORIZON_TIMEOUT_MS = 2_000;
+
 /** Slack on the whole upstream call's deadline, so the last URL's own deadline fires first. */
 export const UPSTREAM_DEADLINE_SLACK_MS = 1_000;
 

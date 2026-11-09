@@ -5,10 +5,17 @@ import {
   type SorobanRpc,
   type TransactionSigner,
 } from "@stellar-x402/signer-pool";
-import { getNetworkPassphrase, getUsdcAddress, type FacilitatorStellarSigner } from "@x402/stellar";
+import {
+  DEFAULT_PUBNET_HORIZON_URL,
+  DEFAULT_TESTNET_HORIZON_URL,
+  getNetworkPassphrase,
+  getUsdcAddress,
+  type FacilitatorStellarSigner,
+} from "@x402/stellar";
 import type pg from "pg";
-import { Agent, setGlobalDispatcher } from "undici";
+import { setGlobalDispatcher } from "undici";
 import { emfMetrics } from "./adapters/emf-metrics.js";
+import { boundedAgent } from "./adapters/http-timeouts.js";
 import { openBaoSigner, type OpenBaoSigner } from "./adapters/openbao-signer.js";
 import { MIGRATIONS, migrate, pendingMigrations } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
@@ -36,6 +43,7 @@ import { createRecords } from "./settlement/records.js";
 import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler, type Settle } from "./settlement/settle.js";
 import { createTrustlineLookup } from "./settlement/trustline.js";
 import {
+  HORIZON_TIMEOUT_MS,
   UPSTREAM_TIMEOUT_MS,
   buildUpstream,
   failureReason,
@@ -461,8 +469,13 @@ export async function main(
     // an upstream call cut off by its deadline can't be cancelled. undici's defaults would hold its
     // socket for 300 s; these end it after 10 s without headers or body data. Process-wide: any
     // other `fetch` in this process gets the same bounds (the facilitator makes no other).
+    // Horizon gets 2 s: upstream verify reads it on every payment, with no timeout of its own, and
+    // a hung one would take every RPC URL past its 10 s. Past 2 s upstream assumes 5 s a ledger.
     setGlobalDispatcher(
-      new Agent({ headersTimeout: UPSTREAM_TIMEOUT_MS, bodyTimeout: UPSTREAM_TIMEOUT_MS }),
+      boundedAgent(UPSTREAM_TIMEOUT_MS, {
+        [new URL(DEFAULT_TESTNET_HORIZON_URL).origin]: HORIZON_TIMEOUT_MS,
+        [new URL(DEFAULT_PUBNET_HORIZON_URL).origin]: HORIZON_TIMEOUT_MS,
+      }),
     );
     // The stores need a migrated schema (`pnpm migrate`); the service never migrates it.
     // Reservations queue on the global scope's lock, a flood's hits on its key's row lock, and a
