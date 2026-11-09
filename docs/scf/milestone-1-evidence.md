@@ -282,7 +282,30 @@ neither tree. Commands and counts:
 curl -s "$FAC/discovery/resources?limit=5" | jq
 ```
 
-`<TODO: the public catalog is empty today ({"items":[],"total":0}): cataloging is deployed but no seller has settled a payment carrying the bazaar extension through it yet. Run apps/facilitator/test/live/catalog-smoke.ts (real testnet payments through a facilitator built by main(), a seller answering 402) and paste its result, transaction hashes and the decoded EXTENSION-RESPONSES header here; say in one line why the public catalog is still empty. Optional: one listing on the public facilitator from a demo seller on public https.>`
+The public catalog is empty today (`{"items":[],"total":0}`): cataloging runs on the deployed
+service, but no seller has yet settled a payment carrying the `bazaar` extension through it, and
+listings come only from real settlements, with no registration step.
+
+The pipeline, end to end on testnet, with
+[`apps/facilitator/test/live/catalog-smoke.ts`](../../apps/facilitator/test/live/catalog-smoke.ts):
+a facilitator built by `main()` (a local stand-in for OpenBao, and `CATALOG_LIST_LOCAL=true`
+since the seller runs on the same machine), a seller whose `GET /weather` answers 402 with the
+`bazaar` extension, a buyer paying with upstream's client, and an outsider calling `/settle`
+itself. The run of 2026-11-09, 18:41–18:47 UTC:
+[`catalog-smoke-testnet.json`](../../apps/facilitator/test/live/results/catalog-smoke-testnet.json).
+
+| Step                                                                          | Transaction                                                                                                                                 | `EXTENSION-RESPONSES`, decoded       | Catalog                                                                                                                            |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| The buyer pays                                                                | [`fee64e4474c5442c…`](https://stellar.expert/explorer/testnet/tx/fee64e4474c5442c89fbd47a48837361f49bd60b2d473baa4973ff24da0ff12c), SUCCESS | `{"bazaar":{"status":"processing"}}` | The facilitator asks the seller with one unpaid request and lists what its 402 says: "Weather by city", 10000 stroops (`inserted`) |
+| An outsider settles to the seller's `payTo` with its own copy, saying "Pwned" | [`8ef5f9f1188d76ad…`](https://stellar.expert/explorer/testnet/tx/8ef5f9f1188d76ad5d857d2e197c4306676bfed34caf3a8b6c015f4fd4b91175), SUCCESS | `{"bazaar":{"status":"processing"}}` | The seller is asked again; the listing keeps the seller's text and price (`updated`)                                               |
+
+After each step, the facilitator's own `/discovery/resources` listed the entry. The run's other
+three steps (a repeat payment, the outsider's settle in the same minute, a new price) were cut
+short by the public testnet RPC, which answered in 7–9 s against the facilitator's 10 s budget:
+one landed after `/settle` had answered `settlement_pending`, two failed at verify. The cataloger's
+tests cover what those steps check
+([`cataloger.test.ts:181`](https://github.com/rumblefishdev/stellar-x402/blob/da93723ae5ac9cecffd503def406fe4ad6b1d5c7/apps/facilitator/test/cataloger.test.ts#L181):
+the seller is asked only when the copy differs, at most once a minute per key).
 
 The pipeline, as the Panel Review response (§3) describes it:
 
@@ -295,7 +318,8 @@ The pipeline, as the Panel Review response (§3) describes it:
   key one entry.
 - **The outcome is reported** in the `EXTENSION-RESPONSES` header
   ([`apps/facilitator/src/http/extension-responses.ts`](../../apps/facilitator/src/http/extension-responses.ts)).
-  `<TODO: a settle response's decoded header, from the demo payment.>`
+  Decoded from the smoke run's settle responses: `{"bazaar":{"status":"processing"}}`. Cataloging
+  runs after the settle response, so the header says it has started, not how it ended.
 - **The endpoint and its filters** (task 0032):
   [`apps/facilitator/src/http/discovery.ts`](../../apps/facilitator/src/http/discovery.ts).
 - Catalog integrity: who may change a listing, field limits, listing from the seller's own 402
