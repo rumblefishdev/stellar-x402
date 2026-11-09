@@ -11,6 +11,7 @@ structure as `docs/scf/` in the Soroban Block Explorer and Stellar Prices API re
 | `milestone-1-evidence.md`                               | Full evidence companion to the M1 submission video — **source of truth**.                             |
 | `milestone-1-evidence.pdf`                              | PDF render of the above, uploaded to Google Drive next to the video. **Build output, not committed.** |
 | `milestone-1-video-scenario.md`                         | Scene-by-scene recording script for the 4–5 minute demo video.                                        |
+| `milestone-1-license-audit.md`                          | The dependency tree's license audit at the Tranche #1 boundary, with its commands.                    |
 | `milestone-1-form-answers.md`                           | Text for each field of SCF's Build Tranche Completion form, and the pre-submission checklist.         |
 | `architecture.mmd`                                      | Mermaid source of the architecture diagram.                                                           |
 | `architecture.png`                                      | Rendered diagram, embedded in the PDF. **Build output.**                                              |

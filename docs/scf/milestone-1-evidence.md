@@ -53,6 +53,10 @@ facilitator through the suite's external facilitator proxy, and the gate recorde
 
 `<TODO: replace the run of record with the final rerun on the finished Tranche 1 build (task 0029), and update every number in this section.>`
 
+The dependency tree's licenses were re-audited at this tranche boundary: no AGPL, GPL, SSPL or
+LGPL-only dependency in 291 npm packages and 239 Rust crates
+([`milestone-1-license-audit.md`](./milestone-1-license-audit.md)).
+
 Tranche #1 is testnet only. Mainnet, search and ranking, the MCP server, SDK helpers and `upto` in
 `/settle` are later tranches of the approved plan ([section 4](#4-scope-against-the-rfp-and-the-proposal));
 [section 7](#7-what-is-deliberately-not-claimed) states plainly what is not claimed.
@@ -194,7 +198,30 @@ It also requires exactly one auth entry for the payer, and a validity window bet
 `MAX_VALIDITY_LEDGERS` (66 ledgers by default), with an upstream error answered as a 500 rather
 than a verdict ([spine AD-3](../architecture/m1-spine.md)). A smart-wallet (C-address) payer
 settles through the network's own authorization flow (`cAccountSettled` in the spend matrix).
-`<TODO: link the test file per check, and a test or run showing a CAP-71 V2 credential accepted.>`
+
+The test of each check (permalinks to `develop` at `da93723a`):
+
+| Check                                                                            | Test                                                                                                                                                                                                                                                                                                                                     |
+| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The facilitator's own (muxed) address anywhere in the payload is refused         | [`verify.test.ts:387`](https://github.com/rumblefishdev/stellar-x402/blob/da93723ae5ac9cecffd503def406fe4ad6b1d5c7/apps/facilitator/test/verify.test.ts#L387)                                                                                                                                                                            |
+| A source-account auth entry is refused, even when upstream accepts it            | [`verify.test.ts:240`](https://github.com/rumblefishdev/stellar-x402/blob/da93723ae5ac9cecffd503def406fe4ad6b1d5c7/apps/facilitator/test/verify.test.ts#L240)                                                                                                                                                                            |
+| A channel as the transaction source                                              | [`verify.test.ts:342`](https://github.com/rumblefishdev/stellar-x402/blob/da93723ae5ac9cecffd503def406fe4ad6b1d5c7/apps/facilitator/test/verify.test.ts#L342)                                                                                                                                                                            |
+| A channel as the operation source                                                | [`verify.test.ts:357`](https://github.com/rumblefishdev/stellar-x402/blob/da93723ae5ac9cecffd503def406fe4ad6b1d5c7/apps/facilitator/test/verify.test.ts#L357)                                                                                                                                                                            |
+| A channel as `from`                                                              | [`verify.test.ts:364`](https://github.com/rumblefishdev/stellar-x402/blob/da93723ae5ac9cecffd503def406fe4ad6b1d5c7/apps/facilitator/test/verify.test.ts#L364)                                                                                                                                                                            |
+| A channel as an auth entry's address, with `Address` and `AddressV2` credentials | [`verify.test.ts:372`](https://github.com/rumblefishdev/stellar-x402/blob/da93723ae5ac9cecffd503def406fe4ad6b1d5c7/apps/facilitator/test/verify.test.ts#L372)                                                                                                                                                                            |
+| The checks run again in `/settle`, which answers a failed one without claiming   | [`settle.test.ts:699`](https://github.com/rumblefishdev/stellar-x402/blob/da93723ae5ac9cecffd503def406fe4ad6b1d5c7/apps/facilitator/test/settle.test.ts#L699)                                                                                                                                                                            |
+| Exactly one auth entry, the payer's                                              | [`verify.test.ts:437`](https://github.com/rumblefishdev/stellar-x402/blob/da93723ae5ac9cecffd503def406fe4ad6b1d5c7/apps/facilitator/test/verify.test.ts#L437)                                                                                                                                                                            |
+| The minimum validity, with `Address` and `AddressV2` credentials                 | [`verify.test.ts:496`](https://github.com/rumblefishdev/stellar-x402/blob/da93723ae5ac9cecffd503def406fe4ad6b1d5c7/apps/facilitator/test/verify.test.ts#L496)                                                                                                                                                                            |
+| The maximum validity (`MAX_VALIDITY_LEDGERS`), with `Address` and `AddressV2`    | [`verify.test.ts:509`](https://github.com/rumblefishdev/stellar-x402/blob/da93723ae5ac9cecffd503def406fe4ad6b1d5c7/apps/facilitator/test/verify.test.ts#L509)                                                                                                                                                                            |
+| An error inside upstream is ours, answered 500, not a verdict                    | [`verify.test.ts:149`](https://github.com/rumblefishdev/stellar-x402/blob/da93723ae5ac9cecffd503def406fe4ad6b1d5c7/apps/facilitator/test/verify.test.ts#L149), [`verify-route.test.ts:235`](https://github.com/rumblefishdev/stellar-x402/blob/da93723ae5ac9cecffd503def406fe4ad6b1d5c7/apps/facilitator/test/verify-route.test.ts#L235) |
+
+**CAP-71 `AddressV2` credentials are accepted.** Both validity tests above accept a payment at the
+exact bound with `AddressV2` credentials as with `Address` ones. On testnet, the channel pool
+settled a payment whose client auth entry is `AddressV2`:
+[`b597301aceaceb40…`](https://stellar.expert/explorer/testnet/tx/b597301aceaceb406760fbc54dbcf25007bbb0083af5b71afe0b5a42f7647052)
+(ledger 5054851, 2026-10-06, successful), kept as a fixture the tests parse
+([`packages/signer-pool/test/xdr-fixture.test.ts`](https://github.com/rumblefishdev/stellar-x402/blob/da93723ae5ac9cecffd503def406fe4ad6b1d5c7/packages/signer-pool/test/xdr-fixture.test.ts#L39)).
+The canonical client in the gate (5.5) still signs `Address` credentials: 18 of 18.
 
 **Fee abuse containment and rate limits.** Requests are limited per client IP: 600 a minute on
 `/verify` and on `/settle`, 120 on `/discovery/*` (defaults in
@@ -204,8 +231,20 @@ failing on chain are cut off by breakers
 ([ADR 0007](../adr/0007-fee-abuse-containment.md)); the testnet run:
 [`spend-matrix-testnet.json`](../../apps/facilitator/test/live/results/spend-matrix-testnet.json).
 
-**Missing trustline.** A buyer without a trustline gets a named reason before anything is sent
-(task 0078). `<TODO: command or test link.>`
+**Missing trustline** (Panel Review response §5, task 0078). When upstream's simulation fails, the
+facilitator looks for the reason, and a missing trustline is answered by name before anything is
+sent: `invalid_exact_stellar_payer_trustline_missing` or
+`invalid_exact_stellar_payto_trustline_missing`, with a message saying which account lacks the
+trustline to which asset and what to do. Tests:
+[`verify.test.ts:175`](https://github.com/rumblefishdev/stellar-x402/blob/da93723ae5ac9cecffd503def406fe4ad6b1d5c7/apps/facilitator/test/verify.test.ts#L175)
+(the reason replaces upstream's `simulation_failed`),
+[`trustline.test.ts:140`](https://github.com/rumblefishdev/stellar-x402/blob/da93723ae5ac9cecffd503def406fe4ad6b1d5c7/apps/facilitator/test/trustline.test.ts#L140)
+(the seller's missing trustline, named with what the seller must do),
+[`trustline.test.ts:149`](https://github.com/rumblefishdev/stellar-x402/blob/da93723ae5ac9cecffd503def406fe4ad6b1d5c7/apps/facilitator/test/trustline.test.ts#L149)
+(the payer's),
+[`verify-route.test.ts:105`](https://github.com/rumblefishdev/stellar-x402/blob/da93723ae5ac9cecffd503def406fe4ad6b1d5c7/apps/facilitator/test/verify-route.test.ts#L105)
+(the route logs its message). The buyer-side SDK step the response also describes is a later
+tranche (SDK helpers).
 
 ### 5.2 D2 — Channel-account pool in the settle path
 
@@ -227,7 +266,11 @@ under Apache-2.0, so concurrent settlements don't wait on one account's sequence
 `<TODO: one gate transaction opened on stellar.expert, screenshot: the channel as source, the fee bump paid by the fee account.>`
 
 **Licensing.** The repository and every package are Apache-2.0, with no AGPL dependency (the RFP's
-non-functional requirement). `<TODO: the dependency tree's license audit output (proposal §3.3).>`
+non-functional requirement). The dependency tree was re-audited at this tranche boundary, as the
+Panel Review response commits to (§5): 291 npm packages (159 shipped) and 239 Rust crates, none
+under AGPL, GPL, SSPL or an LGPL-only license, and OpenZeppelin's AGPL `relayer-plugin-channels` in
+neither tree. Commands and counts:
+[`milestone-1-license-audit.md`](./milestone-1-license-audit.md).
 
 ### 5.3 D3 — Bazaar foundation
 
