@@ -18,7 +18,7 @@ export function addAvailabilityAlarms(f: AlarmFactory, c: EnvironmentConfig): vo
     missing: "breaching",
     description: {
       what: `The facilitator was not ready to settle for ${t.uptimeFailingMinutes} minutes in a row, as the uptime probe reads ${c.uptime.url} through Cloudflare: the process is down or in a crash loop that stays down that long, it holds no lease, or the tunnel or Cloudflare is failing. A deploy's usual downtime stays under this window; uptime-flapping covers a loop that comes up in between.`,
-      next: `Open the URL, then on the server check x402@${c.envName} (systemctl status, journalctl) and the tunnel; the probe's own log names what it read.`,
+      next: `Open the URL, then on the server check x402@${c.envName} (systemctl status, then /var/log/x402/${c.envName}/facilitator.log and facilitator.err.log) and the tunnel's cloudflared.log; the probe's own log names what it read.`,
       noData:
         "A missing point counts as down, so a probe that stops publishing fires this too: the probe, its schedule or eu-central-1 may be the fault.",
     },
@@ -38,7 +38,7 @@ export function addAvailabilityAlarms(f: AlarmFactory, c: EnvironmentConfig): vo
     missing: "breaching",
     description: {
       what: `The facilitator was not ready to settle in ${t.uptimeFlapFailingMinutes} of the last ${t.uptimeFlapWindowMinutes} minutes, as the uptime probe reads ${c.uptime.url}: it keeps going down and coming back, a crash loop, a lease that moves, or a tunnel that drops. One deploy stays under this count.`,
-      next: `On the server: journalctl -u x402@${c.envName} for the restarts and their exit, and facilitator-failed's messages; then the tunnel's log.`,
+      next: `On the server: the restarts and how each ended in /var/log/x402/host/metrics.log (facilitator_failures_total, watchdog_restarts_total) and facilitator-failed's messages; then /var/log/x402/${c.envName}/cloudflared.log.`,
       noData:
         "A missing point counts as down, as for uptime, which fires too when the probe stops.",
     },

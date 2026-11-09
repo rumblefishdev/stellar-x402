@@ -5,7 +5,7 @@ type: FEATURE
 status: active
 milestone: 1
 related_adr: ["0007", "0011", "0013"]
-related_tasks: ["0012", "0014", "0024", "0026", "0020", "0009", "0045", "0049", "0039", "0036", "0038", "0048", "0077", "0089", "0109", "0110"]
+related_tasks: ["0012", "0014", "0024", "0026", "0020", "0009", "0045", "0049", "0039", "0036", "0038", "0048", "0077", "0089", "0109", "0110", "0125"]
 tags: [facilitator, operations, monitoring, priority-medium, effort-large, platform]
 links:
   - ../../../../docs/planning/m1-epics.md
@@ -71,10 +71,26 @@ history:
     status: active
     who: akot
     note: "Watch stack deployed from #145's branch at 12:59 UTC: the Lambda reads Horizon (pubnet 29/30, testnet 30/30) beside the balance. check-series passed for protocol at 12:59 UTC (4 series), so #145 turns the group on (decisions 26, 70); the Alarms deploy waits for the merge."
+  - date: "2026-11-06"
+    status: active
+    who: okarcz
+    note: "#113's server side is live after the third deploy (#137, 68e778e3): the playbook, the agent's admin step (agent as cwagent, credentials refreshed) and the restart window (13:59:56 UTC, 4.7 s), after which all five app streams and the facilitator's and host's metric streams arrive. check-series passed for facilitator (7 of 7 continuous series), host (6 of 6) and logVolume (2 of 2), so the alarm-groups PR turns the three on (decision 26): 35 alarms under 32 names (breaker-opened 3, log-volume 2), each name with a docs/monitoring.md section, and the page now points at the log files instead of the journal. log-volume's text names the logs' event field, not msg. The explorer's and the Prices API's owners are told before host goes on (decision 65)."
   - date: "2026-11-09"
     status: active
     who: okarcz
     note: "Adam handed over #144, #145 and #150. Review of #145: decision 70 amended (mainnet's supported 30, protocol 30 checked on testnet in 0111); a failing mainnet Horizon still fires watch-errors (decision 70 kept), and its runbook says a second section's failure sends nothing new while it is in ALARM; protocol-changed's steps raise supported with expected and skip /verify on a network we don't serve; tests for the reverse handler case, the thresholds apart, the bundle's own fetch and an unknown watch.protocol key; the Watch stack needs a redeploy after the merge."
+  - date: "2026-11-09"
+    status: active
+    who: okarcz
+    note: "Review of #150 after its rebase onto #144 and #145: AC 15 ticked (the 2026-11-06 check-series run on the real path). The pool events the runbook and four alarm texts sent people to (channel-quarantined, sequence-resync, send-retry, fee-raised) are only counted, never logged: the texts now say so and point at pool_events_total, and 0125 logs them. uptime's texts point at the log files, log-volume's query fits each group, probe-silent names the alarms it covers, and a test pins a docs/monitoring.md section for every alarm production makes."
+  - date: "2026-11-09"
+    status: active
+    who: okarcz
+    note: "Stan's review of #150 applied: channel-quarantined's cause is a channel account that is gone (a failed read keeps the channel), settlement_submit_failed names the channel, and the step re-creates it; fee-raised and send-retry are counted only in the EMF lines' type field (Logs Insights); probe-silent's text names what goes blind. Before a group's deploy, read its Level signals' latest values; after it, list what is in ALARM as the starting state (infra/README.md). 0125 narrowed to three events."
+  - date: "2026-11-09"
+    status: active
+    who: okarcz
+    note: "Alarms deployed at 12:19 UTC from develop 1b4229bb (#145 and #150): 39 new alarms (facilitator 25, host 8, logVolume 2, protocol 4), 47 in all. Before it: check-series passed for protocol, facilitator, host and logVolume; every new Level alarm's signal read inside its threshold; the diff added 39 alarms and changed 4 descriptions, nothing removed, no IAM. Watch needed no deploy: Adam's 2026-11-06 12:58 deploy of #145's protocol section matches develop (only CDKMetadata differs). After it: no alarm in ALARM; make fire-test at 12:22:01 UTC, SNS action succeeded, seen in Slack; the gauges' Values arrays aggregate as samples (SampleCount 6 a minute for pool_queued and rpc_on_fallback)."
 ---
 
 # Alerts and metrics
@@ -687,7 +703,7 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
 - [ ] Given the server's disks, OpenBao's audit volume or its memory past their thresholds, when the agent reports them, then an alarm fires (ADR 0011, 0013)
 - [ ] Given the agent, the host probe or the off-server check stopped, when the alarm window passes, then an alarm fires
 - [x] Given a deploy of the alarm stack, when it ends, then a test alarm has reached Slack and a person has seen it (2026-11-06: `emf-validation` by `make fire-test` at 08:39:50 UTC, seen in `#stellar-x402-bot`)
-- [ ] Given a line from the facilitator on the agent's path, when it reaches CloudWatch, then its metrics exist, checked once on the real path (ADR 0011)
+- [x] Given a line from the facilitator on the agent's path, when it reaches CloudWatch, then its metrics exist, checked once on the real path (ADR 0011) (2026-11-06, after the restart window: `make check-series GROUP=facilitator` found 7 of 7 continuous series in `/x402/production/metrics`, shipped by the agent from the server)
 - [ ] Given every alarm in the alarm list, when this story is done, then each has fired once on purpose, on testnet or with a fake, and `docs/monitoring.md` says how and when
 - [ ] Given `docs/monitoring.md`, when this story is done, then it lists every metric and alert
 

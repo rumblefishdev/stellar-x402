@@ -11,6 +11,7 @@ import { INFRA_ROOT } from "../src/lib/names.js";
 import { allOn, ofType, production, type Resource, synth, type TemplateJson } from "./fixtures.js";
 
 const all = synth(allOn());
+const prod = synth(production());
 const records: readonly AlarmRecord[] = all.x.alarms.alarms.records;
 const alarms = ofType(all.alarms, "AWS::CloudWatch::Alarm");
 const byName = new Map(alarms.map((a) => [a.Properties["AlarmName"] as string, a.Properties]));
@@ -261,23 +262,66 @@ test("no stack imports from another (decision 27)", () => {
   }
 });
 
+test("every alarm production makes has its section in docs/monitoring.md, which its message names", () => {
+  // The Slack message ends "Runbook: docs/monitoring.md, <base>": a renamed alarm or a group
+  // turned on without its section would point at nothing.
+  const doc = readFileSync(join(INFRA_ROOT, "..", "docs", "monitoring.md"), "utf8");
+  const sections = new Set([...doc.matchAll(/^### (\S+)$/gm)].map((m) => m[1]));
+  const bases = new Set(prod.x.alarms.alarms.records.map((r) => r.base));
+  expect([...bases].filter((b) => !sections.has(b))).toEqual([]);
+});
+
 test("production as committed makes only the groups that are on", () => {
-  const prod = synth(production());
   expect(prod.x.alarms.alarms.records.map((r) => r.alarmName).sort()).toEqual([
+    "x402-production-audit-disk",
     "x402-production-balance-critical-testnet",
     "x402-production-balance-low-testnet",
+    "x402-production-balance-stale-testnet",
+    "x402-production-breaker-opened-testnet-asset",
+    "x402-production-breaker-opened-testnet-pay-to",
+    "x402-production-breaker-opened-testnet-payer",
+    "x402-production-budget-nearing-testnet",
+    "x402-production-certificate",
+    "x402-production-channel-quarantined-testnet",
+    "x402-production-commit-unmatched-testnet",
+    "x402-production-credentials-stale",
     "x402-production-emf-parsing",
     "x402-production-emf-validation",
+    "x402-production-facilitator-failed",
+    "x402-production-facilitator-silent-testnet",
+    "x402-production-failure-ours-testnet",
+    "x402-production-gauges-silent-testnet",
+    "x402-production-history-gone-testnet",
+    "x402-production-hook-failures-testnet",
+    "x402-production-http-500",
+    "x402-production-landed-after-expired-testnet",
+    "x402-production-log-volume-app",
+    "x402-production-log-volume-metrics",
+    "x402-production-openbao-down",
+    "x402-production-pending-testnet",
+    "x402-production-pool-health-testnet",
+    "x402-production-probe-silent",
     "x402-production-protocol-changed-pubnet",
     "x402-production-protocol-changed-testnet",
     "x402-production-protocol-upgrade-coming-pubnet",
     "x402-production-protocol-upgrade-coming-testnet",
+    "x402-production-queue-waiting-testnet",
+    "x402-production-refused-after-verify-testnet",
+    "x402-production-rpc-on-fallback-testnet",
+    "x402-production-rpc-stalled-testnet",
+    "x402-production-settlement-expired-testnet",
+    "x402-production-signer-failures-testnet",
+    "x402-production-store-outage-testnet",
+    "x402-production-submit-failed-testnet",
+    "x402-production-sweeps-stopped-testnet",
+    "x402-production-telemetry-silent",
     "x402-production-upstream-changed",
     "x402-production-upstream-silent",
     "x402-production-uptime",
     "x402-production-uptime-flapping",
     "x402-production-watch-errors",
     "x402-production-watch-no-invocations",
+    "x402-production-watchdog-restart",
   ]);
 });
 
