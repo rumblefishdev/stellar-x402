@@ -5,7 +5,7 @@ type: FEATURE
 status: active
 milestone: 1
 related_adr: ["0011", "0012", "0013", "0004"]
-related_tasks: ["0076", "0026", "0027", "0036", "0038", "0125"]
+related_tasks: ["0076", "0026", "0027", "0036", "0038", "0126"]
 tags: [facilitator, deploy, architecture, priority-medium, effort-large, platform]
 links:
   - ../../../docs/adr/0011-facilitator-hosting.md
@@ -35,7 +35,7 @@ history:
     status: active
     who: stkrolikiewicz
     note: >
-      PR C, the code, split into 0125 for milestone 2: mainnet is out of T1
+      PR C, the code, split into 0126 for milestone 2: mainnet is out of T1
       (docs/planning/m1-epics.md) and testnet runs on one network as today. 0077 closes with its
       docs, PR A (#79) and PR B (#93).
 ---
@@ -49,7 +49,7 @@ one facilitator service, `facilitator`, for testnet and mainnet. The client name
 the request (`network` in the payment requirements: `stellar:testnet` or `stellar:pubnet`), and
 the facilitator settles through that network's channel pool, key and RPC endpoints. There is no
 testnet/mainnet service split; a staging/production split may come later. Today the docs and the
-code assume one process per network. This task reworks the docs; the code is 0125.
+code assume one process per network. This task reworks the docs; the code is 0126.
 
 ## Context
 
@@ -85,19 +85,19 @@ code assume one process per network. This task reworks the docs; the code is 012
 - **0038:** its premise (one container per network) changes.
 - **0027 (Oskar's note on #75):** one uptime check, the 99% figure, the zone's rate limits and its
   analytics cover both networks at once.
-- **Code (moved to 0125):** `NETWORK` becomes the set of networks served; the channel pool,
+- **Code (moved to 0126):** `NETWORK` becomes the set of networks served; the channel pool,
   signer, RPC endpoints and store are kept per network inside one process; `/supported` lists both.
 
 ## Plan
 
 - **PR A:** ADR 0011, 0026 and 0038, what 0026's deploy is built from.
 - **PR B:** the spine, ADR 0004, 0012 and 0013.
-- **PR C:** the code, now task 0125 (milestone 2). Not needed for M1: mainnet is out of T1, and
+- **PR C:** the code, now task 0126 (milestone 2). Not needed for M1: mainnet is out of T1, and
   testnet runs on one network as today.
 
 ## Open Questions
 
-Moved to 0125 with the code (ADR 0012 lists them): which database holds the catalog, which holds
+Moved to 0126 with the code (ADR 0012 lists them): which database holds the catalog, which holds
 the IP rate limiter's counters, and what `ready` reports.
 
 ## Decided
@@ -166,5 +166,5 @@ the IP rate limiter's counters, and what `ready` reports.
       (PR A: ADR 0011; PR B: the rest)
 - [x] 0026, 0027 and 0038 match (PR A; 0027 needed no change)
 - [ ] The facilitator serves `stellar:testnet` and `stellar:pubnet` from one process, each with its
-      own channel pool, key and RPC endpoints, and `/supported` lists both (deferred to 0125)
+      own channel pool, key and RPC endpoints, and `/supported` lists both (deferred to 0126)
 - [ ] Reviewed by Oskar and Marek

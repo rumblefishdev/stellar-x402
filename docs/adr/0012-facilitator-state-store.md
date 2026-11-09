@@ -49,7 +49,7 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
     in their keys and queries. A testnet reset wipes only testnet's database, and backups,
     restores and migrations stay per network.
     - Each network's spend budgets count only its own fees, paid from its own fee account.
-    - Still open, decided with the code in 0125: which database holds the catalog, since
+    - Still open, decided with the code in 0126: which database holds the catalog, since
       `/discovery/resources` without a `network` filter lists both networks with an exact
       `total` and an `offset` up to 1 000 000, and the IP rate limiter's counters, which are
       counted before the request's network is known.

@@ -1,5 +1,5 @@
 ---
-id: "0125"
+id: "0126"
 title: "Serve testnet and mainnet from one facilitator process, each network with its own pool, key, RPC endpoints and store"
 type: FEATURE
 status: backlog

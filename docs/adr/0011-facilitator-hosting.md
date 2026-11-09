@@ -34,7 +34,7 @@
 `apps/facilitator` is the only deployable service (AD-1): one Node 22 process that serves every
 network it is configured for, with a channel pool per network, and holds `/verify`, `/settle`,
 `/supported` and `/discovery/resources`. The code still serves one network per process (`NETWORK`)
-until 0125 changes it. The Tranche 1 gate needs it at a public HTTPS testnet URL (AD-15,
+until 0126 changes it. The Tranche 1 gate needs it at a public HTTPS testnet URL (AD-15,
 ADR 0009); mainnet follows in a later tranche, in the same process, with a 99% uptime target.
 
 The host must:
@@ -156,7 +156,7 @@ a whole zone, to Cloudflare on the Free plan.
   applied (0026), and a schema behind the code stops the start, as a wrong RPC or channel does,
   so a deploy that hasn't migrated gets no `ready` and rolls back. A store per network gives a lease per network: today, with one
   network, `ready` is its lease, and what readiness means with two (what the deploy, `/health`,
-  the watchdog and 0027's uptime probe wait for) is decided with the code in 0125.
+  the watchdog and 0027's uptime probe wait for) is decided with the code in 0126.
   - A process without the lease keeps trying to take it.
   - A process whose lease renewal fails stops new submissions until it holds the lease again.
   - A process that froze past its TTL while another took the lease sends nothing new once it
@@ -383,7 +383,7 @@ One request or one stop must never outlast the layer in front of it:
     is the `production` environment's; a staging environment would get
     `x402-facilitator-staging.sorobanscan.com`.
   - Only testnet is served for now; mainnet joins the same process later (0038). The code still
-    serves one `NETWORK` per process until 0125 changes it.
+    serves one `NETWORK` per process until 0126 changes it.
   - One tunnel, `x402`. Its `cloudflared` opens outbound connections to Cloudflare (port 7844,
     UDP for QUIC and TCP) and forwards the hostname to `http://facilitator:4021`, the Compose
     service; anything else gets 404. The server opens no port for it. The compose file keeps
