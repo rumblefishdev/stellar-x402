@@ -87,7 +87,7 @@ export function addCostSilenceAlarms(f: AlarmFactory, c: EnvironmentConfig): voi
     group: "host",
     signal: { catalog: "host_probe_heartbeat" },
     description: {
-      what: "No heartbeat from the host probe for 15 minutes, so every host alarm is blind: OpenBao, WAL, backups, the certificate.",
+      what: "No heartbeat from the host probe for 15 minutes, so the probe's alarms are blind: OpenBao, WAL, the backups, the snapshot, the certificate and the agent's credentials.",
       next: "On the server: the x402-host-probe timer and its journal; if telemetry-silent fires too, the agent is the fault.",
       noData: "Breaching: silence is what this alarm is for.",
     },

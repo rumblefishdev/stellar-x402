@@ -21,7 +21,10 @@ export type SubmitterEvent =
   | { type: "sent"; channel: string; hash: string; attempts: number }
   /** A plain `txBadSeq`: the sequence is re-read and the envelope rebuilt once. */
   | { type: "sequence-resync"; channel: string }
-  /** A channel that could not be read for `timeoutSeconds` was taken out of the pool. */
+  /**
+   * The RPC still answered that a channel's account doesn't exist after `timeoutSeconds`, so the
+   * channel was taken out of the pool. A read that fails keeps the channel.
+   */
   | { type: "channel-quarantined"; channel: string; reason: string }
   /** The final outcome of a submission that was reported `pending`. */
   | { type: "resolved"; result: SubmitResult }

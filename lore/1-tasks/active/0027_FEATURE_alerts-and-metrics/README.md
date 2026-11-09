@@ -83,6 +83,10 @@ history:
     status: active
     who: okarcz
     note: "Review of #150 after its rebase onto #144 and #145: AC 15 ticked (the 2026-11-06 check-series run on the real path). The pool events the runbook and four alarm texts sent people to (channel-quarantined, sequence-resync, send-retry, fee-raised) are only counted, never logged: the texts now say so and point at pool_events_total, and 0125 logs them. uptime's texts point at the log files, log-volume's query fits each group, probe-silent names the alarms it covers, and a test pins a docs/monitoring.md section for every alarm production makes."
+  - date: "2026-11-09"
+    status: active
+    who: okarcz
+    note: "Stan's review of #150 applied: channel-quarantined's cause is a channel account that is gone (a failed read keeps the channel), settlement_submit_failed names the channel, and the step re-creates it; fee-raised and send-retry are counted only in the EMF lines' type field (Logs Insights); probe-silent's text names what goes blind. Before a group's deploy, read its Level signals' latest values; after it, list what is in ALARM as the starting state (infra/README.md). 0125 narrowed to three events."
 ---
 
 # Alerts and metrics
