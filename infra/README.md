@@ -140,10 +140,11 @@ runtime. Synth never bundles, so the tests run after `build` (`turbo.json`).
 ## Not checked before a deploy
 
 - That Chatbot posts to the channel from this stack's configuration: the delivery test.
-- That Roles Anywhere accepts the agent's certificate and the role works from the server's IP:
-  #113's live check, after this stack is deployed and the certificate is signed.
-- Whether CloudWatch aggregates a gauge's `Values` array as samples (`Minimum`, `Maximum`): the
-  first deploy of #113.
+- Whether CloudWatch aggregates a gauge's `Values` array as samples (`Minimum`, `Maximum`), which
+  `queue-waiting` and `rpc-on-fallback` rely on: after the deploy that turns `facilitator` on
+  (#150), compare a gauge's `SampleCount` per minute with the samples its lines carry
+  (`aws cloudwatch get-metric-statistics --statistics SampleCount Minimum`).
+  Roles Anywhere was checked live on 2026-11-06 (#113's server side, after the third deploy).
 - That the agent's own series match the catalog: `mem_used_percent` with no dimension and
   `disk_used_percent` with `path` `/` only. #113's config gets there with `omit_hostname` and a
   rollup to `path` with the original dropped (decision 44), tested against the catalog and, in

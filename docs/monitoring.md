@@ -29,54 +29,61 @@ PR (decision 68).
 | `watch-no-invocations`    | `watch`       | 2026-11-06 11:16 UTC      | Not yet                                                                                           |
 | `protocol-changed`        | `protocol`    | With #145's Alarms deploy | Not yet                                                                                           |
 | `protocol-upgrade-coming` | `protocol`    | With #145's Alarms deploy | Not yet                                                                                           |
-| `facilitator-silent`      | `facilitator` | #150                      | Not yet                                                                                           |
-| `gauges-silent`           | `facilitator` | #150                      | Not yet                                                                                           |
-| `http-500`                | `facilitator` | #150                      | Not yet                                                                                           |
-| `rpc-stalled`             | `facilitator` | #150                      | Not yet                                                                                           |
-| `rpc-on-fallback`         | `facilitator` | #150                      | Not yet                                                                                           |
-| `balance-stale`           | `facilitator` | #150                      | Not yet                                                                                           |
-| `pending`                 | `facilitator` | #150                      | Not yet                                                                                           |
-| `sweeps-stopped`          | `facilitator` | #150                      | Not yet                                                                                           |
-| `settlement-expired`      | `facilitator` | #150                      | Not yet                                                                                           |
-| `landed-after-expired`    | `facilitator` | #150                      | Not yet                                                                                           |
-| `history-gone`            | `facilitator` | #150                      | Not yet                                                                                           |
-| `submit-failed`           | `facilitator` | #150                      | Not yet                                                                                           |
-| `refused-after-verify`    | `facilitator` | #150                      | Not yet                                                                                           |
-| `failure-ours`            | `facilitator` | #150                      | Not yet                                                                                           |
-| `signer-failures`         | `facilitator` | #150                      | Not yet                                                                                           |
-| `store-outage`            | `facilitator` | #150                      | Not yet                                                                                           |
-| `hook-failures`           | `facilitator` | #150                      | Not yet                                                                                           |
-| `queue-waiting`           | `facilitator` | #150                      | Not yet                                                                                           |
-| `channel-quarantined`     | `facilitator` | #150                      | Not yet                                                                                           |
-| `pool-health`             | `facilitator` | #150                      | Not yet                                                                                           |
-| `breaker-opened`          | `facilitator` | #150                      | Not yet                                                                                           |
-| `budget-nearing`          | `facilitator` | #150                      | Not yet                                                                                           |
-| `commit-unmatched`        | `facilitator` | #150                      | Not yet                                                                                           |
-| `openbao-down`            | `host`        | #150                      | Not yet                                                                                           |
-| `audit-disk`              | `host`        | #150                      | Not yet                                                                                           |
-| `facilitator-failed`      | `host`        | #150                      | Not yet                                                                                           |
-| `watchdog-restart`        | `host`        | #150                      | Not yet                                                                                           |
-| `probe-silent`            | `host`        | #150                      | Not yet                                                                                           |
-| `telemetry-silent`        | `host`        | #150                      | Not yet                                                                                           |
-| `credentials-stale`       | `host`        | #150                      | Not yet                                                                                           |
-| `certificate`             | `host`        | #150                      | Not yet                                                                                           |
-| `log-volume`              | `logVolume`   | #150                      | Not yet                                                                                           |
+| `facilitator-silent`      | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
+| `gauges-silent`           | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
+| `http-500`                | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
+| `rpc-stalled`             | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
+| `rpc-on-fallback`         | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
+| `balance-stale`           | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
+| `pending`                 | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
+| `sweeps-stopped`          | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
+| `settlement-expired`      | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
+| `landed-after-expired`    | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
+| `history-gone`            | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
+| `submit-failed`           | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
+| `refused-after-verify`    | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
+| `failure-ours`            | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
+| `signer-failures`         | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
+| `store-outage`            | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
+| `hook-failures`           | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
+| `queue-waiting`           | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
+| `channel-quarantined`     | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
+| `pool-health`             | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
+| `breaker-opened`          | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
+| `budget-nearing`          | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
+| `commit-unmatched`        | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
+| `openbao-down`            | `host`        | With #150's Alarms deploy | Not yet                                                                                           |
+| `audit-disk`              | `host`        | With #150's Alarms deploy | Not yet                                                                                           |
+| `facilitator-failed`      | `host`        | With #150's Alarms deploy | Not yet                                                                                           |
+| `watchdog-restart`        | `host`        | With #150's Alarms deploy | Not yet                                                                                           |
+| `probe-silent`            | `host`        | With #150's Alarms deploy | Not yet                                                                                           |
+| `telemetry-silent`        | `host`        | With #150's Alarms deploy | Not yet                                                                                           |
+| `credentials-stale`       | `host`        | With #150's Alarms deploy | Not yet                                                                                           |
+| `certificate`             | `host`        | With #150's Alarms deploy | Not yet                                                                                           |
+| `log-volume`              | `logVolume`   | With #150's Alarms deploy | Not yet                                                                                           |
 
 A network-scoped alarm has the network at the end of its name (`balance-low-testnet`), and
-`breaker-opened` its kind after the network (`breaker-opened-testnet-payer`). AWS commands below use the
-`stellar` SSO profile (`aws sso login --profile stellar`) and `--region eu-central-1`.
+`breaker-opened` its kind after the network (`breaker-opened-testnet-payer`). `log-volume` ends in
+its log group (`log-volume-app`, `log-volume-metrics`). `http-500` and the server's alarms carry
+no network. AWS commands below use the `stellar` SSO profile (`aws sso login --profile stellar`)
+and `--region eu-central-1`.
 
-**The logs.** Each unit writes its output to a file under `/var/log/x402/` on the server, and the
-CloudWatch agent ships it ([runbook, The CloudWatch agent](runbook.md#the-cloudwatch-agent)):
+**The logs.** The facilitator, the tunnel, Postgres, OpenBao and the deploy write their output to
+files under `/var/log/x402/` on the server, and the CloudWatch agent ships them ([runbook, The CloudWatch agent](runbook.md#the-cloudwatch-agent)):
 the facilitator's lines are the stream `facilitator` in `/x402/production/app`, one JSON object
 each, named by its `event`. `journalctl -u x402@production` keeps only the unit's start and stop.
+The watchdog, the host probe, the credentials helper and the snapshot job still log to the
+journal (`journalctl -u <unit>`).
 To find an event in Logs Insights, on `/x402/production/app`:
 
 ```
 fields @timestamp, @message | filter event = "rpc_failover" | sort @timestamp desc | limit 50
 ```
 
-On the server, the same lines: `sudo grep '"event":"rpc_failover"' /var/log/x402/production/facilitator.log`.
+On the server, the same lines, the rotated files included (10 of 100 MB, compressed after the
+first): `sudo zgrep -h '"event":"rpc_failover"' /var/log/x402/production/facilitator.log*`. The
+file also holds the metric lines, which the agent ships apart; leave them out of a `tail` with
+`sudo grep -v '^{"_aws":' /var/log/x402/production/facilitator.log | tail -n 50`.
 
 ## Telemetry
 
@@ -120,8 +127,8 @@ under that. Missing points count as down, so a probe that stops publishing fires
 1. Open the URL. A 502 or a Cloudflare error page points at the tunnel; a JSON body with
    `"ready": false` points at the facilitator (no lease, or the signer or the RPC check failing).
 2. On the server, the [runbook's status commands](runbook.md#what-is-where):
-   `systemctl list-units 'x402*'`, then the end of `/var/log/x402/production/facilitator.log` and
-   `facilitator.err.log`.
+   `systemctl list-units 'x402*'`, then the end of `/var/log/x402/production/facilitator.log`
+   without its metric lines (The logs, above) and `facilitator.err.log`.
 3. A failed or looping `x402@production`: the [watchdog](runbook.md#the-watchdog) and
    [facilitator-failed](#facilitator-failed) say how it ended. The tunnel:
    `/var/log/x402/production/cloudflared.log`.
@@ -216,24 +223,29 @@ The facilitator writes its metrics as EMF lines (#112) in the stream `facilitato
 `/x402/production/metrics`, every minute for its gauges and sweeps, and at once for each event.
 A stopped process writes nothing: Level alarms then keep their last state and Event alarms read
 OK, so [facilitator-silent](#facilitator-silent) is the one that says so. The events named below
-are the `event` field of its log lines (The logs, above).
+are the `event` field of its log lines (The logs, above). The pool's own events
+(`channel-quarantined`, `sequence-resync`, `send-retry`, `fee-raised`) are only counted, as
+`pool_events_total` by `type` in `x402-facilitator`, not logged: the log doesn't name their
+channel yet (task 0125).
 
 ### facilitator-silent
 
 No sweep line from the facilitator for 15 minutes, though it writes one every minute: the process
-is down, or its lines don't reach CloudWatch. It fires beside [uptime](#uptime) when the process
-is down.
+is down, its start hangs or fails (a crash loop included), or its lines don't reach CloudWatch. It
+fires beside [uptime](#uptime) when the process is down.
 
 1. If `uptime` fires too, follow it: the process is down.
-2. If not, the facilitator runs but its lines don't arrive: on the server, `systemctl status
-x402@production`, then check [telemetry-silent](#telemetry-silent) and the agent.
+2. If not, the facilitator runs but its lines don't arrive: on the server,
+   `systemctl status x402@production`, then check [telemetry-silent](#telemetry-silent) and the
+   agent.
 
 ### gauges-silent
 
 One of the facilitator's gauges sent no point for 15 minutes while the sweeps did: its read keeps
 throwing, and that gauge's own alarm keeps its last state. The gauges are
 `settlement_oldest_open_seconds`, `pool_queued`, `pool_quarantined`, `rpc_on_fallback`,
-`rpc_stalled_seconds` and `balance_reading_age_seconds`.
+`rpc_stalled_seconds` and `balance_reading_age_seconds`, and `channel_longest_hold_seconds` once
+the `channelHeld` group is on.
 
 1. In the CloudWatch metrics console, namespace `x402-facilitator`, find the gauge with no recent
    point.
@@ -304,8 +316,8 @@ so the payer's payment didn't settle and the payer has to sign a new one. One is
 mean submissions don't land.
 
 1. The `reconcile_finished` event and the record's `settlement_hashes` for its attempts.
-2. The pool events around that time (`fee-raised`, `send-retry`), and the RPC
-   ([rpc-stalled](#rpc-stalled)).
+2. `pool_events_total` for `fee-raised` and `send-retry` around that time (counts only, task
+   0125), and the RPC ([rpc-stalled](#rpc-stalled)).
 
 ### landed-after-expired
 
@@ -361,8 +373,8 @@ check after start counts each retry, and this sends one message for them.
 A write to Postgres failed: a settlement record, or the spend store. Settle answers may be missing
 from the records, and the spend policy may be blind.
 
-1. On the server, `systemctl status x402-db-testnet@production` and
-   `/var/log/x402/production/postgres-testnet.log`.
+1. On the server, the alarm's network's database: `systemctl status x402-db-testnet@production`
+   and `/var/log/x402/production/postgres-testnet.log` for testnet.
 2. The `settlement_record_failed` and `spend_store_failed` events name the operation.
 
 ### hook-failures
@@ -386,7 +398,10 @@ the pool.
 A channel was taken out of the pool since the facilitator started, so the pool settles with fewer
 channels.
 
-1. The `channel-quarantined` pool event names the channel and the reason.
+1. The pool takes a channel out when it can't read the channel's sequence for its timeout: an
+   RPC that fails or lags ([rpc-stalled](#rpc-stalled), [rpc-on-fallback](#rpc-on-fallback)) is
+   the usual cause. The log doesn't name the channel or the reason yet (task 0125);
+   `pool_quarantined` in `x402-facilitator` says how many are out.
 2. A restart puts the channels back, once the reason is fixed.
 
 ### pool-health
@@ -394,7 +409,9 @@ channels.
 Channels resynced their sequence numbers 5 times or more in 5 minutes: something else uses the
 channel accounts, or submissions keep failing.
 
-1. The `sequence-resync` pool events name the channels.
+1. `pool_events_total` with `type` `sequence-resync` shows when they happened; the log doesn't
+   name the channels yet (task 0125). Each channel account's transactions on Horizon show who
+   else used it.
 2. Make sure no other process holds the facilitator key. A use no one on the team explains is a
    theft of the key (ADR 0013).
 
@@ -428,8 +445,11 @@ so the fee budgets count low.
 The host probe (`x402-host-probe.timer`, every minute) writes the server's checks to
 `/var/log/x402/host/metrics.log`, shipped as the stream `host` of `/x402/production/metrics`; the
 agent adds memory and disk. A failed check, or a job that never ran, writes a value past its
-threshold, so a broken check alarms rather than reading as healthy. With the probe stopped, these
-alarms keep their state, and [probe-silent](#probe-silent) fires.
+threshold, so a broken check alarms rather than reading as healthy. With the probe stopped, its
+alarms (`openbao-down`, `certificate`, `credentials-stale`, and the backups' and snapshot's)
+keep their state, and [probe-silent](#probe-silent) fires. `audit-disk` comes from the agent,
+covered by [telemetry-silent](#telemetry-silent); `facilitator-failed` and `watchdog-restart`
+are written by the units themselves.
 
 ### openbao-down
 
@@ -464,14 +484,16 @@ start limit, so this is what shows it.
 
 ### watchdog-restart
 
-The watchdog stopped an unhealthy facilitator and restarted its unit.
+The watchdog stopped an unhealthy facilitator and restarted its unit. A stopped watchdog sends
+nothing here: a hung facilitator is then left to [uptime](#uptime).
 
 1. The app log before the restart, and `journalctl -u x402-watchdog@production`
    ([runbook, The watchdog](runbook.md#the-watchdog)).
 
 ### probe-silent
 
-No heartbeat from the host probe for 15 minutes, so every alarm in this section is blind.
+No heartbeat from the host probe for 15 minutes, so the probe's alarms are blind: OpenBao, WAL,
+the backups, the snapshot, the certificate and the agent's credentials.
 
 1. If [telemetry-silent](#telemetry-silent) fires too, the agent is the fault: follow it.
 2. If not: `systemctl status x402-host-probe.timer x402-host-probe.service` and
@@ -513,9 +535,10 @@ fails. When it expires, no log or metric line reaches CloudWatch.
 `/x402/production/app` or `/x402/production/metrics` (the alarm's name ends in `-app` or
 `-metrics`) took over 200 MB in an hour: a flood of lines, on the bill and on the server's disk.
 
-1. In Logs Insights on that group, the line that repeats:
-   `stats count() by event | sort count() desc | limit 10` (the metrics group:
-   `stats count() by @logStream`).
+1. In Logs Insights on that group, the line that repeats. The app group:
+   `stats count() by @logStream, event | sort count() desc | limit 10` (only the facilitator's
+   lines have an `event`; the other streams are its own Postgres, tunnel, OpenBao and deploy). The
+   metrics group, whose lines have no `event`: `stats count() by @logStream`.
 2. Then its cause. `x402-logrotate.timer` keeps the files on the server to 10 × 100 MB each.
 
 ## Protocol

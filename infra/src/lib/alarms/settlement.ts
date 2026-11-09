@@ -58,7 +58,7 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
       threshold: t.channelHeldSeconds,
       description: {
         what: `A channel on ${network} has been held by one settlement for over ${t.channelHeldSeconds} s; a default hold lasts up to about 426 s.`,
-        next: "Find the channel and its settlement in the app logs (pool events) and check the RPC; a channel that never frees shrinks the pool.",
+        next: "Find the settlement held open (settlement_oldest_open_seconds, the open records) and check the RPC; the log doesn't name the channel yet (task 0125). A channel that never frees shrinks the pool.",
         noData: SILENT_LEVEL,
       },
     });
@@ -90,7 +90,7 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
       threshold: 1,
       description: {
         what: `A channel on ${network} was taken out of the pool since the facilitator started; the pool settles with fewer channels.`,
-        next: "Read the channel-quarantined pool event in the app logs for the channel and the reason; a restart puts the channels back.",
+        next: "A channel whose sequence couldn't be read for its timeout: check the RPC (rpc-stalled, rpc-on-fallback). The log doesn't name the channel or the reason yet (task 0125); a restart puts the channels back.",
         noData: SILENT_LEVEL,
       },
     });
@@ -202,7 +202,7 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
       signal: { catalog: "settlement_reconciled_total", dims: { network, state: "expired" } },
       description: {
         what: `A settlement on ${network} expired: reconciliation found no transaction of it landed by its ledger bound, so the payer's payment did not settle and the payer has to sign a new one. One is rare; several mean submissions don't land.`,
-        next: "Read reconcile_finished and the record's settlement_hashes for its attempts, then the pool events (fee-raised, send-retry) and the RPC around that time.",
+        next: "Read reconcile_finished and the record's settlement_hashes for its attempts, then pool_events_total for fee-raised and send-retry (counts only, task 0125) and the RPC around that time.",
         noData: SILENT_EVENT,
       },
     });
@@ -265,7 +265,7 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
       threshold: t.sequenceResyncCount,
       description: {
         what: `Channels on ${network} resynced their sequence numbers ${t.sequenceResyncCount} or more times in 5 minutes: something else uses the channel accounts, or submissions keep failing.`,
-        next: "Read the sequence-resync pool events in the app logs for the channels; make sure no other process holds the facilitator key.",
+        next: "pool_events_total with type sequence-resync shows when; the log doesn't name the channels yet (task 0125), so read the channel accounts' transactions on Horizon. Make sure no other process holds the facilitator key.",
         noData: SILENT_EVENT,
       },
     });
