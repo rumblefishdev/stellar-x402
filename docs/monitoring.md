@@ -494,7 +494,8 @@ Postgres; when it fills, OpenBao refuses the requests it can't audit, and signin
 `x402@production` ended other than in success: a crash, a failed start, a drain cut short, a
 dockerd crash, or the watchdog's kill of a hung process ([watchdog-restart](#watchdog-restart)
 fires beside it). A crash after `ready` in cycles of a minute or more never reaches the unit's
-start limit, so this is what shows it.
+start limit, so this is what shows it. A planned stop doesn't fire it: the unit takes Compose's
+130 after a stop as a success.
 
 1. Its line in `/var/log/x402/host/metrics.log` has `result` and `exit_status`.
 2. Then the end of `/var/log/x402/production/facilitator.log` and `facilitator.err.log` before it

@@ -359,7 +359,9 @@ the deploy and the watchdog reset that count before their own restarts. After fi
 A crash after `ready` in cycles of a minute or more never reaches that limit, so every end of
 `x402@production` but a success counts `facilitator_failures_total`, which fires
 `facilitator-failed`: a crash, a failed start, a drain cut short, a `dockerd` crash, and the
-watchdog's kill of a hung process, which fires `watchdog-restart` beside it. The line in
+watchdog's kill of a hung process, which fires `watchdog-restart` beside it. A planned stop (a
+deploy, a drain, `systemctl stop`) is a success: Compose's 130 after the stop signal is listed in
+the unit's `SuccessExitStatus`. The line in
 `/var/log/x402/host/metrics.log` says how it ended (`result`, `exit_code`, `exit_status`), and
 the reason is at the end of `facilitator.log` or `facilitator.err.log` just before it.
 

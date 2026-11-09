@@ -238,6 +238,11 @@ describe("the units' output", () => {
     ]);
   });
 
+  test("x402@ takes Compose's 130 after a planned stop as a success, and nothing else", () => {
+    // Without it, every deploy and drain counted facilitator_failures_total (0027's drill).
+    expect(settings(unit("x402@.service"), "SuccessExitStatus")).toEqual(["130"]);
+  });
+
   test("every count the scripts write is a host counter of the catalog", () => {
     const calls = readdirSync(`${DEPLOY}/libexec`).flatMap((f) => [
       ...read(`libexec/${f}`).matchAll(/x402-host-probe count ([a-z0-9_]+)/g),
