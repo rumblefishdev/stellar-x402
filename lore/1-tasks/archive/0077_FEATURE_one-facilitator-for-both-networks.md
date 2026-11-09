@@ -2,7 +2,7 @@
 id: "0077"
 title: "Run one facilitator service for both networks, the network chosen per request"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0011", "0012", "0013", "0004"]
 related_tasks: ["0076", "0026", "0027", "0036", "0038", "0126"]
@@ -38,6 +38,13 @@ history:
       PR C, the code, split into 0126 for milestone 2: mainnet is out of T1
       (docs/planning/m1-epics.md) and testnet runs on one network as today. 0077 closes with its
       docs, PR A (#79) and PR B (#93).
+  - date: "2026-11-09"
+    status: completed
+    who: stkrolikiewicz
+    note: >
+      Closed after #93 merged: ADR 0011, 0004, 0012, 0013 and the spine describe one facilitator
+      for both networks (PR A #79, PR B #93), reviewed by Oskar; Marek's review not needed. The
+      code is 0126 (milestone 2). Docs only, no tests changed.
 ---
 
 # Run one facilitator service for both networks, the network chosen per request
@@ -111,6 +118,8 @@ the IP rate limiter's counters, and what `ready` reports.
 - **One environment, `production`** (Stan, 2026-10-28), serving testnet now and mainnet later; a
   staging environment maybe later. Deploys go straight to production from `deploy/production`,
   with no promotion step; how deploys stay safe once mainnet joins is a question in 0038.
+- **The code is 0126, in milestone 2** (Stan, 2026-11-09): mainnet is out of T1, and testnet
+  runs on one network as today, so this task closes with its docs.
 
 ## Design Decisions
 
@@ -169,4 +178,25 @@ the IP rate limiter's counters, and what `ready` reports.
 - ~~The facilitator serves `stellar:testnet` and `stellar:pubnet` from one process, each with its
   own channel pool, key and RPC endpoints, and `/supported` lists both~~ Moved to 0126, as its
   first criterion.
-- [ ] Reviewed by Oskar and Marek
+- [x] Reviewed by Oskar and Marek: Oskar reviewed both PRs (#79, #93); Marek's review was not
+      needed (Stan, 2026-11-09)
+
+## Implementation Notes
+
+- **PR A, #79** (merged 2026-10-29): ADR 0011's revision to one facilitator in a `production`
+  environment, 0026's build list and 0038's premise.
+- **PR B, #93** (merged 2026-11-09): the spine (AD-12, AD-13, AD-17, AD-18), ADR 0004's dispatch
+  by network, ADR 0012's database per network and ADR 0013's sockets per network, with Oskar's
+  review applied (`f6e5cf78`). Docs only; no code or tests changed.
+
+## Issues Encountered
+
+- **A task ID taken twice.** The code task was first numbered 0125, three minutes after #150 took
+  0125 for logging the pool events. It became 0126 (`6da32d82`), since #150's alarm texts already
+  cited 0125.
+
+## Future Work
+
+- [0126](../backlog/0126_FEATURE_serve-both-networks-from-one-process.md): the code, milestone 2.
+- [0038](../backlog/0038_RESEARCH_mainnet-availability.md): the mainnet questions this task
+  opened (decision 6).
