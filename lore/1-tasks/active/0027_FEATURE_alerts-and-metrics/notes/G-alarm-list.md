@@ -103,7 +103,7 @@ aggregates an array as samples is unverified: verify it at the first deploy.
 From the off-server check, every 5 minutes, so they fire with the server down. Built in #114. The
 balance alarms and the check's health are the `watch` group, on once #115's Lambda publishes;
 `account-state`, `account-effects` and `backup-secret-read` are `watchSecurity`, on once their
-sections do (decision 68).
+sections do (decision 68), built by task 0127 (decision 71).
 
 | Alarm | Signal | Shape | Fires when | Missing data |
 | --- | --- | --- | --- | --- |
@@ -181,6 +181,7 @@ A failed host check, or a job that never ran, writes a value past its threshold
 ([G-metrics](G-metrics.md#host-namespace-x402-host)). So `wal-failing`, `wal-stale` and
 `backup-age` are a group of their own, `backups`, and `snapshot-age` is `snapshots`: their jobs come
 with 0026, and in `host` they would keep the probe's other alarms off until then (decision 40).
+0026 turns each group on once its job runs (decision 71).
 
 ## Cost, silence and delivery
 
