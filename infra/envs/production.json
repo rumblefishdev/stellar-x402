@@ -48,7 +48,7 @@
     "backups": false,
     "snapshots": false,
     "disk": false,
-    "memory": false,
+    "memory": true,
     "logVolume": true,
     "watch": true,
     "watchSecurity": false,
@@ -72,7 +72,7 @@
     "certificateDaysLeft": 30,
     "credentialsAgeSeconds": 7500,
     "diskUsedPercent": null,
-    "memoryUsedPercent": null,
+    "memoryUsedPercent": 90,
     "logVolumeBytesPerHour": 200000000
   }
 }

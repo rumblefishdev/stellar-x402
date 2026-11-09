@@ -99,6 +99,10 @@ history:
     status: active
     who: okarcz
     note: "Drill (decision 71): 37 alarms fired on purpose, 13:29 to 13:55 UTC, all back to OK by 14:19. It found that every planned stop of x402@production ended failed (Compose's 130 after systemd's stop signal) and counted facilitator_failures_total, so facilitator-failed fired at 13:46:53 for the drill's own stop, and on 2026-11-06 for the third deploy's restart. x402@.service now lists 130 in SuccessExitStatus."
+  - date: "2026-11-09"
+    status: active
+    who: okarcz
+    note: "Drill recorded in docs/monitoring.md (Drills, and Fired on purpose for every alarm): 37 fired, 7 not fired with the reason. Criteria 2, 3, 4, 5, 10, 11 and 13 ticked, 3, 4, 5 and 11 with what the drill didn't prove. Decision 72: memory on at 90%. disk and audit-disk thresholds wait on Stan's and Adam's answer (ADR 0013 and 0011 say 80%)."
 ---
 
 # Alerts and metrics
@@ -713,22 +717,27 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     `sweeps-stopped` fire only on a partly broken process, which neither a stop nor a fake point
     can cause, so they are left out and Drills says why. `disk` goes on at 80%, `memory` after a
     week of data (2026-11-13). The closing PR then records it all (decision 68).
+72. **`memory` goes on at 90% now** (okarcz, 2026-11-09; amends decision 71 and the alarm list's
+    "after a week of data"). Three days of data read 2.5 to 4.4% used, with ClickHouse on the same
+    machine held to its own limit, so a week more would not move a 90% threshold. `Minimum` over 3
+    five-minute periods, as built: a lasting squeeze, not a merge's spike. The weekly review can
+    lower it once more weeks are read.
 
 ## Acceptance Criteria
 
 - [ ] Given the running facilitator, when it serves traffic, then pool `onEvent` events, per-route request counts and settle outcomes are exported as metrics
-- [ ] Given each alert condition: budget nearly used, breaker open, low facilitator balance (`checkFacilitatorBalance`), quarantined channel, pending settlements, when it occurs, then an alert fires on CloudWatch (ADR 0011); each alert has been triggered once on testnet or with a fake
-- [ ] Given a process that stays not ready to settle (no lease) longer than the alarm window, when the alarm evaluates, then it fires (ADR 0011)
-- [ ] Given the public URL unreachable, or a process in a crash loop, for 7 minutes in a row, when the uptime probe reads `/health`, then the uptime alarm fires, a deploy within its usual downtime doesn't fire it, and before the first good deploy it sends nothing (ADR 0011)
-- [ ] Given a process whose sweeps don't list the records (or don't run) for longer than the alarm window, when the alarm evaluates, then it fires (ADR 0011, 0019 decision 36)
+- [x] Given each alert condition: budget nearly used, breaker open, low facilitator balance (`checkFacilitatorBalance`), quarantined channel, pending settlements, when it occurs, then an alert fires on CloudWatch (ADR 0011); each alert has been triggered once on testnet or with a fake (2026-11-09 drill, docs/monitoring.md Drills: budget-nearing, the three breaker-opened, channel-quarantined and pending fired with fake points, the balance alarms on 2026-11-06)
+- [x] Given a process that stays not ready to settle (no lease) longer than the alarm window, when the alarm evaluates, then it fires (ADR 0011) (2026-11-09: uptime fired 7.5 minutes into the stop window. The drill stopped the process rather than holding it up without a lease; uptime reads `ready`, so a process that is up but not ready takes the same path, which the probe's tests cover)
+- [x] Given the public URL unreachable, or a process in a crash loop, for 7 minutes in a row, when the uptime probe reads `/health`, then the uptime alarm fires, a deploy within its usual downtime doesn't fire it, and before the first good deploy it sends nothing (ADR 0011) (2026-11-09: uptime fired at 13:34:24, 7.5 minutes into the stop window, and uptime-flapping at 13:37:34; the 2026-11-06 13:09 deploy, after uptime went on at 11:16, didn't fire it; the group went on only after the first good deploy (decision 5). A crash loop never reads `ready` either, the same path, not drilled)
+- [x] Given a process whose sweeps don't list the records (or don't run) for longer than the alarm window, when the alarm evaluates, then it fires (ADR 0011, 0019 decision 36) (2026-11-09: sweeps that don't run fired facilitator-silent at 13:42:49 in the stop window. Sweeps that run but list nothing (sweeps-stopped) were not fired: no stop or fake point can cause it safely (Drills))
 - [ ] Given a signer or threshold change on the fee account or a channel, or an effect on them other than a credit or a claimable balance naming them, when the off-server check runs, then an alarm fires, with the server down too (ADR 0013) (moved to 0127, decision 71)
 - [ ] Given the off-server check down or failing for any time, when it next succeeds, then it has read every effect and secret read since its last full read, and a partial read moved neither read point (moved to 0127, decision 71)
 - [x] Given the fee account's spendable balance below 25 XLM and below 10 XLM, when the off-server check runs, then an alarm fires each time (ADR 0013) (2026-11-06: a fake 5 XLM `spendable_stroops` point fired `balance-low-testnet` and `balance-critical-testnet`, ALARM 11:20:10 and 11:20:35 UTC, seen in `#stellar-x402-bot`, `docs/monitoring.md` Drills; the check's own read of a low balance is covered by `infra/test/watch-balance.test.ts`)
 - [ ] Given a read of the backup secret, when the off-server check runs, then an alarm fires (ADR 0013) (moved to 0127, decision 71)
-- [ ] Given OpenBao not giving a usable signature (sealed, denied, a wrong key), when the facilitator signs or runs its check, then an alarm fires on the first failure (ADR 0013)
-- [ ] Given OpenBao down or sealed, WAL archiving stuck, a backup or snapshot older than 26 hours, or the certificate under 30 days from expiry, when the condition holds, then an alarm fires, and a check that fails or a job that never ran fires it too (ADR 0011, 0013) (WAL archiving and the backup and snapshot ages: moved to 0026, decision 71)
+- [x] Given OpenBao not giving a usable signature (sealed, denied, a wrong key), when the facilitator signs or runs its check, then an alarm fires on the first failure (ADR 0013) (2026-11-09: signer-failures and openbao-down fired with fake points)
+- [x] Given OpenBao down or sealed, WAL archiving stuck, a backup or snapshot older than 26 hours, or the certificate under 30 days from expiry, when the condition holds, then an alarm fires, and a check that fails or a job that never ran fires it too (ADR 0011, 0013) (WAL archiving and the backup and snapshot ages: moved to 0026, decision 71) (2026-11-09: openbao-down and credentials-stale fired with fake points. The certificate part was not fired: its hourly Maximum always holds the probe's real days left (Drills). WAL, backups and snapshot moved to 0026)
 - [ ] Given the server's disks, OpenBao's audit volume or its memory past their thresholds, when the agent reports them, then an alarm fires (ADR 0011, 0013)
-- [ ] Given the agent, the host probe or the off-server check stopped, when the alarm window passes, then an alarm fires
+- [x] Given the agent, the host probe or the off-server check stopped, when the alarm window passes, then an alarm fires (2026-11-09 stop window: telemetry-silent 13:40:23, probe-silent 13:42:31 and watch-no-invocations 13:41:52, each from a real stop)
 - [x] Given a deploy of the alarm stack, when it ends, then a test alarm has reached Slack and a person has seen it (2026-11-06: `emf-validation` by `make fire-test` at 08:39:50 UTC, seen in `#stellar-x402-bot`)
 - [x] Given a line from the facilitator on the agent's path, when it reaches CloudWatch, then its metrics exist, checked once on the real path (ADR 0011) (2026-11-06, after the restart window: `make check-series GROUP=facilitator` found 7 of 7 continuous series in `/x402/production/metrics`, shipped by the agent from the server)
 - [ ] Given every alarm in the alarm list, when this story is done, then each has fired once on purpose, on testnet or with a fake, and `docs/monitoring.md` says how and when

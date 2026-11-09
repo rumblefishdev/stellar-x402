@@ -291,6 +291,7 @@ test("production as committed makes only the groups that are on", () => {
     "x402-production-landed-after-expired-testnet",
     "x402-production-log-volume-app",
     "x402-production-log-volume-metrics",
+    "x402-production-memory",
     "x402-production-openbao-down",
     "x402-production-pending-testnet",
     "x402-production-pool-health-testnet",
