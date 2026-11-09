@@ -120,7 +120,9 @@ Facts the round rests on, to check in the grilling:
 - The 300 s cap checks the seller's `maxTimeoutSeconds`, not the ledger signed
   (`packages/mcp/src/pay.ts:125`); upstream signs from the RPC's latest ledger and Horizon's mean
   ledger time, so the signed window can be longer. Decoding the payload for the nonce also gives
-  the signed expiry to check before sending.
+  the signed expiry to check before sending. **Decided 2026-11-09:** the buyer checks the ledgers
+  it signed before it sends, here, in this task; nothing goes upstream for now (upstream's open
+  issue on the same family of skew: x402-foundation/x402#3168).
 - Cheapest test, ~15 min on testnet: pay once and sign one entry that is never sent; read both
   nonce keys at the expiry ledger, one after and thirteen after.
 
