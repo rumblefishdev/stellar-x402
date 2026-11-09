@@ -169,6 +169,7 @@ production code.
 | 5 | A fixed list of 10–15 seeded defects, some the tests must newly catch: three such defects pass all 864 tests today | grilling, measured 2026-11-05 | beyond it | not checked upstream | — | — |
 | 6 | Stryker runs on `settle.ts` before and after the test rewrite, on a local copy; the PR's evidence compares the two. Nothing of it enters the repo | grilling, measured 2026-11-09 | beyond it | not checked upstream | — | — |
 | 7 | The four money-path gaps the mutation run found (`settle.ts:1127`, `:1141`, `:1104`, `:1043`) get tests in this task, on the seeded-defect list; a test that shows a real bug gets its fix in a PR of its own | grilling, measured 2026-11-09 | beyond it | not checked upstream | — | — |
+| 8 | `review-2-answers.test.ts` A3 (a real 300 ms budget) and `testing-imports.test.ts` (over vitest's 5 s test timeout) are in this task, so "CI on develop is green" is reachable | grilling, measured 2026-11-09 | sharpens it | not checked upstream | — | — |
 
 ## Not yet decided
 
