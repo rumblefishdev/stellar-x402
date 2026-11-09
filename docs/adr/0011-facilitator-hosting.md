@@ -458,7 +458,7 @@ One request or one stop must never outlast the layer in front of it:
     find them.
     At boot the unit writes them again before it starts anything.
   - The app reads them from files: `DATABASE_URL_FILE` and `RPC_URLS_FILE` (0026), which point
-    at testnet's; with both networks, 0077 gives each network its own. The AppRole files come
+    at testnet's; with both networks, 0126 gives each network its own. The AppRole files come
     with the OpenBao signer (0036).
   - They never go into the image, the repo or the logs, and never into `environment:`, which
     `docker inspect` shows in plain text.
@@ -477,9 +477,10 @@ One request or one stop must never outlast the layer in front of it:
 
 - **PostgreSQL in a container per network, on the same server,** though one facilitator uses
   both (decided 2026-10-28, 0077). It holds the schema and adapter rules of
-  [ADR 0012](0012-facilitator-state-store.md), whose lease, rate-limit and spend tables have no
-  network column, so the facilitator opens one store per network beside that network's pool. A testnet reset wipes only testnet's
-  database, and backups, restores and migrations stay per network.
+  [ADR 0012](0012-facilitator-state-store.md), where the hash, lease, rate-limit and spend tables
+  have no network column, so the facilitator opens one store per network beside that network's
+  pool. A testnet reset wipes only testnet's database, and backups, restores and migrations stay
+  per network.
 - **Sizing:** about 2–4 KB per payment. That is under 1 GB on testnet and about 1 GB a month on
   mainnet at 10,000 payments a day. `pg_wal` stays small, since each segment leaves as it closes
   (below) and Postgres recycles it.

@@ -46,6 +46,8 @@ its own channel pool, signer, RPC endpoints and store, before mainnet joins.
   `invalid_network`.
 - A channel lease per network; without a network's lease, `/settle` for that network isn't served.
 - `/supported` lists an `exact` kind per network and each network's facilitator key.
+- Spend budgets per network, in that network's store, counting only its own fee account's fees
+  (0077 decision 11, AD-18).
 
 ## Open Questions
 
@@ -59,10 +61,22 @@ From 0077 (ADR 0012 lists them):
 - **Which database holds the IP rate limiter's counters.** They are counted before the request's
   network is known, and `/supported` and `/discovery/*` may carry none.
 
+From Oskar's review of #93:
+
+- **One network's failed startup check: refuse the process, or only that network?** AD-12's check
+  refuses the start unless every channel is right, and a schema behind the code stops the start
+  (ADR 0011). With mainnet live, a deploy with testnet's migration behind would keep the whole
+  process down, mainnet with it.
+
 ## Acceptance Criteria
 
 - [ ] The facilitator serves `stellar:testnet` and `stellar:pubnet` from one process, each with its
       own channel pool, key and RPC endpoints, and `/supported` lists both
 - [ ] A payment for a network the process doesn't serve is `invalid_network`
-- [ ] One network's lease lost or database down doesn't stop `/settle` on the other
+- [ ] One network's lease lost or database down doesn't stop `/settle` on the other. If the IP
+      rate limiter's counters sit in one network's database, that database down stops both, so the
+      answer to that question decides whether this holds
+- [ ] Each network's spend budgets, the global one included, count only its own fee account's fees
+- [ ] `deploy/` gives each network its own secret files, OpenBao socket mount and AppRole files
+- [ ] The "until 0126" notes in ADR 0004, ADR 0011 and the spine are gone
 - [ ] The open questions above are decided and recorded in ADR 0012 or the spine

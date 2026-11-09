@@ -104,8 +104,9 @@ the IP rate limiter's counters, and what `ready` reports.
 
 - **A database per network** (Stan, 2026-10-28). The process opens one store per network, beside
   that network's pool, key and RPC endpoints, so the schema stays as it is: in
-  `apps/facilitator/src/adapters/postgres-schema.ts` the settlement and catalog tables record the
-  network, but the lease, rate-limit and spend tables don't (corrected in PR B). A testnet reset
+  `apps/facilitator/src/adapters/postgres-schema.ts` `settlements`, `settlement_in_flight`,
+  `catalog` and `catalog_attempts` record the network, but `settlement_hashes`, `leases`,
+  `rate_limits` and the spend tables don't (corrected in PR B). A testnet reset
   wipes only testnet's database, and backups, restores and migrations stay per network.
 - **One environment, `production`** (Stan, 2026-10-28), serving testnet now and mainnet later; a
   staging environment maybe later. Deploys go straight to production from `deploy/production`,
@@ -144,10 +145,10 @@ the IP rate limiter's counters, and what `ready` reports.
    `postgres-password.testnet`, the AppRole files), so mainnet's files sit beside testnet's in
    `/run/x402/production/` and nothing is renamed (Oskar's review of #79).
 9. **`ready` is today's one network's lease;** what readiness means with a lease per network is
-   decided with the code in PR C (Oskar's review of #79).
+   decided with the code in 0126 (Oskar's review of #79).
 10. **A lease per network** (PR B, spine AD-17): the process takes each served network's channel
     lease through that network's store, and without a network's lease it doesn't serve `/settle`
-    for that network. What `ready` reports stays with PR C (decision 9).
+    for that network. What `ready` reports stays with 0126 (decision 9).
 11. **Spend budgets per network** (PR B, spine AD-18, ADR 0012): each network's budgets live in
     its own store and count only the fees its own fee account pays, so the global budget is per
     network.
@@ -165,6 +166,7 @@ the IP rate limiter's counters, and what `ready` reports.
 - [x] ADR 0011, 0012, 0013, 0004 and the spine describe one facilitator service for both networks
       (PR A: ADR 0011; PR B: the rest)
 - [x] 0026, 0027 and 0038 match (PR A; 0027 needed no change)
-- [ ] The facilitator serves `stellar:testnet` and `stellar:pubnet` from one process, each with its
-      own channel pool, key and RPC endpoints, and `/supported` lists both (deferred to 0126)
+- ~~The facilitator serves `stellar:testnet` and `stellar:pubnet` from one process, each with its
+  own channel pool, key and RPC endpoints, and `/supported` lists both~~ Moved to 0126, as its
+  first criterion.
 - [ ] Reviewed by Oskar and Marek

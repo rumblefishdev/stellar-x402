@@ -44,10 +44,11 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
     over the environment's `internal` network `x402-<environment>-db`, which every network's
     Postgres shares (ADR 0011).
   - **A database per network** (task 0077). The facilitator opens a store per network, beside
-    that network's pool, key and RPC endpoints. The settlement and catalog tables carry the
-    network, but the lease, rate-limit and spend tables don't, so a shared database would need it
-    in their keys and queries. A testnet reset wipes only testnet's database, and backups,
-    restores and migrations stay per network.
+    that network's pool, key and RPC endpoints. `settlements`, `settlement_in_flight`, `catalog`
+    and `catalog_attempts` carry the network, but `settlement_hashes` (AD-16's lookup by any of a
+    settlement's hashes), `leases`, `rate_limits` and the three spend tables don't, so a shared
+    database would need it in their keys and queries. A testnet reset wipes only testnet's
+    database, and backups, restores and migrations stay per network.
     - Each network's spend budgets count only its own fees, paid from its own fee account.
     - Still open, decided with the code in 0126: which database holds the catalog, since
       `/discovery/resources` without a `network` filter lists both networks with an exact

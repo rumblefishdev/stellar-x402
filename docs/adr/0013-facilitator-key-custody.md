@@ -8,8 +8,7 @@
   a socket per network, OpenBao's own unit and limits, from the PR #24 review); 2026-10-22 (the
   OpenBao key's own account, the theft alarm, 1-hour tokens, the admin socket and the restore
   path, from the PR #48 review); 2026-10-29 (task 0077: one facilitator holds every network's
-  socket, and what a socket per network still buys); 2026-11-02 (admin on a loopback listener
-  inside the container,
+  socket, each still its own); 2026-11-02 (admin on a loopback listener inside the container,
   which Raft's cluster address needs, no move of testnet to the OpenBao key, since nothing ran on
   another key, the backup JSON over stdin, and AppRole's lockout off, task 0026); 2026-11-02 (the
   theft alarm reads the accounts instead of our hashes, a second balance alarm, and an alarm on
@@ -245,7 +244,7 @@
 - **One facilitator for both networks is accepted at these stakes too** (0077). A break-in on it
   reaches mainnet's float and reserves, as a break-in on a mainnet-only facilitator would. What is
   new is that testnet's code paths and switches run in the process that holds mainnet's key.
-  0038 weighs a staging environment before mainnet joins.
+  0038 decides what keeps a testnet-only switch away from mainnet before mainnet joins.
 - **OpenBao over Vault:** the same API (the spike passed on both), MPL-2.0 rather than BSL, and its
   HSM and static seals are open source.
 

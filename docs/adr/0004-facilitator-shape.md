@@ -27,7 +27,8 @@ reimplement verify and settle.
   - `apps/facilitator` is the only deployable service and the only composition root. It owns
     HTTP, environment and secrets, store adapters, rate limiting and wiring.
   - One process serves every network it is configured for, testnet and later mainnet, each with
-    its own channel pool, key, RPC endpoints and store (task 0077).
+    its own channel pool, key, RPC endpoints and store (task 0077). Until 0126's code, it serves
+    the one in `NETWORK`.
   - `packages/*` are libraries that take their dependencies through constructors. They never
     read `process.env` and never open a store or socket themselves.
   - `packages/config` is the leaf of the dependency graph.
