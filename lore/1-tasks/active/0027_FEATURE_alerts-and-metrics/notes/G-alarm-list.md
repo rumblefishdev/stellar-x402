@@ -165,7 +165,7 @@ in a PR once acted on, so each re-arms for the next version on its own. In the `
 | Alarm | Signal | Shape | Fires when | Missing data |
 | --- | --- | --- | --- | --- |
 | `disk` | `disk_used_percent`, named mounts | Level, `Maximum`, 3 of 3 five-minute periods | Measure: read the first numbers against 80% used before it goes on. To our channel: the server's base setup is Stan's, and our WAL and logs are what fills it. Its description names the Prices API's `prices-<env>-ch-disk-free` on the same host's ClickHouse volume (decision 20) | Ignore: `telemetry-silent` |
-| `memory` | `mem_used_percent` | Level | Measure: after a week of data | As above |
+| `memory` | `mem_used_percent` | Level, `Minimum`, 3 of 3 five-minute periods | Over 90% (decision 72) | As above |
 | `audit-disk` | `disk_used_percent`, OpenBao's audit volume | Level, `Maximum`, 3 of 3 five-minute periods | 80% used | As above |
 | `openbao-down` | `openbao_up` | Level, `Minimum`, 3 of 3 one-minute periods | Down, sealed, or its check failing, for 3 minutes | Ignore: `probe-silent` |
 | `wal-failing` | `wal_failing` | Level, `Maximum`, 3 of 3 one-minute periods | `last_failed_time` past `last_archived_time`, nothing ever archived, or the check failing | As above |
