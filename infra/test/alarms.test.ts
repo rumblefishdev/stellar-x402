@@ -75,8 +75,8 @@ describe("every alarm reads a series the catalog declares (AD-1)", () => {
 });
 
 describe("the Alarms template", () => {
-  test("has every alarm of the list once per network, 87 with two networks", () => {
-    expect(alarms).toHaveLength(87);
+  test("has every alarm of the list once per network, 88 with two networks", () => {
+    expect(alarms).toHaveLength(88);
     expect(new Set(byName.keys()).size).toBe(alarms.length);
   });
 
@@ -117,11 +117,15 @@ describe("the Alarms template", () => {
     }
   });
 
-  test("fits every evaluation range in a day, which CloudWatch checks only at deploy", () => {
-    for (const a of alarms)
-      expect(
-        (periodOf(a.Properties) ?? 0) * (a.Properties["EvaluationPeriods"] as number),
-      ).toBeLessThanOrEqual(86_400);
+  // PutMetricAlarm, `Period`: the range is at most seven days, and at most a day for a period
+  // under an hour.
+  test("fits every evaluation range in CloudWatch's limit, which it checks only at deploy", () => {
+    for (const a of alarms) {
+      const period = periodOf(a.Properties) ?? 0;
+      expect(period * (a.Properties["EvaluationPeriods"] as number)).toBeLessThanOrEqual(
+        period < 3600 ? 86_400 : 604_800,
+      );
+    }
   });
 
   test("has no CPU alarm (decision 20) and no metric-issue alarm (decision 22)", () => {
@@ -163,6 +167,7 @@ describe("the Alarms template", () => {
       "balance-critical",
       "balance-low",
       "upstream-changed",
+      "upstream-silent",
       "watch-errors",
       "watch-no-invocations",
     ]);
@@ -268,6 +273,7 @@ test("production as committed makes only the groups that are on", () => {
     "x402-production-protocol-upgrade-coming-pubnet",
     "x402-production-protocol-upgrade-coming-testnet",
     "x402-production-upstream-changed",
+    "x402-production-upstream-silent",
     "x402-production-uptime",
     "x402-production-uptime-flapping",
     "x402-production-watch-errors",
@@ -313,7 +319,12 @@ function alarmList(): Row[] {
   return rows;
 }
 
-const PERIOD: Record<string, number> = { "one-minute": 60, "five-minute": 300, "one-hour": 3600 };
+const PERIOD: Record<string, number> = {
+  "one-minute": 60,
+  "five-minute": 300,
+  "one-hour": 3600,
+  "one-day": 86400,
+};
 
 // ---- What the list's "Fires when" column says, written out ----
 
@@ -374,7 +385,8 @@ const LEVEL: Record<
   "watch-errors": [">=", 1, "Sum", 300, 2, 3],
   "protocol-changed": [">", expectedProtocol, "Maximum", 300, 2, 2],
   "protocol-upgrade-coming": [">", supportedProtocol, "Maximum", 300, 2, 2],
-  "upstream-changed": [">=", 1, "Maximum", 3600, 1, 1],
+  "upstream-changed": [">=", 1, "Maximum", 86400, 1, 1],
+  "upstream-silent": ["<", 1, "SampleCount", 86400, 2, 2],
 };
 
 /** Each Event alarm's threshold other than 1, which the list writes as "at N or more". */
@@ -436,7 +448,9 @@ describe("each alarm matches its row in G-alarm-list", () => {
       } else if (row.shape.startsWith("Level") || row.shape.startsWith("Metric math")) {
         expect(r.shape).toBe("level");
         if (stat) expect(statOf(p)).toBe(stat);
-        const window = /(\d+) of (\d+) (one-minute|five-minute|one-hour) period/.exec(row.shape);
+        const window = /(\d+) of (\d+) (one-minute|five-minute|one-hour|one-day) period/.exec(
+          row.shape,
+        );
         if (window) {
           expect(p["DatapointsToAlarm"]).toBe(Number(window[1]));
           expect(p["EvaluationPeriods"]).toBe(Number(window[2]));

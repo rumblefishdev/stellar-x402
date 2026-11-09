@@ -80,7 +80,7 @@ describe("createHandler", () => {
     expect(() => JSON.stringify(result)).not.toThrow();
   });
 
-  test("runs the upstream section once an hour, on the hour, and the balance section every run", async () => {
+  test("runs the upstream section once a day, at 08:00 UTC, and the balance section every run", async () => {
     const rpc = new FakeRpc({ [FEE]: 1n });
     rpc.balances.set(FEE, 1_010_000_000n);
     const fetched: string[] = [];
@@ -97,10 +97,10 @@ describe("createHandler", () => {
         return url.endsWith("upstream.ts") ? `"${"a".repeat(40)}"` : "same";
       },
     });
-    await handler({ scheduledTime: "2026-11-06T09:55:00Z" });
-    expect(fetched).toEqual([]);
     await handler({ scheduledTime: "2026-11-06T10:00:00Z" });
-    expect(fetched).toHaveLength(7);
+    expect(fetched).toEqual([]);
+    await handler({ scheduledTime: "2026-11-06T08:00:00Z" });
+    expect(fetched).toHaveLength(9);
     expect(published.sort()).toEqual([
       "spendable_stroops",
       "spendable_stroops",
@@ -123,7 +123,7 @@ describe("createHandler", () => {
         throw new Error("github down");
       },
     });
-    await expect(handler({ scheduledTime: "2026-11-06T10:00:00Z" })).rejects.toThrow(/github down/);
+    await expect(handler({ scheduledTime: "2026-11-06T08:00:00Z" })).rejects.toThrow(/github down/);
     expect(published).toEqual(["spendable_stroops"]);
   });
 

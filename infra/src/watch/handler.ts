@@ -4,7 +4,7 @@ import { rpc } from "@stellar/stellar-sdk";
 import { type BalanceDeps, runBalance } from "./balance.js";
 import { runProtocol } from "./protocol.js";
 import { PROTOCOL_ENV, TARGETS_ENV, parseProtocolTargets, parseTargets } from "./targets.js";
-import { type UpstreamDeps, fetchText, runUpstream } from "./upstream.js";
+import { type UpstreamDeps, fetchText, isUpstreamRun, runUpstream } from "./upstream.js";
 
 /** The schedule's input (watch-stack.ts): its scheduled time, `<aws.scheduler.scheduled-time>`. */
 export interface WatchEvent {
@@ -38,7 +38,7 @@ export interface HandlerDeps {
 /**
  * The Lambda handler: reads its targets and builds one RPC client per URL once, at the start, so
  * a warm container reuses its connections. Each run reads the balance and protocol sections at
- * once, and the run on the hour the upstream section too: upstream changes far slower. One that
+ * once, and the run at 08:00 UTC the upstream section too: upstream changes far slower. One that
  * fails doesn't stop the others from publishing, and the run then throws for `watch-errors`. It
  * resolves to nothing: the runtime serializes a handler's result as JSON, and the sections' results hold
  * bigints, so returning them failed every run with "Unable to stringify response body".
@@ -67,7 +67,7 @@ export function createHandler(deps: HandlerDeps): (event?: WatchEvent | null) =>
         log,
         at,
       }),
-      ...(at.getUTCMinutes() === 0
+      ...(isUpstreamRun(at)
         ? [runUpstream({ fetchText: deps.fetchText ?? fetchText, publish: deps.publish, log, at })]
         : []),
     ]);

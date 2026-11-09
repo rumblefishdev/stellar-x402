@@ -110,7 +110,7 @@ export function addMoneyAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
     comparison: ">=",
     threshold: 1,
     description: {
-      what: "The off-server check failed in 2 of its last 3 runs: a section was not published, the balance (its RPC), the protocol (Horizon) or, on the hour, the upstream x402 files (GitHub, task 0029). The theft and secret-read sections come later (decision 68).",
+      what: "The off-server check failed in 2 of its last 3 runs: a section was not published, the balance (its RPC) or the protocol (Horizon). A failed daily upstream read can't fill 2 of 3 runs: upstream-silent covers it. The theft and secret-read sections come later (decision 68).",
       next: `Read the ${n.watchFunction} log for watch_section_failed: it names the section and the network; the other section still published.`,
       noData: "Keeps its state; watch-no-invocations covers runs that don't happen.",
     },

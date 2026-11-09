@@ -29,6 +29,8 @@ PR (decision 68).
 | `watch-no-invocations`    | `watch`     | 2026-11-06 11:16 UTC      | Not yet                                                                                           |
 | `protocol-changed`        | `protocol`  | With #145's Alarms deploy | Not yet                                                                                           |
 | `protocol-upgrade-coming` | `protocol`  | With #145's Alarms deploy | Not yet                                                                                           |
+| `upstream-changed`        | `watch`     | With #149's Alarms deploy | Not yet                                                                                           |
+| `upstream-silent`         | `watch`     | With #149's Alarms deploy | Not yet                                                                                           |
 
 A network-scoped alarm has the network at the end of its name (`balance-low-testnet`). AWS
 commands below use the `stellar` SSO profile (`aws sso login --profile stellar`) and
@@ -94,15 +96,20 @@ probe now and then, a lease that moves, or a tunnel that drops.
 ## The off-server check
 
 The Watch stack's Lambda, `x402-production-watch`, runs every 5 minutes in AWS, so it works while
-the server is down (ADR 0013). It has two sections, run at once:
+the server is down (ADR 0013). It has three sections, run at once:
 
 - **balance:** each served network's fee account through RPC with `checkFacilitatorBalance`,
   published as `spendable_stroops`;
 - **protocol:** Horizon's root for each network in `watch.protocol` (testnet and mainnet), served
-  or not, published as `protocol_version` and `protocol_supported_version`.
+  or not, published as `protocol_version` and `protocol_supported_version`;
+- **upstream:** once a day, the run at 08:00 UTC: the conformance gate's pin from this repo's
+  `develop`, and four upstream x402 files at that pin and on upstream `main` (the x402 spec, the
+  Stellar `exact` scheme, the suite's Stellar routes and the discovery spec, task 0029),
+  published as `upstream_files_changed`, the count that differ.
 
 A network a section can't read publishes nothing, so its alarms keep their state and
-`watch-errors` fires instead; the other section still publishes.
+`watch-errors` fires instead; the other sections still publish. The upstream section fails at most
+once a day, which `watch-errors` never counts: `upstream-silent` covers it.
 
 Its log, and a run by hand:
 
@@ -112,8 +119,12 @@ aws lambda invoke --function-name x402-production-watch --payload '{}' \
   --cli-binary-format raw-in-base64-out --profile stellar --region eu-central-1 /dev/stdout
 ```
 
+A run by hand with `--payload '{"scheduledTime":"2026-11-10T08:00:00Z"}'` (any date, 08:00 UTC)
+runs the upstream section too.
+
 Each run logs `watch_balance` with the spendable balance in stroops and `watch_protocol` with
-both versions, or `watch_section_failed` with the section, the network and the error.
+both versions, the 08:00 run `watch_upstream` with the pin and the files that differ, or
+`watch_section_failed` with the section, the network and the error.
 
 ### balance-low
 
@@ -162,6 +173,32 @@ The check hasn't run for 15 minutes, so the balance and protocol alarms see noth
 2. The function: it exists, and its `Throttles` metric is 0 (it is limited to one run at a time).
 3. If the Watch stack was deleted or never deployed, deploy it (`make deploy-production-watch` in
    `infra/`). On a fresh account, deploy Watch before Alarms ([infra/README.md](../infra/README.md)).
+
+### upstream-changed
+
+Upstream x402 `main` changed, since the gate's pin, a file the gate's suite rests on or the
+discovery spec. Nothing breaks for us: the gate still runs the pinned suite. It means a seller or
+buyer on the newest x402 libraries may no longer match what we tested.
+
+1. Read the 08:00 run's `watch_upstream` line: `changed` lists the files.
+2. Read the change upstream: `https://github.com/x402-foundation/x402/commits/main/<file>`.
+3. If it changes what a payment or a listing looks like, bump `UPSTREAM_COMMIT` in
+   `conformance/src/upstream.ts` and rerun the gate (`conformance/README.md`); the next 08:00 run
+   publishes 0 and the alarm goes back to OK. If not, say in the channel why the pin stays.
+
+While it stays in ALARM, a later upstream change sends no new message: read the daily
+`watch_upstream` line until the pin moves.
+
+### upstream-silent
+
+The upstream section published nothing for two days, so `upstream-changed` sees nothing.
+
+1. Read the 08:00 runs for `watch_section_failed` with `section: upstream`: the error names the
+   file.
+2. `answered 404`: upstream moved or deleted a file, a change to read like `upstream-changed`;
+   update `FILES` in `infra/src/watch/upstream.ts` and deploy the Watch stack.
+3. `answered 429` or `5xx`, or a timeout: GitHub refused or was slow; it usually passes by itself.
+4. `expected one commit`: `conformance/src/upstream.ts` no longer holds exactly one commit hash.
 
 ## Protocol
 

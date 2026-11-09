@@ -122,13 +122,15 @@ a check that can't publish (decision 64).
 
 ## Upstream
 
-From the off-server check, once an hour (task 0029). It reads the gate's pin from this repo's
-`develop` and compares three upstream x402 files there with upstream `main`: the x402 spec, the
-Stellar `exact` scheme and the suite's Stellar routes. It is in the `watch` group.
+From the off-server check, once a day at 08:00 UTC (task 0029). It reads the gate's pin from this
+repo's `develop` and compares four upstream x402 files there with upstream `main`: the x402 spec,
+the Stellar `exact` scheme, the suite's Stellar routes and the discovery spec. It is in the
+`watch` group.
 
 | Alarm | Signal | Shape | Fires when | Missing data |
 | --- | --- | --- | --- | --- |
-| `upstream-changed` | `upstream_files_changed` | Level, `Maximum`, 1 of 1 one-hour period | One of the three files differs from the pin; it clears once the pin moves | Ignore: `watch-errors`, `watch-no-invocations` |
+| `upstream-changed` | `upstream_files_changed` | Level, `Maximum`, 1 of 1 one-day period | One of the four files differs from the pin; it clears once the pin moves | Ignore: `upstream-silent` |
+| `upstream-silent` | `upstream_files_changed` | Level, `SampleCount` below 1, 2 of 2 one-day periods | No point for two days: the daily read fails, and `watch-errors` (2 of 3 five-minute runs) can't see a once-a-day failure | Breaching: no point is what it is for |
 
 ## Protocol
 

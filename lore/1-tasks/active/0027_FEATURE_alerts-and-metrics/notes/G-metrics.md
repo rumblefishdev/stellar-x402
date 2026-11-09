@@ -163,7 +163,7 @@ network-scoped. `ready`, `backup_secret_reads` and `upstream_files_changed` are 
 | `account_state_mismatches` | The check: accounts whose signers or thresholds differ from the declared set, or that are gone | `Maximum` | `account-state` |
 | `account_effects_unexpected` | The check: effects other than the allowed two, since the cursor | `Maximum` | `account-effects` |
 | `backup_secret_reads` | The check: `GetSecretValue` events not counted before | `Maximum` | `backup-secret-read` |
-| `upstream_files_changed` | The check, on the hour: upstream x402 files the conformance gate rests on that differ from its pin (task 0029) | `Maximum` | `upstream-changed` |
+| `upstream_files_changed` | The check, daily at 08:00 UTC: upstream x402 files the conformance gate rests on, and the discovery spec, that differ from its pin (task 0029) | `Maximum`, `SampleCount` | `upstream-changed`, `upstream-silent` |
 
 The statistics are the ones a forged point can't hide a real one behind
 ([G-alarm-list](G-alarm-list.md#statistics)).

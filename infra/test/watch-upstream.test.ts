@@ -1,5 +1,5 @@
 import { seriesDims } from "@stellar-x402/metrics-catalog";
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { PutMetricDataInput } from "../src/watch/balance.js";
 import { NAMESPACE } from "../src/watch/metric.js";
 import {
@@ -7,12 +7,14 @@ import {
   OUR_PIN_URL,
   UPSTREAM_METRIC,
   UPSTREAM_RAW,
+  fetchText,
+  isUpstreamRun,
   runUpstream,
 } from "../src/watch/upstream.js";
 
 const PIN = "8827cf19fa9a7b120588b8cc56f56a3def13bb97";
 const PIN_FILE = `export const UPSTREAM_COMMIT = "${PIN}";\n`;
-const AT = new Date("2026-11-06T10:00:00Z");
+const AT = new Date("2026-11-06T08:00:00Z");
 
 /** Upstream as `files` says: each path's text at the pin and on main. */
 function harness(files: Record<string, { pin: string; main: string }>, pinFile = PIN_FILE) {
@@ -67,12 +69,34 @@ describe("runUpstream", () => {
     expect(h.logs).toContainEqual({ msg: "watch_upstream", pin: PIN, changed: [changed] });
   });
 
-  test("compares the three files the gate's suite rests on", () => {
+  test("compares the files the gate's suite rests on and the discovery spec", () => {
     expect(FILES).toEqual([
       "specs/x402-specification-v2.md",
       "specs/schemes/exact/scheme_exact_stellar.md",
       "e2e/config/mechanisms_stellar.json",
+      "specs/extensions/bazaar.md",
     ]);
+  });
+
+  test("reads every file at once after the pin, under one deadline", async () => {
+    const h = harness(same);
+    const signals = new Set<AbortSignal>();
+    let open = 0;
+    let most = 0;
+    const read = h.deps.fetchText;
+    await runUpstream({
+      ...h.deps,
+      fetchText: async (url, signal) => {
+        signals.add(signal);
+        open++;
+        most = Math.max(most, open);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        open--;
+        return read(url);
+      },
+    });
+    expect(most).toBe(FILES.length * 2);
+    expect(signals.size).toBe(1);
   });
 
   test("throws and publishes nothing when the pin file names no single commit", async () => {
@@ -90,5 +114,26 @@ describe("runUpstream", () => {
     const h = harness({ [FILES[0]!]: { pin: "v1", main: "v1" } });
     await expect(runUpstream(h.deps)).rejects.toThrow(/no fake/);
     expect(h.published).toEqual([]);
+  });
+});
+
+describe("fetchText", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  test("names the file when the request fails", async () => {
+    vi.stubGlobal("fetch", async () => {
+      throw new Error("The operation was aborted due to timeout");
+    });
+    await expect(fetchText(OUR_PIN_URL, AbortSignal.timeout(1000))).rejects.toThrow(
+      `${OUR_PIN_URL}: The operation was aborted due to timeout`,
+    );
+  });
+});
+
+describe("isUpstreamRun", () => {
+  test("is the run at 08:00 UTC only, once a day", () => {
+    expect(isUpstreamRun(new Date("2026-11-06T08:00:00Z"))).toBe(true);
+    expect(isUpstreamRun(new Date("2026-11-06T08:05:00Z"))).toBe(false);
+    expect(isUpstreamRun(new Date("2026-11-06T09:00:00Z"))).toBe(false);
   });
 });
