@@ -4,7 +4,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { StellarNetwork } from "@stellar-x402/config";
-import { type MetricName, seriesDims } from "@stellar-x402/metrics-catalog";
+import { CATALOG, type MetricName, seriesDims } from "@stellar-x402/metrics-catalog";
 import { describe, expect, test } from "vitest";
 import { AWS_METRICS, type AlarmRecord } from "../src/lib/alarms/factory.js";
 import { INFRA_ROOT } from "../src/lib/names.js";
@@ -263,6 +263,16 @@ test("every alarm production makes has its section in docs/monitoring.md, which 
   const sections = new Set([...doc.matchAll(/^### (\S+)$/gm)].map((m) => m[1]));
   const bases = new Set(prod.x.alarms.alarms.records.map((r) => r.base));
   expect([...bases].filter((b) => !sections.has(b))).toEqual([]);
+});
+
+test("docs/monitoring.md lists every metric of the catalog and every alarm, on or off (0027 AC 17)", () => {
+  const doc = readFileSync(join(INFRA_ROOT, "..", "docs", "monitoring.md"), "utf8");
+  const rows = new Set([...doc.matchAll(/^\| `([^`]+)` +\|/gm)].map((m) => m[1]));
+  expect(CATALOG.map((m) => m.name).filter((n) => !rows.has(n))).toEqual([]);
+  // An alarm that is on has its section (the test above); one that is off, its row.
+  const sections = new Set([...doc.matchAll(/^### (\S+)$/gm)].map((m) => m[1]));
+  const bases = new Set(all.x.alarms.alarms.records.map((r) => r.base));
+  expect([...bases].filter((b) => !sections.has(b) && !rows.has(b))).toEqual([]);
 });
 
 test("production as committed makes only the groups that are on", () => {
