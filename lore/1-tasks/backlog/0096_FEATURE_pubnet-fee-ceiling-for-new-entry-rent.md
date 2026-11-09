@@ -1,6 +1,6 @@
 ---
 id: "0096"
-title: "Set the pubnet fee ceiling from what a new persistent entry's rent costs there"
+title: "Say why a first payment to a new balance is refused on pubnet"
 type: FEATURE
 status: backlog
 milestone: 2
@@ -23,9 +23,16 @@ history:
       Measured the shapes the task listed, corrected why testnet hides the cost, added that rent
       can rise ~10x and that a higher ceiling reopens a drain. Moved to milestone 2, where pubnet
       ships. The title stays until "Not yet decided" is settled.
+  - date: "2026-11-09"
+    status: backlog
+    who: karolkow
+    note: >
+      Decided: on pubnet a payment that creates a balance stays refused under the 250,000 ceiling,
+      and the refusal says why. Paying for new balances is reconsidered in 0107. Retitled from
+      "Set the pubnet fee ceiling from what a new persistent entry's rent costs there".
 ---
 
-# Set the pubnet fee ceiling from what a new persistent entry's rent costs there
+# Say why a first payment to a new balance is refused on pubnet
 
 ## Summary
 
@@ -122,14 +129,20 @@ refuses without one and says why (0078).
 - **0077** runs one process for both networks; there the ceiling, the budgets and the floor would need
   a value per network. Today one process serves one network, so no code is needed for it.
 
+## Decisions so far
+
+| # | What is done | From | vs the task | Who does the same (checked) | Code | Test |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | On pubnet a payment that creates a balance stays refused: the ceiling stays 250,000, and the refusal says the payment creates `payTo`'s balance and that the seller creates it once from their own account. Paying for new balances is reconsidered in 0107, once each key has a fee budget of its own. | grilling 2026-11-09 | changes it: the task assumed a raised ceiling | the x402 Stellar spec's default ceiling (50,000) and upstream `@x402/stellar` refuse it, with no reason; the x402 Solana spec pays to create a recipient's token account only when the seller and the facilitator both opt in (`scheme_exact_svm.md` `ataCreationRequired`, `ataCreationSponsored`) | — | — |
+
 ## Not yet decided
 
-- What a first payment to a fresh balance does on pubnet: refused with a reason and docs, or paid
+- ~~What a first payment to a fresh balance does on pubnet~~ (decision 1): refused with a reason and docs, or paid
   by the facilitator (then at what ceiling, and whether only behind 0107). AC 2 allows both; the title
   assumes the second.
 - Whether this task or 0010 sets the mainnet `maxFeeStroops`: both claim it today (0010's AC,
   `config.ts:13`, spine).
-- Whether "Support any SEP-41 token with USDC default" (`docs/rfp/07-x402-facilitator-bazaar.md:47`)
+- Assumed by decision 1, to confirm with the RFP's reader: whether "Support any SEP-41 token with USDC default" (`docs/rfp/07-x402-facilitator-bazaar.md:47`)
   is met when a wasm token's first payment needs the seller's setup. The same RFP lists "Trustline
   requirements for SEP-41 assets" (`:88`) as a concept.
 

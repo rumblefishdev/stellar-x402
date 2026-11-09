@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 milestone: 2
 related_adr: ["0007", "0013"]
-related_tasks: ["0024", "0105", "0106", "0108"]
+related_tasks: ["0024", "0096", "0105", "0106", "0108"]
 tags: [facilitator, fees, budgets, before-pubnet, priority-high, effort-medium, platform]
 links:
   - ../../../docs/adr/0007-fee-abuse-containment.md
@@ -50,6 +50,14 @@ doesn't block pubnet: until then the operator raises an account's limit by hand.
   ("Targeted `payTo` budget exhaustion").
 - Whether the quota is counted in settlements, in fees, or both as above.
 - The month: calendar month in UTC, or a rolling 30 days.
+- Whether the facilitator pays for a payment that creates `payTo`'s balance, considered from
+  scratch (0096 decision 1). On pubnet such a payment costs ~443,000 stroops (USDC to a C-address,
+  measured 2026-11-05), about 31× a typical settlement, so 0096 keeps it refused under the 250,000
+  ceiling and says why. Once a key's fees count in its own budget, paying may be safe: the options
+  are a raised ceiling counted in the key's budget, or paying only when the seller and the
+  facilitator both opt in, as the x402 Solana spec does for a recipient's token account
+  (`ataCreationRequired`, `ataCreationSponsored`). Rent may rise about tenfold once pubnet's state
+  passes 2 GB (0096).
 
 ## Acceptance Criteria
 
