@@ -5,8 +5,10 @@ import { DatabaseSync } from "node:sqlite";
 import { Keypair } from "@stellar/stellar-sdk";
 import type { PaymentRequired } from "@x402/core/types";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
+import { testDatabase } from "../../../facilitator/test/database.js";
 import { type FakeCatalog, startFakeCatalog } from "../../../../packages/mcp/test/fake-catalog.js";
 import { running, startServer } from "../src/cli.js";
+import { startFacilitator } from "../src/facilitator.js";
 import type { FakeSeller } from "../src/fakes.js";
 import { friendbot, usdcBalance } from "../src/horizon.js";
 import { type Keys, readKeys } from "../src/keys.js";
@@ -21,10 +23,13 @@ const MIN_BUYER_USDC = 100_000n;
 export let keys: Keys;
 export let unfunded: Keypair;
 export let catalog: FakeCatalog;
+let facilitator: { stop(): Promise<void> };
 export let example: ExampleSeller;
 /** The example seller's 402; the fake sellers answer copies of it, so a real key signs them. */
 export let terms: PaymentRequired;
 let setupError: unknown;
+/** A schema of this run's own: the facilitator takes its network's lease there, whatever else runs. */
+const database = testDatabase();
 const scratch = mkdtempSync(join(tmpdir(), "mcp-e2e-"));
 let dirs = 0;
 
@@ -82,8 +87,13 @@ export function base(extra: Record<string, string> = {}): Record<string, string>
   };
 }
 
+/**
+ * Settings with a key. Signing asks the public testnet RPC, which took up to 14.5 s in 20 measured
+ * calls (2026-11-04), so 30 s lets a scenario reach the step after signing that it checks.
+ */
 export function paying(extra: Record<string, string> = {}): Record<string, string> {
   return base({
+    STELLAR_X402_TIMEOUT_MS: "30000",
     STELLAR_X402_SECRET_KEY: keys.buyerSecret,
     STELLAR_X402_MAX_PER_CALL: PRICE,
     STELLAR_X402_DAILY_BUDGET: "1000000",
@@ -139,7 +149,9 @@ export async function setUp(): Promise<void> {
     unfunded = Keypair.random();
     await friendbot(unfunded.publicKey());
     catalog = await startFakeCatalog(CATALOG);
-    example = await startExampleSeller(keys.sellerPublic);
+    const started = await startFacilitator(database.urlFor(database.schema));
+    facilitator = started;
+    example = await startExampleSeller(keys.sellerPublic, started.url);
     // The fake sellers copy these terms; without them no later scenario means anything.
     const server = await startServer(base());
     const answer = await server.call("get_resource", httpArgs(weather()));
@@ -158,6 +170,7 @@ export async function tearDown(): Promise<void> {
   // A scenario that threw left its servers open.
   await Promise.all([...running].map((server) => server.close()));
   example?.stop();
+  await facilitator?.stop();
   await catalog?.close();
   rmSync(scratch, { recursive: true, force: true });
   writeResults(setupError);

@@ -44,7 +44,10 @@ export function addCostSilenceAlarms(f: AlarmFactory, c: EnvironmentConfig): voi
         threshold: t.logVolumeBytesPerHour,
         description: {
           what: `${group} took over ${t.logVolumeBytesPerHour} bytes in an hour: a flood of lines, on the bill and on the server's disk.`,
-          next: "Find the line that repeats with Logs Insights (stats count() by msg), and its cause.",
+          next:
+            qualifier === "app"
+              ? "Find the line that repeats with Logs Insights (stats count() by @logStream, event), and its cause."
+              : "Find the stream that floods with Logs Insights (stats count() by @logStream), and its cause.",
           noData: "Keeps its state; telemetry-silent covers a stopped agent.",
         },
       });
@@ -84,7 +87,7 @@ export function addCostSilenceAlarms(f: AlarmFactory, c: EnvironmentConfig): voi
     group: "host",
     signal: { catalog: "host_probe_heartbeat" },
     description: {
-      what: "No heartbeat from the host probe for 15 minutes, so every host alarm is blind: OpenBao, WAL, backups, the certificate.",
+      what: "No heartbeat from the host probe for 15 minutes, so the probe's alarms are blind: OpenBao, WAL, the backups, the snapshot, the certificate and the agent's credentials.",
       next: "On the server: the x402-host-probe timer and its journal; if telemetry-silent fires too, the agent is the fault.",
       noData: "Breaching: silence is what this alarm is for.",
     },

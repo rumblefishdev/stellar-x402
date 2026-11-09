@@ -103,11 +103,20 @@ rows, with no XDR error in the second run's log. Measured causes:
 
 | # | What is done | From | vs the task | Who does the same (checked) |
 | --- | --- | --- | --- | --- |
-| 1 | The suite starts our built facilitator, and the example seller settles through it | owner | beyond it | upstream's e2e starts its own facilitators (`e2e/test.ts:886`@58e667f) |
-| 2 | Paid scenarios get a time limit past what signing takes; scenarios that sign nothing keep 3 s | owner | beyond it | checked: no upstream rule |
+| 1 | The suite starts our built facilitator, and the example seller settles through it | owner | beyond it | upstream's e2e starts its own facilitators (`e2e/test.ts:1387-1400`@b9cbd85) |
+| 2 | Settings with a key get a time limit past what signing takes; settings without a key keep 3 s | owner | beyond it | checked: no upstream rule |
+| 3 | `/verify` answers 503 `rpc_unavailable` with `Retry-After: 5` when the RPC gives no answer, instead of 500 (PR #152) | owner | beyond it | no x402 rule for a facilitator; HTTP 503 (RFC 9110 §15.6.4) |
+
+The first limit for real payments, 30 s, failed E-21 and E-22 in 1 of 2 runs with the money moved:
+it can't hold signing and our facilitator's own 30 s settle budget. At 55 s, under the MCP client's
+60 s, 3 of 3 full runs passed all 121 rows.
+
+After the review each run got a schema of its own, one channel, and the facilitator's log on stderr.
+3 more full runs: 2 passed all 121 rows. In the third, E-22a got `payment_rejected` with no money
+moved, because `/verify` hit its 10 s limit per RPC URL on the slow public RPC.
 
 ## Acceptance Criteria
 
 - [ ] One `[structure only]` PR; unit tests unchanged; an e2e run passes on its head
 - [ ] `server.ts` holds no schema
-- [ ] `pnpm mcp:e2e` passes on real testnet, with E-21 and E-22 settled by the suite's own facilitator
+- [x] `pnpm mcp:e2e` passes on real testnet, with E-21 and E-22 settled by the suite's own facilitator

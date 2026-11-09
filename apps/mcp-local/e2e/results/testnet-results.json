@@ -1,6 +1,6 @@
 {
-  "ranAt": "2026-10-15T11:31:03.910Z",
-  "commit": "514113aa858849e3b33acfc891b9eca85c405efa",
+  "ranAt": "2026-11-05T08:58:44.780Z",
+  "commit": "ad62a461dc449ee928c09f8d6300b460f926ef20",
   "rows": 121,
   "failed": 0,
   "results": [
@@ -180,7 +180,7 @@
     },
     {
       "id": "E-16a",
-      "check": "call_paid_http /stall: sent, then unknown within 4 s",
+      "check": "call_paid_http /stall: sent, then unknown within 31 s",
       "expected": [
         "payment_unknown",
         1,
@@ -195,7 +195,7 @@
     },
     {
       "id": "E-16b",
-      "check": "call_paid_http /redir: sent, then unknown within 4 s",
+      "check": "call_paid_http /redir: sent, then unknown within 31 s",
       "expected": [
         "payment_unknown",
         1,
@@ -210,7 +210,7 @@
     },
     {
       "id": "E-16c",
-      "check": "call_paid_http /boom: sent, then unknown within 4 s",
+      "check": "call_paid_http /boom: sent, then unknown within 31 s",
       "expected": [
         "payment_unknown",
         1,
@@ -225,7 +225,7 @@
     },
     {
       "id": "E-16d",
-      "check": "call_paid_http /big: sent, then unknown within 4 s",
+      "check": "call_paid_http /big: sent, then unknown within 31 s",
       "expected": [
         "payment_unknown",
         1,
@@ -240,7 +240,7 @@
     },
     {
       "id": "E-16e",
-      "check": "call_paid_http /drop: sent, then unknown within 4 s",
+      "check": "call_paid_http /drop: sent, then unknown within 31 s",
       "expected": [
         "payment_unknown",
         1,
@@ -269,7 +269,7 @@
     },
     {
       "id": "E-16f",
-      "check": "sent, then unknown at the 5 s deadline (took 5.0 s)",
+      "check": "sent, then unknown at the 30 s deadline (took 30.0 s)",
       "expected": [
         "payment_unknown",
         1,
@@ -1002,7 +1002,7 @@
     },
     {
       "id": "E-06",
-      "check": "call_paid_http {\"url\":\"http://127.0.0.1:57773/ok\",\"method\":\"HEAD\"}: -32602",
+      "check": "call_paid_http {\"url\":\"http://127.0.0.1:58912/ok\",\"method\":\"HEAD\"}: -32602",
       "expected": [
         true,
         true
@@ -1053,8 +1053,8 @@
     {
       "id": "E-07",
       "check": "buyer balance unchanged",
-      "expected": "199589972",
-      "got": "199589972",
+      "expected": "196729972",
+      "got": "196729972",
       "pass": true
     },
     {
@@ -1244,7 +1244,7 @@
     },
     {
       "id": "E-09g",
-      "check": "get_resource http://127.0.0.1.nip.io:57788/free",
+      "check": "get_resource http://127.0.0.1.nip.io:58928/free",
       "expected": "unsafe_url",
       "got": "unsafe_url",
       "pass": true
@@ -1409,7 +1409,7 @@
         true
       ],
       "pass": true,
-      "transaction": "1bc53d50a888d4ffc71ff37c9c39c1c52d876e9069126e6ba1235ae90f8418de"
+      "transaction": "c913a30bc2b3f1d0469298e8d6031858828650e50f25bac54579585af99c75e5"
     },
     {
       "id": "E-21",
@@ -1431,7 +1431,7 @@
         }
       ],
       "pass": true,
-      "transaction": "1bc53d50a888d4ffc71ff37c9c39c1c52d876e9069126e6ba1235ae90f8418de"
+      "transaction": "c913a30bc2b3f1d0469298e8d6031858828650e50f25bac54579585af99c75e5"
     },
     {
       "id": "E-21",
@@ -1447,7 +1447,7 @@
         "0"
       ],
       "pass": true,
-      "transaction": "1bc53d50a888d4ffc71ff37c9c39c1c52d876e9069126e6ba1235ae90f8418de"
+      "transaction": "c913a30bc2b3f1d0469298e8d6031858828650e50f25bac54579585af99c75e5"
     },
     {
       "id": "E-22a",
@@ -1471,7 +1471,7 @@
         true
       ],
       "pass": true,
-      "transaction": "e5e3301b61df509a314f11041abb8d4e0028198c45d692628768a9382a5ff662"
+      "transaction": "42ff9d9894a9b80ee083885e3a8b25ca9b9f9772295aa9f84011a59e5834be7e"
     },
     {
       "id": "E-22a",
@@ -1493,7 +1493,7 @@
         }
       ],
       "pass": true,
-      "transaction": "e5e3301b61df509a314f11041abb8d4e0028198c45d692628768a9382a5ff662"
+      "transaction": "42ff9d9894a9b80ee083885e3a8b25ca9b9f9772295aa9f84011a59e5834be7e"
     },
     {
       "id": "E-22a",
@@ -1509,7 +1509,7 @@
         "0"
       ],
       "pass": true,
-      "transaction": "e5e3301b61df509a314f11041abb8d4e0028198c45d692628768a9382a5ff662"
+      "transaction": "42ff9d9894a9b80ee083885e3a8b25ca9b9f9772295aa9f84011a59e5834be7e"
     },
     {
       "id": "E-22b",
@@ -1529,12 +1529,12 @@
       "id": "E-22",
       "check": "buyer balance unchanged after b and after c",
       "expected": [
-        "199569972",
-        "199569972"
+        "196709972",
+        "196709972"
       ],
       "got": [
-        "199569972",
-        "199569972"
+        "196709972",
+        "196709972"
       ],
       "pass": true
     },

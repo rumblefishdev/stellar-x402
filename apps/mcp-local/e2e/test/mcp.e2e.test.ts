@@ -1,7 +1,7 @@
 // stellar-x402-mcp end to end (task 0037): the built CLI over MCP stdio, as Claude Desktop runs it.
 // Scenarios E-01…E-23 were written from the README, the tool list and the acceptance criteria only,
 // by a reviewer who had not read the code. Two real testnet payments of 0.001 USDC (E-21, E-22) go
-// to the example seller and settle through the public x402.org facilitator; every other paid path
+// to the example seller and settle through a facilitator this run starts; every other paid path
 // uses a local fake seller that never forwards what it receives, so no money moves.
 //
 // Run from the repo root: pnpm mcp:e2e. Results go to results/testnet-results.json.

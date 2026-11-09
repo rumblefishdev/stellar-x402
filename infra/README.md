@@ -112,7 +112,14 @@ exists with its actions off (decision 26).
 
 To turn one on: `make check-series GROUP=<group>` until it passes, then set the flag (and any
 threshold it needs; synth refuses a group without one), `make deploy-production-alarms`, and
-`make fire-test`. The check lists every series the group reads, and fails on one that is written
+`make fire-test`. A series that exists can already be past its threshold, so a Level alarm
+would fire on its first evaluation. Before the deploy, read the latest values of the group's
+Level signals (`aws cloudwatch get-metric-statistics --statistics Maximum` over the last hour):
+for `facilitator` and `host`, `pool_quarantined`, `disk_used_percent` on `/`,
+`certificate_days_left` and `credentials_age_seconds`. After `make fire-test`, list what is in
+ALARM (`aws cloudwatch describe-alarms --state-value ALARM --alarm-name-prefix x402-production-
+--query 'MetricAlarms[].[AlarmName,StateReason]'`) and say in `#stellar-x402-bot` that those are
+the state before the deploy, not new incidents. The check lists every series the group reads, and fails on one that is written
 all the time (a gauge, the sweeps' zero, a Lambda's own metrics) but has no data in the last 3
 hours. A failure counter is written only when the failure happens, so it can't be checked
 beforehand; it travels the same path, and the catalog checks its name and dimensions at synth.
@@ -137,13 +144,16 @@ with every group on, and checks:
 signer-pool's `checkFacilitatorBalance` and stellar-sdk; `@aws-sdk/*` comes with the Lambda
 runtime. Synth never bundles, so the tests run after `build` (`turbo.json`).
 
+Roles Anywhere was checked live on 2026-11-06 (#113's server side, after the third deploy).
+CloudWatch aggregating a gauge's `Values` array as samples, which `queue-waiting` and
+`rpc-on-fallback` rely on (`Minimum`), was checked on 2026-11-09 after the deploy that turned
+`facilitator` on: each line carries 6 values of `pool_queued` and of `rpc_on_fallback`, and
+`SampleCount` read 6 for every minute from 12:11 to 12:21 UTC
+(`aws cloudwatch get-metric-statistics --statistics SampleCount Minimum`).
+
 ## Not checked before a deploy
 
 - That Chatbot posts to the channel from this stack's configuration: the delivery test.
-- That Roles Anywhere accepts the agent's certificate and the role works from the server's IP:
-  #113's live check, after this stack is deployed and the certificate is signed.
-- Whether CloudWatch aggregates a gauge's `Values` array as samples (`Minimum`, `Maximum`): the
-  first deploy of #113.
 - That the agent's own series match the catalog: `mem_used_percent` with no dimension and
   `disk_used_percent` with `path` `/` only. #113's config gets there with `omit_hostname` and a
   rollup to `path` with the original dropped (decision 44), tested against the catalog and, in

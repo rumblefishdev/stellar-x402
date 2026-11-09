@@ -71,7 +71,6 @@ describe("call_paid_http after signing (fake seller, no money moves)", () => {
       paying({
         STELLAR_X402_SECRET_KEY: unfunded.secret(),
         STELLAR_X402_DAILY_BUDGET: PRICE,
-        STELLAR_X402_TIMEOUT_MS: "30000",
       }),
     );
     const first = await server.call("call_paid_http", httpArgs(weather()));
@@ -99,9 +98,7 @@ describe("call_paid_http after signing (fake seller, no money moves)", () => {
     drained = empty.secret();
     await friendbot(empty.publicKey());
     await openUsdcTrustline(empty);
-    const server = await startServer(
-      paying({ STELLAR_X402_SECRET_KEY: empty.secret(), STELLAR_X402_TIMEOUT_MS: "30000" }),
-    );
+    const server = await startServer(paying({ STELLAR_X402_SECRET_KEY: empty.secret() }));
     const answer = await server.call("call_paid_http", httpArgs(weather()));
     await server.close();
     row(
@@ -209,12 +206,12 @@ describe("call_paid_http after signing (fake seller, no money moves)", () => {
     for (const [id, path] of paths) {
       const begin = Date.now();
       const answer = await server.call("call_paid_http", httpArgs(`${fake.url}${path}`));
-      // The 3 s time limit, and 1 s of slack.
+      // The 30 s time limit, and 1 s of slack.
       row(
         `E-16${id}`,
-        `call_paid_http ${path}: sent, then unknown within 4 s`,
+        `call_paid_http ${path}: sent, then unknown within 31 s`,
         ["payment_unknown", 1, true],
-        [code(answer), paidAt(fake, path), Date.now() - begin < 4_000],
+        [code(answer), paidAt(fake, path), Date.now() - begin < 31_000],
       );
     }
     row("E-16b", "redirect not followed", 0, hitsOf(fake, "/free"));
@@ -224,23 +221,23 @@ describe("call_paid_http after signing (fake seller, no money moves)", () => {
   });
 
   it("E-16f one deadline covers the whole call, not each request", async () => {
-    // 2 s to the 402, ~1 s to sign (it simulates on testnet), 2.5 s to the paid answer: a limit per
-    // request (5 s each) would let the call succeed at ~5.5 s; one 5 s limit for the call stops it.
+    // 2 s to the 402, then signing, then 28.5 s to the paid answer: a limit per request (30 s each)
+    // would let the call succeed; one 30 s limit for the call stops it.
     const fake = await startFakeSeller(terms, {
       "/slow": {
         unpaid: (res, t) => setTimeout(() => answer402(t)(res), 2_000),
-        paid: (res) => setTimeout(() => res.writeHead(200).end("{}"), 2_500),
+        paid: (res) => setTimeout(() => res.writeHead(200).end("{}"), 28_500),
       },
     });
-    const server = await startServer(paying({ STELLAR_X402_TIMEOUT_MS: "5000" }));
+    const server = await startServer(paying());
     const begin = Date.now();
     const answer = await server.call("call_paid_http", httpArgs(`${fake.url}/slow`));
     const seconds = (Date.now() - begin) / 1000;
     row(
       "E-16f",
-      `sent, then unknown at the 5 s deadline (took ${seconds.toFixed(1)} s)`,
+      `sent, then unknown at the 30 s deadline (took ${seconds.toFixed(1)} s)`,
       ["payment_unknown", 1, true],
-      [code(answer), paidAt(fake, "/slow"), seconds < 5.5],
+      [code(answer), paidAt(fake, "/slow"), seconds < 30.5],
     );
     await server.close();
     await fake.close();
@@ -293,7 +290,7 @@ describe("call_paid_http after signing (fake seller, no money moves)", () => {
 
   it("E-18 a database held by another process is payment_failed, then pays", async () => {
     const fake = await startFakeSeller(terms, { "/ok": {} });
-    const env = paying({ STELLAR_X402_TIMEOUT_MS: "10000" });
+    const env = paying();
     const server = await startServer(env);
     row(
       "E-18",

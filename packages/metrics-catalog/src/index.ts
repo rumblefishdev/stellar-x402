@@ -313,7 +313,7 @@ export const CATALOG = [
     unit: "Count",
     scope: "process",
     sets: PLAIN,
-    fields: ["origin", "outcome"],
+    fields: ["origin"],
     emit: "aggregated",
   },
   {
