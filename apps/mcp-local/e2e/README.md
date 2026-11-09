@@ -13,7 +13,7 @@ independent review of what the first set left out.
 ## Run
 
 ```sh
-pnpm mcp:e2e   # from the repo root: builds the CLI and the example seller, then runs
+pnpm mcp:e2e   # from the repo root: builds the CLI, the example seller and the facilitator, then runs
 ```
 
 It needs `.env.e2e-testnet` at the repo root (git-ignored), or the file named by `E2E_ENV_FILE`:
@@ -23,6 +23,9 @@ It needs `.env.e2e-testnet` at the repo root (git-ignored), or the file named by
 | `E2E_BUYER_PUBLIC`  | testnet account with a USDC trustline and at least 0.01 USDC     |
 | `E2E_BUYER_SECRET`  | its secret key; only ever passed to the server in its env        |
 | `E2E_SELLER_PUBLIC` | testnet account with a USDC trustline that receives the payments |
+
+It also needs a PostgreSQL for its facilitator: `TEST_DATABASE_URL`, else the local one from
+`compose.yaml` (`docker compose up -d`). The run works in a schema of its own and drops it at the end.
 
 The run checks balances on Horizon, so these accounts must not be used by another run at the same
 time. Testnet USDC comes from Circle's faucet; friendbot gives only XLM. The run also creates two
@@ -44,7 +47,8 @@ trustline and no USDC.
 ## What it spends
 
 Two payments of 0.001 testnet USDC (E-21, E-22) to the example seller (`examples/http-api`,
-started locally), settled by the public x402.org facilitator. Every other paid path uses a local
+started locally), settled by our facilitator (`apps/facilitator`, built), which the run starts with
+a fresh friendbot account for the fees and one fresh channel. Every other paid path uses a local
 fake seller (`src/fakes.ts`) whose 402 copies the example seller's, so a real key signs it; the
 fake never forwards the signed payment, so no money moves. It is not the fake of the unit tests
 (`packages/mcp/test/fake-seller.ts`), which settles in process with fake signing; the catalog fake
@@ -55,4 +59,4 @@ is shared.
 `results/testnet-results.json`: the commit it ran on, then one row per check, with what was
 expected, what came back, and the transaction hash of a real payment. A failed row fails the run,
 but the scenarios after it still run, so the table is complete. A run whose setup fails (no key
-file, too little USDC, friendbot or the seller down) writes the error instead of rows.
+file, too little USDC, no database, friendbot, the facilitator or the seller down) writes the error instead of rows.
