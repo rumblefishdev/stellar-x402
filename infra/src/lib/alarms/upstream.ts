@@ -33,7 +33,7 @@ export function addUpstreamAlarms(f: AlarmFactory): void {
     missing: "breaching",
     description: {
       what: "The off-server check's daily upstream read published nothing for two days, so upstream-changed sees nothing: GitHub refused or timed out, a file moved upstream, or the pin file changed shape.",
-      next: "Read the check's log at 08:00 UTC for watch_section_failed with section upstream: it names the file that failed.",
+      next: "Read the check's log at 08:00 UTC for watch_section_failed with section upstream: it names the file that failed, or the publish.",
       noData: "Breaching: no point is what this alarm is for.",
     },
   });

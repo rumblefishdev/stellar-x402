@@ -163,7 +163,7 @@ the server is down (ADR 0013). It has three sections, run at once:
 
 A network a section can't read publishes nothing, so its alarms keep their state and
 `watch-errors` fires instead; the other sections still publish. The upstream section fails at most
-once a day, which `watch-errors` never counts: `upstream-silent` covers it.
+once a day, which `watch-errors` can't count on its own: `upstream-silent` covers it.
 
 Its log, and a run by hand:
 
@@ -173,8 +173,9 @@ aws lambda invoke --function-name x402-production-watch --payload '{}' \
   --cli-binary-format raw-in-base64-out --profile stellar --region eu-central-1 /dev/stdout
 ```
 
-A run by hand with `--payload '{"scheduledTime":"2026-11-10T08:00:00Z"}'` (any date, 08:00 UTC)
-runs the upstream section too.
+A run by hand with `--payload '{"scheduledTime":"<today>T08:00:00Z"}'`, after 08:00 UTC, runs the
+upstream section too. Use today's date: every point is stamped with that time, and CloudWatch
+refuses a point more than 2 hours ahead, so a later date fails all three sections.
 
 Each run logs `watch_balance` with the spendable balance in stroops and `watch_protocol` with
 both versions, the 08:00 run `watch_upstream` with the pin and the files that differ, or
