@@ -8,6 +8,7 @@ import {
   sameListing,
   sellerOffers,
   sellerRequest,
+  toolCall,
   validate,
 } from "../src/index.js";
 
@@ -130,6 +131,21 @@ describe("the request to the seller (0063 row 4)", () => {
       url,
       method: "POST",
       body: "{}",
+    });
+  });
+});
+
+describe("the unpaid tool call to an MCP seller (0063 row 5)", () => {
+  it("calls the listing's tool with its example arguments, {} without one or over 16 KiB", () => {
+    expect(toolCall({ toolName: "weather", example: { city: "Warsaw" } })).toEqual({
+      name: "weather",
+      arguments: { city: "Warsaw" },
+    });
+    expect(toolCall({ toolName: "weather" })).toEqual({ name: "weather", arguments: {} });
+    const big = { text: "x".repeat(LIMITS.exampleInputBytes) };
+    expect(toolCall({ toolName: "weather", example: big })).toEqual({
+      name: "weather",
+      arguments: {},
     });
   });
 });
