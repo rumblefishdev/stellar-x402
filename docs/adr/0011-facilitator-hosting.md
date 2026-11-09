@@ -34,7 +34,7 @@
 `apps/facilitator` is the only deployable service (AD-1): one Node 22 process that serves every
 network it is configured for, with a channel pool per network, and holds `/verify`, `/settle`,
 `/supported` and `/discovery/resources`. The code still serves one network per process (`NETWORK`)
-until 0077 changes it. The Tranche 1 gate needs it at a public HTTPS testnet URL (AD-15,
+until 0126 changes it. The Tranche 1 gate needs it at a public HTTPS testnet URL (AD-15,
 ADR 0009); mainnet follows in a later tranche, in the same process, with a 99% uptime target.
 
 The host must:
@@ -97,8 +97,8 @@ a whole zone, to Cloudflare on the Free plan.
   and half a CPU.
   - Each network keeps its own listener socket in its own volume, and its own key and policy.
     The facilitator mounts the socket of every network it serves, as external volumes from
-    OpenBao's project, so one process can sign for both networks. ADR 0013's reasons for a
-    socket per facilitator are revisited in 0077.
+    OpenBao's project, so one process can sign for both networks. ADR 0013 weighs what that
+    costs.
 - **The limits add up to 1.625 GiB for production with testnet's database,** 1.875 GiB with
   OpenBao; mainnet's database adds 1 GiB. They are ceilings; testnet uses less.
 - **Testnet and mainnet share the facilitator process and OpenBao,** never a database, a key or a
@@ -156,7 +156,7 @@ a whole zone, to Cloudflare on the Free plan.
   applied (0026), and a schema behind the code stops the start, as a wrong RPC or channel does,
   so a deploy that hasn't migrated gets no `ready` and rolls back. A store per network gives a lease per network: today, with one
   network, `ready` is its lease, and what readiness means with two (what the deploy, `/health`,
-  the watchdog and 0027's uptime probe wait for) is decided with the code in 0077.
+  the watchdog and 0027's uptime probe wait for) is decided with the code in 0126.
   - A process without the lease keeps trying to take it.
   - A process whose lease renewal fails stops new submissions until it holds the lease again.
   - A process that froze past its TTL while another took the lease sends nothing new once it
@@ -383,7 +383,7 @@ One request or one stop must never outlast the layer in front of it:
     is the `production` environment's; a staging environment would get
     `x402-facilitator-staging.sorobanscan.com`.
   - Only testnet is served for now; mainnet joins the same process later (0038). The code still
-    serves one `NETWORK` per process until 0077 changes it.
+    serves one `NETWORK` per process until 0126 changes it.
   - One tunnel, `x402`. Its `cloudflared` opens outbound connections to Cloudflare (port 7844,
     UDP for QUIC and TCP) and forwards the hostname to `http://facilitator:4021`, the Compose
     service; anything else gets 404. The server opens no port for it. The compose file keeps
@@ -458,7 +458,7 @@ One request or one stop must never outlast the layer in front of it:
     find them.
     At boot the unit writes them again before it starts anything.
   - The app reads them from files: `DATABASE_URL_FILE` and `RPC_URLS_FILE` (0026), which point
-    at testnet's; with both networks, 0077 gives each network its own. The AppRole files come
+    at testnet's; with both networks, 0126 gives each network its own. The AppRole files come
     with the OpenBao signer (0036).
   - They never go into the image, the repo or the logs, and never into `environment:`, which
     `docker inspect` shows in plain text.
@@ -477,9 +477,10 @@ One request or one stop must never outlast the layer in front of it:
 
 - **PostgreSQL in a container per network, on the same server,** though one facilitator uses
   both (decided 2026-10-28, 0077). It holds the schema and adapter rules of
-  [ADR 0012](0012-facilitator-state-store.md), which has no network column, so the facilitator
-  opens one store per network beside that network's pool. A testnet reset wipes only testnet's
-  database, and backups, restores and migrations stay per network.
+  [ADR 0012](0012-facilitator-state-store.md), where the hash, lease, rate-limit and spend tables
+  have no network column, so the facilitator opens one store per network beside that network's
+  pool. A testnet reset wipes only testnet's database, and backups, restores and migrations stay
+  per network.
 - **Sizing:** about 2–4 KB per payment. That is under 1 GB on testnet and about 1 GB a month on
   mainnet at 10,000 payments a day. `pg_wal` stays small, since each segment leaves as it closes
   (below) and Postgres recycles it.
