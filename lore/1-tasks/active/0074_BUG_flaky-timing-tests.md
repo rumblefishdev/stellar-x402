@@ -150,6 +150,17 @@ production code.
   `review-2-answers.test.ts` A3 twice, and `testing-imports.test.ts` three times, each a 5 s test
   timeout.
 
+- Trial 2026-11-09 of one writer per claim (decision 11), local branch `lore-0074-one-writer-trial`,
+  `settle.ts` +151/−87: after the claim only the claim's own submission writes; `/settle` and
+  repeats read. Four new tests pass on real PostgreSQL; one, a hash write that outlasts the
+  deadline, fails on `develop` (the answer names a hash nobody sends) and passes on the trial.
+  The full suite, one run on a loaded machine: 24 of 1,011 failed, 10 in untouched files, about 8
+  asserting today's write order, 3 lost behaviours (a success at the deadline answered pending; a
+  store down at the budget answers pending with no hash; the next process's repeat no longer ends
+  the old one's claim), 2 fake-clock timeouts, 1 not classified. The sweep and reopen still write,
+  `settle.ts:1127` and `:1141` stay, and a test of "pending with the signed hash" still needs a
+  real budget. Estimate to finish: 12–25 h, without folding in the sweep.
+
 ## Acceptance Criteria
 
 - [ ] Each failure's cause is named with evidence (a reproduction before and after the fix)
