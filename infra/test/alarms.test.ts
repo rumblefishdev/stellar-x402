@@ -279,6 +279,7 @@ test("production as committed makes only the groups that are on", () => {
     "x402-production-channel-quarantined-testnet",
     "x402-production-commit-unmatched-testnet",
     "x402-production-credentials-stale",
+    "x402-production-disk-root",
     "x402-production-emf-parsing",
     "x402-production-emf-validation",
     "x402-production-facilitator-failed",

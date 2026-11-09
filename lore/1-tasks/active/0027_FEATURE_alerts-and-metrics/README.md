@@ -103,6 +103,10 @@ history:
     status: active
     who: okarcz
     note: "Drill recorded in docs/monitoring.md (Drills, and Fired on purpose for every alarm): 37 fired, 7 not fired with the reason. Criteria 2, 3, 4, 5, 10, 11 and 13 ticked, 3, 4, 5 and 11 with what the drill didn't prove. Decision 72: memory on at 90%. disk and audit-disk thresholds wait on Stan's and Adam's answer (ADR 0013 and 0011 say 80%)."
+  - date: "2026-11-09"
+    status: active
+    who: okarcz
+    note: "Decision 73, agreed with Stan and Adam: disk on at 80%, audit-disk raised to 90%, ADR 0013 and ADR 0011 amended."
 ---
 
 # Alerts and metrics
@@ -722,6 +726,14 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     machine held to its own limit, so a week more would not move a 90% threshold. `Minimum` over 3
     five-minute periods, as built: a lasting squeeze, not a merge's spike. The weekly review can
     lower it once more weeks are read.
+73. **`disk` at 80%, `audit-disk` at 90%** (okarcz with Stan and Adam, 2026-11-09; amends ADR 0013
+    and ADR 0011, which set the audit log disk at 80%). On ch-prod-01 OpenBao's audit volume is on
+    `/` with everything else, so `disk` and `audit-disk` read the same `disk_used_percent{path="/"}`
+    and at one threshold would send two messages for one fact. `disk` at 80% is the warning (plan
+    a cleanup), `audit-disk` at 90% the last call before signing stops. `/` is 1.8 TB, 1.67 TB
+    usable, at 60% and flat since 2026-11-06 apart from a nightly ~17 GB that goes back by morning:
+    80% leaves about 334 GB, 90% about 167 GB, about 35 days of logs at `log-volume`'s ceiling or
+    3 days of a 50 GB-a-day ClickHouse import.
 
 ## Acceptance Criteria
 
