@@ -87,6 +87,10 @@ history:
     status: active
     who: okarcz
     note: "Stan's review of #150 applied: channel-quarantined's cause is a channel account that is gone (a failed read keeps the channel), settlement_submit_failed names the channel, and the step re-creates it; fee-raised and send-retry are counted only in the EMF lines' type field (Logs Insights); probe-silent's text names what goes blind. Before a group's deploy, read its Level signals' latest values; after it, list what is in ALARM as the starting state (infra/README.md). 0125 narrowed to three events."
+  - date: "2026-11-09"
+    status: active
+    who: okarcz
+    note: "Alarms deployed at 12:19 UTC from develop 1b4229bb (#145 and #150): 39 new alarms (facilitator 25, host 8, logVolume 2, protocol 4), 47 in all. Before it: check-series passed for protocol, facilitator, host and logVolume; every new Level alarm's signal read inside its threshold; the diff added 39 alarms and changed 4 descriptions, nothing removed, no IAM. Watch needed no deploy: Adam's 2026-11-06 12:58 deploy of #145's protocol section matches develop (only CDKMetadata differs). After it: no alarm in ALARM; make fire-test at 12:22:01 UTC, SNS action succeeded, seen in Slack; the gauges' Values arrays aggregate as samples (SampleCount 6 a minute for pool_queued and rpc_on_fallback)."
 ---
 
 # Alerts and metrics

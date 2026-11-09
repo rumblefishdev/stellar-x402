@@ -17,50 +17,50 @@ PR (decision 68).
 
 ## The alarms that are on
 
-| Alarm                     | Group         | On since                  | Fired on purpose                                                                                  |
-| ------------------------- | ------------- | ------------------------- | ------------------------------------------------------------------------------------------------- |
-| `emf-validation`          | `telemetry`   | 2026-11-06                | `make fire-test` after each Alarms deploy (delivery test, seen): 08:39:50 and 11:18:30 UTC        |
-| `emf-parsing`             | `telemetry`   | 2026-11-06                | Not yet                                                                                           |
-| `uptime`                  | `uptime`      | 2026-11-06 11:16 UTC      | Not yet                                                                                           |
-| `uptime-flapping`         | `uptime`      | 2026-11-06 11:16 UTC      | Not yet                                                                                           |
-| `balance-low`             | `watch`       | 2026-11-06 11:16 UTC      | 2026-11-06, a fake point ([Drills](#drills)): ALARM 11:20:10, OK 11:25:10 UTC, both seen in Slack |
-| `balance-critical`        | `watch`       | 2026-11-06 11:16 UTC      | 2026-11-06, the same fake point: ALARM 11:20:35, OK 11:25:35 UTC, both seen in Slack              |
-| `watch-errors`            | `watch`       | 2026-11-06 11:16 UTC      | Not yet                                                                                           |
-| `watch-no-invocations`    | `watch`       | 2026-11-06 11:16 UTC      | Not yet                                                                                           |
-| `protocol-changed`        | `protocol`    | With #145's Alarms deploy | Not yet                                                                                           |
-| `protocol-upgrade-coming` | `protocol`    | With #145's Alarms deploy | Not yet                                                                                           |
-| `facilitator-silent`      | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
-| `gauges-silent`           | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
-| `http-500`                | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
-| `rpc-stalled`             | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
-| `rpc-on-fallback`         | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
-| `balance-stale`           | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
-| `pending`                 | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
-| `sweeps-stopped`          | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
-| `settlement-expired`      | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
-| `landed-after-expired`    | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
-| `history-gone`            | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
-| `submit-failed`           | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
-| `refused-after-verify`    | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
-| `failure-ours`            | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
-| `signer-failures`         | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
-| `store-outage`            | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
-| `hook-failures`           | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
-| `queue-waiting`           | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
-| `channel-quarantined`     | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
-| `pool-health`             | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
-| `breaker-opened`          | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
-| `budget-nearing`          | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
-| `commit-unmatched`        | `facilitator` | With #150's Alarms deploy | Not yet                                                                                           |
-| `openbao-down`            | `host`        | With #150's Alarms deploy | Not yet                                                                                           |
-| `audit-disk`              | `host`        | With #150's Alarms deploy | Not yet                                                                                           |
-| `facilitator-failed`      | `host`        | With #150's Alarms deploy | Not yet                                                                                           |
-| `watchdog-restart`        | `host`        | With #150's Alarms deploy | Not yet                                                                                           |
-| `probe-silent`            | `host`        | With #150's Alarms deploy | Not yet                                                                                           |
-| `telemetry-silent`        | `host`        | With #150's Alarms deploy | Not yet                                                                                           |
-| `credentials-stale`       | `host`        | With #150's Alarms deploy | Not yet                                                                                           |
-| `certificate`             | `host`        | With #150's Alarms deploy | Not yet                                                                                           |
-| `log-volume`              | `logVolume`   | With #150's Alarms deploy | Not yet                                                                                           |
+| Alarm                     | Group         | On since             | Fired on purpose                                                                                                           |
+| ------------------------- | ------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `emf-validation`          | `telemetry`   | 2026-11-06           | `make fire-test` after each Alarms deploy (delivery test, seen): 2026-11-06 08:39:50 and 11:18:30, 2026-11-09 12:22:01 UTC |
+| `emf-parsing`             | `telemetry`   | 2026-11-06           | Not yet                                                                                                                    |
+| `uptime`                  | `uptime`      | 2026-11-06 11:16 UTC | Not yet                                                                                                                    |
+| `uptime-flapping`         | `uptime`      | 2026-11-06 11:16 UTC | Not yet                                                                                                                    |
+| `balance-low`             | `watch`       | 2026-11-06 11:16 UTC | 2026-11-06, a fake point ([Drills](#drills)): ALARM 11:20:10, OK 11:25:10 UTC, both seen in Slack                          |
+| `balance-critical`        | `watch`       | 2026-11-06 11:16 UTC | 2026-11-06, the same fake point: ALARM 11:20:35, OK 11:25:35 UTC, both seen in Slack                                       |
+| `watch-errors`            | `watch`       | 2026-11-06 11:16 UTC | Not yet                                                                                                                    |
+| `watch-no-invocations`    | `watch`       | 2026-11-06 11:16 UTC | Not yet                                                                                                                    |
+| `protocol-changed`        | `protocol`    | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `protocol-upgrade-coming` | `protocol`    | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `facilitator-silent`      | `facilitator` | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `gauges-silent`           | `facilitator` | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `http-500`                | `facilitator` | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `rpc-stalled`             | `facilitator` | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `rpc-on-fallback`         | `facilitator` | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `balance-stale`           | `facilitator` | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `pending`                 | `facilitator` | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `sweeps-stopped`          | `facilitator` | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `settlement-expired`      | `facilitator` | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `landed-after-expired`    | `facilitator` | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `history-gone`            | `facilitator` | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `submit-failed`           | `facilitator` | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `refused-after-verify`    | `facilitator` | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `failure-ours`            | `facilitator` | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `signer-failures`         | `facilitator` | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `store-outage`            | `facilitator` | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `hook-failures`           | `facilitator` | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `queue-waiting`           | `facilitator` | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `channel-quarantined`     | `facilitator` | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `pool-health`             | `facilitator` | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `breaker-opened`          | `facilitator` | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `budget-nearing`          | `facilitator` | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `commit-unmatched`        | `facilitator` | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `openbao-down`            | `host`        | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `audit-disk`              | `host`        | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `facilitator-failed`      | `host`        | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `watchdog-restart`        | `host`        | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `probe-silent`            | `host`        | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `telemetry-silent`        | `host`        | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `credentials-stale`       | `host`        | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `certificate`             | `host`        | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
+| `log-volume`              | `logVolume`   | 2026-11-09 12:19 UTC | Not yet                                                                                                                    |
 
 A network-scoped alarm has the network at the end of its name (`balance-low-testnet`), and
 `breaker-opened` its kind after the network (`breaker-opened-testnet-payer`). `log-volume` ends in
