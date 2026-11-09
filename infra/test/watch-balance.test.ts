@@ -183,6 +183,18 @@ describe("runBalance", () => {
     expect(logged).not.toMatch(/key-abc123|s3cr3t/);
   });
 
+  test("masks a key in a subdomain, which a DNS error quotes with the host alone", async () => {
+    const keyed: WatchTarget = { ...pubnet, rpcUrl: "https://key-abc123.rpc.example.com/" };
+    const dns = {
+      getLedgerEntries: async () => {
+        throw new Error("getaddrinfo ENOTFOUND key-abc123.rpc.example.com");
+      },
+    };
+    const h = harness({ [keyed.rpcUrl]: dns as unknown as FakeRpc });
+    await expect(runBalance(h.deps([keyed]))).rejects.toThrow(/ENOTFOUND rpc\(stellar:pubnet\)/);
+    expect(JSON.stringify(h.logs)).not.toContain("key-abc123");
+  });
+
   test("throws when the publish fails, so the run counts as an error", async () => {
     const h = harness({ [testnet.rpcUrl]: rpcWith(TESTNET_FEE, 1_010_000_000n) });
     const deps = {

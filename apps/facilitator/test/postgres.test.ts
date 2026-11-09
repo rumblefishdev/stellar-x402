@@ -27,6 +27,7 @@ import type { Check } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
 import { transferPayload } from "./payment.js";
 import {
+  catalogAttemptStoreContract,
   catalogStoreContract,
   rateLimitStoreContract,
   settlement,
@@ -66,6 +67,7 @@ const catalogEntry = () => ({
   },
   keyVersion: CATALOG_KEY_VERSION,
   ledger: 1,
+  checkedAt: 1,
   resource: {
     resource: "https://seller.example.com/data",
     type: "http",
@@ -200,6 +202,7 @@ describe("PostgreSQL stores", () => {
   spendStoreContract(async () => (await stores()).spend);
   rateLimitStoreContract(async () => (await stores()).rateLimits);
   catalogStoreContract(async () => (await stores()).catalog);
+  catalogAttemptStoreContract(async () => (await stores()).catalogAttempts);
 
   /**
    * Resolves the pid of a backend waiting on a lock `holder` holds, once one is. Other test files
@@ -949,6 +952,7 @@ describe("PostgreSQL stores", () => {
           "0003_catalog_type_seq",
           "0004_spend_window",
           "0005_settlement_attempts",
+          "0006_catalog_seller_check",
           "0007_settlement_reopened",
           "0008_lease_token",
           "0009_spend_budgets",
@@ -979,6 +983,7 @@ describe("PostgreSQL stores", () => {
       expect(await migrate(old)).toEqual([
         "0004_spend_window",
         "0005_settlement_attempts",
+        "0006_catalog_seller_check",
         "0007_settlement_reopened",
         "0008_lease_token",
         "0009_spend_budgets",

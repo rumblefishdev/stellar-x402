@@ -133,6 +133,23 @@ production code.
     where 100 ms did in 5 of 30. Its first call running out of budget before the claim explains the
     100 ms case (derived), not the 1 s one (open). #129 moves its clock by hand.
 
+- Measured 2026-11-09 on `develop` `51a73e2`, Stryker 10.1.1 on `settle.ts` only, 6 runners, 30 min, a
+  loaded machine (load average about 50 on 10 cores, another suite running): 872 mutants, 700 killed,
+  82 timed out, 74 survived, 16 not covered by any test. Of the 90 left, 26 change only a log line, a
+  metric label or an error message. Among the rest: a client that left still has its success marked
+  answered (`:1127`), a late result calls `onSuccess` though it is not a success (`:1141`), the
+  `beforeSubmit` refusal writes without its claim guard (`:1104`), and a `payer_busy` wait does not
+  wait for the other payment (`:1043`). A test that fails on timing marks a mutant killed, so the
+  killed count may be high (not measured).
+- On the same commit, with no mutants, `review-2-answers.test.ts` A3 failed in 1 of 2 full runs and
+  passed 8 of 8 runs of its file alone.
+
+- CI on `develop`, the 100 runs from 2026-11-05 10:18 UTC to 2026-11-09: 11 failed. Four failed typecheck
+  (a code error, not timing). Seven failed a test: `settle.test.ts` "never stores a hash for the earlier
+  claim…" once (it answered `success`), "answers the checks' refusal of a reopen…" once,
+  `review-2-answers.test.ts` A3 twice, and `testing-imports.test.ts` three times, each a 5 s test
+  timeout.
+
 ## Acceptance Criteria
 
 - [ ] Each failure's cause is named with evidence (a reproduction before and after the fix)
@@ -150,14 +167,17 @@ production code.
 | 3 | No automatic test retries: a failed test gets its cause fixed | grilling | beyond it | none found in upstream's test configs | — | — |
 | 4 | "Does not depend on time" means 50 clean runs with a busy loop on every core; such a test passes under any load | grilling, task AC | sharpens it | not checked upstream | — | — |
 | 5 | A fixed list of 10–15 seeded defects, some the tests must newly catch: three such defects pass all 864 tests today | grilling, measured 2026-11-05 | beyond it | not checked upstream | — | — |
+| 6 | Stryker runs on `settle.ts` before and after the test rewrite, on a local copy; the PR's evidence compares the two. Nothing of it enters the repo | grilling, measured 2026-11-09 | beyond it | not checked upstream | — | — |
+| 7 | The four money-path gaps the mutation run found (`settle.ts:1127`, `:1141`, `:1104`, `:1043`) get tests in this task, on the seeded-defect list; a test that shows a real bug gets its fix in a PR of its own | grilling, measured 2026-11-09 | beyond it | not checked upstream | — | — |
+| 8 | `review-2-answers.test.ts` A3 (a real 300 ms budget) and `testing-imports.test.ts` (over vitest's 5 s test timeout) are in this task, so "CI on develop is green" is reachable | grilling, measured 2026-11-09 | sharpens it | not checked upstream | — | — |
+| 9 | This task changes test files only; the settlement code stays as it is | grilling | matches ("fixed in the test") | not checked upstream | — | — |
+| 10 | A test helper refuses a real budget under 5 s unless the test sets the moment it ends; 5 s is an assumption, above the longest store delay measured under load (under 3 s) | grilling | beyond it | none found upstream | — | — |
+| 11 | After the tests, a one-day trial on its own branch of one writer for the settlement record after it is created; its measured cost decides whether the rebuild goes on | grilling | beyond it | not checked upstream | — | — |
 
 ## Not yet decided
 
-- What must be true after this work: for the developer, and for the client.
-- Whether automated mutation testing runs too, once or on a schedule.
-- How a test sets the moment the budget ends, which money rules get a real-time test, and where
-  those tests run. Both depend on the first point.
-- Whether the rewrite lands at once or in parts, and its order against the open PRs on `settle.ts`.
+- Nothing open. How a test ends its budget and how the work splits into PRs follow the code and
+  show in the PR report.
 
 ## Out of scope
 
