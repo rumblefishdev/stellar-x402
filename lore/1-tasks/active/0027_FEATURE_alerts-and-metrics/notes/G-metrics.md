@@ -159,7 +159,7 @@ network-scoped. `ready` and `backup_secret_reads` are process-scoped: one probe,
 | `ready` | The uptime probe, every minute: `/health`'s `ready`, 0 when it can't read it | `Minimum` | `uptime` |
 | `spendable_stroops` | The off-server check, every 5 minutes, `checkFacilitatorBalance` | `Minimum` | `balance-low`, `balance-critical` |
 | `protocol_version` | The check, every 5 minutes: Horizon's `current_protocol_version`, for each network in `watch.protocol`, served or not | `Maximum` | `protocol-changed` |
-| `protocol_supported_version` | The check: Horizon's `core_supported_protocol_version`, the highest version the network's Stellar Core runs | `Maximum` | `protocol-upgrade-coming` |
+| `protocol_supported_version` | The check: Horizon's `core_supported_protocol_version`, the highest version the Stellar Core behind that Horizon supports (SDF's fleet, not the validators' vote) | `Maximum` | `protocol-upgrade-coming` |
 | `account_state_mismatches` | The check: accounts whose signers or thresholds differ from the declared set, or that are gone | `Maximum` | `account-state` |
 | `account_effects_unexpected` | The check: effects other than the allowed two, since the cursor | `Maximum` | `account-effects` |
 | `backup_secret_reads` | The check: `GetSecretValue` events not counted before | `Maximum` | `backup-secret-read` |

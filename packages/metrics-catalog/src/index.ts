@@ -655,8 +655,8 @@ export const CATALOG = [
     sets: PLAIN,
     emit: "aggregated",
   },
-  // The network's ledger protocol and the highest one its Stellar Core supports, from Horizon's
-  // root, so a coming upgrade and a done one both show (0027 decision 70).
+  // The network's ledger protocol and the highest one the Stellar Core behind its Horizon
+  // supports, from Horizon's root, so a coming upgrade and a done one both show (0027 decision 70).
   {
     namespace: WATCH,
     name: "protocol_version",

@@ -1,7 +1,8 @@
 // The off-server check (0027 decisions 7 and 27, ADR 0013): a Lambda in this account, every 5
 // minutes, so it reads the fee account while the server is down, and root on the server can't
-// stop it. This PR builds its balance section; the theft and secret-read sections follow. The
-// alarms that read it are in the Alarms stack and find the function and the metric by name.
+// stop it. It has a balance and a protocol section (decision 70); the theft and secret-read
+// sections follow. The alarms that read it are in the Alarms stack and find the function and the
+// metric by name.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import * as cdk from "aws-cdk-lib";

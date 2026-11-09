@@ -129,7 +129,8 @@ export interface EnvironmentConfig {
      * The networks whose protocol the check reads, served or not, so an upgrade on mainnet is
      * seen before we serve it (decision 70): Horizon's root URL, the protocol the network runs
      * that we have checked (`expected`, `protocol-changed`'s threshold), and the highest version
-     * its Stellar Core supports that we know of (`supported`, `protocol-upgrade-coming`'s). Each
+     * of the Stellar Core behind its Horizon that we have checked the SDK and the RPC against
+     * (`supported`, `protocol-upgrade-coming`'s), never below `expected`. Each
      * is raised in a PR once acted on, so each alarm re-arms for the next version on its own.
      */
     readonly protocol: Readonly<
