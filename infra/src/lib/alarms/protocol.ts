@@ -1,5 +1,5 @@
 // G-alarm-list, "Protocol" (decision 70): the off-server check reads each network's ledger
-// protocol and the highest one its Stellar Core supports from Horizon every 5 minutes, served
+// protocol and the highest one the Stellar Core behind its Horizon supports every 5 minutes, served
 // network or not. On 2026-11-03 testnet moved to protocol 30 and an older SDK stopped reading its
 // ledgers; no alarm saw it. `Maximum`, so a forged lower point from the server can't hide a real
 // higher one (G-alarm-list, "Statistics").
@@ -19,14 +19,15 @@ export function addProtocolAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
       network,
       signal: { catalog: "protocol_version", dims: { network } },
       statistic: "Maximum",
-      // 2 of 2: a Horizon node behind the balancer that lags shows the old version once.
+      // 2 of 2: one odd answer from a node behind the balancer doesn't page on its own. A lagging
+      // node shows the old version, which can't breach; it only delays the alarm by a period.
       periodMinutes: 5,
       periods: 2,
       comparison: ">",
       threshold: expected,
       description: {
         what: `${network}'s ledger protocol is above ${expected}, the version we have checked: the network upgraded. On 2026-11-03 testnet's move to 30 left an older SDK unable to read ledgers.`,
-        next: `Check that /verify and /settle still work on ${network} and that @stellar/stellar-sdk and the RPC support the new version; then raise expected for ${network} in ${config} in a PR and deploy the alarms.`,
+        next: `On a network we serve, check that /verify and /settle still work. Check that @stellar/stellar-sdk and the RPC support the new version; then raise expected for ${network} in ${config} in a PR, and supported with it if it is lower, and deploy the alarms.`,
         noData: NO_DATA,
       },
     });
@@ -42,7 +43,7 @@ export function addProtocolAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
       comparison: ">",
       threshold: supported,
       description: {
-        what: `Stellar Core on ${network} supports a protocol above ${supported}, the highest we know of: the validators can vote an upgrade at any time.`,
+        what: `The Stellar Core behind ${network}'s Horizon supports a protocol above ${supported}, the highest we have checked: the validators can vote the upgrade once enough of them run it.`,
         next: `Find the upgrade's date in Stellar's announcements and plan a test of the SDK and the RPC against the new version on testnet before it reaches ${network}; then raise supported for ${network} in ${config} in a PR. protocol-changed fires on the upgrade itself.`,
         noData: NO_DATA,
       },

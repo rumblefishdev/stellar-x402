@@ -27,7 +27,7 @@
       "stellar:pubnet": {
         "horizonUrl": "https://horizon.stellar.org",
         "expected": 29,
-        "supported": 29
+        "supported": 30
       }
     }
   },

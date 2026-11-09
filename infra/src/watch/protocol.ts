@@ -1,6 +1,6 @@
 // The off-server check's protocol section (0027 decision 70): every 5 minutes it reads Horizon's
 // root for each network in `watch.protocol`, served or not, and publishes the ledger's protocol
-// (`current_protocol_version`) and the highest one its Stellar Core supports
+// (`current_protocol_version`) and the highest one the Stellar Core behind that Horizon supports
 // (`core_supported_protocol_version`) to `x402-watch`. `protocol-changed` and
 // `protocol-upgrade-coming` compare them with the version we run against, which lives in the
 // alarms, not here. A network whose read fails publishes nothing; the run throws for watch-errors.

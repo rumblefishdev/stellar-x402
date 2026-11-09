@@ -28,7 +28,7 @@ PR (decision 68).
 | `watch-errors`            | `watch`     | 2026-11-06 11:16 UTC      | Not yet                                                                                           |
 | `watch-no-invocations`    | `watch`     | 2026-11-06 11:16 UTC      | Not yet                                                                                           |
 | `protocol-changed`        | `protocol`  | With #145's Alarms deploy | Not yet                                                                                           |
-| `protocol-upgrade-coming` | `protocol`  | With #145's Alarms deploy | Expected on the deploy itself: mainnet's Core supports 30 (`supported` 29)                        |
+| `protocol-upgrade-coming` | `protocol`  | With #145's Alarms deploy | Not yet                                                                                           |
 
 A network-scoped alarm has the network at the end of its name (`balance-low-testnet`). AWS
 commands below use the `stellar` SSO profile (`aws sso login --profile stellar`) and
@@ -150,9 +150,12 @@ meanwhile; the other section still published.
    Horizon (`watch.protocol` in the infra config) is down or answering something else; mainnet's
    counts too, though we don't serve it yet. Check it in a browser; it usually passes by itself.
 
+While this alarm stays in ALARM, a failure of the other section sends no new message: both share
+it. Read the log for every `watch_section_failed` until it is back to OK, not only the first one.
+
 ### watch-no-invocations
 
-The check hasn't run for 15 minutes, so the balance alarms see nothing.
+The check hasn't run for 15 minutes, so the balance and protocol alarms see nothing.
 
 1. The schedule: `aws scheduler get-schedule --name x402-production-watch` (state `ENABLED`,
    `cron(0/5 * * * ? *)`).
@@ -163,29 +166,34 @@ The check hasn't run for 15 minutes, so the balance alarms see nothing.
 ## Protocol
 
 The check reads each network's protocol from Horizon (`current_protocol_version`, and
-`core_supported_protocol_version`, the highest version the network's Stellar Core runs). The
+`core_supported_protocol_version`, the highest version the Stellar Core behind that Horizon
+supports: SDF's Horizon fleet, so an upgraded Core build there, not the validators' vote). The
 alarms compare them with two numbers per network in `watch.protocol` in
 `infra/envs/production.json`: `expected`, the protocol we have checked the facilitator against,
-and `supported`, the highest Core version we know of. On 2026-11-06 both were 30 for testnet and
-29 for mainnet, whose Core already supported 30. On 2026-11-03 testnet moved to 30 and an older
-SDK stopped reading its ledgers, which no alarm saw.
+and `supported`, the highest Core version we have checked the SDK and the RPC against.
+`supported` is never below `expected`. On 2026-11-09 testnet was 30/30 and mainnet 29/30: mainnet
+runs 29, its Core supports 30, and testnet has run 30 since 2026-11-03, when an older SDK stopped
+reading its ledgers, which no alarm saw (task 0111 moved the SDK to 16.4.1).
 
 ### protocol-changed
 
 The network now runs a protocol above the version we run against: it upgraded.
 
-1. Check that the facilitator still works on that network: `/health`, and a payment through
-   `/verify` and `/settle` on testnet.
+1. On a network we serve (testnet today), check that the facilitator still works: `/health`, and
+   a payment through `/verify` and `/settle`. On one we don't serve yet (mainnet), skip this step.
 2. Check that `@stellar/stellar-sdk` and the RPC support the new version (their release notes);
    upgrade the SDK if they don't.
-3. Raise `expected` for that network to the new version in a PR, merge it and deploy the alarms
+3. Raise `expected` for that network to the new version in a PR, and `supported` with it if it is
+   lower (the config refuses `supported` below `expected`); merge it and deploy the alarms
    (`make deploy-production-alarms` in `infra/`). The alarm goes back to OK and re-arms for the
    next version.
 
 ### protocol-upgrade-coming
 
-The network's Stellar Core supports a protocol above the version we run against: the validators
-can vote the upgrade at any time. Mainnet was in this state on 2026-11-06 (29, Core supporting 30).
+The Stellar Core behind the network's Horizon supports a protocol above `supported`, the highest
+we have checked: SDF has upgraded its Core, and the validators can vote the upgrade once enough
+of them run it. Mainnet was in this state on 2026-11-06 (29, Core supporting 30), before
+`supported` was set to 30, the version testnet already runs.
 
 1. Find the upgrade's date in Stellar's announcements (the network's upgrade schedule).
 2. Plan a test of the SDK and the RPC against the new version on testnet, which usually upgrades

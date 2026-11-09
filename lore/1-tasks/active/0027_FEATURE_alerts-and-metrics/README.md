@@ -71,6 +71,10 @@ history:
     status: active
     who: akot
     note: "Watch stack deployed from #145's branch at 12:59 UTC: the Lambda reads Horizon (pubnet 29/30, testnet 30/30) beside the balance. check-series passed for protocol at 12:59 UTC (4 series), so #145 turns the group on (decisions 26, 70); the Alarms deploy waits for the merge."
+  - date: "2026-11-09"
+    status: active
+    who: okarcz
+    note: "Adam handed over #144, #145 and #150. Review of #145: decision 70 amended (mainnet's supported 30, protocol 30 checked on testnet in 0111); a failing mainnet Horizon still fires watch-errors (decision 70 kept), and its runbook says a second section's failure sends nothing new while it is in ALARM; protocol-changed's steps raise supported with expected and skip /verify on a network we don't serve; tests for the reverse handler case, the thresholds apart, the bundle's own fetch and an unknown watch.protocol key; the Watch stack needs a redeploy after the merge."
 ---
 
 # Alerts and metrics
@@ -658,9 +662,11 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
     in a PR once acted on, so raising one never silences the other: `protocol-changed` fires when
     the network runs above `expected`, the version we have checked, and
     `protocol-upgrade-coming` when its Core supports a version above `supported`, the highest we
-    know of, which on mainnet is at once, the warning we want. Both are Level alarms with
-    `Maximum` over 2 of 2 five-minute periods (Horizon nodes differ during a rolling upgrade), in
-    a `protocol` group of their own. A Horizon that fails for 2 of 3 runs fires `watch-errors`,
+    have checked the SDK and the RPC against (amended 2026-11-09, okarcz: it was "the highest we
+    know of", with mainnet's at 29 so that it fired at once; testnet already runs 30 and task 0111
+    moved the SDK to 16.4.1 for it, so mainnet's is 30 and the alarm re-arms for 31). Both are
+    Level alarms with `Maximum` over 2 of 2 five-minute periods (Horizon nodes differ during a
+    rolling upgrade), in a `protocol` group of their own. A Horizon that fails for 2 of 3 runs fires `watch-errors`,
     mainnet's too: a dead protocol section must show. The validators' votes, which
     the explorer reads, would give the date; Core's supported version gives the readiness, which
     is enough to test the SDK in time.
