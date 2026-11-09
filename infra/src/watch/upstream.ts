@@ -5,6 +5,7 @@
 // read from raw.githubusercontent.com, so the check needs no token.
 import type { PutMetricDataInput } from "./balance.js";
 import { NAMESPACE } from "./metric.js";
+import { PROTOCOL_DEADLINE_MS } from "./protocol.js";
 
 export const OUR_PIN_URL =
   "https://raw.githubusercontent.com/rumblefishdev/stellar-x402/develop/conformance/src/upstream.ts";
@@ -27,9 +28,12 @@ export interface UpstreamDeps {
   readonly at: Date;
 }
 
-/** A file's text, or a throw on a failed request, so a run that couldn't compare publishes nothing. */
+/**
+ * A file's text, or a throw on a failed request, so a run that couldn't compare publishes nothing.
+ * The protocol section's deadline, below the function's timeout.
+ */
 export async function fetchText(url: string): Promise<string> {
-  const answer = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+  const answer = await fetch(url, { signal: AbortSignal.timeout(PROTOCOL_DEADLINE_MS) });
   if (!answer.ok) throw new Error(`${url} answered ${answer.status}`);
   return answer.text();
 }
