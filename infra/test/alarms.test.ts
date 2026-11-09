@@ -255,6 +255,15 @@ test("no stack imports from another (decision 27)", () => {
   }
 });
 
+test("every alarm production makes has its section in docs/monitoring.md, which its message names", () => {
+  // The Slack message ends "Runbook: docs/monitoring.md, <base>": a renamed alarm or a group
+  // turned on without its section would point at nothing.
+  const doc = readFileSync(join(INFRA_ROOT, "..", "docs", "monitoring.md"), "utf8");
+  const sections = new Set([...doc.matchAll(/^### (\S+)$/gm)].map((m) => m[1]));
+  const bases = new Set(synth(production()).x.alarms.alarms.records.map((r) => r.base));
+  expect([...bases].filter((b) => !sections.has(b))).toEqual([]);
+});
+
 test("production as committed makes only the groups that are on", () => {
   const prod = synth(production());
   expect(prod.x.alarms.alarms.records.map((r) => r.alarmName).sort()).toEqual([
