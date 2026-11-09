@@ -95,6 +95,10 @@ history:
     status: active
     who: okarcz
     note: "Adam handed 0027 over to close. Decision 71: the theft PR and criteria 6, 7 and 9 move to 0127; the backups and snapshots groups and criterion 11's WAL, backup and snapshot ages move to 0026; the drills plan for the 47 live alarms (one 20-minute stop window, fake points, gauges-silent and sweeps-stopped left out)."
+  - date: "2026-11-09"
+    status: active
+    who: okarcz
+    note: "Drill (decision 71): 37 alarms fired on purpose, 13:29 to 13:55 UTC, all back to OK by 14:19. It found that every planned stop of x402@production ended failed (Compose's 130 after systemd's stop signal) and counted facilitator_failures_total, so facilitator-failed fired at 13:46:53 for the drill's own stop, and on 2026-11-06 for the third deploy's restart. x402@.service now lists 130 in SuccessExitStatus."
 ---
 
 # Alerts and metrics
