@@ -1,7 +1,7 @@
 // The Lambda's bundle as it ships (dist/lambdas/watch/index.mjs, from `build`): loaded by a plain
 // Node process, as the runtime does, with a stub for the AWS SDK the runtime provides. It catches
 // what the source tests can't: a bundle that throws at import (a CommonJS `require` with no
-// banner), an entry that exports no handler, or one that never reaches the RPC.
+// banner), an entry that exports no handler, or one that never reaches the RPC or Horizon.
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -47,7 +47,7 @@ describe("the watch bundle", () => {
     expect(existsSync(BUNDLE), `${BUNDLE}: run pnpm build in infra/`).toBe(true);
   });
 
-  test("loads in plain Node, exports a handler, and reaches the RPC it is given", () => {
+  test("loads in plain Node, exports a handler, and reaches the RPC and Horizon it is given", () => {
     copyFileSync(BUNDLE, join(dir, "index.mjs"));
     stubSdk();
     const result = node(
@@ -68,6 +68,10 @@ describe("the watch bundle", () => {
             rpcUrl: "https://127.0.0.1:1",
           },
         ]),
+        // The same closed port: the runtime's own fetch, which no source test reaches.
+        WATCH_PROTOCOL: JSON.stringify([
+          { network: "stellar:testnet", horizonUrl: "https://127.0.0.1:1" },
+        ]),
       },
     );
     expect(result).toEqual({
@@ -75,7 +79,7 @@ describe("the watch bundle", () => {
       // The network's own refusal, not any error: a dynamic `require` that throws inside the
       // read would also reject the run, with "Dynamic require of ... is not supported".
       error: expect.stringMatching(
-        /^balance not read on stellar:testnet \(\w+: .*(fetch failed|ECONNREFUSED)/,
+        /^balance not read on stellar:testnet \(\w+: .*(fetch failed|ECONNREFUSED).*; protocol not read on stellar:testnet \(\w+: .*(fetch failed|ECONNREFUSED)/,
       ),
       sent: 0,
     });

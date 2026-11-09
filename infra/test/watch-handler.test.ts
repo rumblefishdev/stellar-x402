@@ -104,6 +104,32 @@ describe("createHandler", () => {
     ]);
   });
 
+  test("still publishes the protocol when the balance section fails", async () => {
+    // No such account: the balance section fails, Horizon answers.
+    const rpc = new FakeRpc({});
+    const published: PutMetricDataInput[] = [];
+    const handler = createHandler({
+      env: {
+        ...env,
+        WATCH_PROTOCOL: JSON.stringify([
+          { network: "stellar:pubnet", horizonUrl: "https://horizon.stellar.org" },
+        ]),
+      },
+      rpcFor: () => rpc,
+      fetch: async () =>
+        Response.json({ current_protocol_version: 29, core_supported_protocol_version: 30 }),
+      publish: async (input) => {
+        published.push(input);
+      },
+      log: () => {},
+    });
+    await expect(handler({})).rejects.toThrow(/balance not read on stellar:testnet/);
+    expect(published.flatMap((p) => p.MetricData.map((d) => d.MetricName))).toEqual([
+      "protocol_version",
+      "protocol_supported_version",
+    ]);
+  });
+
   test("refuses to start without its targets", () => {
     expect(() => createHandler({ env: {}, publish: async () => {} })).toThrow(/WATCH_TARGETS/);
   });

@@ -42,15 +42,15 @@ describe("envs/production.json", () => {
     });
   });
 
-  test("reads the protocol of testnet and mainnet, at the versions of 2026-11-06 (decision 70)", () => {
+  test("reads the protocol of testnet and mainnet, at the versions of 2026-11-09 (decision 70)", () => {
     expect(production().watch.protocol).toEqual({
       "stellar:testnet": {
         horizonUrl: "https://horizon-testnet.stellar.org",
         expected: 30,
         supported: 30,
       },
-      // Core supported 30 on 2026-11-06: upgrade-coming fires once the group goes on.
-      "stellar:pubnet": { horizonUrl: "https://horizon.stellar.org", expected: 29, supported: 29 },
+      // Mainnet runs 29 and its Core supports 30, which testnet runs and 0111's SDK reads.
+      "stellar:pubnet": { horizonUrl: "https://horizon.stellar.org", expected: 29, supported: 30 },
     });
   });
 
@@ -202,6 +202,17 @@ describe("validateConfig", () => {
         ((m(c).watch.protocol["stellar:pubnet"] as { horizonUrl: string }).horizonUrl =
           "http://horizon.stellar.org"),
       /watch.protocol.stellar:pubnet.horizonUrl/,
+    ],
+    [
+      "a protocol entry for a network that doesn't exist",
+      (c) => {
+        (m(c).watch.protocol as Record<string, unknown>)["stellar:mainnet"] = {
+          horizonUrl: "https://horizon.stellar.org",
+          expected: 29,
+          supported: 30,
+        };
+      },
+      /watch.protocol/,
     ],
     [
       "the protocol group with no network to read",

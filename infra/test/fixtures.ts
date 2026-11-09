@@ -36,6 +36,16 @@ export function allOn(): EnvironmentConfig {
     watch: {
       ...base.watch,
       rpcUrls: { ...base.watch.rpcUrls, "stellar:pubnet": "https://rpc.example.com/pubnet" },
+      // Each alarm's own threshold, apart from the other's, so a test that swaps them fails
+      // whatever production holds (decision 70).
+      protocol: {
+        ...base.watch.protocol,
+        "stellar:pubnet": {
+          horizonUrl: "https://horizon.stellar.org",
+          expected: 29,
+          supported: 31,
+        },
+      },
     },
     // The one mount the agent writes (the catalog's `path`), OpenBao's audit volume on it too.
     host: { diskMounts: ["/"], auditDiskMount: "/" },
