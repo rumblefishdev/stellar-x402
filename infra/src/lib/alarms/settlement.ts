@@ -90,7 +90,7 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
       threshold: 1,
       description: {
         what: `A channel on ${network} was taken out of the pool since the facilitator started; the pool settles with fewer channels.`,
-        next: "A channel whose sequence couldn't be read for its timeout: check the RPC (rpc-stalled, rpc-on-fallback). The log doesn't name the channel or the reason yet (task 0125); a restart puts the channels back.",
+        next: "The RPC answered that the channel's account doesn't exist (a failed read keeps the channel): settlement_submit_failed names it (Account not found: <channel>). Check it on Horizon and re-create the channels if it is gone; a restart puts the channels back.",
         noData: SILENT_LEVEL,
       },
     });
@@ -202,7 +202,7 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
       signal: { catalog: "settlement_reconciled_total", dims: { network, state: "expired" } },
       description: {
         what: `A settlement on ${network} expired: reconciliation found no transaction of it landed by its ledger bound, so the payer's payment did not settle and the payer has to sign a new one. One is rare; several mean submissions don't land.`,
-        next: "Read reconcile_finished and the record's settlement_hashes for its attempts, then pool_events_total for fee-raised and send-retry (counts only, task 0125) and the RPC around that time.",
+        next: "Read reconcile_finished and the record's settlement_hashes for its attempts, then the fee-raised and send-retry counts (Logs Insights on /x402/production/metrics, field type; counts only, task 0125) and the RPC around that time.",
         noData: SILENT_EVENT,
       },
     });

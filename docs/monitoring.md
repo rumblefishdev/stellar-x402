@@ -224,9 +224,15 @@ The facilitator writes its metrics as EMF lines (#112) in the stream `facilitato
 A stopped process writes nothing: Level alarms then keep their last state and Event alarms read
 OK, so [facilitator-silent](#facilitator-silent) is the one that says so. The events named below
 are the `event` field of its log lines (The logs, above). The pool's own events
-(`channel-quarantined`, `sequence-resync`, `send-retry`, `fee-raised`) are only counted, as
-`pool_events_total` by `type` in `x402-facilitator`, not logged: the log doesn't name their
-channel yet (task 0125).
+(`channel-quarantined`, `sequence-resync`, `send-retry`, `fee-raised`) are counted in
+`pool_events_total`, not logged, so the log doesn't name their channel yet (task 0125). Only
+`sequence-resync` has a `type` dimension in `x402-facilitator`; the others go into the network's
+total alone. Each count is in the `type` field of its EMF line, so Logs Insights on
+`/x402/production/metrics` finds them:
+
+```
+filter type = "fee-raised" | stats sum(pool_events_total) by bin(5m)
+```
 
 ### facilitator-silent
 
@@ -316,8 +322,12 @@ so the payer's payment didn't settle and the payer has to sign a new one. One is
 mean submissions don't land.
 
 1. The `reconcile_finished` event and the record's `settlement_hashes` for its attempts.
-2. `pool_events_total` for `fee-raised` and `send-retry` around that time (counts only, task
-   0125), and the RPC ([rpc-stalled](#rpc-stalled)).
+2. The `fee-raised` and `send-retry` counts around that time (counts only, task 0125), and the
+   RPC ([rpc-stalled](#rpc-stalled)). In Logs Insights on `/x402/production/metrics`:
+
+   ```
+   filter type in ["fee-raised", "send-retry"] | stats sum(pool_events_total) by type, bin(5m)
+   ```
 
 ### landed-after-expired
 
@@ -398,11 +408,19 @@ the pool.
 A channel was taken out of the pool since the facilitator started, so the pool settles with fewer
 channels.
 
-1. The pool takes a channel out when it can't read the channel's sequence for its timeout: an
-   RPC that fails or lags ([rpc-stalled](#rpc-stalled), [rpc-on-fallback](#rpc-on-fallback)) is
-   the usual cause. The log doesn't name the channel or the reason yet (task 0125);
-   `pool_quarantined` in `x402-facilitator` says how many are out.
-2. A restart puts the channels back, once the reason is fixed.
+1. The pool takes a channel out only when the RPC still answers, at the end of the read's
+   timeout, that the channel's account doesn't exist; a read that fails or times out keeps the
+   channel. So the usual cause is a channel account that is gone, such as after a testnet reset,
+   or an RPC behind on a new account. `pool_quarantined` in `x402-facilitator` says how many are
+   out.
+2. The `settlement_submit_failed` event names the channel: its error reads
+   `Account not found: <channel>`, and [submit-failed](#submit-failed) fires beside this alarm.
+   In Logs Insights on `/x402/production/app`:
+   `filter event = "settlement_submit_failed" and @message like /Account not found/`.
+3. Look the channel up on Horizon (`/accounts/<channel>`). If it is gone, make new channels with
+   `create-channels.ts` ([runbook, OpenBao](runbook.md#openbao), step 6) and put their addresses
+   in `CHANNELS_TESTNET` ([runbook, Before the first deploy](runbook.md#before-the-first-deploy)).
+4. A restart puts the channels back, once the reason is fixed.
 
 ### pool-health
 

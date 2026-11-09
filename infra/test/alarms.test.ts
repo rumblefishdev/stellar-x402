@@ -11,6 +11,7 @@ import { INFRA_ROOT } from "../src/lib/names.js";
 import { allOn, ofType, production, type Resource, synth, type TemplateJson } from "./fixtures.js";
 
 const all = synth(allOn());
+const prod = synth(production());
 const records: readonly AlarmRecord[] = all.x.alarms.alarms.records;
 const alarms = ofType(all.alarms, "AWS::CloudWatch::Alarm");
 const byName = new Map(alarms.map((a) => [a.Properties["AlarmName"] as string, a.Properties]));
@@ -260,12 +261,11 @@ test("every alarm production makes has its section in docs/monitoring.md, which 
   // turned on without its section would point at nothing.
   const doc = readFileSync(join(INFRA_ROOT, "..", "docs", "monitoring.md"), "utf8");
   const sections = new Set([...doc.matchAll(/^### (\S+)$/gm)].map((m) => m[1]));
-  const bases = new Set(synth(production()).x.alarms.alarms.records.map((r) => r.base));
+  const bases = new Set(prod.x.alarms.alarms.records.map((r) => r.base));
   expect([...bases].filter((b) => !sections.has(b))).toEqual([]);
 });
 
 test("production as committed makes only the groups that are on", () => {
-  const prod = synth(production());
   expect(prod.x.alarms.alarms.records.map((r) => r.alarmName).sort()).toEqual([
     "x402-production-audit-disk",
     "x402-production-balance-critical-testnet",
