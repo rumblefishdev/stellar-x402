@@ -1,2 +1,66 @@
-// Placeholder: implementation starts in its milestone.
-export {};
+export { readAccountEntry } from "./account.js";
+export {
+  checkFacilitatorBalance,
+  type BalanceCheckOptions,
+  type BalanceReport,
+} from "./balance.js";
+export {
+  ChannelPool,
+  NoChannelsError,
+  QueueTimeoutError,
+  ShutdownError,
+  type Channel,
+} from "./channel-pool.js";
+export {
+  FallbackRpc,
+  RpcTimeoutError,
+  RpcUnavailableError,
+  type ActiveEndpoint,
+  type FallbackRpcOptions,
+  type RpcEndpoint,
+} from "./fallback-rpc.js";
+export { failureCause, type FailureCause } from "./failure-cause.js";
+export { FEE_STATS_MIN_STROOPS, feeStatsInclusionFee, type FeeStatsOptions } from "./fees.js";
+export { LedgerClock } from "./ledger-clock.js";
+export {
+  CHANNEL_STARTING_BALANCE,
+  MAX_CHANNELS_PER_TX,
+  buildCreateChannelsTx,
+  checkChannel,
+  type ChannelProblem,
+  type CreateChannelsOptions,
+} from "./setup.js";
+export {
+  SubmitterStats,
+  type RefusalReason,
+  type SubmitterEvent,
+  type SubmitterStatsSnapshot,
+} from "./stats.js";
+export {
+  FeeLimitError,
+  LedgerBoundError,
+  NOT_FOUND_MARGIN_LEDGERS,
+  NOT_FOUND_MARGIN_SECONDS,
+  SettlementSubmitter,
+  SignedHookError,
+  SigningError,
+  SimulationCheckError,
+  SimulationError,
+  SourceAccountAuthError,
+  attemptsOf,
+  cannotLand,
+  rewrappedOutcome,
+  type ContractCall,
+  type FeeEscalation,
+  type SignedBounds,
+  type SubmitOptions,
+  type SubmitterOptions,
+} from "./submitter.js";
+export type {
+  Attempt,
+  Rewrap,
+  SorobanRpc,
+  SubmitResult,
+  SubmitStatus,
+  TransactionSigner,
+} from "./types.js";

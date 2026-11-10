@@ -1,0 +1,582 @@
+import { readFileSync } from "node:fs";
+import { StrKey } from "@stellar/stellar-sdk";
+import { FEE_STATS_MIN_STROOPS } from "@stellar-x402/signer-pool";
+import { STELLAR_NETWORKS } from "@stellar-x402/config";
+import { z } from "zod";
+
+/**
+ * Facilitator configuration, read and validated once at startup from the environment (AD-12,
+ * spine "Config" convention), and from the files it names for secrets ({@link FILE_SETTINGS}).
+ * Only `src/main.ts` reads `process.env`; everything else gets the parsed {@link Config} through
+ * constructors.
+ *
+ * Numeric defaults are interim testnet values; mainnet fee values come from task 0010.
+ */
+
+const DEFAULT_TESTNET_RPC = "https://soroban-testnet.stellar.org";
+/** Largest delay `setTimeout` accepts; longer ones fire at once. */
+const MAX_TIMER_MS = 2_147_483_647;
+/**
+ * Upstream verify tries each RPC URL for 10 s, so more URLs mean a longer worst case for
+ * `/verify` and for `/settle`'s check, which its budget must hold (AD-3, ADR 0011).
+ */
+export const MAX_RPC_URLS = 3;
+
+const list = z.string().transform((value) =>
+  value
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0),
+);
+
+const oneOf = <const T extends [string, ...string[]]>(values: T) =>
+  z.enum(values, { errorMap: () => ({ message: `must be one of ${values.join(", ")}` }) });
+
+/** Plain decimal digits only: no hex, exponents, signs or `Infinity`. */
+const int = (min: number, max: number = Number.MAX_SAFE_INTEGER) =>
+  z
+    .string()
+    .regex(/^\d+$/, "must be a whole number")
+    .transform(Number)
+    .refine(
+      (value) => value >= min && value <= max,
+      max === Number.MAX_SAFE_INTEGER
+        ? `must be at least ${min}`
+        : `must be between ${min} and ${max}`,
+    );
+const ms = (min: number) => int(min, MAX_TIMER_MS);
+
+const stroops = (min: bigint) =>
+  z
+    .string()
+    .regex(/^\d+$/, "must be a whole number of stroops")
+    .transform((value) => BigInt(value))
+    .refine((value) => value >= min, `must be at least ${min}`);
+/** The floor of `signer-pool`'s `feeStatsInclusionFee` bid, used when no bid is set. */
+const FEE_STATS_MIN_BID_STROOPS = BigInt(FEE_STATS_MIN_STROOPS);
+
+/** Largest int64: spend amounts are `bigint` columns in the store. */
+const INT64_MAX = 9_223_372_036_854_775_807n;
+/** A spend budget or the balance floor: at least 1 stroop, at most what the store holds. */
+const spendStroops = stroops(1n).refine(
+  (value) => value <= INT64_MAX,
+  `must be at most ${INT64_MAX}`,
+);
+
+/** The spend budgets (S-design §5), each of which a settlement reserves its ceiling against. */
+const SPEND_BUDGET_VARS = [
+  "SPEND_GLOBAL_STROOPS",
+  "SPEND_PER_PAYER_STROOPS",
+  "SPEND_PER_PAY_TO_STROOPS",
+  "SPEND_PER_ASSET_STROOPS",
+  "SPEND_PER_ASSET_OTHER_STROOPS",
+  "SPEND_TIER_OTHER_STROOPS",
+] as const;
+
+/** Fee settings reach upstream and the pool as a `number`. */
+const feeStroops = stroops(100n).refine(
+  (value) => value <= BigInt(Number.MAX_SAFE_INTEGER),
+  `must be at most ${Number.MAX_SAFE_INTEGER}`,
+);
+
+/**
+ * An http(s) URL without credentials. Upstream's RPC client refuses `user:pass@`, and it writes
+ * the whole URL to stderr on a failed call.
+ */
+function isHttpUrl(value: string): boolean {
+  try {
+    const { protocol, username, password } = new URL(value);
+    return (protocol === "https:" || protocol === "http:") && !username && !password;
+  } catch {
+    return false;
+  }
+}
+
+function isPostgresUrl(value: string): boolean {
+  try {
+    const { protocol } = new URL(value);
+    return protocol === "postgres:" || protocol === "postgresql:";
+  } catch {
+    return false;
+  }
+}
+
+/** Holds a password, so it is never logged and no message echoes it. */
+const databaseUrl = z.string().refine(isPostgresUrl, "must be a postgres:// URL");
+
+const envSchema = z
+  .object({
+    NETWORK: oneOf([STELLAR_NETWORKS.testnet, STELLAR_NETWORKS.pubnet]).default(
+      STELLAR_NETWORKS.testnet,
+    ),
+    /** 0 lets the system pick a free port; the `listening` log line names it. */
+    PORT: int(0, 65_535).default("4021"),
+    LOG_LEVEL: oneOf(["debug", "info", "warn", "error"]).default("info"),
+    /** The commit the image was built from (its Dockerfile); unset on a local run. */
+    GIT_COMMIT: z.string().optional(),
+    /**
+     * Comma-separated, tried in order, at most 3: the pool and the ledger and fee-stats reads
+     * move to the next on a failure and stay there. Upstream verify (one scheme per URL) fails over
+     * on its own and returns to the first once a probe finds it healthy (AD-3). Each URL adds 10 s
+     * to upstream verify's worst case, twice that with fee-stats bids, which `/settle`'s budget
+     * must hold (ADR 0011).
+     */
+    RPC_URLS: list
+      .pipe(
+        z
+          .array(z.string().refine(isHttpUrl, "must be http(s) URLs without credentials"))
+          .min(1, "must list at least one URL")
+          .max(MAX_RPC_URLS, `must list at most ${MAX_RPC_URLS} URLs`),
+      )
+      .optional(),
+
+    /**
+     * The OpenBao key's own account, the fee account and the channels' signer (ADR 0013). Startup
+     * doesn't ask OpenBao, so every signature is checked against it instead.
+     */
+    FACILITATOR_ADDRESS: z
+      .string()
+      .refine(
+        (value) => StrKey.isValidEd25519PublicKey(value),
+        "must be a Stellar account address (G…)",
+      ),
+    /** OpenBao's listener socket for this network; it opens no TCP port (ADR 0013). */
+    OPENBAO_SOCKET: z.string(),
+    /** The Transit key's name. */
+    OPENBAO_KEY: z.string(),
+    /** Pinned, so a rotated Transit key can't sign in place of the one on chain. */
+    OPENBAO_KEY_VERSION: int(1),
+    /** The AppRole login; never logged. Set only as files (`_FILE`). */
+    OPENBAO_ROLE_ID: z.string(),
+    OPENBAO_SECRET_ID: z.string(),
+    /** Refused on the field: zod skips a refine on the object while a required setting is missing. */
+    FACILITATOR_SECRET: z
+      .string()
+      .optional()
+      .refine(
+        (value) => value === undefined,
+        "is no longer read: the key signs in OpenBao (ADR 0013)",
+      ),
+    /** Comma-separated channel account addresses (never secrets). */
+    CHANNELS: list.pipe(
+      z
+        .array(
+          z
+            .string()
+            .refine(
+              (value) => StrKey.isValidEd25519PublicKey(value),
+              "must be Stellar account addresses (G…)",
+            ),
+        )
+        .min(1, "must list at least one channel")
+        .refine(
+          (channels) => new Set(channels).size === channels.length,
+          "must not repeat a channel",
+        ),
+    ),
+
+    /** The PostgreSQL every store lives in, migrated by `pnpm migrate`. */
+    DATABASE_URL: databaseUrl,
+    /** Every store is PostgreSQL now; refused, so a leftover can't look like it still applies. */
+    STORE: z.string().optional(),
+
+    /** Fee ceiling for upstream verify and the pool alike (AD-10). */
+    MAX_FEE_STROOPS: feeStroops.default("250000"),
+    /**
+     * Inclusion bid; unset means the pool's fee-stats provider (at least 100). A settlement pays
+     * it twice, so twice the bid must stay below `MAX_FEE_STROOPS`.
+     */
+    INCLUSION_FEE_STROOPS: feeStroops.optional(),
+    FEE_ESCALATION_FACTOR: z
+      .string()
+      .regex(/^\d+(\.\d+)?$/, "must be a decimal number")
+      .transform(Number)
+      // The pool refuses a factor of 1 or less at construction.
+      .refine((value) => value > 1 && value <= 100, "must be above 1 and at most 100")
+      .optional(),
+    FEE_ESCALATION_MAX_STROOPS: int(100).optional(),
+
+    /**
+     * Least ledgers left before the payer's auth expires (AD-22): 2 for the pool plus about 2 of
+     * channel wait. A client signs for only `maxTimeoutSeconds` (12 ledgers at 60 s). Below 2 the
+     * pool refuses at `/settle` what `/verify` accepted (its one spare ledger).
+     */
+    MIN_VALIDITY_LEDGERS: int(2).default("4"),
+    /**
+     * Most ledgers left before the payer's auth expires (0073 decisions 2, 6). An envelope lives
+     * as long as its auth entry, so this bounds how long a channel can wait on one transaction,
+     * and how long a payload stays landable. Upstream's client signs ⌈maxTimeoutSeconds / t⌉
+     * ledgers, with `t` the Horizon average rounded up to whole seconds: 300 s is 60 ledgers at
+     * 5 s, 50 at 6 s and 75 at 4 s. Upstream's own check allows 2 more, so at 5 s at most 62 reach
+     * this one; the rest of 66 is spare. A resource may ask for this less a tenth, at 5 s a
+     * ledger: 300 s at 66 (decision 22). At most 120, about 10 minutes, so a typo can't reopen
+     * days-long signatures (review D3).
+     */
+    MAX_VALIDITY_LEDGERS: int(3, 120).default("66"),
+    /**
+     * How long a repeat `/settle` waits for a signed record to turn final (AD-6); at most the
+     * budget. Unset means 20 s, or the budget when that is shorter. At least 1 s, so a seller's
+     * retry can use it.
+     */
+    SETTLE_TIMEOUT_MS: ms(1_000).optional(),
+    /**
+     * Longest `/settle` call, the wait for a channel included (ADR 0011). Well below the seller's
+     * own 90 s timeout (`@x402/core`'s `HTTPFacilitatorClient`), so the `settlement_pending`
+     * answer reaches it; at most 80 s, below the load balancer's 120 s.
+     */
+    SETTLE_BUDGET_MS: int(1_000, 80_000).default("30000"),
+    /** Channel lease TTL; renewed well before it runs out (AD-17). */
+    LEASE_TTL_MS: ms(1_000).default("30000"),
+
+    BODY_LIMIT_BYTES: int(1_024).default("65536"),
+    /**
+     * Where the client's IP comes from (AD-11). `cloudflare`: the `CF-Connecting-IP` header, which
+     * Cloudflare sets on every request and refuses from a client; only `cloudflared` reaches the
+     * service (ADR 0011). `socket`: the connection's own address, with no proxy in front, as in
+     * local runs and tests. Required: forgotten behind the tunnel, every client would share the
+     * tunnel's address and one budget. `X-Forwarded-For` is never read.
+     */
+    CLIENT_IP: oneOf(["cloudflare", "socket"]),
+    /** Replaced by `CLIENT_IP`; refused, so a leftover can't look like it still applies. */
+    TRUSTED_PROXY_HOPS: z.string().optional(),
+    RATE_LIMIT_WINDOW_MS: ms(1_000).default("60000"),
+    /**
+     * Requests per window and client. The seller's server calls `/verify` and `/settle` for all of
+     * its buyers, so these are budgets per seller; fees are bounded by the spend budgets (AD-18).
+     */
+    RATE_LIMIT_VERIFY: int(1).default("600"),
+    RATE_LIMIT_SETTLE: int(1).default("600"),
+    RATE_LIMIT_DISCOVERY: int(1).default("120"),
+
+    /** Rolling window of every spend budget (AD-18); a store window, not a timer. */
+    SPEND_WINDOW_MS: int(60_000).default("86400000"),
+    /**
+     * The fee budgets of one window, in stroops (S-design §5). `global` stays below the float
+     * less its alarm (ADR 0013), so one window can't empty the fee account.
+     */
+    SPEND_GLOBAL_STROOPS: spendStroops.default("500000000"),
+    /** One payer in the known assets together, and again in each other token. */
+    SPEND_PER_PAYER_STROOPS: spendStroops.default("20000000"),
+    SPEND_PER_PAY_TO_STROOPS: spendStroops.default("100000000"),
+    /** One known asset (USDC). */
+    SPEND_PER_ASSET_STROOPS: spendStroops.default("250000000"),
+    /** One other token, SAC or wasm: anyone can mint one, so it gets the low tier. */
+    SPEND_PER_ASSET_OTHER_STROOPS: spendStroops.default("20000000"),
+    /** All other tokens together, so junk tokens can't spend what USDC sellers need. */
+    SPEND_TIER_OTHER_STROOPS: spendStroops.default("100000000"),
+    /**
+     * `/settle` refuses while the fee account can spend less: 5 XLM, enough for the fees in flight
+     * (about 1.25 XLM at 50 channels), so ADR 0013's alarms at 25 and 10 XLM fire first (0027).
+     */
+    SPEND_FLOOR_STROOPS: spendStroops.default("50000000"),
+    /** How often the fee account's balance is read for the floor. */
+    SPEND_BALANCE_INTERVAL_MS: ms(1_000).default("30000"),
+    /**
+     * Development only: also list loopback, private and IP resource URLs and `mcp:` tool names,
+     * which the catalog refuses on every network (0054), for a facilitator run locally and the
+     * e2e gate. Testnet only.
+     */
+    CATALOG_LIST_LOCAL: oneOf(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
+
+    /** The breakers are fixed in code now (0024, `BREAKERS` in `spend/policy.ts`); refused, like `STORE`. */
+    BREAKER_FAILURES: z.string().optional(),
+    BREAKER_COOLDOWN_MS: z.string().optional(),
+  })
+  .refine((env) => env.RPC_URLS !== undefined || env.NETWORK === STELLAR_NETWORKS.testnet, {
+    message: "is required outside testnet",
+    path: ["RPC_URLS"],
+  })
+  // Upstream's RPC client refuses http outside testnet, which would make every `/verify` a 500.
+  .refine(
+    (env) =>
+      env.NETWORK === STELLAR_NETWORKS.testnet ||
+      (env.RPC_URLS ?? []).every((url) => url.startsWith("https:")),
+    { message: "must be https outside testnet", path: ["RPC_URLS"] },
+  )
+  // Under the fee bump the bid is paid twice (AD-10), and the ceiling also pays the resource fee,
+  // which is never 0: twice the bid at the ceiling fails every payment.
+  .refine(
+    (env) =>
+      env.INCLUSION_FEE_STROOPS === undefined ||
+      2n * env.INCLUSION_FEE_STROOPS < env.MAX_FEE_STROOPS,
+    { message: "must be below half of MAX_FEE_STROOPS", path: ["INCLUSION_FEE_STROOPS"] },
+  )
+  // The same for the fee-stats bid, which is never below its floor.
+  .refine(
+    (env) =>
+      env.INCLUSION_FEE_STROOPS !== undefined ||
+      2n * FEE_STATS_MIN_BID_STROOPS < env.MAX_FEE_STROOPS,
+    {
+      message: `must be above ${2n * FEE_STATS_MIN_BID_STROOPS}, twice the fee-stats bid's floor`,
+      path: ["MAX_FEE_STROOPS"],
+    },
+  )
+  .refine((env) => env.MAX_VALIDITY_LEDGERS > env.MIN_VALIDITY_LEDGERS, {
+    message: "must be above MIN_VALIDITY_LEDGERS",
+    path: ["MAX_VALIDITY_LEDGERS"],
+  })
+  // A repeat waits at most what the call it repeats could take.
+  .refine((env) => (env.SETTLE_TIMEOUT_MS ?? 0) <= env.SETTLE_BUDGET_MS, {
+    message: "must be at most SETTLE_BUDGET_MS",
+    path: ["SETTLE_TIMEOUT_MS"],
+  })
+  // The seller settles after serving the resource, so a payment that passed `/verify` and is
+  // refused at `/settle` was work given away.
+  .refine((env) => env.RATE_LIMIT_SETTLE >= env.RATE_LIMIT_VERIFY, {
+    message: "must be at least RATE_LIMIT_VERIFY",
+    path: ["RATE_LIMIT_SETTLE"],
+  })
+  .refine((env) => !env.CATALOG_LIST_LOCAL || env.NETWORK === STELLAR_NETWORKS.testnet, {
+    message: "is only allowed on testnet",
+    path: ["CATALOG_LIST_LOCAL"],
+  })
+  .refine((env) => env.TRUSTED_PROXY_HOPS === undefined, {
+    message: "is replaced by CLIENT_IP",
+    path: ["TRUSTED_PROXY_HOPS"],
+  })
+  .refine((env) => env.STORE === undefined, {
+    message: "is no longer read: the stores are always PostgreSQL",
+    path: ["STORE"],
+  })
+  .refine((env) => env.BREAKER_FAILURES === undefined, {
+    message:
+      'is no longer read: the breakers are fixed in code, see "Breakers" in the facilitator README (task 0024)',
+    path: ["BREAKER_FAILURES"],
+  })
+  .refine((env) => env.BREAKER_COOLDOWN_MS === undefined, {
+    message:
+      'is no longer read: the breakers are fixed in code, see "Breakers" in the facilitator README (task 0024)',
+    path: ["BREAKER_COOLDOWN_MS"],
+  })
+  // A settlement reserves the fee ceiling against every budget, so a budget below it refuses
+  // every payment. The floor is not a budget: nothing is reserved against it.
+  .superRefine((env, ctx) => {
+    for (const name of SPEND_BUDGET_VARS) {
+      if (env[name] >= env.MAX_FEE_STROOPS) continue;
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `must be at least MAX_FEE_STROOPS (${env.MAX_FEE_STROOPS}): a settlement reserves the fee ceiling`,
+        path: [name],
+      });
+    }
+  })
+  // `/settle` spends on pubnet, so not before leaving a channel with an open hash out after a
+  // deploy (0090), pubnet's callers presenting an API key (0105) whose settlements count in a fee
+  // budget of its own (0107), an alarm on a failing signer (0027) and deciding again how far the
+  // hot key's power reaches (0048). The spend budgets (0024) bound the loss, but self-payments
+  // from many cheap addresses can still use up the shared budgets and refuse every seller's USDC
+  // (0024 S-design, "Residual risk"; decision 31). Whatever lands narrows the message to what is
+  // still missing (0009 decision 49).
+  .refine((env) => env.NETWORK !== STELLAR_NETWORKS.pubnet, {
+    message:
+      "stellar:pubnet is refused until task 0090, API keys on pubnet (0105), per-key fee budgets (0107), the signer alarm (0027) and the hot key's re-check (0048) land",
+    path: ["NETWORK"],
+  });
+
+/** `pnpm migrate` needs only the database. */
+const migrateEnvSchema = z.object({ DATABASE_URL: databaseUrl });
+
+export type Env = z.input<typeof envSchema>;
+
+/** `SETTLE_TIMEOUT_MS` when unset, unless `SETTLE_BUDGET_MS` is shorter. */
+const DEFAULT_SETTLE_TIMEOUT_MS = 20_000;
+
+/** Parsed environment, grouped for the parts that consume it. */
+export interface Config {
+  network: (typeof STELLAR_NETWORKS)[keyof typeof STELLAR_NETWORKS];
+  port: number;
+  logLevel: "debug" | "info" | "warn" | "error";
+  gitCommit?: string;
+  rpcUrls: string[];
+  /** The facilitator key in OpenBao Transit (0036); the AppRole is never logged. */
+  signer: {
+    address: string;
+    socketPath: string;
+    key: string;
+    keyVersion: number;
+    roleId: string;
+    secretId: string;
+  };
+  channels: string[];
+  /** Never logged. */
+  databaseUrl: string;
+  fees: {
+    maxFeeStroops: bigint;
+    inclusionFeeStroops?: bigint;
+    escalation?: { factor?: number; max?: number };
+  };
+  settlement: {
+    minValidityLedgers: number;
+    maxValidityLedgers: number;
+    settleTimeoutMs: number;
+    settleBudgetMs: number;
+    leaseTtlMs: number;
+  };
+  http: {
+    bodyLimitBytes: number;
+    clientIp: "cloudflare" | "socket";
+    rateLimit: { windowMs: number; verify: number; settle: number; discovery: number };
+  };
+  spend: {
+    windowMs: number;
+    globalStroops: bigint;
+    perPayerStroops: bigint;
+    perPayToStroops: bigint;
+    /** One known asset; `compose` maps these onto the policy's `SpendBudgets`. */
+    perAssetStroops: bigint;
+    perOtherAssetStroops: bigint;
+    tierOtherStroops: bigint;
+    /** The fee account's balance below which `/settle` refuses. */
+    floorStroops: bigint;
+    balanceIntervalMs: number;
+  };
+  catalog: { listLocal: boolean };
+}
+
+/** Names every invalid setting; never echoes a value, so a secret can't leak into logs. */
+export class ConfigError extends Error {
+  override readonly name = "ConfigError";
+  constructor(readonly problems: string[]) {
+    super(`invalid configuration: ${problems.join("; ")}`);
+  }
+}
+
+/**
+ * Settings a deploy passes as a file, `<NAME>_FILE`: a Compose `file:` secret, so the value never
+ * sits in `environment:`, which `docker inspect` shows (ADR 0011). Local runs set the first two
+ * plainly; the AppRole login is a file everywhere, so one way of passing it runs (ADR 0013).
+ */
+const FILE_SETTINGS = ["DATABASE_URL", "RPC_URLS", "OPENBAO_ROLE_ID", "OPENBAO_SECRET_ID"] as const;
+const FILE_ONLY_SETTINGS: readonly string[] = ["OPENBAO_ROLE_ID", "OPENBAO_SECRET_ID"];
+
+/** `env` with each {@link FILE_SETTINGS} entry read from its `_FILE`, where one is set. */
+function readFileSettings(
+  env: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  const read = { ...env };
+  const problems: string[] = [];
+  for (const name of FILE_SETTINGS) {
+    if (FILE_ONLY_SETTINGS.includes(name) && env[name]?.trim()) {
+      problems.push(`${name} is read only from ${name}_FILE`);
+      continue;
+    }
+    const path = env[`${name}_FILE`]?.trim();
+    if (!path) continue;
+    // Refused, so a leftover plain value can't look like the one in use.
+    if (env[name]?.trim()) {
+      problems.push(`${name} and ${name}_FILE must not both be set`);
+      continue;
+    }
+    let value: string;
+    try {
+      value = readFileSync(path, "utf8");
+    } catch (error) {
+      problems.push(`${name}_FILE can't be read (${(error as NodeJS.ErrnoException).code})`);
+      continue;
+    }
+    // Refused, not read as unset: an empty RPC_URLS would quietly start on testnet's public RPC.
+    if (!value.trim()) problems.push(`${name}_FILE is empty`);
+    read[name] = value;
+  }
+  if (problems.length > 0) throw new ConfigError(problems);
+  return read;
+}
+
+/** Parses `env` with `schema`, or throws a {@link ConfigError} naming each bad setting. */
+function parseEnv<S extends z.ZodTypeAny>(
+  schema: S,
+  env: Record<string, string | undefined>,
+): z.output<S> {
+  // Values are trimmed (a secret read from a file keeps its newline); blank means "unset", as in
+  // the deploy env examples.
+  const present = Object.fromEntries(
+    Object.entries(readFileSettings(env))
+      .map(([name, value]) => [name, value?.trim()] as const)
+      .filter(([, value]) => value !== undefined && value !== ""),
+  );
+  const result = schema.safeParse(present);
+  if (!result.success) {
+    // Every message is ours, so none can echo a value.
+    const problems = result.error.issues.map((issue) => {
+      const name = String(issue.path[0] ?? "environment");
+      if (issue.code === "invalid_type") {
+        return `${name} ${issue.received === "undefined" ? "is required" : "is invalid"}`;
+      }
+      return `${name} ${issue.message}`;
+    });
+    throw new ConfigError([...new Set(problems)]);
+  }
+  return result.data;
+}
+
+export function parseConfig(env: Record<string, string | undefined>): Config {
+  const e = parseEnv(envSchema, env);
+  const escalation =
+    e.FEE_ESCALATION_FACTOR !== undefined || e.FEE_ESCALATION_MAX_STROOPS !== undefined
+      ? { factor: e.FEE_ESCALATION_FACTOR, max: e.FEE_ESCALATION_MAX_STROOPS }
+      : undefined;
+  return {
+    network: e.NETWORK,
+    port: e.PORT,
+    logLevel: e.LOG_LEVEL,
+    gitCommit: e.GIT_COMMIT,
+    rpcUrls: e.RPC_URLS ?? [DEFAULT_TESTNET_RPC],
+    signer: {
+      address: e.FACILITATOR_ADDRESS,
+      socketPath: e.OPENBAO_SOCKET,
+      key: e.OPENBAO_KEY,
+      keyVersion: e.OPENBAO_KEY_VERSION,
+      roleId: e.OPENBAO_ROLE_ID,
+      secretId: e.OPENBAO_SECRET_ID,
+    },
+    channels: e.CHANNELS,
+    databaseUrl: e.DATABASE_URL,
+    fees: {
+      maxFeeStroops: e.MAX_FEE_STROOPS,
+      inclusionFeeStroops: e.INCLUSION_FEE_STROOPS,
+      escalation,
+    },
+    settlement: {
+      minValidityLedgers: e.MIN_VALIDITY_LEDGERS,
+      maxValidityLedgers: e.MAX_VALIDITY_LEDGERS,
+      settleTimeoutMs:
+        e.SETTLE_TIMEOUT_MS ?? Math.min(DEFAULT_SETTLE_TIMEOUT_MS, e.SETTLE_BUDGET_MS),
+      settleBudgetMs: e.SETTLE_BUDGET_MS,
+      leaseTtlMs: e.LEASE_TTL_MS,
+    },
+    http: {
+      bodyLimitBytes: e.BODY_LIMIT_BYTES,
+      clientIp: e.CLIENT_IP,
+      rateLimit: {
+        windowMs: e.RATE_LIMIT_WINDOW_MS,
+        verify: e.RATE_LIMIT_VERIFY,
+        settle: e.RATE_LIMIT_SETTLE,
+        discovery: e.RATE_LIMIT_DISCOVERY,
+      },
+    },
+    spend: {
+      windowMs: e.SPEND_WINDOW_MS,
+      globalStroops: e.SPEND_GLOBAL_STROOPS,
+      perPayerStroops: e.SPEND_PER_PAYER_STROOPS,
+      perPayToStroops: e.SPEND_PER_PAY_TO_STROOPS,
+      perAssetStroops: e.SPEND_PER_ASSET_STROOPS,
+      perOtherAssetStroops: e.SPEND_PER_ASSET_OTHER_STROOPS,
+      tierOtherStroops: e.SPEND_TIER_OTHER_STROOPS,
+      floorStroops: e.SPEND_FLOOR_STROOPS,
+      balanceIntervalMs: e.SPEND_BALANCE_INTERVAL_MS,
+    },
+    catalog: { listLocal: e.CATALOG_LIST_LOCAL },
+  };
+}
+
+/**
+ * The config of `pnpm migrate`: only `DATABASE_URL` (or its `_FILE`), which it requires. The other
+ * file settings are still checked, so a plain AppRole login stops it too.
+ */
+export function parseMigrateConfig(env: Record<string, string | undefined>): {
+  databaseUrl: string;
+} {
+  return { databaseUrl: parseEnv(migrateEnvSchema, env).DATABASE_URL };
+}

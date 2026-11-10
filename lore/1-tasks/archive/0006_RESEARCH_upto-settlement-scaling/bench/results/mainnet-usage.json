@@ -1,0 +1,7975 @@
+{
+  "ranAt": "2026-10-05T08:34:29.814Z",
+  "summary": {
+    "rpc": "https://mainnet.sorobanrpc.com",
+    "ledgers": [
+      64779941,
+      64780660
+    ],
+    "sampled": 720,
+    "soroban": {
+      "avg": 105,
+      "max": 214
+    },
+    "sorobanBytes": {
+      "avg": 157025,
+      "max": 290168,
+      "limit": 266240
+    },
+    "classic": {
+      "avg": 222,
+      "max": 845
+    },
+    "sorobanBytesP50": 178676,
+    "ledgersOver90PctBytes": 186,
+    "multiClusterLedgers": 8,
+    "sorobanInclusionFee": {
+      "max": "200",
+      "min": "100",
+      "mode": "200",
+      "p10": "200",
+      "p20": "200",
+      "p30": "200",
+      "p40": "200",
+      "p50": "200",
+      "p60": "200",
+      "p70": "200",
+      "p80": "200",
+      "p90": "200",
+      "p95": "200",
+      "p99": "200",
+      "transactionCount": "5160",
+      "ledgerCount": 50
+    }
+  },
+  "rows": [
+    {
+      "ledger": 64779941,
+      "classic": 203,
+      "soroban": 121,
+      "sorobanBytes": 149280,
+      "stages": [
+        [
+          121
+        ]
+      ]
+    },
+    {
+      "ledger": 64779942,
+      "classic": 172,
+      "soroban": 83,
+      "sorobanBytes": 116368,
+      "stages": [
+        [
+          83
+        ]
+      ]
+    },
+    {
+      "ledger": 64779943,
+      "classic": 164,
+      "soroban": 45,
+      "sorobanBytes": 115764,
+      "stages": [
+        [
+          45
+        ]
+      ]
+    },
+    {
+      "ledger": 64779944,
+      "classic": 282,
+      "soroban": 97,
+      "sorobanBytes": 278488,
+      "stages": [
+        [
+          97
+        ]
+      ]
+    },
+    {
+      "ledger": 64779945,
+      "classic": 209,
+      "soroban": 179,
+      "sorobanBytes": 288348,
+      "stages": [
+        [
+          179
+        ]
+      ]
+    },
+    {
+      "ledger": 64779946,
+      "classic": 161,
+      "soroban": 134,
+      "sorobanBytes": 283316,
+      "stages": [
+        [
+          134
+        ]
+      ]
+    },
+    {
+      "ledger": 64779947,
+      "classic": 380,
+      "soroban": 176,
+      "sorobanBytes": 288200,
+      "stages": [
+        [
+          176
+        ]
+      ]
+    },
+    {
+      "ledger": 64779948,
+      "classic": 654,
+      "soroban": 186,
+      "sorobanBytes": 224984,
+      "stages": [
+        [
+          186
+        ]
+      ]
+    },
+    {
+      "ledger": 64779949,
+      "classic": 519,
+      "soroban": 195,
+      "sorobanBytes": 237596,
+      "stages": [
+        [
+          195
+        ]
+      ]
+    },
+    {
+      "ledger": 64779950,
+      "classic": 227,
+      "soroban": 179,
+      "sorobanBytes": 262512,
+      "stages": [
+        [
+          179
+        ]
+      ]
+    },
+    {
+      "ledger": 64779951,
+      "classic": 178,
+      "soroban": 187,
+      "sorobanBytes": 255400,
+      "stages": [
+        [
+          187
+        ]
+      ]
+    },
+    {
+      "ledger": 64779952,
+      "classic": 123,
+      "soroban": 180,
+      "sorobanBytes": 288948,
+      "stages": [
+        [
+          180
+        ]
+      ]
+    },
+    {
+      "ledger": 64779953,
+      "classic": 236,
+      "soroban": 198,
+      "sorobanBytes": 241260,
+      "stages": [
+        [
+          198
+        ]
+      ]
+    },
+    {
+      "ledger": 64779954,
+      "classic": 402,
+      "soroban": 184,
+      "sorobanBytes": 272376,
+      "stages": [
+        [
+          184
+        ]
+      ]
+    },
+    {
+      "ledger": 64779955,
+      "classic": 184,
+      "soroban": 186,
+      "sorobanBytes": 226928,
+      "stages": [
+        [
+          186
+        ]
+      ]
+    },
+    {
+      "ledger": 64779956,
+      "classic": 401,
+      "soroban": 147,
+      "sorobanBytes": 168504,
+      "stages": [
+        [
+          147
+        ]
+      ]
+    },
+    {
+      "ledger": 64779957,
+      "classic": 311,
+      "soroban": 130,
+      "sorobanBytes": 281252,
+      "stages": [
+        [
+          130
+        ]
+      ]
+    },
+    {
+      "ledger": 64779958,
+      "classic": 224,
+      "soroban": 193,
+      "sorobanBytes": 231324,
+      "stages": [
+        [
+          193
+        ]
+      ]
+    },
+    {
+      "ledger": 64779959,
+      "classic": 204,
+      "soroban": 193,
+      "sorobanBytes": 230680,
+      "stages": [
+        [
+          193
+        ]
+      ]
+    },
+    {
+      "ledger": 64779960,
+      "classic": 271,
+      "soroban": 189,
+      "sorobanBytes": 253840,
+      "stages": [
+        [
+          189
+        ]
+      ]
+    },
+    {
+      "ledger": 64779961,
+      "classic": 194,
+      "soroban": 179,
+      "sorobanBytes": 268976,
+      "stages": [
+        [
+          179
+        ]
+      ]
+    },
+    {
+      "ledger": 64779962,
+      "classic": 263,
+      "soroban": 176,
+      "sorobanBytes": 281212,
+      "stages": [
+        [
+          176
+        ]
+      ]
+    },
+    {
+      "ledger": 64779963,
+      "classic": 271,
+      "soroban": 76,
+      "sorobanBytes": 70176,
+      "stages": [
+        [
+          76
+        ]
+      ]
+    },
+    {
+      "ledger": 64779964,
+      "classic": 281,
+      "soroban": 106,
+      "sorobanBytes": 95724,
+      "stages": [
+        [
+          106
+        ]
+      ]
+    },
+    {
+      "ledger": 64779965,
+      "classic": 285,
+      "soroban": 76,
+      "sorobanBytes": 72292,
+      "stages": [
+        [
+          76
+        ]
+      ]
+    },
+    {
+      "ledger": 64779966,
+      "classic": 210,
+      "soroban": 25,
+      "sorobanBytes": 24400,
+      "stages": [
+        [
+          25
+        ]
+      ]
+    },
+    {
+      "ledger": 64779967,
+      "classic": 177,
+      "soroban": 3,
+      "sorobanBytes": 5716,
+      "stages": [
+        [
+          3
+        ]
+      ]
+    },
+    {
+      "ledger": 64779968,
+      "classic": 187,
+      "soroban": 14,
+      "sorobanBytes": 34192,
+      "stages": [
+        [
+          14
+        ]
+      ]
+    },
+    {
+      "ledger": 64779969,
+      "classic": 215,
+      "soroban": 13,
+      "sorobanBytes": 23736,
+      "stages": [
+        [
+          13
+        ]
+      ]
+    },
+    {
+      "ledger": 64779970,
+      "classic": 183,
+      "soroban": 13,
+      "sorobanBytes": 24024,
+      "stages": [
+        [
+          13
+        ]
+      ]
+    },
+    {
+      "ledger": 64779971,
+      "classic": 210,
+      "soroban": 6,
+      "sorobanBytes": 11744,
+      "stages": [
+        [
+          6
+        ]
+      ]
+    },
+    {
+      "ledger": 64779972,
+      "classic": 185,
+      "soroban": 18,
+      "sorobanBytes": 34084,
+      "stages": [
+        [
+          18
+        ]
+      ]
+    },
+    {
+      "ledger": 64779973,
+      "classic": 155,
+      "soroban": 8,
+      "sorobanBytes": 15000,
+      "stages": [
+        [
+          8
+        ]
+      ]
+    },
+    {
+      "ledger": 64779974,
+      "classic": 191,
+      "soroban": 15,
+      "sorobanBytes": 25880,
+      "stages": [
+        [
+          15
+        ]
+      ]
+    },
+    {
+      "ledger": 64779975,
+      "classic": 450,
+      "soroban": 10,
+      "sorobanBytes": 21616,
+      "stages": [
+        [
+          10
+        ]
+      ]
+    },
+    {
+      "ledger": 64779976,
+      "classic": 269,
+      "soroban": 15,
+      "sorobanBytes": 27384,
+      "stages": [
+        [
+          15
+        ]
+      ]
+    },
+    {
+      "ledger": 64779977,
+      "classic": 189,
+      "soroban": 16,
+      "sorobanBytes": 30232,
+      "stages": [
+        [
+          16
+        ]
+      ]
+    },
+    {
+      "ledger": 64779978,
+      "classic": 207,
+      "soroban": 23,
+      "sorobanBytes": 41032,
+      "stages": [
+        [
+          23
+        ]
+      ]
+    },
+    {
+      "ledger": 64779979,
+      "classic": 390,
+      "soroban": 21,
+      "sorobanBytes": 37968,
+      "stages": [
+        [
+          21
+        ]
+      ]
+    },
+    {
+      "ledger": 64779980,
+      "classic": 365,
+      "soroban": 24,
+      "sorobanBytes": 40776,
+      "stages": [
+        [
+          24
+        ]
+      ]
+    },
+    {
+      "ledger": 64779981,
+      "classic": 845,
+      "soroban": 17,
+      "sorobanBytes": 29300,
+      "stages": [
+        [
+          17
+        ]
+      ]
+    },
+    {
+      "ledger": 64779982,
+      "classic": 601,
+      "soroban": 28,
+      "sorobanBytes": 45452,
+      "stages": [
+        [
+          28
+        ]
+      ]
+    },
+    {
+      "ledger": 64779983,
+      "classic": 652,
+      "soroban": 19,
+      "sorobanBytes": 30628,
+      "stages": [
+        [
+          19
+        ]
+      ]
+    },
+    {
+      "ledger": 64779984,
+      "classic": 272,
+      "soroban": 33,
+      "sorobanBytes": 49472,
+      "stages": [
+        [
+          33
+        ]
+      ]
+    },
+    {
+      "ledger": 64779985,
+      "classic": 332,
+      "soroban": 32,
+      "sorobanBytes": 38312,
+      "stages": [
+        [
+          32
+        ]
+      ]
+    },
+    {
+      "ledger": 64779986,
+      "classic": 232,
+      "soroban": 55,
+      "sorobanBytes": 71992,
+      "stages": [
+        [
+          55
+        ]
+      ]
+    },
+    {
+      "ledger": 64779987,
+      "classic": 422,
+      "soroban": 57,
+      "sorobanBytes": 59684,
+      "stages": [
+        [
+          57
+        ]
+      ]
+    },
+    {
+      "ledger": 64779988,
+      "classic": 197,
+      "soroban": 71,
+      "sorobanBytes": 87092,
+      "stages": [
+        [
+          71
+        ]
+      ]
+    },
+    {
+      "ledger": 64779989,
+      "classic": 226,
+      "soroban": 49,
+      "sorobanBytes": 50616,
+      "stages": [
+        [
+          49
+        ]
+      ]
+    },
+    {
+      "ledger": 64779990,
+      "classic": 199,
+      "soroban": 85,
+      "sorobanBytes": 99748,
+      "stages": [
+        [
+          85
+        ]
+      ]
+    },
+    {
+      "ledger": 64779991,
+      "classic": 284,
+      "soroban": 67,
+      "sorobanBytes": 65732,
+      "stages": [
+        [
+          67
+        ]
+      ]
+    },
+    {
+      "ledger": 64779992,
+      "classic": 458,
+      "soroban": 52,
+      "sorobanBytes": 60380,
+      "stages": [
+        [
+          52
+        ]
+      ]
+    },
+    {
+      "ledger": 64779993,
+      "classic": 785,
+      "soroban": 109,
+      "sorobanBytes": 92860,
+      "stages": [
+        [
+          109
+        ]
+      ]
+    },
+    {
+      "ledger": 64779994,
+      "classic": 587,
+      "soroban": 170,
+      "sorobanBytes": 145244,
+      "stages": [
+        [
+          170
+        ]
+      ]
+    },
+    {
+      "ledger": 64779995,
+      "classic": 238,
+      "soroban": 174,
+      "sorobanBytes": 145088,
+      "stages": [
+        [
+          174
+        ]
+      ]
+    },
+    {
+      "ledger": 64779996,
+      "classic": 160,
+      "soroban": 163,
+      "sorobanBytes": 281236,
+      "stages": [
+        [
+          163
+        ]
+      ]
+    },
+    {
+      "ledger": 64779997,
+      "classic": 148,
+      "soroban": 167,
+      "sorobanBytes": 226668,
+      "stages": [
+        [
+          167
+        ]
+      ]
+    },
+    {
+      "ledger": 64779998,
+      "classic": 158,
+      "soroban": 179,
+      "sorobanBytes": 182688,
+      "stages": [
+        [
+          179
+        ]
+      ]
+    },
+    {
+      "ledger": 64779999,
+      "classic": 167,
+      "soroban": 172,
+      "sorobanBytes": 198224,
+      "stages": [
+        [
+          172
+        ]
+      ]
+    },
+    {
+      "ledger": 64780000,
+      "classic": 157,
+      "soroban": 187,
+      "sorobanBytes": 189648,
+      "stages": [
+        [
+          187
+        ]
+      ]
+    },
+    {
+      "ledger": 64780001,
+      "classic": 525,
+      "soroban": 185,
+      "sorobanBytes": 190372,
+      "stages": [
+        [
+          185
+        ]
+      ]
+    },
+    {
+      "ledger": 64780002,
+      "classic": 502,
+      "soroban": 193,
+      "sorobanBytes": 188448,
+      "stages": [
+        [
+          193
+        ]
+      ]
+    },
+    {
+      "ledger": 64780003,
+      "classic": 389,
+      "soroban": 193,
+      "sorobanBytes": 170220,
+      "stages": [
+        [
+          193
+        ]
+      ]
+    },
+    {
+      "ledger": 64780004,
+      "classic": 230,
+      "soroban": 173,
+      "sorobanBytes": 196872,
+      "stages": [
+        [
+          173
+        ]
+      ]
+    },
+    {
+      "ledger": 64780005,
+      "classic": 363,
+      "soroban": 122,
+      "sorobanBytes": 126348,
+      "stages": [
+        [
+          122
+        ]
+      ]
+    },
+    {
+      "ledger": 64780006,
+      "classic": 263,
+      "soroban": 100,
+      "sorobanBytes": 148788,
+      "stages": [
+        [
+          100
+        ]
+      ]
+    },
+    {
+      "ledger": 64780007,
+      "classic": 463,
+      "soroban": 90,
+      "sorobanBytes": 118752,
+      "stages": [
+        [
+          90
+        ]
+      ]
+    },
+    {
+      "ledger": 64780008,
+      "classic": 353,
+      "soroban": 95,
+      "sorobanBytes": 277948,
+      "stages": [
+        [
+          95
+        ]
+      ]
+    },
+    {
+      "ledger": 64780009,
+      "classic": 312,
+      "soroban": 131,
+      "sorobanBytes": 282168,
+      "stages": [
+        [
+          131
+        ]
+      ]
+    },
+    {
+      "ledger": 64780010,
+      "classic": 239,
+      "soroban": 170,
+      "sorobanBytes": 287656,
+      "stages": [
+        [
+          170
+        ]
+      ]
+    },
+    {
+      "ledger": 64780011,
+      "classic": 298,
+      "soroban": 192,
+      "sorobanBytes": 259336,
+      "stages": [
+        [
+          192
+        ]
+      ]
+    },
+    {
+      "ledger": 64780012,
+      "classic": 168,
+      "soroban": 186,
+      "sorobanBytes": 235496,
+      "stages": [
+        [
+          186
+        ]
+      ]
+    },
+    {
+      "ledger": 64780013,
+      "classic": 218,
+      "soroban": 187,
+      "sorobanBytes": 223068,
+      "stages": [
+        [
+          187
+        ]
+      ]
+    },
+    {
+      "ledger": 64780014,
+      "classic": 208,
+      "soroban": 175,
+      "sorobanBytes": 256816,
+      "stages": [
+        [
+          175
+        ]
+      ]
+    },
+    {
+      "ledger": 64780015,
+      "classic": 155,
+      "soroban": 197,
+      "sorobanBytes": 290168,
+      "stages": [
+        [
+          197
+        ]
+      ]
+    },
+    {
+      "ledger": 64780016,
+      "classic": 151,
+      "soroban": 183,
+      "sorobanBytes": 244136,
+      "stages": [
+        [
+          183
+        ]
+      ]
+    },
+    {
+      "ledger": 64780017,
+      "classic": 151,
+      "soroban": 189,
+      "sorobanBytes": 256672,
+      "stages": [
+        [
+          189
+        ]
+      ]
+    },
+    {
+      "ledger": 64780018,
+      "classic": 175,
+      "soroban": 197,
+      "sorobanBytes": 222368,
+      "stages": [
+        [
+          197
+        ]
+      ]
+    },
+    {
+      "ledger": 64780019,
+      "classic": 164,
+      "soroban": 198,
+      "sorobanBytes": 214632,
+      "stages": [
+        [
+          198
+        ]
+      ]
+    },
+    {
+      "ledger": 64780020,
+      "classic": 342,
+      "soroban": 189,
+      "sorobanBytes": 272376,
+      "stages": [
+        [
+          189
+        ]
+      ]
+    },
+    {
+      "ledger": 64780021,
+      "classic": 142,
+      "soroban": 198,
+      "sorobanBytes": 222412,
+      "stages": [
+        [
+          198
+        ]
+      ]
+    },
+    {
+      "ledger": 64780022,
+      "classic": 158,
+      "soroban": 191,
+      "sorobanBytes": 233356,
+      "stages": [
+        [
+          191
+        ]
+      ]
+    },
+    {
+      "ledger": 64780023,
+      "classic": 255,
+      "soroban": 188,
+      "sorobanBytes": 248448,
+      "stages": [
+        [
+          188
+        ]
+      ]
+    },
+    {
+      "ledger": 64780024,
+      "classic": 184,
+      "soroban": 200,
+      "sorobanBytes": 217668,
+      "stages": [
+        [
+          200
+        ]
+      ]
+    },
+    {
+      "ledger": 64780025,
+      "classic": 181,
+      "soroban": 182,
+      "sorobanBytes": 266204,
+      "stages": [
+        [
+          182
+        ]
+      ]
+    },
+    {
+      "ledger": 64780026,
+      "classic": 134,
+      "soroban": 136,
+      "sorobanBytes": 182860,
+      "stages": [
+        [
+          136
+        ]
+      ]
+    },
+    {
+      "ledger": 64780027,
+      "classic": 145,
+      "soroban": 42,
+      "sorobanBytes": 88896,
+      "stages": [
+        [
+          42
+        ]
+      ]
+    },
+    {
+      "ledger": 64780028,
+      "classic": 148,
+      "soroban": 14,
+      "sorobanBytes": 106060,
+      "stages": [
+        [
+          14
+        ]
+      ]
+    },
+    {
+      "ledger": 64780029,
+      "classic": 182,
+      "soroban": 16,
+      "sorobanBytes": 47812,
+      "stages": [
+        [
+          16
+        ]
+      ]
+    },
+    {
+      "ledger": 64780030,
+      "classic": 150,
+      "soroban": 19,
+      "sorobanBytes": 179924,
+      "stages": [
+        [
+          19
+        ]
+      ]
+    },
+    {
+      "ledger": 64780031,
+      "classic": 133,
+      "soroban": 15,
+      "sorobanBytes": 61312,
+      "stages": [
+        [
+          15
+        ]
+      ]
+    },
+    {
+      "ledger": 64780032,
+      "classic": 161,
+      "soroban": 20,
+      "sorobanBytes": 24552,
+      "stages": [
+        [
+          20
+        ]
+      ]
+    },
+    {
+      "ledger": 64780033,
+      "classic": 213,
+      "soroban": 14,
+      "sorobanBytes": 12600,
+      "stages": [
+        [
+          14
+        ]
+      ]
+    },
+    {
+      "ledger": 64780034,
+      "classic": 257,
+      "soroban": 14,
+      "sorobanBytes": 13328,
+      "stages": [
+        [
+          14
+        ]
+      ]
+    },
+    {
+      "ledger": 64780035,
+      "classic": 230,
+      "soroban": 34,
+      "sorobanBytes": 51056,
+      "stages": [
+        [
+          34
+        ]
+      ]
+    },
+    {
+      "ledger": 64780036,
+      "classic": 179,
+      "soroban": 12,
+      "sorobanBytes": 15228,
+      "stages": [
+        [
+          12
+        ]
+      ]
+    },
+    {
+      "ledger": 64780037,
+      "classic": 192,
+      "soroban": 24,
+      "sorobanBytes": 45672,
+      "stages": [
+        [
+          24
+        ]
+      ]
+    },
+    {
+      "ledger": 64780038,
+      "classic": 171,
+      "soroban": 5,
+      "sorobanBytes": 10024,
+      "stages": [
+        [
+          5
+        ]
+      ]
+    },
+    {
+      "ledger": 64780039,
+      "classic": 156,
+      "soroban": 18,
+      "sorobanBytes": 32112,
+      "stages": [
+        [
+          18
+        ]
+      ]
+    },
+    {
+      "ledger": 64780040,
+      "classic": 322,
+      "soroban": 5,
+      "sorobanBytes": 9544,
+      "stages": [
+        [
+          5
+        ]
+      ]
+    },
+    {
+      "ledger": 64780041,
+      "classic": 458,
+      "soroban": 38,
+      "sorobanBytes": 68856,
+      "stages": [
+        [
+          38
+        ]
+      ]
+    },
+    {
+      "ledger": 64780042,
+      "classic": 196,
+      "soroban": 5,
+      "sorobanBytes": 8872,
+      "stages": [
+        [
+          5
+        ]
+      ]
+    },
+    {
+      "ledger": 64780043,
+      "classic": 160,
+      "soroban": 32,
+      "sorobanBytes": 57504,
+      "stages": [
+        [
+          32
+        ]
+      ]
+    },
+    {
+      "ledger": 64780044,
+      "classic": 154,
+      "soroban": 9,
+      "sorobanBytes": 17512,
+      "stages": [
+        [
+          9
+        ]
+      ]
+    },
+    {
+      "ledger": 64780045,
+      "classic": 141,
+      "soroban": 37,
+      "sorobanBytes": 66852,
+      "stages": [
+        [
+          37
+        ]
+      ]
+    },
+    {
+      "ledger": 64780046,
+      "classic": 155,
+      "soroban": 13,
+      "sorobanBytes": 22796,
+      "stages": [
+        [
+          13
+        ]
+      ]
+    },
+    {
+      "ledger": 64780047,
+      "classic": 203,
+      "soroban": 36,
+      "sorobanBytes": 66524,
+      "stages": [
+        [
+          36
+        ]
+      ]
+    },
+    {
+      "ledger": 64780048,
+      "classic": 159,
+      "soroban": 17,
+      "sorobanBytes": 28004,
+      "stages": [
+        [
+          17
+        ]
+      ]
+    },
+    {
+      "ledger": 64780049,
+      "classic": 150,
+      "soroban": 40,
+      "sorobanBytes": 70320,
+      "stages": [
+        [
+          40
+        ]
+      ]
+    },
+    {
+      "ledger": 64780050,
+      "classic": 149,
+      "soroban": 36,
+      "sorobanBytes": 74968,
+      "stages": [
+        [
+          36
+        ]
+      ]
+    },
+    {
+      "ledger": 64780051,
+      "classic": 133,
+      "soroban": 61,
+      "sorobanBytes": 90412,
+      "stages": [
+        [
+          61
+        ]
+      ]
+    },
+    {
+      "ledger": 64780052,
+      "classic": 164,
+      "soroban": 38,
+      "sorobanBytes": 41064,
+      "stages": [
+        [
+          38
+        ]
+      ]
+    },
+    {
+      "ledger": 64780053,
+      "classic": 161,
+      "soroban": 69,
+      "sorobanBytes": 90900,
+      "stages": [
+        [
+          69
+        ]
+      ]
+    },
+    {
+      "ledger": 64780054,
+      "classic": 170,
+      "soroban": 55,
+      "sorobanBytes": 57248,
+      "stages": [
+        [
+          55
+        ]
+      ]
+    },
+    {
+      "ledger": 64780055,
+      "classic": 179,
+      "soroban": 74,
+      "sorobanBytes": 73180,
+      "stages": [
+        [
+          74
+        ]
+      ]
+    },
+    {
+      "ledger": 64780056,
+      "classic": 126,
+      "soroban": 61,
+      "sorobanBytes": 61260,
+      "stages": [
+        [
+          61
+        ]
+      ]
+    },
+    {
+      "ledger": 64780057,
+      "classic": 189,
+      "soroban": 117,
+      "sorobanBytes": 104476,
+      "stages": [
+        [
+          117
+        ]
+      ]
+    },
+    {
+      "ledger": 64780058,
+      "classic": 161,
+      "soroban": 203,
+      "sorobanBytes": 177448,
+      "stages": [
+        [
+          203
+        ]
+      ]
+    },
+    {
+      "ledger": 64780059,
+      "classic": 299,
+      "soroban": 199,
+      "sorobanBytes": 171600,
+      "stages": [
+        [
+          199
+        ]
+      ]
+    },
+    {
+      "ledger": 64780060,
+      "classic": 209,
+      "soroban": 186,
+      "sorobanBytes": 240508,
+      "stages": [
+        [
+          186
+        ]
+      ]
+    },
+    {
+      "ledger": 64780061,
+      "classic": 157,
+      "soroban": 181,
+      "sorobanBytes": 229392,
+      "stages": [
+        [
+          181
+        ]
+      ]
+    },
+    {
+      "ledger": 64780062,
+      "classic": 170,
+      "soroban": 161,
+      "sorobanBytes": 228504,
+      "stages": [
+        [
+          161
+        ]
+      ]
+    },
+    {
+      "ledger": 64780063,
+      "classic": 214,
+      "soroban": 187,
+      "sorobanBytes": 188032,
+      "stages": [
+        [
+          187
+        ]
+      ]
+    },
+    {
+      "ledger": 64780064,
+      "classic": 190,
+      "soroban": 186,
+      "sorobanBytes": 191540,
+      "stages": [
+        [
+          186
+        ]
+      ]
+    },
+    {
+      "ledger": 64780065,
+      "classic": 203,
+      "soroban": 182,
+      "sorobanBytes": 196444,
+      "stages": [
+        [
+          182
+        ]
+      ]
+    },
+    {
+      "ledger": 64780066,
+      "classic": 162,
+      "soroban": 163,
+      "sorobanBytes": 217816,
+      "stages": [
+        [
+          162,
+          1
+        ]
+      ]
+    },
+    {
+      "ledger": 64780067,
+      "classic": 175,
+      "soroban": 196,
+      "sorobanBytes": 175980,
+      "stages": [
+        [
+          196
+        ]
+      ]
+    },
+    {
+      "ledger": 64780068,
+      "classic": 155,
+      "soroban": 193,
+      "sorobanBytes": 190612,
+      "stages": [
+        [
+          193
+        ]
+      ]
+    },
+    {
+      "ledger": 64780069,
+      "classic": 157,
+      "soroban": 190,
+      "sorobanBytes": 197284,
+      "stages": [
+        [
+          190
+        ]
+      ]
+    },
+    {
+      "ledger": 64780070,
+      "classic": 149,
+      "soroban": 167,
+      "sorobanBytes": 215792,
+      "stages": [
+        [
+          167
+        ]
+      ]
+    },
+    {
+      "ledger": 64780071,
+      "classic": 305,
+      "soroban": 82,
+      "sorobanBytes": 120440,
+      "stages": [
+        [
+          82
+        ]
+      ]
+    },
+    {
+      "ledger": 64780072,
+      "classic": 336,
+      "soroban": 60,
+      "sorobanBytes": 116972,
+      "stages": [
+        [
+          60
+        ]
+      ]
+    },
+    {
+      "ledger": 64780073,
+      "classic": 232,
+      "soroban": 118,
+      "sorobanBytes": 280904,
+      "stages": [
+        [
+          118
+        ]
+      ]
+    },
+    {
+      "ledger": 64780074,
+      "classic": 207,
+      "soroban": 115,
+      "sorobanBytes": 280536,
+      "stages": [
+        [
+          115
+        ]
+      ]
+    },
+    {
+      "ledger": 64780075,
+      "classic": 169,
+      "soroban": 180,
+      "sorobanBytes": 271612,
+      "stages": [
+        [
+          180
+        ]
+      ]
+    },
+    {
+      "ledger": 64780076,
+      "classic": 126,
+      "soroban": 178,
+      "sorobanBytes": 265888,
+      "stages": [
+        [
+          178
+        ]
+      ]
+    },
+    {
+      "ledger": 64780077,
+      "classic": 273,
+      "soroban": 177,
+      "sorobanBytes": 275536,
+      "stages": [
+        [
+          177
+        ]
+      ]
+    },
+    {
+      "ledger": 64780078,
+      "classic": 162,
+      "soroban": 134,
+      "sorobanBytes": 200948,
+      "stages": [
+        [
+          134
+        ]
+      ]
+    },
+    {
+      "ledger": 64780079,
+      "classic": 198,
+      "soroban": 183,
+      "sorobanBytes": 201412,
+      "stages": [
+        [
+          183
+        ]
+      ]
+    },
+    {
+      "ledger": 64780080,
+      "classic": 149,
+      "soroban": 191,
+      "sorobanBytes": 252068,
+      "stages": [
+        [
+          191
+        ]
+      ]
+    },
+    {
+      "ledger": 64780081,
+      "classic": 156,
+      "soroban": 200,
+      "sorobanBytes": 192180,
+      "stages": [
+        [
+          200
+        ]
+      ]
+    },
+    {
+      "ledger": 64780082,
+      "classic": 149,
+      "soroban": 153,
+      "sorobanBytes": 188920,
+      "stages": [
+        [
+          153
+        ]
+      ]
+    },
+    {
+      "ledger": 64780083,
+      "classic": 248,
+      "soroban": 199,
+      "sorobanBytes": 221804,
+      "stages": [
+        [
+          199
+        ]
+      ]
+    },
+    {
+      "ledger": 64780084,
+      "classic": 328,
+      "soroban": 191,
+      "sorobanBytes": 202404,
+      "stages": [
+        [
+          191
+        ]
+      ]
+    },
+    {
+      "ledger": 64780085,
+      "classic": 181,
+      "soroban": 185,
+      "sorobanBytes": 242356,
+      "stages": [
+        [
+          185
+        ]
+      ]
+    },
+    {
+      "ledger": 64780086,
+      "classic": 172,
+      "soroban": 213,
+      "sorobanBytes": 240788,
+      "stages": [
+        [
+          213
+        ]
+      ]
+    },
+    {
+      "ledger": 64780087,
+      "classic": 113,
+      "soroban": 195,
+      "sorobanBytes": 235432,
+      "stages": [
+        [
+          195
+        ]
+      ]
+    },
+    {
+      "ledger": 64780088,
+      "classic": 181,
+      "soroban": 209,
+      "sorobanBytes": 202700,
+      "stages": [
+        [
+          209
+        ]
+      ]
+    },
+    {
+      "ledger": 64780089,
+      "classic": 195,
+      "soroban": 214,
+      "sorobanBytes": 211948,
+      "stages": [
+        [
+          214
+        ]
+      ]
+    },
+    {
+      "ledger": 64780090,
+      "classic": 219,
+      "soroban": 176,
+      "sorobanBytes": 287232,
+      "stages": [
+        [
+          176
+        ]
+      ]
+    },
+    {
+      "ledger": 64780091,
+      "classic": 150,
+      "soroban": 172,
+      "sorobanBytes": 262052,
+      "stages": [
+        [
+          172
+        ]
+      ]
+    },
+    {
+      "ledger": 64780092,
+      "classic": 135,
+      "soroban": 42,
+      "sorobanBytes": 126384,
+      "stages": [
+        [
+          42
+        ]
+      ]
+    },
+    {
+      "ledger": 64780093,
+      "classic": 194,
+      "soroban": 62,
+      "sorobanBytes": 177832,
+      "stages": [
+        [
+          62
+        ]
+      ]
+    },
+    {
+      "ledger": 64780094,
+      "classic": 230,
+      "soroban": 67,
+      "sorobanBytes": 187120,
+      "stages": [
+        [
+          67
+        ]
+      ]
+    },
+    {
+      "ledger": 64780095,
+      "classic": 173,
+      "soroban": 50,
+      "sorobanBytes": 111604,
+      "stages": [
+        [
+          50
+        ]
+      ]
+    },
+    {
+      "ledger": 64780096,
+      "classic": 164,
+      "soroban": 64,
+      "sorobanBytes": 140212,
+      "stages": [
+        [
+          64
+        ]
+      ]
+    },
+    {
+      "ledger": 64780097,
+      "classic": 131,
+      "soroban": 47,
+      "sorobanBytes": 203756,
+      "stages": [
+        [
+          47
+        ]
+      ]
+    },
+    {
+      "ledger": 64780098,
+      "classic": 381,
+      "soroban": 45,
+      "sorobanBytes": 108108,
+      "stages": [
+        [
+          45
+        ]
+      ]
+    },
+    {
+      "ledger": 64780099,
+      "classic": 198,
+      "soroban": 36,
+      "sorobanBytes": 69512,
+      "stages": [
+        [
+          36
+        ]
+      ]
+    },
+    {
+      "ledger": 64780100,
+      "classic": 161,
+      "soroban": 39,
+      "sorobanBytes": 58968,
+      "stages": [
+        [
+          39
+        ]
+      ]
+    },
+    {
+      "ledger": 64780101,
+      "classic": 331,
+      "soroban": 27,
+      "sorobanBytes": 35792,
+      "stages": [
+        [
+          27
+        ]
+      ]
+    },
+    {
+      "ledger": 64780102,
+      "classic": 131,
+      "soroban": 27,
+      "sorobanBytes": 48948,
+      "stages": [
+        [
+          27
+        ]
+      ]
+    },
+    {
+      "ledger": 64780103,
+      "classic": 150,
+      "soroban": 35,
+      "sorobanBytes": 77112,
+      "stages": [
+        [
+          35
+        ]
+      ]
+    },
+    {
+      "ledger": 64780104,
+      "classic": 173,
+      "soroban": 26,
+      "sorobanBytes": 45500,
+      "stages": [
+        [
+          26
+        ]
+      ]
+    },
+    {
+      "ledger": 64780105,
+      "classic": 152,
+      "soroban": 16,
+      "sorobanBytes": 31364,
+      "stages": [
+        [
+          16
+        ]
+      ]
+    },
+    {
+      "ledger": 64780106,
+      "classic": 229,
+      "soroban": 42,
+      "sorobanBytes": 101940,
+      "stages": [
+        [
+          42
+        ]
+      ]
+    },
+    {
+      "ledger": 64780107,
+      "classic": 164,
+      "soroban": 21,
+      "sorobanBytes": 44596,
+      "stages": [
+        [
+          21
+        ]
+      ]
+    },
+    {
+      "ledger": 64780108,
+      "classic": 162,
+      "soroban": 28,
+      "sorobanBytes": 50060,
+      "stages": [
+        [
+          28
+        ]
+      ]
+    },
+    {
+      "ledger": 64780109,
+      "classic": 170,
+      "soroban": 18,
+      "sorobanBytes": 35924,
+      "stages": [
+        [
+          18
+        ]
+      ]
+    },
+    {
+      "ledger": 64780110,
+      "classic": 158,
+      "soroban": 23,
+      "sorobanBytes": 41032,
+      "stages": [
+        [
+          23
+        ]
+      ]
+    },
+    {
+      "ledger": 64780111,
+      "classic": 215,
+      "soroban": 27,
+      "sorobanBytes": 63644,
+      "stages": [
+        [
+          27
+        ]
+      ]
+    },
+    {
+      "ledger": 64780112,
+      "classic": 135,
+      "soroban": 18,
+      "sorobanBytes": 36680,
+      "stages": [
+        [
+          18
+        ]
+      ]
+    },
+    {
+      "ledger": 64780113,
+      "classic": 147,
+      "soroban": 17,
+      "sorobanBytes": 40372,
+      "stages": [
+        [
+          17
+        ]
+      ]
+    },
+    {
+      "ledger": 64780114,
+      "classic": 144,
+      "soroban": 17,
+      "sorobanBytes": 29136,
+      "stages": [
+        [
+          17
+        ]
+      ]
+    },
+    {
+      "ledger": 64780115,
+      "classic": 144,
+      "soroban": 30,
+      "sorobanBytes": 41576,
+      "stages": [
+        [
+          30
+        ]
+      ]
+    },
+    {
+      "ledger": 64780116,
+      "classic": 153,
+      "soroban": 48,
+      "sorobanBytes": 48020,
+      "stages": [
+        [
+          48
+        ]
+      ]
+    },
+    {
+      "ledger": 64780117,
+      "classic": 138,
+      "soroban": 43,
+      "sorobanBytes": 38636,
+      "stages": [
+        [
+          43
+        ]
+      ]
+    },
+    {
+      "ledger": 64780118,
+      "classic": 191,
+      "soroban": 55,
+      "sorobanBytes": 51528,
+      "stages": [
+        [
+          55
+        ]
+      ]
+    },
+    {
+      "ledger": 64780119,
+      "classic": 145,
+      "soroban": 41,
+      "sorobanBytes": 40056,
+      "stages": [
+        [
+          41
+        ]
+      ]
+    },
+    {
+      "ledger": 64780120,
+      "classic": 211,
+      "soroban": 53,
+      "sorobanBytes": 49712,
+      "stages": [
+        [
+          53
+        ]
+      ]
+    },
+    {
+      "ledger": 64780121,
+      "classic": 171,
+      "soroban": 44,
+      "sorobanBytes": 42828,
+      "stages": [
+        [
+          44
+        ]
+      ]
+    },
+    {
+      "ledger": 64780122,
+      "classic": 147,
+      "soroban": 95,
+      "sorobanBytes": 82396,
+      "stages": [
+        [
+          95
+        ]
+      ]
+    },
+    {
+      "ledger": 64780123,
+      "classic": 161,
+      "soroban": 144,
+      "sorobanBytes": 121884,
+      "stages": [
+        [
+          144
+        ]
+      ]
+    },
+    {
+      "ledger": 64780124,
+      "classic": 170,
+      "soroban": 193,
+      "sorobanBytes": 154400,
+      "stages": [
+        [
+          193
+        ]
+      ]
+    },
+    {
+      "ledger": 64780125,
+      "classic": 313,
+      "soroban": 195,
+      "sorobanBytes": 159344,
+      "stages": [
+        [
+          195
+        ]
+      ]
+    },
+    {
+      "ledger": 64780126,
+      "classic": 175,
+      "soroban": 177,
+      "sorobanBytes": 176332,
+      "stages": [
+        [
+          177
+        ]
+      ]
+    },
+    {
+      "ledger": 64780127,
+      "classic": 157,
+      "soroban": 160,
+      "sorobanBytes": 204824,
+      "stages": [
+        [
+          160
+        ]
+      ]
+    },
+    {
+      "ledger": 64780128,
+      "classic": 178,
+      "soroban": 190,
+      "sorobanBytes": 165344,
+      "stages": [
+        [
+          190
+        ]
+      ]
+    },
+    {
+      "ledger": 64780129,
+      "classic": 374,
+      "soroban": 185,
+      "sorobanBytes": 169748,
+      "stages": [
+        [
+          185
+        ]
+      ]
+    },
+    {
+      "ledger": 64780130,
+      "classic": 173,
+      "soroban": 165,
+      "sorobanBytes": 208228,
+      "stages": [
+        [
+          165
+        ]
+      ]
+    },
+    {
+      "ledger": 64780131,
+      "classic": 251,
+      "soroban": 185,
+      "sorobanBytes": 165248,
+      "stages": [
+        [
+          185
+        ]
+      ]
+    },
+    {
+      "ledger": 64780132,
+      "classic": 152,
+      "soroban": 168,
+      "sorobanBytes": 200284,
+      "stages": [
+        [
+          168
+        ]
+      ]
+    },
+    {
+      "ledger": 64780133,
+      "classic": 248,
+      "soroban": 182,
+      "sorobanBytes": 180476,
+      "stages": [
+        [
+          182
+        ]
+      ]
+    },
+    {
+      "ledger": 64780134,
+      "classic": 221,
+      "soroban": 172,
+      "sorobanBytes": 197288,
+      "stages": [
+        [
+          172
+        ]
+      ]
+    },
+    {
+      "ledger": 64780135,
+      "classic": 450,
+      "soroban": 172,
+      "sorobanBytes": 194268,
+      "stages": [
+        [
+          172
+        ]
+      ]
+    },
+    {
+      "ledger": 64780136,
+      "classic": 188,
+      "soroban": 53,
+      "sorobanBytes": 100020,
+      "stages": [
+        [
+          53
+        ]
+      ]
+    },
+    {
+      "ledger": 64780137,
+      "classic": 261,
+      "soroban": 71,
+      "sorobanBytes": 94792,
+      "stages": [
+        [
+          71
+        ]
+      ]
+    },
+    {
+      "ledger": 64780138,
+      "classic": 178,
+      "soroban": 185,
+      "sorobanBytes": 215440,
+      "stages": [
+        [
+          185
+        ]
+      ]
+    },
+    {
+      "ledger": 64780139,
+      "classic": 174,
+      "soroban": 186,
+      "sorobanBytes": 196704,
+      "stages": [
+        [
+          186
+        ]
+      ]
+    },
+    {
+      "ledger": 64780140,
+      "classic": 297,
+      "soroban": 189,
+      "sorobanBytes": 193632,
+      "stages": [
+        [
+          189
+        ]
+      ]
+    },
+    {
+      "ledger": 64780141,
+      "classic": 245,
+      "soroban": 158,
+      "sorobanBytes": 262516,
+      "stages": [
+        [
+          158
+        ]
+      ]
+    },
+    {
+      "ledger": 64780142,
+      "classic": 233,
+      "soroban": 168,
+      "sorobanBytes": 246640,
+      "stages": [
+        [
+          168
+        ]
+      ]
+    },
+    {
+      "ledger": 64780143,
+      "classic": 175,
+      "soroban": 197,
+      "sorobanBytes": 200288,
+      "stages": [
+        [
+          197
+        ]
+      ]
+    },
+    {
+      "ledger": 64780144,
+      "classic": 160,
+      "soroban": 182,
+      "sorobanBytes": 216024,
+      "stages": [
+        [
+          182
+        ]
+      ]
+    },
+    {
+      "ledger": 64780145,
+      "classic": 185,
+      "soroban": 175,
+      "sorobanBytes": 255020,
+      "stages": [
+        [
+          175
+        ]
+      ]
+    },
+    {
+      "ledger": 64780146,
+      "classic": 164,
+      "soroban": 186,
+      "sorobanBytes": 213428,
+      "stages": [
+        [
+          186
+        ]
+      ]
+    },
+    {
+      "ledger": 64780147,
+      "classic": 126,
+      "soroban": 177,
+      "sorobanBytes": 257644,
+      "stages": [
+        [
+          177
+        ]
+      ]
+    },
+    {
+      "ledger": 64780148,
+      "classic": 142,
+      "soroban": 196,
+      "sorobanBytes": 233204,
+      "stages": [
+        [
+          196
+        ]
+      ]
+    },
+    {
+      "ledger": 64780149,
+      "classic": 146,
+      "soroban": 195,
+      "sorobanBytes": 212116,
+      "stages": [
+        [
+          195
+        ]
+      ]
+    },
+    {
+      "ledger": 64780150,
+      "classic": 199,
+      "soroban": 115,
+      "sorobanBytes": 204624,
+      "stages": [
+        [
+          18,
+          97
+        ]
+      ]
+    },
+    {
+      "ledger": 64780151,
+      "classic": 173,
+      "soroban": 190,
+      "sorobanBytes": 213104,
+      "stages": [
+        [
+          190
+        ]
+      ]
+    },
+    {
+      "ledger": 64780152,
+      "classic": 179,
+      "soroban": 185,
+      "sorobanBytes": 272292,
+      "stages": [
+        [
+          185
+        ]
+      ]
+    },
+    {
+      "ledger": 64780153,
+      "classic": 194,
+      "soroban": 194,
+      "sorobanBytes": 230716,
+      "stages": [
+        [
+          194
+        ]
+      ]
+    },
+    {
+      "ledger": 64780154,
+      "classic": 141,
+      "soroban": 183,
+      "sorobanBytes": 275844,
+      "stages": [
+        [
+          183
+        ]
+      ]
+    },
+    {
+      "ledger": 64780155,
+      "classic": 152,
+      "soroban": 176,
+      "sorobanBytes": 227408,
+      "stages": [
+        [
+          176
+        ]
+      ]
+    },
+    {
+      "ledger": 64780156,
+      "classic": 151,
+      "soroban": 53,
+      "sorobanBytes": 174200,
+      "stages": [
+        [
+          53
+        ]
+      ]
+    },
+    {
+      "ledger": 64780157,
+      "classic": 151,
+      "soroban": 41,
+      "sorobanBytes": 106172,
+      "stages": [
+        [
+          41
+        ]
+      ]
+    },
+    {
+      "ledger": 64780158,
+      "classic": 134,
+      "soroban": 52,
+      "sorobanBytes": 124392,
+      "stages": [
+        [
+          52
+        ]
+      ]
+    },
+    {
+      "ledger": 64780159,
+      "classic": 150,
+      "soroban": 43,
+      "sorobanBytes": 67468,
+      "stages": [
+        [
+          43
+        ]
+      ]
+    },
+    {
+      "ledger": 64780160,
+      "classic": 125,
+      "soroban": 58,
+      "sorobanBytes": 87440,
+      "stages": [
+        [
+          58
+        ]
+      ]
+    },
+    {
+      "ledger": 64780161,
+      "classic": 181,
+      "soroban": 41,
+      "sorobanBytes": 66996,
+      "stages": [
+        [
+          41
+        ]
+      ]
+    },
+    {
+      "ledger": 64780162,
+      "classic": 130,
+      "soroban": 45,
+      "sorobanBytes": 68476,
+      "stages": [
+        [
+          45
+        ]
+      ]
+    },
+    {
+      "ledger": 64780163,
+      "classic": 168,
+      "soroban": 61,
+      "sorobanBytes": 90684,
+      "stages": [
+        [
+          61
+        ]
+      ]
+    },
+    {
+      "ledger": 64780164,
+      "classic": 155,
+      "soroban": 58,
+      "sorobanBytes": 93252,
+      "stages": [
+        [
+          58
+        ]
+      ]
+    },
+    {
+      "ledger": 64780165,
+      "classic": 198,
+      "soroban": 24,
+      "sorobanBytes": 35404,
+      "stages": [
+        [
+          24
+        ]
+      ]
+    },
+    {
+      "ledger": 64780166,
+      "classic": 155,
+      "soroban": 33,
+      "sorobanBytes": 55700,
+      "stages": [
+        [
+          33
+        ]
+      ]
+    },
+    {
+      "ledger": 64780167,
+      "classic": 129,
+      "soroban": 16,
+      "sorobanBytes": 29348,
+      "stages": [
+        [
+          16
+        ]
+      ]
+    },
+    {
+      "ledger": 64780168,
+      "classic": 151,
+      "soroban": 37,
+      "sorobanBytes": 65564,
+      "stages": [
+        [
+          37
+        ]
+      ]
+    },
+    {
+      "ledger": 64780169,
+      "classic": 168,
+      "soroban": 14,
+      "sorobanBytes": 25208,
+      "stages": [
+        [
+          14
+        ]
+      ]
+    },
+    {
+      "ledger": 64780170,
+      "classic": 138,
+      "soroban": 35,
+      "sorobanBytes": 65096,
+      "stages": [
+        [
+          35
+        ]
+      ]
+    },
+    {
+      "ledger": 64780171,
+      "classic": 188,
+      "soroban": 17,
+      "sorobanBytes": 33356,
+      "stages": [
+        [
+          17
+        ]
+      ]
+    },
+    {
+      "ledger": 64780172,
+      "classic": 148,
+      "soroban": 32,
+      "sorobanBytes": 56464,
+      "stages": [
+        [
+          32
+        ]
+      ]
+    },
+    {
+      "ledger": 64780173,
+      "classic": 303,
+      "soroban": 15,
+      "sorobanBytes": 25872,
+      "stages": [
+        [
+          15
+        ]
+      ]
+    },
+    {
+      "ledger": 64780174,
+      "classic": 166,
+      "soroban": 32,
+      "sorobanBytes": 56308,
+      "stages": [
+        [
+          32
+        ]
+      ]
+    },
+    {
+      "ledger": 64780175,
+      "classic": 155,
+      "soroban": 18,
+      "sorobanBytes": 32988,
+      "stages": [
+        [
+          18
+        ]
+      ]
+    },
+    {
+      "ledger": 64780176,
+      "classic": 337,
+      "soroban": 25,
+      "sorobanBytes": 47840,
+      "stages": [
+        [
+          25
+        ]
+      ]
+    },
+    {
+      "ledger": 64780177,
+      "classic": 178,
+      "soroban": 28,
+      "sorobanBytes": 52416,
+      "stages": [
+        [
+          28
+        ]
+      ]
+    },
+    {
+      "ledger": 64780178,
+      "classic": 330,
+      "soroban": 20,
+      "sorobanBytes": 38288,
+      "stages": [
+        [
+          20
+        ]
+      ]
+    },
+    {
+      "ledger": 64780179,
+      "classic": 328,
+      "soroban": 23,
+      "sorobanBytes": 42684,
+      "stages": [
+        [
+          23
+        ]
+      ]
+    },
+    {
+      "ledger": 64780180,
+      "classic": 524,
+      "soroban": 25,
+      "sorobanBytes": 33980,
+      "stages": [
+        [
+          25
+        ]
+      ]
+    },
+    {
+      "ledger": 64780181,
+      "classic": 238,
+      "soroban": 29,
+      "sorobanBytes": 37500,
+      "stages": [
+        [
+          29
+        ]
+      ]
+    },
+    {
+      "ledger": 64780182,
+      "classic": 291,
+      "soroban": 33,
+      "sorobanBytes": 45060,
+      "stages": [
+        [
+          33
+        ]
+      ]
+    },
+    {
+      "ledger": 64780183,
+      "classic": 189,
+      "soroban": 56,
+      "sorobanBytes": 74024,
+      "stages": [
+        [
+          56
+        ]
+      ]
+    },
+    {
+      "ledger": 64780184,
+      "classic": 192,
+      "soroban": 43,
+      "sorobanBytes": 50316,
+      "stages": [
+        [
+          43
+        ]
+      ]
+    },
+    {
+      "ledger": 64780185,
+      "classic": 159,
+      "soroban": 54,
+      "sorobanBytes": 58168,
+      "stages": [
+        [
+          54
+        ]
+      ]
+    },
+    {
+      "ledger": 64780186,
+      "classic": 160,
+      "soroban": 52,
+      "sorobanBytes": 48016,
+      "stages": [
+        [
+          52
+        ]
+      ]
+    },
+    {
+      "ledger": 64780187,
+      "classic": 157,
+      "soroban": 137,
+      "sorobanBytes": 128632,
+      "stages": [
+        [
+          137
+        ]
+      ]
+    },
+    {
+      "ledger": 64780188,
+      "classic": 154,
+      "soroban": 189,
+      "sorobanBytes": 190700,
+      "stages": [
+        [
+          189
+        ]
+      ]
+    },
+    {
+      "ledger": 64780189,
+      "classic": 149,
+      "soroban": 193,
+      "sorobanBytes": 176096,
+      "stages": [
+        [
+          193
+        ]
+      ]
+    },
+    {
+      "ledger": 64780190,
+      "classic": 148,
+      "soroban": 190,
+      "sorobanBytes": 170976,
+      "stages": [
+        [
+          190
+        ]
+      ]
+    },
+    {
+      "ledger": 64780191,
+      "classic": 191,
+      "soroban": 178,
+      "sorobanBytes": 182608,
+      "stages": [
+        [
+          178
+        ]
+      ]
+    },
+    {
+      "ledger": 64780192,
+      "classic": 171,
+      "soroban": 167,
+      "sorobanBytes": 210436,
+      "stages": [
+        [
+          167
+        ]
+      ]
+    },
+    {
+      "ledger": 64780193,
+      "classic": 158,
+      "soroban": 179,
+      "sorobanBytes": 186456,
+      "stages": [
+        [
+          179
+        ]
+      ]
+    },
+    {
+      "ledger": 64780194,
+      "classic": 258,
+      "soroban": 169,
+      "sorobanBytes": 186652,
+      "stages": [
+        [
+          169
+        ]
+      ]
+    },
+    {
+      "ledger": 64780195,
+      "classic": 172,
+      "soroban": 185,
+      "sorobanBytes": 172780,
+      "stages": [
+        [
+          185
+        ]
+      ]
+    },
+    {
+      "ledger": 64780196,
+      "classic": 150,
+      "soroban": 179,
+      "sorobanBytes": 188592,
+      "stages": [
+        [
+          179
+        ]
+      ]
+    },
+    {
+      "ledger": 64780197,
+      "classic": 127,
+      "soroban": 161,
+      "sorobanBytes": 231384,
+      "stages": [
+        [
+          161
+        ]
+      ]
+    },
+    {
+      "ledger": 64780198,
+      "classic": 153,
+      "soroban": 186,
+      "sorobanBytes": 161112,
+      "stages": [
+        [
+          186
+        ]
+      ]
+    },
+    {
+      "ledger": 64780199,
+      "classic": 162,
+      "soroban": 167,
+      "sorobanBytes": 258620,
+      "stages": [
+        [
+          167
+        ]
+      ]
+    },
+    {
+      "ledger": 64780200,
+      "classic": 242,
+      "soroban": 183,
+      "sorobanBytes": 216320,
+      "stages": [
+        [
+          183
+        ]
+      ]
+    },
+    {
+      "ledger": 64780201,
+      "classic": 179,
+      "soroban": 129,
+      "sorobanBytes": 281824,
+      "stages": [
+        [
+          129
+        ]
+      ]
+    },
+    {
+      "ledger": 64780202,
+      "classic": 181,
+      "soroban": 158,
+      "sorobanBytes": 269472,
+      "stages": [
+        [
+          158
+        ]
+      ]
+    },
+    {
+      "ledger": 64780203,
+      "classic": 220,
+      "soroban": 128,
+      "sorobanBytes": 282260,
+      "stages": [
+        [
+          128
+        ]
+      ]
+    },
+    {
+      "ledger": 64780204,
+      "classic": 179,
+      "soroban": 183,
+      "sorobanBytes": 209260,
+      "stages": [
+        [
+          183
+        ]
+      ]
+    },
+    {
+      "ledger": 64780205,
+      "classic": 146,
+      "soroban": 184,
+      "sorobanBytes": 245492,
+      "stages": [
+        [
+          184
+        ]
+      ]
+    },
+    {
+      "ledger": 64780206,
+      "classic": 140,
+      "soroban": 197,
+      "sorobanBytes": 193152,
+      "stages": [
+        [
+          197
+        ]
+      ]
+    },
+    {
+      "ledger": 64780207,
+      "classic": 182,
+      "soroban": 129,
+      "sorobanBytes": 153432,
+      "stages": [
+        [
+          129
+        ]
+      ]
+    },
+    {
+      "ledger": 64780208,
+      "classic": 140,
+      "soroban": 188,
+      "sorobanBytes": 245144,
+      "stages": [
+        [
+          188
+        ]
+      ]
+    },
+    {
+      "ledger": 64780209,
+      "classic": 180,
+      "soroban": 180,
+      "sorobanBytes": 249444,
+      "stages": [
+        [
+          180
+        ]
+      ]
+    },
+    {
+      "ledger": 64780210,
+      "classic": 203,
+      "soroban": 194,
+      "sorobanBytes": 239972,
+      "stages": [
+        [
+          194
+        ]
+      ]
+    },
+    {
+      "ledger": 64780211,
+      "classic": 149,
+      "soroban": 190,
+      "sorobanBytes": 244644,
+      "stages": [
+        [
+          190
+        ]
+      ]
+    },
+    {
+      "ledger": 64780212,
+      "classic": 251,
+      "soroban": 201,
+      "sorobanBytes": 235376,
+      "stages": [
+        [
+          201
+        ]
+      ]
+    },
+    {
+      "ledger": 64780213,
+      "classic": 124,
+      "soroban": 184,
+      "sorobanBytes": 266440,
+      "stages": [
+        [
+          184
+        ]
+      ]
+    },
+    {
+      "ledger": 64780214,
+      "classic": 171,
+      "soroban": 191,
+      "sorobanBytes": 239924,
+      "stages": [
+        [
+          191
+        ]
+      ]
+    },
+    {
+      "ledger": 64780215,
+      "classic": 124,
+      "soroban": 194,
+      "sorobanBytes": 222280,
+      "stages": [
+        [
+          194
+        ]
+      ]
+    },
+    {
+      "ledger": 64780216,
+      "classic": 160,
+      "soroban": 166,
+      "sorobanBytes": 287424,
+      "stages": [
+        [
+          166
+        ]
+      ]
+    },
+    {
+      "ledger": 64780217,
+      "classic": 124,
+      "soroban": 190,
+      "sorobanBytes": 240652,
+      "stages": [
+        [
+          190
+        ]
+      ]
+    },
+    {
+      "ledger": 64780218,
+      "classic": 289,
+      "soroban": 134,
+      "sorobanBytes": 246460,
+      "stages": [
+        [
+          134
+        ]
+      ]
+    },
+    {
+      "ledger": 64780219,
+      "classic": 475,
+      "soroban": 105,
+      "sorobanBytes": 145128,
+      "stages": [
+        [
+          105
+        ]
+      ]
+    },
+    {
+      "ledger": 64780220,
+      "classic": 296,
+      "soroban": 47,
+      "sorobanBytes": 214792,
+      "stages": [
+        [
+          47
+        ]
+      ]
+    },
+    {
+      "ledger": 64780221,
+      "classic": 196,
+      "soroban": 26,
+      "sorobanBytes": 62200,
+      "stages": [
+        [
+          26
+        ]
+      ]
+    },
+    {
+      "ledger": 64780222,
+      "classic": 145,
+      "soroban": 25,
+      "sorobanBytes": 206080,
+      "stages": [
+        [
+          25
+        ]
+      ]
+    },
+    {
+      "ledger": 64780223,
+      "classic": 134,
+      "soroban": 17,
+      "sorobanBytes": 46900,
+      "stages": [
+        [
+          17
+        ]
+      ]
+    },
+    {
+      "ledger": 64780224,
+      "classic": 280,
+      "soroban": 26,
+      "sorobanBytes": 132224,
+      "stages": [
+        [
+          26
+        ]
+      ]
+    },
+    {
+      "ledger": 64780225,
+      "classic": 287,
+      "soroban": 19,
+      "sorobanBytes": 24848,
+      "stages": [
+        [
+          19
+        ]
+      ]
+    },
+    {
+      "ledger": 64780226,
+      "classic": 155,
+      "soroban": 26,
+      "sorobanBytes": 40324,
+      "stages": [
+        [
+          26
+        ]
+      ]
+    },
+    {
+      "ledger": 64780227,
+      "classic": 144,
+      "soroban": 19,
+      "sorobanBytes": 30912,
+      "stages": [
+        [
+          19
+        ]
+      ]
+    },
+    {
+      "ledger": 64780228,
+      "classic": 155,
+      "soroban": 14,
+      "sorobanBytes": 21340,
+      "stages": [
+        [
+          14
+        ]
+      ]
+    },
+    {
+      "ledger": 64780229,
+      "classic": 193,
+      "soroban": 10,
+      "sorobanBytes": 30216,
+      "stages": [
+        [
+          10
+        ]
+      ]
+    },
+    {
+      "ledger": 64780230,
+      "classic": 137,
+      "soroban": 5,
+      "sorobanBytes": 16040,
+      "stages": [
+        [
+          5
+        ]
+      ]
+    },
+    {
+      "ledger": 64780231,
+      "classic": 130,
+      "soroban": 45,
+      "sorobanBytes": 94868,
+      "stages": [
+        [
+          45
+        ]
+      ]
+    },
+    {
+      "ledger": 64780232,
+      "classic": 113,
+      "soroban": 9,
+      "sorobanBytes": 28828,
+      "stages": [
+        [
+          9
+        ]
+      ]
+    },
+    {
+      "ledger": 64780233,
+      "classic": 183,
+      "soroban": 41,
+      "sorobanBytes": 82404,
+      "stages": [
+        [
+          41
+        ]
+      ]
+    },
+    {
+      "ledger": 64780234,
+      "classic": 479,
+      "soroban": 10,
+      "sorobanBytes": 31136,
+      "stages": [
+        [
+          10
+        ]
+      ]
+    },
+    {
+      "ledger": 64780235,
+      "classic": 266,
+      "soroban": 33,
+      "sorobanBytes": 72312,
+      "stages": [
+        [
+          33
+        ]
+      ]
+    },
+    {
+      "ledger": 64780236,
+      "classic": 327,
+      "soroban": 18,
+      "sorobanBytes": 42208,
+      "stages": [
+        [
+          18
+        ]
+      ]
+    },
+    {
+      "ledger": 64780237,
+      "classic": 255,
+      "soroban": 24,
+      "sorobanBytes": 52520,
+      "stages": [
+        [
+          24
+        ]
+      ]
+    },
+    {
+      "ledger": 64780238,
+      "classic": 166,
+      "soroban": 28,
+      "sorobanBytes": 59548,
+      "stages": [
+        [
+          28
+        ]
+      ]
+    },
+    {
+      "ledger": 64780239,
+      "classic": 186,
+      "soroban": 20,
+      "sorobanBytes": 44856,
+      "stages": [
+        [
+          20
+        ]
+      ]
+    },
+    {
+      "ledger": 64780240,
+      "classic": 328,
+      "soroban": 28,
+      "sorobanBytes": 64888,
+      "stages": [
+        [
+          28
+        ]
+      ]
+    },
+    {
+      "ledger": 64780241,
+      "classic": 207,
+      "soroban": 26,
+      "sorobanBytes": 49996,
+      "stages": [
+        [
+          26
+        ]
+      ]
+    },
+    {
+      "ledger": 64780242,
+      "classic": 146,
+      "soroban": 34,
+      "sorobanBytes": 53916,
+      "stages": [
+        [
+          34
+        ]
+      ]
+    },
+    {
+      "ledger": 64780243,
+      "classic": 148,
+      "soroban": 38,
+      "sorobanBytes": 74572,
+      "stages": [
+        [
+          38
+        ]
+      ]
+    },
+    {
+      "ledger": 64780244,
+      "classic": 152,
+      "soroban": 55,
+      "sorobanBytes": 76680,
+      "stages": [
+        [
+          55
+        ]
+      ]
+    },
+    {
+      "ledger": 64780245,
+      "classic": 190,
+      "soroban": 63,
+      "sorobanBytes": 83432,
+      "stages": [
+        [
+          63
+        ]
+      ]
+    },
+    {
+      "ledger": 64780246,
+      "classic": 161,
+      "soroban": 61,
+      "sorobanBytes": 86548,
+      "stages": [
+        [
+          61
+        ]
+      ]
+    },
+    {
+      "ledger": 64780247,
+      "classic": 161,
+      "soroban": 119,
+      "sorobanBytes": 123640,
+      "stages": [
+        [
+          119
+        ]
+      ]
+    },
+    {
+      "ledger": 64780248,
+      "classic": 179,
+      "soroban": 205,
+      "sorobanBytes": 178012,
+      "stages": [
+        [
+          205
+        ]
+      ]
+    },
+    {
+      "ledger": 64780249,
+      "classic": 165,
+      "soroban": 197,
+      "sorobanBytes": 167892,
+      "stages": [
+        [
+          197
+        ]
+      ]
+    },
+    {
+      "ledger": 64780250,
+      "classic": 164,
+      "soroban": 200,
+      "sorobanBytes": 174160,
+      "stages": [
+        [
+          200
+        ]
+      ]
+    },
+    {
+      "ledger": 64780251,
+      "classic": 267,
+      "soroban": 197,
+      "sorobanBytes": 164900,
+      "stages": [
+        [
+          197
+        ]
+      ]
+    },
+    {
+      "ledger": 64780252,
+      "classic": 164,
+      "soroban": 144,
+      "sorobanBytes": 262428,
+      "stages": [
+        [
+          144
+        ]
+      ]
+    },
+    {
+      "ledger": 64780253,
+      "classic": 121,
+      "soroban": 151,
+      "sorobanBytes": 225156,
+      "stages": [
+        [
+          151
+        ]
+      ]
+    },
+    {
+      "ledger": 64780254,
+      "classic": 152,
+      "soroban": 157,
+      "sorobanBytes": 230224,
+      "stages": [
+        [
+          157
+        ]
+      ]
+    },
+    {
+      "ledger": 64780255,
+      "classic": 190,
+      "soroban": 177,
+      "sorobanBytes": 202176,
+      "stages": [
+        [
+          177
+        ]
+      ]
+    },
+    {
+      "ledger": 64780256,
+      "classic": 181,
+      "soroban": 166,
+      "sorobanBytes": 221664,
+      "stages": [
+        [
+          166
+        ]
+      ]
+    },
+    {
+      "ledger": 64780257,
+      "classic": 142,
+      "soroban": 181,
+      "sorobanBytes": 198476,
+      "stages": [
+        [
+          181
+        ]
+      ]
+    },
+    {
+      "ledger": 64780258,
+      "classic": 153,
+      "soroban": 171,
+      "sorobanBytes": 208824,
+      "stages": [
+        [
+          171
+        ]
+      ]
+    },
+    {
+      "ledger": 64780259,
+      "classic": 181,
+      "soroban": 149,
+      "sorobanBytes": 174496,
+      "stages": [
+        [
+          149
+        ]
+      ]
+    },
+    {
+      "ledger": 64780260,
+      "classic": 151,
+      "soroban": 74,
+      "sorobanBytes": 130516,
+      "stages": [
+        [
+          74
+        ]
+      ]
+    },
+    {
+      "ledger": 64780261,
+      "classic": 138,
+      "soroban": 47,
+      "sorobanBytes": 49932,
+      "stages": [
+        [
+          47
+        ]
+      ]
+    },
+    {
+      "ledger": 64780262,
+      "classic": 132,
+      "soroban": 83,
+      "sorobanBytes": 80248,
+      "stages": [
+        [
+          83
+        ]
+      ]
+    },
+    {
+      "ledger": 64780263,
+      "classic": 135,
+      "soroban": 99,
+      "sorobanBytes": 91124,
+      "stages": [
+        [
+          99
+        ]
+      ]
+    },
+    {
+      "ledger": 64780264,
+      "classic": 122,
+      "soroban": 37,
+      "sorobanBytes": 40424,
+      "stages": [
+        [
+          37
+        ]
+      ]
+    },
+    {
+      "ledger": 64780265,
+      "classic": 128,
+      "soroban": 27,
+      "sorobanBytes": 230892,
+      "stages": [
+        [
+          27
+        ]
+      ]
+    },
+    {
+      "ledger": 64780266,
+      "classic": 166,
+      "soroban": 142,
+      "sorobanBytes": 281664,
+      "stages": [
+        [
+          142
+        ]
+      ]
+    },
+    {
+      "ledger": 64780267,
+      "classic": 155,
+      "soroban": 96,
+      "sorobanBytes": 277876,
+      "stages": [
+        [
+          96
+        ]
+      ]
+    },
+    {
+      "ledger": 64780268,
+      "classic": 116,
+      "soroban": 70,
+      "sorobanBytes": 274940,
+      "stages": [
+        [
+          70
+        ]
+      ]
+    },
+    {
+      "ledger": 64780269,
+      "classic": 184,
+      "soroban": 121,
+      "sorobanBytes": 281528,
+      "stages": [
+        [
+          121
+        ]
+      ]
+    },
+    {
+      "ledger": 64780270,
+      "classic": 228,
+      "soroban": 141,
+      "sorobanBytes": 283948,
+      "stages": [
+        [
+          141
+        ]
+      ]
+    },
+    {
+      "ledger": 64780271,
+      "classic": 152,
+      "soroban": 188,
+      "sorobanBytes": 261376,
+      "stages": [
+        [
+          188
+        ]
+      ]
+    },
+    {
+      "ledger": 64780272,
+      "classic": 399,
+      "soroban": 172,
+      "sorobanBytes": 284352,
+      "stages": [
+        [
+          172
+        ]
+      ]
+    },
+    {
+      "ledger": 64780273,
+      "classic": 133,
+      "soroban": 188,
+      "sorobanBytes": 250304,
+      "stages": [
+        [
+          188
+        ]
+      ]
+    },
+    {
+      "ledger": 64780274,
+      "classic": 184,
+      "soroban": 185,
+      "sorobanBytes": 244416,
+      "stages": [
+        [
+          185
+        ]
+      ]
+    },
+    {
+      "ledger": 64780275,
+      "classic": 246,
+      "soroban": 132,
+      "sorobanBytes": 205364,
+      "stages": [
+        [
+          132
+        ]
+      ]
+    },
+    {
+      "ledger": 64780276,
+      "classic": 276,
+      "soroban": 174,
+      "sorobanBytes": 288064,
+      "stages": [
+        [
+          174
+        ]
+      ]
+    },
+    {
+      "ledger": 64780277,
+      "classic": 189,
+      "soroban": 170,
+      "sorobanBytes": 265628,
+      "stages": [
+        [
+          170
+        ]
+      ]
+    },
+    {
+      "ledger": 64780278,
+      "classic": 138,
+      "soroban": 188,
+      "sorobanBytes": 252532,
+      "stages": [
+        [
+          188
+        ]
+      ]
+    },
+    {
+      "ledger": 64780279,
+      "classic": 126,
+      "soroban": 190,
+      "sorobanBytes": 225244,
+      "stages": [
+        [
+          190
+        ]
+      ]
+    },
+    {
+      "ledger": 64780280,
+      "classic": 112,
+      "soroban": 194,
+      "sorobanBytes": 239616,
+      "stages": [
+        [
+          194
+        ]
+      ]
+    },
+    {
+      "ledger": 64780281,
+      "classic": 102,
+      "soroban": 191,
+      "sorobanBytes": 231644,
+      "stages": [
+        [
+          191
+        ]
+      ]
+    },
+    {
+      "ledger": 64780282,
+      "classic": 254,
+      "soroban": 188,
+      "sorobanBytes": 228604,
+      "stages": [
+        [
+          188
+        ]
+      ]
+    },
+    {
+      "ledger": 64780283,
+      "classic": 136,
+      "soroban": 146,
+      "sorobanBytes": 284664,
+      "stages": [
+        [
+          146
+        ]
+      ]
+    },
+    {
+      "ledger": 64780284,
+      "classic": 165,
+      "soroban": 200,
+      "sorobanBytes": 224552,
+      "stages": [
+        [
+          200
+        ]
+      ]
+    },
+    {
+      "ledger": 64780285,
+      "classic": 118,
+      "soroban": 133,
+      "sorobanBytes": 282172,
+      "stages": [
+        [
+          133
+        ]
+      ]
+    },
+    {
+      "ledger": 64780286,
+      "classic": 162,
+      "soroban": 136,
+      "sorobanBytes": 196804,
+      "stages": [
+        [
+          136
+        ]
+      ]
+    },
+    {
+      "ledger": 64780287,
+      "classic": 152,
+      "soroban": 101,
+      "sorobanBytes": 134836,
+      "stages": [
+        [
+          101
+        ]
+      ]
+    },
+    {
+      "ledger": 64780288,
+      "classic": 155,
+      "soroban": 40,
+      "sorobanBytes": 47968,
+      "stages": [
+        [
+          40
+        ]
+      ]
+    },
+    {
+      "ledger": 64780289,
+      "classic": 155,
+      "soroban": 37,
+      "sorobanBytes": 56392,
+      "stages": [
+        [
+          37
+        ]
+      ]
+    },
+    {
+      "ledger": 64780290,
+      "classic": 158,
+      "soroban": 37,
+      "sorobanBytes": 47028,
+      "stages": [
+        [
+          37
+        ]
+      ]
+    },
+    {
+      "ledger": 64780291,
+      "classic": 165,
+      "soroban": 36,
+      "sorobanBytes": 62432,
+      "stages": [
+        [
+          36
+        ]
+      ]
+    },
+    {
+      "ledger": 64780292,
+      "classic": 176,
+      "soroban": 45,
+      "sorobanBytes": 77064,
+      "stages": [
+        [
+          45
+        ]
+      ]
+    },
+    {
+      "ledger": 64780293,
+      "classic": 301,
+      "soroban": 24,
+      "sorobanBytes": 34884,
+      "stages": [
+        [
+          24
+        ]
+      ]
+    },
+    {
+      "ledger": 64780294,
+      "classic": 192,
+      "soroban": 24,
+      "sorobanBytes": 41388,
+      "stages": [
+        [
+          24
+        ]
+      ]
+    },
+    {
+      "ledger": 64780295,
+      "classic": 178,
+      "soroban": 23,
+      "sorobanBytes": 41716,
+      "stages": [
+        [
+          23
+        ]
+      ]
+    },
+    {
+      "ledger": 64780296,
+      "classic": 164,
+      "soroban": 12,
+      "sorobanBytes": 17292,
+      "stages": [
+        [
+          12
+        ]
+      ]
+    },
+    {
+      "ledger": 64780297,
+      "classic": 183,
+      "soroban": 8,
+      "sorobanBytes": 17060,
+      "stages": [
+        [
+          8
+        ]
+      ]
+    },
+    {
+      "ledger": 64780298,
+      "classic": 160,
+      "soroban": 4,
+      "sorobanBytes": 5964,
+      "stages": [
+        [
+          4
+        ]
+      ]
+    },
+    {
+      "ledger": 64780299,
+      "classic": 193,
+      "soroban": 15,
+      "sorobanBytes": 47728,
+      "stages": [
+        [
+          15
+        ]
+      ]
+    },
+    {
+      "ledger": 64780300,
+      "classic": 166,
+      "soroban": 6,
+      "sorobanBytes": 18024,
+      "stages": [
+        [
+          6
+        ]
+      ]
+    },
+    {
+      "ledger": 64780301,
+      "classic": 164,
+      "soroban": 7,
+      "sorobanBytes": 18156,
+      "stages": [
+        [
+          7
+        ]
+      ]
+    },
+    {
+      "ledger": 64780302,
+      "classic": 150,
+      "soroban": 2,
+      "sorobanBytes": 5980,
+      "stages": [
+        [
+          2
+        ]
+      ]
+    },
+    {
+      "ledger": 64780303,
+      "classic": 183,
+      "soroban": 13,
+      "sorobanBytes": 31196,
+      "stages": [
+        [
+          13
+        ]
+      ]
+    },
+    {
+      "ledger": 64780304,
+      "classic": 195,
+      "soroban": 30,
+      "sorobanBytes": 60856,
+      "stages": [
+        [
+          30
+        ]
+      ]
+    },
+    {
+      "ledger": 64780305,
+      "classic": 168,
+      "soroban": 22,
+      "sorobanBytes": 37216,
+      "stages": [
+        [
+          22
+        ]
+      ]
+    },
+    {
+      "ledger": 64780306,
+      "classic": 288,
+      "soroban": 30,
+      "sorobanBytes": 58796,
+      "stages": [
+        [
+          30
+        ]
+      ]
+    },
+    {
+      "ledger": 64780307,
+      "classic": 176,
+      "soroban": 24,
+      "sorobanBytes": 48780,
+      "stages": [
+        [
+          24
+        ]
+      ]
+    },
+    {
+      "ledger": 64780308,
+      "classic": 204,
+      "soroban": 25,
+      "sorobanBytes": 48784,
+      "stages": [
+        [
+          25
+        ]
+      ]
+    },
+    {
+      "ledger": 64780309,
+      "classic": 218,
+      "soroban": 34,
+      "sorobanBytes": 52168,
+      "stages": [
+        [
+          34
+        ]
+      ]
+    },
+    {
+      "ledger": 64780310,
+      "classic": 186,
+      "soroban": 30,
+      "sorobanBytes": 47152,
+      "stages": [
+        [
+          30
+        ]
+      ]
+    },
+    {
+      "ledger": 64780311,
+      "classic": 212,
+      "soroban": 43,
+      "sorobanBytes": 61324,
+      "stages": [
+        [
+          43
+        ]
+      ]
+    },
+    {
+      "ledger": 64780312,
+      "classic": 154,
+      "soroban": 74,
+      "sorobanBytes": 98916,
+      "stages": [
+        [
+          74
+        ]
+      ]
+    },
+    {
+      "ledger": 64780313,
+      "classic": 173,
+      "soroban": 201,
+      "sorobanBytes": 168520,
+      "stages": [
+        [
+          201
+        ]
+      ]
+    },
+    {
+      "ledger": 64780314,
+      "classic": 185,
+      "soroban": 201,
+      "sorobanBytes": 178676,
+      "stages": [
+        [
+          201
+        ]
+      ]
+    },
+    {
+      "ledger": 64780315,
+      "classic": 219,
+      "soroban": 201,
+      "sorobanBytes": 168636,
+      "stages": [
+        [
+          201
+        ]
+      ]
+    },
+    {
+      "ledger": 64780316,
+      "classic": 168,
+      "soroban": 198,
+      "sorobanBytes": 172676,
+      "stages": [
+        [
+          198
+        ]
+      ]
+    },
+    {
+      "ledger": 64780317,
+      "classic": 150,
+      "soroban": 178,
+      "sorobanBytes": 205308,
+      "stages": [
+        [
+          178
+        ]
+      ]
+    },
+    {
+      "ledger": 64780318,
+      "classic": 146,
+      "soroban": 141,
+      "sorobanBytes": 208144,
+      "stages": [
+        [
+          141
+        ]
+      ]
+    },
+    {
+      "ledger": 64780319,
+      "classic": 152,
+      "soroban": 121,
+      "sorobanBytes": 256104,
+      "stages": [
+        [
+          118,
+          3
+        ]
+      ]
+    },
+    {
+      "ledger": 64780320,
+      "classic": 210,
+      "soroban": 137,
+      "sorobanBytes": 242856,
+      "stages": [
+        [
+          137
+        ]
+      ]
+    },
+    {
+      "ledger": 64780321,
+      "classic": 250,
+      "soroban": 157,
+      "sorobanBytes": 231420,
+      "stages": [
+        [
+          157
+        ]
+      ]
+    },
+    {
+      "ledger": 64780322,
+      "classic": 337,
+      "soroban": 177,
+      "sorobanBytes": 203812,
+      "stages": [
+        [
+          177
+        ]
+      ]
+    },
+    {
+      "ledger": 64780323,
+      "classic": 323,
+      "soroban": 177,
+      "sorobanBytes": 221596,
+      "stages": [
+        [
+          177
+        ]
+      ]
+    },
+    {
+      "ledger": 64780324,
+      "classic": 190,
+      "soroban": 189,
+      "sorobanBytes": 204056,
+      "stages": [
+        [
+          189
+        ]
+      ]
+    },
+    {
+      "ledger": 64780325,
+      "classic": 165,
+      "soroban": 108,
+      "sorobanBytes": 162048,
+      "stages": [
+        [
+          108
+        ]
+      ]
+    },
+    {
+      "ledger": 64780326,
+      "classic": 221,
+      "soroban": 60,
+      "sorobanBytes": 95416,
+      "stages": [
+        [
+          60
+        ]
+      ]
+    },
+    {
+      "ledger": 64780327,
+      "classic": 839,
+      "soroban": 132,
+      "sorobanBytes": 159508,
+      "stages": [
+        [
+          132
+        ]
+      ]
+    },
+    {
+      "ledger": 64780328,
+      "classic": 545,
+      "soroban": 119,
+      "sorobanBytes": 109168,
+      "stages": [
+        [
+          119
+        ]
+      ]
+    },
+    {
+      "ledger": 64780329,
+      "classic": 349,
+      "soroban": 62,
+      "sorobanBytes": 65144,
+      "stages": [
+        [
+          62
+        ]
+      ]
+    },
+    {
+      "ledger": 64780330,
+      "classic": 223,
+      "soroban": 28,
+      "sorobanBytes": 268716,
+      "stages": [
+        [
+          28
+        ]
+      ]
+    },
+    {
+      "ledger": 64780331,
+      "classic": 222,
+      "soroban": 32,
+      "sorobanBytes": 269480,
+      "stages": [
+        [
+          32
+        ]
+      ]
+    },
+    {
+      "ledger": 64780332,
+      "classic": 182,
+      "soroban": 56,
+      "sorobanBytes": 273240,
+      "stages": [
+        [
+          56
+        ]
+      ]
+    },
+    {
+      "ledger": 64780333,
+      "classic": 242,
+      "soroban": 85,
+      "sorobanBytes": 276072,
+      "stages": [
+        [
+          85
+        ]
+      ]
+    },
+    {
+      "ledger": 64780334,
+      "classic": 161,
+      "soroban": 122,
+      "sorobanBytes": 281216,
+      "stages": [
+        [
+          122
+        ]
+      ]
+    },
+    {
+      "ledger": 64780335,
+      "classic": 162,
+      "soroban": 101,
+      "sorobanBytes": 278480,
+      "stages": [
+        [
+          101
+        ]
+      ]
+    },
+    {
+      "ledger": 64780336,
+      "classic": 136,
+      "soroban": 150,
+      "sorobanBytes": 284728,
+      "stages": [
+        [
+          150
+        ]
+      ]
+    },
+    {
+      "ledger": 64780337,
+      "classic": 114,
+      "soroban": 193,
+      "sorobanBytes": 258256,
+      "stages": [
+        [
+          193
+        ]
+      ]
+    },
+    {
+      "ledger": 64780338,
+      "classic": 131,
+      "soroban": 180,
+      "sorobanBytes": 235904,
+      "stages": [
+        [
+          180
+        ]
+      ]
+    },
+    {
+      "ledger": 64780339,
+      "classic": 294,
+      "soroban": 166,
+      "sorobanBytes": 280840,
+      "stages": [
+        [
+          166
+        ]
+      ]
+    },
+    {
+      "ledger": 64780340,
+      "classic": 426,
+      "soroban": 196,
+      "sorobanBytes": 273404,
+      "stages": [
+        [
+          196
+        ]
+      ]
+    },
+    {
+      "ledger": 64780341,
+      "classic": 186,
+      "soroban": 126,
+      "sorobanBytes": 281988,
+      "stages": [
+        [
+          126
+        ]
+      ]
+    },
+    {
+      "ledger": 64780342,
+      "classic": 154,
+      "soroban": 193,
+      "sorobanBytes": 237728,
+      "stages": [
+        [
+          193
+        ]
+      ]
+    },
+    {
+      "ledger": 64780343,
+      "classic": 153,
+      "soroban": 191,
+      "sorobanBytes": 246008,
+      "stages": [
+        [
+          191
+        ]
+      ]
+    },
+    {
+      "ledger": 64780344,
+      "classic": 145,
+      "soroban": 187,
+      "sorobanBytes": 269020,
+      "stages": [
+        [
+          187
+        ]
+      ]
+    },
+    {
+      "ledger": 64780345,
+      "classic": 486,
+      "soroban": 203,
+      "sorobanBytes": 221100,
+      "stages": [
+        [
+          203
+        ]
+      ]
+    },
+    {
+      "ledger": 64780346,
+      "classic": 163,
+      "soroban": 204,
+      "sorobanBytes": 206108,
+      "stages": [
+        [
+          204
+        ]
+      ]
+    },
+    {
+      "ledger": 64780347,
+      "classic": 192,
+      "soroban": 188,
+      "sorobanBytes": 233524,
+      "stages": [
+        [
+          188
+        ]
+      ]
+    },
+    {
+      "ledger": 64780348,
+      "classic": 385,
+      "soroban": 192,
+      "sorobanBytes": 269224,
+      "stages": [
+        [
+          192
+        ]
+      ]
+    },
+    {
+      "ledger": 64780349,
+      "classic": 451,
+      "soroban": 172,
+      "sorobanBytes": 220916,
+      "stages": [
+        [
+          172
+        ]
+      ]
+    },
+    {
+      "ledger": 64780350,
+      "classic": 236,
+      "soroban": 185,
+      "sorobanBytes": 289584,
+      "stages": [
+        [
+          185
+        ]
+      ]
+    },
+    {
+      "ledger": 64780351,
+      "classic": 419,
+      "soroban": 199,
+      "sorobanBytes": 256052,
+      "stages": [
+        [
+          199
+        ]
+      ]
+    },
+    {
+      "ledger": 64780352,
+      "classic": 201,
+      "soroban": 116,
+      "sorobanBytes": 192236,
+      "stages": [
+        [
+          116
+        ]
+      ]
+    },
+    {
+      "ledger": 64780353,
+      "classic": 198,
+      "soroban": 85,
+      "sorobanBytes": 214264,
+      "stages": [
+        [
+          85
+        ]
+      ]
+    },
+    {
+      "ledger": 64780354,
+      "classic": 228,
+      "soroban": 59,
+      "sorobanBytes": 79948,
+      "stages": [
+        [
+          59
+        ]
+      ]
+    },
+    {
+      "ledger": 64780355,
+      "classic": 171,
+      "soroban": 58,
+      "sorobanBytes": 98444,
+      "stages": [
+        [
+          58
+        ]
+      ]
+    },
+    {
+      "ledger": 64780356,
+      "classic": 175,
+      "soroban": 64,
+      "sorobanBytes": 102316,
+      "stages": [
+        [
+          64
+        ]
+      ]
+    },
+    {
+      "ledger": 64780357,
+      "classic": 207,
+      "soroban": 49,
+      "sorobanBytes": 84928,
+      "stages": [
+        [
+          49
+        ]
+      ]
+    },
+    {
+      "ledger": 64780358,
+      "classic": 140,
+      "soroban": 57,
+      "sorobanBytes": 89984,
+      "stages": [
+        [
+          57
+        ]
+      ]
+    },
+    {
+      "ledger": 64780359,
+      "classic": 139,
+      "soroban": 49,
+      "sorobanBytes": 78312,
+      "stages": [
+        [
+          49
+        ]
+      ]
+    },
+    {
+      "ledger": 64780360,
+      "classic": 148,
+      "soroban": 39,
+      "sorobanBytes": 67068,
+      "stages": [
+        [
+          39
+        ]
+      ]
+    },
+    {
+      "ledger": 64780361,
+      "classic": 123,
+      "soroban": 38,
+      "sorobanBytes": 70784,
+      "stages": [
+        [
+          38
+        ]
+      ]
+    },
+    {
+      "ledger": 64780362,
+      "classic": 185,
+      "soroban": 29,
+      "sorobanBytes": 46924,
+      "stages": [
+        [
+          29
+        ]
+      ]
+    },
+    {
+      "ledger": 64780363,
+      "classic": 529,
+      "soroban": 20,
+      "sorobanBytes": 40284,
+      "stages": [
+        [
+          20
+        ]
+      ]
+    },
+    {
+      "ledger": 64780364,
+      "classic": 241,
+      "soroban": 31,
+      "sorobanBytes": 61100,
+      "stages": [
+        [
+          31
+        ]
+      ]
+    },
+    {
+      "ledger": 64780365,
+      "classic": 195,
+      "soroban": 19,
+      "sorobanBytes": 39324,
+      "stages": [
+        [
+          19
+        ]
+      ]
+    },
+    {
+      "ledger": 64780366,
+      "classic": 161,
+      "soroban": 32,
+      "sorobanBytes": 60284,
+      "stages": [
+        [
+          32
+        ]
+      ]
+    },
+    {
+      "ledger": 64780367,
+      "classic": 129,
+      "soroban": 24,
+      "sorobanBytes": 46260,
+      "stages": [
+        [
+          24
+        ]
+      ]
+    },
+    {
+      "ledger": 64780368,
+      "classic": 177,
+      "soroban": 29,
+      "sorobanBytes": 55600,
+      "stages": [
+        [
+          29
+        ]
+      ]
+    },
+    {
+      "ledger": 64780369,
+      "classic": 157,
+      "soroban": 19,
+      "sorobanBytes": 36284,
+      "stages": [
+        [
+          19
+        ]
+      ]
+    },
+    {
+      "ledger": 64780370,
+      "classic": 161,
+      "soroban": 29,
+      "sorobanBytes": 57736,
+      "stages": [
+        [
+          29
+        ]
+      ]
+    },
+    {
+      "ledger": 64780371,
+      "classic": 193,
+      "soroban": 20,
+      "sorobanBytes": 39100,
+      "stages": [
+        [
+          20
+        ]
+      ]
+    },
+    {
+      "ledger": 64780372,
+      "classic": 158,
+      "soroban": 36,
+      "sorobanBytes": 67868,
+      "stages": [
+        [
+          36
+        ]
+      ]
+    },
+    {
+      "ledger": 64780373,
+      "classic": 142,
+      "soroban": 31,
+      "sorobanBytes": 49376,
+      "stages": [
+        [
+          31
+        ]
+      ]
+    },
+    {
+      "ledger": 64780374,
+      "classic": 380,
+      "soroban": 46,
+      "sorobanBytes": 69192,
+      "stages": [
+        [
+          46
+        ]
+      ]
+    },
+    {
+      "ledger": 64780375,
+      "classic": 464,
+      "soroban": 34,
+      "sorobanBytes": 51792,
+      "stages": [
+        [
+          34
+        ]
+      ]
+    },
+    {
+      "ledger": 64780376,
+      "classic": 263,
+      "soroban": 52,
+      "sorobanBytes": 72416,
+      "stages": [
+        [
+          52
+        ]
+      ]
+    },
+    {
+      "ledger": 64780377,
+      "classic": 179,
+      "soroban": 62,
+      "sorobanBytes": 74264,
+      "stages": [
+        [
+          62
+        ]
+      ]
+    },
+    {
+      "ledger": 64780378,
+      "classic": 339,
+      "soroban": 63,
+      "sorobanBytes": 76064,
+      "stages": [
+        [
+          63
+        ]
+      ]
+    },
+    {
+      "ledger": 64780379,
+      "classic": 767,
+      "soroban": 133,
+      "sorobanBytes": 121112,
+      "stages": [
+        [
+          133
+        ]
+      ]
+    },
+    {
+      "ledger": 64780380,
+      "classic": 741,
+      "soroban": 202,
+      "sorobanBytes": 172888,
+      "stages": [
+        [
+          202
+        ]
+      ]
+    },
+    {
+      "ledger": 64780381,
+      "classic": 756,
+      "soroban": 178,
+      "sorobanBytes": 156684,
+      "stages": [
+        [
+          178
+        ]
+      ]
+    },
+    {
+      "ledger": 64780382,
+      "classic": 395,
+      "soroban": 125,
+      "sorobanBytes": 259304,
+      "stages": [
+        [
+          125
+        ]
+      ]
+    },
+    {
+      "ledger": 64780383,
+      "classic": 255,
+      "soroban": 132,
+      "sorobanBytes": 246084,
+      "stages": [
+        [
+          132
+        ]
+      ]
+    },
+    {
+      "ledger": 64780384,
+      "classic": 432,
+      "soroban": 129,
+      "sorobanBytes": 267984,
+      "stages": [
+        [
+          123,
+          6
+        ]
+      ]
+    },
+    {
+      "ledger": 64780385,
+      "classic": 427,
+      "soroban": 160,
+      "sorobanBytes": 251796,
+      "stages": [
+        [
+          160
+        ]
+      ]
+    },
+    {
+      "ledger": 64780386,
+      "classic": 229,
+      "soroban": 163,
+      "sorobanBytes": 212952,
+      "stages": [
+        [
+          163
+        ]
+      ]
+    },
+    {
+      "ledger": 64780387,
+      "classic": 245,
+      "soroban": 173,
+      "sorobanBytes": 199288,
+      "stages": [
+        [
+          173
+        ]
+      ]
+    },
+    {
+      "ledger": 64780388,
+      "classic": 287,
+      "soroban": 180,
+      "sorobanBytes": 197904,
+      "stages": [
+        [
+          180
+        ]
+      ]
+    },
+    {
+      "ledger": 64780389,
+      "classic": 281,
+      "soroban": 189,
+      "sorobanBytes": 182180,
+      "stages": [
+        [
+          189
+        ]
+      ]
+    },
+    {
+      "ledger": 64780390,
+      "classic": 387,
+      "soroban": 186,
+      "sorobanBytes": 193924,
+      "stages": [
+        [
+          186
+        ]
+      ]
+    },
+    {
+      "ledger": 64780391,
+      "classic": 259,
+      "soroban": 179,
+      "sorobanBytes": 222864,
+      "stages": [
+        [
+          179
+        ]
+      ]
+    },
+    {
+      "ledger": 64780392,
+      "classic": 142,
+      "soroban": 166,
+      "sorobanBytes": 173688,
+      "stages": [
+        [
+          166
+        ]
+      ]
+    },
+    {
+      "ledger": 64780393,
+      "classic": 145,
+      "soroban": 67,
+      "sorobanBytes": 87104,
+      "stages": [
+        [
+          67
+        ]
+      ]
+    },
+    {
+      "ledger": 64780394,
+      "classic": 128,
+      "soroban": 23,
+      "sorobanBytes": 58620,
+      "stages": [
+        [
+          23
+        ]
+      ]
+    },
+    {
+      "ledger": 64780395,
+      "classic": 337,
+      "soroban": 47,
+      "sorobanBytes": 271296,
+      "stages": [
+        [
+          47
+        ]
+      ]
+    },
+    {
+      "ledger": 64780396,
+      "classic": 417,
+      "soroban": 105,
+      "sorobanBytes": 279484,
+      "stages": [
+        [
+          105
+        ]
+      ]
+    },
+    {
+      "ledger": 64780397,
+      "classic": 130,
+      "soroban": 73,
+      "sorobanBytes": 274980,
+      "stages": [
+        [
+          73
+        ]
+      ]
+    },
+    {
+      "ledger": 64780398,
+      "classic": 320,
+      "soroban": 103,
+      "sorobanBytes": 279020,
+      "stages": [
+        [
+          103
+        ]
+      ]
+    },
+    {
+      "ledger": 64780399,
+      "classic": 136,
+      "soroban": 112,
+      "sorobanBytes": 280324,
+      "stages": [
+        [
+          112
+        ]
+      ]
+    },
+    {
+      "ledger": 64780400,
+      "classic": 302,
+      "soroban": 187,
+      "sorobanBytes": 231564,
+      "stages": [
+        [
+          187
+        ]
+      ]
+    },
+    {
+      "ledger": 64780401,
+      "classic": 334,
+      "soroban": 97,
+      "sorobanBytes": 278464,
+      "stages": [
+        [
+          97
+        ]
+      ]
+    },
+    {
+      "ledger": 64780402,
+      "classic": 225,
+      "soroban": 183,
+      "sorobanBytes": 251412,
+      "stages": [
+        [
+          183
+        ]
+      ]
+    },
+    {
+      "ledger": 64780403,
+      "classic": 151,
+      "soroban": 181,
+      "sorobanBytes": 230632,
+      "stages": [
+        [
+          181
+        ]
+      ]
+    },
+    {
+      "ledger": 64780404,
+      "classic": 150,
+      "soroban": 155,
+      "sorobanBytes": 236960,
+      "stages": [
+        [
+          155
+        ]
+      ]
+    },
+    {
+      "ledger": 64780405,
+      "classic": 182,
+      "soroban": 152,
+      "sorobanBytes": 284852,
+      "stages": [
+        [
+          152
+        ]
+      ]
+    },
+    {
+      "ledger": 64780406,
+      "classic": 181,
+      "soroban": 185,
+      "sorobanBytes": 244508,
+      "stages": [
+        [
+          185
+        ]
+      ]
+    },
+    {
+      "ledger": 64780407,
+      "classic": 227,
+      "soroban": 189,
+      "sorobanBytes": 237340,
+      "stages": [
+        [
+          189
+        ]
+      ]
+    },
+    {
+      "ledger": 64780408,
+      "classic": 180,
+      "soroban": 172,
+      "sorobanBytes": 243704,
+      "stages": [
+        [
+          172
+        ]
+      ]
+    },
+    {
+      "ledger": 64780409,
+      "classic": 110,
+      "soroban": 151,
+      "sorobanBytes": 260432,
+      "stages": [
+        [
+          151
+        ]
+      ]
+    },
+    {
+      "ledger": 64780410,
+      "classic": 176,
+      "soroban": 191,
+      "sorobanBytes": 237968,
+      "stages": [
+        [
+          191
+        ]
+      ]
+    },
+    {
+      "ledger": 64780411,
+      "classic": 196,
+      "soroban": 177,
+      "sorobanBytes": 263360,
+      "stages": [
+        [
+          177
+        ]
+      ]
+    },
+    {
+      "ledger": 64780412,
+      "classic": 181,
+      "soroban": 184,
+      "sorobanBytes": 249004,
+      "stages": [
+        [
+          184
+        ]
+      ]
+    },
+    {
+      "ledger": 64780413,
+      "classic": 172,
+      "soroban": 182,
+      "sorobanBytes": 274432,
+      "stages": [
+        [
+          182
+        ]
+      ]
+    },
+    {
+      "ledger": 64780414,
+      "classic": 138,
+      "soroban": 147,
+      "sorobanBytes": 284520,
+      "stages": [
+        [
+          147
+        ]
+      ]
+    },
+    {
+      "ledger": 64780415,
+      "classic": 128,
+      "soroban": 175,
+      "sorobanBytes": 288508,
+      "stages": [
+        [
+          175
+        ]
+      ]
+    },
+    {
+      "ledger": 64780416,
+      "classic": 153,
+      "soroban": 170,
+      "sorobanBytes": 285832,
+      "stages": [
+        [
+          170
+        ]
+      ]
+    },
+    {
+      "ledger": 64780417,
+      "classic": 173,
+      "soroban": 70,
+      "sorobanBytes": 150060,
+      "stages": [
+        [
+          70
+        ]
+      ]
+    },
+    {
+      "ledger": 64780418,
+      "classic": 153,
+      "soroban": 81,
+      "sorobanBytes": 225968,
+      "stages": [
+        [
+          20,
+          61
+        ]
+      ]
+    },
+    {
+      "ledger": 64780419,
+      "classic": 304,
+      "soroban": 67,
+      "sorobanBytes": 184136,
+      "stages": [
+        [
+          67
+        ]
+      ]
+    },
+    {
+      "ledger": 64780420,
+      "classic": 250,
+      "soroban": 51,
+      "sorobanBytes": 120072,
+      "stages": [
+        [
+          51
+        ]
+      ]
+    },
+    {
+      "ledger": 64780421,
+      "classic": 204,
+      "soroban": 63,
+      "sorobanBytes": 175620,
+      "stages": [
+        [
+          63
+        ]
+      ]
+    },
+    {
+      "ledger": 64780422,
+      "classic": 201,
+      "soroban": 41,
+      "sorobanBytes": 56044,
+      "stages": [
+        [
+          41
+        ]
+      ]
+    },
+    {
+      "ledger": 64780423,
+      "classic": 199,
+      "soroban": 40,
+      "sorobanBytes": 56832,
+      "stages": [
+        [
+          40
+        ]
+      ]
+    },
+    {
+      "ledger": 64780424,
+      "classic": 114,
+      "soroban": 24,
+      "sorobanBytes": 32788,
+      "stages": [
+        [
+          24
+        ]
+      ]
+    },
+    {
+      "ledger": 64780425,
+      "classic": 119,
+      "soroban": 30,
+      "sorobanBytes": 48564,
+      "stages": [
+        [
+          30
+        ]
+      ]
+    },
+    {
+      "ledger": 64780426,
+      "classic": 148,
+      "soroban": 25,
+      "sorobanBytes": 37096,
+      "stages": [
+        [
+          25
+        ]
+      ]
+    },
+    {
+      "ledger": 64780427,
+      "classic": 196,
+      "soroban": 22,
+      "sorobanBytes": 43088,
+      "stages": [
+        [
+          22
+        ]
+      ]
+    },
+    {
+      "ledger": 64780428,
+      "classic": 143,
+      "soroban": 21,
+      "sorobanBytes": 38000,
+      "stages": [
+        [
+          21
+        ]
+      ]
+    },
+    {
+      "ledger": 64780429,
+      "classic": 128,
+      "soroban": 32,
+      "sorobanBytes": 61716,
+      "stages": [
+        [
+          32
+        ]
+      ]
+    },
+    {
+      "ledger": 64780430,
+      "classic": 144,
+      "soroban": 21,
+      "sorobanBytes": 38496,
+      "stages": [
+        [
+          21
+        ]
+      ]
+    },
+    {
+      "ledger": 64780431,
+      "classic": 200,
+      "soroban": 28,
+      "sorobanBytes": 56432,
+      "stages": [
+        [
+          28
+        ]
+      ]
+    },
+    {
+      "ledger": 64780432,
+      "classic": 388,
+      "soroban": 15,
+      "sorobanBytes": 32800,
+      "stages": [
+        [
+          15
+        ]
+      ]
+    },
+    {
+      "ledger": 64780433,
+      "classic": 396,
+      "soroban": 20,
+      "sorobanBytes": 42584,
+      "stages": [
+        [
+          20
+        ]
+      ]
+    },
+    {
+      "ledger": 64780434,
+      "classic": 266,
+      "soroban": 12,
+      "sorobanBytes": 22584,
+      "stages": [
+        [
+          12
+        ]
+      ]
+    },
+    {
+      "ledger": 64780435,
+      "classic": 159,
+      "soroban": 15,
+      "sorobanBytes": 27908,
+      "stages": [
+        [
+          15
+        ]
+      ]
+    },
+    {
+      "ledger": 64780436,
+      "classic": 199,
+      "soroban": 14,
+      "sorobanBytes": 30292,
+      "stages": [
+        [
+          14
+        ]
+      ]
+    },
+    {
+      "ledger": 64780437,
+      "classic": 208,
+      "soroban": 18,
+      "sorobanBytes": 31744,
+      "stages": [
+        [
+          18
+        ]
+      ]
+    },
+    {
+      "ledger": 64780438,
+      "classic": 158,
+      "soroban": 19,
+      "sorobanBytes": 39652,
+      "stages": [
+        [
+          19
+        ]
+      ]
+    },
+    {
+      "ledger": 64780439,
+      "classic": 142,
+      "soroban": 27,
+      "sorobanBytes": 37800,
+      "stages": [
+        [
+          27
+        ]
+      ]
+    },
+    {
+      "ledger": 64780440,
+      "classic": 283,
+      "soroban": 30,
+      "sorobanBytes": 42236,
+      "stages": [
+        [
+          30
+        ]
+      ]
+    },
+    {
+      "ledger": 64780441,
+      "classic": 250,
+      "soroban": 37,
+      "sorobanBytes": 39504,
+      "stages": [
+        [
+          37
+        ]
+      ]
+    },
+    {
+      "ledger": 64780442,
+      "classic": 201,
+      "soroban": 89,
+      "sorobanBytes": 102288,
+      "stages": [
+        [
+          89
+        ]
+      ]
+    },
+    {
+      "ledger": 64780443,
+      "classic": 141,
+      "soroban": 159,
+      "sorobanBytes": 132272,
+      "stages": [
+        [
+          159
+        ]
+      ]
+    },
+    {
+      "ledger": 64780444,
+      "classic": 120,
+      "soroban": 193,
+      "sorobanBytes": 155348,
+      "stages": [
+        [
+          193
+        ]
+      ]
+    },
+    {
+      "ledger": 64780445,
+      "classic": 135,
+      "soroban": 203,
+      "sorobanBytes": 181436,
+      "stages": [
+        [
+          203
+        ]
+      ]
+    },
+    {
+      "ledger": 64780446,
+      "classic": 295,
+      "soroban": 161,
+      "sorobanBytes": 213892,
+      "stages": [
+        [
+          161
+        ]
+      ]
+    },
+    {
+      "ledger": 64780447,
+      "classic": 221,
+      "soroban": 127,
+      "sorobanBytes": 244940,
+      "stages": [
+        [
+          127
+        ]
+      ]
+    },
+    {
+      "ledger": 64780448,
+      "classic": 163,
+      "soroban": 121,
+      "sorobanBytes": 255076,
+      "stages": [
+        [
+          120,
+          1
+        ]
+      ]
+    },
+    {
+      "ledger": 64780449,
+      "classic": 139,
+      "soroban": 140,
+      "sorobanBytes": 248856,
+      "stages": [
+        [
+          140
+        ]
+      ]
+    },
+    {
+      "ledger": 64780450,
+      "classic": 494,
+      "soroban": 153,
+      "sorobanBytes": 207700,
+      "stages": [
+        [
+          153
+        ]
+      ]
+    },
+    {
+      "ledger": 64780451,
+      "classic": 248,
+      "soroban": 163,
+      "sorobanBytes": 219224,
+      "stages": [
+        [
+          163
+        ]
+      ]
+    },
+    {
+      "ledger": 64780452,
+      "classic": 358,
+      "soroban": 172,
+      "sorobanBytes": 200528,
+      "stages": [
+        [
+          172
+        ]
+      ]
+    },
+    {
+      "ledger": 64780453,
+      "classic": 164,
+      "soroban": 173,
+      "sorobanBytes": 199604,
+      "stages": [
+        [
+          173
+        ]
+      ]
+    },
+    {
+      "ledger": 64780454,
+      "classic": 190,
+      "soroban": 193,
+      "sorobanBytes": 198316,
+      "stages": [
+        [
+          193
+        ]
+      ]
+    },
+    {
+      "ledger": 64780455,
+      "classic": 145,
+      "soroban": 187,
+      "sorobanBytes": 193164,
+      "stages": [
+        [
+          187
+        ]
+      ]
+    },
+    {
+      "ledger": 64780456,
+      "classic": 187,
+      "soroban": 176,
+      "sorobanBytes": 199792,
+      "stages": [
+        [
+          176
+        ]
+      ]
+    },
+    {
+      "ledger": 64780457,
+      "classic": 153,
+      "soroban": 147,
+      "sorobanBytes": 203420,
+      "stages": [
+        [
+          147
+        ]
+      ]
+    },
+    {
+      "ledger": 64780458,
+      "classic": 183,
+      "soroban": 46,
+      "sorobanBytes": 78632,
+      "stages": [
+        [
+          46
+        ]
+      ]
+    },
+    {
+      "ledger": 64780459,
+      "classic": 329,
+      "soroban": 154,
+      "sorobanBytes": 216200,
+      "stages": [
+        [
+          154
+        ]
+      ]
+    },
+    {
+      "ledger": 64780460,
+      "classic": 153,
+      "soroban": 186,
+      "sorobanBytes": 217244,
+      "stages": [
+        [
+          186
+        ]
+      ]
+    },
+    {
+      "ledger": 64780461,
+      "classic": 330,
+      "soroban": 111,
+      "sorobanBytes": 280048,
+      "stages": [
+        [
+          111
+        ]
+      ]
+    },
+    {
+      "ledger": 64780462,
+      "classic": 244,
+      "soroban": 152,
+      "sorobanBytes": 284512,
+      "stages": [
+        [
+          152
+        ]
+      ]
+    },
+    {
+      "ledger": 64780463,
+      "classic": 165,
+      "soroban": 123,
+      "sorobanBytes": 281272,
+      "stages": [
+        [
+          123
+        ]
+      ]
+    },
+    {
+      "ledger": 64780464,
+      "classic": 287,
+      "soroban": 158,
+      "sorobanBytes": 285256,
+      "stages": [
+        [
+          158
+        ]
+      ]
+    },
+    {
+      "ledger": 64780465,
+      "classic": 158,
+      "soroban": 119,
+      "sorobanBytes": 280620,
+      "stages": [
+        [
+          119
+        ]
+      ]
+    },
+    {
+      "ledger": 64780466,
+      "classic": 217,
+      "soroban": 162,
+      "sorobanBytes": 285672,
+      "stages": [
+        [
+          162
+        ]
+      ]
+    },
+    {
+      "ledger": 64780467,
+      "classic": 129,
+      "soroban": 136,
+      "sorobanBytes": 283532,
+      "stages": [
+        [
+          136
+        ]
+      ]
+    },
+    {
+      "ledger": 64780468,
+      "classic": 151,
+      "soroban": 130,
+      "sorobanBytes": 282212,
+      "stages": [
+        [
+          130
+        ]
+      ]
+    },
+    {
+      "ledger": 64780469,
+      "classic": 132,
+      "soroban": 158,
+      "sorobanBytes": 246396,
+      "stages": [
+        [
+          158
+        ]
+      ]
+    },
+    {
+      "ledger": 64780470,
+      "classic": 139,
+      "soroban": 151,
+      "sorobanBytes": 285440,
+      "stages": [
+        [
+          151
+        ]
+      ]
+    },
+    {
+      "ledger": 64780471,
+      "classic": 159,
+      "soroban": 179,
+      "sorobanBytes": 271644,
+      "stages": [
+        [
+          179
+        ]
+      ]
+    },
+    {
+      "ledger": 64780472,
+      "classic": 126,
+      "soroban": 177,
+      "sorobanBytes": 241448,
+      "stages": [
+        [
+          177
+        ]
+      ]
+    },
+    {
+      "ledger": 64780473,
+      "classic": 150,
+      "soroban": 157,
+      "sorobanBytes": 284296,
+      "stages": [
+        [
+          157
+        ]
+      ]
+    },
+    {
+      "ledger": 64780474,
+      "classic": 514,
+      "soroban": 162,
+      "sorobanBytes": 269384,
+      "stages": [
+        [
+          162
+        ]
+      ]
+    },
+    {
+      "ledger": 64780475,
+      "classic": 468,
+      "soroban": 170,
+      "sorobanBytes": 232980,
+      "stages": [
+        [
+          170
+        ]
+      ]
+    },
+    {
+      "ledger": 64780476,
+      "classic": 370,
+      "soroban": 165,
+      "sorobanBytes": 286904,
+      "stages": [
+        [
+          165
+        ]
+      ]
+    },
+    {
+      "ledger": 64780477,
+      "classic": 279,
+      "soroban": 200,
+      "sorobanBytes": 231664,
+      "stages": [
+        [
+          200
+        ]
+      ]
+    },
+    {
+      "ledger": 64780478,
+      "classic": 227,
+      "soroban": 128,
+      "sorobanBytes": 282016,
+      "stages": [
+        [
+          128
+        ]
+      ]
+    },
+    {
+      "ledger": 64780479,
+      "classic": 130,
+      "soroban": 115,
+      "sorobanBytes": 280460,
+      "stages": [
+        [
+          115
+        ]
+      ]
+    },
+    {
+      "ledger": 64780480,
+      "classic": 134,
+      "soroban": 87,
+      "sorobanBytes": 277160,
+      "stages": [
+        [
+          87
+        ]
+      ]
+    },
+    {
+      "ledger": 64780481,
+      "classic": 138,
+      "soroban": 76,
+      "sorobanBytes": 275620,
+      "stages": [
+        [
+          76
+        ]
+      ]
+    },
+    {
+      "ledger": 64780482,
+      "classic": 179,
+      "soroban": 81,
+      "sorobanBytes": 204176,
+      "stages": [
+        [
+          81
+        ]
+      ]
+    },
+    {
+      "ledger": 64780483,
+      "classic": 258,
+      "soroban": 49,
+      "sorobanBytes": 105580,
+      "stages": [
+        [
+          49
+        ]
+      ]
+    },
+    {
+      "ledger": 64780484,
+      "classic": 154,
+      "soroban": 43,
+      "sorobanBytes": 126296,
+      "stages": [
+        [
+          43
+        ]
+      ]
+    },
+    {
+      "ledger": 64780485,
+      "classic": 479,
+      "soroban": 32,
+      "sorobanBytes": 85900,
+      "stages": [
+        [
+          32
+        ]
+      ]
+    },
+    {
+      "ledger": 64780486,
+      "classic": 433,
+      "soroban": 32,
+      "sorobanBytes": 131164,
+      "stages": [
+        [
+          32
+        ]
+      ]
+    },
+    {
+      "ledger": 64780487,
+      "classic": 239,
+      "soroban": 42,
+      "sorobanBytes": 110324,
+      "stages": [
+        [
+          42
+        ]
+      ]
+    },
+    {
+      "ledger": 64780488,
+      "classic": 250,
+      "soroban": 27,
+      "sorobanBytes": 38640,
+      "stages": [
+        [
+          27
+        ]
+      ]
+    },
+    {
+      "ledger": 64780489,
+      "classic": 176,
+      "soroban": 31,
+      "sorobanBytes": 52192,
+      "stages": [
+        [
+          31
+        ]
+      ]
+    },
+    {
+      "ledger": 64780490,
+      "classic": 140,
+      "soroban": 26,
+      "sorobanBytes": 43144,
+      "stages": [
+        [
+          26
+        ]
+      ]
+    },
+    {
+      "ledger": 64780491,
+      "classic": 168,
+      "soroban": 22,
+      "sorobanBytes": 38944,
+      "stages": [
+        [
+          22
+        ]
+      ]
+    },
+    {
+      "ledger": 64780492,
+      "classic": 156,
+      "soroban": 24,
+      "sorobanBytes": 43092,
+      "stages": [
+        [
+          24
+        ]
+      ]
+    },
+    {
+      "ledger": 64780493,
+      "classic": 116,
+      "soroban": 23,
+      "sorobanBytes": 41872,
+      "stages": [
+        [
+          23
+        ]
+      ]
+    },
+    {
+      "ledger": 64780494,
+      "classic": 111,
+      "soroban": 26,
+      "sorobanBytes": 48844,
+      "stages": [
+        [
+          26
+        ]
+      ]
+    },
+    {
+      "ledger": 64780495,
+      "classic": 172,
+      "soroban": 26,
+      "sorobanBytes": 51312,
+      "stages": [
+        [
+          26
+        ]
+      ]
+    },
+    {
+      "ledger": 64780496,
+      "classic": 199,
+      "soroban": 25,
+      "sorobanBytes": 45812,
+      "stages": [
+        [
+          25
+        ]
+      ]
+    },
+    {
+      "ledger": 64780497,
+      "classic": 138,
+      "soroban": 23,
+      "sorobanBytes": 41728,
+      "stages": [
+        [
+          23
+        ]
+      ]
+    },
+    {
+      "ledger": 64780498,
+      "classic": 535,
+      "soroban": 26,
+      "sorobanBytes": 45844,
+      "stages": [
+        [
+          26
+        ]
+      ]
+    },
+    {
+      "ledger": 64780499,
+      "classic": 372,
+      "soroban": 22,
+      "sorobanBytes": 40764,
+      "stages": [
+        [
+          22
+        ]
+      ]
+    },
+    {
+      "ledger": 64780500,
+      "classic": 254,
+      "soroban": 26,
+      "sorobanBytes": 44676,
+      "stages": [
+        [
+          26
+        ]
+      ]
+    },
+    {
+      "ledger": 64780501,
+      "classic": 215,
+      "soroban": 37,
+      "sorobanBytes": 72520,
+      "stages": [
+        [
+          37
+        ]
+      ]
+    },
+    {
+      "ledger": 64780502,
+      "classic": 153,
+      "soroban": 31,
+      "sorobanBytes": 51428,
+      "stages": [
+        [
+          31
+        ]
+      ]
+    },
+    {
+      "ledger": 64780503,
+      "classic": 143,
+      "soroban": 49,
+      "sorobanBytes": 90200,
+      "stages": [
+        [
+          49
+        ]
+      ]
+    },
+    {
+      "ledger": 64780504,
+      "classic": 164,
+      "soroban": 60,
+      "sorobanBytes": 89848,
+      "stages": [
+        [
+          60
+        ]
+      ]
+    },
+    {
+      "ledger": 64780505,
+      "classic": 289,
+      "soroban": 51,
+      "sorobanBytes": 65504,
+      "stages": [
+        [
+          51
+        ]
+      ]
+    },
+    {
+      "ledger": 64780506,
+      "classic": 302,
+      "soroban": 97,
+      "sorobanBytes": 117140,
+      "stages": [
+        [
+          97
+        ]
+      ]
+    },
+    {
+      "ledger": 64780507,
+      "classic": 313,
+      "soroban": 82,
+      "sorobanBytes": 111788,
+      "stages": [
+        [
+          82
+        ]
+      ]
+    },
+    {
+      "ledger": 64780508,
+      "classic": 126,
+      "soroban": 62,
+      "sorobanBytes": 75116,
+      "stages": [
+        [
+          62
+        ]
+      ]
+    },
+    {
+      "ledger": 64780509,
+      "classic": 242,
+      "soroban": 114,
+      "sorobanBytes": 109544,
+      "stages": [
+        [
+          114
+        ]
+      ]
+    },
+    {
+      "ledger": 64780510,
+      "classic": 164,
+      "soroban": 213,
+      "sorobanBytes": 189524,
+      "stages": [
+        [
+          213
+        ]
+      ]
+    },
+    {
+      "ledger": 64780511,
+      "classic": 156,
+      "soroban": 174,
+      "sorobanBytes": 204236,
+      "stages": [
+        [
+          174
+        ]
+      ]
+    },
+    {
+      "ledger": 64780512,
+      "classic": 245,
+      "soroban": 146,
+      "sorobanBytes": 252624,
+      "stages": [
+        [
+          146
+        ]
+      ]
+    },
+    {
+      "ledger": 64780513,
+      "classic": 319,
+      "soroban": 146,
+      "sorobanBytes": 233912,
+      "stages": [
+        [
+          146
+        ]
+      ]
+    },
+    {
+      "ledger": 64780514,
+      "classic": 239,
+      "soroban": 143,
+      "sorobanBytes": 234764,
+      "stages": [
+        [
+          143
+        ]
+      ]
+    },
+    {
+      "ledger": 64780515,
+      "classic": 171,
+      "soroban": 140,
+      "sorobanBytes": 205432,
+      "stages": [
+        [
+          140
+        ]
+      ]
+    },
+    {
+      "ledger": 64780516,
+      "classic": 190,
+      "soroban": 149,
+      "sorobanBytes": 225036,
+      "stages": [
+        [
+          149
+        ]
+      ]
+    },
+    {
+      "ledger": 64780517,
+      "classic": 136,
+      "soroban": 165,
+      "sorobanBytes": 211108,
+      "stages": [
+        [
+          165
+        ]
+      ]
+    },
+    {
+      "ledger": 64780518,
+      "classic": 221,
+      "soroban": 165,
+      "sorobanBytes": 209160,
+      "stages": [
+        [
+          165
+        ]
+      ]
+    },
+    {
+      "ledger": 64780519,
+      "classic": 180,
+      "soroban": 180,
+      "sorobanBytes": 192260,
+      "stages": [
+        [
+          180
+        ]
+      ]
+    },
+    {
+      "ledger": 64780520,
+      "classic": 186,
+      "soroban": 184,
+      "sorobanBytes": 181580,
+      "stages": [
+        [
+          184
+        ]
+      ]
+    },
+    {
+      "ledger": 64780521,
+      "classic": 150,
+      "soroban": 173,
+      "sorobanBytes": 186172,
+      "stages": [
+        [
+          173
+        ]
+      ]
+    },
+    {
+      "ledger": 64780522,
+      "classic": 299,
+      "soroban": 160,
+      "sorobanBytes": 206480,
+      "stages": [
+        [
+          160
+        ]
+      ]
+    },
+    {
+      "ledger": 64780523,
+      "classic": 166,
+      "soroban": 173,
+      "sorobanBytes": 193968,
+      "stages": [
+        [
+          173
+        ]
+      ]
+    },
+    {
+      "ledger": 64780524,
+      "classic": 149,
+      "soroban": 183,
+      "sorobanBytes": 187716,
+      "stages": [
+        [
+          183
+        ]
+      ]
+    },
+    {
+      "ledger": 64780525,
+      "classic": 159,
+      "soroban": 118,
+      "sorobanBytes": 280868,
+      "stages": [
+        [
+          118
+        ]
+      ]
+    },
+    {
+      "ledger": 64780526,
+      "classic": 188,
+      "soroban": 109,
+      "sorobanBytes": 269832,
+      "stages": [
+        [
+          14,
+          95
+        ]
+      ]
+    },
+    {
+      "ledger": 64780527,
+      "classic": 171,
+      "soroban": 104,
+      "sorobanBytes": 279312,
+      "stages": [
+        [
+          104
+        ]
+      ]
+    },
+    {
+      "ledger": 64780528,
+      "classic": 259,
+      "soroban": 99,
+      "sorobanBytes": 278528,
+      "stages": [
+        [
+          99
+        ]
+      ]
+    },
+    {
+      "ledger": 64780529,
+      "classic": 396,
+      "soroban": 102,
+      "sorobanBytes": 279028,
+      "stages": [
+        [
+          102
+        ]
+      ]
+    },
+    {
+      "ledger": 64780530,
+      "classic": 151,
+      "soroban": 114,
+      "sorobanBytes": 280136,
+      "stages": [
+        [
+          114
+        ]
+      ]
+    },
+    {
+      "ledger": 64780531,
+      "classic": 190,
+      "soroban": 112,
+      "sorobanBytes": 279200,
+      "stages": [
+        [
+          112
+        ]
+      ]
+    },
+    {
+      "ledger": 64780532,
+      "classic": 150,
+      "soroban": 146,
+      "sorobanBytes": 224572,
+      "stages": [
+        [
+          146
+        ]
+      ]
+    },
+    {
+      "ledger": 64780533,
+      "classic": 174,
+      "soroban": 163,
+      "sorobanBytes": 280008,
+      "stages": [
+        [
+          163
+        ]
+      ]
+    },
+    {
+      "ledger": 64780534,
+      "classic": 221,
+      "soroban": 154,
+      "sorobanBytes": 249780,
+      "stages": [
+        [
+          154
+        ]
+      ]
+    },
+    {
+      "ledger": 64780535,
+      "classic": 472,
+      "soroban": 165,
+      "sorobanBytes": 252492,
+      "stages": [
+        [
+          165
+        ]
+      ]
+    },
+    {
+      "ledger": 64780536,
+      "classic": 204,
+      "soroban": 168,
+      "sorobanBytes": 276036,
+      "stages": [
+        [
+          168
+        ]
+      ]
+    },
+    {
+      "ledger": 64780537,
+      "classic": 204,
+      "soroban": 156,
+      "sorobanBytes": 280960,
+      "stages": [
+        [
+          156
+        ]
+      ]
+    },
+    {
+      "ledger": 64780538,
+      "classic": 236,
+      "soroban": 158,
+      "sorobanBytes": 271224,
+      "stages": [
+        [
+          158
+        ]
+      ]
+    },
+    {
+      "ledger": 64780539,
+      "classic": 139,
+      "soroban": 153,
+      "sorobanBytes": 285676,
+      "stages": [
+        [
+          153
+        ]
+      ]
+    },
+    {
+      "ledger": 64780540,
+      "classic": 172,
+      "soroban": 181,
+      "sorobanBytes": 254588,
+      "stages": [
+        [
+          181
+        ]
+      ]
+    },
+    {
+      "ledger": 64780541,
+      "classic": 202,
+      "soroban": 164,
+      "sorobanBytes": 244724,
+      "stages": [
+        [
+          164
+        ]
+      ]
+    },
+    {
+      "ledger": 64780542,
+      "classic": 166,
+      "soroban": 177,
+      "sorobanBytes": 239380,
+      "stages": [
+        [
+          177
+        ]
+      ]
+    },
+    {
+      "ledger": 64780543,
+      "classic": 199,
+      "soroban": 163,
+      "sorobanBytes": 281604,
+      "stages": [
+        [
+          163
+        ]
+      ]
+    },
+    {
+      "ledger": 64780544,
+      "classic": 154,
+      "soroban": 131,
+      "sorobanBytes": 282512,
+      "stages": [
+        [
+          131
+        ]
+      ]
+    },
+    {
+      "ledger": 64780545,
+      "classic": 129,
+      "soroban": 120,
+      "sorobanBytes": 281524,
+      "stages": [
+        [
+          120
+        ]
+      ]
+    },
+    {
+      "ledger": 64780546,
+      "classic": 447,
+      "soroban": 110,
+      "sorobanBytes": 279976,
+      "stages": [
+        [
+          110
+        ]
+      ]
+    },
+    {
+      "ledger": 64780547,
+      "classic": 268,
+      "soroban": 108,
+      "sorobanBytes": 279200,
+      "stages": [
+        [
+          108
+        ]
+      ]
+    },
+    {
+      "ledger": 64780548,
+      "classic": 166,
+      "soroban": 110,
+      "sorobanBytes": 271540,
+      "stages": [
+        [
+          110
+        ]
+      ]
+    },
+    {
+      "ledger": 64780549,
+      "classic": 230,
+      "soroban": 59,
+      "sorobanBytes": 199080,
+      "stages": [
+        [
+          59
+        ]
+      ]
+    },
+    {
+      "ledger": 64780550,
+      "classic": 185,
+      "soroban": 69,
+      "sorobanBytes": 162740,
+      "stages": [
+        [
+          69
+        ]
+      ]
+    },
+    {
+      "ledger": 64780551,
+      "classic": 206,
+      "soroban": 56,
+      "sorobanBytes": 213172,
+      "stages": [
+        [
+          56
+        ]
+      ]
+    },
+    {
+      "ledger": 64780552,
+      "classic": 219,
+      "soroban": 53,
+      "sorobanBytes": 122920,
+      "stages": [
+        [
+          53
+        ]
+      ]
+    },
+    {
+      "ledger": 64780553,
+      "classic": 178,
+      "soroban": 43,
+      "sorobanBytes": 70136,
+      "stages": [
+        [
+          43
+        ]
+      ]
+    },
+    {
+      "ledger": 64780554,
+      "classic": 145,
+      "soroban": 37,
+      "sorobanBytes": 64728,
+      "stages": [
+        [
+          37
+        ]
+      ]
+    },
+    {
+      "ledger": 64780555,
+      "classic": 163,
+      "soroban": 35,
+      "sorobanBytes": 54388,
+      "stages": [
+        [
+          35
+        ]
+      ]
+    },
+    {
+      "ledger": 64780556,
+      "classic": 184,
+      "soroban": 37,
+      "sorobanBytes": 59092,
+      "stages": [
+        [
+          37
+        ]
+      ]
+    },
+    {
+      "ledger": 64780557,
+      "classic": 173,
+      "soroban": 32,
+      "sorobanBytes": 55192,
+      "stages": [
+        [
+          32
+        ]
+      ]
+    },
+    {
+      "ledger": 64780558,
+      "classic": 202,
+      "soroban": 28,
+      "sorobanBytes": 46732,
+      "stages": [
+        [
+          28
+        ]
+      ]
+    },
+    {
+      "ledger": 64780559,
+      "classic": 167,
+      "soroban": 30,
+      "sorobanBytes": 57164,
+      "stages": [
+        [
+          30
+        ]
+      ]
+    },
+    {
+      "ledger": 64780560,
+      "classic": 128,
+      "soroban": 21,
+      "sorobanBytes": 40696,
+      "stages": [
+        [
+          21
+        ]
+      ]
+    },
+    {
+      "ledger": 64780561,
+      "classic": 287,
+      "soroban": 21,
+      "sorobanBytes": 40304,
+      "stages": [
+        [
+          21
+        ]
+      ]
+    },
+    {
+      "ledger": 64780562,
+      "classic": 231,
+      "soroban": 28,
+      "sorobanBytes": 50132,
+      "stages": [
+        [
+          28
+        ]
+      ]
+    },
+    {
+      "ledger": 64780563,
+      "classic": 155,
+      "soroban": 22,
+      "sorobanBytes": 44344,
+      "stages": [
+        [
+          22
+        ]
+      ]
+    },
+    {
+      "ledger": 64780564,
+      "classic": 280,
+      "soroban": 27,
+      "sorobanBytes": 51692,
+      "stages": [
+        [
+          27
+        ]
+      ]
+    },
+    {
+      "ledger": 64780565,
+      "classic": 711,
+      "soroban": 27,
+      "sorobanBytes": 45880,
+      "stages": [
+        [
+          27
+        ]
+      ]
+    },
+    {
+      "ledger": 64780566,
+      "classic": 282,
+      "soroban": 28,
+      "sorobanBytes": 46988,
+      "stages": [
+        [
+          28
+        ]
+      ]
+    },
+    {
+      "ledger": 64780567,
+      "classic": 292,
+      "soroban": 30,
+      "sorobanBytes": 48664,
+      "stages": [
+        [
+          30
+        ]
+      ]
+    },
+    {
+      "ledger": 64780568,
+      "classic": 206,
+      "soroban": 44,
+      "sorobanBytes": 61748,
+      "stages": [
+        [
+          44
+        ]
+      ]
+    },
+    {
+      "ledger": 64780569,
+      "classic": 126,
+      "soroban": 53,
+      "sorobanBytes": 71652,
+      "stages": [
+        [
+          53
+        ]
+      ]
+    },
+    {
+      "ledger": 64780570,
+      "classic": 146,
+      "soroban": 55,
+      "sorobanBytes": 74120,
+      "stages": [
+        [
+          55
+        ]
+      ]
+    },
+    {
+      "ledger": 64780571,
+      "classic": 432,
+      "soroban": 50,
+      "sorobanBytes": 56700,
+      "stages": [
+        [
+          50
+        ]
+      ]
+    },
+    {
+      "ledger": 64780572,
+      "classic": 173,
+      "soroban": 61,
+      "sorobanBytes": 62872,
+      "stages": [
+        [
+          61
+        ]
+      ]
+    },
+    {
+      "ledger": 64780573,
+      "classic": 163,
+      "soroban": 82,
+      "sorobanBytes": 68780,
+      "stages": [
+        [
+          82
+        ]
+      ]
+    },
+    {
+      "ledger": 64780574,
+      "classic": 184,
+      "soroban": 192,
+      "sorobanBytes": 154364,
+      "stages": [
+        [
+          192
+        ]
+      ]
+    },
+    {
+      "ledger": 64780575,
+      "classic": 123,
+      "soroban": 192,
+      "sorobanBytes": 156508,
+      "stages": [
+        [
+          192
+        ]
+      ]
+    },
+    {
+      "ledger": 64780576,
+      "classic": 142,
+      "soroban": 152,
+      "sorobanBytes": 215956,
+      "stages": [
+        [
+          152
+        ]
+      ]
+    },
+    {
+      "ledger": 64780577,
+      "classic": 150,
+      "soroban": 130,
+      "sorobanBytes": 241048,
+      "stages": [
+        [
+          130
+        ]
+      ]
+    },
+    {
+      "ledger": 64780578,
+      "classic": 148,
+      "soroban": 137,
+      "sorobanBytes": 221872,
+      "stages": [
+        [
+          137
+        ]
+      ]
+    },
+    {
+      "ledger": 64780579,
+      "classic": 118,
+      "soroban": 126,
+      "sorobanBytes": 251684,
+      "stages": [
+        [
+          126
+        ]
+      ]
+    },
+    {
+      "ledger": 64780580,
+      "classic": 158,
+      "soroban": 134,
+      "sorobanBytes": 235096,
+      "stages": [
+        [
+          134
+        ]
+      ]
+    },
+    {
+      "ledger": 64780581,
+      "classic": 126,
+      "soroban": 132,
+      "sorobanBytes": 224796,
+      "stages": [
+        [
+          132
+        ]
+      ]
+    },
+    {
+      "ledger": 64780582,
+      "classic": 194,
+      "soroban": 158,
+      "sorobanBytes": 210216,
+      "stages": [
+        [
+          158
+        ]
+      ]
+    },
+    {
+      "ledger": 64780583,
+      "classic": 298,
+      "soroban": 177,
+      "sorobanBytes": 179148,
+      "stages": [
+        [
+          177
+        ]
+      ]
+    },
+    {
+      "ledger": 64780584,
+      "classic": 136,
+      "soroban": 165,
+      "sorobanBytes": 199184,
+      "stages": [
+        [
+          165
+        ]
+      ]
+    },
+    {
+      "ledger": 64780585,
+      "classic": 309,
+      "soroban": 131,
+      "sorobanBytes": 173816,
+      "stages": [
+        [
+          131
+        ]
+      ]
+    },
+    {
+      "ledger": 64780586,
+      "classic": 233,
+      "soroban": 134,
+      "sorobanBytes": 187000,
+      "stages": [
+        [
+          134
+        ]
+      ]
+    },
+    {
+      "ledger": 64780587,
+      "classic": 265,
+      "soroban": 152,
+      "sorobanBytes": 159408,
+      "stages": [
+        [
+          152
+        ]
+      ]
+    },
+    {
+      "ledger": 64780588,
+      "classic": 155,
+      "soroban": 142,
+      "sorobanBytes": 193940,
+      "stages": [
+        [
+          142
+        ]
+      ]
+    },
+    {
+      "ledger": 64780589,
+      "classic": 210,
+      "soroban": 158,
+      "sorobanBytes": 181920,
+      "stages": [
+        [
+          158
+        ]
+      ]
+    },
+    {
+      "ledger": 64780590,
+      "classic": 394,
+      "soroban": 134,
+      "sorobanBytes": 246984,
+      "stages": [
+        [
+          134
+        ]
+      ]
+    },
+    {
+      "ledger": 64780591,
+      "classic": 229,
+      "soroban": 95,
+      "sorobanBytes": 276680,
+      "stages": [
+        [
+          83,
+          12
+        ]
+      ]
+    },
+    {
+      "ledger": 64780592,
+      "classic": 313,
+      "soroban": 132,
+      "sorobanBytes": 282536,
+      "stages": [
+        [
+          132
+        ]
+      ]
+    },
+    {
+      "ledger": 64780593,
+      "classic": 207,
+      "soroban": 123,
+      "sorobanBytes": 281240,
+      "stages": [
+        [
+          123
+        ]
+      ]
+    },
+    {
+      "ledger": 64780594,
+      "classic": 230,
+      "soroban": 113,
+      "sorobanBytes": 280060,
+      "stages": [
+        [
+          113
+        ]
+      ]
+    },
+    {
+      "ledger": 64780595,
+      "classic": 194,
+      "soroban": 99,
+      "sorobanBytes": 278236,
+      "stages": [
+        [
+          99
+        ]
+      ]
+    },
+    {
+      "ledger": 64780596,
+      "classic": 168,
+      "soroban": 174,
+      "sorobanBytes": 278752,
+      "stages": [
+        [
+          174
+        ]
+      ]
+    },
+    {
+      "ledger": 64780597,
+      "classic": 171,
+      "soroban": 98,
+      "sorobanBytes": 278248,
+      "stages": [
+        [
+          98
+        ]
+      ]
+    },
+    {
+      "ledger": 64780598,
+      "classic": 181,
+      "soroban": 169,
+      "sorobanBytes": 284544,
+      "stages": [
+        [
+          169
+        ]
+      ]
+    },
+    {
+      "ledger": 64780599,
+      "classic": 132,
+      "soroban": 158,
+      "sorobanBytes": 254520,
+      "stages": [
+        [
+          158
+        ]
+      ]
+    },
+    {
+      "ledger": 64780600,
+      "classic": 323,
+      "soroban": 132,
+      "sorobanBytes": 282600,
+      "stages": [
+        [
+          132
+        ]
+      ]
+    },
+    {
+      "ledger": 64780601,
+      "classic": 531,
+      "soroban": 167,
+      "sorobanBytes": 248684,
+      "stages": [
+        [
+          167
+        ]
+      ]
+    },
+    {
+      "ledger": 64780602,
+      "classic": 326,
+      "soroban": 117,
+      "sorobanBytes": 229152,
+      "stages": [
+        [
+          117
+        ]
+      ]
+    },
+    {
+      "ledger": 64780603,
+      "classic": 226,
+      "soroban": 111,
+      "sorobanBytes": 279076,
+      "stages": [
+        [
+          111
+        ]
+      ]
+    },
+    {
+      "ledger": 64780604,
+      "classic": 181,
+      "soroban": 110,
+      "sorobanBytes": 278916,
+      "stages": [
+        [
+          110
+        ]
+      ]
+    },
+    {
+      "ledger": 64780605,
+      "classic": 334,
+      "soroban": 159,
+      "sorobanBytes": 285564,
+      "stages": [
+        [
+          159
+        ]
+      ]
+    },
+    {
+      "ledger": 64780606,
+      "classic": 828,
+      "soroban": 184,
+      "sorobanBytes": 220804,
+      "stages": [
+        [
+          184
+        ]
+      ]
+    },
+    {
+      "ledger": 64780607,
+      "classic": 733,
+      "soroban": 147,
+      "sorobanBytes": 284540,
+      "stages": [
+        [
+          147
+        ]
+      ]
+    },
+    {
+      "ledger": 64780608,
+      "classic": 717,
+      "soroban": 183,
+      "sorobanBytes": 228380,
+      "stages": [
+        [
+          183
+        ]
+      ]
+    },
+    {
+      "ledger": 64780609,
+      "classic": 277,
+      "soroban": 173,
+      "sorobanBytes": 232384,
+      "stages": [
+        [
+          173
+        ]
+      ]
+    },
+    {
+      "ledger": 64780610,
+      "classic": 221,
+      "soroban": 164,
+      "sorobanBytes": 285712,
+      "stages": [
+        [
+          164
+        ]
+      ]
+    },
+    {
+      "ledger": 64780611,
+      "classic": 356,
+      "soroban": 154,
+      "sorobanBytes": 284316,
+      "stages": [
+        [
+          154
+        ]
+      ]
+    },
+    {
+      "ledger": 64780612,
+      "classic": 314,
+      "soroban": 83,
+      "sorobanBytes": 276400,
+      "stages": [
+        [
+          83
+        ]
+      ]
+    },
+    {
+      "ledger": 64780613,
+      "classic": 224,
+      "soroban": 101,
+      "sorobanBytes": 278260,
+      "stages": [
+        [
+          101
+        ]
+      ]
+    },
+    {
+      "ledger": 64780614,
+      "classic": 172,
+      "soroban": 115,
+      "sorobanBytes": 279004,
+      "stages": [
+        [
+          115
+        ]
+      ]
+    },
+    {
+      "ledger": 64780615,
+      "classic": 167,
+      "soroban": 65,
+      "sorobanBytes": 125536,
+      "stages": [
+        [
+          65
+        ]
+      ]
+    },
+    {
+      "ledger": 64780616,
+      "classic": 182,
+      "soroban": 76,
+      "sorobanBytes": 230448,
+      "stages": [
+        [
+          76
+        ]
+      ]
+    },
+    {
+      "ledger": 64780617,
+      "classic": 119,
+      "soroban": 63,
+      "sorobanBytes": 178688,
+      "stages": [
+        [
+          63
+        ]
+      ]
+    },
+    {
+      "ledger": 64780618,
+      "classic": 158,
+      "soroban": 64,
+      "sorobanBytes": 177212,
+      "stages": [
+        [
+          64
+        ]
+      ]
+    },
+    {
+      "ledger": 64780619,
+      "classic": 147,
+      "soroban": 48,
+      "sorobanBytes": 69980,
+      "stages": [
+        [
+          48
+        ]
+      ]
+    },
+    {
+      "ledger": 64780620,
+      "classic": 222,
+      "soroban": 57,
+      "sorobanBytes": 80676,
+      "stages": [
+        [
+          57
+        ]
+      ]
+    },
+    {
+      "ledger": 64780621,
+      "classic": 427,
+      "soroban": 34,
+      "sorobanBytes": 51140,
+      "stages": [
+        [
+          34
+        ]
+      ]
+    },
+    {
+      "ledger": 64780622,
+      "classic": 237,
+      "soroban": 37,
+      "sorobanBytes": 51844,
+      "stages": [
+        [
+          37
+        ]
+      ]
+    },
+    {
+      "ledger": 64780623,
+      "classic": 208,
+      "soroban": 35,
+      "sorobanBytes": 56900,
+      "stages": [
+        [
+          35
+        ]
+      ]
+    },
+    {
+      "ledger": 64780624,
+      "classic": 194,
+      "soroban": 27,
+      "sorobanBytes": 40192,
+      "stages": [
+        [
+          27
+        ]
+      ]
+    },
+    {
+      "ledger": 64780625,
+      "classic": 165,
+      "soroban": 28,
+      "sorobanBytes": 49136,
+      "stages": [
+        [
+          28
+        ]
+      ]
+    },
+    {
+      "ledger": 64780626,
+      "classic": 133,
+      "soroban": 23,
+      "sorobanBytes": 38640,
+      "stages": [
+        [
+          23
+        ]
+      ]
+    },
+    {
+      "ledger": 64780627,
+      "classic": 175,
+      "soroban": 25,
+      "sorobanBytes": 41180,
+      "stages": [
+        [
+          25
+        ]
+      ]
+    },
+    {
+      "ledger": 64780628,
+      "classic": 160,
+      "soroban": 21,
+      "sorobanBytes": 34720,
+      "stages": [
+        [
+          21
+        ]
+      ]
+    },
+    {
+      "ledger": 64780629,
+      "classic": 163,
+      "soroban": 23,
+      "sorobanBytes": 41040,
+      "stages": [
+        [
+          23
+        ]
+      ]
+    },
+    {
+      "ledger": 64780630,
+      "classic": 213,
+      "soroban": 23,
+      "sorobanBytes": 38912,
+      "stages": [
+        [
+          23
+        ]
+      ]
+    },
+    {
+      "ledger": 64780631,
+      "classic": 186,
+      "soroban": 30,
+      "sorobanBytes": 50448,
+      "stages": [
+        [
+          30
+        ]
+      ]
+    },
+    {
+      "ledger": 64780632,
+      "classic": 162,
+      "soroban": 40,
+      "sorobanBytes": 53516,
+      "stages": [
+        [
+          40
+        ]
+      ]
+    },
+    {
+      "ledger": 64780633,
+      "classic": 296,
+      "soroban": 28,
+      "sorobanBytes": 36560,
+      "stages": [
+        [
+          28
+        ]
+      ]
+    },
+    {
+      "ledger": 64780634,
+      "classic": 218,
+      "soroban": 51,
+      "sorobanBytes": 68308,
+      "stages": [
+        [
+          51
+        ]
+      ]
+    },
+    {
+      "ledger": 64780635,
+      "classic": 179,
+      "soroban": 49,
+      "sorobanBytes": 51620,
+      "stages": [
+        [
+          49
+        ]
+      ]
+    },
+    {
+      "ledger": 64780636,
+      "classic": 183,
+      "soroban": 68,
+      "sorobanBytes": 76048,
+      "stages": [
+        [
+          68
+        ]
+      ]
+    },
+    {
+      "ledger": 64780637,
+      "classic": 563,
+      "soroban": 76,
+      "sorobanBytes": 82172,
+      "stages": [
+        [
+          76
+        ]
+      ]
+    },
+    {
+      "ledger": 64780638,
+      "classic": 285,
+      "soroban": 62,
+      "sorobanBytes": 59404,
+      "stages": [
+        [
+          62
+        ]
+      ]
+    },
+    {
+      "ledger": 64780639,
+      "classic": 238,
+      "soroban": 94,
+      "sorobanBytes": 76336,
+      "stages": [
+        [
+          94
+        ]
+      ]
+    },
+    {
+      "ledger": 64780640,
+      "classic": 195,
+      "soroban": 185,
+      "sorobanBytes": 147964,
+      "stages": [
+        [
+          185
+        ]
+      ]
+    },
+    {
+      "ledger": 64780641,
+      "classic": 378,
+      "soroban": 195,
+      "sorobanBytes": 159180,
+      "stages": [
+        [
+          195
+        ]
+      ]
+    },
+    {
+      "ledger": 64780642,
+      "classic": 167,
+      "soroban": 127,
+      "sorobanBytes": 247644,
+      "stages": [
+        [
+          127
+        ]
+      ]
+    },
+    {
+      "ledger": 64780643,
+      "classic": 172,
+      "soroban": 123,
+      "sorobanBytes": 243880,
+      "stages": [
+        [
+          123
+        ]
+      ]
+    },
+    {
+      "ledger": 64780644,
+      "classic": 144,
+      "soroban": 154,
+      "sorobanBytes": 206352,
+      "stages": [
+        [
+          154
+        ]
+      ]
+    },
+    {
+      "ledger": 64780645,
+      "classic": 149,
+      "soroban": 128,
+      "sorobanBytes": 241444,
+      "stages": [
+        [
+          128
+        ]
+      ]
+    },
+    {
+      "ledger": 64780646,
+      "classic": 157,
+      "soroban": 140,
+      "sorobanBytes": 220844,
+      "stages": [
+        [
+          140
+        ]
+      ]
+    },
+    {
+      "ledger": 64780647,
+      "classic": 170,
+      "soroban": 148,
+      "sorobanBytes": 227404,
+      "stages": [
+        [
+          148
+        ]
+      ]
+    },
+    {
+      "ledger": 64780648,
+      "classic": 182,
+      "soroban": 149,
+      "sorobanBytes": 212864,
+      "stages": [
+        [
+          149
+        ]
+      ]
+    },
+    {
+      "ledger": 64780649,
+      "classic": 172,
+      "soroban": 153,
+      "sorobanBytes": 187172,
+      "stages": [
+        [
+          153
+        ]
+      ]
+    },
+    {
+      "ledger": 64780650,
+      "classic": 161,
+      "soroban": 182,
+      "sorobanBytes": 175992,
+      "stages": [
+        [
+          182
+        ]
+      ]
+    },
+    {
+      "ledger": 64780651,
+      "classic": 153,
+      "soroban": 159,
+      "sorobanBytes": 217944,
+      "stages": [
+        [
+          159
+        ]
+      ]
+    },
+    {
+      "ledger": 64780652,
+      "classic": 457,
+      "soroban": 170,
+      "sorobanBytes": 191796,
+      "stages": [
+        [
+          170
+        ]
+      ]
+    },
+    {
+      "ledger": 64780653,
+      "classic": 301,
+      "soroban": 165,
+      "sorobanBytes": 197824,
+      "stages": [
+        [
+          165
+        ]
+      ]
+    },
+    {
+      "ledger": 64780654,
+      "classic": 391,
+      "soroban": 112,
+      "sorobanBytes": 182296,
+      "stages": [
+        [
+          112
+        ]
+      ]
+    },
+    {
+      "ledger": 64780655,
+      "classic": 505,
+      "soroban": 164,
+      "sorobanBytes": 187528,
+      "stages": [
+        [
+          164
+        ]
+      ]
+    },
+    {
+      "ledger": 64780656,
+      "classic": 139,
+      "soroban": 127,
+      "sorobanBytes": 282360,
+      "stages": [
+        [
+          127
+        ]
+      ]
+    },
+    {
+      "ledger": 64780657,
+      "classic": 281,
+      "soroban": 89,
+      "sorobanBytes": 276924,
+      "stages": [
+        [
+          89
+        ]
+      ]
+    },
+    {
+      "ledger": 64780658,
+      "classic": 194,
+      "soroban": 107,
+      "sorobanBytes": 279340,
+      "stages": [
+        [
+          107
+        ]
+      ]
+    },
+    {
+      "ledger": 64780659,
+      "classic": 201,
+      "soroban": 131,
+      "sorobanBytes": 282324,
+      "stages": [
+        [
+          131
+        ]
+      ]
+    },
+    {
+      "ledger": 64780660,
+      "classic": 234,
+      "soroban": 92,
+      "sorobanBytes": 277840,
+      "stages": [
+        [
+          92
+        ]
+      ]
+    }
+  ]
+}

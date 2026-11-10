@@ -1,0 +1,227 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { LogFields, Logger } from "../src/logger.js";
+import { memoryMetrics } from "../src/metrics.js";
+import type { SpendStore } from "../src/ports/index.js";
+import { createPruner, type PrunerDeps } from "../src/pruner.js";
+import { testDatabase } from "./database.js";
+
+const DAY = 86_400_000;
+const NOW = 100 * DAY;
+const big = 10n ** 15n;
+
+const db = testDatabase();
+beforeEach(db.empty);
+
+function recordingLogger() {
+  const events: { level: string; event: string; fields?: LogFields }[] = [];
+  const at = (level: string) => (event: string, fields?: LogFields) =>
+    void events.push({ level, event, fields });
+  const logger: Logger = {
+    debug: at("debug"),
+    info: at("info"),
+    warn: at("warn"),
+    error: at("error"),
+  };
+  return { logger, events };
+}
+
+function deps(overrides: Partial<PrunerDeps> = {}): PrunerDeps {
+  return {
+    spend: db.stores().spend,
+    rateLimits: db.stores().rateLimits,
+    catalogAttempts: db.stores().catalogAttempts,
+    spendWindowMs: DAY,
+    rateLimitWindowMs: 60_000,
+    logger: recordingLogger().logger,
+    metrics: memoryMetrics(),
+    now: () => NOW,
+    ...overrides,
+  };
+}
+
+const reserveAt = (spend: SpendStore, id: string, at: number, windowMs = DAY) =>
+  spend.reserve({
+    id,
+    amount: 1n,
+    limits: [{ scope: "global", maxStroops: big, windowMs }],
+    now: at,
+  });
+
+describe("pruner", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("prunes spend past the longer of two windows and 7 days, and rate limits past one window", async () => {
+    const { spend, rateLimits } = db.stores();
+    await reserveAt(spend, "old", NOW - 7 * DAY - 1);
+    await reserveAt(spend, "kept", NOW - 7 * DAY);
+    await rateLimits.hit("ended", 60_000, NOW - 120_001);
+    await rateLimits.hit("previous", 60_000, NOW - 60_000);
+    await createPruner(deps({ spend, rateLimits })).runOnce();
+    expect(await spend.used("global", 30 * DAY, NOW)).toBe(1n);
+    // Its window ended at NOW - 120 000; pruned, so this hit starts it again.
+    expect(await rateLimits.hit("ended", 60_000, NOW - 120_001)).toEqual({
+      count: 1,
+      resetAt: NOW - 120_000,
+    });
+    expect((await rateLimits.hit("previous", 60_000, NOW - 60_000)).count).toBe(2);
+
+    // A 5-day window keeps 10 days.
+    await db.empty();
+    const long = db.stores().spend;
+    await reserveAt(long, "old", NOW - 10 * DAY - 1, 5 * DAY);
+    await reserveAt(long, "kept", NOW - 10 * DAY, 5 * DAY);
+    await createPruner(deps({ spend: long, spendWindowMs: 5 * DAY })).runOnce();
+    expect(await long.used("global", 30 * DAY, NOW)).toBe(1n);
+  });
+
+  it("prunes listing attempts older than 30 days (0063 row 23)", async () => {
+    const { catalogAttempts } = db.stores();
+    const attempt = (at: number) =>
+      catalogAttempts.record({
+        at,
+        network: "stellar:testnet",
+        payTo: "GPAYTO",
+        payer: "GPAYER",
+        stage: "payment",
+        outcome: "unchanged",
+      });
+    await attempt(NOW - 30 * DAY - 1);
+    await attempt(NOW - 30 * DAY);
+    await createPruner(deps({ catalogAttempts })).runOnce();
+    const { rows } = await db.pool.query("SELECT at FROM catalog_attempts");
+    expect(rows).toEqual([{ at: String(NOW - 30 * DAY) }]);
+  });
+
+  it("prunes quiescent spend_scopes rows, keeping those with an open breaker (0024)", async () => {
+    const { spend } = db.stores();
+    await db.pool.query("INSERT INTO spend_scopes (scope, window_start) VALUES ('payer:GONE', 1)");
+    await db.pool.query(
+      "INSERT INTO spend_scopes (scope, breaker_until) VALUES ('asset:OPEN', $1)",
+      [NOW + DAY],
+    );
+    await createPruner(deps({ spend })).runOnce();
+    const { rows } = await db.pool.query<{ scope: string }>(
+      "SELECT scope FROM spend_scopes ORDER BY scope",
+    );
+    expect(rows.map((r) => r.scope)).toEqual(["asset:OPEN"]);
+  });
+
+  it("prunes in batches until one comes back short, each table within its own time budget", async () => {
+    // A flood: every batch comes back full, and each takes 300 ms.
+    let clock = 0;
+    const calls = { spend: 0, rate: 0 };
+    const full = (key: keyof typeof calls) => async (_before: number, limit: number) => {
+      calls[key]++;
+      clock += 300;
+      return limit;
+    };
+    const { logger, events } = recordingLogger();
+    await createPruner(
+      deps({
+        spend: { prune: full("spend"), pruneScopes: async () => 0 },
+        rateLimits: { prune: full("rate") },
+        logger,
+        clock: () => clock,
+      }),
+    ).runOnce();
+    // 1 s each: the batch that crosses it is the last.
+    expect(calls).toEqual({ spend: 4, rate: 4 });
+    expect(events.filter((e) => e.event === "store_pruned")).toEqual([
+      {
+        level: "info",
+        event: "store_pruned",
+        fields: { table: "spend_reservations", rows: 4_000, complete: false },
+      },
+      {
+        level: "info",
+        event: "store_pruned",
+        fields: { table: "rate_limits", rows: 4_000, complete: false },
+      },
+    ]);
+
+    // A short batch ends a table's run; nothing pruned logs nothing.
+    const short = recordingLogger();
+    await createPruner(
+      deps({
+        spend: { prune: async () => 7, pruneScopes: async () => 0 },
+        rateLimits: { prune: async () => 0 },
+        logger: short.logger,
+      }),
+    ).runOnce();
+    expect(short.events).toEqual([
+      {
+        level: "info",
+        event: "store_pruned",
+        fields: { table: "spend_reservations", rows: 7, complete: true },
+      },
+    ]);
+  });
+
+  it("logs and counts a failed prune, and still prunes the other table", async () => {
+    const { logger, events } = recordingLogger();
+    const metrics = memoryMetrics();
+    const { rateLimits } = db.stores();
+    await rateLimits.hit("ended", 60_000, 0);
+    const error = new Error("connection terminated");
+    await createPruner(
+      deps({
+        spend: { prune: () => Promise.reject(error), pruneScopes: async () => 0 },
+        rateLimits,
+        logger,
+        metrics,
+      }),
+    ).runOnce();
+    expect(events).toContainEqual({
+      level: "warn",
+      event: "store_prune_failed",
+      fields: { table: "spend_reservations", rows: 0, error },
+    });
+    expect(metrics.value("store_prune_failures_total", { table: "spend_reservations" })).toBe(1);
+    expect(await rateLimits.prune(NOW, 10)).toBe(0);
+  });
+
+  it("logs the rows earlier batches deleted when a later one fails", async () => {
+    const { logger, events } = recordingLogger();
+    const error = new Error("connection terminated");
+    const prune = vi
+      .fn<(before: number, limit: number) => Promise<number>>()
+      .mockResolvedValueOnce(1_000)
+      .mockResolvedValueOnce(1_000)
+      .mockRejectedValueOnce(error);
+    await createPruner(deps({ spend: { prune, pruneScopes: async () => 0 }, logger })).runOnce();
+    expect(events).toContainEqual({
+      level: "warn",
+      event: "store_prune_failed",
+      fields: { table: "spend_reservations", rows: 2_000, error },
+    });
+  });
+
+  it("runs every interval with ±10% jitter, and close() waits for a running tick and stops", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    let ticks = 0;
+    const spend = {
+      prune: async () => {
+        ticks++;
+        await new Promise<void>((resolve) => (release = resolve));
+        return 0;
+      },
+      pruneScopes: async () => 0,
+    };
+    // random() = 0: the earliest a tick may come, 54 s.
+    const pruner = createPruner(deps({ spend, random: () => 0 }));
+    pruner.start();
+    await vi.advanceTimersByTimeAsync(53_999);
+    expect(ticks).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(ticks).toBe(1);
+    let closed = false;
+    const closing = pruner.close().then(() => (closed = true));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(closed).toBe(false);
+    release();
+    await closing;
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(ticks).toBe(1);
+  });
+});

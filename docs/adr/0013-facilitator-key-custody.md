@@ -1,0 +1,326 @@
+# ADR 0013: Keep the facilitator key in OpenBao Transit on the facilitator's own server
+
+- Status: accepted
+- Date: 2026-10-19
+- Amended: 2026-10-20 (where the unseal backup lives, the restore drill, the fee float and
+  top-ups; [S-key-custody-decisions](../../lore/1-tasks/archive/0047_RESEARCH_hetzner-key-custody/notes/S-key-custody-decisions.md#backup-and-top-ups-2026-10-20));
+  2026-10-21 (the AWS logging role and the other secrets, to match ADR 0011's Hetzner revision;
+  a socket per network, OpenBao's own unit and limits, from the PR #24 review); 2026-10-22 (the
+  OpenBao key's own account, the theft alarm, 1-hour tokens, the admin socket and the restore
+  path, from the PR #48 review); 2026-10-29 (task 0077: one facilitator holds every network's
+  socket, each still its own); 2026-11-02 (admin on a loopback listener inside the container,
+  which Raft's cluster address needs, no move of testnet to the OpenBao key, since nothing ran on
+  another key, the backup JSON over stdin, and AppRole's lockout off, task 0026); 2026-11-02 (the
+  theft alarm reads the accounts instead of our hashes, a second balance alarm, and an alarm on
+  reads of the backup secret, from task 0027); 2026-11-03 (the effects anyone can cause, where the
+  check reads up to, statistics a forged point can't move, and the weekly review from the first
+  deploy with the fee spend metric, from the PR #111 review); 2026-11-05 (the read-only Storage
+  Box account's own directory, and the Storage Box's own snapshots, restored by a copy and never
+  a rollback, from Stan's setup of the box in task 0026); 2026-11-05 (Borg in repokey mode with
+  its key exported to the secret, changed with the passphrase, and the drill restoring through
+  a local copy, task 0026); 2026-11-09 (the audit log disk alarm at 90%, after the server's disk
+  alarm at 80%: on the server the audit volume shares `/` with everything else, so the two
+  thresholds give a warning and then a last call instead of one doubled message; task 0027
+  decision 73)
+- Supersedes: the key custody part of [ADR 0011](0011-facilitator-hosting.md) ("Keys, secrets and
+  access": the SSM parameter for `FACILITATOR_SECRET` and the mainnet KMS key)
+
+## Context
+
+- The facilitator moves from AWS to the company's Hetzner dedicated server, to save cost. ADR 0011
+  kept the key in AWS SSM on testnet and in AWS KMS on mainnet (0036). Neither exists on Hetzner,
+  and Hetzner has no KMS, HSM or secret manager.
+- AD-12: one facilitator key per network signs for every channel and pays fee bumps. It reaches the
+  pool only as a `TransactionSigner`, so a remote signer can replace it.
+- The key can't move buyers' or sellers' tokens. A thief gets the fee account's float and the
+  channels' reserves: about 130 XLM at launch (a 100 XLM float plus ~30 XLM of reserves)
+  ([R-key-leak-impact](../../lore/1-tasks/archive/0047_RESEARCH_hetzner-key-custody/notes/R-key-leak-impact.md)).
+- A spike signed Stellar transactions with OpenBao 2.7.1 Transit Ed25519 keys. One landed on testnet
+  (`26a93987…`, ledger 5210493), at about 6 ms a signature locally.
+- The server also runs another company project's services.
+
+## Decision
+
+### Where the key lives
+
+- **OpenBao's Transit engine holds the key.** It is generated inside OpenBao, `type=ed25519`,
+  `exportable=false`, `allow_plaintext_backup=false`. The raw key never exists outside OpenBao.
+- **OpenBao runs in its own container** on the facilitator's server, beside the facilitator's
+  container, under Docker Compose, pinned by digest, with a 256 MiB memory limit and half a CPU.
+  Its own systemd unit (`x402-openbao.service`, ADR 0011) starts it and passes in the unseal
+  credential. No container gets the Docker socket.
+- **One OpenBao per server.** Testnet and mainnet each get their own Transit key, policy, AppRole
+  and socket. It still shares the process, so a flood from one network slows the other's
+  signing; that is accepted at these stakes (Rationale).
+- **One facilitator holds every network's socket** (task 0077, ADR 0011): it serves both
+  networks, so it mounts both sockets and gets both AppRoles. A break-in on the facilitator signs
+  for both networks; before 0077, a facilitator per network kept a testnet break-in away from
+  mainnet's key. The separate keys, policies, AppRoles and sockets stay: a leaked token or secret
+  ID still signs for one network only, the audit log still shows which network signed, a
+  rotation or revocation still touches one network, and a later split into a process per network
+  needs no change in OpenBao.
+- **The same setup on testnet and mainnet,** so testnet runs exactly what mainnet will.
+- **OpenBao does Transit signing only.** Other secrets, the database password and `RPC_URLS` (one
+  credential file per version, ADR 0011), stay systemd credentials, so OpenBao is needed for
+  `/settle` and not for the facilitator to start.
+
+### How the facilitator signs
+
+- **A Transit `TransactionSigner`** (0036) sends the 32-byte transaction hash to
+  `transit/sign/<network key>` with a pinned `key_version` and adds the 64-byte signature. A
+  rotated Transit key can't then sign in place of the key that is on chain.
+- **The signer's address is the fee account's, from config.** The pool pays fee bumps from it and
+  uses it as the channels' signer, so the fee account is always the OpenBao key's own account.
+  Every signature is checked against that address. After start, a
+  signature of a fixed value, repeated every 30 s while OpenBao is closed or unreachable, reports the check in `/health`'s
+  `signer` without holding up the start, so the facilitator starts without OpenBao (0036).
+- **The OpenBao key signs settlements only.** An ordinary wallet funds the fee account and creates
+  the channels, writing the OpenBao key in as each channel's only signer; the channels' own fresh
+  keys sign that, so no tool signs other transactions through OpenBao (0036). OpenBao doesn't
+  enforce this, since it signs any hash. The theft alarm reads the accounts, not signatures, so the
+  rule keeps it free of exceptions: no tool of ours changes these accounts' signers, and such a
+  change is theft. The one exception is the move off a suspected stolen key, below.
+- **A unix socket per network, and no network port.** OpenBao has one listener per network, each
+  on a socket in its own volume, mounted into the facilitator, plus an admin listener on loopback
+  inside OpenBao's own container, which has no network: only root or the `docker` group on the
+  host reaches it, through `docker compose exec`. Raft takes its cluster address only from a TCP
+  listener: with sockets alone, `bao operator init` fails with "cluster addresses not found". That
+  listener serves the API too, so an admin socket beside it would only keep `/sys/generate-root/*`
+  off TCP, which buys almost nothing in a container with no network (both tried on 2.7.2). Nothing
+  on the network can reach either.
+- **AppRole login.** Each network's role ID and secret ID come in as Compose `file:` secrets,
+  decrypted by the facilitator's unit to a tmpfs (ADR 0011), never as environment variables. The
+  token lives 1 hour (`token_ttl` and `token_max_ttl`), so a renewal can't stretch it; the signer
+  logs in again once less than 5 minutes are left instead of renewing it, and a login that fails ends that settlement. The secret ID doesn't expire. The policy allows only
+  `transit/sign/<network key>`. A leaked token stops working within the hour; a leaked secret ID,
+  or code running in the facilitator's container, signs until the secret ID is destroyed by hand
+  (runbook). OpenBao's user lockout is off for AppRole: only the facilitator reaches its socket,
+  and the default would lock the right secret ID too, after 5 failed logins, for 15 minutes.
+- **Fail closed.** If OpenBao is down, sealed, or can't write its audit log, `/settle` answers an
+  error, `/verify` keeps working and an alarm fires. There is no fallback copy of the key.
+
+### Unseal, backup and recovery
+
+- **Static seal key as an encrypted systemd credential** (`systemd-creds`, `host` mode). systemd
+  decrypts it at start and hands it to OpenBao, which unseals by itself after a restart.
+  - TPM mode (`tpm2` or `host+tpm2`) would bind the credential to the board, so a copied disk
+    couldn't open it. It is the first upgrade to consider; it isn't used now.
+- **Daily Raft snapshots leave the server.** They go to our own sub-account and Borg repository on
+  the company's existing Hetzner Storage Box, daily, keeping 14. The snapshots are encrypted
+  by OpenBao, and the Borg repository is encrypted too. The snapshot job has its own AppRole and
+  a snapshot-only policy (`sys/storage/raft/snapshot`), its credential a systemd credential, and
+  uses the admin listener.
+- **The Storage Box keeps its own snapshots.** Daily, keeping 7 (14 if the space allows), in the
+  box's `.zfs`, which is read-only; only the Hetzner Console or API deletes one. The server's
+  write key can wipe the live repositories, and change the read-only account's keys, which sit
+  under its home (below), but not the last 7 days. A snapshot covers the whole box, the other
+  projects' backups too, so a restore from one copies our directory out of `.zfs/snapshot` with
+  the box's main account. Never a rollback in the Console: it reverts the whole box. The normal
+  restore doesn't need this: it reads the live repositories with the read-only account.
+- **The backup set is kept in AWS Secrets Manager, apart from the snapshots.** A restore on a new
+  server needs five items, all of which are lost with the server
+  ([R-unseal-key-backup](../../lore/1-tasks/archive/0047_RESEARCH_hetzner-key-custody/notes/R-unseal-key-backup.md)):
+  1. the static seal key and its exact key ID (OpenBao refuses a key whose ID differs, and
+     `-force` doesn't get round it), plus the previous pair for 14 days after a rotation;
+  2. the recovery key, which regenerates a root token (it can't unseal or open a snapshot);
+  3. the Borg passphrase and `borg key export` output. The repository is in repokey mode, so its
+     key is on the Storage Box too, but locked by the passphrase: nothing on the Storage Box
+     decrypts a backup by itself, as with pgBackRest's `cipher-pass`. The export covers a damaged
+     key in the repository. It is encrypted with the current passphrase, so a
+     `borg key change-passphrase` replaces both fields together, in one `put-secret-value`;
+  4. the `seal "static"` stanza and the OpenBao version;
+  5. the SSH key of a second, read-only Storage Box sub-account: the server's own key dies with
+     the server. Its home is the repositories' directory (`/x402/data`), one below the write
+     account's (`/x402`), not the same one: a sub-account's `authorized_keys` lives in its home,
+     so a shared home would let either account's key log in as the other.
+- **One secret, `x402/production/openbao-backup`,** in `eu-central-1`, in the AWS account that
+  soroban-explorer and prices-api share. One server runs both networks, so one OpenBao and one
+  secret. It is one JSON (`seal_key_hex`, `seal_key_id`, `seal_key_sha256`,
+  `previous_seal_key_hex`, `previous_seal_key_id`, `recovery_key`, `borg_passphrase`,
+  `borg_key_export`, `seal_config`, `openbao_version`, `storage_box_ro_user`,
+  `storage_box_ro_ssh_key`, `updated`), encrypted with the default
+  `aws/secretsmanager` key, with a 30-day recovery window. Tags `Project=stellar-x402`,
+  `Environment=production`.
+  - **AWS is a store here, not a signer.** People read it during a restore; no settlement calls it.
+    The facilitator's server has no AWS credentials except the roles ADR 0011 names and
+    justifies, and none of them may sign or read this secret. Today that is one logs-and-metrics
+    role (IAM Roles Anywhere), held only by the CloudWatch agent on the host. An S3 fallback for
+    the snapshots would get its own named, write-only role there, not this one.
+  - **Made by hand with the CLI, never by CDK,** so no stack teardown deletes it: the JSON goes
+    over stdin to `create-secret`, so it never reaches a disk. Later changes use
+    `put-secret-value`; the old version stays as `AWSPREVIOUS`. The 0026 operator writes it; the
+    runbook names the fields, never the values.
+  - **AWS is the only copy.** No paper copy for now.
+- **Init with one recovery share:** `bao operator init -recovery-shares=1 -recovery-threshold=1`,
+  and the share goes into the secret.
+- **A restore drill proves the backup.** On a throwaway machine with no route to production, using
+  only the secret and the Storage Box: copy the Borg repository through the read-only account,
+  `borg key import` the secret's export into that copy (the account can't write to the
+  repository, and a damaged repository key would need this restore), restore the newest
+  snapshot from it, regenerate a root token (the
+  legacy API, as below), issue
+  an AppRole login, check that the Transit public key equals the on-chain signer, and check the
+  CloudTrail event history for reads that weren't drills. Before mainnet (first on testnet), then
+  every quarter and after any seal key rotation, passphrase change or OpenBao upgrade. Owned by
+  Platform (0026).
+- **No cold key.** The OpenBao key stays each account's only signer, as AD-12 says today. 0048's
+  cold recovery signer is declined for now and re-checked before mainnet.
+- **If OpenBao's data and the unseal key are both lost,** the fee account and every channel are
+  lost with their XLM. Recovery is then a new key, new accounts and new channels.
+
+### Operations
+
+- **Platform runs OpenBao** as part of 0026: upgrades, snapshots, the audit log and alarms.
+  **Payments owns** the signer code, the key policy and this ADR.
+- **No standing admin access.** The root token is revoked after setup and regenerated with the
+  recovery key when needed. Since OpenBao 2.6 the CLI's `generate-root` needs a token and the
+  unauthenticated endpoints are off by default (CVE-2026-5807), so the admin listener keeps them on
+  (`disable_unauthed_generate_root_endpoints=false`) and the runbook calls `/sys/generate-root/*`
+  with `bao write` inside the container. Only root or the `docker` group on the host reaches that
+  listener, and both already reach the key. Admin is through SSH on the server, over that
+  listener; no web UI, no remote admin.
+- **The audit log** goes to a file on its own volume, rotated, with an alarm at 90% disk, after
+  the server's disk alarm at 80% (amended 2026-11-09): OpenBao stops signing when it can't write
+  it.
+- **Alarms** (0027):
+  - OpenBao sealed or down, or signing failing;
+  - **theft:** any signer or threshold change on the fee account or a channel, and any Horizon
+    effect on them (`/accounts/{id}/effects`) other than the two anyone can cause: a credit
+    (`account_credited`) and a claimable balance that names the account
+    (`claimable_balance_claimant_created`). A balance made from our own account shows
+    `claimable_balance_created` and `account_debited`, so it still fires. A check off the server
+    reads them, since root on the server is the case it is for. The audit log can't show
+    signatures made with a copied key. The check takes nothing from the server, since hashes kept
+    there could be forged, and comparing them would flag top-ups, channel setup, rotations and a
+    third party's fee bump. It keeps where it read up to in AWS, written only by its own role, so
+    after an outage of any length it reads everything it missed. Root can write metric lines into
+    any namespace, so these alarms use the statistic a forged point can't hide a real one behind
+    (`Minimum` for a balance, `Maximum` for a count). It doesn't see the float burned on fees
+    alone, which gains a thief nothing and reaches the balance alarms and the weekly review.
+    Channel setup and a rotation fire it, and nothing suppresses that;
+  - the fee account's spendable balance below 25 XLM, and again below 10 XLM, as a Slack message
+    with the network, the balance, the address and the top-up step, from the same check;
+  - a read of the backup secret, from the CloudTrail event history, which needs no trail. A drill
+    fires it too;
+  - the audit log disk at 90%, after the server's disk alarm at 80% (amended 2026-11-09).
+- **The fee float is 100 XLM, with the alarm at 25 XLM, and no upper limit.** That is about 24,000
+  typical `exact` settlements (~41,200 stroops each, ADR 0003), and about 5 days to act after the
+  alarm at 1,000 settlements a day, before 0024's floor stops settlement at 5 XLM. Testnet uses the same numbers for now.
+  - **Top-ups are by hand.** Testnet: Friendbot, which only creates accounts, so a short script in
+    the 0026 runbook funds a fresh account and merges it into the fee account. Mainnet:
+    a withdrawal from the company's exchange account to the fee account; who makes it is named
+    before mainnet. Never an automatic top-up from a key on the server, which would put the
+    treasury behind the same root.
+  - **A weekly review** (okarcz, Payments). From the first deploy: which alarms are in ALARM
+    (0027). After the mainnet deploy, also the real fee spend, from 0027's `fee_charged_stroops`
+    summed over 7 days and set against the balance's change, where a gap means the fee account
+    paid for something other than settlements; the next refill amount; and whether this custody
+    still fits the float (see Rationale).
+- **Rotation and break-in runbook** (0026):
+  - a leaked token or secret ID: destroy the secret ID, revoke its tokens, issue a new one, and
+    restart the facilitator, which reads it at start;
+  - a restore of OpenBao from a snapshot: restart the facilitator, since a token newer than the
+    snapshot answers 403 until its hour ends and a 403 doesn't make the signer log in again;
+  - a suspected key theft: create a new Transit key and move to it with the old key. In one
+    transaction the old key creates the new key's own account, signs a `set_options` on each
+    channel that adds the new key and removes itself, and merges the old fee account into the new
+    one (`accountMerge`). The service stops for it, as in ADR 0011's rotation steps. Then check the
+    theft alarm's history.
+
+## Rationale
+
+- **The stakes set the cost.** A leak reaches the float plus the channels' reserves: about 130 XLM
+  at launch. Against that, a separate OpenBao machine (~€78–144 a year) or AWS KMS costs more than
+  a likely loss. The float has no upper limit, so the weekly review re-checks this: once a year of
+  the upgrade path costs less than a leak would, the review raises the upgrade.
+- **OpenBao still beats a file secret at no cost.** A facilitator bug can leak only a token that
+  expires within an hour, not the key, and every signature is in the audit log.
+- **Root on the server can still copy the key,** from memory or from the disk plus the unseal
+  credential. That is accepted at these stakes. The theft and balance alarms catch a theft, and
+  the float caps it.
+- **Any admin of the shared AWS account can read the backup set,** and the set alone takes the
+  key: it holds the read-only Storage Box key too, so a restore needs nothing else. That is
+  accepted for the same reason, and it is the access model
+  soroban-explorer and prices-api already use. AWS KMS can't hold the backup: it never gives a key
+  back.
+- **One mechanism on both networks** means testnet rehearses mainnet, unlike ADR 0011's SSM/KMS
+  split.
+- **One facilitator for both networks is accepted at these stakes too** (0077). A break-in on it
+  reaches mainnet's float and reserves, as a break-in on a mainnet-only facilitator would. What is
+  new is that testnet's code paths and switches run in the process that holds mainnet's key.
+  0038 decides what keeps a testnet-only switch away from mainnet before mainnet joins.
+- **OpenBao over Vault:** the same API (the spike passed on both), MPL-2.0 rather than BSL, and its
+  HSM and static seals are open source.
+
+## Alternatives considered
+
+- **OpenBao on its own Hetzner Cloud machine,** linked over a vSwitch with mTLS: root on the
+  facilitator's server could sign but not copy the key. Rejected for cost at today's stakes.
+- **AWS KMS called from Hetzner:** the key never leaves KMS, for ~$12–36 a year. Rejected: it
+  brings AWS back after a move made to leave it for cost, and adds a cross-cloud call to every
+  settlement.
+- **The key as a file secret** (systemd credential): free, but a facilitator bug leaks the key
+  itself, and nothing logs its use.
+- **Shamir unseal:** protects a copied disk or snapshot, but `/settle` stops after every restart
+  until key holders unseal.
+- **A cold recovery signer (0048 as written):** limits the hot key to fees and allows recovery
+  after a loss, but needs a cold key held offline. Declined for now.
+- **A hardware HSM:** not offered by Hetzner for dedicated servers.
+- **A facilitator per network, each mounting only its own socket:** this ADR until 2026-10-29.
+  Replaced by ADR 0011's one facilitator for both networks (tasks 0076, 0077).
+- **One socket and one AppRole for both networks:** one listener and one credential pair fewer,
+  but a leaked secret ID would sign for both networks and a rotation would touch both. Rejected.
+- **For the backup set:** a password manager vault held by two people, a paper copy in a safe,
+  one holder only, or a Shamir split of the seal key. Rejected for the AWS account the other
+  projects already run: one holder is a single point of failure, and a split is over-built at
+  these stakes. AWS KMS can't hold it at all.
+
+## Consequences
+
+- **The hot key can do anything on our accounts.** A theft costs the float plus downtime, and can
+  lock us out of the channels. 0048 stays a mainnet blocker until it is re-decided.
+- **Losing OpenBao's data and the backup set loses the accounts.** The restore drill tests both
+  before mainnet and every quarter.
+- **We depend on the shared AWS account.** If it is closed or we lose access, the backup set goes
+  with it. The AWS account has no CloudTrail trail, so the alarm on a read of the secret and the
+  drill both use the 90-day event history, which lags by about 15 minutes. The check therefore
+  reads back an hour each time and counts each event once.
+- **A restart of the server stops `/settle` until OpenBao is unsealed,** which happens by itself in
+  seconds.
+- **While OpenBao is down, `/verify` still accepts a payment.** The seller's route runs, `/settle`
+  fails, and the route's answer is thrown away: the buyer pays nothing and the seller loses the
+  work until 0027's alarm brings someone. `/verify` doesn't refuse, because one failed signature
+  would then stop every payment until the next check passes.
+- **We depend on another project's Storage Box.** If it is cancelled or resized, our snapshots go
+  with it. 0026 tells that team.
+- **0036 becomes the OpenBao Transit signer,** owned by Payments. 0026 gains the OpenBao deployment
+  and its runbook.
+- **The upgrade path** when the float or `upto` (0015) raises the stakes: TPM-bound credentials,
+  then OpenBao on its own machine, then a KMS. The `TransactionSigner` stays the same.
+- **ADR 0011 describes the hosting on Hetzner** (task 0039): the containers, the deploys and the one
+  AWS role above. A new AWS role on the server needs its own entry and reason there.
+
+## Open questions
+
+- **Who makes mainnet top-ups,** and a backup person (before mainnet, 0026).
+- **Two facts the first drill settles:** whether a restore needs `-force`, and the AppRole
+  re-login after a restore.
+- **Whether the server has a TPM,** for the upgrade above.
+
+## References
+
+- [M1 architecture spine](../architecture/m1-spine.md): AD-12
+- [ADR 0011](0011-facilitator-hosting.md): hosting, and the custody this ADR replaces
+- Task 0047 (`lore/1-tasks/archive/0047_RESEARCH_hetzner-key-custody/`):
+  - `notes/S-key-custody-decisions.md`: every decision, question by question;
+  - `notes/R-key-leak-impact.md`: what a leaked key costs;
+  - `notes/R-unseal-key-backup.md`: what a restore needs, and where its backup lives;
+  - `notes/R-key-custody-options.md` and `notes/R-openbao-on-hetzner.md`: the options compared;
+  - `spike/results.md`: Transit signatures on Stellar.
+- Tasks 0036 (signer), 0026 (deployment and runbook), 0027 (alarms), 0048 (thresholds, re-check)
+- OpenBao: [Transit](https://openbao.org/docs/secrets/transit/),
+  [static seal](https://openbao.org/docs/configuration/seal/static/),
+  [AppRole](https://openbao.org/docs/auth/approle/),
+  [seal concepts and recovery keys](https://openbao.org/docs/concepts/seal/)
+- [AWS Secrets Manager](https://docs.aws.amazon.com/secretsmanager/latest/userguide/intro.html)
+- [systemd credentials](https://systemd.io/CREDENTIALS/)

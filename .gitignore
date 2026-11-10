@@ -3,12 +3,14 @@ node_modules/
 
 # Build output
 dist/
+cdk.out/
 *.tsbuildinfo
 .turbo/
 coverage/
 
 # Rust / Soroban
 contracts/target/
+contracts/**/test_snapshots/
 target/
 .stellar/
 
@@ -48,3 +50,12 @@ lore/0-session/next-tasks.md
 lore/README.md
 lore/BOARD.md
 lore/board.json
+# BMAD (local setup and generated planning docs)
+_bmad/
+_bmad-output/
+
+# Ansible: the real inventory
+deploy/ansible/inventory.ini
+
+# A conformance run against a facilitator on this machine (task 0029).
+conformance/results/testnet-local/

@@ -1,0 +1,43 @@
+# The facilitator of an environment (ADR 0011): x402@production. It neither pulls nor migrates;
+# the deploy does both, then restarts this unit.
+[Unit]
+Description=x402 facilitator (%i)
+Documentation=https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/adr/0011-facilitator-hosting.md
+PartOf=docker.service
+# Wants, not Requires: stopping or restarting a database never stops the facilitator, and at a
+# reboot it drains while the databases and the tunnel are still up.
+Wants=x402-db-testnet@%i.service x402-openbao.service
+After=docker.service x402-tunnel@%i.service x402-db-testnet@%i.service x402-openbao.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+WorkingDirectory=/srv/x402/%i
+# Raw lines for the CloudWatch agent (0027 decision 1): stdout carries the logger's JSON and the
+# EMF lines, which the agent splits into two log groups; stderr, Compose's progress and a crash's
+# trace. append:, so copytruncate leaves no hole. The playbook makes the directory and the files.
+StandardOutput=append:/var/log/x402/%i/facilitator.log
+StandardError=append:/var/log/x402/%i/facilitator.err.log
+ExecStartPre=/usr/local/libexec/x402/x402-creds %i database-url.testnet:1000 rpc-urls.testnet:1000 approle-role-id.testnet:1000 approle-secret-id.testnet:1000
+# The last image that was ready, unless a deploy is starting this one.
+ExecStartPre=/bin/sh -c '[ -e /run/x402/%i/deploying ] || cp digest.good digest'
+# --exit-code-from: a plain `up` exits 0 whatever the container's code.
+ExecStart=/usr/local/libexec/x402/x402-compose %i up --no-log-prefix --no-color --no-deps --pull never --exit-code-from facilitator facilitator
+ExecStop=/usr/local/libexec/x402/x402-compose %i stop facilitator
+# A planned stop: after ExecStop, systemd signals the `up` that is still exiting, and Compose
+# answers a signal with 130. Without this, every deploy, drain and `systemctl stop` ended `failed`
+# and counted a failure (0027's drill, 2026-11-09). The facilitator itself exits 0 or 1, and a
+# hung one the watchdog kills ends 137, so a crash still counts.
+SuccessExitStatus=130
+# Every end but a success counts facilitator_failures_total (0027 decision 43): a crash after
+# ready in cycles of a minute or more never reaches StartLimitBurst. "-": a failed write never
+# changes the result or the restart.
+ExecStopPost=-/usr/local/libexec/x402/x402-host-probe stopped
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=60
+# Above the 180 s stop_grace_period, so a reboot waits for the drain.
+TimeoutStopSec=200
+
+[Install]
+WantedBy=multi-user.target

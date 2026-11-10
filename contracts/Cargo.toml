@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["upto-proxy"]
+members = ["upto-proxy", "test-token", "hostile-token", "test-wallet"]
 
 [workspace.package]
 edition = "2021"

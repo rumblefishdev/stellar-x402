@@ -1,0 +1,185 @@
+import { Address, FeeBumpTransaction, StrKey, Transaction, xdr } from "@stellar/stellar-sdk";
+import { describe, expect, it } from "vitest";
+import {
+  SettlementSubmitter,
+  SimulationCheckError,
+  type SubmitterEvent,
+  type SubmitterOptions,
+} from "../src/index.js";
+import { keypairSigner } from "./testing.js";
+import { FakeRpc, channels, facilitator } from "./fake-rpc.js";
+
+const PASSPHRASE = "Test SDF Network ; September 2015";
+
+const call = () => ({
+  func: xdr.HostFunction.hostFunctionTypeInvokeContract(
+    new xdr.InvokeContractArgs({
+      contractAddress: Address.fromString(StrKey.encodeContract(Buffer.alloc(32, 7))).toScAddress(),
+      functionName: "settle_upto",
+      args: [],
+    }),
+  ),
+  auth: [],
+});
+
+function setup(opts: Partial<SubmitterOptions> = {}, n = 1) {
+  const fake = new FakeRpc(
+    Object.fromEntries([
+      [facilitator.publicKey(), 500n],
+      ...channels.map((c, i) => [c, BigInt(1000 * (i + 1))]),
+    ]),
+  );
+  // For each simulation: was it built ahead, i.e. for a sequence the account has not reached?
+  const ahead: boolean[] = [];
+  const simulate = fake.simulateTransaction.bind(fake);
+  const closeLedger = fake.getLatestLedger.bind(fake);
+  Object.assign(fake, {
+    // Close ledgers a macrotask later, so the next holder's preparation (all microtasks against
+    // the fake) runs while the previous transaction is still pending.
+    getLatestLedger: async () => {
+      await new Promise((r) => setTimeout(r, 0));
+      return closeLedger();
+    },
+    simulateTransaction: async (tx: Transaction) => {
+      ahead.push(BigInt(tx.sequence) > fake.sequences.get(tx.source)! + 1n);
+      return simulate();
+    },
+  });
+  const events: SubmitterEvent[] = [];
+  const submitter = new SettlementSubmitter({
+    rpc: fake,
+    networkPassphrase: PASSPHRASE,
+    signer: keypairSigner(facilitator),
+    channels: channels.slice(0, n),
+    now: () => fake.closeTime * 1000,
+    sleep: async () => {},
+    onEvent: (e) => events.push(e),
+    ...opts,
+  });
+  return { fake, submitter, events, ahead };
+}
+
+const innerSeqs = (fake: FakeRpc) =>
+  fake.sent.map((t) => (t as FeeBumpTransaction).innerTransaction.sequence);
+
+describe("pipelining", () => {
+  it("prepares the next queued call while the channel's transaction is pending", async () => {
+    const { fake, submitter, ahead } = setup();
+    const results = await Promise.all(Array.from({ length: 3 }, () => submitter.submit(call())));
+    expect(results.map((r) => r.status)).toEqual(["success", "success", "success"]);
+    expect(innerSeqs(fake)).toEqual(["1001", "1002", "1003"]);
+    expect(ahead).toEqual([false, true, true]);
+    expect(submitter.stats()).toMatchObject({
+      preparedAhead: { used: 2, rebuilt: 0 },
+      sendRetries: 0,
+      errorCodes: {},
+      busy: 0,
+    });
+  });
+
+  it("rebuilds the prepared envelope when the pending transaction expires", async () => {
+    const { fake, submitter, ahead } = setup({
+      timeoutSeconds: 20,
+      onEvent: (e) => {
+        if (e.type === "final" && e.result.status === "expired") fake.stalled = false;
+      },
+    });
+    fake.stalled = true;
+    const [first, second] = await Promise.all([submitter.submit(call()), submitter.submit(call())]);
+    expect(first?.status).toBe("expired");
+    expect(second?.status).toBe("success");
+    // The prepared 1002 was never sent; the rebuild reused the expired 1001.
+    expect(innerSeqs(fake)).toEqual(["1001", "1001"]);
+    expect(ahead).toEqual([false, true, false]);
+    expect(submitter.stats().preparedAhead).toEqual({ used: 0, rebuilt: 1 });
+  });
+
+  it("keeps the channel until the pending transaction is final when the next call is refused", async () => {
+    const { fake, submitter } = setup();
+    const refuse = {
+      checkSimulation: () => {
+        throw new Error("unexpected balance change");
+      },
+    };
+    const [a, b, c] = await Promise.allSettled([
+      submitter.submit(call()),
+      submitter.submit(call(), refuse),
+      submitter.submit(call()),
+    ]);
+    expect(a).toMatchObject({ status: "fulfilled", value: { status: "success" } });
+    expect(b.status === "rejected" && b.reason).toBeInstanceOf(SimulationCheckError);
+    expect(c).toMatchObject({ status: "fulfilled", value: { status: "success" } });
+    // Released early, the third call would have reused 1001 and hit TRY_AGAIN_LATER / txBadSeq.
+    expect(innerSeqs(fake)).toEqual(["1001", "1002"]);
+    expect(submitter.stats()).toMatchObject({ sendRetries: 0, errorCodes: {}, busy: 0 });
+  });
+
+  it("rebuilds when the pending transaction expires while the prepared envelope has time left", async () => {
+    // Adam's case: the first send is accepted only after more than half its bound (3 retries,
+    // 10 s each), then expires. The prepared envelope was built at acceptance, so it still has
+    // more than half its bound left, and only the sequence check stops it.
+    const { fake, submitter } = setup({
+      timeoutSeconds: 40,
+      onEvent: (e) => {
+        if (e.type === "final" && e.result.status === "expired") fake.stalled = false;
+      },
+    });
+    fake.stalled = true;
+    fake.sendScript.push("TRY_AGAIN_LATER", "TRY_AGAIN_LATER", "TRY_AGAIN_LATER");
+    const [first, second] = await Promise.all([submitter.submit(call()), submitter.submit(call())]);
+    expect(first?.status).toBe("expired");
+    expect(second?.status).toBe("success");
+    expect(innerSeqs(fake).at(-1)).toBe("1001");
+    expect(submitter.stats()).toMatchObject({
+      preparedAhead: { used: 0, rebuilt: 1 },
+      sequenceResyncs: 0,
+    });
+  });
+
+  it("sends a ledger-bounded envelope prepared ahead as is, past half of timeoutSeconds (0073)", async () => {
+    // A ledger-bounded envelope has no time bound, so only "too few ledgers left" rebuilds it.
+    const { fake, submitter } = setup({ timeoutSeconds: 40 });
+    fake.stalled = true;
+    const start = fake.closeTime;
+    const close = fake.getLatestLedger.bind(fake);
+    Object.assign(fake, {
+      getLatestLedger: async () => {
+        if (fake.closeTime - start >= 25) fake.stalled = false;
+        return close();
+      },
+    });
+    const maxLedger = fake.ledger + 60;
+    const results = await Promise.all([
+      submitter.submit(call(), { maxLedger }),
+      submitter.submit(call(), { maxLedger }),
+    ]);
+    expect(results.map((r) => r.status)).toEqual(["success", "success"]);
+    expect(innerSeqs(fake)).toEqual(["1001", "1002"]);
+    expect(submitter.stats().preparedAhead).toEqual({ used: 1, rebuilt: 0 });
+  });
+
+  it("rebuilds when the pending transaction lands with less than half the bound left", async () => {
+    const { fake, submitter } = setup({ timeoutSeconds: 40 });
+    fake.stalled = true;
+    const start = fake.closeTime;
+    const close = fake.getLatestLedger.bind(fake);
+    Object.assign(fake, {
+      getLatestLedger: async () => {
+        if (fake.closeTime - start >= 25) fake.stalled = false; // lands late, within its bound
+        return close();
+      },
+    });
+    const results = await Promise.all([submitter.submit(call()), submitter.submit(call())]);
+    expect(results.map((r) => r.status)).toEqual(["success", "success"]);
+    expect(innerSeqs(fake)).toEqual(["1001", "1002"]);
+    expect(submitter.stats().preparedAhead).toEqual({ used: 0, rebuilt: 1 });
+  });
+
+  it("can be turned off", async () => {
+    const { fake, submitter, events, ahead } = setup({ pipeline: false });
+    await Promise.all(Array.from({ length: 3 }, () => submitter.submit(call())));
+    expect(innerSeqs(fake)).toEqual(["1001", "1002", "1003"]);
+    expect(ahead).toEqual([false, false, false]);
+    expect(events.some((e) => e.type === "prepared-ahead")).toBe(false);
+  });
+});

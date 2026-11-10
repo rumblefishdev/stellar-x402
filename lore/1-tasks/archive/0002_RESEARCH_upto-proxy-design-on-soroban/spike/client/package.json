@@ -1,0 +1,15 @@
+{
+  "name": "upto-spike-client",
+  "private": true,
+  "type": "module",
+  "description": "Throwaway testnet spike for task 0002. Not part of the pnpm workspace.",
+  "scripts": {
+    "spike": "node spike.ts"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "17.2.0"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}

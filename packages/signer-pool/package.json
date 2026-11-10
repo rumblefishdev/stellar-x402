@@ -11,6 +11,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./test/testing.ts",
+      "default": "./test/testing.ts"
     }
   },
   "files": [
@@ -23,8 +27,7 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@stellar-x402/config": "workspace:*",
     "@stellar/stellar-sdk": "^16.3.0",
-    "@x402/stellar": "~2.27.0"
+    "@x402/stellar": "~2.28.0"
   }
 }

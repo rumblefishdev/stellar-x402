@@ -2,8 +2,24 @@
 
 Testnet and mainnet run as separate deployments. They never share keys.
 
-- `testnet.env.example` and `mainnet.env.example`: environment variables for each deployment.
-  Copy to a `.env` file (git-ignored) and fill in.
-- `scripts/`: operational scripts (signer funding, testnet reset recovery, contract deploy).
+- `testnet.env.example` and `mainnet.env.example`: environment variables for each network.
+  Copy to a `.env` file (git-ignored) and fill in, for local runs only. The deployed networks get
+  their secrets from encrypted systemd credentials and sign through OpenBao (ADR 0011, ADR 0013).
+- `scripts/`: operational scripts (signer funding, testnet reset recovery, contract deploy) and
+  CI's check of production's Postgres.
+  - `deploy-contract.sh <upto-proxy|test-token>`: builds and deploys a contract to testnet. The
+    salt is the WASM hash, so a rerun deploys nothing, changed code gets a new ID, and after a
+    testnet reset the same code returns under the same ID. Every run then extends the contract
+    instance and its WASM to the network's maximum TTL (about 180 days), so an unused deployment
+    isn't archived; `EXTEND_TTL=0` skips that. Prints `<NAME>_WASM_HASH` and
+    `<NAME>_CONTRACT_ID`.
+  - **The contract ID is per deployer.** It follows from the deployer's address and the WASM
+    hash, and the deployer is a local stellar-cli identity (`DEPLOYER`, default
+    `x402-testnet-deployer`). Another key, or a build that differs by a byte, gives another ID.
+    `UPTO_PROXY_CONTRACT_ID` in `testnet.env.example` is the deployment from task 0035; whether
+    the team shares one deployer key is decided with the public testnet deployment (0026).
 
-Hosting and the container setup are chosen in the mainnet milestone.
+Hosting: Docker Compose on the company Hetzner server, one facilitator and one PostgreSQL
+container per network, with stop-before-start deploys and the facilitator key in OpenBao Transit
+([ADR 0011](../docs/adr/0011-facilitator-hosting.md), ADR 0013). Task 0026 builds the Dockerfile,
+the compose file, the deploy script and the workflow.

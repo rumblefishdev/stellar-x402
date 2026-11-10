@@ -1,0 +1,89 @@
+{
+  "network": "stellar:testnet",
+  "proxy": "CDBXX22H4G5OZIBPBZ76GNI2CW7W2F3P2V356W5AORLHXJD7OK33VJAK",
+  "token": "CCH46PUSMDVRYST4IC5QZ32OCSFGQV2SDM5MOJW3ETBYG5326OKHNQ2P",
+  "client": "GB4HWP6UQU4MKFIS6N5JYYJ3H3KW2HFIMETW6WLHGXDIUSF6RNOOFL7I",
+  "facilitator": "GA2YE73MBZHOSSPZROCWNFRM2GFNW4QYRYJ3VQQ3XFJDIBBPVQMZTR5Z",
+  "seller": "GDZPXPQ73ACKG5GNRG5Z22UT46ATN4IF67UXCHNI542PT342SZ4JXLOY",
+  "clientXlmDelta": "0",
+  "facilitatorXlmDelta": "-143897",
+  "draftSourcedByClient": [
+    "source:sorobanCredentialsSourceAccount",
+    "GA2YE7:sorobanCredentialsAddressV2"
+  ],
+  "draftSourcedByFacilitator": [
+    "GB4HWP:sorobanCredentialsAddressV2",
+    "source:sorobanCredentialsSourceAccount"
+  ],
+  "clientSignedTree": [
+    "CDBXX2….settle_upto(CCH46PUSMDVRYST4IC5QZ32OCSFGQV2SDM5MOJW3ETBYG5326OKHNQ2P, GDZPXPQ73ACKG5GNRG5Z22UT46ATN4IF67UXCHNI542PT342SZ4JXLOY, GA2YE73MBZHOSSPZROCWNFRM2GFNW4QYRYJ3VQQ3XFJDIBBPVQMZTR5Z, 1000000000, 0x6e0b0e30f2097d7b…, 1790797835, 1790798495)",
+    "  CCH46P….approve(GB4HWP6UQU4MKFIS6N5JYYJ3H3KW2HFIMETW6WLHGXDIUSF6RNOOFL7I, CDBXX22H4G5OZIBPBZ76GNI2CW7W2F3P2V356W5AORLHXJD7OK33VJAK, 1000000000, 4954981)"
+  ],
+  "results": [
+    {
+      "scenario": "S1 partial 37.5 of 100",
+      "expect": "success",
+      "ok": true,
+      "hash": "507b60b1c45ba68dda9c364799fe848650b1e4032e0f4edb5fbbe9c20e98e488",
+      "feeCharged": "38628",
+      "detail": "on-chain SUCCESS; deltas client -375000000, seller 375000000"
+    },
+    {
+      "scenario": "S2 replay S1 entry",
+      "expect": "reject",
+      "ok": true,
+      "detail": "rejected at simulation: Error(Auth, ExistingValue)"
+    },
+    {
+      "scenario": "S3 redirect recipient",
+      "expect": "reject",
+      "ok": true,
+      "detail": "rejected at simulation: Error(Auth, InvalidAction)"
+    },
+    {
+      "scenario": "S4 actual above max",
+      "expect": "reject",
+      "ok": true,
+      "detail": "rejected at simulation: Error(Contract, #1)"
+    },
+    {
+      "scenario": "S5 other party settles",
+      "expect": "reject",
+      "ok": true,
+      "detail": "rejected at simulation: Error(Auth, InvalidAction)"
+    },
+    {
+      "scenario": "S6 zero amount",
+      "expect": "success",
+      "ok": true,
+      "hash": "f4a6ce4c271793e2ee288c03db9f290eed9ba74adb240218588d735f47025570",
+      "feeCharged": "28019",
+      "detail": "on-chain SUCCESS"
+    },
+    {
+      "scenario": "S7b second auth settles first (20)",
+      "expect": "success",
+      "ok": true,
+      "hash": "eb601fa32b41d0250be97541a3f35eee0fbce3f595542565e7afc210cfe5ceed",
+      "feeCharged": "38628",
+      "detail": "on-chain SUCCESS"
+    },
+    {
+      "scenario": "S7a first auth settles at max (50)",
+      "expect": "success",
+      "ok": true,
+      "hash": "681abad3072a365f258f93a8fbb7692d784f060425be965879b1857d6807fa26",
+      "feeCharged": "38622",
+      "detail": "on-chain SUCCESS"
+    },
+    {
+      "scenario": "S8 channel source + facilitator address auth",
+      "expect": "success",
+      "ok": true,
+      "hash": "48f5a10a8c86a3ccdb8c50790ffd13d5118d7949d79d8059b3758bf3376399aa",
+      "feeCharged": "47286",
+      "detail": "on-chain SUCCESS; channel XLM -47286, facilitator XLM 0"
+    }
+  ],
+  "ranAt": "2026-09-30T19:52:03.813Z"
+}

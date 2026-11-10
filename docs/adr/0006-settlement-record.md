@@ -1,0 +1,234 @@
+# ADR 0006: The settlement record: claim, replay, lifecycle and channel lease
+
+- Status: accepted
+- Date: 2026-10-07, amended 2026-10-15 (task 0009: a success is answered once; a repeat of an
+  unsigned record ends it at the first call's budget), 2026-10-16 (task 0009: the store-outage
+  rule; a success answered while the store can't mark it), 2026-10-20 (task 0009: a repeat's
+  settle timeout counts from the hash it sees; a refusal the store can't record), 2026-10-22
+  (task 0019: attempt states, reconciliation sweeps, the outage leftovers), 2026-10-26 (task
+  0019: the record version, sweeps every 10 s beside `/settle`) and 2026-10-28 (task 0073: an
+  envelope's only bound is the payer's auth expiry, so `…_transaction_expired` comes only once
+  the payment can no longer land under our hash, a fee bump someone else wraps it in being 0087;
+  a record closed with nothing sent reopens for the identical payload while its auth entry is
+  valid), 2026-10-29 (task 0071: the lease's fencing token) and 2026-11-04 (task 0087: a hash
+  past its bound is read once more by its inner hash before it is `dead`, so a payment someone
+  else's fee bump landed ends `success` under their hash)
+
+## Context
+
+With every payment settled through the pool ([ADR 0003](0003-settlement-channel-account-pool.md),
+[ADR 0004](0004-facilitator-shape.md)), the facilitator has to:
+
+- answer `settlement_pending` when a transaction isn't final in time, and give a consistent answer
+  when `/settle` is called again;
+- never settle one authorization twice;
+- not lose a payment that may still land when the process restarts.
+
+The M1 architecture review found these holes in a simple "look up, then submit" design:
+
+- **Parallel calls.** Two `/settle` calls for one payload both submit, and we pay the losing
+  transaction's fee.
+- **Replay.** Returning a stored `success` to any caller lets a client pay once and present the
+  same payload to a second merchant.
+- **Lost hash.** `onSigned` in `signer-pool` is synchronous and not awaited, so the hash may not
+  be stored before the transaction is sent.
+- **Overwrites.** A late `resolved` event can be overwritten by an earlier `pending` write.
+- **Shared channels.** Two processes sharing a channel set, for example during a rolling deploy,
+  break each other's sequence numbers.
+- **Expired authorization.** The transaction's time bound (60 s) can outlive the client's auth
+  expiry, so we pay a fee for a transaction that must fail.
+
+The canonical x402 resource server retries `/settle` exactly once, immediately, after
+`settlement_pending`.
+
+## Decision
+
+- **Key.** `network:payer:nonce`, where the nonce is the int64 nonce of the payer's auth entry,
+  stored as a decimal string. A payload must carry exactly one payer auth entry.
+- **Fingerprint.** Each record stores a hash of the canonical payload plus
+  `paymentRequirements`.
+- **Claim before submit.** After verification, `/settle` claims the key with an atomic
+  insert-if-absent. Only the caller that wins the claim submits.
+- **Replay rules.**
+  - A repeat with the same fingerprint returns the record's outcome. If the record is signed but
+    not final, it first waits, up to `SETTLE_TIMEOUT_MS` from when the repeat first sees a hash,
+    for the final outcome. If nothing was signed, it waits until the first call's settle budget
+    ends, counted from the first call's start (`createdAt`, taken before its checks), then
+    ends the record itself with `…_timeout` (compare-and-set against `addHash`). If the store
+    can't end it, the answer is `settlement_pending` with no hash, never `…_timeout`: the record
+    may still be signed. Both waits also end with the repeat's own budget. A repeat that lost the
+    claim began before the first call, so its budget can end first: then it answers
+    `settlement_pending` with no hash and leaves the record to the first call.
+  - A record closed `rejected` with nothing sent (no hash, and `…_timeout`, `…_interrupted`,
+    `…_shutting_down`, `…_rpc_unavailable`, `…_no_channel_in_time`, `…_no_channels`,
+    `…_lease_lost`, or since task 0036 `…_transaction_signing_failed` or
+    `…_fee_bump_signing_failed`) reopens
+    for a repeat with the same fingerprint while the payer's auth entry has at least 2 ledgers
+    left (task 0073). The repeat runs the checks again, then `reopen` moves the record back to
+    `claimed` by compare-and-set, counts it in `reopened` and sets `createdAt` to its own start,
+    so a later repeat counts the new claim's budget; the payment then settles as a first one
+    would. While a repeat can still reopen it, those answers carry `extra.retryable: true` and
+    `extra.expirationLedger`: repeat the same payment rather than sign a new one, which could
+    land beside the old one. Then `retryable` is `false` and the record stays final; with 1
+    ledger left the answer says to wait until the expiration ledger has closed, since the auth
+    entry is valid in it, and only then sign again. An unreadable ledger keeps `retryable: true`.
+    `reopen` adds one to `version`, and the writers of the earlier claim pass the version or
+    `reopened` count they read, which the store matches in the same statement: a repeat ending
+    it by its budget and the sweep's `interrupted` close pass the version; the first call's late
+    hash, its `finish` and `advance` after `submit()` and its hook refusal's close pass its claim.
+    So none of them writes onto the new claim (0073 decision 24). A record claimed before 0073
+    has `reopened` -1 and never reopens, as its release answered "sign a new payment" (decision
+    25).
+  - Every other answer that ended a payment, on a record claimed since 0073, carries
+    `extra.retryable: false` and `extra.expirationLedger` and says "sign a new payment" only once
+    the expiration ledger has closed, or names that ledger when the latest one can't be read
+    (task 0082): a failed or refused transaction doesn't use the auth entry's nonce, so the
+    payload can land in a new envelope until then. A `…_lease_lost` record with a hash stays
+    closed, and `…_transaction_expired` comes only after the expiry, so it says nothing more. The
+    checks' refusal of a reopen leaves the record closed with nothing sent, so it answers as those
+    records do, `retryable: true` while a repeat can reopen it, before the checks' message.
+  - `success: true` is answered once per record, by compare-and-set on `successAnsweredAt`. Later
+    calls get `settle_exact_stellar_already_settled` with the hash. `settlement_pending` doesn't
+    count, and a call whose client left before the mark marks nothing.
+  - When the store can't mark (it fails or misses its 1 s grace), the payment still landed, so the
+    caller gets the success. The process keeps the key in memory, answers every later call
+    `…_already_settled`, and marks it once the store is back (0019 decision 9). Known exception:
+    after a restart, or on another instance, nothing knows it was answered, so a repeat can win
+    the mark and get a second success, at most once. Marking every such record instead would
+    leave a buyer whose answer was `settlement_pending` paid with nothing to show.
+  - A repeat with a different fingerprint is rejected with the stored hash, if any, and nothing is
+    submitted.
+- **Wire mapping.** Every answer carries `network` and `payer`.
+  - `success` → `{success: true, transaction}`, once; after that
+    `{success: false, errorReason: "settle_exact_stellar_already_settled", transaction}`
+  - `pending` → `{success: false, errorReason: "settlement_pending", transaction}`
+  - other outcomes and each thrown submitter error → a fixed `errorReason`, with the record's last
+    hash as `transaction` when it has one
+- **Store outage: refuse before money moves, tell the truth after.** A store that fails or
+  doesn't answer:
+  - before the claim, or at the claim: a 500, and nothing is sent; the client repeats the same
+    request;
+  - at the hash write before a send: the pool doesn't send (AD-16);
+  - after the pool answered: the answer is the pool's result, with its hash, and the record is left
+    as it was, unfinished. One exception: when the pool threw a refusal (e.g.
+    `…_simulation_failed`) and the refusal can't be recorded, the answer is
+    `unexpected_settle_error` (`…_timeout` past the budget), not the refusal's reason. It takes two
+    failures in a row, and the record is still open, so a repeat could answer otherwise;
+  - at the success mark: the success, as above.
+
+  Reconciliation (0019) finishes unfinished records once the store is back: it sweeps every
+  10 s. A final write that threw may have committed, so the next sweep runs the hooks of such a
+  record if it finds it final (0019 decision 29). How available the store must be is set by
+  ADR 0012 (task 0013), and its alarms are 0027's.
+
+- **One owner of the lifecycle.** A single settlement module in `apps/facilitator` writes every
+  record change.
+  - States only move forward: `claimed → signed → pending → success | failed | rejected | expired`.
+    One written exception: `rejected → claimed` for a record nothing was sent for, reopened by
+    the identical payload (task 0073).
+  - Each write is a compare-and-set.
+  - A record keeps every hash it was signed with, and can be found by any of them.
+  - Each hash keeps its attempt state (`stored → sent | unknown → landed | dead`) and its time
+    and ledger bounds (0019 decision 7). `sent` is written without waiting, so it can lag;
+    reconciliation decides from the network, not from `stored`, `sent` or `unknown`. It skips a
+    `dead` hash: one is `dead` only once the pool saw it refused or past its bounds, or the
+    network didn't know it past its bound, by itself or by its inner hash.
+  - Each hash also keeps its inner transaction's hash (task 0087). Anyone can wrap our inner
+    transaction in a fee bump of their own at ten times the fee, and it then lands under their
+    hash. Before calling a hash past its bound `dead`, the pool and reconciliation read it once by
+    its inner hash, under the same bound rule. If that finds it in a ledger, ours is `dead`, theirs
+    is added last as `landed` (so it is the hash the answer names), and `settlement_rewrapped`
+    logs who paid. The fee is 0 under someone else's fee bump, since their fee account paid; the
+    inner transaction sent bare keeps its fee, which the channel paid. A hash stored before the
+    inner hash was kept is read by itself alone.
+- **Durable hash.** `signer-pool` awaits an async `onSigned` before every send and aborts the
+  send if it rejects (task 0016).
+- **Reconciliation.** From startup, and every 10 s after, the module re-checks every non-final
+  record on chain by its hashes, beside `/settle`, which serves at once (0019 decision 27). A hash
+  the network doesn't know stays non-final until its bound has passed, and while the RPC's
+  history doesn't reach back to the record's claim (checked again every 5 minutes); a record
+  expires only once every hash's has, and only if no hash was stored since the sweep read them:
+  `addHash` bumps the record's `version`, and the expiry needs the one it read (0019 decisions 22,
+  26). A claim with no hash is closed as `settle_exact_stellar_interrupted` once its settle budget
+  plus a margin has passed (0019 decisions 1–13, 27).
+- **Channel lease.** A process takes an exclusive, renewable lease on its network's channel set,
+  and doesn't serve `/settle` without it.
+  - Deploys stop the old process before the new one starts.
+  - Shutdown drains in-flight submissions to final or recorded-pending, then releases the lease.
+  - Every acquire draws a new fencing token (`gen_random_uuid()`), its own holder's re-acquire
+    too; a renewal keeps it (task 0071). `addHash` takes the lease's name and the caller's token
+    and stores the hash only while the token is the lease's current one, with the lease row
+    locked `FOR KEY SHARE` in the same statement. `token` is unique, so a takeover's update takes
+    the row's `FOR UPDATE` lock and either waits for the hash or is re-read and refuses it, while
+    a renewal, which changes only `expires_at`, never waits on a hash's write. A refused call sent
+    nothing and ends `rejected` with `settle_exact_stellar_lease_lost`, which reopens like the
+    other "nothing sent" reasons; a call that finds the lease lost or acquired again right after
+    its hash was stored answers it with that hash, and doesn't reopen, and so does a rebuild
+    refused after an earlier envelope was sent and refused with `txBadSeq`, with the hash of that
+    earlier envelope. An envelope stored and checked before its process froze can still go out
+    after a takeover, one per call in flight, and the send loop has no lease check, so it resends
+    until its bound; every resend has the same hash, so it lands at most once. `transition` stays unfenced: a stale
+    holder still records what it had sent, and the new holder's reconciliation finishes what it
+    can't.
+- **Minimum validity.** Payloads whose auth expiration ledger is less than `minValidityLedgers`
+  ahead are rejected. The transaction's ledger bound never goes past the auth expiry, through a
+  new `maxLedger` submit option (task 0016).
+
+## Rationale
+
+- **The claim is the only race-free dedupe.** Lookup-then-write lets parallel calls both submit.
+- **The fingerprint stops cross-merchant replay**, while still letting the same resource server
+  retry safely.
+- **Success once stops one payment unlocking many responses.** A resource server delivers on every
+  `success`: with one per call, one payment header sent N times was served N times (seen on
+  testnet with a stock `@x402/express` seller). Upstream's own `settle()` gives one success per
+  nonce too. The costs:
+  - a seller whose network lost our `success` can't get it again;
+  - the success goes to whichever call marked first: one whose client dropped the connection
+    after the mark, or anyone else holding the payment header (the buyer, a proxy, a log sink).
+- **The outage rule keeps money and answers consistent.** Before anything is sent, refusing costs
+  only a retry. Once something may have been sent, an answer that hides it (a 500 or
+  `…_timeout`) would make the buyer sign and pay again.
+- **The bounded wait keeps the e2e gate passing.** The canonical server's single immediate retry
+  would otherwise get `pending` again and fail the payment.
+- **Forward-only compare-and-set lets one event order win.** Late events can't undo final
+  outcomes, and multi-hash lookup covers rebuilt transactions.
+- **The lease turns the pool's in-memory sequence tracking into a single-owner rule** that the
+  store enforces, not a deployment convention.
+- **The token fences the one write before a send.** A process frozen past its TTL (a VM pause, a
+  long GC) wakes still past its lease check. Only `addHash` comes before money moves, so checking
+  the token there, in the store, stops its next send whatever its clock says. Equality is enough,
+  since the store reads the lease row itself; a random token can't repeat after a release deletes
+  the row, as a counter kept in the row would (task 0071).
+
+## Alternatives considered
+
+- **Look up, then submit, then write the outcome.** Races and replay holes, as found in review.
+  Rejected.
+- **Synchronous write-ahead log in `onSigned`** without changing `signer-pool`. Ties durability
+  to the local disk and complicates hosting (0014). Rejected in favour of an awaited hook.
+- **Returning `pending` on the repeat call.** Fails the canonical resource server's single retry.
+  Rejected.
+- **Rolling deploys with shared channels.** Sequence-number collisions. Rejected; the lease
+  forbids them.
+
+## Consequences
+
+- Each settlement pays one durable store write before its first send.
+- While the store is down, `/settle` takes no new payments: every one is a 500 before its claim.
+- The store (task 0013) must support:
+  - the atomic claim;
+  - compare-and-set state changes;
+  - lookup by any hash;
+  - the channel lease.
+- Hosting (task 0014) must allow stop-before-start deploys, so a deploy has a short gap with no
+  settlement.
+- `signer-pool` gains `onSigned` as an async hook and the `maxLedger` option (task 0016).
+
+## References
+
+- [M1 architecture spine](../architecture/m1-spine.md): AD-6, AD-16, AD-17, AD-22
+- [ADR 0003](0003-settlement-channel-account-pool.md),
+  [Scaling x402 settlement on Stellar](../x402-settlement-scaling-en.md) (ADR-R1)
+- x402 v2 `settlement_pending` and `PendingSettlementStore` in `@x402/core`; `settleWithPendingRetry`
+  in the x402 resource server

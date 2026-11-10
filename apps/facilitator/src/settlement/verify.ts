@@ -1,0 +1,577 @@
+import { Address, MuxedAccount, StrKey, Transaction, xdr } from "@stellar/stellar-sdk";
+import type { StellarNetwork } from "@stellar-x402/config";
+import { RpcUnavailableError } from "@stellar-x402/signer-pool";
+import {
+  DEFAULT_ESTIMATED_LEDGER_SECONDS,
+  getAddressCredentials,
+  getNetworkPassphrase,
+} from "@x402/stellar";
+import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/core/types";
+import type { FindMissingTrustline } from "./trustline.js";
+
+/** Upstream `ExactStellarScheme` as `/verify` uses it: only `verify()`, never `settle()` (AD-3). */
+export interface UpstreamVerifier {
+  verify(
+    payload: PaymentPayload,
+    requirements: PaymentRequirements,
+    trace?: VerifyTrace,
+  ): Promise<VerifyResponse>;
+}
+
+/** What a verification learned besides its answer, for the `verified` log. Never sent. */
+export interface VerifyTrace {
+  /** The `RPC_URLS[i]` name of the URL whose upstream answer this is (AD-3). */
+  rpc?: string;
+}
+
+export interface VerifierDeps {
+  /** The one network this process serves. */
+  network: StellarNetwork;
+  upstream: UpstreamVerifier;
+  /** The facilitator's own address. Upstream checks it as a plain string, so not in muxed form. */
+  facilitator: string;
+  /** Channel account addresses (AD-5). */
+  channels: readonly string[];
+  /** Least ledgers left before the payer's auth expires (AD-22). */
+  minValidityLedgers: number;
+  /**
+   * Most ledgers left before the payer's auth expires (0073 decision 2): an envelope lives as
+   * long as its auth entry, so this bounds a channel's wait on one transaction.
+   */
+  maxValidityLedgers: number;
+  /** Sequence of the latest closed ledger. */
+  latestLedger: () => Promise<number>;
+  /** Looks for a missing trustline behind upstream's `simulation_failed`. */
+  missingTrustline: FindMissingTrustline;
+  /**
+   * How long the whole upstream call may take, in milliseconds, across every RPC URL it tries and
+   * the bid read before them; 10,000 by default. Upstream's RPC and Horizon clients have no timeout
+   * of their own. The AD-22 ledger read comes after it, with `FallbackRpc`'s own timeout, and so
+   * does the trustline lookup, with a limit of its own.
+   */
+  upstreamTimeoutMs?: number;
+}
+
+/**
+ * Our own code for a channel problem, in `extra.reason` next to upstream's standard
+ * `invalidReason`: it tells our check apart from upstream's facilitator-address check.
+ */
+export const CHANNEL_ACCOUNT_REASON = "invalid_exact_stellar_payload_channel_account";
+/**
+ * Our code for the facilitator's own address in muxed form, which upstream's plain-string check
+ * misses; upstream rejects the plain address itself.
+ */
+export const MUXED_FACILITATOR_REASON = "invalid_exact_stellar_payload_facilitator_muxed";
+/**
+ * The requirements ask for an amount of 0. Upstream accepts a zero transfer, which moves nothing
+ * yet takes a nonce, a channel and a fee, so we refuse it before the upstream call.
+ */
+export const AMOUNT_ZERO_REASON = "invalid_exact_stellar_payload_amount_zero";
+/**
+ * The payload doesn't carry exactly one auth entry for the payer, so it has no settlement key
+ * (AD-6), or it carries another address's entry too (0073 decision 21). Upstream de-duplicates
+ * signers and doesn't count entries.
+ */
+export const PAYER_AUTH_REASON = "invalid_exact_stellar_payload_payer_auth_entries";
+/**
+ * Upstream's code for an auth entry without address credentials. A source-account entry
+ * authorizes as the source of the call, which the pool makes a channel, so we refuse it too
+ * instead of trusting only upstream's check.
+ */
+export const UNSUPPORTED_CREDENTIAL_REASON =
+  "invalid_exact_stellar_payload_unsupported_credential_type";
+
+/**
+ * The resource's `maxTimeoutSeconds` is above what the cap fits (0073 decision 22), the auth
+ * expires more than `maxValidityLedgers` after the latest ledger (0073 decision 2), or at or past
+ * the last ledger the pool can bound an envelope by: `/settle` passes it as `maxLedger`, and the
+ * envelope's bound (`maxLedger + 1`) is a uint32.
+ */
+export const EXPIRATION_TOO_FAR_REASON = "invalid_exact_stellar_signature_expiration_too_far";
+const MAX_EXPIRATION_LEDGER = 2 ** 32 - 2;
+
+/** Upstream's code for an exception inside its `verify()`. */
+export const UNEXPECTED_VERIFY_ERROR = "unexpected_verify_error";
+/** Upstream's code for a failed simulation, the only cause it keeps of what the RPC said. */
+const SIMULATION_FAILED_REASON = "invalid_exact_stellar_payload_simulation_failed";
+
+export class UpstreamTimeoutError extends Error {
+  override readonly name = "UpstreamTimeoutError";
+}
+
+/**
+ * About how many ledgers upstream's client signs a resource's `maxTimeoutSeconds` for (AD-22):
+ * ⌈maxTimeoutSeconds / ledger time⌉, with upstream's default ledger time. The client takes the
+ * time from Horizon when it can, so this is an estimate.
+ */
+export function signedLedgers(maxTimeoutSeconds: number): number {
+  return Math.ceil(maxTimeoutSeconds / DEFAULT_ESTIMATED_LEDGER_SECONDS);
+}
+
+/** `trace`, when given, is filled in for the `verified` log. */
+export type Verify = (
+  payload: PaymentPayload,
+  requirements: PaymentRequirements,
+  trace?: VerifyTrace,
+) => Promise<VerifyResponse>;
+
+/**
+ * The `exact` verification `/verify` answers with and `/settle` (0009) runs again (AD-3): the
+ * network and envelope checks, upstream `verify()`, whose failed simulation gets a look for a
+ * missing trustline (0078), then address credentials only, the channel
+ * check (AD-5, with the facilitator's muxed address), the payer's one auth entry (AD-6), then the
+ * validity check (AD-22). The first rejection is the answer; upstream's fee refusal also names the
+ * archived entries the payment's transaction lists (0066). Errors are thrown, not answered: ours
+ * (the ledger read), upstream's, which it reports as `unexpected_verify_error`, and an upstream
+ * call past `upstreamTimeoutMs`.
+ */
+export function createVerifier(deps: VerifierDeps): Verify {
+  const check = createChecker(deps);
+  return async (payload, requirements, trace) =>
+    (await check(payload, requirements, trace)).response;
+}
+
+/** A payment that passed every check, as `/settle` needs it. */
+export interface Verified {
+  transaction: Transaction;
+  payer: string;
+  /** The int64 nonce of the payer's one auth entry, as a decimal string (AD-6). */
+  nonce: string;
+  /** The payer's `signatureExpirationLedger`: its entry is the only address-credential one. */
+  expirationLedger: number;
+  /** The ledger the validity check read. */
+  currentLedger: number;
+}
+
+export type Check = (
+  payload: PaymentPayload,
+  requirements: PaymentRequirements,
+  trace?: VerifyTrace,
+) => Promise<{ response: VerifyResponse; verified?: Verified }>;
+
+/** {@link createVerifier}'s checks, also returning what they parsed and read when they pass. */
+export function createChecker(deps: VerifierDeps): Check {
+  const accounts = new Set([...deps.channels, deps.facilitator]);
+  const timeoutMs = deps.upstreamTimeoutMs ?? 10_000;
+  // The longest `maxTimeoutSeconds` the cap fits, less a tenth spare, at upstream's default 5 s a
+  // ledger: 300 s at 66 ledgers. A client that reads faster ledgers signs more (75 at 4 s).
+  const ceiling = Math.floor(
+    (deps.maxValidityLedgers * DEFAULT_ESTIMATED_LEDGER_SECONDS * 10) / 11,
+  );
+  return async (payload, requirements, trace) => {
+    // Upstream would verify against any Stellar network's default RPC; this process serves one.
+    if (requirements.network !== deps.network) {
+      return {
+        response: invalid("invalid_network", undefined, `this facilitator serves ${deps.network}`),
+      };
+    }
+    if (/^0+$/.test(requirements.amount)) {
+      return { response: invalid(AMOUNT_ZERO_REASON, undefined, "the payment amount is 0") };
+    }
+    // Upstream parses a V0 envelope, and its simulation result then can't be assembled onto it.
+    if (isV0Envelope(payload)) {
+      return {
+        response: invalid(
+          "invalid_exact_stellar_payload_malformed",
+          undefined,
+          "the transaction must be a v1 envelope",
+        ),
+      };
+    }
+    const upstream = withStringPayer(
+      await withTimeout(
+        deps.upstream.verify(payload, requirements, trace),
+        timeoutMs,
+        "upstream verify (every RPC URL)",
+      ),
+    );
+    // Upstream catches every exception, a failed RPC call included, and answers with this code.
+    // It judged nothing, so it is no verdict: `/verify`'s 503, `/settle`'s `rpc_unavailable`.
+    if (upstream.invalidReason === UNEXPECTED_VERIFY_ERROR) {
+      throw new RpcUnavailableError(`upstream verify answered ${UNEXPECTED_VERIFY_ERROR}`, {
+        cause: upstream,
+      });
+    }
+    if (upstream.invalidReason === SIMULATION_FAILED_REASON && upstream.payer !== undefined) {
+      const transaction = new Transaction(
+        (payload.payload as { transaction: string }).transaction,
+        getNetworkPassphrase(deps.network),
+      );
+      // A payload without the payer's entry is free to send, so it buys no more RPC calls.
+      const missing =
+        payerNonce({ transaction, payer: upstream.payer }) === undefined
+          ? undefined
+          : await deps.missingTrustline({
+              transaction,
+              asset: requirements.asset,
+              payer: upstream.payer,
+              payTo: requirements.payTo,
+            });
+      if (missing) {
+        return {
+          response: invalid(missing.invalidReason, upstream.payer, missing.invalidMessage),
+        };
+      }
+    }
+    if (!upstream.isValid) return { response: withArchivedEntries(upstream, payload) };
+    // Upstream always names the payer of a valid payment; without one, nothing below can run.
+    if (upstream.payer === undefined) throw new Error("upstream verify named no payer");
+
+    // Upstream accepted it, so the payload is a parsed, one-operation `transfer` call.
+    const transaction = new Transaction(
+      (payload.payload as { transaction: string }).transaction,
+      getNetworkPassphrase(deps.network),
+    );
+    if (hasSourceAccountAuth(transaction)) {
+      return {
+        response: invalid(
+          UNSUPPORTED_CREDENTIAL_REASON,
+          upstream.payer,
+          "every auth entry must have address credentials",
+        ),
+      };
+    }
+    const problem = channelProblem(transaction, accounts);
+    if (problem) {
+      const isFacilitator = problem.account === deps.facilitator;
+      const response = {
+        ...invalid(
+          problem.invalidReason,
+          upstream.payer,
+          isFacilitator
+            ? "the payload uses the facilitator's account"
+            : "the payload uses a facilitator channel account",
+        ),
+        extra: { reason: isFacilitator ? MUXED_FACILITATOR_REASON : CHANNEL_ACCOUNT_REASON },
+      };
+      return { response };
+    }
+    // `/settle` keys the settlement on this nonce; `/verify` must not accept what it can't settle.
+    // The payload carries the payer's entry alone (0073 decision 21), and the expiry checks below
+    // read that entry's expiry, the one `/settle` reads too.
+    const nonce = payerNonce({ transaction, payer: upstream.payer });
+    const expiration = payerExpiration(transaction, upstream.payer);
+    if (
+      nonce === undefined ||
+      expiration === undefined ||
+      hasOtherAddressAuth(transaction, upstream.payer)
+    ) {
+      return {
+        response: invalid(
+          PAYER_AUTH_REASON,
+          upstream.payer,
+          "the payload must carry exactly one auth entry: the payer's",
+        ),
+      };
+    }
+
+    const current = await deps.latestLedger();
+    if (expiration - current < deps.minValidityLedgers) {
+      // A client signs for about this many ledgers, and some pass before `/verify`.
+      const signed = signedLedgers(requirements.maxTimeoutSeconds);
+      const floor = deps.minValidityLedgers * DEFAULT_ESTIMATED_LEDGER_SECONDS;
+      const hint =
+        signed <= deps.minValidityLedgers
+          ? `; maxTimeoutSeconds ${requirements.maxTimeoutSeconds} is about ${signed} ledgers, ` +
+            `so it should be well above ${floor}`
+          : "";
+      return {
+        response: invalid(
+          "invalid_exact_stellar_signature_expiration_too_soon",
+          upstream.payer,
+          `auth expires at ledger ${expiration}, ${expiration - current} ledgers after ledger ` +
+            `${current}; at least ${deps.minValidityLedgers} are required${hint}`,
+        ),
+      };
+    }
+    // On the requirements, not the ledger: the gap below shrinks as ledgers close, so the same
+    // payment refused by it now would pass later, after its payer may have signed another
+    // (0073 decision 22). Refused here, a retry as it is stays refused.
+    if (requirements.maxTimeoutSeconds > ceiling) {
+      return {
+        response: invalid(
+          EXPIRATION_TOO_FAR_REASON,
+          upstream.payer,
+          `maxTimeoutSeconds ${requirements.maxTimeoutSeconds} is about ` +
+            `${signedLedgers(requirements.maxTimeoutSeconds)} ledgers; at most ${ceiling} is ` +
+            `allowed, assuming about 5 s a ledger`,
+        ),
+      };
+    }
+    // Within the ceiling, only a client that read faster ledgers, an RPC behind the client's or a
+    // payload signed by hand gets here.
+    if (expiration - current > deps.maxValidityLedgers) {
+      return {
+        response: invalid(
+          EXPIRATION_TOO_FAR_REASON,
+          upstream.payer,
+          `auth expires at ledger ${expiration}, ${expiration - current} ledgers after ledger ` +
+            `${current}; at most ${deps.maxValidityLedgers} are allowed`,
+        ),
+      };
+    }
+    if (expiration > MAX_EXPIRATION_LEDGER) {
+      return {
+        response: invalid(
+          EXPIRATION_TOO_FAR_REASON,
+          upstream.payer,
+          `auth expires at ledger ${expiration}; it must be at most ${MAX_EXPIRATION_LEDGER}`,
+        ),
+      };
+    }
+    return {
+      response: upstream,
+      verified: {
+        transaction,
+        payer: upstream.payer,
+        nonce,
+        expirationLedger: expiration,
+        currentLedger: current,
+      },
+    };
+  };
+}
+
+/**
+ * Where one of `accounts` (the channels and the facilitator) appears in the payload, as the
+ * upstream reason for the same problem with the facilitator's own address (ADR 0005: channels
+ * count as the facilitator), and which account it is. Muxed addresses count as their base account.
+ */
+export function channelProblem(
+  transaction: Transaction,
+  accounts: ReadonlySet<string>,
+): { invalidReason: string; account: string } | undefined {
+  const found = (address: string | undefined) => {
+    const account = address === undefined ? undefined : baseAccount(address);
+    return account !== undefined && accounts.has(account) ? account : undefined;
+  };
+  const source =
+    found(transaction.source) ??
+    transaction.operations.map((operation) => found(operation.source)).find(Boolean);
+  if (source) {
+    return {
+      invalidReason: "invalid_exact_stellar_payload_unsafe_tx_or_op_source",
+      account: source,
+    };
+  }
+  for (const operation of transaction.operations) {
+    if (operation.type !== "invokeHostFunction") continue;
+    const func = operation.func;
+    if (func.switch() === xdr.HostFunctionType.hostFunctionTypeInvokeContract()) {
+      const from = func.invokeContract().args()[0];
+      const payer =
+        from?.switch() === xdr.ScValType.scvAddress()
+          ? found(addressOf(from.address()))
+          : undefined;
+      if (payer) {
+        return {
+          invalidReason: "invalid_exact_stellar_payload_facilitator_is_payer",
+          account: payer,
+        };
+      }
+    }
+    for (const entry of operation.auth ?? []) {
+      const credentials = getAddressCredentials(entry.credentials());
+      const signer = credentials ? found(addressOf(credentials.address())) : undefined;
+      if (signer) {
+        return {
+          invalidReason: "invalid_exact_stellar_payload_facilitator_in_auth",
+          account: signer,
+        };
+      }
+    }
+  }
+  return undefined;
+}
+
+/** Whether any auth entry lacks address credentials, e.g. a source-account entry. */
+export function hasSourceAccountAuth(transaction: Transaction): boolean {
+  return transaction.operations.some(
+    (operation) =>
+      operation.type === "invokeHostFunction" &&
+      (operation.auth ?? []).some(
+        (entry) => getAddressCredentials(entry.credentials()) === undefined,
+      ),
+  );
+}
+
+/** The int64 nonce of the payer's one auth entry, as a decimal string (AD-6). */
+export function payerNonce({
+  transaction,
+  payer,
+}: {
+  transaction: Transaction;
+  payer: string;
+}): string | undefined {
+  const nonces: string[] = [];
+  for (const operation of transaction.operations) {
+    if (operation.type !== "invokeHostFunction") continue;
+    for (const entry of operation.auth ?? []) {
+      const credentials = getAddressCredentials(entry.credentials());
+      if (credentials && addressOf(credentials.address()) === payer) {
+        nonces.push(credentials.nonce().toString());
+      }
+    }
+  }
+  return nonces.length === 1 ? nonces[0] : undefined;
+}
+
+/** The payer's one auth entry's `signatureExpirationLedger`, or `undefined` without exactly one. */
+export function payerExpiration(transaction: Transaction, payer: string): number | undefined {
+  const expirations: number[] = [];
+  for (const operation of transaction.operations) {
+    if (operation.type !== "invokeHostFunction") continue;
+    for (const entry of operation.auth ?? []) {
+      const credentials = getAddressCredentials(entry.credentials());
+      if (credentials && addressOf(credentials.address()) === payer)
+        expirations.push(credentials.signatureExpirationLedger());
+    }
+  }
+  return expirations.length === 1 ? expirations[0] : undefined;
+}
+
+/** Whether the payload carries an address-credential auth entry of anyone but `payer`. */
+function hasOtherAddressAuth(transaction: Transaction, payer: string): boolean {
+  return transaction.operations.some(
+    (operation) =>
+      operation.type === "invokeHostFunction" &&
+      (operation.auth ?? []).some((entry) => {
+        const credentials = getAddressCredentials(entry.credentials());
+        return credentials !== undefined && addressOf(credentials.address()) !== payer;
+      }),
+  );
+}
+
+/** Whether the payload's transaction decodes as a V0 envelope; anything else is upstream's. */
+function isV0Envelope(payload: PaymentPayload): boolean {
+  const transaction = (payload.payload as { transaction?: unknown } | undefined)?.transaction;
+  if (typeof transaction !== "string") return false;
+  try {
+    return (
+      xdr.TransactionEnvelope.fromXDR(transaction, "base64").switch() ===
+      xdr.EnvelopeType.envelopeTypeTxV0()
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Upstream's fee refusal, its message followed by the archived entries the payment's transaction
+ * lists (task 0066). Since Protocol 23 a transaction pays their restore rent, which can put the
+ * fee over the ceiling; anyone can restore them from their own account and pay again. The buyer's
+ * client puts its simulation's Soroban data in the transaction, so the entries come with the
+ * payment, unchecked: they only describe the refusal, which stays upstream's, and the message
+ * says they are the transaction's. Any other answer, or a transaction that lists none, is
+ * returned as it is.
+ */
+function withArchivedEntries(response: VerifyResponse, payload: PaymentPayload): VerifyResponse {
+  if (response.invalidReason !== FEE_EXCEEDS_MAXIMUM) return response;
+  const keys = archivedEntries(payload);
+  if (keys.length === 0) return response;
+  const entries = keys.length === 1 ? "1 archived entry" : `${keys.length} archived entries`;
+  const named = keys.slice(0, ARCHIVED_ENTRIES_NAMED);
+  if (keys.length > named.length) named.push(`and ${keys.length - named.length} more`);
+  return {
+    ...response,
+    invalidMessage: `${response.invalidMessage}; the payment's transaction lists ${entries} to restore: ${named.join(", ")}`,
+  };
+}
+
+/** Upstream's fee refusal, the one whose message names archived entries (task 0066). */
+export const FEE_EXCEEDS_MAXIMUM = "invalid_exact_stellar_payload_fee_exceeds_maximum";
+
+/** Most archived entries a refusal names: the client chooses how many it lists. */
+const ARCHIVED_ENTRIES_NAMED = 4;
+/**
+ * Longest key a refusal names, in base64: a token's instance key is 64 and a balance's about 160.
+ * A longer one is counted and shown by its length, so a client can't make the message long.
+ */
+const ARCHIVED_KEY_MAX_CHARS = 512;
+
+/**
+ * The distinct entries the payload's transaction lists as archived, if it decodes, as their base64
+ * `LedgerKey`s: only persistent contract data and contract code, the entries that archive, and a
+ * key longer than `ARCHIVED_KEY_MAX_CHARS` as its length. Each footprint entry is encoded at most
+ * once, however often the client repeats its index.
+ */
+function archivedEntries(payload: PaymentPayload): string[] {
+  const transaction = (payload.payload as { transaction?: unknown } | undefined)?.transaction;
+  if (typeof transaction !== "string") return [];
+  try {
+    const envelope = xdr.TransactionEnvelope.fromXDR(transaction, "base64");
+    if (envelope.switch() !== xdr.EnvelopeType.envelopeTypeTx()) return [];
+    const ext = envelope.v1().tx().ext();
+    if (ext.switch() !== 1) return [];
+    const data = ext.sorobanData();
+    if (data.ext().switch() !== 1) return [];
+    const readWrite = data.resources().footprint().readWrite();
+    const keys = new Map<string, string>();
+    for (const i of new Set(
+      (data.ext().value() as xdr.SorobanResourcesExtV0).archivedSorobanEntries(),
+    )) {
+      const key = readWrite[i];
+      if (key === undefined || !archivable(key)) continue;
+      const encoded = key.toXDR("base64");
+      keys.set(
+        encoded,
+        encoded.length <= ARCHIVED_KEY_MAX_CHARS
+          ? encoded
+          : `a key of ${encoded.length} characters`,
+      );
+    }
+    return [...keys.values()];
+  } catch {
+    return [];
+  }
+}
+
+/** Whether `key` is of an entry that archives: persistent contract data or contract code. */
+function archivable(key: xdr.LedgerKey): boolean {
+  if (key.switch() === xdr.LedgerEntryType.contractCode()) return true;
+  return (
+    key.switch() === xdr.LedgerEntryType.contractData() &&
+    key.contractData().durability() === xdr.ContractDataDurability.persistent()
+  );
+}
+
+/**
+ * Upstream's answer with `payer` only when it is a string. Upstream takes it from `from` before
+ * any signature check, so the client chooses its type: a number breaks x402 clients, and an i128
+ * breaks `res.json`.
+ */
+function withStringPayer(response: VerifyResponse): VerifyResponse {
+  return response.payer === undefined || typeof response.payer === "string"
+    ? response
+    : { ...response, payer: undefined };
+}
+
+/** `promise`, or an `UpstreamTimeoutError` naming `what` after `ms`. */
+export async function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  what = "upstream verify",
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new UpstreamTimeoutError(`${what} gave no answer within ${ms} ms`)),
+      ms,
+    );
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+function addressOf(address: xdr.ScAddress): string {
+  return Address.fromScAddress(address).toString();
+}
+
+function baseAccount(address: string): string {
+  return StrKey.isValidMed25519PublicKey(address)
+    ? MuxedAccount.fromAddress(address, "0").baseAccount().accountId()
+    : address;
+}
+
+function invalid(invalidReason: string, payer: string | undefined, invalidMessage: string) {
+  return { isValid: false, invalidReason, invalidMessage, payer } satisfies VerifyResponse;
+}

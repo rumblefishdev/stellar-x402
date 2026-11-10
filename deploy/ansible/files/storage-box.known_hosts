@@ -1,0 +1,2 @@
+# The Storage Box's host key (BX21 ch-prod-01-backup), pinned for the write sub-account: SHA256:XqONwb1S0zuj5A1CDxpOSuD2hnAArV1A3wKY7Z3sdgM, read on 2026-11-05 and checked against the logins from ch-prod-01 and outside (task 0026).
+[u595862-sub2.your-storagebox.de]:23 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIICf9svRenC/PLKIL9nk6K/pxQgoiFC41wTNvoIncOxs

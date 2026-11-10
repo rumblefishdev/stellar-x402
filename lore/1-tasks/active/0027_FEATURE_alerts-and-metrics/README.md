@@ -1,0 +1,814 @@
+---
+id: "0027"
+title: "Alerts and metrics"
+type: FEATURE
+status: active
+milestone: 1
+related_adr: ["0007", "0011", "0013"]
+related_tasks: ["0012", "0014", "0024", "0026", "0020", "0009", "0045", "0049", "0039", "0036", "0038", "0048", "0077", "0089", "0109", "0110", "0125", "0127"]
+tags: [facilitator, operations, monitoring, priority-medium, effort-large, platform]
+links:
+  - ../../../../docs/planning/m1-epics.md
+  - ../../../../docs/architecture/m1-spine.md
+history:
+  - date: "2026-10-07"
+    status: backlog
+    who: claude
+    note: "Created by 0012 from M1 Story 2.6 (Platform lane)."
+  - date: "2026-10-09"
+    status: backlog
+    who: okarcz
+    note: "Added the UptoProxy TTL alert from 0035's future work."
+  - date: "2026-10-20"
+    status: backlog
+    who: okarcz
+    note: "0047 (ADR 0013 amended): the low-balance alarm at 25 XLM as a Slack message, and a CloudTrail alarm on reads of the backup secret."
+  - date: "2026-10-22"
+    status: backlog
+    who: stkrolikiewicz
+    note: "0039: the uptime check targets the Cloudflare Tunnel hostname on sorobanscan.com."
+  - date: "2026-11-02"
+    status: active
+    who: akot
+    note: "Taken at the team meeting."
+  - date: "2026-11-04"
+    status: active
+    who: akot
+    note: "Decisions 18-20 after comparing with the Prices API and the explorer: metric lines kept 30 days, Level alarms ignore missing data, no CPU metric. Decisions 21-22 from #112's code: hooks and fee run once, scope checked by the compiler."
+  - date: "2026-11-04"
+    status: active
+    who: akot
+    note: "#114's plan after reading the siblings' infra/ (notes/R-infra-patterns.md): decisions 23-28 (every alarm in #114, names, the shared CA and CN, groups absent or on, three stacks, gauges-silent), 29-39 emerged, two of them from the reviews."
+  - date: "2026-11-05"
+    status: active
+    who: akot
+    note: "From the whole-task review of #111-#115: decision 4 amended (every catalog metric is billed), and the catalog names the disk's dimension `path`, as the CloudWatch agent writes it."
+  - date: "2026-11-05"
+    status: active
+    who: akot
+    note: "#114, from the same review: decisions 40-41 (the backups and snapshots groups apart from host, the fee account named in the balance alarms with a testnet top-up in the runbook)."
+  - date: "2026-11-05"
+    status: active
+    who: akot
+    note: "Decisions 42-54 for #113, the server side, from its spine (notes/S-pr113-spine.md): a counter for failed ends of x402@, the agent's two host series, one file per unit, an hourly signing helper, OpenBao on its socket, stamp files, `/` as the one mount, the restart window, the Docker CE spike."
+  - date: "2026-11-06"
+    status: active
+    who: akot
+    note: "Uptime and Alarms stacks deployed, delivery test seen in Slack (AC 14). Decisions 68-69: #115 ships the balance section first for M1 (the watch group split), bundled by esbuild in infra's build; GSD and BMAD reviewed #115's open choices."
+  - date: "2026-11-06"
+    status: active
+    who: akot
+    note: "check-series passed for uptime (08:41 UTC, the probe's ready) and for watch (about 09:45 UTC, after the Watch stack's deploy at 09:36 UTC: spendable_stroops, AWS/Lambda Errors and Invocations), so #115 turns both groups on (decisions 26, 37). Oskar's review of #115: docs/monitoring.md sections for the 8 alarms that are on, the handler's logic and the bundle tested, one URL rule, Watch before Alarms on a fresh account; decisions 2, 23 and 64 amended by 68."
+  - date: "2026-11-06"
+    status: active
+    who: akot
+    note: "#115 and its fix #141 merged and deployed: Watch, then Alarms at 11:16 UTC (uptime and watch groups on). balance-low and balance-critical fired with a fake 5 XLM spendable_stroops point: ALARM 11:20:10 and 11:20:35, OK 11:25:10 and 11:25:35 UTC, all four seen in Slack (docs/monitoring.md, Drills). M1's low-balance alarm is done; budget, breaker, quarantine and pending wait on #137."
+  - date: "2026-11-06"
+    status: active
+    who: akot
+    note: "Decision 70 replaces 66: the watch Lambda reads each network's protocol from Horizon (testnet 30/30, mainnet 29 with Core on 30 on 2026-11-06), with protocol-changed and protocol-upgrade-coming in a protocol group."
+  - date: "2026-11-06"
+    status: active
+    who: akot
+    note: "Watch stack deployed from #145's branch at 12:59 UTC: the Lambda reads Horizon (pubnet 29/30, testnet 30/30) beside the balance. check-series passed for protocol at 12:59 UTC (4 series), so #145 turns the group on (decisions 26, 70); the Alarms deploy waits for the merge."
+  - date: "2026-11-06"
+    status: active
+    who: okarcz
+    note: "#113's server side is live after the third deploy (#137, 68e778e3): the playbook, the agent's admin step (agent as cwagent, credentials refreshed) and the restart window (13:59:56 UTC, 4.7 s), after which all five app streams and the facilitator's and host's metric streams arrive. check-series passed for facilitator (7 of 7 continuous series), host (6 of 6) and logVolume (2 of 2), so the alarm-groups PR turns the three on (decision 26): 35 alarms under 32 names (breaker-opened 3, log-volume 2), each name with a docs/monitoring.md section, and the page now points at the log files instead of the journal. log-volume's text names the logs' event field, not msg. The explorer's and the Prices API's owners are told before host goes on (decision 65)."
+  - date: "2026-11-09"
+    status: active
+    who: okarcz
+    note: "Adam handed over #144, #145 and #150. Review of #145: decision 70 amended (mainnet's supported 30, protocol 30 checked on testnet in 0111); a failing mainnet Horizon still fires watch-errors (decision 70 kept), and its runbook says a second section's failure sends nothing new while it is in ALARM; protocol-changed's steps raise supported with expected and skip /verify on a network we don't serve; tests for the reverse handler case, the thresholds apart, the bundle's own fetch and an unknown watch.protocol key; the Watch stack needs a redeploy after the merge."
+  - date: "2026-11-09"
+    status: active
+    who: okarcz
+    note: "Review of #150 after its rebase onto #144 and #145: AC 15 ticked (the 2026-11-06 check-series run on the real path). The pool events the runbook and four alarm texts sent people to (channel-quarantined, sequence-resync, send-retry, fee-raised) are only counted, never logged: the texts now say so and point at pool_events_total, and 0125 logs them. uptime's texts point at the log files, log-volume's query fits each group, probe-silent names the alarms it covers, and a test pins a docs/monitoring.md section for every alarm production makes."
+  - date: "2026-11-09"
+    status: active
+    who: okarcz
+    note: "Stan's review of #150 applied: channel-quarantined's cause is a channel account that is gone (a failed read keeps the channel), settlement_submit_failed names the channel, and the step re-creates it; fee-raised and send-retry are counted only in the EMF lines' type field (Logs Insights); probe-silent's text names what goes blind. Before a group's deploy, read its Level signals' latest values; after it, list what is in ALARM as the starting state (infra/README.md). 0125 narrowed to three events."
+  - date: "2026-11-09"
+    status: active
+    who: okarcz
+    note: "Alarms deployed at 12:19 UTC from develop 1b4229bb (#145 and #150): 39 new alarms (facilitator 25, host 8, logVolume 2, protocol 4), 47 in all. Before it: check-series passed for protocol, facilitator, host and logVolume; every new Level alarm's signal read inside its threshold; the diff added 39 alarms and changed 4 descriptions, nothing removed, no IAM. Watch needed no deploy: Adam's 2026-11-06 12:58 deploy of #145's protocol section matches develop (only CDKMetadata differs). After it: no alarm in ALARM; make fire-test at 12:22:01 UTC, SNS action succeeded, seen in Slack; the gauges' Values arrays aggregate as samples (SampleCount 6 a minute for pool_queued and rpc_on_fallback)."
+  - date: "2026-11-09"
+    status: active
+    who: okarcz
+    note: "Adam handed 0027 over to close. Decision 71: the theft PR and criteria 6, 7 and 9 move to 0127; the backups and snapshots groups and criterion 11's WAL, backup and snapshot ages move to 0026; the drills plan for the 47 live alarms (one 20-minute stop window, fake points, gauges-silent and sweeps-stopped left out)."
+  - date: "2026-11-09"
+    status: active
+    who: okarcz
+    note: "Drill (decision 71): 37 alarms fired on purpose, 13:29 to 13:55 UTC, all back to OK by 14:19. It found that every planned stop of x402@production ended failed (Compose's 130 after systemd's stop signal) and counted facilitator_failures_total, so facilitator-failed fired at 13:46:53 for the drill's own stop, and on 2026-11-06 for the third deploy's restart. x402@.service now lists 130 in SuccessExitStatus."
+  - date: "2026-11-09"
+    status: active
+    who: okarcz
+    note: "Drill recorded in docs/monitoring.md (Drills, and Fired on purpose for every alarm): 37 fired, 7 not fired with the reason. Criteria 2, 3, 4, 5, 10, 11 and 13 ticked, 3, 4, 5 and 11 with what the drill didn't prove. Decision 72: memory on at 90%. disk and audit-disk thresholds wait on Stan's and Adam's answer (ADR 0013 and 0011 say 80%)."
+  - date: "2026-11-09"
+    status: active
+    who: okarcz
+    note: "Decision 73, agreed with Stan and Adam: disk on at 80%, audit-disk raised to 90%, ADR 0013 and ADR 0011 amended."
+  - date: "2026-11-09"
+    status: active
+    who: okarcz
+    note: "Closing PR: docs/monitoring.md lists every metric (61 in the catalog, 5 AWS) and every alarm, on (44 names) or off (8, each with its task), with a test that fails on a gap; the uptime figure (99.56% since 2026-11-06 11:16 UTC, 100% without the drill); disk-root fired at 15:26:16 with audit-disk silent. Criteria 12, 16 and 17 ticked. 0027 stays active for criterion 1, which needs a real testnet settlement."
+---
+
+# Alerts and metrics
+
+## Summary
+
+As a facilitator operator, I want metrics and alerts for anything that costs money or can lose a payment, so that I hear about problems before users do.
+
+**Story:** [M1 Story 2.6](../../../../docs/planning/m1-epics.md#story-26-alerts-and-metrics) · **Lane:** Platform · **Covers:** FR14 (AD-18); NFR7
+
+## Context
+
+- The backend comes from 0014; the budget and breaker events come from 0024.
+- Related tasks: 0014, 0024, 0026.
+
+## Implementation
+
+- The metrics, each with its source, labels and whether it's billed: [G-metrics](notes/G-metrics.md).
+  The alarms, each with its shape and missing-data rule: [the alarm list](notes/G-alarm-list.md).
+- Five PRs (decision 2): #111 the decisions and ADRs; #112 the adapter and the facilitator's
+  signals; #113 log shipping, the agent and the host probe; #114 the alarms, Slack and the uptime
+  probe in CDK; #115 the off-server check's balance section and `docs/monitoring.md`'s sections
+  for the alarms it turns on. Decision 68 moves the rest to two more PRs: the theft and
+  secret-read sections, and the closing docs. Decision 71 moves the theft PR to 0127.
+- From 0039 ([ADR 0011](../../../../docs/adr/0011-facilitator-hosting.md), revised): the backend
+  is CloudWatch, fed from the Hetzner server.
+  - Each of our units appends its output to a file (decision 1), and the CloudWatch agent sends
+    the files on with the logging role's credentials from IAM Roles Anywhere. Only the agent holds
+    them, so `dockerd` stays untouched and an AWS outage never stops a container.
+  - The adapter writes Embedded Metric Format lines to stdout. Dimensions stay low-cardinality
+    (`network`, route, outcome, event name), never payer or `payTo`, and the adapter emits only
+    listed fields. Check once that extraction works on the agent's path.
+  - The agent reports memory and disk use, since ClickHouse shares the machine; no CPU
+    (decision 20).
+  - Alarms go through SNS and Amazon Q Developer in chat applications to `stellar-x402-bot`
+    (decision 12).
+- From 0014, changed by decision 5: uptime is a Lambda probe reading `/health`'s body every minute
+  at `x402-facilitator.sorobanscan.com` (Cloudflare Tunnel, ADR 0011), so a Cloudflare or tunnel
+  outage counts as downtime.
+  - The alarm needs more failing minutes than a deploy's worst downtime, migrations and the wait
+    for `ready` included: 7 in a row (ADR 0011's Consequences).
+  - The 99% figure counts a minute as up only when the probe reads `ready`.
+  - From 0020: `/supported` answers an object fixed at startup, so its 200 shows only that the
+    process is up. A process whose startup check fails exits with `startup_failed` and restarts
+    in a loop. It never becomes ready, and a missing answer counts as down, so the uptime
+    criterion covers it.
+- From 0014, amended by 0009 (decisions 44, 47; ADR 0011): RPC endpoints are named
+  `RPC_URLS[i]#<fingerprint>` (`rpcEndpointName` in `logger.ts`), never by URL or host.
+  signer-pool's `FallbackRpc.fromUrls` names them by full URL in `onSwitch`; name them with
+  `rpcEndpointName` before wiring that to logs or metrics (0049).
+- From 0009 (PR #41 reviews) and 0019: the settlement counters keep one `settlement_` prefix and
+  labels from closed sets (0009 decision 38). Each one's alarm, or why it has none, is in the two
+  notes. Also from 0019:
+  - `reconcile_finished` (a sweep that changed or failed something), `reconcile_failed`,
+    `settlement_reconcile_failed` and `settlement_resolve_failed` stay log lines, read with Logs
+    Insights. Each hash's attempt state (`settlement_hashes.state`) can be queried for dead
+    attempts and rebuilds;
+  - a record whose hashes the RPC's history no longer reaches stays open until an operator checks
+    it (0019 decision 22). `history-gone` fires once for it, and `pending` leaves it out;
+  - `open` in `reconcile_finished` also counts a record another writer finished during the sweep,
+    so `pending` reads the oldest open record's age instead;
+  - from Stan's review of PR #57 (0019 decision 36): the deploy checks reconciliation once,
+    through `listed`, so `settlement_sweeps_total{outcome}` and its alarm are the net for sweeps
+    that start failing later. A sweep that changes nothing logs nothing.
+- From 0045 (via 0009): `/verify`'s failover logs `rpc_failover` and `rpc_failback` with
+  `rpcEndpointName` names. `rpc_on_fallback` is 1 while on a fallback, since a lagging fallback
+  answers valid payments with rejections (0045 decision 9), and its OK reads as the recovery.
+- From 0047 ([ADR 0013](../../../../docs/adr/0013-facilitator-key-custody.md), amended
+  2026-10-20): low balance (decision 7), theft (decision 8) and reads of the backup secret
+  (decision 9). ADR 0011's "Slack is not a pager" still holds for money alerts on mainnet.
+- Deferred, with backlog tasks: the UptoProxy TTL alarm (0109, from 0035) and a cap on a sweep's
+  time (0110, from 0019).
+- Update `docs/monitoring.md`.
+
+## Design Decisions
+
+### From Plan
+
+1. **The agent reads files our units write, not Docker's `json-file` logs** (akot, 2026-11-02).
+   `x402@.service` runs Compose in the foreground with `--no-log-prefix --no-color` and appends
+   stdout to a file, and stderr to a second one. Lines stay raw, so `_aws` is at the root; a
+   `json-file` line wraps them. No new process, `dockerd` stays untouched, and `docker logs` keeps
+   working. stdout leaves the journal. Our other units do the same, each to its own file and
+   stream in the app group: Postgres, `cloudflared`, OpenBao, and the deploy with its migrations,
+   so their history outlives the host (akot, 2026-11-03, Oskar's review). Tested locally, the live
+   check waits for the first deploy: [R-log-path-spike](notes/R-log-path-spike.md). Its second
+   run (Oskar's review) found that a rotation loses up to 250 ms of unread lines, and during an
+   outage every app line since the agent blocked, all but a few kept in the rotated file, which we
+   accept; and that the agent joins whitespace lines to the line before, which #113's agent config
+   turns off. ADR 0011's Logs section changes with it.
+2. **Five PRs** (akot, 2026-11-02): decisions and ADRs, the metrics adapter, the server side, the
+   alarms in CDK, and the off-server check with the closing docs. Each opens as a draft that
+   describes its scope, and the code follows once the decisions are agreed. Amended by decision
+   68: the off-server check and the closing docs are now three PRs.
+3. **The alarms are CDK in `infra/`, deployed by hand** (akot, 2026-11-02): TypeScript, as in the
+   explorer and the Prices API, with the account's existing default bootstrap in eu-central-1.
+   An operator deploys with SSO. No workflow has AWS credentials, and 0014's own qualifier went
+   with the ECS plan.
+4. **Bill what has an alarm, and the traffic picture** (akot, 2026-11-02): per-route counts, settle
+   outcomes, one `pool_events_total` without a `type` dimension, and the event types that have an
+   alarm. The other labels stay fields in the log line, read with Logs Insights. AC 1 holds as
+   written. A metric costs $0.30 a month only for hours it gets data. The table is
+   [G-metrics](notes/G-metrics.md).
+   **Amended** (akot, 2026-11-05, from the whole-task review): every metric in the catalog is
+   billed, as #112's catalog already writes it. The 19 counters that were to stay log fields get
+   one set each: `network` alone, or no dimension on a process-scoped one. A line with no valid set
+   isn't written at all, so keeping them out of CloudWatch would need a log-only line in the
+   writer. They cost at most $5.70 a month with one network and $9.30 with two, less in practice
+   since the rare ones get data in few hours. An alarm or graph on one needs no code change.
+5. **Uptime and readiness come from one Lambda probe, not Route 53** (akot, 2026-11-02). A small
+   function in eu-central-1 reads `/health` every minute through the public hostname, parses the
+   JSON and publishes its `ready`; what `ready` means with two networks is 0077's (ADR 0011). A
+   missing point counts as down, and the alarm fires after 7 failing minutes. The 99% figure
+   comes from the same metric. It covers a crash loop, a lost lease, the tunnel and Cloudflare,
+   and it doesn't depend on the agent. It costs about $4 a month less and needs no us-east-1
+   stack. The price is one vantage point and every alarm in one region: a fault between AWS and
+   Cloudflare reads as downtime. ADR 0011's Uptime section changes with it. The probe ships with
+   the alarms (PR 4), apart from the off-server check (PR 5), so an RPC or Horizon fault can't take
+   it down. It runs from its deploy, but `/health` answers 502 until the first deploy, so the
+   alarm's actions go on, and the 99% starts counting, at the first good deploy (Stan's review).
+6. **0027 builds the role and the agent** (akot, 2026-11-02): the logging role, the Roles Anywhere
+   profile and the log groups in CDK, the agent and the helper in the playbook, and the certificate
+   renewal steps in the runbook. The holder of the ClickHouse project's CA only signs the
+   certificate. Stan agreed on 2026-11-03 and accepts that his first deploy goes out without
+   CloudWatch logs until 0027 lands. ADR 0011 and 0026's text change here to match.
+7. **Low balance: alarms at 25 and 10 XLM, the floor at 5 XLM** (akot, 2026-11-02). 0024's floor
+   took 25 XLM from ADR 0013's alarm, so the alarm fired as settlement stopped. The floor only has
+   to refuse cleanly before fees start failing on the network: fees in flight hold about 1.25 XLM
+   at 50 channels. ADR 0013's alarm stays at 25 XLM, about 5 days before the floor at 1,000
+   settlements a day, and 10 XLM repeats it about a day before. CloudWatch notifies only on a
+   change of state, hence two. The check runs off the server, every 5 minutes: it publishes
+   `spendable_stroops` from `checkFacilitatorBalance`, and the thresholds live in the alarms, so
+   `low` and its 100 XLM default go unused. The message gives the network, the balance, the fee
+   account's address and the runbook's top-up step. #105 moved `SPEND_FLOOR_STROOPS` to 50,000,000
+   on 2026-11-03, with its docs, before this PR merges (Oskar's review).
+8. **Theft is read from the accounts, not from our hashes** (akot, 2026-11-02; Oskar agreed on
+   2026-11-02 with three conditions, met here). The off-server check compares the signers and all
+   four thresholds of the fee account and each channel with a declared set, and reads their
+   Horizon effects. Two effects are allowed, since anyone can cause them: `account_credited`, and
+   `claimable_balance_claimant_created`, a claimable balance that names our account (Oskar made
+   one on testnet). A balance made from our own account still shows `claimable_balance_created`
+   and `account_debited`.
+   - It needs nothing from the server, which root could forge. It keeps where it read up to in an
+     SSM parameter only its role writes (decision 14), so an outage of any length is read in full
+     when it ends. Each read pages back to that point, since a flood of dust credits can push a
+     debit off one page.
+   - On testnet, a settlement leaves no effect on our accounts: 0006's bench fee account, the op
+     source and fee payer of at least 6,800 settlements, has 1,180 effects, all from its setup and
+     the `create_account`s that funded the bench; a channel with 33 settlements has 3, all from its
+     creation. The token transfer shows only on the payer and the seller.
+   - It can't see the float burned on fees alone, which gains a thief nothing; the balance alarms
+     and the weekly fee review (decision 13) catch that.
+   - Channel setup and key rotation fire it, with no suppression, and the declared set changes
+     first. It is one alarm across all accounts, so while one of them holds it in ALARM, a theft
+     elsewhere sends nothing new. Per-account alarms would cost about $15 a month at 50 channels,
+     so we accept it.
+   - Its alarms take the statistic a forged point can't hide a real one behind, since root can
+     write metric lines in any namespace ([the alarm list](notes/G-alarm-list.md#statistics)).
+   - Horizon sits behind a small port. ADR 0013's theft rule changes with it.
+9. **Reads of the backup secret come from CloudTrail's event history** (akot, 2026-11-02). The
+   off-server check calls `LookupEvents` every 5 minutes, so the shared account needs no trail.
+   Events show up about 10 to 15 minutes late, so each read goes back an hour from where it last
+   read in full and counts each event once (decision 14). Every read fires, a drill's too, with
+   no suppression. The filter by the secret's name is tested once 0026 creates it.
+10. **Host signals are metric lines a probe writes to a file the agent reads** (akot, 2026-11-02).
+    A root timer runs `x402-host-probe` every minute: OpenBao up and unsealed, WAL archiving,
+    backup and snapshot ages, the certificate's days left, and a heartbeat. The watchdog adds a
+    line per restart. Only the agent holds AWS credentials, and OpenBao keeps its socket with no
+    TCP port. One failed check doesn't stop the others, and a check that fails, or a job that never
+    ran, writes a value past its threshold, so it alarms rather than reading as healthy (Oskar's
+    review). Each alarm goes on once its signal exists. WAL keeps ADR 0011's rule, with
+    `last_failed_time` past `last_archived_time` in place of a rising `failed_count`, which never
+    falls. The disk threshold is read against the first real numbers before it goes on. A disk
+    alarm goes to our channel: the server's base setup is Stan's, and our WAL and logs are what
+    fills the disk (Oskar's and Stan's reviews). Memory gets its threshold after a week of data.
+11. **Every log line ships** (akot, 2026-11-02): 30 days for app lines, and for metric lines
+    since decision 18 (3 days before it). Payers are on chain anyway, and the only
+    client IP is in `rate_limited`, which fires only past a limit and lets anyone with AWS access
+    block an address at the edge without a shell on the server. The account is shared, so
+    retention and the IP are looked at again before mainnet, with 0038; the threat model records
+    the IP.
+12. **Alarms go to `stellar-x402-bot`, and a named person owns them** (akot, 2026-11-02): akot
+    first, and Stan as backup, which he confirmed on 2026-11-03: Slack, in working hours on
+    testnet. From the first deploy, Oskar's weekly review (ADR 0013) asks which alarms are in
+    ALARM, since a shared "the team" owner is how the explorer missed 9 days of muted alarms. The
+    rest of that review (fee spend, refill, custody) starts after mainnet. The phone or SMS route
+    ADR 0011 asks for on mainnet goes to 0038.
+13. **Fee spend is a metric with no alarm** (akot, 2026-11-03, Oskar's proposal):
+    `fee_charged_stroops` sums the `feeCharged` of each transaction that landed, success or
+    failure. It counts each once: where a record's final write wins, or where a landing after
+    `expired` is counted (0088), since that fee is spent too. Summed over 7 days, it is the fee
+    spend the weekly review starts with. Set against the balance's change, a gap shows the fee
+    account paying for something other than settlements (channel setup, a rotation, or float burned
+    on fees), earlier than the balance alarms. The server writes it, so root could forge it; the
+    balance it's compared with comes from off the server. An alarm on the gap waits for a few weeks
+    of data.
+
+### Emerged
+
+14. **Two read points in one SSM parameter** (2026-11-03, applying Oskar's suggestion of one time
+    for all). Horizon's point is a ledger: a run reads `history_latest_ledger` first, then every
+    account's effects up to it, and moves the point only once every account was read in full. A
+    re-read can count an effect twice, which repeats an alarm but never hides one. CloudTrail's
+    point is a time, with the IDs counted in the hour before it, since an event can show up late:
+    each read goes back that hour and counts an ID once. Each point moves only after its own read
+    succeeds, so a Horizon outage doesn't count secret reads again. A point older than Horizon's
+    history fails the run, which `watch-errors` shows. A test shows that a partial read moves
+    neither.
+15. **A dimension can be billed for some of its values only** (2026-11-03, for decision 4). The
+    adapter writes a dimension set only for the values with an alarm: `stage` for `pool`,
+    `budget` for `asset`, `other` and `global`, `fault` for `ours`, `type` for `sequence-resync`,
+    `status` for `500`. The other values write no line at all, so they are in no metric line
+    either; `stage: check` and a `payer` budget are in the app log, which logs each such event
+    (2026-11-05, from Karol's review of #112). HTTP metrics carry no `network`, since a
+    route serves both networks after 0077. Host lines go to `x402-host` and the Lambdas' metrics to
+    `x402-watch`, apart from the facilitator's `x402-facilitator`. `disk_used_percent`'s dimension
+    is `path` (2026-11-05, from the whole-task review): that is the CloudWatch agent's name for the
+    mount point, and the agent can't rename a dimension, so the catalog takes its name.
+16. **`rpc_stalled_seconds` comes from a `getLatestLedger` read every 30 s** (2026-11-03). On a
+    quiet server nothing else reads the RPC, so the gauge would stop moving exactly when it
+    matters.
+17. **A stale balance reading has its own alarm** (akot, 2026-11-03). #105's floor fails closed
+    once its last good reading is older than `maxStaleMs`, 5 minutes at the default interval, and
+    `/settle` then refuses every payment while `ready` stays 1 and the balance off the server looks
+    fine. #112 writes `balance_reading_age_seconds` every minute, and `balance-stale` fires above
+    300 s. A gauge, not `balance_read_failures_total`: a read that times out waits up to 10 s per
+    RPC endpoint, so the failures in 5 minutes vary in number. The floor reads on a timer, so the
+    gauge doesn't depend on traffic.
+18. **Metric lines are kept 30 days, like app lines** (akot, 2026-11-04; amends decision 11 and
+    ADR 0011's Logs). A label that isn't a dimension (`reason`, `state`, `type`) exists only as a
+    field in the metric line (decision 4), so 3 days would cut the Logs Insights view of the
+    traffic to 3 days, and the weekly fee review reads a week. The sibling projects keep every log
+    30 days (the Prices API's Lambdas) or 90 (the explorer's ECS tasks), and neither keeps metric
+    lines shorter. The two log groups stay, for their buffering during an AWS outage (ADR 0011).
+19. **A Level alarm keeps its state when data stops** (akot, 2026-11-04; changes the
+    "not breaching" #111 had for the Level rows, from Oskar's review). Under not breaching, a
+    process that dies with a Level alarm in ALARM turns it OK and posts a false recovery to Slack.
+    The Prices API hit this (seven tier alarms posted "recovered" for tiers still frozen when
+    their probe failed) and moved those alarms to `MISSING` and 1-of-2 evaluation. We take
+    `IGNORE` rather than `MISSING`: under `MISSING` an alarm with no data goes to
+    INSUFFICIENT_DATA and drops out of the weekly review's question of which alarms are in ALARM
+    (decision 12). The silence is covered by its own alarm, named in each row
+    (`facilitator-silent`, `probe-silent`, `telemetry-silent`, `watch-no-invocations`). Event and
+    Count alarms stay not breaching, since for them no data means nothing happened. `uptime`
+    stays breaching: its missing point counts as down (decision 5).
+20. **No CPU metric** (akot, 2026-11-04; amends the agent's metrics above and ADR 0011's Host
+    metrics). Nothing alarms on CPU, and decision 4 bills only what has an alarm (since its
+    amendment, everything written is billed, so a CPU metric would cost with nothing reading
+    it). The sibling projects don't collect it either: the explorer removed its CPU widgets (its task 0239), and
+    the Prices API watches only free disk on the same Hetzner host. The Prices API already alarms
+    on that host's free disk (`prices-<env>-ch-disk-free`); our `disk` alarm reads our mounts, and
+    its description names theirs.
+21. **#112 fixes the hooks running twice for one record** (akot, 2026-11-04). Counting
+    `fee_charged_stroops` in `onFinal` showed that 0019's hooks, the spend policy's `commit`
+    among them, could run twice for one record in two races. The sweep ran the hooks of a final
+    record that a writer had taken out of `unconfirmed` while it read; it now runs them only while
+    the key is still listed, since that writer either wins or puts it back. And a writer that won
+    kept a key that a racing writer, whose write threw, had put back, so the next sweep ran them
+    again; a write that wins now forgets the key. Fixed in #112 rather than a PR of its own, since
+    the fee metric needs it: one commit, `fix(lore-0027): run a final record's hooks and fee
+    once`, with a test for each race. It changes settlement behaviour, so #112's description
+    names it for review.
+22. **The compiler checks a metric's scope** (akot, 2026-11-04; changes the spine's AD-3). The
+    root is a `ProcessMetrics` that takes only the catalog's process-scoped names, and
+    `for({ network })` returns a `NetworkMetrics` that takes only network-scoped ones. Before, a
+    network-scoped metric written through the root wrote no line, and the notes planned a
+    `metric-issue` alarm on the writer's warn log to catch it; the in-memory double didn't check
+    scope, so no test would have. A wrong scope now doesn't compile, and the alarm is dropped.
+    The child no longer re-scopes with a second `for()`, which nothing used.
+23. **#114 builds every alarm in the list** (akot, 2026-11-04). The money and security alarms
+    (`balance-low`, `balance-critical`, `account-state`, `account-effects`,
+    `backup-secret-read`), `watch-errors` and `watch-no-invocations` are in #114 with the rest, in
+    a group that stays off until #115's Lambda runs (decision 26). #115 adds the Lambda and
+    `docs/monitoring.md`; the Lambda is named `x402-production-watch`, since the two `watch-*`
+    alarms read `AWS/Lambda` by that name. One PR holds the whole list and the one alarm helper,
+    and an alarm still goes on only with its signal (the spine's AD-6). Amended by decision 68:
+    the group is split, and `docs/monitoring.md` grows with the PRs that turn groups on.
+24. **One environment file and fixed names** (akot, 2026-11-04). `infra/envs/production.json` is
+    `x402@production`. Its `networks` (`["stellar:testnet"]` today) decides which `network` values
+    the network-scoped alarms get. Stacks are `X402-production-<Stack>`. Alarms are
+    `x402-production-<alarm>`, and a network-scoped one ends with the network's name
+    (`x402-production-sweeps-stopped-testnet`), so pubnet renames nothing. The log groups are
+    `/x402/production/app` and `/x402/production/metrics`, the topic `x402-production-alarms`,
+    the Lambdas `x402-production-uptime-probe` and `x402-production-watch`, and the SSM parameters
+    sit under `/x402/production/`.
+25. **The logging role trusts the shared CA, for one CN** (akot, 2026-11-04; as ADR 0011). The
+    trust anchor is the explorer's ClickHouse client CA, `soroban-internal-ca-2026`, which the
+    Prices API's ClickHouse certificates come from too. No sibling uses Roles Anywhere, so ours is
+    the CA's first trust anchor. Every certificate the CA signs can reach it, so the trust policy
+    accepts only `CN=x402-cloudwatch-agent-production` and only our anchor, and every permission
+    needs the server's IP. The CN follows the siblings' `<project>-<component>-<env>`
+    (`prices-api-production`) and names the agent, the only holder of the credentials. A CA of our
+    own would cost about $400 a month (AWS Private CA; $50 in short-lived mode) or another key to
+    guard, for a role that can only write our logs and host metrics from our server. Whoever holds
+    the CA key can issue our CN, and one certificate can't be revoked without a CRL: a leaked key
+    means a new CN and a Telemetry deploy. ADR 0011 accepts both; look again with 0038 if the role
+    ever gains more.
+26. **An alarm group is either absent or on with its actions** (akot, 2026-11-04). `alarmGroups`
+    in the config: off creates none of the group's alarms, on creates them with their actions. No
+    alarm has `actionsEnabled: false`: an alarm without actions is a muted alarm (the explorer's 9
+    days, the Prices API's alarm with an empty action list). `make check-series GROUP=<group>`
+    lists every series the group's alarms read and fails on one CloudWatch doesn't have, so a
+    group goes on once its series have data (AD-6). No `WarmUpConfiguration`: it lasts at most 2
+    days, applies only at creation, and its docs don't cover metric math. At the first deploy only
+    `telemetry` (the EMF error alarms) is on: `uptime` waits for the probe's first points
+    (decision 37), `facilitator` and `host` on #113, `watch` on #115, `channelHeld` on 0089,
+    `backups` and `snapshots` on 0026's jobs (decision 40). The groups
+    `disk`, `memory` and `logVolume` also need a measured threshold, and `host` the audit
+    volume's mount, and synth refuses each one on without it.
+27. **Three stacks with no reference between them** (akot, 2026-11-04). Telemetry (the Roles
+    Anywhere anchor, profile and role, and the two log groups), Alarms (the topic, Chatbot and the
+    alarms) and Uptime (the probe, its schedule and its role). Alarms read metrics by namespace,
+    name and dimensions, and the log groups and Lambdas have fixed names, so no stack exports
+    anything and each deploys alone with `--exclusively` (the Prices API's 0141). A threshold
+    change never shows IAM in the diff, and the probe's code ships without touching an alarm.
+    #115 adds its Lambda as a fourth stack.
+28. **`gauges-silent`, one per network** (akot, 2026-11-04; closes the alarm list's open item). A
+    gauge whose read keeps throwing goes silent while sweeps continue: its Level alarm keeps its
+    state (decision 19), and `facilitator-silent` reads the sweeps, so nothing fired. A
+    `balance_reading_age_seconds` that stopped would keep `balance-stale` quiet while `/settle`
+    refuses every payment. One metric-math alarm per network fires when the sweeps arrive and any
+    of the six gauges sent no point for 3 five-minute periods. With the process down the sweeps
+    stop too, so it stays quiet beside `facilitator-silent`. About $0.70 a month per network.
+    Once `channelHeld` is on, it watches 0089's `channel_longest_hold_seconds` too, whose
+    `channel-held` keeps its state the same way (2026-11-05, Karol's review of #114).
+29. **The CA is a copied file, the server's IP our own SSM parameter** (2026-11-04). The CA's
+    public certificate is copied into `infra/trust/` from the explorer's
+    `infra-hetzner/ca/ca.crt`, so a change of trust root goes through review, and a test checks
+    that it is a CA and not expired. The IP is `/x402/production/server-ip`, kept out of the repo
+    as the explorer keeps `/soroban/production/ch-ip`. It's a parameter of our own, since `ch-ip`
+    describes ClickHouse, and our role shouldn't follow ClickHouse to another box.
+30. **12-hour sessions, and the IP on the permissions** (2026-11-04). The profile and the role
+    allow the 12 hours #113's `aws_signing_helper update` asks for, so the agent keeps shipping
+    through a shorter Roles Anywhere outage; a session used anywhere but the server gets nothing.
+    `aws:SourceIp` sits on each allowed action rather than in the trust policy: it is the agent's
+    own calls the IP limits, and whether Roles Anywhere passes the client's IP to the trust policy
+    is untested. The role only writes: `logs:CreateLogStream`, `logs:PutLogEvents` and
+    `logs:DescribeLogStreams` on the two groups, and `cloudwatch:PutMetricData` for the namespace
+    `x402-host` (the agent's memory and disk). EMF lines need no `PutMetricData`. So #113's agent
+    config can't create groups or set their retention. The namespace condition binds
+    `PutMetricData` only: an EMF line in the metrics group can name any namespace, `x402-watch`
+    included, so it doesn't guard the off-server alarms. Their statistics and the Lambdas'
+    `AWS/Lambda` silence alarms do (G-alarm-list, "Statistics"; 2026-11-05, Karol's review of
+    #114).
+31. **The log groups outlive their stack** (2026-11-04). The app and metrics groups are kept on a
+    stack delete: their history is meant to outlive the host (decision 1), so a `cdk destroy`
+    shouldn't take it. Not on a first create's rollback (`RETAIN_ON_UPDATE_OR_DELETE`), or the
+    empty groups would block the next deploy with "already exists" (the second review). The probe's own group goes with its stack, as the explorer's
+    Lambda groups do.
+32. **Chatbot's guardrail is read-only** (2026-11-04). The siblings leave it at the default,
+    `AdministratorAccess`. The role already limits Chatbot to `CloudWatchReadOnlyAccess`; on a
+    shared account the channel's guardrail says the same.
+33. **`check-series` waits only on the series written all the time** (2026-11-04). A failure
+    counter (`signer_failures_total`, the EMF errors) is written only when the failure happens,
+    so it can't show data before its group goes on, and a check that required it would never
+    pass. The check fails on a gauge, the sweeps' zero, a Lambda's own metrics or a log group's
+    bytes with no data in the last 3 hours, and lists the failure counters: they travel the same
+    path, and the catalog checks their names and dimensions at synth.
+34. **The shapes the list left open** (2026-11-04). `memory`: `Minimum` over 5-minute periods, 3 of
+    3, so it fires on a lasting squeeze, not a ClickHouse merge's spike. `log-volume`: `Sum` of
+    `IncomingBytes` per log group over an hour, 1 of 1. Both stay off until their thresholds are
+    measured. `disk` and `log-volume` make one alarm per mount and per log group, named after it.
+35. **The delivery test fires `emf-validation`** (2026-11-04). `make fire-test` sets an alarm to
+    ALARM by hand. `emf-validation` reads a metric written only on a failure, so its next
+    evaluation puts it back to OK with no OK message, and no real alarm is touched. The target
+    prints the alarm's action history, since a publish SNS refuses shows only there (the
+    explorer's 2026-08-27).
+36. **The siblings' library ranges, today's versions** (2026-11-04). `aws-cdk-lib ^2.245.0`,
+    `constructs ^10.6.0`, `aws-cdk ^2.1114.1`, as both siblings, resolved to 2.275.0, 10.8.1 and
+    2.1147.0. `cdk.json` takes the explorer's feature flags, plus the eight newer than its CDK at
+    their recommended values; the templates are the same with and without them.
+37. **`uptime` goes on after the probe's first points** (2026-11-04, from the second review of
+    #114). Missing data breaches it, so an alarm made before `ready` has 7 minutes of points posts
+    "not ready" at once. The first deploy makes the probe, and the group goes on once
+    `make check-series GROUP=uptime` sees `ready`. Decision 5's condition, the first good deploy,
+    was met by #119.
+38. **The probe runs at the start of every minute** (2026-11-04, the second review).
+    `cron(* * * * ? *)`, not `rate(1 minute)`, which counts from the schedule's creation: a run
+    near a minute's edge could land in the next minute and leave one with no point, read as down
+    and taken off the 99%. Each point is stamped when its run starts.
+39. **#115 publishes every metric on every run, 0 included** (2026-11-04). `check-series` counts
+    `x402-watch` as written all the time, so the `watch` group goes on only once each series has
+    arrived. A count published only when it isn't 0 would leave `account-effects` and
+    `backup-secret-read` reading OK on series that might not exist.
+40. **The backup and snapshot alarms are groups of their own** (2026-11-05, from the whole-task
+    review). `host` held `wal-failing`, `wal-stale`, `backup-age` and `snapshot-age`, whose jobs,
+    pgBackRest and OpenBao's daily snapshot, come with 0026 and don't run yet. The probe writes a
+    value past the threshold for a job that never ran (decision 10), so `host` could never go on,
+    and `openbao-down`, `certificate`, `probe-silent` and `telemetry-silent` would wait with it.
+    `backups` holds the three pgBackRest alarms and `snapshots` holds `snapshot-age`, apart, since
+    the two jobs can land at different times.
+41. **The balance alarms name the fee account, from the infra config** (2026-11-05, from the
+    whole-task review; ADR 0013 asks for the address and the top-up step). `feeAccounts` in
+    `infra/envs/<env>.json` holds one `G...` address per served network; synth refuses a missing
+    one, one for a network not served, and a failed checksum, so a typo can't send a top-up
+    elsewhere. The address is public: `/supported` lists it as the signer. The descriptions point to
+    the runbook's new Topping up the fee account, whose testnet merge was tried between two one-off
+    accounts. An address change, a key rotation, is a config change and an alarm deploy.
+42. **The server side has a spine of its own** (akot, 2026-11-05).
+    [S-pr113-spine](notes/S-pr113-spine.md) fixes what #113's units, agent config, probe and
+    playbook share with each other and with #112 and #114: one table of files, streams and
+    filters, one emitter for host lines, one creator per path, and the rollout. It comes from
+    seven researches against the sources (systemd 255, the agent 1.300074, the signing helper
+    1.8.6, Compose 5.1.3, logrotate 3.21, Ansible) and four reviews of the spine. Decisions 43-54
+    are its choices. #113's decisions are numbered after #114's 23-41.
+43. **A failed end of the facilitator's unit is counted** (akot, 2026-11-05). `x402@`'s
+    `ExecStopPost` runs `x402-host-probe stopped`, which writes `facilitator_failures_total` when
+    `SERVICE_RESULT` isn't `success`, and `facilitator-failed` is an Event alarm in `host` (#114).
+    A crash after `ready` in cycles of a minute or more never reaches `StartLimitBurst`, so nothing
+    fired on it. `NRestarts` would lose counts: `reset-failed` and a manual restart, which the
+    watchdog and the deploy both do, zero it. The counter also takes a drain cut by
+    `TimeoutStopSec`, a `dockerd` crash, and the watchdog's kill of a hung process, which
+    `watchdog-restart` reports too.
+44. **The agent writes the catalog's two host series and nothing else** (akot, 2026-11-05).
+    `omit_hostname`, a rollup to `[["path"]]` and `drop_original_metrics` give
+    `disk_used_percent{path="/"}` and `mem_used_percent` with no dimension. Nothing in the
+    agent's JSON drops `fstype`, and `drop_device` stays out: an original with only `path` gets
+    no rollup and would be dropped whole. The catalog closes `path` to `/`, and
+    `telemetry-silent` reads both series (#114), so a lost disk series fires.
+45. **One file per unit, split only where EMF is** (akot, 2026-11-05). Only `x402@` keeps stdout
+    and stderr apart; the other units write both to one file, in order. Every line starts an event
+    on the files that carry EMF, and the others keep the agent's default, so a stack trace stays
+    one event. Each file is its own stream. The directories are `root:cwagent` 2750, and a
+    logrotate config, state and 10-minute timer (`*:00/10:20`) of our own keep the daily
+    `logrotate.timer` off the files.
+46. **The signing helper runs once an hour** (akot, 2026-11-05). `aws_signing_helper update
+    --once`, a oneshot as `cwagent` on an hourly timer, asks for a 12 h session each time, so the
+    file always holds keys with about 11 h left and the agent ships through a Roles Anywhere
+    outage that long (decision 30); a helper left running refreshes only 5 minutes before expiry.
+    The key reaches it through `LoadCredentialEncrypted=`, since `x402-creds` decrypts for
+    root-run containers. `credentials_age_seconds` and `credentials-stale` (above 7,500 s: two
+    runs and 5 minutes) show a helper that stopped before its keys run out.
+47. **OpenBao is checked on testnet's socket** (akot, 2026-11-05). The probe asks `sys/health`
+    from the host through the socket the facilitator signs through. `bao status` through
+    `docker compose exec` would run about 71 MB inside OpenBao's 256 MB limit every minute, and a
+    timed-out `exec` leaves its process behind. A sign that fails while OpenBao is up stays
+    `signer-failures`' (#112).
+48. **Backup and snapshot ages come from stamp files** (akot, 2026-11-05). A job touches
+    `/var/lib/x402/last-ok/<job>` only after it succeeded, as root, and the probe reads the mtime;
+    a missing stamp reads as a job that never ran. 0026 adds the `touch` to its jobs, and may set
+    the time from the repository. `wal_failing` reads 1 after a Postgres crash too, since
+    PostgreSQL 15 and later reset `pg_stat_archiver`; 0026 is asked for `pg_switch_wal()` after a
+    start and an `archive_timeout` of about 60 s.
+49. **The disks and the audit volume are `/`** (akot, 2026-11-05). `host.diskMounts` is `["/"]`
+    and `host.auditDiskMount` is `"/"` (#114): OpenBao's audit volume lies on `/` with everything
+    else, so `audit-disk` and `disk` read one series. `/boot` stays out: filling it blocks a
+    kernel update, not the facilitator.
+50. **The restart window, in the brief's order, while idle** (akot, 2026-11-05). After the merge's
+    deploy, the playbook and the admin step: stop `x402@production`, restart `x402-openbao`,
+    `x402-db-testnet@production` and `x402-tunnel@production`, start `x402@production`. The
+    runbook takes this order. Typically 30 to 60 s, about 8.3 minutes with every cap hit, so it
+    runs while `/settle` is idle and, when the timing allows, before `uptime`'s group goes on.
+51. **The hand-run migration writes to `deploy.log`** (akot, 2026-11-05). The runbook's
+    `systemd-run --unit=x402-migrate` appends to the deploy's file, so a migration run by hand
+    ships like one in a deploy (decision 1).
+52. **A full disk never stops a rollback, and every timed oneshot has a timeout** (akot,
+    2026-11-05). `x402-deploy` prints through a `say` that ignores a failed write: under
+    `set -e`, a failed `echo` ended the script before its rollback. The watchdog gets the
+    `TimeoutStartSec` it lacked. The runbook's `journalctl` steps for units whose output moves to
+    files change with them.
+53. **`cwagent`'s way to root waits for 0038** (akot, 2026-11-05). The agent hands its `etc/` to
+    `cwagent` at every start, and its root wrapper translates that config at the next one, so a
+    compromised `cwagent` could make the agent root. A drop-in that restores a root-owned config
+    first comes before mainnet.
+54. **The spike is repeated on Docker CE in a VM** (akot, 2026-11-05). A multipass VM with Ubuntu
+    24.04, systemd 255, and the server's Docker CE 29.5.1, Compose 5.1.3 and `daemon.json` repeats
+    the spike's cases and adds dockerd restarts under `live-restore`, a full disk, the
+    `ExecStopPost` results, the playbook's runs, and a stub that answers the agent's CBOR
+    `PutMetricData`. Nothing runs on the server for it.
+55. **A write that loses or throws after another won keeps the key out** (akot, 2026-11-05;
+    from Karol's review of #112; completes decision 21). Decision 21 fixed the order where the
+    winner returns last. In the other order, a winner that returned first and a racing write that
+    threw or lost after it, the loser put the key back in `unconfirmed`, so the next sweep ran
+    `onFinal`, `onSuccess` and the fee count again; with the real spend policy two failed
+    settlements recorded 4 failures and opened breakers early. `finalWrite` now counts the writes
+    in flight per key and remembers a win until the last of them ends: a win moves the record
+    from a non-final state, so a write that throws or loses after it can't be the one that
+    committed. Once no write is in flight the win is forgotten, so a reopened record's write
+    (0073) that throws is listed as before. A test races a write that throws a moment late with
+    one that commits, 200 times on PostgreSQL: before the fix the fee was counted twice by run 3.
+56. **The oldest open age has no sample until a sweep has listed** (akot, 2026-11-05; from
+    Karol's review of #112). It was set at the end of a sweep and read 0 before the first one, so
+    after a restart with the store failing, a 2-hour-old record read 0 for as long as the listing
+    failed, and `pending` (a Level alarm) would turn OK at the wrong moment. A gauge read may now
+    return no value, which writes no sample and reports no issue; the age has none until a sweep
+    lists, so `pending` keeps its state through the gap (decision 19), and `sweeps-stopped`
+    covers a listing that keeps failing. It is also set right after `listNonFinal`, from what was
+    listed, so a first sweep stuck on the RPC already shows the backlog, and again at the end
+    from what the sweep left open.
+57. **Label keys are typed from the catalog** (akot, 2026-11-05; from Karol's review of #112;
+    amends the spine's AD-3). A mistyped key, `{ faults: "ours" }`, matched no set's `when`, so
+    it wrote no line and logged nothing, and decision 22's scope types didn't catch it. Each
+    catalog entry now lists its log-only labels in `fields`; with its sets' dims, their `when`
+    keys and its `values`, they are the keys the port's `increment` and `registerGauge` accept
+    for that name, and a metric with none takes no labels at all. Declaring them showed 20
+    metrics writing log fields the catalog didn't name (`reason`, `origin`, `breaker`, ...); all
+    are listed now. The writer is unchanged: it still takes any record, and an `undefined`
+    value is a label not given.
+58. **The catalog holds the series rule beside its data** (akot, 2026-11-05; from Karol's review
+    of #112; corrects the spine's AD-1 wording). The spine said `packages/metrics-catalog` holds
+    only data and types, while it exports `effectiveSets`, `whenHolds`, `isDimValue` and
+    `seriesDims`. The wording changes, not the code: they are small pure functions over the
+    catalog that the EMF builder, the alarms and the Lambdas must apply alike, and moving them
+    would mean a second package or three copies. The catalog's header already said so.
+59. **`createRpcStallTracker` loses its unused `everyMs`** (akot, 2026-11-05; from Karol's
+    review of #112). No caller passed it; the tracker polls every `RPC_STALL_POLL_MS`.
+
+60. **A failed settlement reaches an alarm** (2026-11-05, from Karol's review of #114, point 1). An
+    `expired` record, an `unexpected_settle_error` answered with status 200, and a hook that threw
+    reached none: `failure-ours` needs a fee, `pending` a record past 750 s, `http-500` a 500.
+    `settlement-expired` (`settlement_reconciled_total` for `state="expired"`), `submit-failed` and
+    `hook-failures` are Event alarms on counters the facilitator already wrote; the three become
+    eager-first, and `settlement_reconciled_total` bills `state` for `expired` only.
+61. **`http-500` fires on the first error** (2026-11-05, point 3). 5 in 5 minutes let 4 errors pass,
+    while `onError` takes anything it doesn't know as ours. It is the plain Event shape, which
+    sends one message per burst. `http_requests_total` stays aggregated: making it eager-first
+    would write a line per route and status, and a crash after a 500 fires `facilitator-failed`.
+62. **`uptime-flapping`, 10 failing minutes of 30** (2026-11-05, point 4). `uptime` needs 7 in a
+    row, so a loop that comes up for a minute between restarts (`0 0 0 0 0 0 1`) never fired it.
+    Same series, same missing-data rule, in the `uptime` group. One deploy stays under 10; synth
+    refuses a count at `uptime`'s run or at the window.
+63. **`breaker-opened` per breaker kind** (2026-11-05, point 7). An Event alarm stays in ALARM for
+    its window, so one series let payer breakers opened with fresh accounts hide a `pay_to` or
+    `asset` one. The catalog bills `breaker`: 3 series per network instead of 1, $0.60 a month
+    more per network.
+64. **#115 posts each theft finding to the topic itself** (2026-11-05, point 5). Root on the server
+    can write a forged `account_effects_unexpected` point every 15 minutes and hold the alarm in
+    ALARM, and CloudWatch notifies only on a change, so a real theft would send nothing. The
+    off-server check publishes each finding (account, effect or signer change, transaction) to
+    `x402-<env>-alarms` straight from AWS, one message per finding, deduplicated by its cursor;
+    `account-effects` and `account-state` stay as the backstop for a check that can't publish.
+    Its role gets `sns:Publish` on that topic only. The theft PR after #115 builds it (decision
+    68).
+65. **The log path reaches other projects' namespaces; `log-volume` is the ceiling** (2026-11-05,
+    point 6). An EMF line in our metrics group can name any namespace of the shared account, such
+    as `SorobanBlockExplorer/Indexer`, which the explorer alarms on, and create custom metrics
+    without limit. No IAM condition covers an EMF namespace. The explorer's and the Prices API's
+    owners are told before `host` goes on. `log-volume` gets a coarse 200 MB an hour per group,
+    set before any measurement, and synth refuses `host` without it.
+66. **No protocol-upgrade watch in 0027** (2026-11-05, point 2). The explorer has one after a
+    16-hour stall at an upgrade. For the facilitator an upgrade is mostly an SDK update; a watch
+    reads the validators' votes, not a metric we have. It is named in G-alarm-list's Deferred, to decide with 0038 before
+    mainnet. Replaced by decision 70 on 2026-11-06.
+67. **Three cuts in `infra/`** (2026-11-05, point 8). The Count shape was `event()` with 5-minute
+    periods, N = 3 and a threshold, so it went; `pool-health` is that Event. The fee account's
+    check is `StrKey.isValidEd25519PublicKey`, as in the facilitator's config, not 30 lines of
+    base32 and CRC16. The config is a zod schema, as in the facilitator and the MCP packages,
+    with the same messages and every field's problem at once.
+68. **The balance alarms go on before the theft ones** (akot, 2026-11-06). M1's story 2.6 needs
+    the low-balance alarm; the theft and secret-read sections need more design (the declared
+    channel set, the read points, SNS findings). #115 builds the Watch stack with its balance
+    section only, and the `watch` group splits: `watch` keeps `balance-low`, `balance-critical`,
+    `watch-errors` and `watch-no-invocations`, and `watchSecurity` takes `account-state`,
+    `account-effects` and `backup-secret-read`, which go on with their sections in the next PR.
+    As with decision 40, one group per job that has to run first. This amends decisions 2, 23
+    and 64, and the PRs after #115 are:
+    - **#115:** the Watch stack with its balance section, the `uptime` and `watch` groups on, and
+      a `docs/monitoring.md` section for each alarm that is on, since every alarm's description
+      points there (`factory.ts`);
+    - **the facilitator PR:** the `facilitator` group on after #137's deploy, with its sections;
+    - **the theft PR:** the theft and secret-read sections, each finding to SNS (decision 64), and
+      `watchSecurity` on;
+    - **the closing PR:** every metric and alarm in `docs/monitoring.md`, the uptime figure, and
+      each alarm fired once on purpose.
+69. **The check is bundled in infra's `build`, not by `NodejsFunction`** (akot, 2026-11-06; a BMAD
+    architecture spine and GSD advisors reviewed #115's open choices apart, then reconciled).
+    esbuild, an explicit devDependency, bundles `lambdas/watch/index.mjs` with signer-pool's
+    `checkFacilitatorBalance` and stellar-sdk into `dist/lambdas/watch/` (350 KB); `@aws-sdk/*`
+    comes with the runtime. Synth stays offline and never bundles, as with the probe's plain
+    modules; `NodejsFunction` in this pnpm workspace looks for esbuild through `pnpm exec` at the
+    root and falls back to Docker. infra's tests run after its `build`. The balance comes from
+    RPC (`getLedgerEntries`), the formula the floor uses (decision 7); the RPC URL per network is
+    in `infra/envs/production.json` (`watch.rpcUrls`), and a failed read publishes nothing, never
+    0. One run at a time, no retries, on the clock every 5 minutes with the scheduled time.
+    Before `stellar:pubnet` joins `networks` (from Oskar's review of #115): a provider's keyed
+    URL comes from an SSM parameter, the role gets `ssm:GetParameter` on it, and errors are masked
+    by the URL's host and path, not only by an exact copy of it.
+70. **The check watches each network's protocol** (akot, 2026-11-06; replaces decision 66). On
+    2026-11-03 testnet moved to protocol 30 and an older SDK stopped reading its ledgers, found
+    only by a chance test, and on 2026-11-06 mainnet ran 29 with its Stellar Core supporting 30.
+    The watch Lambda's protocol section reads Horizon's root every 5 minutes for each network in
+    `watch.protocol`, testnet and mainnet, served or not, and publishes `protocol_version` and
+    `protocol_supported_version`. Horizon, not RPC: it gives both versions, and mainnet has a
+    public Horizon and no RPC of ours yet. Each alarm has its own threshold per network, raised
+    in a PR once acted on, so raising one never silences the other: `protocol-changed` fires when
+    the network runs above `expected`, the version we have checked, and
+    `protocol-upgrade-coming` when its Core supports a version above `supported`, the highest we
+    have checked the SDK and the RPC against (amended 2026-11-09, okarcz: it was "the highest we
+    know of", with mainnet's at 29 so that it fired at once; testnet already runs 30 and task 0111
+    moved the SDK to 16.4.1 for it, so mainnet's is 30 and the alarm re-arms for 31). Both are
+    Level alarms with `Maximum` over 2 of 2 five-minute periods (Horizon nodes differ during a
+    rolling upgrade), in a `protocol` group of their own. A Horizon that fails for 2 of 3 runs fires `watch-errors`,
+    mainnet's too: a dead protocol section must show. The validators' votes, which
+    the explorer reads, would give the date; Core's supported version gives the readiness, which
+    is enough to test the SDK in time.
+71. **0027 closes on the alarms that are live** (okarcz, 2026-11-09, after Adam handed 0027 over).
+    Three parts wait on work outside 0027, so they leave it:
+    - **the theft PR** (decision 68) moves to 0127, with criteria 6, 7 and 9: its design is still
+      open, and the 47 live alarms shouldn't wait on it;
+    - **the `backups` and `snapshots` groups** move to 0026, which turns each on once its job runs
+      (check-series, the flag, the deploy, one firing), with criterion 11's WAL and backup and
+      snapshot ages. Today `wal_failing` reads 1 and both ages read the "none" value, so neither
+      group can go on before 0026's jobs;
+    - **`channel-held`** stays deferred to 0089.
+
+    The drills for the alarms that are on: one announced window of about 20 minutes with the
+    facilitator, the host probe, the Watch schedule and the CloudWatch agent stopped together
+    fires `uptime`, `uptime-flapping`, `facilitator-silent`, `probe-silent`, `telemetry-silent`
+    and `watch-no-invocations` (the agent's stop silences the probe's and the facilitator's lines
+    too, which Drills says). A fake point, as the balance drill did, fires each counter and
+    gauge, `facilitator-failed` and `watchdog-restart` included. `gauges-silent` and
+    `sweeps-stopped` fire only on a partly broken process, which neither a stop nor a fake point
+    can cause, so they are left out and Drills says why. `disk` goes on at 80%, `memory` after a
+    week of data (2026-11-13). The closing PR then records it all (decision 68).
+72. **`memory` goes on at 90% now** (okarcz, 2026-11-09; amends decision 71 and the alarm list's
+    "after a week of data"). Three days of data read 2.5 to 4.4% used, with ClickHouse on the same
+    machine held to its own limit, so a week more would not move a 90% threshold. `Minimum` over 3
+    five-minute periods, as built: a lasting squeeze, not a merge's spike. The weekly review can
+    lower it once more weeks are read.
+73. **`disk` at 80%, `audit-disk` at 90%** (okarcz with Stan and Adam, 2026-11-09; amends ADR 0013
+    and ADR 0011, which set the audit log disk at 80%). On ch-prod-01 OpenBao's audit volume is on
+    `/` with everything else, so `disk` and `audit-disk` read the same `disk_used_percent{path="/"}`
+    and at one threshold would send two messages for one fact. `disk` at 80% is the warning (plan
+    a cleanup), `audit-disk` at 90% the last call before signing stops. `/` is 1.8 TB, 1.67 TB
+    usable, at 60% and flat since 2026-11-06 apart from a nightly ~17 GB that goes back by morning:
+    80% leaves about 334 GB, 90% about 167 GB, about 35 days of logs at `log-volume`'s ceiling or
+    3 days of a 50 GB-a-day ClickHouse import.
+
+## Acceptance Criteria
+
+- [ ] Given the running facilitator, when it serves traffic, then pool `onEvent` events, per-route request counts and settle outcomes are exported as metrics
+- [x] Given each alert condition: budget nearly used, breaker open, low facilitator balance (`checkFacilitatorBalance`), quarantined channel, pending settlements, when it occurs, then an alert fires on CloudWatch (ADR 0011); each alert has been triggered once on testnet or with a fake (2026-11-09 drill, docs/monitoring.md Drills: budget-nearing, the three breaker-opened, channel-quarantined and pending fired with fake points, the balance alarms on 2026-11-06)
+- [x] Given a process that stays not ready to settle (no lease) longer than the alarm window, when the alarm evaluates, then it fires (ADR 0011) (2026-11-09: uptime fired 7.5 minutes into the stop window. The drill stopped the process rather than holding it up without a lease; uptime reads `ready`, so a process that is up but not ready takes the same path, which the probe's tests cover)
+- [x] Given the public URL unreachable, or a process in a crash loop, for 7 minutes in a row, when the uptime probe reads `/health`, then the uptime alarm fires, a deploy within its usual downtime doesn't fire it, and before the first good deploy it sends nothing (ADR 0011) (2026-11-09: uptime fired at 13:34:24, 7.5 minutes into the stop window, and uptime-flapping at 13:37:34; the 2026-11-06 13:09 deploy, after uptime went on at 11:16, didn't fire it; the group went on only after the first good deploy (decision 5). A crash loop never reads `ready` either, the same path, not drilled)
+- [x] Given a process whose sweeps don't list the records (or don't run) for longer than the alarm window, when the alarm evaluates, then it fires (ADR 0011, 0019 decision 36) (2026-11-09: sweeps that don't run fired facilitator-silent at 13:42:49 in the stop window. Sweeps that run but list nothing (sweeps-stopped) were not fired: no stop or fake point can cause it safely (Drills))
+- [ ] Given a signer or threshold change on the fee account or a channel, or an effect on them other than a credit or a claimable balance naming them, when the off-server check runs, then an alarm fires, with the server down too (ADR 0013) (moved to 0127, decision 71)
+- [ ] Given the off-server check down or failing for any time, when it next succeeds, then it has read every effect and secret read since its last full read, and a partial read moved neither read point (moved to 0127, decision 71)
+- [x] Given the fee account's spendable balance below 25 XLM and below 10 XLM, when the off-server check runs, then an alarm fires each time (ADR 0013) (2026-11-06: a fake 5 XLM `spendable_stroops` point fired `balance-low-testnet` and `balance-critical-testnet`, ALARM 11:20:10 and 11:20:35 UTC, seen in `#stellar-x402-bot`, `docs/monitoring.md` Drills; the check's own read of a low balance is covered by `infra/test/watch-balance.test.ts`)
+- [ ] Given a read of the backup secret, when the off-server check runs, then an alarm fires (ADR 0013) (moved to 0127, decision 71)
+- [x] Given OpenBao not giving a usable signature (sealed, denied, a wrong key), when the facilitator signs or runs its check, then an alarm fires on the first failure (ADR 0013) (2026-11-09: signer-failures and openbao-down fired with fake points)
+- [x] Given OpenBao down or sealed, WAL archiving stuck, a backup or snapshot older than 26 hours, or the certificate under 30 days from expiry, when the condition holds, then an alarm fires, and a check that fails or a job that never ran fires it too (ADR 0011, 0013) (WAL archiving and the backup and snapshot ages: moved to 0026, decision 71) (2026-11-09: openbao-down and credentials-stale fired with fake points. The certificate part was not fired: its hourly Maximum always holds the probe's real days left (Drills). WAL, backups and snapshot moved to 0026)
+- [x] Given the server's disks, OpenBao's audit volume or its memory past their thresholds, when the agent reports them, then an alarm fires (ADR 0011, 0013) (2026-11-09: disk-root fired at 15:26:16 on fake points at 85%, with audit-disk (90%, decision 73) staying OK; audit-disk fired at 13:39:32 in the drill. memory (90%, decision 72) was not fired: a Minimum alarm can't be faked while the agent writes real samples)
+- [x] Given the agent, the host probe or the off-server check stopped, when the alarm window passes, then an alarm fires (2026-11-09 stop window: telemetry-silent 13:40:23, probe-silent 13:42:31 and watch-no-invocations 13:41:52, each from a real stop)
+- [x] Given a deploy of the alarm stack, when it ends, then a test alarm has reached Slack and a person has seen it (2026-11-06: `emf-validation` by `make fire-test` at 08:39:50 UTC, seen in `#stellar-x402-bot`)
+- [x] Given a line from the facilitator on the agent's path, when it reaches CloudWatch, then its metrics exist, checked once on the real path (ADR 0011) (2026-11-06, after the restart window: `make check-series GROUP=facilitator` found 7 of 7 continuous series in `/x402/production/metrics`, shipped by the agent from the server)
+- [x] Given every alarm in the alarm list, when this story is done, then each has fired once on purpose, on testnet or with a fake, and `docs/monitoring.md` says how and when (2026-11-09, docs/monitoring.md Drills and Fired on purpose: 37 of the 44 alarm names that are on fired, on testnet or with a fake; not fired, each with its reason: gauges-silent, sweeps-stopped, log-volume, emf-parsing, watch-errors, certificate and memory. The 8 that are off are fired by the task that turns each on (The alarms that are off))
+- [x] Given `docs/monitoring.md`, when this story is done, then it lists every metric and alert (2026-11-09: Every metric lists the catalog's 61 metrics and the 5 AWS ones with the alarms that read them; every alarm has its section or, when off, its row; infra/test/alarms.test.ts fails on a metric or alarm the page lacks)
+
+**What the criteria wait on:** criterion 1's settle outcomes and pool events on a real testnet
+settlement through the deployed facilitator (none since the alarms went on). The theft and
+secret-read criteria are 0127's, the `backups` and `snapshots` groups 0026's, and `channel-held`
+waits on 0089's gauge (alarm list, Deferred).
+
+## Implementation Notes
+
+- **What runs:** 49 CloudWatch alarms in `eu-central-1` (44 alarm names), from four CDK stacks in
+  `infra/` (Telemetry, Uptime, Alarms, Watch), to `#stellar-x402-bot` through SNS and Amazon Q
+  Developer. The facilitator writes EMF lines through `@stellar-x402/metrics-catalog` (61 metrics);
+  the CloudWatch agent on ch-prod-01 ships the logs and metric lines with Roles Anywhere
+  credentials; the host probe writes the server's checks; the Watch Lambda reads the fee account's
+  balance and both networks' protocol off the server every 5 minutes; the uptime Lambda reads
+  `/health` every minute.
+- **PRs:** #111 (decisions), #112 and #136 (EMF and the facilitator's signals), #113 (logs, the
+  agent, the host probe), #114 and #134 (alarms in CDK), #115 and #141 (the Watch stack, balance),
+  #144 (the balance drill), #145 (protocol watch), #150 (the facilitator, host and log volume
+  groups), #157 (the catalog's attempt labels, which broke develop's typecheck), #158 (the deploy),
+  #160 (re-scope, decision 71), #163 (a planned stop is a success), #164 (the drill, `memory`,
+  `disk`, `audit-disk` at 90%), and this one.
+- **Deploys:** Alarms on 2026-11-06 (uptime, watch), 2026-11-09 12:19 UTC (facilitator, host, log
+  volume, protocol: 47 alarms) and 15:11 UTC (disk, memory: 49). Watch on 2026-11-06 12:58 UTC.
+- **The drill** (decision 71): a 20-minute stop window and fake points fired 37 alarms on
+  2026-11-09, and `disk-root` that afternoon; the uptime figure since `uptime` went on is 99.56%,
+  100% without the drill's planned stop.
+
+## Issues Encountered
+
+- **A planned stop counted as a crash.** After `ExecStop`, systemd signals the `docker compose up`
+  still exiting, and Compose answers with 130, so every deploy, drain and `systemctl stop` left
+  `x402@production` failed and counted `facilitator_failures_total`. Found by the drill
+  (`facilitator-failed` fired for the window's own stop); #163 lists 130 in `SuccessExitStatus`. It
+  reaches the server with the next promotion and playbook run.
+- **develop's typecheck broke on a semantic merge.** #89 added a `stage` label to
+  `catalog_attempts_total` after the catalog had typed its labels; #157 added `stage` and `outcome`
+  to the metric's fields.
+- **`Minimum` alarms can't be faked while their producer runs:** `queue-waiting`,
+  `rpc-on-fallback`, `credentials-stale` and `openbao-down` were fired inside the stop window for
+  that reason, and `memory` not at all.
+- **Fake points stay in the metrics' history:** CloudWatch can't delete them; Drills names each
+  range.
+- **No settlement since the alarms went on,** so criterion 1's settle outcomes and pool events
+  have no live series yet.
+
+## Future Work
+
+- 0127: the theft and secret-read sections and `watchSecurity` (criteria 6, 7, 9).
+- 0026: `backups` and `snapshots` on once their jobs run (its decision-71 criterion).
+- 0089: `channel_longest_hold_seconds`, then `channel-held` on.
+- 0125: log the pool events the runbook sends people to.
+- 0109 and 0110 (UptoProxy TTL alarm, a cap on a sweep's time), deferred from the start.
+- The weekly review: read `memory` and `log-volume` against their first weeks and lower the
+  thresholds if the numbers allow.

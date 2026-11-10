@@ -1,0 +1,203 @@
+{
+  "ranAt": "2026-11-10T10:56:49.395Z",
+  "network": "stellar:testnet",
+  "script": "apps/facilitator/test/live/token-matrix.ts",
+  "commit": "5d2e26ba",
+  "rpcUrls": [
+    "https://soroban-rpc.testnet.stellar.gateway.fm",
+    "https://soroban-testnet.stellar.org"
+  ],
+  "facilitator": "GBZDAYQBIGTJAAUPG2RD6B2ZY7HZMWDIPQGDLDGXE54RUVKHSKDYLGD5",
+  "channels": [
+    "GCVEHE44X2HHFWRN4MYX3DZ4BHXOTSC6O2PEHESYM2MPAJNOWEWUFTN2",
+    "GAQBTNKFRBZR6AIUGJMUZHGQCQGWZ3LJJUJKWWMPXARRV4NHLTYMAEZZ",
+    "GDZOQV2RO2OYIYN6ZTOMQZUCPOO4BV7XRRMFMPRDSAXGDBYZPAAOJTJG",
+    "GBZI3LIXRBPPTIHJGLJTMGM74534YWYW7IG2Z4J4JC672NGJHZKSHJ6C"
+  ],
+  "buyer": "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+  "seller": "GAVGTFGJBDMPBB5DM4GJ6PVVLOS6XGZPS6ZXJN3WDBWGPLFDPBESLHD2",
+  "amount": "1000",
+  "buyerAccount": {
+    "before": {
+      "xlm": "99999999800",
+      "sequence": "21842039003938817"
+    },
+    "after": {
+      "xlm": "99999999800",
+      "sequence": "21842039003938817"
+    }
+  },
+  "restoredBeforehand": {
+    "usdc": 0,
+    "sac": 0,
+    "sep41": 0
+  },
+  "matrix": [
+    {
+      "kind": "usdc",
+      "contract": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+      "verified": true,
+      "settled": true,
+      "sellerReceived": "1000",
+      "hash": "71fa8ccb7df5c15c83a95bedf1158470b9f79769b9d891eefed660bf3e14bb3a",
+      "status": "SUCCESS",
+      "ledger": 5656894,
+      "channel": "GCVEHE44X2HHFWRN4MYX3DZ4BHXOTSC6O2PEHESYM2MPAJNOWEWUFTN2",
+      "feePayer": "GBZDAYQBIGTJAAUPG2RD6B2ZY7HZMWDIPQGDLDGXE54RUVKHSKDYLGD5",
+      "feeCharged": "11776"
+    },
+    {
+      "kind": "sac",
+      "contract": "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
+      "verified": true,
+      "settled": true,
+      "sellerReceived": "1000",
+      "hash": "616ad2ef1426e88fa3ce150aadbeff60298ffcd007c268dc0bbbd29de6ca6949",
+      "status": "SUCCESS",
+      "ledger": 5656898,
+      "channel": "GAQBTNKFRBZR6AIUGJMUZHGQCQGWZ3LJJUJKWWMPXARRV4NHLTYMAEZZ",
+      "feePayer": "GBZDAYQBIGTJAAUPG2RD6B2ZY7HZMWDIPQGDLDGXE54RUVKHSKDYLGD5",
+      "feeCharged": "11823"
+    },
+    {
+      "kind": "sep41",
+      "contract": "CBFIYRHJG4C4E4AU3K5XCCMSZKZR3IMVFPCKNAJ3OBRQCHDLPCT3GV53",
+      "verified": true,
+      "settled": true,
+      "sellerReceived": "1000",
+      "hash": "216bdc02fb0470fd131db621d9d4b0345817e6a940324bba0ed3e6af0028c413",
+      "status": "SUCCESS",
+      "ledger": 5656901,
+      "channel": "GDZOQV2RO2OYIYN6ZTOMQZUCPOO4BV7XRRMFMPRDSAXGDBYZPAAOJTJG",
+      "feePayer": "GBZDAYQBIGTJAAUPG2RD6B2ZY7HZMWDIPQGDLDGXE54RUVKHSKDYLGD5",
+      "feeCharged": "26000"
+    }
+  ],
+  "batch": {
+    "size": 6,
+    "token": "CBFIYRHJG4C4E4AU3K5XCCMSZKZR3IMVFPCKNAJ3OBRQCHDLPCT3GV53",
+    "transactions": [
+      {
+        "hash": "43b8453e55100f25dadb134f4dac8726212832de391fa8fe34e614661f84655c",
+        "status": "SUCCESS",
+        "ledger": 5656908,
+        "channel": "GBZI3LIXRBPPTIHJGLJTMGM74534YWYW7IG2Z4J4JC672NGJHZKSHJ6C",
+        "feePayer": "GBZDAYQBIGTJAAUPG2RD6B2ZY7HZMWDIPQGDLDGXE54RUVKHSKDYLGD5",
+        "feeCharged": "10346"
+      },
+      {
+        "hash": "6910a5a5f1e4f2836d79ee80bee57f94d21eeb7dd4be8689c3c99792755f5805",
+        "status": "SUCCESS",
+        "ledger": 5656909,
+        "channel": "GCVEHE44X2HHFWRN4MYX3DZ4BHXOTSC6O2PEHESYM2MPAJNOWEWUFTN2",
+        "feePayer": "GBZDAYQBIGTJAAUPG2RD6B2ZY7HZMWDIPQGDLDGXE54RUVKHSKDYLGD5",
+        "feeCharged": "10346"
+      },
+      {
+        "hash": "dbcb441eac1218b357ae039444a22fd794fca3eb7ea6a987fad0aa50118a5d5e",
+        "status": "SUCCESS",
+        "ledger": 5656907,
+        "channel": "GDZOQV2RO2OYIYN6ZTOMQZUCPOO4BV7XRRMFMPRDSAXGDBYZPAAOJTJG",
+        "feePayer": "GBZDAYQBIGTJAAUPG2RD6B2ZY7HZMWDIPQGDLDGXE54RUVKHSKDYLGD5",
+        "feeCharged": "10346"
+      },
+      {
+        "hash": "e2c2fbcc17f60d1ccea53c6ff710abd97dd955625e1643d5b38ed608f8561fc0",
+        "status": "SUCCESS",
+        "ledger": 5656904,
+        "channel": "GBZI3LIXRBPPTIHJGLJTMGM74534YWYW7IG2Z4J4JC672NGJHZKSHJ6C",
+        "feePayer": "GBZDAYQBIGTJAAUPG2RD6B2ZY7HZMWDIPQGDLDGXE54RUVKHSKDYLGD5",
+        "feeCharged": "10346"
+      },
+      {
+        "hash": "b780c65a084e5aca56389c502908ea93a8c5939ac10b59c63e227a06016a3360",
+        "status": "SUCCESS",
+        "ledger": 5656906,
+        "channel": "GAQBTNKFRBZR6AIUGJMUZHGQCQGWZ3LJJUJKWWMPXARRV4NHLTYMAEZZ",
+        "feePayer": "GBZDAYQBIGTJAAUPG2RD6B2ZY7HZMWDIPQGDLDGXE54RUVKHSKDYLGD5",
+        "feeCharged": "10346"
+      },
+      {
+        "hash": "7bf2eaea6d4b6066b709013eaf4459653c9bd47bb434ec656964715541c5e05e",
+        "status": "SUCCESS",
+        "ledger": 5656905,
+        "channel": "GCVEHE44X2HHFWRN4MYX3DZ4BHXOTSC6O2PEHESYM2MPAJNOWEWUFTN2",
+        "feePayer": "GBZDAYQBIGTJAAUPG2RD6B2ZY7HZMWDIPQGDLDGXE54RUVKHSKDYLGD5",
+        "feeCharged": "10346"
+      }
+    ]
+  },
+  "spread": {
+    "size": 6,
+    "token": "CBFIYRHJG4C4E4AU3K5XCCMSZKZR3IMVFPCKNAJ3OBRQCHDLPCT3GV53",
+    "buyers": [
+      "GCLGK2QOS3HIMVTGQHJR6NNALZD4UVRJW25KJJPWQSIS35NZHY7NMGK2",
+      "GCFZLZ4SK7RKBFVFSEZB7QRM6DGGPYV4KZQG4O4SQBHBWRBPYUBO2OKG",
+      "GAAL3DKJOQKDSQ2VZI7VKBB5QSKQG4VO47YDNT7LF2BNVUDH46S7KAUJ",
+      "GCM6AJGG5DBFS5UIGUDF7YSKOFSZ2ZDI4OQV3XMM5QPACNEJQ44SWMWD",
+      "GDSHKVCSUWIC2XXQGKYPQIWDQPEQIRVZUUHW3KKNXK6JOAYDJX7ZDDUO",
+      "GD52ZC7TK6NDXZJSTHKEUMRDLSOPGMJAEYTSQOW2J7JDINFE4AG5JEEO"
+    ],
+    "transactions": [
+      {
+        "hash": "a52719e007a59df285f9607b006d150d594a1072a544494c7c70befc6ef307f1",
+        "status": "SUCCESS",
+        "ledger": 5656913,
+        "channel": "GAQBTNKFRBZR6AIUGJMUZHGQCQGWZ3LJJUJKWWMPXARRV4NHLTYMAEZZ",
+        "feePayer": "GBZDAYQBIGTJAAUPG2RD6B2ZY7HZMWDIPQGDLDGXE54RUVKHSKDYLGD5",
+        "feeCharged": "10346"
+      },
+      {
+        "hash": "2fafdeaa03b7bc2a5333f3aecd2dc90bc7496f23ea22305840eed53ffb2d7a9c",
+        "status": "SUCCESS",
+        "ledger": 5656911,
+        "channel": "GAQBTNKFRBZR6AIUGJMUZHGQCQGWZ3LJJUJKWWMPXARRV4NHLTYMAEZZ",
+        "feePayer": "GBZDAYQBIGTJAAUPG2RD6B2ZY7HZMWDIPQGDLDGXE54RUVKHSKDYLGD5",
+        "feeCharged": "10346"
+      },
+      {
+        "hash": "25667c987178c84a45ec40bdf75eb8203b9bac2962781efc8a0c126fd9c2a9e8",
+        "status": "SUCCESS",
+        "ledger": 5656912,
+        "channel": "GDZOQV2RO2OYIYN6ZTOMQZUCPOO4BV7XRRMFMPRDSAXGDBYZPAAOJTJG",
+        "feePayer": "GBZDAYQBIGTJAAUPG2RD6B2ZY7HZMWDIPQGDLDGXE54RUVKHSKDYLGD5",
+        "feeCharged": "10344"
+      },
+      {
+        "hash": "1dc373c3fd288e415fd651ddc066d0ac4815d42a65a7b668711fd51772533abb",
+        "status": "SUCCESS",
+        "ledger": 5656912,
+        "channel": "GCVEHE44X2HHFWRN4MYX3DZ4BHXOTSC6O2PEHESYM2MPAJNOWEWUFTN2",
+        "feePayer": "GBZDAYQBIGTJAAUPG2RD6B2ZY7HZMWDIPQGDLDGXE54RUVKHSKDYLGD5",
+        "feeCharged": "10346"
+      },
+      {
+        "hash": "195a61895bca59d0f0c8c4a40adb55186594cbf99051d4814918f8dc7a118afb",
+        "status": "SUCCESS",
+        "ledger": 5656911,
+        "channel": "GBZI3LIXRBPPTIHJGLJTMGM74534YWYW7IG2Z4J4JC672NGJHZKSHJ6C",
+        "feePayer": "GBZDAYQBIGTJAAUPG2RD6B2ZY7HZMWDIPQGDLDGXE54RUVKHSKDYLGD5",
+        "feeCharged": "10346"
+      },
+      {
+        "hash": "b5bf863832945b83824f219db995fa480b2e1129896c8d7148dbac529d84a643",
+        "status": "SUCCESS",
+        "ledger": 5656911,
+        "channel": "GDZOQV2RO2OYIYN6ZTOMQZUCPOO4BV7XRRMFMPRDSAXGDBYZPAAOJTJG",
+        "feePayer": "GBZDAYQBIGTJAAUPG2RD6B2ZY7HZMWDIPQGDLDGXE54RUVKHSKDYLGD5",
+        "feeCharged": "10346"
+      }
+    ]
+  },
+  "checks": {
+    "everyTokenSettled": true,
+    "facilitatorPaidEveryFee": true,
+    "buyerPaidNoXlm": true,
+    "buyerSourcedNothing": true,
+    "batchSettled": true,
+    "batchOnePayerOneAtATime": true,
+    "spreadSettled": true,
+    "batchUsedSeveralChannels": true,
+    "batchSharedALedgerAcrossChannels": true
+  }
+}
