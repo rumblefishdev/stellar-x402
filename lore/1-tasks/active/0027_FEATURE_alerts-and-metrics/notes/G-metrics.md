@@ -151,7 +151,7 @@ The ages are `Seconds`, the percentages `Percent`, the two counters `Count`, and
 
 Published with `PutMetricData` by two Lambdas. `spendable_stroops`, `protocol_version`,
 `protocol_supported_version`, `account_state_mismatches` and `account_effects_unexpected` are
-network-scoped. `ready` and `backup_secret_reads` are process-scoped: one probe, one AWS account.
+network-scoped. `ready`, `backup_secret_reads` and `upstream_files_changed` are process-scoped: one probe, one AWS account.
 `ready`, `spendable_stroops` and the two protocol versions are `None`, the rest `Count`.
 
 | Metric | Source | Alarm statistic | Alarm |
@@ -163,6 +163,7 @@ network-scoped. `ready` and `backup_secret_reads` are process-scoped: one probe,
 | `account_state_mismatches` | The check: accounts whose signers or thresholds differ from the declared set, or that are gone | `Maximum` | `account-state` |
 | `account_effects_unexpected` | The check: effects other than the allowed two, since the cursor | `Maximum` | `account-effects` |
 | `backup_secret_reads` | The check: `GetSecretValue` events not counted before | `Maximum` | `backup-secret-read` |
+| `upstream_files_changed` | The check, daily at 08:00 UTC: upstream x402 files the conformance gate rests on, and the discovery spec, that differ from its pin (task 0029) | `Maximum`, `SampleCount` | `upstream-changed`, `upstream-silent` |
 
 The statistics are the ones a forged point can't hide a real one behind
 ([G-alarm-list](G-alarm-list.md#statistics)).

@@ -1,6 +1,7 @@
 // The off-server check (0027 decisions 7 and 27, ADR 0013): a Lambda in this account, every 5
 // minutes, so it reads the fee account while the server is down, and root on the server can't
-// stop it. It has a balance and a protocol section (decision 70); the theft and secret-read
+// stop it. It has a balance and a protocol section (decision 70), and once a day
+// an upstream section (task 0029); the theft and secret-read
 // sections follow. The alarms that read it are in the Alarms stack and find the function and the
 // metric by name.
 import { existsSync } from "node:fs";
@@ -41,7 +42,7 @@ export class WatchStack extends cdk.Stack {
 
     const fn = new lambda.Function(this, "Watch", {
       functionName,
-      description: `Reads the fee accounts and the networks' protocol every 5 minutes, publishes to ${NAMESPACE} (task 0027)`,
+      description: `Reads the fee accounts and the networks' protocol every 5 minutes, and upstream x402 daily, into ${NAMESPACE}`,
       runtime: lambda.Runtime.NODEJS_22_X,
       architecture: lambda.Architecture.ARM_64,
       handler: "index.handler",

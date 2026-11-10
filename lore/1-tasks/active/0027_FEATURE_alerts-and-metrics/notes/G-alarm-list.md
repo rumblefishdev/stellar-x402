@@ -120,6 +120,19 @@ hold either in ALARM the same way with a forged point every 15 minutes, so #115'
 each finding to the topic itself, one message per finding; the two alarms stay as the backstop for
 a check that can't publish (decision 64).
 
+## Upstream
+
+From the off-server check, once a day at 08:00 UTC (task 0029). It reads the gate's pin from this
+repo's `develop` and compares four upstream x402 files there with upstream `main`: the x402 spec,
+the Stellar `exact` scheme, the suite's Stellar routes and the discovery spec. It is the
+`upstream` group, on once `make check-series GROUP=upstream` passes, in the 3 hours after a
+08:00 UTC run: before the first point `upstream-silent` would fire on nothing.
+
+| Alarm | Signal | Shape | Fires when | Missing data |
+| --- | --- | --- | --- | --- |
+| `upstream-changed` | `upstream_files_changed` | Level, `Maximum`, 1 of 1 one-day period | One of the four files differs from the pin; it clears once the pin moves | Ignore: `upstream-silent` |
+| `upstream-silent` | `upstream_files_changed` | Level, `SampleCount` below 1, 2 of 2 one-day periods | No point for two days: the daily read fails, and `watch-errors` (2 of 3 five-minute runs) can't see a once-a-day failure | Breaching: no point is what it is for |
+
 ## Protocol
 
 From the off-server check's protocol section, every 5 minutes, for each network in

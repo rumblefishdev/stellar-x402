@@ -170,6 +170,7 @@ describe("CATALOG", () => {
       account_state_mismatches: "network",
       account_effects_unexpected: "network",
       backup_secret_reads: "process",
+      upstream_files_changed: "process",
     });
   });
 
@@ -292,6 +293,7 @@ describe("CATALOG", () => {
       account_state_mismatches: [g, "Count", net],
       account_effects_unexpected: [c, "Count", net],
       backup_secret_reads: [c, "Count", proc],
+      upstream_files_changed: [g, "Count", proc],
     };
     expect(Object.fromEntries(ALL.map((m) => [m.name, [m.kind, m.unit, m.scope]]))).toEqual(
       expected,
