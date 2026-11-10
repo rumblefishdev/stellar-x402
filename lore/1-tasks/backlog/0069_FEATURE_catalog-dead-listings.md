@@ -34,6 +34,10 @@ As a buyer browsing the Bazaar, I want listings of services that are gone to dro
   while that offer is still stored, and the seller isn't asked: when a seller stops taking USDC,
   buyers paying in XLM keep the USDC offer listed. Found in the PR #89 review; one way out is to
   treat a listing older than a set age as changed, so the per-listing budget still bounds checks.
+- Measured 2026-11-09 with one unpaid request per URL: of the 1,513 Stellar offers in Coinbase's
+  public CDP list, 1,503 answer with a valid 402; of a random 200 URLs from the whole list, about 40
+  do not work (gone, no answer, or no longer paid). Once the catalog takes in URLs from other lists
+  (task 0122), dead listings become common.
 - Nothing ever removes a listing today. Coinbase's hosted Bazaar drops a resource after 30 days
   without a settlement (docs.cdp.coinbase.com/x402/seller/get-discovered).
 
