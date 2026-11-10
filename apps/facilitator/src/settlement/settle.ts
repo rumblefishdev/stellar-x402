@@ -597,7 +597,10 @@ export function createSettler(deps: SettlerDeps): Settle & {
 
   /** One `/settle` call's own state, shared with its submission. */
   interface Call {
-    /** Set when the budget answer goes out: `onSigned` refuses every new hash from then on. */
+    /**
+     * Set when the budget answer goes out: `onSigned` then signs nothing new, and sends a stored
+     * hash only if the answer named it.
+     */
     budgetOver: boolean;
     /** The hash `onSigned` was last given, stored or not. */
     signing?: string;
@@ -685,7 +688,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
             // acquired again: a new token fences this call too (decision 1).
             if (deps.lease()?.token !== lease.token) throw new LeaseLostError();
             // The budget answer may have gone out while the store wrote. The hash it named is
-            // sent, as the answer told the seller; any other isn't (0009 decision 35).
+            // sent, as the answer told the seller; any other isn't (0009 decision 35, amended).
             if (call.budgetOver && (await call.answer)?.response.transaction !== hash) {
               throw new Error("the settle budget ran out");
             }
