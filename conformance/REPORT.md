@@ -12,7 +12,7 @@ what, what each payment was checked for, and what a pass does not show. It is th
 | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Date        | 2026-11-10, 08:50–09:03 UTC (the suite itself: 11.0 minutes)                                                                                                                                                                                              |
 | Suite       | [x402-foundation/x402](https://github.com/x402-foundation/x402) at `8827cf19fa9a7b120588b8cc56f56a3def13bb97`, unmodified: the gate stops if any tracked file of the checkout changed ([`src/upstream.ts`](src/upstream.ts), `assertClean`)               |
-| Facilitator | `https://x402-facilitator.sorobanscan.com`, commit `5d2e26ba141747db0713efd9e4b2dfd1b2510f69` (the fourth run of the Deploy production workflow, on `deploy/production`; `/health` names this commit)                                                     |
+| Facilitator | `https://x402-facilitator.sorobanscan.com`, commit `5d2e26ba141747db0713efd9e4b2dfd1b2510f69` (the fourth run of the Deploy production workflow, on `deploy/production`; `/health` named this commit at the run)                                          |
 | Fee payer   | `GAVE5V5IOMNNBOZXGZSQOP447L2QLCG6ELIIPO6CFJLGZVY4YIK3KKRP`, the signer its `/supported` lists                                                                                                                                                             |
 | Gate        | this repo's [`conformance/`](README.md) at `49e5b727d3993ac8cb63a232932839fae42d962a`                                                                                                                                                                     |
 | Command     | `pnpm test --testnet --families=stellar --schemes=exact --facilitators=stellar-x402`                                                                                                                                                                      |
@@ -26,7 +26,8 @@ settling the payment. The suite picks the scenarios: every TypeScript client and
 Stellar, over HTTP and MCP, each on two routes. On the plain route the server asks the facilitator
 to verify, serves, then settles: these 9 scenarios are the `exact` verify → settle of the Tranche 1
 bar. On the `upfront` route it settles before it serves, with no verify, as upstream's resource
-server does for that route: these 9 show settle alone.
+server does for that route (`typescript/packages/core/src/server/paymentFlow.ts` at the pinned
+commit): these 9 show settle alone.
 
 A scenario passes only when the suite says so and the gate, reading the transaction back from
 Stellar RPC, finds that it:
