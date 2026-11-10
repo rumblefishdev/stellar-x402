@@ -49,6 +49,18 @@ released, removes our workaround and proves our MCP server can pay such a seller
 - Related, not the same: upstream issue #2993 (a hosted facilitator rejects a too-long
   `description`).
 
+## Decisions so far
+
+| # | What is done | From | vs the task | Who does the same (checked) | Code | Test |
+|---|---|---|---|---|---|---|
+| 1 | Fix it in upstream `@x402/core`, not only in our code; our cleanup follows the release | grilling 2026-11-10 | matches | upstream Python `payments.py:38-40` and Go `v2.go:146-148` already accept these fields | — | — |
+
+## Not yet decided
+
+- The fix's shape: type the three fields only, or drop a bad one to undefined.
+- Whether our preview tool gets a workaround while the upstream PR waits.
+- What the upstream PR carries beyond the schema change (a test of upstream's MCP client).
+
 ## Upstream PR
 
 - PR: not opened yet. Write its URL here when it is opened.
