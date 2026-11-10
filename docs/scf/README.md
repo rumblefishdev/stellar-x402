@@ -14,7 +14,7 @@ structure as `docs/scf/` in the Soroban Block Explorer and Stellar Prices API re
 | `milestone-1-license-audit.md`                          | The dependency tree's license audit at the Tranche #1 boundary, with its commands.                                |
 | `milestone-1-form-answers.md`                           | Text for each field of SCF's Build Tranche Completion form.                                                       |
 | `architecture.mmd`                                      | Mermaid source of the architecture diagram.                                                                       |
-| `architecture.png`                                      | Rendered diagram, embedded in the PDF. **Build output.**                                                          |
+| `architecture.png`                                      | Rendered diagram, embedded in the PDF; committed, so render it again after changing the `.mmd`.                   |
 | `build-pdf.sh`                                          | PDF render script (pandoc + typst).                                                                               |
 | `screenshots/`                                          | Images the evidence document embeds, named after the deliverable (`d2-…`, `d5-…`).                                |
 | `header.typ`, `full-width-tables.lua`, `repo-links.lua` | Typst and pandoc styling; `repo-links.lua` turns relative links into GitHub URLs at the `tranche-1-evidence` tag. |
@@ -47,6 +47,8 @@ npx -y @mermaid-js/mermaid-cli -i architecture.mmd -o architecture.png -s 3 -p p
 ```
 
 ## Submission workflow
+
+For Milestone 1, steps 1–3 and 6 were done on 2026-11-10; what is left starts at step 4.
 
 1. **Final deploy and gate rerun.** Deploy the finished Tranche 1 build, rerun the gate
    (`conformance/README.md`) and commit `conformance/results/testnet-hosted/` (task 0029).

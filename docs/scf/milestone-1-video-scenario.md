@@ -24,8 +24,8 @@ paste the same outputs into the PDF.
    first row of the table in section 5.5 of the evidence document.
 5. **Browser tab 2** — stellar.expert (testnet) on the `UptoProxy` contract
    `CAL7SBTOECJ6HXXO3ST43LM2HJJFSZ3ZDEEZBIWHJPB7DRF5MXS5V2VC`.
-6. **Browser tab 3** — GitHub: `docs/upto-proxy-testnet-report.md` on `develop`.
-7. **Browser tab 4** — GitHub: `conformance/REPORT.md` on `develop`, at its table of
+6. **Browser tab 3** — GitHub: `docs/upto-proxy-testnet-report.md` at the `tranche-1-evidence` tag.
+7. **Browser tab 4** — GitHub: `conformance/REPORT.md` at the `tranche-1-evidence` tag, at its table of
    settlements.
 8. **Browser tab 5** — the upstream PR x402-foundation/x402#3781.
 9. **Browser tab 6** — AWS Console → CloudWatch → Alarms, filtered to `x402-production`, in

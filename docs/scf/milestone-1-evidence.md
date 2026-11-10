@@ -194,7 +194,8 @@ Both read on 2026-11-10; the commit is the one the gate's final rerun names (sec
 
 **Any SEP-41 token, the buyer paying no XLM.** The token matrix
 ([`token-matrix.ts`](../../apps/facilitator/test/live/token-matrix.ts)) starts the facilitator
-from the code it is run on, with channels of its own, and settles one payment each in Circle
+from the code it is run on, with a fee account and channels of its own (not production's), and
+settles one payment each in Circle
 testnet USDC, a Stellar Asset Contract (`UPTOE2E`) and a plain SEP-41 (wasm) token, then two
 batches of six. It ran on 2026-11-10 from `5d2e26ba`, the commit production runs, with RPC ordered
 as production orders it
@@ -280,10 +281,11 @@ under Apache-2.0, so concurrent settlements don't wait on one account's sequence
   [`packages/signer-pool`](../../packages/signer-pool/).
 - In every gate settlement (5.5) the transaction's source is a channel account and the fee bump's
   source is the fee account `GAVE5V5I…KKRP`.
-- In the token matrix (5.1), one payment from each of six buyers, sent at once, settled through
-  four channels, three of them in ledger 5656911 (`spreadSettled`, `batchUsedSeveralChannels`,
+- In the token matrix (5.1), a local run of the deployed commit `5d2e26ba` with a fee account
+  (`GBZDAYQ…LGD5`) and four channels of its own, one payment from each of six buyers, sent at
+  once, settled through all four channels, three of them in ledger 5656911 (`spreadSettled`, `batchUsedSeveralChannels`,
   `batchSharedALedgerAcrossChannels`).
-- Six payments from one buyer, sent at once, settled one at a time, one per ledger
+- In the same run, six payments from one buyer, sent at once, settled one at a time, one per ledger
   (`batchOnePayerOneAtATime`). This is intended: a payer has at most one settlement in flight per
   asset ([ADR 0007](../adr/0007-fee-abuse-containment.md), task 0024), so one balance can't pass
   simulation N times and fail N−1 times on chain at the facilitator's fee. Throughput across
@@ -333,7 +335,8 @@ The pipeline, end to end on testnet, with
 a facilitator built by `main()` (a local stand-in for OpenBao, and `CATALOG_LIST_LOCAL=true`
 since the seller runs on the same machine), a seller whose `GET /weather` answers 402 with the
 `bazaar` extension, a buyer paying with upstream's client, and an outsider calling `/settle`
-itself. The run of 2026-11-09, 18:41–18:47 UTC:
+itself. The run of 2026-11-09, 18:40–18:47 UTC, on commit `2bc55cc2` (its cataloging code is
+unchanged in the deployed `5d2e26ba`):
 [`catalog-smoke-testnet.json`](../../apps/facilitator/test/live/results/catalog-smoke-testnet.json).
 
 | Step                                                                          | Transaction                                                                                                                                 | `EXTENSION-RESPONSES`, decoded       | Catalog                                                                                                                            |

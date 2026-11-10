@@ -10,7 +10,9 @@ local REF = "tranche-1-evidence"
 local function normalize(path)
   local parts = {}
   for seg in path:gmatch("[^/]+") do
-    if seg == ".." then table.remove(parts)
+    if seg == ".." then
+      if #parts == 0 then error("repo-links.lua: a link climbs above the repository root: " .. path) end
+      table.remove(parts)
     elseif seg ~= "." then table.insert(parts, seg) end
   end
   return table.concat(parts, "/")
@@ -21,6 +23,8 @@ function Link(el)
   if t:match("^%a[%w+.-]*:") or t:sub(1, 1) == "#" then return nil end
   local path, anchor = t:match("^([^#]*)(#?.*)$")
   local dir = path:sub(-1) == "/"
-  el.target = REPO .. (dir and "tree" or "blob") .. "/" .. REF .. "/" .. normalize(BASE .. path) .. (dir and "/" or "") .. anchor
+  -- A leading / is the repository root, not this directory.
+  local base = path:sub(1, 1) == "/" and "" or BASE
+  el.target = REPO .. (dir and "tree" or "blob") .. "/" .. REF .. "/" .. normalize(base .. path) .. (dir and "/" or "") .. anchor
   return el
 end

@@ -24,7 +24,7 @@ Field 1's four deliverables quote the Tranche #1 line items of the Panel Review 
 > 1. **Facilitator hardening on testnet (verify/settle/supported, any SEP-41 token, sponsored
 >    fees, rate limiting).** Built on `@x402/stellar` per the x402 v2 spec, with strict per-field
 >    auth-entry checks; shown with Circle testnet USDC, a Stellar Asset Contract and a plain SEP-41
->    token. Buyers hold only the payment asset; requests are rate-limited per client IP, and fee
+>    token in a local run of the deployed commit `5d2e26ba`. Buyers hold only the payment asset; requests are rate-limited per client IP, and fee
 >    spending is capped by rolling budgets with breakers.
 > 2. **Channel-account pool, permissively-licensed reimplementation (sequence-number
 >    throughput).** Settlements go through a pool of channel accounts under Apache-2.0, with no
@@ -38,9 +38,11 @@ Field 1's four deliverables quote the Tranche #1 line items of the Panel Review 
 >    (`CAL7SBTOECJ6HXXO3ST43LM2HJJFSZ3ZDEEZBIWHJPB7DRF5MXS5V2VC`), its end-to-end run 58 of 58.
 >    The Stellar specification is already proposed upstream (x402-foundation/x402#3781).
 > 5. **Tranche #1 conformance bar.** An unmodified canonical client from the
->    `x402-foundation/x402` end-to-end suite completes `exact` verify → settle against our testnet
+>    `x402-foundation/x402` end-to-end suite settles `exact` payments against our testnet
 >    facilitator at the wire level, through the suite's external facilitator proxy: 18 of 18
->    scenarios passed on 2026-11-10, each settled transaction hash recorded and checked on chain.
+>    scenarios settled on 2026-11-10, 9 of them through verify → settle (the other 9, on the suite's
+>    `upfront` route, settle without a `/verify`), each settled transaction hash recorded and
+>    checked on chain.
 >
 > Not claimed in this tranche: mainnet, search, the MCP server, SDK helpers, `upto` in `/settle`
 > and its upstream merge, the developer guide and example integrations, and the security review.

@@ -31,14 +31,16 @@
 
 set -euo pipefail
 
-cd "$(dirname "$0")"
-
-# Default to milestone 1; a later milestone passes its number.
+# Default to milestone 1; a later milestone passes its number. A `.md` path is taken from the
+# caller's directory when it exists there, else from this script's.
 ARG="${1:-1}"
 case "$ARG" in
-    *.md) SRC="$ARG" ;;
+    *.md) if [[ -f "$ARG" ]]; then SRC="$(cd "$(dirname "$ARG")" && pwd)/$(basename "$ARG")"
+          else SRC="$ARG"; fi ;;
     *)    SRC="milestone-${ARG}-evidence.md" ;;
 esac
+
+cd "$(dirname "$0")"
 OUT="${SRC%.md}.pdf"
 
 # ---- Tool checks ---------------------------------------------------------
@@ -46,10 +48,18 @@ command -v pandoc >/dev/null || { echo "❌ pandoc not found — see install not
 command -v typst  >/dev/null || { echo "❌ typst not found  — see install notes at the top of this script"; exit 1; }
 [[ -f "$SRC" ]]               || { echo "❌ source not found: $SRC"; exit 1; }
 
-# A relative link must leave the PDF as its GitHub URL; inside a PDF it points nowhere.
-[[ "$(echo '[x](../a.md#b)' | pandoc -f gfm -t gfm --lua-filter=repo-links.lua)" \
-    == "[x](https://github.com/rumblefishdev/stellar-x402/blob/tranche-1-evidence/docs/a.md#b)" ]] \
+# A relative or root-absolute link must leave the PDF as its GitHub URL at the tag; inside a PDF
+# it points nowhere.
+TAG=$(sed -n 's/^local REF = "\(.*\)"$/\1/p' repo-links.lua)
+URL="https://github.com/rumblefishdev/stellar-x402/blob/$TAG"
+[[ "$(printf '[x](../a.md#b) [y](/c.md)' | pandoc -f gfm -t gfm --wrap=none --lua-filter=repo-links.lua)" \
+    == "[x]($URL/docs/a.md#b) [y]($URL/c.md)" ]] \
     || { echo "❌ repo-links.lua no longer rewrites relative links"; exit 1; }
+
+# The links resolve only once the tag is on origin (README, step 4): a build before that still
+# runs, for a preview, but says so.
+git ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1 \
+    || echo "⚠  tag $TAG is not on origin: the PDF's repository links 404 until it is pushed"
 
 # pandoc < 3.1 has no native typst engine; fail early with a clear message
 # instead of a confusing "pdf-engine typst not found" further down.
