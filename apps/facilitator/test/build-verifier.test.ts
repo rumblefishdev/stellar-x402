@@ -13,6 +13,7 @@ import {
 import {
   NOT_FOUND_MARGIN_LEDGERS,
   NOT_FOUND_MARGIN_SECONDS,
+  RpcUnavailableError,
   type SorobanRpc,
 } from "@stellar-x402/signer-pool";
 import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/core/types";
@@ -476,16 +477,17 @@ describe("buildVerifier (the /verify wiring in main)", () => {
   // With a fixed bid the deadline is 2 × 10 s + slack: without the slack, the overall deadline
   // (set first) and the second URL's own (ending at the same time) would tie, and the overall one
   // would win.
-  it("throws the first URL's timeout when every RPC URL hangs, and logs both", async () => {
+  it("throws no verdict, caused by the first URL's timeout, when every RPC URL hangs, and logs both", async () => {
     vi.useFakeTimers();
     try {
       const { verify, logger } = setup(() => new Promise<never>(() => {}), { config: fixedBid });
       const answer = verify(payload(), requirements);
-      const settled = expect(answer).rejects.toThrow(
-        new UpstreamTimeoutError(
+      const settled = expect(answer).rejects.toMatchObject({
+        name: "RpcUnavailableError",
+        cause: new UpstreamTimeoutError(
           `${rpc(0)}: upstream verify gave no answer within ${UPSTREAM_TIMEOUT_MS} ms`,
         ),
-      );
+      });
       await vi.advanceTimersByTimeAsync(2 * UPSTREAM_TIMEOUT_MS);
       await settled;
       // [0]'s timeout moved the shared client to [1]; [1]'s keeps it there, since only the probe
@@ -528,9 +530,9 @@ describe("buildVerifier (the /verify wiring in main)", () => {
     }
   });
 
-  it("throws when upstream reports unexpected_verify_error on every RPC URL", async () => {
+  it("throws no verdict when upstream reports unexpected_verify_error on every RPC URL", async () => {
     const { verify } = setup({ isValid: false, invalidReason: "unexpected_verify_error", payer });
-    await expect(verify(payload(), requirements)).rejects.toThrow("unexpected_verify_error");
+    await expect(verify(payload(), requirements)).rejects.toBeInstanceOf(RpcUnavailableError);
   });
 
   it("looks for a missing trustline after simulation_failed, in /verify and /settle's check", async () => {

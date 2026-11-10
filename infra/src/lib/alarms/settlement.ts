@@ -32,7 +32,7 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
     group: "facilitator",
     signal: { catalog: "http_requests_total", dims: { route: "/verify", status: "503" } },
     description: {
-      what: "/verify answered 503 rpc_unavailable: upstream's call gave no answer within 10 s on every RPC URL, or the facilitator's ledger read failed on every URL. Sellers can't check payments, so buyers are refused. A burst sends one message.",
+      what: "/verify answered 503 rpc_unavailable: no RPC URL gave upstream's verify a verdict (each hung for 10 s or answered unexpected_verify_error), or the facilitator's ledger read failed on every URL. Sellers can't check payments, so buyers are refused. A burst sends one message.",
       next: `Read verify_rpc_unavailable and rpc_exhausted in /x402/${c.envName}/app with Logs Insights: rpc_exhausted names each URL and why it failed.`,
       noData: SILENT_EVENT,
     },

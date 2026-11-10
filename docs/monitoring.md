@@ -304,8 +304,9 @@ as ours. A burst sends one message. A 503 isn't counted: `verify-rpc-unavailable
 
 ### verify-rpc-unavailable
 
-`/verify` answered 503 `rpc_unavailable`: upstream's call gave no answer within 10 s on every RPC
-URL, or the facilitator's ledger read failed on every URL. Sellers can't check payments, so buyers
+`/verify` answered 503 `rpc_unavailable`: no RPC URL gave upstream's verify a verdict, each one
+hung for 10 s or answered upstream's own `unexpected_verify_error`, or the facilitator's ledger read
+failed on every URL. Sellers can't check payments, so buyers
 are refused. A burst sends one message.
 
 1. In Logs Insights on `/x402/production/app`, the `verify_rpc_unavailable` and `rpc_exhausted`

@@ -1,5 +1,6 @@
 import { Address, MuxedAccount, StrKey, Transaction, xdr } from "@stellar/stellar-sdk";
 import type { StellarNetwork } from "@stellar-x402/config";
+import { RpcUnavailableError } from "@stellar-x402/signer-pool";
 import {
   DEFAULT_ESTIMATED_LEDGER_SECONDS,
   getAddressCredentials,
@@ -185,9 +186,11 @@ export function createChecker(deps: VerifierDeps): Check {
       ),
     );
     // Upstream catches every exception, a failed RPC call included, and answers with this code.
-    // It says nothing about the payment, so it is our error: a 500, logged as one.
+    // It judged nothing, so it is no verdict: `/verify`'s 503, `/settle`'s `rpc_unavailable`.
     if (upstream.invalidReason === UNEXPECTED_VERIFY_ERROR) {
-      throw new Error(`upstream verify failed with ${UNEXPECTED_VERIFY_ERROR}`);
+      throw new RpcUnavailableError(`upstream verify answered ${UNEXPECTED_VERIFY_ERROR}`, {
+        cause: upstream,
+      });
     }
     if (upstream.invalidReason === SIMULATION_FAILED_REASON && upstream.payer !== undefined) {
       const transaction = new Transaction(
