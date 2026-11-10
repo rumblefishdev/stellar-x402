@@ -218,6 +218,7 @@ move to their own tasks.
 | 9 | This task changes test files only; the settlement code stays as it is | grilling | matches ("fixed in the test") | not checked upstream | — | — |
 | 10 | A test helper refuses a real budget under 5 s unless the test sets the moment it ends; 5 s is an assumption, above the longest store delay measured under load (under 3 s) | grilling | beyond it | none found upstream | — | — |
 | 11 | After the tests, a one-day trial on its own branch of one writer for the settlement record after it is created; its measured cost decides whether the rebuild goes on | grilling | beyond it | not checked upstream | — | — |
+| 12 | When the budget ends while the store writes a hash, the hash the budget answer named is sent; any other, such as a rebuild's, is still refused. Found by the one-writer trial; fixed in its own PR (decision 7), amending 0009 decision 35 | grilling | beyond it | the hash is stored before the send and nothing cancels it once stored (checked in an open-source Stellar facilitator) | `settle.ts` `onSigned`, `outOfBudget` (#175) | `settle.test.ts`: sends the hash the budget answer named; refuses a rebuild's hash; store-outage send |
 
 ## Not yet decided
 
