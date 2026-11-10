@@ -34,6 +34,35 @@ Two test groups depend on wall-clock deadlines and fail on a slow CI runner for 
 to what they check. Each gets the cause measured and fixed in the test, not by longer timeouts in
 production code.
 
+## Premise
+
+A fresh review attacked the premise on 2026-11-10, given only the goal, the measured failures and
+the agreed constraints. Verdict: it holds with changes.
+
+- The flakiness is real and current. Over every CI run from 2026-11-02 to 2026-11-10 (495 runs),
+  49 failed; 36 of them on tests (40 failures, 17 distinct tests). About 3 in 4 are settlement
+  tests on the real PostgreSQL database with a real budget of 100–300 ms or a store grace of
+  20–200 ms, asserting one exact answer that holds only if the timer loses the race.
+- The fake clock is flaky itself: two failures on 2026-11-10 ran inside `onFakeClock`
+  (`settle.test.ts:635`, `:1550`). `vi.useFakeTimers` also fakes the database client's own timers.
+- The clock is half injected already: `now` and `sleep` are deps, but `bounded` and `within` use
+  the global `setTimeout` (`settle.ts:1230`, `:1246`). `src/timers.ts` has a `Scheduler` meant for
+  tests. Passing it to the settler, with today's timers as the default, would leave the database on
+  real time, drop `storeIdle`/`elapse`/`onFakeClock`, and change no behaviour. That reverses
+  decision 9 for one structure-only change.
+- The store grace is a second timer the budget rule does not cover: `markSuccessAnswered` is
+  bounded by it even with seconds of budget left (`settle.ts:578`).
+- Test budgets sit below what production allows (`SETTLE_BUDGET_MS` 1–80 s, `config.ts:227`).
+- Decisions 5–7 and 11 are coverage and design work beyond the goal "CI green without hiding
+  bugs".
+- To simplify first: fold what `review-2-answers.test.ts` and `review-2-twice.test.ts` cover that
+  `settle.test.ts` lacks, then delete both; warm ESLint in a `beforeAll` in
+  `testing-imports.test.ts`.
+
+Open for the owner: whether the settler takes a `Scheduler` before the test rewrite, whether test
+timers come from the test's clock instead of short real values, and whether decisions 5–7 and 11
+move to their own tasks.
+
 ## Context
 
 - `packages/mcp/test/pay.test.ts`, "does not send a payment whose signing outlasted the deadline":
