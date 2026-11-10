@@ -48,7 +48,7 @@ command -v typst  >/dev/null || { echo "❌ typst not found  — see install not
 
 # A relative link must leave the PDF as its GitHub URL; inside a PDF it points nowhere.
 [[ "$(echo '[x](../a.md#b)' | pandoc -f gfm -t gfm --lua-filter=repo-links.lua)" \
-    == "[x](https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/a.md#b)" ]] \
+    == "[x](https://github.com/rumblefishdev/stellar-x402/blob/tranche-1-evidence/docs/a.md#b)" ]] \
     || { echo "❌ repo-links.lua no longer rewrites relative links"; exit 1; }
 
 # pandoc < 3.1 has no native typst engine; fail early with a clear message

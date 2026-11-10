@@ -71,15 +71,15 @@ Field 1's four deliverables quote the Tranche #1 line items of the Panel Review 
 >
 > - Repository: `https://github.com/rumblefishdev/stellar-x402`
 > - Tranche 1 scope and acceptance criteria:
->   `https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/planning/m1-epics.md`
+>   `https://github.com/rumblefishdev/stellar-x402/blob/tranche-1-evidence/docs/planning/m1-epics.md`
 > - Conformance gate and its results:
->   `https://github.com/rumblefishdev/stellar-x402/tree/develop/conformance`
+>   `https://github.com/rumblefishdev/stellar-x402/tree/tranche-1-evidence/conformance`
 > - Conformance report:
->   `https://github.com/rumblefishdev/stellar-x402/blob/develop/conformance/REPORT.md`
+>   `https://github.com/rumblefishdev/stellar-x402/blob/tranche-1-evidence/conformance/REPORT.md`
 > - `upto` testnet report:
->   `https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/upto-proxy-testnet-report.md`
+>   `https://github.com/rumblefishdev/stellar-x402/blob/tranche-1-evidence/docs/upto-proxy-testnet-report.md`
 > - Architecture decisions:
->   `https://github.com/rumblefishdev/stellar-x402/tree/develop/docs/adr`
+>   `https://github.com/rumblefishdev/stellar-x402/tree/tranche-1-evidence/docs/adr`
 >
 > **Operational access (on request):** the `x402-production-*` CloudWatch alarms in eu-central-1
 > (read-only access can be provisioned for a reviewer's AWS account).

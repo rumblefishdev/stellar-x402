@@ -1,9 +1,11 @@
 -- A PDF has no repository next to it, so a relative link such as
 -- `../runbook.md` points nowhere once rendered. Rewrite every
--- relative link to its GitHub URL on develop; in-document anchors (`#…`), absolute
+-- relative link to its GitHub URL at REF; in-document anchors (`#…`), absolute
 -- URLs and images are left alone.
 local REPO = "https://github.com/rumblefishdev/stellar-x402/"
 local BASE = "docs/scf/"   -- the directory the evidence documents live in
+-- The tag the submission points at, so a link shows what the PDF describes, not a later run.
+local REF = "tranche-1-evidence"
 
 local function normalize(path)
   local parts = {}
@@ -19,6 +21,6 @@ function Link(el)
   if t:match("^%a[%w+.-]*:") or t:sub(1, 1) == "#" then return nil end
   local path, anchor = t:match("^([^#]*)(#?.*)$")
   local dir = path:sub(-1) == "/"
-  el.target = REPO .. (dir and "tree" or "blob") .. "/develop/" .. normalize(BASE .. path) .. (dir and "/" or "") .. anchor
+  el.target = REPO .. (dir and "tree" or "blob") .. "/" .. REF .. "/" .. normalize(BASE .. path) .. (dir and "/" or "") .. anchor
   return el
 end

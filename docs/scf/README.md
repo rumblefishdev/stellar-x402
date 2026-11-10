@@ -6,18 +6,18 @@ structure as `docs/scf/` in the Soroban Block Explorer and Stellar Prices API re
 
 ## File inventory
 
-| File                                                    | Role                                                                                                  |
-| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `milestone-1-evidence.md`                               | Full evidence companion to the M1 submission video — **source of truth**.                             |
-| `milestone-1-evidence.pdf`                              | PDF render of the above, uploaded to Google Drive next to the video. **Build output, not committed.** |
-| `milestone-1-video-scenario.md`                         | Scene-by-scene recording script for the 4–5 minute demo video.                                        |
-| `milestone-1-license-audit.md`                          | The dependency tree's license audit at the Tranche #1 boundary, with its commands.                    |
-| `milestone-1-form-answers.md`                           | Text for each field of SCF's Build Tranche Completion form, and the pre-submission checklist.         |
-| `architecture.mmd`                                      | Mermaid source of the architecture diagram.                                                           |
-| `architecture.png`                                      | Rendered diagram, embedded in the PDF. **Build output.**                                              |
-| `build-pdf.sh`                                          | PDF render script (pandoc + typst).                                                                   |
-| `screenshots/`                                          | Images the evidence document embeds, named after the deliverable (`d2-…`, `d5-…`).                    |
-| `header.typ`, `full-width-tables.lua`, `repo-links.lua` | Typst and pandoc styling; `repo-links.lua` turns relative links into GitHub URLs on `develop`.        |
+| File                                                    | Role                                                                                                              |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `milestone-1-evidence.md`                               | Full evidence companion to the M1 submission video — **source of truth**.                                         |
+| `milestone-1-evidence.pdf`                              | PDF render of the above, uploaded to Google Drive next to the video. **Build output, not committed.**             |
+| `milestone-1-video-scenario.md`                         | Scene-by-scene recording script for the 4–5 minute demo video.                                                    |
+| `milestone-1-license-audit.md`                          | The dependency tree's license audit at the Tranche #1 boundary, with its commands.                                |
+| `milestone-1-form-answers.md`                           | Text for each field of SCF's Build Tranche Completion form, and the pre-submission checklist.                     |
+| `architecture.mmd`                                      | Mermaid source of the architecture diagram.                                                                       |
+| `architecture.png`                                      | Rendered diagram, embedded in the PDF. **Build output.**                                                          |
+| `build-pdf.sh`                                          | PDF render script (pandoc + typst).                                                                               |
+| `screenshots/`                                          | Images the evidence document embeds, named after the deliverable (`d2-…`, `d5-…`).                                |
+| `header.typ`, `full-width-tables.lua`, `repo-links.lua` | Typst and pandoc styling; `repo-links.lua` turns relative links into GitHub URLs at the `tranche-1-evidence` tag. |
 
 ## Build the PDF
 
@@ -53,11 +53,15 @@ npx -y @mermaid-js/mermaid-cli -i architecture.mmd -o architecture.png -s 3 -p p
 2. **Outputs.** Run every command in `milestone-1-evidence.md` and paste its output over the
    `<TODO:>` marker; rebuild section 5.5's table from the rerun.
 3. **Screenshots** for each `<TODO: screenshot>`, ideally in the same session as the recording.
-4. **Render** the diagram, then `./build-pdf.sh`.
-5. **Record** the video from `milestone-1-video-scenario.md`.
-6. **Upload** the PDF and the video to one Google Drive folder, link-sharing "anyone with the link
+4. **Tag** the commit on `develop` that holds the package and its results:
+   `git tag tranche-1-evidence <commit> && git push origin tranche-1-evidence`. Every repository
+   link in the PDF and in Field 3 points at it, so a later run or rename can't change what a
+   reviewer sees.
+5. **Render** the diagram, then `./build-pdf.sh`.
+6. **Record** the video from `milestone-1-video-scenario.md`.
+7. **Upload** the PDF and the video to one Google Drive folder, link-sharing "anyone with the link
    can view".
-7. **Form.** Replace the placeholders in `milestone-1-form-answers.md`, work its checklist, paste
+8. **Form.** Replace the placeholders in `milestone-1-form-answers.md`, work its checklist, paste
    the four fields into the form and submit.
 
 ## Ground rules for this package
