@@ -38,8 +38,14 @@ released, removes our workaround and proves our MCP server can pay such a seller
   types accept any string or string list there; only the TypeScript schema refuses.
 - Effect for us: 47 of 400 live sellers in a public Bazaar catalog had such a field (measured
   2026-10-28, see `apps/facilitator/test/cataloger.test.ts:140`). Our catalog works around it in
-  `apps/facilitator/src/catalog/seller-check.ts` (`shapeError`). Our MCP server
-  (`packages/mcp/src/pay.ts`) still answers `unsupported_payment` for such a seller.
+  `apps/facilitator/src/catalog/seller-check.ts` (`shapeError`). Our MCP server's preview tool
+  (`packages/mcp/src/preview.ts:70`) still answers `unsupported_payment` for such a seller.
+- Paying over HTTP is not affected: `@x402/fetch` and `decodePaymentRequiredHeader` never run the
+  schema (checked in `@x402/core` 2.28.0, `dist/cjs/http/index.js:1846-1851`), so our pay tool
+  pays such a seller. Upstream's own `x402MCPClient` does run it
+  (`typescript/packages/mcp/src/client/x402MCPClient.ts:967-991`) and then takes the paid tool for
+  a free one.
+- Related upstream PR #3049 (open, spec only): metadata problems must not block payment.
 - Related, not the same: upstream issue #2993 (a hosted facilitator rejects a too-long
   `description`).
 
@@ -56,8 +62,8 @@ released, removes our workaround and proves our MCP server can pay such a seller
    calls), and parse with `PaymentRequiredV2Schema` directly.
 3. Adjust `apps/facilitator/test/cataloger.test.ts:140` if its comment or assertion names the
    workaround.
-4. Add a test in `packages/mcp/test/pay.test.ts`: a fake seller whose 402 carries 6 tags is paid,
-   not refused with `unsupported_payment`.
+4. Add a test in `packages/mcp/test/pay.test.ts` (its preview cases): a fake seller whose 402
+   carries 6 tags gets its terms previewed, not refused with `unsupported_payment`.
 
 ## Acceptance Criteria
 
@@ -65,4 +71,4 @@ released, removes our workaround and proves our MCP server can pay such a seller
 - [ ] The upstream PR is merged and released; the version is in this file.
 - [ ] `@x402/core` bumped in all three packages.
 - [ ] `shapeError` and its calls removed; catalog tests green.
-- [ ] MCP test: a seller with 6 tags is paid.
+- [ ] MCP test: a seller with 6 tags is previewed.
