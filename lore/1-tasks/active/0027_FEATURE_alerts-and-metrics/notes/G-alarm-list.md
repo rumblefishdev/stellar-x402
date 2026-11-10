@@ -124,8 +124,9 @@ a check that can't publish (decision 64).
 
 From the off-server check, once a day at 08:00 UTC (task 0029). It reads the gate's pin from this
 repo's `develop` and compares four upstream x402 files there with upstream `main`: the x402 spec,
-the Stellar `exact` scheme, the suite's Stellar routes and the discovery spec. It is in the
-`watch` group.
+the Stellar `exact` scheme, the suite's Stellar routes and the discovery spec. It is the
+`upstream` group, on once `make check-series GROUP=upstream` passes, in the 3 hours after a
+08:00 UTC run: before the first point `upstream-silent` would fire on nothing.
 
 | Alarm | Signal | Shape | Fires when | Missing data |
 | --- | --- | --- | --- | --- |

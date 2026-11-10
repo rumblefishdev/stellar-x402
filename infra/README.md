@@ -76,7 +76,7 @@ make telemetry-arns             # what the server's credential helper is started
 ```
 
 Every deploy is agreed separately: the account is shared. On a fresh account or a rebuild,
-deploy Watch first, then `make check-series GROUP=watch` and `GROUP=protocol`, then Alarms: `--all` may create the
+deploy Watch first, then `make check-series GROUP=watch`, `GROUP=protocol` and, after 08:00 UTC, `GROUP=upstream`, then Alarms: `--all` may create the
 alarms before the check has run, and `watch-no-invocations` pages on missing data.
 
 After a deliberate delete of the Telemetry stack, its log groups stay, and a new deploy fails on
@@ -109,6 +109,7 @@ exists with its actions off (decision 26).
 | `watch`         | `balance-low`, `balance-critical`, `watch-errors`, `watch-no-invocations`                                                                      | The Watch stack's Lambda publishes `spendable_stroops` (#115)                                           |
 | `watchSecurity` | `account-state`, `account-effects`, `backup-secret-read`                                                                                       | The check's theft and secret-read sections publish: task 0127 (decisions 68, 71)                        |
 | `protocol`      | `protocol-changed`, `protocol-upgrade-coming`                                                                                                  | The check's protocol section publishes both versions for each network in `watch.protocol` (decision 70) |
+| `upstream`      | `upstream-changed`, `upstream-silent`                                                                                                          | The check's 08:00 UTC run publishes `upstream_files_changed` (task 0029)                                |
 
 To turn one on: `make check-series GROUP=<group>` until it passes, then set the flag (and any
 threshold it needs; synth refuses a group without one), `make deploy-production-alarms`, and

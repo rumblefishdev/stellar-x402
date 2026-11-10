@@ -7,7 +7,7 @@ import type { AlarmFactory } from "./factory.js";
 
 export function addUpstreamAlarms(f: AlarmFactory): void {
   f.level("upstream-changed", {
-    group: "watch",
+    group: "upstream",
     signal: { catalog: "upstream_files_changed" },
     statistic: "Maximum",
     periodMinutes: 24 * 60,
@@ -23,7 +23,7 @@ export function addUpstreamAlarms(f: AlarmFactory): void {
 
   // A day with no point breaches. 2 of 2: one failed day pages no one, as the next day's run retries.
   f.level("upstream-silent", {
-    group: "watch",
+    group: "upstream",
     signal: { catalog: "upstream_files_changed" },
     statistic: "SampleCount",
     periodMinutes: 24 * 60,

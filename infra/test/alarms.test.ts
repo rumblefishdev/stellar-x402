@@ -167,8 +167,6 @@ describe("the Alarms template", () => {
     expect(bases("watch")).toEqual([
       "balance-critical",
       "balance-low",
-      "upstream-changed",
-      "upstream-silent",
       "watch-errors",
       "watch-no-invocations",
     ]);
@@ -176,6 +174,13 @@ describe("the Alarms template", () => {
       "account-effects",
       "account-state",
       "backup-secret-read",
+    ]);
+  });
+
+  test("puts the upstream alarms in their own group, so they go on only after the first daily run", () => {
+    expect(records.filter((r) => r.group === "upstream").map((r) => r.alarmName)).toEqual([
+      "x402-production-upstream-changed",
+      "x402-production-upstream-silent",
     ]);
   });
 
@@ -327,8 +332,6 @@ test("production as committed makes only the groups that are on", () => {
     "x402-production-submit-failed-testnet",
     "x402-production-sweeps-stopped-testnet",
     "x402-production-telemetry-silent",
-    "x402-production-upstream-changed",
-    "x402-production-upstream-silent",
     "x402-production-uptime",
     "x402-production-uptime-flapping",
     "x402-production-watch-errors",

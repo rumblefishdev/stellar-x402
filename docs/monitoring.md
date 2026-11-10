@@ -84,7 +84,7 @@ once, by the task that turns it on.
 | `backup-secret-read` | `watchSecurity` | 0127, the secret-read section, once 0026 creates the backup secret                     |
 | `channel-held`       | `channelHeld`   | 0089 builds `channel_longest_hold_seconds`; 0027 owns the alarm (alarm list, Deferred) |
 | `snapshot-age`       | `snapshots`     | 0026, once OpenBao's daily snapshot has run                                            |
-| `upstream-changed`   | `upstream`      | 0029, once the first 08:00 UTC run has published (`make check-series GROUP=watch`)     |
+| `upstream-changed`   | `upstream`      | 0029, `make check-series GROUP=upstream` in the 3 hours after a 08:00 UTC run          |
 | `upstream-silent`    | `upstream`      | 0029, as above                                                                         |
 | `wal-failing`        | `backups`       | 0026, once pgBackRest archives WAL (its decision-71 criterion)                         |
 | `wal-stale`          | `backups`       | 0026, as above                                                                         |
@@ -762,6 +762,7 @@ lacks.
 | `spendable_stroops`                     | `x402-watch`       | gauge, None    | `network`                                                | [balance-critical](#balance-critical), [balance-low](#balance-low)                                            |
 | `protocol_version`                      | `x402-watch`       | gauge, None    | `network`                                                | [protocol-changed](#protocol-changed)                                                                         |
 | `protocol_supported_version`            | `x402-watch`       | gauge, None    | `network`                                                | [protocol-upgrade-coming](#protocol-upgrade-coming)                                                           |
+| `upstream_files_changed`                | `x402-watch`       | gauge, Count   | none                                                     | [upstream-changed](#upstream-changed), [upstream-silent](#upstream-silent) (off)                              |
 | `account_state_mismatches`              | `x402-watch`       | gauge, Count   | `network`                                                | `account-state` (off)                                                                                         |
 | `account_effects_unexpected`            | `x402-watch`       | counter, Count | `network`                                                | `account-effects` (off)                                                                                       |
 | `backup_secret_reads`                   | `x402-watch`       | counter, Count | none                                                     | `backup-secret-read` (off)                                                                                    |
