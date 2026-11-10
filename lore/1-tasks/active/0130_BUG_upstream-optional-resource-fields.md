@@ -57,10 +57,11 @@ released, removes our workaround and proves our MCP server can pay such a seller
 | 2 | The fix types `serviceName`, `tags` and `iconUrl` only; the Bazaar rules stay in extraction, so 6 tags become the first 5 in the catalog | grilling 2026-11-10 | changes it (the task said drop a bad field to undefined, which loses all 6 tags against `bazaar.md:390`) | upstream Python and Go type these fields only | upstream `core/src/schemas/index.ts` | upstream `core/test/unit/schemas/schemas.test.ts` |
 | 3 | The upstream PR carries the core schema test only, no test of upstream's MCP client | grilling 2026-11-10 | matches | — | — | — |
 | 4 | The upstream PR leaves the generated paywall bundles as they are; maintainers regenerate them with `pnpm build:paywall` if they want | grilling 2026-11-10 | beyond it | upstream #2774, #3285 and #3983 changed this schema without regenerating them | — | — |
+| 5 | Until the release, our preview tool reads such a 402 too and shows the agent every field the seller sent (bounded by the 16 KiB header, as 0037 set); one shared workaround in `packages/bazaar` serves the seller check and the preview | grilling 2026-11-10 | beyond it | our seller check already does this | `packages/bazaar`, `apps/facilitator/src/catalog/seller-check.ts`, `packages/mcp/src/preview.ts` | `packages/mcp/test/pay.test.ts` |
 
 ## Not yet decided
 
-- Whether our preview tool gets a workaround while the upstream PR waits.
+Nothing.
 
 ## Upstream PR
 
@@ -71,17 +72,18 @@ released, removes our workaround and proves our MCP server can pay such a seller
 
 1. Bump `@x402/core` to the release that carries the fix (today we pin `~2.28.0` in
    `apps/facilitator`, `packages/bazaar` and `packages/mcp`; latest is 2.30.0).
-2. Delete `shapeError` in `apps/facilitator/src/catalog/seller-check.ts` (the function and its two
-   calls), and parse with `PaymentRequiredV2Schema` directly.
+2. Delete the shared workaround in `packages/bazaar` (today `shapeError` in
+   `apps/facilitator/src/catalog/seller-check.ts`) and its calls in the seller check and the
+   preview tool; both parse with `PaymentRequiredV2Schema` directly.
 3. Adjust `apps/facilitator/test/cataloger.test.ts:140` if its comment or assertion names the
    workaround.
-4. Add a test in `packages/mcp/test/pay.test.ts` (its preview cases): a fake seller whose 402
-   carries 6 tags gets its terms previewed, not refused with `unsupported_payment`.
+4. Keep the preview test that a seller whose 402 carries 6 tags is previewed with all 6; it must
+   stay green after the bump.
 
 ## Acceptance Criteria
 
 - [ ] The upstream PR is opened, with its URL in this file.
 - [ ] The upstream PR is merged and released; the version is in this file.
 - [ ] `@x402/core` bumped in all three packages.
-- [ ] `shapeError` and its calls removed; catalog tests green.
-- [ ] MCP test: a seller with 6 tags is previewed.
+- [ ] Until the release: the preview tool shows a seller with 6 tags (shared workaround).
+- [ ] After the release: the workaround and its calls removed; catalog and MCP tests green.
