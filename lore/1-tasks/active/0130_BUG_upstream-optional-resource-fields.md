@@ -85,7 +85,8 @@ Nothing.
 
 ## After the upstream PR merges and is released
 
-1. Remove the `@x402/core` patch (`patches/` and its `pnpm-workspace.yaml` entry) and bump
+1. Remove the `@x402/core` patch (`patches/`, its `pnpm-workspace.yaml` entry and the
+   `COPY patches` line in `apps/facilitator/Dockerfile`) and bump
    `@x402/core` to the release that carries the fix in `apps/facilitator`, `packages/bazaar` and
    `packages/mcp` (today `~2.28.0`; latest 2.30.0).
 2. Keep the tests that a payment and a 402 with 6 tags are read; they must stay green after the
