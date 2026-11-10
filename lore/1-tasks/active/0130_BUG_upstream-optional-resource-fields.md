@@ -40,7 +40,7 @@ released, removes our workaround and proves our MCP server can pay such a seller
   2026-10-28, see `apps/facilitator/test/cataloger.test.ts:140`). Our catalog works around it in
   `apps/facilitator/src/catalog/seller-check.ts` (`shapeError`). Our MCP server's preview tool
   (`packages/mcp/src/preview.ts:70`) still answers `unsupported_payment` for such a seller.
-- Paying over HTTP is not affected: `@x402/fetch` and `decodePaymentRequiredHeader` never run the
+- The buyer's HTTP client is not affected: `@x402/fetch` and `decodePaymentRequiredHeader` never run the
   schema (checked in `@x402/core` 2.28.0, `dist/cjs/http/index.js:1846-1851`), so our pay tool
   pays such a seller. Upstream's own `x402MCPClient` does run it
   (`typescript/packages/mcp/src/client/x402MCPClient.ts:967-991`) and then takes the paid tool for
@@ -48,6 +48,20 @@ released, removes our workaround and proves our MCP server can pay such a seller
 - Related upstream PR #3049 (open, spec only): metadata problems must not block payment.
 - Related, not the same: upstream issue #2993 (a hosted facilitator rejects a too-long
   `description`).
+
+## Premise
+
+Attacked by a fresh reviewer on 2026-11-10. The problem is real, and it reaches our money path:
+
+- Our facilitator's `/verify` and `/settle` run `PaymentPayloadV2Schema` on the payment
+  (`apps/facilitator/src/http/app.ts:137`), and upstream's client copies the 402's resource into
+  the payment (`@x402/core` 2.28.0 `dist/esm/client/index.mjs:304`). Measured: a payload whose
+  resource has 5 tags parses, one with 6 tags does not, so such a payment is answered 400.
+- The seller check's workaround removes the three fields before the parse, so it also lets a
+  wrong-typed field through (`tags: "x"`); the upstream fix keeps the type check. After the bump
+  such a 402 is refused where it passes today.
+- A cheaper route to consider: a local patch of `@x402/core` with the upstream diff, which fixes
+  all three places at once until the release.
 
 ## Decisions so far
 
@@ -61,7 +75,8 @@ released, removes our workaround and proves our MCP server can pay such a seller
 
 ## Not yet decided
 
-Nothing.
+- How our facilitator accepts such a payment at `/verify` and `/settle` until the release: a local
+  patch of `@x402/core`, the shared workaround, or waiting. This may replace row 5's workaround.
 
 ## Upstream PR
 
