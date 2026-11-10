@@ -68,6 +68,22 @@ As a reviewer of the grant, I want e2e results with real settled transaction has
   misses its own; run it against a catalog under 100 entries.
 - From the 0028 review: the first criterion says "verify → settle" for each scenario, but the 9 `upfront` scenarios settle without a `/verify` (answered in 0028); reword it before starting.
 
+## Premise
+
+A fresh reviewer, given only the goal and the constraints (2026-11-10): the premise partly holds.
+
+- The rerun is required: Story 3.2's last criterion (`docs/planning/m1-epics.md:678-680`), FR21
+  (`m1-epics.md:102-105`). No upstream run can stand in for one against our facilitator: upstream CI
+  runs `--min` against its own (decision 9).
+- The conformance report is an end-of-grant deliverable (`docs/rfp/07-x402-facilitator-bazaar.md:122`),
+  not an M1 criterion (`m1-epics.md:664-680`), and it overlaps 0128's gate section. Open: drop the
+  fifth criterion, or make it 0128's section.
+- The upstream alarm watches the gate's pin, while the facilitator's own `@x402/stellar` is 2.28.0
+  (`~2.28.0`) and npm's latest 2.30.0 (2026-11-04), with no Dependabot or Renovate in the repo.
+  Clearing the alarm reruns the gate, which skips the Bazaar check, so for `bazaar.md` it proves
+  nothing. Open: whether a dependency bump comes first, and whether the alarm moves to 0027.
+- The testnet reset of 2026-12-16 removes the committed hashes; the envelopes stay.
+
 ## Decisions so far
 
 | # | What is done | From | Vs the task | Who does the same (checked) |
@@ -90,6 +106,7 @@ As a reviewer of the grant, I want e2e results with real settled transaction has
 | 17 | A daily read that fails pages: `upstream-silent` fires when the check published no point for two days; `watch-errors` (2 of 3 five-minute runs) never sees a once-a-day failure | agent, from row 16 (daily) and the rule that failures are loud | beyond it | no standard |
 | 18 | One 30 s deadline covers the whole section, and its files are read at once after the pin, so a slow GitHub ends it inside the Lambda's 60 s and logs `watch_section_failed` | agent, from the #149 review | beyond it | no standard |
 | 19 | `upstream-changed` stays one alarm against the pin: one message on the first change, back to OK once the pin moves; a later change while it is in ALARM sends none, and the daily `watch_upstream` log line lists every file that differs | the owner's decision, 2026-11-09 | beyond it | no standard |
+| 20 | The two upstream alarms are a group of their own, `upstream`, off in production until `make check-series GROUP=upstream` passes after a 08:00 UTC run, as `protocol` was before its first points | the owner's decision, 2026-11-10 (an Alarms deploy before the first point would create `upstream-silent` with no data, and it fires at once) | beyond it | no standard |
 
 ## Not yet decided
 
@@ -144,8 +161,10 @@ settled on chain with the facilitator's signer as fee payer. Upstream `8827cf1`,
 - Write the conformance report from that run: what ran and against which commits, each scenario
   with its transaction hash, and what the suite doesn't cover (one good payment per scenario, no
   refusals, no Bazaar check).
-- First: the `upstream-changed` alarm (#149) merged and deployed (`make deploy-production-watch`,
-  `make check-series GROUP=watch`, `make deploy-production-alarms` in `infra/`).
+- First: the `upstream-changed` alarm (#149) merged and on: `make deploy-production-watch`, then
+  `make check-series GROUP=upstream` in the 3 hours after the next 08:00 UTC run, a PR setting
+  `"upstream": true` in `infra/envs/production.json`, then `make deploy-production-alarms` and
+  `make fire-test` in `infra/`.
 - The testnet reset of 2026-12-16 (developers.stellar.org, Networks) removes the transactions from
   the network: the grant's final handover needs a fresh run and the report's table refreshed.
 
