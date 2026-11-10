@@ -11,8 +11,8 @@ what, what each payment was checked for, and what a pass does not show. It is th
 |             |                                                                                                                                                                                                                                                           |
 | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Date        | 2026-11-10, 08:50–09:03 UTC (the suite itself: 11.0 minutes)                                                                                                                                                                                              |
-| Suite       | [x402-foundation/x402](https://github.com/x402-foundation/x402) at `8827cf19fa9a7b120588b8cc56f56a3def13bb97`, unmodified                                                                                                                                 |
-| Facilitator | `https://x402-facilitator.sorobanscan.com`, commit `5d2e26ba141747db0713efd9e4b2dfd1b2510f69` (the fourth production deploy, as its `/health` names it)                                                                                                   |
+| Suite       | [x402-foundation/x402](https://github.com/x402-foundation/x402) at `8827cf19fa9a7b120588b8cc56f56a3def13bb97`, unmodified: the gate stops if any tracked file of the checkout changed ([`src/upstream.ts`](src/upstream.ts), `assertClean`)               |
+| Facilitator | `https://x402-facilitator.sorobanscan.com`, commit `5d2e26ba141747db0713efd9e4b2dfd1b2510f69` (the fourth run of the Deploy production workflow, on `deploy/production`; `/health` names this commit)                                                     |
 | Fee payer   | `GAVE5V5IOMNNBOZXGZSQOP447L2QLCG6ELIIPO6CFJLGZVY4YIK3KKRP`, the signer its `/supported` lists                                                                                                                                                             |
 | Gate        | this repo's [`conformance/`](README.md) at `49e5b727d3993ac8cb63a232932839fae42d962a`                                                                                                                                                                     |
 | Command     | `pnpm test --testnet --families=stellar --schemes=exact --facilitators=stellar-x402`                                                                                                                                                                      |
@@ -22,10 +22,11 @@ what, what each payment was checked for, and what a pass does not show. It is th
 ## What each scenario proves
 
 Each scenario is one canonical x402 client paying one canonical x402 server, with our facilitator
-verifying and settling the payment. The suite picks the scenarios: every TypeScript client and
-server it has for Stellar, over HTTP and MCP, each on two routes. On the plain route the server
-asks the facilitator to verify, serves, then settles; on the `upfront` route it settles before it
-serves, with no verify.
+settling the payment. The suite picks the scenarios: every TypeScript client and server it has for
+Stellar, over HTTP and MCP, each on two routes. On the plain route the server asks the facilitator
+to verify, serves, then settles: these 9 scenarios are the `exact` verify → settle of the Tranche 1
+bar. On the `upfront` route it settles before it serves, with no verify, as upstream's resource
+server does for that route: these 9 show settle alone.
 
 A scenario passes only when the suite says so and the gate, reading the transaction back from
 Stellar RPC, finds that it:
@@ -62,10 +63,16 @@ Stellar RPC, finds that it:
 
 - **Refusals.** Every scenario is one good payment. No scenario sends a bad signature, a short
   amount, an expired authorization or a replay, so a pass says nothing about how the facilitator
-  refuses one. Our own tests cover refusals ([`apps/facilitator/test/`](../apps/facilitator/test/));
-  the end-to-end ones against the deployed facilitator are task 0116.
-- **Discovery.** The suite's Bazaar check (`--extensions=bazaar`) is not run: it calls
-  `/discovery/search`, which comes after Tranche 1.
+  refuses one. Our own tests ([`apps/facilitator/test/`](../apps/facilitator/test/)) cover the
+  refusals the facilitator makes itself: an authorization that expires too soon, a repeat of a
+  settled payment, a zero amount, a wrong network, a fee above the limit, a channel or source
+  misused. A bad signature or a short amount is refused by upstream's `@x402/stellar`; our tests
+  only check that its answer is passed on. End-to-end refusals against the deployed facilitator
+  are task 0116.
+- **Discovery.** The suite's Bazaar check (`--extensions=bazaar`) is not run. It calls
+  `/discovery/search`, which comes after Tranche 1, and it looks for the suite's own
+  `http://localhost:<port>` and `mcp://tool/<name>` entries, which the hosted catalog refuses
+  (task 0054); the gate's proxy forwards only `/verify`, `/settle` and `/supported`.
 - **Other languages and schemes.** At this commit the suite's Stellar routes are TypeScript only,
   and `exact` only (upstream `e2e/config/mechanisms_stellar.json`); `upto` is not in them.
 - **Mainnet.** Testnet only. The facilitator serves `stellar:testnet` alone.
@@ -75,9 +82,12 @@ Stellar RPC, finds that it:
 
 - **A transaction:** open any link above; stellar.expert shows the transfer, the amount and the fee
   account.
-- **After the testnet reset of 2026-12-16,** the links stop resolving: the reset removes every
-  transaction. Each signed envelope stays in `gate.json`, and a transaction's hash can be
-  recomputed from it.
+- **After the testnet reset of 2026-12-16** ([Stellar networks](https://developers.stellar.org/docs/networks)),
+  the links stop resolving: the reset removes every transaction. Each signed envelope stays in
+  `gate.json`, and a transaction's hash can be recomputed from it. An envelope shows what was
+  signed, not that the network applied it, in which ledger, or that it succeeded: after the reset
+  only a fresh run shows that, and the grant's final handover needs one.
 - **The run again:** [`README.md`](README.md), "Run", with `GATE_FACILITATOR_URL` set to the
-  facilitator above. It needs two funded testnet accounts and takes about 13 minutes; each run
-  overwrites `results/testnet-hosted/`, and git keeps the earlier ones.
+  facilitator above. It needs two funded testnet accounts and takes about 15 minutes, 11 of them
+  the suite. Each run overwrites `results/testnet-hosted/`. Git keeps the runs of record
+  (2026-11-06 and this one); trial runs made while the gate was being fixed, on 2026-11-05 and 2026-11-06, were not committed, and their settlements are on chain under the same fee payer (task 0029).
