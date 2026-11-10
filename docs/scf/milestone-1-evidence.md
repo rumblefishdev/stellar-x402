@@ -415,7 +415,15 @@ Not separate deliverables; what makes D1's "hardening" hold up as a public servi
 | Monitoring and alarms | Facilitator, host and log-volume alarms, uptime probe and off-server balance check, to Slack     | [`docs/monitoring.md`](../monitoring.md)                                           |
 | Backups               | OpenBao's daily snapshot to an off-site Storage Box                                              | [`docs/runbook.md`](../runbook.md), "OpenBao snapshots"                            |
 
-`<TODO: screenshots: the CloudWatch alarms list in OK state, and a delivery-test message in Slack (no channel or workspace names visible).>`
+The alarms in CloudWatch on 2026-11-10, filtered to `x402-production`: all 49 in OK state, with
+their actions enabled. The first page of the list:
+
+![The production alarms in CloudWatch, all OK](./screenshots/ops-cloudwatch-alarms-1.png){width=85%}
+
+The rest of the list: [`ops-cloudwatch-alarms-2.png`](./screenshots/ops-cloudwatch-alarms-2.png),
+[`ops-cloudwatch-alarms-3.png`](./screenshots/ops-cloudwatch-alarms-3.png).
+
+`<TODO: screenshot: a delivery-test message in Slack (no channel or workspace names visible).>`
 
 ## 7. What is deliberately not claimed
 
