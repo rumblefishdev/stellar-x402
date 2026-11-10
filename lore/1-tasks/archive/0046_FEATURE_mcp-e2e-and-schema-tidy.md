@@ -2,7 +2,7 @@
 id: "0046"
 title: "Simplify the MCP server after 0037, tidy its e2e suite and move the tool schemas out of server.ts"
 type: FEATURE
-status: active
+status: completed
 related_adr: []
 related_tasks: ["0037"]
 tags: [mcp, tests, structure, priority-low, effort-small]
@@ -30,6 +30,15 @@ history:
     note: >
       Added: `list_resources` takes the Bazaar spec's `scheme` filter, which its strict input
       refused. Found in an audit of the repo.
+  - date: "2026-11-10"
+    status: completed
+    who: karolkow
+    note: >
+      Closed. The plan's five items were done before (premise review); the results file stays
+      committed, as the repo's six other live results do. The red suite passes with its own
+      facilitator (#127). Its runs found the /verify and /settle answers to an RPC with no verdict,
+      fixed in #152, #159, #161 and #168; #162 (a Horizon bound) closed unmerged on 0 Horizon
+      hangs in production logs. 11 merged PRs.
 ---
 
 # Simplify the MCP server after 0037, tidy its e2e suite and move the tool schemas out of server.ts
@@ -134,6 +143,20 @@ moved, because `/verify` hit its 10 s limit per RPC URL on the slow public RPC.
 
 ## Acceptance Criteria
 
-- [ ] One `[structure only]` PR; unit tests unchanged; an e2e run passes on its head
-- [ ] `server.ts` holds no schema
+- [ ] One `[structure only]` PR; unit tests unchanged; an e2e run passes on its head (not met as
+      written: the structure changes landed in earlier PRs, and the red-suite work changed behaviour)
+- [x] `server.ts` holds no schema: it imports them from `catalog.ts`, `preview.ts` and `pay.ts`
 - [x] `pnpm mcp:e2e` passes on real testnet, with E-21 and E-22 settled by the suite's own facilitator
+
+## Closed (2026-11-10)
+
+- **Results file:** `apps/mcp-local/e2e/results/testnet-results.json` stays committed, like the
+  live results under `apps/facilitator/test/live/results/`, `conformance/results/` and
+  `contracts/upto-proxy/e2e/results/`. A change for all of them is one decision, not this file's.
+- **PRs from the e2e runs:** #152 (`/verify` 503 `rpc_unavailable` with its alarm), #159
+  (`/settle`'s checks answer `settle_exact_stellar_rpc_unavailable`), #161 (the store guard a
+  claim sweep relies on, pinned by a test), #168 (no verdict from any RPC URL is a 503). They change
+  facilitator behaviour; their code belongs to 0049's topic, and later fixes there go to 0049.
+- **Left to other tasks:** deploying the `verify-rpc-unavailable` alarm (0027); putting gateway.fm
+  first among the testnet `RPC_URLS` (0029 decision 8), after 79 timeouts of the first URL in
+  3.5 days of production logs; hedged RPC reads (0049).
