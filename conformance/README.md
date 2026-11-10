@@ -4,6 +4,9 @@ The Tranche 1 gate ([ADR 0009](../docs/adr/0009-conformance-gate-harness.md)): t
 x402 end-to-end suite from `x402-foundation/x402`, at a pinned commit, runs every Stellar `exact`
 scenario against a facilitator, and the run is saved with the transaction hashes.
 
+The latest run against our deployed facilitator, with what it shows and what it doesn't:
+[REPORT.md](REPORT.md).
+
 ## Run
 
 ```sh

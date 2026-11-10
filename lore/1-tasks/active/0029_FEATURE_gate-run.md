@@ -108,6 +108,7 @@ A fresh reviewer, given only the goal and the constraints (2026-11-10): the prem
 | 19 | `upstream-changed` stays one alarm against the pin: one message on the first change, back to OK once the pin moves; a later change while it is in ALARM sends none, and the daily `watch_upstream` log line lists every file that differs | the owner's decision, 2026-11-09 | beyond it | no standard |
 | 20 | The two upstream alarms are a group of their own, `upstream`, off in production until `make check-series GROUP=upstream` passes after a 08:00 UTC run, as `protocol` was before its first points | the owner's decision, 2026-11-10 (an Alarms deploy before the first point would create `upstream-silent` with no data, and it fires at once) | beyond it | no standard |
 | 21 | The final rerun runs on the fourth production deploy, `5d2e26b`, without #152 (merged after it) and #162 (open) | the owner's decision, 2026-11-10 | changes it: the task says after the last deploy before the M1 handover | no standard |
+| 22 | The conformance report is its own file, `conformance/REPORT.md`, written from the run's two result files: the run, what each scenario proves, every settlement, what a pass does not show, how to check it; the M1 evidence package links it | the owner's decision, 2026-11-10 | as the task says | no standard |
 
 ## Not yet decided
 
@@ -159,10 +160,8 @@ The first run of record, 2026-11-06 on facilitator `68e778e`, is in git history.
 
 ## Before the M1 handover
 
-- After the last deploy before the M1 handover: rerun the gate and commit `results/testnet-hosted/`.
-- Write the conformance report from that run: what ran and against which commits, each scenario
-  with its transaction hash, and what the suite doesn't cover (one good payment per scenario, no
-  refusals, no Bazaar check).
+- Done 2026-11-10: the rerun on `5d2e26b` (decision 21) and `conformance/REPORT.md` from it
+  (decision 22).
 - First: the `upstream-changed` alarm (#149) merged and on: `make deploy-production-watch`, then
   `make check-series GROUP=upstream` in the 3 hours after the next 08:00 UTC run, a PR setting
   `"upstream": true` in `infra/envs/production.json`, then `make deploy-production-alarms` and
@@ -176,4 +175,4 @@ The first run of record, 2026-11-06 on facilitator `68e778e`, is in git history.
 - [x] Given a finished run, when results are saved, then `conformance/results/` gets the run JSON with the upstream commit, the date, our facilitator version and the transaction hashes
 - [x] Given a failing scenario, when it is analysed, then a backlog task is created for the owning lane (no scenario failed in the run of record)
 - [x] Given the finished T1 build, including Bazaar and spend budgets, when the gate reruns, then it passes and the final results are committed (2026-11-10, facilitator `5d2e26b`, decision 21)
-- [ ] Given the final results, when the conformance report is written, then it lists the e2e results and the settled transaction hashes, with the upstream and facilitator commits (RFP, expected deliverables)
+- [x] Given the final results, when the conformance report is written, then it lists the e2e results and the settled transaction hashes, with the upstream and facilitator commits (RFP, expected deliverables) (`conformance/REPORT.md`, decision 22)
