@@ -73,6 +73,7 @@ Attacked by a fresh reviewer on 2026-11-10. The problem is real, and it reaches 
 | 4 | The upstream PR leaves the generated paywall bundles as they are; maintainers regenerate them with `pnpm build:paywall` if they want | grilling 2026-11-10 | beyond it | upstream #2774, #3285 and #3983 changed this schema without regenerating them | — | — |
 | 5 | Until the release, our preview tool reads such a 402 too and shows the agent every field the seller sent (bounded by the 16 KiB header, as 0037 set); one shared workaround in `packages/bazaar` serves the seller check and the preview | grilling 2026-11-10 | beyond it | our seller check already does this | `packages/bazaar`, `apps/facilitator/src/catalog/seller-check.ts`, `packages/mcp/src/preview.ts` | `packages/mcp/test/pay.test.ts` |
 | 6 | Until the release, a local `pnpm patch` of `@x402/core` 2.28.0 carries the upstream diff, so `/verify`, `/settle`, the preview tool and the seller check all read such a payment or 402; the seller check's workaround goes now. Replaces row 5's workaround | grilling 2026-11-10 | beyond it | none of the checked facilitators patches `@x402/core` | `patches/`, `pnpm-workspace.yaml`, `apps/facilitator/src/catalog/seller-check.ts` | `apps/facilitator/test`, `packages/mcp/test/pay.test.ts` |
+| 7 | No patch: `packages/bazaar` extends upstream's `PaymentRequiredV2Schema` and `PaymentPayloadV2Schema`, typing only `serviceName`, `tags` and `iconUrl`; `/verify`, `/settle`, the preview tool and the seller check use it. Every other rule stays upstream's. Replaces row 6 | grilling 2026-11-10 | beyond it | none of the checked facilitators patches `@x402/core` | `packages/bazaar/src/service-metadata.ts`, `apps/facilitator/src/http/app.ts`, `apps/facilitator/src/catalog/seller-check.ts`, `packages/mcp/src/preview.ts` | `apps/facilitator/test/verify-route.test.ts`, `packages/mcp/test/pay.test.ts` |
 
 ## Not yet decided
 
@@ -86,17 +87,16 @@ Nothing.
 
 ## After the upstream PR merges and is released
 
-1. Remove the `@x402/core` patch (`patches/`, its `pnpm-workspace.yaml` entry and the
-   `COPY patches` line in `apps/facilitator/Dockerfile`) and bump
-   `@x402/core` to the release that carries the fix in `apps/facilitator`, `packages/bazaar` and
-   `packages/mcp` (today `~2.28.0`; latest 2.30.0).
-2. Keep the tests that a payment and a 402 with 6 tags are read; they must stay green after the
-   bump.
+1. Bump `@x402/core` to the release that carries the fix in `apps/facilitator`, `packages/bazaar`
+   and `packages/mcp` (today `~2.28.0`; latest 2.30.0).
+2. Delete `packages/bazaar/src/service-metadata.ts` and import the two schemas from
+   `@x402/core/schemas` again.
+3. Keep the tests that a payment and a 402 with 6 tags are read; they must stay green.
 
 ## Acceptance Criteria
 
 - [ ] The upstream PR is opened, with its URL in this file.
-- [ ] Until the release: `@x402/core` patched; `/verify` accepts a payment whose resource has 6
+- [ ] Until the release: our schema in `packages/bazaar`; `/verify` accepts a payment whose resource has 6
       tags, the preview tool shows a 402 with 6 tags, the seller check's workaround is gone.
 - [ ] The upstream PR is merged and released; the version is in this file.
-- [ ] After the release: the patch removed, `@x402/core` bumped in all three packages, tests green.
+- [ ] After the release: our schema removed, `@x402/core` bumped in all three packages, tests green.
