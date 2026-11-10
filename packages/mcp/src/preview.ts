@@ -87,6 +87,8 @@ export async function previewPayment(
         ...resource,
         description: resource.description?.slice(0, LIMITS.descriptionChars),
         mimeType: resource.mimeType?.slice(0, LIMITS.mimeTypeChars),
+        serviceName: resource.serviceName?.slice(0, LIMITS.descriptionChars),
+        tags: resource.tags?.map((tag) => tag.slice(0, LIMITS.descriptionChars)),
       },
     },
   };

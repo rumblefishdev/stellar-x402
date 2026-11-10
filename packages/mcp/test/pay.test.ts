@@ -472,9 +472,15 @@ describe("get_resource", () => {
     seller.description = "d".repeat(2_000);
     seller.termsError = "e".repeat(2_000);
     seller.contentType = `text/${"x".repeat(300)}`;
+    seller.serviceName = "n".repeat(2_000);
+    seller.tags = ["t".repeat(2_000), "short"];
     const { paymentRequired } = await preview();
     expect(paymentRequired!.resource.description).toHaveLength(500);
     expect(paymentRequired!.resource.mimeType).toHaveLength(127);
+    expect(paymentRequired!.resource).toMatchObject({
+      serviceName: "n".repeat(500),
+      tags: ["t".repeat(500), "short"],
+    });
     expect(paymentRequired!.error).toHaveLength(500);
   });
 
