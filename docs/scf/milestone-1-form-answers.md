@@ -1,7 +1,7 @@
 # SCF Milestone 1 — Form Answers (stellar-x402)
 
 > Copy the text inside each blockquote into the matching field of SCF's Build Tranche Completion
-> form. Anything in `<ANGLE_BRACKETS>` is a placeholder to replace before submitting.
+> form.
 >
 > Full evidence lives in the companion document
 > [`milestone-1-evidence.md`](./milestone-1-evidence.md), exported to PDF and attached in Google
@@ -89,24 +89,3 @@ Field 1's four deliverables quote the Tranche #1 line items of the Panel Review 
 ## Field 4 — Support Needed
 
 > —
-
----
-
-## Pre-submission checklist
-
-- [ ] Field 1 still quotes the Panel Review response's Tranche #1 (§1 line items, §4 conformance
-      bar) word for word; any difference was told to SCF before submitting.
-- [ ] The final deploy is on production and the gate was rerun on it (task 0029); its
-      `results/testnet-hosted/` is committed and the evidence document's section 5.5 uses it.
-- [ ] `curl -s https://x402-facilitator.sorobanscan.com/health` returns `ready: true` with the
-      gate rerun's commit.
-- [ ] D3's evidence is the `catalog-smoke.ts` testnet run in section 5.3; the public catalog's
-      output there is current.
-- [ ] Every `<TODO:>` in `milestone-1-evidence.md` is replaced; screenshots in `screenshots/`.
-- [ ] `architecture.png` rendered from `architecture.mmd`.
-- [ ] `milestone-1-evidence.md` exported: `./build-pdf.sh`.
-- [ ] PDF and video in one Google Drive folder, link-sharing "anyone with the link can view".
-- [x] `<DRIVE_FOLDER_LINK>` and `<VIDEO_LINK>` replaced in this file.
-- [ ] Every link in Field 3 opens anonymously in an incognito window.
-- [ ] No secret in the PDF, the screenshots or any video frame (the script's secrets list).
-- [ ] English only across all four fields; no personal names.

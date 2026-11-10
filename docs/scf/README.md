@@ -12,7 +12,7 @@ structure as `docs/scf/` in the Soroban Block Explorer and Stellar Prices API re
 | `milestone-1-evidence.pdf`                              | PDF render of the above, uploaded to Google Drive next to the video. **Build output, not committed.**             |
 | `milestone-1-video-scenario.md`                         | Scene-by-scene recording script for the 4–5 minute demo video.                                                    |
 | `milestone-1-license-audit.md`                          | The dependency tree's license audit at the Tranche #1 boundary, with its commands.                                |
-| `milestone-1-form-answers.md`                           | Text for each field of SCF's Build Tranche Completion form, and the pre-submission checklist.                     |
+| `milestone-1-form-answers.md`                           | Text for each field of SCF's Build Tranche Completion form.                                                       |
 | `architecture.mmd`                                      | Mermaid source of the architecture diagram.                                                                       |
 | `architecture.png`                                      | Rendered diagram, embedded in the PDF. **Build output.**                                                          |
 | `build-pdf.sh`                                          | PDF render script (pandoc + typst).                                                                               |
@@ -61,8 +61,8 @@ npx -y @mermaid-js/mermaid-cli -i architecture.mmd -o architecture.png -s 3 -p p
 6. **Record** the video from `milestone-1-video-scenario.md`.
 7. **Upload** the PDF and the video to one Google Drive folder, link-sharing "anyone with the link
    can view".
-8. **Form.** Replace the placeholders in `milestone-1-form-answers.md`, work its checklist, paste
-   the four fields into the form and submit.
+8. **Form.** Open every link in Field 3 in a private window, then paste the four fields of
+   `milestone-1-form-answers.md` into the form and submit.
 
 ## Ground rules for this package
 
