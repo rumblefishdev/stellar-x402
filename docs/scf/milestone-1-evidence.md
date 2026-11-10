@@ -11,6 +11,9 @@ margin:
 > - **Team:** Rumble Fish
 > - **Milestone:** 1 (Tranche 1) — testnet facilitator, channel-account pool, Bazaar foundation,
 >   `upto` design and prototype, conformance gate
+> - **Video:** <https://drive.google.com/file/d/1868RzK71uJ3CTgybL05y-x5hnUqn54PA/view?usp=sharing>
+> - **Evidence package (Google Drive, the video and this document as a PDF):**
+>   <https://drive.google.com/drive/folders/1sY7eIOrIbzmoC2ocax6DRn3c08ljh6ne?usp=drive_link>
 >
 > This document is the written companion to the Milestone 1 submission video. It maps every
 > Tranche 1 deliverable to evidence a reviewer can check: commands against the live testnet

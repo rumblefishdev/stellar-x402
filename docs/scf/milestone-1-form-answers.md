@@ -45,19 +45,19 @@ Field 1's four deliverables quote the Tranche #1 line items of the Panel Review 
 > Not claimed in this tranche: mainnet, search, the MCP server, SDK helpers, `upto` in `/settle`
 > and its upstream merge, the developer guide and example integrations, and the security review.
 >
-> Evidence package: `<DRIVE_FOLDER_LINK>`
+> Evidence package: <https://drive.google.com/drive/folders/1sY7eIOrIbzmoC2ocax6DRn3c08ljh6ne?usp=drive_link>
 
 ---
 
 ## Field 2 — Deliverable Verification - Video
 
-> `<VIDEO_LINK>`
+> <https://drive.google.com/file/d/1868RzK71uJ3CTgybL05y-x5hnUqn54PA/view?usp=sharing>
 
 ---
 
 ## Field 3 — Additional Deliverable Verification
 
-> **Evidence package (Google Drive):** `<DRIVE_FOLDER_LINK>` — contains `milestone-1-evidence.pdf`
+> **Evidence package (Google Drive):** <https://drive.google.com/drive/folders/1sY7eIOrIbzmoC2ocax6DRn3c08ljh6ne?usp=drive_link> — contains `milestone-1-evidence.pdf`
 > (every deliverable with commands, outputs, settled transaction hashes and code links, the
 > architecture diagram and what is deliberately not claimed) and the demo video.
 >
@@ -106,7 +106,7 @@ Field 1's four deliverables quote the Tranche #1 line items of the Panel Review 
 - [ ] `architecture.png` rendered from `architecture.mmd`.
 - [ ] `milestone-1-evidence.md` exported: `./build-pdf.sh`.
 - [ ] PDF and video in one Google Drive folder, link-sharing "anyone with the link can view".
-- [ ] `<DRIVE_FOLDER_LINK>` and `<VIDEO_LINK>` replaced in this file.
+- [x] `<DRIVE_FOLDER_LINK>` and `<VIDEO_LINK>` replaced in this file.
 - [ ] Every link in Field 3 opens anonymously in an incognito window.
 - [ ] No secret in the PDF, the screenshots or any video frame (the script's secrets list).
 - [ ] English only across all four fields; no personal names.
