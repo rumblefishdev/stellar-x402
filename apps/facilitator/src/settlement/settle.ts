@@ -49,6 +49,7 @@ import {
 import {
   PAYER_AUTH_REASON,
   UNSUPPORTED_CREDENTIAL_REASON,
+  UpstreamTimeoutError,
   payerExpiration,
   payerNonce,
   type Check,
@@ -962,6 +963,11 @@ export function createSettler(deps: SettlerDeps): Settle & {
       checked = await bounded(deps.check(payload, requirements), left());
     } catch (error) {
       if (error instanceof OutOfTimeError) return unclaimed();
+      // An RPC that gave no answer judged nothing, as `/verify`'s 503 says: nothing is claimed, so
+      // the same payment may be sent again as it is.
+      if (error instanceof UpstreamTimeoutError || error instanceof RpcUnavailableError) {
+        return { ...untouched, response: failure(SETTLE_REASONS.rpcUnavailable, undefined) };
+      }
       throw error;
     }
     const { response: verdict, verified } = checked;

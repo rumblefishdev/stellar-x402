@@ -103,7 +103,7 @@ aggregates an array as samples is unverified: verify it at the first deploy.
 From the off-server check, every 5 minutes, so they fire with the server down. Built in #114. The
 balance alarms and the check's health are the `watch` group, on once #115's Lambda publishes;
 `account-state`, `account-effects` and `backup-secret-read` are `watchSecurity`, on once their
-sections do (decision 68).
+sections do (decision 68), built by task 0127 (decision 71).
 
 | Alarm | Signal | Shape | Fires when | Missing data |
 | --- | --- | --- | --- | --- |
@@ -119,6 +119,21 @@ dimensions would cost about $15 a month at 50 channels, so we accept this. Root 
 hold either in ALARM the same way with a forged point every 15 minutes, so #115's check also posts
 each finding to the topic itself, one message per finding; the two alarms stay as the backstop for
 a check that can't publish (decision 64).
+
+## Protocol
+
+From the off-server check's protocol section, every 5 minutes, for each network in
+`watch.protocol` (testnet and mainnet), served or not, so an upgrade is seen before it reaches a
+network we serve. Each alarm has its own threshold per network in the infra config: `expected`,
+the protocol we have checked, and `supported`, the highest Core version we have checked the SDK
+and the RPC against, never below `expected`. Each is raised
+in a PR once acted on, so each re-arms for the next version on its own. In the `protocol` group
+(decision 70).
+
+| Alarm | Signal | Shape | Fires when | Missing data |
+| --- | --- | --- | --- | --- |
+| `protocol-changed` | `protocol_version` | Level, `Maximum`, 2 of 2 five-minute periods | Above `expected`: the network upgraded. On 2026-11-03 testnet's move to 30 left an older SDK unable to read ledgers, found only by chance | Ignore: `watch-errors`, `watch-no-invocations` |
+| `protocol-upgrade-coming` | `protocol_supported_version` | Level, `Maximum`, 2 of 2 five-minute periods | The Stellar Core behind the network's Horizon (SDF's fleet) supports a version above `supported`: the validators can vote the upgrade once enough of them run it. On 2026-11-06 mainnet ran 29 with Core supporting 30; `supported` is 30 since 2026-11-09, the version testnet runs. Two periods, since Horizon nodes behind the balancer differ during a rolling upgrade | As above |
 
 ## Settlement
 
@@ -149,9 +164,9 @@ a check that can't publish (decision 64).
 
 | Alarm | Signal | Shape | Fires when | Missing data |
 | --- | --- | --- | --- | --- |
-| `disk` | `disk_used_percent`, named mounts | Level, `Maximum`, 3 of 3 five-minute periods | Measure: read the first numbers against 80% used before it goes on. To our channel: the server's base setup is Stan's, and our WAL and logs are what fills it. Its description names the Prices API's `prices-<env>-ch-disk-free` on the same host's ClickHouse volume (decision 20) | Ignore: `telemetry-silent` |
-| `memory` | `mem_used_percent` | Level | Measure: after a week of data | As above |
-| `audit-disk` | `disk_used_percent`, OpenBao's audit volume | Level, `Maximum`, 3 of 3 five-minute periods | 80% used | As above |
+| `disk` | `disk_used_percent`, named mounts | Level, `Maximum`, 3 of 3 five-minute periods | Over 80% (decision 73): the warning before `audit-disk`, on the same mount. To our channel: the server's base setup is Stan's, and our WAL and logs are what fills it. Its description names the Prices API's `prices-<env>-ch-disk-free` on the same host's ClickHouse volume (decision 20) | Ignore: `telemetry-silent` |
+| `memory` | `mem_used_percent` | Level, `Minimum`, 3 of 3 five-minute periods | Over 90% (decision 72) | As above |
+| `audit-disk` | `disk_used_percent`, OpenBao's audit volume | Level, `Maximum`, 3 of 3 five-minute periods | 90% used (decision 73, ADR 0013 amended) | As above |
 | `openbao-down` | `openbao_up` | Level, `Minimum`, 3 of 3 one-minute periods | Down, sealed, or its check failing, for 3 minutes | Ignore: `probe-silent` |
 | `wal-failing` | `wal_failing` | Level, `Maximum`, 3 of 3 one-minute periods | `last_failed_time` past `last_archived_time`, nothing ever archived, or the check failing | As above |
 | `wal-stale` | `wal_last_archived_age_seconds` | Level, `Minimum`, 3 of 3 one-minute periods | The last archived segment older than 10 minutes | As above |
@@ -166,6 +181,7 @@ A failed host check, or a job that never ran, writes a value past its threshold
 ([G-metrics](G-metrics.md#host-namespace-x402-host)). So `wal-failing`, `wal-stale` and
 `backup-age` are a group of their own, `backups`, and `snapshot-age` is `snapshots`: their jobs come
 with 0026, and in `host` they would keep the probe's other alarms off until then (decision 40).
+0026 turns each group on once its job runs (decision 71).
 
 ## Cost, silence and delivery
 
@@ -223,5 +239,3 @@ fields from it, and the weekly fee review needs a week of it.
 - The `channel-held` alarm, until 0089's PR.
 - An external dead-man's switch for a host outside AWS, which the sibling projects recommend:
   decide before mainnet, with 0038.
-- A watch for a coming protocol upgrade, which the explorer has after a 16-hour stall at one: it
-  reads the validators' votes, not a metric we have. Decide before mainnet, with 0038 (decision 66).

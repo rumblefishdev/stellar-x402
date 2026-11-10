@@ -245,6 +245,13 @@ facilitator serves, then restarts `x402@production` on the new image and waits u
 `sudo tail -F /var/log/x402/production/deploy.log`; `journalctl -u x402-deploy@production` has only
 its start and end.
 
+A deploy that lowers `SETTLE_BUDGET_MS` makes the new process close the old process's live claims
+early. A sweep closes a claim with no hash at its start plus its own budget plus 5 s, and a repeat
+at its start plus the budget, each with its own process's budget. Those buyers get
+`settle_exact_stellar_interrupted` with `extra.retryable`, and repeating the same payment settles
+it. Expect one round of such answers. No money moves for a closed claim: the store refuses its
+hash.
+
 ## Rollback
 
 - **Automatic:** a new image that isn't `ready`, `listed` and `signer` ok in 120 s is replaced by
@@ -352,7 +359,9 @@ the deploy and the watchdog reset that count before their own restarts. After fi
 A crash after `ready` in cycles of a minute or more never reaches that limit, so every end of
 `x402@production` but a success counts `facilitator_failures_total`, which fires
 `facilitator-failed`: a crash, a failed start, a drain cut short, a `dockerd` crash, and the
-watchdog's kill of a hung process, which fires `watchdog-restart` beside it. The line in
+watchdog's kill of a hung process, which fires `watchdog-restart` beside it. A planned stop (a
+deploy, a drain, `systemctl stop`) is a success: Compose's 130 after the stop signal is listed in
+the unit's `SuccessExitStatus`. The line in
 `/var/log/x402/host/metrics.log` says how it ended (`result`, `exit_code`, `exit_status`), and
 the reason is at the end of `facilitator.log` or `facilitator.err.log` just before it.
 

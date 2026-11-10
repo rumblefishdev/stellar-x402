@@ -32,8 +32,11 @@ export type ValidationResult =
       /** A template was sent and discarded (counted in metrics). */
       routeTemplateIgnored: boolean;
     }
-  /** `detail` is for logs only and never goes into the header. */
-  | { ok: false; reason: BazaarRejectReason; detail?: string };
+  /**
+   * `detail` is for logs only and never goes into the header. `bytes`: the size of a field over a
+   * byte limit, for the attempt's record.
+   */
+  | { ok: false; reason: BazaarRejectReason; detail?: string; bytes?: number };
 
 export interface ValidateOptions {
   /**
@@ -59,11 +62,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function reject(reason: BazaarRejectReason, detail?: string): ValidationResult {
-  return { ok: false, reason, detail };
+function reject(reason: BazaarRejectReason, detail?: string, bytes?: number): ValidationResult {
+  return { ok: false, reason, detail, ...(bytes === undefined ? {} : { bytes }) };
 }
 
-function serializedBytes(value: unknown): number | undefined {
+/** The size of `value` as JSON, in bytes; `undefined` when it can't be serialized (too deep). */
+export function serializedBytes(value: unknown): number | undefined {
   try {
     return new TextEncoder().encode(JSON.stringify(value)).length;
   } catch {
@@ -123,7 +127,8 @@ function run(
 
   // 3. Size, before any walk. A block too deep to serialize is too large as well.
   const bytes = serializedBytes(raw);
-  if (bytes === undefined || bytes > LIMITS.extensionBytes) return reject("too_large", "extension");
+  if (bytes === undefined || bytes > LIMITS.extensionBytes)
+    return reject("too_large", "extension", bytes);
 
   // 4. Shape: upstream's trusted-shape check, then ours.
   const spec = validateDiscoveryExtensionSpec(raw);
@@ -152,6 +157,11 @@ function run(
     resource.description.length > LIMITS.descriptionChars
   ) {
     return reject("too_large", "description");
+  }
+  // The paid offer is one of the seller's: the listing would carry it, so the offer limit holds.
+  const extraBytes = serializedBytes(requirements.extra ?? {});
+  if (extraBytes === undefined || extraBytes > LIMITS.offerExtraBytes) {
+    return reject("too_large", "requirements.extra", extraBytes);
   }
   // The extension schema and mcp `inputSchema`. http `body`, `queryParams` and `pathParams` are
   // example values (their schemas sit in `raw.schema`), bounded by the size cap only.

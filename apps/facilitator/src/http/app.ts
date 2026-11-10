@@ -237,8 +237,9 @@ export function createApp({
     });
     res.json(response);
   });
-  // Like `/verify`: any settle outcome is a 200 with an x402 body (AD-6). A thrown error, such as
-  // upstream verify failing or the store down before the claim, is a 500.
+  // Like `/verify`: any settle outcome is a 200 with an x402 body (AD-6), an RPC that gave the checks
+  // no answer included. A thrown error, such as upstream's `unexpected_verify_error` or the store
+  // down before the claim, is a 500.
   app.post(
     "/settle",
     leased,

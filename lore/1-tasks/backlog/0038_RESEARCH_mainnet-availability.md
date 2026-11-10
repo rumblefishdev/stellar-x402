@@ -4,7 +4,7 @@ title: "Decide the mainnet availability setup on the Hetzner server"
 type: RESEARCH
 status: backlog
 related_adr: ["0011"]
-related_tasks: ["0014", "0025", "0026", "0027", "0039", "0077"]
+related_tasks: ["0014", "0025", "0026", "0027", "0039", "0077", "0126"]
 tags: [facilitator, mainnet, availability, deploy, priority-low, effort-medium, platform]
 links:
   - ../../../docs/adr/0011-facilitator-hosting.md
@@ -37,6 +37,10 @@ history:
     status: backlog
     who: stkrolikiewicz
     note: "0077: one facilitator for both networks in a production environment. Deploy safety once mainnet joins (staging or stricter rules), the memory limit and the shared uptime check are questions here; the mainnet tunnel and the digest check in a mainnet deploy.sh are gone."
+  - date: "2026-11-06"
+    status: backlog
+    who: karolkow
+    note: "Names the missing next step: a task that brings mainnet up once this decides the setup."
 ---
 
 # Decide the mainnet availability setup on the Hetzner server
@@ -83,7 +87,9 @@ remove, and how deploys stay safe once every one of them reaches mainnet.
   channel pools; from Oskar's review of #75, one uptime check, the 99% figure, the zone's rate
   limit and its analytics cover both networks at once; and, from his review of #79, one process
   couples them: the watchdog's 10 s restart, a crash and every deploy cut both networks'
-  submissions in flight, and rotating one network's key stops both.
+  submissions in flight, and rotating one network's key stops both. From ADR 0013 (0077's PR B,
+  Oskar's review of #93): testnet's code paths and switches run beside mainnet's key; decide what
+  keeps a testnet-only switch away from mainnet.
 - **From 0039 (PR #24 review), to settle before mainnet:**
   - a Hetzner Cloud VM of our own instead of the shared server: ADR 0011's Alternatives list
     what it would remove and what it costs (about €12–20 a month on testnet). Testnet accepts the
@@ -103,6 +109,8 @@ remove, and how deploys stay safe once every one of them reaches mainnet.
   - extend the 0025 lease to channel sets;
   - run a deploy on testnet with two containers while payments flow.
 - Decide the hardware-fault plan and edge rate limiting.
+- Once decided, propose the task that brings mainnet up: its key, channel accounts, config and
+  first deploy. No task holds that step yet.
 
 ## Acceptance Criteria
 

@@ -3,13 +3,15 @@
 // lore 0027 notes/G-alarm-list.md, read from the note itself so the two can't drift apart).
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { type MetricName, seriesDims } from "@stellar-x402/metrics-catalog";
+import type { StellarNetwork } from "@stellar-x402/config";
+import { CATALOG, type MetricName, seriesDims } from "@stellar-x402/metrics-catalog";
 import { describe, expect, test } from "vitest";
 import { AWS_METRICS, type AlarmRecord } from "../src/lib/alarms/factory.js";
 import { INFRA_ROOT } from "../src/lib/names.js";
 import { allOn, ofType, production, type Resource, synth, type TemplateJson } from "./fixtures.js";
 
 const all = synth(allOn());
+const prod = synth(production());
 const records: readonly AlarmRecord[] = all.x.alarms.alarms.records;
 const alarms = ofType(all.alarms, "AWS::CloudWatch::Alarm");
 const byName = new Map(alarms.map((a) => [a.Properties["AlarmName"] as string, a.Properties]));
@@ -74,8 +76,8 @@ describe("every alarm reads a series the catalog declares (AD-1)", () => {
 });
 
 describe("the Alarms template", () => {
-  test("has every alarm of the list once per network, 82 with two networks", () => {
-    expect(alarms).toHaveLength(82);
+  test("has every alarm of the list once per network, 86 with two networks", () => {
+    expect(alarms).toHaveLength(86);
     expect(new Set(byName.keys()).size).toBe(alarms.length);
   });
 
@@ -171,6 +173,16 @@ describe("the Alarms template", () => {
     ]);
   });
 
+  test("puts the protocol alarms in their own group, one pair per network read (70)", () => {
+    const protocol = records.filter((r) => r.group === "protocol");
+    expect(protocol.map((r) => r.alarmName).sort()).toEqual([
+      "x402-production-protocol-changed-pubnet",
+      "x402-production-protocol-changed-testnet",
+      "x402-production-protocol-upgrade-coming-pubnet",
+      "x402-production-protocol-upgrade-coming-testnet",
+    ]);
+  });
+
   test("makes a network-scoped alarm once per configured network", () => {
     const perBase = new Map<string, string[]>();
     for (const r of records)
@@ -244,17 +256,76 @@ test("no stack imports from another (decision 27)", () => {
   }
 });
 
+test("every alarm production makes has its section in docs/monitoring.md, which its message names", () => {
+  // The Slack message ends "Runbook: docs/monitoring.md, <base>": a renamed alarm or a group
+  // turned on without its section would point at nothing.
+  const doc = readFileSync(join(INFRA_ROOT, "..", "docs", "monitoring.md"), "utf8");
+  const sections = new Set([...doc.matchAll(/^### (\S+)$/gm)].map((m) => m[1]));
+  const bases = new Set(prod.x.alarms.alarms.records.map((r) => r.base));
+  expect([...bases].filter((b) => !sections.has(b))).toEqual([]);
+});
+
+test("docs/monitoring.md lists every metric of the catalog and every alarm, on or off (0027 AC 17)", () => {
+  const doc = readFileSync(join(INFRA_ROOT, "..", "docs", "monitoring.md"), "utf8");
+  const rows = new Set([...doc.matchAll(/^\| `([^`]+)` +\|/gm)].map((m) => m[1]));
+  expect(CATALOG.map((m) => m.name).filter((n) => !rows.has(n))).toEqual([]);
+  // An alarm that is on has its section (the test above); one that is off, its row.
+  const sections = new Set([...doc.matchAll(/^### (\S+)$/gm)].map((m) => m[1]));
+  const bases = new Set(all.x.alarms.alarms.records.map((r) => r.base));
+  expect([...bases].filter((b) => !sections.has(b) && !rows.has(b))).toEqual([]);
+});
+
 test("production as committed makes only the groups that are on", () => {
-  const prod = synth(production());
   expect(prod.x.alarms.alarms.records.map((r) => r.alarmName).sort()).toEqual([
+    "x402-production-audit-disk",
     "x402-production-balance-critical-testnet",
     "x402-production-balance-low-testnet",
+    "x402-production-balance-stale-testnet",
+    "x402-production-breaker-opened-testnet-asset",
+    "x402-production-breaker-opened-testnet-pay-to",
+    "x402-production-breaker-opened-testnet-payer",
+    "x402-production-budget-nearing-testnet",
+    "x402-production-certificate",
+    "x402-production-channel-quarantined-testnet",
+    "x402-production-commit-unmatched-testnet",
+    "x402-production-credentials-stale",
+    "x402-production-disk-root",
     "x402-production-emf-parsing",
     "x402-production-emf-validation",
+    "x402-production-facilitator-failed",
+    "x402-production-facilitator-silent-testnet",
+    "x402-production-failure-ours-testnet",
+    "x402-production-gauges-silent-testnet",
+    "x402-production-history-gone-testnet",
+    "x402-production-hook-failures-testnet",
+    "x402-production-http-500",
+    "x402-production-landed-after-expired-testnet",
+    "x402-production-log-volume-app",
+    "x402-production-log-volume-metrics",
+    "x402-production-memory",
+    "x402-production-openbao-down",
+    "x402-production-pending-testnet",
+    "x402-production-pool-health-testnet",
+    "x402-production-probe-silent",
+    "x402-production-protocol-changed-pubnet",
+    "x402-production-protocol-changed-testnet",
+    "x402-production-protocol-upgrade-coming-pubnet",
+    "x402-production-protocol-upgrade-coming-testnet",
+    "x402-production-queue-waiting-testnet",
+    "x402-production-refused-after-verify-testnet",
+    "x402-production-rpc-on-fallback-testnet",
+    "x402-production-rpc-stalled-testnet",
+    "x402-production-settlement-expired-testnet",
+    "x402-production-signer-failures-testnet",
+    "x402-production-store-outage-testnet",
+    "x402-production-submit-failed-testnet",
+    "x402-production-sweeps-stopped-testnet",
+    "x402-production-telemetry-silent",
     "x402-production-uptime",
     "x402-production-uptime-flapping",
     "x402-production-watch-errors",
     "x402-production-watch-no-invocations",
+    "x402-production-watchdog-restart",
   ]);
 });
 
@@ -312,7 +383,23 @@ const OP = {
  * "M of N", by hand: the list's "Fires when" column is prose, and `memory` and `log-volume` say only
  * "Level" (decision 34). Thresholds come from the config the template is built from.
  */
-const LEVEL: Record<string, readonly [keyof typeof OP, number, string, number, number, number]> = {
+/** A threshold set per network, from `watch.protocol` (decision 70). */
+const expectedProtocol = (network: StellarNetwork | undefined) =>
+  allOn().watch.protocol[network!]!.expected;
+const supportedProtocol = (network: StellarNetwork | undefined) =>
+  allOn().watch.protocol[network!]!.supported;
+
+const LEVEL: Record<
+  string,
+  readonly [
+    keyof typeof OP,
+    number | ((network: StellarNetwork | undefined) => number),
+    string,
+    number,
+    number,
+    number,
+  ]
+> = {
   uptime: ["<", 1, "Minimum", 60, t.uptimeFailingMinutes, t.uptimeFailingMinutes],
   "uptime-flapping": ["<", 1, "Minimum", 60, t.uptimeFlapFailingMinutes, t.uptimeFlapWindowMinutes],
   "rpc-stalled": [">", t.rpcStalledSeconds, "Maximum", 60, 5, 5],
@@ -339,6 +426,8 @@ const LEVEL: Record<string, readonly [keyof typeof OP, number, string, number, n
   "log-volume": [">", t.logVolumeBytesPerHour!, "Sum", 3600, 1, 1],
   "gauges-silent": [">=", 1, "SampleCount", 300, 3, 3],
   "watch-errors": [">=", 1, "Sum", 300, 2, 3],
+  "protocol-changed": [">", expectedProtocol, "Maximum", 300, 2, 2],
+  "protocol-upgrade-coming": [">", supportedProtocol, "Maximum", 300, 2, 2],
 };
 
 /** Each Event alarm's threshold other than 1, which the list writes as "at N or more". */
@@ -413,7 +502,13 @@ describe("each alarm matches its row in G-alarm-list", () => {
           statistic: statOf(p),
           period: periodOf(p),
           window: [p["DatapointsToAlarm"], p["EvaluationPeriods"]],
-        }).toEqual({ comparison: OP[op], threshold, statistic, period, window: [m, n] });
+        }).toEqual({
+          comparison: OP[op],
+          threshold: typeof threshold === "function" ? threshold(r.network) : threshold,
+          statistic,
+          period,
+          window: [m, n],
+        });
       } else {
         throw new Error(`${base}: shape "${row.shape}" not understood`);
       }

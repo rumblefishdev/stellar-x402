@@ -1,7 +1,7 @@
 import { lookup } from "node:dns";
 import { isIP, type LookupFunction } from "node:net";
 import ipaddr from "ipaddr.js";
-import { Agent, fetch as undiciFetch } from "undici";
+import { Agent, errors, fetch as undiciFetch } from "undici";
 
 /**
  * Why a seller request was refused or failed. `message` can reach the caller's own client as is (the
@@ -17,6 +17,12 @@ export class SellerFetchError extends Error {
     super(message);
   }
 }
+
+/**
+ * All of a seller's response headers, in bytes. Its terms travel base64-encoded in one header, so
+ * the largest listing we keep (16 KiB) takes about 21.4 KiB, plus the seller's other headers.
+ */
+const MAX_HEADER_BYTES = 24 * 1024;
 
 /** How requests to one seller are bounded. */
 export interface SellerLimits {
@@ -101,6 +107,7 @@ export function checkUrl(raw: string, allowInsecureLocal: boolean): URL {
  * the body arrives. `deadline` is the caller's, `AbortSignal.timeout(timeoutMs)` made once when its
  * work starts: it covers every request made through this fetch, so a request still running at
  * `timeoutMs`, or started after it, is cut off. Work between requests (a payment's signing) is not.
+ * A request's own `signal` ends it earlier: an MCP client closing its event stream.
  */
 export function guardedFetch(limits: SellerLimits, deadline: AbortSignal): typeof fetch {
   // Every name is checked where it is connected to. undici's own `maxResponseSize` is not used: it
@@ -110,7 +117,10 @@ export function guardedFetch(limits: SellerLimits, deadline: AbortSignal): typeo
     limits.allowInsecureLocal && isLoopback(hostname)
       ? lookup(hostname, options, callback)
       : publicOnlyLookup(hostname, options, callback);
-  const dispatcher = new Agent({ connect: { lookup: guardedLookup } });
+  const dispatcher = new Agent({
+    connect: { lookup: guardedLookup },
+    maxHeaderSize: MAX_HEADER_BYTES,
+  });
   return async (input, init) => {
     const request = new Request(input, init);
     // Every request made through this fetch passes here, so the guard holds whoever calls it.
@@ -122,12 +132,15 @@ export function guardedFetch(limits: SellerLimits, deadline: AbortSignal): typeo
         headers: [...request.headers],
         body: request.body ? await request.arrayBuffer() : undefined,
         redirect: "manual",
-        signal: deadline,
+        signal: AbortSignal.any([deadline, request.signal]),
         dispatcher,
       });
     } catch (error) {
       // A refusal from publicOnlyLookup comes back as the cause of undici's "fetch failed".
       if (error instanceof Error && error.cause instanceof SellerFetchError) throw error.cause;
+      if (error instanceof Error && error.cause instanceof errors.HeadersOverflowError) {
+        throw new SellerFetchError("response_too_large", "The seller's response is too large.");
+      }
       throw new SellerFetchError(
         "upstream_error",
         "The request to the seller failed.",

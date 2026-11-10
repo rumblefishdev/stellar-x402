@@ -58,6 +58,7 @@ import {
 } from "../src/settlement/settle.js";
 import {
   PAYER_AUTH_REASON,
+  UpstreamTimeoutError,
   createChecker,
   payerNonce,
   type Check,
@@ -1973,6 +1974,26 @@ describe("createSettler", () => {
       // Nothing is recorded, so the same payment can be sent again as it is.
       expect(await store.get(key)).toBeUndefined();
     });
+
+    it.each([
+      new UpstreamTimeoutError("upstream verify gave no answer within 10000 ms"),
+      new RpcUnavailableError("every RPC endpoint failed"),
+    ])(
+      "answers rpc_unavailable without claiming when the checks' RPC gave no answer: $name",
+      async (error) => {
+        const check: Check = async () => {
+          throw error;
+        };
+        const { settle, store, submit } = setup(landing(), { check });
+        expect((await settle(payload(), requirements)).response).toMatchObject({
+          success: false,
+          errorReason: SETTLE_REASONS.rpcUnavailable,
+        });
+        expect(submit).not.toHaveBeenCalled();
+        // Nothing is recorded, so the same payment can be sent again as it is.
+        expect(await store.get(key)).toBeUndefined();
+      },
+    );
 
     it("answers a timeout without claiming when the checks end just as the budget does", async () => {
       let time = 0;

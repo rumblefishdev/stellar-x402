@@ -99,7 +99,7 @@ graph TD
     - Upstream's Horizon read of the ledger close time has no URL of ours to fail over to. It falls back to upstream's default on an error. Upstream reads it after its RPC calls, so a Horizon that hangs takes the URL being tried past its 10 s, which counts as that URL's timeout and moves the shared URL: `rpc_failover` with `by: "verify"` blames an RPC URL for Horizon's delay. With healthy RPCs the probe that the last URL's timeout starts brings calls back (`rpc_failback`), so while Horizon hangs the two lines repeat. Every URL times out, `rpc_exhausted` lists them, and the answer is a 500 with the `UpstreamTimeoutError` of the first URL tried, the active one, not always `RPC_URLS[0]`. Payments are unaffected: the pool's reads and sends answer on either URL.
   - **`/verify`** = upstream `verify()`, then address credentials only, the AD-5 channel check, the AD-6 one-payer-entry check, then the AD-22 validity check. The first rejection returns `isValid: false` with its reason.
     - Address credentials only: an auth entry with source-account credentials would authorize as the call's source, which the pool makes a channel. Upstream refuses it too (`…_unsupported_credential_type`); we check it again because the pin `~2.28.0` lets upstream patches float, and the pool refuses such a call as well.
-    - A network check runs first: a process serves one network, and upstream would verify another network's payload against that network's default RPC. A V0 envelope is rejected as malformed there too: upstream parses it, but can't assemble its simulation onto it.
+    - A network check runs first: the requirements' `network` picks that network's RPC endpoints, pool, key and store, and a network the process doesn't serve is `invalid_network`, since upstream would verify its payload against that network's default RPC. One process serves both networks (task 0077); until 0126's code, it serves the one in `NETWORK`. A V0 envelope is rejected as malformed there too: upstream parses it, but can't assemble its simulation onto it.
     - Upstream answers its own exceptions, such as a failed RPC call, with `unexpected_verify_error`. That is an error of ours, not a verdict on the payment, so `/verify` answers 500. So does every URL failing, by throwing, giving no answer within 10 s or answering `unexpected_verify_error`: upstream's RPC and Horizon clients have no timeout.
     - A request whose `amount` isn't a whole number is a 400: upstream's `BigInt(amount)` would throw, which would be a 500.
     - Upstream's `payer` passes on only as a string. Upstream reads it from the client's `from` before any signature check.
@@ -157,7 +157,7 @@ graph TD
 - **Rule:**
   - All state goes through four interfaces defined in `apps/facilitator`: `SettlementStore`, `CatalogStore`, `RateLimitStore` and `SpendStore`.
   - Concrete adapters live in `apps/facilitator/src/adapters/`; tests run them on PostgreSQL, a schema per test file (task 0064).
-  - The backing store is one PostgreSQL database per network, in a container on the facilitator's server ([ADR 0012](../adr/0012-facilitator-state-store.md), task 0013). It must support:
+  - The backing store is one PostgreSQL database per network, in a container on the facilitator's server ([ADR 0012](../adr/0012-facilitator-state-store.md), task 0013). The process opens a store per network it serves, beside that network's pool (task 0077). It must support:
     - the atomic claim (AD-6)
     - lookup by any of a settlement's hashes (AD-16)
     - the channel lease (AD-17)
@@ -215,7 +215,7 @@ graph TD
   - **Key.** Each network has one facilitator key. It signs for the channels and pays fee bumps, and it reaches the pool only as a `TransactionSigner`, the OpenBao Transit signer ([ADR 0013](../adr/0013-facilitator-key-custody.md), task 0036).
   - **Config.** The Transit key, its version and the fee account's address (ADR 0013), plus `CHANNELS` (addresses, never secrets).
   - **Startup check.** The service refuses to start unless every channel has its master key weight at 0 and the facilitator key as its only signer (`checkChannel`).
-  - **Separation.** Testnet and mainnet never share a key or a channel.
+  - **Separation.** Testnet and mainnet never share a key or a channel. They share the facilitator process and OpenBao, but each network has its own key, Transit policy, OpenBao socket, channels, RPC endpoints and database ([ADR 0011](../adr/0011-facilitator-hosting.md), [ADR 0013](../adr/0013-facilitator-key-custody.md), task 0077).
 
 ### AD-13: Wire protocol is x402 v2 only [ADOPTED]
 
@@ -224,9 +224,9 @@ graph TD
 - **Rule:**
   - Request and response bodies are `@x402/core` v2 types.
   - **`/supported`** lists:
-    - `kinds`: `exact` on `stellar:testnet` with `extra.areFeesSponsored: true`
+    - `kinds`: `exact` with `extra.areFeesSponsored: true` on each network served; in T1 that is `stellar:testnet`
     - `extensions`: `bazaar`
-    - `signers`: the facilitator key's address only, never the channels
+    - `signers`: under `stellar:*`, the facilitator key of each network served, never the channels
   - `upto` is not advertised until its `/settle` wiring exists (post-T1).
 
 ### AD-14: One upstream version
@@ -271,10 +271,10 @@ graph TD
 - **Binds:** deployment, startup, shutdown
 - **Prevents:** two processes using one channel's sequence numbers, for example during a rolling deploy.
 - **Rule:**
-  - **Lease.** At startup a process takes an exclusive lease on its network's channel set through the store and keeps renewing it. Without the lease it doesn't serve `/settle`.
+  - **Lease.** At startup a process takes an exclusive lease on the channel set of each network it serves, through that network's store, and keeps renewing it. Without a network's lease it doesn't serve `/settle` for that network.
   - **Fencing.** Every acquire draws a new token; a hash is stored, and so sent, only under the lease's current token (task 0071). A holder that lost the lease while frozen sends nothing new, except an envelope already stored and checked when it froze, one per call in flight: the send loop has no lease check, so it resends that envelope until its bound, under one hash.
-  - **Deploys.** They stop the old process before the new one takes the lease.
-  - **Shutdown.** The process stops accepting `/settle`, waits until every in-flight submission is final or recorded as pending, then releases the lease.
+  - **Deploys.** They stop the old process before the new one takes the leases.
+  - **Shutdown.** The process stops accepting `/settle`, waits until every in-flight submission is final or recorded as pending, then releases its leases.
 
 ### AD-18: Spend budgets contain fee abuse
 
@@ -284,7 +284,7 @@ graph TD
   - **Payer proof.** `/settle` refuses a settlement whose simulation didn't use the payer's auth entry (its nonce key isn't in the read-write footprint), so the payer every budget is keyed by signed the payment.
   - **One at a time.** At most one settlement per (network, payer, asset) is in flight; another waits within the settle budget, then gets `settle_exact_stellar_payer_busy`, retryable with the same payment.
   - **Order.** In the `beforeSubmit` hook: the fee account's balance floor, then the breakers, then the budgets.
-  - **Budgets.** `/settle` reserves the fee ceiling against, narrowest first: the payer and the `payTo` (each one scope for the known assets, one per other asset), the asset (a high budget for a known asset, USDC; a low one for any other), `tier:other` (every other asset together) and a global budget. All or none.
+  - **Budgets.** `/settle` reserves the fee ceiling against the payment's network's budgets, kept in that network's store, so they count only the fees its own fee account pays (task 0077). Narrowest first: the payer and the `payTo` (each one scope for the known assets, one per other asset), the asset (a high budget for a known asset, USDC; a low one for any other), `tier:other` (every other asset together) and a global budget. All or none.
   - **Over budget.** Returns `success: false` with a reason naming the narrowest full budget, and submits nothing.
   - **Accounting.** When the record is final, the reservation is lowered to the fee charged, or released when nothing was charged. A release leaves a tombstone, so a reserve that arrives after it counts nothing. A store that doesn't answer refuses the settlement (fail closed).
   - **Windows.** A budget sums what was reserved or paid in its rolling window, exact to the
@@ -315,7 +315,7 @@ graph TD
     - Types come from `@x402/extensions` (bazaar). `packages/bazaar` holds only a pure validator and normalizer.
     - The validator accepts both `http` and `mcp` input types.
     - Required fields that are malformed reject the listing. Optional fields that are malformed (`serviceName`, `tags`, `iconUrl`) are dropped.
-  - **`iconUrl`.** It must be absolute https, with no IP literals and no loopback, private or special-use hosts. The facilitator never fetches any seller-supplied URL in T1.
+  - **`iconUrl`.** It must be absolute https, with no IP literals and no loopback, private or special-use hosts. The facilitator calls a seller URL only to read a listing from the seller's own 402, through the `packages/seller-fetch` guard ([ADR 0008](../adr/0008-bazaar-catalog-integrity.md), task 0063).
   - **Resource URLs.** A scheme allowlist by listing type (`http`: `https`, `http`; `mcp`: also `mcp`) and a DNS-style name for an `mcp:` host; SSRF is checked by whoever fetches them (task 0053, ADR 0008). On every network, only `http(s)` with a public host is listed: IP literals, loopback, private, special-use and single-label hosts and `mcp:` URLs are refused as `resource_not_public`, and the payment settles as usual (task 0054). `CATALOG_LIST_LOCAL=true`, testnet only, lists them for local runs and the e2e gate. An empty `description` or `mimeType` counts as absent.
   - **Catalog key.** It is `network + payTo + method + normalized resource URL` (with `routeTemplate` applied).
   - **Upserts.** They are idempotent and update `lastUpdated`.
@@ -397,11 +397,11 @@ graph LR
     server --> proxy[conformance/external-proxy]
   end
   proxy -- HTTPS --> api
-  subgraph svc[apps/facilitator: one process per network, host per ADR 0011]
+  subgraph svc[apps/facilitator: one process for both networks, host per ADR 0011]
     api[HTTP: /verify /settle /supported /discovery/resources] --> app[settlement module]
-    app --> pool[signer-pool SettlementSubmitter]
+    app --> pool[signer-pool SettlementSubmitter, one per network]
     app -. on success .-> catalog[bazaar validate + catalog]
-    app --> stores[(Settlement / Catalog / RateLimit / Spend stores, PostgreSQL per ADR 0012)]
+    app --> stores[(Settlement / Catalog / RateLimit / Spend stores, a PostgreSQL database per network per ADR 0012)]
     catalog --> stores
   end
   pool -- Soroban RPC --> chain[Stellar testnet]
@@ -486,7 +486,7 @@ The rationale and rejected alternatives for these ADs are in ADRs:
 - **Numeric budgets and limits** (AD-11, AD-18, AD-22): set in config during the T1 build and recorded with the facilitator task.
 - **`upto` settlement in `/settle`:** after T1 (task 0015).
 - **Bazaar search and ranking, MCP server, SDK helpers:** later tranches.
-- **Mainnet and its RPC provider:** later tranche, as a separate deployment per AD-12.
+- **Mainnet and its RPC provider:** later tranche, in the same facilitator process, with its own key, channels, RPC endpoints and database per AD-12 (task 0077).
 - **Runtime pool resizing and operations:** task 0011.
 - **Batch settlement (B2):** task 0008.
 - **Proposing the AD-4 reading upstream:** after T1; nothing is pushed to `x402-foundation/x402` in M1.

@@ -23,11 +23,21 @@ describe("envs/production.json", () => {
     expect(production().networks).toEqual(["stellar:testnet"]);
   });
 
-  test("has on only the groups whose series have data: EMF errors, uptime, the balance (26, 37)", () => {
+  test("has on only the groups whose series have data: EMF errors, uptime, the facilitator, the host, disk, memory, log volume, the balance, the protocol (26, 37, 72, 73)", () => {
     const on = Object.entries(production().alarmGroups)
       .filter(([, v]) => v)
       .map(([g]) => g);
-    expect(on).toEqual(["uptime", "telemetry", "watch"]);
+    expect(on).toEqual([
+      "uptime",
+      "telemetry",
+      "facilitator",
+      "host",
+      "disk",
+      "memory",
+      "logVolume",
+      "watch",
+      "protocol",
+    ]);
   });
 
   test("names the fee account /supported shows as the signer", () => {
@@ -39,6 +49,18 @@ describe("envs/production.json", () => {
   test("reads testnet's fee account through SDF's public RPC", () => {
     expect(production().watch.rpcUrls).toEqual({
       "stellar:testnet": "https://soroban-testnet.stellar.org",
+    });
+  });
+
+  test("reads the protocol of testnet and mainnet, at the versions of 2026-11-09 (decision 70)", () => {
+    expect(production().watch.protocol).toEqual({
+      "stellar:testnet": {
+        horizonUrl: "https://horizon-testnet.stellar.org",
+        expected: 30,
+        supported: 30,
+      },
+      // Mainnet runs 29 and its Core supports 30, which testnet runs and 0111's SDK reads.
+      "stellar:pubnet": { horizonUrl: "https://horizon.stellar.org", expected: 29, supported: 30 },
     });
   });
 
@@ -108,8 +130,22 @@ describe("validateConfig", () => {
       (c) => ((m(c).thresholds as Record<string, number>)["cpu"] = 1),
       /cpu is not a threshold/,
     ],
-    ["disk on with no threshold", (c) => (m(c).alarmGroups.disk = true), /alarmGroups.disk/],
-    ["memory on with no threshold", (c) => (m(c).alarmGroups.memory = true), /alarmGroups.memory/],
+    [
+      "disk on with no threshold",
+      (c) => {
+        m(c).alarmGroups.disk = true;
+        m(c).thresholds.diskUsedPercent = null;
+      },
+      /alarmGroups.disk/,
+    ],
+    [
+      "memory on with no threshold",
+      (c) => {
+        m(c).alarmGroups.memory = true;
+        m(c).thresholds.memoryUsedPercent = null;
+      },
+      /alarmGroups.memory/,
+    ],
     [
       "log volume on with no threshold",
       (c) => {
@@ -128,7 +164,10 @@ describe("validateConfig", () => {
     ],
     [
       "host on without the log-volume ceiling",
-      (c) => (m(c).alarmGroups.host = true),
+      (c) => {
+        m(c).alarmGroups.host = true;
+        m(c).alarmGroups.logVolume = false;
+      },
       /alarmGroups.host needs alarmGroups.logVolume/,
     ],
     [
@@ -173,6 +212,42 @@ describe("validateConfig", () => {
       "an RPC with no dotted host",
       (c) => ((m(c).watch.rpcUrls as Record<string, string>)["stellar:testnet"] = "https://x"),
       /watch.rpcUrls.stellar:testnet/,
+    ],
+    [
+      "a protocol version that isn't an integer",
+      (c) => ((m(c).watch.protocol["stellar:testnet"] as { expected: number }).expected = 30.5),
+      /watch.protocol.stellar:testnet.expected/,
+    ],
+    [
+      "a supported version below the running one",
+      (c) => ((m(c).watch.protocol["stellar:testnet"] as { supported: number }).supported = 29),
+      /watch.protocol.stellar:testnet.supported must be at least expected/,
+    ],
+    [
+      "a plain-http Horizon",
+      (c) =>
+        ((m(c).watch.protocol["stellar:pubnet"] as { horizonUrl: string }).horizonUrl =
+          "http://horizon.stellar.org"),
+      /watch.protocol.stellar:pubnet.horizonUrl/,
+    ],
+    [
+      "a protocol entry for a network that doesn't exist",
+      (c) => {
+        (m(c).watch.protocol as Record<string, unknown>)["stellar:mainnet"] = {
+          horizonUrl: "https://horizon.stellar.org",
+          expected: 29,
+          supported: 30,
+        };
+      },
+      /watch.protocol/,
+    ],
+    [
+      "the protocol group with no network to read",
+      (c) => {
+        m(c).watch.protocol = {};
+        m(c).alarmGroups.protocol = true;
+      },
+      /alarmGroups.protocol needs watch.protocol/,
     ],
     [
       "an RPC for a network not served",

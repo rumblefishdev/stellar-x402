@@ -1,15 +1,14 @@
 # ADR 0013: Keep the facilitator key in OpenBao Transit on the facilitator's own server
 
-- Status: accepted; socket mounting revised by [ADR 0011](0011-facilitator-hosting.md) for task
-  0077: one facilitator mounts every network's socket. The reasons for a socket per facilitator
-  are weighed in 0077's PR B.
+- Status: accepted
 - Date: 2026-10-19
 - Amended: 2026-10-20 (where the unseal backup lives, the restore drill, the fee float and
   top-ups; [S-key-custody-decisions](../../lore/1-tasks/archive/0047_RESEARCH_hetzner-key-custody/notes/S-key-custody-decisions.md#backup-and-top-ups-2026-10-20));
   2026-10-21 (the AWS logging role and the other secrets, to match ADR 0011's Hetzner revision;
   a socket per network, OpenBao's own unit and limits, from the PR #24 review); 2026-10-22 (the
   OpenBao key's own account, the theft alarm, 1-hour tokens, the admin socket and the restore
-  path, from the PR #48 review); 2026-11-02 (admin on a loopback listener inside the container,
+  path, from the PR #48 review); 2026-10-29 (task 0077: one facilitator holds every network's
+  socket, each still its own); 2026-11-02 (admin on a loopback listener inside the container,
   which Raft's cluster address needs, no move of testnet to the OpenBao key, since nothing ran on
   another key, the backup JSON over stdin, and AppRole's lockout off, task 0026); 2026-11-02 (the
   theft alarm reads the accounts instead of our hashes, a second balance alarm, and an alarm on
@@ -19,7 +18,10 @@
   Box account's own directory, and the Storage Box's own snapshots, restored by a copy and never
   a rollback, from Stan's setup of the box in task 0026); 2026-11-05 (Borg in repokey mode with
   its key exported to the secret, changed with the passphrase, and the drill restoring through
-  a local copy, task 0026)
+  a local copy, task 0026); 2026-11-09 (the audit log disk alarm at 90%, after the server's disk
+  alarm at 80%: on the server the audit volume shares `/` with everything else, so the two
+  thresholds give a warning and then a last call instead of one doubled message; task 0027
+  decision 73)
 - Supersedes: the key custody part of [ADR 0011](0011-facilitator-hosting.md) ("Keys, secrets and
   access": the SSM parameter for `FACILITATOR_SECRET` and the mainnet KMS key)
 
@@ -43,14 +45,20 @@
 
 - **OpenBao's Transit engine holds the key.** It is generated inside OpenBao, `type=ed25519`,
   `exportable=false`, `allow_plaintext_backup=false`. The raw key never exists outside OpenBao.
-- **OpenBao runs in its own container** on the facilitator's server, beside the facilitators'
-  containers, under Docker Compose, pinned by digest, with a 256 MiB memory limit and half a CPU.
+- **OpenBao runs in its own container** on the facilitator's server, beside the facilitator's
+  container, under Docker Compose, pinned by digest, with a 256 MiB memory limit and half a CPU.
   Its own systemd unit (`x402-openbao.service`, ADR 0011) starts it and passes in the unseal
   credential. No container gets the Docker socket.
 - **One OpenBao per server.** Testnet and mainnet each get their own Transit key, policy, AppRole
-  and socket, so a break-in on one network's facilitator gets only that network's token and can't
-  reach the other network's socket. It still shares the process, so a flood from one network
-  slows the other's signing; that is accepted at these stakes (Rationale).
+  and socket. It still shares the process, so a flood from one network slows the other's
+  signing; that is accepted at these stakes (Rationale).
+- **One facilitator holds every network's socket** (task 0077, ADR 0011): it serves both
+  networks, so it mounts both sockets and gets both AppRoles. A break-in on the facilitator signs
+  for both networks; before 0077, a facilitator per network kept a testnet break-in away from
+  mainnet's key. The separate keys, policies, AppRoles and sockets stay: a leaked token or secret
+  ID still signs for one network only, the audit log still shows which network signed, a
+  rotation or revocation still touches one network, and a later split into a process per network
+  needs no change in OpenBao.
 - **The same setup on testnet and mainnet,** so testnet runs exactly what mainnet will.
 - **OpenBao does Transit signing only.** Other secrets, the database password and `RPC_URLS` (one
   credential file per version, ADR 0011), stay systemd credentials, so OpenBao is needed for
@@ -73,17 +81,17 @@
   rule keeps it free of exceptions: no tool of ours changes these accounts' signers, and such a
   change is theft. The one exception is the move off a suspected stolen key, below.
 - **A unix socket per network, and no network port.** OpenBao has one listener per network, each
-  on a socket in its own volume, mounted only into that network's facilitator, plus an admin
-  listener on loopback inside OpenBao's own container, which has no network: only root or the
-  `docker` group on the host reaches it, through `docker compose exec`. Raft takes its cluster
-  address only from a TCP listener: with sockets alone, `bao operator init` fails with "cluster
-  addresses not found". That listener serves the API too, so an admin socket beside it would only
-  keep `/sys/generate-root/*` off TCP, which buys almost nothing in a container with no network
-  (both tried on 2.7.2). Nothing on the network can reach either.
-- **AppRole login.** The role ID and secret ID come in as Compose `file:` secrets, decrypted by
-  the network's unit to a tmpfs (ADR 0011), never as environment variables. The token lives
-  1 hour (`token_ttl` and `token_max_ttl`), so a renewal can't stretch it; the signer logs in again
-  once less than 5 minutes are left instead of renewing it, and a login that fails ends that settlement. The secret ID doesn't expire. The policy allows only
+  on a socket in its own volume, mounted into the facilitator, plus an admin listener on loopback
+  inside OpenBao's own container, which has no network: only root or the `docker` group on the
+  host reaches it, through `docker compose exec`. Raft takes its cluster address only from a TCP
+  listener: with sockets alone, `bao operator init` fails with "cluster addresses not found". That
+  listener serves the API too, so an admin socket beside it would only keep `/sys/generate-root/*`
+  off TCP, which buys almost nothing in a container with no network (both tried on 2.7.2). Nothing
+  on the network can reach either.
+- **AppRole login.** Each network's role ID and secret ID come in as Compose `file:` secrets,
+  decrypted by the facilitator's unit to a tmpfs (ADR 0011), never as environment variables. The
+  token lives 1 hour (`token_ttl` and `token_max_ttl`), so a renewal can't stretch it; the signer
+  logs in again once less than 5 minutes are left instead of renewing it, and a login that fails ends that settlement. The secret ID doesn't expire. The policy allows only
   `transit/sign/<network key>`. A leaked token stops working within the hour; a leaked secret ID,
   or code running in the facilitator's container, signs until the secret ID is destroyed by hand
   (runbook). OpenBao's user lockout is off for AppRole: only the facilitator reaches its socket,
@@ -171,8 +179,9 @@
   with `bao write` inside the container. Only root or the `docker` group on the host reaches that
   listener, and both already reach the key. Admin is through SSH on the server, over that
   listener; no web UI, no remote admin.
-- **The audit log** goes to a file on its own volume, rotated, with an alarm at 80% disk: OpenBao
-  stops signing when it can't write it.
+- **The audit log** goes to a file on its own volume, rotated, with an alarm at 90% disk, after
+  the server's disk alarm at 80% (amended 2026-11-09): OpenBao stops signing when it can't write
+  it.
 - **Alarms** (0027):
   - OpenBao sealed or down, or signing failing;
   - **theft:** any signer or threshold change on the fee account or a channel, and any Horizon
@@ -193,7 +202,7 @@
     with the network, the balance, the address and the top-up step, from the same check;
   - a read of the backup secret, from the CloudTrail event history, which needs no trail. A drill
     fires it too;
-  - the audit log disk at 80%.
+  - the audit log disk at 90%, after the server's disk alarm at 80% (amended 2026-11-09).
 - **The fee float is 100 XLM, with the alarm at 25 XLM, and no upper limit.** That is about 24,000
   typical `exact` settlements (~41,200 stroops each, ADR 0003), and about 5 days to act after the
   alarm at 1,000 settlements a day, before 0024's floor stops settlement at 5 XLM. Testnet uses the same numbers for now.
@@ -236,6 +245,10 @@
   back.
 - **One mechanism on both networks** means testnet rehearses mainnet, unlike ADR 0011's SSM/KMS
   split.
+- **One facilitator for both networks is accepted at these stakes too** (0077). A break-in on it
+  reaches mainnet's float and reserves, as a break-in on a mainnet-only facilitator would. What is
+  new is that testnet's code paths and switches run in the process that holds mainnet's key.
+  0038 decides what keeps a testnet-only switch away from mainnet before mainnet joins.
 - **OpenBao over Vault:** the same API (the spike passed on both), MPL-2.0 rather than BSL, and its
   HSM and static seals are open source.
 
@@ -253,6 +266,10 @@
 - **A cold recovery signer (0048 as written):** limits the hot key to fees and allows recovery
   after a loss, but needs a cold key held offline. Declined for now.
 - **A hardware HSM:** not offered by Hetzner for dedicated servers.
+- **A facilitator per network, each mounting only its own socket:** this ADR until 2026-10-29.
+  Replaced by ADR 0011's one facilitator for both networks (tasks 0076, 0077).
+- **One socket and one AppRole for both networks:** one listener and one credential pair fewer,
+  but a leaked secret ID would sign for both networks and a rotation would touch both. Rejected.
 - **For the backup set:** a password manager vault held by two people, a paper copy in a safe,
   one holder only, or a Shamir split of the seal key. Rejected for the AWS account the other
   projects already run: one holder is a single point of failure, and a split is over-built at

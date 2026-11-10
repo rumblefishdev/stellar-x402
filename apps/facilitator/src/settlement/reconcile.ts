@@ -18,7 +18,7 @@ import type {
 } from "../ports/index.js";
 import { isFinalRecord, resultUpdate, type Records } from "./records.js";
 import { SETTLE_REASONS } from "./settle.js";
-import { authExpiration } from "./verify.js";
+import { payerExpiration } from "./verify.js";
 
 export interface ReconcilerDeps {
   network: StellarNetwork;
@@ -28,7 +28,11 @@ export interface ReconcilerDeps {
   records: Records;
   logger: Logger;
   metrics: NetworkMetrics;
-  /** `SETTLE_BUDGET_MS`: past it plus `MARGIN_MS`, no call adds a hash to a claim. */
+  /**
+   * `SETTLE_BUDGET_MS`: past it plus `MARGIN_MS`, the call that claimed has stopped signing for its
+   * claim. The time alone keeps no hash out: a write sent just before the budget can reach the
+   * store after it. What does is `addHash`'s state check, which refuses a closed record.
+   */
   budgetMs: number;
   now?: () => number;
 }
@@ -169,11 +173,17 @@ export function createReconciler(deps: ReconcilerDeps) {
     }
   };
 
-  /** The ledger bound of a hash stored without one (before 0005): the auth entry's expiry. */
+  /**
+   * The ledger bound of a hash stored without one: the payer's auth expiry, past which no envelope
+   * of this payment can land, ours or someone else's fee bump of it (0087).
+   */
   const fallbackLedger = (record: SettlementRecord): number | undefined => {
     try {
       const { transaction } = record.paymentPayload.payload as { transaction: string };
-      return authExpiration(new Transaction(transaction, getNetworkPassphrase(network)));
+      return payerExpiration(
+        new Transaction(transaction, getNetworkPassphrase(network)),
+        record.payer,
+      );
     } catch {
       return undefined;
     }

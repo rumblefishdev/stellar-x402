@@ -2,10 +2,10 @@
 id: "0077"
 title: "Run one facilitator service for both networks, the network chosen per request"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0011", "0012", "0013", "0004"]
-related_tasks: ["0076", "0026", "0027", "0036", "0038"]
+related_tasks: ["0076", "0026", "0027", "0036", "0038", "0126"]
 tags: [facilitator, deploy, architecture, priority-medium, effort-large, platform]
 links:
   - ../../../docs/adr/0011-facilitator-hosting.md
@@ -31,6 +31,20 @@ history:
     status: active
     who: stkrolikiewicz
     note: "Oskar's review of #79: Wants= instead of Requires= on the database units, x402-db-<network>@<environment>, secret files named per network, the database network's cost, ready per network left to PR C, one process's costs in 0038, and status notes in ADR 0012 and 0013."
+  - date: "2026-11-09"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      PR C, the code, split into 0126 for milestone 2: mainnet is out of T1
+      (docs/planning/m1-epics.md) and testnet runs on one network as today. 0077 closes with its
+      docs, PR A (#79) and PR B (#93).
+  - date: "2026-11-09"
+    status: completed
+    who: stkrolikiewicz
+    note: >
+      Closed after #93 merged: ADR 0011, 0004, 0012, 0013 and the spine describe one facilitator
+      for both networks (PR A #79, PR B #93), reviewed by Oskar; Marek's review not needed. The
+      code is 0126 (milestone 2). Docs only, no tests changed.
 ---
 
 # Run one facilitator service for both networks, the network chosen per request
@@ -42,7 +56,7 @@ one facilitator service, `facilitator`, for testnet and mainnet. The client name
 the request (`network` in the payment requirements: `stellar:testnet` or `stellar:pubnet`), and
 the facilitator settles through that network's channel pool, key and RPC endpoints. There is no
 testnet/mainnet service split; a staging/production split may come later. Today the docs and the
-code assume one process per network. This task reworks both.
+code assume one process per network. This task reworks the docs; the code is 0126.
 
 ## Context
 
@@ -78,29 +92,34 @@ code assume one process per network. This task reworks both.
 - **0038:** its premise (one container per network) changes.
 - **0027 (Oskar's note on #75):** one uptime check, the 99% figure, the zone's rate limits and its
   analytics cover both networks at once.
-- **Code:** `NETWORK` becomes the set of networks served; the channel pool, signer, RPC endpoints
-  and store are kept per network inside one process; `/supported` lists both.
+- **Code (moved to 0126):** `NETWORK` becomes the set of networks served; the channel pool,
+  signer, RPC endpoints and store are kept per network inside one process; `/supported` lists both.
 
 ## Plan
 
 - **PR A:** ADR 0011, 0026 and 0038, what 0026's deploy is built from.
 - **PR B:** the spine, ADR 0004, 0012 and 0013.
-- **PR C:** the code. Not needed for M1: testnet runs on one network as today.
+- **PR C:** the code, now task 0126 (milestone 2). Not needed for M1: mainnet is out of T1, and
+  testnet runs on one network as today.
 
 ## Open Questions
 
-- One process holding both networks' signing access: ADR 0011 states it (PR A); ADR 0013's
-  reasons for a socket per facilitator are weighed in PR B.
+Moved to 0126 with the code (ADR 0012 lists them): which database holds the catalog, which holds
+the IP rate limiter's counters, and what `ready` reports.
 
 ## Decided
 
 - **A database per network** (Stan, 2026-10-28). The process opens one store per network, beside
-  that network's pool, key and RPC endpoints, so the schema stays as it is: none of the 8 tables
-  in `apps/facilitator/src/adapters/postgres-schema.ts` records a network. A testnet reset wipes
-  only testnet's database, and backups, restores and migrations stay per network.
+  that network's pool, key and RPC endpoints, so the schema stays as it is: in
+  `apps/facilitator/src/adapters/postgres-schema.ts` `settlements`, `settlement_in_flight`,
+  `catalog` and `catalog_attempts` record the network, but `settlement_hashes`, `leases`,
+  `rate_limits` and the spend tables don't (corrected in PR B). A testnet reset
+  wipes only testnet's database, and backups, restores and migrations stay per network.
 - **One environment, `production`** (Stan, 2026-10-28), serving testnet now and mainnet later; a
   staging environment maybe later. Deploys go straight to production from `deploy/production`,
   with no promotion step; how deploys stay safe once mainnet joins is a question in 0038.
+- **The code is 0126, in milestone 2** (Stan, 2026-11-09): mainnet is out of T1, and testnet
+  runs on one network as today, so this task closes with its docs.
 
 ## Design Decisions
 
@@ -135,12 +154,49 @@ code assume one process per network. This task reworks both.
    `postgres-password.testnet`, the AppRole files), so mainnet's files sit beside testnet's in
    `/run/x402/production/` and nothing is renamed (Oskar's review of #79).
 9. **`ready` is today's one network's lease;** what readiness means with a lease per network is
-   decided with the code in PR C (Oskar's review of #79).
+   decided with the code in 0126 (Oskar's review of #79).
+10. **A lease per network** (PR B, spine AD-17): the process takes each served network's channel
+    lease through that network's store, and without a network's lease it doesn't serve `/settle`
+    for that network. What `ready` reports stays with 0126 (decision 9).
+11. **Spend budgets per network** (PR B, spine AD-18, ADR 0012): each network's budgets live in
+    its own store and count only the fees its own fee account pays, so the global budget is per
+    network.
+12. **The per-network keys, policies, AppRoles and sockets stay** (PR B, ADR 0013). One process
+    holds both, so a break-in on it signs for both networks; testnet's code paths now run beside
+    mainnet's key. The separate ones still keep a leaked token or secret ID, a rotation and the
+    audit log to one network, and keep a later split into a process per network free. One socket
+    and AppRole for both was rejected.
+13. **`/supported` per network served** (PR B, spine AD-13): an `exact` kind per network, and
+    under `stellar:*` each network's facilitator key, since upstream keys `signers` by CAIP
+    family.
 
 ## Acceptance Criteria
 
-- [ ] ADR 0011, 0012, 0013, 0004 and the spine describe one facilitator service for both networks
+- [x] ADR 0011, 0012, 0013, 0004 and the spine describe one facilitator service for both networks
+      (PR A: ADR 0011; PR B: the rest)
 - [x] 0026, 0027 and 0038 match (PR A; 0027 needed no change)
-- [ ] The facilitator serves `stellar:testnet` and `stellar:pubnet` from one process, each with its
-      own channel pool, key and RPC endpoints, and `/supported` lists both
-- [ ] Reviewed by Oskar and Marek
+- ~~The facilitator serves `stellar:testnet` and `stellar:pubnet` from one process, each with its
+  own channel pool, key and RPC endpoints, and `/supported` lists both~~ Moved to 0126, as its
+  first criterion.
+- [x] Reviewed by Oskar and Marek: Oskar reviewed both PRs (#79, #93); Marek's review was not
+      needed (Stan, 2026-11-09)
+
+## Implementation Notes
+
+- **PR A, #79** (merged 2026-10-29): ADR 0011's revision to one facilitator in a `production`
+  environment, 0026's build list and 0038's premise.
+- **PR B, #93** (merged 2026-11-09): the spine (AD-12, AD-13, AD-17, AD-18), ADR 0004's dispatch
+  by network, ADR 0012's database per network and ADR 0013's sockets per network, with Oskar's
+  review applied (`f6e5cf78`). Docs only; no code or tests changed.
+
+## Issues Encountered
+
+- **A task ID taken twice.** The code task was first numbered 0125, three minutes after #150 took
+  0125 for logging the pool events. It became 0126 (`6da32d82`), since #150's alarm texts already
+  cited 0125.
+
+## Future Work
+
+- [0126](../backlog/0126_FEATURE_serve-both-networks-from-one-process.md): the code, milestone 2.
+- [0038](../backlog/0038_RESEARCH_mainnet-availability.md): the mainnet questions this task
+  opened (decision 6).

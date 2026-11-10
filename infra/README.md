@@ -16,12 +16,12 @@ this code came from in the sibling projects is in
 No stack takes anything from another (decision 27): alarms find metrics, log groups and functions
 by name, so each one deploys alone.
 
-| Stack                       | What                                                                                                                                                                                                                        | Changes                         |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| `X402-production-Telemetry` | IAM Roles Anywhere trust anchor (the ClickHouse project's client CA), profile, the logging role, `/x402/production/app` and `/x402/production/metrics` (30 days, kept on a stack delete, not on a failed create's rollback) | Rarely: IAM on a shared account |
-| `X402-production-Alarms`    | SNS topic `x402-production-alarms`, Amazon Q Developer (Chatbot) to `#stellar-x402-bot`, the alarms of the groups that are on                                                                                               | Thresholds, groups going on     |
-| `X402-production-Uptime`    | `x402-production-uptime-probe`: reads `/health` every minute, publishes `ready` to `x402-watch`                                                                                                                             | The probe's code                |
-| `X402-production-Watch`     | `x402-production-watch`: every 5 minutes reads each network's fee account through RPC with `checkFacilitatorBalance` and publishes `spendable_stroops` to `x402-watch`; the theft and secret-read sections follow           | The check's code, the RPC URLs  |
+| Stack                       | What                                                                                                                                                                                                                                                                                                            | Changes                                    |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `X402-production-Telemetry` | IAM Roles Anywhere trust anchor (the ClickHouse project's client CA), profile, the logging role, `/x402/production/app` and `/x402/production/metrics` (30 days, kept on a stack delete, not on a failed create's rollback)                                                                                     | Rarely: IAM on a shared account            |
+| `X402-production-Alarms`    | SNS topic `x402-production-alarms`, Amazon Q Developer (Chatbot) to `#stellar-x402-bot`, the alarms of the groups that are on                                                                                                                                                                                   | Thresholds, groups going on                |
+| `X402-production-Uptime`    | `x402-production-uptime-probe`: reads `/health` every minute, publishes `ready` to `x402-watch`                                                                                                                                                                                                                 | The probe's code                           |
+| `X402-production-Watch`     | `x402-production-watch`: every 5 minutes reads each network's fee account through RPC with `checkFacilitatorBalance` and publishes `spendable_stroops`, and each network's protocol from Horizon (`protocol_version`, `protocol_supported_version`), to `x402-watch`; the theft and secret-read sections follow | The check's code, the RPC and Horizon URLs |
 
 The logging role trusts only `CN=x402-cloudwatch-agent-production` from that CA, and only on
 our trust anchor. It can only create streams in and write to the two log groups, and put metrics
@@ -76,7 +76,7 @@ make telemetry-arns             # what the server's credential helper is started
 ```
 
 Every deploy is agreed separately: the account is shared. On a fresh account or a rebuild,
-deploy Watch first, then `make check-series GROUP=watch`, then Alarms: `--all` may create the
+deploy Watch first, then `make check-series GROUP=watch` and `GROUP=protocol`, then Alarms: `--all` may create the
 alarms before the check has run, and `watch-no-invocations` pages on missing data.
 
 After a deliberate delete of the Telemetry stack, its log groups stay, and a new deploy fails on
@@ -94,24 +94,32 @@ is in `us-east-1`, `/aws/chatbot/x402-production-alarms`.
 A group in `envs/production.json`'s `alarmGroups` is either absent or on with its actions; no alarm
 exists with its actions off (decision 26).
 
-| Group           | Alarms                                                                                                                                         | On when                                                                                   |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `uptime`        | `uptime`, `uptime-flapping`                                                                                                                    | The probe's `ready` has data, a few minutes after the Uptime stack's deploy (decision 37) |
-| `telemetry`     | `emf-validation`, `emf-parsing`                                                                                                                | On                                                                                        |
-| `facilitator`   | Availability and Settlement, `facilitator-silent`, `gauges-silent`                                                                             | The facilitator's metric lines reach CloudWatch (#113)                                    |
-| `channelHeld`   | `channel-held`                                                                                                                                 | 0089 emits its gauge                                                                      |
-| `host`          | `openbao-down`, `certificate`, `credentials-stale`, `watchdog-restart`, `facilitator-failed`, `probe-silent`, `telemetry-silent`, `audit-disk` | #113's probe and agent run, after its restart window                                      |
-| `backups`       | `wal-failing`, `wal-stale`, `backup-age`                                                                                                       | pgBackRest archives WAL and has made a backup (0026; decision 40)                         |
-| `snapshots`     | `snapshot-age`                                                                                                                                 | OpenBao's daily snapshot has run (0026; decision 40)                                      |
-| `disk`          | `disk` per mount                                                                                                                               | A threshold read against the first numbers, `host.diskMounts` set                         |
-| `memory`        | `memory`                                                                                                                                       | A threshold after a week of data                                                          |
-| `logVolume`     | `log-volume` per log group                                                                                                                     | With `host` (#113), at a coarse 200 MB an hour until measured (decision 65)               |
-| `watch`         | `balance-low`, `balance-critical`, `watch-errors`, `watch-no-invocations`                                                                      | The Watch stack's Lambda publishes `spendable_stroops` (#115)                             |
-| `watchSecurity` | `account-state`, `account-effects`, `backup-secret-read`                                                                                       | The check's theft and secret-read sections publish (decision 68)                          |
+| Group           | Alarms                                                                                                                                         | On when                                                                                                 |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `uptime`        | `uptime`, `uptime-flapping`                                                                                                                    | The probe's `ready` has data, a few minutes after the Uptime stack's deploy (decision 37)               |
+| `telemetry`     | `emf-validation`, `emf-parsing`                                                                                                                | On                                                                                                      |
+| `facilitator`   | Availability and Settlement, `facilitator-silent`, `gauges-silent`                                                                             | The facilitator's metric lines reach CloudWatch (#113)                                                  |
+| `channelHeld`   | `channel-held`                                                                                                                                 | 0089 emits its gauge                                                                                    |
+| `host`          | `openbao-down`, `certificate`, `credentials-stale`, `watchdog-restart`, `facilitator-failed`, `probe-silent`, `telemetry-silent`, `audit-disk` | #113's probe and agent run, after its restart window                                                    |
+| `backups`       | `wal-failing`, `wal-stale`, `backup-age`                                                                                                       | pgBackRest archives WAL and has made a backup; 0026 turns it on (decisions 40, 71)                      |
+| `snapshots`     | `snapshot-age`                                                                                                                                 | OpenBao's daily snapshot has run; 0026 turns it on (decisions 40, 71)                                   |
+| `disk`          | `disk` per mount                                                                                                                               | 80%, the warning before `audit-disk`'s 90% on the same mount (0027 decision 73)                         |
+| `memory`        | `memory`                                                                                                                                       | 90%, set after 3 days of data (0027 decision 72)                                                        |
+| `logVolume`     | `log-volume` per log group                                                                                                                     | With `host` (#113), at a coarse 200 MB an hour until measured (decision 65)                             |
+| `watch`         | `balance-low`, `balance-critical`, `watch-errors`, `watch-no-invocations`                                                                      | The Watch stack's Lambda publishes `spendable_stroops` (#115)                                           |
+| `watchSecurity` | `account-state`, `account-effects`, `backup-secret-read`                                                                                       | The check's theft and secret-read sections publish: task 0127 (decisions 68, 71)                        |
+| `protocol`      | `protocol-changed`, `protocol-upgrade-coming`                                                                                                  | The check's protocol section publishes both versions for each network in `watch.protocol` (decision 70) |
 
 To turn one on: `make check-series GROUP=<group>` until it passes, then set the flag (and any
 threshold it needs; synth refuses a group without one), `make deploy-production-alarms`, and
-`make fire-test`. The check lists every series the group reads, and fails on one that is written
+`make fire-test`. A series that exists can already be past its threshold, so a Level alarm
+would fire on its first evaluation. Before the deploy, read the latest values of the group's
+Level signals (`aws cloudwatch get-metric-statistics --statistics Maximum` over the last hour):
+for `facilitator` and `host`, `pool_quarantined`, `disk_used_percent` on `/`,
+`certificate_days_left` and `credentials_age_seconds`. After `make fire-test`, list what is in
+ALARM (`aws cloudwatch describe-alarms --state-value ALARM --alarm-name-prefix x402-production-
+--query 'MetricAlarms[].[AlarmName,StateReason]'`) and say in `#stellar-x402-bot` that those are
+the state before the deploy, not new incidents. The check lists every series the group reads, and fails on one that is written
 all the time (a gauge, the sweeps' zero, a Lambda's own metrics) but has no data in the last 3
 hours. A failure counter is written only when the failure happens, so it can't be checked
 beforehand; it travels the same path, and the catalog checks its name and dimensions at synth.
@@ -136,13 +144,16 @@ with every group on, and checks:
 signer-pool's `checkFacilitatorBalance` and stellar-sdk; `@aws-sdk/*` comes with the Lambda
 runtime. Synth never bundles, so the tests run after `build` (`turbo.json`).
 
+Roles Anywhere was checked live on 2026-11-06 (#113's server side, after the third deploy).
+CloudWatch aggregating a gauge's `Values` array as samples, which `queue-waiting` and
+`rpc-on-fallback` rely on (`Minimum`), was checked on 2026-11-09 after the deploy that turned
+`facilitator` on: each line carries 6 values of `pool_queued` and of `rpc_on_fallback`, and
+`SampleCount` read 6 for every minute from 12:11 to 12:21 UTC
+(`aws cloudwatch get-metric-statistics --statistics SampleCount Minimum`).
+
 ## Not checked before a deploy
 
 - That Chatbot posts to the channel from this stack's configuration: the delivery test.
-- That Roles Anywhere accepts the agent's certificate and the role works from the server's IP:
-  #113's live check, after this stack is deployed and the certificate is signed.
-- Whether CloudWatch aggregates a gauge's `Values` array as samples (`Minimum`, `Maximum`): the
-  first deploy of #113.
 - That the agent's own series match the catalog: `mem_used_percent` with no dimension and
   `disk_used_percent` with `path` `/` only. #113's config gets there with `omit_hostname` and a
   rollup to `path` with the original dropped (decision 44), tested against the catalog and, in

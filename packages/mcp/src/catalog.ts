@@ -41,6 +41,10 @@ const LIST_RESOURCES_INPUT = z
   .object({
     type: z.enum(["http", "mcp"]).optional().describe("HTTP endpoints or MCP tools"),
     payTo: z.string().optional().describe("Address that receives the payment"),
+    scheme: z
+      .string()
+      .optional()
+      .describe("Payment scheme: exact charges the listed amount, upto charges usage up to it"),
     network: z
       .enum([STELLAR_NETWORKS.testnet, STELLAR_NETWORKS.pubnet])
       .optional()
