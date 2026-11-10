@@ -72,5 +72,5 @@ deliverable (and its PDF), a video script Oskar records from, and the form's fie
 - [x] Every claim has a command, output, transaction hash, screenshot or code link a reviewer can
       check; what isn't claimed is said
 - [x] Scope refinements against the RFP and the proposal are named, each with its ADR or task
-- [ ] Oskar has reviewed the video script before recording
+- [x] Oskar has reviewed the video script before recording (recorded 2026-11-10, linked in #173)
 - [x] No secrets, personal names or Polish in any artifact
