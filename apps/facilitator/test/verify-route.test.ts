@@ -196,6 +196,19 @@ describe("POST /verify", () => {
     expect(verify).toHaveBeenCalledTimes(1);
   });
 
+  it("verifies a payment whose resource breaks the Bazaar limits on tags and name (0130)", async () => {
+    // The Bazaar spec drops such a field from the listing; it must not refuse the payment.
+    verify.mockResolvedValue({ isValid: true, payer: "GPAYER" });
+    const resource = {
+      url: "https://seller.example.com/forecast",
+      serviceName: "A".repeat(33),
+      tags: ["a", "b", "c", "d", "e", "f"],
+    };
+    const response = await post({ ...request, paymentPayload: { ...paymentPayload, resource } });
+    expect(response.status).toBe(200);
+    expect(verify).toHaveBeenCalledTimes(1);
+  });
+
   it("verifies a body nested to MAX_BODY_DEPTH, and refuses one level deeper", async () => {
     // `paymentPayload.extensions.deep` holds `levels` arrays; the innermost is at depth levels + 2.
     const nested = (levels: number) => {

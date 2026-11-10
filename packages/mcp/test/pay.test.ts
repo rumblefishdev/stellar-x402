@@ -461,6 +461,13 @@ describe("get_resource", () => {
     expect(await preview("/free")).toEqual({ status: 200, paymentRequired: null });
   });
 
+  it("shows terms whose tags break the Bazaar limits, with every tag the seller sent (0130)", async () => {
+    seller.tags = ["a", "b", "c", "d", "e", "f"];
+    const { status, paymentRequired } = await preview();
+    expect(status).toBe(402);
+    expect(paymentRequired!.resource).toMatchObject({ tags: seller.tags });
+  });
+
   it("cuts the seller's text to the catalog's limits", async () => {
     seller.description = "d".repeat(2_000);
     seller.termsError = "e".repeat(2_000);

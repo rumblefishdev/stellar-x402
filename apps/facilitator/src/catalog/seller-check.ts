@@ -147,17 +147,8 @@ export async function askMcpSeller(
   }
 }
 
-/**
- * Why 402 terms don't have upstream's shape, or `undefined` when they do. `serviceName`, `tags` and
- * `iconUrl` are left to the listing's validator, which drops a malformed one as the Bazaar spec
- * says (`bazaar.md:380-391`) and as it does for a payment's copy; upstream's schema refuses the
- * whole 402 for one, as 47 of 400 live sellers would be (2026-10-28).
- */
+/** Why 402 terms don't have upstream's shape, or `undefined` when they do. */
 function shapeError(paymentRequired: PaymentRequired): string | undefined {
-  const resource = { ...paymentRequired.resource } as Record<string, unknown>;
-  delete resource.serviceName;
-  delete resource.tags;
-  delete resource.iconUrl;
-  const parsed = PaymentRequiredV2Schema.safeParse({ ...paymentRequired, resource });
+  const parsed = PaymentRequiredV2Schema.safeParse(paymentRequired);
   return parsed.success ? undefined : parsed.error.message;
 }

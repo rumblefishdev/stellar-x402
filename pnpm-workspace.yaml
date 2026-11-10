@@ -14,3 +14,9 @@ injectWorkspacePackages: true
 
 allowBuilds:
   esbuild: true
+
+# Until upstream releases it (lore 0130): @x402/core refuses a whole 402 or payment whose
+# serviceName, tags or iconUrl breaks a Bazaar limit, where the spec drops only that field. The
+# patch is the upstream fix: those fields are typed only. Remove it with the bump.
+patchedDependencies:
+  "@x402/core@2.28.0": patches/@x402__core@2.28.0.patch
