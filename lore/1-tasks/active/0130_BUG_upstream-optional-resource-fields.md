@@ -54,12 +54,13 @@ released, removes our workaround and proves our MCP server can pay such a seller
 | # | What is done | From | vs the task | Who does the same (checked) | Code | Test |
 |---|---|---|---|---|---|---|
 | 1 | Fix it in upstream `@x402/core`, not only in our code; our cleanup follows the release | grilling 2026-11-10 | matches | upstream Python `payments.py:38-40` and Go `v2.go:146-148` already accept these fields | — | — |
+| 2 | The fix types `serviceName`, `tags` and `iconUrl` only; the Bazaar rules stay in extraction, so 6 tags become the first 5 in the catalog | grilling 2026-11-10 | changes it (the task said drop a bad field to undefined, which loses all 6 tags against `bazaar.md:390`) | upstream Python and Go type these fields only | upstream `core/src/schemas/index.ts` | upstream `core/test/unit/schemas/schemas.test.ts` |
+| 3 | The upstream PR carries the core schema test only, no test of upstream's MCP client | grilling 2026-11-10 | matches | — | — | — |
 
 ## Not yet decided
 
-- The fix's shape: type the three fields only, or drop a bad one to undefined.
 - Whether our preview tool gets a workaround while the upstream PR waits.
-- What the upstream PR carries beyond the schema change (a test of upstream's MCP client).
+- Whether the upstream PR regenerates the paywall bundles.
 
 ## Upstream PR
 
