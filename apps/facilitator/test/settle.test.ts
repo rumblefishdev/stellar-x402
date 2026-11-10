@@ -1831,7 +1831,7 @@ describe("createSettler", () => {
       await settled;
     });
 
-    it("refuses to send a hash whose slow addHash ends after the budget answer (0009 decision 35)", async () => {
+    it("sends the hash the budget answer named, though its slow addHash ends after the answer", async () => {
       let signed: unknown = "not called";
       const { settle, store } = setup(
         async (opts) => {
@@ -1856,8 +1856,8 @@ describe("createSettler", () => {
         errorReason: SETTLE_REASONS.pending,
         transaction: HASH,
       });
-      // The answer named this hash, but the order (write, then the budget flag) keeps it unsent.
-      expect(signed).toBeInstanceOf(Error);
+      // The answer named this hash, so the seller tracks it: it is sent.
+      expect(signed).toBe("sent");
     });
 
     it("refuses a rebuild's new hash once the budget answer named the first", async () => {
@@ -2055,7 +2055,7 @@ describe("createSettler", () => {
       expect(order).toEqual(["reserved", "onFinal"]);
     });
 
-    it("sends no hash whose write ended after the budget answer named another", async () => {
+    it("sends the hash whose write ended after the budget answer named it", async () => {
       let signed: unknown = "not called";
       const { settle, store } = setup(
         async (opts) => {
@@ -2085,7 +2085,7 @@ describe("createSettler", () => {
         transaction: HASH,
       });
       await storeIdle();
-      expect(signed).toBeInstanceOf(Error);
+      expect(signed).toBe("stored");
     });
 
     it("ends a repeat's wait by its own budget, after a slow lookup", async () => {
