@@ -461,13 +461,26 @@ describe("get_resource", () => {
     expect(await preview("/free")).toEqual({ status: 200, paymentRequired: null });
   });
 
+  it("shows terms whose tags break the Bazaar limits, with every tag the seller sent (0130)", async () => {
+    seller.tags = ["a", "b", "c", "d", "e", "f"];
+    const { status, paymentRequired } = await preview();
+    expect(status).toBe(402);
+    expect(paymentRequired!.resource).toMatchObject({ tags: seller.tags });
+  });
+
   it("cuts the seller's text to the catalog's limits", async () => {
     seller.description = "d".repeat(2_000);
     seller.termsError = "e".repeat(2_000);
     seller.contentType = `text/${"x".repeat(300)}`;
+    seller.serviceName = "n".repeat(2_000);
+    seller.tags = ["t".repeat(2_000), "short"];
     const { paymentRequired } = await preview();
     expect(paymentRequired!.resource.description).toHaveLength(500);
     expect(paymentRequired!.resource.mimeType).toHaveLength(127);
+    expect(paymentRequired!.resource).toMatchObject({
+      serviceName: "n".repeat(500),
+      tags: ["t".repeat(500), "short"],
+    });
     expect(paymentRequired!.error).toHaveLength(500);
   });
 

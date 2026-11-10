@@ -1,6 +1,7 @@
 import { STATUS_CODES } from "node:http";
-import { PaymentPayloadV2Schema, PaymentRequirementsV2Schema } from "@x402/core/schemas";
+import { PaymentRequirementsV2Schema } from "@x402/core/schemas";
 import type { SupportedResponse, VerifyRequest, VerifyResponse } from "@x402/core/types";
+import { PaymentPayloadV2Schema } from "@stellar-x402/bazaar";
 import { byName } from "@stellar-x402/metrics-catalog";
 import { RpcUnavailableError } from "@stellar-x402/signer-pool";
 import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
@@ -118,8 +119,9 @@ function refusedBody(value: unknown, max: number): boolean {
 }
 
 /**
- * An x402 v2 verify or settle request (AD-13), checked with `@x402/core`'s schemas. The objects
- * pass on as the client sent them; `undefined` means a 400.
+ * An x402 v2 verify or settle request (AD-13), checked with x402's schemas (the payment's through
+ * `@stellar-x402/bazaar`, lore 0130). The objects pass on as the client sent them; `undefined`
+ * means a 400.
  *
  * The schema takes any non-empty `amount`, and upstream's `BigInt(amount)` throws on anything but
  * an integer, which it reports as `unexpected_verify_error`: no verdict, a 503 that a repeat can't

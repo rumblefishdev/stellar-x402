@@ -249,6 +249,18 @@ describe("cataloger", () => {
   it.each([
     ["not a 402", { status: 200 }, "not_402"],
     ["a 402 without terms", { status: 402, body: {} as PaymentRequired }, "unreadable_402"],
+    [
+      "a 402 whose tags are not a list (0130)",
+      {
+        status: 402,
+        body: {
+          x402Version: 2,
+          resource: { url: "https://seller.example.com/x", tags: "weather" },
+          accepts: [requirements],
+        } as unknown as PaymentRequired,
+      },
+      "unreadable_402",
+    ],
   ] as const)(
     "creates nothing and changes nothing when the seller answers %s (row 6)",
     async (_name, answer, reason) => {

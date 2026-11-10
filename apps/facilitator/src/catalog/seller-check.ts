@@ -1,9 +1,9 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { CallToolResultSchema, ListToolsResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import { PaymentRequiredV2Schema } from "@stellar-x402/bazaar";
 import { SellerFetchError, guardedFetch, type SellerLimits } from "@stellar-x402/seller-fetch";
 import { decodePaymentRequiredHeader } from "@x402/core/http";
-import { PaymentRequiredV2Schema } from "@x402/core/schemas";
 import type { PaymentRequired } from "@x402/core/types";
 import type { Logger } from "../logger.js";
 
@@ -53,7 +53,7 @@ export async function askSeller(
   } catch (error) {
     return { ok: false, reason: "unreadable_402", detail: String(error) };
   }
-  // Decoding checks the encoding only; the upstream schema checks the shape.
+  // Decoding checks the encoding only; the schema checks the shape.
   const detail = shapeError(paymentRequired);
   if (detail) return { ok: false, reason: "unreadable_402", detail };
   return { ok: true, paymentRequired };
@@ -147,17 +147,8 @@ export async function askMcpSeller(
   }
 }
 
-/**
- * Why 402 terms don't have upstream's shape, or `undefined` when they do. `serviceName`, `tags` and
- * `iconUrl` are left to the listing's validator, which drops a malformed one as the Bazaar spec
- * says (`bazaar.md:380-391`) and as it does for a payment's copy; upstream's schema refuses the
- * whole 402 for one, as 47 of 400 live sellers would be (2026-10-28).
- */
+/** Why 402 terms don't have x402's shape, or `undefined` when they do. */
 function shapeError(paymentRequired: PaymentRequired): string | undefined {
-  const resource = { ...paymentRequired.resource } as Record<string, unknown>;
-  delete resource.serviceName;
-  delete resource.tags;
-  delete resource.iconUrl;
-  const parsed = PaymentRequiredV2Schema.safeParse({ ...paymentRequired, resource });
+  const parsed = PaymentRequiredV2Schema.safeParse(paymentRequired);
   return parsed.success ? undefined : parsed.error.message;
 }

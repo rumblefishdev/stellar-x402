@@ -45,6 +45,9 @@ export interface FakeSeller {
   description: string;
   /** The `error` field of the 402 answer. */
   termsError?: string;
+  /** `resource.serviceName` and `resource.tags` of the 402 answer. */
+  serviceName?: string;
+  tags?: string[];
   /** `extensions.bazaar.schema` of the 402 answer. */
   inputSchema?: unknown;
   contentType: string;
@@ -107,6 +110,8 @@ export async function startFakeSeller(): Promise<FakeSeller> {
           url: `${seller.url}${url.pathname}`,
           description: seller.description,
           mimeType: seller.contentType,
+          serviceName: seller.serviceName,
+          tags: seller.tags,
         },
         error: seller.termsError,
         accepts: [...seller.otherOffers, { asset: seller.asset, amount: seller.price }].map(

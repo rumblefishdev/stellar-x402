@@ -1,6 +1,5 @@
-import { LIMITS } from "@stellar-x402/bazaar";
+import { LIMITS, PaymentRequiredV2Schema } from "@stellar-x402/bazaar";
 import { decodePaymentRequiredHeader } from "@x402/core/http";
-import { PaymentRequiredV2Schema } from "@x402/core/schemas";
 import type { PaymentRequired } from "@x402/core/types";
 import { z } from "zod";
 import { checkUrl, guardedFetch, type SellerLimits } from "@stellar-x402/seller-fetch";
@@ -66,7 +65,7 @@ export async function previewPayment(
       String(error),
     );
   }
-  // Decoding checks the encoding only; the upstream schema checks the shape.
+  // Decoding checks the encoding only; the schema checks the shape.
   const parsed = PaymentRequiredV2Schema.safeParse(paymentRequired);
   if (!parsed.success) {
     throw new ToolError(
@@ -88,6 +87,8 @@ export async function previewPayment(
         ...resource,
         description: resource.description?.slice(0, LIMITS.descriptionChars),
         mimeType: resource.mimeType?.slice(0, LIMITS.mimeTypeChars),
+        serviceName: resource.serviceName?.slice(0, LIMITS.descriptionChars),
+        tags: resource.tags?.map((tag) => tag.slice(0, LIMITS.descriptionChars)),
       },
     },
   };

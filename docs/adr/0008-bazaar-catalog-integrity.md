@@ -3,7 +3,8 @@
 - Status: accepted
 - Date: 2026-10-07, amended 2026-10-20 (task 0032: the `scheme` filter), 2026-10-22 (task 0053:
   resource URLs and empty fields), 2026-10-26 (task 0054: resource hosts) and 2026-10-28 (task
-  0063: listings from the seller's own 402, entry limits)
+  0063: listings from the seller's own 402, entry limits) and 2026-11-10 (task 0130: a wrong type
+  in an optional field)
 
 ## Context
 
@@ -67,7 +68,8 @@ settlement.
     and normalizer.
   - Both `http` and `mcp` input types are accepted.
   - Malformed required fields reject the listing. Malformed optional fields (`serviceName`,
-    `tags`, `iconUrl`) are dropped.
+    `tags`, `iconUrl`) are dropped. A wrong JSON type in one of them, such as `tags` as a string,
+    makes the seller's 402 unreadable, as upstream's schema does (task 0130).
   - An empty `description` or `mimeType` counts as absent: upstream's resource server sends both
     as `|| ""` when a route sets none (task 0053).
 - **SSRF safety.**

@@ -196,6 +196,27 @@ describe("POST /verify", () => {
     expect(verify).toHaveBeenCalledTimes(1);
   });
 
+  it("verifies a payment whose resource breaks the Bazaar limits on name, tags and icon (0130)", async () => {
+    // The Bazaar spec drops such a field from the listing; it must not refuse the payment.
+    verify.mockResolvedValue({ isValid: true, payer: "GPAYER" });
+    const resource = {
+      url: "https://seller.example.com/forecast",
+      serviceName: "A".repeat(33),
+      tags: ["a", "b", "c", "d", "e", "f"],
+      iconUrl: `https://seller.example.com/${"i".repeat(2048)}.png`,
+    };
+    const response = await post({ ...request, paymentPayload: { ...paymentPayload, resource } });
+    expect(response.status).toBe(200);
+    expect(verify).toHaveBeenCalledTimes(1);
+  });
+
+  it("still answers 400 for a resource whose tags are not a list of strings (0130)", async () => {
+    const resource = { url: "https://seller.example.com/forecast", tags: "weather" };
+    const response = await post({ ...request, paymentPayload: { ...paymentPayload, resource } });
+    expect([response.status, await response.json()]).toEqual([400, { error: "bad_request" }]);
+    expect(verify).not.toHaveBeenCalled();
+  });
+
   it("verifies a body nested to MAX_BODY_DEPTH, and refuses one level deeper", async () => {
     // `paymentPayload.extensions.deep` holds `levels` arrays; the innermost is at depth levels + 2.
     const nested = (levels: number) => {
