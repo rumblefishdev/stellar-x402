@@ -67,10 +67,10 @@ deliverable (and its PDF), a video script Oskar records from, and the form's fie
 
 ## Acceptance Criteria
 
-- [ ] `docs/scf/` holds the evidence document, its PDF build, the video script, the form answers
+- [x] `docs/scf/` holds the evidence document, its PDF build, the video script, the form answers
       and a README, on the five T1 items
-- [ ] Every claim has a command, output, transaction hash, screenshot or code link a reviewer can
+- [x] Every claim has a command, output, transaction hash, screenshot or code link a reviewer can
       check; what isn't claimed is said
-- [ ] Scope refinements against the RFP and the proposal are named, each with its ADR or task
+- [x] Scope refinements against the RFP and the proposal are named, each with its ADR or task
 - [ ] Oskar has reviewed the video script before recording
-- [ ] No secrets, personal names or Polish in any artifact
+- [x] No secrets, personal names or Polish in any artifact
