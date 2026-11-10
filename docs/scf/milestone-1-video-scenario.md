@@ -103,8 +103,8 @@ Point at `areFeesSponsored: true` and at `commit`.
 > `transfer` of 0.001 testnet USDC from the buyer to the seller."
 
 > "The same path settles Circle USDC, a Stellar Asset Contract and any plain SEP-41 token; the
-> token matrix in the evidence document shows all three, and a batch spread across several
-> channels in one ledger."
+> token matrix in the evidence document shows all three, and six buyers' payments settled through
+> four channels, three of them in one ledger."
 
 ## Scene 5 — The Bazaar foundation (~0:40)
 
