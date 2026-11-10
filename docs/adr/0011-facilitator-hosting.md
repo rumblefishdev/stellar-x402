@@ -13,7 +13,8 @@
   #111 review: every unit's output ships, the loss the log path accepts, the uptime alarm from
   the first good deploy, the disk alarm to our channel, and certificate renewal in 0027) and
   2026-11-04 (task 0027 decisions 18 and 20: metric lines kept 30 days, no CPU metric) and
-  2026-11-05 (task 0027 decision 4 amended: every metric in the catalog is billed)
+  2026-11-05 (task 0027 decision 4 amended: every metric in the catalog is billed) and
+  2026-11-09 (task 0027 decision 73: OpenBao's audit log disk at 90%, the server's disk at 80%)
 - Revised: 2026-10-13. ECS Fargate became the company Hetzner server (task 0039); the first
   version is in git history and task 0014. 2026-10-21: the key moved to OpenBao (ADR 0013), and
   deploys, reboots, backups, alarms and downtime were worked out in the PR #24 review.
@@ -600,7 +601,8 @@ One request or one stop must never outlast the layer in front of it:
   - no sweep listing the records within the alarm window: since the deploy checks `listed` only
     once, this is the net for sweeps that start failing later (0019 decision 36);
   - from ADR 0013: OpenBao sealed, down or failing to sign; theft and reads of the backup
-    secret, off the server; and OpenBao's audit log disk at 80%;
+    secret, off the server; and OpenBao's audit log disk at 90%, after the server's disk alarm at
+    80% (amended 2026-11-09);
   - WAL archiving failing (`pg_stat_archiver.last_failed_time` past `last_archived_time`, or the
     last archived segment older than 10 minutes). pgBackRest acknowledges a segment only once it is in the
     repository, so this one alarm covers a stuck archive, which fills a disk ClickHouse shares,

@@ -33,7 +33,7 @@ history:
       PR #83 merged on 2026-11-02: the facilitator keeps refusing a payment over its fee ceiling,
       and the refusal's message names the archived entries the payment's transaction lists. The
       threat model, ADR 0007 and the README record it. Follow-ups already in the backlog: 0086,
-      a refused payment settling after its payer signed again, and 0096, the pubnet ceiling.
+      a refused payment settling after its payer signed again, and 0096, the pubnet ceiling (later deleted: the ceiling stays, and the question of paying for a new balance moved to 0107).
 ---
 
 # Decide what /verify does when a payment must restore archived state

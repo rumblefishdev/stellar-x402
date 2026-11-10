@@ -4,7 +4,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { StellarNetwork } from "@stellar-x402/config";
-import { type MetricName, seriesDims } from "@stellar-x402/metrics-catalog";
+import { CATALOG, type MetricName, seriesDims } from "@stellar-x402/metrics-catalog";
 import { describe, expect, test } from "vitest";
 import { AWS_METRICS, type AlarmRecord } from "../src/lib/alarms/factory.js";
 import { INFRA_ROOT } from "../src/lib/names.js";
@@ -76,8 +76,8 @@ describe("every alarm reads a series the catalog declares (AD-1)", () => {
 });
 
 describe("the Alarms template", () => {
-  test("has every alarm of the list once per network, 86 with two networks", () => {
-    expect(alarms).toHaveLength(86);
+  test("has every alarm of the list once per network, 87 with two networks", () => {
+    expect(alarms).toHaveLength(87);
     expect(new Set(byName.keys()).size).toBe(alarms.length);
   });
 
@@ -265,6 +265,16 @@ test("every alarm production makes has its section in docs/monitoring.md, which 
   expect([...bases].filter((b) => !sections.has(b))).toEqual([]);
 });
 
+test("docs/monitoring.md lists every metric of the catalog and every alarm, on or off (0027 AC 17)", () => {
+  const doc = readFileSync(join(INFRA_ROOT, "..", "docs", "monitoring.md"), "utf8");
+  const rows = new Set([...doc.matchAll(/^\| `([^`]+)` +\|/gm)].map((m) => m[1]));
+  expect(CATALOG.map((m) => m.name).filter((n) => !rows.has(n))).toEqual([]);
+  // An alarm that is on has its section (the test above); one that is off, its row.
+  const sections = new Set([...doc.matchAll(/^### (\S+)$/gm)].map((m) => m[1]));
+  const bases = new Set(all.x.alarms.alarms.records.map((r) => r.base));
+  expect([...bases].filter((b) => !sections.has(b) && !rows.has(b))).toEqual([]);
+});
+
 test("production as committed makes only the groups that are on", () => {
   expect(prod.x.alarms.alarms.records.map((r) => r.alarmName).sort()).toEqual([
     "x402-production-audit-disk",
@@ -279,6 +289,7 @@ test("production as committed makes only the groups that are on", () => {
     "x402-production-channel-quarantined-testnet",
     "x402-production-commit-unmatched-testnet",
     "x402-production-credentials-stale",
+    "x402-production-disk-root",
     "x402-production-emf-parsing",
     "x402-production-emf-validation",
     "x402-production-facilitator-failed",
@@ -291,6 +302,7 @@ test("production as committed makes only the groups that are on", () => {
     "x402-production-landed-after-expired-testnet",
     "x402-production-log-volume-app",
     "x402-production-log-volume-metrics",
+    "x402-production-memory",
     "x402-production-openbao-down",
     "x402-production-pending-testnet",
     "x402-production-pool-health-testnet",
@@ -311,6 +323,7 @@ test("production as committed makes only the groups that are on", () => {
     "x402-production-telemetry-silent",
     "x402-production-uptime",
     "x402-production-uptime-flapping",
+    "x402-production-verify-rpc-unavailable",
     "x402-production-watch-errors",
     "x402-production-watch-no-invocations",
     "x402-production-watchdog-restart",

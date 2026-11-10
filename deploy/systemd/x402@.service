@@ -24,6 +24,11 @@ ExecStartPre=/bin/sh -c '[ -e /run/x402/%i/deploying ] || cp digest.good digest'
 # --exit-code-from: a plain `up` exits 0 whatever the container's code.
 ExecStart=/usr/local/libexec/x402/x402-compose %i up --no-log-prefix --no-color --no-deps --pull never --exit-code-from facilitator facilitator
 ExecStop=/usr/local/libexec/x402/x402-compose %i stop facilitator
+# A planned stop: after ExecStop, systemd signals the `up` that is still exiting, and Compose
+# answers a signal with 130. Without this, every deploy, drain and `systemctl stop` ended `failed`
+# and counted a failure (0027's drill, 2026-11-09). The facilitator itself exits 0 or 1, and a
+# hung one the watchdog kills ends 137, so a crash still counts.
+SuccessExitStatus=130
 # Every end but a success counts facilitator_failures_total (0027 decision 43): a crash after
 # ready in cycles of a minute or more never reaches StartLimitBurst. "-": a failed write never
 # changes the result or the restart.

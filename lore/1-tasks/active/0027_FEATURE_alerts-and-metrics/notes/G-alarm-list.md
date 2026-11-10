@@ -103,7 +103,7 @@ aggregates an array as samples is unverified: verify it at the first deploy.
 From the off-server check, every 5 minutes, so they fire with the server down. Built in #114. The
 balance alarms and the check's health are the `watch` group, on once #115's Lambda publishes;
 `account-state`, `account-effects` and `backup-secret-read` are `watchSecurity`, on once their
-sections do (decision 68).
+sections do (decision 68), built by task 0127 (decision 71).
 
 | Alarm | Signal | Shape | Fires when | Missing data |
 | --- | --- | --- | --- | --- |
@@ -150,7 +150,8 @@ in a PR once acted on, so each re-arms for the next version on its own. In the `
 | `history-gone` | `settlement_history_gone_total` | Event | 1 or more; an operator closes the record (runbook). A key is reported once per process, so after each restart or deploy every record still open with its history gone is reported again, in one message: read the log for each record. Match the `settlementKey` in the `settlement_history_gone` log against the records already being handled, and close them to stop the repeats | Not breaching: as above |
 | `landed-after-expired` | `settlement_landed_after_expired_total` | Event | 1 or more | Not breaching: as above |
 | `sweeps-stopped` | `settlement_sweeps_total{outcome:"listed"}`, per network | Level, `Sum` below 1, 5 of 5 one-minute periods | No sweep listed the records for 5 minutes. A live process with failing or hung sweeps writes 0 | Ignore: as above |
-| `http-500` | `http_requests_total`, the `[status]` set at `500`: no `route`, no `network` | Event | 1 or more: `onError` takes an error it doesn't know as ours, so the first one is worth a look; a burst sends one message. A lease or drain 503 isn't counted | Not breaching: as above |
+| `http-500` | `http_requests_total`, the `[status]` set at `500`: no `route`, no `network` | Event | 1 or more: `onError` takes an error it doesn't know as ours, so the first one is worth a look; a burst sends one message. A 503 isn't counted: `verify-rpc-unavailable` covers `/verify`'s, and a lease or drain 503 on `/settle` is routine | Not breaching: as above |
+| `verify-rpc-unavailable` | `http_requests_total`, the `[route, status]` set at `/verify` and `503`: no `network` | Event | 1 or more: `/verify` answered 503 `rpc_unavailable`, so sellers can't check payments; a burst sends one message | Not breaching: as above |
 | `settlement-expired` | `settlement_reconciled_total` for `state="expired"` | Event | 1 or more: a payment that never landed by its bound. Neither `failure-ours` (needs a fee) nor `pending` (needs a record past 750 s) sees it | Not breaching: as above |
 | `submit-failed` | `settlement_submit_failures_total` | Event | 1 or more: an `unexpected_settle_error` with nothing sent, answered with status 200, so `http-500` doesn't see it | Not breaching: as above |
 | `hook-failures` | `settlement_hook_failures_total` | Event | 1 or more: a hook that threw, so the fee count or a breaker may have missed a settlement | Not breaching: as above |
@@ -164,9 +165,9 @@ in a PR once acted on, so each re-arms for the next version on its own. In the `
 
 | Alarm | Signal | Shape | Fires when | Missing data |
 | --- | --- | --- | --- | --- |
-| `disk` | `disk_used_percent`, named mounts | Level, `Maximum`, 3 of 3 five-minute periods | Measure: read the first numbers against 80% used before it goes on. To our channel: the server's base setup is Stan's, and our WAL and logs are what fills it. Its description names the Prices API's `prices-<env>-ch-disk-free` on the same host's ClickHouse volume (decision 20) | Ignore: `telemetry-silent` |
-| `memory` | `mem_used_percent` | Level | Measure: after a week of data | As above |
-| `audit-disk` | `disk_used_percent`, OpenBao's audit volume | Level, `Maximum`, 3 of 3 five-minute periods | 80% used | As above |
+| `disk` | `disk_used_percent`, named mounts | Level, `Maximum`, 3 of 3 five-minute periods | Over 80% (decision 73): the warning before `audit-disk`, on the same mount. To our channel: the server's base setup is Stan's, and our WAL and logs are what fills it. Its description names the Prices API's `prices-<env>-ch-disk-free` on the same host's ClickHouse volume (decision 20) | Ignore: `telemetry-silent` |
+| `memory` | `mem_used_percent` | Level, `Minimum`, 3 of 3 five-minute periods | Over 90% (decision 72) | As above |
+| `audit-disk` | `disk_used_percent`, OpenBao's audit volume | Level, `Maximum`, 3 of 3 five-minute periods | 90% used (decision 73, ADR 0013 amended) | As above |
 | `openbao-down` | `openbao_up` | Level, `Minimum`, 3 of 3 one-minute periods | Down, sealed, or its check failing, for 3 minutes | Ignore: `probe-silent` |
 | `wal-failing` | `wal_failing` | Level, `Maximum`, 3 of 3 one-minute periods | `last_failed_time` past `last_archived_time`, nothing ever archived, or the check failing | As above |
 | `wal-stale` | `wal_last_archived_age_seconds` | Level, `Minimum`, 3 of 3 one-minute periods | The last archived segment older than 10 minutes | As above |
@@ -181,6 +182,7 @@ A failed host check, or a job that never ran, writes a value past its threshold
 ([G-metrics](G-metrics.md#host-namespace-x402-host)). So `wal-failing`, `wal-stale` and
 `backup-age` are a group of their own, `backups`, and `snapshot-age` is `snapshots`: their jobs come
 with 0026, and in `host` they would keep the probe's other alarms off until then (decision 40).
+0026 turns each group on once its job runs (decision 71).
 
 ## Cost, silence and delivery
 

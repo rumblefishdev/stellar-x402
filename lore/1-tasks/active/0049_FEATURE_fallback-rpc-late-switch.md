@@ -2,7 +2,7 @@
 id: "0049"
 title: "Finish FallbackRpc's switching: frozen endpoints, transport-only errors, URL-free fromUrls names, the Attempt.sent split"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: []
 related_tasks: ["0045", "0007", "0016"]
@@ -50,6 +50,13 @@ history:
       Renamed to what 0045 left: frozen endpoints, transport-only RpcUnavailableError, fromUrls
       names and the Attempt.sent split. The late answer and the return to the first URL are done.
       Raised to medium: a frozen endpoint stalls /settle and no alarm says why.
+  - date: "2026-11-10"
+    status: active
+    who: karolkow
+    note: >
+      Started with hedged reads: a read the active endpoint hasn't answered in 2 s goes to the next
+      one too, and the first answer wins. Production logged 79 timeouts of the first testnet URL in
+      3.5 days. The items above follow in later PRs of this task.
 ---
 
 # Finish `FallbackRpc`'s switching: frozen endpoints, transport-only errors, URL-free `fromUrls` names, the `Attempt.sent` split
@@ -152,6 +159,35 @@ transport-only `RpcUnavailableError`, `fromUrls`' names (no longer used by `main
     cancel it: it tries the next URLs, reports their timeouts with `markFailed` and logs
     `rpc_exhausted` for a request already answered. Stop it once the caller gives up, for example
     with an abort signal or a deadline passed in.
+
+## Hedged reads (2026-11-10)
+
+Production, 2026-11-06 19:46 to 2026-11-09 16:09 UTC: 79 `rpc_failover` events, all
+`RPC_URLS[0]` → `RPC_URLS[1]` on testnet, all `timeout`, by `getLatestLedger` (43) and
+`getLedgerEntries` (36); 79 `rpc_failback`; 0 `rpc_exhausted`. A call on a slow first URL waits
+10 s before the next one, and the probe brings calls back to it whatever its speed.
+
+Measured 2026-11-09 16:39 to 17:12 UTC from a laptop, about 205 paired reads per network
+(rounds the laptop's network dropped are left out): with gateway.fm first a second request after
+2 s starts in 1.0% of reads, with SDF first in 64%, and its p99 falls from 10.5 s to 2.3 s. On
+mainnet, sorobanrpc.com first: 0%; Ankr first: 3.4%.
+
+| # | What is done | From | vs the task | Who does the same (checked) |
+| --- | --- | --- | --- | --- |
+| 1 | A read the active endpoint hasn't answered in 2 s is sent to the next endpoint too; the first answer wins | owner | beyond it | ethers v6 `FallbackProvider` (`stallTimeout`); alloy `FallbackLayer` sends to several at once |
+| 2 | Hedge delay 2 s: above the p99 of the fast endpoints measured, below SDF's median | owner, from the measurement above | beyond it | ethers v6 uses 400 ms |
+| 3 | Only reads outside a transaction's lifecycle are hedged: the ledger read, account entries and upstream verify. Simulate, send and poll of one transaction stay on one endpoint | owner | beyond it | js-stellar-sdk #1270, the maintainer's comment of 2026-11-06 |
+| 4 | The endpoint moves after the active one loses 2 reads in a row (no answer in 2 s), and comes back after 5 good probes in a row | owner | beyond it | no standard; the same counts as another Stellar facilitator |
+| 5 | A probe counts as good only when the first endpoint answers within the hedge delay, besides the 2-ledger lag check | owner | changes it | no standard |
+| 6 | No cap on the number of `RPC_URLS`; one call takes at most 15 s whatever their number | owner | changes it (0045 decision 14 capped them at 3) | no standard |
+| 7 | This PR series does hedging only; the items above (frozen endpoints, transport-only errors, `fromUrls` names, the `Attempt.sent` split, the three review notes) follow as later PRs here | owner | changes it | — |
+
+### PR split
+
+1. `signer-pool`: `FallbackRpc` hedges its reads (rows 1-5), with a path that never hedges for a
+   transaction's lifecycle.
+2. `facilitator`: upstream verify hedges across `RPC_URLS` (rows 1, 2), the 15 s deadline and no
+   cap (row 6).
 
 ## Acceptance Criteria
 

@@ -23,7 +23,7 @@ describe("envs/production.json", () => {
     expect(production().networks).toEqual(["stellar:testnet"]);
   });
 
-  test("has on only the groups whose series have data: EMF errors, uptime, the facilitator, the host, log volume, the balance, the protocol (26, 37)", () => {
+  test("has on only the groups whose series have data: EMF errors, uptime, the facilitator, the host, disk, memory, log volume, the balance, the protocol (26, 37, 72, 73)", () => {
     const on = Object.entries(production().alarmGroups)
       .filter(([, v]) => v)
       .map(([g]) => g);
@@ -32,6 +32,8 @@ describe("envs/production.json", () => {
       "telemetry",
       "facilitator",
       "host",
+      "disk",
+      "memory",
       "logVolume",
       "watch",
       "protocol",
@@ -128,8 +130,22 @@ describe("validateConfig", () => {
       (c) => ((m(c).thresholds as Record<string, number>)["cpu"] = 1),
       /cpu is not a threshold/,
     ],
-    ["disk on with no threshold", (c) => (m(c).alarmGroups.disk = true), /alarmGroups.disk/],
-    ["memory on with no threshold", (c) => (m(c).alarmGroups.memory = true), /alarmGroups.memory/],
+    [
+      "disk on with no threshold",
+      (c) => {
+        m(c).alarmGroups.disk = true;
+        m(c).thresholds.diskUsedPercent = null;
+      },
+      /alarmGroups.disk/,
+    ],
+    [
+      "memory on with no threshold",
+      (c) => {
+        m(c).alarmGroups.memory = true;
+        m(c).thresholds.memoryUsedPercent = null;
+      },
+      /alarmGroups.memory/,
+    ],
     [
       "log volume on with no threshold",
       (c) => {

@@ -43,6 +43,23 @@ is committed, and the tool schemas still living in the composition root.
 
 0037 left these as named follow-ups; none changes what the server does.
 
+## Premise
+
+Reviewed 2026-11-10 against `develop` at 1f2a3bb8, from this task's Summary, Context and
+Implementation only:
+
+- The rename is done: `package.json:25` has `mcp:e2e`.
+- The split is done: `mcp.e2e.test.ts` is 40 lines and imports six group files; its one secret
+  scan (E-23) covers every capture, so a vitest `globalSetup` isn't needed.
+- The schemas moved: `packages/mcp/src/server.ts` imports them from `catalog.ts`, `preview.ts`
+  and `pay.ts` and defines none.
+- The `scheme` filter is in: `packages/mcp/src/catalog.ts:43-46`. Against our own catalog it
+  serves `exact` only (`apps/facilitator/src/http/discovery.ts`).
+- Open: whether `results/testnet-results.json` stays committed. It is rewritten on every run
+  (about 1,577 lines) and changed in 3 commits of this task. The owner decides.
+- The Summary's "structure only" no longer fits: the red-suite work below changed the e2e and the
+  facilitator, so the AC asking for one `[structure only]` PR can't be met as written.
+
 ## Implementation
 
 - Rename `pnpm e2e:testnet` to `pnpm mcp:e2e`, next to `contracts:e2e` (W437), README and PR
