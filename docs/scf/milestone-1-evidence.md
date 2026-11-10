@@ -444,7 +444,13 @@ their actions enabled. The first page of the list:
 The rest of the list: [`ops-cloudwatch-alarms-2.png`](./screenshots/ops-cloudwatch-alarms-2.png),
 [`ops-cloudwatch-alarms-3.png`](./screenshots/ops-cloudwatch-alarms-3.png).
 
-`<TODO: screenshot: a delivery-test message in Slack (no channel or workspace names visible).>`
+The alarms reach the team's alarm channel in Slack through SNS and Amazon Q Developer. After each
+alarms deploy, `make fire-test` (in `infra/`) sets `x402-production-emf-validation` to ALARM
+with the reason "Delivery test (make fire-test): no fault, confirm it in Slack", and a person
+confirms it arrived. The tests of 2026-11-09, at 12:22:01 and 15:13:28 UTC, as Slack shows them
+(the account ID masked):
+
+![A delivery test in Slack](./screenshots/ops-slack-delivery-test.png){width=60%}
 
 ## 7. What is deliberately not claimed
 
