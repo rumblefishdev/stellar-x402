@@ -1,0 +1,130 @@
+{
+  "ranAt": "2026-11-09T18:40:55Z",
+  "network": "stellar:testnet",
+  "script": "apps/facilitator/test/live/catalog-smoke.ts",
+  "commit": "2bc55cc2",
+  "facilitator": "GAB3QH5T2DWT5Z6MEDGIU6LQBX4LLUUYJUQYLEL2B4HNWJDOJBKSRN25",
+  "seller": "GDVBUWJL5EK4R4AY2CRH7E2HCSBDMBW3D65QOU3UV7CATPBRZ34OLDVR",
+  "buyer": "GA25XKLIBN4FFFNFOUCTD2KMWEJEUTAAFLWZ2253Z6KGLXDE676ANBM5",
+  "outsider": "GAQNFRWA5W7WKGHI4PYRRBSVH24FGS3RMXEN3Z27KRFAJHDQTCEJGFYP",
+  "steps": {
+    "buyerPays": 200,
+    "afterBuyer": {
+      "listing": [
+        {
+          "description": "Weather by city",
+          "amounts": ["10000"],
+          "lastUpdated": "2026-11-09T18:42:38.823Z"
+        }
+      ],
+      "unpaid": ["GET /weather?city=Warsaw", "GET /weather?city=Warsaw"]
+    },
+    "buyerPaysAgain": 402,
+    "afterRepeat": {
+      "listing": [
+        {
+          "description": "Weather by city",
+          "amounts": ["10000"],
+          "lastUpdated": "2026-11-09T18:42:38.823Z"
+        }
+      ],
+      "unpaid": ["GET /weather?city=Warsaw", "GET /weather?city=Warsaw", "GET /weather?city=Warsaw"]
+    },
+    "afterOutsiderSameMinute": {
+      "listing": [
+        {
+          "description": "Weather by city",
+          "amounts": ["10000"],
+          "lastUpdated": "2026-11-09T18:42:38.823Z"
+        }
+      ],
+      "unpaid": ["GET /weather?city=Warsaw", "GET /weather?city=Warsaw", "GET /weather?city=Warsaw"]
+    },
+    "outsiderNextMinute": true,
+    "afterOutsiderNextMinute": {
+      "listing": [
+        {
+          "description": "Weather by city",
+          "amounts": ["10000"],
+          "lastUpdated": "2026-11-09T18:45:26.980Z"
+        }
+      ],
+      "unpaid": [
+        "GET /weather?city=Warsaw",
+        "GET /weather?city=Warsaw",
+        "GET /weather?city=Warsaw",
+        "GET /weather?city=Warsaw"
+      ]
+    },
+    "buyerPaysNewPrice": 402,
+    "afterNewPrice": {
+      "listing": [
+        {
+          "description": "Weather by city",
+          "amounts": ["10000"],
+          "lastUpdated": "2026-11-09T18:45:26.980Z"
+        }
+      ],
+      "unpaid": [
+        "GET /weather?city=Warsaw",
+        "GET /weather?city=Warsaw",
+        "GET /weather?city=Warsaw",
+        "GET /weather?city=Warsaw",
+        "GET /weather?city=Warsaw"
+      ]
+    }
+  },
+  "settles": [
+    {
+      "transaction": "fee64e4474c5442c89fbd47a48837361f49bd60b2d473baa4973ff24da0ff12c",
+      "extensionResponses": {
+        "bazaar": {
+          "status": "processing"
+        }
+      },
+      "onChain": "SUCCESS"
+    },
+    {
+      "transaction": "5f6a96e2aa213d279c15c41ed538e077bc7fd0c1ac3a3dbe3112cc086f0d8e9c",
+      "extensionResponses": null,
+      "onChain": "SUCCESS"
+    },
+    {
+      "extensionResponses": null
+    },
+    {
+      "transaction": "8ef5f9f1188d76ad5d857d2e197c4306676bfed34caf3a8b6c015f4fd4b91175",
+      "extensionResponses": {
+        "bazaar": {
+          "status": "processing"
+        }
+      },
+      "onChain": "SUCCESS"
+    },
+    {
+      "extensionResponses": null
+    }
+  ],
+  "attempts": [
+    {
+      "stage": "seller",
+      "outcome": "refreshed",
+      "reason": "inserted",
+      "payer": "GA25XKLIBN4FFFNFOUCTD2KMWEJEUTAAFLWZ2253Z6KGLXDE676ANBM5",
+      "transaction": "fee64e4474c5442c89fbd47a48837361f49bd60b2d473baa4973ff24da0ff12c",
+      "resource_url": "http://127.0.0.1:53135/weather",
+      "url": "http://127.0.0.1:53135/weather?city=Warsaw",
+      "content_hash": "ec958cec5a1848179b3a5c324f5369eb8b29c2c70d8a863e7244215d10f6732b"
+    },
+    {
+      "stage": "seller",
+      "outcome": "refreshed",
+      "reason": "updated",
+      "payer": "GAQNFRWA5W7WKGHI4PYRRBSVH24FGS3RMXEN3Z27KRFAJHDQTCEJGFYP",
+      "transaction": "8ef5f9f1188d76ad5d857d2e197c4306676bfed34caf3a8b6c015f4fd4b91175",
+      "resource_url": "http://127.0.0.1:53135/weather",
+      "url": "http://127.0.0.1:53135/weather?city=Warsaw",
+      "content_hash": "ec958cec5a1848179b3a5c324f5369eb8b29c2c70d8a863e7244215d10f6732b"
+    }
+  ]
+}

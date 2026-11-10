@@ -31,15 +31,18 @@ deliverable (and its PDF), a video script Oskar records from, and the form's fie
 
 ## Context
 
-- **Scope:** the five T1 items in `docs/planning/m1-epics.md` (Overview, "T1 scope"). Neither the
-  RFP (`docs/rfp/07-x402-facilitator-bazaar.md`) nor the proposal
-  (`rumblefishdev/stellar-scf-submissions`, `x402-facilitator-bazaar-technical-architecture-after-review.md`,
-  revised 2026-10-12) has a tranche plan; the Prices API's proposal had one (§9). Asked Marek on
-  2026-11-09 whether the SCF form has Tranche 1 deliverables; until he answers, the package
-  documents the five items.
+- **Scope:** Tranche #1 as approved, in our response to the Panel Review (feedback of
+  2026-09-16): the four line items of its budget (§1, "Tranche #1 — $15,600 (20%, Milestone 1,
+  T0 + 4 weeks)") and the Tranche #1 conformance bar it adds (§4). They are the five items of
+  `docs/planning/m1-epics.md`'s "T1 scope". Neither the RFP nor the proposal
+  (`rumblefishdev/stellar-scf-submissions`, revised 2026-10-12) has a tranche plan; the response
+  is not in that repository.
+- **Other commitments the response makes per tranche boundary:** re-audit the dependency tree's
+  licenses (§5); re-run the search ranking's nDCG@10 evaluation (§4), which starts with ranking in
+  Tranche #2.
 - **SCF's rules** (handbook, Budget & Deliverable Guidelines): Tranche #1 is 20% of the award; the
-  form comes by email with the Tranche #0 payment; it is due within 90 days of the previous
-  payment; a scope change is told to SCF before the submission.
+  form comes by email with the Tranche #0 payment; a scope change is told to SCF before the
+  submission.
 - **The reference packages:** `docs/scf/` in `soroban-block-explorer` and `stellar-prices-api`:
   `milestone-N-evidence.md` and its PDF (pandoc + typst), `milestone-N-video-scenario.md`,
   `milestone-N-form-answers.md`, `architecture.mmd`, `screenshots/`.
@@ -60,17 +63,14 @@ deliverable (and its PDF), a video script Oskar records from, and the form's fie
 
 ## Open Questions
 
-- Does the SCF form list Tranche 1 deliverables (Marek)? Field 1 must match them word for word.
-- When was Tranche #0 paid, and who has the Tranche Completion Form's email?
-- The proposal re-audits the dependency tree's licenses "at each delivery milestone" (§3.3): the
-  package needs that audit's output.
+- Who has the Tranche Completion Form's email?
 
 ## Acceptance Criteria
 
-- [ ] `docs/scf/` holds the evidence document, its PDF build, the video script, the form answers
+- [x] `docs/scf/` holds the evidence document, its PDF build, the video script, the form answers
       and a README, on the five T1 items
-- [ ] Every claim has a command, output, transaction hash, screenshot or code link a reviewer can
+- [x] Every claim has a command, output, transaction hash, screenshot or code link a reviewer can
       check; what isn't claimed is said
-- [ ] Scope refinements against the RFP and the proposal are named, each with its ADR or task
-- [ ] Oskar has reviewed the video script before recording
-- [ ] No secrets, personal names or Polish in any artifact
+- [x] Scope refinements against the RFP and the proposal are named, each with its ADR or task
+- [x] Oskar has reviewed the video script before recording (recorded 2026-11-10, linked in #173)
+- [x] No secrets, personal names or Polish in any artifact
