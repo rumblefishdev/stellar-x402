@@ -178,14 +178,25 @@ curl -s $FAC/health | jq
 
 Both read on 2026-11-10; the commit is the one the gate's final rerun names (section 5.5).
 
-**Any SEP-41 token, the buyer paying no XLM.** The token matrix settles one payment each in Circle
-testnet USDC, a Stellar Asset Contract and a plain SEP-41 (wasm) token, then a batch of six across
-several channels:
-[`apps/facilitator/test/live/results/token-matrix-testnet.json`](../../apps/facilitator/test/live/results/token-matrix-testnet.json).
-Its checks: `everyTokenSettled`, `facilitatorPaidEveryFee`, `buyerPaidNoXlm`,
-`buyerSourcedNothing`, `batchSettled`, `batchUsedSeveralChannels` — all `true`.
+**Any SEP-41 token, the buyer paying no XLM.** The token matrix
+([`token-matrix.ts`](../../apps/facilitator/test/live/token-matrix.ts)) starts the facilitator
+from the code it is run on, with channels of its own, and settles one payment each in Circle
+testnet USDC, a Stellar Asset Contract (`UPTOE2E`) and a plain SEP-41 (wasm) token, then two
+batches of six. It ran on 2026-11-10 from `5d2e26ba`, the commit production runs, with RPC ordered
+as production orders it
+([`token-matrix-testnet.json`](../../apps/facilitator/test/live/results/token-matrix-testnet.json),
+[#172](https://github.com/rumblefishdev/stellar-x402/pull/172)):
 
-`<TODO: the matrix of record ran on 2026-10-23, with no commit recorded; rerun it locally from the deployed commit 5d2e26ba (the script starts its own facilitator) and commit the result with that commit.>`
+| Token           | Transaction                                                                                                                        | Ledger  |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| Circle USDC     | [`71fa8ccb7df5c15c…`](https://stellar.expert/explorer/testnet/tx/71fa8ccb7df5c15c83a95bedf1158470b9f79769b9d891eefed660bf3e14bb3a) | 5656894 |
+| SAC (`UPTOE2E`) | [`616ad2ef1426e88f…`](https://stellar.expert/explorer/testnet/tx/616ad2ef1426e88fa3ce150aadbeff60298ffcd007c268dc0bbbd29de6ca6949) | 5656898 |
+| SEP-41 (wasm)   | [`216bdc02fb0470fd…`](https://stellar.expert/explorer/testnet/tx/216bdc02fb0470fd131db621d9d4b0345817e6a940324bba0ed3e6af0028c413) | 5656901 |
+
+Its nine checks are all `true`: each token verified, settled and paid the seller the full amount
+(`everyTokenSettled`), the facilitator paid every fee (`facilitatorPaidEveryFee`), and the buyer's
+XLM balance and sequence number are unchanged (`buyerPaidNoXlm`, `buyerSourcedNothing`). The
+batches' checks are D2's (5.2).
 
 **Strict auth-entry validation** (proposal §3.1.1, Panel Review response §5). `/verify` runs
 upstream's `verify()`, which protects the facilitator's own address, then refuses source-account
@@ -255,8 +266,14 @@ under Apache-2.0, so concurrent settlements don't wait on one account's sequence
   [`packages/signer-pool`](../../packages/signer-pool/).
 - In every gate settlement (5.5) the transaction's source is a channel account and the fee bump's
   source is the fee account `GAVE5V5I…KKRP`.
-- The token matrix's batch put six settlements on several channels in one ledger
-  (`batchUsedSeveralChannels`, `batchSharedALedgerAcrossChannels`).
+- In the token matrix (5.1), one payment from each of six buyers, sent at once, settled through
+  four channels, three of them in ledger 5656911 (`spreadSettled`, `batchUsedSeveralChannels`,
+  `batchSharedALedgerAcrossChannels`).
+- Six payments from one buyer, sent at once, settled one at a time, one per ledger
+  (`batchOnePayerOneAtATime`). This is intended: a payer has at most one settlement in flight per
+  asset ([ADR 0007](../adr/0007-fee-abuse-containment.md), task 0024), so one balance can't pass
+  simulation N times and fail N−1 times on chain at the facilitator's fee. Throughput across
+  channels comes from many payers; one payer settles about one payment per ledger and asset.
 - One process at a time holds the channel set: a lease with a fencing token, released on a
   graceful shutdown (tasks 0025, 0071).
 - The service refuses to start unless every channel's master key weight is 0 and the
@@ -369,9 +386,11 @@ transaction hash is recorded.
 - The final rerun, on the deployed Tranche 1 build:
   [`conformance/results/testnet-hosted/`](../../conformance/results/testnet-hosted/) —
   2026-11-10, 08:50–09:03 UTC, upstream `8827cf19`, facilitator `5d2e26ba` (the commit `/health`
-  names), gate `49e5b727`, 18 of 18 passed in 11.0 minutes, command
-  `pnpm test --testnet --families=stellar --schemes=exact --facilitators=stellar-x402`. The 9
-  `upfront` scenarios settle before serving, without a `/verify`, as upstream's routes do.
+  names), gate `49e5b727`, 18 of 18 passed, the suite taking 11.0 minutes, command
+  `pnpm test --testnet --families=stellar --schemes=exact --facilitators=stellar-x402`. On the
+  plain route, 9 scenarios verify → settle: the Tranche #1 bar. On the `upfront` route, 9 settle
+  before serving, without a `/verify`, as upstream's resource server does for that route: they
+  show settle alone.
 - The conformance report written from it, with each scenario's route and what a pass does not
   show: [`conformance/REPORT.md`](../../conformance/REPORT.md).
 
@@ -398,7 +417,9 @@ transaction hash is recorded.
 
 **After the testnet reset.** The testnet reset scheduled for 2026-12-16 removes every transaction
 from the network. The gate saves each settlement's signed envelope in `gate.json`, so each hash
-above can be recomputed from its envelope after the links stop resolving.
+above can be recomputed from its envelope after the links stop resolving. An envelope shows what
+was signed, not that the network applied it or that it succeeded: after the reset only a fresh run
+shows that, and the grant's final handover needs one.
 
 **Keeping conformance current.** A daily off-server check compares the upstream files the suite
 rests on with the gate's pin and raises an alarm when they change (task 0029).
