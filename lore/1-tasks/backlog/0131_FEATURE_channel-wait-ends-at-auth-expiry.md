@@ -1,6 +1,6 @@
 ---
 id: "0131"
-title: "End the wait for a channel at the payer's real expiry ledger, or drop the estimate"
+title: "Ledger-time guesses in settlement: the channel wait estimate and the 66-ledger cap"
 type: FEATURE
 status: backlog
 related_adr: ["0011"]
@@ -16,7 +16,7 @@ history:
       build only once a case shows.
 ---
 
-# End the wait for a channel at the payer's real expiry ledger, or drop the estimate
+# Ledger-time guesses in settlement: the channel wait estimate and the 66-ledger cap
 
 ## Summary
 
@@ -54,7 +54,20 @@ Two guesses of one length, used only when a payment arrives with 4 or 5 ledgers 
   own process could still sign, not the network. Closing at the expiry ledger instead would hold
   an abandoned claim up to 5.5 minutes rather than about 35 s.
 
+## Also parked here: the 66-ledger cap on faster ledgers
+
+- `MAX_VALIDITY_LEDGERS` (66 by default, 0073 decision 6) is sized for 5 s ledgers: upstream's
+  client signs a 300 s offer for 60 ledgers, its check allows 2 more, the rest is spare. If the
+  validators vote 4 s ledgers, the same offer signs 75 ledgers and every such payment is refused
+  with `…_signature_expiration_too_far` until the cap is raised (about 81: 75 + 2 + 4 spare).
+- Measured with the block explorer's database (one row per ledger, 2026-11-10): no month of the
+  last year averaged under 5.0 s; the last two averaged 5.0 s, earlier ones 5.1–5.8 s.
+- **Decided 2026-11-10:** nothing is built for it now. When a vote for shorter ledgers is
+  announced, raise the cap before it takes effect, and consider deriving it from the ledger time.
+- Upstream reads the ledger time from Horizon for this; OpenZeppelin uses a 5 s constant.
+
 ## Acceptance Criteria
 
 - [ ] A case of a payment dropped while still landable is measured, or ledgers average above 6 s
 - [ ] A or D is picked, with a test that fails before the change
+- [ ] Before a vote for shorter ledgers takes effect, `MAX_VALIDITY_LEDGERS` fits the new ledger time
