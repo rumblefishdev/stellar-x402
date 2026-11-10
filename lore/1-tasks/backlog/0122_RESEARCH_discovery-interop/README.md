@@ -31,6 +31,8 @@ As the grant's reviewer, I want to know how our Bazaar works with other x402 cat
 - Our listings already use upstream's discovery types and the spec's resources endpoint.
 - Other catalogs exist: a crawl of Coinbase's on 2026-10-20 counted 26,427 listings, 638 of them
   payable on `stellar:pubnet` (not re-measured).
+- Findings so far: `notes/R-public-catalog-sources.md` (2026-11-10). The network-wide
+  alternative is task 0129.
 
 ## Implementation
 
