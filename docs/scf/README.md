@@ -50,16 +50,14 @@ npx -y @mermaid-js/mermaid-cli -i architecture.mmd -o architecture.png -s 3 -p p
 
 1. **Final deploy and gate rerun.** Deploy the finished Tranche 1 build, rerun the gate
    (`conformance/README.md`) and commit `conformance/results/testnet-hosted/` (task 0029).
-2. **Demo listing.** Settle one payment with the `bazaar` extension, so
-   `/discovery/resources` lists a resource.
-3. **Outputs.** Run every command in `milestone-1-evidence.md` and paste its output over the
+2. **Outputs.** Run every command in `milestone-1-evidence.md` and paste its output over the
    `<TODO:>` marker; rebuild section 5.5's table from the rerun.
-4. **Screenshots** for each `<TODO: screenshot>`, ideally in the same session as the recording.
-5. **Render** the diagram, then `./build-pdf.sh`.
-6. **Record** the video from `milestone-1-video-scenario.md`.
-7. **Upload** the PDF and the video to one Google Drive folder, link-sharing "anyone with the link
+3. **Screenshots** for each `<TODO: screenshot>`, ideally in the same session as the recording.
+4. **Render** the diagram, then `./build-pdf.sh`.
+5. **Record** the video from `milestone-1-video-scenario.md`.
+6. **Upload** the PDF and the video to one Google Drive folder, link-sharing "anyone with the link
    can view".
-8. **Form.** Replace the placeholders in `milestone-1-form-answers.md`, work its checklist, paste
+7. **Form.** Replace the placeholders in `milestone-1-form-answers.md`, work its checklist, paste
    the four fields into the form and submit.
 
 ## Ground rules for this package

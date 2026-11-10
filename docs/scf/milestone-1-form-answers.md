@@ -98,7 +98,8 @@ Field 1's four deliverables quote the Tranche #1 line items of the Panel Review 
       `results/testnet-hosted/` is committed and the evidence document's section 5.5 uses it.
 - [ ] `curl -s https://x402-facilitator.sorobanscan.com/health` returns `ready: true` with the
       gate rerun's commit.
-- [ ] A demo payment with the `bazaar` extension has settled, and `/discovery/resources` lists it.
+- [ ] D3's evidence is the `catalog-smoke.ts` testnet run in section 5.3; the public catalog's
+      output there is current.
 - [ ] Every `<TODO:>` in `milestone-1-evidence.md` is replaced; screenshots in `screenshots/`.
 - [ ] `architecture.png` rendered from `architecture.mmd`.
 - [ ] `milestone-1-evidence.md` exported: `./build-pdf.sh`.

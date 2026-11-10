@@ -282,7 +282,7 @@ neither tree. Commands and counts:
 curl -s "$FAC/discovery/resources?limit=5" | jq
 ```
 
-The public catalog is empty today (`{"items":[],"total":0}`): cataloging runs on the deployed
+The public catalog is empty today (`"items":[]`, `"total":0`): cataloging runs on the deployed
 service, but no seller has yet settled a payment carrying the `bazaar` extension through it, and
 listings come only from real settlements, with no registration step.
 

@@ -15,19 +15,20 @@ paste the same outputs into the PDF.
 
 ### Windows to have open (in this order — the scene order)
 
-1. **Image viewer** — `architecture.png`, full screen.
-2. **Terminal A** — `export FAC=https://x402-facilitator.sorobanscan.com`, `jq` installed. Run
+1. **PDF viewer** — `milestone-1-evidence.pdf`, at section 1; Scene 5 jumps to section 5.3.
+2. **Image viewer** — `architecture.png`, full screen.
+3. **Terminal A** — `export FAC=https://x402-facilitator.sorobanscan.com`, `jq` installed. Run
    every command of Scenes 3 and 5 once beforehand, so you know the output before the camera is
    on.
-3. **Browser tab 1** — stellar.expert (testnet) on one transaction from the gate's run, e.g. the
+4. **Browser tab 1** — stellar.expert (testnet) on one transaction from the gate's run, e.g. the
    first row of the table in section 5.5 of the evidence document.
-4. **Browser tab 2** — stellar.expert (testnet) on the `UptoProxy` contract
+5. **Browser tab 2** — stellar.expert (testnet) on the `UptoProxy` contract
    `CAL7SBTOECJ6HXXO3ST43LM2HJJFSZ3ZDEEZBIWHJPB7DRF5MXS5V2VC`.
-5. **Browser tab 3** — GitHub: `docs/upto-proxy-testnet-report.md` on `develop`.
-6. **Browser tab 4** — GitHub: `conformance/results/testnet-hosted/suite.json` (or the
+6. **Browser tab 3** — GitHub: `docs/upto-proxy-testnet-report.md` on `develop`.
+7. **Browser tab 4** — GitHub: `conformance/results/testnet-hosted/suite.json` (or the
    evidence PDF at section 5.5).
-7. **Browser tab 5** — the upstream PR x402-foundation/x402#3781.
-8. **Browser tab 6** — AWS Console → CloudWatch → Alarms, filtered to `x402-production`, in
+8. **Browser tab 5** — the upstream PR x402-foundation/x402#3781.
+9. **Browser tab 6** — AWS Console → CloudWatch → Alarms, filtered to `x402-production`, in
    eu-central-1.
 
 ### ⚠️ Secrets — read this before you hit record
@@ -48,7 +49,7 @@ Nothing below may appear in any frame:
 | The deployed commit                           | `curl -s $FAC/health \| jq -r .commit` — must equal the gate rerun's facilitator commit |
 | Gate run: passed/total, date, upstream commit | `conformance/results/testnet-hosted/gate.json` and `suite.json`                         |
 | One gate transaction                          | Section 5.5 of the evidence document                                                    |
-| A catalog listing                             | `curl -s "$FAC/discovery/resources?limit=1" \| jq` after the demo payment               |
+| The catalog pipeline's run                    | Section 5.3 of the evidence document: two transactions and the decoded header           |
 
 ### What NOT to show
 
@@ -105,18 +106,26 @@ Point at `areFeesSponsored: true` and at `commit`.
 > token matrix in the evidence document shows all three, and a batch spread across several
 > channels in one ledger."
 
-## Scene 5 — The Bazaar foundation (~0:30)
+## Scene 5 — The Bazaar foundation (~0:40)
 
-**Screen:** Terminal A.
+**Screen:** Terminal A, then the PDF at section 5.3.
 
 ```bash
-curl -s "$FAC/discovery/resources?limit=1" | jq
-curl -s "$FAC/discovery/resources?network=stellar:testnet&type=http&limit=1" | jq '.pagination'
+curl -s "$FAC/discovery/resources?network=stellar:testnet&type=http&limit=1" | jq
 ```
 
-> "When a payment with the Bazaar extension settles, the resource is cataloged automatically.
-> `/discovery/resources` lists it, with the spec's filters: type, payTo, network, extensions,
-> limit and offset. Search and ranking come in a later tranche."
+> "The Bazaar's resources endpoint is live, with the spec's filters: type, payTo, network,
+> extensions, limit and offset. Its catalog fills only from real settlements carrying the Bazaar
+> extension, with no registration step, and no seller has settled one through it yet, so today
+> it is empty."
+
+Switch to the PDF, section 5.3.
+
+> "Here is the pipeline end to end on testnet. A buyer's payment settles, and the facilitator
+> lists what the seller's own 402 response says. An outsider's payment with a forged description
+> leaves the seller's text and price in place. Search and ranking come in a later tranche."
+
+Point at the two transaction hashes and at `processing` in the decoded header.
 
 ## Scene 6 — `upto` (~0:30)
 
