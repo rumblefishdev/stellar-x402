@@ -5,9 +5,6 @@ settings:
   excludeLinksFromLockfile: false
   injectWorkspacePackages: true
 
-patchedDependencies:
-  '@x402/core@2.28.0': edde4c7ab19999725f34dc16b92d53232dccaa8ae687b48a06d0af0d0d609af3
-
 importers:
 
   .:
@@ -68,7 +65,7 @@ importers:
         version: 16.4.1
       '@x402/core':
         specifier: ~2.28.0
-        version: 2.28.0(patch_hash=edde4c7ab19999725f34dc16b92d53232dccaa8ae687b48a06d0af0d0d609af3)
+        version: 2.28.0
       '@x402/extensions':
         specifier: ~2.28.0
         version: 2.28.0(typescript@6.0.3)
@@ -133,7 +130,7 @@ importers:
         version: 16.4.1
       '@x402/core':
         specifier: ~2.28.0
-        version: 2.28.0(patch_hash=edde4c7ab19999725f34dc16b92d53232dccaa8ae687b48a06d0af0d0d609af3)
+        version: 2.28.0
       '@x402/extensions':
         specifier: ~2.28.0
         version: 2.28.0(typescript@6.0.3)
@@ -166,7 +163,7 @@ importers:
         version: 16.4.1
       '@x402/core':
         specifier: ~2.28.0
-        version: 2.28.0(patch_hash=edde4c7ab19999725f34dc16b92d53232dccaa8ae687b48a06d0af0d0d609af3)
+        version: 2.28.0
       '@x402/express':
         specifier: ~2.28.0
         version: 2.28.0(express@5.2.1)(typescript@6.0.3)
@@ -234,7 +231,7 @@ importers:
     dependencies:
       '@x402/core':
         specifier: ~2.28.0
-        version: 2.28.0(patch_hash=edde4c7ab19999725f34dc16b92d53232dccaa8ae687b48a06d0af0d0d609af3)
+        version: 2.28.0
       '@x402/extensions':
         specifier: ~2.28.0
         version: 2.28.0(typescript@6.0.3)
@@ -257,7 +254,7 @@ importers:
         version: link:../seller-fetch
       '@x402/core':
         specifier: ~2.28.0
-        version: 2.28.0(patch_hash=edde4c7ab19999725f34dc16b92d53232dccaa8ae687b48a06d0af0d0d609af3)
+        version: 2.28.0
       '@x402/extensions':
         specifier: ~2.28.0
         version: 2.28.0(typescript@6.0.3)
@@ -2462,13 +2459,13 @@ snapshots:
 
   '@vitest/spy@5.0.2': {}
 
-  '@x402/core@2.28.0(patch_hash=edde4c7ab19999725f34dc16b92d53232dccaa8ae687b48a06d0af0d0d609af3)':
+  '@x402/core@2.28.0':
     dependencies:
       zod: 3.25.76
 
   '@x402/express@2.28.0(express@5.2.1)(typescript@6.0.3)':
     dependencies:
-      '@x402/core': 2.28.0(patch_hash=edde4c7ab19999725f34dc16b92d53232dccaa8ae687b48a06d0af0d0d609af3)
+      '@x402/core': 2.28.0
       '@x402/extensions': 2.28.0(typescript@6.0.3)
       express: 5.2.1
     transitivePeerDependencies:
@@ -2482,7 +2479,7 @@ snapshots:
       '@noble/curves': 1.9.7
       '@scure/base': 1.2.6
       '@signinwithethereum/siwe': 4.2.1(viem@2.56.9(typescript@6.0.3)(zod@3.25.76))
-      '@x402/core': 2.28.0(patch_hash=edde4c7ab19999725f34dc16b92d53232dccaa8ae687b48a06d0af0d0d609af3)
+      '@x402/core': 2.28.0
       ajv: 8.20.0
       jose: 5.10.0
       tweetnacl: 1.0.3
@@ -2496,12 +2493,12 @@ snapshots:
 
   '@x402/fetch@2.28.0':
     dependencies:
-      '@x402/core': 2.28.0(patch_hash=edde4c7ab19999725f34dc16b92d53232dccaa8ae687b48a06d0af0d0d609af3)
+      '@x402/core': 2.28.0
 
   '@x402/mcp@2.28.0':
     dependencies:
       '@modelcontextprotocol/sdk': 1.30.1(zod@3.25.76)
-      '@x402/core': 2.28.0(patch_hash=edde4c7ab19999725f34dc16b92d53232dccaa8ae687b48a06d0af0d0d609af3)
+      '@x402/core': 2.28.0
       zod: 3.25.76
     transitivePeerDependencies:
       - '@cfworker/json-schema'
@@ -2510,7 +2507,7 @@ snapshots:
   '@x402/stellar@2.28.0':
     dependencies:
       '@stellar/stellar-sdk': 16.4.1
-      '@x402/core': 2.28.0(patch_hash=edde4c7ab19999725f34dc16b92d53232dccaa8ae687b48a06d0af0d0d609af3)
+      '@x402/core': 2.28.0
     transitivePeerDependencies:
       - debug
       - supports-color
