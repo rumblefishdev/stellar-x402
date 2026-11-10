@@ -15,6 +15,13 @@ history:
     note: >
       Created and started: fix it upstream, since the source fix is smaller than our workaround
       plus a second one in the MCP server. The upstream PR is not opened yet.
+  - date: "2026-11-10"
+    status: active
+    who: karolkow
+    note: >
+      #174 merged: until upstream's release, our schema reads a 402 or payment whose serviceName,
+      tags or iconUrl breaks a Bazaar limit; the preview cuts name and tags to 500; a wrong type
+      still refuses. The upstream PR waits for a signing key.
 ---
 
 # Upstream fix: @x402/core refuses a whole 402 for one bad optional resource field
@@ -84,7 +91,7 @@ Nothing.
 ## Upstream PR
 
 - PR: not opened yet. Write its URL here when it is opened.
-- Our patch until the release (row 6): https://github.com/rumblefishdev/stellar-x402/pull/174
+- Our schema until the release (rows 7–9): https://github.com/rumblefishdev/stellar-x402/pull/174, merged 2026-11-10.
 - Released in `@x402/core`: not yet. Write the version here.
 
 ## After the upstream PR merges and is released
@@ -101,7 +108,7 @@ Nothing.
 ## Acceptance Criteria
 
 - [ ] The upstream PR is opened, with its URL in this file.
-- [ ] Until the release: our schema in `packages/bazaar`; `/verify` accepts a payment whose resource has 6
+- [x] Until the release: our schema in `packages/bazaar`; `/verify` accepts a payment whose resource has 6
       tags, the preview tool shows a 402 with 6 tags, the seller check's workaround is gone.
 - [ ] The upstream PR is merged and released; the version is in this file.
 - [ ] After the release: our schema removed, `@x402/core` bumped in all three packages, tests green.
