@@ -108,4 +108,3 @@ Field 1's four deliverables quote the Tranche #1 line items of the Panel Review 
 - [ ] Every link in Field 3 opens anonymously in an incognito window.
 - [ ] No secret in the PDF, the screenshots or any video frame (the script's secrets list).
 - [ ] English only across all four fields; no personal names.
-- [ ] Submitted within 90 days of the Tranche #0 payment.

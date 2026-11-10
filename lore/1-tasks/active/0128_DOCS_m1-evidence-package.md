@@ -41,8 +41,8 @@ deliverable (and its PDF), a video script Oskar records from, and the form's fie
   licenses (§5); re-run the search ranking's nDCG@10 evaluation (§4), which starts with ranking in
   Tranche #2.
 - **SCF's rules** (handbook, Budget & Deliverable Guidelines): Tranche #1 is 20% of the award; the
-  form comes by email with the Tranche #0 payment; it is due within 90 days of the previous
-  payment; a scope change is told to SCF before the submission.
+  form comes by email with the Tranche #0 payment; a scope change is told to SCF before the
+  submission.
 - **The reference packages:** `docs/scf/` in `soroban-block-explorer` and `stellar-prices-api`:
   `milestone-N-evidence.md` and its PDF (pandoc + typst), `milestone-N-video-scenario.md`,
   `milestone-N-form-answers.md`, `architecture.mmd`, `screenshots/`.
@@ -63,9 +63,7 @@ deliverable (and its PDF), a video script Oskar records from, and the form's fie
 
 ## Open Questions
 
-- When was Tranche #0 paid (T0), and who has the Tranche Completion Form's email? The form is due
-  within 90 days of it.
-- The dependency tree's license audit, for this tranche boundary: the package needs its output.
+- Who has the Tranche Completion Form's email?
 
 ## Acceptance Criteria
 
