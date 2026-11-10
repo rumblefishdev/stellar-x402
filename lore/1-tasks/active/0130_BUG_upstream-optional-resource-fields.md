@@ -81,6 +81,7 @@ Nothing.
 ## Upstream PR
 
 - PR: not opened yet. Write its URL here when it is opened.
+- Our patch until the release (row 6): https://github.com/rumblefishdev/stellar-x402/pull/174
 - Released in `@x402/core`: not yet. Write the version here.
 
 ## After the upstream PR merges and is released
