@@ -6,8 +6,10 @@
  *    and settle through the same code: only `asset` changes in the requirements.
  * 2. The buyer's XLM balance and sequence number are the same before and after: the facilitator
  *    pays every fee, and the buyer sources no transaction.
- * 3. A batch of concurrent payments settles, and one ledger holds settlements from more than one
- *    channel.
+ * 3. A batch of concurrent payments from the buyer settles one at a time, each in a ledger of its
+ *    own: since 0024 a payer has one settlement in flight per asset (ADR 0007).
+ * 4. A batch of concurrent payments from fresh buyers, one each, settles across several channels,
+ *    and one ledger holds settlements from more than one channel.
  *
  * Env:
  *   CLIENT_SECRET    the buyer: 0004's e2e client (`client` in
@@ -17,7 +19,10 @@
  *   TEST_TOKEN       optional, another deployment of `contracts/test-token` (deploy-contract.sh)
  *   AMOUNT           base units per payment (default 1000)
  *   BATCH            payments in the concurrent batch (default 6)
- *   RPC_URLS         passed to the facilitator (default: the testnet RPC)
+ *   RPC_URLS         passed to the facilitator, and the script reads through the first (default:
+ *                    SDF's testnet RPC)
+ *   DATABASE_URL     the facilitator's PostgreSQL (default: compose's, 127.0.0.1:15432); the run
+ *                    works in a schema of its own, `token_matrix`, recreated each run
  *
  *   cd apps/facilitator
  *   CLIENT_SECRET=S… npx tsx test/live/token-matrix.ts
@@ -46,12 +51,31 @@ import { buildCreateChannelsTx, readAccountEntry } from "@stellar-x402/signer-po
 import type { PaymentRequirements, SettleResponse, VerifyResponse } from "@x402/core/types";
 import { createEd25519Signer } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/client";
+import pg from "pg";
 import { Agent, fetch } from "undici";
+import { migrate } from "../../src/adapters/postgres-schema.js";
 import { main } from "../../src/main.js";
 import { fakeOpenBao, signerEnv } from "../fake-openbao.js";
 
 const network = "stellar:testnet";
-const server = new rpc.Server("https://soroban-testnet.stellar.org");
+// The script's own reads and setup go through the facilitator's first RPC.
+const server = new rpc.Server(
+  process.env.RPC_URLS?.split(",")[0] ?? "https://soroban-testnet.stellar.org",
+);
+
+// The facilitator's stores are PostgreSQL: a schema of this run's own, recreated, so a missing
+// database stops the run before anything is spent on testnet.
+const SCHEMA = "token_matrix";
+const base = process.env.DATABASE_URL ?? "postgres://postgres:postgres@127.0.0.1:15432/postgres";
+const databaseUrl = (() => {
+  const url = new URL(base);
+  url.searchParams.set("options", `-c search_path=${SCHEMA}`);
+  return url.toString();
+})();
+const admin = new pg.Pool({ connectionString: base, max: 1 });
+await admin.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE; CREATE SCHEMA ${SCHEMA}`);
+const db = new pg.Pool({ connectionString: databaseUrl, max: 2 });
+await migrate(db);
 /** Circle's testnet USDC. */
 const USDC = new Asset("USDC", "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5");
 /** 0004's self-issued asset; its SAC is deployed. */
@@ -261,6 +285,8 @@ const facilitatorServer = await main(
     CHANNELS: channelKeys.map((keypair) => keypair.publicKey()).join(","),
     PORT: "0",
     LOG_LEVEL: "warn",
+    DATABASE_URL: databaseUrl,
+    CLIENT_IP: "socket",
     RPC_URLS: process.env.RPC_URLS,
   },
   { write: (line) => process.stderr.write(line) },
@@ -290,17 +316,40 @@ const post = async <T>(route: string, requirements: PaymentRequirements, payload
   if (response.status !== 200) throw new Error(`/${route} answered ${response.status}`);
   return (await response.json()) as T;
 };
-/** One payment: the same steps for every token. */
-async function pay(asset: string) {
+/** One payment: the same steps for every token and every buyer. */
+async function pay(asset: string, by = payer) {
   const requirements = requirementsFor(asset);
   const payload = {
-    ...(await payer.createPaymentPayload(2, requirements)),
+    ...(await by.createPaymentPayload(2, requirements)),
     accepted: requirements,
   };
   const verified = await post<VerifyResponse>("verify", requirements, payload);
   const settled = await post<SettleResponse>("settle", requirements, payload);
   return { verified, settled, chain: settled.success ? await onChain(settled.transaction) : null };
 }
+
+// The many-payer batch's buyers: fresh accounts holding the test token, one payment each. One at a
+// time: friendbot and the facilitator account's sequence both take one request after another.
+const spreadBuyers: Keypair[] = [];
+for (let i = 0; i < BATCH; i++) spreadBuyers.push(await friendbot());
+for (const buyer of spreadBuyers) {
+  await submit(
+    facilitator,
+    [
+      Operation.invokeContractFunction({
+        contract: TEST_TOKEN,
+        function: "mint",
+        args: [
+          Address.fromString(buyer.publicKey()).toScVal(),
+          nativeToScVal(AMOUNT, { type: "i128" }),
+        ],
+      }),
+    ],
+    true,
+  );
+}
+const schemeOf = (buyer: Keypair) =>
+  new ExactStellarScheme(createEd25519Signer(buyer.secret(), network));
 
 try {
   const buyerBefore = await xlmAndSequence(client.publicKey());
@@ -318,12 +367,16 @@ try {
     });
   }
   const batch = await Promise.all(Array.from({ length: BATCH }, () => pay(TEST_TOKEN)));
+  const spread = await Promise.all(spreadBuyers.map((buyer) => pay(TEST_TOKEN, schemeOf(buyer))));
   const buyerAfter = await xlmAndSequence(client.publicKey());
 
-  const landed = batch.map((payment) => payment.chain).filter((tx) => tx?.status === "SUCCESS");
-  // The channels each ledger's batch settlements came through.
+  const settledOf = (payments: typeof batch) =>
+    payments.map((payment) => payment.chain).filter((tx) => tx?.status === "SUCCESS");
+  const landed = settledOf(batch);
+  const spreadLanded = settledOf(spread);
+  // The channels each ledger's many-payer settlements came through.
   const perLedger = new Map<number, Set<string>>();
-  for (const tx of landed)
+  for (const tx of spreadLanded)
     perLedger.set(tx.ledger!, (perLedger.get(tx.ledger!) ?? new Set()).add(tx.channel!));
   const checks = {
     everyTokenSettled: matrix.every(
@@ -333,13 +386,15 @@ try {
         row.chain?.status === "SUCCESS" &&
         row.sellerReceived === AMOUNT.toString(),
     ),
-    facilitatorPaidEveryFee: [...matrix.map((row) => row.chain), ...landed].every(
+    facilitatorPaidEveryFee: [...matrix.map((row) => row.chain), ...landed, ...spreadLanded].every(
       (tx) => tx?.feePayer === source,
     ),
     buyerPaidNoXlm: buyerAfter.xlm === buyerBefore.xlm,
     buyerSourcedNothing: buyerAfter.sequence === buyerBefore.sequence,
     batchSettled: landed.length === BATCH,
-    batchUsedSeveralChannels: new Set(landed.map((tx) => tx.channel)).size > 1,
+    batchOnePayerOneAtATime: new Set(landed.map((tx) => tx.ledger)).size === landed.length,
+    spreadSettled: spreadLanded.length === BATCH,
+    batchUsedSeveralChannels: new Set(spreadLanded.map((tx) => tx.channel)).size > 1,
     batchSharedALedgerAcrossChannels: [...perLedger.values()].some((channels) => channels.size > 1),
   };
   const results = {
@@ -370,6 +425,15 @@ try {
           chain ?? { invalidReason: verified.invalidReason, errorReason: settled.errorReason },
       ),
     },
+    spread: {
+      size: BATCH,
+      token: TEST_TOKEN,
+      buyers: spreadBuyers.map((buyer) => buyer.publicKey()),
+      transactions: spread.map(
+        ({ verified, settled, chain }) =>
+          chain ?? { invalidReason: verified.invalidReason, errorReason: settled.errorReason },
+      ),
+    },
     checks,
   };
   mkdirSync(new URL("./results/", import.meta.url), { recursive: true });
@@ -382,4 +446,6 @@ try {
 } finally {
   await facilitatorServer.close();
   openbao.close();
+  await db.end();
+  await admin.end();
 }
