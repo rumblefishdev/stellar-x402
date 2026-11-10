@@ -107,7 +107,7 @@ A fresh reviewer, given only the goal and the constraints (2026-11-10): the prem
 | 18 | One 30 s deadline covers the whole section, and its files are read at once after the pin, so a slow GitHub ends it inside the Lambda's 60 s and logs `watch_section_failed` | agent, from the #149 review | beyond it | no standard |
 | 19 | `upstream-changed` stays one alarm against the pin: one message on the first change, back to OK once the pin moves; a later change while it is in ALARM sends none, and the daily `watch_upstream` log line lists every file that differs | the owner's decision, 2026-11-09 | beyond it | no standard |
 | 20 | The two upstream alarms are a group of their own, `upstream`, off in production until `make check-series GROUP=upstream` passes after a 08:00 UTC run, as `protocol` was before its first points | the owner's decision, 2026-11-10 (an Alarms deploy before the first point would create `upstream-silent` with no data, and it fires at once) | beyond it | no standard |
-| 21 | The final rerun runs on the fourth production deploy, `5d2e26b`, without #152 (merged after it) and #162 (open) | the owner's decision, 2026-11-10 | changes it: the task says after the last deploy before the M1 handover | no standard |
+| 21 | The final rerun runs on the fourth production deploy, `5d2e26b`, without #152 (merged after it) and #162 (closed unmerged the same day) | the owner's decision, 2026-11-10 | changes it: the task says after the last deploy before the M1 handover | no standard |
 | 22 | The conformance report is its own file, `conformance/REPORT.md`, written from the run's two result files: the run, what each scenario proves, every settlement, what a pass does not show, how to check it; the M1 evidence package links it | the owner's decision, 2026-11-10 | as the task says | no standard |
 
 ## Not yet decided
@@ -125,8 +125,7 @@ A fresh reviewer, given only the goal and the constraints (2026-11-10): the prem
 
 ## Run of record
 
-2026-11-10, 08:50 UTC, `conformance/results/testnet-hosted/`: 18 of 18 scenarios passed in 12.7
-minutes, each settled on chain in ledgers 5655406–5655524 with the facilitator's signer as fee
+2026-11-10, 08:50 UTC, `conformance/results/testnet-hosted/`: 18 of 18 scenarios passed in 12.7 minutes of gate time (the suite itself 11.0), each settled on chain in ledgers 5655406–5655524 with the facilitator's signer as fee
 payer. Upstream `8827cf1`, facilitator `5d2e26b` (the fourth production deploy), gate `49e5b72`.
 The first run of record, 2026-11-06 on facilitator `68e778e`, is in git history.
 
