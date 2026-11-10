@@ -47,8 +47,8 @@
     "host": true,
     "backups": false,
     "snapshots": false,
-    "disk": false,
-    "memory": false,
+    "disk": true,
+    "memory": true,
     "logVolume": true,
     "watch": true,
     "watchSecurity": false,
@@ -65,14 +65,14 @@
     "sequenceResyncCount": 5,
     "balanceLowStroops": 250000000,
     "balanceCriticalStroops": 100000000,
-    "auditDiskUsedPercent": 80,
+    "auditDiskUsedPercent": 90,
     "walStaleSeconds": 600,
     "backupAgeSeconds": 93600,
     "snapshotAgeSeconds": 93600,
     "certificateDaysLeft": 30,
     "credentialsAgeSeconds": 7500,
-    "diskUsedPercent": null,
-    "memoryUsedPercent": null,
+    "diskUsedPercent": 80,
+    "memoryUsedPercent": 90,
     "logVolumeBytesPerHour": 200000000
   }
 }

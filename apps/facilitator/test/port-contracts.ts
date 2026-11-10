@@ -136,6 +136,20 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       });
     });
 
+    it("refuses a hash for a claim closed with nothing sent, so a late write can't send", async () => {
+      // A sweep closes a claim with no hash by the time (reconcile, decision 13); a call's write
+      // sent before that close and arriving after it must still be refused.
+      const s = settlement("1");
+      await store.claim(s);
+      await store.transition(s.key, "claimed", {
+        state: "rejected",
+        errorReason: "settle_exact_stellar_interrupted",
+        updatedAt: 3_000,
+      });
+      expect(await store.addHash(s.key, "h1", LEASE, 2_000)).toBe(false);
+      expect((await store.get(s.key))?.hashes).toEqual([]);
+    });
+
     it("lets exactly one of addHash and a versioned transition win when they race", async () => {
       for (let i = 0; i < 10; i++) {
         const s = settlement(String(i));
