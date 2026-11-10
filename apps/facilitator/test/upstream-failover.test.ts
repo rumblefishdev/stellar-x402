@@ -205,9 +205,30 @@ describe("failoverUpstream", () => {
     ]);
   });
 
-  it("returns the first failure when every endpoint fails", async () => {
-    const thrown = failover([endpoint("a", "hang"), endpoint("b", unexpected)], { timeoutMs: 20 });
-    await expect(thrown.upstream.verify(payload, requirements)).rejects.toBeInstanceOf(
+  it("decides the same whatever endpoint comes first when every endpoint fails", async () => {
+    // Upstream's own error wins over a throw, and any other throw over a timeout: a timeout comes
+    // out only when every endpoint timed out, the one case `/verify` answers 503.
+    const x = new Error("x");
+    for (const order of [
+      ["hang", unexpected],
+      [unexpected, "hang"],
+    ] as const) {
+      const { upstream } = failover([endpoint("a", order[0]), endpoint("b", order[1])], {
+        timeoutMs: 20,
+      });
+      await expect(upstream.verify(payload, requirements)).resolves.toEqual(unexpected);
+    }
+    for (const order of [
+      ["hang", x],
+      [x, "hang"],
+    ] as const) {
+      const { upstream } = failover([endpoint("a", order[0]), endpoint("b", order[1])], {
+        timeoutMs: 20,
+      });
+      await expect(upstream.verify(payload, requirements)).rejects.toBe(x);
+    }
+    const hung = failover([endpoint("a", "hang"), endpoint("b", "hang")], { timeoutMs: 20 });
+    await expect(hung.upstream.verify(payload, requirements)).rejects.toBeInstanceOf(
       UpstreamTimeoutError,
     );
     const a = endpoint("a", unexpected);

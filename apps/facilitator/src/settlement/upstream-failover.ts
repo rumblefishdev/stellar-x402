@@ -1,6 +1,11 @@
 import type { FallbackRpc } from "@stellar-x402/signer-pool";
 import type { VerifyResponse } from "@x402/core/types";
-import { UNEXPECTED_VERIFY_ERROR, withTimeout, type UpstreamVerifier } from "./verify.js";
+import {
+  UNEXPECTED_VERIFY_ERROR,
+  UpstreamTimeoutError,
+  withTimeout,
+  type UpstreamVerifier,
+} from "./verify.js";
 
 export interface UpstreamEndpoint {
   /** A label for the logs and the `verified` trace. Not the URL: an RPC URL can carry an API key. */
@@ -29,8 +34,10 @@ export interface UpstreamFailoverOptions {
  * shared active endpoint, and the same call is tried on the next ones when it throws, takes longer
  * than `timeoutMs`, or answers `unexpected_verify_error` (upstream's answer to its own exceptions,
  * such as a failed RPC call). The first endpoint with any other answer, valid or not, answers.
- * If every endpoint fails, the first failure is the result: the error is thrown, or the
- * `unexpected_verify_error` answer returned, for `createVerifier`'s 500.
+ * If every endpoint fails, the result doesn't depend on which came first: the first
+ * `unexpected_verify_error` answer is returned, for `createVerifier`'s 500; with none, the first
+ * error other than a timeout is thrown; a timeout only when every endpoint timed out, which
+ * `/verify` answers 503.
  *
  * Only a throw or a timeout is reported to the shared state, and moves every caller: a hang is the
  * outage that costs each caller its own timeout. `unexpected_verify_error` moves nothing, since one
@@ -95,10 +102,16 @@ export function failoverUpstream(
         return answer;
       }
       notify(() => opts.onExhausted?.(tried));
-      const first = tried[0]!;
-      if ("error" in first.failure) throw first.failure.error;
-      if (trace) trace.rpc = first.name;
-      return first.failure.answer;
+      const errors: unknown[] = [];
+      for (const { name, failure } of tried) {
+        if ("error" in failure) {
+          errors.push(failure.error);
+          continue;
+        }
+        if (trace) trace.rpc = name;
+        return failure.answer;
+      }
+      throw errors.find((error) => !(error instanceof UpstreamTimeoutError)) ?? errors[0];
     },
   };
 }

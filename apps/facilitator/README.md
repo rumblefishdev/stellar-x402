@@ -348,6 +348,12 @@ channel out until its record ends (0090).
 
 `/verify` passes on upstream's `invalid_exact_stellar_*` reasons, plus the checks of its own.
 
+When the RPC gives no answer, `/verify` answers `503 {"error":"rpc_unavailable"}` with
+`Retry-After: 5`, logged as `verify_rpc_unavailable`: upstream's call passed its 10 s on every
+`RPC_URLS` entry, or the facilitator's own ledger read failed on every URL. The payment wasn't
+judged, so the same request may be sent again. Upstream's `unexpected_verify_error` stays a 500:
+it doesn't say whether the RPC failed.
+
 While a breaker is open (task 0024, "Breakers" above), a payment every other check accepted gets
 `/settle`'s reason early, so a seller doesn't serve what `/settle` would refuse. `invalidMessage`
 says which breaker, with no address, amount or reset time:

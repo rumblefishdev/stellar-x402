@@ -101,7 +101,7 @@ metrics. A gauge that stops is silence, not a stale value. The only zero written
 
 | Metric | Source | Billed by | Log fields | Alarm |
 | --- | --- | --- | --- | --- |
-| `http_requests_total` | Every HTTP answer Express sees, when its response closes | Two sets: `[route]` (`/verify`, `/settle`, `/supported`, `/health`, `/discovery`, `other`), and `[status]`, only for `500` | `status` | `http-500` |
+| `http_requests_total` | Every HTTP answer Express sees, when its response closes | Three sets: `[route]` (`/verify`, `/settle`, `/supported`, `/health`, `/discovery`, `other`), `[status]`, only for `500`, and `[route, status]`, only for `/verify` and `503` | `status` | `http-500`, `verify-rpc-unavailable` |
 | `settlement_sweeps_total` | Each sweep, `reconcile.ts`: `listed` once it has listed the records, `failed` when it rejects. Only `listed` is written as 0 | `outcome`: `listed` or `failed` | | `sweeps-stopped`, `facilitator-silent` |
 | `settlement_oldest_open_seconds` | Gauge, computed at the read: the age of the oldest record the latest sweep left open, `history_gone` ones left out; 0 with none; set right after the listing too; no sample until a sweep has listed, so a restart doesn't read 0 (decision 56) | Yes | | `pending` |
 | `pool_queued` | Gauge from the pool's stats | Yes | `channels`, `busy` | `queue-waiting` |

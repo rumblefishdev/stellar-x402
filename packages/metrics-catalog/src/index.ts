@@ -422,7 +422,13 @@ export const CATALOG = [
     kind: "counter",
     unit: "Count",
     scope: "process",
-    sets: [{ dims: ["route"] }, { dims: ["status"], when: { status: ["500"] } }],
+    // `/verify`'s 503 is its RPC giving no answer, with an alarm of its own; a lease or drain 503
+    // on `/settle` is routine on every deploy, so only `/verify`'s gets the set.
+    sets: [
+      { dims: ["route"] },
+      { dims: ["status"], when: { status: ["500"] } },
+      { dims: ["route", "status"], when: { route: ["/verify"], status: ["503"] } },
+    ],
     values: {
       route: ["/verify", "/settle", "/supported", "/health", "/discovery", "other"],
       // What http/app.ts and rate-limit.ts answer (400, 413 and 415 from body-parser, 304 from

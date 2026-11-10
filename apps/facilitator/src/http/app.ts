@@ -1,7 +1,8 @@
 import { STATUS_CODES } from "node:http";
 import { PaymentPayloadV2Schema, PaymentRequirementsV2Schema } from "@x402/core/schemas";
-import type { SupportedResponse, VerifyRequest } from "@x402/core/types";
+import type { SupportedResponse, VerifyRequest, VerifyResponse } from "@x402/core/types";
 import { byName } from "@stellar-x402/metrics-catalog";
+import { RpcUnavailableError } from "@stellar-x402/signer-pool";
 import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
 import type { SignerState } from "../adapters/openbao-signer.js";
 import type { Config } from "../config.js";
@@ -13,7 +14,12 @@ import type { LeaseKeeper } from "../settlement/lease.js";
 import type { Reconciliation } from "../settlement/reconcile.js";
 import type { Settle } from "../settlement/settle.js";
 import { TRUSTLINE_REASONS } from "../settlement/trustline.js";
-import { FEE_EXCEEDS_MAXIMUM, type Verify, type VerifyTrace } from "../settlement/verify.js";
+import {
+  FEE_EXCEEDS_MAXIMUM,
+  UpstreamTimeoutError,
+  type Verify,
+  type VerifyTrace,
+} from "../settlement/verify.js";
 import type { BalanceReader } from "../spend/balance-floor.js";
 import { discoveryResources } from "./discovery.js";
 import { EXTENSION_RESPONSES_HEADER, encodeExtensionResponses } from "./extension-responses.js";
@@ -56,6 +62,13 @@ export interface AppDeps {
 
 /** Seconds a client waits before it tries `/settle` again on a process that can't settle now. */
 export const NO_LEASE_RETRY_AFTER_S = 5;
+
+/**
+ * How long a seller should wait before it sends the same `/verify` again after the RPC gave no
+ * answer: one ledger. No measurement of how fast an RPC recovers sets it; it only asks a seller not
+ * to retry at once.
+ */
+export const RPC_UNAVAILABLE_RETRY_AFTER_S = 5;
 
 /**
  * The refusals whose message the `verified` and `settled` logs carry: it names the account and the
@@ -215,7 +228,9 @@ export function createApp({
     next();
   };
 
-  // A verify outcome, valid or not, is a 200 with an x402 body; a thrown error is a 500.
+  // A verify outcome, valid or not, is a 200 with an x402 body. An RPC that gave no answer is a
+  // 503: the payment wasn't judged, so the same request may come again. Any other thrown error is a
+  // 500. Upstream's `unexpected_verify_error` stays a 500: it doesn't say whether the RPC failed.
   app.post("/verify", limit("verify", config.http.rateLimit.verify), json, async (req, res) => {
     const request = parsePaymentRequest(req.body);
     if (!request) {
@@ -223,7 +238,22 @@ export function createApp({
       return;
     }
     const trace: VerifyTrace = {};
-    const response = await verify(request.paymentPayload, request.paymentRequirements, trace);
+    let response: VerifyResponse;
+    try {
+      response = await verify(request.paymentPayload, request.paymentRequirements, trace);
+    } catch (error) {
+      // `FallbackRpc` turns its own timeouts into `RpcUnavailableError` once every URL failed.
+      const noAnswer =
+        error instanceof UpstreamTimeoutError || error instanceof RpcUnavailableError;
+      if (!noAnswer) throw error;
+      logger.warn("verify_rpc_unavailable", {
+        network: request.paymentRequirements.network,
+        error,
+      });
+      res.setHeader("Retry-After", `${RPC_UNAVAILABLE_RETRY_AFTER_S}`);
+      res.status(503).json({ error: "rpc_unavailable" });
+      return;
+    }
     logger.info("verified", {
       network: request.paymentRequirements.network,
       isValid: response.isValid,
