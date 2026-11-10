@@ -149,6 +149,11 @@ production code.
   claim…" once (it answered `success`), "answers the checks' refusal of a reopen…" once,
   `review-2-answers.test.ts` A3 twice, and `testing-imports.test.ts` three times, each a 5 s test
   timeout.
+- CI on `develop`, the 23 runs from 2026-11-09 13:31 UTC to 2026-11-10 10:16 UTC: one failed
+  (run 42784591712), a test not in the list above: `settle.test.ts` "never lets a waiting repeat
+  end a claim reopened since it read the earlier one (0073 decision 19)". On a real 100 ms budget
+  it answered `settle_exact_stellar_timeout` where it expects `settlement_pending`, so it is the
+  same kind as the rest.
 
 - Trial 2026-11-09 of one writer per claim (decision 11), local branch `lore-0074-one-writer-trial`,
   `settle.ts` +151/−87: after the claim only the claim's own submission writes; `/settle` and
