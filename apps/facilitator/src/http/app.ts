@@ -1,6 +1,7 @@
 import { STATUS_CODES } from "node:http";
-import { PaymentPayloadV2Schema, PaymentRequirementsV2Schema } from "@x402/core/schemas";
+import { PaymentRequirementsV2Schema } from "@x402/core/schemas";
 import type { SupportedResponse, VerifyRequest, VerifyResponse } from "@x402/core/types";
+import { PaymentPayloadV2Schema } from "@stellar-x402/bazaar";
 import { byName } from "@stellar-x402/metrics-catalog";
 import { RpcUnavailableError } from "@stellar-x402/signer-pool";
 import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
