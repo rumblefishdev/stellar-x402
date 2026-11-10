@@ -87,9 +87,12 @@ Nothing.
 
 ## After the upstream PR merges and is released
 
-1. Bump `@x402/core` to the release that carries the fix in `apps/facilitator`, `packages/bazaar`
-   and `packages/mcp` (today `~2.28.0`; latest 2.30.0).
-2. Delete `packages/bazaar/src/service-metadata.ts` and import the two schemas from
+1. Bump the whole `@x402/*` family together (`@x402/core`, `@x402/extensions`, `@x402/stellar`,
+   `@x402/fetch`, ...; today `~2.28.0`) to the release that carries the fix, in its own PR, and
+   show one copy of `@x402/core` with `pnpm why @x402/core`: `@x402/fetch` checks our client with
+   `instanceof` against its own copy.
+2. Delete `packages/bazaar/src/service-metadata.ts`, its export in `packages/bazaar/src/index.ts`
+   and `zod` in `packages/bazaar/package.json`, and import the two schemas from
    `@x402/core/schemas` again.
 3. Keep the tests that a payment and a 402 with 6 tags are read; they must stay green.
 
