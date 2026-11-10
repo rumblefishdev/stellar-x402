@@ -31,8 +31,10 @@ Stellar, so that I can pitch it to partners and funders as an extension of this 
   in the 30 days to 2026-11-09 (`notes/R-network-index-measurements.md`).
 - An x402 settlement is visible on chain, so an index can see every seller and payer across all
   facilitators. The chain carries accounts and amounts, not service URLs.
-- The current grant already delivers search with ranking (RFP 7, `docs/rfp/07-x402-facilitator-bazaar.md`,
-  evaluation criteria). The extension must add something the grant does not.
+- The current grant already promises search ranking with buyer reach, distinct buyers in a
+  trailing window (our proposal, `docs/rfp/x402-facilitator-bazaar-technical-architecture.md:154-168`;
+  the RFP's evaluation criteria ask for search with ranking too). The extension must add something the
+  grant does not.
 - Interop with other catalogs inside the current grant is task 0122.
 
 ## Decisions so far
