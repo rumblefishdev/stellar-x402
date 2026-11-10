@@ -262,7 +262,19 @@ under Apache-2.0, so concurrent settlements don't wait on one account's sequence
 - The service refuses to start unless every channel's master key weight is 0 and the
   facilitator key is its only signer (ADR 0005).
 
-`<TODO: one gate transaction opened on stellar.expert, screenshot: the channel as source, the fee bump paid by the fee account.>`
+One gate settlement, row 1 of the table in 5.5: the source account is the channel
+`GAZRJX2N…SAHK` (master key weight 0, the facilitator key its only signer), the fee source is the
+fee account `GAVE5V5I…KKRP`, and the one operation is a `transfer` of 10000 units (0.001 USDC)
+from the buyer `GDUF…5AFK` to the seller `GAS7…L5IF`. The buyer is neither a source nor a fee
+payer. In Soroban Scan, Rumble Fish's explorer
+([`testnet.sorobanscan.com`](https://testnet.sorobanscan.com/transactions/259d727f5e31dce9f76a075c965ab52ba756d30ade8c81ad11bfd53a0cdd9daf)):
+
+![The gate's first settlement in Soroban Scan](./screenshots/d2-gate-transaction-sorobanscan.png){width=85%}
+
+The same transaction in an independent explorer
+([`stellar.expert`](https://stellar.expert/explorer/testnet/tx/259d727f5e31dce9f76a075c965ab52ba756d30ade8c81ad11bfd53a0cdd9daf)):
+
+![The same settlement in stellar.expert](./screenshots/d2-gate-transaction-stellar-expert.png){width=85%}
 
 **Licensing.** The repository and every package are Apache-2.0, with no AGPL dependency (the RFP's
 non-functional requirement). The dependency tree was re-audited at this tranche boundary, as the
