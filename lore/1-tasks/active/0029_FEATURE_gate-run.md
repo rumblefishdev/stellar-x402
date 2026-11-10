@@ -107,6 +107,7 @@ A fresh reviewer, given only the goal and the constraints (2026-11-10): the prem
 | 18 | One 30 s deadline covers the whole section, and its files are read at once after the pin, so a slow GitHub ends it inside the Lambda's 60 s and logs `watch_section_failed` | agent, from the #149 review | beyond it | no standard |
 | 19 | `upstream-changed` stays one alarm against the pin: one message on the first change, back to OK once the pin moves; a later change while it is in ALARM sends none, and the daily `watch_upstream` log line lists every file that differs | the owner's decision, 2026-11-09 | beyond it | no standard |
 | 20 | The two upstream alarms are a group of their own, `upstream`, off in production until `make check-series GROUP=upstream` passes after a 08:00 UTC run, as `protocol` was before its first points | the owner's decision, 2026-11-10 (an Alarms deploy before the first point would create `upstream-silent` with no data, and it fires at once) | beyond it | no standard |
+| 21 | The final rerun runs on the fourth production deploy, `5d2e26b`, without #152 (merged after it) and #162 (open) | the owner's decision, 2026-11-10 | changes it: the task says after the last deploy before the M1 handover | no standard |
 
 ## Not yet decided
 
@@ -123,9 +124,10 @@ A fresh reviewer, given only the goal and the constraints (2026-11-10): the prem
 
 ## Run of record
 
-2026-11-06, 13:31 UTC, `conformance/results/testnet-hosted/`: 18 of 18 scenarios passed, each
-settled on chain with the facilitator's signer as fee payer. Upstream `8827cf1`, facilitator
-`68e778e`, gate `a2fdfb0`. The final run on the finished T1 build is still to come.
+2026-11-10, 08:50 UTC, `conformance/results/testnet-hosted/`: 18 of 18 scenarios passed in 12.7
+minutes, each settled on chain in ledgers 5655406–5655524 with the facilitator's signer as fee
+payer. Upstream `8827cf1`, facilitator `5d2e26b` (the fourth production deploy), gate `49e5b72`.
+The first run of record, 2026-11-06 on facilitator `68e778e`, is in git history.
 
 ## Implementation Notes
 
@@ -173,5 +175,5 @@ settled on chain with the facilitator's signer as fee payer. Upstream `8827cf1`,
 - [x] Given our facilitator deployed at its public URL (0026), when the gate runs, then the canonical client settles `exact` for each Stellar scenario (the 9 `upfront` ones without a `/verify`) and every run records a real transaction hash
 - [x] Given a finished run, when results are saved, then `conformance/results/` gets the run JSON with the upstream commit, the date, our facilitator version and the transaction hashes
 - [x] Given a failing scenario, when it is analysed, then a backlog task is created for the owning lane (no scenario failed in the run of record)
-- [ ] Given the finished T1 build, including Bazaar and spend budgets, when the gate reruns, then it passes and the final results are committed
+- [x] Given the finished T1 build, including Bazaar and spend budgets, when the gate reruns, then it passes and the final results are committed (2026-11-10, facilitator `5d2e26b`, decision 21)
 - [ ] Given the final results, when the conformance report is written, then it lists the e2e results and the settled transaction hashes, with the upstream and facilitator commits (RFP, expected deliverables)
