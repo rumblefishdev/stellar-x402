@@ -295,11 +295,25 @@ the `channelHeld` group is on.
 ### http-500
 
 The facilitator answered status 500 on some route: an error it doesn't classify, so it counts it
-as ours. A burst sends one message. A lease or drain 503 isn't counted.
+as ours. A burst sends one message. A 503 isn't counted: `verify-rpc-unavailable` covers
+`/verify`'s, and a lease or drain 503 on `/settle` is routine.
 
 1. In Logs Insights on `/x402/production/app`, the `level = "error"` lines around that time:
    `fields @timestamp, event, @message | filter level = "error" | sort @timestamp desc | limit 50`.
 2. Fix the cause, or classify the error so it gets its own answer.
+
+### verify-rpc-unavailable
+
+`/verify` answered 503 `rpc_unavailable`: upstream's call gave no answer within 10 s on every RPC
+URL, or the facilitator's ledger read failed on every URL. Sellers can't check payments, so buyers
+are refused. A burst sends one message.
+
+1. In Logs Insights on `/x402/production/app`, the `verify_rpc_unavailable` and `rpc_exhausted`
+   lines around that time: `rpc_exhausted` names each `RPC_URLS[i]#fingerprint` and why it failed.
+2. If every URL timed out and `rpc-stalled` stays quiet, the ledger still moves: check Horizon
+   (`horizon.stellar.org` or `horizon-testnet.stellar.org`). Upstream's verify reads it on every
+   payment, with no timeout of its own, so a hung Horizon times out every RPC URL.
+3. Otherwise fix the endpoint, or reorder `RPC_URLS` ([runbook, Credentials](runbook.md#credentials)).
 
 ### rpc-stalled
 

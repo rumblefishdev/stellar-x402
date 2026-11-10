@@ -1,14 +1,15 @@
 import { Keypair } from "@stellar/stellar-sdk";
+import { RpcUnavailableError } from "@stellar-x402/signer-pool";
 import type { PaymentRequirements, VerifyResponse } from "@x402/core/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { MAX_BODY_DEPTH } from "../src/http/app.js";
+import { MAX_BODY_DEPTH, RPC_UNAVAILABLE_RETRY_AFTER_S } from "../src/http/app.js";
 import { parseConfig } from "../src/config.js";
 import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import { start, type Started } from "../src/start.js";
 import { PAYTO_TRUSTLINE_REASON } from "../src/settlement/trustline.js";
-import type { Verify } from "../src/settlement/verify.js";
+import { UpstreamTimeoutError, type Verify } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
 import { bazaarExtensions, depthOf } from "./payment.js";
 import { signerEnv } from "./fake-openbao.js";
@@ -34,6 +35,7 @@ describe("POST /verify", () => {
   const db = testDatabase();
   const lines: string[] = [];
   const verify = vi.fn<Verify>();
+  const metrics = memoryMetrics();
   let app: Started;
   let url: string;
 
@@ -49,7 +51,7 @@ describe("POST /verify", () => {
     app = await start({
       config,
       logger,
-      metrics: memoryMetrics(),
+      metrics,
       stores: db.stores(),
       verify,
       settle: async () => {
@@ -233,9 +235,28 @@ describe("POST /verify", () => {
   });
 
   it("answers 500 and logs the error when verification throws", async () => {
-    verify.mockRejectedValueOnce(new Error("rpc down"));
+    verify.mockRejectedValueOnce(new Error("a bug"));
     const response = await post(request);
     expect([response.status, await response.json()]).toEqual([500, { error: "internal_error" }]);
     expect(lines.join("")).toContain("http_error");
+  });
+
+  it.each([
+    new UpstreamTimeoutError("upstream verify gave no answer within 10000 ms"),
+    new RpcUnavailableError("every endpoint failed"),
+  ])("answers 503 rpc_unavailable when the RPC gave no answer: $name", async (error) => {
+    verify.mockRejectedValueOnce(error);
+    const counted = { route: "/verify", status: "503" };
+    const before = metrics.value("http_requests_total", counted);
+    const response = await post(request);
+    expect([response.status, response.headers.get("retry-after"), await response.json()]).toEqual([
+      503,
+      `${RPC_UNAVAILABLE_RETRY_AFTER_S}`,
+      { error: "rpc_unavailable" },
+    ]);
+    expect(lines.join("")).toContain("verify_rpc_unavailable");
+    expect(lines.join("")).not.toContain("http_error");
+    // Counted when the response closes, which can come just after the client read it.
+    await vi.waitFor(() => expect(metrics.value("http_requests_total", counted)).toBe(before + 1));
   });
 });
