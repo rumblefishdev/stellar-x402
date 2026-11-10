@@ -196,7 +196,7 @@ describe("POST /verify", () => {
     expect(verify).toHaveBeenCalledTimes(1);
   });
 
-  it("verifies a payment whose resource breaks the Bazaar limits on tags and name (0130)", async () => {
+  it("verifies a payment whose resource breaks the Bazaar limits on name, tags and icon (0130)", async () => {
     // The Bazaar spec drops such a field from the listing; it must not refuse the payment.
     verify.mockResolvedValue({ isValid: true, payer: "GPAYER" });
     const resource = {

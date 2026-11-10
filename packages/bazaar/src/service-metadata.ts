@@ -6,29 +6,18 @@ import {
 import { z } from "zod";
 
 /**
- * Upstream's 402 and payment schemas with `serviceName`, `tags` and `iconUrl` typed only. Upstream
- * (`@x402/core` 2.28.0) refuses the whole 402 or payment when one of them breaks a Bazaar limit,
- * such as 6 tags, while the Bazaar spec drops only that field (`bazaar.md:380-391`) and the
- * listing's validator does so. Every other rule is upstream's. Lore 0130: delete with the bump to
- * the release that carries the upstream fix.
+ * Upstream's 402 and payment schemas with `serviceName`, `tags` and `iconUrl` typed only: the Bazaar
+ * spec drops a field that breaks its limit (`bazaar.md:380-391`), upstream 2.28.0 refuses the whole
+ * object. Lore 0130: delete with the bump to the release that carries the upstream fix.
  */
 const resource = ResourceInfoSchema.extend({
-  serviceName: z
-    .string()
-    .nullish()
-    .transform((v) => v ?? undefined),
-  tags: z
-    .array(z.string())
-    .nullish()
-    .transform((v) => v ?? undefined),
-  iconUrl: z
-    .string()
-    .nullish()
-    .transform((v) => v ?? undefined),
+  serviceName: z.string().nullish(),
+  tags: z.array(z.string()).nullish(),
+  iconUrl: z.string().nullish(),
 });
 
 export const PaymentRequiredV2Schema = UpstreamPaymentRequiredV2Schema.extend({ resource });
 
 export const PaymentPayloadV2Schema = UpstreamPaymentPayloadV2Schema.extend({
-  resource: resource.nullish().transform((v) => v ?? undefined),
+  resource: resource.nullish(),
 });
