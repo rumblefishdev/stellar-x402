@@ -747,12 +747,12 @@ describe("upstream's console.error in main()", () => {
     });
     await once(child, "exit");
 
-    expect(await statuses).toEqual([500, 200]);
+    expect(await statuses).toEqual([503, 200]);
     const events = stdout
       .split("\n")
       .filter(Boolean)
       .map((line) => JSON.parse(line));
-    for (const event of ["console_error", "rpc_exhausted", "http_error", "verified"]) {
+    for (const event of ["console_error", "rpc_exhausted", "verify_rpc_unavailable", "verified"]) {
       expect(events.map((e) => e.event)).toContain(event);
     }
     for (const key of ["S3CR3T", "0TH3R"]) expect(stdout + stderr).not.toContain(key);

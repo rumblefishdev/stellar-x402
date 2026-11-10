@@ -122,7 +122,8 @@ function refusedBody(value: unknown, max: number): boolean {
  * pass on as the client sent them; `undefined` means a 400.
  *
  * The schema takes any non-empty `amount`, and upstream's `BigInt(amount)` throws on anything but
- * an integer, which it reports as `unexpected_verify_error`: our 500. So `amount` must be digits.
+ * an integer, which it reports as `unexpected_verify_error`: no verdict, a 503 that a repeat can't
+ * change. So `amount` must be digits.
  * A body nested deeper than {@link MAX_BODY_DEPTH} is a 400 too, before anything recurses on it,
  * and so is a NUL or a lone surrogate anywhere in it.
  */
@@ -228,9 +229,9 @@ export function createApp({
     next();
   };
 
-  // A verify outcome, valid or not, is a 200 with an x402 body. An RPC that gave no answer is a
-  // 503: the payment wasn't judged, so the same request may come again. Any other thrown error is a
-  // 500. Upstream's `unexpected_verify_error` stays a 500: it doesn't say whether the RPC failed.
+  // A verify outcome, valid or not, is a 200 with an x402 body. No verdict from any RPC URL, hung or
+  // upstream's own `unexpected_verify_error`, is a 503: the payment wasn't judged, so the same
+  // request may come again. Any other thrown error is a 500.
   app.post("/verify", limit("verify", config.http.rateLimit.verify), json, async (req, res) => {
     const request = parsePaymentRequest(req.body);
     if (!request) {
@@ -268,8 +269,7 @@ export function createApp({
     res.json(response);
   });
   // Like `/verify`: any settle outcome is a 200 with an x402 body (AD-6), an RPC that gave the checks
-  // no answer included. A thrown error, such as upstream's `unexpected_verify_error` or the store
-  // down before the claim, is a 500.
+  // no verdict included. A thrown error, such as the store down before the claim, is a 500.
   app.post(
     "/settle",
     leased,

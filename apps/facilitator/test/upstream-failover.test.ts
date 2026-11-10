@@ -1,4 +1,4 @@
-import { FallbackRpc, type SorobanRpc } from "@stellar-x402/signer-pool";
+import { FallbackRpc, RpcUnavailableError, type SorobanRpc } from "@stellar-x402/signer-pool";
 import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/core/types";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -6,11 +6,7 @@ import {
   type UpstreamEndpoint,
   type UpstreamFailoverOptions,
 } from "../src/settlement/upstream-failover.js";
-import {
-  UpstreamTimeoutError,
-  type UpstreamVerifier,
-  type VerifyTrace,
-} from "../src/settlement/verify.js";
+import { type UpstreamVerifier, type VerifyTrace } from "../src/settlement/verify.js";
 
 const payload = {} as PaymentPayload;
 const requirements = {} as PaymentRequirements;
@@ -198,46 +194,39 @@ describe("failoverUpstream", () => {
     const { upstream } = failover([endpoint("a", unexpected), endpoint("b", error)], {
       onExhausted,
     });
-    await expect(upstream.verify(payload, requirements)).resolves.toEqual(unexpected);
+    await expect(upstream.verify(payload, requirements)).rejects.toBeInstanceOf(
+      RpcUnavailableError,
+    );
     expect(onExhausted).toHaveBeenCalledExactlyOnceWith([
       { name: "a", failure: { answer: unexpected } },
       { name: "b", failure: { error } },
     ]);
   });
 
-  it("decides the same whatever endpoint comes first when every endpoint fails", async () => {
-    // Upstream's own error wins over a throw, and any other throw over a timeout: a timeout comes
-    // out only when every endpoint timed out, the one case `/verify` answers 503.
-    const x = new Error("x");
+  it("answers no verdict whatever failed, whichever endpoint comes first", async () => {
+    // No endpoint judged the payment, so the call is RpcUnavailableError: `/verify`'s 503.
     for (const order of [
       ["hang", unexpected],
       [unexpected, "hang"],
+      ["hang", new Error("x")],
+      [new Error("x"), "hang"],
+      ["hang", "hang"],
+      [unexpected, unexpected],
     ] as const) {
       const { upstream } = failover([endpoint("a", order[0]), endpoint("b", order[1])], {
         timeoutMs: 20,
       });
-      await expect(upstream.verify(payload, requirements)).resolves.toEqual(unexpected);
+      await expect(upstream.verify(payload, requirements)).rejects.toBeInstanceOf(
+        RpcUnavailableError,
+      );
     }
-    for (const order of [
-      ["hang", x],
-      [x, "hang"],
-    ] as const) {
-      const { upstream } = failover([endpoint("a", order[0]), endpoint("b", order[1])], {
-        timeoutMs: 20,
-      });
-      await expect(upstream.verify(payload, requirements)).rejects.toBe(x);
-    }
-    const hung = failover([endpoint("a", "hang"), endpoint("b", "hang")], { timeoutMs: 20 });
-    await expect(hung.upstream.verify(payload, requirements)).rejects.toBeInstanceOf(
-      UpstreamTimeoutError,
-    );
-    const a = endpoint("a", unexpected);
-    const answered = failover([a, endpoint("b", unexpected)]);
+    // Upstream's own error moves no endpoint, even when every one answers it.
+    const answered = failover([endpoint("a", unexpected), endpoint("b", unexpected)]);
     const trace: VerifyTrace = {};
-    await expect(answered.upstream.verify(payload, requirements, trace)).resolves.toEqual(
-      unexpected,
+    await expect(answered.upstream.verify(payload, requirements, trace)).rejects.toBeInstanceOf(
+      RpcUnavailableError,
     );
-    expect(trace).toEqual({ rpc: "a" });
+    expect(trace).toEqual({});
     expect(answered.switches).toEqual([]);
   });
 

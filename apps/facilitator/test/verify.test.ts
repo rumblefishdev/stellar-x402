@@ -11,6 +11,7 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import { STELLAR_NETWORKS } from "@stellar-x402/config";
+import { RpcUnavailableError } from "@stellar-x402/signer-pool";
 import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/core/types";
 import { describe, expect, it, vi } from "vitest";
 import type { FindMissingTrustline, MissingTrustline } from "../src/settlement/trustline.js";
@@ -146,15 +147,13 @@ describe("createVerifier", () => {
     expect(upstream.verify).toHaveBeenCalledWith(p, requirements, trace);
   });
 
-  it("throws upstream's unexpected_verify_error, which is a failure of ours, not a verdict", async () => {
+  it("throws no verdict on upstream's unexpected_verify_error, which judged nothing", async () => {
     const { verify, latestLedger } = setup({
       isValid: false,
       invalidReason: "unexpected_verify_error",
       payer,
     });
-    await expect(verify(payload(), requirements)).rejects.toThrow(
-      "upstream verify failed with unexpected_verify_error",
-    );
+    await expect(verify(payload(), requirements)).rejects.toBeInstanceOf(RpcUnavailableError);
     expect(latestLedger).not.toHaveBeenCalled();
   });
 
