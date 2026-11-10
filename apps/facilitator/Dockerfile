@@ -10,7 +10,7 @@ FROM ${NODE_IMAGE} AS build
 WORKDIR /repo
 # pnpm at the version `packageManager` names.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-# The dependency patches `pnpm-workspace.yaml` names, which `pnpm fetch` applies.
+# The dependency patches `pnpm-workspace.yaml` names: `pnpm fetch` stops without them.
 COPY patches ./patches
 RUN corepack enable && corepack install
 # The store from the lockfile alone, so a source change doesn't download it again.
