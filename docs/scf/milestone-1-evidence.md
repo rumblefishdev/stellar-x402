@@ -46,12 +46,11 @@ Apache-2.0, so concurrent payments don't wait on one account's sequence number. 
 `bazaar` extension settles. The `upto` scheme's design is final, its proxy contract runs on
 testnet, and its specification is already proposed upstream.
 
-The Tranche #1 conformance bar is met. In the run of record (2026-11-06), the x402 Foundation's
-own end-to-end suite, unmodified, completed 18 of 18 `exact` payments against our public
-facilitator through the suite's external facilitator proxy, and the gate recorded and checked
-18 settled testnet transactions.
-
-`<TODO: replace the run of record with the final rerun on the finished Tranche 1 build (task 0029), and update every number in this section.>`
+The Tranche #1 conformance bar is met. In the final rerun on the deployed Tranche 1 build
+(2026-11-10, facilitator commit `5d2e26ba`), the x402 Foundation's own end-to-end suite,
+unmodified, completed 18 of 18 `exact` payments against our public facilitator through the
+suite's external facilitator proxy, and the gate recorded and checked 18 settled testnet
+transactions ([`conformance/REPORT.md`](../../conformance/REPORT.md)).
 
 The dependency tree's licenses were re-audited at this tranche boundary: no AGPL, GPL, SSPL or
 LGPL-only dependency in 291 npm packages and 239 Rust crates
@@ -173,11 +172,11 @@ curl -s $FAC/health | jq
   "ready": true,
   "signer": "ok",
   "listed": true,
-  "commit": "68e778e36af4713f2d193aa781ba89ca6a72fc95"
+  "commit": "5d2e26ba141747db0713efd9e4b2dfd1b2510f69"
 }
 ```
 
-`<TODO: rerun both after the final deploy and paste the output; the commit must match the gate rerun's.>`
+Both read on 2026-11-10; the commit is the one the gate's final rerun names (section 5.5).
 
 **Any SEP-41 token, the buyer paying no XLM.** The token matrix settles one payment each in Circle
 testnet USDC, a Stellar Asset Contract and a plain SEP-41 (wasm) token, then a batch of six across
@@ -186,7 +185,7 @@ several channels:
 Its checks: `everyTokenSettled`, `facilitatorPaidEveryFee`, `buyerPaidNoXlm`,
 `buyerSourcedNothing`, `batchSettled`, `batchUsedSeveralChannels` — all `true`.
 
-`<TODO: the matrix of record ran on 2026-10-23 against a facilitator run by the script; rerun it against the deployed service and commit the result.>`
+`<TODO: the matrix of record ran on 2026-10-23, with no commit recorded; rerun it locally from the deployed commit 5d2e26ba (the script starts its own facilitator) and commit the result with that commit.>`
 
 **Strict auth-entry validation** (proposal §3.1.1, Panel Review response §5). `/verify` runs
 upstream's `verify()`, which protects the facilitator's own address, then refuses source-account
@@ -355,39 +354,42 @@ transaction hash is recorded.
 - The gate fails unless every scenario passed with its own hash, and each hash, read back from
   Stellar RPC, succeeded as one `transfer` of 0.001 testnet USDC from the buyer to the seller, its
   fee paid by the facilitator's signer, in a ledger after the run started.
-- The run of record: [`conformance/results/testnet-hosted/`](../../conformance/results/testnet-hosted/)
-  — 2026-11-06, upstream `8827cf19`, facilitator `68e778e3`, 18 of 18 passed in 10.8 minutes,
-  command `pnpm test --testnet --families=stellar --schemes=exact --facilitators=stellar-x402`.
+- The final rerun, on the deployed Tranche 1 build:
+  [`conformance/results/testnet-hosted/`](../../conformance/results/testnet-hosted/) —
+  2026-11-10, 08:50–09:03 UTC, upstream `8827cf19`, facilitator `5d2e26ba` (the commit `/health`
+  names), gate `49e5b727`, 18 of 18 passed in 11.0 minutes, command
+  `pnpm test --testnet --families=stellar --schemes=exact --facilitators=stellar-x402`. The 9
+  `upfront` scenarios settle before serving, without a `/verify`, as upstream's routes do.
+- The conformance report written from it, with each scenario's route and what a pass does not
+  show: [`conformance/REPORT.md`](../../conformance/REPORT.md).
 
 | #   | Client                  | Server                    | Transaction                                                                                                                        | Ledger  |
 | --- | ----------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| 1   | `typescript/http/axios` | `typescript/http/express` | [`298beb5fb6ceeeb5…`](https://stellar.expert/explorer/testnet/tx/298beb5fb6ceeeb574398297ddf7a4b4833fbfc0c74cfbaf2a4d07593ed3e3ea) | 5589521 |
-| 2   | `typescript/http/axios` | `typescript/http/express` | [`02f40c5607a49cf0…`](https://stellar.expert/explorer/testnet/tx/02f40c5607a49cf06877516a05f6ba28ae4d50451eebc416e3952463ffdec445) | 5589524 |
-| 3   | `typescript/http/fetch` | `typescript/http/express` | [`0ae098a100e9f180…`](https://stellar.expert/explorer/testnet/tx/0ae098a100e9f18055b020e9f23478af7c43bac3d129883b1cee54b14588930a) | 5589528 |
-| 4   | `typescript/http/fetch` | `typescript/http/express` | [`3b4cdbff91bd81ba…`](https://stellar.expert/explorer/testnet/tx/3b4cdbff91bd81ba96509dff6ea9e6010b1733d9cbdad749ca605443df74563d) | 5589532 |
-| 5   | `typescript/http/axios` | `typescript/http/fastify` | [`79f930aa0adb187b…`](https://stellar.expert/explorer/testnet/tx/79f930aa0adb187b2064cabd6121d0dce790508d266982901610ea72beeebf84) | 5589543 |
-| 6   | `typescript/http/axios` | `typescript/http/fastify` | [`7d4aa5b025e32628…`](https://stellar.expert/explorer/testnet/tx/7d4aa5b025e326287c8b5b1104a25c2ce608bf72f2260bd248acedacfa151f94) | 5589546 |
-| 7   | `typescript/http/fetch` | `typescript/http/fastify` | [`2a68406d87d32d57…`](https://stellar.expert/explorer/testnet/tx/2a68406d87d32d57cebdbcde4473922f7983edc7e642268ef883916b44b7e196) | 5589549 |
-| 8   | `typescript/http/fetch` | `typescript/http/fastify` | [`bb417d1a26d4b6b9…`](https://stellar.expert/explorer/testnet/tx/bb417d1a26d4b6b9cde1a6939a6bd6a57a68de09d12ecf6f510de1eed5555456) | 5589552 |
-| 9   | `typescript/http/axios` | `typescript/http/hono`    | [`862f778befc9c0e5…`](https://stellar.expert/explorer/testnet/tx/862f778befc9c0e52fd1c17d6bef737b7c84d487cd46c67fee3ca6bf8f36d024) | 5589557 |
-| 10  | `typescript/http/axios` | `typescript/http/hono`    | [`d6f6da7ba1ab7fd7…`](https://stellar.expert/explorer/testnet/tx/d6f6da7ba1ab7fd79dd99f94a5f4aa61014c1c440bac93d54dd71f7e5f625ace) | 5589567 |
-| 11  | `typescript/http/fetch` | `typescript/http/hono`    | [`63edcd235e21ae5c…`](https://stellar.expert/explorer/testnet/tx/63edcd235e21ae5c8bda839ad8aa05529c0882437315cd8598cbda5e90edbaca) | 5589578 |
-| 12  | `typescript/http/fetch` | `typescript/http/hono`    | [`9b86112e0f31cbf5…`](https://stellar.expert/explorer/testnet/tx/9b86112e0f31cbf5de2fbecd6d983f9e4af9f41ca26723540fe6d3eb680c2503) | 5589585 |
-| 13  | `typescript/http/axios` | `typescript/http/next`    | [`efa1d8334bee2423…`](https://stellar.expert/explorer/testnet/tx/efa1d8334bee2423a8379cb3e41258578d33e872aeb927029388b4c7da542198) | 5589594 |
-| 14  | `typescript/http/axios` | `typescript/http/next`    | [`fe20cc76dab566a9…`](https://stellar.expert/explorer/testnet/tx/fe20cc76dab566a9b5ac565fcbab7cbd6e8c17e6d3db89ee8e7a20e098449689) | 5589603 |
-| 15  | `typescript/http/fetch` | `typescript/http/next`    | [`0d047b5fe6f60772…`](https://stellar.expert/explorer/testnet/tx/0d047b5fe6f607725d3607aa27a0ed426e3641baeb85ba368736950844df0209) | 5589610 |
-| 16  | `typescript/http/fetch` | `typescript/http/next`    | [`c024ec6d7386be1f…`](https://stellar.expert/explorer/testnet/tx/c024ec6d7386be1f9f16b0f4752fb9963ecb70fa2dc140da56c563f9566f0c95) | 5589618 |
-| 17  | `typescript/mcp`        | `typescript/mcp`          | [`a6752973224771f5…`](https://stellar.expert/explorer/testnet/tx/a6752973224771f5b0e2b08477b1562f7fa68303296c25e97a98229fa82d48c1) | 5589628 |
-| 18  | `typescript/mcp`        | `typescript/mcp`          | [`90a6a77a0c921857…`](https://stellar.expert/explorer/testnet/tx/90a6a77a0c9218574dbdc8a75825c545aed1eaa74fd12093e94e7d09c0bdf03d) | 5589635 |
+| 1   | `typescript/http/axios` | `typescript/http/express` | [`259d727f5e31dce9…`](https://stellar.expert/explorer/testnet/tx/259d727f5e31dce9f76a075c965ab52ba756d30ade8c81ad11bfd53a0cdd9daf) | 5655406 |
+| 2   | `typescript/http/axios` | `typescript/http/express` | [`79b2949d4f437251…`](https://stellar.expert/explorer/testnet/tx/79b2949d4f43725142a2496dd0eeb7b6f49e91576331336cb876c9bdfbbf1675) | 5655408 |
+| 3   | `typescript/http/fetch` | `typescript/http/express` | [`84ddd855c5ea9256…`](https://stellar.expert/explorer/testnet/tx/84ddd855c5ea92568d11bc8dcf324907d16945c85f39771f338f6af1101940ef) | 5655415 |
+| 4   | `typescript/http/fetch` | `typescript/http/express` | [`f169897c47c05088…`](https://stellar.expert/explorer/testnet/tx/f169897c47c0508800613e80fe1ead8d68860402b5fa852e7e1c503aa22bea33) | 5655422 |
+| 5   | `typescript/http/axios` | `typescript/http/fastify` | [`c423f7fad5e02d03…`](https://stellar.expert/explorer/testnet/tx/c423f7fad5e02d0357ad7bda170f9c9092c6f69bd818879c758f922e6ec65b62) | 5655429 |
+| 6   | `typescript/http/axios` | `typescript/http/fastify` | [`caf391cb39e787a3…`](https://stellar.expert/explorer/testnet/tx/caf391cb39e787a368825fc3bee72f61ff056d18df9e492b4664cbfb71e4b5c4) | 5655433 |
+| 7   | `typescript/http/fetch` | `typescript/http/fastify` | [`3afc9be14fa254e0…`](https://stellar.expert/explorer/testnet/tx/3afc9be14fa254e03891f6fb517e92ff49174f3ea2202cff3eaf51eb4f9a7024) | 5655442 |
+| 8   | `typescript/http/fetch` | `typescript/http/fastify` | [`48d6ec07de9fefc4…`](https://stellar.expert/explorer/testnet/tx/48d6ec07de9fefc45dbb0b3d57b66279eb64b5b2d3411a6832f22122fa89bad3) | 5655448 |
+| 9   | `typescript/http/axios` | `typescript/http/hono`    | [`ee442bdc8232fead…`](https://stellar.expert/explorer/testnet/tx/ee442bdc8232feadc94518197bdb49b75be274099b93b90351c1f1c78c5912a7) | 5655461 |
+| 10  | `typescript/http/axios` | `typescript/http/hono`    | [`613c9210ec04304b…`](https://stellar.expert/explorer/testnet/tx/613c9210ec04304bc1cd4a9f0e6ab0e99eaa7319b0d8488d6cf0860908e3799b) | 5655468 |
+| 11  | `typescript/http/fetch` | `typescript/http/hono`    | [`c3e9d83c7f35e7e0…`](https://stellar.expert/explorer/testnet/tx/c3e9d83c7f35e7e0d1850be16909c30d15e351cfd56bbe54441ef987552a06e7) | 5655473 |
+| 12  | `typescript/http/fetch` | `typescript/http/hono`    | [`470c2a2ef39111a2…`](https://stellar.expert/explorer/testnet/tx/470c2a2ef39111a25b28a9f245a25a66c371c67f675f5f31456e5a2eca53d378) | 5655484 |
+| 13  | `typescript/http/axios` | `typescript/http/next`    | [`2acd428b39ddf552…`](https://stellar.expert/explorer/testnet/tx/2acd428b39ddf552c385cc5d8e346a2eeb87b5911bf29fded5d50e11d9693e97) | 5655497 |
+| 14  | `typescript/http/axios` | `typescript/http/next`    | [`b75f72f4453b0496…`](https://stellar.expert/explorer/testnet/tx/b75f72f4453b049612d38ac7d3b62a611d67aa215bffe8c98a097c9df7a7acc4) | 5655502 |
+| 15  | `typescript/http/fetch` | `typescript/http/next`    | [`6e2a5c6e6221d8b1…`](https://stellar.expert/explorer/testnet/tx/6e2a5c6e6221d8b16dd44a94d5aa062295ecf15fade0867bd8ddc1652e647e61) | 5655507 |
+| 16  | `typescript/http/fetch` | `typescript/http/next`    | [`3cad2faab726db44…`](https://stellar.expert/explorer/testnet/tx/3cad2faab726db447eef2c47a031633205e2039d49f0153a466c75543b391d6f) | 5655510 |
+| 17  | `typescript/mcp`        | `typescript/mcp`          | [`b441ca223f8391c1…`](https://stellar.expert/explorer/testnet/tx/b441ca223f8391c142ecc9c3b8c1d5d491cef6d4ceeba7f876370a454106ad52) | 5655522 |
+| 18  | `typescript/mcp`        | `typescript/mcp`          | [`f3c0cc08af5da350…`](https://stellar.expert/explorer/testnet/tx/f3c0cc08af5da3506301e3f7f147b68ea6557a50f5bf095dbe1f5ad28b6ace65) | 5655524 |
 
 **After the testnet reset.** The testnet reset scheduled for 2026-12-16 removes every transaction
 from the network. The gate saves each settlement's signed envelope in `gate.json`, so each hash
 above can be recomputed from its envelope after the links stop resolving.
 
-**Keeping conformance current.** An hourly off-server check compares the upstream files the suite
+**Keeping conformance current.** A daily off-server check compares the upstream files the suite
 rests on with the gate's pin and raises an alarm when they change (task 0029).
-
-`<TODO: replace this table and the run's numbers with the final rerun (task 0029).>`
 
 ## 6. The production service behind the testnet deployment
 

@@ -25,8 +25,8 @@ paste the same outputs into the PDF.
 5. **Browser tab 2** — stellar.expert (testnet) on the `UptoProxy` contract
    `CAL7SBTOECJ6HXXO3ST43LM2HJJFSZ3ZDEEZBIWHJPB7DRF5MXS5V2VC`.
 6. **Browser tab 3** — GitHub: `docs/upto-proxy-testnet-report.md` on `develop`.
-7. **Browser tab 4** — GitHub: `conformance/results/testnet-hosted/suite.json` (or the
-   evidence PDF at section 5.5).
+7. **Browser tab 4** — GitHub: `conformance/REPORT.md` on `develop`, at its table of
+   settlements.
 8. **Browser tab 5** — the upstream PR x402-foundation/x402#3781.
 9. **Browser tab 6** — AWS Console → CloudWatch → Alarms, filtered to `x402-production`, in
    eu-central-1.
@@ -143,10 +143,10 @@ Point at the two transaction hashes and at `processing` in the decoded header.
 > "Conformance is tested at the wire level. The gate runs the x402 Foundation's own end-to-end
 > suite, unmodified, at a pinned commit, against our public testnet facilitator through an
 > external proxy, the mechanism the suite provides for that. Every canonical TypeScript client and
-> server, over HTTP and MCP: N of N passed, each with a settled transaction the gate reads back
+> server, over HTTP and MCP: 18 of 18 passed, each with a settled transaction the gate reads back
 > from the network and checks."
 
-Say the rerun's real numbers in place of "N of N" and its date.
+The numbers are the final rerun's (2026-11-10, facilitator `5d2e26ba`), the same as the PDF's.
 
 ## Scene 8 — Operations and wrap-up (~0:30)
 

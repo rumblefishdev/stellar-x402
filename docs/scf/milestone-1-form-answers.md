@@ -39,8 +39,8 @@ Field 1's four deliverables quote the Tranche #1 line items of the Panel Review 
 >    The Stellar specification is already proposed upstream (x402-foundation/x402#3781).
 > 5. **Tranche #1 conformance bar.** An unmodified canonical client from the
 >    `x402-foundation/x402` end-to-end suite completes `exact` verify → settle against our testnet
->    facilitator at the wire level, through the suite's external facilitator proxy: `<N> of <N>`
->    scenarios passed on `<DATE>`, each settled transaction hash recorded and checked on chain.
+>    facilitator at the wire level, through the suite's external facilitator proxy: 18 of 18
+>    scenarios passed on 2026-11-10, each settled transaction hash recorded and checked on chain.
 >
 > Not claimed in this tranche: mainnet, search, the MCP server, SDK helpers, `upto` in `/settle`
 > and its upstream merge, the developer guide and example integrations, and the security review.
@@ -74,6 +74,8 @@ Field 1's four deliverables quote the Tranche #1 line items of the Panel Review 
 >   `https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/planning/m1-epics.md`
 > - Conformance gate and its results:
 >   `https://github.com/rumblefishdev/stellar-x402/tree/develop/conformance`
+> - Conformance report:
+>   `https://github.com/rumblefishdev/stellar-x402/blob/develop/conformance/REPORT.md`
 > - `upto` testnet report:
 >   `https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/upto-proxy-testnet-report.md`
 > - Architecture decisions:
@@ -104,7 +106,7 @@ Field 1's four deliverables quote the Tranche #1 line items of the Panel Review 
 - [ ] `architecture.png` rendered from `architecture.mmd`.
 - [ ] `milestone-1-evidence.md` exported: `./build-pdf.sh`.
 - [ ] PDF and video in one Google Drive folder, link-sharing "anyone with the link can view".
-- [ ] `<DRIVE_FOLDER_LINK>`, `<VIDEO_LINK>`, `<N>` and `<DATE>` replaced in this file.
+- [ ] `<DRIVE_FOLDER_LINK>` and `<VIDEO_LINK>` replaced in this file.
 - [ ] Every link in Field 3 opens anonymously in an incognito window.
 - [ ] No secret in the PDF, the screenshots or any video frame (the script's secrets list).
 - [ ] English only across all four fields; no personal names.
