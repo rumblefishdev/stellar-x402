@@ -14,9 +14,10 @@ itself is covered separately.
 ### Assets and trust
 
 - **The payer's tokens.** The client authorizes up to `max_amount` of one token, to one
-  recipient, through one facilitator, within a time window.
-- **The seller's payment.** The seller serves first and relies on the facilitator to settle the
-  amount it asks for afterwards.
+  recipient, with one receiver authorizer, within a time window.
+- **The seller's payment.** The seller serves first. In self-managed mode it signs the actual
+  amount itself; in facilitator-delegated mode it relies on the facilitator to settle the amount
+  it asks for.
 - **The facilitator's XLM.** It pays every transaction fee and fee bump.
 
 What each party must trust:
@@ -34,33 +35,43 @@ What each party must trust:
 
 - **Attack:** Someone who sees the client's signed entry (in the payload, or in a pending
   transaction) settles it first, for example for 1 stroop, cheating the seller.
-- **Mitigation:** The client signs `facilitator`, and the contract calls
-  `facilitator.require_auth()`; the facilitator's authorization covers `actual_amount`. Another
-  submitter fails with `Error(Auth, InvalidAction)` (spike S5, and the 0004 "different facilitator"
-  scenario). Another facilitator that rewrites `facilitator` to itself breaks the client's
-  signature (0004 tampering scenario).
+- **Mitigation:** The client signs `receiver_authorizer`, and the contract calls
+  `receiver_authorizer.require_auth()`; that authorization covers `actual_amount`. Without the
+  receiver authorizer's signature, a submitter fails with `Error(Auth, InvalidAction)` (spike S5,
+  and the e2e "different facilitator" scenario). Another facilitator that rewrites
+  `receiver_authorizer` to itself breaks the client's signature (e2e tampering scenario).
 - **Residual risk:** None found.
 
 #### Replay of a signed entry
 
 - **Attack:** Submitting the same signed entry a second time.
-- **Mitigation:** Soroban makes each auth entry single-use: `Error(Auth, ExistingValue)`. Shown on
-  testnet in 0004.
+- **Mitigation:** Soroban makes each auth entry single-use: `Error(Auth, ExistingValue)`. This is
+  the only single-use check; the contract stores no nonce of its own (ADR 0010, D6). Shown on
+  testnet in 0004 and again on 2026-11-12. A zero settlement never reaches the chain, so the
+  facilitator records `(from, auth nonce)` for it and refuses the entry afterwards (spec §8.1).
 - **Residual risk:** None.
 
-#### Replay of a payment nonce
+#### Reuse of a payment ID
 
-- **Attack:** A client (or a facilitator holding two entries) signs two payments with the same x402
-  nonce.
-- **Mitigation:** The contract stores `(from, nonce)` until at least `allowance_expiration_ledger`
-  and refuses a second settlement with `NonceUsed` (shown in 0004). After the entry expires, the
-  facilitator's durable record of settled pairs refuses reuse at verify and settle (spec §8.1).
-- **Residual risk:** The contract keys the nonce by `(from, nonce)`, without the facilitator, and
-  each facilitator's record covers only its own settlements. A client can sign the same nonce for
-  two sellers on different facilitators: both pass `/verify`, both sellers serve, the first
-  settles, and the second's `settle_upto` fails with `NonceUsed` while the first entry is live.
-  This doesn't move extra funds, but it leaves the second seller unpaid; see
-  [Seller not paid](#seller-not-paid).
+- **Attack:** A client signs two entries with the same x402 `nonce`.
+- **Mitigation:** None needed: `nonce` is only a payment ID, and two signed entries are two
+  payments the client authorized. Both settle (e2e, 2026-11-12). Until 2026-11-12 the contract
+  stored the nonce and refused the second with `NonceUsed`, which left a second seller who had
+  already served unpaid.
+- **Residual risk:** An indexer or seller that treats `nonce` as unique sees two settlements under
+  one ID. Use the transaction hash, or `(from, auth nonce)`, as the unique key.
+
+#### Receiver authorizer key
+
+- **Attack:** In self-managed mode the resource server holds a hot key that authorizes the actual
+  amount. Someone who steals it authorizes charges on open authorizations.
+- **Mitigation:** The key can only authorize `settle_upto` calls the client already signed: the
+  money goes to the signed `payTo`, at most the signed ceiling, within the signed window. It holds
+  no funds. In facilitator-delegated mode the facilitator holds this authority instead, and the
+  server trusts it to charge only the amount asked for.
+- **Residual risk:** A stolen key can charge every open authorization up to its ceiling, to the
+  seller's own `payTo`. The exposure is the same as a dishonest seller's (see the trust note
+  above), bounded by the ceilings and windows.
 
 #### Blind signing by the client
 
@@ -103,7 +114,7 @@ What each party must trust:
   the payer until `allowance_expiration_ledger`; after a zero settlement, the full ceiling. 0004
   measured 750,000 left after settling 250,000 of a 1,000,000 ceiling.
 - **Mitigation:** Only the proxy is the spender, and it calls `transfer_from` only inside
-  `settle_upto`, after a new client signature, an unused nonce and the facilitator's authorization.
+  `settle_upto`, after a new client signature and the receiver authorizer's authorization.
   The next settlement's `approve` overwrites the value. The allowance expires with the ledger the
   client signed, at most about `maxTimeoutSeconds` ahead.
 - **Residual risk:** A wallet or explorer shows an open allowance to the proxy for a few minutes. A
@@ -114,8 +125,8 @@ What each party must trust:
 
 - **Attack:** A token contract re-enters the proxy, lies in events, charges transfer fees or ignores
   expiry.
-- **Mitigation:** Soroban forbids re-entry, and the nonce is written before any token call. The
-  proxy holds no funds or shared state a token could reach; its only state is nonces keyed by payer.
+- **Mitigation:** Soroban forbids re-entry. The proxy holds no funds and stores no contract data a
+  token could reach.
   The facilitator lists accepted tokens in `/supported` and checks balance changes in the
   settle-time simulation, not only events.
 - **Residual risk:** A bad token can only harm the payer and seller who chose it, for example a
@@ -125,7 +136,7 @@ What each party must trust:
 
 - **Attack:** In `upto` the seller serves before settlement, so a client can receive the service
   and then make the settlement fail: move its balance away between `/verify` and `/settle`, or
-  reuse its nonce with another facilitator so the second settlement fails with `NonceUsed`.
+  revoke its allowance to the proxy.
 - **Mitigation:** Short windows (`maxTimeoutSeconds`) and settling soon after serving. At settle,
   the facilitator re-simulates against current state, which shows a balance below the actual
   amount, and refuses before sending, so it pays no fee. Sellers can settle per request or in
@@ -148,23 +159,25 @@ What each party must trust:
 #### Fee inflation by rent
 
 - **Attack:** Payments that create ledger entries (a recipient's first balance in a token, a
-  client's first allowance entry, a nonce entry with a long TTL) or extend an entry's TTL (a token
+  client's first allowance entry, a host nonce entry with a long TTL) or extend an entry's TTL (a token
   instance whose TTL runs low, or the proxy's own instance and code) pay rent on top of the normal
   fee. A payment that touches an archived entry (the token's instance or code, a non-SAC balance,
   a C-account's SAC balance) restores it and pays its restore rent in the same fee: 0021's testnet
   run measured resource fees of 342,189 and 551,787 stroops with archived entries, against 14,278
   for live USDC.
   The payer picks `allowance_expiration_ledger`, and the facilitator pays temporary rent on the
-  nonce entry and the token's allowance entry until then: in the unit test
+  token's allowance entry until then: in the unit test
   `a_far_allowance_expiration_costs_the_facilitator_rent`, the furthest expiry the network allows
   costs about 14 million stroops more than one 12 ledgers ahead. The host also keeps a nonce
   entry for the client's signature until `signatureExpirationLedger`, which the payer picks too
-  and the contract never sees. Over the fee ceiling, the settlement is refused after the seller
+  and the contract never sees; in self-managed mode the same holds for the server's entry and its
+  `signatureExpirationLedger`. Over the fee ceiling, the settlement is refused after the seller
   has served; under it, every settlement can be made to cost up to the ceiling.
 - **Mitigation:** The facilitator computes fees from a fresh simulation and caps them with
   `maxFeeStroops` (250,000 by default, ADR 0007). At verify it refuses an
   `allowance_expiration_ledger` beyond the payment window and a `signatureExpirationLedger` that
-  differs from it (README, Verify step 2). The second check is the only bound on the signature
+  differs from it (README, Verify step 2), and in self-managed mode a server entry whose
+  `signatureExpirationLedger` is past the client's. The second check is the only bound on the signature
   nonce's rent, so it is required, not defence in depth; the facilitator's `/verify` for `upto` is task 0015, and until
   then the rule is enforced only by the e2e suite's `checkClientAuth`. The contract refuses an
   expiry more than 17,280 ledgers (about a day) ahead, so even a facilitator that skips the check
@@ -185,9 +198,9 @@ What each party must trust:
 
 #### Nonce griefing
 
-- **Attack:** A third party consumes a client's nonce to block its payment.
-- **Mitigation:** Storing a nonce requires the client's signature and the facilitator's
-  authorization. Nonces are keyed per payer, so payers can't collide.
+- **Attack:** A third party consumes a client's auth nonce to block its payment.
+- **Mitigation:** Consuming it requires the client's signed entry and the receiver authorizer's
+  authorization. Host nonces are keyed per address, so payers can't collide.
 - **Residual risk:** None.
 
 #### Proxy archived
