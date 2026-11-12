@@ -2,7 +2,7 @@
 id: "0136"
 title: "Rust seller crate, part 1: answer 402 with Stellar terms and settle through a facilitator"
 type: FEATURE
-status: backlog
+status: active
 milestone: 2
 related_adr: ["0001"]
 related_tasks: ["0102", "0041", "0132"]
@@ -23,6 +23,10 @@ history:
       Added before starting: a survey of the existing Rust x402 crates as the first step, the
       proposal's buyer-side signing named as part 2's, and a criterion that a failed route is not
       settled.
+  - date: "2026-11-12"
+    status: active
+    who: akot
+    note: "Work starts: track 3 of the Milestone 2 plan."
 ---
 
 # Rust seller crate, part 1: answer 402 with Stellar terms and settle through a facilitator
