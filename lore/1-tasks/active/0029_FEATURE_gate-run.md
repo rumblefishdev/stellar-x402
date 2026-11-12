@@ -109,6 +109,7 @@ A fresh reviewer, given only the goal and the constraints (2026-11-10): the prem
 | 20 | The two upstream alarms are a group of their own, `upstream`, off in production until `make check-series GROUP=upstream` passes after a 08:00 UTC run, as `protocol` was before its first points | the owner's decision, 2026-11-10 (an Alarms deploy before the first point would create `upstream-silent` with no data, and it fires at once) | beyond it | no standard |
 | 21 | The final rerun runs on the fourth production deploy, `5d2e26b`, without #152 (merged after it) and #162 (closed unmerged the same day) | the owner's decision, 2026-11-10 | changes it: the task says after the last deploy before the M1 handover | no standard |
 | 22 | The conformance report is its own file, `conformance/REPORT.md`, written from the run's two result files: the run, what each scenario proves, every settlement, what a pass does not show, how to check it; the M1 evidence package links it | the owner's decision, 2026-11-10 | as the task says | no standard |
+| 23 | The upstream alarms go on with the next production deploy, not with a Watch deploy of their own | the owner's decision, 2026-11-12 (the Watch Lambda in production is still the 2026-11-06 build, before #149) | beyond it | no standard |
 
 ## Not yet decided
 
@@ -161,7 +162,7 @@ The first run of record, 2026-11-06 on facilitator `68e778e`, is in git history.
 
 - Done 2026-11-10: the rerun on `5d2e26b` (decision 21) and `conformance/REPORT.md` from it
   (decision 22).
-- First: the `upstream-changed` alarm (#149) merged and on: `make deploy-production-watch`, then
+- With the next production deploy (decision 23): the `upstream-changed` alarm (#149) on: `make deploy-production-watch`, then
   `make check-series GROUP=upstream` in the 3 hours after the next 08:00 UTC run, a PR setting
   `"upstream": true` in `infra/envs/production.json`, then `make deploy-production-alarms` and
   `make fire-test` in `infra/`.
