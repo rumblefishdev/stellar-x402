@@ -24,7 +24,7 @@ On `stellar:pubnet`, `/verify` and `/settle` answer only a caller with a known A
 testnet a key is ignored and every route stays open (decided by akot, 2026-11-03, ADR 0007's
 amendment of that date). 0024's budgets bound the loss but not availability: self-payments from
 free addresses can fill the shared `asset:USDC` budget and refuse every seller's USDC (0024's
-[S-design](../active/0024_FEATURE_spend-budgets-and-breakers/notes/S-design.md), "Residual
+[S-design](../archive/0024_FEATURE_spend-budgets-and-breakers/notes/S-design.md), "Residual
 risk"). A key costs a Discord account in the Stellar Developers server (0106) and gets a budget of
 its own (0107), so that attack no longer reaches the callers with keys. `stellar:pubnet` is refused
 until this task and 0107 land, as well as 0090.

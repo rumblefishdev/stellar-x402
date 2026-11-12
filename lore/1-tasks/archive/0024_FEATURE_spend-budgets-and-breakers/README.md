@@ -2,7 +2,7 @@
 id: "0024"
 title: "Spend budgets and circuit breakers"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0007"]
 related_tasks: ["0073", "0012", "0017", "0009"]
@@ -27,6 +27,14 @@ history:
     status: active
     who: akot
     note: "Karol's PR #105 review: decisions 33-44, 0097 taken in, front-run probe on testnet."
+  - date: "2026-11-12"
+    status: completed
+    who: akot
+    note: >
+      PR #105 merged on 2026-11-04: spend budgets, attributed breakers and the balance floor
+      behind the before-submit hook. All four criteria ticked; 0097 closed with it (decisions 39,
+      42). ADR 0007 and m1-spine.md now link into archive/. Follow-ups stay in the backlog: 0098,
+      and 0105-0108 for M2.
 ---
 
 # Spend budgets and circuit breakers
@@ -360,10 +368,10 @@ facilitator refuses to start.
 
 ## Follow-ups
 
-- [0097](../../backlog/0097_FEATURE_prune-spend-scopes.md): taken in by this task (39, 42); close
-  it when #105 merges.
-- On archiving this task: ADR 0007 (two links) and `m1-spine.md`'s AD-18 link into
-  `lore/1-tasks/active/0024_…`; point them at `archive/` (Karol's review).
+- [0097](../0097_FEATURE_prune-spend-scopes.md): taken in by this task (39, 42); closed with it
+  after #105 merged.
+- ADR 0007 (two links) and `m1-spine.md`'s AD-18 link now point at `archive/` (Karol's review),
+  done on archiving.
 - [0098](../../backlog/0098_BUG_spend-review-minors.md): the minors left from the per-task and final
   reviews.
 - M2, from decision 31: [0105](../../backlog/0105_FEATURE_api-keys-on-pubnet.md) (API keys on

@@ -100,7 +100,7 @@ It also found that two fee ceilings disagreed:
 ## Amendment 2026-10-30 (task 0024)
 
 Task 0024 built the spend budgets and the breakers
-([S-design](../../lore/1-tasks/active/0024_FEATURE_spend-budgets-and-breakers/notes/S-design.md)).
+([S-design](../../lore/1-tasks/archive/0024_FEATURE_spend-budgets-and-breakers/notes/S-design.md)).
 It found that the decision above bound less than it said, and changed it as follows.
 
 - **The payer is proven.** Upstream checks only that the payer's auth entry is signed, and Soroban
@@ -148,7 +148,7 @@ any one party can cost us" as "bound what any one address can cost us".
 ## Amendment 2026-11-03 (task 0024): API keys on pubnet
 
 Decided by akot after 0024's analysis of the shared budgets: nobody in the
-[facilitator survey](../../lore/1-tasks/active/0024_FEATURE_spend-budgets-and-breakers/notes/R-facilitator-survey.md)
+[facilitator survey](../../lore/1-tasks/archive/0024_FEATURE_spend-budgets-and-breakers/notes/R-facilitator-survey.md)
 with an open `/settle` that pays fees for any payer closed that attack without an identity that
 costs something, or a price. No requirement asks for an open `/settle` on mainnet: the RFP asks for
 a free testnet, configurable mainnet pricing and documented caller authentication, and the keyless

@@ -280,7 +280,7 @@ graph TD
 
 - **Binds:** `/settle`, `/verify`, `SpendStore`, alerts
 - **Prevents:** someone draining the facilitator's XLM through valid self-payments, junk tokens or payments that fail on chain, which IP limits can't stop.
-- **Rule** (task 0024, [S-design](../../lore/1-tasks/active/0024_FEATURE_spend-budgets-and-breakers/notes/S-design.md)):
+- **Rule** (task 0024, [S-design](../../lore/1-tasks/archive/0024_FEATURE_spend-budgets-and-breakers/notes/S-design.md)):
   - **Payer proof.** `/settle` refuses a settlement whose simulation didn't use the payer's auth entry (its nonce key isn't in the read-write footprint), so the payer every budget is keyed by signed the payment.
   - **One at a time.** At most one settlement per (network, payer, asset) is in flight; another waits within the settle budget, then gets `settle_exact_stellar_payer_busy`, retryable with the same payment.
   - **Order.** In the `beforeSubmit` hook: the fee account's balance floor, then the breakers, then the budgets.
