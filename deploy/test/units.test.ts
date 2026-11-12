@@ -302,6 +302,34 @@ describe("the snapshot job", () => {
     expect(settings(service, "RestartSec")).toEqual(["20min"]);
   });
 
+  // Without the limit a failure that lasts retried every 20 minutes all day, each try a login to
+  // OpenBao and an SSH session to the shared box (0123, D2).
+  test("stops after the run and two retries, until the next night's timer", () => {
+    const service = unit("x402-openbao-snapshot.service");
+    const inUnit = service.slice(service.indexOf("[Unit]"), service.indexOf("[Service]"));
+    expect(settings(inUnit, "StartLimitIntervalSec")).toEqual(["3h"]);
+    expect(settings(inUnit, "StartLimitBurst")).toEqual(["3"]);
+    // The limit counts starts inside the window. A window shorter than three whole tries lets the
+    // first start leave it before the fourth, and the retries never stop; one of a day or more
+    // refuses the timer's next run too.
+    const minutes = (key: string) => {
+      const [, n, unitOfTime] = /^(\d+)(h|min)$/.exec(settings(service, key)[0] ?? "") ?? [];
+      expect(unitOfTime, key).toBeDefined();
+      return Number(n) * (unitOfTime === "h" ? 60 : 1);
+    };
+    const tries = Number(settings(inUnit, "StartLimitBurst")[0]);
+    const wholeTry = minutes("TimeoutStartSec") + minutes("RestartSec");
+    expect(minutes("StartLimitIntervalSec")).toBeGreaterThan(tries * wholeTry);
+    expect(minutes("StartLimitIntervalSec")).toBeLessThan(24 * 60);
+  });
+
+  // x402-creds decrypts into a dot file and renames it: a decrypt that stops between the two
+  // leaves the dot file, which the script's own test can't reach (it runs on plain files).
+  test("cleans up a half-decrypted credential too", () => {
+    expect(read("libexec/x402-creds")).toContain('mv -f "$dst/.$name" "$dst/$name"');
+    expect(script).toContain('rm -f "$run/$c" "$run/.$c"');
+  });
+
   test("fails on any step, and keeps both AppRole IDs off the command line", () => {
     expect(script).toMatch(/^#!\/bin\/bash\n/);
     expect(script).toContain("set -euo pipefail");
