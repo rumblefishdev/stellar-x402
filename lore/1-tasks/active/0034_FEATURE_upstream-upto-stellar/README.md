@@ -2,7 +2,7 @@
 id: "0034"
 title: "Merge the Stellar upto scheme upstream: scheme_upto_stellar.md and the @x402/stellar classes"
 type: FEATURE
-status: blocked
+status: active
 owner: okarcz
 milestone: 2
 related_adr: ["0001"]
@@ -55,6 +55,15 @@ history:
       Status note brought up to date: a maintainer started reviewing #3781 on 2026-10-20, and
       Eras256 (#3098) asked on 2026-10-23 which PR to converge on, still unanswered. Still blocked
       on the review; the reply to Eras256 is ours to send.
+  - date: "2026-11-12"
+    status: active
+    who: okarcz
+    note: >
+      Unblocked: jeesunikim's review of #3781 landed with two comments. okarcz accepted both: an
+      `extra.receiverAuthorizer` with self-managed and facilitator-delegated modes, as in SVM
+      upto; and no x402 nonce storage in UptoProxy, relying on Soroban's auth nonce as #3134
+      does. The contract's `facilitator` parameter becomes `receiver_authorizer`. Work on the
+      local branch lore-0034-review-fixes; nothing goes upstream until okarcz says so.
 ---
 
 # Merge the Stellar upto scheme upstream: scheme_upto_stellar.md and the @x402/stellar classes
@@ -67,13 +76,13 @@ once it is **merged**, not when it is proposed.
 
 **Lane:** Payments
 
-## Status: Blocked
+## Status: Active
 
-> Blocked since 2026-10-15 on the maintainers' review of the upstream spec PR. A maintainer
-> (jeesunikim) started it on 2026-10-20. One thing is ours to do: Eras256, author of the
-> competing #3098, asked on 2026-10-23 which PR to converge on, and nobody has answered. The code
-> PR also waits on 0015.
-> Drafts are in [`drafts/`](drafts/).
+> jeesunikim's review of #3781 landed on 2026-11-12 with two comments; okarcz accepted both (see
+> [Review of #3781](#review-of-3781-2026-11-12)). Next: change UptoProxy, redeploy it on testnet,
+> rerun the e2e suite, then update the spec, ADR 0010 and the threat model. Nothing is posted to
+> #3781 until okarcz asks. Eras256's convergence question (2026-10-23) is still unanswered. The
+> code PR also waits on 0015. Drafts are in [`drafts/`](drafts/).
 
 ## Context
 
@@ -275,6 +284,66 @@ Local work so far, steps 1 and 2 as drafts. Nothing is sent upstream.
   and profiles), #3134 (Iam0TI, stateless) and #3428 (davedumto, interoperability requirements).
   #3781's description names all three and offers to converge. AutoLayer, another RFP respondent,
   said it won't open a competing spec PR.
+
+### Review of #3781 (2026-11-12)
+
+jeesunikim left two inline comments; okarcz accepted both on 2026-11-12.
+
+1. **`extra.receiverAuthorizer` with two modes** (line 71), as in `scheme_upto_svm.md`.
+   Facilitator-delegated: the server copies the facilitator's key from `/supported`, as
+   `facilitatorAddress` works today. Self-managed: the server puts its own key there and, at
+   `/settle`, sends its own auth entry for `settle_upto`. That entry covers every argument,
+   including `actual_amount`, so the facilitator can't charge more than the server signed, and
+   open authorizations survive a change of facilitator. The contract's `require_auth()` already
+   covers all arguments, so only the parameter name changes (`facilitator` →
+   `receiver_authorizer`). Open: the payload field name, the limit on the server entry's
+   `signatureExpirationLedger`, and whether the key must be a `G...` account.
+2. **No x402 nonce storage in UptoProxy** (line 182), as in #3134. Soroban's auth nonce already
+   makes each signed entry single-use. ADR 0010 D6's two reasons for storing it are weak: the
+   host's nonce entry can be read with `getLedgerEntries`, and a client that signs two entries with
+   the same x402 nonce signed two payments (today the second seller serves and goes unpaid). `nonce`
+   stays as a signed payment ID in the arguments and the `upto_settled` event; `is_nonce_used` and
+   `NonceUsed` go. Open: key the facilitator's zero-settlement record on Soroban's nonce.
+
+Both need a new WASM and a new canonical testnet address, the e2e suite rerun, and ADR 0010, the
+threat model, the testnet report and the spec updated.
+
+**Done locally on 2026-11-12** (branch `lore-0034-review-fixes`, not committed, nothing posted):
+
+- UptoProxy changed as above, error code 7 retired (not renumbered). `cargo test` 40/40 and the two
+  WASM tests pass.
+- The e2e suite settles again: the receiver authorizer signs its own address-credential entry
+  (`packages/signer-pool` refuses source-account entries since `d85b041`, which had blocked the
+  suite until 0015). 58/58 on testnet against the new proxy `CDPHI4JY…EA2X` (WASM `a3d7bd0a…f666`).
+- Contract README, ADR 0010 (D6 amended, D12 added), threat model, testnet report (new run on top),
+  `deploy/testnet.env.example` and `drafts/scheme_upto_stellar.md` updated. The `docs/scf/`
+  milestone 1 documents keep the old address: they record what milestone 1 delivered.
+
+**okarcz's decisions on the open points (2026-11-12):**
+
+- The payload field is `payload.receiverAuthorization` (base64 `SorobanAuthorizationEntry`).
+- The receiver authorization's `signatureExpirationLedger` is at most the client's
+  `allowance_expiration_ledger`.
+- The spec allows `G...` and `C...` receiver authorizers (a `C...` one is verified only by the
+  enforcing simulation, as for a smart-wallet client); our seller SDK signs with a `G...` key first.
+- The facilitator keys its zero-settlement record on `(from, authorization nonce)`.
+
+**Emerged while writing the spec** (for okarcz to confirm):
+
+- In self-managed mode the receiver authorizer signs only at `/settle`, so `/verify` simulates in
+  recording mode and checks the client's signature and authorization nonce itself; the enforcing
+  simulation moves to settlement. A `C...` client's failing `__check_auth` then surfaces only at
+  settlement (Security Considerations, item 6).
+- A self-managed `/settle` with amount 0 still needs `payload.receiverAuthorization`, since it is
+  what authorizes the server's claim.
+- In facilitator-delegated mode the facilitator MAY still authorize as the operation source, but
+  never with source-account credentials when the operation has no source of its own.
+- Non-zero settlements no longer need a facilitator record: the host's nonce outlives every use of
+  the entry. Phase 4's "record before submitting" step is gone.
+- New error reason `invalid_upto_stellar_payload_receiver_authorization`;
+  `invalid_upto_stellar_payload_nonce_used` now means the client entry's authorization nonce.
+
+**Future work:** C-account signing in our seller SDK (a backlog task, not created yet).
 
 ## Design Decisions
 
