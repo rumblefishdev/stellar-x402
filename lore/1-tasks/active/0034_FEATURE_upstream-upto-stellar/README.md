@@ -79,9 +79,9 @@ once it is **merged**, not when it is proposed.
 ## Status: Active
 
 > jeesunikim's review of #3781 landed on 2026-11-12 with two comments; okarcz accepted both (see
-> [Review of #3781](#review-of-3781-2026-11-12)). Next: change UptoProxy, redeploy it on testnet,
-> rerun the e2e suite, then update the spec, ADR 0010 and the threat model. Nothing is posted to
-> #3781 until okarcz asks. Eras256's convergence question (2026-10-23) is still unanswered. The
+> [Review of #3781](#review-of-3781-2026-11-12)). The contract, the e2e suite, the docs and the spec
+> draft are changed on `lore-0034-review-fixes` for the team's review in our repo. Nothing is
+> posted to #3781 until okarcz asks. Eras256's convergence question (2026-10-23) is still unanswered. The
 > code PR also waits on 0015. Drafts are in [`drafts/`](drafts/).
 
 ## Context
@@ -308,13 +308,14 @@ jeesunikim left two inline comments; okarcz accepted both on 2026-11-12.
 Both need a new WASM and a new canonical testnet address, the e2e suite rerun, and ADR 0010, the
 threat model, the testnet report and the spec updated.
 
-**Done locally on 2026-11-12** (branch `lore-0034-review-fixes`, not committed, nothing posted):
+**Done on 2026-11-12** (branch `lore-0034-review-fixes`, committed, nothing posted upstream):
 
 - UptoProxy changed as above, error code 7 retired (not renumbered). `cargo test` 40/40 and the two
   WASM tests pass.
 - The e2e suite settles again: the receiver authorizer signs its own address-credential entry
   (`packages/signer-pool` refuses source-account entries since `d85b041`, which had blocked the
-  suite until 0015). 58/58 on testnet against the new proxy `CDPHI4JY…EA2X` (WASM `a3d7bd0a…f666`).
+  suite until 0015). 61/61 on testnet against the new proxy `CDPHI4JY…EA2X` (WASM `a3d7bd0a…f666`),
+  including a self-managed payment relayed by another facilitator.
 - Contract README, ADR 0010 (D6 amended, D12 added), threat model, testnet report (new run on top),
   `deploy/testnet.env.example` and `drafts/scheme_upto_stellar.md` updated. The `docs/scf/`
   milestone 1 documents keep the old address: they record what milestone 1 delivered.
@@ -338,12 +339,22 @@ threat model, the testnet report and the spec updated.
   what authorizes the server's claim.
 - In facilitator-delegated mode the facilitator MAY still authorize as the operation source, but
   never with source-account credentials when the operation has no source of its own.
-- Non-zero settlements no longer need a facilitator record: the host's nonce outlives every use of
-  the entry. Phase 4's "record before submitting" step is gone.
+- ~~Non-zero settlements no longer need a facilitator record.~~ Reversed by okarcz after the code
+  review (2026-11-12): the facilitator records `(from, authorization nonce)` before every
+  settlement, so concurrent `/settle` calls on one payload don't pay for a doomed duplicate.
 - New error reason `invalid_upto_stellar_payload_receiver_authorization`;
   `invalid_upto_stellar_payload_nonce_used` now means the client entry's authorization nonce.
 
-**Future work:** C-account signing in our seller SDK (a backlog task, not created yet).
+**okarcz's decisions from the code review (2026-11-12):**
+
+- Record every settlement before submitting it (above).
+- Add an e2e scenario for self-managed mode: the seller's account is the receiver authorizer and
+  the other facilitator relays its entry.
+- A facilitator that doesn't relay self-managed payments refuses them at `/verify` with
+  `invalid_upto_stellar_payload_receiver_authorization`.
+
+**Future work:** C-account signing in our seller SDK (a backlog task, not created yet). Enforcing
+the receiver-entry rules in the facilitator belongs to 0015.
 
 ## Design Decisions
 

@@ -47,8 +47,9 @@ What each party must trust:
 - **Attack:** Submitting the same signed entry a second time.
 - **Mitigation:** Soroban makes each auth entry single-use: `Error(Auth, ExistingValue)`. This is
   the only single-use check; the contract stores no nonce of its own (ADR 0010, D6). Shown on
-  testnet in 0004 and again on 2026-11-12. A zero settlement never reaches the chain, so the
-  facilitator records `(from, auth nonce)` for it and refuses the entry afterwards (spec §8.1).
+  testnet in 0004 and again on 2026-11-12. The facilitator records `(from, auth nonce)` before
+  every settlement and refuses the entry afterwards: a zero settlement never reaches the chain, and
+  the record keeps concurrent `/settle` calls from paying for a duplicate (spec §8.1).
 - **Residual risk:** None.
 
 #### Reuse of a payment ID
@@ -71,7 +72,11 @@ What each party must trust:
   server trusts it to charge only the amount asked for.
 - **Residual risk:** A stolen key can charge every open authorization up to its ceiling, to the
   seller's own `payTo`. The exposure is the same as a dishonest seller's (see the trust note
-  above), bounded by the ceilings and windows.
+  above), bounded by the ceilings and windows. Open authorizations are bound to the key, so it
+  can't be revoked before they expire, and rotating it strands them; short windows limit both.
+  Each facilitator's settlement record is its own, so in self-managed mode a server that
+  zero-settled an entry at one facilitator can still charge it, within its ceiling, through
+  another.
 
 #### Blind signing by the client
 
@@ -176,8 +181,9 @@ What each party must trust:
 - **Mitigation:** The facilitator computes fees from a fresh simulation and caps them with
   `maxFeeStroops` (250,000 by default, ADR 0007). At verify it refuses an
   `allowance_expiration_ledger` beyond the payment window and a `signatureExpirationLedger` that
-  differs from it (README, Verify step 2), and in self-managed mode a server entry whose
-  `signatureExpirationLedger` is past the client's. The second check is the only bound on the signature
+  differs from it (README, Verify step 2); at settle, in self-managed mode, it refuses a server
+  entry whose `signatureExpirationLedger` is past the client's. Like the client rule, that check
+  lives only in the spec until the facilitator's `upto` settlement (task 0015) implements it. The second check is the only bound on the signature
   nonce's rent, so it is required, not defence in depth; the facilitator's `/verify` for `upto` is task 0015, and until
   then the rule is enforced only by the e2e suite's `checkClientAuth`. The contract refuses an
   expiry more than 17,280 ledgers (about a day) ahead, so even a facilitator that skips the check

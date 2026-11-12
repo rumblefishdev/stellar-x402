@@ -8,12 +8,14 @@ mode).
 
 The contract is immutable: no admin, no constructor arguments, no upgrade, no pause, no
 cancellation, and it never holds funds. It stores no contract data: single use comes from
-Soroban's own auth nonce. Its instance and
-WASM code are persistent ledger entries with their own TTL, and every settlement keeps them alive
-(see [Availability](#availability) below). The design and its
+Soroban's own auth nonce. Its instance and WASM code are persistent ledger entries with their own
+TTL, and every settlement keeps them alive (see [Availability](#availability) below). The design
+and its
 reasoning are in [ADR 0010](../../docs/adr/0010-upto-proxy-design.md); the normative spec is
 [G-upto-proxy-contract-spec](../../lore/1-tasks/archive/0002_RESEARCH_upto-proxy-design-on-soroban/notes/G-upto-proxy-contract-spec.md)
-(section numbers below, §N, refer to it).
+(section numbers below, §N, refer to it). ADR 0010's D6 and D12 (2026-11-12) supersede its
+nonce storage (§4 step 8, §7, `is_nonce_used`) and its `facilitator` name, so this README's
+execution order is numbered on its own.
 
 ## Deployments
 
@@ -108,8 +110,10 @@ authorizer signed.
   and sends it with `/settle`; any facilitator can relay it, so open authorizations survive a
   change of facilitator.
 
-`packages/signer-pool` refuses source-account entries (they would authorize as the channel
-account), so the receiver authorizer never authorizes as the operation source.
+The spec lets a facilitator in delegated mode authorize as the operation source instead, when it
+is one. Our `packages/signer-pool` sets no operation source and refuses source-account entries
+(they would authorize as the channel account), so with it the receiver authorizer always signs
+its own address entry.
 
 ## Execution order
 
@@ -213,11 +217,18 @@ Every invariant has a test in `src/test/` (§8):
    that ledger, so a far expiry is a cost the payer picks (threat model, "Fee inflation by
    rent"). The contract refuses anything over `MAX_ALLOWANCE_LEDGERS` (17,280 ledgers, about a
    day) ahead as a backstop, so `maxTimeoutSeconds` can't exceed about a day.
-3. The client entry is unused: its auth nonce isn't consumed on chain (the simulation below
-   fails with `Error(Auth, ExistingValue)` otherwise), **and** `(from, auth nonce)` is not in the
-   facilitator's own record of zero settlements (§8.1).
-4. Simulate with `actual_amount = max_amount`, the worst case. The only balance changes are
-   `from` −max and `to` +max, plus the allowance write for `(from, UptoProxy)`.
+3. The client entry is unused: its auth nonce isn't consumed on chain, **and** `(from, auth
+nonce)` is not in the facilitator's own settlement record (Settle, steps 2 and 4). In
+   delegated mode the simulation below fails with `Error(Auth, ExistingValue)` on a consumed
+   nonce. In self-managed mode it runs in recording mode, which never checks the client's nonce,
+   so read the host's nonce entry (`getLedgerEntries`, `LedgerKeyNonce` under the client's
+   address).
+4. Simulate with `actual_amount = max_amount`, the worst case: in enforcing mode with this
+   facilitator's own receiver authorization (delegated), or in recording mode (self-managed: the
+   server signs only at `/settle`). The only balance changes are `from` −max and `to` +max, plus
+   the allowance write for `(from, UptoProxy)`.
+5. `payload.receiverAuthorization` is absent. A facilitator that doesn't relay self-managed
+   payments refuses them here, before the seller serves.
 
 ### Settle
 
@@ -226,15 +237,23 @@ Every invariant has a test in `src/test/` (§8):
 2. If the actual amount is 0, send nothing, but record `(from, auth nonce)` durably as settled
    first, exactly as in step 4. The response has `transaction: ""` and `amount: "0"`. Without the
    record, a second `/settle` on the same payload with a non-zero amount would pass, because the
-   host never saw the entry. On chain the entry stays usable until it expires, but only with the
-   receiver authorizer's signature. The contract accepts 0 too, which uses the authorization up on chain;
-   the [testnet report](../../docs/upto-proxy-testnet-report.md#cost-per-settlement) has its cost.
+   host never saw the entry. On chain the entry stays usable until it expires, but only with a
+   receiver authorizer's signature; the record is this facilitator's, so in self-managed mode
+   another facilitator could still settle the entry with a new server entry. The contract accepts
+   0 too, which uses the authorization up on chain; the
+   [testnet report](../../docs/upto-proxy-testnet-report.md#cost-per-settlement) has its cost.
 3. Build `settle_upto` with the actual amount, the client's signed entry unchanged, and the
-   receiver authorizer's entry: the facilitator signs it in delegated mode; in self-managed mode
-   the server sent it, and the facilitator checks that it covers exactly this call. Re-simulate in enforcing mode and check that the client's tree is
-   unchanged and the balance changes are `from` −actual and `to` +actual. A non-SAC token may
-   emit other events or charge transfer fees, so check the balances, not only the events.
-4. Record `(from, auth nonce)` durably and never delete it, then submit.
+   receiver authorizer's entry. Delegated: the facilitator signs it. Self-managed: the server sent
+   it as `payload.receiverAuthorization` (required even for 0); check that it is one `ADDRESS` /
+   `ADDRESS_V2` entry for `extra.receiverAuthorizer`, that its root is exactly this call with no
+   sub-invocations, and that its `signatureExpirationLedger` is no later than the client's
+   `allowance_expiration_ledger`. Re-simulate in enforcing mode, which checks both signatures,
+   and check that both trees are unchanged and the balance changes are `from` −actual and `to`
+   +actual. A non-SAC token may emit other events or charge transfer fees, so check the balances,
+   not only the events.
+4. Record `(from, auth nonce)` durably and never delete it, then submit. A second `/settle` for a
+   recorded entry is refused, so concurrent calls on one payload don't pay for a doomed
+   duplicate.
 
 ### Recommended submission shape
 
@@ -243,7 +262,7 @@ has no source of its own. Each channel's master key is disabled and the facilita
 only signer. The receiver authorizer's authorization is its own address entry (above). This is the
 shape `packages/signer-pool`'s `SettlementSubmitter` builds
 ([ADR 0003](../../docs/adr/0003-settlement-channel-account-pool.md)), and the shape the e2e suite
-settled 58 scenarios with on 2026-11-12. 0006 measured an earlier shape, with the facilitator as
+settled 61 scenarios with on 2026-11-12. 0006 measured an earlier shape, with the facilitator as
 the operation source.
 
 With N channels, N settlements can land per ledger; one source account allows only one. The
@@ -324,7 +343,8 @@ spec is task 0034.
 2. **`extra.receiverAuthorizer`.** The resource server's own key (self-managed), or the key the
    facilitator publishes in `/supported` (facilitator-delegated). The client binds it into its
    signature. The proxy ID is canonical, not a requirements field.
-3. **The client's draft simulation** uses the facilitator's address as source, never its own.
+3. **The client's draft simulation** uses another account than the client as source, such as the
+   facilitator's.
 4. **Credentials.** The client's entry uses `ADDRESS` or `ADDRESS_V2`; never source-account
    credentials.
 5. **Exactly one sub-invocation** in the client's tree, where `exact` allows none:
@@ -344,9 +364,9 @@ spec is task 0034.
 10. **Zero amount.** No transaction, `transaction: ""`, `amount: "0"`, and the pair is recorded
     as settled (item 11).
 11. **Single use.** Soroban's auth nonce makes each signed client entry single-use on chain. The
-    facilitator keeps a durable record of `(from, auth nonce)` for zero settlements, which never
-    reach the chain, and refuses those entries at verify and settle. The x402 `nonce` is only a
-    payment ID.
+    facilitator records `(from, auth nonce)` before every settlement, zero ones included (they
+    never reach the chain), and refuses recorded entries at verify and settle. The x402 `nonce` is
+    only a payment ID.
 12. **Balance checks.** The settle-time simulation shows only `from` −actual and `to` +actual, plus
     the `(from, proxy)` allowance write. Events alone aren't enough for non-SAC tokens.
 13. **Fees.** A fresh simulation plus a buffer; the client's fee is ignored. The fee ceiling must

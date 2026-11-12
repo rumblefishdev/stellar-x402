@@ -6,46 +6,55 @@ the cost of keeping the contract alive (task 0035), and the throughput measured 
 
 ## Latest run: 2026-11-12 (task 0034)
 
-**58/58 scenarios passed** on 2026-11-12 at 20:04 UTC against a new deployment, with 24
-settlement transactions on the proxy in ledgers 5,698,013–5,698,045 and 2 more on a fresh instance
-of it. The run tests the two changes made after the review of the upstream spec PR #3781
-(ADR 0010, D6 and D12):
+**61/61 scenarios passed** on 2026-11-12 at 20:58 UTC against a new deployment, with 27
+settlement transactions on the proxy in ledgers 5,698,651–5,698,688 and 2 more on a fresh instance
+of it. The run tests the two changes made after the review of the upstream spec PR (ADR 0010, D6
+and D12):
 
 - **No contract nonce storage.** `is_nonce_used` and `NonceUsed` are gone. A replayed auth entry
   still fails with `Error(Auth, ExistingValue)`, and a reused payment ID under a new client
-  signature now settles: USDC [tx](https://testnet.sorobanscan.rumblefish.dev/transactions/b3d1902be3a03104e463b55f18cc814af9b3a642a3bfcd9564d441c04899d4e9),
-  UPTOE2E [tx](https://testnet.sorobanscan.rumblefish.dev/transactions/7a9b1e9cf79289e86157070822cadfff6b3d605a5fa92c9f986eb1ef8cf1b63a),
-  TEST [tx](https://testnet.sorobanscan.rumblefish.dev/transactions/c349f8b4104099f427213f541c843705aa6caffe1be93ef4de694ba0b2d0e799). This scenario
+  signature now settles: USDC [tx](https://testnet.sorobanscan.rumblefish.dev/transactions/66f00305c5c945ece5069aa1e99791aca2005ac497ec8a22de892bb12689c08e),
+  UPTOE2E [tx](https://testnet.sorobanscan.rumblefish.dev/transactions/93db0ee8cc932926af87d5d02e22cb519d772f19248260b5cd3a8fbe911c429d),
+  TEST [tx](https://testnet.sorobanscan.rumblefish.dev/transactions/d9bc5839db22a6db5cb75452ff7d27555cf64de3a4a220da140a9d0b2eb2026d). This scenario
   replaces "rejects a reused nonce with a new signature" (`NonceUsed`).
-- **`receiver_authorizer`.** The parameter and the event field are renamed. The receiver
-  authorizer (here the facilitator's key) signs its own address-credential entry for the call,
-  actual amount included, the shape a resource server uses in self-managed mode. The transaction
-  has a channel as its source, the facilitator pays the fee bump, and the operation has no source
-  of its own, because `packages/signer-pool` refuses source-account entries.
+- **`receiver_authorizer`, facilitator-delegated.** In every other settlement the receiver
+  authorizer is the facilitator's key, and it signs its own address-credential entry for the call,
+  actual amount included. A channel is the transaction source, the facilitator pays the fee bump,
+  and the operation has no source of its own (`packages/signer-pool` refuses source-account
+  entries).
+- **Self-managed, relayed by another facilitator** (new). The seller's own account is the receiver
+  authorizer and signs its entry for the actual amount without simulation. The other facilitator,
+  which never saw the payment, submits it through its own channel
+  (`GBIGZK…QQ6SMKL6`) and pays the fee bump (`GDVTHE…A6EKB7VV`): USDC
+  [tx](https://testnet.sorobanscan.rumblefish.dev/transactions/cfed07708a76f1a01f348ecd3f064c1273b12a9a750b2328fc31461ce4297ad9), UPTOE2E
+  [tx](https://testnet.sorobanscan.rumblefish.dev/transactions/ca1ec7534e60765deddd691dc60447264780e5ad6a3a21bf43b83a568e947ce8), TEST
+  [tx](https://testnet.sorobanscan.rumblefish.dev/transactions/5ed0e7affab323ab9b2e4ea54bc027d33b2ca8491dce2e0ad4622a159117975f).
 
 Every other scenario and check passed as in the 2026-10-09 run below: the other rejections and
 tampering cases, both concurrency cases, the client's refusal of a forged tree, the facilitator's
 window and signature-expiry checks, the client paying no fee (XLM unchanged at 99,999,999,800
-stroops), the proxy's TTL (instance 3,110,361 and code 3,110,362 ledgers left at ledger
-5,698,045), and a fresh instance extending itself by 720 ledgers per settlement.
+stroops), the proxy's TTL (instance 3,110,357 and code 3,110,358 ledgers left at ledger
+5,698,688), and a fresh instance extending itself by 720 ledgers per settlement.
 
 |                    |                                                                                                                                                                             |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | UptoProxy contract | [`CDPHI4JYNSWNAQFXUAZAWTBUBYLZZRWFU6F6EJIHLSTAL6MJWXOVEA2X`](https://testnet.sorobanscan.rumblefish.dev/contracts/CDPHI4JYNSWNAQFXUAZAWTBUBYLZZRWFU6F6EJIHLSTAL6MJWXOVEA2X) |
 | WASM hash          | `a3d7bd0a4d8f24002b2a07162b32c36abe4620bc60d3550262da05b4ef52f666`                                                                                                          |
 
-Fee charged to the facilitator, in stroops:
+Fee charged to the submitting facilitator, in stroops:
 
-| Token   | At the ceiling | Zero settlement | Reused payment ID | First settlement of the run |
-| ------- | -------------: | --------------: | ----------------: | --------------------------: |
-| USDC    |         21,742 |          16,498 |            21,740 |                      23,090 |
-| UPTOE2E |         21,789 |          16,498 |            21,786 |                      40,711 |
-| TEST    |         20,126 |          16,381 |            20,126 |                      37,121 |
+| Token   | At the ceiling | Zero settlement | Reused payment ID | Self-managed, relayed |
+| ------- | -------------: | --------------: | ----------------: | --------------------: |
+| USDC    |         23,015 |          17,770 |            23,015 |                23,015 |
+| UPTOE2E |         23,061 |          17,770 |            23,061 |                23,061 |
+| TEST    |         21,399 |          17,653 |            21,399 |                21,399 |
 
-A settlement at the ceiling costs about half of the 2026-10-09 figures below (40,944 for USDC).
-This run can't say how much of that comes from the contract: the shape changed too (an address
-entry for the receiver authorizer instead of source-account credentials), and testnet moved from
-protocol 29 to 30. The first settlement per token pays extra rent for entries the run creates.
+A self-managed settlement costs the same as a delegated one: both carry two address-credential
+entries. A settlement at the ceiling costs about half of the 2026-10-09 figures below (40,944 for
+USDC). This run can't say how much of that comes from the contract: the shape changed too (an
+address entry for the receiver authorizer instead of source-account credentials), and testnet
+moved from protocol 29 to 30. An earlier run on the same day, before the self-managed scenario
+was added, passed 58/58 against the same deployment.
 
 Data: [`testnet-results.json`](../contracts/upto-proxy/e2e/results/testnet-results.json). The
 sections below describe the 2026-10-09 run of the previous deployment, `CAL7SBTO…V2VC`, and still
