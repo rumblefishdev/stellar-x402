@@ -2,7 +2,7 @@
 id: "0144"
 title: "Keep a task's owner on the board when someone else adds a history note"
 type: BUG
-status: backlog
+status: active
 milestone: 2
 related_adr: []
 related_tasks: ["0001", "0033", "0026"]
@@ -15,6 +15,10 @@ history:
     status: backlog
     who: okarcz
     note: "Found on 0026: a history note from 0029's closing made the board show its author as 0026's owner."
+  - date: "2026-11-12"
+    status: active
+    who: okarcz
+    note: "Started after the team agreed to the owner field."
 ---
 
 # Keep a task's owner on the board when someone else adds a history note
