@@ -4,6 +4,55 @@ What `UptoProxy` ([README](../contracts/upto-proxy/README.md),
 [ADR 0010](adr/0010-upto-proxy-design.md)) does and costs on Stellar testnet: the end-to-end run,
 the cost of keeping the contract alive (task 0035), and the throughput measured in task 0006.
 
+## Latest run: 2026-11-12 (task 0034)
+
+**58/58 scenarios passed** on 2026-11-12 at 20:04 UTC against a new deployment, with 24
+settlement transactions on the proxy in ledgers 5,698,013–5,698,045 and 2 more on a fresh instance
+of it. The run tests the two changes made after the review of the upstream spec PR #3781
+(ADR 0010, D6 and D12):
+
+- **No contract nonce storage.** `is_nonce_used` and `NonceUsed` are gone. A replayed auth entry
+  still fails with `Error(Auth, ExistingValue)`, and a reused payment ID under a new client
+  signature now settles: USDC [tx](https://testnet.sorobanscan.rumblefish.dev/transactions/b3d1902be3a03104e463b55f18cc814af9b3a642a3bfcd9564d441c04899d4e9),
+  UPTOE2E [tx](https://testnet.sorobanscan.rumblefish.dev/transactions/7a9b1e9cf79289e86157070822cadfff6b3d605a5fa92c9f986eb1ef8cf1b63a),
+  TEST [tx](https://testnet.sorobanscan.rumblefish.dev/transactions/c349f8b4104099f427213f541c843705aa6caffe1be93ef4de694ba0b2d0e799). This scenario
+  replaces "rejects a reused nonce with a new signature" (`NonceUsed`).
+- **`receiver_authorizer`.** The parameter and the event field are renamed. The receiver
+  authorizer (here the facilitator's key) signs its own address-credential entry for the call,
+  actual amount included, the shape a resource server uses in self-managed mode. The transaction
+  has a channel as its source, the facilitator pays the fee bump, and the operation has no source
+  of its own, because `packages/signer-pool` refuses source-account entries.
+
+Every other scenario and check passed as in the 2026-10-09 run below: the other rejections and
+tampering cases, both concurrency cases, the client's refusal of a forged tree, the facilitator's
+window and signature-expiry checks, the client paying no fee (XLM unchanged at 99,999,999,800
+stroops), the proxy's TTL (instance 3,110,361 and code 3,110,362 ledgers left at ledger
+5,698,045), and a fresh instance extending itself by 720 ledgers per settlement.
+
+|                    |                                                                                                                                                                             |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| UptoProxy contract | [`CDPHI4JYNSWNAQFXUAZAWTBUBYLZZRWFU6F6EJIHLSTAL6MJWXOVEA2X`](https://testnet.sorobanscan.rumblefish.dev/contracts/CDPHI4JYNSWNAQFXUAZAWTBUBYLZZRWFU6F6EJIHLSTAL6MJWXOVEA2X) |
+| WASM hash          | `a3d7bd0a4d8f24002b2a07162b32c36abe4620bc60d3550262da05b4ef52f666`                                                                                                          |
+
+Fee charged to the facilitator, in stroops:
+
+| Token   | At the ceiling | Zero settlement | Reused payment ID | First settlement of the run |
+| ------- | -------------: | --------------: | ----------------: | --------------------------: |
+| USDC    |         21,742 |          16,498 |            21,740 |                      23,090 |
+| UPTOE2E |         21,789 |          16,498 |            21,786 |                      40,711 |
+| TEST    |         20,126 |          16,381 |            20,126 |                      37,121 |
+
+A settlement at the ceiling costs about half of the 2026-10-09 figures below (40,944 for USDC).
+This run can't say how much of that comes from the contract: the shape changed too (an address
+entry for the receiver authorizer instead of source-account credentials), and testnet moved from
+protocol 29 to 30. The first settlement per token pays extra rent for entries the run creates.
+
+Data: [`testnet-results.json`](../contracts/upto-proxy/e2e/results/testnet-results.json). The
+sections below describe the 2026-10-09 run of the previous deployment, `CAL7SBTO…V2VC`, and still
+hold for everything this run didn't change.
+
+## Previous run: 2026-10-09
+
 **58/58 scenarios passed** on 2026-10-09 at 13:03 UTC, with 21 settlement transactions on the
 proxy in ledgers 5,105,444–5,105,479, and 2 more on a fresh instance of it. The contract settled real payments in three tokens with the signing model the
 x402 facilitator will use. Every settlement, rejection and tampering case behaved as the contract
@@ -19,9 +68,8 @@ on each settlement.
   checks (an allowance that outlives the window or ends before the deadline, a signature that
   expires apart from it), and the self-extension observed on a fresh instance. The 57/57 run
   before the PR review's fixes is in the git history.
-- Data: [`testnet-results.json`](../contracts/upto-proxy/e2e/results/testnet-results.json),
-  written by `pnpm contracts:e2e`. This report is a snapshot of the 2026-10-09 run; a new run
-  rewrites the JSON, not this page.
+- Data: the JSON now holds the 2026-11-12 run; the 2026-10-09 run's JSON is in the git history of
+  `contracts/upto-proxy/e2e/results/testnet-results.json`.
 - Interactive version of the 50/50 run, with the TTL measurements:
   <https://claude.ai/artifact/TNurkGqjefJWXtKCNPwkcE>. It is a claude.ai page shared by link; the
   JSON above is the source of record.
