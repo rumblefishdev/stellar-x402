@@ -40,10 +40,11 @@ through its agent. One view of the server, ClickHouse and the facilitator is the
     server to patch and back up, and it needs its own watcher.
   - Grafana Cloud's alerting runs outside our infrastructure. An absent-data rule on the agent then
     serves as the Hetzner server's heartbeat.
-- **One agent on the Hetzner server.** Grafana Alloy replaces the CloudWatch agent and scrapes three
-  sources:
+- **One agent on the Hetzner server.** Grafana Alloy replaces the CloudWatch agent. It is one
+  process with node_exporter built in (`prometheus.exporter.unix`), so no separate exporter runs. It
+  collects from three sources:
   - the facilitator's `/metrics`. It is a long-running process, so it can be scraped;
-  - node_exporter;
+  - the host's own metrics, through the built-in exporter;
   - ClickHouse's built-in Prometheus endpoint. That endpoint is the explorer's and the Prices
     API's way in later, at almost no extra work.
 - **Alert rules as code.** This answers ADR 0011's objection that the rules would sit outside our
@@ -71,7 +72,8 @@ The other EMF writers do not go through that adapter. Each needs its own answer:
 - **The `uptime-probe` and `watch` Lambdas** cannot be scraped. They either push over OTLP or stay
   on EMF, since they write only a few metrics.
 - **The host probe** (`deploy/libexec/x402-host-probe`) writes EMF to a file that the CloudWatch
-  agent reads. Under Alloy it would write a node_exporter textfile instead.
+  agent reads. Under Alloy it would write a textfile that the built-in exporter's textfile collector
+  reads.
 
 ## To check before deciding
 
