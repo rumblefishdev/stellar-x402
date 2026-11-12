@@ -800,6 +800,10 @@ a run the timer starts after a reboot is skipped).
    systemctl list-timers x402-openbao-snapshot.timer
    ```
 
+   A first run that fails is tried twice more by itself, and a start by hand counts too: after
+   three starts in 3 hours the next one is refused. Fix the cause, then
+   `sudo systemctl reset-failed x402-openbao-snapshot.service` before starting it again.
+
    Then the `snapshots` alarm group goes on (`infra/README.md`), so a run that fails every night
    alerts instead of showing only in the journal. From `infra/`:
 
@@ -815,7 +819,8 @@ a run the timer starts after a reboot is skipped).
 The export is encrypted with the passphrase, so both fields of the backup secret change together.
 The new passphrase is stored on the server before the repository changes, so a step that fails
 never leaves the repository under a passphrase nobody has. The timer and the job are stopped
-meanwhile; stopping the service also cancels a retry that is waiting to start.
+meanwhile; stopping the service also cancels a retry that is waiting to start, and ends a
+snapshot that is running at that moment. The last line's start makes a fresh one.
 
 ```sh
 (
@@ -851,7 +856,8 @@ follows when it is next due.
 the alarm fires a day later:
 
 - Before `change-passphrase`: the repository is unchanged. Delete `borg-passphrase.next.cred`
-  and start the timer.
+  and start the timer. If the stop ended that night's run or cancelled its retry, start the
+  service too, after `reset-failed` (OpenBao snapshots, above).
 - After it, before the swap: the new passphrase is in `borg-passphrase.next.cred`. Run the swap
   line and the rest by hand, reading the passphrase back with
   `sudo systemd-creds decrypt --name=borg-passphrase $c/borg-passphrase.next.cred -`.
