@@ -68,7 +68,7 @@ writing the protocol myself.
 
 ## Implementation Notes
 
-`packages/sdk/rust`, crate `stellar-x402`, not committed yet:
+`packages/sdk/rust`, crate `stellar-x402`, PR #177:
 
 - `src/terms.rs`, `price.rs`, `network.rs`: the 402 answer and its terms.
 - `src/bazaar.rs`: the `bazaar` block, for query and JSON-body routes.
@@ -174,7 +174,8 @@ facilitator that asks for one (0105 is not built).
 - [x] Given a payment the facilitator refuses, when the server answers, then the buyer gets the
       facilitator's reason
 - [x] The testnet run's transaction hash is recorded for 0132
-- [ ] The crate is Apache-2.0, its dependencies pass the licence audit, and CI builds and tests it
-      (licences checked, decision 16; the CI job has not run yet: nothing is pushed)
+- [x] The crate is Apache-2.0, its dependencies pass the licence audit, and CI builds and tests it
+      (licences: decision 16, with `webpki-roots` to confirm in 0132; CI: job `sdk-rust` passed on
+      PR #177)
 - [x] The task lists what is left for part 2, the buyer-side signing among it or dropped in
       writing
