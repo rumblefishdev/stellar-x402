@@ -2,7 +2,7 @@
 id: "0097"
 title: "Prune spend_scopes rows nothing counts any more"
 type: FEATURE
-status: backlog
+status: completed
 milestone: 1
 related_adr: ["0007", "0012"]
 related_tasks: ["0024", "0050"]
@@ -13,6 +13,10 @@ history:
     status: backlog
     who: akot
     note: "Spawned from 0024 future work."
+  - date: "2026-11-12"
+    status: completed
+    who: akot
+    note: "Taken in by 0024 (decisions 39 and 42): pruneScopes in 0050's pruner, merged in PR #105 on 2026-11-04."
 ---
 
 # Prune spend_scopes rows nothing counts any more
@@ -33,7 +37,7 @@ covers `spend_reservations` only. Payer addresses are free, so the table grows f
 
 ## Acceptance Criteria
 
-- [ ] Given a scope with nothing in any window and no breaker or strike still fresh, when the
-      pruner runs, then its row is deleted
-- [ ] Given a scope with a live reservation, an open breaker or a fresh strike, when the pruner
-      runs, then its row stays, and `reserve` is unaffected
+- [x] Given a scope with nothing in any window and no breaker or strike still fresh, when the
+      pruner runs, then its row is deleted (0024 decision 39, PR #105)
+- [x] Given a scope with a live reservation, an open breaker or a fresh strike, when the pruner
+      runs, then its row stays, and `reserve` is unaffected (0024 decision 42, PR #105)
