@@ -66,7 +66,8 @@ fn terms_in_another_token_carry_its_contract_and_base_units() {
     let token = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 
     let terms =
-        PaymentRequirements::exact(Network::Testnet, PAY_TO, Price::token(token, 250)).unwrap();
+        PaymentRequirements::exact(Network::Testnet, PAY_TO, Price::token(token, 250).unwrap())
+            .unwrap();
 
     let json = serde_json::to_value(terms).unwrap();
     assert_eq!(json["asset"], token);

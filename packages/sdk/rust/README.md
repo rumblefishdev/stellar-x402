@@ -83,7 +83,7 @@ Two things the seller gets that upstream's middleware does not pass on:
 | `PaymentGate::base_url(url)`            | the seller's public address; set it behind a proxy, else the `Host` header names the URL |
 | `PaymentGate::on_event(observe)`        | settlements, refusals and facilitator failures, for logs and metrics                     |
 | `Price::usdc("0.001")`                  | USDC as a decimal, read as text and never as a float; at most 7 decimals                 |
-| `Price::token(contract, base_units)`    | any SEP-41 token                                                                         |
+| `Price::token(contract, base_units)`    | any SEP-41 token, in its base units; zero is refused, as for USDC                        |
 | `PaidRoute::listing(Listing::query(…))` | the `bazaar` block; `Listing::json_body` for POST, PUT and PATCH                         |
 
 A mistyped `payTo` or token contract, and a network the facilitator does not settle on, stop the

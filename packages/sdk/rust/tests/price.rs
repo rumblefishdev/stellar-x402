@@ -64,3 +64,17 @@ fn an_amount_too_large_for_a_token_is_refused() {
     let text = format!("{}", u128::MAX);
     assert_eq!(Price::usdc(&text), Err(PriceError::TooLarge));
 }
+
+const TOKEN: &str = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
+
+#[test]
+fn a_token_price_of_zero_is_refused() {
+    assert_eq!(Price::token(TOKEN, 0), Err(PriceError::Zero));
+}
+
+#[test]
+fn a_token_amount_too_large_for_a_token_is_refused() {
+    // SEP-41 amounts are i128.
+    assert_eq!(Price::token(TOKEN, u128::MAX), Err(PriceError::TooLarge));
+    assert!(Price::token(TOKEN, i128::MAX as u128).is_ok());
+}

@@ -49,11 +49,11 @@ fn a_secret_key_is_refused_as_the_account_to_pay() {
 #[test]
 fn a_token_that_is_not_a_contract_is_refused() {
     assert_eq!(
-        terms(ACCOUNT, Price::token(ACCOUNT, 1)),
+        terms(ACCOUNT, Price::token(ACCOUNT, 1).unwrap()),
         Err(AddressError::Token)
     );
     assert_eq!(
-        terms(ACCOUNT, Price::token("USDC", 1)),
+        terms(ACCOUNT, Price::token("USDC", 1).unwrap()),
         Err(AddressError::Token)
     );
 }

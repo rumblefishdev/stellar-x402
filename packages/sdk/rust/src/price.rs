@@ -52,24 +52,25 @@ impl Price {
         // Both parts are digits only, so a failed parse is an overflow.
         let scaled = format!("{whole}{fraction:0<USDC_DECIMALS$}");
         let amount: u128 = scaled.parse().map_err(|_| PriceError::TooLarge)?;
+        Self::of(Asset::Usdc, amount)
+    }
+
+    /// A price in any SEP-41 token: its contract address and an amount in its base units.
+    ///
+    /// Refused when the amount is zero or above what a token amount holds, as a USDC price is.
+    pub fn token(contract: impl Into<String>, base_units: u128) -> Result<Self, PriceError> {
+        Self::of(Asset::Token(contract.into()), base_units)
+    }
+
+    /// SEP-41 amounts are i128, and a transfer of nothing pays for nothing.
+    fn of(asset: Asset, amount: u128) -> Result<Self, PriceError> {
         if amount > i128::MAX as u128 {
             return Err(PriceError::TooLarge);
         }
         if amount == 0 {
             return Err(PriceError::Zero);
         }
-        Ok(Self {
-            asset: Asset::Usdc,
-            amount,
-        })
-    }
-
-    /// A price in any SEP-41 token: its contract address and an amount in its base units.
-    pub fn token(contract: impl Into<String>, base_units: u128) -> Self {
-        Self {
-            asset: Asset::Token(contract.into()),
-            amount: base_units,
-        }
+        Ok(Self { asset, amount })
     }
 
     pub(crate) fn asset_on(&self, network: Network) -> String {

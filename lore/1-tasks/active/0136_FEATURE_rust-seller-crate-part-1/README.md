@@ -77,8 +77,8 @@ writing the protocol myself.
 - `src/facilitator.rs`: `/supported`, `/verify`, `/settle`, the API key, `EXTENSION-RESPONSES`.
 - `src/axum.rs` (feature `axum`, on by default): `PaymentGate` and the layer.
 - `examples/weather.rs`: the example server, the twin of `examples/http-api`.
-- 62 tests with the feature, 45 with `--no-default-features`; the layer's run a seller and a fake facilitator on local
-  ports. CI job `sdk-rust`.
+- 65 tests with the feature, 48 with `--no-default-features`; the layer's run a seller and a fake
+  facilitator on local ports. CI job `sdk-rust`.
 
 ### Testnet run, 2026-11-12
 
@@ -135,6 +135,7 @@ facilitator that asks for one (0105 is not built).
    query string and `error` reads "Payment required", as upstream sends them.
 6. **A USDC price is read as text, never as a float**, and refused when it has more than 7
    decimals, is zero or is not plain digits. Upstream's TypeScript takes a number.
+   `Price::token` takes base units and refuses zero and an amount above `i128` the same way.
 7. **Rust 1.81 is the oldest supported**, edition 2021, checked in CI next to the 1.97.1 build.
    1.81 is what was at hand to check with; raise it when a dependency needs more.
 8. **`publish = false` until 0140** decides the release.
@@ -153,7 +154,7 @@ facilitator that asks for one (0105 is not built).
     facilitator does not settle on is refused then. Upstream's client retries a 429 there three
     times; ours does not.
 14. **The API key goes to `/verify` and `/settle` only**, as `Authorization: Bearer` (0105);
-    `/supported` is open.
+    `/supported` is open. The client's debug output says that a key is set, never the key.
 15. **The oldest Rust holds with `Cargo.lock`'s versions.** The newest `idna_adapter`,
     `stellar-strkey` 1.0 and others need 1.82 to 1.87, so `.cargo/config.toml` keeps `cargo update`
     on versions that fit, and CI checks 1.81 with `--locked`. A seller on 1.81 needs the same

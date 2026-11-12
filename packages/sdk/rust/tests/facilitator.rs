@@ -307,3 +307,15 @@ fn a_url_that_is_not_http_is_refused_when_the_client_is_made() {
         Err(FacilitatorError::Url { .. })
     ));
 }
+
+#[test]
+fn the_api_key_is_left_out_of_debug_output() {
+    let facilitator = Facilitator::new("https://facilitator.example")
+        .unwrap()
+        .with_api_key("secret-key");
+
+    let debug = format!("{facilitator:?}");
+
+    assert!(!debug.contains("secret-key"), "{debug}");
+    assert!(debug.contains("https://facilitator.example"), "{debug}");
+}

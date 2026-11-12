@@ -15,12 +15,23 @@ const EXTENSION_RESPONSES: &str = "EXTENSION-RESPONSES";
 const EXCERPT_CHARS: usize = 200;
 
 /// A facilitator: the service that checks a buyer's payment and settles it on Stellar.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Facilitator {
     url: String,
     http: reqwest::Client,
     api_key: Option<String>,
     timeout: Duration,
+}
+
+/// Says whether an API key is set, never the key: debug output ends up in logs.
+impl std::fmt::Debug for Facilitator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Facilitator")
+            .field("url", &self.url)
+            .field("api_key", &self.api_key.as_ref().map(|_| "set"))
+            .field("timeout", &self.timeout)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Why a call to the facilitator gave no answer to act on.
