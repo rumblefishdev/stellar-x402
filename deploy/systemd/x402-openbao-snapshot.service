@@ -9,6 +9,13 @@ After=network-online.target x402-openbao.service
 # The playbook enables the timer, and an enabled timer also starts at the next boot: until the
 # runbook's admin step has made the AppRole's credential, a run is skipped instead of failing.
 ConditionPathExists=/srv/x402/backup/creds/snapshot-secret-id.cred
+# The run and two retries, then the unit stays failed until the next night's timer: a failure that
+# lasts (a wrong passphrase or host key, a full box) doesn't log in to OpenBao and open an SSH
+# session to the shared box every 20 minutes all day. The window is longer than three whole tries,
+# 3 x (TimeoutStartSec + RestartSec), so the count can't run out between them, and shorter than a
+# day, so it never refuses the timer's next run.
+StartLimitIntervalSec=3h
+StartLimitBurst=3
 
 [Service]
 Type=oneshot
@@ -16,7 +23,8 @@ ExecStart=/usr/local/libexec/x402/x402-openbao-snapshot
 # A snapshot is kilobytes; most of the time is SSH and Borg's prune and compact. Well under a day.
 TimeoutStartSec=30min
 # One run a day against a 26-hour alarm: a box or network blip at night is retried the same
-# night instead of costing a day's snapshot. A retry that meets a run still holding the lock
-# fails at once and tries again later.
+# night instead of costing a day's snapshot. A retry that meets the lock waits up to
+# X402_LOCK_WAIT (600 s) for it, then fails and tries again later; only an admin's `borg` call can
+# hold it.
 Restart=on-failure
 RestartSec=20min

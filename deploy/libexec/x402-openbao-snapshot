@@ -2,8 +2,8 @@
 # OpenBao's daily Raft snapshot, sent off the server to our Borg repository on the Storage Box
 # (ADR 0013, task 0026). Run as root by x402-openbao-snapshot.timer. It logs in with the
 # snapshot-only AppRole, saves a snapshot inside the container, copies it to a tmpfs on the host,
-# makes one Borg archive of it, prunes to 14 days and touches the stamp 0027's probe reads. A run
-# that fails anywhere leaves no stamp, and the snapshot-age alarm fires after 26 hours.
+# makes one Borg archive of it, keeps 14 daily archives and touches the stamp 0027's probe reads.
+# A run that fails anywhere leaves no stamp, and the snapshot-age alarm fires after 26 hours.
 # Overridable for a test or a local run: X402_LOCK, X402_LOCK_WAIT and the paths below.
 #   x402-openbao-snapshot
 #   x402-openbao-snapshot borg ARGS...   any Borg command on that repository, for an admin: init,
@@ -46,7 +46,8 @@ cleanup() {
   docker compose -f "$X402_OPENBAO_DIR/compose.yaml" exec -T openbao rm -f /tmp/raft.snap > /dev/null 2>&1 || :
   rm -f "$snap"
   if [ -z "${X402_CREDS_DIR:-}" ]; then
-    for c in "${creds[@]}"; do rm -f "$run/$c"; done
+    # "$run/.$c": the file x402-creds decrypts into before its mv, left by a decrypt that stopped.
+    for c in "${creds[@]}"; do rm -f "$run/$c" "$run/.$c"; done
   fi
 }
 # Before the decrypt: one that fails halfway leaves no file it already wrote.
