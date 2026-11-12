@@ -1,5 +1,5 @@
 //! Authorization with real ed25519 signatures, verified by the host (I2, I3). The payer and
-//! the facilitator are classic accounts; the token is the in-repo SEP-41 token so the payer
+//! the receiver authorizer are classic accounts; the token is the in-repo SEP-41 token so the payer
 //! can hold a balance without a trustline. Spike S1–S8 covered the SAC on testnet.
 
 extern crate std;
@@ -12,7 +12,7 @@ use soroban_sdk::TryIntoVal;
 struct Real {
     s: Setup,
     client: Signer,
-    facilitator: Signer,
+    authorizer: Signer,
 }
 
 fn contract_address(env: &Env, id: u8) -> Address {
@@ -30,14 +30,14 @@ fn setup_real() -> Real {
     env.register_at(&proxy, UptoProxy, ());
     env.register_at(&token, TestToken, ());
     let client = Signer::new(&env, 1);
-    let facilitator = Signer::new(&env, 2);
+    let authorizer = Signer::new(&env, 2);
     let to = Signer::new(&env, 3).address;
     TestTokenClient::new(&env, &token).mint(&client.address, &MINTED);
     let p = Payment {
         token,
         from: client.address.clone(),
         to,
-        facilitator: facilitator.address.clone(),
+        receiver_authorizer: authorizer.address.clone(),
         max_amount: MAX,
         nonce: BytesN::from_array(&env, &[7; 32]),
         valid_after: VALID_AFTER,
@@ -47,12 +47,21 @@ fn setup_real() -> Real {
     Real {
         s: Setup { env, proxy, p },
         client,
-        facilitator,
+        authorizer,
     }
 }
 
 /// The client's entry (§3.1): signature expiration equals the allowance expiration.
 fn client_entry(r: &Real, p: &Payment) -> SorobanAuthorizationEntry {
+    client_entry_with_auth_nonce(r, p, 1)
+}
+
+/// `client_entry` signed under Soroban auth nonce `auth_nonce`.
+fn client_entry_with_auth_nonce(
+    r: &Real,
+    p: &Payment,
+    auth_nonce: i64,
+) -> SorobanAuthorizationEntry {
     let env = &r.s.env;
     let approve = invocation(
         env,
@@ -68,11 +77,12 @@ fn client_entry(r: &Real, p: &Payment) -> SorobanAuthorizationEntry {
         signed_args(env, p),
         std::vec![approve],
     );
-    r.client.sign(env, 1, p.exp_ledger, root)
+    r.client.sign(env, auth_nonce, p.exp_ledger, root)
 }
 
-/// The facilitator's entry (§3.2): all 10 args, no sub-invocations.
-fn facilitator_entry(r: &Real, p: &Payment, actual: i128) -> SorobanAuthorizationEntry {
+/// The receiver authorizer's entry (§3.2): all 10 args, no sub-invocations. In self-managed mode
+/// the resource server signs it; in facilitator-delegated mode the facilitator does.
+fn authorizer_entry(r: &Real, p: &Payment, actual: i128) -> SorobanAuthorizationEntry {
     let env = &r.s.env;
     let root = invocation(
         env,
@@ -81,7 +91,7 @@ fn facilitator_entry(r: &Real, p: &Payment, actual: i128) -> SorobanAuthorizatio
         full_args(env, p, actual),
         std::vec![],
     );
-    r.facilitator.sign(env, 2, SEQ + 100, root)
+    r.authorizer.sign(env, 2, SEQ + 100, root)
 }
 
 fn submit(r: &Real, p: &Payment, actual: i128, auths: &[SorobanAuthorizationEntry]) -> TryResult {
@@ -97,7 +107,7 @@ fn one_signed_entry_settles_any_amount_up_to_max() {
         let r = setup_real();
         let p = r.s.p.clone();
         // The very same signed entry, reused byte for byte for every amount.
-        let auths = [signed.clone(), facilitator_entry(&r, &p, actual)];
+        let auths = [signed.clone(), authorizer_entry(&r, &p, actual)];
         assert_eq!(
             submit(&r, &p, actual, &auths),
             Ok(Ok(())),
@@ -124,9 +134,9 @@ fn setup_tampered(field: &str) -> (Real, Payment, Payment) {
 #[test]
 fn changing_any_signed_field_fails_the_signature() {
     for field in SIGNED_FIELDS {
-        // The facilitator signs the tampered call; the client signed the original.
+        // The receiver authorizer signs the tampered call; the client signed the original.
         let (r, signed, t) = setup_tampered(field);
-        let auths = [client_entry(&r, &signed), facilitator_entry(&r, &t, 10)];
+        let auths = [client_entry(&r, &signed), authorizer_entry(&r, &t, 10)];
         assert_host_error(submit(&r, &t, 10, &auths));
         assert_eq!(
             TestTokenClient::new(&r.s.env, &t.token).balance(&t.to),
@@ -136,7 +146,7 @@ fn changing_any_signed_field_fails_the_signature() {
 
         // Control: once the client signs the same values, the call settles.
         let (r, _, t) = setup_tampered(field);
-        let auths = [client_entry(&r, &t), facilitator_entry(&r, &t, 10)];
+        let auths = [client_entry(&r, &t), authorizer_entry(&r, &t, 10)];
         assert_eq!(
             submit(&r, &t, 10, &auths),
             Ok(Ok(())),
@@ -146,7 +156,7 @@ fn changing_any_signed_field_fails_the_signature() {
 }
 
 #[test]
-fn missing_facilitator_signature_is_rejected() {
+fn missing_receiver_authorizer_signature_is_rejected() {
     let r = setup_real();
     let p = r.s.p.clone();
     assert_host_error(submit(&r, &p, 10, &[client_entry(&r, &p)]));
@@ -154,11 +164,11 @@ fn missing_facilitator_signature_is_rejected() {
 }
 
 #[test]
-fn a_different_facilitator_cannot_use_the_client_signature() {
+fn a_different_receiver_authorizer_cannot_use_the_client_signature() {
     let r = setup_real();
     let rogue = Signer::new(&r.s.env, 4);
     let p = Payment {
-        facilitator: rogue.address.clone(),
+        receiver_authorizer: rogue.address.clone(),
         ..r.s.p.clone()
     };
     let rogue_entry = {
@@ -172,7 +182,7 @@ fn a_different_facilitator_cannot_use_the_client_signature() {
         );
         rogue.sign(env, 3, SEQ + 100, root)
     };
-    // The client signed the original facilitator.
+    // The client signed the original receiver authorizer.
     let auths = [client_entry(&r, &r.s.p), rogue_entry];
     assert_host_error(submit(&r, &p, 10, &auths));
     assert_eq!(balance(&r.s, &p.to), 0);
@@ -189,7 +199,7 @@ fn a_signature_by_another_key_is_rejected() {
             p: p.clone(),
         },
         client: Signer::new(&r.s.env, 5),
-        facilitator: Signer::new(&r.s.env, 6),
+        authorizer: Signer::new(&r.s.env, 6),
     };
     // A valid signature from the wrong key, presented for the client's address.
     let mut forged = client_entry(&impostor, &p);
@@ -201,7 +211,7 @@ fn a_signature_by_another_key_is_rejected() {
     {
         f.address = g.address.clone();
     }
-    let auths = [forged, facilitator_entry(&r, &p, 10)];
+    let auths = [forged, authorizer_entry(&r, &p, 10)];
     assert_host_error(submit(&r, &p, 10, &auths));
 }
 
@@ -219,7 +229,7 @@ fn signed_entry_without_approve_is_rejected() {
     );
     let auths = [
         r.client.sign(env, 1, p.exp_ledger, root),
-        facilitator_entry(&r, &p, 10),
+        authorizer_entry(&r, &p, 10),
     ];
     assert_host_error(submit(&r, &p, 10, &auths));
 }
@@ -229,12 +239,12 @@ fn a_signed_entry_cannot_be_replayed() {
     let r = setup_real();
     let p = r.s.p.clone();
     let signed = client_entry(&r, &p);
-    let auths = [signed.clone(), facilitator_entry(&r, &p, 10)];
+    let auths = [signed.clone(), authorizer_entry(&r, &p, 10)];
     assert_eq!(submit(&r, &p, 10, &auths), Ok(Ok(())));
-    // The host's native auth nonce stops the replay before the contract's nonce check.
+    // The host's native auth nonce stops the replay: this is the only single-use check.
     let auths = [
         signed,
-        r.facilitator.sign(&r.s.env, 9, SEQ + 100, {
+        r.authorizer.sign(&r.s.env, 9, SEQ + 100, {
             let env = &r.s.env;
             invocation(
                 env,
@@ -247,4 +257,30 @@ fn a_signed_entry_cannot_be_replayed() {
     ];
     assert_host_error(submit(&r, &p, 10, &auths));
     assert_eq!(balance(&r.s, &p.to), 10);
+}
+
+/// The x402 `nonce` is a payment ID, not a single-use key: a client that signs a second entry with
+/// the same payment ID, under a new Soroban auth nonce, has signed a second payment, and it
+/// settles.
+#[test]
+fn a_second_signed_entry_with_the_same_payment_id_settles() {
+    let r = setup_real();
+    let p = r.s.p.clone();
+    let auths = [client_entry(&r, &p), authorizer_entry(&r, &p, 10)];
+    assert_eq!(submit(&r, &p, 10, &auths), Ok(Ok(())));
+    let second = [
+        client_entry_with_auth_nonce(&r, &p, 2),
+        r.authorizer.sign(&r.s.env, 3, SEQ + 100, {
+            let env = &r.s.env;
+            invocation(
+                env,
+                &r.s.proxy,
+                "settle_upto",
+                full_args(env, &p, 10),
+                std::vec![],
+            )
+        }),
+    ];
+    assert_eq!(submit(&r, &p, 10, &second), Ok(Ok(())));
+    assert_eq!(balance(&r.s, &p.to), 20);
 }

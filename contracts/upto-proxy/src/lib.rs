@@ -1,16 +1,17 @@
 #![no_std]
 //! `UptoProxy`: settles an x402 `upto` payment on Soroban.
 //!
-//! The client signs a ceiling (`max_amount`) once; the bound facilitator then settles any
-//! `actual_amount` between 0 and that ceiling. The contract is immutable: no admin, no
-//! constructor arguments, no upgrade path and no funds held between calls.
+//! The client signs a ceiling (`max_amount`) once; the bound receiver authorizer then authorizes
+//! any `actual_amount` between 0 and that ceiling. The receiver authorizer is the facilitator's key
+//! (facilitator-delegated mode) or the resource server's own key (self-managed mode). The contract
+//! is immutable: no admin, no constructor arguments, no upgrade path and no funds held between
+//! calls.
 //!
 //! Normative spec: `lore/1-tasks/archive/0002_RESEARCH_upto-proxy-design-on-soroban/notes/
 //! G-upto-proxy-contract-spec.md`. Section numbers in comments (§N) refer to it.
 
 use soroban_sdk::{
-    contract, contracterror, contractevent, contractimpl, contracttype, token, vec, Address,
-    BytesN, Env, IntoVal,
+    contract, contracterror, contractevent, contractimpl, token, vec, Address, BytesN, Env, IntoVal,
 };
 
 /// Contract errors (§5). Auth failures surface as host `Error(Auth, …)` instead.
@@ -24,7 +25,7 @@ pub enum UptoError {
     NotYetValid = 4,
     Expired = 5,
     InvalidAllowanceExpiration = 6,
-    NonceUsed = 7,
+    // 7 was `NonceUsed`; single use is now Soroban's auth nonce, so the code is retired.
     InvalidRecipient = 8,
 }
 
@@ -38,7 +39,7 @@ pub struct UptoSettled {
     pub from: Address,
     #[topic]
     pub to: Address,
-    pub facilitator: Address,
+    pub receiver_authorizer: Address,
     pub max_amount: i128,
     pub actual_amount: i128,
     pub nonce: BytesN<32>,
@@ -60,8 +61,8 @@ pub const TTL_MIN_EXTENSION: u32 = 120;
 pub const TTL_MAX_EXTENSION: u32 = 720;
 
 /// The furthest `allowance_expiration_ledger` a settlement accepts, in ledgers after the current
-/// one: 17,280 (about 1 day at 5 s ledgers). The facilitator pays temporary rent on the nonce entry
-/// and the token's allowance until that ledger, and the payer picks it, so without a cap a payer
+/// one: 17,280 (about 1 day at 5 s ledgers). The facilitator pays temporary rent on the token's
+/// allowance until that ledger, and the payer picks it, so without a cap a payer
 /// could make one settlement pay for up to `max_entry_ttl` (about 180 days, 3.9 million stroops on
 /// testnet). A day costs about 25,000 stroops (1.3 per ledger, measured on testnet). The
 /// facilitator's `/verify` holds expiries to the payment window; this is defence in depth if it
@@ -70,13 +71,6 @@ pub const TTL_MAX_EXTENSION: u32 = 720;
 /// `signatureExpirationLedger == allowance_expiration_ledger` check bounds that, so the check is
 /// required.
 pub const MAX_ALLOWANCE_LEDGERS: u32 = 17_280;
-
-/// Storage keys (§7). Only temporary storage is used.
-#[contracttype]
-#[derive(Clone)]
-enum DataKey {
-    Nonce(Address, BytesN<32>),
-}
 
 #[contract]
 pub struct UptoProxy;
@@ -87,14 +81,18 @@ impl UptoProxy {
     ///
     /// `from` signs every argument except `actual_amount` (and itself), plus the
     /// `token.approve` sub-invocation that binds `allowance_expiration_ledger` (§3).
-    /// `facilitator` must authorize the full call (§3.2).
+    /// `receiver_authorizer` must authorize the full call, `actual_amount` included (§3.2).
+    ///
+    /// Single use comes from Soroban's own auth nonce in `from`'s signed entry: the host refuses
+    /// the same signed entry twice. `nonce` is not stored; it is a signed payment ID, carried in
+    /// the arguments and the event.
     #[allow(clippy::too_many_arguments)]
     pub fn settle_upto(
         env: Env,
         token: Address,
         from: Address,
         to: Address,
-        facilitator: Address,
+        receiver_authorizer: Address,
         max_amount: i128,
         actual_amount: i128,
         nonce: BytesN<32>,
@@ -124,15 +122,16 @@ impl UptoProxy {
             &env,
             token.into_val(&env),
             to.into_val(&env),
-            facilitator.into_val(&env),
+            receiver_authorizer.into_val(&env),
             max_amount.into_val(&env),
             nonce.into_val(&env),
             valid_after.into_val(&env),
             deadline.into_val(&env),
         ]);
 
-        // §4 step 5: facilitator binding.
-        facilitator.require_auth();
+        // §4 step 5: receiver authorizer binding. It covers every argument, so in self-managed
+        // mode the resource server's key signs the exact `actual_amount`.
+        receiver_authorizer.require_auth();
 
         // §4 step 6: time window, unix seconds, inclusive.
         let now = env.ledger().timestamp();
@@ -152,19 +151,6 @@ impl UptoProxy {
             || allowance_expiration_ledger > seq.saturating_add(MAX_ALLOWANCE_LEDGERS)
         {
             return Err(UptoError::InvalidAllowanceExpiration);
-        }
-
-        // §4 step 8: consume the nonce before any external call. The entry lives until at
-        // least `allowance_expiration_ledger` (I4).
-        let key = DataKey::Nonce(from.clone(), nonce.clone());
-        let temporary = env.storage().temporary();
-        if temporary.has(&key) {
-            return Err(UptoError::NonceUsed);
-        }
-        temporary.set(&key, &());
-        let live_for = allowance_expiration_ledger - seq;
-        if live_for > 0 {
-            temporary.extend_ttl(&key, live_for, live_for);
         }
 
         // §4 steps 9–10: the approve sub-invocation the client signed, then the transfer.
@@ -188,18 +174,13 @@ impl UptoProxy {
             token,
             from,
             to,
-            facilitator,
+            receiver_authorizer,
             max_amount,
             actual_amount,
             nonce,
         }
         .publish(&env);
         Ok(())
-    }
-
-    /// Returns whether `(from, nonce)` was consumed and its entry is still live (§7).
-    pub fn is_nonce_used(env: Env, from: Address, nonce: BytesN<32>) -> bool {
-        env.storage().temporary().has(&DataKey::Nonce(from, nonce))
     }
 }
 
