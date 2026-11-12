@@ -232,16 +232,16 @@ async function checkSettled(
   t: UptoTerms,
   hash: string,
   actual: bigint,
-  { allowance = true } = {},
+  { allowance = true, payer = world.facilitator.publicKey(), channels = world.channels } = {},
 ): Promise<TxReport> {
   const tx = await txReport(hash, t.proxy);
   r.transactions.push(tx);
 
-  // Delegated-bump shape: the facilitator pays, a channel provides the sequence number. The pool
-  // sets no operation source.
-  expect(tx.feeSource).toBe(t.facilitator);
+  // Delegated-bump shape: the submitting facilitator pays, a channel provides the sequence number.
+  // The pool sets no operation source.
+  expect(tx.feeSource).toBe(payer);
   expect(tx.opSource).toBeUndefined();
-  expect(world.channels).toContain(tx.txSource);
+  expect(channels).toContain(tx.txSource);
   expect([tx.feeSource, tx.txSource, tx.opSource]).not.toContain(t.from);
 
   expect(tx.events).toHaveLength(1);
@@ -350,9 +350,39 @@ describe.each(TOKENS)("UptoProxy on testnet with %s", (kind) => {
     scenario(kind, "settles a reused payment ID under a new signature", "success", async (r) => {
       const last = settled.get(kind);
       if (!last) throw new Error("no earlier settlement to reuse");
-      await settleAndCheck(r, last.terms, await clientSign(last.terms, world.client), 1n);
+      // Fresh terms with the earlier payment ID, so a slow run can't push it past its deadline.
+      const t = terms(kind, { nonce: last.terms.nonce });
+      await settleAndCheck(r, t, await clientSign(t, world.client), 1n);
       r.outcome = "success";
     }));
+
+  // Self-managed mode: the seller's own account is the receiver authorizer. It signs its entry for
+  // the actual amount without simulation, and the other facilitator, which never saw the payment
+  // before, relays it through its own channel and fee bump.
+  it("settles a self-managed payment relayed by another facilitator", () =>
+    scenario(
+      kind,
+      "settles a self-managed payment relayed by another facilitator",
+      "success, the seller's key authorizes, the other facilitator pays",
+      async (r) => {
+        const t = terms(kind, { facilitator: world.seller.publicKey() });
+        const auth = await clientSign(t, world.client);
+        checkClientAuth(auth, t, await facilitatorWindow(t));
+        const before = await balances(t);
+        const actual = MAX / 4n;
+        const call = await settleCall(auth, t, actual, world.seller);
+        const result = await otherSubmitter.submit(call);
+        expect(result.status, `submit ${result.hash}: ${result.errorCode ?? ""}`).toBe("success");
+        await checkSettled(r, t, result.hash!, actual, {
+          payer: world.otherFacilitator.publicKey(),
+          channels: world.otherChannels,
+        });
+        const after = await balances(t);
+        expect(before.client - after.client).toBe(actual);
+        expect(after.seller - before.seller).toBe(actual);
+        r.outcome = "success";
+      },
+    ));
 
   it("rejects a settlement before valid_after", () =>
     scenario(kind, "rejects a settlement before valid_after", "NotYetValid (#4)", async (r) => {
