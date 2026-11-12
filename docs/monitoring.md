@@ -84,8 +84,8 @@ once, by the task that turns it on.
 | `backup-secret-read` | `watchSecurity` | 0127, the secret-read section, once 0026 creates the backup secret                     |
 | `channel-held`       | `channelHeld`   | 0089 builds `channel_longest_hold_seconds`; 0027 owns the alarm (alarm list, Deferred) |
 | `snapshot-age`       | `snapshots`     | 0026, once OpenBao's daily snapshot has run                                            |
-| `upstream-changed`   | `upstream`      | 0029, `make check-series GROUP=upstream` in the 3 hours after a 08:00 UTC run          |
-| `upstream-silent`    | `upstream`      | 0029, as above                                                                         |
+| `upstream-changed`   | `upstream`      | 0026, `make check-series GROUP=upstream` in the 3 hours after a 08:00 UTC run          |
+| `upstream-silent`    | `upstream`      | 0026, as above                                                                         |
 | `wal-failing`        | `backups`       | 0026, once pgBackRest archives WAL (its decision-71 criterion)                         |
 | `wal-stale`          | `backups`       | 0026, as above                                                                         |
 

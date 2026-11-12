@@ -2,7 +2,7 @@
 id: "0029"
 title: "Gate run against our testnet facilitator"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0009"]
 related_tasks: ["0012", "0028", "0026", "0009", "0020", "0059"]
@@ -36,6 +36,14 @@ history:
       Reopened for its last criterion: the rerun on the finished T1 build, with the conformance
       report written from it, both before the M1 handover. 0119, which held them, is folded back
       in and removed.
+  - date: "2026-11-12"
+    status: completed
+    who: karolkow
+    note: >
+      Rerun on the T1 build, facilitator 5d2e26b: 18 of 18 (#169), and conformance/REPORT.md from
+      it (#170, #171); the M1 evidence package links both (#165). The upstream alarms (#149) are
+      merged and off; turning them on with the next production deploy, and the rerun after the
+      testnet reset of 2026-12-16, moved to 0026.
 ---
 
 # Gate run against our testnet facilitator
@@ -140,7 +148,8 @@ The first run of record, 2026-11-06 on facilitator `68e778e`, is in git history.
   `results/testnet-hosted/` (`testnet-local/` is ignored by git).
 - #139: another facilitator's dry run removed from `conformance/results/`.
 - #148: the run of record.
-- #149 (open): the `upstream-changed` alarm in the off-server check (decision 16).
+- #149: the `upstream-changed` and `upstream-silent` alarms in the off-server check (decisions 16, 17, 19, 20), merged and off in production.
+- #169: the rerun of record; #170 and #171: `conformance/REPORT.md`.
 
 ## Issues Encountered
 
@@ -156,18 +165,15 @@ The first run of record, 2026-11-06 on facilitator `68e778e`, is in git history.
 ## Future Work
 
 - 0116: the project's full end-to-end suite, with refusals.
-- #149: the upstream change alarm; it needs a review, a merge and two infra deploys (checked before the rerun).
+- 0026: the upstream alarms on, and the rerun after the testnet reset.
 
 ## Before the M1 handover
 
 - Done 2026-11-10: the rerun on `5d2e26b` (decision 21) and `conformance/REPORT.md` from it
   (decision 22).
-- With the next production deploy (decision 23): the `upstream-changed` alarm (#149) on: `make deploy-production-watch`, then
-  `make check-series GROUP=upstream` in the 3 hours after the next 08:00 UTC run, a PR setting
-  `"upstream": true` in `infra/envs/production.json`, then `make deploy-production-alarms` and
-  `make fire-test` in `infra/`.
-- The testnet reset of 2026-12-16 (developers.stellar.org, Networks) removes the transactions from
-  the network: the grant's final handover needs a fresh run and the report's table refreshed.
+- Moved to 0026 on closing: the upstream alarms on with the next production deploy (decision 23),
+  and a fresh run after the testnet reset of 2026-12-16 (developers.stellar.org, Networks), which
+  removes the run's transactions from the network.
 
 ## Acceptance Criteria
 
