@@ -49,8 +49,10 @@ reads first.
 ## Implementation
 
 - **The field.** `owner: <lore id>` in the frontmatter, a key of `lore/0-session/team.yaml`.
-- **The rule.** For an active or archived task the board shows `owner` when it is set, and the last
-  history entry's `who` when it is not. Tasks without the field show what they show today.
+- **The rule.** For an active, blocked or archived task the board shows `owner` when it is set,
+  and the last history entry's `who` when it is not; a backlog task shows nobody. Active and
+  archived tasks without the field show what they show today. Blocked tasks used to show nobody:
+  okarcz decided (2026-11-12) they show their owner like active ones.
 - **One copy of the rule.** `board.html` reads the `assignee` the script wrote to `board.json`
   instead of working it out again.
 - **Who sets it.** Activating a task sets `owner`; a handoff changes it, with a history entry that
@@ -63,8 +65,8 @@ reads first.
 - [ ] `generate-lore-board.mjs` writes `assignee` from `owner` when the task has one, and from the
       last history entry's `who` when it has none.
 - [ ] `board.html` takes the assignee from `board.json`; its own history rule is gone.
-- [ ] `pnpm board` on this branch gives 0026 the assignee `okarcz`, and every other task the
-      assignee it had before.
+- [ ] `pnpm board` on this branch gives 0026 the assignee `okarcz`, the blocked 0034 `okarcz`
+      (none before), and every other task the assignee it had before.
 - [ ] The task template, `lore/1-tasks/CLAUDE.md` and the `promote-task` and `pr` skills name the
       field and say who sets it.
 - [ ] Every active and blocked task has `owner`.
@@ -72,5 +74,6 @@ reads first.
 
 ## Notes
 
-- Archived tasks keep the old rule: their last entry is the closing one, by the person who did the
-  work.
+- Archived tasks read `owner` first too (okarcz, 2026-11-12, from the code review): the owner is
+  who did the work, even when someone else's PR closes the task. Tasks archived before this have
+  no `owner` and keep showing their last entry's `who`.

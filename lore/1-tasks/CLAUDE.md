@@ -23,7 +23,8 @@ All tasks by lifecycle status. Shared ID sequence (NNNN).
 task's assignee. Without it the board falls back to the `who` of the last history entry.
 
 - Activating a task sets `owner` to the person taking it.
-- A handoff changes `owner`, with a history entry that says so.
+- A handoff changes `owner`, with a history entry: the task's current status, `who` the new
+  owner, and the note `Handoff from <old id>: <why>`.
 - A note in someone else's task (criteria handed over, a decision recorded) leaves `owner` alone.
 
 `pnpm board` stops with an error when an `owner` isn't a key of `team.yaml`.
