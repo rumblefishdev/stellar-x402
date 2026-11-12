@@ -118,6 +118,7 @@ description or price, and nobody can make `/discovery/resources` answer megabyte
 | 42 | Row 1 re-examined and kept: a listing comes from the seller's own 402. A rule that only a payment from the `payTo` account writes needs about 15 lines but stops buyers' payments from listing anything, which the RFP's automatic cataloging excludes | grilling | beyond it | `docs/rfp/07-x402-facilitator-bazaar.md:60` | | |
 | 43 | The `catalog_attempts` table stays as it is, copy and answer included: only the operator can read it, and it serves debugging. What the facilitator keeps of a client's URL is decided once, for this table, the logs and the settlements together | grilling | beyond it | spec silent | | |
 | 44 | A listing keeps the path values the seller's 402 carries (`info.input.pathParams`), as upstream writes them and most catalogs store them. ADR 0008 names the cost: a client's value can be public until the next check, and a route with several values checks at most once a minute with a row per differing payment. Measured: 173 of 198 hosts echo the value | grilling | beyond it | `bazaar.md:532`; spec silent on storage (`:429`) | | |
+| 45 | On pubnet a listing's resource URL must use `https`; `http` stays allowed on testnet, where the conformance suite runs its local servers. Measured 2026-11-12: 0 of 27,788 HTTP resources in the largest public catalog use plain `http` | owner, 2026-11-12 | beyond it | spec silent on the resource scheme (`specs/extensions/bazaar.md`) | | |
 
 ## Not yet decided
 
