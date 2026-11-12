@@ -3,6 +3,7 @@ id: "0144"
 title: "Keep a task's owner on the board when someone else adds a history note"
 type: BUG
 status: active
+owner: okarcz
 milestone: 2
 related_adr: []
 related_tasks: ["0001", "0033", "0026"]

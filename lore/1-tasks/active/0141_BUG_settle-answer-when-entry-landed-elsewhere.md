@@ -3,6 +3,7 @@ id: "0141"
 title: "Answer the seller correctly when the payer's auth entry landed in another transaction"
 type: BUG
 status: active
+owner: karolkow
 related_adr: []
 related_tasks: ["0024", "0124", "0043"]
 tags: [facilitator, settlement, payments, priority-high, effort-small]

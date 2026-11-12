@@ -17,6 +17,17 @@ All tasks by lifecycle status. Shared ID sequence (NNNN).
 
 `NNNN_TYPE_slug.md` or `NNNN_TYPE_slug/` (directory for complex tasks)
 
+## Owner
+
+`owner:` in the frontmatter, a key of `lore/0-session/team.yaml`, is who the board shows as the
+task's assignee. Without it the board falls back to the `who` of the last history entry.
+
+- Activating a task sets `owner` to the person taking it.
+- A handoff changes `owner`, with a history entry that says so.
+- A note in someone else's task (criteria handed over, a decision recorded) leaves `owner` alone.
+
+`pnpm board` stops with an error when an `owner` isn't a key of `team.yaml`.
+
 ## Task Size
 
 **Keep README.md short** (~50-100 lines): summary, status, context.

@@ -3,6 +3,7 @@ id: "0026"
 title: "Public testnet deployment"
 type: FEATURE
 status: active
+owner: okarcz
 milestone: 1
 related_adr: ["0011", "0012", "0013"]
 related_tasks: ["0012", "0014", "0022", "0017", "0020", "0013", "0039", "0036", "0047", "0099", "0100", "0118", "0127"]

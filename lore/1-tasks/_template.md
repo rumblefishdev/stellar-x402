@@ -3,6 +3,7 @@ id: "NNNN"
 title: "[Title]"
 type: FEATURE  # BUG | FEATURE | RESEARCH | REFACTOR | DOCS
 status: active  # active | blocked | completed | backlog
+owner: your-id  # a key of lore/0-session/team.yaml; the board's assignee, changed only on a handoff
 related_adr: []
 related_tasks: []
 tags: []

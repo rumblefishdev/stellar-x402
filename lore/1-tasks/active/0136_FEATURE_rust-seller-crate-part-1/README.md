@@ -3,6 +3,7 @@ id: "0136"
 title: "Rust seller crate, part 1: answer 402 with Stellar terms and settle through a facilitator"
 type: FEATURE
 status: active
+owner: akot
 milestone: 2
 related_adr: ["0001"]
 related_tasks: ["0102", "0041", "0132", "0140", "0145"]
