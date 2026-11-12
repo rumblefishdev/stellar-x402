@@ -31,10 +31,11 @@ Every authorization binds a **receiver authorizer**: the key that authorizes the
 | Mode                      | `extra.receiverAuthorizer`                                          | Who signs the receiver authorization                                                                    |
 | ------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | **Self-managed**          | The resource server's own key                                       | The resource server, after measuring usage; it sends the entry with `/settle` as `payload.receiverAuthorization` |
-| **Facilitator-delegated** | The key the facilitator publishes in the `extra` of its `/supported` entry for `upto` | The facilitator, at settlement                                                                          |
+| **Facilitator-delegated** | The key the facilitator publishes as `extra.receiverAuthorizer` in its `/supported` entry for `upto` | The facilitator, at settlement                                                                          |
 
 - **Self-managed** needs a server hot key that holds no funds. Any facilitator can relay the server's entry, so open authorizations survive a change of facilitator, and no facilitator can charge more than the server signed.
 - **Facilitator-delegated** needs no server key. The server trusts the facilitator to settle the amount it asked for and no more, and the facilitator authenticates the server's `/settle` calls out of band.
+- A facilitator that doesn't relay self-managed payments MUST refuse them at `/verify` with `invalid_upto_stellar_payload_receiver_authorization`, so the resource server learns before it serves.
 - The receiver authorizer MAY be a Stellar account (`G...`) or a contract account (`C...`). A `G...` signature can be checked off chain; a `C...` account's `__check_auth` runs only on chain, so the facilitator verifies it by the enforcing simulation alone, under its fee ceiling, as it does for a smart-wallet client.
 
 ## Protocol Flow
@@ -81,7 +82,7 @@ Every authorization binds a **receiver authorizer**: the key that authorizes the
 **`extra` fields:**
 
 - `extra.areFeesSponsored`: MUST be `true`. The facilitator pays every fee; the client never pays one.
-- `extra.receiverAuthorizer`: The address (`G...` or `C...`) that authorizes the actual amount at settlement ([Receiver Authorizer Modes](#receiver-authorizer-modes)). In self-managed mode it is the resource server's own key; in facilitator-delegated mode the resource server copies it from the `extra` of the facilitator's `/supported` entry for `upto`. The client signs it as the `receiver_authorizer` argument, so nothing settles without that key's authorization.
+- `extra.receiverAuthorizer`: The address (`G...` or `C...`) that authorizes the actual amount at settlement ([Receiver Authorizer Modes](#receiver-authorizer-modes)). In self-managed mode it is the resource server's own key; in facilitator-delegated mode the resource server copies it from `extra.receiverAuthorizer` in the facilitator's `/supported` entry for `upto`. The client signs it as the `receiver_authorizer` argument, so nothing settles without that key's authorization.
 
 `maxTimeoutSeconds` MUST NOT exceed what `MAX_ALLOWANCE_LEDGERS` (17,280 ledgers) covers at the network's ledger close time: 86,400 seconds at 5-second ledgers. The contract refuses an allowance expiry further ahead (`InvalidAllowanceExpiration`), so a longer window can't be settled.
 
@@ -202,7 +203,8 @@ A facilitator verifying an `upto` payment on Stellar MUST enforce all of the fol
 - `x402Version` MUST be `2`.
 - `payload.accepted.scheme` and `requirements.scheme` MUST be `"upto"`.
 - `payload.accepted.network` MUST equal `requirements.network`.
-- If `requirements.extra.receiverAuthorizer` is one of the receiver authorizers this facilitator publishes, the payment is facilitator-delegated; otherwise it is self-managed.
+- If `requirements.extra.receiverAuthorizer` is one of the receiver authorizers this facilitator publishes, the payment is facilitator-delegated; otherwise it is self-managed. A facilitator that rotates its receiver authorizer MUST keep treating the retired key as its own until every authorization bound to it has expired (at most `maxTimeoutSeconds`).
+- A facilitator that doesn't relay self-managed payments MUST refuse a self-managed payment here (`invalid_upto_stellar_payload_receiver_authorization`).
 - `payload.receiverAuthorization` MUST be absent at `/verify`.
 
 ### 2. Authorization Entry
@@ -220,13 +222,13 @@ A facilitator verifying an `upto` payment on Stellar MUST enforce all of the fol
 - `valid_after <= now <= deadline`, and `deadline` MUST NOT exceed `now + maxTimeoutSeconds`.
 - `signatureExpirationLedger` MUST equal `allowance_expiration_ledger`. This check is required, not defence in depth: nothing else bounds how long the host keeps the client's signature nonce, whose rent the facilitator pays.
 - `allowance_expiration_ledger` MUST be no earlier than the ledger expected at `deadline`, less a small margin for the close-time estimate. An earlier expiry passes verification but fails settlement with `Expired` after the resource server has served.
-- `allowance_expiration_ledger` MUST NOT exceed `currentLedger + ceil(maxTimeoutSeconds / ledgerCloseSeconds)` plus a small margin. The facilitator pays temporary rent on the nonce entry and the allowance until that ledger, so a far expiry is a cost the client chooses.
+- `allowance_expiration_ledger` MUST NOT exceed `currentLedger + ceil(maxTimeoutSeconds / ledgerCloseSeconds)` plus a small margin. The facilitator pays temporary rent on the host's nonce entry for the client's signature and on the allowance until that ledger, so a far expiry is a cost the client chooses.
 - The contract independently refuses an expiry more than 17,280 ledgers ahead (`InvalidAllowanceExpiration`).
 
 ### 4. Single Use
 
-- The client entry's authorization nonce MUST NOT be consumed on chain. The host keeps a temporary ledger entry for each consumed nonce until the entry's `signatureExpirationLedger`; the facilitator reads it, or relies on the simulation below failing with `Error(Auth, ExistingValue)`.
-- `(from, authorization nonce)` MUST NOT be in the facilitator's record of zero settlements ([Phase 2](#phase-2-zero-settlement)).
+- The client entry's authorization nonce MUST NOT be consumed on chain. The host keeps a temporary ledger entry for each consumed nonce until the entry's `signatureExpirationLedger`; in facilitator-delegated mode the enforcing simulation below fails with `Error(Auth, ExistingValue)` on a consumed nonce. In self-managed mode the simulation runs in recording mode, which never checks the client's nonce, so the facilitator MUST read that ledger entry (`getLedgerEntries` on the client address's `LedgerKeyNonce`).
+- `(from, authorization nonce)` MUST NOT be in the facilitator's record of settlements ([Phase 2](#phase-2-zero-settlement), [Phase 4](#phase-4-submission)).
 
 ### 5. 🚨 Facilitator Safety
 
@@ -238,7 +240,7 @@ A facilitator verifying an `upto` payment on Stellar MUST enforce all of the fol
 
 - The facilitator MUST simulate `settle_upto` with `actual_amount = max_amount` (the worst case) against the current ledger state.
   - Facilitator-delegated: in enforcing mode, with the client's entry and its own receiver authorization.
-  - Self-managed: the receiver authorizer signs only at settlement, so the facilitator simulates in recording mode, checks the client's signature (for a `G...` client) and its authorization nonce as in [Single Use](#4-single-use), and leaves the enforcing simulation to settlement ([Phase 3](#phase-3-transaction-construction)).
+  - Self-managed: the receiver authorizer signs only at settlement, so the facilitator simulates in recording mode, checks the client's signature (for a `G...` client) and reads its authorization nonce entry as in [Single Use](#4-single-use), and leaves the enforcing simulation to settlement ([Phase 3](#phase-3-transaction-construction)).
 - The simulation MUST succeed.
 - The only balance changes MUST be `from` decreasing by `max_amount` and `to` increasing by `max_amount`. The only other writes allowed are the `(from, UptoProxy)` allowance on `token`, the host's authorization nonce entries, and TTL extensions. A non-SAC token may emit extra events or charge transfer fees, so facilitators MUST check balance changes, not only events.
 
@@ -254,13 +256,13 @@ At `/settle`, `requirements.amount` is the **actual** amount ([`scheme_upto.md` 
 
 ### Phase 2: Zero Settlement
 
-If `requirements.amount` is `0`, the facilitator MUST NOT submit a transaction. It MUST first record `(from, authorization nonce)` of the client's entry durably as settled and never delete it, then return `success: true`, `transaction: ""` and `amount: "0"`. Without the record, a second `/settle` on the same payload with a non-zero amount would pass, because the host never saw the entry. On chain the entry stays usable until it expires, but only with the receiver authorizer's authorization. The record is keyed by the authorization nonce, not the payment ID, so it blocks exactly this signed entry.
+If `requirements.amount` is `0`, the facilitator MUST NOT submit a transaction. It MUST first record `(from, authorization nonce)` of the client's entry durably as settled and never delete it, then return `success: true`, `transaction: ""` and `amount: "0"`. Without the record, a second `/settle` on the same payload with a non-zero amount would pass, because the host never saw the entry. On chain the entry stays usable until it expires, but only with the receiver authorizer's authorization. The record is keyed by the authorization nonce, not the payment ID, so it blocks exactly this signed entry, at this facilitator only: in self-managed mode another facilitator can still settle the entry with a new server authorization ([Security Considerations](#security-considerations), item 7).
 
 The contract also accepts `actual_amount = 0`, which uses the authorization up on chain and emits the event; a facilitator MAY submit it that way, at the cost of a transaction fee.
 
 ### Phase 3: Transaction Construction
 
-1. Build one `invokeHostFunction` operation calling `UptoProxy.settle_upto` with all ten arguments: `[token, from, to, facilitator, max_amount, actual_amount, nonce, valid_after, deadline, allowance_expiration_ledger]`, where `actual_amount = requirements.amount`.
+1. Build one `invokeHostFunction` operation calling `UptoProxy.settle_upto` with all ten arguments: `[token, from, to, receiver_authorizer, max_amount, actual_amount, nonce, valid_after, deadline, allowance_expiration_ledger]`, where `actual_amount = requirements.amount`.
 2. Attach the client's entry **unchanged**.
 3. Attach the receiver authorization ([Receiver Authorization Entry](#receiver-authorization-entry)): in self-managed mode `payload.receiverAuthorization` unchanged; in facilitator-delegated mode an entry the facilitator signs, or source-account credentials when the receiver authorizer is the operation source. Source-account credentials MUST NOT be used when the operation has no source of its own, because they would authorize as the transaction source (for example a channel account).
 4. The **transaction source** is the facilitator's account or a channel account the facilitator controls. The facilitator MAY wrap the transaction in a fee bump.
@@ -269,9 +271,10 @@ The contract also accepts `actual_amount = 0`, which uses the authorization up o
 
 ### Phase 4: Submission
 
-1. Sign and submit with RPC `sendTransaction`. The status MUST be `PENDING`; then poll for `SUCCESS` or `FAILED`.
-2. A successful settlement emits the `upto_settled` event (see [Event](#event)).
-3. If the transaction was sent but its outcome can't be established, the facilitator MAY return `settlement_pending` with the transaction hash, as in [x402 v2 §9](../../x402-specification-v2.md#9-error-handling).
+1. Durably record `(from, authorization nonce)` of the client's entry **before** submitting, and refuse a second `/settle` for an entry already recorded. The host would refuse the second transaction anyway, but only after the facilitator has paid its fee; the record stops concurrent `/settle` calls on one payload from both being sent.
+2. Sign and submit with RPC `sendTransaction`. The status MUST be `PENDING`; then poll for `SUCCESS` or `FAILED`.
+3. A successful settlement emits the `upto_settled` event (see [Event](#event)).
+4. If the transaction was sent but its outcome can't be established, the facilitator MAY return `settlement_pending` with the transaction hash, as in [x402 v2 §9](../../x402-specification-v2.md#9-error-handling).
 
 ### Phase 5: `SettlementResponse`
 
@@ -310,14 +313,14 @@ The `upto` scheme on Stellar uses the standard x402 error codes, plus these:
 | `invalid_upto_stellar_payload_malformed`                   | `payload.authorization` is missing or isn't one `SorobanAuthorizationEntry`                        |
 | `invalid_upto_stellar_payload_unsupported_credential_type` | The credentials aren't `Address` or `AddressV2`                                                    |
 | `invalid_upto_stellar_payload_wrong_contract`              | The root contract isn't the canonical UptoProxy, or the function isn't `settle_upto`               |
-| `invalid_upto_stellar_payload_auth_mismatch`               | The tree doesn't match the requirements (token, recipient, facilitator, maximum or `approve`)      |
+| `invalid_upto_stellar_payload_auth_mismatch`               | The tree doesn't match the requirements (token, recipient, receiver authorizer, maximum or `approve`)      |
 | `invalid_upto_stellar_payload_missing_payer_signature`     | The signature is missing or invalid                                                                |
-| `invalid_upto_stellar_signature_expiration_too_far`        | The allowance expiry is past the `maxTimeoutSeconds` bound or the contract's 17,280-ledger cap (contract error `InvalidAllowanceExpiration`), ends before `deadline`, or `signatureExpirationLedger` differs from it; or the receiver authorization expires after the client's allowance |
+| `invalid_upto_stellar_signature_expiration_too_far`        | The allowance expiry is past the `maxTimeoutSeconds` bound or the contract's 17,280-ledger cap (contract error `InvalidAllowanceExpiration`), ends before `deadline`, or `signatureExpirationLedger` differs from it |
 | `invalid_upto_stellar_payload_not_yet_valid`               | `now < valid_after` (contract error `NotYetValid`)                                                 |
 | `invalid_upto_stellar_payload_expired`                     | `now > deadline` or the ledger is past the allowance (contract error `Expired`)                    |
-| `invalid_upto_stellar_payload_nonce_used`                  | The client entry's authorization nonce is used on chain (`Error(Auth, ExistingValue)`) or in the facilitator's zero-settlement record |
+| `invalid_upto_stellar_payload_nonce_used`                  | The client entry's authorization nonce is used on chain (`Error(Auth, ExistingValue)`) or in the facilitator's settlement record |
 | `invalid_upto_stellar_payload_facilitator_is_payer`        | `from` is the receiver authorizer or a facilitator address                                         |
-| `invalid_upto_stellar_payload_receiver_authorization`      | Self-managed: `payload.receiverAuthorization` is missing at `/settle`, present at `/verify`, or isn't one entry for exactly the submitted call; facilitator-delegated: it is present |
+| `invalid_upto_stellar_payload_receiver_authorization`      | Self-managed: `payload.receiverAuthorization` is missing at `/settle`, present at `/verify`, or isn't one validly signed entry for exactly the submitted call, or expires after the client's allowance; facilitator-delegated: it is present; or the facilitator doesn't relay self-managed payments |
 | `invalid_upto_stellar_payload_invalid_recipient`           | `to` is the proxy or `from` (contract errors `InvalidRecipient`, `SelfPayment`)                    |
 | `invalid_upto_stellar_payload_settlement_exceeds_amount`   | `requirements.amount` at settlement exceeds the signed maximum (contract error `AmountExceedsMax`) |
 | `invalid_upto_stellar_payload_simulation_failed`           | Simulation failed for any other reason, including a low balance                                    |
@@ -330,11 +333,11 @@ The `upto` scheme on Stellar uses the standard x402 error codes, plus these:
 2. **Replay.** Reusing a signed entry fails in Soroban's own authorization (`Error(Auth, ExistingValue)`). That is the only single-use check, and it needs no contract storage: the host's nonce entry lives until the entry's `signatureExpirationLedger`, after which the entry can't be used anyway. A zero settlement never reaches the chain, so the facilitator's record of `(from, authorization nonce)` covers it. The x402 `nonce` is a payment ID: two entries with the same ID are two payments the client signed, and both settle.
 3. **Recipient and receiver authorizer binding.** `to` and `receiver_authorizer` are signed, and the contract calls `receiver_authorizer.require_auth()`, whose authorization covers `actual_amount`. Another party that sees the payload cannot settle it, even for a smaller amount, and a facilitator that rewrites `receiver_authorizer` to itself breaks the client's signature. In self-managed mode no facilitator can charge more than the resource server signed.
 4. **Leftover allowance.** `approve` sets the proxy's allowance to `max_amount`, and `transfer_from` spends `actual_amount`, so `max_amount - actual_amount` stays approved to the proxy until `allowance_expiration_ledger`. Only the proxy can spend it, and only through `settle_upto` with a new client signature. A client that wants it cleared earlier can set its allowance to the proxy to `0`.
-5. **Receiver authorizer key.** In self-managed mode the resource server's key authorizes the actual amount. A stolen key can charge open authorizations up to their maximums, but only to the signed `payTo` and within the signed windows. It holds no funds and SHOULD be used for nothing else.
+5. **Receiver authorizer key.** In self-managed mode the resource server's key authorizes the actual amount. A stolen key can charge open authorizations up to their maximums, but only to the signed `payTo` and within the signed windows. It holds no funds and SHOULD be used for nothing else. Open authorizations are bound to the key, so a stolen key can't be revoked before their windows end, and rotating it strands them: keep windows short.
 6. **Server credit risk.** In `upto` the resource server serves before settlement, so a client can make the settlement fail afterwards, for example by moving its balance away or revoking its allowance to the proxy. In self-managed mode `/verify` can't run the enforcing simulation, so a `C...` client's failing `__check_auth` also surfaces only at settlement. The settle-time simulation catches this before anything is submitted, so the facilitator pays no fee, but the resource server is exposed to at most one maximum per open authorization. Short windows and small maximums bound it.
-7. **Server trust.** As on every network, the client trusts the resource server to charge for real usage, up to the maximum.
+7. **Server trust.** As on every network, the client trusts the resource server to charge for real usage, up to the maximum. The facilitator's settlement record is its own: in self-managed mode a server that zero-settled at one facilitator can still charge the same entry, within its maximum, through another.
 8. **Blind signing.** A client that signs whatever a simulation returns can be made to authorize another call. Clients build the tree from the requirements, or compare the simulated tree with it ([Authorization Entry](#authorization-entry)).
-9. **Fee exposure.** The facilitator pays for failed transactions too. Simulating immediately before submission and capping fees bound that cost; a state change between simulation and inclusion can still make a settlement fail and be charged.
+9. **Fee exposure.** The facilitator pays for failed transactions too. Simulating immediately before submission and capping fees bound that cost; a state change between simulation and inclusion can still make a settlement fail and be charged. Recording each entry before submitting ([Phase 4](#phase-4-submission)) keeps concurrent `/settle` calls on one payload from paying for a doomed duplicate.
 10. **Rent chosen by the client and the server.** The client picks `allowance_expiration_ledger` and `signatureExpirationLedger`, and in self-managed mode the resource server picks its entry's `signatureExpirationLedger`; the facilitator pays rent on the entries that live until then. The [time-bound rules](#3-time-bounds), the cap on the receiver authorization's expiry and the contract's 17,280-ledger cap keep that cost within the payment window.
 11. **Availability.** The proxy's instance and code are persistent entries that expire if nobody extends them. Every settlement extends them ([Availability](#availability)), and open authorizations are bound to the proxy's address, so they can't move to a redeployment.
 12. **Throughput.** One payment is one transaction. Settlements from different clients don't contend, and with N channel accounts a facilitator can land N per ledger, up to the network's share of ledger capacity.
@@ -395,7 +398,7 @@ The contract stores no data of its own.
 | 4    | `NotYetValid`                |
 | 5    | `Expired`                    |
 | 6    | `InvalidAllowanceExpiration` |
-| 7    | (unused)                     |
+| 7    | (retired)                    |
 | 8    | `InvalidRecipient`           |
 
 ### Availability
@@ -422,6 +425,6 @@ The cap keeps one settlement from refilling a long gap: rent is about 198.8 stro
 
 ### Testnet Evidence
 
-An end-to-end suite passed 58 of 58 scenarios on testnet on 2026-11-12 against the canonical testnet deployment, across Circle testnet USDC, a classic asset through its SAC, and a non-SAC SEP-41 token: settlements below, at and at zero of the maximum, a replayed entry refused, a reused payment ID under a new signature settled, two payments from one payer in one ledger, every rejection above, tampering with each signed value, a client refusing a forged simulated tree, the facilitator's window and signature-expiry checks, and the TTL self-extension on a fresh instance. Every settlement carried the receiver authorizer's own address-credential entry, the shape of self-managed mode, through a channel account with a fee bump. The client paid no fees. Report with the transaction hashes and the rent measurements: [UptoProxy testnet report](https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/upto-proxy-testnet-report.md). Threat model: [`docs/threat-model.md`](https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/threat-model.md).
+An end-to-end suite passed 61 of 61 scenarios on testnet on 2026-11-12 against the canonical testnet deployment, across Circle testnet USDC, a classic asset through its SAC, and a non-SAC SEP-41 token: settlements below, at and at zero of the maximum, a replayed entry refused, a reused payment ID under a new signature settled, two payments from one payer in one ledger, every rejection above, tampering with each signed value, a client refusing a forged simulated tree, the facilitator's window and signature-expiry checks, and the TTL self-extension on a fresh instance. Facilitator-delegated settlements carried the facilitator's own address-credential entry as the receiver authorization. A self-managed settlement per token had the seller's account sign the receiver authorization without simulation, and a second facilitator, which had not seen the payment, relayed it through its own channel and fee bump. The client paid no fees. Report with the transaction hashes and the rent measurements: [UptoProxy testnet report](https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/upto-proxy-testnet-report.md). Threat model: [`docs/threat-model.md`](https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/threat-model.md).
 
 [SEP-41]: https://stellar.org/protocol/sep-41

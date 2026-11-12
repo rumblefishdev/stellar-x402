@@ -8,7 +8,8 @@
 //! calls.
 //!
 //! Normative spec: `lore/1-tasks/archive/0002_RESEARCH_upto-proxy-design-on-soroban/notes/
-//! G-upto-proxy-contract-spec.md`. Section numbers in comments (§N) refer to it.
+//! G-upto-proxy-contract-spec.md`. Section numbers in comments (§N) refer to it. ADR 0010's D6
+//! and D12 supersede its nonce storage (§4 step 8, §7) and its `facilitator` name.
 
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, token, vec, Address, BytesN, Env, IntoVal,
@@ -62,7 +63,8 @@ pub const TTL_MAX_EXTENSION: u32 = 720;
 
 /// The furthest `allowance_expiration_ledger` a settlement accepts, in ledgers after the current
 /// one: 17,280 (about 1 day at 5 s ledgers). The facilitator pays temporary rent on the token's
-/// allowance until that ledger, and the payer picks it, so without a cap a payer
+/// allowance, and on the host's nonce entry for the client's signature (whose expiry `/verify`
+/// holds equal to this ledger), until that ledger, and the payer picks it, so without a cap a payer
 /// could make one settlement pay for up to `max_entry_ttl` (about 180 days, 3.9 million stroops on
 /// testnet). A day costs about 25,000 stroops (1.3 per ledger, measured on testnet). The
 /// facilitator's `/verify` holds expiries to the payment window; this is defence in depth if it
