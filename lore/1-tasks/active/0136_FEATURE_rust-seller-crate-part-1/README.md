@@ -92,10 +92,11 @@ by upstream's unmodified `@x402/core`, `@x402/fetch` and `@x402/stellar` 2.28.0.
 | Route answers 400 | 400, nothing settled, balances unchanged |
 | The same payment twice | 200 with `b831d67e60389ad432746fbd46a235dd8c3fe30a5091e14d96290a5246a56afc`, then 402 `invalid_exact_stellar_payload_simulation_failed` |
 | The catalog's answer | the seller's log shows `{"rejectedReason":"resource_not_public","status":"rejected"}`: the seller ran on `localhost` |
+| A listing cataloged, on a public address | the seller behind a Cloudflare quick tunnel (`PUBLIC_URL`), at the crate's commit `0ea941a2`: 200, `dd6113e23a83e4ba0d820cd3f5259b87724439bdb61c1c3a030c08a50812579a`, 0.001 USDC moved; the seller's log shows `{"status":"processing"}`, and `/discovery/resources` then lists `https://back-pvc-missions-bench.trycloudflare.com/weather` with the route's terms and `bazaar` block |
 
-The buyer script and the two friendbot accounts were one-off and are not in the repo. Not run: a
-listing cataloged end to end (it needs a seller on a public address), pubnet, an API key against a
-facilitator that asks for one (0105 is not built).
+The buyer script and the two friendbot accounts were one-off and are not in the repo. The tunnel
+is closed, so the listing it left in testnet's catalog names a dead address. Not run: pubnet, an
+API key against a facilitator that asks for one (0105 is not built).
 
 ## Left for part 2 (0140)
 
