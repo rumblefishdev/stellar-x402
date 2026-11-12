@@ -2,7 +2,7 @@
 id: "0138"
 title: "Measure what CloudWatch costs and decide: cut it down or move to Grafana"
 type: RESEARCH
-status: backlog
+status: active
 milestone: 2
 related_adr: ["0011"]
 related_tasks: ["0014", "0027", "0139"]
@@ -17,6 +17,10 @@ history:
     note: >
       Created with okarcz from the Milestone 2 plan and its review: the team wants monitoring on
       Grafana, and the choice changes the metric format every lane writes.
+  - date: "2026-11-12"
+    status: active
+    who: stkrolikiewicz
+    note: "Work starts: the platform track of the Milestone 2 plan."
 ---
 
 # Measure what CloudWatch costs and decide: cut it down or move to Grafana
