@@ -55,11 +55,12 @@ Stellar testnet) and rerun.
 For each token (Circle testnet USDC, a self-issued asset through its SAC, and the in-repo non-SAC
 SEP-41 `test-token`):
 
-- **Settles:** below the ceiling, at the ceiling and zero. Each one checks the balance deltas, the
-  `upto_settled` event, the used nonce, the leftover allowance and the transaction's fee payer
-  and sources.
-- **Rejected:** an amount over the ceiling, a replayed auth entry, a reused nonce with a new
-  signature, before `valid_after`, after the deadline, an allowance expiry past the contract's
+- **Settles:** below the ceiling, at the ceiling and zero; a reused payment ID under a new
+  signature; and a self-managed payment, where the seller's own account is the receiver authorizer
+  and the other facilitator relays it. Each one checks the balance deltas, the `upto_settled`
+  event, the leftover allowance and the transaction's fee payer and sources.
+- **Rejected:** an amount over the ceiling, a replayed auth entry, before `valid_after`, after the
+  deadline, an allowance expiry past the contract's
   17,280-ledger cap, and a different facilitator.
 - **Tampering:** changing the recipient, token, ceiling or nonce breaks the client's signature, and
   so does another facilitator rewriting the `facilitator` argument to itself.
