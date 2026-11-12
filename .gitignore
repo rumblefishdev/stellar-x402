@@ -54,9 +54,6 @@ lore/board.json
 _bmad/
 _bmad-output/
 
-# VibeWise (local learning notes)
-.vibe-wise/
-
 # Ansible: the real inventory
 deploy/ansible/inventory.ini
 
