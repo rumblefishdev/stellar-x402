@@ -3,6 +3,7 @@ id: "0138"
 title: "Measure what CloudWatch costs and decide: cut it down or move to Grafana"
 type: RESEARCH
 status: active
+owner: stkrolikiewicz
 milestone: 2
 related_adr: ["0011"]
 related_tasks: ["0014", "0027", "0139"]
