@@ -54,6 +54,9 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      # The board script stops on an owner that isn't in team.yaml (0144): here, so a typo fails
+      # the pull request instead of every board deploy after it.
+      - run: pnpm board
 
   # Production's Postgres from its own compose file, as its unit starts it (task 0091). On every
   # pull request, not only those under deploy/: a job skipped by a paths filter can't be required.

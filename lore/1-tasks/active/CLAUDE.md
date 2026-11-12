@@ -7,6 +7,7 @@ Tasks currently being worked on.
 - One task active per person at a time (focus)
 - Update status in frontmatter when moving
 - Add history entry on status change
+- Leave `owner` as it is when moving; only a handoff changes it (`../CLAUDE.md`, Owner)
 
 ## Moving Tasks
 
