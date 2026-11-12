@@ -2,7 +2,7 @@
 id: "0141"
 title: "Answer the seller correctly when the payer's auth entry landed in another transaction"
 type: BUG
-status: backlog
+status: active
 related_adr: []
 related_tasks: ["0024", "0124", "0043"]
 tags: [facilitator, settlement, payments, priority-high, effort-small]
@@ -15,6 +15,10 @@ history:
     note: >
       Found on testnet while stress-testing ways to label settlements: a third party settled the
       payer's signed auth entry first, and our /settle answered "failed, sign a new payment".
+  - date: "2026-11-12"
+    status: active
+    who: karolkow
+    note: "Work starts."
 ---
 
 # Answer the seller correctly when the payer's auth entry landed in another transaction
