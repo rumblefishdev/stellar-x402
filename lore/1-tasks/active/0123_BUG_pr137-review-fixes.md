@@ -109,6 +109,11 @@ The review deferred three findings. They stay out unless this task takes them on
 - The `x402-snapshot` AppRole has no secret-id expiry or CIDR binding, and the runbook has no
   rotation for the secret-id or the Storage Box key (a design point for the restore drill).
 - The local round trip (stand-in box, compose override, restore steps) isn't committed.
+- A run that systemd kills (SIGKILL) skips the cleanup trap, so its decrypted credentials stay in
+  `/run/x402/backup/` until the next run (Stan's review of #178; the cleanup now removes them
+  before its calls to OpenBao and Docker, which can hang). The fix at the source is
+  `RuntimeDirectory=` on the unit, which systemd removes however the run ended; the admin `borg`
+  path runs outside the unit and would need a directory of its own.
 
 ## Notes
 

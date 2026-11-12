@@ -112,21 +112,28 @@ describe("judge, the run's record", () => {
   });
 });
 
+// A run filed as hosted replaces the committed run of record behind the milestone evidence.
 describe("resultsFolder", () => {
   it.each([
-    "http://localhost:4022",
-    "http://127.0.0.1:4022",
-    "http://[::1]:4022",
-    "http://LOCALHOST:4022/",
-  ])("keeps a run against %s out of git, as local", (url) => {
-    expect(resultsFolder(url)).toBe("testnet-local");
+    "https://x402-facilitator.sorobanscan.com",
+    "https://x402-facilitator.sorobanscan.com/",
+    "HTTPS://X402-FACILITATOR.SOROBANSCAN.COM",
+  ])("files a run against our deployed facilitator, %s, as hosted", (url) => {
+    expect(resultsFolder(url)).toBe("testnet-hosted");
   });
 
   it.each([
-    "https://facilitator.example.org",
+    "https://x402.org/facilitator",
+    "http://localhost:4022",
+    "http://127.0.0.1:4022",
+    "http://127.0.0.2:4022",
+    "http://0.0.0.0:4022",
+    "http://[::1]:4022",
+    "http://localhost.:4022",
     "http://192.168.1.20:4022",
-    "https://localhost.example.org",
-  ])("files a run against %s as hosted", (url) => {
-    expect(resultsFolder(url)).toBe("testnet-hosted");
+    "https://x402-facilitator.sorobanscan.com.example.org",
+    "https://facilitator.example.org",
+  ])("keeps a run against %s out of git, as local", (url) => {
+    expect(resultsFolder(url)).toBe("testnet-local");
   });
 });

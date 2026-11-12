@@ -42,13 +42,15 @@ snap=$run/openbao.snap
 token=
 bao() { docker compose -f "$X402_OPENBAO_DIR/compose.yaml" exec -T -e BAO_TOKEN openbao bao "$@"; }
 cleanup() {
-  if [ "$token" ]; then BAO_TOKEN=$token bao token revoke -self > /dev/null 2>&1 || :; fi
-  docker compose -f "$X402_OPENBAO_DIR/compose.yaml" exec -T openbao rm -f /tmp/raft.snap > /dev/null 2>&1 || :
+  # This host's files first: the two calls after them can hang on a wedged OpenBao or Docker until
+  # systemd kills the run, and a kill must not leave the decrypted credentials behind.
   rm -f "$snap"
   if [ -z "${X402_CREDS_DIR:-}" ]; then
     # "$run/.$c": the file x402-creds decrypts into before its mv, left by a decrypt that stopped.
     for c in "${creds[@]}"; do rm -f "$run/$c" "$run/.$c"; done
   fi
+  if [ "$token" ]; then BAO_TOKEN=$token bao token revoke -self > /dev/null 2>&1 || :; fi
+  docker compose -f "$X402_OPENBAO_DIR/compose.yaml" exec -T openbao rm -f /tmp/raft.snap > /dev/null 2>&1 || :
 }
 # Before the decrypt: one that fails halfway leaves no file it already wrote.
 trap cleanup EXIT
