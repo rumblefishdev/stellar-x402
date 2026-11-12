@@ -1,7 +1,8 @@
 // The `upto` signing model, split by role as the x402 facilitator will use it:
 // - the client simulates `settle_upto` with a placeholder amount and signs only its auth entry;
 // - the facilitator checks that entry against the payment terms, swaps in the actual amount and
-//   submits through the channel pool (delegated-bump shape, ADR 0003).
+//   submits through the channel pool (delegated-bump shape, ADR 0003), authorizing the actual
+//   amount with its own address-credential entry.
 import { randomBytes } from "node:crypto";
 import {
   Address,
@@ -199,7 +200,7 @@ export function clientSignDirect(
 /**
  * Facilitator side: refuse an entry that isn't exactly the tree the terms call for, whose
  * signature doesn't expire with the allowance, or whose allowance outlives the payment window.
- * The facilitator pays rent on the nonce and the allowance until `allowance_expiration_ledger`,
+ * The facilitator pays rent on the allowance until `allowance_expiration_ledger`,
  * so a payer-chosen far expiry would make it pay for months (threat model, "Fee inflation by
  * rent"). The signature check also bounds the rent on the host's own nonce for the client's
  * entry, which lives until `signatureExpirationLedger` and which the contract never sees.
@@ -238,17 +239,26 @@ export function checkClientAuth(
 }
 
 /**
- * Facilitator side: the call it submits, with `actual` swapped in. The facilitator authorizes as
- * the operation source (source-account credentials), which the pool now refuses (see 0015).
- * `argsTerms` lets a test tamper with the submitted arguments while keeping the signed entry.
+ * Facilitator side: the call it submits, with `actual` swapped in. `authorizer` signs its own
+ * address-credential entry for the full call, `actual` included, as a resource server does in
+ * self-managed mode. The pool refuses source-account entries, which would authorize as the
+ * channel. The entry expires with the client's allowance. `argsTerms` lets a test tamper with the
+ * submitted arguments while keeping the client's signed entry.
  */
-export function settleCall(
+export async function settleCall(
   clientAuth: xdr.SorobanAuthorizationEntry,
   t: UptoTerms,
   actual: bigint,
+  authorizer: Keypair,
   argsTerms: UptoTerms = t,
-): ContractCall {
+): Promise<ContractCall> {
   const args = settleArgs(argsTerms, actual);
+  const authorizerAuth = await authorizeEntry(
+    unsignedEntry(authorizer.publicKey(), contractFn(argsTerms.proxy, "settle_upto", args)),
+    authorizer,
+    t.allowanceExpirationLedger,
+    PASSPHRASE,
+  );
   return {
     func: xdr.HostFunction.hostFunctionTypeInvokeContract(
       new xdr.InvokeContractArgs({
@@ -257,15 +267,6 @@ export function settleCall(
         args,
       }),
     ),
-    auth: [
-      clientAuth,
-      new xdr.SorobanAuthorizationEntry({
-        credentials: xdr.SorobanCredentials.sorobanCredentialsSourceAccount(),
-        rootInvocation: contractFn(argsTerms.proxy, "settle_upto", args),
-      }),
-    ],
+    auth: [clientAuth, authorizerAuth],
   };
 }
-
-/** Arguments of `is_nonce_used` for these terms. */
-export const nonceArgs = (t: UptoTerms) => [addr(t.from), xdr.ScVal.scvBytes(t.nonce)];
