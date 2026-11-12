@@ -5,7 +5,7 @@ type: FEATURE
 status: active
 milestone: 2
 related_adr: ["0001"]
-related_tasks: ["0102", "0041", "0132"]
+related_tasks: ["0102", "0041", "0132", "0140"]
 tags: [sdk, rust, seller, priority-high, effort-medium, platform]
 links:
   - ../../../docs/rfp/07-x402-facilitator-bazaar.md
@@ -44,7 +44,7 @@ writing the protocol myself.
   TypeScript helpers are 0102.
 - Nothing in the repo is Rust outside `contracts/`. ADR 0001 keeps the SDK in this monorepo.
 - Part 1 is the paid request end to end with `exact`. Left for part 2: `upto`, framework
-  integrations beyond the first, publishing to crates.io.
+  integrations beyond the first, publishing to crates.io. Part 2 is 0140.
 - The proposal's architecture (`docs/rfp/x402-facilitator-bazaar-technical-architecture.md`, §7)
   also promises the buyer side in Rust: building and signing Soroban auth entries, as
   `@x402/stellar` does in TypeScript. A seller signs nothing, so part 1 leaves it out; part 2
