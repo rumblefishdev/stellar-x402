@@ -2,7 +2,7 @@
 id: "0027"
 title: "Alerts and metrics"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0007", "0011", "0013"]
 related_tasks: ["0012", "0014", "0024", "0026", "0020", "0009", "0045", "0049", "0039", "0036", "0038", "0048", "0077", "0089", "0109", "0110", "0125", "0127"]
@@ -111,6 +111,10 @@ history:
     status: active
     who: okarcz
     note: "Closing PR: docs/monitoring.md lists every metric (61 in the catalog, 5 AWS) and every alarm, on (44 names) or off (8, each with its task), with a test that fails on a gap; the uptime figure (99.56% since 2026-11-06 11:16 UTC, 100% without the drill); disk-root fired at 15:26:16 with audit-disk silent. Criteria 12, 16 and 17 ticked. 0027 stays active for criterion 1, which needs a real testnet settlement."
+  - date: "2026-11-12"
+    status: completed
+    who: okarcz
+    note: "Closed. Criterion 1 ticked on the final gate run's settlements through production (2026-11-10, 08:50 to 09:05 UTC): settlement_outcomes_total counted 18 success on stellar:testnet and pool_events_total 36, http_requests_total has a series for each route, and no alarm changed state between 08:30 and 09:45 UTC. #163 is live since 2026-11-10: the playbook after the fourth deploy (#167) loaded SuccessExitStatus=130, and the restart at 08:14:57 UTC wrote no facilitator_failures_total line. 15 of 18 criteria ticked; 6, 7 and 9 are 0127's (decision 71). 49 alarms on under 44 names, 37 fired on purpose."
 ---
 
 # Alerts and metrics
@@ -741,7 +745,7 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
 
 ## Acceptance Criteria
 
-- [ ] Given the running facilitator, when it serves traffic, then pool `onEvent` events, per-route request counts and settle outcomes are exported as metrics
+- [x] Given the running facilitator, when it serves traffic, then pool `onEvent` events, per-route request counts and settle outcomes are exported as metrics (2026-11-10, the final gate run through production, 08:50 to 09:05 UTC: `settlement_outcomes_total` counted 18 `success` on `stellar:testnet` and `pool_events_total` 36; `http_requests_total` has a series for `/verify`, `/settle`, `/supported`, `/discovery`, `/health` and `other`; read from CloudWatch on 2026-11-12)
 - [x] Given each alert condition: budget nearly used, breaker open, low facilitator balance (`checkFacilitatorBalance`), quarantined channel, pending settlements, when it occurs, then an alert fires on CloudWatch (ADR 0011); each alert has been triggered once on testnet or with a fake (2026-11-09 drill, docs/monitoring.md Drills: budget-nearing, the three breaker-opened, channel-quarantined and pending fired with fake points, the balance alarms on 2026-11-06)
 - [x] Given a process that stays not ready to settle (no lease) longer than the alarm window, when the alarm evaluates, then it fires (ADR 0011) (2026-11-09: uptime fired 7.5 minutes into the stop window. The drill stopped the process rather than holding it up without a lease; uptime reads `ready`, so a process that is up but not ready takes the same path, which the probe's tests cover)
 - [x] Given the public URL unreachable, or a process in a crash loop, for 7 minutes in a row, when the uptime probe reads `/health`, then the uptime alarm fires, a deploy within its usual downtime doesn't fire it, and before the first good deploy it sends nothing (ADR 0011) (2026-11-09: uptime fired at 13:34:24, 7.5 minutes into the stop window, and uptime-flapping at 13:37:34; the 2026-11-06 13:09 deploy, after uptime went on at 11:16, didn't fire it; the group went on only after the first good deploy (decision 5). A crash loop never reads `ready` either, the same path, not drilled)
@@ -759,10 +763,9 @@ As a facilitator operator, I want metrics and alerts for anything that costs mon
 - [x] Given every alarm in the alarm list, when this story is done, then each has fired once on purpose, on testnet or with a fake, and `docs/monitoring.md` says how and when (2026-11-09, docs/monitoring.md Drills and Fired on purpose: 37 of the 44 alarm names that are on fired, on testnet or with a fake; not fired, each with its reason: gauges-silent, sweeps-stopped, log-volume, emf-parsing, watch-errors, certificate and memory. The 8 that are off are fired by the task that turns each on (The alarms that are off))
 - [x] Given `docs/monitoring.md`, when this story is done, then it lists every metric and alert (2026-11-09: Every metric lists the catalog's 61 metrics and the 5 AWS ones with the alarms that read them; every alarm has its section or, when off, its row; infra/test/alarms.test.ts fails on a metric or alarm the page lacks)
 
-**What the criteria wait on:** criterion 1's settle outcomes and pool events on a real testnet
-settlement through the deployed facilitator (none since the alarms went on). The theft and
-secret-read criteria are 0127's, the `backups` and `snapshots` groups 0026's, and `channel-held`
-waits on 0089's gauge (alarm list, Deferred).
+**What the open criteria wait on:** the theft and secret-read criteria (6, 7 and 9) are 0127's,
+the `backups` and `snapshots` groups 0026's, and `channel-held` waits on 0089's gauge (alarm
+list, Deferred).
 
 ## Implementation Notes
 
@@ -791,7 +794,8 @@ waits on 0089's gauge (alarm list, Deferred).
   still exiting, and Compose answers with 130, so every deploy, drain and `systemctl stop` left
   `x402@production` failed and counted `facilitator_failures_total`. Found by the drill
   (`facilitator-failed` fired for the window's own stop); #163 lists 130 in `SuccessExitStatus`. It
-  reaches the server with the next promotion and playbook run.
+  is live since 2026-11-10: the playbook after the fourth deploy loaded it, and the restart at
+  08:14:57 UTC wrote no failure line.
 - **develop's typecheck broke on a semantic merge.** #89 added a `stage` label to
   `catalog_attempts_total` after the catalog had typed its labels; #157 added `stage` and `outcome`
   to the metric's fields.
@@ -800,8 +804,8 @@ waits on 0089's gauge (alarm list, Deferred).
   that reason, and `memory` not at all.
 - **Fake points stay in the metrics' history:** CloudWatch can't delete them; Drills names each
   range.
-- **No settlement since the alarms went on,** so criterion 1's settle outcomes and pool events
-  have no live series yet.
+- **No settlement between the alarms going on and the closing PR,** so criterion 1 waited a day
+  for the final gate run's settlements (2026-11-10).
 
 ## Future Work
 

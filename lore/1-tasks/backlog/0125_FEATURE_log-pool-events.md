@@ -8,7 +8,7 @@ related_adr: ["0011"]
 related_tasks: ["0027"]
 tags: [facilitator, signer-pool, operations, priority-medium, effort-small, platform]
 links:
-  - ../active/0027_FEATURE_alerts-and-metrics/README.md
+  - ../archive/0027_FEATURE_alerts-and-metrics/README.md
   - ../../../docs/monitoring.md
 history:
   - date: "2026-11-09"

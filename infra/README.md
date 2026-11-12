@@ -6,10 +6,10 @@ Everything is in `eu-central-1` on the team's shared account, deployed by hand w
 workflow holds AWS credentials (0027 decision 3). The account's existing default bootstrap is used.
 
 The alarms are listed, with the reasoning behind each shape, in
-[the alarm list](../lore/1-tasks/active/0027_FEATURE_alerts-and-metrics/notes/G-alarm-list.md);
+[the alarm list](../lore/1-tasks/archive/0027_FEATURE_alerts-and-metrics/notes/G-alarm-list.md);
 the metrics they read in [`@stellar-x402/metrics-catalog`](../packages/metrics-catalog). Where
 this code came from in the sibling projects is in
-[R-infra-patterns](../lore/1-tasks/active/0027_FEATURE_alerts-and-metrics/notes/R-infra-patterns.md).
+[R-infra-patterns](../lore/1-tasks/archive/0027_FEATURE_alerts-and-metrics/notes/R-infra-patterns.md).
 
 ## Stacks
 

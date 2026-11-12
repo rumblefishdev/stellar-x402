@@ -6,9 +6,9 @@ channel `#stellar-x402-bot`. Every alarm's description ends with `Runbook: docs/
 <alarm>`, which points at a section below.
 
 - The metrics, with their names, units and dimensions: [`@stellar-x402/metrics-catalog`](../packages/metrics-catalog/src/index.ts),
-  explained in task 0027's [G-metrics](../lore/1-tasks/active/0027_FEATURE_alerts-and-metrics/notes/G-metrics.md).
+  explained in task 0027's [G-metrics](../lore/1-tasks/archive/0027_FEATURE_alerts-and-metrics/notes/G-metrics.md).
 - Every alarm, with its shape and missing-data rule:
-  [the alarm list](../lore/1-tasks/active/0027_FEATURE_alerts-and-metrics/notes/G-alarm-list.md).
+  [the alarm list](../lore/1-tasks/archive/0027_FEATURE_alerts-and-metrics/notes/G-alarm-list.md).
 - The stacks and the alarm groups: [infra/README.md](../infra/README.md).
 
 This page has every alarm: a section for each one that is on, and the [alarms that are off](#the-alarms-that-are-off)
@@ -712,7 +712,7 @@ of them run it. Mainnet was in this state on 2026-11-06 (29, Core supporting 30)
 
 Every metric in [`@stellar-x402/metrics-catalog`](../packages/metrics-catalog/src/index.ts), then
 the AWS metrics the alarms read. What each one measures and where it comes from is in
-[G-metrics](../lore/1-tasks/active/0027_FEATURE_alerts-and-metrics/notes/G-metrics.md). A dimension
+[G-metrics](../lore/1-tasks/archive/0027_FEATURE_alerts-and-metrics/notes/G-metrics.md). A dimension
 set marked "only" is written for those values alone; "none" is a series with no dimension. A metric with no alarm is read in Logs Insights or in
 the weekly review. `infra/test/alarms.test.ts` fails when the catalog gains a metric this table
 lacks.
