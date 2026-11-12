@@ -837,6 +837,23 @@ describe("our inner transaction under another envelope (0087)", () => {
     expect(res.attempts.at(-1)?.hash).toBe(ours.hash().toString("hex"));
   });
 
+  // Without it the next call builds on the sequence the rewrap used up, is refused with txBadSeq
+  // and lands only after a rebuild (0123, P6).
+  it("moves the channel's sequence past a rewrap, so the next call lands on its first envelope", async () => {
+    const { fake, submitter } = stalledWith(rewrap);
+    const first = await submitter.submit(call(), { maxLedger: fake.ledger + 3 });
+    expect(first.status).toBe("success");
+    // On the network the rewrap applied our inner transaction, so the channel's sequence moved.
+    const used = BigInt(inner(fake).sequence);
+    fake.sequences.set(channels[0]!, used);
+    fake.stalled = false;
+    const before = fake.sent.length;
+    const second = await submitter.submit(call());
+    expect(second.status).toBe("success");
+    expect(fake.sent.length - before).toBe(1);
+    expect(inner(fake).sequence).toBe(String(used + 1n));
+  });
+
   it("reads the inner hash only once ours can no longer land, and still expires when it isn't there", async () => {
     const { fake, submitter, reads } = stalledWith(() => undefined);
     const res = await submitter.submit(call(), { maxLedger: fake.ledger + 3 });
