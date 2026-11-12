@@ -2,7 +2,7 @@
 id: "0060"
 title: "Accept a configured API key as the rate limiter's key"
 type: FEATURE
-status: backlog
+status: active
 milestone: 1
 related_adr: ["0007"]
 related_tasks: ["0023"]
@@ -14,6 +14,10 @@ history:
     status: backlog
     who: karolkow
     note: "Spawned from 0023: its acceptance criterion 3 moved here."
+  - date: "2026-11-12"
+    status: active
+    who: akot
+    note: "Work starts."
 ---
 
 # Accept a configured API key as the rate limiter's key
@@ -34,11 +38,11 @@ behind one cloud NAT share theirs the same way.
 
 Decided by akot (0024 decision 31, ADR 0007's amendment of 2026-11-03): on pubnet `/verify` and
 `/settle` require a key from our portal, issued after Discord sign-in, and the limiter counts a
-caller by it ([0105](0105_FEATURE_api-keys-on-pubnet.md),
-[0106](0106_FEATURE_api-key-portal-discord.md)); its fee budget is
-[0107](0107_FEATURE_per-key-fee-quota.md). On testnet a key is ignored. So the pubnet key is no
-longer this task's, and a key on testnet won't solve the Cloudflare Workers case above: it needs
-another answer before 0026, or is accepted there, for this task's owner to decide.
+caller by it ([0105](../backlog/0105_FEATURE_api-keys-on-pubnet.md),
+[0106](../backlog/0106_FEATURE_api-key-portal-discord.md)); its fee budget is
+[0107](../backlog/0107_FEATURE_per-key-fee-quota.md). On testnet a key is ignored. So the pubnet key
+is no longer this task's, and a key on testnet won't solve the Cloudflare Workers case above: it
+needs another answer before 0026, or is accepted there, for this task's owner to decide.
 
 ## Implementation
 
