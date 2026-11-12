@@ -90,5 +90,5 @@ Stellar RPC, finds that it:
   only a fresh run shows that, and the grant's final handover needs one.
 - **The run again:** [`README.md`](README.md), "Run", with `GATE_FACILITATOR_URL` set to the
   facilitator above. It needs two funded testnet accounts and takes about 15 minutes, 11 of them
-  the suite. Each run overwrites `results/testnet-hosted/`. Git keeps the runs of record
+  the suite. Each run against our deployed facilitator overwrites `results/testnet-hosted/`. Git keeps the runs of record
   (2026-11-06 and this one); trial runs made while the gate was being fixed, on 2026-11-05 and 2026-11-06, were not committed, and their settlements are on chain under the same fee payer (task 0029).

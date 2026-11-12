@@ -22,7 +22,7 @@ admin with `sudo`; the admins are the explorer's (`soroban-block-explorer`'s
 | `/etc/systemd/system/x402*`         | the units (`deploy/systemd`)                                                                        |
 | `/etc/x402/`                        | the CloudWatch agent's config, the rotation's, the helper's ARNs, the Storage Box's pinned host key |
 | `/srv/x402/backup/creds/*.cred`     | the backup jobs' credentials, decrypted by the snapshot script on the host, not for a container     |
-| `/run/x402/backup/`                 | the snapshot job's decrypted credentials and the snapshot, during a run only (tmpfs)                |
+| `/run/x402/backup/`                 | the snapshot job's decrypted files (tmpfs), removed when it ends, or by the next run after a kill   |
 | `/var/lib/x402/borg/`               | Borg's cache and the repository's last-seen state                                                   |
 | `/var/log/x402/`                    | the files the CloudWatch agent ships (The CloudWatch agent)                                         |
 | `/var/lib/x402/last-ok/`            | the stamps a backup or snapshot job touches after it succeeds                                       |
@@ -649,6 +649,10 @@ is refused for up to 3 hours after the night's first try:
 sudo systemctl reset-failed x402-openbao-snapshot.service
 sudo systemctl start x402-openbao-snapshot.service
 ```
+
+The 3 hours count from the first of the three starts, a start by hand included. One that fails
+again in the 3 hours before 03:15 uses up the limit for the timer's run as well, and that night
+has no snapshot: clear the limit again after the last failed try.
 
 | Storage Box (BX21 `ch-prod-01-backup`, port 23) | Home         | Use                                   |
 | ----------------------------------------------- | ------------ | ------------------------------------- |

@@ -12,8 +12,9 @@ ConditionPathExists=/srv/x402/backup/creds/snapshot-secret-id.cred
 # The run and two retries, then the unit stays failed until the next night's timer: a failure that
 # lasts (a wrong passphrase or host key, a full box) doesn't log in to OpenBao and open an SSH
 # session to the shared box every 20 minutes all day. The window is longer than three whole tries,
-# 3 x (TimeoutStartSec + RestartSec), so the count can't run out between them, and shorter than a
-# day, so it never refuses the timer's next run.
+# 3 x (TimeoutStartSec + TimeoutStopSec + RestartSec), so the count can't run out between them.
+# It counts from a burst's first start: a burst that began in the 3 hours before the night's run
+# (a start by hand that failed again) refuses that run too, and the night has no snapshot.
 StartLimitIntervalSec=3h
 StartLimitBurst=3
 

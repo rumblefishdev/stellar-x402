@@ -309,16 +309,21 @@ describe("the snapshot job", () => {
     const inUnit = service.slice(service.indexOf("[Unit]"), service.indexOf("[Service]"));
     expect(settings(inUnit, "StartLimitIntervalSec")).toEqual(["3h"]);
     expect(settings(inUnit, "StartLimitBurst")).toEqual(["3"]);
-    // The limit counts starts inside the window. A window shorter than three whole tries lets the
-    // first start leave it before the fourth, and the retries never stop; one of a day or more
-    // refuses the timer's next run too.
-    const minutes = (key: string) => {
-      const [, n, unitOfTime] = /^(\d+)(h|min)$/.exec(settings(service, key)[0] ?? "") ?? [];
+    // The limit counts starts inside the window, from a burst's first. A window shorter than
+    // three whole tries lets the first start leave it before the fourth, and the retries never
+    // stop; one of a day or more refuses every next night's run after a failed one.
+    const minutes = (key: string, unset?: number) => {
+      const value = settings(service, key)[0];
+      if (value === undefined && unset !== undefined) return unset;
+      const [, n, unitOfTime] = /^(\d+)(h|min|s)$/.exec(value ?? "") ?? [];
       expect(unitOfTime, key).toBeDefined();
-      return Number(n) * (unitOfTime === "h" ? 60 : 1);
+      return Number(n) * ({ h: 60, min: 1, s: 1 / 60 }[unitOfTime as "h" | "min" | "s"] ?? 0);
     };
     const tries = Number(settings(inUnit, "StartLimitBurst")[0]);
-    const wholeTry = minutes("TimeoutStartSec") + minutes("RestartSec");
+    // A try that reaches its timeout is stopped, which takes up to TimeoutStopSec (systemd's 90 s
+    // when the unit sets none), before the wait for the next one starts.
+    const wholeTry =
+      minutes("TimeoutStartSec") + minutes("TimeoutStopSec", 1.5) + minutes("RestartSec");
     expect(minutes("StartLimitIntervalSec")).toBeGreaterThan(tries * wholeTry);
     expect(minutes("StartLimitIntervalSec")).toBeLessThan(24 * 60);
   });

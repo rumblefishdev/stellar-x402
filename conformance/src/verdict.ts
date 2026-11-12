@@ -59,10 +59,16 @@ export function judge(
 }
 
 /**
- * The results folder for a facilitator at `url`: one per kind, and a local facilitator's stays out
- * of git. `URL` keeps an IPv6 host's brackets.
+ * Our deployed facilitators, by host: only a run against one of them is a run of record. A new
+ * deployment joins the list in its own pull request before its first run of record.
+ */
+export const HOSTED_FACILITATORS: readonly string[] = ["x402-facilitator.sorobanscan.com"];
+
+/**
+ * The results folder for a facilitator at `url`. `testnet-hosted/` is committed and each run
+ * there replaces the run of record, so it is named, not guessed: any other host, a dry run
+ * against x402.org, this machine or a mistyped URL, goes to `testnet-local/`, which git ignores.
  */
 export function resultsFolder(url: string): "testnet-local" | "testnet-hosted" {
-  const local = ["localhost", "127.0.0.1", "[::1]"].includes(new URL(url).hostname);
-  return local ? "testnet-local" : "testnet-hosted";
+  return HOSTED_FACILITATORS.includes(new URL(url).hostname) ? "testnet-hosted" : "testnet-local";
 }
