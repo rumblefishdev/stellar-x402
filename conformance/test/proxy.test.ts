@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import { networkInterfaces } from "node:os";
 import { text } from "node:stream/consumers";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 // The proxy is started the way the x402 e2e suite starts it: `bash run.sh` in its folder, PORT set.
@@ -21,7 +22,7 @@ let seen: Seen[] = [];
 interface Answer {
   status: number;
   contentType: string;
-  body: string;
+  body: string | Buffer;
   headers?: Record<string, string>;
 }
 const valid: Answer = { status: 200, contentType: "application/json", body: '{"isValid":true}' };
@@ -169,6 +170,21 @@ describe("external proxy", () => {
     expect(res.headers.get("extension-responses")).toBe("e30=");
     expect(res.headers.get("retry-after")).toBe("5");
     expect(await res.text()).toBe('{"isValid":true}');
+  });
+
+  // fetch has decoded the body by the time the proxy forwards it: the header left on would have
+  // the suite's client gunzip plain JSON (0123, P8).
+  it("returns a gzip answer decoded, without its content-encoding", async () => {
+    answer = {
+      ...valid,
+      body: gzipSync('{"isValid":true}'),
+      headers: { "content-encoding": "gzip" },
+    };
+    const proxy = await startProxy();
+    const res = await fetch(`${proxy.url}/verify`, { method: "POST", body: "{}" });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-encoding")).toBeNull();
+    expect(await res.json()).toEqual({ isValid: true });
   });
 
   it("forwards nothing else", async () => {

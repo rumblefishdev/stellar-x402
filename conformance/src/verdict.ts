@@ -16,23 +16,35 @@ export interface SuiteResult {
   transaction?: string;
 }
 
+/** What the gate knows of a run beside the suite's file: which code was tested, and by which. */
+export interface RunRecord {
+  /** The commit the facilitator names on `/health`; null when it names none. */
+  facilitatorCommit: string | null;
+  /** `git status --porcelain` of the gate's own code; empty when it is all committed. */
+  gateChanges: string;
+}
+
 /**
  * What stops the gate passing, one line each; empty means it passed. The suite exits 0 when no
  * scenario matched its filters, writing no file, and its clients report success without a
  * transaction when the payment response header is missing. Neither is evidence, so both fail here,
  * as does any exit but 0, even after a file with every scenario passed, and one hash reported by
- * two scenarios: a facilitator replaying an earlier answer.
+ * two scenarios: a facilitator replaying an earlier answer. A run of record also says which
+ * facilitator build answered and which gate judged it, so a facilitator that names no commit and
+ * gate code that isn't the commit it names fail too, whatever the suite did.
  */
-export function judge(run: SuiteRun | undefined, exitCode: number | null): string[] {
+export function judge(
+  run: SuiteRun | undefined,
+  exitCode: number | null,
+  record: RunRecord,
+): string[] {
   const problems: string[] = [];
   if (exitCode !== 0) problems.push(`the suite exited with ${exitCode}`);
-  if (!run) {
+  if (!run)
     problems.push("the suite wrote no results: no scenario matched, or it stopped before running");
-    return problems;
-  }
-  if (run.results.length === 0) problems.push("the suite ran no scenarios");
+  else if (run.results.length === 0) problems.push("the suite ran no scenarios");
   const reportedBy = new Map<string, number>();
-  for (const result of run.results) {
+  for (const result of run?.results ?? []) {
     const name = `#${result.testNumber} ${result.client} -> ${result.server} ${result.endpoint}`;
     const first = result.transaction ? reportedBy.get(result.transaction) : undefined;
     if (!result.passed) problems.push(`${name} failed: ${result.error ?? "no error given"}`);
@@ -41,5 +53,16 @@ export function judge(run: SuiteRun | undefined, exitCode: number | null): strin
       problems.push(`${name} reports transaction ${result.transaction}, as #${first} does`);
     else reportedBy.set(result.transaction, result.testNumber);
   }
+  if (!record.facilitatorCommit) problems.push("the facilitator names no commit on /health");
+  if (record.gateChanges) problems.push(`the gate has uncommitted changes:\n${record.gateChanges}`);
   return problems;
+}
+
+/**
+ * The results folder for a facilitator at `url`: one per kind, and a local facilitator's stays out
+ * of git. `URL` keeps an IPv6 host's brackets.
+ */
+export function resultsFolder(url: string): "testnet-local" | "testnet-hosted" {
+  const local = ["localhost", "127.0.0.1", "[::1]"].includes(new URL(url).hostname);
+  return local ? "testnet-local" : "testnet-hosted";
 }
