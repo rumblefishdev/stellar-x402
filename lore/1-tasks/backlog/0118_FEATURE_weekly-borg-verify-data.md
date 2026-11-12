@@ -57,6 +57,10 @@ facts, from the units as 0123 left them:
 - Either job waits `X402_LOCK_WAIT` for the lock, 600 s by default, then fails. A nightly run that
   meets the check uses up one of its three tries; a check that meets a slow nightly run gives up,
   and its stamp ages as if the repository were damaged.
+- The clock is not the whole picture. The timer is `Persistent=true`, so a run missed while the
+  server was down starts at boot, at any hour, with its retries; an admin's `borg` call and the
+  passphrase change's start by hand take the lock at any hour too. A time alone can't keep the
+  check away from them: the wait and the alarm's age have to allow for a meeting.
 
 To decide in this task (the review of #137 raised them, 0123 left them here):
 
@@ -65,12 +69,20 @@ To decide in this task (the review of #137 raised them, 0123 left them here):
   the alarm's age allowing for a skipped week; the default 10 minutes is shorter than a slow run.
 - **The alarm's age.** The review suggested 8 days: a week and a day's margin.
 
+With a second job on the lock, two texts of the snapshot job change in this task too:
+
+- The service's comment says only an admin's `borg` call can hold the lock a retry meets
+  (`deploy/systemd/x402-openbao-snapshot.service`).
+- The runbook's passphrase change stops the snapshot's timer and service; it has to stop the
+  check's units as well, or the check reads a repository whose key is being changed.
+
 ## Acceptance Criteria
 
 - [ ] The weekly check runs on the server and touches its stamp only on a pass.
 - [ ] A check that fails leaves the stamp alone, and the alarm fires once it is older than the
       chosen age (`make fire-test` seen in Slack).
 - [ ] The runbook covers the check, the alarm and the response.
-- [ ] The check's time, its wait for the lock and the alarm's age are decided and recorded here,
-      and a check that meets the nightly run neither fails that night's snapshot nor raises its
-      own alarm.
+- [ ] The check's time, its wait for the lock and the alarm's age are decided and recorded here.
+      When the check meets the nightly run, the night still ends with a fresh snapshot stamp and
+      the check raises no alarm of its own; whether the nightly run may lose one of its three
+      tries to the check is part of the decision. A test or a drill on the server shows it.

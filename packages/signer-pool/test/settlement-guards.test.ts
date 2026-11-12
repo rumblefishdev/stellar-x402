@@ -837,8 +837,9 @@ describe("our inner transaction under another envelope (0087)", () => {
     expect(res.attempts.at(-1)?.hash).toBe(ours.hash().toString("hex"));
   });
 
-  // Without it the next call builds on the sequence the rewrap used up, is refused with txBadSeq
-  // and lands only after a rebuild (0123, P6).
+  // Without `channel.sequence = txSequence` in confirm()'s rewrap branch, the next call builds on
+  // the sequence the rewrap used up, is refused with txBadSeq and lands only after a rebuild
+  // (0123, P6).
   it("moves the channel's sequence past a rewrap, so the next call lands on its first envelope", async () => {
     const { fake, submitter } = stalledWith(rewrap);
     const first = await submitter.submit(call(), { maxLedger: fake.ledger + 3 });

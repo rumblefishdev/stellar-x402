@@ -91,7 +91,11 @@ interface Run {
   calls: string[];
   borg: string[];
 }
-async function snapshot(env: Record<string, string> = {}, args: string[] = []): Promise<Run> {
+async function snapshot(
+  env: Record<string, string> = {},
+  args: string[] = [],
+  started: (pid: number) => void = () => {},
+): Promise<Run> {
   const child = spawn("bash", [SCRIPT, ...args], {
     env: {
       PATH: `${fakes}:${process.env["PATH"]}`,
@@ -105,6 +109,7 @@ async function snapshot(env: Record<string, string> = {}, args: string[] = []): 
       ...env,
     },
   });
+  started(child.pid!);
   let stderr = "";
   child.stderr.on("data", (b) => (stderr += b));
   const status = await new Promise<number | null>((ok) => child.on("close", ok));
@@ -114,7 +119,7 @@ async function snapshot(env: Record<string, string> = {}, args: string[] = []): 
 const verbs = (r: Run) => r.borg.map((c) => c.split(" ")[1]);
 
 describe("x402-openbao-snapshot", () => {
-  test("archives a whole snapshot, prunes to 14 days, compacts, then touches the stamp", async () => {
+  test("archives a whole snapshot, keeps 14 daily archives, compacts, then touches the stamp", async () => {
     const r = await snapshot();
     expect(r.status, r.stderr).toBe(0);
     expect(verbs(r)).toEqual(["create", "prune", "compact"]);
@@ -212,7 +217,8 @@ describe("x402-openbao-snapshot", () => {
   async function holdLock() {
     const holder = spawn("flock", [lock, "-c", "read _"], { stdio: ["pipe", "ignore", "ignore"] });
     const closed = new Promise((ok) => holder.on("close", ok));
-    const taken = () => spawnSync("flock", ["-n", lock, "true"]).status !== 0;
+    // flock -n exits 1 when the lock is held; any other end (no flock at all) isn't "held".
+    const taken = () => spawnSync("flock", ["-n", lock, "true"]).status === 1;
     for (let waited = 0; !taken() && waited < 5000; waited += 25)
       await new Promise((ok) => setTimeout(ok, 25));
     const release = async () => {
@@ -240,14 +246,26 @@ describe("x402-openbao-snapshot", () => {
 
   test("waits for another run's lock, and runs once it is freed", async () => {
     const holder = await holdLock();
-    const freed = new Promise((ok) => setTimeout(ok, 300)).then(holder.release);
-    try {
-      const r = await snapshot({ X402_LOCK_WAIT: "5" });
-      expect(r.stderr).not.toContain("another snapshot run holds");
-      expect(r.status).toBe(0);
-      expect(existsSync(stamp)).toBe(true);
-    } finally {
-      await freed;
-    }
+    let script = 0;
+    const run = snapshot({ X402_LOCK_WAIT: "30" }, [], (pid) => (script = pid));
+    // The lock is freed only once the script is seen waiting for it, in its own `flock`: a
+    // release on a timer would let a slow script find the lock free and pass without a wait.
+    const waiting = () => spawnSync("pgrep", ["-P", String(script), "-x", "flock"]).status === 0;
+    const sawItWait = await (async () => {
+      try {
+        for (let waited = 0; waited < 5000; waited += 25) {
+          if (waiting()) return true;
+          await new Promise((ok) => setTimeout(ok, 25));
+        }
+        return waiting();
+      } finally {
+        await holder.release();
+      }
+    })();
+    const r = await run;
+    expect(sawItWait).toBe(true);
+    expect(r.stderr).not.toContain("another snapshot run holds");
+    expect(r.status).toBe(0);
+    expect(existsSync(stamp)).toBe(true);
   });
 });

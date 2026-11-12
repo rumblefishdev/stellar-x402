@@ -172,18 +172,21 @@ describe("external proxy", () => {
     expect(await res.text()).toBe('{"isValid":true}');
   });
 
-  // fetch has decoded the body by the time the proxy forwards it: the header left on would have
-  // the suite's client gunzip plain JSON (0123, P8).
-  it("returns a gzip answer decoded, without its content-encoding", async () => {
+  // fetch has decoded the body by the time the proxy forwards it: the encoding left on would have
+  // the suite's client gunzip plain JSON, and the compressed length would cut the body short
+  // (0123, P8).
+  it("returns a gzip answer decoded, without its content-encoding or its length", async () => {
+    const body = gzipSync('{"isValid":true}');
     answer = {
       ...valid,
-      body: gzipSync('{"isValid":true}'),
-      headers: { "content-encoding": "gzip" },
+      body,
+      headers: { "content-encoding": "gzip", "content-length": String(body.length) },
     };
     const proxy = await startProxy();
     const res = await fetch(`${proxy.url}/verify`, { method: "POST", body: "{}" });
     expect(res.status).toBe(200);
     expect(res.headers.get("content-encoding")).toBeNull();
+    expect(res.headers.get("content-length")).not.toBe(String(body.length));
     expect(await res.json()).toEqual({ isValid: true });
   });
 
