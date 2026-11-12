@@ -21,7 +21,8 @@ admin with `sudo`; the admins are the explorer's (`soroban-block-explorer`'s
 | `/usr/local/libexec/x402/`          | the units' scripts (`deploy/libexec`)                                                               |
 | `/etc/systemd/system/x402*`         | the units (`deploy/systemd`)                                                                        |
 | `/etc/x402/`                        | the CloudWatch agent's config, the rotation's, the helper's ARNs, the Storage Box's pinned host key |
-| `/srv/x402/backup/creds/*.cred`     | the backup jobs' credentials (OpenBao snapshots)                                                    |
+| `/srv/x402/backup/creds/*.cred`     | the backup jobs' credentials, decrypted by the snapshot script on the host, not for a container     |
+| `/run/x402/backup/`                 | the snapshot job's decrypted credentials and the snapshot, during a run only (tmpfs)                |
 | `/var/lib/x402/borg/`               | Borg's cache and the repository's last-seen state                                                   |
 | `/var/log/x402/`                    | the files the CloudWatch agent ships (The CloudWatch agent)                                         |
 | `/var/lib/x402/last-ok/`            | the stamps a backup or snapshot job touches after it succeeds                                       |
@@ -133,7 +134,9 @@ so the second command reads its settings from the compose file instead: `ALL` an
 
 Encrypted systemd credentials in `/srv/x402/production/creds/` (OpenBao's in
 `/srv/x402/openbao/creds/`), one per file, each decrypted by the unit whose container reads it
-([ADR 0011](adr/0011-facilitator-hosting.md)):
+([ADR 0011](adr/0011-facilitator-hosting.md)). The backup jobs' are in `/srv/x402/backup/creds/`
+and go to no container: the snapshot script decrypts its own on the host, into
+`/run/x402/backup/`, and removes them when it ends (OpenBao snapshots):
 
 | Credential                  | Read by                        | Decrypted by        |
 | --------------------------- | ------------------------------ | ------------------- |
@@ -638,6 +641,15 @@ the AppRole `x402-snapshot`, whose policy allows only `sys/storage/raft/snapshot
 archives and touches `/var/lib/x402/last-ok/openbao-snapshot` when every step passed. 0027's
 `snapshot-age` alarm reads that stamp. Its output is in `journalctl -u x402-openbao-snapshot`.
 
+A failed run is tried again twice, 20 minutes apart, then the unit stays failed until the next
+night's timer. To run it by hand after fixing what failed, clear the limit first, or the start
+is refused for up to 3 hours after the night's first try:
+
+```sh
+sudo systemctl reset-failed x402-openbao-snapshot.service
+sudo systemctl start x402-openbao-snapshot.service
+```
+
 | Storage Box (BX21 `ch-prod-01-backup`, port 23) | Home         | Use                                   |
 | ----------------------------------------------- | ------------ | ------------------------------------- |
 | `u595862-sub2`, reachable only from the server  | `/x402`      | writes: the snapshots, `data/openbao` |
@@ -726,7 +738,12 @@ a run the timer starts after a reboot is skipped).
    export AWS_PROFILE=soroban-admin AWS_REGION=eu-central-1
    id=x402/production/openbao-backup
    cred=/srv/x402/backup/creds/borg-passphrase.cred
-   ssh SERVER "sudo test ! -e $cred" || { echo "a passphrase is already stored: this step is done"; exit 1; }
+   stored=$(ssh SERVER "sudo sh -c 'test -e $cred && echo stored || echo none'") || stored=
+   case $stored in
+     none) ;;
+     stored) echo "a passphrase is already stored: this step is done"; exit 1 ;;
+     *) echo "ssh failed: nothing was checked or written"; exit 1 ;;
+   esac
    pass=$(openssl rand -base64 32 | tr -d '\n')
    printf %s "$pass" | ssh SERVER "sudo systemd-creds encrypt --with-key=host --name=borg-passphrase - $cred"
    ssh SERVER 'sudo /usr/local/libexec/x402/x402-openbao-snapshot borg init -e repokey-blake2' ||
@@ -742,7 +759,8 @@ a run the timer starts after a reboot is skipped).
    )
    ```
 
-   The step refuses to run twice: a stored passphrase stops it before anything is written, and a
+   The step refuses to run twice: a stored passphrase stops it before anything is written (an SSH
+   or sudo failure stops it too, and says "ssh failed", not that one is stored), and a
    `borg init` that finds a repository already on the box removes the passphrase it just stored,
    so the job is never left with one that opens nothing. A rebuilt server with the repository
    still on the box takes the secret's `borg_passphrase` instead; that path comes with the restore
@@ -796,7 +814,8 @@ a run the timer starts after a reboot is skipped).
 
 The export is encrypted with the passphrase, so both fields of the backup secret change together.
 The new passphrase is stored on the server before the repository changes, so a step that fails
-never leaves the repository under a passphrase nobody has, and the timer is stopped meanwhile.
+never leaves the repository under a passphrase nobody has. The timer and the job are stopped
+meanwhile; stopping the service also cancels a retry that is waiting to start.
 
 ```sh
 (
@@ -804,7 +823,7 @@ set -eu
 export AWS_PROFILE=soroban-admin AWS_REGION=eu-central-1
 id=x402/production/openbao-backup
 c=/srv/x402/backup/creds
-ssh SERVER 'sudo systemctl stop x402-openbao-snapshot.timer'
+ssh SERVER 'sudo systemctl stop x402-openbao-snapshot.timer x402-openbao-snapshot.service'
 pass=$(openssl rand -base64 32 | tr -d '\n')
 printf %s "$pass" | ssh SERVER "sudo systemd-creds encrypt --with-key=host --name=borg-passphrase - $c/borg-passphrase.next.cred"
 printf %s "$pass" | ssh SERVER 'sudo sh -c "BORG_NEW_PASSPHRASE=\$(cat) /usr/local/libexec/x402/x402-openbao-snapshot borg key change-passphrase ::"'
@@ -818,14 +837,18 @@ strip='del(.borg_passphrase, .borg_key_export, .updated)'
 printf %s "$new" | aws secretsmanager put-secret-value --secret-id $id --secret-string file:///dev/stdin --query VersionId --output text
 [ "$(aws secretsmanager get-secret-value --secret-id $id --query SecretString --output text)" = "$new" ] && echo "secret: read back the same"
 ssh SERVER 'sudo /usr/local/libexec/x402/x402-openbao-snapshot borg list --last 1'   # the new passphrase opens the repository
-ssh SERVER "sudo rm $c/borg-passphrase.old.cred && sudo systemctl start x402-openbao-snapshot.service x402-openbao-snapshot.timer"
+ssh SERVER "sudo rm $c/borg-passphrase.old.cred"
+# The unit may be at its retry limit from the night's failed tries; "not loaded" means it isn't.
+ssh SERVER 'sudo systemctl reset-failed x402-openbao-snapshot.service || :'
+ssh SERVER 'sudo systemctl start x402-openbao-snapshot.service x402-openbao-snapshot.timer'
 )
 ```
 
 Then `journalctl -u x402-openbao-snapshot -n 30 --no-pager` shows the run, and the restore drill
 follows when it is next due.
 
-**If it stopped partway,** the timer stays stopped and the alarm fires a day later:
+**If it stopped partway,** the timer and the service stay stopped, with no retry waiting, and
+the alarm fires a day later:
 
 - Before `change-passphrase`: the repository is unchanged. Delete `borg-passphrase.next.cred`
   and start the timer.
