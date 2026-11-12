@@ -1,6 +1,6 @@
 ---
 id: "0129"
-title: "Pitch a Stellar-wide x402 index as a grant extension"
+title: "Research a Stellar-wide index of x402 settlements"
 type: RESEARCH
 status: active
 related_adr: ["0008"]
@@ -15,9 +15,15 @@ history:
     note: >
       Created for the team lead, who will pitch a Bazaar that rests on Stellar network traffic,
       not on one facilitator's data, to partners as an extension of this grant.
+  - date: "2026-11-12"
+    status: active
+    who: karolkow
+    note: >
+      Renamed. A larger measurement corrected the time-limit rule and the USDC total in
+      notes/R-network-index-measurements.md.
 ---
 
-# Pitch a Stellar-wide x402 index as a grant extension
+# Research a Stellar-wide index of x402 settlements
 
 ## Summary
 

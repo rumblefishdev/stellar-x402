@@ -25,7 +25,7 @@ amount)`, one auth entry signed by `from`, no sub-invocations, a submitter other
    rule is needed: the transaction time limit (time bounds max minus ledger close time) is at least
    30 s for every x402 settlement seen and at most 19 s for the relayer. 0 errors on 1,734 x402 and
    1,000 relayer transactions. This is one relayer only; the limit is a facilitator setting, not a
-   fixed trait.
+   fixed trait. A larger check on 2026-11-12 (below) found 4 exceptions.
 2. **Attribution.** 4 of the 5 accounts that submitted settlements in 30 days were named from public
    sources: facilitators' `/supported` signer lists, a public registry, addresses in public code,
    and the account that created them. A facilitator that publishes nothing stays unnamed.
@@ -51,10 +51,30 @@ whose payer and payee share a funder.
 | 2026-10          | 561           | 15     | 12     | 4.98  |
 | 2026-11 (to 9th) | 440           | 11     | 12     | 17.26 |
 
-- Total: about 2,900 real payments, 59 payers, 30 payees, about 185 USDC.
+- Total: about 2,900 real payments, 59 payers, 30 payees, about 185 USDC. Of the USDC, 160.35 is 9
+  payments to one payee through one submitter that no public source names; without them, about
+  24 USDC. Payers are G accounts only: contract (C) payers are not counted.
 - Distinct payers per payee: 13, 8, 8, 7, 5, 3, then eight payees with 2 and sixteen with 1.
 - Method: full Horizon history of 80 accounts (300k transactions) plus 140 windows of the data lake
   (5.76M transactions); the lake sample found no settlement Horizon had missed.
+
+## Larger check of the time-limit rule (2026-11-12)
+
+Envelopes of 5,896 shaped pubnet transactions from Horizon: 3,481 from two facilitators named in
+public sources (2026-03 to 2026-11), 2,281 from 15 unnamed submitters that pass the rules, 1,084 from
+the relayer (2026-10-27 to 2026-11-09), and 33 from two unnamed submitters whose payers are all
+contract accounts.
+
+- 4 of the 3,481 named-facilitator settlements have a time limit under 30 s (18, 23, 25, 27 s; April
+  to June). A cut at 20 s gave 1 miss and 0 relayer matches; the relayer's longest limit is 19 s.
+- The 33 contract-payer transactions pass every time-limit cut; whether they are x402 is unknown.
+- USDC alone matched no relayer or unknown transaction but misses 3.5% of x402 (XLM, USDT0).
+- Fee bump, memo, fee level and channel accounts follow a facilitator's setup, not x402.
+- No single trait decides; a curated list of submitter accounts is the only trait that follows the
+  facilitator.
+- 0 of 360 sampled single-transfer USDC transactions on the whole network (block explorer database,
+  six windows of 20,000 ledgers) were direct `transfer` calls, so the shape rule alone excludes DeFi
+  traffic.
 
 ## Seller resolution results
 
