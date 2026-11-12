@@ -380,7 +380,8 @@ CloudWatch change, as backlog task 0118.
     `x402-openbao.service` for the unseal credential. Its snapshots and restore drill follow
     ADR 0013 (task 0047).
   - Node `keepAliveTimeout` 125 s, above `cloudflared`'s 90 s idle keep-alive, with
-    `headersTimeout` above it; the client IP from `CF-Connecting-IP` (0023).
+    `headersTimeout` above it; the client IP from `CF-Connecting-IP` (0023). Sellers on Cloudflare
+    Workers, or behind one NAT, share one rate-limit budget there: accepted on testnet (0060).
 - From 0039, the image: `pnpm deploy --prod` with `injectWorkspacePackages: true`;
   `"files": ["dist"]` in `apps/facilitator/package.json` and a `.dockerignore` that excludes
   `.env*`; `node:22-slim` pinned by digest, `linux/amd64`, user `node`, read-only root filesystem.
