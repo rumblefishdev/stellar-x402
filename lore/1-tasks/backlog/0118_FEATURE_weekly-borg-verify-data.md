@@ -14,6 +14,10 @@ history:
     status: backlog
     who: okarcz
     note: "Spawned from 0026: the team's decision on checking the snapshot repository (Slack, 2026-11-06), raised in #140's review."
+  - date: "2026-11-12"
+    status: backlog
+    who: okarcz
+    note: "From 0123 (P11, the review of #137): how the weekly check and the nightly run share the lock is this task's to decide; the facts and the three decisions are under Implementation, with a criterion."
 ---
 
 # Check the Borg repository of OpenBao's snapshots weekly, with its own stamp and alarm
@@ -42,9 +46,31 @@ drill.
 - A 0027 alarm on the stamp's age, in its own group, turned on as `infra/README.md` describes.
 - Runbook: what a failed check means and what to do.
 
+### Sharing the lock with the nightly run
+
+"The same lock" keeps the two from running together, but the one that waits can fail for it. The
+facts, from the units as 0123 left them:
+
+- The nightly run starts between 03:15 and 03:30 UTC (`RandomizedDelaySec=15min`), takes up to 30
+  minutes (`TimeoutStartSec`), and after a failure is tried twice more, 20 minutes apart: a bad
+  night can still be running at about 05:40 UTC.
+- Either job waits `X402_LOCK_WAIT` for the lock, 600 s by default, then fails. A nightly run that
+  meets the check uses up one of its three tries; a check that meets a slow nightly run gives up,
+  and its stamp ages as if the repository were damaged.
+
+To decide in this task (the review of #137 raised them, 0123 left them here):
+
+- **When the check runs.** Away from the nightly run and its retries, not only from 03:15-03:30.
+- **How long the check waits for the lock.** Longer than a whole nightly run, or not at all with
+  the alarm's age allowing for a skipped week; the default 10 minutes is shorter than a slow run.
+- **The alarm's age.** The review suggested 8 days: a week and a day's margin.
+
 ## Acceptance Criteria
 
 - [ ] The weekly check runs on the server and touches its stamp only on a pass.
 - [ ] A check that fails leaves the stamp alone, and the alarm fires once it is older than the
       chosen age (`make fire-test` seen in Slack).
 - [ ] The runbook covers the check, the alarm and the response.
+- [ ] The check's time, its wait for the lock and the alarm's age are decided and recorded here,
+      and a check that meets the nightly run neither fails that night's snapshot nor raises its
+      own alarm.

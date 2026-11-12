@@ -93,6 +93,8 @@ signer-pool and the conformance gate.
 - [ ] **P11. 0118 says how the weekly check and the nightly run share the lock.** The check runs
       away from 03:15-03:30 UTC and waits for the lock longer than 10 minutes (or not at all), so
       it never fails a night's snapshot; the alarm's age is named (suggested: 8 days).
+      (2026-11-12, okarcz: the three values are 0118's to decide. 0118 now has the facts, the
+      three decisions and a criterion for them; this task names no time, wait or age.)
 
 ### Done
 
