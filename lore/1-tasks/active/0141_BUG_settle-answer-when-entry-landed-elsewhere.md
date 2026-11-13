@@ -56,24 +56,35 @@ else's transaction, so that I serve a buyer who paid and the buyer is not told t
 A detection prototype found the rival's transaction in 535 ms with two RPC calls: the nonce entry's
 `lastModifiedLedgerSeq`, then `getTransactions` for that ledger.
 
+## Premise
+
+Reviewed 2026-11-12 by a fresh reviewer given only the goal and the code paths. The problem is real: both
+testnet cases reproduce (rival in ledger 5694924, ours failed in 5694925). What it changed:
+
+- Today's advice is false whatever is decided: after `scecExistingValue` the nonce is spent, so the entry
+  can never land, yet `settle.ts:479-486` says it may and tells the client to sign a new payment, and the
+  comment at `settle.ts:207-213` assumes a failed transaction spends no nonce.
+- Answering success breaks the property that one signed entry gets at most one success across all
+  facilitators, and the task's proof set can be satisfied by a transaction that carries our entry unused
+  (derived from the Soroban host's auth code, not run). Put to the owner; decision 2.
+- The task covers only our transaction failing on chain; the other transaction can also land before ours
+  is sent, so settle's own simulation fails (3 of the 7 testnet cases). Put to the owner as scope.
+- Acceptance criterion 4 is mostly met: `fee_charged_stroops{state}` counts every fee; only a split by
+  cause is missing.
+
 ## Decisions so far
 
 | # | What is decided | From | Vs the task | Who does the same (checked) | Code | Test |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | The fix lives in this repository as its own task; a proposal for the x402 spec is drafted separately and sent only on the owner's word | owner, 2026-11-12 | the task's premise | spec silent on the case (`scheme_exact_stellar.md:184-190`) | | |
+| 2 | When our transaction fails because another transaction consumed the payer's nonce (`sceAuth/scecExistingValue`), `/settle` answers a distinct failure reason that says so, without the advice to sign a new payment; it never answers success for a transaction it did not submit. Why: answering success lets a buyer race one signed entry through two facilitators to the same `payTo` and be served twice, a profitable attack, while the failure leaves only griefing with no gain; 0 such front-runs found in ~4,500 pubnet settlements of four submitters (2026-03 to 2026-11) | owner, 2026-11-13 (option B) | changes it: the task's option A dropped | upstream EVM exact answers `invalid_exact_evm_nonce_already_used` also after a failed submit (`mechanisms/evm/src/exact/facilitator/eip3009.ts:604-616`@f33e4cf); Stellar spec silent | | |
 
 ## Not yet decided
 
-- **What `/settle` answers when the payer's entry landed in another transaction.**
-  - A — detect it with every proof (the same signed entry byte for byte, the nonce created in that
-    transaction's meta, a matching transfer event to the seller, the consuming ledger closed after the
-    request, an RPC read at or past our failed ledger) and answer success with that transaction's hash
-    and a `settledBy` marker; log and count `settlement_settled_elsewhere`; blame the payer for a
-    second entry under the same nonce; correct the threat model. Residual: one payment routed through
-    two facilitators at once could be served twice.
-  - B — a distinct failure reason ("the nonce was used by another transaction") without the advice to
-    sign a new payment; the seller still refuses a buyer who paid.
-  - C — leave the answer; correct the threat model only.
+- **The reason's name:** reuse `settle_exact_stellar_nonce_already_used` (today: the nonce was used by
+  another payload) or a new code.
+- **Scope:** also the window where the other transaction landed before ours was sent, so settle's own
+  simulation fails with the same error (3 of 7 testnet cases, 2026-11-12), and `/verify`'s simulation.
 
 ## Implementation
 
