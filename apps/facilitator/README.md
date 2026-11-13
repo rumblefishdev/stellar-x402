@@ -364,13 +364,14 @@ says which breaker, with no address, amount or reset time:
 | `settle_exact_stellar_breaker_open_pay_to` | settlements to `payTo` failed on chain too often   | wait, and check what fails with the operator |
 | `settle_exact_stellar_breaker_open_asset`  | this token's settlements failed on chain too often | offer another asset                          |
 
-After upstream's `invalid_exact_stellar_payload_simulation_failed` it simulates once more, to
-name the one cause upstream drops:
+After upstream's `invalid_exact_stellar_payload_simulation_failed` it reads the payer's nonce,
+then simulates once more, to name the causes upstream drops:
 
-| `invalidReason`                                 | meaning                                                                     | what to do                                          |
-| ----------------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------- |
-| `invalid_exact_stellar_payto_trustline_missing` | `payTo` holds no trustline to the classic asset, or the account is unfunded | the seller funds the account and adds it            |
-| `invalid_exact_stellar_payer_trustline_missing` | the payer holds no trustline to the classic asset                           | the payer makes sure the account exists and adds it |
+| `invalidReason`                                          | meaning                                                                     | what to do                                             |
+| -------------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `invalid_exact_stellar_payload_nonce_consumed_elsewhere` | another transaction already used the payment's nonce (task 0141)            | refuse; the buyer checks the chain before paying again |
+| `invalid_exact_stellar_payto_trustline_missing`          | `payTo` holds no trustline to the classic asset, or the account is unfunded | the seller funds the account and adds it               |
+| `invalid_exact_stellar_payer_trustline_missing`          | the payer holds no trustline to the classic asset                           | the payer makes sure the account exists and adds it    |
 
 `invalidMessage` names the account, the asset and the ledger the simulation saw, and the `verified`
 and `settled` logs carry it as `message`. The token must be a Stellar Asset Contract: any
@@ -379,6 +380,12 @@ failure, the payer's side first, so the payer's message adds that `payTo` wasn't
 missing one too shows up on the next try. Once the trustline is there, the same payment may be
 sent again until its auth expires. `/settle`'s check before the claim gives the same two reasons; a
 trustline removed after it answers `settle_exact_stellar_simulation_failed` from the pool.
+
+The nonce is used when its entry exists on chain: the host keeps it until the auth entry expires.
+Another transaction then consumed it: the same signed entry submitted by whoever held the payment,
+which paid the seller, or a second entry the payer signed under the same nonce, which did not. The
+chain tells which, so the answer gives no advice to sign a new payment. A nonce read that fails is
+logged as `nonce_lookup_failed` and the trustline lookup follows.
 
 Every other failure keeps upstream's reason. So does a lookup that fails or takes over 3 s, logged
 as `trustline_lookup_failed`, a muxed `payTo`, because the error names its G-address, and a payload
@@ -409,6 +416,7 @@ unlocks one response.
 | `settlement_pending`                                 | the hash, or empty      | sent, not final yet; empty: not signed yet, or the store couldn't say                                | repeat the same request (see below), or look the hash up                                    |
 | `settle_exact_stellar_already_settled`               | the hash                | settled; an earlier call already got this payment's success                                          | don't serve again for this payment                                                          |
 | `settle_exact_stellar_nonce_already_used`            | the stored hash, if any | this payer's nonce is already used by another payment, in whatever state                             | refuse: the payment isn't for this request                                                  |
+| `settle_exact_stellar_nonce_consumed_elsewhere`      | ours, if it landed      | another transaction used the payer's nonce first: ours failed on chain, or the pool's simulation did | refuse; the buyer checks the chain before paying again (see below)                          |
 | `settle_exact_stellar_timeout`                       | —                       | the settle budget ran out before anything was signed; nothing was or will be                         | repeat the same payment while `extra.retryable` (see below)                                 |
 | `settle_exact_stellar_payer_busy`                    | —                       | another payment from this payer in this asset is settling; nothing was recorded for this one         | send the same payment again                                                                 |
 | `settle_exact_stellar_interrupted`                   | —                       | the facilitator restarted before anything was signed; nothing was or will be                         | repeat the same payment while `extra.retryable` (see below)                                 |
@@ -555,6 +563,15 @@ inner transaction, at ten times our fee, or the inner transaction sent bare. It 
 landed (`transaction`), ours, and `feeSource`, the account that paid. The record ends `success` or
 `failed` under their hash, with fee 0 under their fee bump. The payer paid what they signed, so no
 action is needed; many of them would mean someone is outbidding our fee bumps.
+
+`settlement_nonce_consumed_elsewhere` (a warning, counted in
+`settlement_nonce_consumed_elsewhere_total`) reports a record that ended
+`settle_exact_stellar_nonce_consumed_elsewhere` (task 0141), with our hash and `feeCharged`, the fee
+our failed transaction cost, absent when nothing was sent. Someone holding the payment, or watching
+the network, submitted the payer's entry first, or the payer spent the nonce on a second entry. A
+`success` is never answered for a transaction we didn't submit: one entry raced through two
+facilitators to the same seller would be served twice. No action is needed for one; many of them
+mean someone grieves our fees.
 
 `settlement_landed_after_expired` (counted in `settlement_landed_after_expired_total` by `state`)
 reports a transaction found on chain after its record ended `expired`, with its hash and ledger. The

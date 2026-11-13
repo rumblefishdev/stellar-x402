@@ -386,22 +386,36 @@ require one (0105).
 
 #### Payload front-running
 
-- **Attack:** A seller (or anyone the payload reaches) submits the buyer's signed payload itself,
-  paying its own fee, before the facilitator does. Our transaction then fails on chain at our fee
-  with `Error(Auth, ExistingValue)`: the nonce is used. Charged to the payer, three of them would
-  close the buyer's USDC breaker for every seller.
-- **Mitigation:** A reused nonce feeds no breaker: the payer signed one payment and it settled.
-  The fee still counts against the budgets. The payment itself settled once, so nobody is paid
-  twice. The host checks the nonce when the token calls `require_auth`, before a C-account's
-  `__check_auth` runs, so the error names the token, never the payer: shown on testnet for a
-  `test-wallet` payer in a wasm token and in a SAC (task 0024,
-  `apps/facilitator/test/live/results/front-run-testnet.json`).
-- **Residual risk:** Each front-run costs us one fee, bounded by the budgets, and costs the
-  front-runner its own. A wasm token can raise `Error(Auth, ExistingValue)` itself (a
-  `require_auth` of its own on a used entry), so its failures feed no breaker; they stay bounded
-  by the budgets. The same error in a C-account payer's own frame can't come from a front-run
-  (the token's frame fails first), only from the wallet's own nested auth, so it is blamed on the
-  payer like any failure there: its breaker opens at once.
+- **Attack:** Anyone who sees the buyer's signed entry submits it in a transaction of their own,
+  paying its own fee, before the facilitator's lands. It reaches the seller, anyone the seller's
+  logs reach, and every node of the network: our pending transaction is flooded to all connected
+  peers, and the RPC node holds it. Our transaction then fails on chain at our fee with
+  `Error(Auth, ExistingValue)`: the nonce is used. Or it lands first and our checks' simulation
+  fails the same way. The payer can also spend the nonce itself, on a second entry it signs under
+  the same nonce. Charged to the payer, three of them would close the buyer's USDC breaker for
+  every seller.
+- **Mitigation:** A used nonce proves only that some entry with that nonce was used, not that this
+  payment was paid: the same signed entry pays the seller, a second entry under the same nonce
+  (shown on testnet: 1 stroop to another account) pays the seller nothing. So `/settle` never
+  answers `success` for a transaction it didn't submit, and never tells the client to sign a new
+  payment either: it answers `…_nonce_consumed_elsewhere`, and the chain tells which it was (task
+  0141; both cases in `apps/facilitator/test/fixtures/nonce-consumed-elsewhere.json`). Answering
+  `success` would let a buyer race one entry through two facilitators to the same seller and be
+  served twice. A used nonce feeds no breaker. The fee still counts against the budgets, and each
+  such record is logged with it (`settlement_nonce_consumed_elsewhere`). The host checks the nonce
+  when the token calls `require_auth`, before a C-account's `__check_auth` runs, so the error names
+  the token, never the payer: shown on testnet for a `test-wallet` payer in a wasm token and in a
+  SAC (task 0024, `apps/facilitator/test/live/results/front-run-testnet.json`).
+- **Residual risk:** A buyer whose entry was submitted by someone else paid and is refused: the
+  seller holds the payment until it refunds. The front-runner gains nothing and pays its own fee; no
+  case was found in about 4,500 pubnet settlements of four submitters (March to November 2026).
+  Stellar has no private submission, so only an entry bound to the facilitator, as
+  `contracts/upto-proxy` binds it, would prevent it. Each front-run costs us one fee, bounded by the
+  budgets. A wasm token can raise `Error(Auth, ExistingValue)` itself (a `require_auth` of its own
+  on a used entry), so its failures feed no breaker and are answered as a used nonce; they stay
+  bounded by the budgets. The same error in a C-account payer's own frame can't come from a
+  front-run (the token's frame fails first), only from the wallet's own nested auth, so it is blamed
+  on the payer like any failure there: its breaker opens at once.
 
 #### Shared budget exhaustion by Sybil self-payments
 
