@@ -1,6 +1,7 @@
 import { Address, xdr } from "@stellar/stellar-sdk";
 import type { FailureCause, SorobanRpc } from "@stellar-x402/signer-pool";
 import type { Logger } from "../logger.js";
+import { withTimeout } from "./verify.js";
 
 /**
  * `/verify`'s code, and `/settle`'s through its re-check: another transaction already used the
@@ -25,14 +26,17 @@ export function consumedElsewhere(failure: FailureCause | undefined, payer: stri
   );
 }
 
-/** `true` if the payer's nonce is used on chain, `false` if not, `undefined` if it couldn't be read. */
-export type IsNonceUsed = (payer: string, nonce: string) => Promise<boolean | undefined>;
+/** Whether the payer's nonce is used on chain; `false` too when it couldn't be read. */
+export type IsNonceUsed = (payer: string, nonce: string) => Promise<boolean>;
+
+/** How long the read may take. It only names the cause of a refusal already decided. */
+const LOOKUP_TIMEOUT_MS = 3_000;
 
 /**
  * Reads the entry the host writes for a used nonce: a temporary entry of the payer's address,
  * kept until the auth entry expires. So while the payment could still settle, it says whether
- * another transaction used the nonce. A failed read is `undefined`: the payment is refused either
- * way, and the answer it already has stays true.
+ * the nonce is used. A read that fails or takes over 3 s is logged and `false`: the payment is
+ * refused either way, and the answer it already has stays true.
  */
 export function createNonceLookup(
   rpc: Pick<SorobanRpc, "getLedgerEntries">,
@@ -50,11 +54,15 @@ export function createNonceLookup(
       }),
     );
     try {
-      const { entries } = await rpc.getLedgerEntries(key);
+      const { entries } = await withTimeout(
+        rpc.getLedgerEntries(key),
+        LOOKUP_TIMEOUT_MS,
+        "nonce lookup",
+      );
       return entries.length > 0;
     } catch (error) {
       logger.warn("nonce_lookup_failed", { network, error });
-      return undefined;
+      return false;
     }
   };
 }

@@ -196,21 +196,12 @@ describe("createVerifier", () => {
         isValid: false,
         invalidReason: NONCE_CONSUMED_REASON,
         invalidMessage:
-          "another transaction already used this payment's nonce: the payment may have " +
-          "settled there, so check the chain before signing a new one",
+          "this payment's nonce is already used on chain: the payment may have settled, so " +
+          "check the chain before signing a new one",
         payer,
       });
       expect(nonceUsed).toHaveBeenCalledWith(payer, "1");
       expect(missingTrustline).not.toHaveBeenCalled();
-    });
-
-    it("looks for a trustline when the nonce is unused, or its read failed", async () => {
-      for (const used of [false, undefined]) {
-        const nonceUsed = vi.fn<IsNonceUsed>(async () => used);
-        const { verify, missingTrustline } = setup(failed, { nonceUsed });
-        await expect(verify(payload(), requirements)).resolves.toBe(failed);
-        expect(missingTrustline).toHaveBeenCalledOnce();
-      }
     });
 
     it("keeps upstream's answer when no trustline is missing", async () => {

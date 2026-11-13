@@ -44,12 +44,6 @@ const CONCURRENCY = 4;
 /** How often a record whose hash fell out of the RPC's history is checked again (decision 27). */
 const HISTORY_GONE_RECHECK_MS = 5 * 60_000;
 
-/** Why a landed transaction of ours failed, and the reason its record ends with (0141). */
-function failedFields(res: rpc.Api.GetFailedTransactionResponse, payer: string) {
-  const failure = failureCause(res);
-  return { errorReason: resultReason({ status: "failed", failure }, payer), failure };
-}
-
 /** What one sweep did, by the state each record ended in; `open` stayed non-final. */
 export type SweepReport = Record<
   "rejected" | "success" | "failed" | "expired" | "open" | "errors",
@@ -89,6 +83,7 @@ export function createReconciler(deps: ReconcilerDeps) {
       ? rewrappedOutcome(res, attempt.hash, getNetworkPassphrase(network))
       : undefined;
     const rewrap = found?.rewrap;
+    const failure = success ? undefined : failureCause(res);
     const channel = attempt.channel !== undefined && { channel: attempt.channel };
     const { record: finished, won } = await records.finish(
       record.key,
@@ -97,7 +92,10 @@ export function createReconciler(deps: ReconcilerDeps) {
         ledger: res.ledger,
         feeCharged: found?.feeCharged ?? res.resultXdr.feeCharged().toBigInt(),
         ...channel,
-        ...(!success && failedFields(res, record.payer)),
+        ...(failure && {
+          errorReason: resultReason("failed", failure, record.payer),
+          failure,
+        }),
         attempts: rewrap
           ? [
               ...others,
@@ -393,7 +391,7 @@ export function createReconciler(deps: ReconcilerDeps) {
         ? { state: "success", ...fields }
         : {
             state: result.status,
-            errorReason: resultReason(result, record.payer),
+            errorReason: resultReason(result.status, result.failure, record.payer),
             ...(result.failure && { failure: result.failure }),
             ...fields,
           },

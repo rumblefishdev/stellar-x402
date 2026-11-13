@@ -26,6 +26,7 @@ import {
   SimulationCheckError,
   SimulationError,
   SourceAccountAuthError,
+  failureCause,
   type FailureCause,
   type SorobanRpc,
   type SubmitOptions,
@@ -43,7 +44,10 @@ import {
 } from "../src/ports/index.js";
 import type { SettlementHooks } from "../src/settlement/hooks.js";
 import { createLeaseKeeper } from "../src/settlement/lease.js";
-import { NONCE_CONSUMED_SETTLE_REASON } from "../src/settlement/nonce-used.js";
+import {
+  NONCE_CONSUMED_REASON,
+  NONCE_CONSUMED_SETTLE_REASON,
+} from "../src/settlement/nonce-used.js";
 import { createReconciler } from "../src/settlement/reconcile.js";
 import { createRecords } from "../src/settlement/records.js";
 import { SETTLE_REASONS } from "../src/settlement/reasons.js";
@@ -66,6 +70,7 @@ import {
   type Check,
 } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
+import measured from "./fixtures/nonce-consumed-elsewhere.json" with { type: "json" };
 import { holdLease } from "./port-contracts.js";
 
 // `attemptsOf` reads a private WeakMap that only the real submitter fills; these tests put the
@@ -784,6 +789,29 @@ describe("createSettler", () => {
       expect(hooks.onSuccess).not.toHaveBeenCalled();
     });
 
+    it.each(measured.cases.map((c) => [c.case, c] as const))(
+      "answers it when, on testnet, %s",
+      async (_name, c) => {
+        // The failure the pool reads from our failed transaction, as testnet answered it.
+        const failure = failureCause({
+          status: "FAILED",
+          resultXdr: xdr.TransactionResult.fromXDR(c.resultXdr, "base64"),
+          diagnosticEventsXdr: c.diagnosticEventsXdr.map((e) =>
+            xdr.DiagnosticEvent.fromXDR(e, "base64"),
+          ),
+        } as unknown as rpc.Api.GetFailedTransactionResponse);
+        // The fixture's payer is not this test's, so the error's frame is never the payer's.
+        const { settle } = setup(async (opts) => {
+          await opts.onSigned?.(HASH, BOUNDS);
+          return { ...result("failed"), failure };
+        });
+        expect((await settle(payload(), requirements)).response).toEqual({
+          ...consumed,
+          transaction: HASH,
+        });
+      },
+    );
+
     it("logs and counts it with the fee our transaction was charged", async () => {
       const { settle, lines, metrics } = setup(failedOnUsedNonce);
       await settle(payload(), requirements);
@@ -837,22 +865,6 @@ describe("createSettler", () => {
         state: "rejected",
         errorReason: NONCE_CONSUMED_SETTLE_REASON,
       });
-    });
-
-    it("keeps …_simulation_failed when the nonce is unused, or its read failed", async () => {
-      for (const used of [false, undefined]) {
-        await db.empty();
-        fence = await holdLease(db.stores().settlements);
-        const { settle } = setup(
-          async () => {
-            throw new SimulationError("x");
-          },
-          { nonceUsed: async () => used },
-        );
-        expect((await settle(payload(), requirements)).response).toMatchObject({
-          errorReason: SETTLE_REASONS.simulation,
-        });
-      }
     });
 
     it("doesn't read the nonce after any other refusal", async () => {
@@ -3013,6 +3025,36 @@ describe("an answer that ended a payment (0082)", () => {
     });
     expect(await store.get(key)).toMatchObject({ errorReason: SETTLE_REASONS.noChannels });
     expect((await settle(payload(), requirements)).response).toMatchObject({ success: true });
+  });
+
+  it("adds no advice when the checks refuse a reopen because another transaction used the nonce (0141)", async () => {
+    const check = vi.fn(passing);
+    let calls = 0;
+    const { settle } = setup(
+      async (opts) => {
+        if (calls++ === 0) throw new NoChannelsError("x");
+        return landing()(opts);
+      },
+      { check },
+    );
+    await settle(payload(), requirements);
+    check.mockResolvedValueOnce({
+      response: {
+        isValid: false,
+        invalidReason: NONCE_CONSUMED_REASON,
+        invalidMessage: "what the check found",
+        payer,
+      },
+    });
+    const { response } = await settle(payload(), requirements);
+    expect(response).toEqual({
+      success: false,
+      errorReason: NONCE_CONSUMED_REASON,
+      errorMessage: "what the check found",
+      payer,
+      transaction: "",
+      network,
+    });
   });
 
   it("reads the latest ledger once for a reopen that ends", async () => {

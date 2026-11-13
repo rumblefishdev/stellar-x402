@@ -1,4 +1,4 @@
-import type { SubmitResult } from "@stellar-x402/signer-pool";
+import type { FailureCause, SubmitResult } from "@stellar-x402/signer-pool";
 import { NONCE_CONSUMED_SETTLE_REASON, consumedElsewhere } from "./nonce-used.js";
 import { PAYER_AUTH_REASON, UNSUPPORTED_CREDENTIAL_REASON } from "./verify.js";
 
@@ -158,28 +158,27 @@ export const UNSENT = new Set(UNSENT_REASONS);
 
 /**
  * Failed answers about a record that don't tell the payer to sign again (0082): it isn't over, it
- * landed, the payload is another payment, another transaction used its nonce (0141), its auth
- * entry has expired, or nothing was recorded because another payment of the payer and asset held
- * the slot (0024). Every other failed answer about a record ended a payment whose auth entry can
- * still land until its expiration ledger, in a new envelope: our failed or refused transaction
- * spent no nonce.
+ * landed, the payload is another payment, its auth entry has expired, or nothing was recorded
+ * because another payment of the payer and asset held the slot (0024). Every other failed answer
+ * about a record ended a payment whose auth entry can still land until its expiration ledger, in
+ * a new envelope: our failed or refused transaction spent no nonce. A nonce another transaction
+ * used gets no advice at all (0141, `withRetry`).
  */
 export const NOT_SIGN_AGAIN = new Set<string>([
   SETTLE_REASONS.pending,
   SETTLE_REASONS.alreadySettled,
   SETTLE_REASONS.nonceUsed,
-  SETTLE_REASONS.nonceConsumedElsewhere,
   SETTLE_REASONS.expired,
   SETTLE_REASONS.payerBusy,
 ]);
 
 /** The `errorReason` of a pool result that isn't a success: its fixed one, or 0141's for a used nonce. */
 export function resultReason(
-  result: Pick<SubmitResult, "status" | "failure">,
+  status: Exclude<SubmitResult["status"], "success">,
+  failure: FailureCause | undefined,
   payer: string,
 ): string {
-  if (result.status === "success") throw new Error("a success has no errorReason");
-  return result.status === "failed" && consumedElsewhere(result.failure, payer)
+  return status === "failed" && consumedElsewhere(failure, payer)
     ? SETTLE_REASONS.nonceConsumedElsewhere
-    : SETTLE_REASONS[result.status];
+    : SETTLE_REASONS[status];
 }

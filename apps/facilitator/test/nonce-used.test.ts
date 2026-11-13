@@ -77,13 +77,13 @@ describe("createNonceLookup", () => {
     await expect(used(payer, "7")).resolves.toBe(false);
   });
 
-  it("is undefined, and logged, when the read fails", async () => {
+  it("is false, and logged, when the read fails", async () => {
     const warn = vi.fn();
     const getLedgerEntries = vi.fn(async () => {
       throw new Error("rpc down");
     });
     const used = createNonceLookup({ getLedgerEntries } as never, "stellar:testnet", { warn });
-    await expect(used(payer, "7")).resolves.toBeUndefined();
+    await expect(used(payer, "7")).resolves.toBe(false);
     expect(warn).toHaveBeenCalledWith(
       "nonce_lookup_failed",
       expect.objectContaining({ network: "stellar:testnet" }),

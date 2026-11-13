@@ -104,7 +104,7 @@ export function createRecords(deps: RecordsDeps) {
    * Another transaction used the payer's nonce first (0141): the payment may have settled there,
    * and our transaction's fee, if it landed, is lost. A warning, counted, with that fee.
    */
-  const consumedElsewhere = (record: SettlementRecord) => {
+  const reportConsumedElsewhere = (record: SettlementRecord) => {
     logger.warn("settlement_nonce_consumed_elsewhere", {
       network,
       settlementKey: record.key,
@@ -116,7 +116,7 @@ export function createRecords(deps: RecordsDeps) {
 
   const onFinal = (record: SettlementRecord, origin: SettlementOrigin) => {
     charged(record.state, record.feeCharged);
-    if (record.errorReason === NONCE_CONSUMED_SETTLE_REASON) consumedElsewhere(record);
+    if (record.errorReason === NONCE_CONSUMED_SETTLE_REASON) reportConsumedElsewhere(record);
     runHook("onFinal", record.key, () => deps.hooks.onFinal(record, origin));
   };
 

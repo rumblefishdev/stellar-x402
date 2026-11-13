@@ -209,8 +209,8 @@ export function createChecker(deps: VerifierDeps): Check {
           response: invalid(
             NONCE_CONSUMED_REASON,
             upstream.payer,
-            "another transaction already used this payment's nonce: the payment may have " +
-              "settled there, so check the chain before signing a new one",
+            "this payment's nonce is already used on chain: the payment may have settled, so " +
+              "check the chain before signing a new one",
           ),
         };
       }

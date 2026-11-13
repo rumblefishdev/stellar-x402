@@ -39,7 +39,7 @@ import {
   type SettlementStore,
 } from "../ports/index.js";
 import type { BeforeSubmitResult, SettlementHooks, SettlementOrigin } from "./hooks.js";
-import type { IsNonceUsed } from "./nonce-used.js";
+import { NONCE_CONSUMED_REASON, type IsNonceUsed } from "./nonce-used.js";
 import {
   attemptUpdates,
   createRecords,
@@ -211,7 +211,12 @@ export function createSettler(deps: SettlerDeps): Settle & {
   const answerResult = (result: SubmitResult, payer: string): SettleResponse => {
     const transaction = result.hash ?? "";
     if (result.status === "success") return { success: true, transaction, network, payer };
-    return failure(resultReason(result, payer), payer, undefined, transaction);
+    return failure(
+      resultReason(result.status, result.failure, payer),
+      payer,
+      undefined,
+      transaction,
+    );
   };
 
   const records =
@@ -296,6 +301,10 @@ export function createSettler(deps: SettlerDeps): Settle & {
     const { response } = settled;
     if (response.success || settled.claimedBefore0073) return settled;
     const reason = response.errorReason ?? "";
+    // Another transaction used the nonce (0141): no repeat can settle it, and only the chain tells
+    // whether it paid, so the answer carries no advice at all.
+    if (reason === NONCE_CONSUMED_REASON || reason === SETTLE_REASONS.nonceConsumedElsewhere)
+      return settled;
     // `payer_busy` recorded nothing (0024): like an unsent answer, the same payment can be sent
     // again, so it carries `retryable` and "repeat the same payment", not "sign a new one".
     const unsent =
@@ -614,7 +623,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
               key,
               {
                 state: result.status,
-                errorReason: resultReason(result, verified.payer),
+                errorReason: resultReason(result.status, result.failure, verified.payer),
                 ...(result.failure && { failure: result.failure }),
                 ...fields,
               },

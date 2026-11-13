@@ -384,8 +384,8 @@ trustline removed after it answers `settle_exact_stellar_simulation_failed` from
 The nonce is used when its entry exists on chain: the host keeps it until the auth entry expires.
 Another transaction then consumed it: the same signed entry submitted by whoever held the payment,
 which paid the seller, or a second entry the payer signed under the same nonce, which did not. The
-chain tells which, so the answer gives no advice to sign a new payment. A nonce read that fails is
-logged as `nonce_lookup_failed` and the trustline lookup follows.
+chain tells which, so the answer gives no advice to sign a new payment. A nonce read that fails or
+takes over 3 s is logged as `nonce_lookup_failed`, and the trustline lookup follows.
 
 Every other failure keeps upstream's reason. So does a lookup that fails or takes over 3 s, logged
 as `trustline_lookup_failed`, a muxed `payTo`, because the error names its G-address, and a payload
