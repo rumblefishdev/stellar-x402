@@ -90,8 +90,18 @@ Both made by akot on 2026-11-13: "Design Decisions", 1 and 2.
 - **Docs.** The facilitator README ("Callers and rate limits", "API keys on pubnet"), AD-11, the
   threat model ("API keys", seven entries), ADR 0007's amendment of 2026-11-13, ADR 0012.
 - **Tests.** `pnpm test`, 2026-11-13: 20 of 20 tasks, the facilitator 1120 tests (3 skipped),
-  108 of them new. `pnpm typecheck` passes. Nothing was run on testnet: the testnet path is covered
-  by tests only.
+  108 of them new, on `@x402` 2.31.0 after the rebase onto 0145. `pnpm typecheck` passes.
+- **Testnet run**, 2026-11-13, at `1e6507ab`: `test/live/api-key-smoke.ts`, 11 of 11 checks
+  (`test/live/results/api-key-smoke-testnet.json`). A facilitator built by `main()`, payments from
+  upstream's client, a key issued and revoked by the script. Three payments of 0.0001 XLM settled
+  on testnet, each counted under the IP: with no header
+  `099755d39fedfb7410ea6a9ce56dd308f1711a555d7f2e11d5a2a41154881cf2`, with a made-up key
+  `d545e0a81ad6830f1e1683d4154b8b2f68919e93f110bdec93fcd2fd518079d2`, with the registered key
+  `f5f895f711f413fa184c53811e7988f33a47db9e03af0b45c656c2c1c8ed7077`. A request naming
+  `stellar:pubnet` got 401 without a key and with a made-up one, counting nowhere; with the key it
+  reached the real verifier (`invalid_network`, this process serves testnet) and counted under
+  the owner; after the revocation, 401. A pubnet settlement itself can't be run until the process
+  serves pubnet.
 
 **Modified tests:**
 
