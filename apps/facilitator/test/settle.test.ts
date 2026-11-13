@@ -26,6 +26,7 @@ import {
   SimulationCheckError,
   SimulationError,
   SourceAccountAuthError,
+  type FailureCause,
   type SorobanRpc,
   type SubmitOptions,
   type SubmitResult,
@@ -42,6 +43,7 @@ import {
 } from "../src/ports/index.js";
 import type { SettlementHooks } from "../src/settlement/hooks.js";
 import { createLeaseKeeper } from "../src/settlement/lease.js";
+import { NONCE_CONSUMED_SETTLE_REASON } from "../src/settlement/nonce-used.js";
 import { createReconciler } from "../src/settlement/reconcile.js";
 import { createRecords } from "../src/settlement/records.js";
 import {
@@ -316,6 +318,7 @@ function setup(behaviour: Behaviour = landing(), overrides: Partial<SettlerDeps>
     budgetMs: 5_000,
     pollMs: 5,
     latestLedger: async () => CURRENT,
+    nonceUsed: async () => false,
     lease: () => fence,
     ...overrides,
   });
@@ -748,6 +751,125 @@ describe("createSettler", () => {
     expect(hooks.onFinal).toHaveBeenCalledTimes(1);
   });
 
+  describe("when another transaction used the payer's nonce first (0141)", () => {
+    /** What our transaction's failure says when the nonce was used: the host's error, in the token's frame. */
+    const usedNonce: FailureCause = {
+      opCode: "invokeHostFunctionTrapped",
+      error: { type: "sceAuth", code: "scecExistingValue" },
+      contract: asset,
+    };
+    const failedOnUsedNonce: Behaviour = async (opts) => {
+      await opts.onSigned?.(HASH, BOUNDS);
+      return { ...result("failed"), failure: usedNonce };
+    };
+    const consumed = {
+      success: false,
+      errorReason: NONCE_CONSUMED_SETTLE_REASON,
+      payer,
+      network,
+    };
+
+    it("answers its own reason for our failed transaction, without advice to sign again", async () => {
+      const { settle, store, hooks } = setup(failedOnUsedNonce);
+      expect((await settle(payload(), requirements)).response).toEqual({
+        ...consumed,
+        transaction: HASH,
+      });
+      expect(await store.get(key)).toMatchObject({
+        state: "failed",
+        errorReason: NONCE_CONSUMED_SETTLE_REASON,
+        feeCharged: 41_000n,
+      });
+      expect(hooks.onFinal).toHaveBeenCalledTimes(1);
+      expect(hooks.onSuccess).not.toHaveBeenCalled();
+    });
+
+    it("logs and counts it with the fee our transaction was charged", async () => {
+      const { settle, lines, metrics } = setup(failedOnUsedNonce);
+      await settle(payload(), requirements);
+      expect(lines.map((line) => JSON.parse(line))).toContainEqual(
+        expect.objectContaining({
+          event: "settlement_nonce_consumed_elsewhere",
+          network,
+          settlementKey: key,
+          transaction: HASH,
+          feeCharged: "41000",
+        }),
+      );
+      expect(metrics.value("settlement_nonce_consumed_elsewhere_total", {})).toBe(1);
+    });
+
+    it("answers a repeat of the payload the same way", async () => {
+      const { settle } = setup(failedOnUsedNonce);
+      await settle(payload(), requirements);
+      expect((await settle(payload(), requirements)).response).toEqual({
+        ...consumed,
+        transaction: HASH,
+      });
+    });
+
+    it("keeps …_transaction_failed for the same error in the payer's own contract", async () => {
+      const { settle } = setup(async (opts) => {
+        await opts.onSigned?.(HASH, BOUNDS);
+        return { ...result("failed"), failure: { ...usedNonce, contract: payer } };
+      });
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.failed,
+        ...untilExpiry,
+      });
+    });
+
+    it("answers its own reason when the pool's simulation failed on a used nonce", async () => {
+      const nonceUsed = vi.fn(async () => true);
+      const { settle, store, submit } = setup(
+        async () => {
+          throw new SimulationError("HostError: Error(Auth, ExistingValue)");
+        },
+        { nonceUsed },
+      );
+      expect((await settle(payload(), requirements)).response).toEqual({
+        ...consumed,
+        transaction: "",
+      });
+      expect(nonceUsed).toHaveBeenCalledWith(payer, "7");
+      expect(submit).toHaveBeenCalledOnce();
+      expect(await store.get(key)).toMatchObject({
+        state: "rejected",
+        errorReason: NONCE_CONSUMED_SETTLE_REASON,
+      });
+    });
+
+    it("keeps …_simulation_failed when the nonce is unused, or its read failed", async () => {
+      for (const used of [false, undefined]) {
+        await db.empty();
+        fence = await holdLease(db.stores().settlements);
+        const { settle } = setup(
+          async () => {
+            throw new SimulationError("x");
+          },
+          { nonceUsed: async () => used },
+        );
+        expect((await settle(payload(), requirements)).response).toMatchObject({
+          errorReason: SETTLE_REASONS.simulation,
+        });
+      }
+    });
+
+    it("doesn't read the nonce after any other refusal", async () => {
+      const nonceUsed = vi.fn(async () => true);
+      const { settle } = setup(
+        async () => {
+          throw new FeeLimitError("x");
+        },
+        { nonceUsed },
+      );
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.fee,
+      });
+      expect(nonceUsed).not.toHaveBeenCalled();
+    });
+  });
+
   it("keeps …_record_write_failed when addHash fails for a reason other than the lease", async () => {
     let sent = false;
     const { settle, store } = setup(async (opts) => {
@@ -935,6 +1057,7 @@ describe("createSettler", () => {
       maxValidityLedgers: 66,
       latestLedger: async () => CURRENT,
       missingTrustline: async () => undefined,
+      nonceUsed: async () => false,
     });
     const { settle, submit } = setup(landing(), { check });
     const { response } = await settle(payload(), requirements);
