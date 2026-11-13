@@ -46,7 +46,8 @@ function refuse(res: Response, error: KeyRefusal): void {
  *   counts under the client's IP, and the `Authorization` header isn't read at all.
  *
  * The network is in the body, so the body is read before the request is counted: at most the
- * body limit is read and parsed for a client already over its budget. The network is the one the
+ * body limit is read and parsed for a client already over its budget. An owner over its budget
+ * costs the registry read as well, since only the read names the owner. The network is the one the
  * settlement runs on, `paymentRequirements.network`: the checks refuse any other the payload
  * names. A registry or counter error rejects, which Express answers with a 500: nothing is let in
  * unchecked.

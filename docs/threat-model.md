@@ -551,12 +551,18 @@ by its payer's signature. Who may get a key is the portal's rule (0106), not cov
 
 - **Attack:** A client past its rate budget keeps sending. Before 0105 it got its 429 without the
   body being read; now `/verify` and `/settle` read the body first, since it names the network,
-  so each request costs a read and a JSON parse of at most 64 KiB.
+  so each request costs a read and a JSON parse of at most 64 KiB. On pubnet a caller past its
+  owner's budget costs a read of the key registry too: only the read names the owner, so it comes
+  before the count.
 - **Mitigation:** The body limit bounds each request's cost, and a client over budget is still
   answered from memory, without a store write. A body that names no network counts under the
-  client's IP, so a malformed or oversized one is limited as before.
+  client's IP, so a malformed or oversized one is limited as before. The registry read is the one
+  primary-key lookup a made-up key costs, on the rate limiter's own pool ("Requests without a
+  valid key, in bulk").
 - **Residual risk:** Accepted (akot, 2026-11-13): a parse costs less than the store write every
   request within budget already makes. A flood large enough to matter is the edge's to stop.
+  Revoking the key of an owner that floods doesn't spare the read: a revoked key is looked up
+  like any other.
 
 ## Facilitator key
 

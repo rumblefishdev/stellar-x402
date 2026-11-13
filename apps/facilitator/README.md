@@ -80,7 +80,8 @@ key counts nowhere. `/supported` has no limit.
   window's end, and every blocked client is released at the same moment.
 - **The counters live in the store** (`rate_limits`). A store error is a 500,
   logged. A client over its budget is answered from the process until its window ends, without a
-  store write.
+  store write. On pubnet its key is looked up first, so each such request still costs one read of
+  the key registry.
 
 ### API keys on pubnet
 

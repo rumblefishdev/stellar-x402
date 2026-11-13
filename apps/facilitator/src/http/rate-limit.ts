@@ -41,6 +41,8 @@ export interface RateLimiter {
  *
  * A client over its budget is remembered in the process until its window ends and answered
  * without a store hit, so its flood can't hold the store's few connections from everyone else.
+ * That holds for the counter only: an owner is known from the registry, so `admit` has read the
+ * registry on the same pool before `byOwner` is called, for an owner over its budget too.
  */
 export function rateLimiter({
   route,

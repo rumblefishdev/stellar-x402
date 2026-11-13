@@ -43,7 +43,12 @@ doesn't block pubnet: until then the operator raises an account's limit by hand.
 - From 0105: the spend policy's `beforeSubmit` gets the key's owner as `ctx.caller.owner`
   (`operator:<name>` or `discord:<id>`), `undefined` on testnet. The owner is not stored with the
   settlement: `onFinal` gets the record, and a reservation keeps its scopes. The rate limiter
-  already counts a pubnet caller by the same owner.
+  already counts a pubnet caller by the same owner. The caller is the one whose request reaches
+  `beforeSubmit`: on a repeat or a reopen (`ctx.reopened`) that is the owner repeating the
+  payload, which may not be the owner of the first request, so the quota has to say whose a
+  reopened settlement is. Only the `/settle` route calls `Settle` today, so on pubnet `caller` is
+  always set; a caller added later that passes none must be refused or given a scope, not left
+  outside every quota (from the review of #185, 2026-11-13).
 - Docs: the facilitator README, ADR 0007, the threat model ("Shared budget exhaustion", "Targeted
   `payTo` budget exhaustion").
 

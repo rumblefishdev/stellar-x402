@@ -188,6 +188,13 @@ Decided by akot on 2026-11-13, before any code.
 16. **ADR 0007 has an amendment and ADR 0012 two notes**, beyond the docs the task lists: the
     decisions above change what ADR 0007 says about the limiter, and 0012 lists each database's
     tables and the open question on the limiter's counters, which this task narrows.
+17. **An owner over its budget still costs a registry read, and that is written down, not fixed.**
+    From the review of #185, 2026-11-13: `ownerOf` runs before `byOwner`, so the limiter's
+    in-process memory of blocked clients spares the counter write but not the read. Skipping the
+    read would mean remembering blocked keys by hash, and a revoked key would then get a 429
+    until its window ends, against decision 1. The limiter's and `admit`'s comments, the README
+    and the threat model ("A client over its budget still makes the server read its body") say
+    so. Two notes went to 0126 (one reading of the network) and 0107 (whose quota a reopen is).
 
 ## Future Work
 
