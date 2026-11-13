@@ -23,7 +23,7 @@ export interface UptoTerms {
   token: string;
   from: string;
   to: string;
-  facilitator: string;
+  receiverAuthorizer: string;
   maxAmount: bigint;
   nonce: Buffer;
   validAfter: bigint;
@@ -56,7 +56,7 @@ export function settleArgs(t: UptoTerms, actual: bigint): xdr.ScVal[] {
     addr(t.token),
     addr(t.from),
     addr(t.to),
-    addr(t.facilitator),
+    addr(t.receiverAuthorizer),
     i128(t.maxAmount),
     i128(actual),
     xdr.ScVal.scvBytes(t.nonce),
@@ -95,7 +95,7 @@ export function expectedClientInvocation(t: UptoTerms): xdr.SorobanAuthorizedInv
     [
       addr(t.token),
       addr(t.to),
-      addr(t.facilitator),
+      addr(t.receiverAuthorizer),
       i128(t.maxAmount),
       xdr.ScVal.scvBytes(t.nonce),
       u64(t.validAfter),
@@ -133,10 +133,10 @@ export async function clientSign(
   t: UptoTerms,
   client: Keypair,
 ): Promise<xdr.SorobanAuthorizationEntry> {
-  // The facilitator is the simulation source, as this suite's call has it as caller: with the
-  // client as source, its auth would be recorded as source-account credentials, not a signable
+  // The receiver authorizer is the simulation source, as this suite's call has it as caller: with
+  // the client as source, its auth would be recorded as source-account credentials, not a signable
   // address entry.
-  const draft = new TransactionBuilder(await server.getAccount(t.facilitator), {
+  const draft = new TransactionBuilder(await server.getAccount(t.receiverAuthorizer), {
     fee: "100",
     networkPassphrase: PASSPHRASE,
   })

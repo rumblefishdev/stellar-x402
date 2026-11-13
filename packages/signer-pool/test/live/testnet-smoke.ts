@@ -119,10 +119,21 @@ async function settleCall(client: Keypair, to: string, expLedger: number) {
     nativeToScVal(deadline, { type: "u64" }),
     nativeToScVal(expLedger, { type: "u32" }),
   ];
-  const facAuth = new xdr.SorobanAuthorizationEntry({
-    credentials: xdr.SorobanCredentials.sorobanCredentialsSourceAccount(),
+  // The facilitator is the receiver authorizer (facilitator-delegated mode). It signs its own
+  // address-credential entry: the pool refuses source-account entries, which would authorize as
+  // the channel. Its signature expires no later than the client's allowance.
+  const receiverEntry = new xdr.SorobanAuthorizationEntry({
+    credentials: xdr.SorobanCredentials.sorobanCredentialsAddressV2(
+      new xdr.SorobanAddressCredentials({
+        address: Address.fromString(facilitator.publicKey()).toScAddress(),
+        nonce: xdr.Int64.fromString(randomBytes(8).readBigInt64BE().toString()),
+        signatureExpirationLedger: 0,
+        signature: xdr.ScVal.scvVoid(),
+      }),
+    ),
     rootInvocation: invocation(PROXY, "settle_upto", args),
   });
+  const receiverAuth = await authorizeEntry(receiverEntry, facilitator, expLedger, passphrase);
   return {
     func: xdr.HostFunction.hostFunctionTypeInvokeContract(
       new xdr.InvokeContractArgs({
@@ -131,7 +142,7 @@ async function settleCall(client: Keypair, to: string, expLedger: number) {
         args,
       }),
     ),
-    auth: [clientAuth, facAuth],
+    auth: [clientAuth, receiverAuth],
   };
 }
 
