@@ -136,6 +136,20 @@ What changed between 2.28.0 and 2.31.0, read from the built packages (no changel
 5. **No `minimumReleaseAgeExclude`**: pnpm 11 holds back a release younger than a day and wrote
    the six 2.31.0 packages into `pnpm-workspace.yaml` at the bump. A fresh
    `pnpm install --frozen-lockfile` passes without them, so they are not kept.
+6. **`@stellar/stellar-sdk` `^16.4.1` in every package** (review of #184, stkrolikiewicz,
+   2026-11-13): the range `@x402/stellar` 2.31.0 asks for. With `^16.3.0` only the lockfile kept
+   one copy; an install that resolves otherwise could give our code 16.3.x beside upstream's
+   16.4.1, the two copies AD-14 prevents. `xdr-fixture.test.ts` now also checks that upstream
+   loads the copy of the SDK we load, which its `/^16\./` did not show.
+7. **A test names the zod major** (same review): `packages/bazaar/test/zod-major.test.ts` fails
+   when the package's zod is not the major of `@x402/core`'s. The other tests fail then too, with
+   `expected a Zod schema`, which doesn't name the cause. AD-14 and the spine's version table now
+   list the second zod.
+8. **Citations of upstream follow the pin where the code was read again** (same review):
+   `@x402/mcp`'s `createPaymentRequiredResult` answers the same in 2.31.0 (it now copies
+   `accepts` first), so `seller-check.ts` and the test's fake MCP seller cite 2.31.0; so do
+   `main.ts` (the same constructor, two lines lower) and `validate.ts` (`routeConfig.… || ""`).
+   Archived tasks, ADRs and the planning docs keep the version they were written against.
 
 ## Acceptance Criteria
 

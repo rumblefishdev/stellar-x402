@@ -26,7 +26,7 @@
     "@stellar-x402/metrics-catalog": "workspace:*",
     "@stellar-x402/seller-fetch": "workspace:*",
     "@stellar-x402/signer-pool": "workspace:*",
-    "@stellar/stellar-sdk": "^16.3.0",
+    "@stellar/stellar-sdk": "^16.4.1",
     "@x402/core": "~2.31.0",
     "@x402/extensions": "~2.31.0",
     "@x402/stellar": "~2.31.0",

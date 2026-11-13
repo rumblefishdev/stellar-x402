@@ -14,7 +14,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@stellar/stellar-sdk": "^16.3.0",
+    "@stellar/stellar-sdk": "^16.4.1",
     "@x402/core": "~2.31.0",
     "@x402/express": "~2.31.0",
     "@x402/extensions": "~2.31.0",

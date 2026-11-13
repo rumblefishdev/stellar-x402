@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
+import { createRequire } from "node:module";
 import { gunzipSync } from "node:zlib";
 import {
   FeeBumpTransaction,
@@ -34,6 +35,17 @@ describe("protocol-29 XDR fixture", () => {
   it("runs on the versions AD-14 pins", () => {
     expect(installed("@stellar/stellar-sdk")).toMatch(/^16\./);
     expect(installed("@x402/stellar")).toMatch(/^2\.31\./);
+  });
+
+  it("loads the copy of @stellar/stellar-sdk that upstream loads", () => {
+    // AD-14: one copy in the process. Upstream resolves from its real place in pnpm's store, so
+    // a range of ours that lets an older 16.x in shows here as a second path.
+    const upstream = createRequire(
+      realpathSync(new URL("../node_modules/@x402/stellar/package.json", import.meta.url)),
+    );
+    expect(upstream.resolve("@stellar/stellar-sdk")).toBe(
+      createRequire(import.meta.url).resolve("@stellar/stellar-sdk"),
+    );
   });
 
   it("parses the fee bump with its AddressV2 entry and keeps the hash", () => {

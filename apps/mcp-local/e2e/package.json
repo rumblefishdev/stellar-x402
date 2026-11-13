@@ -13,7 +13,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.0",
     "@stellar-x402/signer-pool": "workspace:*",
-    "@stellar/stellar-sdk": "^16.3.0",
+    "@stellar/stellar-sdk": "^16.4.1",
     "@x402/core": "~2.31.0",
     "@x402/extensions": "~2.31.0"
   }

@@ -61,7 +61,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/signer-pool
       '@stellar/stellar-sdk':
-        specifier: ^16.3.0
+        specifier: ^16.4.1
         version: 16.4.1
       '@x402/core':
         specifier: ~2.31.0
@@ -114,7 +114,7 @@ importers:
         version: 3.25.76
     devDependencies:
       '@stellar/stellar-sdk':
-        specifier: ^16.3.0
+        specifier: ^16.4.1
         version: 16.4.1
 
   apps/mcp-local/e2e:
@@ -126,7 +126,7 @@ importers:
         specifier: workspace:*
         version: link:../../../packages/signer-pool
       '@stellar/stellar-sdk':
-        specifier: ^16.3.0
+        specifier: ^16.4.1
         version: 16.4.1
       '@x402/core':
         specifier: ~2.31.0
@@ -138,7 +138,7 @@ importers:
   conformance:
     dependencies:
       '@stellar/stellar-sdk':
-        specifier: ^16.3.0
+        specifier: ^16.4.1
         version: 16.4.1
 
   contracts/upto-proxy/e2e:
@@ -147,7 +147,7 @@ importers:
         specifier: workspace:*
         version: link:../../../packages/signer-pool
       '@stellar/stellar-sdk':
-        specifier: ^16.3.0
+        specifier: ^16.4.1
         version: 16.4.1
 
   deploy:
@@ -159,7 +159,7 @@ importers:
   examples/http-api:
     dependencies:
       '@stellar/stellar-sdk':
-        specifier: ^16.3.0
+        specifier: ^16.4.1
         version: 16.4.1
       '@x402/core':
         specifier: ~2.31.0
@@ -208,7 +208,7 @@ importers:
         specifier: workspace:*
         version: link:../packages/signer-pool
       '@stellar/stellar-sdk':
-        specifier: ^16.3.0
+        specifier: ^16.4.1
         version: 16.4.1
       aws-cdk-lib:
         specifier: ^2.245.0
@@ -286,7 +286,7 @@ importers:
   packages/signer-pool:
     dependencies:
       '@stellar/stellar-sdk':
-        specifier: ^16.3.0
+        specifier: ^16.4.1
         version: 16.4.1
       '@x402/stellar':
         specifier: ~2.31.0

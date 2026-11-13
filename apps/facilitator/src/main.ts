@@ -104,7 +104,7 @@ export function buildRpc(
 
 /**
  * Upstream's signer for `ExactStellarScheme`, which `/verify` uses only for the facilitator's
- * address (`@x402/stellar` 2.28.0 `exact/facilitator/index.mjs:69-104`); `/settle` signs through
+ * address (`@x402/stellar` 2.31.0 `exact/facilitator/index.mjs:71-106`); `/settle` signs through
  * the pool, so upstream never signs and no secret is needed here.
  */
 function verifyOnlySigner(address: string): FacilitatorStellarSigner {
