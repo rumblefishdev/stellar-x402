@@ -2,7 +2,7 @@
 id: "0105"
 title: "Require an API key on pubnet's /verify and /settle"
 type: FEATURE
-status: backlog
+status: active
 milestone: 2
 related_adr: ["0007"]
 related_tasks: ["0024", "0060", "0077", "0106", "0107"]
@@ -14,6 +14,10 @@ history:
     status: backlog
     who: akot
     note: "Spawned from 0024: the team chose API keys on pubnet over keyless /settle."
+  - date: "2026-11-13"
+    status: active
+    who: akot
+    note: "Work starts."
 ---
 
 # Require an API key on pubnet's /verify and /settle
