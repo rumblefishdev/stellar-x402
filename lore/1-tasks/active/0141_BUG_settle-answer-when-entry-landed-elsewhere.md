@@ -100,11 +100,14 @@ Nothing.
   (reads the payer's nonce entry).
 - `/verify` and `/settle`'s re-check: after upstream's `simulation_failed`, the nonce read comes
   before the trustline lookup (`verify.ts`).
-- A claimed settlement: `resultReason` for our failed transaction in all three final writers
-  (`settle.ts`, `reconcile.ts` sweep and `resolved`); the pool's `SimulationError` reads the nonce
-  (`settle.ts`). The code is in `NOT_SIGN_AGAIN`, so no advice to sign again.
+- A claimed settlement: `resultReason` (`reasons.ts`) decides the reason for our failed
+  transaction, reading the nonce when the error doesn't tell, in every writer that ends a record
+  (`settle.ts` and its answer after a failed record write, `reconcile.ts` sweep and `resolved`);
+  the pool's `SimulationError` reads the nonce (`settle.ts`). The early return in `withRetry`
+  keeps the advice to sign again out of the answer.
 - `records.ts` `onFinal`: the `settlement_nonce_consumed_elsewhere` warning with `feeCharged`, and
-  `settlement_nonce_consumed_elsewhere_total` (`packages/metrics-catalog`).
+  `settlement_nonce_consumed_elsewhere_total` with `window: "settle"`; `/verify` (`http/app.ts`)
+  and `/settle`'s re-check count it with `window: "verify"` (`packages/metrics-catalog`).
 - Docs: `docs/threat-model.md` (Payload front-running), `apps/facilitator/README.md` (both codes,
   the log), `docs/monitoring.md` (the counter).
 
