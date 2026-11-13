@@ -21,7 +21,7 @@ import {
   createReconciler,
   scheduleReconciliation,
 } from "../src/settlement/reconcile.js";
-import { NONCE_CONSUMED_SETTLE_REASON } from "../src/settlement/nonce-used.js";
+import { NONCE_CONSUMED_SETTLE_REASON, type IsNonceUsed } from "../src/settlement/nonce-used.js";
 import { createRecords } from "../src/settlement/records.js";
 import { SETTLE_REASONS } from "../src/settlement/reasons.js";
 import type { SubmitResult } from "@stellar-x402/signer-pool";
@@ -132,7 +132,7 @@ function rewrapped(status: "SUCCESS" | "FAILED" = "SUCCESS") {
 
 function setup(
   answers: Record<string, rpc.Api.GetTransactionResponse | Error> = {},
-  nonceUsed = vi.fn(async (_payer: string, _nonce: string) => false),
+  nonceUsed = vi.fn<IsNonceUsed>(async () => false),
 ) {
   const store = db.stores().settlements;
   const hooks = {

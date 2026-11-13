@@ -1,5 +1,5 @@
 import type { FailureCause, SubmitResult } from "@stellar-x402/signer-pool";
-import { NONCE_CONSUMED_SETTLE_REASON, consumedElsewhere } from "./nonce-used.js";
+import { NONCE_CONSUMED_SETTLE_REASON, consumedElsewhere, type IsNonceUsed } from "./nonce-used.js";
 import { PAYER_AUTH_REASON, UNSUPPORTED_CREDENTIAL_REASON } from "./verify.js";
 
 /**
@@ -172,13 +172,21 @@ export const NOT_SIGN_AGAIN = new Set<string>([
   SETTLE_REASONS.payerBusy,
 ]);
 
-/** The `errorReason` of a pool result that isn't a success: its fixed one, or 0141's for a used nonce. */
-export function resultReason(
+/**
+ * The `errorReason` of a pool result that isn't a success: its fixed one, or 0141's when another
+ * transaction used the payer's nonce first. An RPC without diagnostic events gives no error to
+ * read, so then the payer's nonce entry tells: ours failed and wrote no nonce, so an entry means
+ * another transaction used it. Every writer that ends a record calls this (0141 decision 6).
+ */
+export async function resultReason(
   status: Exclude<SubmitResult["status"], "success">,
   failure: FailureCause | undefined,
   payer: string,
-): string {
-  return status === "failed" && consumedElsewhere(failure, payer)
-    ? SETTLE_REASONS.nonceConsumedElsewhere
-    : SETTLE_REASONS[status];
+  nonce: string,
+  nonceUsed: IsNonceUsed,
+): Promise<string> {
+  if (status !== "failed") return SETTLE_REASONS[status];
+  if (consumedElsewhere(failure, payer)) return SETTLE_REASONS.nonceConsumedElsewhere;
+  if (await nonceUsed(payer, nonce)) return SETTLE_REASONS.nonceConsumedElsewhere;
+  return SETTLE_REASONS.failed;
 }

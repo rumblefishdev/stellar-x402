@@ -237,6 +237,7 @@ describe("REFUTE B: one process answers a success twice (finding 3 by another ti
       logger,
       metrics,
       budgetMs: 5_000,
+      nonceUsed: async () => false,
     });
     // The settler's success write goes out on a connection that dies: no reply for a while
     // (pg's query_timeout is 15 s), then an error. Other connections work.

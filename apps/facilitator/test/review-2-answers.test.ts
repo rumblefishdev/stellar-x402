@@ -246,6 +246,7 @@ function process1(
     logger,
     metrics,
     budgetMs: overrides.budgetMs ?? 5_000,
+    nonceUsed: async () => false,
   });
   return { store, hooks, records, settle, reconciler };
 }

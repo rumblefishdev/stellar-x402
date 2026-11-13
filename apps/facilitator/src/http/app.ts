@@ -13,6 +13,7 @@ import type { Stores } from "../ports/index.js";
 import type { SettlementHooks } from "../settlement/hooks.js";
 import type { LeaseKeeper } from "../settlement/lease.js";
 import type { Reconciliation } from "../settlement/reconcile.js";
+import { NONCE_CONSUMED_REASON } from "../settlement/nonce-used.js";
 import type { Settle } from "../settlement/settle.js";
 import { TRUSTLINE_REASONS } from "../settlement/trustline.js";
 import {
@@ -268,6 +269,10 @@ export function createApp({
       rpc: trace.rpc,
       message: LOGGED_MESSAGES.has(response.invalidReason) ? response.invalidMessage : undefined,
     });
+    if (response.invalidReason === NONCE_CONSUMED_REASON)
+      metrics
+        .for({ network: config.network })
+        .increment("settlement_nonce_consumed_elsewhere_total", { window: "verify" });
     res.json(response);
   });
   // Like `/verify`: any settle outcome is a 200 with an x402 body (AD-6), an RPC that gave the checks

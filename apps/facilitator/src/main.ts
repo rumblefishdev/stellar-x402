@@ -209,6 +209,7 @@ export function buildSettlement(
     logger,
     metrics,
     budgetMs: config.settlement.settleBudgetMs,
+    nonceUsed: deps.checks.nonceUsed,
   });
   // The only sender of transactions in the service (AD-2). `main()` checks its channels before
   // it starts, and `/settle` reaches it only while the process holds the lease (0025).

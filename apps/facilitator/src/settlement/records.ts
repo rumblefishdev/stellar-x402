@@ -111,7 +111,7 @@ export function createRecords(deps: RecordsDeps) {
       transaction: record.hashes.at(-1),
       feeCharged: record.feeCharged,
     });
-    metrics.increment("settlement_nonce_consumed_elsewhere_total");
+    metrics.increment("settlement_nonce_consumed_elsewhere_total", { window: "settle" });
   };
 
   const onFinal = (record: SettlementRecord, origin: SettlementOrigin) => {

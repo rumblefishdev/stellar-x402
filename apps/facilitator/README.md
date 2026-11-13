@@ -565,13 +565,18 @@ landed (`transaction`), ours, and `feeSource`, the account that paid. The record
 action is needed; many of them would mean someone is outbidding our fee bumps.
 
 `settlement_nonce_consumed_elsewhere` (a warning, counted in
-`settlement_nonce_consumed_elsewhere_total`) reports a record that ended
+`settlement_nonce_consumed_elsewhere_total` with `window: "settle"`) reports a record that ended
 `settle_exact_stellar_nonce_consumed_elsewhere` (task 0141), with our hash and `feeCharged`, the fee
-our failed transaction cost, absent when nothing was sent. Someone holding the payment, or watching
+our failed transaction cost, absent when nothing was sent. The code comes from the host's error,
+`Error(Auth, ExistingValue)`, or, from an RPC that gives no error event, from the payer's nonce
+entry: ours failed and wrote no nonce, so an entry means another transaction used it. `/settle` and
+reconciliation read it the same way. Someone holding the payment, or watching
 the network, submitted the payer's entry first, or the payer spent the nonce on a second entry. A
 `success` is never answered for a transaction we didn't submit: one entry raced through two
 facilitators to the same seller would be served twice. No action is needed for one; many of them
-mean someone grieves our fees.
+mean someone grieves our fees. The same counter with `window: "verify"` counts a refusal in `/verify` or in `/settle`'s re-check
+before the claim, which writes no record: there the other transaction landed before ours was sent,
+so it cost no fee. A seller that sends `/verify` and then `/settle` counts it twice.
 
 `settlement_landed_after_expired` (counted in `settlement_landed_after_expired_total` by `state`)
 reports a transaction found on chain after its record ended `expired`, with its hash and ledger. The

@@ -39,7 +39,7 @@ import {
   type SettlementStore,
 } from "../ports/index.js";
 import type { BeforeSubmitResult, SettlementHooks, SettlementOrigin } from "./hooks.js";
-import { NONCE_CONSUMED_REASON, consumedElsewhere, type IsNonceUsed } from "./nonce-used.js";
+import { NONCE_CONSUMED_REASON, type IsNonceUsed } from "./nonce-used.js";
 import {
   attemptUpdates,
   createRecords,
@@ -211,11 +211,15 @@ export function createSettler(deps: SettlerDeps): Settle & {
   };
 
   /** The pool's own result, for when the store failed to record it (`submit()`). */
-  const answerResult = (result: SubmitResult, payer: string): SettleResponse => {
+  const answerResult = async (
+    result: SubmitResult,
+    payer: string,
+    nonce: string,
+  ): Promise<SettleResponse> => {
     const transaction = result.hash ?? "";
     if (result.status === "success") return { success: true, transaction, network, payer };
     return failure(
-      resultReason(result.status, result.failure, payer),
+      await resultReason(result.status, result.failure, payer, nonce, deps.nonceUsed),
       payer,
       undefined,
       transaction,
@@ -620,21 +624,19 @@ export function createSettler(deps: SettlerDeps): Settle & {
             won: false,
             origin: call.origin,
           };
-        default: {
-          // An RPC without diagnostic events gives no error to read, so the nonce entry tells
-          // (0141): ours failed and wrote no nonce, so an entry means another transaction used it.
-          const usedElsewhere =
-            result.status === "failed" &&
-            !consumedElsewhere(result.failure, verified.payer) &&
-            (await deps.nonceUsed(verified.payer, verified.nonce));
+        default:
           return noteRewrap(
             await finish(
               key,
               {
                 state: result.status,
-                errorReason: usedElsewhere
-                  ? SETTLE_REASONS.nonceConsumedElsewhere
-                  : resultReason(result.status, result.failure, verified.payer),
+                errorReason: await resultReason(
+                  result.status,
+                  result.failure,
+                  verified.payer,
+                  verified.nonce,
+                  deps.nonceUsed,
+                ),
                 ...(result.failure && { failure: result.failure }),
                 ...fields,
               },
@@ -642,7 +644,6 @@ export function createSettler(deps: SettlerDeps): Settle & {
               own,
             ),
           );
-        }
       }
     } catch (error) {
       // A store failure while recording: the answer is the pool's result, or `pending` with the
@@ -676,7 +677,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
                 updatedAt: now(),
               }
             : undefined;
-        fallback = { response: answerResult(result, verified.payer), record };
+        fallback = { response: await answerResult(result, verified.payer, verified.nonce), record };
       } else if (uncertain) {
         fallback = {
           response: failure(SETTLE_REASONS.pending, verified.payer, undefined, uncertain),
@@ -839,6 +840,8 @@ export function createSettler(deps: SettlerDeps): Settle & {
     const { response: verdict, verified } = checked;
     if (!verified) {
       flagDrift(undefined, verdict.invalidReason, "check");
+      if (verdict.invalidReason === NONCE_CONSUMED_REASON)
+        metrics.increment("settlement_nonce_consumed_elsewhere_total", { window: "verify" });
       return {
         ...untouched,
         reopenRefused: reopening !== undefined,

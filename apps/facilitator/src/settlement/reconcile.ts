@@ -17,6 +17,7 @@ import type {
   SettlementStore,
 } from "../ports/index.js";
 import { isFinalRecord, resultUpdate, type Records } from "./records.js";
+import type { IsNonceUsed } from "./nonce-used.js";
 import { SETTLE_REASONS, resultReason } from "./reasons.js";
 import { payerExpiration } from "./verify.js";
 
@@ -34,6 +35,8 @@ export interface ReconcilerDeps {
    * store after it. What does is `addHash`'s state check, which refuses a closed record.
    */
   budgetMs: number;
+  /** Whether the payer's nonce is used on chain, read after our transaction failed (0141). */
+  nonceUsed: IsNonceUsed;
   now?: () => number;
 }
 
@@ -93,7 +96,13 @@ export function createReconciler(deps: ReconcilerDeps) {
         feeCharged: found?.feeCharged ?? res.resultXdr.feeCharged().toBigInt(),
         ...channel,
         ...(failure && {
-          errorReason: resultReason("failed", failure, record.payer),
+          errorReason: await resultReason(
+            "failed",
+            failure,
+            record.payer,
+            record.nonce,
+            deps.nonceUsed,
+          ),
           failure,
         }),
         attempts: rewrap
@@ -391,7 +400,13 @@ export function createReconciler(deps: ReconcilerDeps) {
         ? { state: "success", ...fields }
         : {
             state: result.status,
-            errorReason: resultReason(result.status, result.failure, record.payer),
+            errorReason: await resultReason(
+              result.status,
+              result.failure,
+              record.payer,
+              record.nonce,
+              deps.nonceUsed,
+            ),
             ...(result.failure && { failure: result.failure }),
             ...fields,
           },

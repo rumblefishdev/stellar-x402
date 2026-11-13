@@ -3277,6 +3277,7 @@ describe("with reconciliation (0019)", () => {
         logger,
         metrics,
         budgetMs: 5_000,
+        nonceUsed: async () => false,
       });
     return { store, hooks, logger, metrics, records, settle, reconcilerOn };
   }
