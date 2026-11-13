@@ -252,8 +252,12 @@ nonce)` is not in the facilitator's own settlement record (Settle, steps 2 and 4
    +actual. A non-SAC token may emit other events or charge transfer fees, so check the balances,
    not only the events.
 4. Record `(from, auth nonce)` durably and never delete it, then submit. A second `/settle` for a
-   recorded entry is refused, so concurrent calls on one payload don't pay for a doomed
-   duplicate.
+   recorded entry is refused while the first is in progress, settled or uncertain, so concurrent
+   calls on one payload don't pay for a doomed duplicate. The record reopens, while the client's
+   entry is unexpired, for the same entry and actual amount when the earlier attempt sent nothing
+   (SHOULD), or when its transaction ended `FAILED`, which rolls back the host's nonce (MAY): the
+   seller has already served, and the client won't sign again. A reopened settlement repeats the
+   enforcing simulation of step 3 first.
 
 ### Recommended submission shape
 

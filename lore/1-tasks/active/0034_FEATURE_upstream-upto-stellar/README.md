@@ -353,6 +353,24 @@ threat model, the testnet report and the spec updated.
 - A facilitator that doesn't relay self-managed payments refuses them at `/verify` with
   `invalid_upto_stellar_payload_receiver_authorization`.
 
+**okarcz's decisions from Stan's review of #181 (2026-11-13):**
+
+- A recorded settlement reopens for the same client entry and actual amount while that entry is
+  unexpired: SHOULD when nothing was sent (as `exact` does since 0073), MAY when its transaction
+  ended `FAILED`, which rolls back the host's nonce. Unlike `exact`, the seller has already served
+  and the client has no reason to sign again. A reopened settlement repeats the enforcing
+  simulation first, and an uncertain outcome never reopens. Written into the spec (Phase 4, Security
+  item 9), the contract README, ADR 0010 and the threat model.
+- For 0015: how many resends per entry after a `FAILED` transaction, and how a reopen is claimed.
+- `UptoTerms.facilitator` in the e2e code is now `receiverAuthorizer`; `settleAndCheck` takes the
+  authorizer, submitter, payer and channels, and the self-managed relay scenario uses it.
+- The spec's 2026-11-12 fee figures now come from the 61/61 run; the issue draft and
+  `deploy/README.md` name `CDPHI4JY…EA2X`; the signer-pool smoke script signs an
+  address-credential receiver entry (it had been broken since `d85b041`; not run). The e2e suite
+  passed 61/61 again on 2026-11-13 against the same proxy
+  (`contracts/upto-proxy/e2e/results/testnet-results-2026-11-13.json`); the report keeps citing the
+  2026-11-12 run.
+
 **Future work:** C-account signing in our seller SDK (a backlog task, not created yet). Enforcing
 the receiver-entry rules in the facilitator belongs to 0015.
 

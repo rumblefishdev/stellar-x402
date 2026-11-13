@@ -49,7 +49,9 @@ What each party must trust:
   the only single-use check; the contract stores no nonce of its own (ADR 0010, D6). Shown on
   testnet in 0004 and again on 2026-11-12. The facilitator records `(from, auth nonce)` before
   every settlement and refuses the entry afterwards: a zero settlement never reaches the chain, and
-  the record keeps concurrent `/settle` calls from paying for a duplicate (spec §8.1).
+  the record keeps concurrent `/settle` calls from paying for a duplicate (spec §8.1). The record
+  reopens only when nothing was sent or the transaction ended `FAILED`; either way the host's
+  nonce is unused, so the entry still settles at most once.
 - **Residual risk:** None.
 
 #### Reuse of a payment ID
@@ -159,7 +161,9 @@ What each party must trust:
   0004 were caught this way). Spend budgets and breakers per payer and per facilitator ([ADR
   0007](adr/0007-fee-abuse-containment.md)) bound what gets through.
 - **Residual risk:** The state can still change between simulation and inclusion (a few seconds),
-  and the fee is charged on failure. Bounded by the budgets.
+  and the fee is charged on failure. Bounded by the budgets. An `upto` record reopened after a
+  `FAILED` transaction is resent only after a passing simulation, and the number of resends per
+  entry is bounded (0015).
 
 #### Fee inflation by rent
 

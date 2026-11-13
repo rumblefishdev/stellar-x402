@@ -49,7 +49,8 @@ settle_upto(token, from, to, receiver_authorizer, max_amount, actual_amount, non
   (`Error(Auth, ExistingValue)` on a replay). The contract stores nothing; `nonce` is a signed
   payment ID in the arguments and the event (D6). The facilitator still records each client entry
   before settling it: zero settlements never reach the chain, and the record keeps concurrent
-  `/settle` calls on one payload from paying for a doomed duplicate (spec §8.1).
+  `/settle` calls on one payload from paying for a doomed duplicate (spec §8.1). The record reopens
+  while the entry is unexpired if nothing was sent, or if the transaction ended `FAILED`.
 - **Time bounds.** `valid_after` and `deadline` are unix seconds, inclusive, checked against the
   ledger timestamp. `allowance_expiration_ledger` bounds the allowance, and must equal the client entry's `signatureExpirationLedger`. It may be at most 17,280 ledgers
   (about a day) ahead (D11).
