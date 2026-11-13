@@ -21,12 +21,14 @@ import {
   createReconciler,
   scheduleReconciliation,
 } from "../src/settlement/reconcile.js";
+import { NONCE_CONSUMED_SETTLE_REASON, type IsNonceUsed } from "../src/settlement/nonce-used.js";
 import { createRecords } from "../src/settlement/records.js";
 import { SETTLE_REASONS } from "../src/settlement/reasons.js";
 import type { SubmitResult } from "@stellar-x402/signer-pool";
 import { failedResult } from "@stellar-x402/signer-pool/testing";
 import { holdLease, settlement } from "./port-contracts.js";
 import { testDatabase } from "./database.js";
+import measured from "./fixtures/nonce-consumed-elsewhere.json" with { type: "json" };
 
 const db = testDatabase();
 beforeEach(db.empty);
@@ -128,7 +130,10 @@ function rewrapped(status: "SUCCESS" | "FAILED" = "SUCCESS") {
   };
 }
 
-function setup(answers: Record<string, rpc.Api.GetTransactionResponse | Error> = {}) {
+function setup(
+  answers: Record<string, rpc.Api.GetTransactionResponse | Error> = {},
+  nonceUsed = vi.fn<IsNonceUsed>(async () => false),
+) {
   const store = db.stores().settlements;
   const hooks = {
     onFinal: vi.fn<SettlementHooks["onFinal"]>(async () => {}),
@@ -153,10 +158,11 @@ function setup(answers: Record<string, rpc.Api.GetTransactionResponse | Error> =
     logger,
     metrics,
     budgetMs: BUDGET_MS,
+    nonceUsed,
     now,
   });
   const advance = (ms: number) => (clock += ms);
-  return { store, hooks, lines, metrics, records, reconciler, getTransaction, advance };
+  return { store, hooks, lines, metrics, records, reconciler, getTransaction, advance, nonceUsed };
 }
 
 async function claimed(store: SettlementStore, nonce = "1", createdAt = NOW) {
@@ -288,6 +294,55 @@ describe("createReconciler", () => {
         state: "failed",
         errorReason: SETTLE_REASONS.failed,
       });
+    });
+
+    it.each(measured.cases.map((c) => [c.case, c] as const))(
+      "finishes ours as failed with its own reason when, on testnet, %s (0141)",
+      async (_name, c) => {
+        const answer = {
+          status: rpc.Api.GetTransactionStatus.FAILED,
+          ledger: c.ledger,
+          resultXdr: xdr.TransactionResult.fromXDR(c.resultXdr, "base64"),
+          diagnosticEventsXdr: c.diagnosticEventsXdr.map((e) =>
+            xdr.DiagnosticEvent.fromXDR(e, "base64"),
+          ),
+        } as unknown as rpc.Api.GetTransactionResponse;
+        const { store, reconciler, lines } = setup({ [A]: answer });
+        const key = await signed(store, [A]);
+        expect(await reconciler.sweep()).toMatchObject({ failed: 1 });
+        expect(await store.get(key)).toMatchObject({
+          state: "failed",
+          errorReason: NONCE_CONSUMED_SETTLE_REASON,
+          // What testnet charged our transaction.
+          feeCharged: 8_800n,
+        });
+        expect(
+          lines.filter((line) => line.includes('"settlement_nonce_consumed_elsewhere"')),
+        ).toHaveLength(1);
+      },
+    );
+
+    it("tells it from the nonce entry when the RPC gives no error event (0141 decision 6)", async () => {
+      const { store, reconciler, nonceUsed } = setup(
+        { [A]: landed("FAILED") },
+        vi.fn(async () => true),
+      );
+      const key = await signed(store, [A]);
+      expect(await reconciler.sweep()).toMatchObject({ failed: 1 });
+      const record = await store.get(key);
+      expect(record).toMatchObject({ state: "failed", errorReason: NONCE_CONSUMED_SETTLE_REASON });
+      expect(nonceUsed).toHaveBeenCalledWith(record!.payer, record!.nonce);
+    });
+
+    it("keeps …_transaction_failed when the RPC gives no error event and the nonce is unused", async () => {
+      const { store, reconciler, nonceUsed } = setup({ [A]: landed("FAILED") });
+      const key = await signed(store, [A]);
+      await reconciler.sweep();
+      expect(await store.get(key)).toMatchObject({
+        state: "failed",
+        errorReason: SETTLE_REASONS.failed,
+      });
+      expect(nonceUsed).toHaveBeenCalledTimes(1);
     });
 
     it("stores why a landed failure failed", async () => {
@@ -911,6 +966,50 @@ describe("createReconciler", () => {
       });
       expect((await store.get(key))?.state).toBe("expired");
       expect(lines.some((line) => line.includes('"settlement_landed_after_expired"'))).toBe(false);
+    });
+
+    it("finishes a failure on a used nonce with its own reason (0141)", async () => {
+      const { store, reconciler } = setup();
+      const key = await signed(store, [A]);
+      await store.transition(key, "signed", { state: "pending", updatedAt: NOW });
+      await reconciler.resolved({
+        status: "failed",
+        hash: A,
+        channel: "GCHANNEL",
+        ledger: 4_001,
+        feeCharged: 41_000n,
+        failure: {
+          error: { type: "sceAuth", code: "scecExistingValue" },
+          contract: StrKey.encodeContract(Buffer.alloc(32, 7)),
+        },
+        attempts: [{ hash: A, sent: "yes" }],
+      });
+      expect(await store.get(key)).toMatchObject({
+        state: "failed",
+        errorReason: NONCE_CONSUMED_SETTLE_REASON,
+      });
+    });
+
+    it("tells a used nonce from the nonce entry when the pool's result has no error event (0141 decision 6)", async () => {
+      const { store, reconciler } = setup(
+        {},
+        vi.fn(async () => true),
+      );
+      const key = await signed(store, [A]);
+      await store.transition(key, "signed", { state: "pending", updatedAt: NOW });
+      await reconciler.resolved({
+        status: "failed",
+        hash: A,
+        channel: "GCHANNEL",
+        ledger: 4_001,
+        feeCharged: 41_000n,
+        failure: { opCode: "invokeHostFunctionTrapped" },
+        attempts: [{ hash: A, sent: "yes" }],
+      });
+      expect(await store.get(key)).toMatchObject({
+        state: "failed",
+        errorReason: NONCE_CONSUMED_SETTLE_REASON,
+      });
     });
 
     it("finishes a pending record from the pool's result, with its attempts", async () => {

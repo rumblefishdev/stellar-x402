@@ -14,6 +14,7 @@ import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import { RpcUnavailableError } from "@stellar-x402/signer-pool";
 import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/core/types";
 import { describe, expect, it, vi } from "vitest";
+import { NONCE_CONSUMED_REASON, type IsNonceUsed } from "../src/settlement/nonce-used.js";
 import type { FindMissingTrustline, MissingTrustline } from "../src/settlement/trustline.js";
 import {
   AMOUNT_ZERO_REASON,
@@ -120,6 +121,7 @@ function setup(
   const upstream = { verify: vi.fn<UpstreamVerifier["verify"]>(async () => upstreamResponse) };
   const latestLedger = vi.fn(async () => CURRENT);
   const missingTrustline = vi.fn<FindMissingTrustline>(async () => missing);
+  const nonceUsed = vi.fn<IsNonceUsed>(async () => false);
   const verify = createVerifier({
     network,
     upstream,
@@ -129,9 +131,10 @@ function setup(
     maxValidityLedgers: MAX_VALIDITY,
     latestLedger,
     missingTrustline,
+    nonceUsed,
     ...deps,
   });
-  return { verify, upstream, latestLedger, missingTrustline };
+  return { verify, upstream, latestLedger, missingTrustline, nonceUsed };
 }
 
 const rejected = (invalidReason: string) =>
@@ -186,6 +189,21 @@ describe("createVerifier", () => {
       expect(payment.transaction.toXDR()).toBe((p.payload as { transaction: string }).transaction);
     });
 
+    it("answers that another transaction used the payer's nonce, before any trustline lookup", async () => {
+      const nonceUsed = vi.fn<IsNonceUsed>(async () => true);
+      const { verify, missingTrustline } = setup(failed, { nonceUsed });
+      await expect(verify(payload(), requirements)).resolves.toEqual({
+        isValid: false,
+        invalidReason: NONCE_CONSUMED_REASON,
+        invalidMessage:
+          "this payment's nonce is already used on chain: the payment may have settled, so " +
+          "check the chain before signing a new one",
+        payer,
+      });
+      expect(nonceUsed).toHaveBeenCalledWith(payer, "1");
+      expect(missingTrustline).not.toHaveBeenCalled();
+    });
+
     it("keeps upstream's answer when no trustline is missing", async () => {
       const { verify, missingTrustline } = setup(failed);
       await expect(verify(payload(), requirements)).resolves.toBe(failed);
@@ -193,11 +211,12 @@ describe("createVerifier", () => {
     });
 
     it("doesn't look for a payload without exactly one entry of the payer's", async () => {
-      const { verify, missingTrustline } = setup(failed);
+      const { verify, missingTrustline, nonceUsed } = setup(failed);
       for (const auth of [[], [authEntry(payTo, CURRENT + MIN_VALIDITY)]]) {
         await expect(verify(payload({ auth }), requirements)).resolves.toBe(failed);
       }
       expect(missingTrustline).not.toHaveBeenCalled();
+      expect(nonceUsed).not.toHaveBeenCalled();
     });
 
     it("looks only after simulation_failed, and only with a payer to compare", async () => {
@@ -208,9 +227,11 @@ describe("createVerifier", () => {
       const other = setup(wrongAmount);
       await other.verify(payload(), requirements);
       expect(other.missingTrustline).not.toHaveBeenCalled();
+      expect(other.nonceUsed).not.toHaveBeenCalled();
       const noPayer = setup({ ...failed, payer: undefined });
       await noPayer.verify(payload(), requirements);
       expect(noPayer.missingTrustline).not.toHaveBeenCalled();
+      expect(noPayer.nonceUsed).not.toHaveBeenCalled();
     });
   });
 
@@ -260,6 +281,7 @@ describe("createVerifier", () => {
       maxValidityLedgers: MAX_VALIDITY,
       latestLedger: async () => CURRENT,
       missingTrustline: async () => undefined,
+      nonceUsed: async () => false,
       upstreamTimeoutMs: 20,
     });
     await expect(verify(payload(), requirements)).rejects.toThrow(UpstreamTimeoutError);
@@ -480,6 +502,7 @@ describe("createVerifier", () => {
         maxValidityLedgers: MAX_VALIDITY,
         latestLedger: async () => CURRENT,
         missingTrustline: async () => undefined,
+        nonceUsed: async () => false,
       });
       const { verified } = await check(payload(), requirements);
       expect(verified).toMatchObject({

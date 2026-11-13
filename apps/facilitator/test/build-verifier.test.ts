@@ -47,6 +47,11 @@ import {
 } from "../src/settlement/verify.js";
 import { signerEnv } from "./fake-openbao.js";
 
+/** A read of a payer's nonce entry (0141). */
+const isNonceKey = (key: xdr.LedgerKey) =>
+  key.switch().name === "contractData" &&
+  key.contractData().key().switch().name === "scvLedgerKeyNonce";
+
 const secret = Keypair.random().secret();
 const channel = Keypair.random().publicKey();
 const asset = StrKey.encodeContract(Buffer.alloc(32, 7));
@@ -602,10 +607,13 @@ describe("buildVerifier (the /verify wiring in main)", () => {
               _parsed: true,
               error: "HostError: Error(Contract, #13)",
             }) as never,
-          getLedgerEntries: async () =>
+          // The SAC's instance; the payer's nonce is unused, so its read finds nothing (0141).
+          getLedgerEntries: async (...keys: xdr.LedgerKey[]) =>
             ({
               latestLedger: CURRENT,
-              entries: [{ val: xdr.LedgerEntryData.contractData(contractData) }],
+              entries: keys.some(isNonceKey)
+                ? []
+                : [{ val: xdr.LedgerEntryData.contractData(contractData) }],
             }) as never,
         },
       },

@@ -17,7 +17,8 @@ import type {
   SettlementStore,
 } from "../ports/index.js";
 import { isFinalRecord, resultUpdate, type Records } from "./records.js";
-import { SETTLE_REASONS } from "./reasons.js";
+import type { IsNonceUsed } from "./nonce-used.js";
+import { SETTLE_REASONS, resultReason } from "./reasons.js";
 import { payerExpiration } from "./verify.js";
 
 export interface ReconcilerDeps {
@@ -34,6 +35,8 @@ export interface ReconcilerDeps {
    * store after it. What does is `addHash`'s state check, which refuses a closed record.
    */
   budgetMs: number;
+  /** Whether the payer's nonce is used on chain, read after our transaction failed (0141). */
+  nonceUsed: IsNonceUsed;
   now?: () => number;
 }
 
@@ -83,6 +86,7 @@ export function createReconciler(deps: ReconcilerDeps) {
       ? rewrappedOutcome(res, attempt.hash, getNetworkPassphrase(network))
       : undefined;
     const rewrap = found?.rewrap;
+    const failure = success ? undefined : failureCause(res);
     const channel = attempt.channel !== undefined && { channel: attempt.channel };
     const { record: finished, won } = await records.finish(
       record.key,
@@ -91,7 +95,16 @@ export function createReconciler(deps: ReconcilerDeps) {
         ledger: res.ledger,
         feeCharged: found?.feeCharged ?? res.resultXdr.feeCharged().toBigInt(),
         ...channel,
-        ...(!success && { errorReason: SETTLE_REASONS.failed, failure: failureCause(res) }),
+        ...(failure && {
+          errorReason: await resultReason(
+            "failed",
+            failure,
+            record.payer,
+            record.nonce,
+            deps.nonceUsed,
+          ),
+          failure,
+        }),
         attempts: rewrap
           ? [
               ...others,
@@ -387,7 +400,13 @@ export function createReconciler(deps: ReconcilerDeps) {
         ? { state: "success", ...fields }
         : {
             state: result.status,
-            errorReason: SETTLE_REASONS[result.status],
+            errorReason: await resultReason(
+              result.status,
+              result.failure,
+              record.payer,
+              record.nonce,
+              deps.nonceUsed,
+            ),
             ...(result.failure && { failure: result.failure }),
             ...fields,
           },

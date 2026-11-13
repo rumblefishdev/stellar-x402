@@ -1,3 +1,5 @@
+import type { FailureCause, SubmitResult } from "@stellar-x402/signer-pool";
+import { NONCE_CONSUMED_SETTLE_REASON, consumedElsewhere, type IsNonceUsed } from "./nonce-used.js";
 import { PAYER_AUTH_REASON, UNSUPPORTED_CREDENTIAL_REASON } from "./verify.js";
 
 /**
@@ -50,6 +52,12 @@ export const SETTLE_REASONS = {
    * is the stored hash, if any, never the outcome.
    */
   nonceUsed: "settle_exact_stellar_nonce_already_used",
+  /**
+   * Another transaction used the payer's nonce first (0141): our transaction failed on chain, or
+   * the pool's simulation did, so the payment may have settled there. Never answered `success`:
+   * one signed entry raced through two facilitators would then be served twice.
+   */
+  nonceConsumedElsewhere: NONCE_CONSUMED_SETTLE_REASON,
   /**
    * This payment settled, and its `success` was already answered once (AD-6). `transaction` is
    * its hash. The resource was paid for once, so it is served once.
@@ -153,7 +161,8 @@ export const UNSENT = new Set(UNSENT_REASONS);
  * landed, the payload is another payment, its auth entry has expired, or nothing was recorded
  * because another payment of the payer and asset held the slot (0024). Every other failed answer
  * about a record ended a payment whose auth entry can still land until its expiration ledger, in
- * a new envelope: a failed or refused transaction spends no nonce.
+ * a new envelope: our failed or refused transaction spent no nonce. A nonce another transaction
+ * used gets no advice at all (0141, `withRetry`).
  */
 export const NOT_SIGN_AGAIN = new Set<string>([
   SETTLE_REASONS.pending,
@@ -162,3 +171,22 @@ export const NOT_SIGN_AGAIN = new Set<string>([
   SETTLE_REASONS.expired,
   SETTLE_REASONS.payerBusy,
 ]);
+
+/**
+ * The `errorReason` of a pool result that isn't a success: its fixed one, or 0141's when another
+ * transaction used the payer's nonce first. An RPC without diagnostic events gives no error to
+ * read, so then the payer's nonce entry tells: ours failed and wrote no nonce, so an entry means
+ * another transaction used it. Every writer that ends a record calls this (0141 decision 6).
+ */
+export async function resultReason(
+  status: Exclude<SubmitResult["status"], "success">,
+  failure: FailureCause | undefined,
+  payer: string,
+  nonce: string,
+  nonceUsed: IsNonceUsed,
+): Promise<string> {
+  if (status !== "failed") return SETTLE_REASONS[status];
+  if (consumedElsewhere(failure, payer)) return SETTLE_REASONS.nonceConsumedElsewhere;
+  if (await nonceUsed(payer, nonce)) return SETTLE_REASONS.nonceConsumedElsewhere;
+  return SETTLE_REASONS.failed;
+}

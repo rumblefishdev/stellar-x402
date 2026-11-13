@@ -195,6 +195,7 @@ function setup(behaviour: Behaviour = landing(), overrides: Partial<SettlerDeps>
     budgetMs: 5_000,
     pollMs: 5,
     latestLedger: async () => CURRENT,
+    nonceUsed: async () => false,
     lease: () => fence,
     ...overrides,
   });
@@ -245,6 +246,7 @@ function process1(
     logger,
     metrics,
     budgetMs: overrides.budgetMs ?? 5_000,
+    nonceUsed: async () => false,
   });
   return { store, hooks, records, settle, reconciler };
 }

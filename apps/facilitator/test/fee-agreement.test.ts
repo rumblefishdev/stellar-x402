@@ -67,14 +67,26 @@ beforeAll(async () => {
     let body = "";
     req.on("data", (chunk) => (body += chunk));
     req.on("end", () => {
-      const { id, method } = JSON.parse(body) as { id: number; method: string };
+      const { id, method, params } = JSON.parse(body) as {
+        id: number;
+        method: string;
+        params?: { keys?: string[] };
+      };
+      // The payer's nonce is unused, so its read finds nothing (0141).
+      const nonceRead = (params?.keys ?? []).some((raw) => {
+        const key = xdr.LedgerKey.fromXDR(raw, "base64");
+        return (
+          key.switch().name === "contractData" &&
+          key.contractData().key().switch().name === "scvLedgerKeyNonce"
+        );
+      });
       res.setHeader("content-type", "application/json");
       const { events, error, instance, latestLedger: ledger } = realTrustlineMissing;
       const answers: Record<string, unknown> = {
         simulateTransaction: trustlineMissing
           ? { id: "1", latestLedger: ledger, events, error }
           : simulation(),
-        getLedgerEntries: { latestLedger: ledger, entries: [instance] },
+        getLedgerEntries: { latestLedger: ledger, entries: nonceRead ? [] : [instance] },
       };
       res.end(
         JSON.stringify(

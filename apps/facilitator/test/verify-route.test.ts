@@ -8,6 +8,7 @@ import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import { start, type Started } from "../src/start.js";
+import { NONCE_CONSUMED_REASON } from "../src/settlement/nonce-used.js";
 import { PAYTO_TRUSTLINE_REASON } from "../src/settlement/trustline.js";
 import { UpstreamTimeoutError, type Verify } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
@@ -93,6 +94,21 @@ describe("POST /verify", () => {
       expect(verify).toHaveBeenCalledWith(paymentPayload, requirements, expect.any(Object));
     },
   );
+
+  it("counts a refusal because another transaction used the payer's nonce (0141 decision 7)", async () => {
+    verify.mockResolvedValueOnce({
+      isValid: false,
+      invalidReason: NONCE_CONSUMED_REASON,
+      payer: "GPAYER",
+    });
+    await post(request);
+    expect(
+      metrics.value("settlement_nonce_consumed_elsewhere_total", {
+        window: "verify",
+        network: "stellar:testnet",
+      }),
+    ).toBe(1);
+  });
 
   it("logs the RPC URL that answered", async () => {
     verify.mockImplementationOnce(async (_payload, _requirements, trace) => {

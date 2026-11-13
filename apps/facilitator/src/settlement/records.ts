@@ -11,6 +11,7 @@ import {
   type SettlementUpdate,
 } from "../ports/index.js";
 import type { SettlementHooks, SettlementOrigin } from "./hooks.js";
+import { NONCE_CONSUMED_SETTLE_REASON } from "./nonce-used.js";
 
 export interface RecordsDeps {
   network: StellarNetwork;
@@ -99,8 +100,23 @@ export function createRecords(deps: RecordsDeps) {
     metrics.increment("settlement_rewrapped_total", { state: seen.state });
   };
 
+  /**
+   * Another transaction used the payer's nonce first (0141): the payment may have settled there,
+   * and our transaction's fee, if it landed, is lost. A warning, counted, with that fee.
+   */
+  const reportConsumedElsewhere = (record: SettlementRecord) => {
+    logger.warn("settlement_nonce_consumed_elsewhere", {
+      network,
+      settlementKey: record.key,
+      transaction: record.hashes.at(-1),
+      feeCharged: record.feeCharged,
+    });
+    metrics.increment("settlement_nonce_consumed_elsewhere_total", { window: "settle" });
+  };
+
   const onFinal = (record: SettlementRecord, origin: SettlementOrigin) => {
     charged(record.state, record.feeCharged);
+    if (record.errorReason === NONCE_CONSUMED_SETTLE_REASON) reportConsumedElsewhere(record);
     runHook("onFinal", record.key, () => deps.hooks.onFinal(record, origin));
   };
 
