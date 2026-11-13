@@ -98,6 +98,25 @@ fn terms_get_no_extra_when_the_facilitator_does_not_support_their_network() {
 }
 
 #[test]
+fn terms_are_not_supported_by_a_facilitator_with_another_version_or_scheme_on_their_network() {
+    // A facilitator that speaks `exact` only in x402 v1, and v2 only for `upto`: every `/verify`
+    // of the seller's v2 `exact` terms would fail, so `charge()` must refuse them at start.
+    let other: Supported = serde_json::from_value(json!({
+        "kinds": [
+            { "x402Version": 1, "scheme": "exact", "network": "stellar:testnet", "extra": { "areFeesSponsored": true } },
+            { "x402Version": 2, "scheme": "upto", "network": "stellar:testnet", "extra": { "areFeesSponsored": true } }
+        ]
+    }))
+    .unwrap();
+    let terms =
+        PaymentRequirements::exact(Network::Testnet, PAY_TO, Price::usdc("1").unwrap()).unwrap();
+
+    assert!(!other.supports(&terms));
+    let terms = terms.with_supported(&other);
+    assert_eq!(serde_json::to_value(terms).unwrap().get("extra"), None);
+}
+
+#[test]
 fn only_a_boolean_fee_sponsorship_is_copied_from_supported() {
     let odd: Supported = serde_json::from_value(json!({
         "kinds": [{

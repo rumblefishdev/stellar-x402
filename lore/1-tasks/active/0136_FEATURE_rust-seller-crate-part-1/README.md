@@ -78,7 +78,7 @@ writing the protocol myself.
   `settlement_pending` with a hash), the API key, `EXTENSION-RESPONSES`.
 - `src/axum.rs` (feature `axum`, on by default): `PaymentGate` and the layer.
 - `examples/weather.rs`: the example server, the twin of `examples/http-api`.
-- 105 tests with the feature, 66 with `--no-default-features`; the layer's run a seller and a fake
+- 108 tests with the feature, 67 with `--no-default-features`; the layer's run a seller and a fake
   facilitator on local ports. CI job `sdk-rust`.
 
 ### Parity run, 2026-11-13

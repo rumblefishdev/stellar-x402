@@ -745,6 +745,38 @@ async fn a_browser_without_a_payment_gets_upstreams_page() {
 }
 
 #[tokio::test]
+async fn a_request_with_one_sign_of_a_browser_but_not_both_gets_json() {
+    // Upstream's `isWebBrowser` wants both: `Accept` with `text/html` and a `Mozilla` agent.
+    let seller = seller().await;
+    let url = format!("{}/weather?city=Warsaw", seller.url);
+    let client = reqwest::Client::new();
+
+    let html_from_a_script = client
+        .get(&url)
+        .header("accept", "text/html")
+        .header("user-agent", "curl/8.5.0")
+        .send()
+        .await
+        .unwrap();
+    let json_from_a_browser = client
+        .get(&url)
+        .header("accept", "application/json")
+        .header("user-agent", "Mozilla/5.0")
+        .send()
+        .await
+        .unwrap();
+
+    for response in [html_from_a_script, json_from_a_browser] {
+        assert_eq!(response.status(), 402);
+        assert_eq!(response.headers()["content-type"], "application/json");
+        assert_eq!(
+            response.json::<Value>().await.unwrap(),
+            json!({ "error": "Payment required" })
+        );
+    }
+}
+
+#[tokio::test]
 async fn the_seller_is_told_whether_the_catalog_took_its_listing() {
     let seller = seller().await;
     seller.fake.settle_replies(
@@ -850,6 +882,41 @@ async fn a_method_the_route_does_not_have_gets_405_and_no_terms() {
     }
     assert_eq!(seller.served(), 0);
     assert_eq!(seller.asked(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn a_head_request_is_paid_for_as_its_get_route_is() {
+    // axum answers HEAD with the GET handler; `@x402/core` 2.31.0 charges for it the same way.
+    let seller = seller().await;
+    let url = format!("{}/weather?city=Warsaw", seller.url);
+    let client = reqwest::Client::new();
+
+    let unpaid = client.head(&url).send().await.unwrap();
+
+    assert_eq!(unpaid.status(), 402);
+    let required = decoded(&unpaid, "payment-required").unwrap();
+    assert_eq!(required["error"], "Payment required");
+    assert_eq!(
+        required["extensions"]["bazaar"]["info"]["input"]["method"],
+        "HEAD"
+    );
+    assert_eq!(seller.served(), 0);
+
+    let payment = json!({ "x402Version": 2, "accepted": required["accepts"][0], "payload": {} });
+    let paid = client
+        .head(&url)
+        .header("PAYMENT-SIGNATURE", header_of(&payment))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(paid.status(), 200);
+    assert_eq!(
+        decoded(&paid, "payment-response").unwrap()["transaction"],
+        HASH
+    );
+    assert_eq!(seller.served(), 1);
+    assert_eq!(seller.asked(), ["/verify", "/settle"]);
 }
 
 #[tokio::test]

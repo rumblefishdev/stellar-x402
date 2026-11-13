@@ -78,8 +78,8 @@ pub enum FacilitatorError {
         route: &'static str,
         /// The facilitator's `error` code, when its answer has one.
         code: Option<String>,
-        /// The answer as upstream's `responseExcerpt` cuts it: JSON as `JSON.stringify` writes
-        /// it, at most 200 characters.
+        /// The answer as upstream's `responseExcerpt` cuts it, at most 200 characters; JSON with
+        /// the whitespace outside its strings removed (see `compact_json`).
         body: String,
     },
     #[error("the facilitator's answer on {route} is not JSON: {body}")]
@@ -521,7 +521,8 @@ struct Answer {
 impl Answer {
     /// Upstream's error for an answer with an error status and no verdict.
     fn status_error(&self, route: &'static str) -> FacilitatorError {
-        // `JSON.stringify(JSON.parse(text))` for JSON, the text as it is otherwise.
+        // Upstream writes `JSON.stringify(JSON.parse(text))` for JSON, the text as it is
+        // otherwise; `compact_json` matches the first for the answers a facilitator sends.
         let shown = match self.json {
             Some(_) => compact_json(&self.body),
             None => self.body.clone(),
@@ -663,7 +664,13 @@ fn js_string(value: &Value) -> String {
     }
 }
 
-/// JSON text with the whitespace outside its strings removed, as `JSON.stringify` writes it.
+/// JSON text with the whitespace outside its strings removed, and nothing else changed.
+///
+/// That is what upstream's `JSON.stringify(JSON.parse(text))` gives for the answers our facilitator
+/// sends. JavaScript also rewrites numbers (`1.0` to `1`, `1e3` to `1000`), escapes (`é` to
+/// `é`) and duplicate keys (the last wins), which stay here as the facilitator sent them.
+/// Re-serializing through `serde_json` would sort the keys, unless its `preserve_order` feature is
+/// on for the seller's whole build.
 fn compact_json(text: &str) -> String {
     let mut compact = String::with_capacity(text.len());
     let (mut in_string, mut escaped) = (false, false);

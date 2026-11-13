@@ -119,8 +119,10 @@ impl PaymentGate {
     }
 
     /// The seller's public address, such as `https://api.example.com`: the 402 names the resource
-    /// by it. Without one the request's `Host` header is used, with `http`, which is wrong behind
-    /// a proxy that ends TLS.
+    /// by it, and so does the catalog's listing of a route with [`PaidRoute::listing`]. Without
+    /// one the URL is `http://` and the request's `Host` header, as upstream builds it: wrong
+    /// behind a proxy that ends TLS, and any buyer can choose the `Host`. A listed route behind
+    /// TLS needs it.
     pub fn base_url(mut self, url: impl Into<String>) -> Self {
         self.base_url = Some(url.into().trim_end_matches('/').to_owned());
         self
@@ -178,7 +180,8 @@ impl PaidRoute {
         self
     }
 
-    /// Asks a facilitator that catalogs to list the route.
+    /// Asks a facilitator that catalogs to list the route. The catalog lists it at the URL the
+    /// 402 names: set [`PaymentGate::base_url`] for a route behind a proxy that ends TLS.
     pub fn listing(mut self, listing: Listing) -> Self {
         self.listing = Some(listing);
         self
