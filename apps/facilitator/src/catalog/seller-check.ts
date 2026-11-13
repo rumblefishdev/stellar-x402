@@ -97,7 +97,7 @@ export async function askMcpSeller(
       cursor = page.nextCursor;
     } while (!listed && cursor);
     if (!listed) return { ok: false, reason: "no_tool", detail: call.name };
-    // The terms as upstream's payment wrapper sends them (`@x402/mcp` 2.28.0
+    // The terms as upstream's payment wrapper sends them (`@x402/mcp` 2.31.0
     // `createPaymentRequiredResult`): an error result carrying them in `structuredContent`, or as
     // JSON in its first text (9 of 20 live sellers). Read here, not with upstream's MCP client,
     // whose schema reads terms with too many tags as no 402 at all.
