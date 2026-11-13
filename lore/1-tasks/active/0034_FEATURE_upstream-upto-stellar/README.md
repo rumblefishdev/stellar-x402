@@ -356,6 +356,35 @@ threat model, the testnet report and the spec updated.
 **Future work:** C-account signing in our seller SDK (a backlog task, not created yet). Enforcing
 the receiver-entry rules in the facilitator belongs to 0015.
 
+**Note for whoever builds the seller SDK (2026-11-13):**
+
+- There is no seller SDK package yet. `packages/sdk` was empty and 0101 removed it (`623bfa26`);
+  0102 creates it with its first helper. "Our seller SDK" above means the planned seller-side code.
+- The seller-side `upto` code lands in two places: the `upto` `server` class upstream (step 3) and
+  the Rust crate, part 2 (0140).
+- The `server` class needs, at the 402:
+  - `extra.areFeesSponsored: true`;
+  - `extra.receiverAuthorizer`: the address from the facilitator's `/supported` entry
+    (facilitator-delegated) or the seller's own public address (self-managed). The seller picks
+    the mode in its configuration.
+- At `/settle`, in self-managed mode only:
+  - build the receiver authorization entry from the client's entry and the actual amount: the 10
+    `settle_upto` arguments, no sub-invocations, a random nonce, and a `signatureExpirationLedger`
+    no later than the client's `allowance_expiration_ledger` (spec, "Receiver Authorization
+    Entry");
+  - sign it with a `G...` key through a pluggable signer, so `C...` signing can come later;
+  - send it as `payload.receiverAuthorization`, for a zero amount too;
+  - handle a facilitator that refuses self-managed payments
+    (`invalid_upto_stellar_payload_receiver_authorization`).
+  - Unit tests: the entry matches the spec's tree byte for byte, the expiry bound, a zero amount.
+- Check first: how the server in `svm/src/upto/` adds its signature to the payload before
+  `/settle`. In x402 the payload comes from the client. Not checked yet.
+- The `client` class puts `requirements.extra.receiverAuthorizer` in the `receiver_authorizer`
+  argument. `contracts/upto-proxy/e2e/src/upto.ts` already does this.
+- The backlog task for `C...` signing must say where it lands: the `server` class, 0140, or both.
+- 0015 still says `facilitator.require_auth()` and doesn't cover self-managed mode. Update it after
+  #181 merges.
+
 ## Design Decisions
 
 ### Planned
