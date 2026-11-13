@@ -103,6 +103,17 @@ What changed between 2.28.0 and 2.31.0, read from the built packages (no changel
   `GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ` and seller
   `GDHBG2354YS6ONMU6P22EKNEXQTRQUI4J3LSCNRRE2DWK3EYZ4UW2LQT` are new friendbot accounts; the
   buyer's 0.05 USDC came from a path payment on testnet's exchange, as in 0136.
+- Parity run, 2026-11-13: 0136's harness, unchanged in its 45 requests, with the repo's own
+  `examples/http-api` (`@x402/express`, `@x402/core`, `@x402/stellar`, `@x402/extensions`
+  2.31.0 installed; its `src` equals 0136's scratch twin) and `examples/weather.rs` behind one
+  fake facilitator. The terms are equal; 43 answers are equal, compared on status,
+  `Cache-Control`, `Content-Type` without express's `; charset=utf-8`, `PAYMENT-REQUIRED`,
+  `PAYMENT-RESPONSE`, body, other headers and the calls the facilitator got. OPTIONS (express
+  200 `GET, HEAD`, axum 405) and POST on the GET route (express 404, axum 405) differ, the
+  frameworks' own answers, as in 0136. The harness stays out of the repo, as 0136 decided.
+- No fixture needed re-capturing: every test passes on 2.31.0, and the Rust crate's 402 fixture
+  (captured from 2.28.0) is what its test compares with, while the parity run finds 2.31.0's
+  terms equal to the crate's.
 
 ## Design Decisions
 
@@ -132,5 +143,6 @@ What changed between 2.28.0 and 2.31.0, read from the built packages (no changel
 - [x] Given a payment from `@x402/fetch` 2.31.0 on testnet, when our facilitator verifies and
       settles it, then it moves the money, and the transaction hash is recorded (Implementation
       Notes: E-21, E-22a)
-- [ ] Given the requests of 0136's parity run, when `examples/http-api` and the Rust crate's
-      example answer them, then they answer the same, framework differences aside
+- [x] Given the requests of 0136's parity run, when `examples/http-api` and the Rust crate's
+      example answer them, then they answer the same, framework differences aside (43 of 45;
+      OPTIONS and POST are the frameworks')
