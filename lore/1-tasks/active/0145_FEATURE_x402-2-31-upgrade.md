@@ -3,6 +3,7 @@ id: "0145"
 title: "Raise the @x402 packages from 2.28.0 to 2.31.0 across the repo"
 type: FEATURE
 status: active
+owner: akot
 related_adr: []
 related_tasks: ["0136", "0140", "0130"]
 tags: [upstream, dependencies, facilitator, priority-medium, effort-medium]

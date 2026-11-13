@@ -3,6 +3,7 @@ id: "0105"
 title: "Require an API key on pubnet's /verify and /settle"
 type: FEATURE
 status: active
+owner: akot
 milestone: 2
 related_adr: ["0007"]
 related_tasks: ["0024", "0060", "0077", "0106", "0107"]

@@ -2,7 +2,7 @@
 id: "0144"
 title: "Keep a task's owner on the board when someone else adds a history note"
 type: BUG
-status: active
+status: completed
 owner: okarcz
 milestone: 2
 related_adr: []
@@ -20,6 +20,14 @@ history:
     status: active
     who: okarcz
     note: "Started after the team agreed to the owner field."
+  - date: "2026-11-13"
+    status: completed
+    who: okarcz
+    note: >
+      #180 merged (468847e6, de83c84c), approved by Stan: the board reads `owner` first, board.html
+      takes the script's assignee, CI runs the owner check on pull requests. Rebased over
+      develop's move of 0060 to archive and 0136 to a directory; 0105 and 0145, started on develop
+      before the merge, got `owner: akot` on closing.
 ---
 
 # Keep a task's owner on the board when someone else adds a history note
@@ -62,15 +70,33 @@ reads first.
 
 ## Acceptance Criteria
 
-- [ ] `generate-lore-board.mjs` writes `assignee` from `owner` when the task has one, and from the
+- [x] `generate-lore-board.mjs` writes `assignee` from `owner` when the task has one, and from the
       last history entry's `who` when it has none.
-- [ ] `board.html` takes the assignee from `board.json`; its own history rule is gone.
-- [ ] `pnpm board` on this branch gives 0026 the assignee `okarcz`, the blocked 0034 `okarcz`
+- [x] `board.html` takes the assignee from `board.json`; its own history rule is gone.
+- [x] `pnpm board` on this branch gives 0026 the assignee `okarcz`, the blocked 0034 `okarcz`
       (none before), and every other task the assignee it had before.
-- [ ] The task template, `lore/1-tasks/CLAUDE.md` and the `promote-task` and `pr` skills name the
+- [x] The task template, `lore/1-tasks/CLAUDE.md` and the `promote-task` and `pr` skills name the
       field and say who sets it.
-- [ ] Every active and blocked task has `owner`.
-- [ ] Lint and format pass; the PR's CI is green.
+- [x] Every active and blocked task has `owner`.
+- [x] Lint and format pass; the PR's CI is green.
+
+## Implementation Notes
+
+- `tools/scripts/generate-lore-board.mjs`: `getAssignee` reads `owner` first for active, blocked
+  and archived tasks and stops when an owner isn't a key of `team.yaml`; `lore/board.html` reads
+  `t.assignee`. CI runs `pnpm board` on pull requests, so a bad owner fails the PR.
+- `pnpm board` before and after: 135 of 137 tasks unchanged, 0026 karolkow → okarcz, 0034 none →
+  okarcz; a typo (`okracz`) exits 1 with a message.
+- Merged with `--rebase` on 2026-11-13 after a rebase onto develop: 0060 had moved to `archive/`
+  and 0136 had become a directory, so their `owner: akot` went to the new paths.
+
+## Design Decisions
+
+### Emerged
+
+1. **0105 and 0145 got `owner: akot` when closing.** Adam started both on develop while #180 was
+   open, so the template didn't ask for the field yet. Both history entries are his, and the board
+   already showed him; the field keeps the "every active task has `owner`" criterion true.
 
 ## Notes
 
