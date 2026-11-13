@@ -46,10 +46,10 @@ import { createLeaseKeeper } from "../src/settlement/lease.js";
 import { NONCE_CONSUMED_SETTLE_REASON } from "../src/settlement/nonce-used.js";
 import { createReconciler } from "../src/settlement/reconcile.js";
 import { createRecords } from "../src/settlement/records.js";
+import { SETTLE_REASONS } from "../src/settlement/reasons.js";
 import {
   LeaseLostError,
   PayerNotAuthorizedError,
-  SETTLE_REASONS,
   createSettler,
   expectTransfer,
   fingerprintOf,

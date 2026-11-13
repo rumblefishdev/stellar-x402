@@ -23,7 +23,7 @@ import {
 } from "../src/settlement/reconcile.js";
 import { NONCE_CONSUMED_SETTLE_REASON } from "../src/settlement/nonce-used.js";
 import { createRecords } from "../src/settlement/records.js";
-import { SETTLE_REASONS } from "../src/settlement/settle.js";
+import { SETTLE_REASONS } from "../src/settlement/reasons.js";
 import type { SubmitResult } from "@stellar-x402/signer-pool";
 import { failedResult } from "@stellar-x402/signer-pool/testing";
 import { holdLease, settlement } from "./port-contracts.js";

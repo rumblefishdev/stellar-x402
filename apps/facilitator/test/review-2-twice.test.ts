@@ -20,12 +20,8 @@ import type { LeaseFence } from "../src/ports/index.js";
 import type { SettlementHooks } from "../src/settlement/hooks.js";
 import { createReconciler } from "../src/settlement/reconcile.js";
 import { createRecords } from "../src/settlement/records.js";
-import {
-  SETTLE_REASONS,
-  createSettler,
-  type SettlerDeps,
-  type Submitter,
-} from "../src/settlement/settle.js";
+import { SETTLE_REASONS } from "../src/settlement/reasons.js";
+import { createSettler, type SettlerDeps, type Submitter } from "../src/settlement/settle.js";
 import { PAYER_AUTH_REASON, payerNonce, type Check } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
 import { holdLease } from "./port-contracts.js";

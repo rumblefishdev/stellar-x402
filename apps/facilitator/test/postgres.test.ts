@@ -16,13 +16,8 @@ import {
 } from "../src/ports/index.js";
 import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
-import {
-  SETTLE_REASONS,
-  createSettler,
-  fingerprintOf,
-  keyOf,
-  type Submitter,
-} from "../src/settlement/settle.js";
+import { SETTLE_REASONS } from "../src/settlement/reasons.js";
+import { createSettler, fingerprintOf, keyOf, type Submitter } from "../src/settlement/settle.js";
 import type { Check } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
 import { transferPayload } from "./payment.js";

@@ -6,7 +6,7 @@ import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import type { SettlementRecord, SpendScope, SpendStore } from "../src/ports/index.js";
 import type { BeforeSubmitContext } from "../src/settlement/hooks.js";
-import { SETTLE_REASONS } from "../src/settlement/settle.js";
+import { SETTLE_REASONS } from "../src/settlement/reasons.js";
 import type { AssetKind, AssetKinds } from "../src/spend/asset-kinds.js";
 import { budgetKind, spendLimits, type SpendBudgets } from "../src/spend/limits.js";
 import {
