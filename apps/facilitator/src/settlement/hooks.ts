@@ -3,6 +3,15 @@ import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import type { ExtensionResponses } from "@stellar-x402/bazaar";
 import type { SettlementKey, SettlementRecord } from "../ports/index.js";
 
+/**
+ * Who sent a request on a network that requires an API key (0105): `stellar:pubnet`. A network
+ * that takes none, testnet, has no caller.
+ */
+export interface Caller {
+  /** The key's owner in the registry, e.g. `operator:acme-weather` or `discord:<id>`. */
+  owner: string;
+}
+
 /** A verified, claimed settlement about to be submitted. */
 export interface BeforeSubmitContext {
   key: SettlementKey;
@@ -17,6 +26,12 @@ export interface BeforeSubmitContext {
   maxFeeStroops: bigint;
   paymentPayload: PaymentPayload;
   paymentRequirements: PaymentRequirements;
+  /**
+   * The caller this `/settle` request came from, on a network that requires an API key (0105);
+   * `undefined` on one that takes none. A repeat or a reopen carries its own request's caller,
+   * which may differ from the first one's. 0107 budgets by `caller.owner`.
+   */
+  caller?: Caller;
   /**
    * How many times the record was reopened (0073 decision 16): 0 for a first claim. A reopened
    * record's earlier claim may still get its `onFinal` after this call reserves, so a reservation
