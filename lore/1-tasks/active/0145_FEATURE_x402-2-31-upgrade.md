@@ -2,7 +2,7 @@
 id: "0145"
 title: "Raise the @x402 packages from 2.28.0 to 2.31.0 across the repo"
 type: FEATURE
-status: backlog
+status: active
 related_adr: []
 related_tasks: ["0136", "0140", "0130"]
 tags: [upstream, dependencies, facilitator, priority-medium, effort-medium]
@@ -15,6 +15,10 @@ history:
       Spawned from 0136's parity work: the Rust crate answers as @x402/express 2.31.0, the newest
       upstream, while the repo's TypeScript is on 2.28.0. A task of its own, as it touches the
       facilitator in production (akot, 2026-11-13).
+  - date: "2026-11-13"
+    status: active
+    who: akot
+    note: "Work starts, after 0136's PR #177 merged."
 ---
 
 # Raise the @x402 packages from 2.28.0 to 2.31.0 across the repo
