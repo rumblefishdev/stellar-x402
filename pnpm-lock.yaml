@@ -40,8 +40,8 @@ importers:
   apps/facilitator:
     dependencies:
       '@modelcontextprotocol/sdk':
-        specifier: ^1.30.1
-        version: 1.30.1(zod@3.25.76)
+        specifier: ^1.32.0
+        version: 1.32.2(zod@3.25.76)
       '@stellar-x402/bazaar':
         specifier: workspace:*
         version: link:../../packages/bazaar
@@ -64,20 +64,20 @@ importers:
         specifier: ^16.3.0
         version: 16.4.1
       '@x402/core':
-        specifier: ~2.28.0
-        version: 2.28.0
+        specifier: ~2.31.0
+        version: 2.31.0
       '@x402/extensions':
-        specifier: ~2.28.0
-        version: 2.28.0(typescript@6.0.3)
+        specifier: ~2.31.0
+        version: 2.31.0(typescript@6.0.3)
       '@x402/stellar':
-        specifier: ~2.28.0
-        version: 2.28.0
+        specifier: ~2.31.0
+        version: 2.31.0
       express:
-        specifier: ^5.2.1
-        version: 5.2.1
+        specifier: ^5.3.0
+        version: 5.3.0
       express-rate-limit:
         specifier: ^8.7.0
-        version: 8.7.0(express@5.2.1)
+        version: 8.7.0(express@5.3.0)
       pg:
         specifier: ^8.23.1
         version: 8.23.1
@@ -98,8 +98,8 @@ importers:
   apps/mcp-local:
     dependencies:
       '@modelcontextprotocol/sdk':
-        specifier: ^1.30.1
-        version: 1.30.1(zod@3.25.76)
+        specifier: ^1.32.0
+        version: 1.32.2(zod@3.25.76)
       '@stellar-x402/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -107,8 +107,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/mcp
       '@x402/stellar':
-        specifier: ~2.28.0
-        version: 2.28.0
+        specifier: ~2.31.0
+        version: 2.31.0
       zod:
         specifier: ^3.25.76
         version: 3.25.76
@@ -120,8 +120,8 @@ importers:
   apps/mcp-local/e2e:
     dependencies:
       '@modelcontextprotocol/sdk':
-        specifier: ^1.30.1
-        version: 1.30.1(zod@3.25.76)
+        specifier: ^1.32.0
+        version: 1.32.2(zod@4.6.7)
       '@stellar-x402/signer-pool':
         specifier: workspace:*
         version: link:../../../packages/signer-pool
@@ -129,11 +129,11 @@ importers:
         specifier: ^16.3.0
         version: 16.4.1
       '@x402/core':
-        specifier: ~2.28.0
-        version: 2.28.0
+        specifier: ~2.31.0
+        version: 2.31.0
       '@x402/extensions':
-        specifier: ~2.28.0
-        version: 2.28.0(typescript@6.0.3)
+        specifier: ~2.31.0
+        version: 2.31.0(typescript@6.0.3)
 
   conformance:
     dependencies:
@@ -162,20 +162,20 @@ importers:
         specifier: ^16.3.0
         version: 16.4.1
       '@x402/core':
-        specifier: ~2.28.0
-        version: 2.28.0
+        specifier: ~2.31.0
+        version: 2.31.0
       '@x402/express':
-        specifier: ~2.28.0
-        version: 2.28.0(express@5.2.1)(typescript@6.0.3)
+        specifier: ~2.31.0
+        version: 2.31.0(express@5.3.0)(typescript@6.0.3)
       '@x402/extensions':
-        specifier: ~2.28.0
-        version: 2.28.0(typescript@6.0.3)
+        specifier: ~2.31.0
+        version: 2.31.0(typescript@6.0.3)
       '@x402/stellar':
-        specifier: ~2.28.0
-        version: 2.28.0
+        specifier: ~2.31.0
+        version: 2.31.0
       express:
-        specifier: ^5.2.1
-        version: 5.2.1
+        specifier: ^5.3.0
+        version: 5.3.0
       zod:
         specifier: ^3.25.76
         version: 3.25.76
@@ -187,11 +187,11 @@ importers:
   examples/mcp-metered:
     dependencies:
       '@modelcontextprotocol/sdk':
-        specifier: ^1.30.1
-        version: 1.30.1(zod@3.25.76)
+        specifier: ^1.32.0
+        version: 1.32.2(zod@3.25.76)
       '@x402/mcp':
-        specifier: ~2.28.0
-        version: 2.28.0
+        specifier: ~2.31.0
+        version: 2.31.0
       zod:
         specifier: ^3.25.76
         version: 3.25.76
@@ -230,22 +230,22 @@ importers:
   packages/bazaar:
     dependencies:
       '@x402/core':
-        specifier: ~2.28.0
-        version: 2.28.0
+        specifier: ~2.31.0
+        version: 2.31.0
       '@x402/extensions':
-        specifier: ~2.28.0
-        version: 2.28.0(typescript@6.0.3)
+        specifier: ~2.31.0
+        version: 2.31.0(typescript@6.0.3)
       zod:
-        specifier: ^3.25.76
-        version: 3.25.76
+        specifier: ^4.6.7
+        version: 4.6.7
 
   packages/config: {}
 
   packages/mcp:
     dependencies:
       '@modelcontextprotocol/sdk':
-        specifier: ^1.30.1
-        version: 1.30.1(zod@3.25.76)
+        specifier: ^1.32.0
+        version: 1.32.2(zod@3.25.76)
       '@stellar-x402/bazaar':
         specifier: workspace:*
         version: link:../bazaar
@@ -256,14 +256,14 @@ importers:
         specifier: workspace:*
         version: link:../seller-fetch
       '@x402/core':
-        specifier: ~2.28.0
-        version: 2.28.0
+        specifier: ~2.31.0
+        version: 2.31.0
       '@x402/extensions':
-        specifier: ~2.28.0
-        version: 2.28.0(typescript@6.0.3)
+        specifier: ~2.31.0
+        version: 2.31.0(typescript@6.0.3)
       '@x402/fetch':
-        specifier: ~2.28.0
-        version: 2.28.0
+        specifier: ~2.31.0
+        version: 2.31.0
       zod:
         specifier: ^3.25.76
         version: 3.25.76
@@ -289,8 +289,8 @@ importers:
         specifier: ^16.3.0
         version: 16.4.1
       '@x402/stellar':
-        specifier: ~2.28.0
-        version: 2.28.0
+        specifier: ~2.31.0
+        version: 2.31.0
 
 packages:
 
@@ -556,8 +556,8 @@ packages:
   '@keyv/serialize@1.1.1':
     resolution: {integrity: sha512-dXn3FZhPv0US+7dtJsIi2R+c7qWYiReoEh5zUntWCf4oSpMNib8FDhSoed6m3QyZdx5hK7iLFkYk3rNxwt8vTA==}
 
-  '@modelcontextprotocol/sdk@1.30.1':
-    resolution: {integrity: sha512-H2HxLvC3HDNybePJaLdSrU1hhUK5iQw+WvV1b01myFyI7sdVGe1u/IPTE5D9fGCiJDVtgMV/lmFkQXLmQyIFYA==}
+  '@modelcontextprotocol/sdk@1.32.2':
+    resolution: {integrity: sha512-SWsVtH/0vULSQStoZ6xxH2K09Li8fXYTMC64ZeogCdpZ3XSi1eCPOByV1OpuJxuI3OcmHhosDWYyii07tpPsLw==}
     engines: {node: '>=18'}
     peerDependencies:
       '@cfworker/json-schema': ^4.1.1
@@ -874,29 +874,29 @@ packages:
   '@vitest/spy@5.0.2':
     resolution: {integrity: sha512-Ijc7T1nT9efNb5LxvjaBrEqw3f/QwUv5EE0nKqZxgqsaV/FxAAZ8baGylA8X/Z2oS4Lp+K74Jr6dTJsDKxJDeg==}
 
-  '@x402/core@2.28.0':
-    resolution: {integrity: sha512-Da/7zKxCKqpBoB4Msc9tFgkAv7tJTD8nG+DSSm+QdXAyJS4PQsmgVSKe17rDJTtlu0pwNbLcOje6MyQ6kaDkig==}
+  '@x402/core@2.31.0':
+    resolution: {integrity: sha512-7ToCOwHfftfFEERW5Mp6Fc5U1+JrtCLTkbQnEVsBl13IutltP9lWIBYi/J+zy8vQWaLUmACq8A2qywzdt/RRIQ==}
 
-  '@x402/express@2.28.0':
-    resolution: {integrity: sha512-/94ZT89ce9Y92TgAxMuBQiS32BbvZOh0ZziMxTR8js2dbroEZ8po5guayy8zHOG79/x0p5GHJ/yoUUC4faMnvA==}
+  '@x402/express@2.31.0':
+    resolution: {integrity: sha512-hUumfQGb8mNdwkpLAZuuoHCJ3p5gNtu5/yRaZNRNqQILp155Ur2tJQCizPQZR1XNsZ6mXwJG4+5rE1iW0f/9sg==}
     peerDependencies:
-      '@x402/paywall': ^2.28.0
-      express: ^4.0.0 || ^5.0.0
+      '@x402/paywall': ^2.31.0
+      express: ^4.22.3 || ^5.3.0
     peerDependenciesMeta:
       '@x402/paywall':
         optional: true
 
-  '@x402/extensions@2.28.0':
-    resolution: {integrity: sha512-M3SVxO8DJnx7gpok/ODQp803jr21s1XrCMholNw0hSgOVvSPRksfTZ+CUNfJwteNaHmaAxGjPelXWBhTCMD9oQ==}
+  '@x402/extensions@2.31.0':
+    resolution: {integrity: sha512-hFq11UtXNWPirZSZjZuWFHvjetYvFQmkQSZcNEMaQYxOz70ZLNFmIdXfG2J/B8YGE2nS2d223Hz9Lnkrxw+Sqw==}
 
-  '@x402/fetch@2.28.0':
-    resolution: {integrity: sha512-kF5IjZIz/izg2TD/Zav+SVj0jtC0zBDfE7WcKCnMZWIsZcLCyL2GgvwXCn7CCSsNjpQ/z3Rz4OqTCA4AaeKySQ==}
+  '@x402/fetch@2.31.0':
+    resolution: {integrity: sha512-Td+Nxhy0TIwKMZ4G7q+lv+oD5SsRI1T0peGE34lSZaaZwXvqQbeR/TQDzex6tQpljq12+D7Mjwp1wX0Maa2Zeg==}
 
-  '@x402/mcp@2.28.0':
-    resolution: {integrity: sha512-I84qbst4aazR8lqfcw/XRURjECxzKuFsNMWgELgD63OBK39Jqjz0dar9o0X7Vdm4FcsWA/QET+F1MFFEU4QmKQ==}
+  '@x402/mcp@2.31.0':
+    resolution: {integrity: sha512-l0qxG1d+f5EQ5rL8D01OuYl+gC2/xfLT650bmM7XfAljGn8mIEByYjKejvBun9tq02bFrwfUNDLWeOi6+pBrZg==}
 
-  '@x402/stellar@2.28.0':
-    resolution: {integrity: sha512-H/P46YVVEvJmnXlss8fJBNGgjaLkp3pWJ6PH2uOJY+jVemugUoQPArwtQKNovEV2BnF0gnJ+sdaRg+4Gucu6jQ==}
+  '@x402/stellar@2.31.0':
+    resolution: {integrity: sha512-UCohyXXxTdcvnhU2YrELCMj0WATzgLwAZk2gAe3ewDA5pp0m1M+ndw/bJoHFvJ9vs/5WpKUOukKwwzhLxC5Pcg==}
     engines: {node: '>=22.0.0'}
 
   abitype@1.2.3:
@@ -1036,6 +1036,10 @@ packages:
 
   content-disposition@1.1.0:
     resolution: {integrity: sha512-5jRCH9Z/+DRP7rkvY83B+yGIGX96OYdJmzngqnw2SBSxqCFPd0w2km3s5iawpGX8krnwSGmF0FW5Nhr0Hfai3g==}
+    engines: {node: '>=18'}
+
+  content-disposition@2.0.1:
+    resolution: {integrity: sha512-e+H0ZXHSWYrENhQzw1LPuP4oF5MzVKmDU6d3hxlvaPEYLLg62MxtQNPRx4SYSuYJSBUgnQIG4HIN2tEtNv7Dog==}
     engines: {node: '>=18'}
 
   content-type@1.0.5:
@@ -1204,6 +1208,10 @@ packages:
 
   express@5.2.1:
     resolution: {integrity: sha512-hIS4idWWai69NezIdRt2xFVofaF4j+6INOpJlVOLDO8zXGpUVEVzIYk12UUi2JzjEzWL3IOAxcTubgz9Po0yXw==}
+    engines: {node: '>= 18'}
+
+  express@5.3.0:
+    resolution: {integrity: sha512-qCqy1xSoaugxOD4IVHb1ZWdkvCF2W3aE2okKouWj8VwJ+ztskSiXoBnCSJqfKT+cVPJhuJqe9YLbY425+Zh00g==}
     engines: {node: '>= 18'}
 
   fast-deep-equal@3.1.3:
@@ -1980,6 +1988,9 @@ packages:
   zod@3.25.76:
     resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
 
+  zod@4.6.7:
+    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
+
 snapshots:
 
   '@adraffy/ens-normalize@1.11.1': {}
@@ -2151,7 +2162,7 @@ snapshots:
 
   '@keyv/serialize@1.1.1': {}
 
-  '@modelcontextprotocol/sdk@1.30.1(zod@3.25.76)':
+  '@modelcontextprotocol/sdk@1.32.2(zod@3.25.76)':
     dependencies:
       '@hono/node-server': 2.1.1(hono@4.13.10)
       ajv: 8.20.0
@@ -2170,6 +2181,28 @@ snapshots:
       raw-body: 3.0.2
       zod: 3.25.76
       zod-to-json-schema: 3.25.2(zod@3.25.76)
+    transitivePeerDependencies:
+      - supports-color
+
+  '@modelcontextprotocol/sdk@1.32.2(zod@4.6.7)':
+    dependencies:
+      '@hono/node-server': 2.1.1(hono@4.13.10)
+      ajv: 8.20.0
+      ajv-formats: 3.0.1(ajv@8.20.0)
+      content-type: 1.0.5
+      cors: 2.8.6
+      cross-spawn: 7.0.6
+      eventsource: 3.0.7
+      eventsource-parser: 3.1.1
+      express: 5.2.1
+      express-rate-limit: 8.7.0(express@5.2.1)
+      hono: 4.13.10
+      jose: 6.2.12
+      json-schema-typed: 8.0.2
+      pkce-challenge: 5.0.1
+      raw-body: 3.0.2
+      zod: 4.6.7
+      zod-to-json-schema: 3.25.2(zod@4.6.7)
     transitivePeerDependencies:
       - supports-color
 
@@ -2462,55 +2495,55 @@ snapshots:
 
   '@vitest/spy@5.0.2': {}
 
-  '@x402/core@2.28.0':
+  '@x402/core@2.31.0':
     dependencies:
-      zod: 3.25.76
+      zod: 4.6.7
 
-  '@x402/express@2.28.0(express@5.2.1)(typescript@6.0.3)':
+  '@x402/express@2.31.0(express@5.3.0)(typescript@6.0.3)':
     dependencies:
-      '@x402/core': 2.28.0
-      '@x402/extensions': 2.28.0(typescript@6.0.3)
-      express: 5.2.1
+      '@x402/core': 2.31.0
+      '@x402/extensions': 2.31.0(typescript@6.0.3)
+      express: 5.3.0
     transitivePeerDependencies:
       - bufferutil
       - ethers
       - typescript
       - utf-8-validate
 
-  '@x402/extensions@2.28.0(typescript@6.0.3)':
+  '@x402/extensions@2.31.0(typescript@6.0.3)':
     dependencies:
       '@noble/curves': 1.9.7
       '@scure/base': 1.2.6
       '@signinwithethereum/siwe': 4.2.1(viem@2.56.9(typescript@6.0.3)(zod@3.25.76))
-      '@x402/core': 2.28.0
+      '@x402/core': 2.31.0
       ajv: 8.20.0
       jose: 5.10.0
       tweetnacl: 1.0.3
-      viem: 2.56.9(typescript@6.0.3)(zod@3.25.76)
-      zod: 3.25.76
+      viem: 2.56.9(typescript@6.0.3)(zod@4.6.7)
+      zod: 4.6.7
     transitivePeerDependencies:
       - bufferutil
       - ethers
       - typescript
       - utf-8-validate
 
-  '@x402/fetch@2.28.0':
+  '@x402/fetch@2.31.0':
     dependencies:
-      '@x402/core': 2.28.0
+      '@x402/core': 2.31.0
 
-  '@x402/mcp@2.28.0':
+  '@x402/mcp@2.31.0':
     dependencies:
-      '@modelcontextprotocol/sdk': 1.30.1(zod@3.25.76)
-      '@x402/core': 2.28.0
-      zod: 3.25.76
+      '@modelcontextprotocol/sdk': 1.32.2(zod@4.6.7)
+      '@x402/core': 2.31.0
+      zod: 4.6.7
     transitivePeerDependencies:
       - '@cfworker/json-schema'
       - supports-color
 
-  '@x402/stellar@2.28.0':
+  '@x402/stellar@2.31.0':
     dependencies:
       '@stellar/stellar-sdk': 16.4.1
-      '@x402/core': 2.28.0
+      '@x402/core': 2.31.0
     transitivePeerDependencies:
       - debug
       - supports-color
@@ -2519,6 +2552,12 @@ snapshots:
     optionalDependencies:
       typescript: 6.0.3
       zod: 3.25.76
+    optional: true
+
+  abitype@1.2.3(typescript@6.0.3)(zod@4.6.7):
+    optionalDependencies:
+      typescript: 6.0.3
+      zod: 4.6.7
 
   accepts@2.0.0:
     dependencies:
@@ -2642,6 +2681,8 @@ snapshots:
   constructs@10.8.1: {}
 
   content-disposition@1.1.0: {}
+
+  content-disposition@2.0.1: {}
 
   content-type@1.0.5: {}
 
@@ -2826,12 +2867,53 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  express-rate-limit@8.7.0(express@5.3.0):
+    dependencies:
+      debug: 4.4.3
+      express: 5.3.0
+      ip-address: 10.7.2
+    transitivePeerDependencies:
+      - supports-color
+
   express@5.2.1:
     dependencies:
       accepts: 2.0.0
       body-parser: 2.3.0
       content-disposition: 1.1.0
       content-type: 1.0.5
+      cookie: 0.7.2
+      cookie-signature: 1.2.2
+      debug: 4.4.3
+      depd: 2.0.0
+      encodeurl: 2.0.0
+      escape-html: 1.0.3
+      etag: 1.8.1
+      finalhandler: 2.1.1
+      fresh: 2.0.0
+      http-errors: 2.0.1
+      merge-descriptors: 2.0.0
+      mime-types: 3.0.2
+      on-finished: 2.4.1
+      once: 1.4.0
+      parseurl: 1.3.3
+      proxy-addr: 2.0.8
+      qs: 6.16.0
+      range-parser: 1.3.0
+      router: 2.2.0
+      send: 1.2.1
+      serve-static: 2.2.1
+      statuses: 2.0.2
+      type-is: 2.1.0
+      vary: 1.1.2
+    transitivePeerDependencies:
+      - supports-color
+
+  express@5.3.0:
+    dependencies:
+      accepts: 2.0.0
+      body-parser: 2.3.0
+      content-disposition: 2.0.1
+      content-type: 2.1.0
       cookie: 0.7.2
       cookie-signature: 1.2.2
       debug: 4.4.3
@@ -3164,6 +3246,22 @@ snapshots:
       typescript: 6.0.3
     transitivePeerDependencies:
       - zod
+    optional: true
+
+  ox@0.14.45(typescript@6.0.3)(zod@4.6.7):
+    dependencies:
+      '@adraffy/ens-normalize': 1.11.1
+      '@noble/ciphers': 1.3.0
+      '@noble/curves': 1.9.1
+      '@noble/hashes': 1.8.0
+      '@scure/bip32': 1.7.0
+      '@scure/bip39': 1.6.0
+      abitype: 1.2.3(typescript@6.0.3)(zod@4.6.7)
+      eventemitter3: 5.0.1
+    optionalDependencies:
+      typescript: 6.0.3
+    transitivePeerDependencies:
+      - zod
 
   p-limit@3.1.0:
     dependencies:
@@ -3462,6 +3560,24 @@ snapshots:
       - bufferutil
       - utf-8-validate
       - zod
+    optional: true
+
+  viem@2.56.9(typescript@6.0.3)(zod@4.6.7):
+    dependencies:
+      '@noble/curves': 1.9.1
+      '@noble/hashes': 1.8.0
+      '@scure/bip32': 1.7.0
+      '@scure/bip39': 1.6.0
+      abitype: 1.2.3(typescript@6.0.3)(zod@4.6.7)
+      isows: 1.0.7(ws@8.21.0)
+      ox: 0.14.45(typescript@6.0.3)(zod@4.6.7)
+      ws: 8.21.0
+    optionalDependencies:
+      typescript: 6.0.3
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
+      - zod
 
   vite@8.3.1(@types/node@22.20.4)(esbuild@0.28.2)(tsx@4.23.15):
     dependencies:
@@ -3517,4 +3633,10 @@ snapshots:
     dependencies:
       zod: 3.25.76
 
+  zod-to-json-schema@3.25.2(zod@4.6.7):
+    dependencies:
+      zod: 4.6.7
+
   zod@3.25.76: {}
+
+  zod@4.6.7: {}

@@ -234,8 +234,8 @@ graph TD
 - **Binds:** all workspace `package.json` files
 - **Prevents:** two copies of `@x402/core` or `@stellar/stellar-sdk` in one process.
 - **Rule:**
-  - All `@x402/*` packages share one pinned minor, `~2.28.0` from T1.
-  - `@stellar/stellar-sdk` stays on `^16.3.0`. `@x402/stellar` 2.28 requires 16.x, and our code uses the XDR accessor API.
+  - All `@x402/*` packages share one pinned minor: `~2.28.0` from T1, `~2.31.0` from 0145.
+  - `@stellar/stellar-sdk` stays on 16.x (`^16.3.0`; the lockfile has 16.4.1, which `@x402/stellar` 2.31 requires), and our code uses the XDR accessor API.
   - A protocol-29 XDR fixture test (`AddressV2`) guards this rule.
 
 ### AD-15: The gate runs from our repo against a clean upstream checkout
@@ -379,9 +379,9 @@ graph TD
 | Node.js                                     | >=22.12 (22 LTS, maintenance until 2027-04; CI also runs 24)       |
 | pnpm                                        | 11.5.2                                                             |
 | TypeScript                                  | ~6.0.3 (ESM, NodeNext, strict; staying on 6.x in T1 is deliberate) |
-| @x402/core, @x402/stellar, @x402/extensions | ~2.28.0                                                            |
+| @x402/core, @x402/stellar, @x402/extensions | ~2.31.0                                                            |
 | @stellar/stellar-sdk                        | ^16.3.0                                                            |
-| express                                     | ^5.2.1                                                             |
+| express                                     | ^5.3.0                                                             |
 | zod                                         | ^3.25.76 (to be added to `apps/facilitator`)                       |
 | vitest                                      | ^5.0.2                                                             |
 | x402 protocol                               | v2                                                                 |

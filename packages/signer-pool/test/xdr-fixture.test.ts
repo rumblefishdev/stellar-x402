@@ -33,7 +33,7 @@ const installed = (name: string) =>
 describe("protocol-29 XDR fixture", () => {
   it("runs on the versions AD-14 pins", () => {
     expect(installed("@stellar/stellar-sdk")).toMatch(/^16\./);
-    expect(installed("@x402/stellar")).toMatch(/^2\.28\./);
+    expect(installed("@x402/stellar")).toMatch(/^2\.31\./);
   });
 
   it("parses the fee bump with its AddressV2 entry and keeps the hash", () => {
