@@ -64,6 +64,13 @@ history:
       upto; and no x402 nonce storage in UptoProxy, relying on Soroban's auth nonce as #3134
       does. The contract's `facilitator` parameter becomes `receiver_authorizer`. Work on the
       local branch lore-0034-review-fixes; nothing goes upstream until okarcz says so.
+  - date: "2026-11-13"
+    status: active
+    who: okarcz
+    note: >
+      #181 merged after Stan's review. On #3781: the updated spec pushed (a3ac96fe), the
+      description replaced, both of jeesunikim's comments answered, and a comment asking for CI
+      approval and a re-review. Eras256's question is still open.
 ---
 
 # Merge the Stellar upto scheme upstream: scheme_upto_stellar.md and the @x402/stellar classes
@@ -78,11 +85,12 @@ once it is **merged**, not when it is proposed.
 
 ## Status: Active
 
-> jeesunikim's review of #3781 landed on 2026-11-12 with two comments; okarcz accepted both (see
-> [Review of #3781](#review-of-3781-2026-11-12)). The contract, the e2e suite, the docs and the spec
-> draft are changed on `lore-0034-review-fixes` for the team's review in our repo. Nothing is
-> posted to #3781 until okarcz asks. Eras256's convergence question (2026-10-23) is still unanswered. The
-> code PR also waits on 0015. Drafts are in [`drafts/`](drafts/).
+> jeesunikim's review of #3781 (2026-11-12) is answered: the contract, the e2e suite and the docs
+> changed in our #181 (merged 2026-11-13), and the updated spec, a new description and replies to
+> both comments went up on 2026-11-13 (see [Upstream update](#upstream-update-2026-11-13)). #3781
+> now waits for a maintainer to approve its CI runs and for jeesunikim's re-review. Eras256's
+> convergence question (2026-10-23) is still unanswered. The code PR also waits on 0015. Drafts are
+> in [`drafts/`](drafts/).
 
 ## Context
 
@@ -371,6 +379,30 @@ threat model, the testnet report and the spec updated.
   (`contracts/upto-proxy/e2e/results/testnet-results-2026-11-13.json`); the report keeps citing the
   2026-11-12 run.
 
+### Upstream update (2026-11-13)
+
+Posted by okarcz's go, step by step:
+
+- **Spec:** `a3ac96fe` "docs(specs): add receiver authorizer modes to upto on Stellar", signed,
+  pushed to `karczuRF/x402:feature/upto-stellar-spec`; the file equals
+  [`drafts/scheme_upto_stellar.md`](drafts/scheme_upto_stellar.md) as merged in #181. Local
+  `main` of the fork clone was moved to upstream `27e37052` first; upstream changed no `upto` spec
+  and none of the anchors the draft links to, so no rebase was needed.
+- **Description:** replaced (the posted body is the record): the two receiver authorizer modes, single use from Soroban's nonce, proxy `CDPHI4JY…EA2X` and
+  the 61/61 run, an "Updated after review" line, and the relationship to #3134 instead of #3098.
+- **Replies** to both of jeesunikim's comments (`discussion_r4564647727`, receiver authorizer;
+  `discussion_r4564648146`, no nonce storage). okarcz left out of the first reply the two points
+  still listed above for confirmation (recording-mode `/verify` in self-managed mode, and a
+  self-managed zero `/settle` carrying `receiverAuthorization`); both stay in the pushed spec.
+- **PR comment** (`issuecomment-6856267580`): asks a maintainer to approve the CI runs and
+  jeesunikim to look again.
+- **CI:** CarsonBot's checklist (`issuecomment-6729323361`) had only "CI passes" open, failing
+  `lint-python`, `test-python` and `Check Python` on `f31b9d9`. Both failures were infrastructure:
+  a 504 while downloading tools, and the runner picking Python 3.15, which `rignore` (PyO3) can't
+  build on. Python CI passes on upstream `main` since. The runs for `a3ac96fe` show
+  `action_required`: a fork's workflows wait for a maintainer. Vercel's preview still waits for a
+  Coinbase team member, as for any outside contributor.
+
 **Future work:** C-account signing in our seller SDK (a backlog task, not created yet). Enforcing
 the receiver-entry rules in the facilitator belongs to 0015.
 
@@ -437,9 +469,9 @@ the receiver-entry rules in the facilitator belongs to 0015.
 
 ## Open
 
-- **#3781:** reply to Eras256's convergence comment of 2026-10-23; answer the maintainer review
-  started on 2026-10-20 when it lands; ask through the Technical Steering Committee,
-  or SDF's board seat, if it stalls. Optionally post the four maintainer questions as a first
+- **#3781:** wait for the CI approval and jeesunikim's re-review (asked 2026-11-13); reply to
+  Eras256's convergence comment of 2026-10-23; ask through the Technical Steering Committee, or
+  SDF's board seat, if it stalls. Optionally post the four maintainer questions as a first
   comment and point #3098 and #3134 at #3781.
 - **Code PR:** the `upto` classes wait on 0015. The org fork of `x402-foundation/x402` (ADR 0001)
   can be created for it.
