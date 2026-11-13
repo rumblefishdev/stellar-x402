@@ -17,6 +17,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..", "..");
 const TASKS_DIR = join(ROOT, "lore", "1-tasks");
 const OUT_JSON = join(ROOT, "lore", "board.json");
+const TEAM_YAML = join(ROOT, "lore", "0-session", "team.yaml");
 
 const STATUS_DIRS = ["backlog", "active", "blocked", "archive"];
 
@@ -195,11 +196,33 @@ function getPriority(task) {
   return p ? p.replace("priority-", "") : "medium";
 }
 
+/**
+ * Who the board shows for a task: its `owner` when set, else the `who` of its last history entry.
+ * A history note by someone else used to hand them the task (0144); `owner` changes only on a
+ * handoff. A backlog task has nobody yet.
+ */
 function getAssignee(task) {
-  if (task._dir !== "active" && task._dir !== "archive") return null;
+  if (task._dir === "backlog") return null;
+  if (task.owner) return task.owner;
   const history = Array.isArray(task.history) ? task.history : [];
   const lastEntry = history[history.length - 1];
   return lastEntry?.who || null;
+}
+
+/** The team's lore ids: the top-level keys of team.yaml. */
+function loadTeam() {
+  return new Set(
+    [...readFileSync(TEAM_YAML, "utf-8").matchAll(/^([\w-]+):\s*$/gm)].map((m) => m[1]),
+  );
+}
+
+/** An owner the team doesn't have is a typo, and the board would show a person who isn't there. */
+function checkOwners(tasks, team) {
+  const unknown = tasks.filter((t) => t.owner && !team.has(t.owner));
+  if (unknown.length === 0) return;
+  for (const t of unknown)
+    console.error(`${t._path}: owner "${t.owner}" is not a key of lore/0-session/team.yaml`);
+  process.exit(1);
 }
 
 function extractDescription(content) {
@@ -243,6 +266,7 @@ function generateJSON(tasks) {
 
 // Main
 const tasks = loadTasks();
+checkOwners(tasks, loadTeam());
 const json = generateJSON(tasks);
 
 writeFileSync(

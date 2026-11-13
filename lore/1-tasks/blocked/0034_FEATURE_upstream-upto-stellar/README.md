@@ -3,6 +3,7 @@ id: "0034"
 title: "Merge the Stellar upto scheme upstream: scheme_upto_stellar.md and the @x402/stellar classes"
 type: FEATURE
 status: blocked
+owner: okarcz
 milestone: 2
 related_adr: ["0001"]
 related_tasks: ["0002", "0003", "0004", "0005", "0015"]

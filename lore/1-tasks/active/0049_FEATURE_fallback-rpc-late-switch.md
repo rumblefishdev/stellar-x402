@@ -3,6 +3,7 @@ id: "0049"
 title: "Finish FallbackRpc's switching: frozen endpoints, transport-only errors, URL-free fromUrls names, the Attempt.sent split"
 type: FEATURE
 status: active
+owner: karolkow
 milestone: 1
 related_adr: []
 related_tasks: ["0045", "0007", "0016"]
