@@ -60,8 +60,9 @@ Every request counts, a malformed or oversized one too. `/supported` has no limi
   not these, bound the fees the facilitator pays.
 - **Sellers on Cloudflare Workers share one budget.** A Worker's request to another Cloudflare
   zone arrives with `CF-Connecting-IP: 2a06:98c0:3600::103` for every Worker, and sellers behind
-  one cloud NAT share its address the same way. On testnet this stays so, since a key is ignored
-  there (0060); on pubnet a caller will be counted by its API key (0105).
+  one cloud NAT share its address the same way. One of them over the budget gets the others a 429
+  until the window ends. On testnet this is accepted (0060), since a key is ignored there; on
+  pubnet a caller will be counted by its API key (0105).
 - **`CLIENT_IP` is required**, so it can't be forgotten behind the tunnel, where every client
   would share the tunnel's address and one budget. `cloudflare` reads `CF-Connecting-IP`, which
   Cloudflare sets on every request and refuses from a client; `socket` takes the connection's own
