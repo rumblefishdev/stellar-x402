@@ -17,7 +17,7 @@ import type {
   SettlementStore,
 } from "../ports/index.js";
 import { isFinalRecord, resultUpdate, type Records } from "./records.js";
-import { SETTLE_REASONS } from "./settle.js";
+import { SETTLE_REASONS } from "./reasons.js";
 import { payerExpiration } from "./verify.js";
 
 export interface ReconcilerDeps {
