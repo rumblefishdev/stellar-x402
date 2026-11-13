@@ -22,6 +22,10 @@ history:
     status: active
     who: stkrolikiewicz
     note: "Work starts: the platform track of the Milestone 2 plan."
+  - date: "2026-11-13"
+    status: active
+    who: stkrolikiewicz
+    note: "Every alarm checked against what it reads, and a draft decision for the team; not decided yet"
 ---
 
 # Measure what CloudWatch costs and decide: cut it down or move to Grafana
