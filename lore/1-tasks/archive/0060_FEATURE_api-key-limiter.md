@@ -2,7 +2,7 @@
 id: "0060"
 title: "Accept a configured API key as the rate limiter's key"
 type: FEATURE
-status: active
+status: completed
 milestone: 1
 related_adr: ["0007"]
 related_tasks: ["0023", "0024", "0026", "0105"]
@@ -19,6 +19,13 @@ history:
     status: active
     who: akot
     note: "Work starts."
+  - date: "2026-11-13"
+    status: completed
+    who: akot
+    note: >
+      #179 merged (7167414c): the shared rate-limit budget is accepted on testnet; the
+      facilitator README, FR12 and Story 2.2 in the M1 epics, and 0026 say so. Docs only, no
+      code. The API key criteria went to 0105, for pubnet.
 ---
 
 # Accept a configured API key as the rate limiter's key
