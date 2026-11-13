@@ -90,6 +90,20 @@ What changed between 2.28.0 and 2.31.0, read from the built packages (no changel
   paid testnet request through the facilitator.
 - Re-capture any fixture taken from 2.28.0 output that changes.
 
+## Implementation Notes
+
+- The bump: `92ebe3f3`. `pnpm test` on it: every package passes, the facilitator 1012 tests
+  (3 skipped) against the local PostgreSQL.
+- MCP testnet run, 2026-11-13, at `706a8e9a`: `pnpm mcp:e2e`, 121 of 121
+  (`apps/mcp-local/e2e/results/testnet-results.json`). The buyer is `packages/mcp` on
+  `@x402/fetch` 2.31.0, the seller `examples/http-api` on `@x402/express` 2.31.0, the
+  facilitator this branch's build. Two payments of 0.001 USDC, the facilitator paying the fees:
+  E-21 `118b37d00e3590bb8090815b4d0385cc0cc3923d0a3f1ccf963c0629ce0f789e`, E-22a
+  `494233720028a9e56592580d088e733a5bf5e6fd033418ca05c3d4cc89cef6b9`. Buyer
+  `GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ` and seller
+  `GDHBG2354YS6ONMU6P22EKNEXQTRQUI4J3LSCNRRE2DWK3EYZ4UW2LQT` are new friendbot accounts; the
+  buyer's 0.05 USDC came from a path payment on testnet's exchange, as in 0136.
+
 ## Design Decisions
 
 ### Emerged
@@ -114,8 +128,9 @@ What changed between 2.28.0 and 2.31.0, read from the built packages (no changel
 
 ## Acceptance Criteria
 
-- [ ] Every package in the repo is on `@x402` 2.31.0, and `pnpm test` passes
-- [ ] Given a payment from `@x402/fetch` 2.31.0 on testnet, when our facilitator verifies and
-      settles it, then it moves the money, and the transaction hash is recorded
+- [x] Every package in the repo is on `@x402` 2.31.0, and `pnpm test` passes
+- [x] Given a payment from `@x402/fetch` 2.31.0 on testnet, when our facilitator verifies and
+      settles it, then it moves the money, and the transaction hash is recorded (Implementation
+      Notes: E-21, E-22a)
 - [ ] Given the requests of 0136's parity run, when `examples/http-api` and the Rust crate's
       example answer them, then they answer the same, framework differences aside
