@@ -2,11 +2,13 @@
 title: "If Grafana, the smallest shape that pays its way"
 type: idea
 status: developing
-spawns: []
+spawns:
+  - S-decision-draft.md
 tags: [monitoring, grafana, cloudwatch]
 links:
   - R-cloudwatch-cost-measurement.md
   - R-logs-cloudwatch-or-loki.md
+  - R-alarm-inventory-and-reductions.md
   - ../../../../../docs/adr/0011-facilitator-hosting.md
 history:
   - date: "2026-11-12"
