@@ -77,7 +77,7 @@ writing the protocol myself.
 - `src/facilitator.rs`: `/supported`, `/verify`, `/settle`, the API key, `EXTENSION-RESPONSES`.
 - `src/axum.rs` (feature `axum`, on by default): `PaymentGate` and the layer.
 - `examples/weather.rs`: the example server, the twin of `examples/http-api`.
-- 65 tests with the feature, 48 with `--no-default-features`; the layer's run a seller and a fake
+- 76 tests with the feature, 50 with `--no-default-features`; the layer's run a seller and a fake
   facilitator on local ports. CI job `sdk-rust`.
 
 ### Testnet run, 2026-11-12
@@ -111,6 +111,13 @@ API key against a facilitator that asks for one (0105 is not built).
 - Settling before the route runs (upstream's `upfront` flow), and a retry of `/supported` on 429.
 - A live test in the repo: a buyer script next to the crate, with accounts as the MCP e2e run
   takes them.
+- A buyer who disconnects: verify, the route and settle run inside the request's future, which
+  hyper drops with the connection. Dropped during `/settle`, the money may move with no event;
+  dropped after the route ran, its work is not paid for. Settling on a task of its own adds
+  `tokio` to the layer. The README says so (review of #177).
+- An event that names its route, for a seller with more than one paid route; the facilitator's
+  `Retry-After` on 429 and 503, dropped today; a muxed `payTo` (`M…`), accepted as terms with no
+  run that settles one.
 
 ## Design Decisions
 
@@ -147,10 +154,14 @@ API key against a facilitator that asks for one (0105 is not built).
     `error` stays the reason code, as upstream sends it; the body is
     `{"error": reason, "message": message}`. Upstream's middleware and `r402` drop the message.
 11. **The seller learns the catalog's answer through `PaymentGate::on_event`**, which also carries
-    refusals and facilitator failures. No logging crate is pulled in; the seller logs as it likes.
+    the facilitator's refusals and its failures. The gate's own refusals (an unreadable header,
+    a payment for other terms) send no event; a variant for them is part 2's. No logging crate is pulled in; the seller logs as it likes.
 12. **A facilitator that gives no answer to act on is 502 `facilitator_unavailable` to the buyer**,
     at verify and at settle, without the cause: it may be the seller's own, such as its API key.
-    Upstream answers 402 for most of these.
+    Upstream answers 402 for most of these. One exception: a 400 from `/verify` with no verdict
+    is a refusal, 402 `invalid_payload` and `VerifyRefused`. The seller's terms passed its own
+    checks, so what the facilitator could not read is the buyer's payment, and a buyer must not
+    be able to raise the seller's count of facilitator failures (review of #177).
 13. **`/supported` is read once, when the gate is made**, and a route on a network the
     facilitator does not settle on is refused then. Upstream's client retries a 429 there three
     times; ours does not.
@@ -158,12 +169,32 @@ API key against a facilitator that asks for one (0105 is not built).
     `/supported` is open. The client's debug output says that a key is set, never the key.
 15. **The oldest Rust holds with `Cargo.lock`'s versions.** The newest `idna_adapter`,
     `stellar-strkey` 1.0 and others need 1.82 to 1.87, so `.cargo/config.toml` keeps `cargo update`
-    on versions that fit, and CI checks 1.81 with `--locked`. A seller on 1.81 needs the same
-    setting.
+    on versions that fit, and CI checks 1.81 with `--locked`, with the layer and without it.
+    Cargo reads that setting from 1.84 on: cargo 1.81 resolving alone picks `idna_adapter` 1.2.2,
+    cargo 1.97 with the setting 1.2.0 (checked 2026-11-13). A seller on 1.81 sets
+    `rust-version = "1.81"`, resolves with cargo 1.84 or newer and
+    `CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback`, and builds with 1.81; without
+    `rust-version` the resolver aims at the cargo it runs on. The README says so. CI's other
+    cargo steps are `--locked` too, so a stale lockfile fails there.
 16. **`webpki-roots` is under CDLA-Permissive-2.0**, a permissive data licence the M1 audit's list
     does not have (it comes with `reqwest`'s rustls). The other 158 crates in the lockfile are
     MIT, Apache-2.0, BSD, ISC, Zlib, Unicode or a choice that includes one. For 0132's licence
     review.
+17. **`route_layer`, not `layer`, in every example** (review of #177). axum's
+    `MethodRouter::layer` also wraps its fallback for a method the route does not have, so an
+    `OPTIONS` preflight or a `POST` got 402, and a paid `POST` cost a `/verify` call before its
+    405. A test holds the 405.
+18. **The facilitator client follows no redirect.** A 307 or 308 would send the buyer's signed
+    payment to another address, and a 301 turns the POST into a GET; a 3xx is a `Status` error,
+    so 502. `packages/seller-fetch` refuses redirects for the same reason.
+19. **A paid answer's `Cache-Control` gets `private` added to the route's own**, as upstream's
+    `withPrivateCacheControl` does, in place of being set only when the route set none.
+20. **The public error and event enums are `#[non_exhaustive]`** (`GateError`, `PaymentEvent`,
+    `FacilitatorError`, `PaymentHeaderError`, `AddressError`, `PriceError`), free while the crate
+    is unpublished, so part 2's variants break no seller's `match`.
+21. **The README installs the crate from git, `branch = "develop"`**, since `publish = false` and
+    `main` has it only after the release; a git dependency on the monorepo resolves (checked
+    with cargo 1.97). The layer is for axum 0.8.
 
 ## Acceptance Criteria
 
