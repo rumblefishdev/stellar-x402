@@ -33,7 +33,7 @@ The draft spec is attached: <link to scheme_upto_stellar.md in our fork>.
 ## Status
 
 - Contract, unit, property and real-signature tests: <https://github.com/rumblefishdev/stellar-x402/tree/develop/contracts/upto-proxy>
-- Deployed on testnet (`CAL7SBTOECJ6HXXO3ST43LM2HJJFSZ3ZDEEZBIWHJPB7DRF5MXS5V2VC`); a 58-scenario end-to-end run with 23 settlement transactions across Circle testnet USDC, a SAC asset and a non-SAC SEP-41 token, plus the measured rent of keeping the contract alive: <https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/upto-proxy-testnet-report.md>
+- Deployed on testnet (`CDPHI4JYNSWNAQFXUAZAWTBUBYLZZRWFU6F6EJIHLSTAL6MJWXOVEA2X`); a 61-scenario end-to-end run with 27 settlement transactions across Circle testnet USDC, a SAC asset and a non-SAC SEP-41 token, plus the measured rent of keeping the contract alive: <https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/upto-proxy-testnet-report.md>
 - Design record: <https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/adr/0010-upto-proxy-design.md>
 - Threat model: <https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/threat-model.md>
 - Security review: an internal review found no way to move funds without the payer's signature; its fixes (the one-day cap on the allowance expiry, the client's check of simulated trees, the facilitator's expiry rules) are in the contract, the draft and the tests. External audit: <status>
