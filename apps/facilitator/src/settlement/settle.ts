@@ -597,12 +597,17 @@ export function createSettler(deps: SettlerDeps): Settle & {
 
   /** One `/settle` call's own state, shared with its submission. */
   interface Call {
-    /** Set when the budget answer goes out: `onSigned` refuses every new hash from then on. */
+    /**
+     * Set when the budget answer goes out: `onSigned` then signs nothing new, and sends a stored
+     * hash only if the answer named it.
+     */
     budgetOver: boolean;
     /** The hash `onSigned` was last given, stored or not. */
     signing?: string;
     /** Where a record this call finishes turns final: `resolved` once the budget answer is out. */
     origin: SettlementOrigin;
+    /** The budget answer, set with `budgetOver`: the hash it names is the one the seller tracks. */
+    answer?: Promise<Settled>;
   }
 
   /**
@@ -682,9 +687,11 @@ export function createSettler(deps: SettlerDeps): Settle & {
             // The stored expiry may have passed while the store wrote, or the lease lapsed and was
             // acquired again: a new token fences this call too (decision 1).
             if (deps.lease()?.token !== lease.token) throw new LeaseLostError();
-            // The budget answer may have gone out while the store wrote: it named the hash it
-            // could read, so this one isn't sent.
-            if (call.budgetOver) throw new Error("the settle budget ran out");
+            // The budget answer may have gone out while the store wrote. The hash it named is
+            // sent, as the answer told the seller; any other isn't (0009 decision 35, amended).
+            if (call.budgetOver && (await call.answer)?.response.transaction !== hash) {
+              throw new Error("the settle budget ran out");
+            }
           },
           // A hint for debugging, never awaited: the send has happened, so a failed write changes
           // nothing (0019 decision 7). Not a record failure: no outage alarm, no sweep.
@@ -1058,9 +1065,13 @@ export function createSettler(deps: SettlerDeps): Settle & {
      * `rejected`, a signed one is `settlement_pending` with its hash, and a submission that is
      * already signed goes on. If the store doesn't answer, the answer is what this call knows.
      */
-    const outOfBudget = async (hook?: Promise<unknown>): Promise<Settled> => {
+    const outOfBudget = (hook?: Promise<unknown>): Promise<Settled> => {
       call.budgetOver = true;
       call.origin = "resolved";
+      call.answer = budgetAnswer(hook);
+      return call.answer;
+    };
+    const budgetAnswer = async (hook?: Promise<unknown>): Promise<Settled> => {
       const record = await endUnsigned(key, claim.record.version, hook);
       const signed = record ? record.hashes.length > 0 : call.signing !== undefined;
       metrics.increment("settlement_budget_exhausted_total", { signed: String(signed) });

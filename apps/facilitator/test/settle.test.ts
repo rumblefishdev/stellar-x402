@@ -1831,7 +1831,7 @@ describe("createSettler", () => {
       await settled;
     });
 
-    it("refuses to send a hash whose slow addHash ends after the budget answer (0009 decision 35)", async () => {
+    it("sends the hash the budget answer named, though its slow addHash ends after the answer", async () => {
       let signed: unknown = "not called";
       const { settle, store } = setup(
         async (opts) => {
@@ -1856,8 +1856,8 @@ describe("createSettler", () => {
         errorReason: SETTLE_REASONS.pending,
         transaction: HASH,
       });
-      // The answer named this hash, but the order (write, then the budget flag) keeps it unsent.
-      expect(signed).toBeInstanceOf(Error);
+      // The answer named this hash, so the seller tracks it: it is sent.
+      expect(signed).toBe("sent");
     });
 
     it("refuses a rebuild's new hash once the budget answer named the first", async () => {
@@ -1886,6 +1886,80 @@ describe("createSettler", () => {
       await storeIdle();
       expect(second).toBeInstanceOf(Error);
       expect((await store.get(key))?.hashes).toEqual([HASH]);
+    });
+
+    it("refuses a rebuild's hash whose write ended after the budget answer named the first", async () => {
+      const second = "b".repeat(64);
+      let rebuilt: unknown = "not called";
+      const { settle, store } = setup(
+        async (opts) => {
+          await opts.onSigned?.(HASH, BOUNDS);
+          // `txBadSeq`: the pool rebuilds and signs a new envelope before the budget ends.
+          rebuilt = await Promise.resolve(opts.onSigned!(second, BOUNDS)).then(
+            () => "sent",
+            (error: unknown) => error,
+          );
+          return new Promise(() => {});
+        },
+        { budgetMs: BUDGET_MS },
+      );
+      // The second hash reaches the store only after the budget answer has read the first.
+      let answered!: () => void;
+      const budgetAnswer = new Promise<void>((resolve) => (answered = resolve));
+      const addHash = store.addHash.bind(store);
+      vi.spyOn(store, "addHash").mockImplementation(async (...args) => {
+        if (args[1] === second) await budgetAnswer;
+        return addHash(...args);
+      });
+      const settled = settle(payload(), requirements);
+      await elapse(BUDGET_MS);
+      const { response } = await settled;
+      answered();
+      expect(response).toMatchObject({
+        errorReason: SETTLE_REASONS.pending,
+        transaction: HASH,
+      });
+      await storeIdle();
+      // The seller tracks the first hash, so the second is not sent.
+      expect(rebuilt).toBeInstanceOf(Error);
+    });
+
+    it("sends the hash a store-failed budget answer named only if its write lands", async () => {
+      for (const lands of [true, false]) {
+        await db.empty();
+        fence = await holdLease(db.stores().settlements);
+        let signed: unknown = "not called";
+        const { settle, store } = setup(
+          async (opts) => {
+            signed = await Promise.resolve(opts.onSigned!(HASH, BOUNDS)).then(
+              () => "sent",
+              (error: unknown) => error,
+            );
+            return new Promise(() => {});
+          },
+          { budgetMs: BUDGET_MS },
+        );
+        // The budget answer can't read the store, so it names the hash being written.
+        vi.spyOn(store, "transition").mockRejectedValue(new Error("store down"));
+        let answered!: () => void;
+        const budgetAnswer = new Promise<void>((resolve) => (answered = resolve));
+        const addHash = store.addHash.bind(store);
+        vi.spyOn(store, "addHash").mockImplementation(async (...args) => {
+          await budgetAnswer;
+          return lands ? addHash(...args) : false;
+        });
+        const settled = settle(payload(), requirements);
+        await elapse(BUDGET_MS);
+        const { response } = await settled;
+        answered();
+        expect(response).toMatchObject({
+          errorReason: SETTLE_REASONS.pending,
+          transaction: HASH,
+        });
+        await storeIdle();
+        if (lands) expect(signed).toBe("sent");
+        else expect(signed).toBeInstanceOf(Error);
+      }
     });
 
     it("names no hash in a budget answer when the lease stopped the call before its write", async () => {
@@ -2055,7 +2129,7 @@ describe("createSettler", () => {
       expect(order).toEqual(["reserved", "onFinal"]);
     });
 
-    it("sends no hash whose write ended after the budget answer named another", async () => {
+    it("sends the hash whose write ended after the budget answer named it", async () => {
       let signed: unknown = "not called";
       const { settle, store } = setup(
         async (opts) => {
@@ -2085,7 +2159,7 @@ describe("createSettler", () => {
         transaction: HASH,
       });
       await storeIdle();
-      expect(signed).toBeInstanceOf(Error);
+      expect(signed).toBe("stored");
     });
 
     it("ends a repeat's wait by its own budget, after a slow lookup", async () => {
