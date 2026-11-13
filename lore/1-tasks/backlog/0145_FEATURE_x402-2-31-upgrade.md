@@ -1,5 +1,5 @@
 ---
-id: "0141"
+id: "0145"
 title: "Raise the @x402 packages from 2.28.0 to 2.31.0 across the repo"
 type: FEATURE
 status: backlog

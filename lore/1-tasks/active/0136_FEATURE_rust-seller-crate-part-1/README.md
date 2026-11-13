@@ -5,7 +5,7 @@ type: FEATURE
 status: active
 milestone: 2
 related_adr: ["0001"]
-related_tasks: ["0102", "0041", "0132", "0140", "0141"]
+related_tasks: ["0102", "0041", "0132", "0140", "0145"]
 tags: [sdk, rust, seller, priority-high, effort-medium, platform]
 links:
   - ../../../../docs/rfp/07-x402-facilitator-bazaar.md
@@ -236,7 +236,7 @@ API key against a facilitator that asks for one (0105 is not built).
 23. **Every answer to the buyer is `@x402/express` 2.31.0's, the newest upstream** (akot,
     2026-11-13): "the Rust SDK answers as the TypeScript one, and handles everything our
     facilitator answers". 2.31.0 came out on 2026-11-12; the repo's TypeScript is on 2.28.0 and
-    0141 raises it. From 2.31 the crate also takes: a 402 with an `error` repeats it in the body,
+    0145 raises it. From 2.31 the crate also takes: a 402 with an `error` repeats it in the body,
     HEAD on a GET route is paid for, the `bazaar` block names a method its input can take (GET
     for a query, POST for a body), and a browser without a payment gets upstream's fallback HTML
     page. The parity run holds it. Not a permanent test (akot, 2026-11-13). Two differences stay,
