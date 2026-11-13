@@ -86,6 +86,13 @@ testnet cases reproduce (rival in ledger 5694924, ours failed in 5694925). What 
 
 Nothing.
 
+## Out of scope
+
+- Finding the other transaction that used the nonce, to name its hash in the log or the answer. With 0
+  front-runs in ~4,500 pubnet settlements it waits for data: when
+  `settlement_nonce_consumed_elsewhere_total` counts cases on mainnet, the lookup is two RPC reads (the
+  nonce entry's `lastModifiedLedgerSeq`, then `getTransactions` for that ledger). Owner, 2026-11-13.
+
 ## Implementation
 
 - `apps/facilitator/src/settlement/nonce-used.ts`: both codes, `consumedElsewhere` (a failure's

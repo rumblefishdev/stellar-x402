@@ -63,6 +63,31 @@ jobs:
       - uses: actions/checkout@v4
       - run: deploy/scripts/check-production-postgres.sh
 
+  # The Rust SDK (task 0136), apart from contracts/, which builds WASM with its own profile.
+  sdk-rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Same version as packages/sdk/rust/rust-toolchain.toml.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.1
+          components: rustfmt, clippy
+      - run: cargo fmt --manifest-path packages/sdk/rust/Cargo.toml --all --check
+      # With the axum layer and without it: the core must build alone. `--locked`: a stale
+      # Cargo.lock fails here and not only on 1.81.
+      - run: cargo clippy --manifest-path packages/sdk/rust/Cargo.toml --locked --all-targets -- -D warnings
+      - run: cargo clippy --manifest-path packages/sdk/rust/Cargo.toml --locked --all-targets --no-default-features -- -D warnings
+      - run: cargo test --manifest-path packages/sdk/rust/Cargo.toml --locked
+      - run: cargo test --manifest-path packages/sdk/rust/Cargo.toml --locked --no-default-features
+      # The oldest Rust the crate promises, `rust-version` in its Cargo.toml, with Cargo.lock's
+      # versions, with the layer and without it.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.81.0
+      - run: cargo +1.81.0 check --manifest-path packages/sdk/rust/Cargo.toml --locked
+      - run: cargo +1.81.0 check --manifest-path packages/sdk/rust/Cargo.toml --locked --no-default-features
+
   contracts:
     runs-on: ubuntu-latest
     steps:
