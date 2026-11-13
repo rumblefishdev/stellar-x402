@@ -828,6 +828,22 @@ describe("createSettler", () => {
       expect(nonceUsed).toHaveBeenCalledWith(payer, "7");
     });
 
+    it("keeps …_transaction_failed when the RPC gives no error event and the nonce is unused", async () => {
+      const nonceUsed = vi.fn(async () => false);
+      const { settle } = setup(
+        async (opts) => {
+          await opts.onSigned?.(HASH, BOUNDS);
+          return { ...result("failed"), failure: { opCode: "invokeHostFunctionTrapped" } };
+        },
+        { nonceUsed },
+      );
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        success: false,
+        errorReason: SETTLE_REASONS.failed,
+      });
+      expect(nonceUsed).toHaveBeenCalledWith(payer, "7");
+    });
+
     it("doesn't read the nonce when the error event already tells", async () => {
       const nonceUsed = vi.fn(async () => true);
       const { settle } = setup(failedOnUsedNonce, { nonceUsed });
@@ -847,7 +863,9 @@ describe("createSettler", () => {
           feeCharged: "41000",
         }),
       );
-      expect(metrics.value("settlement_nonce_consumed_elsewhere_total", {})).toBe(1);
+      expect(metrics.value("settlement_nonce_consumed_elsewhere_total", { window: "settle" })).toBe(
+        1,
+      );
     });
 
     it("answers a repeat of the payload the same way", async () => {
@@ -3078,6 +3096,19 @@ describe("an answer that ended a payment (0082)", () => {
       transaction: "",
       network,
     });
+  });
+
+  it("counts a re-check that refuses because another transaction used the nonce (0141 decision 7)", async () => {
+    const check = vi.fn(async () => ({
+      response: { isValid: false, invalidReason: NONCE_CONSUMED_REASON, payer },
+    }));
+    const { settle, metrics } = setup(landing(), { check });
+    expect((await settle(payload(), requirements)).response).toMatchObject({
+      errorReason: NONCE_CONSUMED_REASON,
+    });
+    expect(metrics.value("settlement_nonce_consumed_elsewhere_total", { window: "verify" })).toBe(
+      1,
+    );
   });
 
   it("reads the latest ledger once for a reopen that ends", async () => {
