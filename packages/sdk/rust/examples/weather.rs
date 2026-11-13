@@ -63,24 +63,31 @@ fn report(event: &PaymentEvent<'_>) {
             eprintln!("payment refused: {:?}", verified.invalid_reason)
         }
         PaymentEvent::FacilitatorFailed(error) => eprintln!("{error}"),
+        // Part 2 may add events.
+        _ => {}
     }
+}
+
+/// A variable that is set and not empty, as the twin reads it.
+fn var(name: &str) -> Option<String> {
+    env::var(name).ok().filter(|value| !value.is_empty())
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let seller = env::var("SELLER_ADDRESS").map_err(|_| "SELLER_ADDRESS is required")?;
-    let url = env::var("FACILITATOR_URL").unwrap_or_else(|_| DEFAULT_FACILITATOR.to_owned());
-    let port: u16 = match env::var("PORT") {
-        Ok(port) => port.parse().map_err(|_| "PORT is not a port number")?,
-        Err(_) => 4020,
+    let seller = var("SELLER_ADDRESS").ok_or("SELLER_ADDRESS is required")?;
+    let url = var("FACILITATOR_URL").unwrap_or_else(|| DEFAULT_FACILITATOR.to_owned());
+    let port: u16 = match var("PORT") {
+        Some(port) => port.parse().map_err(|_| "PORT is not a port number")?,
+        None => 4020,
     };
 
     let mut facilitator = Facilitator::new(&url)?;
-    if let Ok(key) = env::var("X402_API_KEY") {
+    if let Some(key) = var("X402_API_KEY") {
         facilitator = facilitator.with_api_key(key);
     }
     let mut gate = PaymentGate::connect(facilitator).await?.on_event(report);
-    if let Ok(public_url) = env::var("PUBLIC_URL") {
+    if let Some(public_url) = var("PUBLIC_URL") {
         gate = gate.base_url(public_url);
     }
     let paid = gate
@@ -96,7 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .output(json!({ "city": "Warsaw", "tempC": 14 })),
         );
 
-    let app = Router::new().route("/weather", get(weather).layer(paid));
+    let app = Router::new().route("/weather", get(weather).route_layer(paid));
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     eprintln!("Paid weather API on http://localhost:{port}/weather?city=Warsaw, paying {seller}");
     axum::serve(listener, app).await?;

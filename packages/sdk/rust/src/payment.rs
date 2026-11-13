@@ -16,6 +16,7 @@ pub struct PaymentPayload(Map<String, Value>);
 
 /// Why a `PAYMENT-SIGNATURE` header was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum PaymentHeaderError {
     #[error("the PAYMENT-SIGNATURE header is not base64")]
     NotBase64,

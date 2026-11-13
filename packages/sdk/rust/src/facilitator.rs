@@ -13,6 +13,8 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(90);
 const EXTENSION_RESPONSES: &str = "EXTENSION-RESPONSES";
 /// How much of an unexpected answer an error keeps.
 const EXCERPT_CHARS: usize = 200;
+/// The reason a payment the facilitator could not read is refused with.
+const INVALID_PAYLOAD: &str = "invalid_payload";
 
 /// A facilitator: the service that checks a buyer's payment and settles it on Stellar.
 #[derive(Clone)]
@@ -39,6 +41,7 @@ impl std::fmt::Debug for Facilitator {
 /// A refused payment is not one of these: it comes back as a [`VerifyResponse`] or a
 /// [`SettleResponse`] that says why.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum FacilitatorError {
     #[error("{url} is not an http(s) URL")]
     Url { url: String },
@@ -126,7 +129,10 @@ impl Facilitator {
                 url: url.to_owned(),
             });
         }
+        // A redirect is answered as it is, never followed: a 307 or 308 would send the buyer's
+        // signed payment to another address, and a 301 turns the POST into a GET.
         let http = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(FacilitatorError::Client)?;
         Ok(Self {
@@ -162,6 +168,10 @@ impl Facilitator {
     }
 
     /// Asks whether `payment` pays `terms`. Nothing is sent to the network.
+    ///
+    /// A 400 without a verdict is a refusal, `invalid_payload`, and not an error: the seller's
+    /// terms passed its own checks, so what the facilitator could not read is the buyer's
+    /// payment.
     pub async fn verify(
         &self,
         payment: &PaymentPayload,
@@ -169,6 +179,15 @@ impl Facilitator {
     ) -> Result<VerifyResponse, FacilitatorError> {
         let route = "/verify";
         let answer = self.send(route, self.post(route, payment, terms)).await?;
+        if answer.json.get("isValid").is_none() && answer.status == 400 {
+            return Ok(VerifyResponse {
+                is_valid: false,
+                invalid_reason: Some(INVALID_PAYLOAD.to_owned()),
+                invalid_message: None,
+                payer: None,
+                extension_responses: answer.extension_responses,
+            });
+        }
         if answer.json.get("isValid").is_none() && !answer.ok {
             return Err(answer.status_error(route));
         }

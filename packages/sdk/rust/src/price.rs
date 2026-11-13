@@ -21,6 +21,7 @@ enum Asset {
 
 /// Why a decimal price was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum PriceError {
     #[error("a price is digits with at most one point between them, as in 0.001")]
     NotANumber,

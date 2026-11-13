@@ -4,6 +4,9 @@ mod support;
 
 use std::time::Duration;
 
+use axum::http::header::LOCATION;
+use axum::http::StatusCode;
+use axum::Router;
 use serde_json::json;
 use stellar_x402::{Facilitator, FacilitatorError};
 use support::{payment, payment_json, terms, FakeFacilitator, Reply, HASH, PAYER};
@@ -246,6 +249,47 @@ async fn an_error_status_names_the_status_and_the_facilitators_code() {
         error.to_string(),
         "the facilitator answered 401 on /verify: missing_api_key"
     );
+}
+
+#[tokio::test]
+async fn a_payment_the_facilitator_cannot_read_is_a_refusal() {
+    let fake = FakeFacilitator::start().await;
+    fake.verify_replies(Reply::json(400, json!({ "error": "bad_request" })));
+
+    let verified = Facilitator::new(&fake.url)
+        .unwrap()
+        .verify(&payment(&terms()), &terms())
+        .await
+        .unwrap();
+
+    assert!(!verified.is_valid);
+    assert_eq!(verified.invalid_reason.as_deref(), Some("invalid_payload"));
+}
+
+#[tokio::test]
+async fn a_redirect_is_not_followed() {
+    let fake = FakeFacilitator::start().await;
+    let target = format!("{}/verify", fake.url);
+    let moved = Router::new().fallback(move || {
+        let target = target.clone();
+        async move { (StatusCode::TEMPORARY_REDIRECT, [(LOCATION, target)]) }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, moved).await.unwrap() });
+
+    let error = Facilitator::new(&url)
+        .unwrap()
+        .verify(&payment(&terms()), &terms())
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(error, FacilitatorError::Status { status: 307, .. }),
+        "{error:?}"
+    );
+    // The buyer's payment did not go on to where the redirect pointed.
+    assert_eq!(fake.paths(), Vec::<String>::new());
 }
 
 #[tokio::test]

@@ -7,6 +7,7 @@ mod support;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use axum::extract::Query;
 use axum::http::StatusCode;
@@ -15,10 +16,11 @@ use axum::{Extension, Json, Router};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde_json::{json, Value};
 use stellar_x402::axum::{GateError, Payer, PaymentEvent, PaymentGate};
-use stellar_x402::{Facilitator, Listing, Network, Price};
+use stellar_x402::{Facilitator, FacilitatorError, Listing, Network, Price};
 use support::{header_of, FakeFacilitator, Reply, HASH, PAYER, PAY_TO};
 
-/// A seller with one paid route, `GET /weather?city=`, that answers 400 without a city.
+/// A seller with one paid route, `GET /weather?city=`, that answers 400 without a city and 500
+/// when asked to `fail`. The same route is nested under `/v1`.
 struct Seller {
     url: String,
     /// How many times the route itself ran.
@@ -37,10 +39,19 @@ async fn seller() -> Seller {
 }
 
 async fn seller_with(fake: FakeFacilitator, base_url: Option<&str>) -> Seller {
+    let facilitator = Facilitator::new(&fake.url).unwrap();
+    seller_on(fake, base_url, facilitator).await
+}
+
+async fn seller_on(
+    fake: FakeFacilitator,
+    base_url: Option<&str>,
+    facilitator: Facilitator,
+) -> Seller {
     let served = Arc::new(AtomicUsize::new(0));
     let events = Arc::new(Mutex::new(Vec::new()));
     let seen = events.clone();
-    let mut gate = PaymentGate::connect(Facilitator::new(&fake.url).unwrap())
+    let mut gate = PaymentGate::connect(facilitator)
         .await
         .unwrap()
         .on_event(move |event| {
@@ -61,6 +72,7 @@ async fn seller_with(fake: FakeFacilitator, base_url: Option<&str>) -> Seller {
                     format!("verify refused {:?}", verified.invalid_reason)
                 }
                 PaymentEvent::FacilitatorFailed(error) => format!("facilitator failed: {error}"),
+                other => format!("{other:?}"),
             };
             seen.lock().unwrap().push(line);
         });
@@ -80,6 +92,12 @@ async fn seller_with(fake: FakeFacilitator, base_url: Option<&str>) -> Seller {
     let weather = move |Query(query): Query<HashMap<String, String>>,
                         payer: Option<Extension<Payer>>| async move {
         count.fetch_add(1, Ordering::SeqCst);
+        if query.contains_key("fail") {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "the weather station is down" })),
+            );
+        }
         match query.get("city") {
             Some(city) => (
                 StatusCode::OK,
@@ -91,7 +109,12 @@ async fn seller_with(fake: FakeFacilitator, base_url: Option<&str>) -> Seller {
             ),
         }
     };
-    let app = Router::new().route("/weather", get(weather).layer(paid));
+    let app = Router::new()
+        .route("/weather", get(weather.clone()).route_layer(paid.clone()))
+        .nest(
+            "/v1",
+            Router::new().route("/weather", get(weather).route_layer(paid)),
+        );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -479,4 +502,210 @@ async fn a_mistyped_account_is_refused_at_start() {
         .err();
 
     assert!(matches!(error, Some(GateError::Address(_))), "{error:?}");
+}
+
+#[tokio::test]
+async fn a_method_the_route_does_not_have_gets_405_and_no_terms() {
+    let seller = seller().await;
+    let client = reqwest::Client::new();
+    let terms = decoded(
+        &seller.get("/weather?city=Warsaw").await,
+        "payment-required",
+    )
+    .unwrap()["accepts"][0]
+        .clone();
+    let payment = json!({ "x402Version": 2, "accepted": terms, "payload": {} });
+
+    let options = client
+        .request(
+            reqwest::Method::OPTIONS,
+            format!("{}/weather?city=Warsaw", seller.url),
+        )
+        .send()
+        .await
+        .unwrap();
+    let paid_post = client
+        .post(format!("{}/weather?city=Warsaw", seller.url))
+        .header("PAYMENT-SIGNATURE", header_of(&payment))
+        .send()
+        .await
+        .unwrap();
+
+    for response in [options, paid_post] {
+        assert_eq!(response.status(), 405);
+        assert!(response.headers().get("payment-required").is_none());
+    }
+    assert_eq!(seller.served(), 0);
+    assert_eq!(seller.asked(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn a_route_that_fails_is_not_settled() {
+    let seller = seller().await;
+
+    let response = seller.pay("/weather?city=Warsaw&fail").await;
+
+    assert_eq!(response.status(), 500);
+    assert!(response.headers().get("payment-response").is_none());
+    assert_eq!(seller.served(), 1);
+    assert_eq!(seller.asked(), ["/verify"]);
+}
+
+#[tokio::test]
+async fn a_payment_the_facilitator_cannot_read_is_refused_and_not_a_facilitator_failure() {
+    let seller = seller().await;
+    // What our facilitator answers a payload that fails its schema.
+    seller
+        .fake
+        .verify_replies(Reply::json(400, json!({ "error": "bad_request" })));
+
+    let response = seller.pay("/weather?city=Warsaw").await;
+
+    assert_eq!(response.status(), 402);
+    assert_eq!(
+        decoded(&response, "payment-required").unwrap()["error"],
+        "invalid_payload"
+    );
+    assert_eq!(
+        response.json::<Value>().await.unwrap(),
+        json!({ "error": "invalid_payload" })
+    );
+    assert_eq!(seller.served(), 0);
+    assert_eq!(
+        seller.events(),
+        [r#"verify refused Some("invalid_payload")"#]
+    );
+}
+
+#[tokio::test]
+async fn a_routes_own_cache_control_is_kept_and_made_private() {
+    let fake = FakeFacilitator::start().await;
+    let gate = PaymentGate::connect(Facilitator::new(&fake.url).unwrap())
+        .await
+        .unwrap();
+    let paid = gate
+        .charge(Network::Testnet, PAY_TO, Price::usdc("0.001").unwrap())
+        .unwrap();
+    let cached = |value: &'static str| {
+        get(move || async move { ([("cache-control", value)], "14 °C") }).route_layer(paid.clone())
+    };
+    let app = Router::new()
+        .route("/public", cached("public, max-age=60"))
+        .route("/private", cached("Private, max-age=60"));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let seller = Seller {
+        url,
+        served: Arc::default(),
+        events: Arc::default(),
+        fake,
+    };
+
+    let public = seller.pay("/public").await;
+    let private = seller.pay("/private").await;
+
+    assert_eq!(public.status(), 200);
+    assert_eq!(
+        public.headers()["cache-control"],
+        "public, max-age=60, private"
+    );
+    assert_eq!(private.headers()["cache-control"], "Private, max-age=60");
+}
+
+#[tokio::test]
+async fn the_gate_does_not_start_when_the_facilitator_fails_on_supported() {
+    let fake = FakeFacilitator::start().await;
+    fake.supported_replies(Reply::text(503, "starting"));
+
+    let error = PaymentGate::connect(Facilitator::new(&fake.url).unwrap()).await;
+
+    assert!(
+        matches!(
+            error,
+            Err(GateError::Facilitator(FacilitatorError::Status {
+                status: 503,
+                ..
+            }))
+        ),
+        "{:?}",
+        error.err()
+    );
+}
+
+#[tokio::test]
+async fn fields_of_the_settlement_this_crate_does_not_read_reach_the_buyer() {
+    let seller = seller().await;
+    seller.fake.settle_replies(Reply::json(
+        200,
+        json!({
+            "success": true,
+            "payer": PAYER,
+            "transaction": HASH,
+            "network": "stellar:testnet",
+            "amount": "10000"
+        }),
+    ));
+
+    let response = seller.pay("/weather?city=Warsaw").await;
+
+    assert_eq!(
+        decoded(&response, "payment-response").unwrap()["amount"],
+        "10000"
+    );
+}
+
+#[tokio::test]
+async fn a_nested_route_is_named_by_its_full_path() {
+    let seller = seller().await;
+
+    let response = seller.get("/v1/weather?city=Warsaw").await;
+
+    assert_eq!(
+        decoded(&response, "payment-required").unwrap()["resource"]["url"],
+        "https://api.example.com/v1/weather?city=Warsaw"
+    );
+}
+
+#[tokio::test]
+async fn a_trailing_slash_in_the_base_url_is_dropped() {
+    let seller = seller_with(
+        FakeFacilitator::start().await,
+        Some("https://api.example.com/"),
+    )
+    .await;
+
+    let response = seller.get("/weather?city=Warsaw").await;
+
+    assert_eq!(
+        decoded(&response, "payment-required").unwrap()["resource"]["url"],
+        "https://api.example.com/weather?city=Warsaw"
+    );
+}
+
+#[tokio::test]
+async fn a_settlement_that_does_not_answer_in_time_gets_502_and_may_still_settle() {
+    let fake = FakeFacilitator::start().await;
+    fake.settle_replies(Reply::json(200, json!({})).after(Duration::from_secs(5)));
+    let facilitator = Facilitator::new(&fake.url)
+        .unwrap()
+        .with_timeout(Duration::from_millis(200));
+    let seller = seller_on(fake, Some("https://api.example.com"), facilitator).await;
+
+    let response = seller.pay("/weather?city=Warsaw").await;
+
+    assert_eq!(response.status(), 502);
+    assert!(response.headers().get("payment-response").is_none());
+    assert_eq!(
+        response.json::<Value>().await.unwrap(),
+        json!({
+            "error": "facilitator_unavailable",
+            "message": "The payment could not be settled. It may still settle: check before paying again."
+        })
+    );
+    assert_eq!(seller.served(), 1);
+    assert_eq!(
+        seller.events(),
+        ["facilitator failed: the facilitator did not answer /settle in time"]
+    );
 }

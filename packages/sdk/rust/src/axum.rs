@@ -13,9 +13,12 @@
 //!     "GDPBXAO27ZR2M2TM6DVG5IVJ5D3C6DLHPE5FXYXKAUTM6XKPIACDAIH3",
 //!     Price::usdc("0.001")?,
 //! )?;
-//! Ok(Router::new().route("/weather", get(|| async { "14 °C" }).layer(paid)))
+//! Ok(Router::new().route("/weather", get(|| async { "14 °C" }).route_layer(paid)))
 //! # }
 //! ```
+//!
+//! `route_layer`, not `layer`: `layer` also wraps the answer to a method the route does not have,
+//! so a `POST` or a browser's `OPTIONS` would get 402 in place of 405.
 //!
 //! A request without a payment gets 402 and the terms. A request with one is checked by the
 //! facilitator, then the route runs, and only when the route answers without an error is the
@@ -47,6 +50,7 @@ const PAYMENT_RESPONSE: &str = "PAYMENT-RESPONSE";
 
 /// Why a gate or a paid route could not be made.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum GateError {
     #[error(transparent)]
     Facilitator(#[from] FacilitatorError),
@@ -59,13 +63,15 @@ pub enum GateError {
 /// What happened to a payment, for the seller's logs and metrics. The buyer sees none of it
 /// beyond what the answer carries.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum PaymentEvent<'a> {
     /// A payment was settled. `extension_responses` holds the facilitator's answer about the
     /// listing: for `bazaar`, whether the catalog took it.
     Settled(&'a SettleResponse),
     /// The route answered, and the facilitator then refused to settle. The buyer got 402.
     SettleRefused(&'a SettleResponse),
-    /// The facilitator found the payment invalid. The route did not run.
+    /// The facilitator found the payment invalid, or could not read it (`invalid_payload`). The
+    /// route did not run.
     VerifyRefused(&'a VerifyResponse),
     /// The facilitator gave no answer to act on, or refused the seller itself, as with a wrong
     /// API key. The buyer got 502.
@@ -138,7 +144,7 @@ impl PaymentGate {
     }
 }
 
-/// One route's price and description. A tower layer: `get(handler).layer(paid)`.
+/// One route's price and description. A tower layer: `get(handler).route_layer(paid)`.
 #[derive(Clone)]
 pub struct PaidRoute {
     gate: PaymentGate,
@@ -257,9 +263,8 @@ impl PaidRoute {
                 self.emit(PaymentEvent::Settled(&settled));
                 let headers = response.headers_mut();
                 headers.insert(PAYMENT_RESPONSE, header_value(&settled.to_header()));
-                headers
-                    .entry(CACHE_CONTROL)
-                    .or_insert(HeaderValue::from_static("private"));
+                let cache_control = private(headers.get(CACHE_CONTROL));
+                headers.insert(CACHE_CONTROL, cache_control);
                 response
             }
             Ok(settled) => {
@@ -283,6 +288,22 @@ impl PaidRoute {
             }
         }
     }
+}
+
+/// The route's `Cache-Control` with `private` added, as upstream does: a shared cache must not
+/// keep a paid answer and its `PAYMENT-RESPONSE`.
+fn private(route: Option<&HeaderValue>) -> HeaderValue {
+    let Some((header, value)) = route.and_then(|header| Some((header, header.to_str().ok()?)))
+    else {
+        return HeaderValue::from_static("private");
+    };
+    let is_private = value
+        .split(',')
+        .any(|directive| directive.trim().eq_ignore_ascii_case("private"));
+    if is_private {
+        return header.clone();
+    }
+    HeaderValue::from_str(&format!("{value}, private")).expect("a header value and ASCII")
 }
 
 fn refusal(reason: &str, message: Option<&str>) -> Value {

@@ -16,6 +16,7 @@ const ARE_FEES_SPONSORED: &str = "areFeesSponsored";
 
 /// Why terms were refused. The address is left out: it may be a secret key pasted by mistake.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum AddressError {
     #[error("the account to pay is not a Stellar account (G…, M…) or contract (C…) address")]
     PayTo,
