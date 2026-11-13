@@ -12,10 +12,12 @@ import { emfMetrics } from "./adapters/emf-metrics.js";
 import { openBaoSigner, type OpenBaoSigner } from "./adapters/openbao-signer.js";
 import { MIGRATIONS, migrate, pendingMigrations } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
+import { isApiKeyOwner } from "./adapters/rules.js";
 import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
 import { parseConfig, parseMigrateConfig } from "./config.js";
 import type { Config } from "./config.js";
 import type { AppDeps } from "./http/app.js";
+import { apiKeyHash, newApiKey } from "./http/api-key.js";
 import { supportedResponse } from "./http/supported.js";
 import { captureConsoleError, jsonLogger, rpcEndpointName, type Logger } from "./logger.js";
 import { memoryMetrics, type NetworkMetrics, type ProcessMetrics } from "./metrics.js";
@@ -596,6 +598,94 @@ export async function migrateMain(env: Record<string, string | undefined> = proc
   try {
     const applied = await migrate(pool, Date.now(), MIGRATIONS, { logger });
     logger.info("migrated", { applied });
+  } finally {
+    await pool.end();
+  }
+}
+
+/** What the operator's key script answers a mistake with: the entry point prints the message. */
+export class KeysError extends Error {
+  override name = "KeysError";
+}
+
+const KEYS_USAGE = `usage: keys issue <name> | keys revoke <name | owner> | keys list
+  issue <name>     a new key for operator:<name>, printed once; <name> is a-z, 0-9, "_" and "-"
+  revoke <owner>   revokes the owner's active key at once; a bare <name> means operator:<name>
+  list             every key: owner, state, times and the start of its hash`;
+
+/** A name the operator gives a key's holder: what follows `operator:` in the owner. */
+const OPERATOR_NAME = /^[a-z0-9][a-z0-9_-]*$/;
+
+type KeysCommand =
+  { command: "issue"; owner: string } | { command: "revoke"; owner: string } | { command: "list" };
+
+/** The command line of the key script; anything it doesn't take is a {@link KeysError}. */
+function parseKeysCommand(argv: readonly string[]): KeysCommand {
+  const [command, target, ...rest] = argv;
+  const usage = () => new KeysError(KEYS_USAGE);
+  if (command === "list" && target === undefined) return { command };
+  if ((command !== "issue" && command !== "revoke") || target === undefined || rest.length > 0)
+    throw usage();
+  // Only the portal issues an owner of another kind (0106), so `issue` takes a name alone; a
+  // revocation may name any owner, as the operator revokes a leaked key whoever issued it.
+  const named = OPERATOR_NAME.test(target);
+  const owner = named ? `operator:${target}` : target;
+  if ((command === "issue" && !named) || !isApiKeyOwner(owner)) throw usage();
+  return { command, owner };
+}
+
+/**
+ * `pnpm keys`: the operator's hand on the API key registry (0105), the same one the portal
+ * writes (0106). It needs only `DATABASE_URL`, of the network whose callers the key is for.
+ *
+ * `issue` prints the new key once, through `write` (stdout) and never through the logger: only
+ * its SHA-256 is stored, so a lost key is replaced, not read back. `revoke` holds from the
+ * caller's next request, on every instance. A mistake rejects with a {@link KeysError}.
+ */
+export async function keysMain(
+  argv: readonly string[],
+  env: Record<string, string | undefined> = process.env,
+  write: (line: string) => void = (line) => void process.stdout.write(`${line}\n`),
+): Promise<void> {
+  const parsed = parseKeysCommand(argv);
+  const { databaseUrl } = parseMigrateConfig(env);
+  // Stdout is the operator's, so a lost connection is logged to stderr.
+  const logger = jsonLogger("info", (line) => process.stderr.write(line));
+  const pool = createPool(databaseUrl, poolErrorLogger(logger), 1);
+  try {
+    const pending = await pendingMigrations(pool);
+    if (pending.length > 0)
+      throw new KeysError(`the schema lacks migrations: ${pending.join(", ")}`);
+    const { apiKeys } = postgresStores(pool);
+    if (parsed.command === "list") {
+      const keys = await apiKeys.list();
+      if (keys.length === 0) write("no keys");
+      const at = (ms: number) => new Date(ms).toISOString();
+      for (const key of keys)
+        write(
+          [
+            key.owner,
+            key.state,
+            `issued ${at(key.createdAt)}`,
+            key.revokedAt === undefined ? "-" : `revoked ${at(key.revokedAt)}`,
+            `sha256 ${key.hash.slice(0, 12)}`,
+          ].join("\t"),
+        );
+      return;
+    }
+    const { owner } = parsed;
+    if (parsed.command === "revoke") {
+      if (!(await apiKeys.revoke(owner, Date.now())))
+        throw new KeysError(`${owner} has no active key`);
+      write(`revoked: ${owner}`);
+      return;
+    }
+    const key = newApiKey();
+    if (!(await apiKeys.issue({ hash: apiKeyHash(key), owner, now: Date.now() })))
+      throw new KeysError(`${owner} has an active key: revoke it first`);
+    write(`owner: ${owner}`);
+    write(`key: ${key}`);
+    write('Shown once: only its SHA-256 is stored. Sent as "Authorization: Bearer <key>".');
   } finally {
     await pool.end();
   }
