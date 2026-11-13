@@ -17,7 +17,7 @@ import type {
   SettlementStore,
 } from "../ports/index.js";
 import { isFinalRecord, resultUpdate, type Records } from "./records.js";
-import { SETTLE_REASONS } from "./settle.js";
+import { SETTLE_REASONS, resultReason } from "./settle.js";
 import { payerExpiration } from "./verify.js";
 
 export interface ReconcilerDeps {
@@ -43,6 +43,12 @@ const MARGIN_MS = 5_000;
 const CONCURRENCY = 4;
 /** How often a record whose hash fell out of the RPC's history is checked again (decision 27). */
 const HISTORY_GONE_RECHECK_MS = 5 * 60_000;
+
+/** Why a landed transaction of ours failed, and the reason its record ends with (0141). */
+function failedFields(res: rpc.Api.GetFailedTransactionResponse, payer: string) {
+  const failure = failureCause(res);
+  return { errorReason: resultReason({ status: "failed", failure }, payer), failure };
+}
 
 /** What one sweep did, by the state each record ended in; `open` stayed non-final. */
 export type SweepReport = Record<
@@ -91,7 +97,7 @@ export function createReconciler(deps: ReconcilerDeps) {
         ledger: res.ledger,
         feeCharged: found?.feeCharged ?? res.resultXdr.feeCharged().toBigInt(),
         ...channel,
-        ...(!success && { errorReason: SETTLE_REASONS.failed, failure: failureCause(res) }),
+        ...(!success && failedFields(res, record.payer)),
         attempts: rewrap
           ? [
               ...others,
@@ -387,7 +393,7 @@ export function createReconciler(deps: ReconcilerDeps) {
         ? { state: "success", ...fields }
         : {
             state: result.status,
-            errorReason: SETTLE_REASONS[result.status],
+            errorReason: resultReason(result, record.payer),
             ...(result.failure && { failure: result.failure }),
             ...fields,
           },

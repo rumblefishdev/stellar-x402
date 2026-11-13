@@ -39,6 +39,7 @@ import {
   type SettlementStore,
 } from "../ports/index.js";
 import type { BeforeSubmitResult, SettlementHooks, SettlementOrigin } from "./hooks.js";
+import { NONCE_CONSUMED_SETTLE_REASON, consumedElsewhere, type IsNonceUsed } from "./nonce-used.js";
 import {
   attemptUpdates,
   createRecords,
@@ -106,6 +107,12 @@ export const SETTLE_REASONS = {
    * is the stored hash, if any, never the outcome.
    */
   nonceUsed: "settle_exact_stellar_nonce_already_used",
+  /**
+   * Another transaction used the payer's nonce first (0141): our transaction failed on chain, or
+   * the pool's simulation did, so the payment may have settled there. Never answered `success`:
+   * one signed entry raced through two facilitators would then be served twice.
+   */
+  nonceConsumedElsewhere: NONCE_CONSUMED_SETTLE_REASON,
   /**
    * This payment settled, and its `success` was already answered once (AD-6). `transaction` is
    * its hash. The resource was paid for once, so it is served once.
@@ -206,15 +213,17 @@ const UNSENT = new Set(UNSENT_REASONS);
 
 /**
  * Failed answers about a record that don't tell the payer to sign again (0082): it isn't over, it
- * landed, the payload is another payment, its auth entry has expired, or nothing was recorded
- * because another payment of the payer and asset held the slot (0024). Every other failed answer
- * about a record ended a payment whose auth entry can still land until its expiration ledger, in
- * a new envelope: a failed or refused transaction spends no nonce.
+ * landed, the payload is another payment, another transaction used its nonce (0141), its auth
+ * entry has expired, or nothing was recorded because another payment of the payer and asset held
+ * the slot (0024). Every other failed answer about a record ended a payment whose auth entry can
+ * still land until its expiration ledger, in a new envelope: our failed or refused transaction
+ * spent no nonce.
  */
 const NOT_SIGN_AGAIN = new Set<string>([
   SETTLE_REASONS.pending,
   SETTLE_REASONS.alreadySettled,
   SETTLE_REASONS.nonceUsed,
+  SETTLE_REASONS.nonceConsumedElsewhere,
   SETTLE_REASONS.expired,
   SETTLE_REASONS.payerBusy,
 ]);
@@ -271,6 +280,8 @@ export interface SettlerDeps {
    * decision 15, 0082). Read only on an answer that ended a payment and before a reopen.
    */
   latestLedger: () => Promise<number>;
+  /** Whether the payer's nonce is used on chain, read after the pool's simulation failed (0141). */
+  nonceUsed: IsNonceUsed;
   /** Estimated ledger close time, to turn the auth expiry into a deadline. */
   ledgerMs?: number;
   /** The record writes and hooks to share, e.g. with reconciliation; its own by default. */
@@ -372,7 +383,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
   const answerResult = (result: SubmitResult, payer: string): SettleResponse => {
     const transaction = result.hash ?? "";
     if (result.status === "success") return { success: true, transaction, network, payer };
-    return failure(SETTLE_REASONS[result.status], payer, undefined, transaction);
+    return failure(resultReason(result, payer), payer, undefined, transaction);
   };
 
   const records =
@@ -704,7 +715,13 @@ export function createSettler(deps: SettlerDeps): Settle & {
         // A send that threw may have reached the network: keep the record open (0019 resolves it).
         // `sent: "yes"` is an accepted send or a refused one, so after an unexpected error it may
         // still land too; a classified error says the pool knows it won't.
-        const errorReason = reasonFor(error);
+        const thrown = reasonFor(error);
+        // The pool's simulation fails this way too once another transaction used the nonce.
+        const errorReason =
+          thrown === SETTLE_REASONS.simulation &&
+          (await deps.nonceUsed(verified.payer, verified.nonce))
+            ? SETTLE_REASONS.nonceConsumedElsewhere
+            : thrown;
         const attempts = attemptUpdates(attemptsOf(error), { error });
         const unknown = attemptsOf(error).filter((attempt) =>
           errorReason === SETTLE_REASONS.unexpected
@@ -769,7 +786,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
               key,
               {
                 state: result.status,
-                errorReason: SETTLE_REASONS[result.status],
+                errorReason: resultReason(result, verified.payer),
                 ...(result.failure && { failure: result.failure }),
                 ...fields,
               },
@@ -1261,6 +1278,17 @@ export class LeaseLostError extends Error {
   constructor() {
     super("the channel lease was lost");
   }
+}
+
+/** The `errorReason` of a pool result that isn't a success: its fixed one, or 0141's for a used nonce. */
+export function resultReason(
+  result: Pick<SubmitResult, "status" | "failure">,
+  payer: string,
+): string {
+  if (result.status === "success") throw new Error("a success has no errorReason");
+  return result.status === "failed" && consumedElsewhere(result.failure, payer)
+    ? SETTLE_REASONS.nonceConsumedElsewhere
+    : SETTLE_REASONS[result.status];
 }
 
 /** The fixed `errorReason` for each error `submit()` throws (AD-6). */

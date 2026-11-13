@@ -160,6 +160,7 @@ describe("PostgreSQL stores", () => {
           settleTimeoutMs,
           budgetMs: 5_000,
           pollMs: 5,
+          nonceUsed: async () => false,
           latestLedger: async () => 1_000,
           lease: () => fence,
         });

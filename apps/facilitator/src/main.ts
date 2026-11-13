@@ -34,6 +34,7 @@ import {
 import { createLeaseKeeper } from "./settlement/lease.js";
 import { createRecords } from "./settlement/records.js";
 import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler, type Settle } from "./settlement/settle.js";
+import { createNonceLookup } from "./settlement/nonce-used.js";
 import { createTrustlineLookup } from "./settlement/trustline.js";
 import {
   UPSTREAM_TIMEOUT_MS,
@@ -142,6 +143,7 @@ export function buildChecks(
     maxValidityLedgers: config.settlement.maxValidityLedgers,
     latestLedger: async () => (await rpc.getLatestLedger()).sequence,
     missingTrustline: createTrustlineLookup(rpc, config.network, logger),
+    nonceUsed: createNonceLookup(rpc, config.network, logger),
   };
 }
 
@@ -254,6 +256,7 @@ export function buildSettlement(
     settleTimeoutMs: config.settlement.settleTimeoutMs,
     budgetMs: config.settlement.settleBudgetMs,
     latestLedger: deps.checks.latestLedger,
+    nonceUsed: deps.checks.nonceUsed,
     records,
     lease: deps.lease,
   });

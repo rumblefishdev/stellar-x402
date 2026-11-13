@@ -129,6 +129,17 @@ export const CATALOG = [
     fields: ["state"],
     emit: "aggregated",
   },
+  // 0141: our transaction failed because another transaction used the payer's nonce first. Its
+  // fee is lost; a warning only, no alarm.
+  {
+    namespace: FAC,
+    name: "settlement_nonce_consumed_elsewhere_total",
+    kind: "counter",
+    unit: "Count",
+    scope: "network",
+    sets: PLAIN,
+    emit: "aggregated",
+  },
   // The OpenBao signer holds one network's keys (openbao-signer.ts logs its `network`).
   {
     namespace: FAC,
