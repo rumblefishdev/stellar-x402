@@ -2,7 +2,7 @@
 id: "0034"
 title: "Merge the Stellar upto scheme upstream: scheme_upto_stellar.md and the @x402/stellar classes"
 type: FEATURE
-status: active
+status: blocked
 owner: okarcz
 milestone: 2
 related_adr: ["0001"]
@@ -71,6 +71,10 @@ history:
       #181 merged after Stan's review. On #3781: the updated spec pushed (a3ac96fe), the
       description replaced, both of jeesunikim's comments answered, and a comment asking for CI
       approval and a re-review. Eras256's question is still open.
+  - date: "2026-11-13"
+    status: blocked
+    who: okarcz
+    note: "Blocked again: waiting for jeesunikim's re-review of #3781 and the CI approval."
 ---
 
 # Merge the Stellar upto scheme upstream: scheme_upto_stellar.md and the @x402/stellar classes
@@ -83,12 +87,13 @@ once it is **merged**, not when it is proposed.
 
 **Lane:** Payments
 
-## Status: Active
+## Status: Blocked
 
 > jeesunikim's review of #3781 (2026-11-12) is answered: the contract, the e2e suite and the docs
 > changed in our #181 (merged 2026-11-13), and the updated spec, a new description and replies to
 > both comments went up on 2026-11-13 (see [Upstream update](#upstream-update-2026-11-13)). #3781
-> now waits for a maintainer to approve its CI runs and for jeesunikim's re-review. Eras256's
+> now waits for a maintainer to approve its CI runs and for jeesunikim's re-review; blocked until
+> she replies. Eras256's
 > convergence question (2026-10-23) is still unanswered. The code PR also waits on 0015. Drafts are
 > in [`drafts/`](drafts/).
 
