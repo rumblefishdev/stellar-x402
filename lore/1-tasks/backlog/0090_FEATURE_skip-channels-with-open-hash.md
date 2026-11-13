@@ -29,8 +29,8 @@ The drain stops at 150 s, while since 0073 a sent transaction stays valid until 
 expires (about 426 s at the default). A deploy during traffic then leaves one open, and the new
 process's sends on that channel may fail with `txBadSeq` and rebuild until it lands or expires:
 minutes, not about 60 s. ADR 0011 records it; accepted for testnet, not for pubnet. The config
-refuses `NETWORK=stellar:pubnet` until this task, API keys on pubnet (0105), per-key fee budgets
-(0107), the signer alarm (0027) and the hot key's re-check (0048) land (0024 decisions 12 and 31,
+refuses `NETWORK=stellar:pubnet` until this task, per-key fee budgets
+(0107), the signer alarm (0027) and the hot key's re-check (0048) land (0105 landed its part) (0024 decisions 12 and 31,
 0036 decision 24): whichever lands last lifts the rule, the others
 narrow its message (`config.ts`, 0071 decision 14).
 

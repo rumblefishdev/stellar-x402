@@ -49,11 +49,16 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
     settlement's hashes), `leases`, `rate_limits` and the three spend tables don't, so a shared
     database would need it in their keys and queries. A testnet reset wipes only testnet's
     database, and backups, restores and migrations stay per network.
+    - The API key registry (`api_keys`, task 0105) carries no network either: a key is for the
+      callers of the network whose database holds it. Only pubnet requires one, so only pubnet's
+      registry is read; testnet's stays empty.
     - Each network's spend budgets count only its own fees, paid from its own fee account.
     - Still open, decided with the code in 0126: which database holds the catalog, since
       `/discovery/resources` without a `network` filter lists both networks with an exact
-      `total` and an `offset` up to 1 000 000, and the IP rate limiter's counters, which are
-      counted before the request's network is known.
+      `total` and an `offset` up to 1 000 000, and the IP rate limiter's counters. Since 0105
+      `/verify` and `/settle` count a request after its body named the network, so their counters
+      can sit in that network's database; `/discovery/*` and a body that names no network still
+      count before any network is known.
   - Backups: pgBackRest pushes each WAL segment as it closes, compressed and encrypted, and takes
     a daily backup, to our own sub-account on the company's existing Hetzner Storage Box over
     SFTP, kept 14 days (ADR 0011). They allow point-in-time restore and lose about a minute. An

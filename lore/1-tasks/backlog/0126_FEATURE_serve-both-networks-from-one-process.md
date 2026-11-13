@@ -48,6 +48,12 @@ its own channel pool, signer, RPC endpoints and store, before mainnet joins.
 - `/supported` lists an `exact` kind per network and each network's facilitator key.
 - Spend budgets per network, in that network's store, counting only its own fee account's fees
   (0077 decision 11, AD-18).
+- From 0105: `/verify` and `/settle` already read the body before they count a request and
+  require an API key by `paymentRequirements.network` (`http/admit.ts`), so nothing there changes
+  with two networks, but the registry (`stores.apiKeys`) and the counters it uses must become the
+  request's network's. The key rule holds only while a settlement's network comes from that field
+  (threat model, "Naming another network to skip the key"). Pubnet's compose services need one
+  for the key script (`node dist/keys.js`), as `migrate-testnet` is for migrations.
 
 ## Open Questions
 

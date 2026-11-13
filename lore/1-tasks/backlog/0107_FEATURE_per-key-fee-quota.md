@@ -40,6 +40,10 @@ doesn't block pubnet: until then the operator raises an account's limit by hand.
   operator raises one account's limit (config or the registry, to decide).
 - Events for 0027: an account nearing and reaching its quota, the shared free budget nearing its
   limit.
+- From 0105: the spend policy's `beforeSubmit` gets the key's owner as `ctx.caller.owner`
+  (`operator:<name>` or `discord:<id>`), `undefined` on testnet. The owner is not stored with the
+  settlement: `onFinal` gets the record, and a reservation keeps its scopes. The rate limiter
+  already counts a pubnet caller by the same owner.
 - Docs: the facilitator README, ADR 0007, the threat model ("Shared budget exhaustion", "Targeted
   `payTo` budget exhaustion").
 
