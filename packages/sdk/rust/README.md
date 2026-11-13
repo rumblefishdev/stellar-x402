@@ -58,16 +58,26 @@ curl -i "http://localhost:4020/weather?city=Warsaw"   # 402 with the PAYMENT-REQ
 
 ## What a request gets
 
-| Request                                              | Answer                                                                            |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------- |
-| No payment, or a `PAYMENT-SIGNATURE` nobody can read | 402, the terms in `PAYMENT-REQUIRED`                                              |
-| A payment made for other terms                       | 402, `error: "No matching payment requirements"`; the facilitator is not asked    |
-| A payment the facilitator refuses                    | 402, `error` is its reason code; the body adds its message                        |
-| A payment the facilitator cannot read (its 400)      | 402, `error: "invalid_payload"`; the route does not run                           |
-| A valid payment, and the route answers below 400     | the route's answer, with `PAYMENT-RESPONSE` and the transaction's hash            |
-| A valid payment, and the route answers 400 or above  | the route's answer; nothing is settled, so the buyer pays nothing                 |
-| The route answered, and the facilitator won't settle | 402, `PAYMENT-RESPONSE` with the reason; the route's answer is not sent           |
-| The facilitator gives no answer to act on            | 502 `facilitator_unavailable`; the cause goes to the seller's `on_event`, not out |
+The same answer, for the same request and the same facilitator answer, as `@x402/express` 2.31.0
+gives: status, `PAYMENT-REQUIRED`, `PAYMENT-RESPONSE`, `Cache-Control` and body, its error
+messages word for word. A 402 with an `error` repeats it in the body, `{"error": "…"}`.
+
+| Request                                                                    | Answer                                                                                                                           |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| No payment, or a `PAYMENT-SIGNATURE` nobody can read                       | 402, the terms in `PAYMENT-REQUIRED`, `error: "Payment required"`; a browser gets upstream's HTML page instead of the JSON body  |
+| A payment made for other terms                                             | 402, `error: "No matching payment requirements"`; the facilitator is not asked                                                   |
+| A payment the facilitator refuses                                          | 402, `error` is its reason code; its message goes to the seller's `on_event` only                                                |
+| A facilitator answer with an error status (400, 401, 429, 503, …)          | 402, `error` is upstream's, e.g. `Facilitator verify failed (503): {"error":"rpc_unavailable"}`; the route does not run          |
+| A valid payment, and the route answers below 400                           | the route's answer, with `PAYMENT-RESPONSE` and the transaction's hash                                                           |
+| A valid payment, and the route answers 400 or above                        | the route's answer; nothing is settled, so the buyer pays nothing                                                                |
+| The route answered, and the facilitator won't settle or can't              | 402, an empty body, `PAYMENT-RESPONSE` with the reason (for an error status, upstream's message); the route's answer is not sent |
+| The facilitator answers `settlement_pending` with a transaction hash       | `/settle` is asked once more, as upstream does, and that answer counts                                                           |
+| A facilitator answer that is not JSON, not what the route returns, or late | 502, `{"error": "Facilitator verify returned invalid JSON: …"}` or `… request timed out after 90000ms`                           |
+
+The facilitator's answers are read as upstream's client reads them: at most 1 MiB, checked
+against its schemas, and a `PAYMENT-RESPONSE` with only the fields its schema keeps. A redirect is
+the one place the crate is stricter: it is not followed (upstream follows it), so it answers as an
+error status.
 
 A paid answer keeps the route's own `Cache-Control`, with `private` added, so a shared cache does
 not keep it.
@@ -77,16 +87,18 @@ disconnects ends all three where they are: during `/settle` the facilitator may 
 money with no event to say so, and after the route ran its work is not paid for. Settling apart
 from the request is part 2's.
 
-The 402 is held equal to what upstream's `@x402/express` 2.28.0 sends for the same route: a test
-compares the two (`tests/fixtures/payment-required-upstream.json`).
+The payment is settled once the route's answer has its status and headers, before its body is
+sent. A streamed body that breaks halfway is still paid for: the buyer gets 200 and
+`PAYMENT-RESPONSE`, then a body that ends early. Upstream's middleware holds the whole body before
+it settles; holding it here is part 2's too.
 
-Two things the seller gets that upstream's middleware does not pass on:
+The 402 is held equal to what `@x402/express` sends for the same route: a test compares the two
+(`tests/fixtures/payment-required-upstream.json`, captured from 2.28.0; 2.31.0 sends the same).
 
-- **The facilitator's message with its reason.** A refusal's body is
-  `{"error": "<reason code>", "message": "<what to do>"}`, as for a missing trustline. The
-  `PAYMENT-REQUIRED` header stays as upstream's, so every client reads it.
-- **The catalog's answer.** `PaymentGate::on_event` reports each settlement with what the
-  facilitator's `EXTENSION-RESPONSES` said: whether the Bazaar took the listing, and why not.
+What the seller gets that upstream's middleware does not pass on, through
+`PaymentGate::on_event`: the facilitator's message with each refusal, its own code (`extra`, such
+as our facilitator's `reason`), the cause of each failure, and the catalog's answer from
+`EXTENSION-RESPONSES`: whether the Bazaar took the listing, and why not.
 
 ## Settings
 

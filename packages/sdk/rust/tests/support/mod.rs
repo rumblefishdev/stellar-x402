@@ -1,6 +1,7 @@
 //! A facilitator on a local port that answers what a test tells it to and keeps what it was sent.
 #![allow(dead_code)]
 
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -102,6 +103,8 @@ struct Replies {
     supported: Reply,
     verify: Reply,
     settle: Reply,
+    /// Answers to the next `/settle` calls, one each, before `settle` answers again.
+    settle_once: VecDeque<Reply>,
 }
 
 #[derive(Clone)]
@@ -126,6 +129,7 @@ impl FakeFacilitator {
                     "network": "stellar:testnet"
                 }),
             ),
+            settle_once: VecDeque::new(),
         };
         let fake = Self {
             url: String::new(),
@@ -155,6 +159,11 @@ impl FakeFacilitator {
         self.replies.lock().unwrap().settle = reply;
     }
 
+    /// Answers the next `/settle` with `reply`, and the ones after it as before.
+    pub fn settle_replies_once(&self, reply: Reply) {
+        self.replies.lock().unwrap().settle_once.push_back(reply);
+    }
+
     /// Every request so far, in order.
     pub fn seen(&self) -> Vec<Seen> {
         self.seen.lock().unwrap().clone()
@@ -181,11 +190,14 @@ async fn answer(
         body: serde_json::from_slice(&body).unwrap_or(Value::Null),
     });
     let reply = {
-        let replies = fake.replies.lock().unwrap();
+        let mut replies = fake.replies.lock().unwrap();
         match path.as_str() {
             "/supported" => replies.supported.clone(),
             "/verify" => replies.verify.clone(),
-            _ => replies.settle.clone(),
+            _ => match replies.settle_once.pop_front() {
+                Some(once) => once,
+                None => replies.settle.clone(),
+            },
         }
     };
     tokio::time::sleep(reply.delay).await;

@@ -23,6 +23,14 @@
 //! A request without a payment gets 402 and the terms. A request with one is checked by the
 //! facilitator, then the route runs, and only when the route answers without an error is the
 //! payment settled: a request the route refuses costs the buyer nothing.
+//!
+//! The payment is settled once the route's answer has its status and headers, before its body is
+//! sent: a streamed body that breaks halfway is still paid for. Upstream's middleware holds the
+//! whole body before it settles; doing the same is part 2's (task 0140).
+//!
+//! Every answer the layer gives the buyer is the one `@x402/express` 2.31.0 gives for the same
+//! request and the same facilitator answer: status, `PAYMENT-REQUIRED`, `PAYMENT-RESPONSE`,
+//! `Cache-Control` and body, its error messages word for word.
 
 use std::convert::Infallible;
 use std::future::Future;
@@ -32,7 +40,7 @@ use std::task::{Context, Poll};
 
 use ::axum::body::Body;
 use ::axum::extract::{OriginalUri, Request};
-use ::axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, HOST};
+use ::axum::http::header::{ACCEPT, CACHE_CONTROL, CONTENT_TYPE, HOST, USER_AGENT};
 use ::axum::http::{HeaderValue, StatusCode};
 use ::axum::response::Response;
 use serde_json::{json, Value};
@@ -68,13 +76,16 @@ pub enum PaymentEvent<'a> {
     /// A payment was settled. `extension_responses` holds the facilitator's answer about the
     /// listing: for `bazaar`, whether the catalog took it.
     Settled(&'a SettleResponse),
-    /// The route answered, and the facilitator then refused to settle. The buyer got 402.
+    /// The route answered, and the facilitator then refused to settle, or answered
+    /// `settlement_pending` again when asked a second time: that transaction was sent and may
+    /// still land. The buyer got 402 and the facilitator's `PAYMENT-RESPONSE`.
     SettleRefused(&'a SettleResponse),
-    /// The facilitator found the payment invalid, or could not read it (`invalid_payload`). The
-    /// route did not run.
+    /// The facilitator found the payment invalid, or could not read it (a 400, or a 413 for its
+    /// size). The route did not run; the buyer got 402.
     VerifyRefused(&'a VerifyResponse),
     /// The facilitator gave no answer to act on, or refused the seller itself, as with a wrong
-    /// API key. The buyer got 502.
+    /// API key. The buyer got what `@x402/express` answers: 402 with the error's message, or 502
+    /// when the facilitator's answer could not be read or came too late.
     FacilitatorFailed(&'a FacilitatorError),
 }
 
@@ -222,28 +233,30 @@ impl PaidRoute {
             .and_then(|header| header.to_str().ok())
             .and_then(|header| PaymentPayload::from_header(header).ok());
         let Some(payment) = payment else {
-            return payment_required(&required, json!({}));
+            if from_a_browser(&request) {
+                return paywall_page(&required);
+            }
+            return payment_required(&required);
         };
         if !payment.accepts(&self.terms) {
             let required = required.with_error("No matching payment requirements");
-            return payment_required(&required, json!({}));
+            return payment_required(&required);
         }
 
         let verified = match self.gate.facilitator.verify(&payment, &self.terms).await {
             Ok(verified) => verified,
             Err(error) => {
                 self.emit(PaymentEvent::FacilitatorFailed(&error));
-                return facilitator_unavailable("The payment could not be checked.");
+                if error.is_response_error() {
+                    return facilitator_error(&error);
+                }
+                return payment_required(&required.with_error(error.upstream_message()));
             }
         };
         if !verified.is_valid {
             self.emit(PaymentEvent::VerifyRefused(&verified));
-            let reason = verified
-                .invalid_reason
-                .as_deref()
-                .unwrap_or("invalid_payment");
-            let body = refusal(reason, verified.invalid_message.as_deref());
-            return payment_required(&required.with_error(reason), body);
+            let required = required.with_reason(verified.invalid_reason.as_deref());
+            return payment_required(&required);
         }
         if let Some(payer) = &verified.payer {
             request.extensions_mut().insert(Payer(payer.clone()));
@@ -269,25 +282,62 @@ impl PaidRoute {
             }
             Ok(settled) => {
                 self.emit(PaymentEvent::SettleRefused(&settled));
-                let reason = settled
-                    .error_reason
-                    .as_deref()
-                    .unwrap_or("settlement_failed");
-                let body = refusal(reason, settled.error_message.as_deref());
-                let mut response = json_response(StatusCode::PAYMENT_REQUIRED, &body);
-                response
-                    .headers_mut()
-                    .insert(PAYMENT_RESPONSE, header_value(&settled.to_header()));
-                response
+                settlement_failed(&settled)
             }
             Err(error) => {
                 self.emit(PaymentEvent::FacilitatorFailed(&error));
-                facilitator_unavailable(
-                    "The payment could not be settled. It may still settle: check before paying again.",
-                )
+                if error.is_response_error() {
+                    return facilitator_error(&error);
+                }
+                let network = self.terms.network().as_str();
+                settlement_failed(&SettleResponse::failed(error.upstream_message(), network))
             }
         }
     }
+}
+
+/// Upstream's `isWebBrowser`: a request that takes HTML from a browser's user agent.
+fn from_a_browser(request: &Request) -> bool {
+    let header = |name| {
+        request
+            .headers()
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+    };
+    header(ACCEPT).contains("text/html") && header(USER_AGENT).contains("Mozilla")
+}
+
+/// `@x402/core` 2.31.0's `FALLBACK_PAYWALL_HTML` (Apache-2.0, x402 Foundation): the page a browser
+/// gets for a scheme without an in-browser paywall, as Stellar is upstream.
+const PAYWALL_PAGE: &str = r#"<!DOCTYPE html>
+<html>
+  <head>
+    <title>Payment Required</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  </head>
+  <body>
+    <div style="max-width: 600px; margin: 50px auto; padding: 20px; font-family: system-ui, -apple-system, sans-serif;">
+      <h1>Payment Required</h1>
+      <p>This resource is protected by the x402 payment protocol.</p>
+      <p style="margin-top: 2rem; padding: 1rem; background: #fef3c7; border-radius: 0.5rem;">
+        <strong>Note to developers:</strong> install <code>@x402/paywall</code> to enable
+        the in-browser wallet connection and payment UI. Programmatic clients should read
+        the payment requirements from the 402 response headers and JSON body.
+      </p>
+    </div>
+  </body>
+</html>"#;
+
+fn paywall_page(required: &PaymentRequired) -> Response {
+    let mut response = Response::new(Body::from(PAYWALL_PAGE));
+    *response.status_mut() = StatusCode::PAYMENT_REQUIRED;
+    let headers = response.headers_mut();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("text/html"));
+    headers.insert(PAYMENT_REQUIRED, header_value(&required.to_header()));
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 /// The route's `Cache-Control` with `private` added, as upstream does: a shared cache must not
@@ -306,41 +356,50 @@ fn private(route: Option<&HeaderValue>) -> HeaderValue {
     HeaderValue::from_str(&format!("{value}, private")).expect("a header value and ASCII")
 }
 
-fn refusal(reason: &str, message: Option<&str>) -> Value {
-    match message {
-        Some(message) => json!({ "error": reason, "message": message }),
-        None => json!({ "error": reason }),
-    }
-}
-
 /// Base64 and the header names here are plain ASCII.
 fn header_value(text: &str) -> HeaderValue {
     HeaderValue::from_str(text).expect("base64 is a valid header value")
 }
 
-/// A JSON answer that no cache may keep.
 fn json_response(status: StatusCode, body: &Value) -> Response {
     let mut response = Response::new(Body::from(body.to_string()));
     *response.status_mut() = status;
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    response
+}
+
+/// 402 with the terms, and the refusal's reason in the body too, as `@x402/core` 2.31.0's
+/// `createHTTPResponse`. No cache may keep it.
+fn payment_required(required: &PaymentRequired) -> Response {
+    let body = match required.error() {
+        Some(error) => json!({ "error": error }),
+        None => json!({}),
+    };
+    let mut response = json_response(StatusCode::PAYMENT_REQUIRED, &body);
     let headers = response.headers_mut();
-    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    headers.insert(PAYMENT_REQUIRED, header_value(&required.to_header()));
     headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
 }
 
-fn payment_required(required: &PaymentRequired, body: Value) -> Response {
-    let mut response = json_response(StatusCode::PAYMENT_REQUIRED, &body);
-    response
-        .headers_mut()
-        .insert(PAYMENT_REQUIRED, header_value(&required.to_header()));
+/// 402 with the failed settlement in `PAYMENT-RESPONSE` and an empty body, as upstream's
+/// `buildSettlementFailureResponse`. The route's answer is not sent.
+fn settlement_failed(settled: &SettleResponse) -> Response {
+    let mut response = json_response(StatusCode::PAYMENT_REQUIRED, &json!({}));
+    let headers = response.headers_mut();
+    headers.insert(PAYMENT_RESPONSE, header_value(&settled.to_header()));
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
 }
 
-/// The buyer learns that the facilitator failed, not why: the cause may be the seller's own, such
-/// as its API key, and goes to [`PaymentEvent::FacilitatorFailed`].
-fn facilitator_unavailable(message: &str) -> Response {
-    let body = json!({ "error": "facilitator_unavailable", "message": message });
-    json_response(StatusCode::BAD_GATEWAY, &body)
+/// Upstream's answer to a `FacilitatorResponseError`: 502 and the error's message.
+fn facilitator_error(error: &FacilitatorError) -> Response {
+    json_response(
+        StatusCode::BAD_GATEWAY,
+        &json!({ "error": error.upstream_message() }),
+    )
 }
 
 impl<S> Layer<S> for PaidRoute {

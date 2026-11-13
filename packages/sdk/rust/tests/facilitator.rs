@@ -7,7 +7,8 @@ use std::time::Duration;
 use axum::http::header::LOCATION;
 use axum::http::StatusCode;
 use axum::Router;
-use serde_json::json;
+use base64::{engine::general_purpose::STANDARD, Engine};
+use serde_json::{json, Value};
 use stellar_x402::{Facilitator, FacilitatorError};
 use support::{payment, payment_json, terms, FakeFacilitator, Reply, HASH, PAYER};
 
@@ -111,6 +112,65 @@ async fn a_refusal_sent_with_an_error_status_is_still_a_refusal() {
 
     assert!(!verified.is_valid);
     assert_eq!(verified.invalid_reason.as_deref(), Some("invalid_payload"));
+}
+
+#[tokio::test]
+async fn a_verdict_sent_with_an_error_status_is_never_valid() {
+    // Upstream's client throws a `VerifyError` for any non-2xx answer with `isValid`, so the
+    // route never runs; its reason, with no `invalidReason`, is "unknown reason".
+    let fake = FakeFacilitator::start().await;
+    fake.verify_replies(Reply::json(500, json!({ "isValid": true, "payer": PAYER })));
+
+    let verified = Facilitator::new(&fake.url)
+        .unwrap()
+        .verify(&payment(&terms()), &terms())
+        .await
+        .unwrap();
+
+    assert!(!verified.is_valid);
+    assert_eq!(verified.invalid_reason.as_deref(), Some("unknown reason"));
+}
+
+#[tokio::test]
+async fn a_refusal_sent_with_an_error_status_carries_its_message_as_upstream_words_it() {
+    let fake = FakeFacilitator::start().await;
+    fake.verify_replies(Reply::json(
+        400,
+        json!({
+            "isValid": false,
+            "invalidReason": "invalid_exact_stellar_payer_trustline_missing",
+            "invalidMessage": "The payer has no trustline to USDC."
+        }),
+    ));
+
+    let verified = Facilitator::new(&fake.url)
+        .unwrap()
+        .verify(&payment(&terms()), &terms())
+        .await
+        .unwrap();
+
+    assert!(!verified.is_valid);
+    assert_eq!(
+        verified.invalid_reason.as_deref(),
+        Some("invalid_exact_stellar_payer_trustline_missing: The payer has no trustline to USDC.")
+    );
+}
+
+#[tokio::test]
+async fn a_verify_answer_upstreams_schema_refuses_is_an_error() {
+    let fake = FakeFacilitator::start().await;
+    fake.verify_replies(Reply::json(200, json!({ "isValid": "yes" })));
+
+    let error = Facilitator::new(&fake.url)
+        .unwrap()
+        .verify(&payment(&terms()), &terms())
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(&error, FacilitatorError::InvalidData { body, .. } if body == r#"{"isValid":"yes"}"#),
+        "{error:?}"
+    );
 }
 
 #[tokio::test]
@@ -263,7 +323,137 @@ async fn a_payment_the_facilitator_cannot_read_is_a_refusal() {
         .unwrap();
 
     assert!(!verified.is_valid);
-    assert_eq!(verified.invalid_reason.as_deref(), Some("invalid_payload"));
+    // Upstream's error for it, word for word: the buyer's 402 carries it.
+    assert_eq!(
+        verified.invalid_reason.as_deref(),
+        Some(r#"Facilitator verify failed (400): {"error":"bad_request"}"#)
+    );
+}
+
+#[tokio::test]
+async fn a_payment_too_large_for_the_facilitator_is_a_refusal() {
+    // Our facilitator answers a body over its limit (64 KiB) with 413. The seller's terms are
+    // small, so what is too large is the buyer's payment.
+    let fake = FakeFacilitator::start().await;
+    fake.verify_replies(Reply::json(413, json!({ "error": "payload_too_large" })));
+
+    let verified = Facilitator::new(&fake.url)
+        .unwrap()
+        .verify(&payment(&terms()), &terms())
+        .await
+        .unwrap();
+
+    assert!(!verified.is_valid);
+    assert_eq!(
+        verified.invalid_reason.as_deref(),
+        Some(r#"Facilitator verify failed (413): {"error":"payload_too_large"}"#)
+    );
+}
+
+/// The `body` of the `Status` error for a `/verify` answered with `status` and `body`.
+async fn status_excerpt(status: u16, reply: Reply) -> String {
+    let fake = FakeFacilitator::start().await;
+    fake.verify_replies(Reply { status, ..reply });
+    let error = Facilitator::new(&fake.url)
+        .unwrap()
+        .verify(&payment(&terms()), &terms())
+        .await
+        .unwrap_err();
+    match error {
+        FacilitatorError::Status { body, .. } => body,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn an_error_answer_is_cut_as_upstreams_response_excerpt_cuts_it() {
+    // JSON as `JSON.stringify` writes it, text with its whitespace folded, 200 characters at
+    // most with "..." in the last three, and a word for an empty answer.
+    assert_eq!(
+        status_excerpt(
+            503,
+            Reply::text(503, "{ \"error\" : \"rpc_unavailable\" }\n")
+        )
+        .await,
+        r#"{"error":"rpc_unavailable"}"#
+    );
+    assert_eq!(
+        status_excerpt(502, Reply::text(502, "  bad\n\n  gateway ")).await,
+        "bad gateway"
+    );
+    assert_eq!(
+        status_excerpt(500, Reply::text(500, &"x".repeat(300))).await,
+        format!("{}...", "x".repeat(197))
+    );
+    assert_eq!(
+        status_excerpt(500, Reply::text(500, "")).await,
+        "<empty response>"
+    );
+}
+
+/// What our facilitator answers when its settle budget ran out after the transaction was sent:
+/// not final yet, with the transaction's hash, or with none when nothing was sent.
+fn pending(transaction: &str) -> Reply {
+    Reply::json(
+        200,
+        json!({
+            "success": false,
+            "errorReason": "settlement_pending",
+            "payer": PAYER,
+            "transaction": transaction,
+            "network": "stellar:testnet"
+        }),
+    )
+}
+
+#[tokio::test]
+async fn a_settlement_still_pending_is_asked_for_once_more() {
+    // As upstream's `settleWithPendingRetry`: the facilitator answers the repeat with how the
+    // transaction ended.
+    let fake = FakeFacilitator::start().await;
+    fake.settle_replies_once(pending(HASH));
+
+    let settled = Facilitator::new(&fake.url)
+        .unwrap()
+        .settle(&payment(&terms()), &terms())
+        .await
+        .unwrap();
+
+    assert!(settled.success);
+    assert_eq!(settled.transaction, HASH);
+    assert_eq!(fake.paths(), ["/settle", "/settle"]);
+}
+
+#[tokio::test]
+async fn a_settlement_pending_twice_is_asked_for_only_once_more() {
+    let fake = FakeFacilitator::start().await;
+    fake.settle_replies(pending(HASH));
+
+    let settled = Facilitator::new(&fake.url)
+        .unwrap()
+        .settle(&payment(&terms()), &terms())
+        .await
+        .unwrap();
+
+    assert!(!settled.success);
+    assert_eq!(settled.error_reason.as_deref(), Some("settlement_pending"));
+    assert_eq!(fake.paths(), ["/settle", "/settle"]);
+}
+
+#[tokio::test]
+async fn a_pending_settlement_without_a_transaction_is_not_asked_for_again() {
+    // Upstream asks again only when a transaction was sent.
+    let fake = FakeFacilitator::start().await;
+    fake.settle_replies_once(pending(""));
+
+    let settled = Facilitator::new(&fake.url)
+        .unwrap()
+        .settle(&payment(&terms()), &terms())
+        .await
+        .unwrap();
+
+    assert!(!settled.success);
+    assert_eq!(fake.paths(), ["/settle"]);
 }
 
 #[tokio::test]
@@ -303,7 +493,163 @@ async fn an_answer_that_is_not_what_the_route_returns_is_an_error() {
         .await
         .unwrap_err();
 
-    assert!(matches!(error, FacilitatorError::Body { .. }), "{error:?}");
+    assert!(
+        matches!(&error, FacilitatorError::NotJson { body, .. } if body == "<html>gateway</html>"),
+        "{error:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_settlement_without_a_transaction_is_an_error() {
+    // Upstream's schema needs `transaction` and `network` as strings.
+    let fake = FakeFacilitator::start().await;
+    fake.settle_replies(Reply::json(200, json!({ "success": true })));
+
+    let error = Facilitator::new(&fake.url)
+        .unwrap()
+        .settle(&payment(&terms()), &terms())
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(error, FacilitatorError::InvalidData { .. }),
+        "{error:?}"
+    );
+}
+
+#[tokio::test]
+async fn the_buyer_gets_only_the_settlement_fields_upstreams_schema_has() {
+    let fake = FakeFacilitator::start().await;
+    fake.settle_replies(Reply::json(
+        200,
+        json!({
+            "success": true,
+            "payer": PAYER,
+            "transaction": HASH,
+            "network": "stellar:testnet",
+            "amount": "10000",
+            "errorReason": null,
+            "ledger": 123
+        }),
+    ));
+
+    let settled = Facilitator::new(&fake.url)
+        .unwrap()
+        .settle(&payment(&terms()), &terms())
+        .await
+        .unwrap();
+
+    // The seller still reads what upstream's schema drops.
+    assert_eq!(settled.other["ledger"], 123);
+    let header = STANDARD.decode(settled.to_header()).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&header).unwrap(),
+        json!({
+            "success": true,
+            "payer": PAYER,
+            "transaction": HASH,
+            "network": "stellar:testnet",
+            "amount": "10000"
+        })
+    );
+}
+
+#[tokio::test]
+async fn a_settlement_verdict_sent_with_an_error_status_is_a_refusal_as_upstream_builds_it() {
+    // Upstream's `SettleError` path: never a success, and the buyer's `PAYMENT-RESPONSE` built
+    // from the reason, or "unknown reason", and the fields the answer had.
+    let fake = FakeFacilitator::start().await;
+    fake.settle_replies(Reply::json(
+        500,
+        json!({ "success": true, "transaction": HASH, "network": "stellar:testnet" }),
+    ));
+
+    let settled = Facilitator::new(&fake.url)
+        .unwrap()
+        .settle(&payment(&terms()), &terms())
+        .await
+        .unwrap();
+
+    assert!(!settled.success);
+    let header = STANDARD.decode(settled.to_header()).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&header).unwrap(),
+        json!({
+            "success": false,
+            "errorReason": "unknown reason",
+            "errorMessage": "unknown reason",
+            "transaction": HASH,
+            "network": "stellar:testnet"
+        })
+    );
+}
+
+#[tokio::test]
+async fn a_settlement_verdict_sent_with_an_error_status_leaves_out_what_it_did_not_say() {
+    let fake = FakeFacilitator::start().await;
+    fake.settle_replies(Reply::json(
+        500,
+        json!({ "success": false, "errorReason": "settle_exact_stellar_timeout" }),
+    ));
+
+    let settled = Facilitator::new(&fake.url)
+        .unwrap()
+        .settle(&payment(&terms()), &terms())
+        .await
+        .unwrap();
+
+    let header = STANDARD.decode(settled.to_header()).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&header).unwrap(),
+        json!({
+            "success": false,
+            "errorReason": "settle_exact_stellar_timeout",
+            "errorMessage": "settle_exact_stellar_timeout"
+        })
+    );
+}
+
+#[tokio::test]
+async fn our_facilitators_own_code_reaches_the_seller() {
+    // `apps/facilitator` puts its own code next to upstream's reason, e.g. for a channel account.
+    let fake = FakeFacilitator::start().await;
+    fake.verify_replies(Reply::json(
+        200,
+        json!({
+            "isValid": false,
+            "invalidReason": "invalid_exact_stellar_payload_channel_account",
+            "extra": { "reason": "channel_account" }
+        }),
+    ));
+
+    let verified = Facilitator::new(&fake.url)
+        .unwrap()
+        .verify(&payment(&terms()), &terms())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        verified.extra,
+        json!({ "reason": "channel_account" }).as_object().cloned()
+    );
+}
+
+#[tokio::test]
+async fn a_pending_settlement_sent_with_an_error_status_is_asked_for_once_more_too() {
+    let fake = FakeFacilitator::start().await;
+    fake.settle_replies_once(Reply::json(
+        503,
+        json!({ "success": false, "errorReason": "settlement_pending", "transaction": HASH }),
+    ));
+
+    let settled = Facilitator::new(&fake.url)
+        .unwrap()
+        .settle(&payment(&terms()), &terms())
+        .await
+        .unwrap();
+
+    assert!(settled.success);
+    assert_eq!(fake.paths(), ["/settle", "/settle"]);
 }
 
 #[tokio::test]

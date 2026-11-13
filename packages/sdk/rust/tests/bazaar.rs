@@ -16,7 +16,8 @@ fn answer(listing: &Listing, method: &str) -> Value {
 
 #[test]
 fn a_listed_get_route_matches_what_upstreams_middleware_sends() {
-    // The whole 402 of `examples/http-api` (`@x402/express` and `@x402/extensions` 2.28.0).
+    // The whole 402 of `examples/http-api` (`@x402/express` and `@x402/extensions` 2.28.0;
+    // 2.31.0 sends the same, by the parity run of 0136).
     let listing = Listing::query(json!({ "city": "Warsaw" }))
         .input_schema(
             json!({ "properties": { "city": { "type": "string" } }, "required": ["city"] }),
@@ -43,6 +44,21 @@ fn the_listing_names_the_method_of_the_request_it_answers() {
 }
 
 #[test]
+fn a_method_the_input_cannot_take_is_named_as_the_first_one_it_can() {
+    // `@x402/extensions` 2.31's `resolveDeclaredMethod`: GET, HEAD, DELETE for a query; POST,
+    // PUT, PATCH for a body.
+    let query = &answer(&Listing::query(json!({})), "POST")["extensions"]["bazaar"];
+    let body = &answer(&Listing::json_body(json!({})), "GET")["extensions"]["bazaar"];
+
+    assert_eq!(query["info"]["input"]["method"], "GET");
+    assert_eq!(
+        query["schema"]["properties"]["input"]["properties"]["method"]["enum"],
+        json!(["GET"])
+    );
+    assert_eq!(body["info"]["input"]["method"], "POST");
+}
+
+#[test]
 fn a_listing_without_an_output_example_declares_no_output() {
     let bazaar =
         &answer(&Listing::query(json!({ "city": "Warsaw" })), "GET")["extensions"]["bazaar"];
@@ -65,7 +81,7 @@ fn a_listing_without_an_input_schema_accepts_any_query() {
 #[test]
 fn a_listed_json_body_route_is_declared_as_upstream_declares_it() {
     // Written from `createBodyDiscoveryExtension` and `bazaarResourceServerExtension` of
-    // `@x402/extensions` 2.28.0.
+    // `@x402/extensions` 2.31.0, unchanged there since 2.28.0.
     let schema = json!({ "type": "object", "properties": { "text": { "type": "string" } }, "required": ["text"] });
     let listing = Listing::json_body(json!({ "text": "hello" }))
         .input_schema(schema.clone())

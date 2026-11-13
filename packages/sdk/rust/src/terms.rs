@@ -71,6 +71,11 @@ impl PaymentRequirements {
         })
     }
 
+    #[cfg(feature = "axum")]
+    pub(crate) fn network(&self) -> Network {
+        self.network
+    }
+
     /// Adds what the facilitator says about these terms' scheme and network: whether it pays the
     /// network fee. A buyer's client reads it before it signs.
     pub fn with_supported(mut self, supported: &Supported) -> Self {
@@ -87,14 +92,15 @@ impl PaymentRequirements {
 }
 
 /// The resource a payment buys.
+///
+/// `description` and `mimeType` are always sent, empty when not set, as upstream's middleware
+/// sends them.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResourceInfo {
     url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    mime_type: Option<String>,
+    description: String,
+    mime_type: String,
 }
 
 impl ResourceInfo {
@@ -103,20 +109,20 @@ impl ResourceInfo {
     pub fn new(url: impl Into<String>) -> Self {
         Self {
             url: url.into(),
-            description: None,
-            mime_type: None,
+            description: String::new(),
+            mime_type: String::new(),
         }
     }
 
     /// What the resource is, in a sentence.
     pub fn description(mut self, description: impl Into<String>) -> Self {
-        self.description = Some(description.into());
+        self.description = description.into();
         self
     }
 
     /// The media type of the resource's answer.
     pub fn mime_type(mut self, mime_type: impl Into<String>) -> Self {
-        self.mime_type = Some(mime_type.into());
+        self.mime_type = mime_type.into();
         self
     }
 }
@@ -126,7 +132,8 @@ impl ResourceInfo {
 #[serde(rename_all = "camelCase")]
 pub struct PaymentRequired {
     x402_version: u8,
-    error: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
     resource: ResourceInfo,
     accepts: Vec<PaymentRequirements>,
     #[serde(skip_serializing_if = "Map::is_empty")]
@@ -138,7 +145,7 @@ impl PaymentRequired {
     pub fn new(resource: ResourceInfo, accepts: Vec<PaymentRequirements>) -> Self {
         Self {
             x402_version: X402_VERSION,
-            error: "Payment required".to_owned(),
+            error: Some("Payment required".to_owned()),
             resource,
             accepts,
             extensions: Map::new(),
@@ -148,8 +155,20 @@ impl PaymentRequired {
     /// Says why a payment was refused, in place of "Payment required": a reason code from the
     /// facilitator, or upstream's wording.
     pub fn with_error(mut self, error: impl Into<String>) -> Self {
-        self.error = error.into();
+        self.error = Some(error.into());
         self
+    }
+
+    /// Sets `error`, or leaves it out as upstream does for a refusal without a reason.
+    #[cfg(feature = "axum")]
+    pub(crate) fn with_reason(mut self, reason: Option<&str>) -> Self {
+        self.error = reason.map(str::to_owned);
+        self
+    }
+
+    /// Why the payment was refused, when the answer says.
+    pub fn error(&self) -> Option<&str> {
+        self.error.as_deref()
     }
 
     /// Asks a facilitator that catalogs to list the route, as `listing` describes it. `method` is

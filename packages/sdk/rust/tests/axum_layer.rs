@@ -205,7 +205,11 @@ async fn a_request_without_a_payment_gets_the_terms_and_the_route_does_not_run()
         required["extensions"]["bazaar"]["info"]["input"]["method"],
         "GET"
     );
-    assert_eq!(response.json::<Value>().await.unwrap(), json!({}));
+    // `@x402/core` 2.31: a 402 with an `error` repeats it in the body.
+    assert_eq!(
+        response.json::<Value>().await.unwrap(),
+        json!({ "error": "Payment required" })
+    );
     assert_eq!(seller.served(), 0);
     assert_eq!(seller.asked(), Vec::<String>::new());
 }
@@ -275,7 +279,7 @@ async fn a_route_that_answers_an_error_is_not_settled() {
 }
 
 #[tokio::test]
-async fn a_refused_payment_gets_the_facilitators_reason_and_its_message() {
+async fn a_refused_payment_gets_the_facilitators_reason_and_not_its_message() {
     let seller = seller().await;
     seller.fake.verify_replies(Reply::json(
         200,
@@ -296,12 +300,11 @@ async fn a_refused_payment_gets_the_facilitators_reason_and_its_message() {
         "invalid_exact_stellar_payer_trustline_missing"
     );
     assert_eq!(required["accepts"][0]["amount"], "10000");
+    // As upstream's middleware: the reason in the body too, the message only in the seller's
+    // event.
     assert_eq!(
         response.json::<Value>().await.unwrap(),
-        json!({
-            "error": "invalid_exact_stellar_payer_trustline_missing",
-            "message": "The payer has no trustline to USDC. Add one, then pay again."
-        })
+        json!({ "error": "invalid_exact_stellar_payer_trustline_missing" })
     );
     assert_eq!(seller.served(), 0);
     assert_eq!(seller.asked(), ["/verify"]);
@@ -333,6 +336,10 @@ async fn a_payment_for_other_terms_is_refused_without_asking_the_facilitator() {
     assert_eq!(
         decoded(&response, "payment-required").unwrap()["error"],
         "No matching payment requirements"
+    );
+    assert_eq!(
+        response.json::<Value>().await.unwrap(),
+        json!({ "error": "No matching payment requirements" })
     );
     assert_eq!(seller.served(), 0);
     assert_eq!(seller.asked(), Vec::<String>::new());
@@ -380,12 +387,10 @@ async fn a_settlement_the_facilitator_refuses_gets_402_with_its_reason_and_not_t
     assert_eq!(settlement["success"], false);
     assert_eq!(settlement["errorReason"], "spend_budget_exhausted");
     assert_eq!(
-        response.json::<Value>().await.unwrap(),
-        json!({
-            "error": "spend_budget_exhausted",
-            "message": "This payer's fee budget is used up for today."
-        })
+        settlement["errorMessage"],
+        "This payer's fee budget is used up for today."
     );
+    assert_eq!(response.json::<Value>().await.unwrap(), json!({}));
     assert_eq!(
         seller.events(),
         [r#"settle refused Some("spend_budget_exhausted")"#]
@@ -393,7 +398,7 @@ async fn a_settlement_the_facilitator_refuses_gets_402_with_its_reason_and_not_t
 }
 
 #[tokio::test]
-async fn a_facilitator_that_fails_at_verify_gets_502_and_the_route_does_not_run() {
+async fn a_facilitator_that_fails_at_verify_gets_402_with_upstreams_error() {
     let seller = seller().await;
     seller
         .fake
@@ -401,11 +406,17 @@ async fn a_facilitator_that_fails_at_verify_gets_502_and_the_route_does_not_run(
 
     let response = seller.pay("/weather?city=Warsaw").await;
 
-    assert_eq!(response.status(), 502);
-    let body = response.json::<Value>().await.unwrap();
-    assert_eq!(body["error"], "facilitator_unavailable");
-    // The seller's own trouble, an API key here, is for the seller and not the buyer.
-    assert!(!body.to_string().contains("invalid_api_key"));
+    // What `@x402/express` answers: 402, the facilitator's answer in `error`, an empty body.
+    assert_eq!(response.status(), 402);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    assert_eq!(
+        decoded(&response, "payment-required").unwrap()["error"],
+        r#"Facilitator verify failed (401): {"error":"invalid_api_key"}"#
+    );
+    assert_eq!(
+        response.json::<Value>().await.unwrap(),
+        json!({ "error": r#"Facilitator verify failed (401): {"error":"invalid_api_key"}"# })
+    );
     assert_eq!(seller.served(), 0);
     assert_eq!(
         seller.events(),
@@ -414,21 +425,323 @@ async fn a_facilitator_that_fails_at_verify_gets_502_and_the_route_does_not_run(
 }
 
 #[tokio::test]
-async fn a_facilitator_that_fails_at_settle_gets_502() {
+async fn a_facilitator_that_fails_at_settle_gets_402_with_upstreams_failed_settlement() {
     let seller = seller().await;
     seller.fake.settle_replies(Reply::text(500, "boom"));
 
     let response = seller.pay("/weather?city=Warsaw").await;
 
-    assert_eq!(response.status(), 502);
+    assert_eq!(response.status(), 402);
+    assert_eq!(response.headers()["cache-control"], "no-store");
     assert_eq!(
-        response.json::<Value>().await.unwrap()["error"],
-        "facilitator_unavailable"
+        decoded(&response, "payment-response").unwrap(),
+        json!({
+            "success": false,
+            "errorReason": "Facilitator settle failed (500): boom",
+            "errorMessage": "Facilitator settle failed (500): boom",
+            "network": "stellar:testnet",
+            "transaction": ""
+        })
     );
+    assert_eq!(response.json::<Value>().await.unwrap(), json!({}));
     assert_eq!(
         seller.events(),
         ["facilitator failed: the facilitator answered 500 on /settle: boom"]
     );
+}
+
+#[tokio::test]
+async fn a_facilitator_answer_that_is_not_json_gets_502_with_upstreams_error() {
+    let seller = seller().await;
+    seller.fake.verify_replies(Reply::text(200, "not json"));
+
+    let response = seller.pay("/weather?city=Warsaw").await;
+
+    // Upstream's `FacilitatorResponseError`: 502 and its message, no terms, no `Cache-Control`.
+    assert_eq!(response.status(), 502);
+    assert!(response.headers().get("payment-required").is_none());
+    assert!(response.headers().get("cache-control").is_none());
+    assert_eq!(
+        response.json::<Value>().await.unwrap(),
+        json!({ "error": "Facilitator verify returned invalid JSON: not json" })
+    );
+    assert_eq!(seller.served(), 0);
+}
+
+#[tokio::test]
+async fn a_verdict_with_an_error_status_never_lets_the_route_run() {
+    let seller = seller().await;
+    seller
+        .fake
+        .verify_replies(Reply::json(500, json!({ "isValid": true, "payer": PAYER })));
+
+    let response = seller.pay("/weather?city=Warsaw").await;
+
+    assert_eq!(response.status(), 402);
+    assert_eq!(
+        decoded(&response, "payment-required").unwrap()["error"],
+        "unknown reason"
+    );
+    assert_eq!(seller.served(), 0);
+    assert_eq!(seller.asked(), ["/verify"]);
+}
+
+#[tokio::test]
+async fn a_refusal_without_a_reason_leaves_error_out_of_the_terms() {
+    let seller = seller().await;
+    seller
+        .fake
+        .verify_replies(Reply::json(200, json!({ "isValid": false })));
+
+    let response = seller.pay("/weather?city=Warsaw").await;
+
+    assert_eq!(response.status(), 402);
+    let required = decoded(&response, "payment-required").unwrap();
+    assert_eq!(required.get("error"), None);
+}
+
+/// A facilitator on a local port that answers `/supported`, finds every payment valid on
+/// `/verify`, and closes the connection without an answer on `route`.
+async fn facilitator_that_hangs_up_on(route: &'static str) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let supported = support::fixture("supported.json").to_string();
+    let valid = json!({ "isValid": true, "payer": PAYER }).to_string();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = vec![0; 65_536];
+            let read = socket.read(&mut request).await.unwrap();
+            let head = String::from_utf8_lossy(&request[..read]).into_owned();
+            let path = head.split(' ').nth(1).unwrap_or_default().to_owned();
+            let body = match path.as_str() {
+                path if path == route => continue,
+                "/supported" => &supported,
+                _ => &valid,
+            };
+            let answer = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            socket.write_all(answer.as_bytes()).await.unwrap();
+        }
+    });
+    url
+}
+
+#[tokio::test]
+async fn a_facilitator_that_hangs_up_at_verify_gets_402_as_a_failed_fetch_does_upstream() {
+    let url = facilitator_that_hangs_up_on("/verify").await;
+    let fake = FakeFacilitator::start().await;
+    let seller = seller_on(
+        fake,
+        Some("https://api.example.com"),
+        Facilitator::new(&url).unwrap(),
+    )
+    .await;
+
+    let response = seller.pay("/weather?city=Warsaw").await;
+
+    // Node's `fetch` throws "fetch failed", and upstream's middleware puts it in the 402.
+    assert_eq!(response.status(), 402);
+    assert_eq!(
+        decoded(&response, "payment-required").unwrap()["error"],
+        "fetch failed"
+    );
+    assert_eq!(seller.served(), 0);
+    assert_eq!(seller.events().len(), 1);
+    assert!(seller.events()[0]
+        .starts_with("facilitator failed: the facilitator could not be reached on /verify"));
+}
+
+#[tokio::test]
+async fn a_facilitator_that_hangs_up_at_settle_gets_402_with_a_failed_fetch_settlement() {
+    let url = facilitator_that_hangs_up_on("/settle").await;
+    let fake = FakeFacilitator::start().await;
+    let seller = seller_on(
+        fake,
+        Some("https://api.example.com"),
+        Facilitator::new(&url).unwrap(),
+    )
+    .await;
+
+    let response = seller.pay("/weather?city=Warsaw").await;
+
+    assert_eq!(response.status(), 402);
+    assert_eq!(
+        decoded(&response, "payment-response").unwrap(),
+        json!({
+            "success": false,
+            "errorReason": "fetch failed",
+            "errorMessage": "fetch failed",
+            "network": "stellar:testnet",
+            "transaction": ""
+        })
+    );
+    assert_eq!(seller.served(), 1);
+}
+
+#[tokio::test]
+async fn our_facilitators_failures_at_verify_get_402_with_upstreams_error() {
+    // `apps/facilitator`: the rate limit (429), an RPC with no verdict (503), a thrown error (500).
+    for (status, code) in [
+        (429, "too_many_requests"),
+        (503, "rpc_unavailable"),
+        (500, "internal_error"),
+    ] {
+        let seller = seller().await;
+        seller
+            .fake
+            .verify_replies(Reply::json(status, json!({ "error": code })));
+
+        let response = seller.pay("/weather?city=Warsaw").await;
+
+        let error = format!(r#"Facilitator verify failed ({status}): {{"error":"{code}"}}"#);
+        assert_eq!(response.status(), 402, "{code}");
+        assert_eq!(
+            decoded(&response, "payment-required").unwrap()["error"],
+            error.as_str()
+        );
+        assert_eq!(
+            response.json::<Value>().await.unwrap(),
+            json!({ "error": error })
+        );
+        assert_eq!(seller.served(), 0, "{code}");
+        assert_eq!(
+            seller.events(),
+            [format!(
+                "facilitator failed: the facilitator answered {status} on /verify: {code}"
+            )]
+        );
+    }
+}
+
+#[tokio::test]
+async fn our_facilitators_failures_at_settle_get_402_with_a_failed_settlement() {
+    // `apps/facilitator`: a process without the lease or shutting down (503, nothing sent), the
+    // rate limit (429), a thrown error such as the store down (500). None is asked again.
+    for (status, code) in [
+        (503, "no_lease"),
+        (503, "shutting_down"),
+        (429, "too_many_requests"),
+        (500, "internal_error"),
+    ] {
+        let seller = seller().await;
+        seller
+            .fake
+            .settle_replies(Reply::json(status, json!({ "error": code })));
+
+        let response = seller.pay("/weather?city=Warsaw").await;
+
+        let error = format!(r#"Facilitator settle failed ({status}): {{"error":"{code}"}}"#);
+        assert_eq!(response.status(), 402, "{code}");
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        assert_eq!(
+            decoded(&response, "payment-response").unwrap(),
+            json!({
+                "success": false,
+                "errorReason": error,
+                "errorMessage": error,
+                "network": "stellar:testnet",
+                "transaction": ""
+            })
+        );
+        assert_eq!(response.json::<Value>().await.unwrap(), json!({}));
+        assert_eq!(seller.asked(), ["/verify", "/settle"], "{code}");
+    }
+}
+
+#[tokio::test]
+async fn a_payment_already_settled_gets_402_with_the_facilitators_settlement() {
+    // Our facilitator answers a success once (AD-6); the same payment again gets this, with the
+    // hash of the transaction that paid.
+    let seller = seller().await;
+    let already = json!({
+        "success": false,
+        "errorReason": "settle_exact_stellar_already_settled",
+        "errorMessage": "This payment was already answered.",
+        "payer": PAYER,
+        "transaction": HASH,
+        "network": "stellar:testnet"
+    });
+    seller
+        .fake
+        .settle_replies(Reply::json(200, already.clone()));
+
+    let response = seller.pay("/weather?city=Warsaw").await;
+
+    assert_eq!(response.status(), 402);
+    assert_eq!(decoded(&response, "payment-response").unwrap(), already);
+    assert_eq!(response.json::<Value>().await.unwrap(), json!({}));
+    assert_eq!(seller.asked(), ["/verify", "/settle"]);
+    assert_eq!(
+        seller.events(),
+        [r#"settle refused Some("settle_exact_stellar_already_settled")"#]
+    );
+}
+
+#[tokio::test]
+async fn a_facilitator_answer_over_one_mebibyte_gets_402_as_upstream_cuts_it() {
+    let seller = seller().await;
+    seller.fake.verify_replies(Reply::json(
+        200,
+        json!({ "isValid": true, "payer": PAYER, "pad": "x".repeat(1_100_000) }),
+    ));
+
+    let response = seller.pay("/weather?city=Warsaw").await;
+
+    assert_eq!(response.status(), 402);
+    assert_eq!(
+        decoded(&response, "payment-required").unwrap()["error"],
+        "http response body too large: limit 1048576 bytes"
+    );
+    assert_eq!(seller.served(), 0);
+}
+
+#[tokio::test]
+async fn a_settlement_missing_what_upstreams_schema_needs_gets_502() {
+    let seller = seller().await;
+    // As text: upstream quotes the answer as it came, in its own key order.
+    seller.fake.settle_replies(Reply::text(
+        200,
+        r#"{"success":true,"network":"stellar:testnet"}"#,
+    ));
+
+    let response = seller.pay("/weather?city=Warsaw").await;
+
+    assert_eq!(response.status(), 502);
+    assert_eq!(
+        response.json::<Value>().await.unwrap(),
+        json!({
+            "error": r#"Facilitator settle returned invalid data: {"success":true,"network":"stellar:testnet"}"#
+        })
+    );
+}
+
+#[tokio::test]
+async fn a_browser_without_a_payment_gets_upstreams_page() {
+    let seller = seller().await;
+
+    let response = reqwest::Client::new()
+        .get(format!("{}/weather?city=Warsaw", seller.url))
+        .header("accept", "text/html,application/xhtml+xml")
+        .header("user-agent", "Mozilla/5.0")
+        .send()
+        .await
+        .unwrap();
+
+    // `@x402/core`'s fallback page: Stellar has no in-browser paywall upstream.
+    assert_eq!(response.status(), 402);
+    assert_eq!(response.headers()["content-type"], "text/html");
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    assert_eq!(
+        decoded(&response, "payment-required").unwrap()["error"],
+        "Payment required"
+    );
+    let page = response.text().await.unwrap();
+    assert!(page.starts_with("<!DOCTYPE html>"), "{page}");
+    assert!(page.contains("This resource is protected by the x402 payment protocol."));
 }
 
 #[tokio::test]
@@ -564,17 +877,82 @@ async fn a_payment_the_facilitator_cannot_read_is_refused_and_not_a_facilitator_
     assert_eq!(response.status(), 402);
     assert_eq!(
         decoded(&response, "payment-required").unwrap()["error"],
-        "invalid_payload"
+        r#"Facilitator verify failed (400): {"error":"bad_request"}"#
     );
     assert_eq!(
         response.json::<Value>().await.unwrap(),
-        json!({ "error": "invalid_payload" })
+        json!({ "error": r#"Facilitator verify failed (400): {"error":"bad_request"}"# })
+    );
+    assert_eq!(seller.served(), 0);
+    // A refusal for the seller: the buyer's payment, not the facilitator, is at fault.
+    assert_eq!(
+        seller.events(),
+        [r#"verify refused Some("Facilitator verify failed (400): {\"error\":\"bad_request\"}")"#]
+    );
+}
+
+#[tokio::test]
+async fn a_payment_too_large_for_the_facilitator_is_refused_and_not_a_facilitator_failure() {
+    let seller = seller().await;
+    // What our facilitator answers a body over its limit, 64 KiB unless set.
+    seller
+        .fake
+        .verify_replies(Reply::json(413, json!({ "error": "payload_too_large" })));
+    let terms = decoded(
+        &seller.get("/weather?city=Warsaw").await,
+        "payment-required",
+    )
+    .unwrap()["accepts"][0]
+        .clone();
+    // The terms copied, so it gets past the gate, and a payload no real payment needs.
+    let payment = json!({
+        "x402Version": 2,
+        "accepted": terms,
+        "payload": { "transaction": "A".repeat(70_000) }
+    });
+
+    let response = seller.pay_with("/weather?city=Warsaw", &payment).await;
+
+    assert_eq!(response.status(), 402);
+    assert_eq!(
+        decoded(&response, "payment-required").unwrap()["error"],
+        r#"Facilitator verify failed (413): {"error":"payload_too_large"}"#
     );
     assert_eq!(seller.served(), 0);
     assert_eq!(
         seller.events(),
-        [r#"verify refused Some("invalid_payload")"#]
+        [
+            r#"verify refused Some("Facilitator verify failed (413): {\"error\":\"payload_too_large\"}")"#
+        ]
     );
+}
+
+#[tokio::test]
+async fn a_settlement_still_pending_is_asked_for_again_and_the_answer_served() {
+    let seller = seller().await;
+    // The facilitator's settle budget ran out after the transaction was sent; asked again, it
+    // answers how the transaction ended.
+    seller.fake.settle_replies_once(Reply::json(
+        200,
+        json!({
+            "success": false,
+            "errorReason": "settlement_pending",
+            "payer": PAYER,
+            "transaction": HASH,
+            "network": "stellar:testnet"
+        }),
+    ));
+
+    let response = seller.pay("/weather?city=Warsaw").await;
+
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        decoded(&response, "payment-response").unwrap()["success"],
+        true
+    );
+    assert_eq!(seller.served(), 1);
+    assert_eq!(seller.asked(), ["/verify", "/settle", "/settle"]);
+    assert_eq!(seller.events(), [format!("settled {HASH} bazaar=none")]);
 }
 
 #[tokio::test]
@@ -634,7 +1012,7 @@ async fn the_gate_does_not_start_when_the_facilitator_fails_on_supported() {
 }
 
 #[tokio::test]
-async fn fields_of_the_settlement_this_crate_does_not_read_reach_the_buyer() {
+async fn the_buyer_gets_the_settlement_fields_upstreams_schema_has_and_no_others() {
     let seller = seller().await;
     seller.fake.settle_replies(Reply::json(
         200,
@@ -643,15 +1021,22 @@ async fn fields_of_the_settlement_this_crate_does_not_read_reach_the_buyer() {
             "payer": PAYER,
             "transaction": HASH,
             "network": "stellar:testnet",
-            "amount": "10000"
+            "amount": "10000",
+            "extensionResponses": { "bazaar": { "status": "rejected" } }
         }),
     ));
 
     let response = seller.pay("/weather?city=Warsaw").await;
 
     assert_eq!(
-        decoded(&response, "payment-response").unwrap()["amount"],
-        "10000"
+        decoded(&response, "payment-response").unwrap(),
+        json!({
+            "success": true,
+            "payer": PAYER,
+            "transaction": HASH,
+            "network": "stellar:testnet",
+            "amount": "10000"
+        })
     );
 }
 
@@ -684,7 +1069,7 @@ async fn a_trailing_slash_in_the_base_url_is_dropped() {
 }
 
 #[tokio::test]
-async fn a_settlement_that_does_not_answer_in_time_gets_502_and_may_still_settle() {
+async fn a_settlement_that_does_not_answer_in_time_gets_502_with_upstreams_error() {
     let fake = FakeFacilitator::start().await;
     fake.settle_replies(Reply::json(200, json!({})).after(Duration::from_secs(5)));
     let facilitator = Facilitator::new(&fake.url)
@@ -694,14 +1079,12 @@ async fn a_settlement_that_does_not_answer_in_time_gets_502_and_may_still_settle
 
     let response = seller.pay("/weather?city=Warsaw").await;
 
+    // Upstream's `FacilitatorTimeoutError`, a `FacilitatorResponseError`: 502 and its message.
     assert_eq!(response.status(), 502);
     assert!(response.headers().get("payment-response").is_none());
     assert_eq!(
         response.json::<Value>().await.unwrap(),
-        json!({
-            "error": "facilitator_unavailable",
-            "message": "The payment could not be settled. It may still settle: check before paying again."
-        })
+        json!({ "error": "Facilitator settle request timed out after 200ms" })
     );
     assert_eq!(seller.served(), 1);
     assert_eq!(

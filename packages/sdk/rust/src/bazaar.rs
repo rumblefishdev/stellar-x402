@@ -1,7 +1,7 @@
 //! The `bazaar` extension: a route's request to be listed in a facilitator's catalog.
 //!
 //! The block is built as upstream's `declareDiscoveryExtension` and
-//! `bazaarResourceServerExtension` build it (`@x402/extensions` 2.28.0), so a catalog that reads
+//! `bazaarResourceServerExtension` build it (`@x402/extensions` 2.31.0), so a catalog that reads
 //! theirs reads ours.
 
 use serde_json::{json, Map, Value};
@@ -62,8 +62,23 @@ impl Listing {
         self
     }
 
+    /// The method a listing names for a request made with `method`: that one when the input can
+    /// take it, else the first one it can, as `@x402/extensions`' `resolveDeclaredMethod`.
+    fn declared_method(&self, method: &str) -> String {
+        let allowed: &[&str] = match self.input {
+            Input::Query => &["GET", "HEAD", "DELETE"],
+            Input::JsonBody => &["POST", "PUT", "PATCH"],
+        };
+        let method = method.to_ascii_uppercase();
+        match allowed.contains(&method.as_str()) {
+            true => method,
+            false => allowed[0].to_owned(),
+        }
+    }
+
     /// The `bazaar` block for a request made with `method`.
     pub(crate) fn extension(&self, method: &str) -> Value {
+        let method = self.declared_method(method);
         let mut input = json!({ "type": "http", "method": method });
         let mut properties = json!({
             "type": { "type": "string", "const": "http" },

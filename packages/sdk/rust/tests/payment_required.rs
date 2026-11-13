@@ -29,11 +29,24 @@ fn weather_402() -> PaymentRequired {
 
 #[test]
 fn matches_what_upstreams_middleware_sends() {
-    // Captured from `examples/http-api` (`@x402/express` 2.28.0) for the same route and seller.
+    // Captured from `examples/http-api` (`@x402/express` 2.28.0) for the same route and seller;
+    // 2.31.0 sends the same, by the parity run of 0136.
     let mut upstream = fixture("payment-required-upstream.json");
     upstream.as_object_mut().unwrap().remove("extensions");
 
     assert_eq!(serde_json::to_value(weather_402()).unwrap(), upstream);
+}
+
+#[test]
+fn a_resource_without_a_description_or_a_media_type_names_both_empty() {
+    // Upstream's middleware writes `description: routeConfig.description || ""`, and the same
+    // for `mimeType`.
+    let resource = ResourceInfo::new("http://localhost:4021/weather");
+
+    assert_eq!(
+        serde_json::to_value(resource).unwrap(),
+        json!({ "url": "http://localhost:4021/weather", "description": "", "mimeType": "" })
+    );
 }
 
 #[test]
