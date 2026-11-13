@@ -1,0 +1,3 @@
+# Keeps `cargo update` on versions that build with the crate's `rust-version`.
+[resolver]
+incompatible-rust-versions = "fallback"
