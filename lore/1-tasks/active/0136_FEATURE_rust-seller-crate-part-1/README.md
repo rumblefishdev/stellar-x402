@@ -5,7 +5,7 @@ type: FEATURE
 status: active
 milestone: 2
 related_adr: ["0001"]
-related_tasks: ["0102", "0041", "0132", "0140"]
+related_tasks: ["0102", "0041", "0132", "0140", "0141"]
 tags: [sdk, rust, seller, priority-high, effort-medium, platform]
 links:
   - ../../../../docs/rfp/07-x402-facilitator-bazaar.md
@@ -74,11 +74,26 @@ writing the protocol myself.
 - `src/bazaar.rs`: the `bazaar` block, for query and JSON-body routes.
 - `src/payment.rs`: the buyer's payment from `PAYMENT-SIGNATURE`, matched to the terms by
   upstream's rule.
-- `src/facilitator.rs`: `/supported`, `/verify`, `/settle`, the API key, `EXTENSION-RESPONSES`.
+- `src/facilitator.rs`: `/supported`, `/verify`, `/settle` (asked once more on a
+  `settlement_pending` with a hash), the API key, `EXTENSION-RESPONSES`.
 - `src/axum.rs` (feature `axum`, on by default): `PaymentGate` and the layer.
 - `examples/weather.rs`: the example server, the twin of `examples/http-api`.
-- 76 tests with the feature, 50 with `--no-default-features`; the layer's run a seller and a fake
+- 105 tests with the feature, 66 with `--no-default-features`; the layer's run a seller and a fake
   facilitator on local ports. CI job `sdk-rust`.
+
+### Parity run, 2026-11-13
+
+The TypeScript twin (`examples/http-api`, on `@x402/express`, `@x402/core`, `@x402/stellar` and
+`@x402/extensions` 2.31.0 in a scratch copy) and `examples/weather.rs`, behind one fake
+facilitator, got the same 45 requests: every answer our facilitator gives (`app.ts`,
+`rate-limit.ts`, `settle.ts`: verdicts, 400, 401, 413, 429, 500, 503 `rpc_unavailable`,
+`no_lease`, `shutting_down`, `settlement_pending` with and without a hash, `already_settled`, a
+dropped connection, an answer over 1 MiB) and the buyer's own cases (no payment, other terms, an
+unreadable header, a browser, HEAD). Compared: status, `Cache-Control`, `PAYMENT-REQUIRED`,
+`PAYMENT-RESPONSE`, body and the calls the facilitator got. 43 are equal; OPTIONS and POST on a
+GET route differ, the frameworks' own answers (express 200 and 404, axum 405) with no x402 in
+them. Express adds `; charset=utf-8` to `Content-Type`, `ETag` and `X-Powered-By`, not compared.
+The script was one-off and is not in the repo (akot, 2026-11-13).
 
 ### Testnet run, 2026-11-12
 
@@ -115,9 +130,17 @@ API key against a facilitator that asks for one (0105 is not built).
   hyper drops with the connection. Dropped during `/settle`, the money may move with no event;
   dropped after the route ran, its work is not paid for. Settling on a task of its own adds
   `tokio` to the layer. The README says so (review of #177).
-- An event that names its route, for a seller with more than one paid route; the facilitator's
-  `Retry-After` on 429 and 503, dropped today; a muxed `payTo` (`M…`), accepted as terms with no
-  run that settles one.
+- An event that names its route, for a seller with more than one paid route; a muxed `payTo`
+  (`M…`), accepted as terms with no run that settles one.
+- The facilitator's `Retry-After` on 429 and 503. `/settle` answers 503 `no_lease` or
+  `shutting_down` during a deploy, with nothing sent: the buyer gets 402 after the route ran, as
+  from `@x402/express`, which asks no more (akot, 2026-11-13). Asking again after `Retry-After`
+  would save the sale and answer otherwise than TypeScript.
+- Settling after the whole body. The layer settles once the route's answer has its status and
+  headers, so a streamed body that breaks halfway is still paid for (a probe: 200,
+  `PAYMENT-RESPONSE`, then a body that ends early). Upstream's middleware holds every write until
+  the body ends and settles after it. The README and the layer's rustdoc say so (self-review of
+  #177).
 
 ## Design Decisions
 
@@ -140,7 +163,8 @@ API key against a facilitator that asks for one (0105 is not built).
 
 5. **The 402 answer is held equal to upstream's.** A fixture captured from `examples/http-api`
    (`@x402/express` 2.28.0) is what the answer's test compares with, so `resource.url` keeps the
-   query string and `error` reads "Payment required", as upstream sends them.
+   query string and `error` reads "Payment required", as upstream sends them. 2.31.0 sends the
+   same terms (parity run); every other answer follows decision 23.
 6. **A USDC price is read as text, never as a float**, and refused when it has more than 7
    decimals, is zero or is not plain digits. Upstream's TypeScript takes a number.
    `Price::token` takes base units and refuses zero and an amount above `i128` the same way.
@@ -150,18 +174,25 @@ API key against a facilitator that asks for one (0105 is not built).
 9. **`payTo` and a token's contract are checked when terms are made** (`stellar-strkey`), so a
    mistyped address stops the seller at start. The error leaves the address out: it may be a
    secret key pasted by mistake.
-10. **A refusal's message goes in the 402's body, not in `PAYMENT-REQUIRED`.** The header's
-    `error` stays the reason code, as upstream sends it; the body is
-    `{"error": reason, "message": message}`. Upstream's middleware and `r402` drop the message.
+10. **A refusal's message goes to the seller, not the buyer** (akot, 2026-11-13, by decision 23;
+    the first version put it in the body as `{"error", "message"}`). The 402's body is
+    `{"error": reason}`, as `@x402/core` 2.31.0 writes it; the message reaches `on_event`.
 11. **The seller learns the catalog's answer through `PaymentGate::on_event`**, which also carries
     the facilitator's refusals and its failures. The gate's own refusals (an unreadable header,
     a payment for other terms) send no event; a variant for them is part 2's. No logging crate is pulled in; the seller logs as it likes.
-12. **A facilitator that gives no answer to act on is 502 `facilitator_unavailable` to the buyer**,
-    at verify and at settle, without the cause: it may be the seller's own, such as its API key.
-    Upstream answers 402 for most of these. One exception: a 400 from `/verify` with no verdict
-    is a refusal, 402 `invalid_payload` and `VerifyRefused`. The seller's terms passed its own
-    checks, so what the facilitator could not read is the buyer's payment, and a buyer must not
-    be able to raise the seller's count of facilitator failures (review of #177).
+12. **A facilitator that fails is answered as `@x402/express` 2.31.0 answers it** (akot,
+    2026-11-13, by decision 23; the first version answered 502 `facilitator_unavailable` without
+    the cause). An error status, or no answer at all (`fetch failed`), is 402 with upstream's
+    message in `error`, the cause included: a key problem reads
+    `Facilitator verify failed (401): {"error":"invalid_api_key"}`. At settle it is 402 with a
+    failed `PAYMENT-RESPONSE` and an empty body. An answer that is not JSON, fails upstream's
+    schema or comes too late is its `FacilitatorResponseError`: 502 `{"error": message}`. For the
+    seller's events a 400 or a 413 from `/verify` stays a refusal, `VerifyRefused`: the seller's
+    terms passed its own checks and are small, so what the facilitator could not read, or would
+    not take for its size, is the buyer's payment, and a buyer must not be able to raise the
+    seller's count of facilitator failures (review of #177). The 413 is our facilitator's body
+    limit (`BODY_LIMIT_BYTES`, 64 KiB) on a buyer's copy of the terms with a 70 KB payload, which
+    hyper takes as a header (self-review of #177).
 13. **`/supported` is read once, when the gate is made**, and a route on a network the
     facilitator does not settle on is refused then. Upstream's client retries a 429 there three
     times; ours does not.
@@ -186,7 +217,7 @@ API key against a facilitator that asks for one (0105 is not built).
     405. A test holds the 405.
 18. **The facilitator client follows no redirect.** A 307 or 308 would send the buyer's signed
     payment to another address, and a 301 turns the POST into a GET; a 3xx is a `Status` error,
-    so 502. `packages/seller-fetch` refuses redirects for the same reason.
+    answered as decision 25 says. `packages/seller-fetch` refuses redirects for the same reason.
 19. **A paid answer's `Cache-Control` gets `private` added to the route's own**, as upstream's
     `withPrivateCacheControl` does, in place of being set only when the route set none.
 20. **The public error and event enums are `#[non_exhaustive]`** (`GateError`, `PaymentEvent`,
@@ -195,6 +226,36 @@ API key against a facilitator that asks for one (0105 is not built).
 21. **The README installs the crate from git, `branch = "develop"`**, since `publish = false` and
     `main` has it only after the release; a git dependency on the monorepo resolves (checked
     with cargo 1.97). The layer is for axum 0.8.
+22. **A `settlement_pending` with a transaction hash is asked for once more**
+    (self-review of #177), as `@x402/core`'s `settleWithPendingRetry` does. Our facilitator
+    answers it when its settle budget runs out after the transaction was sent, and answers the
+    repeat with how the transaction ended (`settle.ts`, `SETTLE_TIMEOUT_MS`). Without the repeat
+    the buyer got 402 while the transaction landed. In `Facilitator::settle`, so a seller without
+    the layer gets it too. One repeat only, and none without a hash, as upstream; a second
+    `settlement_pending` is `SettleRefused` and 402.
+23. **Every answer to the buyer is `@x402/express` 2.31.0's, the newest upstream** (akot,
+    2026-11-13): "the Rust SDK answers as the TypeScript one, and handles everything our
+    facilitator answers". 2.31.0 came out on 2026-11-12; the repo's TypeScript is on 2.28.0 and
+    0141 raises it. From 2.31 the crate also takes: a 402 with an `error` repeats it in the body,
+    HEAD on a GET route is paid for, the `bazaar` block names a method its input can take (GET
+    for a query, POST for a body), and a browser without a payment gets upstream's fallback HTML
+    page. The parity run holds it. Not a permanent test (akot, 2026-11-13). Two differences stay,
+    both under "Left for part 2": upstream's check of a payment's echoed extensions, and settling
+    after the whole body.
+24. **The facilitator's answers are read as `HTTPFacilitatorClient` 2.31.0 reads them**: at most
+    1 MiB; a 2xx answer checked against `verifyResponseSchema` and `settleResponseSchema` (a
+    settlement needs `transaction` and `network`); error text cut by `responseExcerpt`; a verdict
+    sent with an error status never valid (`VerifyError`, `SettleError`, the latter's
+    `PAYMENT-RESPONSE` without the fields the answer lacked); a `PAYMENT-RESPONSE` with only the
+    schema's fields, the rest kept for the seller in `SettleResponse::other`; `description` and
+    `mimeType` always sent, empty when unset. Inside a verdict with an error status, a value of
+    the wrong type (a number as the reason) may be worded otherwise than JavaScript writes it.
+25. **Redirects stay unfollowed** (decision 18), the one place the crate is stricter than
+    upstream, which follows them: a 3xx is answered as an error status, 402
+    `Facilitator verify failed (307): …`.
+26. **Our facilitator's own code reaches the seller**: `VerifyResponse::extra`, such as
+    `reason: channel_account` next to upstream's `invalid_exact_stellar_payload_channel_account`.
+    Upstream's middleware passes nothing of it on.
 
 ## Acceptance Criteria
 
