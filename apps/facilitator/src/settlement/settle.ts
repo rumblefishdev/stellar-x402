@@ -38,7 +38,7 @@ import {
   type SettlementRecord,
   type SettlementStore,
 } from "../ports/index.js";
-import type { BeforeSubmitResult, SettlementHooks, SettlementOrigin } from "./hooks.js";
+import type { BeforeSubmitResult, Caller, SettlementHooks, SettlementOrigin } from "./hooks.js";
 import {
   attemptUpdates,
   createRecords,
@@ -141,11 +141,16 @@ export interface Settled {
   afterResponse?: () => void;
 }
 
-/** `signal` aborts once the client has left: a repeat stops waiting, and no success is used up. */
+/**
+ * `signal` aborts once the client has left: a repeat stops waiting, and no success is used up.
+ * `caller` is who the request came from, on a network that requires an API key (0105); it reaches
+ * `beforeSubmit` and changes nothing else.
+ */
 export type Settle = (
   payload: PaymentPayload,
   requirements: PaymentRequirements,
   signal?: AbortSignal,
+  caller?: Caller,
 ) => Promise<Settled>;
 
 /**
@@ -765,6 +770,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
     payload: PaymentPayload,
     requirements: PaymentRequirements,
     signal: AbortSignal | undefined,
+    caller: Caller | undefined,
     validOnce: () => Promise<Validity | undefined>,
   ): Promise<Settled> => {
     const startedAt = now();
@@ -926,6 +932,8 @@ export function createSettler(deps: SettlerDeps): Settle & {
         paymentPayload: payload,
         paymentRequirements: requirements,
         reopened: claim.record.reopened,
+        // Present only on a network that requires an API key (0105).
+        ...(caller && { caller }),
         now: now(),
         deadline: startedAt + deps.budgetMs,
       });
@@ -987,12 +995,12 @@ export function createSettler(deps: SettlerDeps): Settle & {
 
   // Every answer by outcome (0027): `success`, or the `errorReason`. A thrown error is the
   // route's 500.
-  const settler: Settle = async (payload, requirements, signal) => {
+  const settler: Settle = async (payload, requirements, signal, caller) => {
     // One ledger read per call, shared by the reopen and the answer, so both decide alike.
     let valid: Promise<Validity | undefined> | undefined;
     const validOnce = () => (valid ??= validity(payload));
     const settled = await withRetry(
-      await settle(payload, requirements, signal, validOnce),
+      await settle(payload, requirements, signal, caller, validOnce),
       validOnce,
     );
     const { response } = settled;

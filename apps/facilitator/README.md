@@ -26,23 +26,23 @@ discovery routes. Design: [the M1 spine](../../docs/architecture/m1-spine.md) (A
   every new `/settle` wait for a channel until its budget ends. No metric shows a held channel
   yet (0089).
 - `NETWORK=stellar:pubnet` refuses to start until a deploy can't reuse a channel left open (0090),
-  pubnet's callers present an API key (0105), each key's settlements count in a fee budget of its
-  own (0107), a failing signer raises an alarm (0027) and the hot key's reach is decided again
-  (0048). The spend budgets bound the loss, but self-payments from many cheap addresses
-  can still use up the shared budgets for every seller (see "Shared budgets used up by
-  self-payments" below).
+  each API key owner's settlements count in a fee budget of its own (0107), a failing signer
+  raises an alarm (0027) and the hot key's reach is decided again (0048). The spend budgets bound
+  the loss, but self-payments from many cheap addresses can still use up the shared budgets for
+  every seller (see "Shared budgets used up by self-payments" below). Pubnet's callers already
+  need an API key (0105, "API keys on pubnet" below).
 
 ## Callers and rate limits
 
-Every route is open on testnet: no caller authenticates, and an API key is ignored. On pubnet
-`/verify` and `/settle` will require one, issued by our portal after Discord sign-in (0105, 0106;
-pubnet is refused until then). `/verify`
-and `/settle` send no CORS headers, so a browser page can't call them; a seller's server calls
-them for its buyers.
+Every route is open on testnet: no caller authenticates, and an API key is ignored. A `/verify`
+or `/settle` request for `stellar:pubnet` requires one (0105, "API keys on pubnet" below);
+`/supported` and `/discovery/*` are open on every network. `/verify` and `/settle` send no CORS
+headers, so a browser page can't call them; a seller's server calls them for its buyers.
 
 Each client has a budget per route and window. Past it the route answers 429
 `{"error":"too_many_requests"}` with `Retry-After` in seconds; the other routes still answer.
-Every request counts, a malformed or oversized one too. `/supported` has no limit.
+Every request counts, a malformed or oversized one too; only a pubnet request refused for its API
+key counts nowhere. `/supported` has no limit.
 
 | Setting                | Default  | Meaning                                                                             |
 | ---------------------- | -------- | ----------------------------------------------------------------------------------- |
@@ -53,7 +53,8 @@ Every request counts, a malformed or oversized one too. `/supported` has no limi
 | `BODY_LIMIT_BYTES`     | 65 536   | a larger request body is a 413                                                      |
 | `CLIENT_IP`            | required | `cloudflare`: the `CF-Connecting-IP` header; `socket`: the connection's own address |
 
-- **A client is its IP**, an IPv6 one its /56. The seller's server calls `/verify` and `/settle`
+- **A client is its IP**, an IPv6 one its /56, except on `/verify` and `/settle` for pubnet, where
+  it is the API key's owner. The seller's server calls `/verify` and `/settle`
   for all of its buyers, so a budget is a budget per seller: a seller above about 10 paid requests
   a second needs higher values. `/settle`'s budget is never below `/verify`'s, since the seller
   settles after serving: a payment refused there was work given away. The spend budgets (AD-18),
@@ -62,7 +63,11 @@ Every request counts, a malformed or oversized one too. `/supported` has no limi
   zone arrives with `CF-Connecting-IP: 2a06:98c0:3600::103` for every Worker, and sellers behind
   one cloud NAT share its address the same way. One of them over the budget gets the others a 429
   until the window ends. On testnet this is accepted (0060), since a key is ignored there; on
-  pubnet a caller will be counted by its API key (0105).
+  pubnet a caller is counted by its API key's owner, wherever its requests come from (0105).
+- **`/verify` and `/settle` read the body before they count the request**, since the body names
+  the network and the network decides what the request is counted under. A client over its budget
+  is answered after its body was read and parsed, at most `BODY_LIMIT_BYTES` of it. A body that
+  names no network (malformed, too large, not JSON) counts under the client's IP.
 - **`CLIENT_IP` is required**, so it can't be forgotten behind the tunnel, where every client
   would share the tunnel's address and one budget. `cloudflare` reads `CF-Connecting-IP`, which
   Cloudflare sets on every request and refuses from a client; `socket` takes the connection's own
@@ -75,7 +80,73 @@ Every request counts, a malformed or oversized one too. `/supported` has no limi
   window's end, and every blocked client is released at the same moment.
 - **The counters live in the store** (`rate_limits`). A store error is a 500,
   logged. A client over its budget is answered from the process until its window ends, without a
-  store write.
+  store write. On pubnet its key is looked up first, so each such request still costs one read of
+  the key registry.
+
+### API keys on pubnet
+
+A `/verify` or `/settle` request whose `paymentRequirements.network` is `stellar:pubnet` must
+carry an API key (ADR 0007's amendment of 2026-11-03, task 0105). A request for any other network
+needs none, and its `Authorization` header is not read at all, so testnet answers a caller with a
+key, without one and with a made-up one alike. The rule follows the network the request names,
+not `NETWORK`, so it holds in a process that serves both networks (0126).
+
+- **The key travels as `Authorization: Bearer <key>`.** Upstream's `HTTPFacilitatorClient` sends
+  it through `createAuthHeaders`, so a seller changes its config, not its code:
+
+  ```ts
+  const headers = { Authorization: `Bearer ${process.env.X402_FACILITATOR_API_KEY}` };
+  new HTTPFacilitatorClient({
+    url,
+    createAuthHeaders: async () => ({ verify: headers, settle: headers, supported: headers }),
+  });
+  ```
+
+- **Without an active key the answer is a 401**, before any check of the payment:
+
+  | Request                                                           | Answer                            |
+  | ----------------------------------------------------------------- | --------------------------------- |
+  | no `Authorization` header                                         | 401 `{"error":"missing_api_key"}` |
+  | another scheme, a malformed key, an unknown key, or a revoked one | 401 `{"error":"invalid_api_key"}` |
+
+  Both carry `WWW-Authenticate: Bearer` (RFC 6750). The answer doesn't say whether a key was never
+  issued or was revoked. Nothing is verified or settled, and the request counts in no budget: not
+  the key's, which it doesn't have, and not its IP's, which sellers on one address share. Upstream's
+  client throws `Facilitator verify failed (401): {"error":"missing_api_key"}`.
+
+- **A key is `x402_` and 43 base64url characters** (32 random bytes). The registry (`api_keys`,
+  migration `0013_api_keys`) stores its SHA-256, never the key, so a key is shown once, when it is
+  issued, and a lost one is replaced. A malformed key is refused without a read of the registry.
+- **A key has an owner**, `<kind>:<id>`: `operator:<name>` for a key the operator issues by hand,
+  `discord:<id>` for one the portal issues (0106). An owner has one active key at a time. The rate
+  limiter counts a pubnet request under its owner (`settle:key:operator:acme`), with the same
+  budgets as an IP's, and `/settle` hands the owner to the spend policy, which will give each
+  owner a fee budget of its own (0107). Until then a pubnet settlement counts in the budgets
+  below, like any other. The count is the owner's, not the key's: a replaced key continues it.
+  The `verified`, `settled` and `rate_limited` log lines name the owner (`caller`, `owner`); no
+  line carries a key or its hash.
+- **A revocation holds from the next request**, on every instance: the registry is read on each
+  pubnet request, one primary-key lookup on the rate limiter's pool, and nothing caches it. If the
+  registry can't be read the answer is a 500 and nothing is let in.
+- **The operator's script** issues, revokes and lists keys by hand, over the same registry the
+  portal will write. It needs only `DATABASE_URL` (or `DATABASE_URL_FILE`), of the network whose
+  callers the key is for, on a migrated schema:
+
+  ```sh
+  pnpm --filter @stellar-x402/facilitator keys issue acme-weather   # prints the key, once
+  pnpm --filter @stellar-x402/facilitator keys revoke acme-weather  # holds from the next request
+  pnpm --filter @stellar-x402/facilitator keys revoke discord:412345678901234567
+  pnpm --filter @stellar-x402/facilitator keys list
+  ```
+
+  `pnpm keys` runs the built `dist/keys.js`, as the image does (`node dist/keys.js …`); from a
+  checkout without a build, `pnpm exec tsx src/keys.ts …` in `apps/facilitator`. `issue` takes a
+  name in `a-z`, `0-9`, `_` and `-` and makes the owner `operator:<name>`; an owner that has an
+  active key is refused until it is revoked, so replacing a key is `revoke`, then `issue`, and the
+  owner has no key in between. `revoke` takes a name or a whole owner, so it also revokes a key the
+  portal issued. `list` prints each key's owner, state, times and the first 12 hex digits of its
+  hash. The new key is printed to stdout and nowhere else; errors go to stderr with exit code 1.
+  The production compose file has no service for it yet: pubnet's services come with 0126.
 
 ## Spend budgets and breakers
 
@@ -186,8 +257,9 @@ succeeds, so no breaker opens, and USDC is then refused for every seller until t
 The loss stops at 25 XLM for USDC and 10 XLM for other tokens per window. That bounds the rate,
 not the sum: an attack kept up for under three days takes the float from 100 XLM to its 5 XLM floor,
 and `facilitator_underfunded` then refuses every payment until a top-up. This is accepted on
-testnet. On pubnet callers will present API keys with fee budgets of their own (0105, 0107): see
-the threat model, "Shared budget exhaustion by Sybil self-payments".
+testnet. On pubnet callers present API keys (0105), and each owner's settlements will count in a
+fee budget of its own (0107): see the threat model, "Shared budget exhaustion by Sybil
+self-payments".
 
 The signal is `spend_budget_nearing` (warn, counted in `spend_budget_nearing_total{budget}`) at
 80 %. It fires for every budget; for this attack, watch `asset`, `other` and `global`. Then:
@@ -253,7 +325,8 @@ Labels come from closed sets; addresses are in log lines only.
   each hash's attempt state and bounds; hashes written before it fall back to the auth entry's
   expiry. `0007_settlement_reopened` adds the reopen count: rows already there, and rows an older
   release writes during the deploy, get -1 and never reopen. This release can't claim a payment
-  on a database without it. `0011_settlement_in_flight`: `/settle` can't claim a payment without it.
+  on a database without it. `0011_settlement_in_flight`: `/settle` can't claim a payment without it. `0013_api_keys` adds the
+  API key registry, a new table the release before it never reads.
 - An online migration (ADR 0012) commits step by step, so `pnpm migrate` after a stopped or
   failed run continues from the next step. It logs `migration_step` after each step and
   `migration_backfill` every 50 backfill batches. A backfill writes about 1.2 GiB of WAL per

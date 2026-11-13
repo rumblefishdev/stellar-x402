@@ -1,5 +1,6 @@
 import { Keypair } from "@stellar/stellar-sdk";
 import type { PaymentRequirements, VerifyResponse } from "@x402/core/types";
+import { byName } from "@stellar-x402/metrics-catalog";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseConfig } from "../src/config.js";
 import { routeLabel } from "../src/http/app.js";
@@ -112,6 +113,21 @@ describe("http_requests_total", () => {
     await get();
     expect((await get()).status).toBe(429);
     await vi.waitFor(() => expect(count("/discovery", "429")).toBe(1));
+  });
+
+  it("counts a request refused for want of an API key as status 401, which the catalog lists (0105)", async () => {
+    const { post, count, counted } = await serve();
+    const pubnet = { ...requirements, network: "stellar:pubnet" };
+    const refused = await post("/settle", {
+      ...request,
+      paymentPayload: { ...request.paymentPayload, accepted: pubnet },
+      paymentRequirements: pubnet,
+    });
+    expect(refused.status).toBe(401);
+    await vi.waitFor(() => expect(count("/settle", "401")).toBe(1));
+    expect(counted).toEqual([{ route: "/settle", status: "401" }]);
+    // Outside the list, the EMF line would write it as `other` and report an unknown value.
+    expect(byName("http_requests_total")?.values?.status).toContain("401");
   });
 
   it("counts an unknown path under route other, status 404", async () => {

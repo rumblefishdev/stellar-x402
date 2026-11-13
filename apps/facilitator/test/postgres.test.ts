@@ -22,6 +22,7 @@ import type { Check } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
 import { transferPayload } from "./payment.js";
 import {
+  apiKeyStoreContract,
   catalogAttemptStoreContract,
   catalogStoreContract,
   rateLimitStoreContract,
@@ -198,6 +199,7 @@ describe("PostgreSQL stores", () => {
   rateLimitStoreContract(async () => (await stores()).rateLimits);
   catalogStoreContract(async () => (await stores()).catalog);
   catalogAttemptStoreContract(async () => (await stores()).catalogAttempts);
+  apiKeyStoreContract(async () => (await stores()).apiKeys);
 
   /**
    * Resolves the pid of a backend waiting on a lock `holder` holds, once one is. Other test files
@@ -827,6 +829,33 @@ describe("PostgreSQL stores", () => {
     );
   });
 
+  it("0013_api_keys: the table refuses what the adapter refuses, for a row written past it (0105)", async () => {
+    await db.empty();
+    const insert = (row: Record<string, unknown>) => {
+      const full = { key_hash: "a".repeat(64), owner: "operator:acme", created_at: 1, ...row };
+      const columns = Object.keys(full);
+      const params = columns.map((_, i) => `$${i + 1}`);
+      return pool.query(
+        `INSERT INTO api_keys (${columns.join(", ")}) VALUES (${params.join(", ")})`,
+        Object.values(full),
+      );
+    };
+    // A key in the hash column, an owner outside `<kind>:<id>`, and a state at odds with its time.
+    await expect(insert({ key_hash: `x402_${"k".repeat(43)}` })).rejects.toThrow(/check/);
+    await expect(insert({ owner: "acme" })).rejects.toThrow(/check/);
+    await expect(insert({ owner: `operator:${"a".repeat(120)}` })).rejects.toThrow(/check/);
+    await expect(insert({ state: "paused" })).rejects.toThrow(/check/);
+    await expect(insert({ state: "revoked" })).rejects.toThrow(/check/);
+    await expect(insert({ revoked_at: 2 })).rejects.toThrow(/check/);
+    // One active key per owner, and any number of revoked ones.
+    await insert({});
+    await expect(insert({ key_hash: "b".repeat(64) })).rejects.toThrow(/api_keys_one_active/);
+    await insert({ key_hash: "c".repeat(64), state: "revoked", revoked_at: 2 });
+    await insert({ key_hash: "d".repeat(64), state: "revoked", revoked_at: 3 });
+    const { rows } = await pool.query("SELECT count(*)::int AS count FROM api_keys");
+    expect(rows).toEqual([{ count: 3 }]);
+  });
+
   it("applies the migrations once when two runs race", async () => {
     const fresh = `${schema}_m`;
     await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
@@ -954,6 +983,7 @@ describe("PostgreSQL stores", () => {
           "0010_settlement_failure",
           "0011_settlement_in_flight",
           "0012_settlement_inner_hash",
+          "0013_api_keys",
         ]);
         expect(await typeIndex(old), built).toBe(1);
       } finally {
@@ -985,6 +1015,7 @@ describe("PostgreSQL stores", () => {
         "0010_settlement_failure",
         "0011_settlement_in_flight",
         "0012_settlement_inner_hash",
+        "0013_api_keys",
       ]);
       const { rows } = await old.query(
         "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",

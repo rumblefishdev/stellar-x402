@@ -16,6 +16,7 @@ import { EMF_LINE_PREFIX } from "@stellar-x402/metrics-catalog";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { MIGRATIONS, migrate } from "../src/adapters/postgres-schema.js";
 import { ConfigError, parseConfig } from "../src/config.js";
+import { apiKeyHash, newApiKey } from "../src/http/api-key.js";
 import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger, rpcEndpointName } from "../src/logger.js";
 import { main } from "../src/main.js";
@@ -184,7 +185,7 @@ describe("startup with a bad config", () => {
     const error = await main(pubnet).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ConfigError);
     expect((error as ConfigError).problems).toEqual([
-      "NETWORK stellar:pubnet is refused until task 0090, API keys on pubnet (0105), per-key fee budgets (0107), the signer alarm (0027) and the hot key's re-check (0048) land",
+      "NETWORK stellar:pubnet is refused until task 0090, per-key fee budgets (0107), the signer alarm (0027) and the hot key's re-check (0048) land",
     ]);
   });
 });
@@ -508,6 +509,68 @@ describe("main()", () => {
     }
   });
 
+  it("asks a stellar:pubnet request for a key from its registry, and passes a registered one on to the verifier (0105)", async () => {
+    const app = await main({ ...env, RPC_URLS: rpc.url, PORT: "0", LOG_LEVEL: "error" });
+    try {
+      const requirements = {
+        scheme: "exact",
+        network: "stellar:pubnet",
+        asset: "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+        amount: "1000",
+        payTo: Keypair.random().publicKey(),
+        maxTimeoutSeconds: 60,
+        extra: {},
+      };
+      const body = JSON.stringify({
+        x402Version: 2,
+        paymentPayload: { x402Version: 2, accepted: requirements, payload: { transaction: "AA" } },
+        paymentRequirements: requirements,
+      });
+      const verify = async (headers: Record<string, string> = {}) => {
+        const response = await fetch(`http://127.0.0.1:${app.port}/verify`, {
+          method: "POST",
+          headers: { "content-type": "application/json", ...headers },
+          body,
+        });
+        return [response.status, await response.json()];
+      };
+      const counters = async () =>
+        (
+          await db.pool.query(
+            "SELECT key, count FROM rate_limits ORDER BY key LIKE 'verify:key:%', key",
+          )
+        ).rows;
+      const before = await counters();
+      expect(await verify()).toEqual([401, { error: "missing_api_key" }]);
+      const apiKey = newApiKey();
+      const authorization = `Bearer ${apiKey}`;
+      expect(await verify({ authorization })).toEqual([401, { error: "invalid_api_key" }]);
+
+      await app.stores.apiKeys.issue({
+        hash: apiKeyHash(apiKey),
+        owner: "operator:acme",
+        now: Date.now(),
+      });
+      // The real verifier's answer: this process serves testnet until 0126.
+      expect(await verify({ authorization })).toEqual([
+        200,
+        {
+          isValid: false,
+          invalidReason: "invalid_network",
+          invalidMessage: "this facilitator serves stellar:testnet",
+        },
+      ]);
+      // Only the request with the registered key counted, under the key's owner: the counters
+      // other tests of this file left are as they were.
+      expect(await counters()).toEqual([...before, { key: "verify:key:operator:acme", count: 1 }]);
+    } finally {
+      await app.close();
+      await db.pool.query(
+        "DELETE FROM api_keys; DELETE FROM rate_limits WHERE key LIKE 'verify:key:%'",
+      );
+    }
+  });
+
   it("prunes the stores with the config's windows", async () => {
     const day = 86_400_000;
     const hour = 3_600_000;
@@ -604,10 +667,11 @@ describe("main()", () => {
       cwd: fileURLToPath(new URL("..", import.meta.url)),
       env: { ...env, PORT: "0", RPC_URLS: rpc.url },
     });
-    // A pubnet payment: the real verifier rejects it before any RPC call; a stub wouldn't.
+    // A payment for a network this process doesn't serve: the real verifier rejects it before any
+    // RPC call; a stub wouldn't. Not pubnet, whose requests need an API key first (0105).
     const requirements = {
       scheme: "exact",
-      network: "stellar:pubnet",
+      network: "stellar:futurenet",
       asset: "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
       amount: "1000",
       payTo: Keypair.random().publicKey(),

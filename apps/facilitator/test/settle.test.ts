@@ -365,6 +365,20 @@ describe("reopenedLabels (0027)", () => {
 });
 
 describe("createSettler", () => {
+  it("hands beforeSubmit the request's caller (0105)", async () => {
+    const { settle, hooks } = setup();
+    await settle(payload(), requirements, undefined, { owner: "operator:acme" });
+    expect(hooks.beforeSubmit).toHaveBeenCalledTimes(1);
+    expect(hooks.beforeSubmit.mock.calls[0]![0].caller).toEqual({ owner: "operator:acme" });
+  });
+
+  it("hands beforeSubmit no caller for a request without one (0105)", async () => {
+    const { settle, hooks } = setup();
+    await settle(payload(), requirements);
+    expect(hooks.beforeSubmit).toHaveBeenCalledTimes(1);
+    expect(hooks.beforeSubmit.mock.calls[0]![0]).not.toHaveProperty("caller");
+  });
+
   it("claims, runs beforeSubmit, submits the client's call bounded by its auth, and answers success", async () => {
     const { settle, store, submit, hooks, order } = setup();
     const p = payload();
