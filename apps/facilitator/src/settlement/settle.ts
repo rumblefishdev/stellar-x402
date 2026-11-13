@@ -39,7 +39,7 @@ import {
   type SettlementStore,
 } from "../ports/index.js";
 import type { BeforeSubmitResult, SettlementHooks, SettlementOrigin } from "./hooks.js";
-import { NONCE_CONSUMED_REASON, type IsNonceUsed } from "./nonce-used.js";
+import { NONCE_CONSUMED_REASON, consumedElsewhere, type IsNonceUsed } from "./nonce-used.js";
 import {
   attemptUpdates,
   createRecords,
@@ -108,7 +108,10 @@ export interface SettlerDeps {
    * decision 15, 0082). Read only on an answer that ended a payment and before a reopen.
    */
   latestLedger: () => Promise<number>;
-  /** Whether the payer's nonce is used on chain, read after the pool's simulation failed (0141). */
+  /**
+   * Whether the payer's nonce is used on chain, read after the pool's simulation failed, or after
+   * our transaction failed without an error event that tells (0141).
+   */
   nonceUsed: IsNonceUsed;
   /** Estimated ledger close time, to turn the auth expiry into a deadline. */
   ledgerMs?: number;
@@ -617,13 +620,21 @@ export function createSettler(deps: SettlerDeps): Settle & {
             won: false,
             origin: call.origin,
           };
-        default:
+        default: {
+          // An RPC without diagnostic events gives no error to read, so the nonce entry tells
+          // (0141): ours failed and wrote no nonce, so an entry means another transaction used it.
+          const usedElsewhere =
+            result.status === "failed" &&
+            !consumedElsewhere(result.failure, verified.payer) &&
+            (await deps.nonceUsed(verified.payer, verified.nonce));
           return noteRewrap(
             await finish(
               key,
               {
                 state: result.status,
-                errorReason: resultReason(result.status, result.failure, verified.payer),
+                errorReason: usedElsewhere
+                  ? SETTLE_REASONS.nonceConsumedElsewhere
+                  : resultReason(result.status, result.failure, verified.payer),
                 ...(result.failure && { failure: result.failure }),
                 ...fields,
               },
@@ -631,6 +642,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
               own,
             ),
           );
+        }
       }
     } catch (error) {
       // A store failure while recording: the answer is the pool's result, or `pending` with the

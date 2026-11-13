@@ -812,6 +812,29 @@ describe("createSettler", () => {
       },
     );
 
+    it("tells it from the nonce entry when the RPC gives no error event (0141 decision 5)", async () => {
+      const nonceUsed = vi.fn(async () => true);
+      const { settle } = setup(
+        async (opts) => {
+          await opts.onSigned?.(HASH, BOUNDS);
+          return { ...result("failed"), failure: { opCode: "invokeHostFunctionTrapped" } };
+        },
+        { nonceUsed },
+      );
+      expect((await settle(payload(), requirements)).response).toEqual({
+        ...consumed,
+        transaction: HASH,
+      });
+      expect(nonceUsed).toHaveBeenCalledWith(payer, "7");
+    });
+
+    it("doesn't read the nonce when the error event already tells", async () => {
+      const nonceUsed = vi.fn(async () => true);
+      const { settle } = setup(failedOnUsedNonce, { nonceUsed });
+      await settle(payload(), requirements);
+      expect(nonceUsed).not.toHaveBeenCalled();
+    });
+
     it("logs and counts it with the fee our transaction was charged", async () => {
       const { settle, lines, metrics } = setup(failedOnUsedNonce);
       await settle(payload(), requirements);
