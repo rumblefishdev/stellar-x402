@@ -44,10 +44,10 @@ import type { SettlementHooks } from "../src/settlement/hooks.js";
 import { createLeaseKeeper } from "../src/settlement/lease.js";
 import { createReconciler } from "../src/settlement/reconcile.js";
 import { createRecords } from "../src/settlement/records.js";
+import { SETTLE_REASONS } from "../src/settlement/reasons.js";
 import {
   LeaseLostError,
   PayerNotAuthorizedError,
-  SETTLE_REASONS,
   createSettler,
   expectTransfer,
   fingerprintOf,
