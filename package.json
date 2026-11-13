@@ -19,7 +19,7 @@
     "format:check": "prettier --check .",
     "board": "node tools/scripts/generate-lore-board.mjs",
     "sdk-rust:test": "cd packages/sdk/rust && cargo test && cargo test --no-default-features",
-    "sdk-rust:lint": "cd packages/sdk/rust && cargo fmt --all --check && cargo clippy --all-targets -- -D warnings",
+    "sdk-rust:lint": "cd packages/sdk/rust && cargo fmt --all --check && cargo clippy --all-targets -- -D warnings && cargo clippy --all-targets --no-default-features -- -D warnings",
     "contracts:test": "cd contracts && cargo test",
     "contracts:build": "cd contracts && stellar contract build",
     "contracts:lint": "cd contracts && cargo fmt --all --check && cargo clippy --all-targets -- -D warnings",
