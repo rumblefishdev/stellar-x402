@@ -38,9 +38,8 @@ channel while production is behind.
 - AD-14 (`docs/architecture/m1-spine.md`) keeps every `@x402/*` package on one pinned minor,
   bumped on purpose (0145 moved them from `~2.28.0` to `~2.31.0`). It says how to bump, not how the
   team learns a bump is due.
-- `@x402/stellar` had 19 releases from 2026-05-01 to 2026-11-16, every one a new minor
-  (2.12.0 … 2.31.0, npm `time`); `@x402/core` and `@x402/extensions` were released with it, at
-  2.31.0 on 2026-11-16.
+- `@x402/stellar` had 19 releases from 2026-05-01 to 2026-11-16 (2.12.0 … 2.31.0, npm `time`);
+  `@x402/core` and `@x402/extensions` were released with it, at 2.31.0 on 2026-11-16.
 - A protocol upgrade the SDK can't read has its own early alarm, `protocol-upgrade-coming` (0027).
 - Production's `/health` names its commit (`5d2e26ba` on 2026-11-16); `uptime.url` in
   `infra/envs/production.json` already holds that URL.
@@ -52,7 +51,10 @@ channel while production is behind.
 | 1 | The version compared is the one production runs: the commit from `/health`, then `apps/facilitator/package.json` at that commit, so a bump merged but not deployed still pages | the owner's decision, 2026-11-16 | as the task says | no standard | | |
 | 2 | Its own alarm and metric, not a fifth entry in `upstream_files_changed`: production is behind for most of the time, which would hide spec changes behind one ALARM state | the owner's decision, 2026-11-16 | as the task says | no standard | | |
 | 3 | The alarm is named `upstream-library-behind`, in the `upstream` group beside `upstream-changed` and `upstream-silent` | the owner's decision, 2026-11-16 | as the task says | no standard | | |
-| 4 | Only `@x402/stellar` is compared, by minor: AD-14 keeps every `@x402/*` on one minor, and 19 of 19 releases since May were minors | agent, from AD-14 and the npm count | beyond it | no standard | | |
+| 4 | One plain question: is the `@x402/stellar` version production asks for (its `package.json` range, without the `~`) the one npm calls `latest`? 1 when they differ, 0 when equal; no minor count, no major rule | the owner's decision, 2026-11-16 | changes it: the task said minors behind | no standard | | |
+| 5 | A `/health` with no `commit` fails the read loudly (`watch_section_failed`), never falls back to develop | the owner's decision, 2026-11-16 | beyond it | no standard | | |
+| 6 | The version is read with a plain match on `~X.Y.Z`, the shape AD-14 sets; any other shape fails the read | the owner's decision, 2026-11-16 | beyond it | no standard | | |
+| 7 | Once a day, in the 08:00 UTC run with the upstream section, on a one-day alarm period | the owner's decision, 2026-11-16 | beyond it | no standard | | |
 
 ## Not yet decided
 
@@ -65,7 +67,7 @@ channel while production is behind.
 
 ## Acceptance Criteria
 
-- [ ] Given production behind npm's latest `@x402/stellar` minor, when the 08:00 UTC run reads both, then it publishes how many minors behind, and `upstream-library-behind` goes to ALARM
-- [ ] Given production on npm's latest minor, when the run reads both, then it publishes 0 and the alarm is OK
+- [ ] Given production on another `@x402/stellar` version than npm's `latest`, when the 08:00 UTC run reads both, then it publishes 1, and `upstream-library-behind` goes to ALARM
+- [ ] Given production on npm's `latest`, when the run reads both, then it publishes 0 and the alarm is OK
 - [ ] Given `/health`, GitHub or npm failing, when the run reads them, then it publishes nothing for this read, logs `watch_section_failed` with the read that failed, and `upstream-silent` covers it
 - [ ] Given the alarm list, when this task is done, then `docs/monitoring.md` lists `upstream-library-behind` among the alarms that are off, turned on by 0026
