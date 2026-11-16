@@ -71,6 +71,24 @@ description or price, and nobody can make `/discovery/resources` answer megabyte
 - The spec says nothing on who may change a listing (`specs/extensions/bazaar.md`); upstream
   issue x402-foundation/x402#3005 is open on it.
 
+## Premise
+
+Reviewed 2026-11-16 by a fresh reviewer given only the goal and constraints: the premise holds,
+with doubts.
+
+- The problem is real: the listing key is network + `payTo` + method + URL
+  (`packages/bazaar/src/url.ts:185`), so before this task a payment's copy to someone else's
+  `payTo` wrote their listing.
+- A cheaper fix may exist on pubnet: `/settle` there needs an API key (0105), but a key's owner is
+  a free `<kind>:<id>` label not tied to any `payTo` (`adapters/rules.ts:79`). A key tied to the
+  `payTo` accounts its owner proves would let the payment's copy write the listing with no request
+  to the seller. Testnet takes no key, so it would still need another rule.
+- The seller check makes the facilitator send an unpaid request, method and input chosen by the
+  payer, to any public `https` URL, 30 a minute per host; ADR 0008 states it.
+- The MCP check runs a full MCP session for 126 listings, and a free tool runs for real
+  (`catalog/seller-check.ts:66-146`).
+- `listingBytes` (16 KiB) alone bounds a page; the `extra` and offer-count limits repeat it.
+
 ## Decisions so far
 
 | # | What is done | From | Vs the task | Who does the same (checked) | Code | Test |
