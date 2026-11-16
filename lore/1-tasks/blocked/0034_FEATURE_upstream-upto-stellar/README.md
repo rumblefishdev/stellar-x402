@@ -55,6 +55,26 @@ history:
       Status note brought up to date: a maintainer started reviewing #3781 on 2026-10-20, and
       Eras256 (#3098) asked on 2026-10-23 which PR to converge on, still unanswered. Still blocked
       on the review; the reply to Eras256 is ours to send.
+  - date: "2026-11-12"
+    status: active
+    who: okarcz
+    note: >
+      Unblocked: jeesunikim's review of #3781 landed with two comments. okarcz accepted both: an
+      `extra.receiverAuthorizer` with self-managed and facilitator-delegated modes, as in SVM
+      upto; and no x402 nonce storage in UptoProxy, relying on Soroban's auth nonce as #3134
+      does. The contract's `facilitator` parameter becomes `receiver_authorizer`. Work on the
+      local branch lore-0034-review-fixes; nothing goes upstream until okarcz says so.
+  - date: "2026-11-13"
+    status: active
+    who: okarcz
+    note: >
+      #181 merged after Stan's review. On #3781: the updated spec pushed (a3ac96fe), the
+      description replaced, both of jeesunikim's comments answered, and a comment asking for CI
+      approval and a re-review. Eras256's question is still open.
+  - date: "2026-11-13"
+    status: blocked
+    who: okarcz
+    note: "Blocked again: waiting for jeesunikim's re-review of #3781 and the CI approval."
 ---
 
 # Merge the Stellar upto scheme upstream: scheme_upto_stellar.md and the @x402/stellar classes
@@ -69,11 +89,13 @@ once it is **merged**, not when it is proposed.
 
 ## Status: Blocked
 
-> Blocked since 2026-10-15 on the maintainers' review of the upstream spec PR. A maintainer
-> (jeesunikim) started it on 2026-10-20. One thing is ours to do: Eras256, author of the
-> competing #3098, asked on 2026-10-23 which PR to converge on, and nobody has answered. The code
-> PR also waits on 0015.
-> Drafts are in [`drafts/`](drafts/).
+> jeesunikim's review of #3781 (2026-11-12) is answered: the contract, the e2e suite and the docs
+> changed in our #181 (merged 2026-11-13), and the updated spec, a new description and replies to
+> both comments went up on 2026-11-13 (see [Upstream update](#upstream-update-2026-11-13)). #3781
+> now waits for a maintainer to approve its CI runs and for jeesunikim's re-review; blocked until
+> she replies. Eras256's
+> convergence question (2026-10-23) is still unanswered. The code PR also waits on 0015. Drafts are
+> in [`drafts/`](drafts/).
 
 ## Context
 
@@ -276,6 +298,148 @@ Local work so far, steps 1 and 2 as drafts. Nothing is sent upstream.
   #3781's description names all three and offers to converge. AutoLayer, another RFP respondent,
   said it won't open a competing spec PR.
 
+### Review of #3781 (2026-11-12)
+
+jeesunikim left two inline comments; okarcz accepted both on 2026-11-12.
+
+1. **`extra.receiverAuthorizer` with two modes** (line 71), as in `scheme_upto_svm.md`.
+   Facilitator-delegated: the server copies the facilitator's key from `/supported`, as
+   `facilitatorAddress` works today. Self-managed: the server puts its own key there and, at
+   `/settle`, sends its own auth entry for `settle_upto`. That entry covers every argument,
+   including `actual_amount`, so the facilitator can't charge more than the server signed, and
+   open authorizations survive a change of facilitator. The contract's `require_auth()` already
+   covers all arguments, so only the parameter name changes (`facilitator` →
+   `receiver_authorizer`). Open: the payload field name, the limit on the server entry's
+   `signatureExpirationLedger`, and whether the key must be a `G...` account.
+2. **No x402 nonce storage in UptoProxy** (line 182), as in #3134. Soroban's auth nonce already
+   makes each signed entry single-use. ADR 0010 D6's two reasons for storing it are weak: the
+   host's nonce entry can be read with `getLedgerEntries`, and a client that signs two entries with
+   the same x402 nonce signed two payments (today the second seller serves and goes unpaid). `nonce`
+   stays as a signed payment ID in the arguments and the `upto_settled` event; `is_nonce_used` and
+   `NonceUsed` go. Open: key the facilitator's zero-settlement record on Soroban's nonce.
+
+Both need a new WASM and a new canonical testnet address, the e2e suite rerun, and ADR 0010, the
+threat model, the testnet report and the spec updated.
+
+**Done on 2026-11-12** (branch `lore-0034-review-fixes`, committed, nothing posted upstream):
+
+- UptoProxy changed as above, error code 7 retired (not renumbered). `cargo test` 40/40 and the two
+  WASM tests pass.
+- The e2e suite settles again: the receiver authorizer signs its own address-credential entry
+  (`packages/signer-pool` refuses source-account entries since `d85b041`, which had blocked the
+  suite until 0015). 61/61 on testnet against the new proxy `CDPHI4JY…EA2X` (WASM `a3d7bd0a…f666`),
+  including a self-managed payment relayed by another facilitator.
+- Contract README, ADR 0010 (D6 amended, D12 added), threat model, testnet report (new run on top),
+  `deploy/testnet.env.example` and `drafts/scheme_upto_stellar.md` updated. The `docs/scf/`
+  milestone 1 documents keep the old address: they record what milestone 1 delivered.
+
+**okarcz's decisions on the open points (2026-11-12):**
+
+- The payload field is `payload.receiverAuthorization` (base64 `SorobanAuthorizationEntry`).
+- The receiver authorization's `signatureExpirationLedger` is at most the client's
+  `allowance_expiration_ledger`.
+- The spec allows `G...` and `C...` receiver authorizers (a `C...` one is verified only by the
+  enforcing simulation, as for a smart-wallet client); our seller SDK signs with a `G...` key first.
+- The facilitator keys its zero-settlement record on `(from, authorization nonce)`.
+
+**Emerged while writing the spec** (for okarcz to confirm):
+
+- In self-managed mode the receiver authorizer signs only at `/settle`, so `/verify` simulates in
+  recording mode and checks the client's signature and authorization nonce itself; the enforcing
+  simulation moves to settlement. A `C...` client's failing `__check_auth` then surfaces only at
+  settlement (Security Considerations, item 6).
+- A self-managed `/settle` with amount 0 still needs `payload.receiverAuthorization`, since it is
+  what authorizes the server's claim.
+- In facilitator-delegated mode the facilitator MAY still authorize as the operation source, but
+  never with source-account credentials when the operation has no source of its own.
+- ~~Non-zero settlements no longer need a facilitator record.~~ Reversed by okarcz after the code
+  review (2026-11-12): the facilitator records `(from, authorization nonce)` before every
+  settlement, so concurrent `/settle` calls on one payload don't pay for a doomed duplicate.
+- New error reason `invalid_upto_stellar_payload_receiver_authorization`;
+  `invalid_upto_stellar_payload_nonce_used` now means the client entry's authorization nonce.
+
+**okarcz's decisions from the code review (2026-11-12):**
+
+- Record every settlement before submitting it (above).
+- Add an e2e scenario for self-managed mode: the seller's account is the receiver authorizer and
+  the other facilitator relays its entry.
+- A facilitator that doesn't relay self-managed payments refuses them at `/verify` with
+  `invalid_upto_stellar_payload_receiver_authorization`.
+
+**okarcz's decisions from Stan's review of #181 (2026-11-13):**
+
+- A recorded settlement reopens for the same client entry and actual amount while that entry is
+  unexpired: SHOULD when nothing was sent (as `exact` does since 0073), MAY when its transaction
+  ended `FAILED`, which rolls back the host's nonce. Unlike `exact`, the seller has already served
+  and the client has no reason to sign again. A reopened settlement repeats the enforcing
+  simulation first, and an uncertain outcome never reopens. Written into the spec (Phase 4, Security
+  item 9), the contract README, ADR 0010 and the threat model.
+- For 0015: how many resends per entry after a `FAILED` transaction, and how a reopen is claimed.
+- `UptoTerms.facilitator` in the e2e code is now `receiverAuthorizer`; `settleAndCheck` takes the
+  authorizer, submitter, payer and channels, and the self-managed relay scenario uses it.
+- The spec's 2026-11-12 fee figures now come from the 61/61 run; the issue draft and
+  `deploy/README.md` name `CDPHI4JY…EA2X`; the signer-pool smoke script signs an
+  address-credential receiver entry (it had been broken since `d85b041`; not run). The e2e suite
+  passed 61/61 again on 2026-11-13 against the same proxy
+  (`contracts/upto-proxy/e2e/results/testnet-results-2026-11-13.json`); the report keeps citing the
+  2026-11-12 run.
+
+### Upstream update (2026-11-13)
+
+Posted by okarcz's go, step by step:
+
+- **Spec:** `a3ac96fe` "docs(specs): add receiver authorizer modes to upto on Stellar", signed,
+  pushed to `karczuRF/x402:feature/upto-stellar-spec`; the file equals
+  [`drafts/scheme_upto_stellar.md`](drafts/scheme_upto_stellar.md) as merged in #181. Local
+  `main` of the fork clone was moved to upstream `27e37052` first; upstream changed no `upto` spec
+  and none of the anchors the draft links to, so no rebase was needed.
+- **Description:** replaced (the posted body is the record): the two receiver authorizer modes, single use from Soroban's nonce, proxy `CDPHI4JY…EA2X` and
+  the 61/61 run, an "Updated after review" line, and the relationship to #3134 instead of #3098.
+- **Replies** to both of jeesunikim's comments (`discussion_r4564647727`, receiver authorizer;
+  `discussion_r4564648146`, no nonce storage). okarcz left out of the first reply the two points
+  still listed above for confirmation (recording-mode `/verify` in self-managed mode, and a
+  self-managed zero `/settle` carrying `receiverAuthorization`); both stay in the pushed spec.
+- **PR comment** (`issuecomment-6856267580`): asks a maintainer to approve the CI runs and
+  jeesunikim to look again.
+- **CI:** CarsonBot's checklist (`issuecomment-6729323361`) had only "CI passes" open, failing
+  `lint-python`, `test-python` and `Check Python` on `f31b9d9`. Both failures were infrastructure:
+  a 504 while downloading tools, and the runner picking Python 3.15, which `rignore` (PyO3) can't
+  build on. Python CI passes on upstream `main` since. The runs for `a3ac96fe` show
+  `action_required`: a fork's workflows wait for a maintainer. Vercel's preview still waits for a
+  Coinbase team member, as for any outside contributor.
+
+**Future work:** C-account signing in our seller SDK (a backlog task, not created yet). Enforcing
+the receiver-entry rules in the facilitator belongs to 0015.
+
+**Note for whoever builds the seller SDK (2026-11-13):**
+
+- There is no seller SDK package yet. `packages/sdk` was empty and 0101 removed it (`623bfa26`);
+  0102 creates it with its first helper. "Our seller SDK" above means the planned seller-side code.
+- The seller-side `upto` code lands in two places: the `upto` `server` class upstream (step 3) and
+  the Rust crate, part 2 (0140).
+- The `server` class needs, at the 402:
+  - `extra.areFeesSponsored: true`;
+  - `extra.receiverAuthorizer`: the address from the facilitator's `/supported` entry
+    (facilitator-delegated) or the seller's own public address (self-managed). The seller picks
+    the mode in its configuration.
+- At `/settle`, in self-managed mode only:
+  - build the receiver authorization entry from the client's entry and the actual amount: the 10
+    `settle_upto` arguments, no sub-invocations, a random nonce, and a `signatureExpirationLedger`
+    no later than the client's `allowance_expiration_ledger` (spec, "Receiver Authorization
+    Entry");
+  - sign it with a `G...` key through a pluggable signer, so `C...` signing can come later;
+  - send it as `payload.receiverAuthorization`, for a zero amount too;
+  - handle a facilitator that refuses self-managed payments
+    (`invalid_upto_stellar_payload_receiver_authorization`).
+  - Unit tests: the entry matches the spec's tree byte for byte, the expiry bound, a zero amount.
+- Check first: how the server in `svm/src/upto/` adds its signature to the payload before
+  `/settle`. In x402 the payload comes from the client. Not checked yet.
+- The `client` class puts `requirements.extra.receiverAuthorizer` in the `receiver_authorizer`
+  argument. `contracts/upto-proxy/e2e/src/upto.ts` already does this.
+- The backlog task for `C...` signing must say where it lands: the `server` class, 0140, or both.
+- 0015 still says `facilitator.require_auth()` and doesn't cover self-managed mode. Update it after
+  #181 merges.
+
 ## Design Decisions
 
 ### Planned
@@ -310,9 +474,9 @@ Local work so far, steps 1 and 2 as drafts. Nothing is sent upstream.
 
 ## Open
 
-- **#3781:** reply to Eras256's convergence comment of 2026-10-23; answer the maintainer review
-  started on 2026-10-20 when it lands; ask through the Technical Steering Committee,
-  or SDF's board seat, if it stalls. Optionally post the four maintainer questions as a first
+- **#3781:** wait for the CI approval and jeesunikim's re-review (asked 2026-11-13); reply to
+  Eras256's convergence comment of 2026-10-23; ask through the Technical Steering Committee, or
+  SDF's board seat, if it stalls. Optionally post the four maintainer questions as a first
   comment and point #3098 and #3134 at #3781.
 - **Code PR:** the `upto` classes wait on 0015. The org fork of `x402-foundation/x402` (ADR 0001)
   can be created for it.

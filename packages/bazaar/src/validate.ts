@@ -190,7 +190,7 @@ function run(
   delete discovered.resourceUrl;
   delete discovered.routeTemplate;
   // Upstream servers send `description` and `mimeType` as `routeConfig.… || ""` (`@x402/core`
-  // 2.28.0): "" means none, so the entry leaves it out.
+  // 2.31.0): "" means none, so the entry leaves it out.
   if (discovered.description === "") delete discovered.description;
   if (discovered.mimeType === "") delete discovered.mimeType;
   const iconUrl = sanitizeIconUrl(extracted.iconUrl);

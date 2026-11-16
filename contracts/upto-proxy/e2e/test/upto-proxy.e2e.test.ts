@@ -1,6 +1,7 @@
 // UptoProxy on testnet (task 0004). Settlements go through SettlementSubmitter: a channel is the
-// transaction source, the facilitator is the operation source and pays the fee bump. The pool now
-// refuses that consent entry and sets no operation source, so this suite can't settle until 0015.
+// transaction source and the facilitator pays the fee bump. The receiver authorizer (here the
+// facilitator's key) signs its own address-credential entry for the actual amount, as a resource
+// server does in self-managed mode; the pool refuses source-account entries.
 // Rejections are checked in the submitter's enforcing simulation against live testnet state, so
 // they have no transaction hash.
 //
@@ -8,7 +9,13 @@
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Address, authorizeEntry, nativeToScVal, type xdr } from "@stellar/stellar-sdk";
+import {
+  Address,
+  type Keypair,
+  authorizeEntry,
+  nativeToScVal,
+  type xdr,
+} from "@stellar/stellar-sdk";
 import { type ContractCall, SettlementSubmitter } from "@stellar-x402/signer-pool";
 import { keypairSigner } from "@stellar-x402/signer-pool/testing";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -31,7 +38,6 @@ import {
   contractFn,
   expectedClientInvocation,
   newTerms,
-  nonceArgs,
   settleCall,
   signSimulatedEntry,
   unsignedEntry,
@@ -109,7 +115,7 @@ afterAll(() => {
     /** The tokens this run covered; a subset run (E2E_TOKENS) leaves the others out. */
     tokensRun: TOKENS,
     accounts: {
-      facilitator: world.facilitator.publicKey(),
+      receiverAuthorizer: world.facilitator.publicKey(),
       otherFacilitator: world.otherFacilitator.publicKey(),
       client: world.client.publicKey(),
       seller: world.seller.publicKey(),
@@ -147,7 +153,7 @@ const terms = (kind: TokenKind, overrides: Partial<UptoTerms> = {}): UptoTerms =
       token: world.tokens[kind],
       from: world.client.publicKey(),
       to: world.seller.publicKey(),
-      facilitator: world.facilitator.publicKey(),
+      receiverAuthorizer: world.facilitator.publicKey(),
       maxAmount: MAX,
       allowanceExpirationLedger: 0,
     },
@@ -212,39 +218,39 @@ const allowanceOf = async (t: UptoTerms) =>
       t.token,
       "allowance",
       [Address.fromString(t.from).toScVal(), Address.fromString(t.proxy).toScVal()],
-      t.facilitator,
+      t.receiverAuthorizer,
     )) as bigint,
   );
 
 /**
  * Checks what a successful settlement must leave on chain, except the balances: the
- * delegated-bump shape, the event, the used nonce and, unless another settlement from the same
- * payer may have run after it, the leftover allowance.
+ * delegated-bump shape, the event and, unless another settlement from the same payer may have run
+ * after it, the leftover allowance.
  */
 async function checkSettled(
   r: ScenarioResult,
   t: UptoTerms,
   hash: string,
   actual: bigint,
-  { allowance = true } = {},
+  { allowance = true, payer = world.facilitator.publicKey(), channels = world.channels } = {},
 ): Promise<TxReport> {
   const tx = await txReport(hash, t.proxy);
   r.transactions.push(tx);
 
-  // Delegated-bump shape: the facilitator pays, a channel provides the sequence number.
-  expect(tx.feeSource).toBe(t.facilitator);
-  expect(tx.opSource).toBe(t.facilitator);
-  expect(world.channels).toContain(tx.txSource);
+  // Delegated-bump shape: the submitting facilitator pays, a channel provides the sequence number.
+  // The pool sets no operation source.
+  expect(tx.feeSource).toBe(payer);
+  expect(tx.opSource).toBeUndefined();
+  expect(channels).toContain(tx.txSource);
   expect([tx.feeSource, tx.txSource, tx.opSource]).not.toContain(t.from);
 
   expect(tx.events).toHaveLength(1);
   const [event] = tx.events as { topics: unknown[]; data: Record<string, unknown> }[];
   expect(event!.topics).toEqual(["upto_settled", t.token, t.from, t.to]);
-  expect(event!.data.facilitator).toBe(t.facilitator);
+  expect(event!.data.receiver_authorizer).toBe(t.receiverAuthorizer);
   expect(BigInt(event!.data.max_amount as bigint)).toBe(t.maxAmount);
   expect(BigInt(event!.data.actual_amount as bigint)).toBe(actual);
 
-  expect(await readContract(t.proxy, "is_nonce_used", nonceArgs(t), t.facilitator)).toBe(true);
   if (allowance) {
     const left = await allowanceOf(t);
     expect(left).toBe(t.maxAmount - actual);
@@ -254,17 +260,34 @@ async function checkSettled(
 }
 
 /** Submits through the pool and checks everything a successful settlement must leave on chain. */
+/**
+ * Who settles: the receiver authorizer that signs its entry, the submitter that sends it, and the
+ * fee payer and channels `checkSettled` expects. Defaults to the facilitator-delegated shape.
+ */
+interface Settler {
+  authorizer?: Keypair;
+  via?: SettlementSubmitter;
+  payer?: string;
+  channels?: string[];
+}
+
 async function settleAndCheck(
   r: ScenarioResult,
   t: UptoTerms,
   auth: xdr.SorobanAuthorizationEntry,
   actual: bigint,
+  {
+    authorizer = world.facilitator,
+    via = submitter,
+    payer = world.facilitator.publicKey(),
+    channels = world.channels,
+  }: Settler = {},
 ): Promise<TxReport> {
   checkClientAuth(auth, t, await facilitatorWindow(t));
   const before = await balances(t);
-  const result = await submitter.submit(settleCall(auth, t, actual));
+  const result = await via.submit(await settleCall(auth, t, actual, authorizer));
   expect(result.status, `submit ${result.hash}: ${result.errorCode ?? ""}`).toBe("success");
-  const tx = await checkSettled(r, t, result.hash!, actual);
+  const tx = await checkSettled(r, t, result.hash!, actual, { payer, channels });
   const after = await balances(t);
   expect(before.client - after.client).toBe(actual);
   expect(after.seller - before.seller).toBe(actual);
@@ -314,7 +337,7 @@ describe.each(TOKENS)("UptoProxy on testnet with %s", (kind) => {
   }
 
   it("settles zero", () =>
-    scenario(kind, "settles zero", "success, no transfer, event and nonce recorded", async (r) => {
+    scenario(kind, "settles zero", "success, no transfer, event emitted", async (r) => {
       const t = terms(kind);
       await settleAndCheck(r, t, await clientSign(t, world.client), 0n);
       r.outcome = "success";
@@ -324,30 +347,58 @@ describe.each(TOKENS)("UptoProxy on testnet with %s", (kind) => {
     scenario(kind, "rejects an amount over the ceiling", "AmountExceedsMax (#2)", async (r) => {
       const t = terms(kind);
       const auth = await clientSign(t, world.client);
-      await expectRefused(r, settleCall(auth, t, MAX + 1n), CONTRACT(2));
+      await expectRefused(r, await settleCall(auth, t, MAX + 1n, world.facilitator), CONTRACT(2));
     }));
 
   it("rejects a replayed auth entry", () =>
     scenario(kind, "rejects a replayed auth entry", "Error(Auth, ExistingValue)", async (r) => {
       const last = settled.get(kind);
       if (!last) throw new Error("no earlier settlement to replay");
-      await expectRefused(r, settleCall(last.auth, last.terms, 1n), REPLAYED);
+      await expectRefused(
+        r,
+        await settleCall(last.auth, last.terms, 1n, world.facilitator),
+        REPLAYED,
+      );
     }));
 
-  it("rejects a reused nonce with a new signature", () =>
-    scenario(kind, "rejects a reused nonce with a new signature", "NonceUsed (#7)", async (r) => {
+  // The x402 nonce is a payment ID: single use is Soroban's auth nonce (the replay scenario above).
+  // A new signature over the same terms is a second payment and settles.
+  it("settles a reused payment ID under a new signature", () =>
+    scenario(kind, "settles a reused payment ID under a new signature", "success", async (r) => {
       const last = settled.get(kind);
-      if (!last) throw new Error("no earlier settlement to replay");
-      const auth = await clientSignDirect(last.terms, world.client);
-      await expectRefused(r, settleCall(auth, last.terms, 1n), CONTRACT(7));
+      if (!last) throw new Error("no earlier settlement to reuse");
+      // Fresh terms with the earlier payment ID, so a slow run can't push it past its deadline.
+      const t = terms(kind, { nonce: last.terms.nonce });
+      await settleAndCheck(r, t, await clientSign(t, world.client), 1n);
+      r.outcome = "success";
     }));
+
+  // Self-managed mode: the seller's own account is the receiver authorizer. It signs its entry for
+  // the actual amount without simulation, and the other facilitator, which never saw the payment
+  // before, relays it through its own channel and fee bump.
+  it("settles a self-managed payment relayed by another facilitator", () =>
+    scenario(
+      kind,
+      "settles a self-managed payment relayed by another facilitator",
+      "success, the seller's key authorizes, the other facilitator pays",
+      async (r) => {
+        const t = terms(kind, { receiverAuthorizer: world.seller.publicKey() });
+        await settleAndCheck(r, t, await clientSign(t, world.client), MAX / 4n, {
+          authorizer: world.seller,
+          via: otherSubmitter,
+          payer: world.otherFacilitator.publicKey(),
+          channels: world.otherChannels,
+        });
+        r.outcome = "success";
+      },
+    ));
 
   it("rejects a settlement before valid_after", () =>
     scenario(kind, "rejects a settlement before valid_after", "NotYetValid (#4)", async (r) => {
       const now = BigInt(Math.floor(Date.now() / 1000));
       const t = terms(kind, { validAfter: now + 3600n, deadline: now + 7200n });
       const auth = await clientSignDirect(t, world.client);
-      await expectRefused(r, settleCall(auth, t, 1n), CONTRACT(4));
+      await expectRefused(r, await settleCall(auth, t, 1n, world.facilitator), CONTRACT(4));
     }));
 
   it("rejects a settlement after the deadline", () =>
@@ -355,7 +406,7 @@ describe.each(TOKENS)("UptoProxy on testnet with %s", (kind) => {
       const now = BigInt(Math.floor(Date.now() / 1000));
       const t = terms(kind, { validAfter: now - 7200n, deadline: now - 3600n });
       const auth = await clientSignDirect(t, world.client);
-      await expectRefused(r, settleCall(auth, t, 1n), CONTRACT(5));
+      await expectRefused(r, await settleCall(auth, t, 1n, world.facilitator), CONTRACT(5));
     }));
 
   it("rejects an allowance expiry beyond the contract's cap", () =>
@@ -368,7 +419,7 @@ describe.each(TOKENS)("UptoProxy on testnet with %s", (kind) => {
         const latest = (await server.getLatestLedger()).sequence;
         const t = terms(kind, { allowanceExpirationLedger: latest + MAX_ALLOWANCE_LEDGERS + 100 });
         const auth = await clientSignDirect(t, world.client);
-        await expectRefused(r, settleCall(auth, t, 1n), CONTRACT(6));
+        await expectRefused(r, await settleCall(auth, t, 1n, world.facilitator), CONTRACT(6));
       },
     ));
 
@@ -376,20 +427,24 @@ describe.each(TOKENS)("UptoProxy on testnet with %s", (kind) => {
     scenario(kind, "rejects a different facilitator", "Error(Auth, InvalidAction)", async (r) => {
       const t = terms(kind);
       const auth = await clientSign(t, world.client);
-      await expectRefused(r, settleCall(auth, t, 1n), AUTH_MISMATCH, otherSubmitter);
+      // The other facilitator signs for itself; the call still names the bound authorizer.
+      const call = await settleCall(auth, t, 1n, world.otherFacilitator);
+      await expectRefused(r, call, AUTH_MISMATCH, otherSubmitter);
     }));
 
   // The facilitator case is sent by the other facilitator, with its own authorization, so only
   // the client's signature can refuse it.
-  const tampers: [string, (t: UptoTerms) => Partial<UptoTerms>, () => SettlementSubmitter][] = [
-    ["recipient", (t) => ({ to: t.facilitator }), () => submitter],
-    ["token", () => ({ token: world.tokens[kind === "sac" ? "sep41" : "sac"] }), () => submitter],
-    ["ceiling", (t) => ({ maxAmount: t.maxAmount * 2n }), () => submitter],
-    ["nonce", () => ({ nonce: Buffer.alloc(32, 9) }), () => submitter],
+  type Via = () => [SettlementSubmitter, Keypair];
+  const ours: Via = () => [submitter, world.facilitator];
+  const tampers: [string, (t: UptoTerms) => Partial<UptoTerms>, Via][] = [
+    ["recipient", (t) => ({ to: t.receiverAuthorizer }), ours],
+    ["token", () => ({ token: world.tokens[kind === "sac" ? "sep41" : "sac"] }), ours],
+    ["ceiling", (t) => ({ maxAmount: t.maxAmount * 2n }), ours],
+    ["nonce", () => ({ nonce: Buffer.alloc(32, 9) }), ours],
     [
       "facilitator",
-      () => ({ facilitator: world.otherFacilitator.publicKey() }),
-      () => otherSubmitter,
+      () => ({ receiverAuthorizer: world.otherFacilitator.publicKey() }),
+      () => [otherSubmitter, world.otherFacilitator],
     ],
   ];
   for (const [field, change, via] of tampers) {
@@ -400,7 +455,9 @@ describe.each(TOKENS)("UptoProxy on testnet with %s", (kind) => {
         const auth = await clientSign(t, world.client);
         const tampered = { ...t, ...change(t) };
         expect(() => checkClientAuth(auth, tampered)).toThrow();
-        await expectRefused(r, settleCall(auth, t, 1n, tampered), AUTH_MISMATCH, via());
+        const [sender, authorizer] = via();
+        const call = await settleCall(auth, t, 1n, authorizer, tampered);
+        await expectRefused(r, call, AUTH_MISMATCH, sender);
       }),
     );
   }
@@ -434,8 +491,8 @@ describe.each(TOKENS)("UptoProxy on testnet with %s", (kind) => {
           // transfer; check the pair as a whole instead.
           const before = await balances(a);
           const [ra, rb] = await Promise.all([
-            submitter.submit(settleCall(authA, a, 3_000n)),
-            submitter.submit(settleCall(authB, b, 4_000n)),
+            submitter.submit(await settleCall(authA, a, 3_000n, world.facilitator)),
+            submitter.submit(await settleCall(authB, b, 4_000n, world.facilitator)),
           ]);
           expect([ra.status, rb.status]).toEqual(["success", "success"]);
           // Which `approve` ran last is unknown, so the allowance is checked for the pair.
@@ -475,7 +532,7 @@ describe("client and facilitator checks", () => {
         // What a lying RPC could return: the payer's whole ceiling sent to the facilitator.
         const transfer = contractFn(t.token, "transfer", [
           Address.fromString(t.from).toScVal(),
-          Address.fromString(t.facilitator).toScVal(),
+          Address.fromString(t.receiverAuthorizer).toScVal(),
           nativeToScVal(t.maxAmount, { type: "i128" }),
         ]);
         await expect(

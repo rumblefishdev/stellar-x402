@@ -98,7 +98,7 @@ graph TD
     - A call cut off by its 10 s keeps running, since upstream's clients can't be cancelled. `main()` sets undici's global header and body timeouts to 10 s, which stellar-sdk's `fetch` uses, so the abandoned request ends instead of holding its socket for undici's default 300 s.
     - Upstream's Horizon read of the ledger close time has no URL of ours to fail over to. It falls back to upstream's default on an error. Upstream reads it after its RPC calls, so a Horizon that hangs takes the URL being tried past its 10 s, which counts as that URL's timeout and moves the shared URL: `rpc_failover` with `by: "verify"` blames an RPC URL for Horizon's delay. With healthy RPCs the probe that the last URL's timeout starts brings calls back (`rpc_failback`), so while Horizon hangs the two lines repeat. Every URL times out, `rpc_exhausted` lists them, and the answer is a 503 `rpc_unavailable`, from the `UpstreamTimeoutError` of the first URL tried, the active one, not always `RPC_URLS[0]`: it blames the RPC for Horizon's delay too. Payments are unaffected: the pool's reads and sends answer on either URL.
   - **`/verify`** = upstream `verify()`, then address credentials only, the AD-5 channel check, the AD-6 one-payer-entry check, then the AD-22 validity check. The first rejection returns `isValid: false` with its reason.
-    - Address credentials only: an auth entry with source-account credentials would authorize as the call's source, which the pool makes a channel. Upstream refuses it too (`…_unsupported_credential_type`); we check it again because the pin `~2.28.0` lets upstream patches float, and the pool refuses such a call as well.
+    - Address credentials only: an auth entry with source-account credentials would authorize as the call's source, which the pool makes a channel. Upstream refuses it too (`…_unsupported_credential_type`); we check it again because the pin `~2.31.0` lets upstream patches float, and the pool refuses such a call as well.
     - A network check runs first: the requirements' `network` picks that network's RPC endpoints, pool, key and store, and a network the process doesn't serve is `invalid_network`, since upstream would verify its payload against that network's default RPC. One process serves both networks (task 0077); until 0126's code, it serves the one in `NETWORK`. A V0 envelope is rejected as malformed there too: upstream parses it, but can't assemble its simulation onto it.
     - Upstream answers its own exceptions, such as a failed RPC call, with `unexpected_verify_error`. It says nothing about the payment, and the cause it hides may be the RPC or the payload, so it is no verdict, like a URL that gives no answer within 10 s (upstream's RPC and Horizon clients have no timeout). When no URL gives a verdict, whichever failed first, or our ledger read fails on every URL, `/verify` answers 503 `rpc_unavailable` with `Retry-After: 5`, and `http_requests_total` counts each in its `[route, status]` set for the `verify-rpc-unavailable` alarm. The payment wasn't judged, so the seller may send the same request again.
     - A request whose `amount` isn't a whole number is a 400: upstream's `BigInt(amount)` would throw, which would be a 500.
@@ -234,9 +234,10 @@ graph TD
 - **Binds:** all workspace `package.json` files
 - **Prevents:** two copies of `@x402/core` or `@stellar/stellar-sdk` in one process.
 - **Rule:**
-  - All `@x402/*` packages share one pinned minor, `~2.28.0` from T1.
-  - `@stellar/stellar-sdk` stays on `^16.3.0`. `@x402/stellar` 2.28 requires 16.x, and our code uses the XDR accessor API.
-  - A protocol-29 XDR fixture test (`AddressV2`) guards this rule.
+  - All `@x402/*` packages share one pinned minor: `~2.28.0` from T1, `~2.31.0` from 0145.
+  - `@stellar/stellar-sdk` stays on 16.x, on the range `@x402/stellar` 2.31 asks for (`^16.4.1`), so no install can give our code an older copy than upstream's, and our code uses the XDR accessor API.
+  - A protocol-29 XDR fixture test (`AddressV2`) guards this rule, and checks that upstream loads the copy of `@stellar/stellar-sdk` we load.
+  - `zod` is not one version: `packages/bazaar` is on the major `@x402/core` builds its schemas with (4 from 2.31), because it extends them, and a field of another major throws on every parse; a test there compares the two. The rest of the repo parses with its own zod 3 schemas (0145).
 
 ### AD-15: The gate runs from our repo against a clean upstream checkout
 
@@ -379,10 +380,10 @@ graph TD
 | Node.js                                     | >=22.12 (22 LTS, maintenance until 2027-04; CI also runs 24)       |
 | pnpm                                        | 11.5.2                                                             |
 | TypeScript                                  | ~6.0.3 (ESM, NodeNext, strict; staying on 6.x in T1 is deliberate) |
-| @x402/core, @x402/stellar, @x402/extensions | ~2.28.0                                                            |
-| @stellar/stellar-sdk                        | ^16.3.0                                                            |
-| express                                     | ^5.2.1                                                             |
-| zod                                         | ^3.25.76 (to be added to `apps/facilitator`)                       |
+| @x402/core, @x402/stellar, @x402/extensions | ~2.31.0                                                            |
+| @stellar/stellar-sdk                        | ^16.4.1                                                            |
+| express                                     | ^5.3.0                                                             |
+| zod                                         | ^3.25.76; ^4.6.7 in `packages/bazaar`, as `@x402/core` (AD-14)     |
 | vitest                                      | ^5.0.2                                                             |
 | x402 protocol                               | v2                                                                 |
 | soroban-sdk / Rust / stellar-cli            | 28.0.0 / 1.97.1 / 28.1.0                                           |

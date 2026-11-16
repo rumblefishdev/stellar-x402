@@ -51,7 +51,7 @@ proptest! {
             prop_assert_eq!(t.allowance(&from, &s.proxy), max - actual);
         }
         if failed {
-            prop_assert!(!nonce_used(&s, &p));
+            prop_assert_eq!(allowance(&s, &p), 0);
             prop_assert_eq!(balance(&s, &from), i128::MAX);
         }
     }

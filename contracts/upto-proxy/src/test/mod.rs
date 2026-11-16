@@ -16,8 +16,8 @@ mod wasm;
 use super::*;
 use soroban_sdk::{
     testutils::{
-        storage::Temporary as _, Address as _, AuthorizedFunction, AuthorizedInvocation, Events,
-        Ledger, MockAuth, MockAuthInvoke,
+        Address as _, AuthorizedFunction, AuthorizedInvocation, Events, Ledger, MockAuth,
+        MockAuthInvoke,
     },
     token::{StellarAssetClient, TokenClient},
     xdr::ScVal,
@@ -49,7 +49,7 @@ struct Payment {
     token: Address,
     from: Address,
     to: Address,
-    facilitator: Address,
+    receiver_authorizer: Address,
     max_amount: i128,
     nonce: BytesN<32>,
     valid_after: u64,
@@ -101,7 +101,7 @@ fn setup(kind: TokenKind) -> Setup {
         token,
         from,
         to: Address::generate(&env),
-        facilitator: Address::generate(&env),
+        receiver_authorizer: Address::generate(&env),
         max_amount: MAX,
         nonce: BytesN::from_array(&env, &[7; 32]),
         valid_after: VALID_AFTER,
@@ -120,7 +120,7 @@ fn signed_args(env: &Env, p: &Payment) -> Vec<Val> {
     (
         p.token.clone(),
         p.to.clone(),
-        p.facilitator.clone(),
+        p.receiver_authorizer.clone(),
         p.max_amount,
         p.nonce.clone(),
         p.valid_after,
@@ -129,13 +129,13 @@ fn signed_args(env: &Env, p: &Payment) -> Vec<Val> {
         .into_val(env)
 }
 
-/// All 10 real arguments of `settle_upto`, as the facilitator authorizes them.
+/// All 10 real arguments of `settle_upto`, as the receiver authorizer authorizes them.
 fn full_args(env: &Env, p: &Payment, actual: i128) -> Vec<Val> {
     (
         p.token.clone(),
         p.from.clone(),
         p.to.clone(),
-        p.facilitator.clone(),
+        p.receiver_authorizer.clone(),
         p.max_amount,
         actual,
         p.nonce.clone(),
@@ -150,8 +150,8 @@ fn approve_args(env: &Env, proxy: &Address, p: &Payment) -> Vec<Val> {
     (p.from.clone(), proxy.clone(), p.max_amount, p.exp_ledger).into_val(env)
 }
 
-/// Mocks exactly the client tree (§3.1) and the facilitator entry (§3.2).
-fn mock_auth(s: &Setup, client: &Payment, facilitator: &Payment, actual: i128) {
+/// Mocks exactly the client tree (§3.1) and the receiver authorizer entry (§3.2).
+fn mock_auth(s: &Setup, client: &Payment, authorizer: &Payment, actual: i128) {
     let env = &s.env;
     let approve = MockAuthInvoke {
         contract: &client.token,
@@ -165,10 +165,10 @@ fn mock_auth(s: &Setup, client: &Payment, facilitator: &Payment, actual: i128) {
         args: signed_args(env, client),
         sub_invokes: core::slice::from_ref(&approve),
     };
-    let facilitator_root = MockAuthInvoke {
+    let authorizer_root = MockAuthInvoke {
         contract: &s.proxy,
         fn_name: "settle_upto",
-        args: full_args(env, facilitator, actual),
+        args: full_args(env, authorizer, actual),
         sub_invokes: &[],
     };
     env.mock_auths(&[
@@ -177,8 +177,8 @@ fn mock_auth(s: &Setup, client: &Payment, facilitator: &Payment, actual: i128) {
             invoke: &client_root,
         },
         MockAuth {
-            address: &facilitator.facilitator,
-            invoke: &facilitator_root,
+            address: &authorizer.receiver_authorizer,
+            invoke: &authorizer_root,
         },
     ]);
 }
@@ -190,7 +190,7 @@ fn try_settle(s: &Setup, p: &Payment, actual: i128) -> TryResult {
         &p.token,
         &p.from,
         &p.to,
-        &p.facilitator,
+        &p.receiver_authorizer,
         &p.max_amount,
         &actual,
         &p.nonce,
@@ -200,14 +200,15 @@ fn try_settle(s: &Setup, p: &Payment, actual: i128) -> TryResult {
     )
 }
 
-/// Settles `p` with the exact client and facilitator trees mocked.
+/// Settles `p` with the exact client and receiver authorizer trees mocked.
 fn settle(s: &Setup, p: &Payment, actual: i128) -> TryResult {
     mock_auth(s, p, p, actual);
     try_settle(s, p, actual)
 }
 
-fn nonce_used(s: &Setup, p: &Payment) -> bool {
-    UptoProxyClient::new(&s.env, &s.proxy).is_nonce_used(&p.from, &p.nonce)
+/// The proxy's allowance from `p.from`: 0 means a failed settlement left nothing behind.
+fn allowance(s: &Setup, p: &Payment) -> i128 {
+    TokenClient::new(&s.env, &p.token).allowance(&p.from, &s.proxy)
 }
 
 fn balance(s: &Setup, id: &Address) -> i128 {
@@ -228,7 +229,7 @@ fn expected_event(p: &Payment, actual: i128) -> UptoSettled {
         token: p.token.clone(),
         from: p.from.clone(),
         to: p.to.clone(),
-        facilitator: p.facilitator.clone(),
+        receiver_authorizer: p.receiver_authorizer.clone(),
         max_amount: p.max_amount,
         actual_amount: actual,
         nonce: p.nonce.clone(),
@@ -255,10 +256,8 @@ fn settles_any_amount_up_to_max() {
             assert_eq!(balance(&s, &p.from), MINTED - actual);
             assert_eq!(balance(&s, &s.proxy), 0);
             // The leftover allowance is spendable only by the proxy, and only with a new
-            // client signature over a fresh nonce.
-            let t = TokenClient::new(&s.env, &p.token);
-            assert_eq!(t.allowance(&p.from, &s.proxy), MAX - actual);
-            assert!(nonce_used(&s, &p));
+            // client signature, which carries a fresh Soroban auth nonce.
+            assert_eq!(allowance(&s, &p), MAX - actual);
         }
     }
 }
@@ -282,14 +281,14 @@ fn event_has_the_spec_topics_and_map_data() {
             IntoVal::<Env, Val>::into_val(&10i128, &s.env)
         ),
         (
-            Symbol::new(&s.env, "facilitator"),
-            p.facilitator.into_val(&s.env)
-        ),
-        (
             Symbol::new(&s.env, "max_amount"),
             IntoVal::<Env, Val>::into_val(&MAX, &s.env)
         ),
         (Symbol::new(&s.env, "nonce"), p.nonce.into_val(&s.env)),
+        (
+            Symbol::new(&s.env, "receiver_authorizer"),
+            p.receiver_authorizer.into_val(&s.env)
+        ),
     ];
     assert_eq!(
         s.env.events().all().filter_by_contract(&s.proxy),
@@ -320,7 +319,7 @@ fn insufficient_balance_fails_without_side_effects() {
         };
         assert_host_error(settle(&s, &p, MINTED + 1));
         assert_eq!(balance(&s, &p.from), MINTED);
-        assert!(!nonce_used(&s, &p), "{kind:?}: nonce must roll back");
+        assert_eq!(allowance(&s, &p), 0, "{kind:?}: approve must roll back");
     }
 }
 
@@ -343,7 +342,7 @@ fn rejects_invalid_amounts() {
             ..s.p.clone()
         };
         assert_contract_error(settle(&s, &p, actual), err);
-        assert!(!nonce_used(&s, &p));
+        assert_eq!(allowance(&s, &p), 0);
     }
 }
 
@@ -426,75 +425,21 @@ fn allowance_expiration_ledger_stops_at_the_network_limit() {
     }
 }
 
-// ---- Nonces (I4) ----
+// ---- Single use (I4) ----
+//
+// Single use is Soroban's auth nonce: the host refuses the same signed entry twice
+// (`real_signatures::a_signed_entry_cannot_be_replayed`). The contract stores no nonce of its own,
+// so `nonce` is only a signed payment ID.
 
 #[test]
-fn replay_is_rejected_while_the_entry_lives() {
+fn the_same_payment_id_settles_again_under_a_new_signature() {
+    // Mocked auth gives every call a fresh auth nonce, as a client signing a second entry does.
     let s = setup(TokenKind::Sac);
     let p = s.p.clone();
     settle(&s, &p, 10).unwrap().unwrap();
-    assert_contract_error(settle(&s, &p, 10), UptoError::NonceUsed);
-
-    // Still rejected on the allowance expiration ledger itself.
-    s.env.ledger().set_sequence_number(EXP_LEDGER);
-    let later = Payment {
-        exp_ledger: EXP_LEDGER + 1_000,
-        ..p.clone()
-    };
-    assert_contract_error(settle(&s, &later, 10), UptoError::NonceUsed);
-    assert_eq!(balance(&s, &p.to), 10);
-}
-
-#[test]
-fn nonce_entry_lives_until_the_allowance_expiration() {
-    let s = setup(TokenKind::Sac);
-    let p = s.p.clone();
-    settle(&s, &p, 10).unwrap().unwrap();
-    let key = DataKey::Nonce(p.from.clone(), p.nonce.clone());
-    let ttl = s
-        .env
-        .as_contract(&s.proxy, || s.env.storage().temporary().get_ttl(&key));
-    assert_eq!(SEQ + ttl, EXP_LEDGER);
-
-    // After the entry expires the contract no longer sees the nonce; the facilitator's
-    // durable record (§8.1) is what blocks reuse from then on.
-    s.env.ledger().set_sequence_number(EXP_LEDGER + 1);
-    assert!(!nonce_used(&s, &p));
-}
-
-#[test]
-fn short_expiry_still_records_the_nonce() {
-    // live_for == 0: no TTL extension, the minimum temporary TTL covers the entry.
-    let s = setup(TokenKind::Sac);
-    let p = Payment {
-        exp_ledger: SEQ,
-        ..s.p.clone()
-    };
-    settle(&s, &p, 10).unwrap().unwrap();
-    assert!(nonce_used(&s, &p));
-    assert_contract_error(settle(&s, &p, 10), UptoError::NonceUsed);
-}
-
-#[test]
-fn nonces_are_scoped_per_payer() {
-    let s = setup(TokenKind::Sac);
-    let p = s.p.clone();
-    settle(&s, &p, 10).unwrap().unwrap();
-
-    let other_from = Address::generate(&s.env);
-    mint(&s.env, &p.token, TokenKind::Sac, &other_from, MINTED);
-    let q = Payment {
-        from: other_from,
-        ..p.clone()
-    };
-    assert!(!nonce_used(&s, &q));
-    assert_eq!(settle(&s, &q, 10), Ok(Ok(())));
-
-    let r = Payment {
-        nonce: BytesN::from_array(&s.env, &[8; 32]),
-        ..p
-    };
-    assert_eq!(settle(&s, &r, 10), Ok(Ok(())));
+    assert_eq!(settle(&s, &p, 10), Ok(Ok(())));
+    assert_eq!(balance(&s, &p.to), 20);
+    assert_eq!(allowance(&s, &p), MAX - 10);
 }
 
 // ---- Authorization (I2, I3, I6) ----
@@ -522,7 +467,7 @@ fn recorded_auth_tree_matches_the_spec() {
                 sub_invocations: std::vec![],
             }],
         };
-        let facilitator = AuthorizedInvocation {
+        let authorizer = AuthorizedInvocation {
             function: AuthorizedFunction::Contract((
                 s.proxy.clone(),
                 Symbol::new(&s.env, "settle_upto"),
@@ -536,7 +481,7 @@ fn recorded_auth_tree_matches_the_spec() {
             s.env.auths(),
             std::vec![
                 (p.from.clone(), client),
-                (p.facilitator.clone(), facilitator)
+                (p.receiver_authorizer.clone(), authorizer)
             ],
             "{kind:?}"
         );
@@ -579,7 +524,7 @@ fn client_payload_excludes_actual_amount() {
     let approve = call_args(&client.sub_invocations[0]);
 
     // In a fresh, identical setup, the client authorizes exactly that recorded tree, and
-    // the facilitator authorizes actual = 10. The settlement must still go through.
+    // the receiver authorizer authorizes actual = 10. The settlement must still go through.
     let s = setup(TokenKind::Sac);
     let p = s.p.clone();
     let approve = MockAuthInvoke {
@@ -594,7 +539,7 @@ fn client_payload_excludes_actual_amount() {
         args: args_from_xdr(&s.env, &root_args),
         sub_invokes: core::slice::from_ref(&approve),
     };
-    let facilitator_root = MockAuthInvoke {
+    let authorizer_root = MockAuthInvoke {
         contract: &s.proxy,
         fn_name: "settle_upto",
         args: full_args(&s.env, &p, 10),
@@ -606,8 +551,8 @@ fn client_payload_excludes_actual_amount() {
             invoke: &client_root,
         },
         MockAuth {
-            address: &p.facilitator,
-            invoke: &facilitator_root,
+            address: &p.receiver_authorizer,
+            invoke: &authorizer_root,
         },
     ]);
     assert_eq!(try_settle(&s, &p, 10), Ok(Ok(())));
@@ -615,7 +560,7 @@ fn client_payload_excludes_actual_amount() {
 }
 
 #[test]
-fn missing_facilitator_auth_is_rejected() {
+fn missing_receiver_authorizer_auth_is_rejected() {
     let s = setup(TokenKind::Sac);
     let p = s.p.clone();
     let approve = MockAuthInvoke {
@@ -638,17 +583,29 @@ fn missing_facilitator_auth_is_rejected() {
 }
 
 #[test]
-fn a_different_facilitator_cannot_settle() {
+fn a_different_receiver_authorizer_cannot_settle() {
     let s = setup(TokenKind::Sac);
     let signed = s.p.clone();
     let rogue = Payment {
-        facilitator: Address::generate(&s.env),
+        receiver_authorizer: Address::generate(&s.env),
         ..signed.clone()
     };
-    // The rogue facilitator authorizes its own call; the client signed the original one.
+    // The rogue authorizer authorizes its own call; the client signed the original one.
     mock_auth(&s, &signed, &rogue, 10);
     assert_host_error(try_settle(&s, &rogue, 10));
     assert_eq!(balance(&s, &signed.to), 0);
+}
+
+/// Self-managed mode rests on this: the receiver authorizer signs `actual_amount`, so whoever
+/// submits the transaction can't charge more than it signed.
+#[test]
+fn the_receiver_authorizer_signs_the_actual_amount() {
+    let s = setup(TokenKind::Sac);
+    let p = s.p.clone();
+    mock_auth(&s, &p, &p, 10);
+    assert_host_error(try_settle(&s, &p, 50));
+    assert_eq!(balance(&s, &p.to), 0);
+    assert_eq!(settle(&s, &p, 10), Ok(Ok(())));
 }
 
 /// Names of the fields `tampered` changes, one per signed value.
@@ -711,7 +668,7 @@ fn approve_sub_invocation_is_required() {
             },
         },
         MockAuth {
-            address: &p.facilitator,
+            address: &p.receiver_authorizer,
             invoke: &MockAuthInvoke {
                 contract: &s.proxy,
                 fn_name: "settle_upto",

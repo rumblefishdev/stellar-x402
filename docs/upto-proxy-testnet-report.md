@@ -4,6 +4,64 @@ What `UptoProxy` ([README](../contracts/upto-proxy/README.md),
 [ADR 0010](adr/0010-upto-proxy-design.md)) does and costs on Stellar testnet: the end-to-end run,
 the cost of keeping the contract alive (task 0035), and the throughput measured in task 0006.
 
+## Latest run: 2026-11-12 (task 0034)
+
+**61/61 scenarios passed** on 2026-11-12 at 20:58 UTC against a new deployment, with 27
+settlement transactions on the proxy in ledgers 5,698,651–5,698,688 and 2 more on a fresh instance
+of it. The run tests the two changes made after the review of the upstream spec PR (ADR 0010, D6
+and D12):
+
+- **No contract nonce storage.** `is_nonce_used` and `NonceUsed` are gone. A replayed auth entry
+  still fails with `Error(Auth, ExistingValue)`, and a reused payment ID under a new client
+  signature now settles: USDC [tx](https://testnet.sorobanscan.rumblefish.dev/transactions/66f00305c5c945ece5069aa1e99791aca2005ac497ec8a22de892bb12689c08e),
+  UPTOE2E [tx](https://testnet.sorobanscan.rumblefish.dev/transactions/93db0ee8cc932926af87d5d02e22cb519d772f19248260b5cd3a8fbe911c429d),
+  TEST [tx](https://testnet.sorobanscan.rumblefish.dev/transactions/d9bc5839db22a6db5cb75452ff7d27555cf64de3a4a220da140a9d0b2eb2026d). This scenario
+  replaces "rejects a reused nonce with a new signature" (`NonceUsed`).
+- **`receiver_authorizer`, facilitator-delegated.** In every other settlement the receiver
+  authorizer is the facilitator's key, and it signs its own address-credential entry for the call,
+  actual amount included. A channel is the transaction source, the facilitator pays the fee bump,
+  and the operation has no source of its own (`packages/signer-pool` refuses source-account
+  entries).
+- **Self-managed, relayed by another facilitator** (new). The seller's own account is the receiver
+  authorizer and signs its entry for the actual amount without simulation. The other facilitator,
+  which never saw the payment, submits it through its own channel
+  (`GBIGZK…QQ6SMKL6`) and pays the fee bump (`GDVTHE…A6EKB7VV`): USDC
+  [tx](https://testnet.sorobanscan.rumblefish.dev/transactions/cfed07708a76f1a01f348ecd3f064c1273b12a9a750b2328fc31461ce4297ad9), UPTOE2E
+  [tx](https://testnet.sorobanscan.rumblefish.dev/transactions/ca1ec7534e60765deddd691dc60447264780e5ad6a3a21bf43b83a568e947ce8), TEST
+  [tx](https://testnet.sorobanscan.rumblefish.dev/transactions/5ed0e7affab323ab9b2e4ea54bc027d33b2ca8491dce2e0ad4622a159117975f).
+
+Every other scenario and check passed as in the 2026-10-09 run below: the other rejections and
+tampering cases, both concurrency cases, the client's refusal of a forged tree, the facilitator's
+window and signature-expiry checks, the client paying no fee (XLM unchanged at 99,999,999,800
+stroops), the proxy's TTL (instance 3,110,357 and code 3,110,358 ledgers left at ledger
+5,698,688), and a fresh instance extending itself by 720 ledgers per settlement.
+
+|                    |                                                                                                                                                                             |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| UptoProxy contract | [`CDPHI4JYNSWNAQFXUAZAWTBUBYLZZRWFU6F6EJIHLSTAL6MJWXOVEA2X`](https://testnet.sorobanscan.rumblefish.dev/contracts/CDPHI4JYNSWNAQFXUAZAWTBUBYLZZRWFU6F6EJIHLSTAL6MJWXOVEA2X) |
+| WASM hash          | `a3d7bd0a4d8f24002b2a07162b32c36abe4620bc60d3550262da05b4ef52f666`                                                                                                          |
+
+Fee charged to the submitting facilitator, in stroops:
+
+| Token   | At the ceiling | Zero settlement | Reused payment ID | Self-managed, relayed |
+| ------- | -------------: | --------------: | ----------------: | --------------------: |
+| USDC    |         23,015 |          17,770 |            23,015 |                23,015 |
+| UPTOE2E |         23,061 |          17,770 |            23,061 |                23,061 |
+| TEST    |         21,399 |          17,653 |            21,399 |                21,399 |
+
+A self-managed settlement costs the same as a delegated one: both carry two address-credential
+entries. A settlement at the ceiling costs about half of the 2026-10-09 figures below (40,944 for
+USDC). This run can't say how much of that comes from the contract: the shape changed too (an
+address entry for the receiver authorizer instead of source-account credentials), and testnet
+moved from protocol 29 to 30. An earlier run on the same day, before the self-managed scenario
+was added, passed 58/58 against the same deployment.
+
+Data: [`testnet-results.json`](../contracts/upto-proxy/e2e/results/testnet-results.json). The
+sections below describe the 2026-10-09 run of the previous deployment, `CAL7SBTO…V2VC`, and still
+hold for everything this run didn't change.
+
+## Previous run: 2026-10-09
+
 **58/58 scenarios passed** on 2026-10-09 at 13:03 UTC, with 21 settlement transactions on the
 proxy in ledgers 5,105,444–5,105,479, and 2 more on a fresh instance of it. The contract settled real payments in three tokens with the signing model the
 x402 facilitator will use. Every settlement, rejection and tampering case behaved as the contract
@@ -19,9 +77,8 @@ on each settlement.
   checks (an allowance that outlives the window or ends before the deadline, a signature that
   expires apart from it), and the self-extension observed on a fresh instance. The 57/57 run
   before the PR review's fixes is in the git history.
-- Data: [`testnet-results.json`](../contracts/upto-proxy/e2e/results/testnet-results.json),
-  written by `pnpm contracts:e2e`. This report is a snapshot of the 2026-10-09 run; a new run
-  rewrites the JSON, not this page.
+- Data: the JSON now holds the 2026-11-12 run; the 2026-10-09 run's JSON is in the git history of
+  `contracts/upto-proxy/e2e/results/testnet-results.json`.
 - Interactive version of the 50/50 run, with the TTL measurements:
   <https://claude.ai/artifact/TNurkGqjefJWXtKCNPwkcE>. It is a claude.ai page shared by link; the
   JSON above is the source of record.
