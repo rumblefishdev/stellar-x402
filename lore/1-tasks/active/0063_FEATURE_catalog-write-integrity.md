@@ -142,15 +142,17 @@ with doubts.
 | 47 | A schema `pattern` over 256 characters is dropped from the listing's copy, the rest kept: the facilitator never runs it. 1 of 400 real HTTP listings had been refused for it | owner, 2026-11-16 | changes it | spec silent on `pattern` | `packages/bazaar/src/schema.ts` (#189) | `bazaar.test.ts` "without each pattern over 256" |
 | 48 | Row 1 kept after the premise review: on pubnet too, a listing's text comes from the seller's own 402. A pubnet API key tied to proven `payTo` accounts (0105) would replace the check only after the seller proves its account once, and testnet would still need the check | owner, 2026-11-16 | matches it | spec silent; upstream issue #3005 open | — | — |
 | 49 | The `500` answers once noted under 20 concurrent `/discovery/resources` reads get no task: not reproduced. Locally (2026-11-16): 0 of ~1.4 million reads at 20, 50 and 100 concurrent, 500 listings; with the default limit every read over 120 a minute is a 429. On the deployed testnet: 100 of 100 answered 200 in 5 bursts of 20, p95 238 ms, a catalog of 1 listing. Not covered: a large catalog on a loaded database | owner, 2026-11-16 | changes it (its own task once measured) | — | — | — |
+| 50 | Kept on the owner's word: an unchanged copy doesn't refresh `lastUpdated`, which stays the time of the seller's last confirmation; one `catalog_attempts_total` counter by stage and outcome replaces the rejection and upsert counters; two checks of one key are ordered by a `checked_at` column, the later-started one kept, and `ledger` stays | owner, 2026-11-16 | beyond it | x402 v2 §8.3 names `lastUpdated` only | | |
+| 51 | A catalog item carries no flag that it differs from the seller's 402: the buyer pays by the seller's live 402 (`packages/mcp/src/pay.ts`), which the item's `resource` URL gives. The facilitator logs the cut fields in `catalog_upserted` as `trimmed` | owner, 2026-11-16 | beyond it | spec has no such field (`bazaar.md` ~427-432); no facilitator checked puts one on the item | | |
+| 52 | A cut description ends with "…", counted in the 500, so an agent sees the text goes on | owner, 2026-11-16 | beyond it | Rialto, Vellar and openx402 cut with a plain slice | `packages/bazaar/src/validate.ts` (#189) | `bazaar.test.ts` "the last one an ellipsis" |
 
 ## Not yet decided
 
-- Choices made while coding, open for the owner's veto: an example input over 16 KiB is left out and
-  the check runs without it; the listing URL is the one asked, not `resource.url` from the answer;
-  an unchanged copy doesn't refresh `lastUpdated`; a seller answer up to 64 KiB within 10 s
-  (measured p95 1.85 s, max 5.3 s); an oversized `extra` in the paid offer makes the header say
-  `too_large` at once; one `catalog_attempts_total` counter replaces the rejection and upsert
-  counters; writes are ordered by a new `checked_at` column and `ledger` stays.
+- Choices made while coding, still open (the owner asked for more on each): an example input over
+  16 KiB is left out and the check runs without it; the listing URL is the one asked, not
+  `resource.url` from the answer; a seller answer up to 64 KiB within 10 s, and a listing stays as
+  it was when the answer breaks it (measured p95 1.85 s, max 5.3 s); an oversized `extra` in the
+  paid offer makes the header say `too_large` at once.
 
 ## PR split
 
