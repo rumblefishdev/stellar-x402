@@ -22,8 +22,6 @@ export const LIMITS = {
   offerExtraBytes: 4 * 1024,
   /** Offers kept per listing: twice the most measured per listing key there (4, 0063). */
   offers: 8,
-  /** The listing's example query or body sent to the seller with its check, in bytes (0063). */
-  exampleInputBytes: 16 * 1024,
   /**
    * A whole listing, serialized, in bytes: a page of 100 stays under 1.6 MB. 5 of 95,733 listings
    * in the largest public catalog are larger (0063).
