@@ -886,6 +886,15 @@ describe("createSettler", () => {
       );
     });
 
+    it("answers it from the pool's result when the store fails to record it", async () => {
+      const { settle, store } = setup(failedOnUsedNonce, entry);
+      vi.spyOn(store, "transition").mockRejectedValue(new Error("store down"));
+      const settled = await settle(payload(), requirements);
+      // `toEqual`: no `extra`, so no wait before "sign a new payment".
+      expect(settled.response).toEqual({ ...consumed, transaction: HASH });
+      expect(settled.record).toBeUndefined();
+    });
+
     it("answers a repeat of the payload the same way", async () => {
       const { settle } = setup(failedOnUsedNonce, entry);
       await settle(payload(), requirements);
