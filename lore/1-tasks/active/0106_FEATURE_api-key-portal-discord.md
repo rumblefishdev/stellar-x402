@@ -2,7 +2,8 @@
 id: "0106"
 title: "Issue API keys from our portal after Discord sign-in"
 type: FEATURE
-status: backlog
+status: active
+owner: akot
 milestone: 2
 related_adr: ["0007"]
 related_tasks: ["0024", "0105", "0107"]
@@ -14,6 +15,10 @@ history:
     status: backlog
     who: akot
     note: "Spawned from 0024: keys on pubnet come from our portal, as in stellar-prices-api."
+  - date: "2026-11-16"
+    status: active
+    who: akot
+    note: "Work starts."
 ---
 
 # Issue API keys from our portal after Discord sign-in

@@ -88,6 +88,8 @@ testnet cases reproduce (rival in ledger 5694924, ours failed in 5694925). What 
 | 9 | A record that ends `settle_exact_stellar_nonce_consumed_elsewhere` feeds no breaker, also without an error event that names the cause. Done in its own PR after this task's PR merges, not here: the gap is in the breaker code already merged | owner, 2026-11-13 | beyond it | nobody checked does it | | |
 | 10 | The trustline lookup behind `/verify`'s `simulation_failed` loses its own 3 s timeout too, like the nonce read (decision 8): the RPC's per-URL timeout and failover apply. Done in decision 9's PR | owner, 2026-11-16 | beyond it | nobody checked does it | | |
 | 11 | A front-run is named only by the payer's nonce entry on chain, never by parsing the error event: every writer that ends a record, and the pool-simulation path, read the entry after a failure, and an entry means another transaction used the nonce (ours writes none). The breaker keeps its own event rule (0024). Why: one proof in one place; the event check became redundant once decisions 5 and 6 read the entry on every path | owner, 2026-11-16 | changes decision 2's detection (`sceAuth/scecExistingValue`) | upstream EVM decides by the on-chain nonce state (`eip3009-utils.ts:195-205`@f33e4cf) | `reasons.ts` `resultReason`; `settle.ts` pool-simulation catch; `consumedElsewhere` removed | `settle.test.ts`, `reconcile.test.ts` (decision 11); `test/live/nonce-consumed-elsewhere.ts` |
+| 12 | One rule names a failure that may hide a used nonce: `reasonAfterFailure` reads the nonce entry after `…_transaction_failed` or `…_simulation_failed`, for every writer; the `verify`-window counter is incremented once, where the checks produce the code. The answer after a failed record write keeps its nonce read: without it a front-run during a store outage gets the advice to sign a new payment. No behaviour change | owner, 2026-11-16 | beyond it | nobody checked does it | `reasons.ts` `reasonAfterFailure`; `verify.ts` counts the refusal | `verify.test.ts` "counts that refusal once"; the 0141 cases in `settle.test.ts` and `reconcile.test.ts` |
+| 13 | `withRetry`'s advice becomes one table from reason to advice kind (repeat / sign after ledger X / none) instead of the `UNSENT` and `NOT_SIGN_AGAIN` lists and the early return; a `[refactor]` PR after this task's, behaviour unchanged, reviewed by the author of tasks 0073 and 0082 | owner, 2026-11-16 | beyond it | upstream x402 gives no advice, only the code (`x402-specification-v2.md` §9) | | |
 
 ## Not yet decided
 
@@ -102,19 +104,16 @@ Nothing.
 
 ## Implementation
 
-- `apps/facilitator/src/settlement/nonce-used.ts`: both codes, `consumedElsewhere` (a failure's
-  cause names `Error(Auth, ExistingValue)` outside the payer's own frame) and `createNonceLookup`
-  (reads the payer's nonce entry).
+- `apps/facilitator/src/settlement/nonce-used.ts`: both codes and `createNonceLookup` (reads the
+  payer's nonce entry).
 - `/verify` and `/settle`'s re-check: after upstream's `simulation_failed`, the nonce read comes
-  before the trustline lookup (`verify.ts`).
-- A claimed settlement: `resultReason` (`reasons.ts`) decides the reason for our failed
-  transaction, reading the nonce when the error doesn't tell, in every writer that ends a record
-  (`settle.ts` and its answer after a failed record write, `reconcile.ts` sweep and `resolved`);
-  the pool's `SimulationError` reads the nonce (`settle.ts`). The early return in `withRetry`
-  keeps the advice to sign again out of the answer.
+  before the trustline lookup, and the refusal is counted with `window: "verify"` (`verify.ts`).
+- A claimed settlement: `reasonAfterFailure` (`reasons.ts`) reads the nonce after
+  `…_transaction_failed` or `…_simulation_failed`, in every writer that ends a record (`settle.ts`,
+  its answer after a failed record write, `reconcile.ts` sweep and `resolved`). The early return in
+  `withRetry` keeps the advice to sign again out of the answer.
 - `records.ts` `onFinal`: the `settlement_nonce_consumed_elsewhere` warning with `feeCharged`, and
-  `settlement_nonce_consumed_elsewhere_total` with `window: "settle"`; `/verify` (`http/app.ts`)
-  and `/settle`'s re-check count it with `window: "verify"` (`packages/metrics-catalog`).
+  `settlement_nonce_consumed_elsewhere_total` with `window: "settle"` (`packages/metrics-catalog`).
 - Docs: `docs/threat-model.md` (Payload front-running), `apps/facilitator/README.md` (both codes,
   the log), `docs/monitoring.md` (the counter).
 

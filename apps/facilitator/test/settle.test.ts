@@ -2800,8 +2800,11 @@ describe("createSettler", () => {
       const get = store.get.bind(store);
       let reads = 0;
       vi.spyOn(store, "get").mockImplementation(async (k) => {
-        // After the repeat's first read: the earlier claim ends and another call reopens it.
-        if (reads++ === 1) {
+        const read = await get(k);
+        // Right after the repeat's first read: the earlier claim ends and another call reopens
+        // it. Whether the repeat reads again before the claim's budget ends depends on the
+        // runner's speed, so the reopen doesn't wait for a second read.
+        if (reads++ === 0) {
           await store.transition(key, "claimed", {
             state: "rejected",
             errorReason: SETTLE_REASONS.noChannelInTime,
@@ -2809,7 +2812,7 @@ describe("createSettler", () => {
           });
           await store.reopen(key, fingerprint, [SETTLE_REASONS.noChannelInTime], Date.now());
         }
-        return get(k);
+        return read;
       });
       expect((await settle(payload(), requirements)).response).toMatchObject({
         success: false,

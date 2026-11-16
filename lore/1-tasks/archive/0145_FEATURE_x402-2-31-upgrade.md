@@ -2,7 +2,7 @@
 id: "0145"
 title: "Raise the @x402 packages from 2.28.0 to 2.31.0 across the repo"
 type: FEATURE
-status: active
+status: completed
 owner: akot
 related_adr: []
 related_tasks: ["0136", "0140", "0130"]
@@ -20,6 +20,15 @@ history:
     status: active
     who: akot
     note: "Work starts, after 0136's PR #177 merged."
+  - date: "2026-11-16"
+    status: completed
+    who: akot
+    note: >
+      PR #184 merged on 2026-11-13: every package is on `@x402` 2.31.0, with zod 4 in
+      `packages/bazaar`, `express` `^5.3.0`, `@modelcontextprotocol/sdk` `^1.32.0` and
+      `@stellar/stellar-sdk` `^16.4.1`. The MCP e2e run on testnet passed 121 of 121 with two
+      payments settled, and 0136's parity run gave 43 equal answers of 45, the other two the
+      frameworks' own. No follow-up tasks.
 ---
 
 # Raise the @x402 packages from 2.28.0 to 2.31.0 across the repo
