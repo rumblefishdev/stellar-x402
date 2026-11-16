@@ -757,6 +757,8 @@ describe("createSettler", () => {
   });
 
   describe("when another transaction used the payer's nonce first (0141)", () => {
+    /** The payer's nonce entry is on chain: another transaction used the nonce (decision 11). */
+    const entry = { nonceUsed: async () => true };
     /** What our transaction's failure says when the nonce was used: the host's error, in the token's frame. */
     const usedNonce: FailureCause = {
       opCode: "invokeHostFunctionTrapped",
@@ -775,7 +777,7 @@ describe("createSettler", () => {
     };
 
     it("answers its own reason for our failed transaction, without advice to sign again", async () => {
-      const { settle, store, hooks } = setup(failedOnUsedNonce);
+      const { settle, store, hooks } = setup(failedOnUsedNonce, entry);
       expect((await settle(payload(), requirements)).response).toEqual({
         ...consumed,
         transaction: HASH,
@@ -800,11 +802,11 @@ describe("createSettler", () => {
             xdr.DiagnosticEvent.fromXDR(e, "base64"),
           ),
         } as unknown as rpc.Api.GetFailedTransactionResponse);
-        // The fixture's payer is not this test's, so the error's frame is never the payer's.
+        // Its payer's nonce entry was on chain: the front-run wrote it.
         const { settle } = setup(async (opts) => {
           await opts.onSigned?.(HASH, BOUNDS);
           return { ...result("failed"), failure };
-        });
+        }, entry);
         expect((await settle(payload(), requirements)).response).toEqual({
           ...consumed,
           transaction: HASH,
@@ -844,15 +846,17 @@ describe("createSettler", () => {
       expect(nonceUsed).toHaveBeenCalledWith(payer, "7");
     });
 
-    it("doesn't read the nonce when the error event already tells", async () => {
-      const nonceUsed = vi.fn(async () => true);
+    it("keeps …_transaction_failed when the error names a used nonce but the payer's entry is absent (0141 decision 11)", async () => {
+      const nonceUsed = vi.fn(async () => false);
       const { settle } = setup(failedOnUsedNonce, { nonceUsed });
-      await settle(payload(), requirements);
-      expect(nonceUsed).not.toHaveBeenCalled();
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        errorReason: SETTLE_REASONS.failed,
+      });
+      expect(nonceUsed).toHaveBeenCalledWith(payer, "7");
     });
 
     it("logs and counts it with the fee our transaction was charged", async () => {
-      const { settle, lines, metrics } = setup(failedOnUsedNonce);
+      const { settle, lines, metrics } = setup(failedOnUsedNonce, entry);
       await settle(payload(), requirements);
       expect(lines.map((line) => JSON.parse(line))).toContainEqual(
         expect.objectContaining({
@@ -869,7 +873,7 @@ describe("createSettler", () => {
     });
 
     it("answers a repeat of the payload the same way", async () => {
-      const { settle } = setup(failedOnUsedNonce);
+      const { settle } = setup(failedOnUsedNonce, entry);
       await settle(payload(), requirements);
       expect((await settle(payload(), requirements)).response).toEqual({
         ...consumed,
@@ -878,10 +882,14 @@ describe("createSettler", () => {
     });
 
     it("keeps …_transaction_failed for the same error in the payer's own contract", async () => {
-      const { settle } = setup(async (opts) => {
-        await opts.onSigned?.(HASH, BOUNDS);
-        return { ...result("failed"), failure: { ...usedNonce, contract: payer } };
-      });
+      // A C-account wallet's own nested auth: the payment's nonce entry is absent.
+      const { settle } = setup(
+        async (opts) => {
+          await opts.onSigned?.(HASH, BOUNDS);
+          return { ...result("failed"), failure: { ...usedNonce, contract: payer } };
+        },
+        { nonceUsed: async () => false },
+      );
       expect((await settle(payload(), requirements)).response).toMatchObject({
         errorReason: SETTLE_REASONS.failed,
         ...untilExpiry,

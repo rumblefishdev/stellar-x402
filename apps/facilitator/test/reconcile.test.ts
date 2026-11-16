@@ -307,7 +307,11 @@ describe("createReconciler", () => {
             xdr.DiagnosticEvent.fromXDR(e, "base64"),
           ),
         } as unknown as rpc.Api.GetTransactionResponse;
-        const { store, reconciler, lines } = setup({ [A]: answer });
+        // Its payer's nonce entry was on chain: the front-run wrote it.
+        const { store, reconciler, lines } = setup(
+          { [A]: answer },
+          vi.fn(async () => true),
+        );
         const key = await signed(store, [A]);
         expect(await reconciler.sweep()).toMatchObject({ failed: 1 });
         expect(await store.get(key)).toMatchObject({
@@ -969,7 +973,10 @@ describe("createReconciler", () => {
     });
 
     it("finishes a failure on a used nonce with its own reason (0141)", async () => {
-      const { store, reconciler } = setup();
+      const { store, reconciler } = setup(
+        {},
+        vi.fn(async () => true),
+      );
       const key = await signed(store, [A]);
       await store.transition(key, "signed", { state: "pending", updatedAt: NOW });
       await reconciler.resolved({
@@ -988,6 +995,29 @@ describe("createReconciler", () => {
         state: "failed",
         errorReason: NONCE_CONSUMED_SETTLE_REASON,
       });
+    });
+
+    it("keeps …_transaction_failed when the error names a used nonce but the payer's entry is absent (0141 decision 11)", async () => {
+      const { store, reconciler, nonceUsed } = setup();
+      const key = await signed(store, [A]);
+      await store.transition(key, "signed", { state: "pending", updatedAt: NOW });
+      await reconciler.resolved({
+        status: "failed",
+        hash: A,
+        channel: "GCHANNEL",
+        ledger: 4_001,
+        feeCharged: 41_000n,
+        failure: {
+          error: { type: "sceAuth", code: "scecExistingValue" },
+          contract: StrKey.encodeContract(Buffer.alloc(32, 7)),
+        },
+        attempts: [{ hash: A, sent: "yes" }],
+      });
+      expect(await store.get(key)).toMatchObject({
+        state: "failed",
+        errorReason: SETTLE_REASONS.failed,
+      });
+      expect(nonceUsed).toHaveBeenCalledTimes(1);
     });
 
     it("tells a used nonce from the nonce entry when the pool's result has no error event (0141 decision 6)", async () => {
