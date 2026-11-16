@@ -88,8 +88,8 @@ describe("packages/bazaar", () => {
     const long = pay("https://x.com/a", { info: http }, { description: "d".repeat(499) + "😀ab" });
     const r = validate(long, req);
     expect(r?.ok && r.trimmed).toEqual(["description"]);
-    // Cut by character, so the emoji stays whole.
-    expect(entry(long).resource.description).toBe("d".repeat(499) + "😀");
+    // 500 UTF-16 units, as the buyer's MCP counts: the emoji that doesn't fit whole is left out.
+    expect(entry(long).resource.description).toBe("d".repeat(499));
     const fits = validate(
       pay("https://x.com/a", { info: http }, { description: "d".repeat(500) }),
       req,

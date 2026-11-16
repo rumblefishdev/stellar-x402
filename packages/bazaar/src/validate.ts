@@ -203,14 +203,15 @@ function run(
   // 2.31.0): "" means none, so the entry leaves it out.
   if (discovered.description === "") delete discovered.description;
   if (discovered.mimeType === "") delete discovered.mimeType;
-  // A long description is cut, not refused (0063). It is cut by Unicode character, so the cut
-  // never splits an emoji into half a character the database would refuse.
-  if (typeof discovered.description === "string") {
-    const chars = Array.from(discovered.description);
-    if (chars.length > LIMITS.descriptionChars) {
-      discovered.description = chars.slice(0, LIMITS.descriptionChars).join("");
-      trimmed.push("description");
-    }
+  // A long description is cut, not refused (0063), to 500 UTF-16 units as the buyer's MCP counts
+  // them. An emoji that doesn't fit whole is left out: half of one is JSON a strict parser refuses.
+  if (
+    typeof discovered.description === "string" &&
+    discovered.description.length > LIMITS.descriptionChars
+  ) {
+    const cut = discovered.description.slice(0, LIMITS.descriptionChars);
+    discovered.description = /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
+    trimmed.push("description");
   }
   const iconUrl = sanitizeIconUrl(extracted.iconUrl);
   if (iconUrl) discovered.iconUrl = iconUrl;
