@@ -36,6 +36,7 @@ import { Agent, setGlobalDispatcher } from "undici";
 import { parseConfig } from "../../src/config.js";
 import { jsonLogger } from "../../src/logger.js";
 import { buildRpc, buildVerifier } from "../../src/main.js";
+import { memoryMetrics } from "../../src/metrics.js";
 import { UPSTREAM_TIMEOUT_MS } from "../../src/settlement/upstream.js";
 import { feeSettings } from "../../src/settlement/fees.js";
 import { signerEnv } from "../fake-openbao.js";
@@ -91,7 +92,13 @@ async function verifyWith(
   });
   const logger = jsonLogger(config.logLevel, write, config.rpcUrls);
   const rpc = buildRpc(config, logger);
-  const verify = buildVerifier(config, rpc, feeSettings(config.fees, rpc), logger);
+  const verify = buildVerifier(
+    config,
+    rpc,
+    feeSettings(config.fees, rpc),
+    logger,
+    memoryMetrics().for({ network: config.network }),
+  );
   const trace: { rpc?: string } = {};
   const answer = await verify(paymentPayload, requirements, trace);
   return {

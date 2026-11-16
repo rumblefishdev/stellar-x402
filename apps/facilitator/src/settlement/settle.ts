@@ -47,7 +47,13 @@ import {
   resultUpdate,
   type Records,
 } from "./records.js";
-import { NOT_SIGN_AGAIN, SETTLE_REASONS, UNSENT, UNSENT_REASONS, resultReason } from "./reasons.js";
+import {
+  NOT_SIGN_AGAIN,
+  SETTLE_REASONS,
+  UNSENT,
+  UNSENT_REASONS,
+  reasonAfterFailure,
+} from "./reasons.js";
 import {
   UpstreamTimeoutError,
   payerExpiration,
@@ -224,7 +230,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
     const transaction = result.hash ?? "";
     if (result.status === "success") return { success: true, transaction, network, payer };
     return failure(
-      await resultReason(result.status, payer, nonce, deps.nonceUsed),
+      await reasonAfterFailure(SETTLE_REASONS[result.status], payer, nonce, deps.nonceUsed),
       payer,
       undefined,
       transaction,
@@ -564,13 +570,12 @@ export function createSettler(deps: SettlerDeps): Settle & {
         // A send that threw may have reached the network: keep the record open (0019 resolves it).
         // `sent: "yes"` is an accepted send or a refused one, so after an unexpected error it may
         // still land too; a classified error says the pool knows it won't.
-        const thrown = reasonFor(error);
-        // The pool's simulation fails this way too once another transaction used the nonce.
-        const errorReason =
-          thrown === SETTLE_REASONS.simulation &&
-          (await deps.nonceUsed(verified.payer, verified.nonce))
-            ? SETTLE_REASONS.nonceConsumedElsewhere
-            : thrown;
+        const errorReason = await reasonAfterFailure(
+          reasonFor(error),
+          verified.payer,
+          verified.nonce,
+          deps.nonceUsed,
+        );
         const attempts = attemptUpdates(attemptsOf(error), { error });
         const unknown = attemptsOf(error).filter((attempt) =>
           errorReason === SETTLE_REASONS.unexpected
@@ -636,8 +641,8 @@ export function createSettler(deps: SettlerDeps): Settle & {
               key,
               {
                 state: result.status,
-                errorReason: await resultReason(
-                  result.status,
+                errorReason: await reasonAfterFailure(
+                  SETTLE_REASONS[result.status],
                   verified.payer,
                   verified.nonce,
                   deps.nonceUsed,
@@ -846,8 +851,6 @@ export function createSettler(deps: SettlerDeps): Settle & {
     const { response: verdict, verified } = checked;
     if (!verified) {
       flagDrift(undefined, verdict.invalidReason, "check");
-      if (verdict.invalidReason === NONCE_CONSUMED_REASON)
-        metrics.increment("settlement_nonce_consumed_elsewhere_total", { window: "verify" });
       return {
         ...untouched,
         reopenRefused: reopening !== undefined,

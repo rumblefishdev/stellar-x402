@@ -29,6 +29,7 @@ import {
   settleCheck,
 } from "../src/main.js";
 import { rpcEndpointName } from "../src/logger.js";
+import { memoryMetrics } from "../src/metrics.js";
 import { feeSettings, type FeeSettings } from "../src/settlement/fees.js";
 import { PAYTO_TRUSTLINE_REASON } from "../src/settlement/trustline.js";
 import {
@@ -193,9 +194,10 @@ function setup(
   const base = feeSettings(cfg.fees, rpc);
   const fees = opts.fees ? opts.fees(base) : base;
   const seams = { makeScheme };
+  const metrics = memoryMetrics().for({ network: cfg.network });
   return {
-    verify: buildVerifier(cfg, rpc, fees, logger, seams),
-    check: settleCheck(buildChecks(cfg, rpc, fees, logger, seams)),
+    verify: buildVerifier(cfg, rpc, fees, logger, metrics, seams),
+    check: settleCheck(buildChecks(cfg, rpc, fees, logger, metrics, seams)),
     schemes,
     logger,
     latestLedger,

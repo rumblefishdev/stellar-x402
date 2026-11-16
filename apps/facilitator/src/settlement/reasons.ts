@@ -1,4 +1,3 @@
-import type { SubmitResult } from "@stellar-x402/signer-pool";
 import { NONCE_CONSUMED_SETTLE_REASON, type IsNonceUsed } from "./nonce-used.js";
 import { PAYER_AUTH_REASON, UNSUPPORTED_CREDENTIAL_REASON } from "./verify.js";
 
@@ -173,18 +172,24 @@ export const NOT_SIGN_AGAIN = new Set<string>([
 ]);
 
 /**
- * The `errorReason` of a pool result that isn't a success: its fixed one, or 0141's when another
- * transaction used the payer's nonce first. The payer's nonce entry tells: ours failed and wrote
- * no nonce, so an entry means another transaction used it (0141 decisions 5 and 11). Every writer
- * that ends a record calls this (0141 decision 6).
+ * The failures another transaction's use of the payer's nonce also causes: our transaction failed
+ * on chain, or the pool's simulation did (0141 decision 12).
  */
-export async function resultReason(
-  status: Exclude<SubmitResult["status"], "success">,
+const MAYBE_USED_NONCE = new Set<string>([SETTLE_REASONS.failed, SETTLE_REASONS.simulation]);
+
+/**
+ * The `errorReason` a failure ends with: its own, or 0141's when another transaction used the
+ * payer's nonce first. The payer's nonce entry tells: ours failed and wrote no nonce, so an entry
+ * means another transaction used it (0141 decisions 5 and 11). Every writer that ends a record
+ * calls this (0141 decision 6).
+ */
+export async function reasonAfterFailure(
+  reason: string,
   payer: string,
   nonce: string,
   nonceUsed: IsNonceUsed,
 ): Promise<string> {
-  if (status !== "failed") return SETTLE_REASONS[status];
+  if (!MAYBE_USED_NONCE.has(reason)) return reason;
   if (await nonceUsed(payer, nonce)) return SETTLE_REASONS.nonceConsumedElsewhere;
-  return SETTLE_REASONS.failed;
+  return reason;
 }

@@ -18,7 +18,7 @@ import type {
 } from "../ports/index.js";
 import { isFinalRecord, resultUpdate, type Records } from "./records.js";
 import type { IsNonceUsed } from "./nonce-used.js";
-import { SETTLE_REASONS, resultReason } from "./reasons.js";
+import { SETTLE_REASONS, reasonAfterFailure } from "./reasons.js";
 import { payerExpiration } from "./verify.js";
 
 export interface ReconcilerDeps {
@@ -96,7 +96,12 @@ export function createReconciler(deps: ReconcilerDeps) {
         feeCharged: found?.feeCharged ?? res.resultXdr.feeCharged().toBigInt(),
         ...channel,
         ...(failure && {
-          errorReason: await resultReason("failed", record.payer, record.nonce, deps.nonceUsed),
+          errorReason: await reasonAfterFailure(
+            SETTLE_REASONS.failed,
+            record.payer,
+            record.nonce,
+            deps.nonceUsed,
+          ),
           failure,
         }),
         attempts: rewrap
@@ -394,8 +399,8 @@ export function createReconciler(deps: ReconcilerDeps) {
         ? { state: "success", ...fields }
         : {
             state: result.status,
-            errorReason: await resultReason(
-              result.status,
+            errorReason: await reasonAfterFailure(
+              SETTLE_REASONS[result.status],
               record.payer,
               record.nonce,
               deps.nonceUsed,

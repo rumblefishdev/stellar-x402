@@ -7,6 +7,7 @@ import {
   getNetworkPassphrase,
 } from "@x402/stellar";
 import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/core/types";
+import type { NetworkMetrics } from "../metrics.js";
 import { NONCE_CONSUMED_REASON, type IsNonceUsed } from "./nonce-used.js";
 import type { FindMissingTrustline } from "./trustline.js";
 
@@ -46,6 +47,8 @@ export interface VerifierDeps {
   missingTrustline: FindMissingTrustline;
   /** Looks, before that, for the payer's nonce used by another transaction (0141). */
   nonceUsed: IsNonceUsed;
+  /** Counts that refusal, here where `/verify` and `/settle`'s re-check both give it (0141). */
+  metrics: NetworkMetrics;
   /**
    * How long the whole upstream call may take, in milliseconds, across every RPC URL it tries and
    * the bid read before them; 10,000 by default. Upstream's RPC and Horizon clients have no timeout
@@ -205,6 +208,7 @@ export function createChecker(deps: VerifierDeps): Check {
       // A used nonce fails the simulation first: the token asks for the payer's auth before it
       // moves anything.
       if (nonce !== undefined && (await deps.nonceUsed(upstream.payer, nonce))) {
+        deps.metrics.increment("settlement_nonce_consumed_elsewhere_total", { window: "verify" });
         return {
           response: invalid(
             NONCE_CONSUMED_REASON,

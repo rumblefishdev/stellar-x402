@@ -1119,6 +1119,7 @@ describe("createSettler", () => {
     // Upstream reads `payer` from `from` before any signature check; the client picks its type.
     const check = createChecker({
       network,
+      metrics: memoryMetrics().for({ network }),
       upstream: {
         verify: async () => ({
           isValid: false,

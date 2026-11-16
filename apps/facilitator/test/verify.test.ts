@@ -285,6 +285,7 @@ describe("createVerifier", () => {
   it("throws when upstream gives no answer within upstreamTimeoutMs", async () => {
     const verify = createVerifier({
       network,
+      metrics: memoryMetrics().for({ network }),
       upstream: { verify: () => new Promise<never>(() => {}) },
       facilitator,
       channels: [channel],
@@ -506,6 +507,7 @@ describe("createVerifier", () => {
     it("hands /settle the payer's nonce, its auth expiry and the ledger it read", async () => {
       const check = createChecker({
         network,
+        metrics: memoryMetrics().for({ network }),
         upstream: { verify: async () => ({ isValid: true, payer }) },
         facilitator,
         channels: [channel],
