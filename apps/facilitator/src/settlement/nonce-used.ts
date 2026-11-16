@@ -30,11 +30,12 @@ export type IsNonceUsed = (payer: string, nonce: string) => Promise<boolean>;
 
 /**
  * Reads the entry the host writes for a used nonce: a temporary entry of the payer's address,
- * kept until the auth entry expires. So while the payment could still settle, it says whether
- * the nonce is used. The RPC's own timeout and its failover to the next URL apply. A read that
- * still fails is logged and `false`: the payment is refused either way. Then a front-run keeps
- * the old reason and its advice to sign a new payment, which needs every RPC URL down in that
- * second.
+ * kept at least until the auth entry expires, longer when the network's minimum life of a
+ * temporary entry is (`consume_nonce` in soroban-env-host). So while the payment could still
+ * settle, it says whether the nonce is used. The RPC's own timeout and its failover to the next
+ * URL apply. A read that still fails is logged and `false`: the payment is refused either way.
+ * Then a front-run keeps the old reason and its advice to sign a new payment, which needs every
+ * RPC URL down in that second.
  */
 export function createNonceLookup(
   rpc: Pick<SorobanRpc, "getLedgerEntries">,
