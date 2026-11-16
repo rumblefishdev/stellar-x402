@@ -1,5 +1,5 @@
 import { Address, xdr } from "@stellar/stellar-sdk";
-import type { FailureCause, SorobanRpc } from "@stellar-x402/signer-pool";
+import type { SorobanRpc } from "@stellar-x402/signer-pool";
 import type { Logger } from "../logger.js";
 
 /**
@@ -10,20 +10,6 @@ import type { Logger } from "../logger.js";
 export const NONCE_CONSUMED_REASON = "invalid_exact_stellar_payload_nonce_consumed_elsewhere";
 /** The same for a settlement that was already claimed: its record ends with this code. */
 export const NONCE_CONSUMED_SETTLE_REASON = "settle_exact_stellar_nonce_consumed_elsewhere";
-
-/**
- * Whether our failed transaction failed because another transaction used the payer's nonce first.
- * The host then raises `Error(Auth, ExistingValue)` in the token's frame, when the token asks for
- * the payer's auth. In the payer's own frame the same error comes from the wallet's own nested
- * auth, not from a used nonce (0024).
- */
-export function consumedElsewhere(failure: FailureCause | undefined, payer: string): boolean {
-  return (
-    failure?.error?.type === "sceAuth" &&
-    failure.error.code === "scecExistingValue" &&
-    failure.contract !== payer
-  );
-}
 
 /** Whether the payer's nonce is used on chain; `false` too when it couldn't be read. */
 export type IsNonceUsed = (payer: string, nonce: string) => Promise<boolean>;

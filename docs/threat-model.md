@@ -399,7 +399,9 @@ require one (0105).
   (shown on testnet: 1 stroop to another account) pays the seller nothing. So `/settle` never
   answers `success` for a transaction it didn't submit, and never tells the client to sign a new
   payment either: it answers `…_nonce_consumed_elsewhere`, and the chain tells which it was (task
-  0141; both cases in `apps/facilitator/test/fixtures/nonce-consumed-elsewhere.json`). Answering
+  0141; both cases in `apps/facilitator/test/fixtures/nonce-consumed-elsewhere.json`). The code
+  comes from the payer's nonce entry on chain, not from the error: our failed transaction wrote no
+  nonce, so an entry means another transaction used it. Answering
   `success` would let a buyer race one entry through two facilitators to the same seller and be
   served twice. A used nonce feeds no breaker. The fee still counts against the budgets, and each
   such record is logged with it (`settlement_nonce_consumed_elsewhere`). The host checks the nonce
@@ -412,8 +414,8 @@ require one (0105).
   Stellar has no private submission, so only an entry bound to the facilitator, as
   `contracts/upto-proxy` binds it, would prevent it. Each front-run costs us one fee, bounded by the
   budgets. A wasm token can raise `Error(Auth, ExistingValue)` itself (a `require_auth` of its own
-  on a used entry), so its failures feed no breaker and are answered as a used nonce; they stay
-  bounded by the budgets. The same error in a C-account payer's own frame can't come from a
+  on a used entry), so its failures feed no breaker; they stay bounded by the budgets. They are
+  answered as a used nonce only when the payer's nonce entry is on chain. The same error in a C-account payer's own frame can't come from a
   front-run (the token's frame fails first), only from the wallet's own nested auth, so it is blamed
   on the payer like any failure there: its breaker opens at once.
 

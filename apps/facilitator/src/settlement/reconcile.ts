@@ -96,13 +96,7 @@ export function createReconciler(deps: ReconcilerDeps) {
         feeCharged: found?.feeCharged ?? res.resultXdr.feeCharged().toBigInt(),
         ...channel,
         ...(failure && {
-          errorReason: await resultReason(
-            "failed",
-            failure,
-            record.payer,
-            record.nonce,
-            deps.nonceUsed,
-          ),
+          errorReason: await resultReason("failed", record.payer, record.nonce, deps.nonceUsed),
           failure,
         }),
         attempts: rewrap
@@ -402,7 +396,6 @@ export function createReconciler(deps: ReconcilerDeps) {
             state: result.status,
             errorReason: await resultReason(
               result.status,
-              result.failure,
               record.payer,
               record.nonce,
               deps.nonceUsed,

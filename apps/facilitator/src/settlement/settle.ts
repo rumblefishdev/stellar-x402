@@ -109,8 +109,8 @@ export interface SettlerDeps {
    */
   latestLedger: () => Promise<number>;
   /**
-   * Whether the payer's nonce is used on chain, read after the pool's simulation failed, or after
-   * our transaction failed without an error event that tells (0141).
+   * Whether the payer's nonce is used on chain, read after the pool's simulation failed or our
+   * transaction failed (0141).
    */
   nonceUsed: IsNonceUsed;
   /** Estimated ledger close time, to turn the auth expiry into a deadline. */
@@ -219,7 +219,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
     const transaction = result.hash ?? "";
     if (result.status === "success") return { success: true, transaction, network, payer };
     return failure(
-      await resultReason(result.status, result.failure, payer, nonce, deps.nonceUsed),
+      await resultReason(result.status, payer, nonce, deps.nonceUsed),
       payer,
       undefined,
       transaction,
@@ -632,7 +632,6 @@ export function createSettler(deps: SettlerDeps): Settle & {
                 state: result.status,
                 errorReason: await resultReason(
                   result.status,
-                  result.failure,
                   verified.payer,
                   verified.nonce,
                   deps.nonceUsed,
