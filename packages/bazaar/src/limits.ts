@@ -19,14 +19,15 @@ export const LIMITS = {
    * One offer's serialized `extra`, in bytes, the paid one included: twice the largest measured in
    * the largest public catalog (1,846 B over 5,000 entries, 0063).
    */
-  offerExtraBytes: 4 * 1024,
   /** Offers kept per listing: twice the most measured per listing key there (4, 0063). */
   offers: 8,
   /**
-   * A whole listing, serialized, in bytes: a page of 100 stays under 1.6 MB. 5 of 95,733 listings
-   * in the largest public catalog are larger (0063).
+   * A whole listing, serialized, in bytes, as rail402 keeps it: a page of 100 stays under 3.7 MB.
+   * 0 of 33,446 listings in the largest public catalog are larger, the largest 25.3 KiB (0063).
+   * Measured locally: a page of 100 such listings reads in 491 ms at p95 under 20 readers, and
+   * other routes stay as fast.
    */
-  listingBytes: 16 * 1024,
+  listingBytes: 36 * 1024,
 } as const;
 
 /**
