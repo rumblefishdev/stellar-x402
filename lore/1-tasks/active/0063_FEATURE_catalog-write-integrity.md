@@ -164,8 +164,10 @@ Nothing.
 | #88 | the MCP turns a guard refusal into a tool error in one place (row 27) | merged |
 | #89 | listings from the seller's page: field limits, HTTP check, the attempts table, ADR 0008 | merged |
 | #90 | MCP listings, stacked on #89 | merged |
-| #187 | drop the unused `@stellar-x402/mcp` dependency from `apps/facilitator/package.json` | open |
-| #189 | cut a long `description`, drop a long schema `pattern` (rows 46, 47) | open |
+| #187 | drop the unused `@stellar-x402/mcp` dependency from `apps/facilitator/package.json` | merged |
+| #189 | cut a long `description`, drop a long schema `pattern` (rows 46, 47, 52) | open |
+| #190 | send the listing's example whatever its size (row 55) | merged |
+| #193 | one whole-listing cap for `extra`, raised to 36 KiB (rows 56, 57); after #189 | open |
 
 The schema depth limit (row 25) went in as task 0083 (#87).
 
