@@ -363,15 +363,16 @@ const envSchema = z
     }
   })
   // `/settle` spends on pubnet, so not before leaving a channel with an open hash out after a
-  // deploy (0090), pubnet's callers presenting an API key (0105) whose settlements count in a fee
-  // budget of its own (0107), an alarm on a failing signer (0027) and deciding again how far the
-  // hot key's power reaches (0048). The spend budgets (0024) bound the loss, but self-payments
-  // from many cheap addresses can still use up the shared budgets and refuse every seller's USDC
-  // (0024 S-design, "Residual risk"; decision 31). Whatever lands narrows the message to what is
-  // still missing (0009 decision 49).
+  // deploy (0090), counting each API key owner's settlements in a fee budget of its own (0107),
+  // an alarm on a failing signer (0027) and deciding again how far the hot key's power reaches
+  // (0048). The spend budgets (0024) bound the loss, but self-payments from many cheap addresses
+  // can still use up the shared budgets and refuse every seller's USDC (0024 S-design, "Residual
+  // risk"; decision 31). Pubnet's callers already need an API key (0105), which is what such a
+  // budget is counted by. Whatever lands narrows the message to what is still missing (0009
+  // decision 49).
   .refine((env) => env.NETWORK !== STELLAR_NETWORKS.pubnet, {
     message:
-      "stellar:pubnet is refused until task 0090, API keys on pubnet (0105), per-key fee budgets (0107), the signer alarm (0027) and the hot key's re-check (0048) land",
+      "stellar:pubnet is refused until task 0090, per-key fee budgets (0107), the signer alarm (0027) and the hot key's re-check (0048) land",
     path: ["NETWORK"],
   });
 

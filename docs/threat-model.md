@@ -2,8 +2,8 @@
 
 Written so far: the `upto` contract, `/verify` RPC failover, auth-entry expiry, settlement fees
 (what `/settle` can cost the facilitator: spend budgets, breakers, fee griefing with failed
-transactions) and the facilitator key. Planned: catalog integrity, auth-entry validation, SSRF in
-Bazaar metadata, API key abuse.
+transactions), API keys and the facilitator key. Planned: catalog integrity, auth-entry
+validation, SSRF in Bazaar metadata.
 
 ## `upto` contract
 
@@ -352,8 +352,8 @@ Scope: the `exact` payer's auth entry and how long it stays landable (spine AD-6
 
 Scope: what `/settle` for `exact` can cost the facilitator, which pays every fee (AD-10), and the
 spend budgets and breakers that bound it (AD-18, [ADR 0007](adr/0007-fee-abuse-containment.md),
-task 0024). `/settle` accepts any SEP-41 token. On testnet it takes no API key; on pubnet it will
-require one (0105).
+task 0024). `/settle` accepts any SEP-41 token. On testnet it takes no API key; on pubnet it
+requires one (0105, "API keys" below).
 
 ### Threats
 
@@ -443,9 +443,10 @@ require one (0105).
   `spend_budget_nearing` fires at 80 % of a shared budget, and the facilitator README has a
   runbook to tell an attack from real traffic.
 - **Residual risk:** Accepted on testnet (decided by akot, 2026-10-30): the shared budgets bound
-  the loss, not availability. On pubnet `/verify` and `/settle` will require an API key issued
-  after Discord sign-in, and a key's settlements count in a budget of its own, not in the shared
-  ones (0105, 0106, 0107; akot, 2026-11-03); `stellar:pubnet` is refused until they land. A
+  the loss, not availability. On pubnet `/verify` and `/settle` require an API key (0105), to be
+  issued after Discord sign-in (0106), and a key owner's settlements will count in a budget of its
+  own, not in the shared ones (0107; akot, 2026-11-03); `stellar:pubnet` is refused until that
+  lands. A
   Discord account then plays the part of an address, but only up to its free quota, and all free
   quotas share one budget, so many accounts use up only the free traffic (0107).
 
@@ -463,6 +464,115 @@ require one (0105).
 - **Residual risk:** The USDC route is accepted, as Sybil self-payments are: per-party budgets
   bound one address, not one attacker. On pubnet API keys (0105) close it only if the `payTo`
   budget is also kept per caller, one of 0107's decisions.
+
+## API keys
+
+Scope: the API key a `/verify` or `/settle` request for `stellar:pubnet` must carry (AD-11,
+[ADR 0007](adr/0007-fee-abuse-containment.md)'s amendments of 2026-11-03 and 2026-11-13, task
+0105), and its registry. A key says who calls, so the rate limiter and, with 0107, the fee budgets
+can count a caller; it gives no right over anyone's funds, and a payment is still authorized only
+by its payer's signature. Who may get a key is the portal's rule (0106), not covered here.
+
+### Threats
+
+#### A key leaks
+
+- **Attack:** A seller's key ends up in a repository, a log or a client bundle, and someone else
+  calls `/verify` and `/settle` with it. They use up the owner's rate budget, so the owner's own
+  requests get a 429, and with 0107 the owner's free quota and fee budget.
+- **Mitigation:** The owner's key is revoked, by the operator's script or the portal, and the
+  revocation holds from the next request on every instance: the registry is read on each request
+  and nothing caches it. The count is the owner's, so the replacement key starts no new budget
+  for the thief to share. The `x402_` prefix lets a secret scanner recognize a key. The
+  facilitator logs a key's owner, never the key or its hash.
+- **Residual risk:** Until the owner notices, the thief spends the owner's budgets. A key never
+  expires on its own. `/settle` can't be called from a browser (no CORS), but nothing stops a
+  seller from shipping its key in one.
+
+#### The registry or its backup is read
+
+- **Attack:** Someone reads `api_keys`, from the database, a dump or a backup (ADR 0012), to call
+  as the sellers in it.
+- **Mitigation:** The registry holds each key's SHA-256, never the key, and the table's own CHECK
+  refuses anything but 64 hex digits in that column. A key is 32 random bytes, so its hash can't
+  be searched back into the key, salted or not. The hash is not a credential: sent as a key it is
+  refused as malformed, without a read.
+- **Residual risk:** The owners are readable, and from 0106 they are Discord account ids, which
+  its privacy policy has to cover. Whoever can write the database can add a key of their own;
+  that takes the database password, which only the facilitator and the migration service hold
+  (ADR 0012).
+
+#### Requests without a valid key, in bulk
+
+- **Attack:** Someone floods `/verify` and `/settle` with pubnet requests that carry no key, or a
+  made-up one. A request refused for its key counts in no budget, so no 429 ever stops them: each
+  costs a body read and parse of at most `BODY_LIMIT_BYTES` (64 KiB), and each made-up key of the
+  right form one read of the registry.
+- **Mitigation:** A key of the wrong form is refused without a read. The read is one primary-key
+  lookup on the registry's own pool of 3 connections, so the flood queues there and takes no
+  connection from settlement, which runs on the main pool, or from the rate limiter's counters,
+  which have their own: a request on a network without keys, as every testnet payment is, doesn't
+  wait behind it. Nothing is verified or simulated for
+  such a request, so it costs no RPC call and no fee. The facilitator is reachable only through
+  Cloudflare (ADR 0011), whose rate rules are the place to stop a flood. The Free plan has one
+  rate-limit rule for the whole `sorobanscan.com` zone, shared with sorobanscan and the Prices
+  API, and a paid plan is 0038's to decide, so today that rule may not be ours to set.
+- **Residual risk:** Accepted (akot, 2026-11-13). A real key is read from the registry like a
+  made-up one, so while the flood keeps the registry's pool busy, every request with a key waits
+  behind it and may get a 500. The flood needs no pubnet: today's testnet process reads the
+  registry for a request that names `stellar:pubnet`, though there it holds up nobody, since
+  testnet's payments carry no key. Counting these requests by IP would stop it, but one caller
+  without a key could then lock out every seller behind its address, as sellers on Cloudflare
+  Workers are (0060). A budget of their own for refused requests has the same fault if it is
+  checked before the read, and spares no read if it is checked after; remembering unknown hashes
+  stops only a repeated key, and a flood makes up a new one each time. To settle before pubnet
+  opens, in 0126 or 0038. No alarm watches the 401s
+  yet: they are in `http_requests_total` under their route, with the status as a log field only.
+
+#### Guessing a key, or learning which keys exist
+
+- **Attack:** Someone tries keys until one works, or probes whether a key was ever issued.
+- **Mitigation:** A key is 256 random bits. An unknown key and a revoked one get the same answer,
+  401 `invalid_api_key`, after the same lookup, so the answer doesn't tell them apart.
+- **Residual risk:** None known.
+
+#### Naming another network to skip the key
+
+- **Attack:** A caller without a key names a network that needs none, or misspells
+  `stellar:pubnet`, in the hope of a pubnet settlement.
+- **Mitigation:** The rule reads `paymentRequirements.network`, the field the checks and the
+  settlement run on: a request settles on pubnet only if that field is exactly `stellar:pubnet`,
+  and then it needs the key. Any other value is another network: `invalid_network` if the process
+  doesn't serve it, a testnet settlement if it does. A payload that names a network other than
+  its requirements' is refused by the checks (`network_mismatch`).
+- **Residual risk:** The rule holds as long as the network a settlement runs on comes from this
+  field. 0126, which makes one process pick each network's pool by it, has to keep that.
+
+#### A new key for a new budget
+
+- **Attack:** A caller that used up its rate budget, or with 0107 its free quota, replaces its
+  key to start again.
+- **Mitigation:** The limiter counts by the key's owner, not the key, and an owner has one active
+  key (a partial unique index, whoever writes the row), so a replaced key continues the count.
+- **Residual risk:** A caller with several owners has several budgets. An owner costs a Discord
+  account that passed the portal's gates (0106), or the operator's decision to issue one by hand.
+
+#### A client over its budget still makes the server read its body
+
+- **Attack:** A client past its rate budget keeps sending. Before 0105 it got its 429 without the
+  body being read; now `/verify` and `/settle` read the body first, since it names the network,
+  so each request costs a read and a JSON parse of at most 64 KiB. On pubnet a caller past its
+  owner's budget costs a read of the key registry too: only the read names the owner, so it comes
+  before the count.
+- **Mitigation:** The body limit bounds each request's cost, and a client over budget is still
+  answered from memory, without a store write. A body that names no network counts under the
+  client's IP, so a malformed or oversized one is limited as before. The registry read is the one
+  primary-key lookup a made-up key costs, on the registry's own pool ("Requests without a valid
+  key, in bulk").
+- **Residual risk:** Accepted (akot, 2026-11-13): a parse costs less than the store write every
+  request within budget already makes. A flood large enough to matter is the edge's to stop.
+  Revoking the key of an owner that floods doesn't spare the read: a revoked key is looked up
+  like any other.
 
 ## Facilitator key
 

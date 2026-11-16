@@ -431,10 +431,23 @@ export const CATALOG = [
     ],
     values: {
       route: ["/verify", "/settle", "/supported", "/health", "/discovery", "other"],
-      // What http/app.ts and rate-limit.ts answer (400, 413 and 415 from body-parser, 304 from
-      // Express's weak ETag on a repeated GET), and `aborted` for a client that left before the
-      // answer.
-      status: ["200", "304", "400", "404", "413", "415", "429", "500", "503", "aborted", "other"],
+      // What http/app.ts, admit.ts and rate-limit.ts answer (400, 413 and 415 from body-parser,
+      // 401 for a request that needs an API key and has no active one, 304 from Express's weak
+      // ETag on a repeated GET), and `aborted` for a client that left before the answer.
+      status: [
+        "200",
+        "304",
+        "400",
+        "401",
+        "404",
+        "413",
+        "415",
+        "429",
+        "500",
+        "503",
+        "aborted",
+        "other",
+      ],
     },
     emit: "aggregated",
   },

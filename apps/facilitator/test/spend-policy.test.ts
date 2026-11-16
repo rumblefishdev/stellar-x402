@@ -189,6 +189,21 @@ describe("createSpendPolicy beforeSubmit", () => {
     expect(await used(store, `payer:${ctx.payer}/${USDC}`)).toBe(0n);
   });
 
+  it("takes a context with an API key's owner and budgets it like any other, until 0107 (0105)", async () => {
+    const { policy, store } = setup();
+    const ctx = context({ caller: { owner: "operator:acme" } });
+
+    expect(await policy.beforeSubmit(ctx)).toEqual({ allow: true });
+    // The owner travels in the context; a budget of its own is 0107's, so the scopes are 0024's.
+    for (const scope of [
+      `payer:${ctx.payer}`,
+      `payTo:${ctx.payTo}`,
+      `asset:${USDC}`,
+      "global",
+    ] as const)
+      expect(await used(store, scope)).toBe(CEILING);
+  });
+
   it("adds tier:other and keys the payer and payTo by asset for another token", async () => {
     const { policy, store } = setup();
     const token = contract();

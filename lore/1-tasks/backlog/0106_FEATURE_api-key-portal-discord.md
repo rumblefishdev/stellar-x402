@@ -37,6 +37,10 @@ Developers server.
   so prices-api's once-a-month rotation limit isn't needed.
 - A dashboard: the key's state and the account's use of its free quota (0107).
 - A privacy policy for the Discord IDs we keep, as prices-api has.
+- From 0105: the portal writes the registry through `ApiKeyStore` (`issue`, `revoke`), with the
+  owner `discord:<snowflake>`. `issue` refuses an owner that has an active key, and a revocation
+  holds from the next request. The registry keeps only a key's SHA-256, so a key can be shown
+  once: that settles the third decision below unless the portal keeps keys itself.
 
 ## Decisions to make here
 

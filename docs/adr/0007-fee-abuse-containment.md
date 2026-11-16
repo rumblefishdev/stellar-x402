@@ -3,8 +3,8 @@
 - Status: accepted
 - Date: 2026-10-07, amended 2026-10-14 (task 0018: the bid counts twice), 2026-10-29 (task 0066:
   restore rent), 2026-10-30 (task 0024: payer proof, budget tiers, attributed breakers, what
-  the budgets bound) and 2026-11-03 (task 0024: API keys on pubnet, and the floor at 5 XLM for
-  task 0027's alarms)
+  the budgets bound), 2026-11-03 (task 0024: API keys on pubnet, and the floor at 5 XLM for
+  task 0027's alarms) and 2026-11-13 (task 0105: how a key is checked and counted)
 
 ## Context
 
@@ -55,7 +55,9 @@ It also found that two fee ceilings disagreed:
     exceeded.
   - It is keyed by client IP, taken only from configured trusted-proxy hops.
   - An optional per-caller API key is accepted as an alternative key, not required in Tranche 1.
-    _Since 2026-11-03:_ required on pubnet, ignored on testnet (below).
+    _Since 2026-11-03:_ required on pubnet, ignored on testnet (below). _Since 2026-11-13:_ a
+    request with a key is counted by the key's owner, and `/verify` and `/settle` read the body
+    before they count (below).
 - **Spend budgets** (as amended on 2026-10-30, below).
   - Before `submit()`, `/settle` reserves the fee against a global rolling budget and against
     per-payer, per-`payTo` and per-asset budgets. When over budget it returns `success: false` and
@@ -169,6 +171,31 @@ a free testnet, configurable mainnet pricing and documented caller authenticatio
   shared-budget residual stays accepted there.
 - **Mainnet ships in M2**, so none of this is in Tranche 1. `stellar:pubnet` is refused until
   0090, 0105 and 0107 land, with 0027 and 0048 from ADR 0013.
+
+## Amendment 2026-11-13 (task 0105): how a key is checked and counted
+
+Task 0105 built the key on `/verify` and `/settle`. Decided by akot with it:
+
+- **The rule follows the request's network**, `paymentRequirements.network`, not the process's
+  `NETWORK`: one process serves both networks (task 0126). The network is in the body, so both
+  routes now read the body, within the body limit, before they count the request. A client over
+  its budget costs a parse of at most that limit where it cost nothing; a body that names no
+  network counts under the client's IP, as before.
+- **A revocation holds from the next request.** The registry is read on every request that needs
+  a key, one primary-key lookup, and nothing caches it: the limiter already writes to the store
+  on every request, and a cache would leave a leaked key working on some instances for its
+  lifetime.
+- **The registry holds a key's SHA-256, its owner and its state**, never the key. A key is 32
+  random bytes, so the hash needs no salt and can't be turned back into the key.
+- **The limiter counts by the key's owner, not by the key**, and the spend policy gets the owner
+  (task 0107). stellar-prices-api counts usage per key, in AWS, so there a replaced key has to
+  wait for the next quota period, or a new key would be a new quota; counted by owner, a replaced
+  key continues the count.
+- **A request refused for its key counts nowhere**, neither under a key nor under its IP. Counted
+  by IP, one caller without a key could use up the budget of every seller behind its address
+  (task 0060). The cost is that such requests are unthrottled here: each is a body parse and, for
+  a well-formed key, one registry read. The edge (Cloudflare) is the control for a flood of them
+  (threat model, "API keys").
 
 ## References
 
