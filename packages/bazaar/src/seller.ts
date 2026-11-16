@@ -10,31 +10,26 @@ import { serializedBytes, validate, type ValidateOptions } from "./validate.js";
 /** Methods whose request carries a body, as upstream's `BodyDiscoveryInfo` names them. */
 const BODY_METHODS = ["POST", "PUT", "PATCH"];
 
-/** The example when its JSON fits `LIMITS.exampleInputBytes`, else nothing. */
-function example(value: unknown): unknown {
-  const bytes = serializedBytes(value);
-  return bytes !== undefined && bytes <= LIMITS.exampleInputBytes ? value : undefined;
-}
-
 /**
  * The unpaid request that asks the seller for its listing (0063): the listing's method on its
  * concrete URL, with the listing's example input, since a route that needs a parameter answers 400
  * without one. `queryParams` go into the query; a body method sends `body` as JSON, or `{}`. An
- * unpaid request is answered with a 402 before the route runs, so the example is not trusted.
+ * unpaid request is answered with a 402 before the route runs, so the example is not trusted. Its
+ * size is bounded by the 32 KiB `bazaar` block it comes in.
  */
 export function sellerRequest(
   resourceUrl: string,
   input: { method: string; queryParams?: unknown; body?: unknown },
 ): { url: string; method: string; body?: string } {
   const url = new URL(resourceUrl);
-  const query = example(input.queryParams);
+  const query = input.queryParams;
   if (typeof query === "object" && query !== null) {
     for (const [name, value] of Object.entries(query))
       url.searchParams.set(name, typeof value === "string" ? value : JSON.stringify(value));
   }
   const request = { url: url.href, method: input.method };
   if (!BODY_METHODS.includes(input.method)) return request;
-  return { ...request, body: JSON.stringify(example(input.body) ?? {}) };
+  return { ...request, body: JSON.stringify(input.body ?? {}) };
 }
 
 /**
@@ -46,7 +41,7 @@ export function toolCall(input: { toolName: string; example?: unknown }): {
   name: string;
   arguments: Record<string, unknown>;
 } {
-  const args = example(input.example);
+  const args = input.example;
   const isObject = typeof args === "object" && args !== null && !Array.isArray(args);
   return { name: input.toolName, arguments: isObject ? (args as Record<string, unknown>) : {} };
 }

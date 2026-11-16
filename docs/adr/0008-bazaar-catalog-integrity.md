@@ -38,8 +38,8 @@ settlement.
     payer filling it holds back only the hosts it pays for; `/settle`'s per-IP limit (task 0023)
     and the settled payment each check needs bound the rest. Over a budget the check is
     skipped; the next payment tries again. There is no retry queue.
-  - The request uses the listing's method and its example input up to 16 KiB: `queryParams` as
-    the query, `body` as a JSON body (`{}` without one). Nothing proves before the request that
+  - The request uses the listing's method and its example input, bounded by the 32 KiB
+    `bazaar` block: `queryParams` as the query, `body` as a JSON body (`{}` without one). Nothing proves before the request that
     the URL is an x402 seller, so a payer can have the facilitator send an unpaid request of any
     method to any public `https` URL, 30 a minute per host. It carries no credentials, so it can
     do only what the payer could do directly; what it adds is the facilitator's address as the
@@ -50,7 +50,7 @@ settlement.
   - Of two checks of one key, the result of the one that started later is kept. `lastUpdated`
     is the time of the seller's answer.
   - An `mcp` listing on a server URL is checked with an MCP client: `initialize`, `tools/list`,
-    then the listing's tool called without payment with its example arguments up to 16 KiB (`{}`
+    then the listing's tool called without payment with its example arguments (`{}`
     without one). Its terms are read from the error result's `structuredContent` or first text,
     as `@x402/mcp`'s payment wrapper sends them, and checked as an HTTP seller's are. A tool the
     server doesn't list (`no_tool`), a server that doesn't answer, and a tool that runs without

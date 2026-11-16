@@ -124,29 +124,23 @@ describe("the request to the seller (0063 row 4)", () => {
     expect(sellerRequest(url, { method: "POST" })).toEqual({ url, method: "POST", body: "{}" });
   });
 
-  it("leaves out an example over 16 KiB", () => {
-    const big = { text: "x".repeat(LIMITS.exampleInputBytes) };
-    expect(sellerRequest(url, { method: "GET", queryParams: big })).toEqual({ url, method: "GET" });
+  it("sends an example of any size: the bazaar block's 32 KiB bounds it", () => {
+    const big = { text: "x".repeat(20 * 1024) };
     expect(sellerRequest(url, { method: "POST", body: big })).toEqual({
       url,
       method: "POST",
-      body: "{}",
+      body: JSON.stringify(big),
     });
   });
 });
 
 describe("the unpaid tool call to an MCP seller (0063 row 5)", () => {
-  it("calls the listing's tool with its example arguments, {} without one or over 16 KiB", () => {
+  it("calls the listing's tool with its example arguments, {} without one", () => {
     expect(toolCall({ toolName: "weather", example: { city: "Warsaw" } })).toEqual({
       name: "weather",
       arguments: { city: "Warsaw" },
     });
     expect(toolCall({ toolName: "weather" })).toEqual({ name: "weather", arguments: {} });
-    const big = { text: "x".repeat(LIMITS.exampleInputBytes) };
-    expect(toolCall({ toolName: "weather", example: big })).toEqual({
-      name: "weather",
-      arguments: {},
-    });
   });
 });
 
