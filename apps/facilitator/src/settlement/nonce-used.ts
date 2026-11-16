@@ -31,16 +31,16 @@ export function createNonceLookup(
   logger: Pick<Logger, "warn">,
 ): IsNonceUsed {
   return async (payer, nonce) => {
-    const key = xdr.LedgerKey.contractData(
-      new xdr.LedgerKeyContractData({
-        contract: new Address(payer).toScAddress(),
-        key: xdr.ScVal.scvLedgerKeyNonce(
-          new xdr.ScNonceKey({ nonce: xdr.Int64.fromString(nonce) }),
-        ),
-        durability: xdr.ContractDataDurability.temporary(),
-      }),
-    );
     try {
+      const key = xdr.LedgerKey.contractData(
+        new xdr.LedgerKeyContractData({
+          contract: new Address(payer).toScAddress(),
+          key: xdr.ScVal.scvLedgerKeyNonce(
+            new xdr.ScNonceKey({ nonce: xdr.Int64.fromString(nonce) }),
+          ),
+          durability: xdr.ContractDataDurability.temporary(),
+        }),
+      );
       const { entries } = await rpc.getLedgerEntries(key);
       return entries.length > 0;
     } catch (error) {
