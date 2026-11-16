@@ -138,6 +138,9 @@ with doubts.
 | 43 | The `catalog_attempts` table stays as it is, copy and answer included: only the operator can read it, and it serves debugging. What the facilitator keeps of a client's URL is decided once, for this table, the logs and the settlements together | grilling | beyond it | spec silent | | |
 | 44 | A listing keeps the path values the seller's 402 carries (`info.input.pathParams`), as upstream writes them and most catalogs store them. ADR 0008 names the cost: a client's value can be public until the next check, and a route with several values checks at most once a minute with a row per differing payment. Measured: 173 of 198 hosts echo the value | grilling | beyond it | `bazaar.md:532`; spec silent on storage (`:429`) | | |
 | 45 | On pubnet a listing's resource URL must use `https`; `http` stays allowed on testnet, where the conformance suite runs its local servers. Measured 2026-11-12: 0 of 27,788 HTTP resources in the largest public catalog use plain `http` | owner, 2026-11-12 | beyond it | spec silent on the resource scheme (`specs/extensions/bazaar.md`) | | |
+| 46 | A `description` over 500 characters is cut to its first 500, by Unicode character, and the listing is kept; `catalog_upserted` names it in `trimmed`. 140 of 92,790 real descriptions are longer; the refusal had dropped 4 of 400 real HTTP listings | owner, 2026-11-16 | changes it (the limit refused the listing) | spec soft-drops `serviceName` and `tags` (`bazaar.md:389-391`), sets no `description` limit (`:277`) | `packages/bazaar/src/validate.ts` (#189) | `bazaar.test.ts` "cut to its first 500" |
+| 47 | A schema `pattern` over 256 characters is dropped from the listing's copy, the rest kept: the facilitator never runs it. 1 of 400 real HTTP listings had been refused for it | owner, 2026-11-16 | changes it | spec silent on `pattern` | `packages/bazaar/src/schema.ts` (#189) | `bazaar.test.ts` "without each pattern over 256" |
+| 48 | Row 1 kept after the premise review: on pubnet too, a listing's text comes from the seller's own 402. A pubnet API key tied to proven `payTo` accounts (0105) would replace the check only after the seller proves its account once, and testnet would still need the check | owner, 2026-11-16 | matches it | spec silent; upstream issue #3005 open | — | — |
 
 ## Not yet decided
 
@@ -147,11 +150,11 @@ with doubts.
   (measured p95 1.85 s, max 5.3 s); an oversized `extra` in the paid offer makes the header say
   `too_large` at once; one `catalog_attempts_total` counter replaces the rejection and upsert
   counters; writes are ordered by a new `checked_at` column and `ledger` stays.
-- Whether the `description` limit of 500 characters and the schema `pattern` limit of 256 (both
-  from 0030) stay: 140 of 92,790 real descriptions are longer (the longest 4,982), the spec sets
-  no limit, and in the run over 400 real HTTP hosts they refused 4 and 1 listings.
 - The measured cause of the `500` answers under 20 concurrent `/discovery/resources` reads
-  (hypothesis: the database pool); its own task once measured.
+  (hypothesis: the database pool). Not reproduced locally on 2026-11-16: 0 of ~1.4 million reads
+  at 20, 50 and 100 concurrent, 500 listings, local PostgreSQL; with the default limit every read
+  over 120 a minute is a 429. A rerun on the deployed testnet follows (its catalog holds 1
+  listing).
 
 ## PR split
 
@@ -159,11 +162,11 @@ with doubts.
 |---|---|---|
 | #71 | the guard's error type | merged |
 | #72 | the guard moves to `packages/seller-fetch` | merged |
-| #88 | the MCP turns a guard refusal into a tool error in one place (row 27) | open |
-| #89 | listings from the seller's page: field limits, HTTP check, the attempts table, ADR 0008 | open |
-| #90 | MCP listings, stacked on #89 | open |
-| next | drop the unused `@stellar-x402/mcp` dependency from `apps/facilitator/package.json` | after #90 |
-| maybe | other `description` and schema `pattern` limits, if the decision below changes them | open |
+| #88 | the MCP turns a guard refusal into a tool error in one place (row 27) | merged |
+| #89 | listings from the seller's page: field limits, HTTP check, the attempts table, ADR 0008 | merged |
+| #90 | MCP listings, stacked on #89 | merged |
+| #187 | drop the unused `@stellar-x402/mcp` dependency from `apps/facilitator/package.json` | open |
+| #189 | cut a long `description`, drop a long schema `pattern` (rows 46, 47) | open |
 
 The schema depth limit (row 25) went in as task 0083 (#87).
 
