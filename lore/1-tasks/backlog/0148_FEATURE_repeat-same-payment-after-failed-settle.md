@@ -61,6 +61,10 @@ decision 5), and changes the advice to "repeat the same payment".
   `reconcile.ts` `land` and `resolved`, a rewrap of our own inner transaction per 0087). If
   another transaction used the nonce between our failure and the repeat, the repeat's checks
   answer 0141's `…_nonce_consumed_elsewhere`. The tests pin both.
+- The answer when the record write fails (`answerResult` in `settle.ts`, from 0009) follows the
+  same rule. Decide in this task whether a failure there answers the pool's code with "repeat"
+  or `settlement_pending`, and drop its nonce read: once a repeat can't pay twice, the read only
+  sharpens the code.
 - README "What to do" column, ADR 0006.
 
 ## Decisions so far
