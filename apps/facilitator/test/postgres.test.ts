@@ -555,6 +555,37 @@ describe("PostgreSQL stores", () => {
     }
   });
 
+  it("keeps registry reads queued on their pool from starving the rate limiter", async () => {
+    await stores();
+    const main = poolFor(schema, 2);
+    const limiting = poolFor(schema, 1);
+    const registry = poolFor(schema, 1);
+    try {
+      const { apiKeys, rateLimits } = postgresStores(main, {
+        rateLimits: limiting,
+        apiKeys: registry,
+      });
+      // A flood of made-up keys: the registry's pool has no connection left for the next read.
+      const held = await registry.connect();
+      let queued: Promise<unknown>[] = [];
+      try {
+        queued = [0, 1, 2].map(() => apiKeys.ownerOf("0".repeat(64)));
+        expect(registry.waitingCount).toBe(3);
+        const started = Date.now();
+        expect((await rateLimits.hit("k", 60_000, 0)).count).toBe(1);
+        expect(Date.now() - started).toBeLessThan(1_000);
+        expect(registry.waitingCount).toBe(3);
+      } finally {
+        held.release();
+      }
+      expect(await Promise.all(queued)).toEqual([undefined, undefined, undefined]);
+    } finally {
+      await main.end();
+      await limiting.end();
+      await registry.end();
+    }
+  });
+
   it("gives up a reservation that waits on the scope lock too long", async () => {
     const { spend } = await stores();
     await pool.query("INSERT INTO spend_scopes (scope) VALUES ('global')");

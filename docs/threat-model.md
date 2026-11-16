@@ -509,15 +509,25 @@ by its payer's signature. Who may get a key is the portal's rule (0106), not cov
   costs a body read and parse of at most `BODY_LIMIT_BYTES` (64 KiB), and each made-up key of the
   right form one read of the registry.
 - **Mitigation:** A key of the wrong form is refused without a read. The read is one primary-key
-  lookup on the rate limiter's own pool of 3 connections, so the flood queues there and takes no
-  connection from settlement, which runs on the main pool. Nothing is verified or simulated for
+  lookup on the registry's own pool of 3 connections, so the flood queues there and takes no
+  connection from settlement, which runs on the main pool, or from the rate limiter's counters,
+  which have their own: a request on a network without keys, as every testnet payment is, doesn't
+  wait behind it. Nothing is verified or simulated for
   such a request, so it costs no RPC call and no fee. The facilitator is reachable only through
-  Cloudflare (ADR 0011), whose rate rules are the place to stop a flood.
-- **Residual risk:** Accepted (akot, 2026-11-13). While the flood lasts, the limiter's pool is
-  busy, so requests with a key wait behind it and some may get a 500. Counting these requests by
-  IP would stop that, but one caller without a key could then lock out every seller behind its
-  address, as sellers on Cloudflare Workers are (0060). No alarm watches the 401s yet: they are
-  in `http_requests_total` under their route, with the status as a log field only.
+  Cloudflare (ADR 0011), whose rate rules are the place to stop a flood. The Free plan has one
+  rate-limit rule for the whole `sorobanscan.com` zone, shared with sorobanscan and the Prices
+  API, and a paid plan is 0038's to decide, so today that rule may not be ours to set.
+- **Residual risk:** Accepted (akot, 2026-11-13). A real key is read from the registry like a
+  made-up one, so while the flood keeps the registry's pool busy, every request with a key waits
+  behind it and may get a 500. The flood needs no pubnet: today's testnet process reads the
+  registry for a request that names `stellar:pubnet`, though there it holds up nobody, since
+  testnet's payments carry no key. Counting these requests by IP would stop it, but one caller
+  without a key could then lock out every seller behind its address, as sellers on Cloudflare
+  Workers are (0060). A budget of their own for refused requests has the same fault if it is
+  checked before the read, and spares no read if it is checked after; remembering unknown hashes
+  stops only a repeated key, and a flood makes up a new one each time. To settle before pubnet
+  opens, in 0126 or 0038. No alarm watches the 401s
+  yet: they are in `http_requests_total` under their route, with the status as a log field only.
 
 #### Guessing a key, or learning which keys exist
 
@@ -557,8 +567,8 @@ by its payer's signature. Who may get a key is the portal's rule (0106), not cov
 - **Mitigation:** The body limit bounds each request's cost, and a client over budget is still
   answered from memory, without a store write. A body that names no network counts under the
   client's IP, so a malformed or oversized one is limited as before. The registry read is the one
-  primary-key lookup a made-up key costs, on the rate limiter's own pool ("Requests without a
-  valid key, in bulk").
+  primary-key lookup a made-up key costs, on the registry's own pool ("Requests without a valid
+  key, in bulk").
 - **Residual risk:** Accepted (akot, 2026-11-13): a parse costs less than the store write every
   request within budget already makes. A flood large enough to matter is the edge's to stop.
   Revoking the key of an owner that floods doesn't spare the read: a revoked key is looked up

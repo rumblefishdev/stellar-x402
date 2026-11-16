@@ -453,7 +453,8 @@ export async function main(
   const config = parseConfig(env);
   const logger = jsonLogger(config.logLevel, opts.write, config.rpcUrls);
   let pools:
-    { main: pg.Pool; reserve: pg.Pool; rateLimits: pg.Pool; discovery: pg.Pool } | undefined;
+    | { main: pg.Pool; reserve: pg.Pool; rateLimits: pg.Pool; discovery: pg.Pool; apiKeys: pg.Pool }
+    | undefined;
   const endPools = () => Promise.all(Object.values(pools ?? {}).map((p) => p.end()));
   let rpcStall: RpcStallTracker | undefined;
   /** The EMF writer, for the catch: a start that failed stops it. */
@@ -468,7 +469,8 @@ export async function main(
     );
     // The stores need a migrated schema (`pnpm migrate`); the service never migrates it.
     // Reservations queue on the global scope's lock, a flood's hits on its key's row lock, and a
-    // burst of public listings on the pool itself; their own pools keep those off the others.
+    // burst of public listings or of made-up API keys' registry reads on the pool itself; their
+    // own pools keep those off the others.
     // A listing takes milliseconds (at most ~0.5 s measured at 1 000 000 entries), so the
     // discovery pool cuts one off sooner: until 0023's rate limits, 3 slow ones hold it.
     const url = config.databaseUrl;
@@ -477,6 +479,7 @@ export async function main(
       reserve: createPool(url, poolErrorLogger(logger), 3),
       rateLimits: createPool(url, poolErrorLogger(logger), 3),
       discovery: createPool(url, poolErrorLogger(logger), 3, DISCOVERY_STATEMENT_TIMEOUT_MS),
+      apiKeys: createPool(url, poolErrorLogger(logger), 3),
     };
     // Every migration this code knows, applied by the deploy before it starts (ADR 0011). A schema
     // ahead of the code passes, so a rollback to an earlier image starts.

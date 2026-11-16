@@ -76,7 +76,7 @@ Both made by akot on 2026-11-13: "Design Decisions", 1 and 2.
 
 - **Registry.** Port `ApiKeyStore` (`ports/api-key-store.ts`): `ownerOf(hash)`, `issue`, `revoke`,
   `list`. Migration `0013_api_keys`, transactional: a new table, so the release before it keeps
-  working. `PostgresApiKeyStore` reads on the rate limiter's pool and writes on the main one.
+  working. `PostgresApiKeyStore` reads on a pool of its own (decision 18) and writes on the main one.
 - **Way in.** `http/admit.ts` replaces the limiter and the body parser in front of `/verify` and
   `/settle`: body, then the network it names, then the key and the owner's count, or the IP's
   count. `http/api-key.ts` holds the key's form, its hash and `requiresApiKey`. `rate-limit.ts`
@@ -166,8 +166,9 @@ Decided by akot on 2026-11-13, before any code.
    `Bearer` and an active key is `invalid_api_key`, the same for a key never issued and a revoked
    one. A key of the wrong form is refused without a read. Both carry RFC 6750's
    `WWW-Authenticate`.
-9. **The registry is read on the rate limiter's pool.** It is read before a request is let in,
-   as the counter is, and a flood of made-up keys must not take settlement's connections.
+9. **The registry is read on the rate limiter's pool.** Replaced by decision 18: a pool of its
+   own. It is read before a request is let in, as the counter is, and a flood of made-up keys
+   must not take settlement's connections.
 10. **The caller is not stored with the settlement.** It travels to `beforeSubmit` only. `onFinal`
     gets the record, and a reservation keeps its own scopes, so 0107 can commit or release an
     owner's budget without it. The `verified` and `settled` log lines carry it as `caller`.
@@ -195,6 +196,21 @@ Decided by akot on 2026-11-13, before any code.
     until its window ends, against decision 1. The limiter's and `admit`'s comments, the README
     and the threat model ("A client over its budget still makes the server read its body") say
     so. Two notes went to 0126 (one reading of the network) and 0107 (whose quota a reopen is).
+
+18. **The registry's reads get a pool of their own, and the flood of made-up keys no other
+    guard.** From Stanisław's review of #185, 2026-11-13, not blocking; decided with akot,
+    2026-11-16. On the limiter's pool, as decision 9 had it, a flood of made-up keys held up the
+    counter write of every request, a testnet payment's too, and today's testnet process reads
+    the registry for a request that names `stellar:pubnet`. `pools.apiKeys`, 3 connections, takes
+    that queue off the counters: 22 connections per process (ADR 0012), under PostgreSQL's default
+    of 100 with two processes during a deploy. A request with a real key still waits behind the
+    flood, which the threat model's "Requests without a valid key, in bulk" now says, with
+    Cloudflare's one rate rule on the Free plan. Neither guard he proposed was added. A cache of
+    unknown hashes stops a repeated key only. A budget for refusals per IP makes a counter,
+    against the first criterion, and locks out the sellers behind a shared address if it is
+    checked before the registry read, or spares no read if after. Notes went to 0126 (what is
+    left for a request with a key) and 0038 (the one rate rule). Test: `postgres.test.ts`, "keeps
+    registry reads queued on their pool from starving the rate limiter".
 
 ## Future Work
 

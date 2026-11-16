@@ -43,8 +43,9 @@ import { PostgresCatalogAttemptStore, PostgresCatalogStore } from "./postgres-ca
 
 /**
  * PostgreSQL adapters of the ports (AD-7, ADR 0012), on the schema in `postgres-schema.ts`.
- * They share one pool, except `reserve`, the rate limiter's `hit` and the catalog's `list`, which
- * can each run on their own; concurrent calls run on separate connections.
+ * They share one pool, except `reserve`, the rate limiter's `hit`, the catalog's `list` and the
+ * API key registry's `ownerOf`, which can each run on their own; concurrent calls run on separate
+ * connections.
  *
  * - Every time comes from the caller; the SQL never reads the database's clock.
  * - Every statement runs at Read Committed, so a role or server default can't change it: each
@@ -63,13 +64,15 @@ import { PostgresCatalogAttemptStore, PostgresCatalogStore } from "./postgres-ca
  *   must not take the connections `/settle` needs. Catalog writes stay on the main pool. `main()`
  *   gives that pool a short statement timeout, so a few slow listings can't hold it for long.
  * - `prune` runs on the main pool for both, so pruning a flood's keys takes nothing from `hit`.
- * - The API key registry's `ownerOf` runs on `pools.rateLimits` too: it is read before a request
- *   is let in, as `hit` is, and a flood of made-up keys must not take the connections `/settle`
- *   needs. Its writes, the operator's and the portal's, stay on the main pool.
+ * - The API key registry's `ownerOf` runs on `pools.apiKeys`: it is read before a request is let
+ *   in, and a request refused for its key counts nowhere, so made-up keys can arrive without end.
+ *   Its own pool keeps that queue off `/settle`'s connections and off `hit`, which every request
+ *   on a network without keys still needs. A request with a real key waits in that queue too.
+ *   Its writes, the operator's and the portal's, stay on the main pool.
  */
 export function postgresStores(
   pool: pg.Pool,
-  pools: { reserve?: pg.Pool; rateLimits?: pg.Pool; discovery?: pg.Pool } = {},
+  pools: { reserve?: pg.Pool; rateLimits?: pg.Pool; discovery?: pg.Pool; apiKeys?: pg.Pool } = {},
 ): Stores {
   return {
     settlements: new PostgresSettlementStore(pool),
@@ -77,7 +80,7 @@ export function postgresStores(
     catalogAttempts: new PostgresCatalogAttemptStore(pool),
     rateLimits: new PostgresRateLimitStore(pools.rateLimits ?? pool, pool),
     spend: new PostgresSpendStore(pool, pools.reserve ?? pool),
-    apiKeys: new PostgresApiKeyStore(pools.rateLimits ?? pool, pool),
+    apiKeys: new PostgresApiKeyStore(pools.apiKeys ?? pool, pool),
   };
 }
 

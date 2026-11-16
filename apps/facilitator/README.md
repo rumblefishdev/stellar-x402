@@ -126,7 +126,7 @@ not `NETWORK`, so it holds in a process that serves both networks (0126).
   The `verified`, `settled` and `rate_limited` log lines name the owner (`caller`, `owner`); no
   line carries a key or its hash.
 - **A revocation holds from the next request**, on every instance: the registry is read on each
-  pubnet request, one primary-key lookup on the rate limiter's pool, and nothing caches it. If the
+  pubnet request, one primary-key lookup on a pool of its own, and nothing caches it. If the
   registry can't be read the answer is a 500 and nothing is let in.
 - **The operator's script** issues, revokes and lists keys by hand, over the same registry the
   portal will write. It needs only `DATABASE_URL` (or `DATABASE_URL_FILE`), of the network whose

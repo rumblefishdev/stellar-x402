@@ -58,6 +58,13 @@ its own channel pool, signer, RPC endpoints and store, before mainnet joins.
   signer by network, read it once and hand the same value to the key rule and the handler, so the
   two can't come apart (from the review of #185, 2026-11-13). Pubnet's compose services need one
   for the key script (`node dist/keys.js`), as `migrate-testnet` is for migrations.
+- From 0105, before pubnet opens: a flood of made-up keys is unthrottled (threat model, "Requests
+  without a valid key, in bulk"), and each one of the right form reads the registry. Since #185
+  that read has a pool of its own (3 connections), so the flood no longer holds up the counters
+  or a request without a key; keep that when each network gets its own store and pools. What is
+  left: a request with a real key waits behind the flood's reads. Decide whether the edge stops
+  it (0038) or a guard on refusals does, with the faults the threat model lists (from Stanisław's
+  review of #185, 2026-11-13).
 
 ## Open Questions
 

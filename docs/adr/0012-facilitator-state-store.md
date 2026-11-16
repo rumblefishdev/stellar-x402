@@ -7,7 +7,8 @@
   2026-10-22 (task 0039: pgBackRest; migrations before the old facilitator stops) and 2026-10-26
   (task 0032: a pool for listings; task 0064: no memory store, tests run on PostgreSQL) and
   2026-10-27 (task 0067: online migrations) and 2026-10-29 (task 0077: one facilitator for both
-  networks, still with a database per network)
+  networks, still with a database per network) and 2026-11-16 (task 0105: a pool for the API key
+  registry's reads)
 
 ## Context
 
@@ -75,9 +76,10 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
   - Minor upgrades are a digest bump in a planned window; a major upgrade is planned on its own.
 - **Access.**
   - The `pg` driver and small fixed pools per process: 10 connections, plus 3 for
-    `reserve`, 3 for the rate limiter and 3 for `/discovery/resources` listings, so reservations
-    queued on the global scope's lock, a flood's hits on its key's row lock, or a burst of public
-    listings can't starve the other stores. 19 connections per process and network. The
+    `reserve`, 3 for the rate limiter, 3 for `/discovery/resources` listings and 3 for the API
+    key registry's reads (task 0105), so reservations queued on the global scope's lock, a flood's
+    hits on its key's row lock, a burst of public listings or a flood of made-up API keys can't
+    starve the other stores. 22 connections per process and network. The
     listings' pool has a 2 s statement timeout instead of 10 s, so a few slow listings hold it
     only briefly.
   - No TLS: the connection stays on one host's internal Docker network (ADR 0011). Passwords use
