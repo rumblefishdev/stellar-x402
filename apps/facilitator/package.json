@@ -23,7 +23,6 @@
     "@modelcontextprotocol/sdk": "^1.32.0",
     "@stellar-x402/bazaar": "workspace:*",
     "@stellar-x402/config": "workspace:*",
-    "@stellar-x402/mcp": "workspace:*",
     "@stellar-x402/metrics-catalog": "workspace:*",
     "@stellar-x402/seller-fetch": "workspace:*",
     "@stellar-x402/signer-pool": "workspace:*",

@@ -45,6 +45,10 @@ As a buyer browsing the Bazaar, I want listings of services that are gone to dro
 
 - Decide with the owner: remove after N days without a settlement, or mark the listing and filter
   it out by default.
+- Decide with the owner (moved from 0063, 2026-11-16): what a listing becomes when its seller
+  check keeps failing on the seller's side — an answer over 64 KiB or later than 10 s, no 402.
+  Today it stays as the seller last confirmed it, with that `lastUpdated`. Peers: Veridex compares
+  the live payment terms at each refresh; openx402's MCP shows `status: stale`.
 - Pruning runs where 0050 prunes other store rows, if that fits.
 
 ## Acceptance Criteria

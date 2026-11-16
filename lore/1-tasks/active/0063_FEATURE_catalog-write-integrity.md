@@ -138,20 +138,23 @@ with doubts.
 | 43 | The `catalog_attempts` table stays as it is, copy and answer included: only the operator can read it, and it serves debugging. What the facilitator keeps of a client's URL is decided once, for this table, the logs and the settlements together | grilling | beyond it | spec silent | | |
 | 44 | A listing keeps the path values the seller's 402 carries (`info.input.pathParams`), as upstream writes them and most catalogs store them. ADR 0008 names the cost: a client's value can be public until the next check, and a route with several values checks at most once a minute with a row per differing payment. Measured: 173 of 198 hosts echo the value | grilling | beyond it | `bazaar.md:532`; spec silent on storage (`:429`) | | |
 | 45 | On pubnet a listing's resource URL must use `https`; `http` stays allowed on testnet, where the conformance suite runs its local servers. Measured 2026-11-12: 0 of 27,788 HTTP resources in the largest public catalog use plain `http` | owner, 2026-11-12 | beyond it | spec silent on the resource scheme (`specs/extensions/bazaar.md`) | | |
+| 46 | A `description` over 500 characters is cut to its first 500 UTF-16 units, as the buyer's MCP counts them (an emoji that does not fit whole is left out), and the listing is kept; `catalog_upserted` names it in `trimmed`. 140 of 92,790 real descriptions are longer; the refusal had dropped 4 of 400 real HTTP listings | owner, 2026-11-16 | changes it (the limit refused the listing) | spec soft-drops `serviceName` and `tags` (`bazaar.md:389-391`), sets no `description` limit (`:277`) | `packages/bazaar/src/validate.ts` (#189) | `bazaar.test.ts` "cut to its first 500" |
+| 47 | A schema `pattern` over 256 characters is dropped from the listing's copy, the rest kept: the facilitator never runs it. 1 of 400 real HTTP listings had been refused for it | owner, 2026-11-16 | changes it | spec silent on `pattern` | `packages/bazaar/src/schema.ts` (#189) | `bazaar.test.ts` "without each pattern over 256" |
+| 48 | Row 1 kept after the premise review: on pubnet too, a listing's text comes from the seller's own 402. A pubnet API key tied to proven `payTo` accounts (0105) would replace the check only after the seller proves its account once, and testnet would still need the check | owner, 2026-11-16 | matches it | spec silent; upstream issue #3005 open | — | — |
+| 49 | The `500` answers once noted under 20 concurrent `/discovery/resources` reads get no task: not reproduced. Locally (2026-11-16): 0 of ~1.4 million reads at 20, 50 and 100 concurrent, 500 listings; with the default limit every read over 120 a minute is a 429. On the deployed testnet: 100 of 100 answered 200 in 5 bursts of 20, p95 238 ms, a catalog of 1 listing. Not covered: a large catalog on a loaded database | owner, 2026-11-16 | changes it (its own task once measured) | — | — | — |
+| 50 | Kept on the owner's word: an unchanged copy doesn't refresh `lastUpdated`, which stays the time of the seller's last confirmation; one `catalog_attempts_total` counter by stage and outcome replaces the rejection and upsert counters; two checks of one key are ordered by a `checked_at` column, the later-started one kept, and `ledger` stays | owner, 2026-11-16 | beyond it | x402 v2 §8.3 names `lastUpdated` only | | |
+| 51 | A catalog item carries no flag that it differs from the seller's 402: the buyer pays by the seller's live 402 (`packages/mcp/src/pay.ts`), which the item's `resource` URL gives. The facilitator logs the cut fields in `catalog_upserted` as `trimmed` | owner, 2026-11-16 | beyond it | spec has no such field (`bazaar.md` ~427-432); no facilitator checked puts one on the item | | |
+| 52 | A cut description ends with "…", counted in the 500, so an agent sees the text goes on | owner, 2026-11-16 | beyond it | Rialto, Vellar and openx402 cut with a plain slice | `packages/bazaar/src/validate.ts` (#189) | `bazaar.test.ts` "the last one an ellipsis" |
+| 53 | A listing keeps the URL the facilitator asked, not the `resource.url` the seller's 402 names: the URL that answered is the fact. Measured 2026-11-16 on 150 CDP hosts: 137 of 138 v2 402s name the asked URL, 1 names `http://localhost:3000/...` | owner, 2026-11-16 | beyond it | spec silent; `@x402/core` fills it from the seller's config or the request | `packages/bazaar/src/seller.ts` | `seller.test.ts` "the URL from the listing" |
+| 54 | A seller answer is read up to 64 KiB within 10 s; an answer that breaks it leaves the listing as the seller last confirmed it. What such a listing becomes later moves to 0069 | owner, 2026-11-16 | beyond it | Veridex compares live terms at refresh; openx402's MCP shows `stale` | `apps/facilitator/src/catalog/cataloger.ts` | `cataloger.test.ts` row 6 |
+| 55 | The seller check sends the listing's example input whatever its size: the 16 KiB cap on it guarded 0 cases, since such an example breaks the 16 KiB listing cap, and the 32 KiB `bazaar` block bounds it | owner, 2026-11-16 | changes row 4 (up to 16 KiB) | — | `packages/bazaar/src/seller.ts` (#190) | `seller.test.ts` "an example of any size" |
+| 56 | An offer's `extra` has no cap of its own; the whole-listing cap bounds it, so a paid offer with a large `extra` no longer gets `too_large` in the settle header at once. Honest `extra` measures at most 1,846 B; 4 of 33,446 CDP listings are over 16 KiB (2026-11-16) | owner, 2026-11-16 | changes row 9 (4 KiB per `extra`) | openx402, walras and fastnear cap only the whole metadata or block | `packages/bazaar/src/offers.ts`, `validate.ts` (#193) | `seller.test.ts` "an extra of any size" |
+| 57 | The whole-listing cap is 36 KiB, as rail402 keeps it, and the seller's header cap 52 KiB so such a listing fits base64-encoded in a header. 0 of 33,446 CDP listings are larger (the largest 25.3 KiB, 4 over 16 KiB). Measured locally, 1,000 listings, 20 readers for 30 s: a page of 100 reads at p95 285 ms at 16 KiB, 491 ms at 36 KiB, and `/supported` stays at p95 0.4 ms | owner, 2026-11-16 | changes rows 37 and 40 (16 KiB, 24 KiB) | rail402 36 KiB on the whole listing | `packages/bazaar/src/limits.ts`, `packages/seller-fetch/src/guard.ts` (#193) | `seller.test.ts` "over 36 KiB", `guard.test.ts` header sizes |
 
 ## Not yet decided
 
-- Choices made while coding, open for the owner's veto: an example input over 16 KiB is left out and
-  the check runs without it; the listing URL is the one asked, not `resource.url` from the answer;
-  an unchanged copy doesn't refresh `lastUpdated`; a seller answer up to 64 KiB within 10 s
-  (measured p95 1.85 s, max 5.3 s); an oversized `extra` in the paid offer makes the header say
-  `too_large` at once; one `catalog_attempts_total` counter replaces the rejection and upsert
-  counters; writes are ordered by a new `checked_at` column and `ledger` stays.
-- Whether the `description` limit of 500 characters and the schema `pattern` limit of 256 (both
-  from 0030) stay: 140 of 92,790 real descriptions are longer (the longest 4,982), the spec sets
-  no limit, and in the run over 400 real HTTP hosts they refused 4 and 1 listings.
-- The measured cause of the `500` answers under 20 concurrent `/discovery/resources` reads
-  (hypothesis: the database pool); its own task once measured.
+- Whether `trimmed` (the fields cut, in the `catalog_upserted` log) stays: the attempt row already
+  keeps the seller's answer as sent.
 
 ## PR split
 
@@ -159,11 +162,11 @@ with doubts.
 |---|---|---|
 | #71 | the guard's error type | merged |
 | #72 | the guard moves to `packages/seller-fetch` | merged |
-| #88 | the MCP turns a guard refusal into a tool error in one place (row 27) | open |
-| #89 | listings from the seller's page: field limits, HTTP check, the attempts table, ADR 0008 | open |
-| #90 | MCP listings, stacked on #89 | open |
-| next | drop the unused `@stellar-x402/mcp` dependency from `apps/facilitator/package.json` | after #90 |
-| maybe | other `description` and schema `pattern` limits, if the decision below changes them | open |
+| #88 | the MCP turns a guard refusal into a tool error in one place (row 27) | merged |
+| #89 | listings from the seller's page: field limits, HTTP check, the attempts table, ADR 0008 | merged |
+| #90 | MCP listings, stacked on #89 | merged |
+| #187 | drop the unused `@stellar-x402/mcp` dependency from `apps/facilitator/package.json` | open |
+| #189 | cut a long `description`, drop a long schema `pattern` (rows 46, 47) | open |
 
 The schema depth limit (row 25) went in as task 0083 (#87).
 

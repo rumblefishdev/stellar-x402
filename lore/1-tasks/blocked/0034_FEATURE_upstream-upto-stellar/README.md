@@ -408,7 +408,7 @@ Posted by okarcz's go, step by step:
   `action_required`: a fork's workflows wait for a maintainer. Vercel's preview still waits for a
   Coinbase team member, as for any outside contributor.
 
-**Future work:** C-account signing in our seller SDK (a backlog task, not created yet). Enforcing
+**Future work:** C-account signing in our seller SDK (backlog task 0146, Milestone 3). Enforcing
 the receiver-entry rules in the facilitator belongs to 0015.
 
 **Note for whoever builds the seller SDK (2026-11-13):**
@@ -436,7 +436,7 @@ the receiver-entry rules in the facilitator belongs to 0015.
   `/settle`. In x402 the payload comes from the client. Not checked yet.
 - The `client` class puts `requirements.extra.receiverAuthorizer` in the `receiver_authorizer`
   argument. `contracts/upto-proxy/e2e/src/upto.ts` already does this.
-- The backlog task for `C...` signing must say where it lands: the `server` class, 0140, or both.
+- The backlog task for `C...` signing is 0146: it lands in both the `server` class and 0140.
 - 0015 still says `facilitator.require_auth()` and doesn't cover self-managed mode. Update it after
   #181 merges.
 

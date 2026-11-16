@@ -152,11 +152,6 @@ function run(
   }
 
   // 6. Content limits. The schema is data: walked for limits, never compiled.
-  // The paid offer is one of the seller's: the listing would carry it, so the offer limit holds.
-  const extraBytes = serializedBytes(requirements.extra ?? {});
-  if (extraBytes === undefined || extraBytes > LIMITS.offerExtraBytes) {
-    return reject("too_large", "requirements.extra", extraBytes);
-  }
   // The extension schema and mcp `inputSchema`. http `body`, `queryParams` and `pathParams` are
   // example values (their schemas sit in `raw.schema`), bounded by the size cap only.
   const schema = limitSchema(raw.schema);

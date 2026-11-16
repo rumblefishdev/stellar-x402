@@ -38,8 +38,8 @@ settlement.
     payer filling it holds back only the hosts it pays for; `/settle`'s per-IP limit (task 0023)
     and the settled payment each check needs bound the rest. Over a budget the check is
     skipped; the next payment tries again. There is no retry queue.
-  - The request uses the listing's method and its example input up to 16 KiB: `queryParams` as
-    the query, `body` as a JSON body (`{}` without one). Nothing proves before the request that
+  - The request uses the listing's method and its example input, bounded by the 32 KiB
+    `bazaar` block: `queryParams` as the query, `body` as a JSON body (`{}` without one). Nothing proves before the request that
     the URL is an x402 seller, so a payer can have the facilitator send an unpaid request of any
     method to any public `https` URL, 30 a minute per host. It carries no credentials, so it can
     do only what the payer could do directly; what it adds is the facilitator's address as the
@@ -50,24 +50,25 @@ settlement.
   - Of two checks of one key, the result of the one that started later is kept. `lastUpdated`
     is the time of the seller's answer.
   - An `mcp` listing on a server URL is checked with an MCP client: `initialize`, `tools/list`,
-    then the listing's tool called without payment with its example arguments up to 16 KiB (`{}`
+    then the listing's tool called without payment with its example arguments (`{}`
     without one). Its terms are read from the error result's `structuredContent` or first text,
     as `@x402/mcp`'s payment wrapper sends them, and checked as an HTTP seller's are. A tool the
     server doesn't list (`no_tool`), a server that doesn't answer, and a tool that runs without
     asking for a payment (`not_402`) change nothing, as above. Its responses may take up to
     256 KiB each: a tool list carries every tool's schemas (largest measured 122,729 B).
 - **Entry limits (task 0063).**
-  - An offer keeps the spec's seven fields (the upstream `PaymentRequirements` schema); its
-    `extra` takes up to 4 KiB. A listing keeps up to 8 offers. The `bazaar` block keeps its
-    32 KiB. A whole listing, serialized, takes up to 16 KiB, so a page of 100 stays under 1.6 MB
-    (5 of 95,733 listings in the largest public catalog are larger).
-  - Over a limit the whole listing is refused as `too_large`, the paid requirement's `extra`
-    included; the payment never is.
+  - An offer keeps the spec's seven fields (the upstream `PaymentRequirements` schema). A
+    listing keeps up to 8 offers. The `bazaar` block keeps its 32 KiB. A whole listing,
+    serialized, takes up to 36 KiB, so a page of 100 stays under 3.7 MB (0 of 33,446 listings in
+    the largest public catalog are larger, the largest 25.3 KiB, 2026-11-16; a page of 100 such
+    listings read in 491 ms at p95 under 20 readers, measured locally). An offer's `extra` has no
+    cap of its own: the whole-listing cap bounds it.
+  - Over a limit the whole listing is refused as `too_large`; the payment never is.
   - Two fields are cut instead, and the rest of the listing is kept: a `description` over 500
-    characters is cut to 500, its last one "…", and a schema `pattern` over 256 characters is dropped (the
-    facilitator never runs it). The seller's answer as sent stays in the listing attempt's row. In the
-    largest public catalog 140 of 92,790 descriptions are longer; in a run over 400 real HTTP
-    hosts the two limits had refused 4 listings and 1.
+    characters is cut to 500, its last one "…", and a schema `pattern` over 256 characters is
+    dropped (the facilitator never runs it). The seller's answer as sent stays in the listing
+    attempt's row. In the largest public catalog 140 of 92,790 descriptions are longer; in a run
+    over 400 real HTTP hosts the two limits had refused 4 listings and 1.
 - **Validation.**
   - Types come from `@x402/extensions` (bazaar). `packages/bazaar` holds only a pure validator
     and normalizer.
@@ -83,7 +84,7 @@ settlement.
   - The facilitator calls a seller URL only for the listing check above, through the
     `packages/seller-fetch` guard: https only, the address checked where it connects (no
     loopback, private or special-use address), no redirects, a 10 s deadline, a 64 KiB body cap
-    (256 KiB for an MCP server, above) and a 24 KiB header cap, enough for a 16 KiB listing once
+    (256 KiB for an MCP server, above) and a 52 KiB header cap, enough for a 36 KiB listing once
     base64-encoded in a header. Either cap passed is `response_too_large`. `CATALOG_LIST_LOCAL`
     also opens http to this machine.
   - Resource URLs carry a scheme allowlist by listing type (task 0053): an `http` listing takes
@@ -149,9 +150,9 @@ settlement.
   buyer's answer until `/settle` returns (`@x402/express` 2.28.0). Payment latency comes first.
 - **A whole listing is refused over a limit**, not trimmed, except for `description` and a schema
   `pattern`, which are cut (above): a listing missing an offer misleads a buyer, and a cut
-  description or a dropped format check doesn't keep the buyer from paying the right price. The limits
-  are twice the largest measured in the largest public catalog (5,000 entries: `extra` at most
-  1,846 B, at most 4 offers per listing key).
+  description or a dropped format check doesn't keep the buyer from paying the right price. The
+  offer count is twice the largest measured in the largest public catalog (4 per listing key over
+  5,000 entries); `extra` is left to the whole-listing cap (at most 1,846 B measured there).
 - **SSRF is checked where a URL is fetched.** A rule on the URL text can't stop a public name that
   resolves to `127.0.0.1` (OWASP: check the resolved address at connection time), which is what
   `packages/mcp` does before every call. On resource URLs the host rules only refused what
