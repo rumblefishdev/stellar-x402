@@ -3,7 +3,7 @@ id: "0056"
 title: "Stop the channel sequence read at the caller's deadline"
 type: BUG
 status: backlog
-milestone: 1
+milestone: 2
 related_adr: []
 related_tasks: ["0051", "0009"]
 tags: [signer-pool, payments, priority-medium, effort-small]
@@ -13,6 +13,11 @@ history:
     status: backlog
     who: karolkow
     note: "Spawned from 0051 future work."
+  - date: "2026-11-16"
+    status: backlog
+    who: okarcz
+    note: >
+      Moved to M2 by okarcz in the M1 Payments cleanup: not started, and M1 is closing.
 ---
 
 # Stop the channel sequence read at the caller's deadline

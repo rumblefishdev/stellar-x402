@@ -3,7 +3,7 @@ id: "0092"
 title: "Tell a buyer about a missing trustline before signing, in the SDK and MCP"
 type: FEATURE
 status: backlog
-milestone: 1
+milestone: 2
 related_adr: []
 related_tasks: ["0078"]
 tags: [sdk, mcp, payments, priority-medium, effort-small]
@@ -21,6 +21,11 @@ history:
     note: >
       Moved from M2 to M1 and packages/mcp added (Adam's review of #94): upstream 2.29.0 throws
       TrustlineMissingError, and MCP answers a seller's missing trustline with insufficient_funds.
+  - date: "2026-11-16"
+    status: backlog
+    who: okarcz
+    note: >
+      Moved to M2 by okarcz in the M1 Payments cleanup: not started, and M1 is closing.
 ---
 
 # Tell a buyer about a missing trustline before signing, in the SDK and MCP
