@@ -2,7 +2,7 @@
 id: "0063"
 title: "Keep catalog listings from being overwritten or padded before pubnet"
 type: FEATURE
-status: active
+status: completed
 owner: karolkow
 milestone: 1
 related_adr: ["0008"]
@@ -28,6 +28,14 @@ history:
     who: karolkow
     note: >
       Work starts.
+  - date: "2026-11-16"
+    status: completed
+    who: karolkow
+    note: >
+      Last PRs merged: #187, #189, #190, #193. A listing's text comes from the seller's own 402;
+      one 36 KiB cap on the whole listing; a long description is cut to 500 with "…" and a long
+      schema pattern dropped instead of refusing the listing. Testnet end to end on #189 passed;
+      packages/bazaar 137 tests, the facilitator's catalog tests 40.
 ---
 
 # Keep catalog listings from being overwritten or padded before pubnet
@@ -165,9 +173,9 @@ Nothing.
 | #89 | listings from the seller's page: field limits, HTTP check, the attempts table, ADR 0008 | merged |
 | #90 | MCP listings, stacked on #89 | merged |
 | #187 | drop the unused `@stellar-x402/mcp` dependency from `apps/facilitator/package.json` | merged |
-| #189 | cut a long `description`, drop a long schema `pattern` (rows 46, 47, 52) | open |
+| #189 | cut a long `description`, drop a long schema `pattern` (rows 46, 47, 52) | merged |
 | #190 | send the listing's example whatever its size (row 55) | merged |
-| #193 | one whole-listing cap for `extra`, raised to 36 KiB (rows 56, 57); after #189 | open |
+| #193 | one whole-listing cap for `extra`, raised to 36 KiB (rows 56, 57) | merged |
 
 The schema depth limit (row 25) went in as task 0083 (#87).
 
@@ -179,10 +187,26 @@ The schema depth limit (row 25) went in as task 0083 (#87).
 
 ## Acceptance Criteria
 
-- [ ] Decided and written into ADR 0008: who may change an existing listing, and the entry size
-      limits
-- [ ] Given an entry written by one settlement, when a settlement by another payer to the same
+- [x] Decided and written into ADR 0008: who may change an existing listing, and the entry size
+      limits (ADR 0008 Decision: content from the seller's own 402; Entry limits)
+- [x] Given an entry written by one settlement, when a settlement by another payer to the same
       key arrives, then it can't replace the entry's text or an existing price unless the
-      decision above allows it
-- [ ] Given a requirement with unknown fields or an oversized `extra`, when it is cataloged, then
-      the stored entry stays within the decided limit
+      decision above allows it (`cataloger.test.ts` "keeps the seller's text and price when
+      another payer's copy says otherwise")
+- [x] Given a requirement with unknown fields or an oversized `extra`, when it is cataloged, then
+      the stored entry stays within the decided limit (offers keep the spec's seven fields,
+      `cataloger.test.ts` row 8; the whole listing is refused over 36 KiB, `seller.test.ts`)
+
+## Issues Encountered
+
+- A settle test that assumed a second store read within a 100 ms budget failed on a slow CI
+  runner (#187); fixed in the test, #188 (task 0074's class).
+- A first cut counted 500 by code point while the buyer's MCP counts UTF-16 units, so the MCP
+  could split an emoji again; found by the devil's-advocate review, fixed before merge (#189).
+- Merging #193 before #189 left an orphaned comment in `limits.ts`; removed in #189's merge.
+
+## Future Work
+
+Covered by existing tasks, none new: listings whose seller stops confirming (0069, now also the
+over-limit-answer question from decision 54), the buyer's MCP refusing a price above the listing
+(0068), a verified badge for `payTo` (0070), seller-fetch error codes (0085).
