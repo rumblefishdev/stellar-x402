@@ -5,7 +5,7 @@ import {
   type DiscoveredResource,
 } from "@x402/extensions/bazaar";
 import { LIMITS, type BazaarRejectReason } from "./limits.js";
-import { isSchemaWithinLimits } from "./schema.js";
+import { limitSchema } from "./schema.js";
 import {
   canonicalizeUrl,
   isPublicResourceUrl,
@@ -152,21 +152,28 @@ function run(
   }
 
   // 6. Content limits. The schema is data: walked for limits, never compiled.
-  if (
-    typeof resource.description === "string" &&
-    resource.description.length > LIMITS.descriptionChars
-  ) {
-    return reject("too_large", "description");
-  }
   // The extension schema and mcp `inputSchema`. http `body`, `queryParams` and `pathParams` are
   // example values (their schemas sit in `raw.schema`), bounded by the size cap only.
-  if (![raw.schema, input.inputSchema].every(isSchemaWithinLimits)) {
-    return reject("schema_too_complex");
+  const schema = limitSchema(raw.schema);
+  const inputSchema = limitSchema(input.inputSchema);
+  if (!schema.ok || !inputSchema.ok) return reject("schema_too_complex");
+  let bazaar = raw;
+  // A schema that lost a long `pattern` is a copy; the payment's own block stays as sent.
+  if (schema.schema !== raw.schema || inputSchema.schema !== input.inputSchema) {
+    const info = {
+      ...(raw.info as Record<string, unknown>),
+      input: { ...input, inputSchema: inputSchema.schema },
+    };
+    bazaar = { ...raw, info, schema: schema.schema };
   }
 
   // 7. Upstream extraction, only now that it can't hit its known throws. `validate = false`:
   //    `true` would compile the seller's schema in-process.
-  const extracted = extractDiscoveryInfo(payload, requirements, false);
+  const extracted = extractDiscoveryInfo(
+    { ...payload, extensions: { ...extensions, bazaar } },
+    requirements,
+    false,
+  );
   if (!extracted) return reject("internal_error", "extraction returned null");
 
   // 8. Template (http only): our grammar and a segment match against the canonical path.
@@ -178,7 +185,7 @@ function run(
 
   // Upstream echoes every client extension; only `bazaar` belongs in the catalog, and only with
   // the template we kept.
-  const bazaarBlock: Record<string, unknown> = { ...raw };
+  const bazaarBlock: Record<string, unknown> = { ...bazaar };
   delete bazaarBlock.routeTemplate;
   if (routeTemplate) bazaarBlock.routeTemplate = routeTemplate;
   const discovered: Record<string, unknown> = { ...extracted, extensions: { bazaar: bazaarBlock } };
@@ -188,6 +195,16 @@ function run(
   // 2.31.0): "" means none, so the entry leaves it out.
   if (discovered.description === "") delete discovered.description;
   if (discovered.mimeType === "") delete discovered.mimeType;
+  // A long description is cut, not refused (0063), to 500 UTF-16 units as the buyer's MCP counts
+  // them, the last one "…" so an agent sees the text goes on. An emoji that doesn't fit whole is
+  // left out: half of one is JSON a strict parser refuses.
+  if (
+    typeof discovered.description === "string" &&
+    discovered.description.length > LIMITS.descriptionChars
+  ) {
+    const cut = discovered.description.slice(0, LIMITS.descriptionChars - 1);
+    discovered.description = (/[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut) + "…";
+  }
   const iconUrl = sanitizeIconUrl(extracted.iconUrl);
   if (iconUrl) discovered.iconUrl = iconUrl;
   else delete discovered.iconUrl;
