@@ -5,12 +5,23 @@
 // `@x402/stellar` than npm's latest, and clears once a deploy brings it there. Each reads a day
 // with no point as a breach: a read that broke can't pass as all clear, and `watch-errors` counts
 // 2 of 3 five-minute runs, so a once-a-day failure never reaches it.
+import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
 import type { AlarmFactory } from "./factory.js";
+
+/**
+ * Whole UTC days, not CloudWatch's default sliding 24 hours: that window loses yesterday's 08:00
+ * point before today's lands and would fire and clear every morning (AWS, "Alarm evaluation
+ * window"). A day's point is read once the day ends, at 00:00 UTC.
+ */
+function readWholeDays(alarm: cloudwatch.Alarm | undefined): void {
+  if (alarm)
+    (alarm.node.defaultChild as cloudwatch.CfnAlarm).evaluationWindow = { wallClockWindow: {} };
+}
 
 export function addUpstreamAlarms(f: AlarmFactory): void {
   // FILL(m, 1) turns a day with no point into a breach; `breaching` covers a series that was never
   // written, which metric math alone can't see (the factory's Silence shape, the Prices API's 0222).
-  f.level("upstream-changed", {
+  const changed = f.level("upstream-changed", {
     group: "upstream",
     signal: { expression: "FILL(m, 1)", using: { m: { catalog: "upstream_files_changed" } } },
     statistic: "Maximum",
@@ -26,7 +37,7 @@ export function addUpstreamAlarms(f: AlarmFactory): void {
     },
   });
 
-  f.level("upstream-library-behind", {
+  const behind = f.level("upstream-library-behind", {
     group: "upstream",
     signal: { expression: "FILL(m, 1)", using: { m: { catalog: "upstream_library_behind" } } },
     statistic: "Maximum",
@@ -41,4 +52,7 @@ export function addUpstreamAlarms(f: AlarmFactory): void {
       noData: "Breaching: a day with no point is a read that failed.",
     },
   });
+
+  readWholeDays(changed);
+  readWholeDays(behind);
 }

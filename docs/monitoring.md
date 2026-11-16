@@ -202,7 +202,9 @@ the server is down (ADR 0013). It has four sections, run at once:
 A network a section can't read publishes nothing, so its alarms keep their state and
 `watch-errors` fires instead; the other sections still publish. The upstream and library sections
 fail at most once a day, which `watch-errors` can't count on its own: their alarms read a day with
-no point as a breach.
+no point as a breach. Both read whole UTC days, so a day's result reaches the channel after
+00:00 UTC: a sliding 24 hours would lose yesterday's point before today's lands and fire every
+morning.
 
 Its log, and a run by hand:
 

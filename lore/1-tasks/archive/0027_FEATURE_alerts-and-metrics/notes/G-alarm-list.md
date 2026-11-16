@@ -132,8 +132,8 @@ fire.
 
 | Alarm | Signal | Shape | Fires when | Missing data |
 | --- | --- | --- | --- | --- |
-| `upstream-changed` | `upstream_files_changed` | Metric math `FILL(m, 1)`, `Maximum`, 1 of 1 one-day period | One of the four files differs from the pin, or the day's read published nothing; it clears once the pin moves | Breaching: a series never written, which `FILL` can't see |
-| `upstream-library-behind` | `upstream_library_behind` | Metric math `FILL(m, 1)`, `Maximum`, 1 of 1 one-day period | Production asks for another `@x402/stellar` than npm's `latest`, or the day's read published nothing; it clears once a deploy brings production there | As above |
+| `upstream-changed` | `upstream_files_changed` | Metric math `FILL(m, 1)`, `Maximum`, 1 of 1 one-day period, whole UTC days | One of the four files differs from the pin, or the day's read published nothing; it clears once the pin moves | Breaching: a series never written, which `FILL` can't see |
+| `upstream-library-behind` | `upstream_library_behind` | Metric math `FILL(m, 1)`, `Maximum`, 1 of 1 one-day period, whole UTC days | Production asks for another `@x402/stellar` than npm's `latest`, or the day's read published nothing; it clears once a deploy brings production there | As above |
 
 ## Protocol
 

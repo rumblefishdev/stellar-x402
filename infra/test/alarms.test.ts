@@ -579,6 +579,16 @@ describe("the upstream alarms read a day with no point as a breach (0147 decisio
       ids: { m: [metric, {}] },
     });
   });
+
+  // A sliding 24-hour window loses yesterday's 08:00 point before today's lands, so it would fire
+  // and clear every morning; a UTC calendar day holds exactly one run (0147 decision 10).
+  test.each(["upstream-changed", "upstream-library-behind"])(
+    "%s reads whole UTC days, not a sliding 24 hours",
+    (base) => {
+      const p = byName.get(`x402-production-${base}`)!;
+      expect(p["EvaluationWindow"]).toEqual({ WallClockWindow: {} });
+    },
+  );
 });
 
 describe("gauges-silent (decision 28)", () => {
