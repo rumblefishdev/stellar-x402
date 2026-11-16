@@ -86,6 +86,7 @@ testnet cases reproduce (rival in ledger 5694924, ours failed in 5694925). What 
 | 7 | `settlement_nonce_consumed_elsewhere_total` carries a label `window`: `verify` for a refusal in `/verify` or in `/settle`'s re-check before the claim, `settle` for a record that ends with the settle code. Why: the out-of-scope lookup below waits on this counter, and a refusal before the claim writes no record (3 of the 7 testnet cases) | owner, 2026-11-13 | beyond it | nobody checked does it | | |
 | 8 | The nonce read has no timeout of its own: the RPC's per-URL timeout and its failover to the next URL apply. A read that still fails keeps the old reason, logged as `nonce_lookup_failed`; nothing is built for a nonce that can't be read. Why: an own 3 s cut stopped the failover, and a failed read after a front-run needs every RPC URL down in that second (0 cases) | owner, 2026-11-13 | beyond it | nobody checked does it | | |
 | 9 | A record that ends `settle_exact_stellar_nonce_consumed_elsewhere` feeds no breaker, also without an error event that names the cause. Done in its own PR after this task's PR merges, not here: the gap is in the breaker code already merged | owner, 2026-11-13 | beyond it | nobody checked does it | | |
+| 10 | The trustline lookup behind `/verify`'s `simulation_failed` loses its own 3 s timeout too, like the nonce read (decision 8): the RPC's per-URL timeout and failover apply. Done in decision 9's PR | owner, 2026-11-16 | beyond it | nobody checked does it | | |
 
 ## Not yet decided
 
