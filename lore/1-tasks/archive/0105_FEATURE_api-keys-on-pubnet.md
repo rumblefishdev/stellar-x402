@@ -2,7 +2,7 @@
 id: "0105"
 title: "Require an API key on pubnet's /verify and /settle"
 type: FEATURE
-status: active
+status: completed
 owner: akot
 milestone: 2
 related_adr: ["0007"]
@@ -19,6 +19,16 @@ history:
     status: active
     who: akot
     note: "Work starts."
+  - date: "2026-11-16"
+    status: completed
+    who: akot
+    note: >
+      PR #185 merged on 2026-11-16: a pubnet request to `/verify` or `/settle` needs an active API
+      key, read from the `api_keys` registry on a pool of its own, and the limiter and the spend
+      policy get the key's owner; testnet answers as before. The operator's `pnpm keys` script,
+      108 new facilitator tests, and a testnet run of 11 of 11 checks. The portal is 0106 and the
+      owner's budget 0107; the compose service for the script is noted in 0126. Open, not
+      spawned: an alarm or a count of the 401s.
 ---
 
 # Require an API key on pubnet's /verify and /settle
@@ -29,7 +39,7 @@ On `stellar:pubnet`, `/verify` and `/settle` answer only a caller with a known A
 testnet a key is ignored and every route stays open (decided by akot, 2026-11-03, ADR 0007's
 amendment of that date). 0024's budgets bound the loss but not availability: self-payments from
 free addresses can fill the shared `asset:USDC` budget and refuse every seller's USDC (0024's
-[S-design](../archive/0024_FEATURE_spend-budgets-and-breakers/notes/S-design.md), "Residual
+[S-design](0024_FEATURE_spend-budgets-and-breakers/notes/S-design.md), "Residual
 risk"). A key costs a Discord account in the Stellar Developers server (0106) and gets a budget of
 its own (0107), so that attack no longer reaches the callers with keys. `stellar:pubnet` is refused
 until this task and 0107 land, as well as 0090.
