@@ -1,3 +1,4 @@
+import { apiKeyStoreContract } from "@stellar-x402/api-keys/testing";
 import { CATALOG_KEY_VERSION } from "@stellar-x402/bazaar";
 import { Keypair, Networks, StrKey, Transaction } from "@stellar/stellar-sdk";
 import type { PaymentRequirements } from "@x402/core/types";
@@ -22,7 +23,6 @@ import type { Check } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
 import { transferPayload } from "./payment.js";
 import {
-  apiKeyStoreContract,
   catalogAttemptStoreContract,
   catalogStoreContract,
   rateLimitStoreContract,
