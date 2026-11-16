@@ -2,7 +2,7 @@
 id: "0136"
 title: "Rust seller crate, part 1: answer 402 with Stellar terms and settle through a facilitator"
 type: FEATURE
-status: active
+status: completed
 owner: akot
 milestone: 2
 related_adr: ["0001"]
@@ -28,6 +28,15 @@ history:
     status: active
     who: akot
     note: "Work starts: track 3 of the Milestone 2 plan."
+  - date: "2026-11-16"
+    status: completed
+    who: akot
+    note: >
+      PR #177 merged on 2026-11-13: the crate `stellar-x402` in `packages/sdk/rust`, with the
+      axum layer and `examples/weather.rs`. 108 tests with the layer, 67 without; CI job
+      `sdk-rust`. Paid requests settled on testnet, and its answers equal `@x402/express`
+      2.31.0's in 43 of 45 requests, the other two the frameworks' own. What is left is listed
+      for part 2, 0140; 0145 raised the repo's TypeScript to 2.31.0.
 ---
 
 # Rust seller crate, part 1: answer 402 with Stellar terms and settle through a facilitator
