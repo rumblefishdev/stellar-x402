@@ -31,8 +31,6 @@ export type ValidationResult =
       routeTemplate?: string;
       /** A template was sent and discarded (counted in metrics). */
       routeTemplateIgnored: boolean;
-      /** The fields cut to a limit rather than refused (0063): `description`, `pattern`. */
-      trimmed: string[];
     }
   /**
    * `detail` is for logs only and never goes into the header. `bytes`: the size of a field over a
@@ -164,15 +162,14 @@ function run(
   const schema = limitSchema(raw.schema);
   const inputSchema = limitSchema(input.inputSchema);
   if (!schema.ok || !inputSchema.ok) return reject("schema_too_complex");
-  const trimmed: string[] = [];
   let bazaar = raw;
-  if (schema.patternsDropped > 0 || inputSchema.patternsDropped > 0) {
+  // A schema that lost a long `pattern` is a copy; the payment's own block stays as sent.
+  if (schema.schema !== raw.schema || inputSchema.schema !== input.inputSchema) {
     const info = {
       ...(raw.info as Record<string, unknown>),
       input: { ...input, inputSchema: inputSchema.schema },
     };
     bazaar = { ...raw, info, schema: schema.schema };
-    trimmed.push("pattern");
   }
 
   // 7. Upstream extraction, only now that it can't hit its known throws. `validate = false`:
@@ -212,7 +209,6 @@ function run(
   ) {
     const cut = discovered.description.slice(0, LIMITS.descriptionChars - 1);
     discovered.description = (/[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut) + "…";
-    trimmed.push("description");
   }
   const iconUrl = sanitizeIconUrl(extracted.iconUrl);
   if (iconUrl) discovered.iconUrl = iconUrl;
@@ -224,7 +220,6 @@ function run(
     resourceUrl,
     ...(routeTemplate ? { routeTemplate } : {}),
     routeTemplateIgnored: rawTemplate !== undefined && routeTemplate === undefined,
-    trimmed,
   };
 }
 

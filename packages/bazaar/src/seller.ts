@@ -52,13 +52,7 @@ export function toolCall(input: { toolName: string; example?: unknown }): {
 }
 
 export type SellerListing =
-  | {
-      ok: true;
-      entry: NormalizedEntry;
-      droppedFields: number;
-      routeTemplateIgnored: boolean;
-      trimmed: string[];
-    }
+  | { ok: true; entry: NormalizedEntry; droppedFields: number; routeTemplateIgnored: boolean }
   | {
       ok: false;
       reason: BazaarRejectReason | Extract<OffersResult, { ok: false }>["reason"] | "no_listing";
@@ -97,7 +91,6 @@ export function listingFromSeller(
     entry: { key, keyVersion, resource: listed },
     droppedFields: offers.droppedFields,
     routeTemplateIgnored: result.routeTemplateIgnored,
-    trimmed: result.trimmed,
   };
 }
 

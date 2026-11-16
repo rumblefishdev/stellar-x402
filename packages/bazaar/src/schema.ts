@@ -38,7 +38,8 @@ function isPrefix(prefix: string[], path: string[]): boolean {
   return prefix.length <= path.length && prefix.every((segment, i) => segment === path[i]);
 }
 
-export type LimitedSchema = { ok: true; schema: unknown; patternsDropped: number } | { ok: false };
+/** `schema` is the one given when nothing was dropped, else a copy. */
+export type LimitedSchema = { ok: true; schema: unknown } | { ok: false };
 
 /**
  * A seller-supplied JSON Schema within our caps. The schema is treated as data: it is walked with
@@ -85,7 +86,7 @@ export function limitSchema(schema: unknown): LimitedSchema {
       stack.push({ value: child, depth: depth + 1, path: [...path, key], keywords: childKeywords });
     }
   }
-  if (longPatterns.length === 0) return { ok: true, schema, patternsDropped: 0 };
+  if (longPatterns.length === 0) return { ok: true, schema };
   // The depth is within 32 by now, so the copy can't overflow.
   const copy = structuredClone(schema);
   for (const path of longPatterns) {
@@ -93,5 +94,5 @@ export function limitSchema(schema: unknown): LimitedSchema {
     for (const segment of path) holder = holder[segment] as Record<string, unknown>;
     delete holder.pattern;
   }
-  return { ok: true, schema: copy, patternsDropped: longPatterns.length };
+  return { ok: true, schema: copy };
 }

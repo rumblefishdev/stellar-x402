@@ -86,8 +86,6 @@ describe("packages/bazaar", () => {
 
   it("lists a description over 500 characters cut to 500, the last one an ellipsis (0063)", () => {
     const long = pay("https://x.com/a", { info: http }, { description: "d".repeat(600) });
-    const r = validate(long, req);
-    expect(r?.ok && r.trimmed).toEqual(["description"]);
     expect(entry(long).resource.description).toBe("d".repeat(499) + "…");
     // 500 UTF-16 units, as the buyer's MCP counts: an emoji that doesn't fit whole is left out.
     const emoji = pay("https://x.com/a", { info: http }, { description: "d".repeat(498) + "😀ab" });
@@ -96,7 +94,7 @@ describe("packages/bazaar", () => {
       pay("https://x.com/a", { info: http }, { description: "d".repeat(500) }),
       req,
     );
-    expect(fits?.ok && [fits.discovered.description?.length, fits.trimmed]).toEqual([500, []]);
+    expect(fits?.ok && fits.discovered.description).toBe("d".repeat(500));
   });
 
   it("lists a schema without each pattern over 256 characters, keeping the rest (0063)", () => {
@@ -109,8 +107,6 @@ describe("packages/bazaar", () => {
       },
     };
     const http402 = pay("https://x.com/a", { info: http, schema });
-    const r = validate(http402, req);
-    expect(r?.ok && r.trimmed).toEqual(["pattern"]);
     expect(entry(http402).resource.extensions?.bazaar).toMatchObject({
       schema: {
         properties: {
