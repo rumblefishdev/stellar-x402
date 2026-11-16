@@ -70,15 +70,8 @@ describe("seller offers (0063 rows 7-9)", () => {
     });
   });
 
-  it("takes extra up to 4 KiB and 8 offers; one more refuses the whole listing (row 9)", () => {
-    const at = (size: number) => ({ ...offer, extra: extraOf(size) });
-    expect(sellerOffers([at(LIMITS.offerExtraBytes)], key)).toMatchObject({ ok: true });
-    expect(sellerOffers([at(LIMITS.offerExtraBytes + 1)], key)).toEqual({
-      ok: false,
-      reason: "too_large",
-      detail: "accepts.extra",
-      bytes: LIMITS.offerExtraBytes + 1,
-    });
+  it("takes an extra of any size and 8 offers; a ninth refuses the whole listing (row 9)", () => {
+    expect(sellerOffers([{ ...offer, extra: extraOf(5 * 1024) }], key)).toMatchObject({ ok: true });
     const assets = (n: number) =>
       Array.from({ length: n }, (_, i) => ({ ...offer, asset: `C${i}` }));
     expect(sellerOffers(assets(LIMITS.offers), key)).toMatchObject({ ok: true });
@@ -90,20 +83,14 @@ describe("seller offers (0063 rows 7-9)", () => {
     });
   });
 
-  it("refuses a paid requirement whose extra is over 4 KiB in the header too (rows 9, 22)", () => {
+  it("leaves a paid requirement's extra to the whole listing's cap (0063, 17e)", () => {
     const payload = {
       x402Version: 2,
       resource: { url },
       extensions: { bazaar },
     } as unknown as PaymentPayload;
-    const big = { ...offer, extra: extraOf(LIMITS.offerExtraBytes + 1) };
-    expect(validate(payload, big)).toEqual({
-      ok: false,
-      reason: "too_large",
-      detail: "requirements.extra",
-      bytes: LIMITS.offerExtraBytes + 1,
-    });
-    expect(validate(payload, offer)).toMatchObject({ ok: true });
+    const big = { ...offer, extra: extraOf(5 * 1024) };
+    expect(validate(payload, big)).toMatchObject({ ok: true });
   });
 });
 

@@ -57,12 +57,12 @@ settlement.
     asking for a payment (`not_402`) change nothing, as above. Its responses may take up to
     256 KiB each: a tool list carries every tool's schemas (largest measured 122,729 B).
 - **Entry limits (task 0063).**
-  - An offer keeps the spec's seven fields (the upstream `PaymentRequirements` schema); its
-    `extra` takes up to 4 KiB. A listing keeps up to 8 offers. The `bazaar` block keeps its
-    32 KiB. A whole listing, serialized, takes up to 16 KiB, so a page of 100 stays under 1.6 MB
-    (5 of 95,733 listings in the largest public catalog are larger).
-  - Over a limit the whole listing is refused as `too_large`, the paid requirement's `extra`
-    included; the payment never is.
+  - An offer keeps the spec's seven fields (the upstream `PaymentRequirements` schema). A
+    listing keeps up to 8 offers. The `bazaar` block keeps its 32 KiB. A whole listing,
+    serialized, takes up to 16 KiB, so a page of 100 stays under 1.6 MB (4 of 33,446 listings in
+    the largest public catalog are larger, 2026-11-16). An offer's `extra` has no cap of its own:
+    the whole-listing cap bounds it.
+  - Over a limit the whole listing is refused as `too_large`; the payment never is.
 - **Validation.**
   - Types come from `@x402/extensions` (bazaar). `packages/bazaar` holds only a pure validator
     and normalizer.
@@ -143,9 +143,9 @@ settlement.
 - **The check runs after the settle response** because the seller's middleware holds the
   buyer's answer until `/settle` returns (`@x402/express` 2.28.0). Payment latency comes first.
 - **A whole listing is refused over a limit**, not trimmed: the spec's soft drop covers only
-  `serviceName`, `tags` and `iconUrl`, and a listing missing an offer misleads a buyer. The limits
-  are twice the largest measured in the largest public catalog (5,000 entries: `extra` at most
-  1,846 B, at most 4 offers per listing key).
+  `serviceName`, `tags` and `iconUrl`, and a listing missing an offer misleads a buyer. The offer
+  count is twice the largest measured in the largest public catalog (4 per listing key over 5,000
+  entries); `extra` is left to the whole-listing cap (at most 1,846 B measured there).
 - **SSRF is checked where a URL is fetched.** A rule on the URL text can't stop a public name that
   resolves to `127.0.0.1` (OWASP: check the resolved address at connection time), which is what
   `packages/mcp` does before every call. On resource URLs the host rules only refused what

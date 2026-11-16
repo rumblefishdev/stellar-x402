@@ -19,7 +19,6 @@ export const LIMITS = {
    * One offer's serialized `extra`, in bytes, the paid one included: twice the largest measured in
    * the largest public catalog (1,846 B over 5,000 entries, 0063).
    */
-  offerExtraBytes: 4 * 1024,
   /** Offers kept per listing: twice the most measured per listing key there (4, 0063). */
   offers: 8,
   /**
