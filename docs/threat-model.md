@@ -426,11 +426,15 @@ requires one (0105, "API keys" below).
   comes from the payer's nonce entry on chain, not from the error: our failed transaction wrote no
   nonce, so an entry means another transaction used it. Answering
   `success` would let a buyer race one entry through two facilitators to the same seller and be
-  served twice. A used nonce feeds no breaker. The fee still counts against the budgets, and each
-  such record is logged with it (`settlement_nonce_consumed_elsewhere`). The host checks the nonce
-  when the token calls `require_auth`, before a C-account's `__check_auth` runs, so the error names
-  the token, never the payer: shown on testnet for a `test-wallet` payer in a wasm token and in a
-  SAC (task 0024, `apps/facilitator/test/live/results/front-run-testnet.json`).
+  served twice. With an error event that names it, a used nonce feeds no breaker; without one (an
+  RPC without diagnostic events) it still does until task 0141 decision 9. The fee still counts
+  against the budgets, and each such record is logged with it
+  (`settlement_nonce_consumed_elsewhere`). The host runs a C-account's `__check_auth` first and
+  checks the nonce after it, when the token calls `require_auth` (`authenticate`, then
+  `verify_and_consume_nonce`, in soroban-env-host's `auth.rs`), so for a payer whose `__check_auth`
+  passes the error names the token: shown on testnet for a `test-wallet` payer in a wasm token and
+  in a SAC (task 0024, `apps/facilitator/test/live/results/front-run-testnet.json`). A wallet whose
+  own check fails first, say on a spending limit the front-run used up, fails in its own frame.
 - **Residual risk:** A buyer whose entry was submitted by someone else paid and is refused: the
   seller holds the payment until it refunds. The front-runner gains nothing and pays its own fee; no
   case was found in about 4,500 pubnet settlements of four submitters (March to November 2026).

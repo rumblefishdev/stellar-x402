@@ -446,12 +446,12 @@ then simulates once more, to name the causes upstream drops:
 | `invalid_exact_stellar_payto_trustline_missing`          | `payTo` holds no trustline to the classic asset, or the account is unfunded | the seller funds the account and adds it               |
 | `invalid_exact_stellar_payer_trustline_missing`          | the payer holds no trustline to the classic asset                           | the payer makes sure the account exists and adds it    |
 
-`invalidMessage` names the account, the asset and the ledger the simulation saw, and the `verified`
+For the two trustline reasons, `invalidMessage` names the account, the asset and the ledger the simulation saw, and the `verified`
 and `settled` logs carry it as `message`. The token must be a Stellar Asset Contract: any
 contract can emit the same error, and only a SAC's means a trustline. A SAC stops at its first
 failure, the payer's side first, so the payer's message adds that `payTo` wasn't checked: a seller
 missing one too shows up on the next try. Once the trustline is there, the same payment may be
-sent again until its auth expires. `/settle`'s check before the claim gives the same two reasons; a
+sent again until its auth expires. `/settle`'s check before the claim gives the same three reasons; a
 trustline removed after it answers `settle_exact_stellar_simulation_failed` from the pool.
 
 The nonce is used when its entry exists on chain: the host keeps it until the auth entry expires.
@@ -649,7 +649,9 @@ the network, submitted the payer's entry first, or the payer spent the nonce on 
 facilitators to the same seller would be served twice. No action is needed for one; many of them
 mean someone grieves our fees. The same counter with `window: "verify"` counts a refusal in `/verify` or in `/settle`'s re-check
 before the claim, which writes no record: there the other transaction landed before ours was sent,
-so it cost no fee. A seller that sends `/verify` and then `/settle` counts it twice.
+so it cost no fee. It counts requests, not payments: each `/verify`, each `/settle` retry and each
+reopen re-check of the same payload adds one, so a burst of retries is not a burst of front-runs.
+`/verify` keeps no record either, so a repeat of a payment we settled ourselves counts too.
 
 `settlement_landed_after_expired` (counted in `settlement_landed_after_expired_total` by `state`)
 reports a transaction found on chain after its record ended `expired`, with its hash and ledger. The
