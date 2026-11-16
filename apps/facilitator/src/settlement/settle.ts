@@ -597,7 +597,8 @@ export function createSettler(deps: SettlerDeps): Settle & {
           logger.error("settlement_submit_failed", { network, settlementKey: key, error });
           metrics.increment("settlement_submit_failures_total");
         }
-        // The answer is the same fixed reason: a new payment, once this one can't land (0082).
+        // The answer is the same fixed reason: a new payment, once this one can't land (0082); a
+        // nonce another transaction used gets no advice (0141, `withRetry`).
         flagDrift(key, errorReason, "pool");
         return await finish(key, { state: "rejected", errorReason, attempts }, call.origin, own);
       }
