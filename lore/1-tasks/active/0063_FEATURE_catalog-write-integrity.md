@@ -145,14 +145,15 @@ with doubts.
 | 50 | Kept on the owner's word: an unchanged copy doesn't refresh `lastUpdated`, which stays the time of the seller's last confirmation; one `catalog_attempts_total` counter by stage and outcome replaces the rejection and upsert counters; two checks of one key are ordered by a `checked_at` column, the later-started one kept, and `ledger` stays | owner, 2026-11-16 | beyond it | x402 v2 §8.3 names `lastUpdated` only | | |
 | 51 | A catalog item carries no flag that it differs from the seller's 402: the buyer pays by the seller's live 402 (`packages/mcp/src/pay.ts`), which the item's `resource` URL gives. The facilitator logs the cut fields in `catalog_upserted` as `trimmed` | owner, 2026-11-16 | beyond it | spec has no such field (`bazaar.md` ~427-432); no facilitator checked puts one on the item | | |
 | 52 | A cut description ends with "…", counted in the 500, so an agent sees the text goes on | owner, 2026-11-16 | beyond it | Rialto, Vellar and openx402 cut with a plain slice | `packages/bazaar/src/validate.ts` (#189) | `bazaar.test.ts` "the last one an ellipsis" |
+| 53 | A listing keeps the URL the facilitator asked, not the `resource.url` the seller's 402 names: the URL that answered is the fact. Measured 2026-11-16 on 150 CDP hosts: 137 of 138 v2 402s name the asked URL, 1 names `http://localhost:3000/...` | owner, 2026-11-16 | beyond it | spec silent; `@x402/core` fills it from the seller's config or the request | `packages/bazaar/src/seller.ts` | `seller.test.ts` "the URL from the listing" |
+| 54 | A seller answer is read up to 64 KiB within 10 s; an answer that breaks it leaves the listing as the seller last confirmed it. What such a listing becomes later moves to 0069 | owner, 2026-11-16 | beyond it | Veridex compares live terms at refresh; openx402's MCP shows `stale` | `apps/facilitator/src/catalog/cataloger.ts` | `cataloger.test.ts` row 6 |
 
 ## Not yet decided
 
-- Choices made while coding, still open (the owner asked for more on each): an example input over
-  16 KiB is left out and the check runs without it; the listing URL is the one asked, not
-  `resource.url` from the answer; a seller answer up to 64 KiB within 10 s, and a listing stays as
-  it was when the answer breaks it (measured p95 1.85 s, max 5.3 s); an oversized `extra` in the
-  paid offer makes the header say `too_large` at once.
+- An example input over 16 KiB is left out of the seller check: keep the limit, or drop it as a
+  guard for a case the data shows 0 times (the 16 KiB listing cap refuses such a listing anyway).
+- An oversized `extra` in the paid offer makes the header say `too_large` at once; the payment
+  settles either way.
 
 ## PR split
 
