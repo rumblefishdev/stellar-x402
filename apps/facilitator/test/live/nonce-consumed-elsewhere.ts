@@ -73,7 +73,7 @@ const send = rpc.Server.prototype.sendTransaction;
 const get = rpc.Server.prototype.getTransaction;
 let armed: Transaction | undefined;
 const stripped = new Set<string>();
-let ours: { hash: string; strip: boolean } | undefined;
+let ours: { hash: string; strip: boolean; frontRun: string } | undefined;
 let stripNext = false;
 rpc.Server.prototype.sendTransaction = async function (this: rpc.Server, tx) {
   const frontRun = armed;
@@ -84,7 +84,7 @@ rpc.Server.prototype.sendTransaction = async function (this: rpc.Server, tx) {
     log(`front-run ${landed.status} ${sent.hash}, now ours`);
     const hash = tx.hash().toString("hex");
     if (stripNext) stripped.add(hash);
-    ours = { hash, strip: stripNext };
+    ours = { hash, strip: stripNext, frontRun: sent.hash };
   }
   return send.call(this, tx);
 };
@@ -203,7 +203,7 @@ try {
     ours = undefined;
     const res = seen && (await server.getTransaction(seen.hash));
     return {
-      frontRun: armed === undefined ? "landed first" : "not sent",
+      frontRun: seen?.frontRun,
       ours: seen?.hash,
       oursOnChain: res?.status,
       oursEventsStripped: seen?.strip ?? false,
