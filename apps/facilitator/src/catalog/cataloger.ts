@@ -348,6 +348,7 @@ export function createCataloger({
         outcome,
         droppedFields: listing.droppedFields,
         routeTemplateIgnored: listing.routeTemplateIgnored,
+        trimmed: listing.trimmed,
       });
       if (listing.routeTemplateIgnored && outcome !== "stale")
         metrics.increment("catalog_route_template_ignored_total", { origin });

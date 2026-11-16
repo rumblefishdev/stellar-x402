@@ -5,7 +5,7 @@ import {
   type DiscoveredResource,
 } from "@x402/extensions/bazaar";
 import { LIMITS, type BazaarRejectReason } from "./limits.js";
-import { isSchemaWithinLimits } from "./schema.js";
+import { limitSchema } from "./schema.js";
 import {
   canonicalizeUrl,
   isPublicResourceUrl,
@@ -31,6 +31,8 @@ export type ValidationResult =
       routeTemplate?: string;
       /** A template was sent and discarded (counted in metrics). */
       routeTemplateIgnored: boolean;
+      /** The fields cut to a limit rather than refused (0063): `description`, `pattern`. */
+      trimmed: string[];
     }
   /**
    * `detail` is for logs only and never goes into the header. `bytes`: the size of a field over a
@@ -152,12 +154,6 @@ function run(
   }
 
   // 6. Content limits. The schema is data: walked for limits, never compiled.
-  if (
-    typeof resource.description === "string" &&
-    resource.description.length > LIMITS.descriptionChars
-  ) {
-    return reject("too_large", "description");
-  }
   // The paid offer is one of the seller's: the listing would carry it, so the offer limit holds.
   const extraBytes = serializedBytes(requirements.extra ?? {});
   if (extraBytes === undefined || extraBytes > LIMITS.offerExtraBytes) {
@@ -165,13 +161,27 @@ function run(
   }
   // The extension schema and mcp `inputSchema`. http `body`, `queryParams` and `pathParams` are
   // example values (their schemas sit in `raw.schema`), bounded by the size cap only.
-  if (![raw.schema, input.inputSchema].every(isSchemaWithinLimits)) {
-    return reject("schema_too_complex");
+  const schema = limitSchema(raw.schema);
+  const inputSchema = limitSchema(input.inputSchema);
+  if (!schema.ok || !inputSchema.ok) return reject("schema_too_complex");
+  const trimmed: string[] = [];
+  let bazaar = raw;
+  if (schema.patternsDropped > 0 || inputSchema.patternsDropped > 0) {
+    const info = {
+      ...(raw.info as Record<string, unknown>),
+      input: { ...input, inputSchema: inputSchema.schema },
+    };
+    bazaar = { ...raw, info, schema: schema.schema };
+    trimmed.push("pattern");
   }
 
   // 7. Upstream extraction, only now that it can't hit its known throws. `validate = false`:
   //    `true` would compile the seller's schema in-process.
-  const extracted = extractDiscoveryInfo(payload, requirements, false);
+  const extracted = extractDiscoveryInfo(
+    { ...payload, extensions: { ...extensions, bazaar } },
+    requirements,
+    false,
+  );
   if (!extracted) return reject("internal_error", "extraction returned null");
 
   // 8. Template (http only): our grammar and a segment match against the canonical path.
@@ -183,7 +193,7 @@ function run(
 
   // Upstream echoes every client extension; only `bazaar` belongs in the catalog, and only with
   // the template we kept.
-  const bazaarBlock: Record<string, unknown> = { ...raw };
+  const bazaarBlock: Record<string, unknown> = { ...bazaar };
   delete bazaarBlock.routeTemplate;
   if (routeTemplate) bazaarBlock.routeTemplate = routeTemplate;
   const discovered: Record<string, unknown> = { ...extracted, extensions: { bazaar: bazaarBlock } };
@@ -193,6 +203,15 @@ function run(
   // 2.31.0): "" means none, so the entry leaves it out.
   if (discovered.description === "") delete discovered.description;
   if (discovered.mimeType === "") delete discovered.mimeType;
+  // A long description is cut, not refused (0063). It is cut by Unicode character, so the cut
+  // never splits an emoji into half a character the database would refuse.
+  if (typeof discovered.description === "string") {
+    const chars = Array.from(discovered.description);
+    if (chars.length > LIMITS.descriptionChars) {
+      discovered.description = chars.slice(0, LIMITS.descriptionChars).join("");
+      trimmed.push("description");
+    }
+  }
   const iconUrl = sanitizeIconUrl(extracted.iconUrl);
   if (iconUrl) discovered.iconUrl = iconUrl;
   else delete discovered.iconUrl;
@@ -203,6 +222,7 @@ function run(
     resourceUrl,
     ...(routeTemplate ? { routeTemplate } : {}),
     routeTemplateIgnored: rawTemplate !== undefined && routeTemplate === undefined,
+    trimmed,
   };
 }
 
