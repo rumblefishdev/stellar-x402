@@ -20,9 +20,9 @@ export class SellerFetchError extends Error {
 
 /**
  * All of a seller's response headers, in bytes. Its terms travel base64-encoded in one header, so
- * the largest listing we keep (16 KiB) takes about 21.4 KiB, plus the seller's other headers.
+ * the largest listing we keep (36 KiB) takes 48 KiB, plus the seller's other headers.
  */
-const MAX_HEADER_BYTES = 24 * 1024;
+const MAX_HEADER_BYTES = 52 * 1024;
 
 /** How requests to one seller are bounded. */
 export interface SellerLimits {

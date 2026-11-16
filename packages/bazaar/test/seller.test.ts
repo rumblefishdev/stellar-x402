@@ -160,15 +160,19 @@ describe("a listing from the seller's 402 (0063 row 1)", () => {
     ).toMatchObject({ ok: false, reason: "other_pay_to" });
   });
 
-  it("refuses a listing over 16 KiB as a whole, though each field is within its limit", () => {
-    const withExample = (size: number) =>
+  it("refuses a listing over 36 KiB as a whole, though each field is within its limit", () => {
+    // A `bazaar` block within its 32 KiB and an offer whose `extra` takes the listing past 36 KiB.
+    const withExtra = (size: number) =>
       answer({
+        accepts: [{ ...offer, extra: extraOf(size) }],
         extensions: {
-          bazaar: { info: { ...bazaar.info, output: { type: "json", example: "x".repeat(size) } } },
+          bazaar: {
+            info: { ...bazaar.info, output: { type: "json", example: "x".repeat(30 * 1024) } },
+          },
         },
       });
-    expect(listingFromSeller(withExample(1024), { url, ...key })).toMatchObject({ ok: true });
-    const result = listingFromSeller(withExample(LIMITS.listingBytes), { url, ...key });
+    expect(listingFromSeller(withExtra(1024), { url, ...key })).toMatchObject({ ok: true });
+    const result = listingFromSeller(withExtra(8 * 1024), { url, ...key });
     expect(result).toMatchObject({ ok: false, reason: "too_large", detail: "listing" });
     expect(result.ok === false && result.bytes).toBeGreaterThan(LIMITS.listingBytes);
   });

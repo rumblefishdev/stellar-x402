@@ -59,8 +59,9 @@ settlement.
 - **Entry limits (task 0063).**
   - An offer keeps the spec's seven fields (the upstream `PaymentRequirements` schema). A
     listing keeps up to 8 offers. The `bazaar` block keeps its 32 KiB. A whole listing,
-    serialized, takes up to 16 KiB, so a page of 100 stays under 1.6 MB (4 of 33,446 listings in
-    the largest public catalog are larger, 2026-11-16). An offer's `extra` has no cap of its own:
+    serialized, takes up to 36 KiB, so a page of 100 stays under 3.7 MB (0 of 33,446 listings in
+    the largest public catalog are larger, the largest 25.3 KiB, 2026-11-16; a page of 100 such
+    listings read in 491 ms at p95 under 20 readers, measured locally). An offer's `extra` has no cap of its own:
     the whole-listing cap bounds it.
   - Over a limit the whole listing is refused as `too_large`; the payment never is.
 - **Validation.**
@@ -78,7 +79,7 @@ settlement.
   - The facilitator calls a seller URL only for the listing check above, through the
     `packages/seller-fetch` guard: https only, the address checked where it connects (no
     loopback, private or special-use address), no redirects, a 10 s deadline, a 64 KiB body cap
-    (256 KiB for an MCP server, above) and a 24 KiB header cap, enough for a 16 KiB listing once
+    (256 KiB for an MCP server, above) and a 52 KiB header cap, enough for a 36 KiB listing once
     base64-encoded in a header. Either cap passed is `response_too_large`. `CATALOG_LIST_LOCAL`
     also opens http to this machine.
   - Resource URLs carry a scheme allowlist by listing type (task 0053): an `http` listing takes
