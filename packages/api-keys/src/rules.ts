@@ -23,3 +23,12 @@ export function assertApiKey(hash: string, owner: string): void {
       `an API key owner must be <kind>:<id> in a-z, 0-9, "_" and "-", at most ${API_KEY_OWNER_MAX_LENGTH} characters`,
     );
 }
+
+/** The longest sealed copy of a key the registry's issuer may store (0106). */
+export const SEALED_KEY_MAX_BYTES = 1024;
+
+/** Rejects a sealed copy the table would refuse: an empty one, or one over the limit. */
+export function assertSealedKey(sealed: Buffer): void {
+  if (!Buffer.isBuffer(sealed) || sealed.length === 0 || sealed.length > SEALED_KEY_MAX_BYTES)
+    throw new RangeError(`a sealed key must be 1 to ${SEALED_KEY_MAX_BYTES} bytes`);
+}

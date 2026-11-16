@@ -38,3 +38,43 @@ export interface ApiKeyStore {
   /** Every key ever issued, oldest first: for the operator's script. */
   list(): Promise<ApiKeyRecord[]>;
 }
+
+/** The key an owner holds now, as its issuer sees it. */
+export interface OwnedKey {
+  hash: string;
+  createdAt: number;
+  /**
+   * The key's sealed copy. Absent for a key issued without one, the operator's script's, which
+   * nobody can show again.
+   */
+  sealed?: Buffer;
+}
+
+/** An owner's keys: the active one, when it has one, and when its last one was revoked. */
+export interface OwnerKeys {
+  active?: OwnedKey;
+  /** When the owner's most recently revoked key was revoked. */
+  lastRevokedAt?: number;
+}
+
+/**
+ * The registry for an issuer that shows a key to its owner again (0106 decision 3). The registry
+ * holds a key's hash only, so each key issued here is stored with a copy the issuer sealed, and
+ * the copy lives as long as the key is active. The store sees neither the key nor what seals it.
+ */
+export interface SealedKeyStore {
+  /**
+   * Stores a new active key for `owner` and its sealed copy, both or neither. Resolves `false`,
+   * storing nothing, when the owner has an active key. Throws a `RangeError` for what
+   * {@link ApiKeyStore.issue} refuses and for a copy that is empty or over
+   * {@link SEALED_KEY_MAX_BYTES}.
+   */
+  issue(key: { hash: string; owner: string; sealed: Buffer; now: number }): Promise<boolean>;
+  /**
+   * Revokes the owner's active key and deletes every copy of the owner's keys, both or neither.
+   * Resolves `false` when it has no active key.
+   */
+  revoke(owner: string, now: number): Promise<boolean>;
+  /** The owner's active key and its last revocation; `{}` for an owner the registry never saw. */
+  keysOf(owner: string): Promise<OwnerKeys>;
+}
