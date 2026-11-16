@@ -48,9 +48,6 @@ importers:
       '@stellar-x402/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@stellar-x402/mcp':
-        specifier: workspace:*
-        version: link:../../packages/mcp
       '@stellar-x402/metrics-catalog':
         specifier: workspace:*
         version: link:../../packages/metrics-catalog
