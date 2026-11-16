@@ -141,6 +141,7 @@ with doubts.
 | 46 | A `description` over 500 characters is cut to its first 500, by Unicode character, and the listing is kept; `catalog_upserted` names it in `trimmed`. 140 of 92,790 real descriptions are longer; the refusal had dropped 4 of 400 real HTTP listings | owner, 2026-11-16 | changes it (the limit refused the listing) | spec soft-drops `serviceName` and `tags` (`bazaar.md:389-391`), sets no `description` limit (`:277`) | `packages/bazaar/src/validate.ts` (#189) | `bazaar.test.ts` "cut to its first 500" |
 | 47 | A schema `pattern` over 256 characters is dropped from the listing's copy, the rest kept: the facilitator never runs it. 1 of 400 real HTTP listings had been refused for it | owner, 2026-11-16 | changes it | spec silent on `pattern` | `packages/bazaar/src/schema.ts` (#189) | `bazaar.test.ts` "without each pattern over 256" |
 | 48 | Row 1 kept after the premise review: on pubnet too, a listing's text comes from the seller's own 402. A pubnet API key tied to proven `payTo` accounts (0105) would replace the check only after the seller proves its account once, and testnet would still need the check | owner, 2026-11-16 | matches it | spec silent; upstream issue #3005 open | — | — |
+| 49 | The `500` answers once noted under 20 concurrent `/discovery/resources` reads get no task: not reproduced. Locally (2026-11-16): 0 of ~1.4 million reads at 20, 50 and 100 concurrent, 500 listings; with the default limit every read over 120 a minute is a 429. On the deployed testnet: 100 of 100 answered 200 in 5 bursts of 20, p95 238 ms, a catalog of 1 listing. Not covered: a large catalog on a loaded database | owner, 2026-11-16 | changes it (its own task once measured) | — | — | — |
 
 ## Not yet decided
 
@@ -150,11 +151,6 @@ with doubts.
   (measured p95 1.85 s, max 5.3 s); an oversized `extra` in the paid offer makes the header say
   `too_large` at once; one `catalog_attempts_total` counter replaces the rejection and upsert
   counters; writes are ordered by a new `checked_at` column and `ledger` stays.
-- The measured cause of the `500` answers under 20 concurrent `/discovery/resources` reads
-  (hypothesis: the database pool). Not reproduced locally on 2026-11-16: 0 of ~1.4 million reads
-  at 20, 50 and 100 concurrent, 500 listings, local PostgreSQL; with the default limit every read
-  over 120 a minute is a 429. A rerun on the deployed testnet follows (its catalog holds 1
-  listing).
 
 ## PR split
 
