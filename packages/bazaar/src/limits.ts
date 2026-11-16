@@ -1,7 +1,10 @@
 /** Version of the catalog-key rules. Bump it when a normalization rule changes, so stored keys can be migrated. */
 export const CATALOG_KEY_VERSION = 1;
 
-/** Policy limits (see the 0030 G note). A listing over a limit is rejected; the payment never is. */
+/**
+ * Policy limits (see the 0030 G note). A listing over a limit is rejected, except that a long
+ * `description` is cut and a long schema `pattern` dropped (0063); the payment never is.
+ */
 export const LIMITS = {
   /** Serialized `extensions.bazaar`, in bytes. */
   extensionBytes: 32 * 1024,

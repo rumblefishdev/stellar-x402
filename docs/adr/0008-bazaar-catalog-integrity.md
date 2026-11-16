@@ -147,8 +147,9 @@ settlement.
   paid copies can make the facilitator send.
 - **The check runs after the settle response** because the seller's middleware holds the
   buyer's answer until `/settle` returns (`@x402/express` 2.28.0). Payment latency comes first.
-- **A whole listing is refused over a limit**, not trimmed: the spec's soft drop covers only
-  `serviceName`, `tags` and `iconUrl`, and a listing missing an offer misleads a buyer. The limits
+- **A whole listing is refused over a limit**, not trimmed, except for `description` and a schema
+  `pattern`, which are cut (above): a listing missing an offer misleads a buyer, and a cut
+  description or a dropped format check doesn't keep the buyer from paying the right price. The limits
   are twice the largest measured in the largest public catalog (5,000 entries: `extra` at most
   1,846 B, at most 4 offers per listing key).
 - **SSRF is checked where a URL is fetched.** A rule on the URL text can't stop a public name that
