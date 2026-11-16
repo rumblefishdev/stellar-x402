@@ -61,9 +61,14 @@ settlement.
     listing keeps up to 8 offers. The `bazaar` block keeps its 32 KiB. A whole listing,
     serialized, takes up to 36 KiB, so a page of 100 stays under 3.7 MB (0 of 33,446 listings in
     the largest public catalog are larger, the largest 25.3 KiB, 2026-11-16; a page of 100 such
-    listings read in 491 ms at p95 under 20 readers, measured locally). An offer's `extra` has no cap of its own:
-    the whole-listing cap bounds it.
+    listings read in 491 ms at p95 under 20 readers, measured locally). An offer's `extra` has no
+    cap of its own: the whole-listing cap bounds it.
   - Over a limit the whole listing is refused as `too_large`; the payment never is.
+  - Two fields are cut instead, and the rest of the listing is kept: a `description` over 500
+    characters is cut to 500, its last one "…", and a schema `pattern` over 256 characters is
+    dropped (the facilitator never runs it). The seller's answer as sent stays in the listing
+    attempt's row. In the largest public catalog 140 of 92,790 descriptions are longer; in a run
+    over 400 real HTTP hosts the two limits had refused 4 listings and 1.
 - **Validation.**
   - Types come from `@x402/extensions` (bazaar). `packages/bazaar` holds only a pure validator
     and normalizer.
@@ -143,10 +148,11 @@ settlement.
   paid copies can make the facilitator send.
 - **The check runs after the settle response** because the seller's middleware holds the
   buyer's answer until `/settle` returns (`@x402/express` 2.28.0). Payment latency comes first.
-- **A whole listing is refused over a limit**, not trimmed: the spec's soft drop covers only
-  `serviceName`, `tags` and `iconUrl`, and a listing missing an offer misleads a buyer. The offer
-  count is twice the largest measured in the largest public catalog (4 per listing key over 5,000
-  entries); `extra` is left to the whole-listing cap (at most 1,846 B measured there).
+- **A whole listing is refused over a limit**, not trimmed, except for `description` and a schema
+  `pattern`, which are cut (above): a listing missing an offer misleads a buyer, and a cut
+  description or a dropped format check doesn't keep the buyer from paying the right price. The
+  offer count is twice the largest measured in the largest public catalog (4 per listing key over
+  5,000 entries); `extra` is left to the whole-listing cap (at most 1,846 B measured there).
 - **SSRF is checked where a URL is fetched.** A rule on the URL text can't stop a public name that
   resolves to `127.0.0.1` (OWASP: check the resolved address at connection time), which is what
   `packages/mcp` does before every call. On resource URLs the host rules only refused what

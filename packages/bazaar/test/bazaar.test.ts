@@ -84,6 +84,53 @@ describe("packages/bazaar", () => {
     ]);
   });
 
+  it("lists a description over 500 characters cut to 500, the last one an ellipsis (0063)", () => {
+    const long = pay("https://x.com/a", { info: http }, { description: "d".repeat(600) });
+    expect(entry(long).resource.description).toBe("d".repeat(499) + "…");
+    // 500 UTF-16 units, as the buyer's MCP counts: an emoji that doesn't fit whole is left out.
+    const emoji = pay("https://x.com/a", { info: http }, { description: "d".repeat(498) + "😀ab" });
+    expect(entry(emoji).resource.description).toBe("d".repeat(498) + "…");
+    const fits = validate(
+      pay("https://x.com/a", { info: http }, { description: "d".repeat(500) }),
+      req,
+    );
+    expect(fits?.ok && fits.discovered.description).toBe("d".repeat(500));
+  });
+
+  it("lists a schema without each pattern over 256 characters, keeping the rest (0063)", () => {
+    const schema = {
+      properties: {
+        id: { type: "string", pattern: "x".repeat(257) },
+        code: { type: "string", pattern: "y".repeat(256) },
+        // A property named `pattern` is a name, not the keyword.
+        pattern: { type: "string" },
+      },
+    };
+    const http402 = pay("https://x.com/a", { info: http, schema });
+    expect(entry(http402).resource.extensions?.bazaar).toMatchObject({
+      schema: {
+        properties: {
+          id: { type: "string" },
+          code: { type: "string", pattern: "y".repeat(256) },
+          pattern: { type: "string" },
+        },
+      },
+    });
+    expect(
+      (entry(http402).resource.extensions?.bazaar as { schema: typeof schema }).schema.properties
+        .id,
+    ).not.toHaveProperty("pattern");
+    // The payment's own block is left as it was sent.
+    expect(schema.properties.id.pattern).toHaveLength(257);
+
+    const inputSchema = { type: "object", properties: { q: { pattern: "z".repeat(300) } } };
+    const tool = pay("https://x.com/mcp", { info: { input: { ...mcp.input, inputSchema } } });
+    const bazaar = entry(tool).resource.extensions?.bazaar as {
+      info: { input: { inputSchema: unknown } };
+    };
+    expect(bazaar.info.input.inputSchema).toEqual({ type: "object", properties: { q: {} } });
+  });
+
   it("treats an http body as example data, not a schema", () => {
     const body = { $ref: "order-42", pattern: "x".repeat(257) };
     const p = pay("https://x.com/a", {
@@ -169,11 +216,6 @@ describe("packages/bazaar", () => {
     ["mimeType json", pay("https://x.com/a", { info: http }, { mimeType: "json" }), "invalid_info"],
     ["x402 v1", pay("https://x.com/a", { info: http }, {}, 1), "unsupported_version"],
     ["x402 v3", pay("https://x.com/a", { info: http }, {}, 3), "unsupported_version"],
-    [
-      "501-char description",
-      pay("https://x.com/a", { info: http }, { description: "d".repeat(501) }),
-      "too_large",
-    ],
     ["deep schema", pay("https://x.com/a", { info: http, schema: deep(33) }), "schema_too_complex"],
     [
       "external $ref",

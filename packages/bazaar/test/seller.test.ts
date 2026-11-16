@@ -147,6 +147,12 @@ describe("a listing from the seller's 402 (0063 row 1)", () => {
     });
   });
 
+  it("cuts a long description in the seller's own 402 as in a payment's copy (0063)", () => {
+    const long = answer({ resource: { url, description: "d".repeat(600) } });
+    const result = listingFromSeller(long, { url, ...key });
+    expect(result.ok && result.entry.resource.description).toBe("d".repeat(499) + "…");
+  });
+
   it("refuses an answer without a listing, or with one that breaks a rule", () => {
     expect(listingFromSeller(answer({ extensions: {} }), { url, ...key })).toMatchObject({
       ok: false,
