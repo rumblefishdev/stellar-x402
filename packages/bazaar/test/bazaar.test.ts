@@ -84,12 +84,14 @@ describe("packages/bazaar", () => {
     ]);
   });
 
-  it("lists a description over 500 characters cut to its first 500 (0063)", () => {
-    const long = pay("https://x.com/a", { info: http }, { description: "d".repeat(499) + "😀ab" });
+  it("lists a description over 500 characters cut to 500, the last one an ellipsis (0063)", () => {
+    const long = pay("https://x.com/a", { info: http }, { description: "d".repeat(600) });
     const r = validate(long, req);
     expect(r?.ok && r.trimmed).toEqual(["description"]);
-    // 500 UTF-16 units, as the buyer's MCP counts: the emoji that doesn't fit whole is left out.
-    expect(entry(long).resource.description).toBe("d".repeat(499));
+    expect(entry(long).resource.description).toBe("d".repeat(499) + "…");
+    // 500 UTF-16 units, as the buyer's MCP counts: an emoji that doesn't fit whole is left out.
+    const emoji = pay("https://x.com/a", { info: http }, { description: "d".repeat(498) + "😀ab" });
+    expect(entry(emoji).resource.description).toBe("d".repeat(498) + "…");
     const fits = validate(
       pay("https://x.com/a", { info: http }, { description: "d".repeat(500) }),
       req,

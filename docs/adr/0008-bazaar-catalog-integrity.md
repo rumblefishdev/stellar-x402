@@ -64,7 +64,7 @@ settlement.
   - Over a limit the whole listing is refused as `too_large`, the paid requirement's `extra`
     included; the payment never is.
   - Two fields are cut instead, and the rest of the listing is kept: a `description` over 500
-    characters keeps its first 500, and a schema `pattern` over 256 characters is dropped (the
+    characters is cut to 500, its last one "…", and a schema `pattern` over 256 characters is dropped (the
     facilitator never runs it). The `catalog_upserted` log line names them in `trimmed`. In the
     largest public catalog 140 of 92,790 descriptions are longer; in a run over 400 real HTTP
     hosts the two limits had refused 4 listings and 1.
