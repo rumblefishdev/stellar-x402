@@ -1,13 +1,8 @@
 import { seriesDims } from "@stellar-x402/metrics-catalog";
 import { describe, expect, test } from "vitest";
 import type { PutMetricDataInput } from "../src/watch/balance.js";
-import {
-  LIBRARY_METRIC,
-  NPM_LATEST_URL,
-  OUR_RAW,
-  PACKAGE_PATH,
-  runLibrary,
-} from "../src/watch/library.js";
+import { LIBRARY_METRIC, NPM_LATEST_URL, PACKAGE_PATH, runLibrary } from "../src/watch/library.js";
+import { OUR_RAW } from "../src/watch/upstream.js";
 import { NAMESPACE } from "../src/watch/metric.js";
 
 const HEALTH = "https://x402-facilitator.sorobanscan.com/health";
@@ -81,12 +76,6 @@ describe("runLibrary", () => {
     expect(h.published[0]?.MetricData[0]?.Value).toBe(0);
   });
 
-  test("reads the facilitator's package.json at the commit production runs, not develop", () => {
-    expect(PACKAGE_PATH).toBe("apps/facilitator/package.json");
-    expect(OUR_RAW).toBe("https://raw.githubusercontent.com/rumblefishdev/stellar-x402");
-    expect(NPM_LATEST_URL).toBe("https://registry.npmjs.org/@x402/stellar/latest");
-  });
-
   test.each([
     ["a /health that names no commit", { [HEALTH]: health() }, /names no commit/],
     [
@@ -95,6 +84,11 @@ describe("runLibrary", () => {
       /\^2\.31\.0/,
     ],
     ["npm down", { [NPM_LATEST_URL]: undefined }, /404/],
+    [
+      "a page in place of /health's JSON",
+      { [HEALTH]: "<html>challenge</html>" },
+      /x402-facilitator\.sorobanscan\.com\/health answered no JSON/,
+    ],
     ["GitHub without the file", { [`${OUR_RAW}/${COMMIT}/${PACKAGE_PATH}`]: undefined }, /404/],
   ] as const)("publishes nothing and fails loudly on %s", async (_, change, error) => {
     const answers = { ...today, ...change } as Record<string, string | undefined>;

@@ -7,8 +7,8 @@ import type { PutMetricDataInput } from "./balance.js";
 import { NAMESPACE } from "./metric.js";
 import { PROTOCOL_DEADLINE_MS } from "./protocol.js";
 
-export const OUR_PIN_URL =
-  "https://raw.githubusercontent.com/rumblefishdev/stellar-x402/develop/conformance/src/upstream.ts";
+export const OUR_RAW = "https://raw.githubusercontent.com/rumblefishdev/stellar-x402";
+export const OUR_PIN_URL = `${OUR_RAW}/develop/conformance/src/upstream.ts`;
 export const UPSTREAM_RAW = "https://raw.githubusercontent.com/x402-foundation/x402";
 
 /**

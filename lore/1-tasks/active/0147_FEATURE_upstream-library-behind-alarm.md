@@ -52,8 +52,8 @@ A fresh review of the goal alone, 2026-11-16: the premise holds, with caveats.
   2.31.0; 2.29.0 came out on 2026-10-28, so production had been behind for about three weeks.
 - With a release about once a week and deploys by hand, the alarm sits in ALARM most of the time,
   and CloudWatch notifies only on a change of state: a second release, or a read that breaks, while
-  it is in ALARM sends nothing. Decisions 8 and 9 accept that; the failed read still shows once a
-  deploy should have brought the alarm back to OK.
+  it is in ALARM sends nothing. Decisions 8 and 9 accept that, and the owner kept them after this review (2026-11-16): the
+  failed read still shows once a deploy should have brought the alarm back to OK.
 - A patch release (2.31.1) keeps it in ALARM until the range is raised to `~2.31.1`: production
   does run 2.31.0 then. 0 patch releases of `@x402/stellar` since 2026-05-01.
 - Other categories weighed: a dependency bot (a PR per release, no alarm), and "merged but not
@@ -65,7 +65,7 @@ A fresh review of the goal alone, 2026-11-16: the premise holds, with caveats.
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | The version compared is the one production runs: the commit from `/health`, then `apps/facilitator/package.json` at that commit, so a bump merged but not deployed still pages | the owner's decision, 2026-11-16 | as the task says | no standard | `infra/src/watch/library.ts` | `watch-library.test.ts`: 1 when production asks for another |
 | 2 | Its own alarm and metric, not a fifth entry in `upstream_files_changed`: production is behind for most of the time, which would hide spec changes behind one ALARM state | the owner's decision, 2026-11-16 | as the task says | no standard | `infra/src/lib/alarms/upstream.ts`, metrics-catalog | `alarms.test.ts`: the upstream group |
-| 3 | The alarm is named `upstream-library-behind`, in the `upstream` group beside `upstream-changed` and `upstream-silent` | the owner's decision, 2026-11-16 | as the task says | no standard | `infra/src/lib/alarms/upstream.ts` | `alarms.test.ts`: the upstream group |
+| 3 | The alarm is named `upstream-library-behind`, in the `upstream` group beside `upstream-changed` | the owner's decision, 2026-11-16 | as the task says | no standard | `infra/src/lib/alarms/upstream.ts` | `alarms.test.ts`: the upstream group |
 | 4 | One plain question: is the `@x402/stellar` version production asks for (its `package.json` range, without the `~`) the one npm calls `latest`? 1 when they differ, 0 when equal; no minor count, no major rule | the owner's decision, 2026-11-16 | changes it: the task said minors behind | no standard | `infra/src/watch/library.ts` | `watch-library.test.ts`: 1 / 0 |
 | 5 | A `/health` with no `commit` fails the read loudly (`watch_section_failed`), never falls back to develop | the owner's decision, 2026-11-16 | beyond it | no standard | `infra/src/watch/library.ts` | `watch-library.test.ts`: names no commit |
 | 6 | The version is read with a plain match on `~X.Y.Z`, the shape AD-14 sets; any other shape fails the read | the owner's decision, 2026-11-16 | beyond it | no standard | `infra/src/watch/library.ts` | `watch-library.test.ts`: another shape |

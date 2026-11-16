@@ -314,6 +314,8 @@ line. If the day's read failed, `watch_section_failed` with `section: library` n
 - `not ~X.Y.Z`: the range in `apps/facilitator/package.json` has another shape; AD-14 asks for
   `~X.Y.Z`. Change it back, or the read in `infra/src/watch/library.ts`.
 - `answered 404`, `429` or `5xx`, or a timeout: GitHub, npm or `/health` refused or was slow.
+- `answered no JSON`: the named URL sent a page in place of JSON, such as a Cloudflare challenge in
+  front of `/health`.
 
 ## The facilitator
 

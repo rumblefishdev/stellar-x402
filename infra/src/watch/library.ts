@@ -7,9 +7,9 @@
 import type { PutMetricDataInput } from "./balance.js";
 import { NAMESPACE } from "./metric.js";
 import { PROTOCOL_DEADLINE_MS } from "./protocol.js";
+import { OUR_RAW } from "./upstream.js";
 
 export const HEALTH_ENV = "WATCH_HEALTH_URL";
-export const OUR_RAW = "https://raw.githubusercontent.com/rumblefishdev/stellar-x402";
 export const PACKAGE_PATH = "apps/facilitator/package.json";
 export const NPM_LATEST_URL = "https://registry.npmjs.org/@x402/stellar/latest";
 
@@ -38,17 +38,27 @@ export async function runLibrary(deps: LibraryDeps): Promise<void> {
   }
 }
 
+/** A body as JSON, or a throw naming the URL: a challenge page in place of JSON says where it came from. */
+async function readJson(deps: LibraryDeps, url: string, signal: AbortSignal): Promise<unknown> {
+  const text = await deps.fetchText(url, signal);
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new Error(`${url} answered no JSON`, { cause: error });
+  }
+}
+
 async function compare(deps: LibraryDeps): Promise<void> {
   // One deadline for every read, the protocol section's, inside the function's 60 s timeout.
   const signal = AbortSignal.timeout(PROTOCOL_DEADLINE_MS);
 
-  const health = JSON.parse(await deps.fetchText(deps.healthUrl, signal)) as { commit?: unknown };
+  const health = (await readJson(deps, deps.healthUrl, signal)) as { commit?: unknown };
   const commit = health.commit;
   if (typeof commit !== "string" || !/^[0-9a-f]{40}$/.test(commit))
     throw new Error(`${deps.healthUrl} names no commit`);
 
   const packageUrl = `${OUR_RAW}/${commit}/${PACKAGE_PATH}`;
-  const pkg = JSON.parse(await deps.fetchText(packageUrl, signal)) as {
+  const pkg = (await readJson(deps, packageUrl, signal)) as {
     dependencies?: Record<string, string>;
   };
   // AD-14 pins every @x402 package as `~X.Y.Z`; another shape is a change this read must hear of.
@@ -57,7 +67,7 @@ async function compare(deps: LibraryDeps): Promise<void> {
   if (!pinned) throw new Error(`${packageUrl} asks for @x402/stellar ${range}, not ~X.Y.Z`);
   const production = pinned[1]!;
 
-  const npm = JSON.parse(await deps.fetchText(NPM_LATEST_URL, signal)) as { version?: unknown };
+  const npm = (await readJson(deps, NPM_LATEST_URL, signal)) as { version?: unknown };
   const latest = npm.version;
   if (typeof latest !== "string") throw new Error(`${NPM_LATEST_URL} names no version`);
 
