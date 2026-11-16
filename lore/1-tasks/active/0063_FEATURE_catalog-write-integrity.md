@@ -147,11 +147,10 @@ with doubts.
 | 52 | A cut description ends with "…", counted in the 500, so an agent sees the text goes on | owner, 2026-11-16 | beyond it | Rialto, Vellar and openx402 cut with a plain slice | `packages/bazaar/src/validate.ts` (#189) | `bazaar.test.ts` "the last one an ellipsis" |
 | 53 | A listing keeps the URL the facilitator asked, not the `resource.url` the seller's 402 names: the URL that answered is the fact. Measured 2026-11-16 on 150 CDP hosts: 137 of 138 v2 402s name the asked URL, 1 names `http://localhost:3000/...` | owner, 2026-11-16 | beyond it | spec silent; `@x402/core` fills it from the seller's config or the request | `packages/bazaar/src/seller.ts` | `seller.test.ts` "the URL from the listing" |
 | 54 | A seller answer is read up to 64 KiB within 10 s; an answer that breaks it leaves the listing as the seller last confirmed it. What such a listing becomes later moves to 0069 | owner, 2026-11-16 | beyond it | Veridex compares live terms at refresh; openx402's MCP shows `stale` | `apps/facilitator/src/catalog/cataloger.ts` | `cataloger.test.ts` row 6 |
+| 55 | The seller check sends the listing's example input whatever its size: the 16 KiB cap on it guarded 0 cases, since such an example breaks the 16 KiB listing cap, and the 32 KiB `bazaar` block bounds it | owner, 2026-11-16 | changes row 4 (up to 16 KiB) | — | `packages/bazaar/src/seller.ts` (#190) | `seller.test.ts` "an example of any size" |
 
 ## Not yet decided
 
-- An example input over 16 KiB is left out of the seller check: keep the limit, or drop it as a
-  guard for a case the data shows 0 times (the 16 KiB listing cap refuses such a listing anyway).
 - An oversized `extra` in the paid offer makes the header say `too_large` at once; the payment
   settles either way.
 
