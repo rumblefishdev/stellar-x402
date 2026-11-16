@@ -14,6 +14,7 @@ import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import { RpcUnavailableError } from "@stellar-x402/signer-pool";
 import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/core/types";
 import { describe, expect, it, vi } from "vitest";
+import { memoryMetrics } from "../src/metrics.js";
 import { NONCE_CONSUMED_REASON, type IsNonceUsed } from "../src/settlement/nonce-used.js";
 import type { FindMissingTrustline, MissingTrustline } from "../src/settlement/trustline.js";
 import {
@@ -122,6 +123,7 @@ function setup(
   const latestLedger = vi.fn(async () => CURRENT);
   const missingTrustline = vi.fn<FindMissingTrustline>(async () => missing);
   const nonceUsed = vi.fn<IsNonceUsed>(async () => false);
+  const metrics = memoryMetrics();
   const verify = createVerifier({
     network,
     upstream,
@@ -132,9 +134,10 @@ function setup(
     latestLedger,
     missingTrustline,
     nonceUsed,
+    metrics: metrics.for({ network }),
     ...deps,
   });
-  return { verify, upstream, latestLedger, missingTrustline, nonceUsed };
+  return { verify, upstream, latestLedger, missingTrustline, nonceUsed, metrics };
 }
 
 const rejected = (invalidReason: string) =>
@@ -202,6 +205,14 @@ describe("createVerifier", () => {
       });
       expect(nonceUsed).toHaveBeenCalledWith(payer, "1");
       expect(missingTrustline).not.toHaveBeenCalled();
+    });
+
+    it("counts that refusal once, for /verify and /settle's re-check alike (0141 decision 12)", async () => {
+      const { verify, metrics } = setup(failed, { nonceUsed: async () => true });
+      await verify(payload(), requirements);
+      expect(
+        metrics.value("settlement_nonce_consumed_elsewhere_total", { window: "verify", network }),
+      ).toBe(1);
     });
 
     it("keeps upstream's answer when no trustline is missing", async () => {

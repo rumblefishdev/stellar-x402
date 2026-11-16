@@ -3120,19 +3120,6 @@ describe("an answer that ended a payment (0082)", () => {
     });
   });
 
-  it("counts a re-check that refuses because another transaction used the nonce (0141 decision 7)", async () => {
-    const check = vi.fn(async () => ({
-      response: { isValid: false, invalidReason: NONCE_CONSUMED_REASON, payer },
-    }));
-    const { settle, metrics } = setup(landing(), { check });
-    expect((await settle(payload(), requirements)).response).toMatchObject({
-      errorReason: NONCE_CONSUMED_REASON,
-    });
-    expect(metrics.value("settlement_nonce_consumed_elsewhere_total", { window: "verify" })).toBe(
-      1,
-    );
-  });
-
   it("reads the latest ledger once for a reopen that ends", async () => {
     const latestLedger = vi.fn(async () => CURRENT);
     let calls = 0;
