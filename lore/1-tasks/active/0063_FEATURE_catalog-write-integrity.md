@@ -148,11 +148,14 @@ with doubts.
 | 53 | A listing keeps the URL the facilitator asked, not the `resource.url` the seller's 402 names: the URL that answered is the fact. Measured 2026-11-16 on 150 CDP hosts: 137 of 138 v2 402s name the asked URL, 1 names `http://localhost:3000/...` | owner, 2026-11-16 | beyond it | spec silent; `@x402/core` fills it from the seller's config or the request | `packages/bazaar/src/seller.ts` | `seller.test.ts` "the URL from the listing" |
 | 54 | A seller answer is read up to 64 KiB within 10 s; an answer that breaks it leaves the listing as the seller last confirmed it. What such a listing becomes later moves to 0069 | owner, 2026-11-16 | beyond it | Veridex compares live terms at refresh; openx402's MCP shows `stale` | `apps/facilitator/src/catalog/cataloger.ts` | `cataloger.test.ts` row 6 |
 | 55 | The seller check sends the listing's example input whatever its size: the 16 KiB cap on it guarded 0 cases, since such an example breaks the 16 KiB listing cap, and the 32 KiB `bazaar` block bounds it | owner, 2026-11-16 | changes row 4 (up to 16 KiB) | — | `packages/bazaar/src/seller.ts` (#190) | `seller.test.ts` "an example of any size" |
+| 56 | An offer's `extra` has no cap of its own; the 16 KiB whole-listing cap bounds it, so a paid offer with a large `extra` no longer gets `too_large` in the settle header at once. Honest `extra` measures at most 1,846 B; 4 of 33,446 CDP listings are over 16 KiB (2026-11-16) | owner, 2026-11-16 | changes row 9 (4 KiB per `extra`) | openx402, walras and fastnear cap only the whole metadata or block | `packages/bazaar/src/offers.ts`, `validate.ts` (#193) | `seller.test.ts` "an extra of any size" |
 
 ## Not yet decided
 
-- An oversized `extra` in the paid offer makes the header say `too_large` at once; the payment
-  settles either way.
+- The whole-listing cap: 16 KiB (a page of 100 under 1.6 MB, chosen, not measured) or 36 KiB as
+  rail402; a local measurement of page cost at both sizes runs first.
+- Whether `trimmed` (the fields cut, in the `catalog_upserted` log) stays: the attempt row already
+  keeps the seller's answer as sent.
 
 ## PR split
 
