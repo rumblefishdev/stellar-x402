@@ -72,6 +72,8 @@ describe("the watch bundle", () => {
         WATCH_PROTOCOL: JSON.stringify([
           { network: "stellar:testnet", horizonUrl: "https://127.0.0.1:1" },
         ]),
+        // Read only by the 08:00 UTC run, which this one isn't; the handler refuses to start without it.
+        WATCH_HEALTH_URL: "https://127.0.0.1:1/health",
       },
     );
     expect(result).toEqual({

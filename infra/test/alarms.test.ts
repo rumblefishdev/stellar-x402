@@ -180,7 +180,7 @@ describe("the Alarms template", () => {
   test("puts the upstream alarms in their own group, so they go on only after the first daily run", () => {
     expect(records.filter((r) => r.group === "upstream").map((r) => r.alarmName)).toEqual([
       "x402-production-upstream-changed",
-      "x402-production-upstream-silent",
+      "x402-production-upstream-library-behind",
     ]);
   });
 
@@ -446,7 +446,7 @@ const LEVEL: Record<
   "protocol-changed": [">", expectedProtocol, "Maximum", 300, 2, 2],
   "protocol-upgrade-coming": [">", supportedProtocol, "Maximum", 300, 2, 2],
   "upstream-changed": [">=", 1, "Maximum", 86400, 1, 1],
-  "upstream-silent": ["<", 1, "SampleCount", 86400, 2, 2],
+  "upstream-library-behind": [">=", 1, "Maximum", 86400, 1, 1],
 };
 
 /** Each Event alarm's threshold other than 1, which the list writes as "at N or more". */
@@ -567,6 +567,19 @@ const SIX = {
   stalled: "rpc_stalled_seconds",
   balance: "balance_reading_age_seconds",
 };
+
+describe("the upstream alarms read a day with no point as a breach (0147 decisions 8, 9)", () => {
+  test.each([
+    ["upstream-changed", "upstream_files_changed"],
+    ["upstream-library-behind", "upstream_library_behind"],
+  ])("%s fills a missing point with 1", (base, metric) => {
+    expect(mathOf(all.alarms, `x402-production-${base}`)).toEqual({
+      expression: "FILL(m, 1)",
+      stats: ["Maximum"],
+      ids: { m: [metric, {}] },
+    });
+  });
+});
 
 describe("gauges-silent (decision 28)", () => {
   const on = allOn();

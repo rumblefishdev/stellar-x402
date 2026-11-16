@@ -733,6 +733,16 @@ export const CATALOG = [
     sets: PLAIN,
     emit: "aggregated",
   },
+  // 1 while production asks for another @x402/stellar than npm's latest, 0 when it matches (0147).
+  {
+    namespace: WATCH,
+    name: "upstream_library_behind",
+    kind: "gauge",
+    unit: "Count",
+    scope: "process",
+    sets: PLAIN,
+    emit: "aggregated",
+  },
 ] as const satisfies readonly MetricDef[];
 
 type Entry = (typeof CATALOG)[number];

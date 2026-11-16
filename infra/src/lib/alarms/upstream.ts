@@ -1,40 +1,44 @@
-// G-alarm-list, "Upstream": the off-server check's upstream section (task 0029), once a day at
-// 08:00 UTC. `upstream-changed` fires while a file the conformance gate rests on, or the discovery
-// spec, differs from the gate's pin, and clears once the pin moves to an upstream that has the
-// change. `upstream-silent` fires when the section published nothing for two days: `watch-errors`
-// counts 2 of 3 five-minute runs, so a once-a-day failure never reaches it.
+// G-alarm-list, "Upstream": the off-server check's upstream and library sections (tasks 0029 and
+// 0147), once a day at 08:00 UTC. `upstream-changed` fires while a file the conformance gate rests
+// on, or the discovery spec, differs from the gate's pin, and clears once the pin moves to an
+// upstream that has the change. `upstream-library-behind` fires while production asks for another
+// `@x402/stellar` than npm's latest, and clears once a deploy brings it there. Each reads a day
+// with no point as a breach: a read that broke can't pass as all clear, and `watch-errors` counts
+// 2 of 3 five-minute runs, so a once-a-day failure never reaches it.
 import type { AlarmFactory } from "./factory.js";
 
 export function addUpstreamAlarms(f: AlarmFactory): void {
+  // FILL(m, 1) turns a day with no point into a breach; `breaching` covers a series that was never
+  // written, which metric math alone can't see (the factory's Silence shape, the Prices API's 0222).
   f.level("upstream-changed", {
     group: "upstream",
-    signal: { catalog: "upstream_files_changed" },
+    signal: { expression: "FILL(m, 1)", using: { m: { catalog: "upstream_files_changed" } } },
     statistic: "Maximum",
     periodMinutes: 24 * 60,
     periods: 1,
     comparison: ">=",
     threshold: 1,
+    missing: "breaching",
     description: {
-      what: "Upstream x402 main changed, since the conformance gate's pin, a file its suite rests on (the x402 spec, the Stellar exact scheme, the suite's Stellar routes) or the discovery spec (bazaar.md).",
-      next: "Read the check's watch_upstream log line for the files, then the change upstream. Bump the pin in conformance/src/upstream.ts and rerun the gate (conformance/README.md), or say in the channel why not.",
-      noData: "Keeps its state; upstream-silent covers a section that stops publishing.",
+      what: "Upstream x402 main changed, since the conformance gate's pin, a file its suite rests on (the x402 spec, the Stellar exact scheme, the suite's Stellar routes) or the discovery spec (bazaar.md); or the day's read failed.",
+      next: "Read the check's 08:00 UTC log: watch_upstream lists the files that differ, watch_section_failed with section upstream names the read that failed. Bump the pin in conformance/src/upstream.ts and rerun the gate (conformance/README.md), or say in the channel why not.",
+      noData: "Breaching: a day with no point is a read that failed.",
     },
   });
 
-  // A day with no point breaches. 2 of 2: one failed day pages no one, as the next day's run retries.
-  f.level("upstream-silent", {
+  f.level("upstream-library-behind", {
     group: "upstream",
-    signal: { catalog: "upstream_files_changed" },
-    statistic: "SampleCount",
+    signal: { expression: "FILL(m, 1)", using: { m: { catalog: "upstream_library_behind" } } },
+    statistic: "Maximum",
     periodMinutes: 24 * 60,
-    periods: 2,
-    comparison: "<",
+    periods: 1,
+    comparison: ">=",
     threshold: 1,
     missing: "breaching",
     description: {
-      what: "The off-server check's daily upstream read published nothing for two days, so upstream-changed sees nothing: GitHub refused or timed out, a file moved upstream, or the pin file changed shape.",
-      next: "Read the check's log at 08:00 UTC for watch_section_failed with section upstream: it names the file that failed, or the publish.",
-      noData: "Breaching: no point is what this alarm is for.",
+      what: "Production's facilitator asks for another @x402/stellar than the one npm calls latest; or the day's read failed (/health, GitHub or npm).",
+      next: "Read the check's 08:00 UTC log: watch_library names both versions, watch_section_failed with section library names the read that failed. Raise the @x402 packages (AD-14 in docs/architecture/m1-spine.md) and deploy, or say in the channel why not.",
+      noData: "Breaching: a day with no point is a read that failed.",
     },
   });
 }
