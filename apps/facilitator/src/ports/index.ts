@@ -1,8 +1,10 @@
+import type { ApiKeyStore } from "./api-key-store.js";
 import type { CatalogAttemptStore, CatalogStore } from "./catalog-store.js";
 import type { RateLimitStore } from "./rate-limit-store.js";
 import type { SettlementStore } from "./settlement-store.js";
 import type { SpendStore } from "./spend-store.js";
 
+export type { ApiKeyRecord, ApiKeyStore } from "./api-key-store.js";
 export type {
   CatalogAttempt,
   CatalogAttemptOutcome,
@@ -53,4 +55,5 @@ export interface Stores {
   catalogAttempts: CatalogAttemptStore;
   rateLimits: RateLimitStore;
   spend: SpendStore;
+  apiKeys: ApiKeyStore;
 }

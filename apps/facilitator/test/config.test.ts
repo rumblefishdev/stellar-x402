@@ -31,10 +31,10 @@ const minimal = {
   CLIENT_IP: "socket",
   DATABASE_URL: "postgres://db.internal/x402",
 };
-/** Pubnet is refused until 0090, API keys on pubnet (0105) and per-key fee budgets (0107) land. */
+/** Pubnet is refused until 0090 and per-key fee budgets (0107) land, with 0027 and 0048. */
 const pubnet = { NETWORK: "stellar:pubnet" };
 const PUBNET_REFUSED =
-  "NETWORK stellar:pubnet is refused until task 0090, API keys on pubnet (0105), per-key fee budgets (0107), the signer alarm (0027) and the hot key's re-check (0048) land";
+  "NETWORK stellar:pubnet is refused until task 0090, per-key fee budgets (0107), the signer alarm (0027) and the hot key's re-check (0048) land";
 
 function problems(
   env: Record<string, string | undefined>,
@@ -432,7 +432,7 @@ describe("parseConfig", () => {
     expect(() => parseConfig({ ...minimal, SPEND_FLOOR_STROOPS: "1" })).not.toThrow();
   });
 
-  it("refuses stellar:pubnet with nothing else wrong, until 0090, API keys and per-key fee budgets land", () => {
+  it("refuses stellar:pubnet with nothing else wrong, until 0090 and per-key fee budgets land", () => {
     // Spend budgets (0024) bound the loss, but Sybil self-payments can still use up the shared
     // budgets until callers are authenticated or pay (S-design, residual risk).
     expect(PUBNET_REFUSED).not.toContain("0024");

@@ -1,0 +1,102 @@
+{
+  "ranAt": "2026-11-13T14:39:47.133Z",
+  "network": "stellar:testnet",
+  "script": "apps/facilitator/test/live/api-key-smoke.ts",
+  "commit": "1e6507ab",
+  "facilitator": "GACYWCMNQ5SNB46OD42HYBVU22AH7S372RFXZBEHQMZ2PIYFH27A2PHO",
+  "payer": "GDJ7BOCYCQ2M66S6J6E2476G7ZKUGYP767CDXETAUB4AKZC763L5DDSM",
+  "payTo": "GA5BEMZOYGDAISAKTP6KOGWIRNIVORDJKGLHCQN3QGZ4CUV3JHMIQ3WB",
+  "owner": "operator:smoke-mwf31pyz",
+  "issued": [
+    "owner: operator:smoke-mwf31pyz",
+    "key: (not recorded)",
+    "Shown once: only its SHA-256 is stored. Sent as \"Authorization: Bearer <key>\"."
+  ],
+  "testnet": {
+    "keyless": {
+      "verify": 200,
+      "isValid": true,
+      "settle": 200,
+      "success": true,
+      "transaction": "099755d39fedfb7410ea6a9ce56dd308f1711a555d7f2e11d5a2a41154881cf2",
+      "onChain": "SUCCESS"
+    },
+    "madeUp": {
+      "verify": 200,
+      "isValid": true,
+      "settle": 200,
+      "success": true,
+      "transaction": "d545e0a81ad6830f1e1683d4154b8b2f68919e93f110bdec93fcd2fd518079d2",
+      "onChain": "SUCCESS"
+    },
+    "registered": {
+      "verify": 200,
+      "isValid": true,
+      "settle": 200,
+      "success": true,
+      "transaction": "f5f895f711f413fa184c53811e7988f33a47db9e03af0b45c656c2c1c8ed7077",
+      "onChain": "SUCCESS"
+    },
+    "counters": {
+      "settle:ip:127.0.0.1": 3,
+      "verify:ip:127.0.0.1": 3
+    }
+  },
+  "pubnet": {
+    "verifyNoKey": {
+      "status": 401,
+      "body": {
+        "error": "missing_api_key"
+      }
+    },
+    "settleNoKey": {
+      "status": 401,
+      "body": {
+        "error": "missing_api_key"
+      }
+    },
+    "verifyMadeUpKey": {
+      "status": 401,
+      "body": {
+        "error": "invalid_api_key"
+      }
+    },
+    "settleMadeUpKey": {
+      "status": 401,
+      "body": {
+        "error": "invalid_api_key"
+      }
+    },
+    "withKey": {
+      "status": 200,
+      "body": {
+        "isValid": false,
+        "invalidReason": "invalid_network",
+        "invalidMessage": "this facilitator serves stellar:testnet"
+      }
+    },
+    "revoked": ["revoked: operator:smoke-mwf31pyz"],
+    "afterRevoke": {
+      "status": 401,
+      "body": {
+        "error": "invalid_api_key"
+      }
+    },
+    "counters": {
+      "verify:key:operator:smoke-mwf31pyz": 1
+    }
+  },
+  "checks": {
+    "testnetSettlesWithoutAKey": true,
+    "testnetIgnoresAMadeUpKey": true,
+    "testnetIgnoresARegisteredKey": true,
+    "testnetCountsByIp": true,
+    "pubnetWithoutAKeyIs401": true,
+    "pubnetWithAMadeUpKeyIs401": true,
+    "refusalsCountNowhere": true,
+    "pubnetWithTheKeyReachesTheVerifier": true,
+    "pubnetCountsByOwner": true,
+    "revokedKeyIs401": true,
+    "onlyTheOwnersRequestCounted": true
+  }
+}

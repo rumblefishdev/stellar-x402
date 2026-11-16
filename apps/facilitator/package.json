@@ -16,7 +16,8 @@
     "dev": "tsx src/migrate.ts && tsx watch src/server.ts",
     "dev:openbao": "tsx test/local-openbao.ts",
     "start": "node dist/server.js",
-    "migrate": "node dist/migrate.js"
+    "migrate": "node dist/migrate.js",
+    "keys": "node dist/keys.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.0",
