@@ -39,7 +39,7 @@ import {
   type SettlementStore,
 } from "../ports/index.js";
 import type { BeforeSubmitResult, Caller, SettlementHooks, SettlementOrigin } from "./hooks.js";
-import { NONCE_CONSUMED_REASON, type IsNonceUsed } from "./nonce-used.js";
+import type { IsNonceUsed } from "./nonce-used.js";
 import {
   attemptUpdates,
   createRecords,
@@ -47,13 +47,7 @@ import {
   resultUpdate,
   type Records,
 } from "./records.js";
-import {
-  NOT_SIGN_AGAIN,
-  SETTLE_REASONS,
-  UNSENT,
-  UNSENT_REASONS,
-  reasonAfterFailure,
-} from "./reasons.js";
+import { ADVICE, SETTLE_REASONS, UNSENT, UNSENT_REASONS, reasonAfterFailure } from "./reasons.js";
 import {
   UpstreamTimeoutError,
   payerExpiration,
@@ -318,18 +312,12 @@ export function createSettler(deps: SettlerDeps): Settle & {
   ): Promise<Settled> => {
     const { response } = settled;
     if (response.success || settled.claimedBefore0073) return settled;
-    const reason = response.errorReason ?? "";
-    // Another transaction used the nonce (0141): no repeat can settle it, and only the chain tells
-    // whether it paid, so the answer carries no advice at all.
-    if (reason === NONCE_CONSUMED_REASON || reason === SETTLE_REASONS.nonceConsumedElsewhere)
-      return settled;
-    // `payer_busy` recorded nothing (0024): like an unsent answer, the same payment can be sent
-    // again, so it carries `retryable` and "repeat the same payment", not "sign a new one".
-    const unsent =
-      ((UNSENT.has(reason) || settled.reopenRefused) && !response.transaction) ||
-      reason === SETTLE_REASONS.payerBusy;
-    const ended = settled.key !== undefined && !NOT_SIGN_AGAIN.has(reason);
-    if (!unsent && !ended) return settled;
+    const advice = ADVICE.get(response.errorReason ?? "");
+    if (advice === "none") return settled;
+    // A hash means an envelope was sent, so the record doesn't reopen.
+    const unsent = (advice === "repeat" || settled.reopenRefused) && !response.transaction;
+    // Without a record (`key`), only an unsent answer advises anything.
+    if (!unsent && settled.key === undefined) return settled;
     const valid = await validOnce();
     if (!valid) return settled;
     const { expiration, left } = valid;
