@@ -185,7 +185,7 @@ describe("startup with a bad config", () => {
     const error = await main(pubnet).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ConfigError);
     expect((error as ConfigError).problems).toEqual([
-      "NETWORK stellar:pubnet is refused until task 0090, per-key fee budgets (0107), the signer alarm (0027) and the hot key's re-check (0048) land",
+      "NETWORK stellar:pubnet is refused until per-key fee budgets (0107), the signer alarm (0027) and the hot key's re-check (0048) land",
     ]);
   });
 });
