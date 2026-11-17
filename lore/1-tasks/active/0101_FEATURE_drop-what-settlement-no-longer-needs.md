@@ -46,7 +46,7 @@ Figures are from `origin/develop` on 2026-11-03. Work each item from what is tru
    `stats()` for `queued`, `channels`, `busy` and `quarantined`. The other eleven counters have no
    production reader, but the signer pool's tests observe the submitter through them (38 calls),
    and 0138 may make metrics of them.
-3. **`[refactor]`, ~1 h. Attempts as a plain property on the error.** Delete the `WeakMap` behind
+3. **In #198. `[refactor]`, ~1 h. Attempts as a plain property on the error.** Delete the `WeakMap` behind
    `attemptsOf` and the three `vi.mock`s of the package that exist because of it.
 4. **Merged in #146. `[structure only]`, ~1.5 h. What in `main.ts` isn't wiring.** Move `start()` to its own file,
    and `failureReason`, `upstreamDeadlineMs` and `buildUpstream` beside `upstream-failover.ts`.
@@ -84,6 +84,7 @@ out of the app again, which decision 9 already allows.
 | 8 | Keep the submitter statistics: production reads four of them, and the tests read the rest to observe the submitter; trimming them costs 2–3 h and changes nothing anyone sees | owner | changes it | none | none |
 | 9 | Merge `packages/mcp` into `apps/mcp-local`: a package boundary with one user only gets in the way; it can be split out again when a second user appears | owner | beyond it | `packages/mcp`, `apps/mcp-local` | moved tests, assertions unchanged |
 | 10 | Mark the M1 plan's in-memory fakes as replaced by ADR 0012, in one note at its top: its acceptance criteria stay as written | owner | beyond it | `docs/planning/m1-epics.md` | none, wording |
+| 11 | A rejected submission's attempts ride on the error as `attempts`, not in a private `WeakMap`: the facilitator's tests already threw errors in that shape and mocked `attemptsOf` to read it | owner | matches | `signer-pool/src/submitter.ts` | the three mocks removed, assertions unchanged |
 
 ## PR split
 
