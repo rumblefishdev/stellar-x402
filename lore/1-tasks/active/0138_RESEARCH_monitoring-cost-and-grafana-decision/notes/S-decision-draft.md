@@ -23,6 +23,10 @@ history:
       Rewritten from Grafana Cloud Free to a self-hosted stack on a separate Hetzner Cloud VM
       (option B), after comparing it with the same stack on ch-prod-01 (A) and Grafana Cloud
       Free (C). The ADR 0011 amendment is drafted on the lore-0138-alarm-signals branch.
+  - date: "2026-11-17"
+    status: developing
+    who: stkrolikiewicz
+    note: "The VM is bought; the series count stays open as a check of its plan"
 ---
 
 # Draft decision: Prometheus and Alertmanager on a Hetzner Cloud VM, CloudWatch for what must outlive it
@@ -119,12 +123,17 @@ explorer follow.
    go off. No period with both (decided 2026-11-17). Every rule is drilled once right after the
    switch, and one that fails its drill is fixed forward.
 
+## Settled since the draft
+
+- The VM: Marek approved it and it was bought on 2026-11-17: a CPX12 in Helsinki on Ubuntu 24.04. The console bills in dollars: $10.99 and $0.60 for the IPv4.
+  The Cost-Optimized plans were not available.
+
 ## Still open
 
-- The series count, to size the VM: one day of the agent, with ClickHouse's endpoint on all four
-  metric families.
+- The series count, as a check of the CPX12: one day of the agent, with ClickHouse's endpoint on
+  all four metric families, against the estimate of 4,000 to 10,000 series. Over about 8,000, the
+  VM moves to a bigger plan.
 - The repeat interval for standing alerts (Alertmanager's `repeat_interval`).
-- Who creates the Hetzner Cloud project and pays for it.
 - The phone route for pubnet's money alerts: no SNS topic for it exists today.
 - The proposed numbers: a 15 s scrape and a 20 GB retention cap.
 - `snapshot_age_seconds` still reads the 1e9 sentinel although the snapshot timer is installed.
