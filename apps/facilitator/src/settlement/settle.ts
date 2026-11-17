@@ -39,6 +39,7 @@ import {
   type SettlementStore,
 } from "../ports/index.js";
 import type { BeforeSubmitResult, Caller, SettlementHooks, SettlementOrigin } from "./hooks.js";
+import { NONCE_CONSUMED_REASON, type IsNonceUsed } from "./nonce-used.js";
 import {
   attemptUpdates,
   createRecords,
@@ -46,7 +47,13 @@ import {
   resultUpdate,
   type Records,
 } from "./records.js";
-import { NOT_SIGN_AGAIN, SETTLE_REASONS, UNSENT, UNSENT_REASONS } from "./reasons.js";
+import {
+  NOT_SIGN_AGAIN,
+  SETTLE_REASONS,
+  UNSENT,
+  UNSENT_REASONS,
+  reasonAfterFailure,
+} from "./reasons.js";
 import {
   UpstreamTimeoutError,
   payerExpiration,
@@ -107,6 +114,11 @@ export interface SettlerDeps {
    * decision 15, 0082). Read only on an answer that ended a payment and before a reopen.
    */
   latestLedger: () => Promise<number>;
+  /**
+   * Whether the payer's nonce is used on chain, read after the pool's simulation failed or our
+   * transaction failed (0141).
+   */
+  nonceUsed: IsNonceUsed;
   /** Estimated ledger close time, to turn the auth expiry into a deadline. */
   ledgerMs?: number;
   /** The record writes and hooks to share, e.g. with reconciliation; its own by default. */
@@ -210,10 +222,19 @@ export function createSettler(deps: SettlerDeps): Settle & {
   };
 
   /** The pool's own result, for when the store failed to record it (`submit()`). */
-  const answerResult = (result: SubmitResult, payer: string): SettleResponse => {
+  const answerResult = async (
+    result: SubmitResult,
+    payer: string,
+    nonce: string,
+  ): Promise<SettleResponse> => {
     const transaction = result.hash ?? "";
     if (result.status === "success") return { success: true, transaction, network, payer };
-    return failure(SETTLE_REASONS[result.status], payer, undefined, transaction);
+    return failure(
+      await reasonAfterFailure(SETTLE_REASONS[result.status], payer, nonce, deps.nonceUsed),
+      payer,
+      undefined,
+      transaction,
+    );
   };
 
   const records =
@@ -298,6 +319,10 @@ export function createSettler(deps: SettlerDeps): Settle & {
     const { response } = settled;
     if (response.success || settled.claimedBefore0073) return settled;
     const reason = response.errorReason ?? "";
+    // Another transaction used the nonce (0141): no repeat can settle it, and only the chain tells
+    // whether it paid, so the answer carries no advice at all.
+    if (reason === NONCE_CONSUMED_REASON || reason === SETTLE_REASONS.nonceConsumedElsewhere)
+      return settled;
     // `payer_busy` recorded nothing (0024): like an unsent answer, the same payment can be sent
     // again, so it carries `retryable` and "repeat the same payment", not "sign a new one".
     const unsent =
@@ -545,7 +570,12 @@ export function createSettler(deps: SettlerDeps): Settle & {
         // A send that threw may have reached the network: keep the record open (0019 resolves it).
         // `sent: "yes"` is an accepted send or a refused one, so after an unexpected error it may
         // still land too; a classified error says the pool knows it won't.
-        const errorReason = reasonFor(error);
+        const errorReason = await reasonAfterFailure(
+          reasonFor(error),
+          verified.payer,
+          verified.nonce,
+          deps.nonceUsed,
+        );
         const attempts = attemptUpdates(attemptsOf(error), { error });
         const unknown = attemptsOf(error).filter((attempt) =>
           errorReason === SETTLE_REASONS.unexpected
@@ -572,7 +602,8 @@ export function createSettler(deps: SettlerDeps): Settle & {
           logger.error("settlement_submit_failed", { network, settlementKey: key, error });
           metrics.increment("settlement_submit_failures_total");
         }
-        // The answer is the same fixed reason: a new payment, once this one can't land (0082).
+        // The answer is the same fixed reason: a new payment, once this one can't land (0082); a
+        // nonce another transaction used gets no advice (0141, `withRetry`).
         flagDrift(key, errorReason, "pool");
         return await finish(key, { state: "rejected", errorReason, attempts }, call.origin, own);
       }
@@ -610,7 +641,12 @@ export function createSettler(deps: SettlerDeps): Settle & {
               key,
               {
                 state: result.status,
-                errorReason: SETTLE_REASONS[result.status],
+                errorReason: await reasonAfterFailure(
+                  SETTLE_REASONS[result.status],
+                  verified.payer,
+                  verified.nonce,
+                  deps.nonceUsed,
+                ),
                 ...(result.failure && { failure: result.failure }),
                 ...fields,
               },
@@ -651,7 +687,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
                 updatedAt: now(),
               }
             : undefined;
-        fallback = { response: answerResult(result, verified.payer), record };
+        fallback = { response: await answerResult(result, verified.payer, verified.nonce), record };
       } else if (uncertain) {
         fallback = {
           response: failure(SETTLE_REASONS.pending, verified.payer, undefined, uncertain),

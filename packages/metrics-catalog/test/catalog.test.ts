@@ -232,6 +232,7 @@ describe("CATALOG", () => {
       "settlement_history_gone_total",
       "settlement_landed_after_expired_total",
       "settlement_rewrapped_total",
+      "settlement_nonce_consumed_elsewhere_total",
       "signer_failures_total",
       "pool_events_total",
       "settlement_uncertain_total",

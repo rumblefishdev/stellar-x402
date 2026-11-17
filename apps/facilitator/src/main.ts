@@ -36,6 +36,7 @@ import {
 import { createLeaseKeeper } from "./settlement/lease.js";
 import { createRecords } from "./settlement/records.js";
 import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler, type Settle } from "./settlement/settle.js";
+import { createNonceLookup } from "./settlement/nonce-used.js";
 import { createTrustlineLookup } from "./settlement/trustline.js";
 import {
   UPSTREAM_TIMEOUT_MS,
@@ -130,6 +131,7 @@ export function buildChecks(
   >,
   fees: FeeSettings,
   logger: Pick<Logger, "warn" | "info">,
+  metrics: NetworkMetrics,
   seams?: UpstreamSeams,
 ): VerifierDeps {
   // Upstream knows only the facilitator key, and only in plain form; the channels and the muxed
@@ -144,6 +146,8 @@ export function buildChecks(
     maxValidityLedgers: config.settlement.maxValidityLedgers,
     latestLedger: async () => (await rpc.getLatestLedger()).sequence,
     missingTrustline: createTrustlineLookup(rpc, config.network, logger),
+    nonceUsed: createNonceLookup(rpc, config.network, logger),
+    metrics,
   };
 }
 
@@ -156,9 +160,10 @@ export function buildVerifier(
   rpc: Parameters<typeof buildChecks>[1],
   fees: FeeSettings,
   logger: Pick<Logger, "warn" | "info">,
+  metrics: NetworkMetrics,
   seams?: UpstreamSeams,
 ): Verify {
-  return createVerifier(buildChecks(config, rpc, fees, logger, seams));
+  return createVerifier(buildChecks(config, rpc, fees, logger, metrics, seams));
 }
 
 /**
@@ -209,6 +214,7 @@ export function buildSettlement(
     logger,
     metrics,
     budgetMs: config.settlement.settleBudgetMs,
+    nonceUsed: deps.checks.nonceUsed,
   });
   // The only sender of transactions in the service (AD-2). `main()` checks its channels before
   // it starts, and `/settle` reaches it only while the process holds the lease (0025).
@@ -256,6 +262,7 @@ export function buildSettlement(
     settleTimeoutMs: config.settlement.settleTimeoutMs,
     budgetMs: config.settlement.settleBudgetMs,
     latestLedger: deps.checks.latestLedger,
+    nonceUsed: deps.checks.nonceUsed,
     records,
     lease: deps.lease,
   });
@@ -343,7 +350,7 @@ export function compose(
   // One fee configuration: `/verify` and `/settle` check with it, and the pool pays with it, so
   // they share one ceiling and one bid (AD-10).
   const fees = feeSettings(config.fees, rpc);
-  const checks = buildChecks(config, rpc, fees, logger, opts.seams);
+  const checks = buildChecks(config, rpc, fees, logger, metrics, opts.seams);
   const signer = openBaoSigner({ ...config.signer, network: config.network, logger, metrics });
   // One lease per network's channel set (AD-17): only its holder settles.
   const lease = createLeaseKeeper({

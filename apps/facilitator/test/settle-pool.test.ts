@@ -207,6 +207,7 @@ function setup(
     shared,
     fees,
     upstreamLogger,
+    memoryMetrics().for({ network: config.network }),
     seams ?? { makeScheme: () => ({ verify: async () => ({ isValid: true, payer }) }) },
   );
   const store = db.stores().settlements;
