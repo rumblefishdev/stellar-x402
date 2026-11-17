@@ -156,6 +156,23 @@ describe("lease keeper (0025)", () => {
     expect(onAcquired).toHaveBeenCalledTimes(2);
   });
 
+  it("counts an onAcquired that runs past a third of the TTL as a failed acquire (0090)", async () => {
+    const store = db.stores().settlements;
+    const onAcquired = vi
+      .fn<() => Promise<void>>()
+      .mockReturnValueOnce(new Promise<void>(() => {}))
+      .mockResolvedValue();
+    // A 30 ms TTL: the limit is 10 ms of real time; the keeper's own clock stands still.
+    const { lease, events } = keeper(store, { ttlMs: 30, onAcquired });
+    await lease.runOnce();
+    expect(lease.held()).toBe(false);
+    expect(events()).toMatchObject([
+      { event: "lease_acquire_failed", error: { message: "onAcquired took more than 10 ms" } },
+    ]);
+    await lease.runOnce();
+    expect(lease.held()).toBe(true);
+  });
+
   it("ends held() at its own expiry while a renewal hangs", async () => {
     const store = db.stores().settlements;
     const { lease, clock } = keeper(store);

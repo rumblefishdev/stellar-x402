@@ -95,7 +95,7 @@ describe("ChannelPool", () => {
       expect(() => pool.handOver(a)).toThrow("under a hold");
       pool.release(a);
       expect(() => pool.release(a)).toThrow("released twice");
-      expect(() => pool.retire(a)).toThrow("is not held");
+      expect(() => pool.retire(a)).toThrow("parked under a hold");
 
       const waiter = pool.acquire();
       await tick();
