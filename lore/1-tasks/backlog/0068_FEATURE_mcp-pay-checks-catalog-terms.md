@@ -34,8 +34,8 @@ can't lure an agent into paying a price it never saw.
 
 ## Context
 
-- `call_paid_http` pays the live 402, never the catalog (`packages/mcp/src/server.ts`), within
-  the per-call limit and the daily budget per asset (`packages/mcp/src/pay.ts:125`, `:152`).
+- `call_paid_http` pays the live 402, never the catalog (`apps/mcp-local/src/server.ts`), within
+  the per-call limit and the daily budget per asset (`apps/mcp-local/src/pay.ts:125`, `:152`).
   Nothing compares the live terms with the listing.
 - 0063 makes the facilitator write a listing only when the payment's echo equals the seller's own
   402. The seller can still change its 402 after the listing is written.

@@ -9,7 +9,7 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { countDaily, refundDaily } from "../src/daily.js";
-import { createServer } from "../src/index.js";
+import { createServer } from "../src/server.js";
 import {
   fakeScheme,
   NO_TRUSTLINE,

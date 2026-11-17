@@ -33,7 +33,7 @@ refused listing's reason is exact. As a buyer's agent, I want the same tool erro
 - The facilitator stores those codes as attempt reasons and metric labels
   (`apps/facilitator/src/catalog/seller-check.ts`), so one `unsafe_url` covers three causes:
   no `https`, a private address, a redirect.
-- `asToolError` (`packages/mcp/src/results.ts`, #88) is the one place the MCP turns a guard error
+- `asToolError` (`apps/mcp-local/src/results.ts`, #88) is the one place the MCP turns a guard error
   into a tool error.
 
 ## Implementation

@@ -66,7 +66,7 @@ move to their own tasks.
 
 ## Context
 
-- `packages/mcp/test/pay.test.ts`, "does not send a payment whose signing outlasted the deadline":
+- `apps/mcp-local/test/pay.test.ts`, "does not send a payment whose signing outlasted the deadline":
   the check that the amount came back ran under the same 300 ms deadline as the late call, too
   short for a whole paid call on a slow runner (CI run 40497106902). Fix: PR #74.
 - `apps/facilitator/test/settle.test.ts`, block "settle budget (ADR 0011)": four different tests
@@ -111,7 +111,7 @@ move to their own tasks.
   - `postgres.test.ts`: "rejects a hash another record's insert commits…" attached `.rejects`
     after `COMMIT`; "makes a takeover wait…" compared the arrival order of two connections, which
     says nothing about the database's. The check before `COMMIT` proves the wait.
-  - `packages/mcp/test/pay.test.ts`, "gives the whole call one deadline…": 150 ms of slack missed
+  - `apps/mcp-local/test/pay.test.ts`, "gives the whole call one deadline…": 150 ms of slack missed
     by 54 ms, and an uncut call took only 1.2 s. Scaled up: a 2 s deadline, 1.2 s answers, 300 ms
     of slack, still below the 2.4 s of an uncut call.
   - Not reproduced or explained: "waits on close() for a settlement answered pending…" (once in 5

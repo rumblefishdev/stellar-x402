@@ -61,6 +61,15 @@ Figures are from `origin/develop` on 2026-11-03. Work each item from what is tru
    has one importer, and the app's e2e reaches into its tests by relative path. Its files move into
    the app under their own names; the package goes.
 
+## Premise
+
+Checked for item 7 by a fresh reviewer on 2026-11-17, from the goal and constraints alone: it holds,
+with a caveat. The cost of the package boundary is real but small: one importer, two builds, one
+test import across packages. Nothing else needs the code as a package: the facilitator serves no
+`/mcp` route, `examples/mcp-metered` uses upstream's `@x402/mcp`, and the backlog's MCP tasks
+change the server's own tools. Caveat: if 0102's buyer helpers reuse `pay.ts`, that logic moves
+out of the app again, which decision 9 already allows.
+
 ## Decisions so far
 
 | # | What is done | From | Vs the task | Code | Test |

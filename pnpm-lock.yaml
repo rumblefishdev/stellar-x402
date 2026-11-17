@@ -97,12 +97,24 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.32.0
         version: 1.32.2(zod@3.25.76)
+      '@stellar-x402/bazaar':
+        specifier: workspace:*
+        version: link:../../packages/bazaar
       '@stellar-x402/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@stellar-x402/mcp':
+      '@stellar-x402/seller-fetch':
         specifier: workspace:*
-        version: link:../../packages/mcp
+        version: link:../../packages/seller-fetch
+      '@x402/core':
+        specifier: ~2.31.0
+        version: 2.31.0
+      '@x402/extensions':
+        specifier: ~2.31.0
+        version: 2.31.0(typescript@6.0.3)
+      '@x402/fetch':
+        specifier: ~2.31.0
+        version: 2.31.0
       '@x402/stellar':
         specifier: ~2.31.0
         version: 2.31.0
@@ -237,33 +249,6 @@ importers:
         version: 4.6.7
 
   packages/config: {}
-
-  packages/mcp:
-    dependencies:
-      '@modelcontextprotocol/sdk':
-        specifier: ^1.32.0
-        version: 1.32.2(zod@3.25.76)
-      '@stellar-x402/bazaar':
-        specifier: workspace:*
-        version: link:../bazaar
-      '@stellar-x402/config':
-        specifier: workspace:*
-        version: link:../config
-      '@stellar-x402/seller-fetch':
-        specifier: workspace:*
-        version: link:../seller-fetch
-      '@x402/core':
-        specifier: ~2.31.0
-        version: 2.31.0
-      '@x402/extensions':
-        specifier: ~2.31.0
-        version: 2.31.0(typescript@6.0.3)
-      '@x402/fetch':
-        specifier: ~2.31.0
-        version: 2.31.0
-      zod:
-        specifier: ^3.25.76
-        version: 3.25.76
 
   packages/metrics-catalog:
     dependencies:
