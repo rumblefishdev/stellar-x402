@@ -2,7 +2,8 @@
 id: "0149"
 title: "Show the dev-tools lane on the board and in /pr's lane table"
 type: FEATURE
-status: backlog
+status: active
+owner: okarcz
 milestone: 2
 related_adr: []
 related_tasks: ["0144"]
@@ -18,6 +19,11 @@ history:
     note: >
       Created on okarcz's decision of 2026-11-17: the M2 plan's fifth lane (agents, SDK and quality, for the developer joining
       later) gets the tag `dev-tools`, and 13 tasks carry it now.
+  - date: "2026-11-17"
+    status: active
+    who: okarcz
+    note: >
+      Started: the lane shows on the board as "DevTools", so the fifth developer finds their tasks there.
 ---
 
 # Show the dev-tools lane on the board and in /pr's lane table
