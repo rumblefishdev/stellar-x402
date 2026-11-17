@@ -240,8 +240,8 @@ type Outcome = Omit<SubmitResult, "attempts">;
 /**
  * The attempts of a submission that `submit()` rejected with `error`, so the caller can tell
  * whether anything may have reached the network (see `onSigned`). `submit()` puts them on the
- * error as `attempts`. Empty when nothing was signed for it, or for an error `submit()` did not
- * throw.
+ * error it rejects with, its own or one it rethrows, as `attempts`; this reads that property.
+ * Empty when nothing was signed for it, or when the error has no `attempts`.
  */
 export function attemptsOf(error: unknown): Attempt[] {
   return (error as { attempts?: Attempt[] } | null)?.attempts ?? [];
