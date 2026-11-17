@@ -55,8 +55,8 @@ losing an alarm that protects money or a payment.
 
 ## Acceptance Criteria
 
-- [ ] Given a full month (or a measured week scaled to one), when the facilitator's monitoring
-      cost is read, then it is at or under the amount recorded by 0138
+- [ ] Given a full month (or a measured week scaled to one), when x402's CloudWatch bill is read,
+      then it is at or under $8 a month, with the monitoring VM on CPX12 (0138's target)
 - [ ] Given every alarm in `docs/monitoring.md`, when the drill runs, then each has fired once in
       the new setup, and the drill is recorded
 - [ ] The switch is one change, with no period running both the old alarms and the new rules,

@@ -26,6 +26,13 @@ history:
     status: active
     who: stkrolikiewicz
     note: "Every alarm checked against what it reads, and a draft decision for the team; not decided yet"
+  - date: "2026-11-17"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      Decided with the team: option B, Prometheus and Alertmanager on a separate Hetzner Cloud VM
+      (CPX12 in Helsinki, bought the same day), recorded in the ADR 0011 amendment. Merging PR
+      #186 is the team's agreement.
 ---
 
 # Measure what CloudWatch costs and decide: cut it down or move to Grafana
@@ -50,6 +57,29 @@ metric in a format we then drop.
   other two is not work of this project; this task decides for the facilitator and says what the
   shared setup would need.
 - Monitoring is not a Tranche #2 line item.
+
+## Decision (2026-11-17)
+
+Option B of the [draft](notes/S-decision-draft.md): Prometheus and Alertmanager on a separate
+Hetzner Cloud VM, CloudWatch for what must outlive it. The record is the ADR 0011 amendment.
+
+- **Format: Prometheus.** New metrics go through `packages/metrics-catalog` as before; 0139
+  replaces its EMF adapter with `/metrics`. Nobody adds an EMF-only metric from now on.
+- **Metrics that stay:** every metric in the catalog, under the same name, as a Prometheus series
+  (the list is `docs/monitoring.md`); none is dropped. In CloudWatch stay `x402-watch`'s
+  (`spendable_stroops`, `protocol_version`, `protocol_supported_version`,
+  `upstream_files_changed`, `account_state_mismatches`, `account_effects_unexpected`,
+  `backup_secret_reads`), the uptime probe's `ready`, the audit log disk's use, and the
+  heartbeat topic's `NumberOfMessagesPublished`, which costs nothing.
+- **Logs that stay:** all of them, in CloudWatch Logs through the CloudWatch agent: the app lines,
+  the units' output and the Lambdas' logs. Only the EMF lines stop, and their log group is
+  deleted once its 30-day retention has run out.
+- **Target:** x402's CloudWatch at or under $8 a month, with the VM on CPX12 ($11.59 a month with
+  its IPv4, before VAT). It is 0139's done signal.
+- **The explorer and the Prices API:** moving their monitoring to the VM is possible later and
+  not planned here. It is outside this project's work: the Prices API keeps its alarms until its
+  Milestone 2 acceptance, and the explorer first has to supersede its ADR 0054. Their findings
+  went to rumblefishdev/stellar-prices-api#420 and rumblefishdev/soroban-block-explorer#733.
 
 ## Questions
 
