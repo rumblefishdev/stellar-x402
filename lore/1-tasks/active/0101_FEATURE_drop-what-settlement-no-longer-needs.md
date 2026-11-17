@@ -57,6 +57,9 @@ Figures are from `origin/develop` on 2026-11-03. Work each item from what is tru
 6. **Merged in #135. `[refactor]`, ~1 h. One `resultUpdate(result)`.** `settle.ts` and `reconcile.ts` build
    the same update from a pool result, under two rules for a ledger or a fee the result doesn't
    have. #105's `failure` line stays outside the function: it belongs to non-success results only.
+7. **`[structure only]`, ~1.5 h. `packages/mcp` into `apps/mcp-local`.** The package is private and
+   has one importer, and the app's e2e reaches into its tests by relative path. Its files move into
+   the app under their own names; the package goes.
 
 ## Decisions so far
 
@@ -70,6 +73,8 @@ Figures are from `origin/develop` on 2026-11-03. Work each item from what is tru
 | 6 | One `resultUpdate` for both writes of a pool result, with one rule: a ledger or a fee the result doesn't have is left out. The stored result doesn't change, because a non-final record holds neither value. Clearing is the wrong rule to keep: a final record without a fee releases its budget reservation | owner | matches | `settlement/records.ts`, `settle.ts`, `reconcile.ts` | `records.test.ts`, other assertions unchanged |
 | 7 | Keep the fallback for a hash stored without bounds, read through `payerExpiration` for the record's payer: the payer's auth expiry is the one deadline every envelope of the payment shares, and someone else's fee bump of ours (0087) is stored without bounds. No production query: nothing changes for stored rows | owner | changes it | `settlement/verify.ts`, `reconcile.ts` | `reconcile.test.ts`: the fallback, with the payload of the record's payer |
 | 8 | Keep the submitter statistics: production reads four of them, and the tests read the rest to observe the submitter; trimming them costs 2–3 h and changes nothing anyone sees | owner | changes it | none | none |
+| 9 | Merge `packages/mcp` into `apps/mcp-local`: a package boundary with one user only gets in the way; it can be split out again when a second user appears | owner | beyond it | `packages/mcp`, `apps/mcp-local` | moved tests, assertions unchanged |
+| 10 | Mark the M1 plan's in-memory fakes as replaced by ADR 0012, in one note at its top: its acceptance criteria stay as written | owner | beyond it | `docs/planning/m1-epics.md` | none, wording |
 
 ## PR split
 
@@ -78,8 +83,7 @@ touched, or start from what is true then.
 
 ## Not yet decided
 
-- Merging `packages/mcp` into `apps/mcp-local` (1–1.5 h, `[structure only]`): one importer, and e2e
-  reaches across by relative path, but the interface is already 3 names. Layout is the owner's call.
+- None.
 
 ## Out of scope
 
