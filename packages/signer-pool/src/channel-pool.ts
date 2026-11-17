@@ -107,8 +107,9 @@ export class ChannelPool {
   retire(channel: Channel): void {
     const i = this.all.indexOf(channel);
     if (i < 0) throw new Error(`unknown channel ${channel.address}`);
-    if (this.free.includes(channel) || this.parked.has(channel))
-      throw new Error(`channel ${channel.address} is not held`);
+    if (this.free.includes(channel)) throw new Error(`channel ${channel.address} is not held`);
+    if (this.parked.has(channel))
+      throw new Error(`channel ${channel.address} is parked under a hold, with no holder`);
     this.all.splice(i, 1);
     if (this.all.length === 0)
       for (const w of this.waiters.splice(0)) w.reject(new NoChannelsError("no channels left"));

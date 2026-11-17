@@ -77,10 +77,11 @@ Branch `lore-0090-skip-channels-with-open-hash`.
 - **`createChannelHolder`** (`apps/facilitator/src/settlement/open-channels.ts`): `holdOpen()` lists
   the non-final records and their attempts. It holds every channel of ours with an attempt in
   `stored`, `sent` or `unknown` whose bound hasn't passed: `maxLedger` against the latest ledger,
-  else `maxTime`, else the payer's auth expiry (`payerLedgerBound`, moved out of the reconciler).
-  Each hold ends once every one of the channel's attempts is `landed` or `dead`, or its record is
-  final. The store is re-read at the sweep interval (10 s). Logs `channel_held` (with the hashes)
-  and `channel_freed`.
+  else `maxTime` against its close time, else the payer's auth expiry (`payerLedgerBound`, moved
+  out of the reconciler). Each hold ends once every one of the channel's attempts is `landed` or
+  `dead`, or its record is final, or the network is past its bound by the `NOT_FOUND` margin
+  (`cannotLand`). The store and the latest ledger are re-read at the sweep interval (10 s). Logs
+  `channel_held` (with the hashes), `channel_freed` and `channel_hold_skipped`.
 - **Lease** (`lease.ts`): an `onAcquired` step runs after the store grants the lease and before
   `held()` turns true. If it rejects, the acquire counts as failed (`lease_acquire_failed`) and the
   keeper tries again. `compose()` wires it to `holdOpen()`, and `drain` stops the holder.
@@ -107,7 +108,11 @@ Branch `lore-0090-skip-channels-with-open-hash`.
    passed), not its record as a whole.
 2. **Who checks:** the new process, when it takes the lease. The store is all the previous process
    leaves behind. The facilitator tells the pool; the pool never reads the store.
-3. **What ends a hold:** reconciliation's answer, the attempt `landed` or `dead`.
+3. **What ends a hold:** reconciliation's answer, the attempt `landed` or `dead`. Amended after
+   the code review (D1, okarcz): or the network past the attempt's bound by the `NOT_FOUND`
+   margin, whichever comes first. Reconciliation may never answer (a hash past the RPC's history,
+   a stopped sweep), and the sequence number read again after a hold makes ending at the bound
+   safe.
 4. **Every channel held:** callers queue as when all are busy, and get the same `QueueTimeoutError`
    answer at their deadline.
 
@@ -139,6 +144,25 @@ Branch `lore-0090-skip-channels-with-open-hash`.
 13. **The latest ledger is read only when an attempt is open.** A start with nothing open needs no
     RPC, so a down RPC doesn't keep the lease from being taken; found when main() tests on an RPC
     stub couldn't take the lease.
+
+## Code review (2026-11-17)
+
+Four review layers; 2 decisions, 10 patches applied, 12 findings rejected. The report stays local.
+
+- **D1:** decision 3 amended above.
+- **D2, the deploy that ships 0090:** hashes stored by code before 0090 carry no channel, so the
+  first 0090 process can't hold what the previous one left open; that deploy can still see
+  `txBadSeq` rebuilds for a few minutes, as before. Every later deploy holds correctly. Noted
+  here only, no code (okarcz).
+- **Patches:**
+  - a retired channel is skipped (`channel_hold_skipped`) instead of failing every acquire;
+  - `onAcquired` is capped at a third of the TTL;
+  - a submitter test pins that a held channel isn't handed over while pipelining;
+  - holder tests cover the payer-auth fallback bound, an unreadable bound, a failed ledger read, no
+    RPC call with nothing open, and the end at the bound;
+  - `retire` on a parked channel has its own message;
+  - `holdOpen`'s doc says holds stack on a re-acquire;
+  - ADR 0011 and the `config.ts` comment are reworded.
 
 ## Open
 

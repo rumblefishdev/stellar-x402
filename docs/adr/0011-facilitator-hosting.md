@@ -50,9 +50,9 @@ The host must:
   `confirmGraceSeconds` 30, about 426 s by default and 750 s at 120, so it can outlast the drain. One still open at 150 s is finished by
   the next process's reconciliation, and until it lands or expires the next process's sends on
   its channel may fail with `txBadSeq` and rebuild, for minutes rather than about 60 s. Accepted
-  for testnet; before pubnet the next process leaves such a channel out (0090). Since 0090 it
-  holds the channel back from the moment it takes the lease until reconciliation marks that
-  transaction landed or dead, and sends on the other channels meanwhile;
+  for testnet, not for pubnet, so the next process holds such a channel back (0090): from the
+  moment it takes the lease until reconciliation marks that transaction landed or dead, or the
+  network is past its bound by the `NOT_FOUND` margin, and sends on the other channels meanwhile;
 - **keep the facilitator key out of the image, the logs and the facilitator's process** (AD-12);
 - **offer a durable store** for the PostgreSQL schema of ADR 0012.
 

@@ -267,7 +267,10 @@ export function buildSettlement(
     store: deps.store,
     network,
     channels: config.channels,
-    latestLedger: deps.checks.latestLedger,
+    latestLedger: async () => {
+      const latest = await deps.rpc.getLatestLedger();
+      return { sequence: latest.sequence, closeTime: Number(latest.closeTime) };
+    },
     hold: (address, until) => submitter.hold(address, until),
     logger,
   });
