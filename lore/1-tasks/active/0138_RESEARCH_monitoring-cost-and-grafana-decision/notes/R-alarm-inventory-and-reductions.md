@@ -187,8 +187,9 @@ PR #733; the ingestion-stall task was 0670 until develop took that ID on 2026-11
 - **CloudWatch alone saves about $22 a month across the account**, most of it Container Insights on
   the explorer's Galexie cluster ($11.10: 37 billable metrics, read by one alarm).
 - **Fewer pages.** One ingestion-stall alarm in the explorer's production gives 2 pages instead of
-  9 over 15 replayed days. The Prices API's `ledger-processor-no-invocations` paged behind
-  `rollup-freshness-1m` in all 4 stalls since June.
+  9 over 15 replayed days. The Prices API's `ledger-processor-no-invocations` never paged
+  first: of the 5 stalls in the 30 days of alarm history, it fired in 4, each 2.5 to 7.6 minutes
+  after `rollup-freshness-1m`, and not at all in the fifth (stellar-prices-api 0346).
 - **Gaps, not reductions:**
   - the Prices API's `CoarseSweepTableFailures` has no alarm, though a failed table doesn't fail
     the Lambda;

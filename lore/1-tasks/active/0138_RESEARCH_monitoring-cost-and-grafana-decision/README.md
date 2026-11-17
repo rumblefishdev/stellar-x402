@@ -78,8 +78,9 @@ Hetzner Cloud VM, CloudWatch for what must outlive it. The record is the ADR 001
   its IPv4, before VAT). It is 0139's done signal.
 - **The explorer and the Prices API:** moving their monitoring to the VM is possible later and
   not planned here. It is outside this project's work: the Prices API keeps its alarms until its
-  Milestone 2 acceptance, and the explorer first has to supersede its ADR 0054. Their findings
-  went to rumblefishdev/stellar-prices-api#420 and rumblefishdev/soroban-block-explorer#733.
+  Milestone 2 acceptance, except for its own fixes (0344–0347), and the explorer first has to
+  supersede its ADR 0054. Their findings went to rumblefishdev/stellar-prices-api#420 and
+  rumblefishdev/soroban-block-explorer#733.
 
 ## Questions
 

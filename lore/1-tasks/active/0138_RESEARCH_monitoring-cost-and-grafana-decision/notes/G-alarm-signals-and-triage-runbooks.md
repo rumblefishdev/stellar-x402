@@ -28,8 +28,8 @@ history:
       Trimmed to x402 and the account-wide summary after review. Aligned with the ADR 0011
       amendment (option B): Prometheus, Alertmanager and Grafana on the monitoring VM, a
       Prometheus agent on ch-prod-01, the heartbeat as a CloudWatch alarm. The Prices API and
-      explorer runbooks, SQL and decisions live in stellar-prices-api#420 and
-      soroban-block-explorer#733.
+      explorer plans, runbooks and SQL stay in the version before the trim (b99fad33); their
+      backlog tasks are in stellar-prices-api#420 and soroban-block-explorer#733.
 ---
 
 # Alarms as early signals: reduction plan (2026-11-16)
@@ -38,7 +38,8 @@ history:
 
 **Scope (trimmed 2026-11-17).** This note keeps the design rules of the signals (§2), the
 triage tiers T0–T4 (§4), x402's signals and runbooks (§3.3, §4.1) and the account-wide summary
-(§1). The other two projects carry their own parts:
+(§1). The other two projects' plans, runbooks and SQL were cut; they stay in the
+[version before the trim][pre-trim]. Their findings went to backlog tasks:
 
 - **Prices API:** [stellar-prices-api#420](https://github.com/rumblefishdev/stellar-prices-api/pull/420),
   backlog tasks 0344–0347 and an update to 0093.
@@ -57,11 +58,12 @@ triage tiers T0–T4 (§4), x402's signals and runbooks (§3.3, §4.1) and the a
 - CloudWatch keeps the logs, x402-watch, the uptime probe, the certificate, credentials and
   log-delivery alarms, the audit-disk alarm (90%, off-host) and the heartbeat.
 - No transition period: the switch (0139) is one change, and every rule is drilled right after it.
-- The Prices API keeps its old alarms until Milestone 2 acceptance. The explorer joins only after
-  it supersedes its ADR 0054.
+- The Prices API keeps its old alarms until Milestone 2 acceptance, except for its own fixes in
+  stellar-prices-api#420 (0344–0347), which change some of them before it. The explorer joins
+  only after it supersedes its ADR 0054.
 
 **Rules:**
-- I count each alarm once. x402's 49 alarms: Appendix A. x402's 55 series: Appendix B. The Prices API and explorer mappings are in their PRs.
+- I count each alarm once. x402's 49 alarms: Appendix A. x402's 55 series: Appendix B. The Prices API and explorer mappings are in the [version before the trim][pre-trim].
 - All SQL queries are **unverified-against-live-data**. I wrote them from the schemas and did not run them.
 - Schema of `default.*` and `testnet.*` (chain tables): `crates/db-clickhouse/schema/init.sql` (soroban-block-explorer 5b7bd304).
 - **New x402 resources (proposed, they do not exist today).** Checked read-only on 2026-11-16: `lambda list-functions`, `sns list-topics`, `ssm describe-parameters`, `logs describe-log-groups`. Runbooks that use them work only after deployment. I mark them *(proposed)*.
@@ -74,7 +76,7 @@ triage tiers T0–T4 (§4), x402's signals and runbooks (§3.3, §4.1) and the a
 
 **TL;DR**
 - **Account-wide CloudWatch alarms: 155 → 29**, plus 3 Prometheus rules for x402 on the monitoring VM. This is the state after the 0139 switch and the explorer's sidecar gate. **Before 0139: ~62** (§1.1).
-- **Custom metric series: 166 → 29**, plus 8 Prices series kept conditionally until their events (stellar-prices-api#420). Until then, 37. **Before 0139: ~103** (with Container Insights and those 8).
+- **Custom metric series: 166 → 29**, plus 8 Prices series kept conditionally until their events ([before the trim][pre-trim]). Until then, 37. **Before 0139: ~103** (with Container Insights and those 8).
 - **CloudWatch cost (billing per metric in an alarm): ~$62.80 → ~$9.60 /month.** Plus ~$4–5 of side costs (GetMetricData, Logs Insights). With the 8 conditional series ~$12.00; before 0139 ~$35.90 (§1.2).
 - **x402 after 0139:** 11 CloudWatch alarms (`balance-low`, `balance-critical`, `watch-blind`, `watch-findings`, `uptime`, `uptime-flapping`, `certificate`, `credentials-stale`, `log-delivery`, `audit-disk`, the heartbeat), 3 Prometheus rules (P1–P3) and 6 series. About $3.00 a month at the §1.2 rates (§1.2).
 - **x402 runbooks (§4.1): 9 headings, plus CW4 (disabled), the heartbeat and the phone delivery alarms (D25).** With the log-path and `audit-disk` headings, they cover x402's 11 CloudWatch alarms and 3 Prometheus rules. Pubnet adds 5 alarms (§1.1); the balance, CW4 and `phone-delivery` headings cover them.
@@ -109,7 +111,7 @@ State before 0139 (Prices counted with the 8 conditional series, 16 + 8 = 24, be
 - Explorer until the sidecar gate: 6 alarms (5 target ones and `production-galexie-ephemeral-storage`) and 38 Container Insights series.
 
 Where these numbers come from:
-- **Prices API 13 alarms and 16 series (+8 conditional), explorer 5 alarms and 7 series:** the per-signal breakdown is in stellar-prices-api#420 and soroban-block-explorer#733.
+- **Prices API 13 alarms and 16 series (+8 conditional), explorer 5 alarms and 7 series:** the per-signal breakdown is in the [version before the trim][pre-trim] (§3.1, §3.2, Appendices A and B). They are a plan: stellar-prices-api#420 and soroban-block-explorer#733 take only part of it, and differ in places (Oskar's review of #420, 2026-11-17).
 - **x402 11 CW:** `balance-low`, `balance-critical`, `watch-blind`, `watch-findings`, `uptime`, `uptime-flapping`, `certificate`, `credentials-stale`, `log-delivery`, `audit-disk` and the heartbeat `x402-production-monitoring-heartbeat` *(proposed)*. `log-delivery` and the heartbeat read AWS/Logs and AWS/SNS metrics, not custom ones.
 - **x402 3 Prometheus rules (on the VM):** `x402-settlement`, `x402-money`, `x402-runtime`.
 - **x402 series 6:** `ready`, `spendable_stroops`, `findings` (new), `disk_used_percent`, `certificate_days_left` and `credentials_age_seconds`. Unconditionally only after 0139. Before that 34 (see above).
@@ -247,19 +249,21 @@ aws cloudformation list-stacks --stack-status-filter UPDATE_COMPLETE CREATE_COMP
 
 ### 3.1 Prices API
 
-In [stellar-prices-api#420](https://github.com/rumblefishdev/stellar-prices-api/pull/420):
-backlog tasks 0344–0347 and an update to 0093. They hold the signals (PD-1 to PD-4, PR-SERVE,
-PR-INGEST, PR-WORKERS-*, PR-RUNTIME-OUTPUTS, `alert-notifier-health`), the proposed
-`prices.data_checks` table, the runbooks with their SQL, and the Prices decisions. The old Prices
-alarms stay until Milestone 2 acceptance. Summary numbers: 87 → 13 alarms and 66 → 16 series
-(+8 conditional), §1.1.
+The plan (the signals PD-1 to PD-4, PR-SERVE, PR-INGEST, PR-WORKERS-*, PR-RUNTIME-OUTPUTS and
+`alert-notifier-health`, the proposed `prices.data_checks` table, the runbooks with their SQL and
+the Prices decisions) is in the [version before the trim][pre-trim]. The review's findings are
+backlog tasks 0344–0347 and an update to 0093, in
+[stellar-prices-api#420](https://github.com/rumblefishdev/stellar-prices-api/pull/420). The old
+Prices alarms stay until Milestone 2 acceptance, except for what 0344–0347 change. Summary
+numbers: 87 → 13 alarms and 66 → 16 series (+8 conditional), §1.1.
 
 ### 3.2 Explorer
 
-In [soroban-block-explorer#733](https://github.com/rumblefishdev/soroban-block-explorer/pull/733):
-backlog tasks 0671–0674. They hold the production and testnet signals (`*-explorer-signal` with
-`*-new-cause`), `production-galexie-readiness`, the runbooks and the explorer decisions. The
-explorer joins only after it supersedes its ADR 0054. Summary numbers: 19 → 5 alarms and
+The plan (the production and testnet signals `*-explorer-signal` with `*-new-cause`,
+`production-galexie-readiness`, the runbooks and the explorer decisions) is in the
+[version before the trim][pre-trim]. The review's findings are backlog tasks 0671–0674, in
+[soroban-block-explorer#733](https://github.com/rumblefishdev/soroban-block-explorer/pull/733).
+The explorer joins only after it supersedes its ADR 0054. Summary numbers: 19 → 5 alarms and
 45 → 7 series, §1.1.
 
 ### 3.3 x402
@@ -811,7 +815,7 @@ Alarms *(proposed)*, both on `x402-production-alarms` (Slack), because it is the
    - All SQL is unverified.
    - One ch-prod-01 failure pages in three channels at once: Prices, explorer and x402 P1/P3. There is no shared host signal to silence them (D20).
 3. **The account-wide numbers are a target, not a state.**
-   - The Prices API keeps its old alarms until Milestone 2 acceptance, and the explorer joins only after it supersedes its ADR 0054 (their PRs).
+   - The Prices API keeps its old alarms until Milestone 2 acceptance, except for what its 0344–0347 change, and the explorer joins only after it supersedes its ADR 0054 (their PRs).
    - x402 P1–P3 wait for the 0139 switch. Until then the 33 old x402 alarms run (§3.3).
 
 ### 5.2 Unresolved skeptic objections (after the final version)
@@ -1014,3 +1018,5 @@ kept 5, replaced 32, drop 18; of which 28 conditional.
 | x402-host | `wal_last_archived_age_seconds` | — | drop from CW | backups/snapshots groups disabled; they return as P3 causes in 0026 |
 
 New series account-wide (not in the 166): Prices `FailingChecks`, `FailingCriticalChecks`, `RuntimeChecksFailing`, `PortalSourcesLoadFailed` (empty today); Explorer `ReadinessFailing`, `Bits` ×2, `NewBits` ×2; x402 `findings`. In total 10 new + 19 kept = 29.
+
+[pre-trim]: https://github.com/rumblefishdev/stellar-x402/blob/b99fad33b4c91ad411f958a24c5840e94e5b7858/lore/1-tasks/active/0138_RESEARCH_monitoring-cost-and-grafana-decision/notes/G-alarm-signals-and-triage-runbooks.md
