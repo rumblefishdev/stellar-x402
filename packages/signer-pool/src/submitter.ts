@@ -120,6 +120,11 @@ export interface SignedBounds {
   maxTime?: number;
   /** The last ledger it may land in (inclusive), when the call set `maxLedger`. */
   maxLedger?: number;
+  /**
+   * The channel account whose sequence number it uses, so a caller that stores the hash knows
+   * which channel it may still occupy (0090).
+   */
+  channel?: string;
 }
 
 export interface SubmitOptions {
@@ -387,6 +392,17 @@ export class SettlementSubmitter {
     const forget = () => void this.inFlight.delete(submission);
     submission.then(forget, forget);
     return submission;
+  }
+
+  /**
+   * Keeps the channel at `address` from every call until `until` settles (0090): while a
+   * transaction another process sent on it may still land, a send here would only get `txBadSeq`.
+   * A free channel leaves the pool at once, one in use when its call lets it go. Calls queue for
+   * the other channels meanwhile, as when all are busy, and the channel's sequence number is read
+   * again before its next use.
+   */
+  hold(address: string, until: Promise<unknown>): void {
+    this.pool.hold(address, until);
   }
 
   /**
@@ -774,7 +790,15 @@ export class SettlementSubmitter {
       this.pastLedgerBound(maxLedger, this.clock.current);
     // Nothing is sent until the caller has the hash: a store write that fails must stop the send.
     if (opts.onSigned) {
-      await this.awaitSigned(opts.onSigned, hash, innerHash, maxTime, maxLedger, boundAt);
+      await this.awaitSigned(
+        opts.onSigned,
+        hash,
+        innerHash,
+        maxTime,
+        maxLedger,
+        boundAt,
+        channel.address,
+      );
       // The write took time: an envelope already past a bound can only get txTooLate.
       if (pastBounds()) return { ...base, status: "expired", hash };
     }
@@ -834,7 +858,8 @@ export class SettlementSubmitter {
     }
     if (accepted) callSafely(opts.onSent, hash);
     const dueAt = (boundAt + this.confirmGraceSeconds) * 1000;
-    if (accepted && this.pipeline && this.pool.queued > 0) {
+    // A channel under a hold (0090) goes back through release(), which keeps it until the hold ends.
+    if (accepted && this.pipeline && this.pool.queued > 0 && !this.pool.isHeld(channel)) {
       const final = new Promise<void>((resolve) => (hold.finish = resolve));
       channel.pending = { sequence: txSequence, final, dueAt };
       this.pool.handOver(channel);
@@ -866,6 +891,7 @@ export class SettlementSubmitter {
     maxTime: number | undefined,
     maxLedger: number | undefined,
     boundAt: number,
+    channel: string,
   ): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let watchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -893,6 +919,7 @@ export class SettlementSubmitter {
       const bounds: SignedBounds = {
         ...(maxTime !== undefined && { maxTime }),
         ...(maxLedger !== undefined && { maxLedger }),
+        channel,
       };
       const written = Promise.resolve().then(() => onSigned(hash, bounds, innerHash)); // a synchronous throw too
       const outcome = await Promise.race([written, timedOut, pastLedger]).catch(
