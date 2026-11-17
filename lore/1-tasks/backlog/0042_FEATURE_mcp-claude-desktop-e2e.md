@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 related_adr: []
 related_tasks: ["0037", "0032", "0041"]
-tags: [mcp, discovery, e2e, priority-medium, effort-small]
+tags: [mcp, dev-tools, e2e, priority-medium, effort-small]
 links: []
 history:
   - date: "2026-10-13"

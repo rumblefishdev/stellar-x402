@@ -6,7 +6,7 @@ status: backlog
 milestone: 2
 related_adr: []
 related_tasks: ["0037", "0043"]
-tags: [mcp, payments, mainnet, security, priority-medium, effort-large]
+tags: [mcp, dev-tools, mainnet, security, priority-medium, effort-large]
 links: []
 history:
   - date: "2026-10-14"

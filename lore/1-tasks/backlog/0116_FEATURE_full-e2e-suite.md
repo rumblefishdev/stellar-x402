@@ -6,7 +6,7 @@ status: backlog
 milestone: 2
 related_adr: ["0009"]
 related_tasks: ["0029", "0041", "0042", "0046", "0058"]
-tags: [tests, e2e, priority-medium, effort-large]
+tags: [tests, e2e, priority-medium, effort-large, dev-tools]
 links: []
 history:
   - date: "2026-11-06"

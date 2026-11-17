@@ -6,7 +6,7 @@ status: backlog
 milestone: 1
 related_adr: []
 related_tasks: ["0064", "0073", "0021"]
-tags: [facilitator, scripts, testnet, priority-low, effort-small]
+tags: [facilitator, scripts, testnet, priority-low, effort-small, dev-tools]
 links: []
 history:
   - date: "2026-10-28"
