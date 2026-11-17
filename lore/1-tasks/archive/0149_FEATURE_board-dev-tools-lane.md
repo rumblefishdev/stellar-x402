@@ -2,7 +2,7 @@
 id: "0149"
 title: "Show the dev-tools lane on the board and in /pr's lane table"
 type: FEATURE
-status: active
+status: completed
 owner: okarcz
 milestone: 2
 related_adr: []
@@ -24,6 +24,13 @@ history:
     who: okarcz
     note: >
       Started: the lane shows on the board as "DevTools", so the fifth developer finds their tasks there.
+  - date: "2026-11-17"
+    status: completed
+    who: okarcz
+    note: >
+      PR #196 rebase-merged (93051e85): the board shows the 13 dev-tools tasks as a DevTools lane, and /pr's lane table
+      has the row. board.json changed only in those 13 lanes. No code review (gate skipped by okarcz); no package tests
+      apply.
 ---
 
 # Show the dev-tools lane on the board and in /pr's lane table
@@ -78,3 +85,18 @@ the board and to the `/pr` skill's lane table.
   `discovery` now names `karolkow`.
 - `pnpm board` before and after: 13 of 142 tasks changed, each only in `lane` (`null` → `dev-tools`): 0042, 0043,
   0044, 0055, 0068, 0075, 0081, 0084, 0085, 0102, 0116, 0131, 0137.
+
+## Design Decisions
+
+### From Plan
+
+1. **Tag `dev-tools`, label `DevTools`** (okarcz, 2026-11-17).
+2. **0057, 0058 and 0092 stay in Payments** (okarcz's decision of 2026-11-16); 0043, 0044, 0042, 0137 and 0075 moved
+   to `dev-tools`.
+
+### Emerged
+
+3. **`dev-tools` is last in `LANES`**, so a task that still carries an older lane tag keeps it.
+4. **Colour `#58a6ff`**, a blue apart from the other three lanes' pink, teal and amber.
+5. **The `/pr` row has no owner**: a `dev-tools` task with no owner gets no confirm bullet until the fifth developer
+   joins. Set the owner then.
