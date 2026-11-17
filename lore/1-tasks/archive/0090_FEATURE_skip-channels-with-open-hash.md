@@ -68,8 +68,10 @@ narrow its message (`config.ts`, 0071 decision 14).
 ## Acceptance Criteria
 
 - [x] Given a transaction the previous process left open on a channel, when the new process
-      takes the lease, then it sends on that channel only once the record is final
-      (`channel-hold-takeover.test.ts` for the hold, `open-channels.test.ts` for the release)
+      takes the lease, then it sends on that channel only once reconciliation marks that
+      transaction landed or dead, the record is final, or the network is past its bound by the
+      `NOT_FOUND` margin (decision 3 as amended by review D1; `channel-hold-takeover.test.ts` for
+      the hold, `open-channels.test.ts` for the release)
 
 ## Implementation Notes
 
