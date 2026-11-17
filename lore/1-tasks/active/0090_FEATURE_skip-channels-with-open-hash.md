@@ -164,6 +164,14 @@ Four review layers; 2 decisions, 10 patches applied, 12 findings rejected. The r
   - `holdOpen`'s doc says holds stack on a re-acquire;
   - ADR 0011 and the `config.ts` comment are reworded.
 
+## PR #195 review (Stan, 2026-11-17)
+
+- **A hanging primary RPC during a deploy:** the hold check runs inside the acquire's limit (10 s at
+  the default TTL), the same as `FallbackRpc`'s timeout, so the first acquire fails and `/settle`
+  answers 503 for one more interval until the fallback takes over. Accepted as it recovers by
+  itself (okarcz); written in the `onAcquired` doc and ADR 0011.
+- **`queue-waiting`:** its description now names channels held back after a deploy.
+
 ## Open
 
 - The `txBadSeq` rebuild: per the task, count `txBadSeq` in production first; if nothing is left

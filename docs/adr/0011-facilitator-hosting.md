@@ -52,7 +52,10 @@ The host must:
   its channel may fail with `txBadSeq` and rebuild, for minutes rather than about 60 s. Accepted
   for testnet, not for pubnet, so the next process holds such a channel back (0090): from the
   moment it takes the lease until reconciliation marks that transaction landed or dead, or the
-  network is past its bound by the `NOT_FOUND` margin, and sends on the other channels meanwhile;
+  network is past its bound by the `NOT_FOUND` margin, and sends on the other channels meanwhile.
+  That check runs inside the lease acquire, within a third of the TTL; a primary RPC that hangs
+  then fails the first acquire and `/settle` answers 503 for one more interval until the fallback
+  RPC takes over. Accepted: it recovers by itself;
 - **keep the facilitator key out of the image, the logs and the facilitator's process** (AD-12);
 - **offer a durable store** for the PostgreSQL schema of ADR 0012.
 
