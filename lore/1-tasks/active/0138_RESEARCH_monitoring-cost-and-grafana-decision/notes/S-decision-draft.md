@@ -125,8 +125,9 @@ explorer follow.
 
 ## Settled since the draft
 
-- The VM: Marek approved it and it was bought on 2026-11-17: a CPX12 in Helsinki on Ubuntu 24.04. The console bills in dollars: $10.99 and $0.60 for the IPv4.
-  The Cost-Optimized plans were not available.
+- The VM: Marek approved it and it was bought on 2026-11-17: a CPX12 in Helsinki on Ubuntu
+  24.04. The console bills in dollars: $10.99 and $0.60 for the IPv4. The Cost-Optimized plans
+  were not available.
 
 ## Still open
 
