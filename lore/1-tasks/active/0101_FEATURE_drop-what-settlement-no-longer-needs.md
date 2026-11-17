@@ -42,11 +42,10 @@ Figures are from `origin/develop` on 2026-11-03. Work each item from what is tru
    `README.md`, ADR 0001 and task 0092, which name `packages/sdk`. 0102 keeps the RFP's SDK visible.
    `examples/mcp-metered` stays, without its dependency on the SDK. The edge from the facilitator to
    `mcp` stays with 0063.
-2. **`[refactor]`, 2–3 h, after #110. Submitter statistics.** `stats()` has 0 production readers,
-   also in 0027's PRs: `main.ts` reads `onEvent`. Remove `SubmitterStats`, `stats()`,
-   `refusalReason` and `RefusalReason`, about 128 lines; `stats.ts`'s event types stay. 33
-   assertions in 6 test files move to `onEvent`. Also stop exporting `ChannelPool` and `LedgerClock`,
-   which have no outside reader.
+2. **Dropped. Submitter statistics.** Since 0027's gauges (2026-11-04), `main.ts` reads
+   `stats()` for `queued`, `channels`, `busy` and `quarantined`. The other eleven counters have no
+   production reader, but the signer pool's tests observe the submitter through them (38 calls),
+   and 0138 may make metrics of them.
 3. **`[refactor]`, ~1 h. Attempts as a plain property on the error.** Delete the `WeakMap` behind
    `attemptsOf` and the three `vi.mock`s of the package that exist because of it.
 4. **Merged in #146. `[structure only]`, ~1.5 h. What in `main.ts` isn't wiring.** Move `start()` to its own file,
@@ -70,6 +69,7 @@ Figures are from `origin/develop` on 2026-11-03. Work each item from what is tru
 | 5 | Keep `examples/mcp-metered`, without its dependency on `packages/sdk`: it records the idea of a second example, and 0041 hasn't chosen one | owner | changes it | `examples/mcp-metered/package.json` | CI steps, assertions unchanged |
 | 6 | One `resultUpdate` for both writes of a pool result, with one rule: a ledger or a fee the result doesn't have is left out. The stored result doesn't change, because a non-final record holds neither value. Clearing is the wrong rule to keep: a final record without a fee releases its budget reservation | owner | matches | `settlement/records.ts`, `settle.ts`, `reconcile.ts` | `records.test.ts`, other assertions unchanged |
 | 7 | Keep the fallback for a hash stored without bounds, read through `payerExpiration` for the record's payer: the payer's auth expiry is the one deadline every envelope of the payment shares, and someone else's fee bump of ours (0087) is stored without bounds. No production query: nothing changes for stored rows | owner | changes it | `settlement/verify.ts`, `reconcile.ts` | `reconcile.test.ts`: the fallback, with the payload of the record's payer |
+| 8 | Keep the submitter statistics: production reads four of them, and the tests read the rest to observe the submitter; trimming them costs 2–3 h and changes nothing anyone sees | owner | changes it | none | none |
 
 ## PR split
 
