@@ -485,8 +485,8 @@ final settlement, so budgets and breakers count low.
 
 ### queue-waiting
 
-Settle has waited for a free channel for 3 minutes, every sample: every channel is busy or out of
-the pool.
+Settle has waited for a free channel for 3 minutes, every sample: every channel is busy, out of
+the pool, or held back after a deploy (0090).
 
 1. Check [channel-quarantined](#channel-quarantined) and the traffic.
 2. If load holds them rather than faults, add channels ([runbook, OpenBao](runbook.md#openbao)).

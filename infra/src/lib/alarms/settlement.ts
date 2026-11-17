@@ -83,7 +83,7 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
       comparison: ">",
       threshold: 0,
       description: {
-        what: `Settle on ${network} has waited for a free channel for 3 minutes, every sample of each minute: every channel is busy or out of the pool.`,
+        what: `Settle on ${network} has waited for a free channel for 3 minutes, every sample of each minute: every channel is busy, out of the pool, or held back after a deploy (0090).`,
         next: "Check channel-quarantined and the traffic; add channels (docs/runbook.md, OpenBao) when it is load rather than faults that holds them.",
         noData: SILENT_LEVEL,
       },

@@ -23,6 +23,9 @@ export interface LeaseKeeperDeps {
    * channels the previous holder left a transaction open on (0090). If it rejects, or takes more than
    * a third of the TTL, the acquire counts as failed and the keeper tries again at its next attempt.
    * One that runs on past that limit isn't stopped, so what it does must stay safe to repeat.
+   * Accepted trade-off: the limit (10 s at the default TTL) equals `FallbackRpc`'s timeout, so a
+   * primary RPC that hangs during a deploy fails the first acquire, and `/settle` answers 503 for one
+   * more interval until the fallback takes over.
    */
   onAcquired?: () => Promise<void>;
 }
