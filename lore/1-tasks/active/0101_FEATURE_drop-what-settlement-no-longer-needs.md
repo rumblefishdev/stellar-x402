@@ -57,7 +57,7 @@ Figures are from `origin/develop` on 2026-11-03. Work each item from what is tru
 6. **Merged in #135. `[refactor]`, ~1 h. One `resultUpdate(result)`.** `settle.ts` and `reconcile.ts` build
    the same update from a pool result, under two rules for a ledger or a fee the result doesn't
    have. #105's `failure` line stays outside the function: it belongs to non-success results only.
-7. **`[structure only]`, ~1.5 h. `packages/mcp` into `apps/mcp-local`.** The package is private and
+7. **Merged in #197. `[structure only]`, ~1.5 h. `packages/mcp` into `apps/mcp-local`.** The package is private and
    has one importer, and the app's e2e reaches into its tests by relative path. Its files move into
    the app under their own names; the package goes.
 
