@@ -2,7 +2,8 @@
 title: "Every alarm against what it reads: what can go, and what doesn't carry over"
 type: research
 status: developing
-spawns: []
+spawns:
+  - notes/G-alarm-signals-and-triage-runbooks.md
 tags: [monitoring, cloudwatch, grafana, alarms, cost]
 links:
   - R-cloudwatch-cost-measurement.md
@@ -170,7 +171,8 @@ and the rule count stays. `balance-low` and `balance-critical` stay in CloudWatc
 
 Not this project's work (0138's context). The reductions and gaps found there were handed to those
 projects on 2026-11-13: the Prices API's backlog tasks 0344–0347 and an update to its 0093
-(stellar-prices-api PR #420), and the explorer's backlog tasks 0670–0673.
+(stellar-prices-api PR #420), and the explorer's backlog tasks 0671–0674 (soroban-block-explorer
+PR #733; the ingestion-stall task was 0670 until develop took that ID on 2026-11-16).
 
 - **CloudWatch alone saves about $22 a month across the account**, most of it Container Insights on
   the explorer's Galexie cluster ($11.10: 37 billable metrics, read by one alarm).
