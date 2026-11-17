@@ -3,6 +3,7 @@ id: "0139"
 title: "Carry out the monitoring decision for the facilitator, with every alarm fired again"
 type: FEATURE
 status: active
+owner: stkrolikiewicz
 milestone: 2
 related_adr: ["0011"]
 related_tasks: ["0138", "0027", "0089", "0109", "0118", "0125", "0127"]
