@@ -80,12 +80,12 @@ Reviewers, please confirm:
 - Say WHAT changed, not HOW. Name the tasks that inherit deferred work (`0022 runs the same suites…`).
 - **Reviewers, please confirm** goes at the end of the Summary, as in PR #23. It has one bullet per other team member whose task this PR affects: a task it edits, a task in the current task's `related_tasks`, or a task the body names as inheriting work. That task's owner is its `owner:` field, or the last `who` in its `history` when it has none (the board's assignee). A task with no `owner` whose last `who` is `claude` (usually a backlog task) belongs to its lane's owner, from its tags:
 
-  | Lane tag    | Owner                                           |
-  | ----------- | ----------------------------------------------- |
-  | `payments`  | `okarcz`                                        |
-  | `discovery` | `karolkow`                                      |
-  | `platform`  | `stkrolikiewicz`                                |
-  | `dev-tools` | none until the fifth developer joins: no bullet |
+  | Lane tag    | Owner            |
+  | ----------- | ---------------- |
+  | `payments`  | `okarcz`         |
+  | `discovery` | `karolkow`       |
+  | `platform`  | `stkrolikiewicz` |
+  | `dev-tools` | `bstruzyk`       |
 
   Skip tasks of the PR's creator. Each bullet says in one sentence what the PR changes for that task and what to confirm, e.g. `**@adamkoot** (0032): no resource filter is needed; details before paying come from the seller's 402 answer.` Leave the list out when no one else's task is affected. These people are always requested as reviewers (step 6).
 
@@ -139,6 +139,7 @@ Say who was picked, and that the pick was random. `team.yaml` ids map to GitHub 
 | `akot`           | `adamkoot`       |
 | `stkrolikiewicz` | `stkrolikiewicz` |
 | `karolkow`       | `karolko9`       |
+| `bstruzyk`       | `Bartek-str`     |
 
 ```bash
 git push -u origin {branch}
