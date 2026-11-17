@@ -2,7 +2,7 @@
 id: "0090"
 title: "After a deploy, don't send on a channel the last process left a transaction open on"
 type: FEATURE
-status: active
+status: completed
 owner: okarcz
 milestone: 2
 related_adr: ["0011", "0006"]
@@ -30,6 +30,14 @@ history:
     who: okarcz
     note: >
       Started: first of the quick, high-priority M2 Payments tasks.
+  - date: "2026-11-17"
+    status: completed
+    who: okarcz
+    note: >
+      PR #195 rebase-merged (aa268603), approved by Stan: a new process holds back the channels the last one left a
+      transaction open on, until reconciliation ends it or its bound passes. Code review: 2 decisions, 10 patches.
+      signer-pool 196/196, facilitator 1137 passed and 3 skipped; testnet smoke 4 payments landed. The `txBadSeq`
+      rebuild question went to 0150.
 ---
 
 # After a deploy, don't send on a channel the last process left a transaction open on
@@ -172,7 +180,7 @@ Four review layers; 2 decisions, 10 patches applied, 12 findings rejected. The r
   itself (okarcz); written in the `onAcquired` doc and ADR 0011.
 - **`queue-waiting`:** its description now names channels held back after a deploy.
 
-## Open
+## Future Work
 
-- The `txBadSeq` rebuild: per the task, count `txBadSeq` in production first; if nothing is left
-  for the rebuild, propose removing it. Not decided here.
+- The `txBadSeq` rebuild: count `txBadSeq` in production first; if nothing is left for the
+  rebuild, propose removing it → 0150.
