@@ -1,7 +1,7 @@
 ---
 title: "If Grafana, the smallest shape that pays its way"
 type: idea
-status: developing
+status: superseded
 spawns:
   - S-decision-draft.md
 tags: [monitoring, grafana, cloudwatch]
@@ -19,7 +19,16 @@ history:
     status: developing
     who: stkrolikiewicz
     note: "The CloudWatch agent stays for logs; the log-only fields are a step before the cut-over"
+  - date: "2026-11-17"
+    status: superseded
+    who: stkrolikiewicz
+    note: >
+      Superseded by the ADR 0011 amendment (option B: Prometheus and Alertmanager on a separate
+      Hetzner Cloud VM, an agent in agent mode on ch-prod-01). The free-tier and Alloy reasoning
+      no longer applies; the log-only fields still do (0139 step 4).
 ---
+
+> **Superseded** by the ADR 0011 amendment of 2026-11-17. Kept for the log-only fields.
 
 # If Grafana, the smallest shape that pays its way
 

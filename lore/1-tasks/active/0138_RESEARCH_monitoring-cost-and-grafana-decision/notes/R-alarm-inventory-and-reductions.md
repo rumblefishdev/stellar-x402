@@ -3,7 +3,7 @@ title: "Every alarm against what it reads: what can go, and what doesn't carry o
 type: research
 status: developing
 spawns:
-  - notes/G-alarm-signals-and-triage-runbooks.md
+  - G-alarm-signals-and-triage-runbooks.md
 tags: [monitoring, cloudwatch, grafana, alarms, cost]
 links:
   - R-cloudwatch-cost-measurement.md
@@ -18,6 +18,13 @@ history:
     note: >
       Inventory read on 2026-11-13 with read-only access. Each claim was checked a second time,
       by reviewers told to refute it, against the code and live CloudWatch.
+  - date: "2026-11-17"
+    status: developing
+    who: stkrolikiewicz
+    note: >
+      The inventory stands. "Grafana behaviour that shapes the rules" and "Decisions the move runs
+      into" assumed Grafana-managed alerting; the ADR 0011 amendment chose Prometheus and
+      Alertmanager on a separate VM (option B), which supersedes them.
 ---
 
 # Every alarm against what it reads
@@ -134,6 +141,9 @@ and the rule count stays. `balance-low` and `balance-critical` stay in CloudWatc
   Keep both.
 
 ## Grafana behaviour that shapes the rules
+
+> **Superseded** by the ADR 0011 amendment of 2026-11-17: the rules run in Prometheus and
+> Alertmanager, not in Grafana. Kept for the record.
 
 - **Free plan:** "up to 500 free alert rules, with each alert rule having a maximum of 1000 alert
   instances" (Grafana docs, creating a Grafana-managed rule). The count is not a constraint.

@@ -41,8 +41,8 @@ history:
 - **The monitoring VM.** Prometheus, Alertmanager and Grafana run on a small Hetzner Cloud VM
   in Helsinki, another location than ch-prod-01 in Falkenstein.
   - A CPX12: 1 AMD vCPU, 2 GB, 40 GB NVMe, 20 TB traffic, $11.59 a month in Helsinki with its
-    IPv4, before VAT, on Ubuntu 24.04. Enough for all three projects, an estimated 4,000 to 10,000
-    series; a bigger plan is a rescale.
+    IPv4, before VAT, on Ubuntu 24.04. It holds up to about 8,000 series; above that, a rescale,
+    not a migration (0139 measures the count).
   - Provisioned from soroban-infrastructure's `monitoring/` (private), with copies of the
     explorer's `infra-hetzner` base roles and a monitoring role. Each project keeps its metrics,
     rules and dashboards in its own public repository.
@@ -69,11 +69,14 @@ history:
     log-delivery silence alarm;
   - `x402-watch` and its Lambda's alarms, off the server by design (ADR 0013): balance, protocol
     and uptime;
-  - what watches the VM: an always-firing Watchdog rule goes through Alertmanager to AWS every
-    minute and writes one metric, and a CloudWatch alarm with missing data breaching fires when
-    it stops;
-  - a rule on `alertmanager_notifications_failed_total`, sent through Alertmanager's SNS
-    receiver, so a broken Slack webhook still reaches the channel.
+  - OpenBao's audit log disk at 90%, off the server, since signing stops when it fills; the
+    CloudWatch agent keeps that one metric;
+  - what watches the VM: an always-firing Watchdog rule goes through Alertmanager to an SNS topic
+    of its own every minute (its route repeats every minute), and a CloudWatch alarm on the
+    topic's `NumberOfMessagesPublished`, missing data breaching, fires when it stops. The VM
+    reaches AWS through Roles Anywhere with its own certificate;
+  - a rule on `alertmanager_notifications_failed_total` through the other receiver: a failing
+    Slack webhook through SNS, a failing SNS publish through Slack.
 - **The explorer and the Prices API** stay on CloudWatch in this decision. The VM can take them
   later ([signals](G-alarm-signals-and-triage-runbooks.md)); the explorer first needs its ADR
   0054 superseded ([inventory](R-alarm-inventory-and-reductions.md#decisions-the-move-runs-into)).
@@ -96,15 +99,15 @@ history:
 
 ## What it costs
 
-|                  | Today | After 0139                                                                                                          |
-| ---------------- | ----- | ------------------------------------------------------------------------------------------------------------------- |
-| CloudWatch, x402 | ~$21  | ~$5: `x402-watch` (6 metrics, 10 alarms), the heartbeat, the certificate, credentials and log-delivery alarms, logs |
-| Monitoring VM    | —     | $11.59 a month before VAT (CPX12 with IPv4), for every project on ch-prod-01                                        |
+|                  | Today | After 0139                                                                                                 |
+| ---------------- | ----- | ---------------------------------------------------------------------------------------------------------- |
+| CloudWatch, x402 | ~$21  | ~$5: 11 alarms on 6 series (about $3, [signals §3.3](G-alarm-signals-and-triage-runbooks.md)) and the logs |
+| Monitoring VM    | —     | $11.59 a month before VAT (CPX12 with IPv4), for every project on ch-prod-01                               |
 
 Target for 0139: **x402's CloudWatch at or under $8 a month, with the VM on CPX12.**
 
 Across the account, the [signals plan](G-alarm-signals-and-triage-runbooks.md) estimates
-CloudWatch at about $62.80 → $8.50 a month, plus about $4–5 of reads, once the Prices API and the
+CloudWatch at about $62.80 → $9.60 a month, plus about $4–5 of reads, once the Prices API and the
 explorer follow.
 
 ## Order (0139)
@@ -148,8 +151,8 @@ explorer follow.
   outage would be lost. Moving from B to A, or back, changes only the agent's `remote_write`
   target.
 - **Grafana Cloud Free (C).** $0 and off the server, but 10,000 active series, 14 days of
-  history, 100 alert rules, 3 people a month for a team of four, and a second vendor. The
-  fallback if nobody runs the VM.
+  history, 500 alert rules (Grafana's docs, read 2026-11-17), 3 people a month for a team of
+  four, and a second vendor. The fallback if nobody runs the VM.
 - **Cut CloudWatch only.** About $22 a month across the account, nearly all of it the explorer's
   and the Prices API's; x402's own part is about $1. Pubnet still doubles the facilitator's alarms.
 - **All three projects to the VM now.** Blocked by the explorer's ADR 0054. The Prices API's
