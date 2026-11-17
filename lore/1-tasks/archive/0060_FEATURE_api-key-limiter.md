@@ -3,6 +3,7 @@ id: "0060"
 title: "Accept a configured API key as the rate limiter's key"
 type: FEATURE
 status: completed
+owner: akot
 milestone: 1
 related_adr: ["0007"]
 related_tasks: ["0023", "0024", "0026", "0105"]

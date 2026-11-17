@@ -29,6 +29,7 @@ import {
   settleCheck,
 } from "../src/main.js";
 import { rpcEndpointName } from "../src/logger.js";
+import { memoryMetrics } from "../src/metrics.js";
 import { feeSettings, type FeeSettings } from "../src/settlement/fees.js";
 import { PAYTO_TRUSTLINE_REASON } from "../src/settlement/trustline.js";
 import {
@@ -46,6 +47,11 @@ import {
   type VerifyTrace,
 } from "../src/settlement/verify.js";
 import { signerEnv } from "./fake-openbao.js";
+
+/** A read of a payer's nonce entry (0141). */
+const isNonceKey = (key: xdr.LedgerKey) =>
+  key.switch().name === "contractData" &&
+  key.contractData().key().switch().name === "scvLedgerKeyNonce";
 
 const secret = Keypair.random().secret();
 const channel = Keypair.random().publicKey();
@@ -188,9 +194,10 @@ function setup(
   const base = feeSettings(cfg.fees, rpc);
   const fees = opts.fees ? opts.fees(base) : base;
   const seams = { makeScheme };
+  const metrics = memoryMetrics().for({ network: cfg.network });
   return {
-    verify: buildVerifier(cfg, rpc, fees, logger, seams),
-    check: settleCheck(buildChecks(cfg, rpc, fees, logger, seams)),
+    verify: buildVerifier(cfg, rpc, fees, logger, metrics, seams),
+    check: settleCheck(buildChecks(cfg, rpc, fees, logger, metrics, seams)),
     schemes,
     logger,
     latestLedger,
@@ -602,10 +609,13 @@ describe("buildVerifier (the /verify wiring in main)", () => {
               _parsed: true,
               error: "HostError: Error(Contract, #13)",
             }) as never,
-          getLedgerEntries: async () =>
+          // The SAC's instance; the payer's nonce is unused, so its read finds nothing (0141).
+          getLedgerEntries: async (...keys: xdr.LedgerKey[]) =>
             ({
               latestLedger: CURRENT,
-              entries: [{ val: xdr.LedgerEntryData.contractData(contractData) }],
+              entries: keys.some(isNonceKey)
+                ? []
+                : [{ val: xdr.LedgerEntryData.contractData(contractData) }],
             }) as never,
         },
       },

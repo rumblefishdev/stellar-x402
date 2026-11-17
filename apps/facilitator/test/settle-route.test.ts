@@ -93,7 +93,13 @@ describe("POST /settle", () => {
 
     const response = await post(request);
     expect([response.status, await response.json()]).toEqual([200, success]);
-    expect(settle).toHaveBeenCalledWith(paymentPayload, requirements, expect.any(AbortSignal));
+    // The fourth argument is the caller: none on testnet, which takes no API key (0105).
+    expect(settle).toHaveBeenCalledWith(
+      paymentPayload,
+      requirements,
+      expect.any(AbortSignal),
+      undefined,
+    );
     expect(lines.map((line) => JSON.parse(line))).toContainEqual(
       expect.objectContaining({ event: "settled", settlementKey: record.key, replay: false }),
     );

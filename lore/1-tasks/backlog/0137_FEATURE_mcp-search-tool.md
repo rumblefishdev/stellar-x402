@@ -6,7 +6,7 @@ status: backlog
 milestone: 2
 related_adr: ["0008"]
 related_tasks: ["0120", "0037", "0042", "0046", "0068"]
-tags: [mcp, bazaar, search, priority-medium, effort-small, discovery]
+tags: [mcp, bazaar, search, priority-medium, effort-small, dev-tools]
 links:
   - ../../../docs/rfp/07-x402-facilitator-bazaar.md
 history:

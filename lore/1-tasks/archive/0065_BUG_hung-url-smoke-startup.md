@@ -2,7 +2,7 @@
 id: "0065"
 title: "Make the hung-URL smoke runs start under the startup RPC check"
 type: BUG
-status: backlog
+status: completed
 milestone: 1
 related_adr: []
 related_tasks: ["0061", "0045", "0051"]
@@ -13,6 +13,11 @@ history:
     status: backlog
     who: okarcz
     note: "Spawned from 0061 future work."
+  - date: "2026-11-16"
+    status: completed
+    who: okarcz
+    note: >
+      Closed as won't-do by okarcz in the M1 Payments cleanup: only the hand-run failover smoke stub is affected, CI is not. Whoever runs it again starts the stub by hand past the startup check (PR #62's stub).
 ---
 
 # Make the hung-URL smoke runs start under the startup RPC check
@@ -39,3 +44,9 @@ method. Make that the scripted way, so the failover smoke runs work again withou
       check passes, `failedOver` included
 - [ ] Given `verify-smoke.ts` in the same setup, then it passes `failedOver` too
 - [ ] Given the scripts' headers, then they describe the setup that works with the startup check
+
+## Closed
+
+Won't do (okarcz, 2026-11-16). Only the hand-run failover smoke scripts need the stub; no CI test
+depends on it. Whoever runs them again sets up the stub by hand, as PR #62 (0061) did. Neither
+criterion is met.

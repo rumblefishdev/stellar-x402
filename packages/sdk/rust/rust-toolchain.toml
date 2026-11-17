@@ -1,0 +1,4 @@
+[toolchain]
+# The version CI builds with (.github/workflows/ci.yml, job `sdk-rust`). Upgrade both together.
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]

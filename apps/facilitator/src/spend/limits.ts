@@ -1,5 +1,5 @@
 import type { SpendLimit, SpendScope } from "../ports/index.js";
-import { SETTLE_REASONS } from "../settlement/settle.js";
+import { SETTLE_REASONS } from "../settlement/reasons.js";
 import type { AssetTier } from "./asset-kinds.js";
 
 /** The fee budgets of one rolling window, in stroops (S-design §5). */

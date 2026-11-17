@@ -1,0 +1,12 @@
+{
+  "kinds": [
+    {
+      "x402Version": 2,
+      "scheme": "exact",
+      "network": "stellar:testnet",
+      "extra": { "areFeesSponsored": true }
+    }
+  ],
+  "extensions": ["bazaar"],
+  "signers": { "stellar:*": ["GAVE5V5IOMNNBOZXGZSQOP447L2QLCG6ELIIPO6CFJLGZVY4YIK3KKRP"] }
+}

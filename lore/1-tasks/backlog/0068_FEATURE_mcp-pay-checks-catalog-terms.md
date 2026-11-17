@@ -6,7 +6,7 @@ status: backlog
 milestone: 1
 related_adr: ["0008"]
 related_tasks: ["0063", "0037"]
-tags: [mcp, bazaar, security, before-pubnet, priority-medium, effort-small]
+tags: [mcp, bazaar, security, before-pubnet, priority-medium, effort-small, dev-tools]
 links:
   - ../../../docs/adr/0008-bazaar-catalog-integrity.md
 history:

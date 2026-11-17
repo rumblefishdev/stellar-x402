@@ -2,7 +2,8 @@
 id: "0139"
 title: "Carry out the monitoring decision for the facilitator, with every alarm fired again"
 type: FEATURE
-status: backlog
+status: active
+owner: stkrolikiewicz
 milestone: 2
 related_adr: ["0011"]
 related_tasks: ["0138", "0027", "0089", "0109", "0118", "0125", "0127"]
@@ -16,6 +17,12 @@ history:
     who: claude
     note: >
       Created with okarcz from the Milestone 2 plan. Waits on 0138's decision.
+  - date: "2026-11-17"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      Started with the monitoring VM, bought on 2026-11-17 (CPX12 in Helsinki). The decision is
+      the ADR 0011 amendment in PR #186.
 ---
 
 # Carry out the monitoring decision for the facilitator, with every alarm fired again

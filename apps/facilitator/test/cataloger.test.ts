@@ -384,7 +384,7 @@ describe("cataloger", () => {
     seller.paymentRequired = (url) => ({
       x402Version: 2,
       resource: { url, description: DESCRIPTION },
-      accepts: [{ ...requirements, extra: { pad: "x".repeat(5_000) } }],
+      accepts: [{ ...requirements, extra: { pad: "x".repeat(37_000) } }],
       extensions: { bazaar: valid },
     });
     expect(setup().cataloger.extensionResponses(record(valid))).toEqual({
@@ -395,10 +395,10 @@ describe("cataloger", () => {
     expect(counted("seller", "too_large")).toBe(1);
     expect(logger.info).toHaveBeenCalledWith(
       "catalog_rejected",
-      expect.objectContaining({ detail: "accepts.extra", bytes: 5_010 }),
+      expect.objectContaining({ detail: "listing" }),
     );
     const { rows } = await db.pool.query(`SELECT field_bytes FROM catalog_attempts`);
-    expect(rows).toEqual([{ field_bytes: 5_010 }]);
+    expect(rows[0].field_bytes).toBeGreaterThan(36 * 1024);
   });
 
   it("keeps the result of the check that started later, whichever answers first (row 10)", async () => {

@@ -151,8 +151,8 @@ describe("guardedFetch", () => {
   });
 
   it.each([
-    [20_000, 200],
-    [30_000, undefined],
+    [49_000, 200],
+    [60_000, undefined],
   ])(
     "with a %i-byte header, a seller's answer is read or refused as too large",
     async (bytes, status) => {

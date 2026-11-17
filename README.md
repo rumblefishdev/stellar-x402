@@ -15,6 +15,7 @@ package. Status: skeleton, nothing implemented yet.
 | `packages/mcp`          | MCP tools (search, paid call) and error codes                            |
 | `packages/seller-fetch` | requests to seller URLs: public addresses only, no redirects, limits     |
 | `packages/config`       | shared network config and types                                          |
+| `packages/sdk/rust`     | Rust crate `stellar-x402`: a seller charges for a route (axum layer)     |
 | `contracts/upto-proxy`  | Soroban contract for the `upto` scheme                                   |
 | `examples/`             | a test seller (`http-api`) and a placeholder for a second example        |
 | `conformance/`          | wire-level conformance runs and report                                   |

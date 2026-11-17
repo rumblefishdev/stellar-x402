@@ -13,7 +13,8 @@ import { emfMetrics } from "../src/adapters/emf-metrics.js";
 import { memoryMetrics, type ProcessMetrics } from "../src/metrics.js";
 import type { LeaseFence, SettlementStore, SpendScope } from "../src/ports/index.js";
 import { feeSettings } from "../src/settlement/fees.js";
-import { SETTLE_REASONS, keyOf } from "../src/settlement/settle.js";
+import { SETTLE_REASONS } from "../src/settlement/reasons.js";
+import { keyOf } from "../src/settlement/settle.js";
 import type { UpstreamSeams } from "../src/settlement/upstream.js";
 import { start } from "../src/start.js";
 import { payerScope } from "../src/spend/limits.js";
@@ -206,6 +207,7 @@ function setup(
     shared,
     fees,
     upstreamLogger,
+    memoryMetrics().for({ network: config.network }),
     seams ?? { makeScheme: () => ({ verify: async () => ({ isValid: true, payer }) }) },
   );
   const store = db.stores().settlements;

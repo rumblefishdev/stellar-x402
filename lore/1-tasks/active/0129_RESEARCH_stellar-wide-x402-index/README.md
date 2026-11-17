@@ -3,6 +3,7 @@ id: "0129"
 title: "Research a Stellar-wide index of x402 settlements"
 type: RESEARCH
 status: active
+owner: karolkow
 related_adr: ["0008"]
 related_tasks: ["0122", "0063", "0044"]
 tags: [bazaar, discovery, research, grant-extension, priority-medium, effort-medium]

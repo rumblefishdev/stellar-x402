@@ -38,7 +38,8 @@ import {
   type SettlementRecord,
   type SettlementStore,
 } from "../ports/index.js";
-import type { BeforeSubmitResult, SettlementHooks, SettlementOrigin } from "./hooks.js";
+import type { BeforeSubmitResult, Caller, SettlementHooks, SettlementOrigin } from "./hooks.js";
+import { NONCE_CONSUMED_REASON, type IsNonceUsed } from "./nonce-used.js";
 import {
   attemptUpdates,
   createRecords,
@@ -47,177 +48,19 @@ import {
   type Records,
 } from "./records.js";
 import {
-  PAYER_AUTH_REASON,
-  UNSUPPORTED_CREDENTIAL_REASON,
+  NOT_SIGN_AGAIN,
+  SETTLE_REASONS,
+  UNSENT,
+  UNSENT_REASONS,
+  reasonAfterFailure,
+} from "./reasons.js";
+import {
   UpstreamTimeoutError,
   payerExpiration,
   payerNonce,
   type Check,
   type Verified,
 } from "./verify.js";
-
-/**
- * Every `errorReason` `/settle` sends besides the reasons of the `/verify` checks (AD-6). Three are
- * upstream's own settle codes for the same outcome (`failed`, `rejected`, `unexpected`), and
- * `pending` is `@x402/core`'s. `payerAuth` and `unsupportedCredential` are `/verify` reasons too:
- * `/settle` sends them from its own re-check, and the pool's guard gives the second.
- */
-export const SETTLE_REASONS = {
-  /** Sent, not final by its bound (the RPC stopped answering) or the settle budget. */
-  pending: "settlement_pending",
-  /** Included in a ledger but failed (upstream's code). */
-  failed: "settle_exact_stellar_transaction_failed",
-  /** Refused by the network before inclusion, e.g. `txBadSeq` twice (upstream's code). */
-  rejected: "settle_exact_stellar_transaction_submission_failed",
-  /** Not included before its ledger bound, the payer's auth expiry: it can no longer land. */
-  expired: "settle_exact_stellar_transaction_expired",
-  /** The settlement's own simulation failed. */
-  simulation: "settle_exact_stellar_simulation_failed",
-  /** The settlement's simulation moves something other than the one expected transfer. */
-  balanceChanges: "settle_exact_stellar_unexpected_balance_changes",
-  /**
-   * The settlement's simulation never used the payer's auth entry: the token's `transfer` doesn't
-   * require the payer's signature, so the event's `from` proves nothing.
-   */
-  payerNotAuthorized: "settle_exact_stellar_payer_not_authorized",
-  /** The settlement's simulated fee is above `MAX_FEE_STROOPS`. */
-  fee: "settle_exact_stellar_fee_exceeds_maximum",
-  /** Fewer than two ledgers were left before the auth expiry by the time a channel was free. */
-  ledgerBound: "settle_exact_stellar_signature_expiration_too_soon",
-  /** The signed hash could not be stored, so nothing was sent. */
-  recordWrite: "settle_exact_stellar_record_write_failed",
-  /**
-   * The facilitator key's signer (OpenBao, 0036) failed on the transaction (upstream's code).
-   * This envelope wasn't sent ({@link UNSENT_REASONS}).
-   */
-  transactionSigning: "settle_exact_stellar_transaction_signing_failed",
-  /** The signer failed on the fee bump (upstream's code). This envelope wasn't sent ({@link UNSENT_REASONS}). */
-  feeBumpSigning: "settle_exact_stellar_fee_bump_signing_failed",
-  /** No channel was free before the deadline. Nothing was sent ({@link UNSENT_REASONS}). */
-  noChannelInTime: "settle_exact_stellar_no_channel_in_time",
-  /** Every channel is out of the pool. Nothing was sent ({@link UNSENT_REASONS}). */
-  noChannels: "settle_exact_stellar_no_channels",
-  /** The before-submit hook threw. A refusal carries the hook's own reason. */
-  refused: "settle_exact_stellar_refused",
-  /** The payload doesn't carry exactly one auth entry for the payer, so it has no settlement key. */
-  payerAuth: PAYER_AUTH_REASON,
-  /**
-   * This payer's nonce was already used for a different payload or requirements. `transaction`
-   * is the stored hash, if any, never the outcome.
-   */
-  nonceUsed: "settle_exact_stellar_nonce_already_used",
-  /**
-   * This payment settled, and its `success` was already answered once (AD-6). `transaction` is
-   * its hash. The resource was paid for once, so it is served once.
-   */
-  alreadySettled: "settle_exact_stellar_already_settled",
-  /**
-   * The settle budget ran out before anything was signed: nothing was or will be sent for this
-   * payment ({@link UNSENT_REASONS}).
-   */
-  timeout: "settle_exact_stellar_timeout",
-  /**
-   * No RPC endpoint answered before anything was signed (every one refused, failed or timed
-   * out). Not a bug: try again later ({@link UNSENT_REASONS}).
-   */
-  rpcUnavailable: "settle_exact_stellar_rpc_unavailable",
-  /** An auth entry with source-account credentials would authorize as the channel (AD-5). */
-  unsupportedCredential: UNSUPPORTED_CREDENTIAL_REASON,
-  /**
-   * The facilitator stopped before anything was signed (a crash or a restart), and reconciliation
-   * closed the record: nothing was or will be sent for this payment ({@link UNSENT_REASONS}).
-   */
-  interrupted: "settle_exact_stellar_interrupted",
-  /**
-   * The facilitator was stopping (a deploy) before anything was signed: nothing was or will be
-   * sent for this payment ({@link UNSENT_REASONS}); a retry reaches the next process (0025).
-   */
-  shuttingDown: "settle_exact_stellar_shutting_down",
-  /**
-   * This process lost the channel lease before it sent this envelope: another process took it,
-   * or none holds it (0071). Nothing is on its way for this payment ({@link UNSENT_REASONS}); a
-   * retry reaches the process that holds it. With a `transaction` the record has that hash, so it
-   * doesn't reopen: an envelope never sent, or one a `txBadSeq` refused before the rebuild.
-   */
-  leaseLost: "settle_exact_stellar_lease_lost",
-  /**
-   * Another payment from this payer in this asset was still settling when the settle budget ran
-   * out (0024): one balance is spent by one settlement at a time. Nothing was claimed, signed or
-   * sent for this payment: send the same payment again.
-   */
-  payerBusy: "settle_exact_stellar_payer_busy",
-  /**
-   * The payer's fee budget for this window is spent (AD-18): for a known asset its budget, for
-   * another token its budget in that token. Nothing was sent; the buyer waits for the window.
-   */
-  spendLimitPayer: "settle_exact_stellar_spend_limit_payer",
-  /** The recipient's fee budget for this window is spent. The seller asks the operator. */
-  spendLimitPayTo: "settle_exact_stellar_spend_limit_pay_to",
-  /** The asset's fee budget for this window is spent. Pay in another asset. */
-  spendLimitAsset: "settle_exact_stellar_spend_limit_asset",
-  /** The budget all tokens but the known ones share is spent. Pay in a known asset. */
-  spendLimitOther: "settle_exact_stellar_spend_limit_other",
-  /** The facilitator's fee budget for this window is spent. Use another facilitator. */
-  spendLimitGlobal: "settle_exact_stellar_spend_limit_global",
-  /** The payer's settlements failed on chain too often: its breaker is open for a while. */
-  breakerOpenPayer: "settle_exact_stellar_breaker_open_payer",
-  /** Settlements to this recipient failed on chain too often: its breaker is open for a while. */
-  breakerOpenPayTo: "settle_exact_stellar_breaker_open_pay_to",
-  /** This wasm token's transfers failed on chain too often: its breaker is open for a while. */
-  breakerOpenAsset: "settle_exact_stellar_breaker_open_asset",
-  /**
-   * The spend store didn't answer within the settle budget, so no fee could be reserved and
-   * nothing was sent (fail closed). Sign a new payment shortly.
-   */
-  spendStoreUnavailable: "settle_exact_stellar_spend_store_unavailable",
-  /** The facilitator's fee account is below its floor. Nothing was sent; the operator acts. */
-  facilitatorUnderfunded: "settle_exact_stellar_facilitator_underfunded",
-  /** Anything else (upstream's code). */
-  unexpected: "unexpected_settle_error",
-} as const;
-
-/**
- * Reasons a record ends with when nothing was sent for it (0073 decisions 3, 5, 15). The payer's
- * auth entry can still land until its expiration ledger, by whoever holds the payload, so the
- * answer never says "sign a new payment" while it is valid: it carries `extra.retryable` and
- * `extra.expirationLedger`, and the identical payload reopens the record and settles it once.
- * Past that ledger, `retryable` is `false`: sign a new payment. With a `transaction` an earlier
- * envelope was sent and a `txBadSeq` refused it before the rebuild: the record has its hash, so it
- * doesn't reopen and `retryable` is `false` at once.
- */
-export const UNSENT_REASONS: readonly string[] = [
-  SETTLE_REASONS.timeout,
-  SETTLE_REASONS.rpcUnavailable,
-  SETTLE_REASONS.interrupted,
-  SETTLE_REASONS.shuttingDown,
-  SETTLE_REASONS.noChannelInTime,
-  SETTLE_REASONS.noChannels,
-  SETTLE_REASONS.leaseLost,
-  SETTLE_REASONS.transactionSigning,
-  SETTLE_REASONS.feeBumpSigning,
-  // Transient spend-lane refusals (0024): the floor was momentarily below, or the store timed
-  // out. Nothing was sent and the payment is still valid, so the identical payload reopens and
-  // settles once the floor or store recovers, as the infra failures above do. The budget and
-  // breaker refusals are not here: those are a deliberate wait or cut-off, not a transient miss.
-  SETTLE_REASONS.facilitatorUnderfunded,
-  SETTLE_REASONS.spendStoreUnavailable,
-];
-const UNSENT = new Set(UNSENT_REASONS);
-
-/**
- * Failed answers about a record that don't tell the payer to sign again (0082): it isn't over, it
- * landed, the payload is another payment, its auth entry has expired, or nothing was recorded
- * because another payment of the payer and asset held the slot (0024). Every other failed answer
- * about a record ended a payment whose auth entry can still land until its expiration ledger, in
- * a new envelope: a failed or refused transaction spends no nonce.
- */
-const NOT_SIGN_AGAIN = new Set<string>([
-  SETTLE_REASONS.pending,
-  SETTLE_REASONS.alreadySettled,
-  SETTLE_REASONS.nonceUsed,
-  SETTLE_REASONS.expired,
-  SETTLE_REASONS.payerBusy,
-]);
 
 /**
  * The validity minimum `/settle` rechecks with (AD-22): the pool's own floor. `signer-pool` keeps
@@ -271,6 +114,11 @@ export interface SettlerDeps {
    * decision 15, 0082). Read only on an answer that ended a payment and before a reopen.
    */
   latestLedger: () => Promise<number>;
+  /**
+   * Whether the payer's nonce is used on chain, read after the pool's simulation failed or our
+   * transaction failed (0141).
+   */
+  nonceUsed: IsNonceUsed;
   /** Estimated ledger close time, to turn the auth expiry into a deadline. */
   ledgerMs?: number;
   /** The record writes and hooks to share, e.g. with reconciliation; its own by default. */
@@ -305,11 +153,16 @@ export interface Settled {
   afterResponse?: () => void;
 }
 
-/** `signal` aborts once the client has left: a repeat stops waiting, and no success is used up. */
+/**
+ * `signal` aborts once the client has left: a repeat stops waiting, and no success is used up.
+ * `caller` is who the request came from, on a network that requires an API key (0105); it reaches
+ * `beforeSubmit` and changes nothing else.
+ */
 export type Settle = (
   payload: PaymentPayload,
   requirements: PaymentRequirements,
   signal?: AbortSignal,
+  caller?: Caller,
 ) => Promise<Settled>;
 
 /**
@@ -369,10 +222,19 @@ export function createSettler(deps: SettlerDeps): Settle & {
   };
 
   /** The pool's own result, for when the store failed to record it (`submit()`). */
-  const answerResult = (result: SubmitResult, payer: string): SettleResponse => {
+  const answerResult = async (
+    result: SubmitResult,
+    payer: string,
+    nonce: string,
+  ): Promise<SettleResponse> => {
     const transaction = result.hash ?? "";
     if (result.status === "success") return { success: true, transaction, network, payer };
-    return failure(SETTLE_REASONS[result.status], payer, undefined, transaction);
+    return failure(
+      await reasonAfterFailure(SETTLE_REASONS[result.status], payer, nonce, deps.nonceUsed),
+      payer,
+      undefined,
+      transaction,
+    );
   };
 
   const records =
@@ -457,6 +319,10 @@ export function createSettler(deps: SettlerDeps): Settle & {
     const { response } = settled;
     if (response.success || settled.claimedBefore0073) return settled;
     const reason = response.errorReason ?? "";
+    // Another transaction used the nonce (0141): no repeat can settle it, and only the chain tells
+    // whether it paid, so the answer carries no advice at all.
+    if (reason === NONCE_CONSUMED_REASON || reason === SETTLE_REASONS.nonceConsumedElsewhere)
+      return settled;
     // `payer_busy` recorded nothing (0024): like an unsent answer, the same payment can be sent
     // again, so it carries `retryable` and "repeat the same payment", not "sign a new one".
     const unsent =
@@ -704,7 +570,12 @@ export function createSettler(deps: SettlerDeps): Settle & {
         // A send that threw may have reached the network: keep the record open (0019 resolves it).
         // `sent: "yes"` is an accepted send or a refused one, so after an unexpected error it may
         // still land too; a classified error says the pool knows it won't.
-        const errorReason = reasonFor(error);
+        const errorReason = await reasonAfterFailure(
+          reasonFor(error),
+          verified.payer,
+          verified.nonce,
+          deps.nonceUsed,
+        );
         const attempts = attemptUpdates(attemptsOf(error), { error });
         const unknown = attemptsOf(error).filter((attempt) =>
           errorReason === SETTLE_REASONS.unexpected
@@ -731,7 +602,8 @@ export function createSettler(deps: SettlerDeps): Settle & {
           logger.error("settlement_submit_failed", { network, settlementKey: key, error });
           metrics.increment("settlement_submit_failures_total");
         }
-        // The answer is the same fixed reason: a new payment, once this one can't land (0082).
+        // The answer is the same fixed reason: a new payment, once this one can't land (0082); a
+        // nonce another transaction used gets no advice (0141, `withRetry`).
         flagDrift(key, errorReason, "pool");
         return await finish(key, { state: "rejected", errorReason, attempts }, call.origin, own);
       }
@@ -769,7 +641,12 @@ export function createSettler(deps: SettlerDeps): Settle & {
               key,
               {
                 state: result.status,
-                errorReason: SETTLE_REASONS[result.status],
+                errorReason: await reasonAfterFailure(
+                  SETTLE_REASONS[result.status],
+                  verified.payer,
+                  verified.nonce,
+                  deps.nonceUsed,
+                ),
                 ...(result.failure && { failure: result.failure }),
                 ...fields,
               },
@@ -810,7 +687,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
                 updatedAt: now(),
               }
             : undefined;
-        fallback = { response: answerResult(result, verified.payer), record };
+        fallback = { response: await answerResult(result, verified.payer, verified.nonce), record };
       } else if (uncertain) {
         fallback = {
           response: failure(SETTLE_REASONS.pending, verified.payer, undefined, uncertain),
@@ -929,6 +806,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
     payload: PaymentPayload,
     requirements: PaymentRequirements,
     signal: AbortSignal | undefined,
+    caller: Caller | undefined,
     validOnce: () => Promise<Validity | undefined>,
   ): Promise<Settled> => {
     const startedAt = now();
@@ -1090,6 +968,8 @@ export function createSettler(deps: SettlerDeps): Settle & {
         paymentPayload: payload,
         paymentRequirements: requirements,
         reopened: claim.record.reopened,
+        // Present only on a network that requires an API key (0105).
+        ...(caller && { caller }),
         now: now(),
         deadline: startedAt + deps.budgetMs,
       });
@@ -1151,12 +1031,12 @@ export function createSettler(deps: SettlerDeps): Settle & {
 
   // Every answer by outcome (0027): `success`, or the `errorReason`. A thrown error is the
   // route's 500.
-  const settler: Settle = async (payload, requirements, signal) => {
+  const settler: Settle = async (payload, requirements, signal, caller) => {
     // One ledger read per call, shared by the reopen and the answer, so both decide alike.
     let valid: Promise<Validity | undefined> | undefined;
     const validOnce = () => (valid ??= validity(payload));
     const settled = await withRetry(
-      await settle(payload, requirements, signal, validOnce),
+      await settle(payload, requirements, signal, caller, validOnce),
       validOnce,
     );
     const { response } = settled;

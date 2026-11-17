@@ -249,6 +249,7 @@ describe("settlement_oldest_open_seconds", () => {
       logger,
       metrics,
       budgetMs: 30_000,
+      nonceUsed: async () => false,
       now,
     });
     /** Holds every RPC read until the returned release is called. */

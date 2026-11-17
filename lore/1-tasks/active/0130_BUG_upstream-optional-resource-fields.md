@@ -3,6 +3,7 @@ id: "0130"
 title: "Upstream fix: @x402/core refuses a whole 402 for one bad optional resource field"
 type: BUG
 status: active
+owner: karolkow
 related_adr: []
 related_tasks: ["0053"]
 tags: [upstream, bazaar, mcp, priority-medium, effort-small]

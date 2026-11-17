@@ -43,6 +43,17 @@ complete.
 
 - Read 0136's leftovers and its crate survey; correct this task's scope and effort.
 - Seller side: answer 402 with `upto` terms and settle the actual amount after the route answers.
+- Seller side: settle after the route's whole body, not once its status and headers are ready.
+  Part 1 settles before the body is sent, so a streamed body that breaks halfway is still paid
+  for; upstream's middleware holds every write until the body ends. Hold the body (with a size
+  limit, and a way out for a route that must stream), or say in writing why part 1's order
+  stays. From 0136's self-review of #177.
+- Seller side: whether to ask `/settle` again after the facilitator's `Retry-After` on 503
+  `no_lease` or `shutting_down` (a deploy, nothing sent). Part 1 answers as `@x402/express` does,
+  402 after the route ran (akot, 2026-11-13); asking again saves the sale and answers otherwise
+  than TypeScript.
+- Keep the crate's answers equal to the newest `@x402/express` (0136 decision 23), with upstream's
+  check of a payment's echoed extensions (`extension_echo_mismatch`), the one check part 1 lacks.
 - Buyer side: build and sign the Soroban auth entry for `exact`, and for `upto` if 0015 and 0034
   allow; pay a 402 from a Rust client. Or the owner drops the buyer side in writing.
 - Integrations for the frameworks beyond part 1's, chosen from what Rust sellers use.
@@ -59,6 +70,8 @@ complete.
       `@x402/stellar` builds from the same input; or the buyer side is dropped in writing
 - [ ] Given each framework the task names, when its example server runs, then it charges for a
       route as part 1's example does
+- [ ] Given a paid route whose streamed body breaks before it ends, when the server answers, then
+      nothing is settled, as with upstream's middleware; or the README says why it still is
 - [ ] The crate is on crates.io under Apache-2.0, its docs build on docs.rs, and a release is one
       documented step
 - [ ] The dependencies pass the licence audit, and CI builds and tests every feature

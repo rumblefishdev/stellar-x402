@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 related_adr: ["0011"]
 related_tasks: ["0046", "0073", "0074"]
-tags: ["effort-small", "priority-low", "money-path"]
+tags: ["effort-small", "priority-low", "money-path", "dev-tools"]
 links: []
 history:
   - date: "2026-11-10"

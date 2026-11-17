@@ -42,7 +42,11 @@ git worktree add --detach "$SCRATCH/promote-0042" origin/develop
 
 **Use `/lore-framework-tasks`. Never edit the frontmatter by hand.** It sets the status, `git mv`s the task to the matching directory (`active/`, `blocked/`, `archive/`) and, for **completed**, runs its completion checklist and spawns follow-up tasks.
 
-The new `history` entry sets the assignee: the board shows the last entry's `who`. So `who` is **the user's lore id**, a key of `lore/0-session/team.yaml` (`okarcz`, `akot`, `stkrolikiewicz`, `karolkow`). Read it from `LORE_SESSION_CURRENT_USER` or `lore-framework_show-session`. It is not `claude`, and not the git user name: Oskar commits as `karczuRF` but is `okarcz`.
+The board shows a task's `owner:` field as its assignee, and the last history entry's `who` only when the task has no `owner`. So activating sets `owner:` (after `status:`) to **the user's lore id**, and the new `history` entry's `who` is the same id. The id is a key of `lore/0-session/team.yaml` (`okarcz`, `akot`, `stkrolikiewicz`, `karolkow`). Read it from `LORE_SESSION_CURRENT_USER` or `lore-framework_show-session`. It is not `claude`, and not the git user name: Oskar commits as `karczuRF` but is `okarcz`.
+
+`/lore-framework-tasks` doesn't know `owner`, so add that one line by hand next to what it writes; it is the only frontmatter edit made by hand.
+
+Closing or blocking leaves `owner` as it is. A note in someone else's task never changes it. Taking over someone else's task is a handoff: set `owner` to the new id and add a history entry with the task's current status, `who` the new owner and the note `Handoff from <old id>: <why>`.
 
 ### 4. Commit with /lore-framework-git
 

@@ -3,6 +3,7 @@ id: "0074"
 title: "Make the timing-sensitive CI tests pass on a slow runner"
 type: BUG
 status: active
+owner: karolkow
 related_adr: ["0011"]
 related_tasks: []
 tags: [ci, tests, priority-medium, effort-small]

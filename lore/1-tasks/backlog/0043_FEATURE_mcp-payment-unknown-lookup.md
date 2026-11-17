@@ -6,7 +6,7 @@ status: backlog
 milestone: 2
 related_adr: []
 related_tasks: ["0037"]
-tags: [mcp, payments, priority-low, effort-medium]
+tags: [mcp, dev-tools, priority-low, effort-medium]
 links: []
 history:
   - date: "2026-10-13"

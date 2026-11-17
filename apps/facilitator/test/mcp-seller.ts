@@ -26,7 +26,7 @@ const read = async (req: IncomingMessage) => {
 
 /**
  * An MCP seller on this machine for the cataloger's check (0063 rows 5, 18): one tool, `weather`,
- * that takes a `city`. Unpaid, it answers as upstream's payment wrapper does (`@x402/mcp` 2.28.0
+ * that takes a `city`. Unpaid, it answers as upstream's payment wrapper does (`@x402/mcp` 2.31.0
  * `createPaymentRequiredResult`): an error result whose `structuredContent` and first text are the
  * 402 terms; `free` answers as a free tool; `never` accepts the call and never sends its result. `tools` lists other names instead of `weather`;
  * `outputSchema` gives the tool one the terms don't match; `textOnly` leaves out

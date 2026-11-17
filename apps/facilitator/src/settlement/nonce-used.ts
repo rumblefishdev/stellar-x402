@@ -1,0 +1,51 @@
+import { Address, xdr } from "@stellar/stellar-sdk";
+import type { SorobanRpc } from "@stellar-x402/signer-pool";
+import type { Logger } from "../logger.js";
+
+/**
+ * `/verify`'s code, and `/settle`'s through its re-check: another transaction already used the
+ * payer's nonce (0141). The payment may have settled there, or the payer spent the nonce on
+ * another transfer; the chain tells which, so it is no advice to sign a new payment.
+ */
+export const NONCE_CONSUMED_REASON = "invalid_exact_stellar_payload_nonce_consumed_elsewhere";
+/** The same for a settlement that was already claimed: its record ends with this code. */
+export const NONCE_CONSUMED_SETTLE_REASON = "settle_exact_stellar_nonce_consumed_elsewhere";
+
+/** Whether the payer's nonce is used on chain; `false` too when it couldn't be read. */
+export type IsNonceUsed = (payer: string, nonce: string) => Promise<boolean>;
+
+/**
+ * Reads the entry the host writes for a used nonce: a temporary entry of the payer's address,
+ * kept at least until the auth entry expires, longer when the network's minimum life of a
+ * temporary entry is (`consume_nonce` in soroban-env-host). So while the payment could still
+ * settle, it says whether the nonce is used. The RPC's own timeout and its failover to the next
+ * URL apply. A read that still fails is logged and `false`: the payment is refused either way.
+ * Then a front-run keeps the old reason and its advice to sign a new payment, which needs every
+ * RPC URL down in that second. The same happens when the URL that answers is a few ledgers behind
+ * the one where the other transaction used the nonce: it shows no entry yet. Healthy URLs agree to
+ * within a ledger, and nothing here checks the answer's `latestLedger`; an accepted risk.
+ */
+export function createNonceLookup(
+  rpc: Pick<SorobanRpc, "getLedgerEntries">,
+  network: string,
+  logger: Pick<Logger, "warn">,
+): IsNonceUsed {
+  return async (payer, nonce) => {
+    try {
+      const key = xdr.LedgerKey.contractData(
+        new xdr.LedgerKeyContractData({
+          contract: new Address(payer).toScAddress(),
+          key: xdr.ScVal.scvLedgerKeyNonce(
+            new xdr.ScNonceKey({ nonce: xdr.Int64.fromString(nonce) }),
+          ),
+          durability: xdr.ContractDataDurability.temporary(),
+        }),
+      );
+      const { entries } = await rpc.getLedgerEntries(key);
+      return entries.length > 0;
+    } catch (error) {
+      logger.warn("nonce_lookup_failed", { network, error });
+      return false;
+    }
+  };
+}

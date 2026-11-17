@@ -3,6 +3,7 @@ id: "0101"
 title: "Drop what the settlement modules no longer need"
 type: FEATURE
 status: active
+owner: karolkow
 related_adr: ["0001", "0004", "0012"]
 related_tasks: ["0036", "0102", "0063"]
 tags: [facilitator, signer-pool, refactor, priority-low, effort-medium]

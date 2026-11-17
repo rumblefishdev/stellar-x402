@@ -4,6 +4,7 @@ title: "M2 evidence package for SCF's Tranche 2 verification"
 type: DOCS
 status: backlog
 milestone: 2
+owner: okarcz
 related_adr: []
 related_tasks: ["0128", "0120", "0034", "0102", "0121", "0135", "0136", "0137"]
 tags: [scf, evidence, docs, priority-high, effort-medium, payments]
@@ -17,6 +18,11 @@ history:
     note: >
       Created with okarcz from the Milestone 2 plan. Raised in the plan's review: M1's package
       (0128) took 14 commits and the whole last day, so M2's starts in week 1.
+  - date: "2026-11-16"
+    status: backlog
+    who: okarcz
+    note: >
+      okarcz takes ownership; a deviation row records the upto replay nonce change after the #3781 review.
 ---
 
 # M2 evidence package for SCF's Tranche 2 verification
@@ -40,6 +46,12 @@ last days of the milestone go to checking it, not to writing it.
 - The Panel Review response is the approved tranche plan, and it is not in this repository. The
   M1 package quotes it; M2 planning had to read it from outside the repo.
 - M1's package is the pattern: `docs/scf/milestone-1-*.md`, `build-pdf.sh`, a tag for the links.
+
+### Deviations from the Panel Review response
+
+| Line item | Promised (Panel Review) | Delivered | Why |
+| --- | --- | --- | --- |
+| D3 | §5, Replay: "our own proxy-contract nonce for `upto`" | UptoProxy stores no nonce; Soroban's auth-entry nonce makes each signed entry single-use, and the x402 `nonce` stays a signed payment ID in the arguments and the `upto_settled` event (ADR 0010 D6 amended, D12) | jeesunikim's review of upstream #3781 (2026-11-12), aligned with #3134; replay is still refused by the host (`Error(Auth, ExistingValue)`), shown in the 61/61 testnet run |
 
 ## Implementation Plan
 

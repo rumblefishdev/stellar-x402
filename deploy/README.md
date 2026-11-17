@@ -16,7 +16,8 @@ Testnet and mainnet run as separate deployments. They never share keys.
   - **The contract ID is per deployer.** It follows from the deployer's address and the WASM
     hash, and the deployer is a local stellar-cli identity (`DEPLOYER`, default
     `x402-testnet-deployer`). Another key, or a build that differs by a byte, gives another ID.
-    `UPTO_PROXY_CONTRACT_ID` in `testnet.env.example` is the deployment from task 0035; whether
+    `UPTO_PROXY_CONTRACT_ID` in `testnet.env.example` is the deployment from task 0034
+    (`CDPHI4JY…EA2X`, the 61/61 run of 2026-11-12); whether
     the team shares one deployer key is decided with the public testnet deployment (0026).
 
 Hosting: Docker Compose on the company Hetzner server, one facilitator and one PostgreSQL

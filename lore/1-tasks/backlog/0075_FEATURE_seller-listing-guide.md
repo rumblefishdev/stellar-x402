@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 related_adr: ["0008"]
 related_tasks: ["0063"]
-tags: [docs, bazaar, discovery, priority-medium, effort-small]
+tags: [docs, bazaar, dev-tools, priority-medium, effort-small]
 links: []
 history:
   - date: "2026-10-27"

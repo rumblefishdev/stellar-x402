@@ -1,7 +1,10 @@
 /** Version of the catalog-key rules. Bump it when a normalization rule changes, so stored keys can be migrated. */
 export const CATALOG_KEY_VERSION = 1;
 
-/** Policy limits (see the 0030 G note). A listing over a limit is rejected; the payment never is. */
+/**
+ * Policy limits (see the 0030 G note). A listing over a limit is rejected, except that a long
+ * `description` is cut and a long schema `pattern` dropped (0063); the payment never is.
+ */
 export const LIMITS = {
   /** Serialized `extensions.bazaar`, in bytes. */
   extensionBytes: 32 * 1024,
@@ -15,20 +18,15 @@ export const LIMITS = {
   toolNameChars: 128,
   urlChars: 2048,
   mimeTypeChars: 127,
-  /**
-   * One offer's serialized `extra`, in bytes, the paid one included: twice the largest measured in
-   * the largest public catalog (1,846 B over 5,000 entries, 0063).
-   */
-  offerExtraBytes: 4 * 1024,
   /** Offers kept per listing: twice the most measured per listing key there (4, 0063). */
   offers: 8,
-  /** The listing's example query or body sent to the seller with its check, in bytes (0063). */
-  exampleInputBytes: 16 * 1024,
   /**
-   * A whole listing, serialized, in bytes: a page of 100 stays under 1.6 MB. 5 of 95,733 listings
-   * in the largest public catalog are larger (0063).
+   * A whole listing, serialized, in bytes, as rail402 keeps it: a page of 100 stays under 3.7 MB.
+   * 0 of 33,446 listings in the largest public catalog are larger, the largest 25.3 KiB (0063).
+   * Measured locally: a page of 100 such listings reads in 491 ms at p95 under 20 readers, and
+   * other routes stay as fast.
    */
-  listingBytes: 16 * 1024,
+  listingBytes: 36 * 1024,
 } as const;
 
 /**
