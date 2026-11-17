@@ -177,17 +177,7 @@ export function createReconciler(deps: ReconcilerDeps) {
    * The ledger bound of a hash stored without one: the payer's auth expiry, past which no envelope
    * of this payment can land, ours or someone else's fee bump of it (0087).
    */
-  const fallbackLedger = (record: SettlementRecord): number | undefined => {
-    try {
-      const { transaction } = record.paymentPayload.payload as { transaction: string };
-      return payerExpiration(
-        new Transaction(transaction, getNetworkPassphrase(network)),
-        record.payer,
-      );
-    } catch {
-      return undefined;
-    }
-  };
+  const fallbackLedger = (record: SettlementRecord) => payerLedgerBound(record, network);
 
   /**
    * Whether the RPC's history reaches back to the record's claim: only then does `NOT_FOUND` say a
@@ -436,6 +426,25 @@ export interface Reconciliation {
   start(): void;
   /** Stops the sweeps, and settles once a sweep under way has ended: the drain waits for it. */
   close(): Promise<void>;
+}
+
+/**
+ * The last ledger the payer's authorization allows: the bound of an attempt stored before attempts
+ * kept their own. `undefined` when the payload can't be read.
+ */
+export function payerLedgerBound(
+  record: SettlementRecord,
+  network: StellarNetwork,
+): number | undefined {
+  try {
+    const { transaction } = record.paymentPayload.payload as { transaction: string };
+    return payerExpiration(
+      new Transaction(transaction, getNetworkPassphrase(network)),
+      record.payer,
+    );
+  } catch {
+    return undefined;
+  }
 }
 
 /** Between the end of one sweep and the start of the next (decision 27). */

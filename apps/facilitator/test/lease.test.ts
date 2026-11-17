@@ -119,6 +119,43 @@ describe("lease keeper (0025)", () => {
     expect(lease.held()).toBe(true);
   });
 
+  it("counts the lease as held only once onAcquired is done, and runs it on each acquire (0090)", async () => {
+    const store = db.stores().settlements;
+    let done!: () => void;
+    const calls: string[] = [];
+    const { lease } = keeper(store, {
+      onAcquired: () => {
+        calls.push("onAcquired");
+        return new Promise<void>((r) => (done = r));
+      },
+    });
+    const attempt = lease.runOnce();
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    expect(lease.held()).toBe(false);
+    done();
+    await attempt;
+    expect(lease.held()).toBe(true);
+    // A renewal keeps the lease: nothing to hold again.
+    await lease.runOnce();
+    expect(calls).toHaveLength(1);
+  });
+
+  it("takes the lease up only after onAcquired succeeds, and tries again (0090)", async () => {
+    const store = db.stores().settlements;
+    const onAcquired = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error("store down"))
+      .mockResolvedValue();
+    const { lease, events } = keeper(store, { onAcquired });
+    await lease.runOnce();
+    expect(lease.held()).toBe(false);
+    expect(lease.current()).toBeUndefined();
+    expect(events()).toMatchObject([{ event: "lease_acquire_failed" }]);
+    await lease.runOnce();
+    expect(lease.held()).toBe(true);
+    expect(onAcquired).toHaveBeenCalledTimes(2);
+  });
+
   it("ends held() at its own expiry while a renewal hangs", async () => {
     const store = db.stores().settlements;
     const { lease, clock } = keeper(store);

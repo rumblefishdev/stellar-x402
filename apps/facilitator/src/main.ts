@@ -34,6 +34,7 @@ import {
   type Reconciliation,
 } from "./settlement/reconcile.js";
 import { createLeaseKeeper } from "./settlement/lease.js";
+import { createChannelHolder, type ChannelHolder } from "./settlement/open-channels.js";
 import { createRecords } from "./settlement/records.js";
 import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler, type Settle } from "./settlement/settle.js";
 import { createTrustlineLookup } from "./settlement/trustline.js";
@@ -196,6 +197,8 @@ export function buildSettlement(
   settle: Settle;
   submitter: SettlementSubmitter;
   reconciliation: Reconciliation;
+  /** Holds back the channels a previous process left open; run when the lease is acquired (0090). */
+  channelHolder: ChannelHolder;
   drain: () => Promise<void>;
 } {
   const { logger, metrics } = deps;
@@ -260,6 +263,14 @@ export function buildSettlement(
     lease: deps.lease,
   });
   const reconciliation = scheduleReconciliation({ reconciler, logger, metrics, network });
+  const channelHolder = createChannelHolder({
+    store: deps.store,
+    network,
+    channels: config.channels,
+    latestLedger: deps.checks.latestLedger,
+    hold: (address, until) => submitter.hold(address, until),
+    logger,
+  });
   // Gauges read at each sample, from memory only (0027 AD-5): `stats()` copies the pool's
   // counters and load, and the reconciler's age is taken at the read.
   metrics.registerGauge("pool_queued", () => {
@@ -273,10 +284,11 @@ export function buildSettlement(
   });
   // Closing the pool first refuses every call that sent nothing, so their records close too.
   const drain = async () => {
+    channelHolder.close();
     await submitter.close();
     await settle.drain();
   };
-  return { settle, submitter, reconciliation, drain };
+  return { settle, submitter, reconciliation, channelHolder, drain };
 }
 
 /**
@@ -345,13 +357,17 @@ export function compose(
   const fees = feeSettings(config.fees, rpc);
   const checks = buildChecks(config, rpc, fees, logger, opts.seams);
   const signer = openBaoSigner({ ...config.signer, network: config.network, logger, metrics });
-  // One lease per network's channel set (AD-17): only its holder settles.
+  // One lease per network's channel set (AD-17): only its holder settles, and only once the
+  // channels the previous holder left a transaction open on are held back (0090). The holder is
+  // built with the submitter below, before the keeper's first attempt.
+  const late: { channelHolder?: ChannelHolder } = {};
   const lease = createLeaseKeeper({
     store: stores.settlements,
     network: config.network,
     ttlMs: config.settlement.leaseTtlMs,
     logger,
     metrics,
+    onAcquired: () => late.channelHolder!.holdOpen(),
   });
   // The spend lane (AD-18, 0024): before a submit, the fee account's balance floor, the breakers
   // and the fee budgets; once a record is final, the fee charged and the breakers' counts. The fee
@@ -393,7 +409,7 @@ export function compose(
     logger,
     metrics,
   });
-  const { settle, reconciliation, drain } = buildSettlement(config, {
+  const built = buildSettlement(config, {
     rpc,
     fees,
     checks,
@@ -409,6 +425,8 @@ export function compose(
     ...(opts.sleep && { sleep: opts.sleep }),
     lease: lease.current,
   });
+  const { settle, reconciliation, drain } = built;
+  late.channelHolder = built.channelHolder;
   return {
     deps: {
       config,

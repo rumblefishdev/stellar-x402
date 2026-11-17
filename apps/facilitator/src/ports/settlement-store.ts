@@ -112,6 +112,8 @@ export interface AttemptBounds {
   maxTime?: number;
   /** The last ledger it may land in (inclusive). */
   maxLedger?: number;
+  /** The channel account whose sequence number it uses (0090); absent on older hashes. */
+  channel?: string;
 }
 
 /** One signed transaction of a settlement: a row of its hashes. */
