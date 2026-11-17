@@ -150,18 +150,21 @@ describe("onSigned", () => {
     expect(log).toEqual([`stored ${res.hash} after 0 sends`]);
   });
 
-  it("is given the envelope's bounds, so a stored hash can be resolved after a crash", async () => {
+  it("is given the envelope's bounds and channel, so a stored hash can be resolved after a crash", async () => {
     const { fake, submitter } = setup();
     const maxLedger = fake.ledger + 10;
     const given: unknown[] = [];
     await submitter.submit(call(), { maxLedger, onSigned: (_, bounds) => void given.push(bounds) });
-    // A ledger-bounded envelope has no time bound (0073 decision 1).
-    expect(given).toEqual([{ maxLedger }]);
+    // A ledger-bounded envelope has no time bound (0073 decision 1). The channel comes too, so a
+    // new process keeps off it while the hash may still land (0090).
+    expect(given).toEqual([{ maxLedger, channel: inner(fake).source }]);
 
     // Without a ledger bound only the time bound is given.
     given.length = 0;
     await submitter.submit(call(), { onSigned: (_, bounds) => void given.push(bounds) });
-    expect(given).toEqual([{ maxTime: Number(inner(fake).timeBounds?.maxTime) }]);
+    expect(given).toEqual([
+      { maxTime: Number(inner(fake).timeBounds?.maxTime), channel: inner(fake).source },
+    ]);
   });
 
   it("sends nothing and frees the channel when it rejects", async () => {
