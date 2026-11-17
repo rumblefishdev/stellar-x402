@@ -43,9 +43,10 @@ history:
   - A CPX12: 1 AMD vCPU, 2 GB, 40 GB NVMe, 20 TB traffic, $11.59 a month in Helsinki with its
     IPv4, before VAT, on Ubuntu 24.04. Enough for all three projects, an estimated 4,000 to 10,000
     series; a bigger plan is a rescale.
-  - Provisioned with the base roles of `infra-hetzner` (base, security, users) and a monitoring
-    role.
-  - The Hetzner Cloud firewall and `ufw` open 443 to all and 22 to the admins. Caddy on 443
+  - Provisioned from soroban-infrastructure's `monitoring/` (private), with copies of the
+    explorer's `infra-hetzner` base roles and a monitoring role. Each project keeps its metrics,
+    rules and dashboards in its own public repository.
+  - The Hetzner Cloud firewall and `ufw` open 22 for key-only SSH and 443 to all. Caddy on 443
     takes metrics only with a client certificate from the ClickHouse project's CA.
   - Prometheus keeps 90 days, capped at 20 GB.
 - **ch-prod-01 runs only an agent** (Prometheus in agent mode, or Alloy). It scrapes the

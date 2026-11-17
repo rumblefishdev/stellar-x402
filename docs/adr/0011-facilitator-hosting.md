@@ -613,10 +613,12 @@ One request or one stop must never outlast the layer in front of it:
   - A CPX12 (Regular Performance: 1 AMD vCPU, 2 GB, 40 GB NVMe, $11.59 a month in Helsinki with
     its IPv4, before VAT) is enough for the three projects on this server, an estimated 4,000 to
     10,000 series. A bigger plan is a rescale, not a migration.
-  - It runs Ubuntu 24.04, as this server does, and is provisioned with the base roles of the
-    server's setup (soroban-block-explorer `infra-hetzner`: base, security, users) and its own
-    monitoring role, since it serves every project on the server.
-  - The Hetzner Cloud firewall and `ufw` open 443 to all and 22 to the admins only. Caddy on 443
+  - It runs Ubuntu 24.04, as this server does. Since it serves every project on the server, it
+    is provisioned from soroban-infrastructure (`monitoring/`, private): copies of the base roles
+    of the server's setup (soroban-block-explorer `infra-hetzner`: base, users, security, docker)
+    and its own monitoring role. Each project keeps its metrics, rules and dashboards in its own
+    repository.
+  - The Hetzner Cloud firewall and `ufw` open 22 for key-only SSH and 443 to all. Caddy on 443
     takes `remote_write` from this server's agent and, later, metrics from the Lambdas, each
     with a client certificate from the ClickHouse project's CA.
   - Prometheus keeps 90 days, capped by size (`--storage.tsdb.retention.size`, 20 GB) on the
