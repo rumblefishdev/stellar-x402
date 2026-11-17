@@ -1,0 +1,165 @@
+{
+  "network": "stellar:testnet",
+  "ranAt": "2026-11-16T08:53:01.545Z",
+  "facilitator": "GAJTT7MGMKX7MYIJTXFK3YQW364U7CL2NYWSKE4VTWRE5QXGWMMO3AEL",
+  "payer": "GBVTF4NDMWDOVVJXMDL7ZF5V4UGSW2TXZ73MLC2JGNCIAX5CO6LF2KOK",
+  "payTo": "GBEKBAIG4ZPWO7HCDMK7YE7UPB4W2RZ3BJYNEIDRPODMHR7ER4U5VWN4",
+  "frontRunner": "GAE2QIJNUGVLVJW3SNVKF2Q5SFJNZB744OGFWYG7R6HPXDOOHL5BRHSW",
+  "before": {
+    "frontRun": {
+      "hash": "cdc6abd4c40e7fbed3db6e2897580258be15e79fbaa46bb562d8a19528251c17",
+      "status": "SUCCESS"
+    },
+    "verified": {
+      "isValid": false,
+      "invalidReason": "invalid_exact_stellar_payload_nonce_consumed_elsewhere",
+      "invalidMessage": "this payment's nonce is already used on chain: the payment may have settled, so check the chain before signing a new one",
+      "payer": "GBVTF4NDMWDOVVJXMDL7ZF5V4UGSW2TXZ73MLC2JGNCIAX5CO6LF2KOK"
+    },
+    "refused": {
+      "success": false,
+      "errorReason": "invalid_exact_stellar_payload_nonce_consumed_elsewhere",
+      "errorMessage": "this payment's nonce is already used on chain: the payment may have settled, so check the chain before signing a new one",
+      "payer": "GBVTF4NDMWDOVVJXMDL7ZF5V4UGSW2TXZ73MLC2JGNCIAX5CO6LF2KOK",
+      "transaction": "",
+      "network": "stellar:testnet"
+    }
+  },
+  "onChain": {
+    "frontRun": "f0d24b8ef3d963f6d670bbf1cc00f13e957c5c8f9cc64331974b10b687a86872",
+    "ours": "9104389f96276ad847f90a6631a6b2274ca4d71dc20e52b960e904b23ac55fa6",
+    "oursOnChain": "FAILED",
+    "oursEventsStripped": false,
+    "answer": {
+      "success": false,
+      "errorReason": "settle_exact_stellar_nonce_consumed_elsewhere",
+      "payer": "GBVTF4NDMWDOVVJXMDL7ZF5V4UGSW2TXZ73MLC2JGNCIAX5CO6LF2KOK",
+      "transaction": "9104389f96276ad847f90a6631a6b2274ca4d71dc20e52b960e904b23ac55fa6",
+      "network": "stellar:testnet"
+    },
+    "repeat": {
+      "success": false,
+      "errorReason": "settle_exact_stellar_nonce_consumed_elsewhere",
+      "payer": "GBVTF4NDMWDOVVJXMDL7ZF5V4UGSW2TXZ73MLC2JGNCIAX5CO6LF2KOK",
+      "transaction": "9104389f96276ad847f90a6631a6b2274ca4d71dc20e52b960e904b23ac55fa6",
+      "network": "stellar:testnet"
+    }
+  },
+  "onChainNoEvents": {
+    "frontRun": "0548f4631648fc5996f48d7295b6894afe9996058f85ee899f814f8cac181c28",
+    "ours": "f98cf2728da1d42f2aa3fd72fd29d467c7bcd7e370c0e3e13bdff2c0556fb3f6",
+    "oursOnChain": "FAILED",
+    "oursEventsStripped": true,
+    "answer": {
+      "success": false,
+      "errorReason": "settle_exact_stellar_nonce_consumed_elsewhere",
+      "payer": "GBVTF4NDMWDOVVJXMDL7ZF5V4UGSW2TXZ73MLC2JGNCIAX5CO6LF2KOK",
+      "transaction": "f98cf2728da1d42f2aa3fd72fd29d467c7bcd7e370c0e3e13bdff2c0556fb3f6",
+      "network": "stellar:testnet"
+    },
+    "repeat": {
+      "success": false,
+      "errorReason": "settle_exact_stellar_nonce_consumed_elsewhere",
+      "payer": "GBVTF4NDMWDOVVJXMDL7ZF5V4UGSW2TXZ73MLC2JGNCIAX5CO6LF2KOK",
+      "transaction": "f98cf2728da1d42f2aa3fd72fd29d467c7bcd7e370c0e3e13bdff2c0556fb3f6",
+      "network": "stellar:testnet"
+    }
+  },
+  "reported": [
+    {
+      "time": "2026-11-16T08:52:47.818Z",
+      "level": "warn",
+      "event": "settlement_nonce_consumed_elsewhere",
+      "network": "stellar:testnet",
+      "settlementKey": "stellar:testnet:GBVTF4NDMWDOVVJXMDL7ZF5V4UGSW2TXZ73MLC2JGNCIAX5CO6LF2KOK:4438133809741776148",
+      "transaction": "9104389f96276ad847f90a6631a6b2274ca4d71dc20e52b960e904b23ac55fa6",
+      "feeCharged": "8800"
+    },
+    {
+      "time": "2026-11-16T08:53:01.398Z",
+      "level": "warn",
+      "event": "settlement_nonce_consumed_elsewhere",
+      "network": "stellar:testnet",
+      "settlementKey": "stellar:testnet:GBVTF4NDMWDOVVJXMDL7ZF5V4UGSW2TXZ73MLC2JGNCIAX5CO6LF2KOK:5883969065224386705",
+      "transaction": "f98cf2728da1d42f2aa3fd72fd29d467c7bcd7e370c0e3e13bdff2c0556fb3f6",
+      "feeCharged": "8800"
+    }
+  ],
+  "counted": [
+    {
+      "_aws": {
+        "Timestamp": 1794819120000,
+        "CloudWatchMetrics": [
+          {
+            "Namespace": "x402-facilitator",
+            "Dimensions": [["network"]],
+            "Metrics": [
+              {
+                "Name": "settlement_nonce_consumed_elsewhere_total",
+                "Unit": "Count"
+              }
+            ]
+          }
+        ]
+      },
+      "window": "verify",
+      "network": "stellar:testnet",
+      "settlement_nonce_consumed_elsewhere_total": 2
+    },
+    {
+      "_aws": {
+        "Timestamp": 1794819120000,
+        "CloudWatchMetrics": [
+          {
+            "Namespace": "x402-facilitator",
+            "Dimensions": [["network"]],
+            "Metrics": [
+              {
+                "Name": "settlement_nonce_consumed_elsewhere_total",
+                "Unit": "Count"
+              }
+            ]
+          }
+        ]
+      },
+      "window": "settle",
+      "network": "stellar:testnet",
+      "settlement_nonce_consumed_elsewhere_total": 1
+    },
+    {
+      "_aws": {
+        "Timestamp": 1794819180000,
+        "CloudWatchMetrics": [
+          {
+            "Namespace": "x402-facilitator",
+            "Dimensions": [["network"]],
+            "Metrics": [
+              {
+                "Name": "settlement_nonce_consumed_elsewhere_total",
+                "Unit": "Count"
+              }
+            ]
+          }
+        ]
+      },
+      "window": "settle",
+      "network": "stellar:testnet",
+      "settlement_nonce_consumed_elsewhere_total": 1
+    }
+  ],
+  "checks": {
+    "beforeFrontRunLanded": true,
+    "beforeVerifyRefused": true,
+    "beforeSettleRefused": true,
+    "eventsOursFailedOnChain": true,
+    "eventsAnswer": true,
+    "eventsRepeat": true,
+    "eventsLogged": true,
+    "noEventsOursFailedOnChain": true,
+    "noEventsAnswer": true,
+    "noEventsRepeat": true,
+    "noEventsLogged": true,
+    "countedVerify": true,
+    "countedSettle": true
+  }
+}

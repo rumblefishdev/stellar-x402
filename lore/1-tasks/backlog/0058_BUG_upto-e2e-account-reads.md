@@ -3,16 +3,21 @@ id: "0058"
 title: "Read accounts in the upto-proxy e2e harness without the SDK's masking catch"
 type: BUG
 status: backlog
-milestone: 1
+milestone: 2
 related_adr: []
 related_tasks: ["0051"]
-tags: [tests, contracts, priority-low, effort-small]
+tags: [tests, contracts, priority-low, effort-small, payments]
 links: []
 history:
   - date: "2026-10-23"
     status: backlog
     who: karolkow
     note: "Spawned from 0051 future work."
+  - date: "2026-11-16"
+    status: backlog
+    who: okarcz
+    note: >
+      Payments lane, M2 (okarcz, unlaned M1 check): accountExists still swallows every error and getAccount is still called.
 ---
 
 # Read accounts in the upto-proxy e2e harness without the SDK's masking catch

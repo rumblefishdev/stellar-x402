@@ -7,6 +7,8 @@ import {
   getNetworkPassphrase,
 } from "@x402/stellar";
 import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/core/types";
+import type { NetworkMetrics } from "../metrics.js";
+import { NONCE_CONSUMED_REASON, type IsNonceUsed } from "./nonce-used.js";
 import type { FindMissingTrustline } from "./trustline.js";
 
 /** Upstream `ExactStellarScheme` as `/verify` uses it: only `verify()`, never `settle()` (AD-3). */
@@ -43,6 +45,10 @@ export interface VerifierDeps {
   latestLedger: () => Promise<number>;
   /** Looks for a missing trustline behind upstream's `simulation_failed`. */
   missingTrustline: FindMissingTrustline;
+  /** Looks, before that, for the payer's nonce used by another transaction (0141). */
+  nonceUsed: IsNonceUsed;
+  /** Counts that refusal, here where `/verify` and `/settle`'s re-check both give it (0141). */
+  metrics: NetworkMetrics;
   /**
    * How long the whole upstream call may take, in milliseconds, across every RPC URL it tries and
    * the bid read before them; 10,000 by default. Upstream's RPC and Horizon clients have no timeout
@@ -198,8 +204,22 @@ export function createChecker(deps: VerifierDeps): Check {
         getNetworkPassphrase(deps.network),
       );
       // A payload without the payer's entry is free to send, so it buys no more RPC calls.
+      const nonce = payerNonce({ transaction, payer: upstream.payer });
+      // A used nonce fails the simulation first: the token asks for the payer's auth before it
+      // moves anything.
+      if (nonce !== undefined && (await deps.nonceUsed(upstream.payer, nonce))) {
+        deps.metrics.increment("settlement_nonce_consumed_elsewhere_total", { window: "verify" });
+        return {
+          response: invalid(
+            NONCE_CONSUMED_REASON,
+            upstream.payer,
+            "this payment's nonce is already used on chain: the payment may have settled, so " +
+              "check the chain before signing a new one",
+          ),
+        };
+      }
       const missing =
-        payerNonce({ transaction, payer: upstream.payer }) === undefined
+        nonce === undefined
           ? undefined
           : await deps.missingTrustline({
               transaction,

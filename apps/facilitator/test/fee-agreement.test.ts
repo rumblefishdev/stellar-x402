@@ -26,6 +26,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { parseConfig } from "../src/config.js";
 import { rpcEndpointName } from "../src/logger.js";
 import { buildChecks, buildRpc, buildVerifier, settleCheck } from "../src/main.js";
+import { memoryMetrics } from "../src/metrics.js";
 import { feeSettings } from "../src/settlement/fees.js";
 import { PAYTO_TRUSTLINE_REASON } from "../src/settlement/trustline.js";
 import { createVerifier, type VerifyTrace } from "../src/settlement/verify.js";
@@ -67,14 +68,26 @@ beforeAll(async () => {
     let body = "";
     req.on("data", (chunk) => (body += chunk));
     req.on("end", () => {
-      const { id, method } = JSON.parse(body) as { id: number; method: string };
+      const { id, method, params } = JSON.parse(body) as {
+        id: number;
+        method: string;
+        params?: { keys?: string[] };
+      };
+      // The payer's nonce is unused, so its read finds nothing (0141).
+      const nonceRead = (params?.keys ?? []).some((raw) => {
+        const key = xdr.LedgerKey.fromXDR(raw, "base64");
+        return (
+          key.switch().name === "contractData" &&
+          key.contractData().key().switch().name === "scvLedgerKeyNonce"
+        );
+      });
       res.setHeader("content-type", "application/json");
       const { events, error, instance, latestLedger: ledger } = realTrustlineMissing;
       const answers: Record<string, unknown> = {
         simulateTransaction: trustlineMissing
           ? { id: "1", latestLedger: ledger, events, error }
           : simulation(),
-        getLedgerEntries: { latestLedger: ledger, entries: [instance] },
+        getLedgerEntries: { latestLedger: ledger, entries: nonceRead ? [] : [instance] },
       };
       res.end(
         JSON.stringify(
@@ -157,6 +170,7 @@ describe("the fee ceiling at /verify and in the pool (AD-10)", () => {
       buildRpc(cfg, logger, () => poolRpc),
       fees,
       logger,
+      memoryMetrics().for({ network: cfg.network }),
     );
     const answer = await verify(payload(), requirements);
     // A fee it accepts goes on to the event check, which an empty simulation fails.
@@ -259,7 +273,13 @@ describe("real upstream refusing a payment with no trustline (0078)", () => {
     });
     const logger = { warn: vi.fn(), info: vi.fn() };
     const shared = buildRpc(config, logger);
-    const verify = buildVerifier(config, shared, feeSettings(config.fees, shared), logger);
+    const verify = buildVerifier(
+      config,
+      shared,
+      feeSettings(config.fees, shared),
+      logger,
+      memoryMetrics().for({ network: config.network }),
+    );
     trustlineMissing = true;
     try {
       await expect(
@@ -300,7 +320,13 @@ describe("real upstream with a down first RPC URL (AD-3)", () => {
     const logger = { warn: vi.fn(), info: vi.fn() };
     // The pool's reads still work on both URLs: only upstream's simulation is refused.
     const shared = buildRpc(config, logger, () => poolRpc);
-    const verify = buildVerifier(config, shared, feeSettings(config.fees, shared), logger);
+    const verify = buildVerifier(
+      config,
+      shared,
+      feeSettings(config.fees, shared),
+      logger,
+      memoryMetrics().for({ network: config.network }),
+    );
     const trace: VerifyTrace = {};
     // The second URL's verdict: the fee passes, and the empty simulation has no transfer events.
     await expect(verify(payload(), requirements, trace)).resolves.toMatchObject({
@@ -395,7 +421,13 @@ describe("a fee refusal for a payment that restores archived state (task 0066)",
     resourceFee = fee;
     const logger = { warn() {}, info() {} };
     const shared = buildRpc(config, logger, () => poolRpc);
-    return buildChecks(config, shared, feeSettings(config.fees, shared), logger);
+    return buildChecks(
+      config,
+      shared,
+      feeSettings(config.fees, shared),
+      logger,
+      memoryMetrics().for({ network: config.network }),
+    );
   }
 
   /** Real upstream as `main()` wires it for `/verify`, simulating `fee` stroops. */

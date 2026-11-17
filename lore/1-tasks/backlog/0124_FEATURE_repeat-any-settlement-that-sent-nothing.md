@@ -3,7 +3,7 @@ id: "0124"
 title: "Let every settlement that sent nothing be repeated as it is"
 type: FEATURE
 status: backlog
-milestone: 1
+milestone: 2
 related_adr: ["0006"]
 related_tasks: ["0009", "0073", "0082", "0024", "0086", "0036"]
 tags: [facilitator, settlement, payments, priority-medium, effort-medium]
@@ -15,6 +15,11 @@ history:
     note: >
       Every new failure before a send had to be added to `UNSENT_REASONS` by hand, or the payment
       ended for good; 0036 and 0024 added four in a week.
+  - date: "2026-11-16"
+    status: backlog
+    who: okarcz
+    note: >
+      Moved to M2 by okarcz in the M1 Payments cleanup: not started, and M1 is closing.
 ---
 
 # Let every settlement that sent nothing be repeated as it is

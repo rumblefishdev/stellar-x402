@@ -3,10 +3,10 @@ id: "0086"
 title: "Keep a payment refused for its fee from settling after its payer signed again"
 type: BUG
 status: backlog
-milestone: 1
+milestone: 2
 related_adr: ["0006"]
 related_tasks: ["0073", "0009"]
-tags: [facilitator, settlement, priority-medium, effort-medium]
+tags: [facilitator, settlement, priority-medium, effort-medium, payments, before-pubnet]
 links: []
 history:
   - date: "2026-10-29"
@@ -15,6 +15,11 @@ history:
     note: >
       Spawned from 0073 decision 23 (PR #80 review): the same replay as `…_too_far`, which
       decision 22 closed on the requirements; a fee isn't in them.
+  - date: "2026-11-16"
+    status: backlog
+    who: okarcz
+    note: >
+      Payments lane, M2, before pubnet (okarcz, unlaned M1 check): a fee refusal still records nothing, so the double charge is still possible.
 ---
 
 # Keep a payment refused for its fee from settling after its payer signed again

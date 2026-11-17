@@ -1,3 +1,4 @@
+import { NONCE_CONSUMED_SETTLE_REASON, type IsNonceUsed } from "./nonce-used.js";
 import { PAYER_AUTH_REASON, UNSUPPORTED_CREDENTIAL_REASON } from "./verify.js";
 
 /**
@@ -50,6 +51,12 @@ export const SETTLE_REASONS = {
    * is the stored hash, if any, never the outcome.
    */
   nonceUsed: "settle_exact_stellar_nonce_already_used",
+  /**
+   * Another transaction used the payer's nonce first (0141): our transaction failed on chain, or
+   * the pool's simulation did, so the payment may have settled there. Never answered `success`:
+   * one signed entry raced through two facilitators would then be served twice.
+   */
+  nonceConsumedElsewhere: NONCE_CONSUMED_SETTLE_REASON,
   /**
    * This payment settled, and its `success` was already answered once (AD-6). `transaction` is
    * its hash. The resource was paid for once, so it is served once.
@@ -153,7 +160,8 @@ export const UNSENT = new Set(UNSENT_REASONS);
  * landed, the payload is another payment, its auth entry has expired, or nothing was recorded
  * because another payment of the payer and asset held the slot (0024). Every other failed answer
  * about a record ended a payment whose auth entry can still land until its expiration ledger, in
- * a new envelope: a failed or refused transaction spends no nonce.
+ * a new envelope: our failed or refused transaction spent no nonce. A nonce another transaction
+ * used gets no advice at all (0141, `withRetry`).
  */
 export const NOT_SIGN_AGAIN = new Set<string>([
   SETTLE_REASONS.pending,
@@ -162,3 +170,26 @@ export const NOT_SIGN_AGAIN = new Set<string>([
   SETTLE_REASONS.expired,
   SETTLE_REASONS.payerBusy,
 ]);
+
+/**
+ * The failures another transaction's use of the payer's nonce also causes: our transaction failed
+ * on chain, or the pool's simulation did (0141 decision 12).
+ */
+const MAYBE_USED_NONCE = new Set<string>([SETTLE_REASONS.failed, SETTLE_REASONS.simulation]);
+
+/**
+ * The `errorReason` a failure ends with: its own, or 0141's when another transaction used the
+ * payer's nonce first. The payer's nonce entry tells: ours failed and wrote no nonce, so an entry
+ * means another transaction used it (0141 decisions 5 and 11). Every writer that ends a record
+ * calls this (0141 decision 6).
+ */
+export async function reasonAfterFailure(
+  reason: string,
+  payer: string,
+  nonce: string,
+  nonceUsed: IsNonceUsed,
+): Promise<string> {
+  if (!MAYBE_USED_NONCE.has(reason)) return reason;
+  if (await nonceUsed(payer, nonce)) return SETTLE_REASONS.nonceConsumedElsewhere;
+  return reason;
+}

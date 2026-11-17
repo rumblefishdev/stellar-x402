@@ -2,11 +2,12 @@
 id: "0090"
 title: "After a deploy, don't send on a channel the last process left a transaction open on"
 type: FEATURE
-status: backlog
-milestone: 1
+status: active
+owner: okarcz
+milestone: 2
 related_adr: ["0011", "0006"]
 related_tasks: ["0073", "0026", "0025"]
-tags: [facilitator, signer-pool, deploy, before-pubnet, priority-medium, effort-medium]
+tags: [facilitator, signer-pool, deploy, before-pubnet, priority-high, effort-medium, payments]
 links: []
 history:
   - date: "2026-10-29"
@@ -19,6 +20,16 @@ history:
     who: karolkow
     note: >
       Added the question of what this leaves the rebuild after `txBadSeq` for.
+  - date: "2026-11-16"
+    status: backlog
+    who: okarcz
+    note: >
+      Payments lane, M2, priority high (okarcz, unlaned M1 check): the config refuses pubnet until it lands, and mainnet is prepared in M2.
+  - date: "2026-11-17"
+    status: active
+    who: okarcz
+    note: >
+      Started: first of the quick, high-priority M2 Payments tasks.
 ---
 
 # After a deploy, don't send on a channel the last process left a transaction open on

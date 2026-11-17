@@ -3,16 +3,21 @@ id: "0057"
 title: "One test account builder, and checkChannel tests for every signer kind"
 type: FEATURE
 status: backlog
-milestone: 1
+milestone: 2
 related_adr: []
 related_tasks: ["0051", "0020"]
-tags: [tests, signer-pool, priority-low, effort-small]
+tags: [tests, signer-pool, priority-low, effort-small, payments]
 links: []
 history:
   - date: "2026-10-23"
     status: backlog
     who: karolkow
     note: "Spawned from 0051 future work."
+  - date: "2026-11-16"
+    status: backlog
+    who: okarcz
+    note: >
+      Payments lane, M2 (okarcz, unlaned M1 check): the duplicate builder and the missing signer-kind tests are still there.
 ---
 
 # One test account builder, and checkChannel tests for every signer kind
