@@ -419,8 +419,8 @@ export class PostgresSettlementStore implements SettlementStore {
          FOR UPDATE
        ), ins AS (
          INSERT INTO settlement_hashes
-           (hash, key, state, max_time, max_ledger, inner_hash, updated_at)
-         SELECT $2, key, 'stored', $4::bigint, $5::bigint, $9::text, $3 FROM rec
+           (hash, key, state, max_time, max_ledger, inner_hash, channel, updated_at)
+         SELECT $2, key, 'stored', $4::bigint, $5::bigint, $9::text, $10::text, $3 FROM rec
          WHERE state IN (${NON_FINAL_SQL})
          ON CONFLICT (hash) DO NOTHING
          RETURNING key
@@ -446,6 +446,7 @@ export class PostgresSettlementStore implements SettlementStore {
         lease.name,
         lease.token,
         innerHash ?? null,
+        bounds?.channel ?? null,
       ],
     );
     const { fenced, state, added, owner } = rows[0]!;

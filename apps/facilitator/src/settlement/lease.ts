@@ -18,6 +18,12 @@ export interface LeaseKeeperDeps {
   holder?: string;
   /** The app clock, as for every stored time. */
   now?: () => number;
+  /**
+   * Runs after the store grants the lease and before `held()` turns true, e.g. to hold back the
+   * channels the previous holder left a transaction open on (0090). If it rejects, the acquire
+   * counts as failed and the keeper tries again at its next attempt.
+   */
+  onAcquired?: () => Promise<void>;
 }
 
 export interface LeaseKeeper {
@@ -85,6 +91,7 @@ export function createLeaseKeeper(deps: LeaseKeeperDeps): LeaseKeeper {
       else {
         const lease = await store.acquireLease(name, holder, ttlMs, at);
         ok = lease !== undefined;
+        if (ok) await deps.onAcquired?.();
         token = lease?.token;
       }
       if (ok) {
