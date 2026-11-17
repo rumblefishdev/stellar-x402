@@ -5,7 +5,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createServer, type PaymentConfig } from "../src/index.js";
+import type { PaymentConfig } from "../src/pay.js";
+import { createServer } from "../src/server.js";
 import {
   fakeScheme,
   NO_TRUSTLINE,

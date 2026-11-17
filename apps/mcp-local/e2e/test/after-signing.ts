@@ -298,7 +298,7 @@ describe("call_paid_http after signing (fake seller, no money moves)", () => {
       "ok",
       code(await server.call("call_paid_http", httpArgs(`${fake.url}/ok`))),
     );
-    // The server waits up to 5 s for a lock (busy_timeout in packages/mcp/src/daily.ts); this
+    // The server waits up to 5 s for a lock (busy_timeout in apps/mcp-local/src/daily.ts); this
     // process holds it for 8 s, so the wait runs out while the lock is still held.
     const holder = new DatabaseSync(join(env.STELLAR_X402_STATE_DIR!, "spent.sqlite"));
     holder.exec("BEGIN EXCLUSIVE");

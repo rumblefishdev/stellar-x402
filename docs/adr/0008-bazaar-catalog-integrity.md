@@ -155,7 +155,7 @@ settlement.
   5,000 entries); `extra` is left to the whole-listing cap (at most 1,846 B measured there).
 - **SSRF is checked where a URL is fetched.** A rule on the URL text can't stop a public name that
   resolves to `127.0.0.1` (OWASP: check the resolved address at connection time), which is what
-  `packages/mcp` does before every call. On resource URLs the host rules only refused what
+  `apps/mcp-local` does before every call. On resource URLs the host rules only refused what
   upstream servers send by default (`http://localhost:<port>`, the e2e suite, local sellers). The
   scheme allowlist stays, since a catalog rendered as links would run `javascript:`. `iconUrl`
   keeps its host rules: a browser fetches an icon as soon as the catalog is shown.

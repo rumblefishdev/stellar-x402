@@ -24,7 +24,7 @@ export type SellerAnswer =
 
 /**
  * Asks the seller for its listing with one unpaid request (0063) and reads its 402 terms as the
- * buyer's MCP server does (`packages/mcp` preview). The request goes through the seller-fetch
+ * buyer's MCP server does (`apps/mcp-local` preview). The request goes through the seller-fetch
  * guard: public addresses only, no redirects, a deadline and a body cap.
  */
 export async function askSeller(

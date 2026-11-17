@@ -1,7 +1,7 @@
 # stellar-x402-mcp testnet e2e
 
 End-to-end run of `stellar-x402-mcp` (task 0037): the built CLI started over MCP stdio, the way an
-MCP client such as Claude Desktop starts it. Unit tests in `packages/mcp` cover the logic in one
+MCP client such as Claude Desktop starts it. Unit tests in `apps/mcp-local/test` cover the logic in one
 process with fakes; this run covers what they cannot: the built binary and its settings, real
 stdio, real signing, two real payments on testnet, and the buyer's secret absent from everything
 the servers write.
@@ -51,7 +51,7 @@ started locally), settled by our facilitator (`apps/facilitator`, built), which 
 a fresh friendbot account for the fees and one fresh channel. Every other paid path uses a local
 fake seller (`src/fakes.ts`) whose 402 copies the example seller's, so a real key signs it; the
 fake never forwards the signed payment, so no money moves. It is not the fake of the unit tests
-(`packages/mcp/test/fake-seller.ts`), which settles in process with fake signing; the catalog fake
+(`apps/mcp-local/test/fake-seller.ts`), which settles in process with fake signing; the catalog fake
 is shared.
 
 ## Results

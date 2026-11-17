@@ -1,7 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createServer } from "../src/index.js";
+import { createServer } from "../src/server.js";
 import { startFakeCatalog, type FakeCatalog } from "./fake-catalog.js";
 
 /** What the tools return, loosely typed for assertions. */

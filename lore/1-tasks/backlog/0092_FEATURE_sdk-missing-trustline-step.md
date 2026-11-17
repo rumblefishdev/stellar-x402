@@ -45,7 +45,7 @@ is the one missing.
   users never reach `/verify`.
 - `@x402/stellar` 2.29.0 (2026-10-28) throws `TrustlineMissingError`, a `SimulationFailedError` with
   `account` and `asset`. Not checked: whether `@x402/fetch` rewraps it.
-- `packages/mcp/src/pay.ts` maps `#10` and `#13` alike to `insufficient_funds`, so a missing
+- `apps/mcp-local/src/pay.ts` maps `#10` and `#13` alike to `insufficient_funds`, so a missing
   trustline, a seller's too, reads as "The payer does not hold enough of the asset."
 - The panel review response (§5, "Trustline onboarding") promises an actionable error before
   payment is attempted. For upstream's client that holds only once this task is done (0078
@@ -57,7 +57,7 @@ is the one missing.
 ## Implementation
 
 - Bump the `@x402/*` packages to 2.29.0, and check whether `@x402/fetch` rewraps the error.
-- Catch `TrustlineMissingError` in `packages/mcp`, and in `packages/sdk` if 0102 has created it.
+- Catch `TrustlineMissingError` in `apps/mcp-local`, and in `packages/sdk` if 0102 has created it.
 - Throw an error that names the account, the asset and what to do; MCP gets a result of its own,
   not `insufficient_funds`.
 - Decide whether the SDK offers to add the trustline, or only reports it.

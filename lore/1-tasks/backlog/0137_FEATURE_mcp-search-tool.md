@@ -29,7 +29,7 @@ can find a paid service and then call it with the paid-call tool.
 
 - 0120 holds the route `/discovery/search` and, until now, the MCP tool over it. This task takes
   the tool; 0120 keeps the route and the ranking.
-- The MCP server (`packages/mcp`, `apps/mcp-local`) lists resources through
+- The MCP server (`apps/mcp-local`) lists resources through
   `/discovery/resources` today (0037, 0046).
 - The tool depends only on the route's request and response types, which 0120 agrees first. It
   can be built and tested against a fake of the route.
