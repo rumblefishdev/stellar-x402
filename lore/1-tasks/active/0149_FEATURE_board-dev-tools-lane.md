@@ -52,7 +52,7 @@ the board and to the `/pr` skill's lane table.
 ### Step 1: Board
 
 - Add `dev-tools` to `LANES` in `generate-lore-board.mjs`.
-- Add a label (`Dev tools`) and a colour distinct from the three existing ones to `LANE_LABELS` and `LANE_COLORS` in
+- Add a label (`DevTools`, okarcz) and a colour distinct from the three existing ones to `LANE_LABELS` and `LANE_COLORS` in
   `lore/board.html`.
 - Regenerate `board.json` and compare it before and after: only the 13 tasks gain a lane.
 
@@ -64,6 +64,17 @@ the board and to the `/pr` skill's lane table.
 
 ## Acceptance Criteria
 
-- [ ] The board shows the 13 `dev-tools` tasks under a "Dev tools" lane, and its lane filter lists it
-- [ ] `/pr`'s lane table has `dev-tools` with no owner, and `discovery` names `karolkow`
-- [ ] `board.json` before and after differs only in the lanes of those 13 tasks
+- [x] The board shows the 13 `dev-tools` tasks under a "DevTools" lane, and its lane filter lists it
+- [x] `/pr`'s lane table has `dev-tools` with no owner, and `discovery` names `karolkow`
+- [x] `board.json` before and after differs only in the lanes of those 13 tasks
+
+## Implementation Notes
+
+- `tools/scripts/generate-lore-board.mjs`: `dev-tools` added to `LANES`, last, so a task that still carries an older
+  lane tag keeps it.
+- `lore/board.html`: label `DevTools`, colour `#58a6ff` (blue, apart from pink, teal and amber). The lane filter and the
+  badge read both maps, so nothing else changed.
+- `.claude/skills/pr/SKILL.md`: `dev-tools` row with no owner (no confirm bullet until the fifth developer joins);
+  `discovery` now names `karolkow`.
+- `pnpm board` before and after: 13 of 142 tasks changed, each only in `lane` (`null` → `dev-tools`): 0042, 0043,
+  0044, 0055, 0068, 0075, 0081, 0084, 0085, 0102, 0116, 0131, 0137.
