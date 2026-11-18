@@ -989,6 +989,7 @@ agent's own log is `/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agen
 | `production/portal-deploy.log`    | the portal's deploys                          | `portal-deploy` in `app`                           |
 | `openbao/openbao.log`             | `x402-openbao`                                | `openbao` in `app`                                 |
 | `host/metrics.log`                | the host probe, the watchdog, `x402@`'s stop  | `host` in `metrics`                                |
+| `metrics/agent.log`               | `x402-metrics`                                | `metrics-agent` in `app`                           |
 
 `x402-logrotate.timer` rotates a file past 100 MB every 10 minutes and keeps 10: `*.log.1` as it
 was, the older ones compressed. A rotation during an AWS outage loses the app lines the agent
@@ -1642,6 +1643,36 @@ revoke last, or with a second Discord account.
   (0106 decisions 1 and 6): both are the explorer's distribution's.
 - A gate on the backend's hostname: there is none, on purpose. Every route but `/health` needs
   the hub's token (0106 decisions 22 and 33).
+
+## The metrics agent
+
+`x402-metrics.service` runs `/srv/x402/metrics`: Prometheus in agent mode and node_exporter (ADR
+0011, "Metrics"). The agent scrapes node_exporter and itself every 15 s and sends the samples to
+the monitoring VM, `https://metrics.sorobanscan.com/api/v1/write`, with a client certificate from
+the ClickHouse project's CA. Its write-ahead log, the volume `x402-metrics-wal`, holds the samples
+while the VM can't be reached. The facilitator's `/metrics` joins at the switch (0139 step 7), and
+ClickHouse's endpoint once the explorer's config turns it on. The VM lets only the CNs in
+`metrics_writer_cns` write (soroban-infrastructure, `monitoring/`).
+
+**The certificate,** as the CloudWatch agent's: the key was made on the server on 2026-11-18 as
+`/srv/x402/metrics/creds/metrics-agent-key.2026-11-18.cred` (`metrics-agent-key.cred` links to
+it), with `--name=metrics-agent-key`, and its CSR (`CN=x402-metrics-agent-production`,
+`CA:FALSE`, `digitalSignature`, `clientAuth`) was signed by the CA for 365 days. The certificate
+is `deploy/ansible/files/metrics-agent-production.crt`; the playbook checks it and that it is the
+key's before it copies it. Issued by `soroban-internal-ca-2026`, serial
+`03869E42EE8A16EB9F0060AABC2C0811`, valid until 2027-11-18 14:24:12 UTC. Renewal follows the
+CloudWatch agent's, with these names.
+
+**The admin step,** as `deploy` with sudo, after the playbook run from that merge:
+
+```sh
+sudo systemctl start x402-metrics
+tail -n 20 /var/log/x402/metrics/agent.log   # no "remote_write" errors
+cd /srv/x402/metrics && sudo docker compose exec -T agent \
+  wget -qO- localhost:9090/metrics | grep prometheus_remote_storage_samples_total
+```
+
+On the VM, `up{host="ch-prod-01"}` answers in Prometheus (`ssh -L 9090:localhost:9090 monitoring`).
 
 ## Not here yet
 

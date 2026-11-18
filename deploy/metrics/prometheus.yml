@@ -1,0 +1,24 @@
+# The metrics agent's config (ADR 0011): what it scrapes every 15 s and where it sends it. The
+# facilitator's /metrics joins at the switch (0139 step 7); ClickHouse's endpoint once the
+# explorer's config turns it on.
+global:
+  scrape_interval: 15s
+  external_labels:
+    host: ch-prod-01
+
+scrape_configs:
+  - job_name: node
+    static_configs:
+      - targets: [node-exporter:9100]
+  # The agent's own: its remote_write backlog and failures, for the VM's rules.
+  - job_name: agent
+    static_configs:
+      - targets: [localhost:9090]
+
+remote_write:
+  # Caddy on the monitoring VM, mTLS with a certificate from the ClickHouse project's CA; only
+  # the CNs in its metrics_writer_cns may write (soroban-infrastructure, monitoring/).
+  - url: https://metrics.sorobanscan.com/api/v1/write
+    tls_config:
+      cert_file: /etc/prometheus/metrics-agent.crt
+      key_file: /run/secrets/metrics-agent-key
