@@ -50,6 +50,36 @@ checking anything.
 
 ## Acceptance Criteria
 
-- [ ] Given no `DATABASE_URL` set, when `verify-smoke.ts` runs on testnet, then it starts and
+- [x] Given no `DATABASE_URL` set, when `verify-smoke.ts` runs on testnet, then it starts and
       checks its payments
-- [ ] Given the script's header, when it is read, then `DATABASE_URL` is in its variable list
+- [x] Given the script's header, when it is read, then `DATABASE_URL` is in its variable list
+
+## Implementation Notes
+
+- `verify-smoke.ts`: `databaseUrl` is `process.env.DATABASE_URL`, else
+  `postgres://postgres:postgres@127.0.0.1:15432/postgres` (`compose.yaml`'s host port), passed to
+  `parseConfig()`. The header's `Env:` list names it and says no database has to run.
+- Before the change, on testnet with `DATABASE_URL` unset: `ConfigError: invalid configuration:
+  DATABASE_URL is required` at `verify-smoke.ts:85`, exit 1.
+- After it, same run with two friendbot-funded accounts: exit 0, `checks.validPayment: true`,
+  `checks.channelRejected: true` (`extra.reason` = `invalid_exact_stellar_payload_channel_account`).
+- `pnpm test` in `apps/facilitator`: 1165 passed, 3 skipped (compose PostgreSQL up).
+
+## Design Decisions
+
+### From Plan
+
+1. **Fall back to `compose.yaml`'s URL rather than require one**: the verifiers open no store, so
+   any `postgres://` URL satisfies the config; the same default as `token-matrix.ts`.
+
+### Emerged
+
+2. **`??`, not `?.trim() ||`**: a blank `DATABASE_URL=` still fails with "DATABASE_URL is
+   required" (the config reads blank as unset). Kept as `??` to match `token-matrix.ts`,
+   `spend-matrix.ts` and `catalog-smoke.ts`; changing it belongs in all of them at once.
+
+## Issues Encountered
+
+- **The compose URL is now in five files** (`test/database.ts`'s `COMPOSE_DATABASE_URL` and four
+  live scripts). It can't be imported from `test/database.ts`, which imports vitest. Not changed
+  here.
