@@ -47,6 +47,8 @@ export interface SettlementRecord {
   errorReason?: string;
   /** The checks' message for a `refused` record, so a repeat gets the same answer (0086). */
   errorMessage?: string;
+  /** Our own code next to upstream's reason (`extra.reason`) for a `refused` record (0086). */
+  errorDetail?: string;
   /** Why an included transaction failed, as far as the RPC said (`failed` only). */
   failure?: FailureCause;
   /** When a `/settle` call first answered this record's `success` (AD-6: once per record). */
@@ -77,6 +79,7 @@ export type NewSettlement = Omit<
   | "feeCharged"
   | "errorReason"
   | "errorMessage"
+  | "errorDetail"
   | "failure"
   | "successAnsweredAt"
   | "version"
@@ -299,7 +302,8 @@ export interface SettlementStore {
   ): Promise<ReopenResult>;
   /**
    * Records the checks' refusal of a payment (0086), so the same payment never settles here once
-   * it would pass: insert-if-absent of a `refused` record with `errorReason`, `errorMessage`, no
+   * it would pass: insert-if-absent of a `refused` record with `errorReason`, `errorMessage`,
+   * `errorDetail`, no
    * hash and `reopened` 0 (-1 marks a record claimed before 0073, whose answer has no advice). It takes no payer and asset slot (0024): a final record holds none.
    * A record of the same `fingerprint` that is `rejected` with one of `unsent` as its reason and
    * no hash, which a repeat could reopen, moves to `refused` instead, adding one to its `version`,
@@ -308,7 +312,7 @@ export interface SettlementStore {
    */
   refuse(
     settlement: NewSettlement,
-    refusal: { errorReason: string; errorMessage?: string },
+    refusal: { errorReason: string; errorMessage?: string; errorDetail?: string },
     unsent: readonly string[],
     now: number,
   ): Promise<SettlementRecord>;

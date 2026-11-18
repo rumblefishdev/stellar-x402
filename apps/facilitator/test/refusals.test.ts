@@ -132,6 +132,15 @@ describe("verifyWithRefusals (0086)", () => {
     expect(inner).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps our own code next to upstream's reason for the repeat", async () => {
+    const { inner, verify, store } = setup();
+    inner.mockResolvedValueOnce({ ...feeRefusal, extra: { reason: "our_code" } });
+    const first = await verify(payload(), requirements);
+    expect(first.extra).toEqual({ reason: "our_code", expirationLedger: EXPIRATION });
+    expect(await store.get(key)).toMatchObject({ errorDetail: "our_code" });
+    expect(await verify(payload(), requirements)).toEqual(first);
+  });
+
   it("verifies another payment of the payer as usual", async () => {
     const { inner, verify } = setup();
     await verify(payload(), requirements);

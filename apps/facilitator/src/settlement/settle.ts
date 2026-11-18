@@ -873,6 +873,9 @@ export function createSettler(deps: SettlerDeps): Settle & {
             {
               errorReason,
               ...(verdict.invalidMessage !== undefined && { errorMessage: verdict.invalidMessage }),
+              ...(typeof verdict.extra?.reason === "string" && {
+                errorDetail: verdict.extra.reason,
+              }),
             },
             UNSENT_REASONS,
             now(),

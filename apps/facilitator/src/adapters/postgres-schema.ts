@@ -288,7 +288,8 @@ CREATE TABLE api_key_copies (
 `,
   },
   {
-    // 0086: a check refusal is recorded as a `refused` record, with the checks' message, so the
+    // 0086: a check refusal is recorded as a `refused` record, with the checks' message and our
+    // own code next to upstream's reason (`extra.reason`), so the
     // same payment never settles here once it would pass; the pruner deletes it after its auth
     // entry expired, through the partial index. Transactional, as online migrations wait for
     // 0080: the build holds writes to `settlements` for as long as one scan of it, milliseconds on
@@ -298,6 +299,7 @@ CREATE TABLE api_key_copies (
     name: "0015_settlement_refused",
     sql: `
 ALTER TABLE settlements ADD COLUMN error_message text;
+ALTER TABLE settlements ADD COLUMN error_detail text;
 CREATE INDEX settlements_refused ON settlements (created_at) WHERE state = 'refused';
 `,
   },

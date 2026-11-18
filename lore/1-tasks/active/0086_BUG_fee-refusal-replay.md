@@ -102,8 +102,9 @@ passes once fees drop. If its payer signed a second payment meanwhile, both can 
 
 ### Emerged
 
-8. **`error_message` column**: a repeat gets the checks' message again, the archived entries to
-   restore included. Nullable, in the same migration.
+8. **`error_message` and `error_detail` columns**: a repeat gets the checks' message again, the
+   archived entries to restore included, and our own code next to upstream's reason
+   (`extra.reason`), which the testnet check found missing. Nullable, in the same migration.
 9. **The answer reuses the "ended" advice**: `/settle` sets the key, so `withRetry` adds "may still
    land in ledger N: sign a new payment once that ledger has closed" with
    `extra.expirationLedger`; `/verify` adds the same from the payload alone, with no ledger read.
