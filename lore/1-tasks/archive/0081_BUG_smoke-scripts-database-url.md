@@ -6,7 +6,7 @@ status: completed
 owner: bstruzyk
 milestone: 2
 related_adr: []
-related_tasks: ["0064", "0073", "0021", "0128"]
+related_tasks: ["0064", "0073", "0021", "0128", "0152"]
 tags: [facilitator, scripts, testnet, priority-low, effort-small, dev-tools]
 links: []
 history:
@@ -91,3 +91,13 @@ checking anything.
 - **The compose URL is now in five files** (`test/database.ts`'s `COMPOSE_DATABASE_URL` and four
   live scripts). It can't be imported from `test/database.ts`, which imports vitest. Not changed
   here.
+- **324f7a48's message overstates the precedent**: it calls the fallback "the same default
+  token-matrix.ts and the other live scripts use". Only `token-matrix.ts`, `spend-matrix.ts` and
+  `catalog-smoke.ts` fall back; `settle-smoke.ts`, `api-key-smoke.ts` and
+  `nonce-consumed-elsewhere.ts` require `DATABASE_URL` (karczuRF, #202). The PR was already
+  rebase-merged, so the message stays on develop as written; this note is the correction.
+
+## Future Work
+
+- Blank `DATABASE_URL=` handling in the four scripts that fall back, and one definition of the
+  compose URL (five code files, two script headers): 0152.
