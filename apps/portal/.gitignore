@@ -1,0 +1,2 @@
+# The hand run's work directory (test/live/hand-run.sh) holds its log
+.hand-run.*/
