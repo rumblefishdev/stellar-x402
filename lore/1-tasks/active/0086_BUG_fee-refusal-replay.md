@@ -2,7 +2,8 @@
 id: "0086"
 title: "Keep a payment refused for its fee from settling after its payer signed again"
 type: BUG
-status: backlog
+status: active
+owner: okarcz
 milestone: 2
 related_adr: ["0006"]
 related_tasks: ["0073", "0009"]
@@ -20,6 +21,10 @@ history:
     who: okarcz
     note: >
       Payments lane, M2, before pubnet (okarcz, unlaned M1 check): a fee refusal still records nothing, so the double charge is still possible.
+  - date: "2026-11-18"
+    status: active
+    who: okarcz
+    note: "Started by okarcz: Payments lane, M2, before pubnet."
 ---
 
 # Keep a payment refused for its fee from settling after its payer signed again
