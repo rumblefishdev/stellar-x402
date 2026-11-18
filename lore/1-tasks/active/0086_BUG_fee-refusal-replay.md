@@ -1,12 +1,12 @@
 ---
 id: "0086"
-title: "Keep a payment refused for its fee from settling after its payer signed again"
+title: "Keep a payment the checks refused from settling after its payer signed again"
 type: BUG
 status: active
 owner: okarcz
 milestone: 2
 related_adr: ["0006"]
-related_tasks: ["0073", "0009"]
+related_tasks: ["0073", "0009", "0153"]
 tags: [facilitator, settlement, priority-medium, effort-medium, payments, before-pubnet]
 links: []
 history:
@@ -25,9 +25,15 @@ history:
     status: active
     who: okarcz
     note: "Started by okarcz: Payments lane, M2, before pubnet."
+  - date: "2026-11-18"
+    status: active
+    who: okarcz
+    note: >
+      Scope widened from the fee refusal to every check refusal that can pass later (okarcz);
+      title and acceptance criteria follow. Breaker refusals in /verify spawned as 0153.
 ---
 
-# Keep a payment refused for its fee from settling after its payer signed again
+# Keep a payment the checks refused from settling after its payer signed again
 
 ## Summary
 
@@ -58,7 +64,58 @@ passes once fees drop. If its payer signed a second payment meanwhile, both can 
 
 ## Acceptance Criteria
 
-- [ ] Given a payment refused for its fee, when the same payment is sent again after fees drop,
-      then it doesn't settle through the facilitator
+- [ ] Given a payment the checks refused (fee, low balance, missing trustline, ledger gap, or any
+      other reason) in `/verify` or `/settle`, when the same payment is sent again after the reason
+      no longer holds, then it doesn't settle through the facilitator
 - [ ] Given that refusal, when the seller reads the answer, then it says what to do without
       inviting a second signature that can land next to the first
+- [ ] Given a `/verify` refusal the store can't record, when the seller reads the answer, then it
+      is a 503 that invites the same payment again, not a new signature
+- [ ] Given a refusal record past its auth entry's expiry, when the pruner runs, then the record
+      is deleted and no other settlement record is
+
+## Design Decisions
+
+### From Plan
+
+1. **A final record, not only an answer** (okarcz, of the two options above): the facilitator
+   refuses the payment for good, so the answer can say what to do safely. An answer alone
+   (`retryable`) would leave AC1 open to a seller that ignores it.
+2. **Every check refusal of a payload with a key** (okarcz, wider than the fee): the fee isn't the
+   only refusal that can pass later; a low balance, a trustline added later and the ledger gap of
+   `…_too_far` have the same path. No list of reasons: a new upstream reason is covered by
+   default, and one that can never pass costs a row.
+3. **A `refused` state in `settlements`** (okarcz, over a separate table): a second start next to
+   `claimed`, final, holding no payer and asset slot. `refuse` inserts it, or moves a
+   reopenable `rejected` record of the same payment to it, AD-16's second written exception.
+   Blocking by key, not fingerprint: two payloads with one nonce can't both land, and another
+   payload under the key gets `…_nonce_already_used`, as AD-6 answers.
+4. **`/verify` answers 503 when the store fails**, `store_unavailable`: an unrecorded refusal would
+   invite the second signature. `/settle` keeps its 500 before the claim.
+5. **The pruner deletes `refused` records after 1 h** (`REFUSED_HORIZON_MS`): the auth entry lasts
+   at most 66 ledgers after signing. Settlement records were never pruned before.
+6. **A transactional migration** (`0015_settlement_refused`): online migrations wait for 0080.
+   The partial index `WHERE state = 'refused'` holds `settlements` writes for one scan, small on
+   testnet and nothing on a new mainnet database.
+7. **One release, with a deploy note**: the release before reads `refused` as open and answers a
+   repeat `settlement_pending` during the deploy; it never settles it.
+
+### Emerged
+
+8. **`error_message` column**: a repeat gets the checks' message again, the archived entries to
+   restore included. Nullable, in the same migration.
+9. **The answer reuses the "ended" advice**: `/settle` sets the key, so `withRetry` adds "may still
+   land in ledger N: sign a new payment once that ledger has closed" with
+   `extra.expirationLedger`; `/verify` adds the same from the payload alone, with no ledger read.
+10. **`refused` is never a `transition` target** (`isForward`): only `refuse` writes it.
+11. **`/verify` reads the store before the checks**: a `refused` record of the same payload is
+    answered without an RPC call. Any other record leaves `/verify` as before.
+12. **2 s store timeout in `/verify`** (`VERIFY_STORE_TIMEOUT_MS`): `/verify` has no budget of its
+    own.
+13. **A bogus payload can occupy a key**: a refusal is recorded before any signature check, so a
+    payload naming someone's payer and nonce, refused, blocks that payment here. It needs the nonce
+    first, and whoever has it can submit the payment on chain anyway (0141's front-run).
+
+## Future Work
+
+- Breaker refusals in `/verify`: 0153.

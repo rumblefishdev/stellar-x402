@@ -332,7 +332,12 @@ Labels come from closed sets; addresses are in log lines only.
   expiry. `0007_settlement_reopened` adds the reopen count: rows already there, and rows an older
   release writes during the deploy, get -1 and never reopen. This release can't claim a payment
   on a database without it. `0011_settlement_in_flight`: `/settle` can't claim a payment without it. `0013_api_keys` adds the
-  API key registry, a new table the release before it never reads.
+  API key registry, a new table the release before it never reads. `0015_settlement_refused`
+  (0086) adds the checks' message column and the index the pruner reads `refused` records
+  through; a transactional migration, since online ones wait for 0080: building the index holds
+  writes to `settlements` for one scan of it. The release before never writes `refused`, and
+  reads such a record as not final: during the deploy, an old process answers a repeat of a
+  refused payment `settlement_pending` until its budget ends, and never settles it.
 - An online migration (ADR 0012) commits step by step, so `pnpm migrate` after a stopped or
   failed run continues from the next step. It logs `migration_step` after each step and
   `migration_backfill` every 50 backfill batches. A backfill writes about 1.2 GiB of WAL per
@@ -433,6 +438,16 @@ When no RPC URL gives a verdict, `/verify` answers `503 {"error":"rpc_unavailabl
 its own `unexpected_verify_error` on every `RPC_URLS` entry, or the facilitator's own ledger read
 failed on every URL. The payment wasn't judged, so the same request may be sent again.
 
+A refusal of a payment whose payload names a payer and nonce is recorded (task 0086), so the same
+payment never settles through us once it would pass: fees drop, the payer tops up or adds a
+trustline. Its `invalidMessage` starts with what to do: `this payment will not settle here, but
+its auth entry may still land in ledger N: sign a new payment once that ledger has closed`, and
+`extra.expirationLedger` is N. The same payment sent again gets the recorded answer without the
+checks. When the settlement store doesn't answer within 2 s, `/verify` answers
+`503 {"error":"store_unavailable"}` with `Retry-After: 5`, logged as `verify_store_unavailable`:
+a refusal it couldn't record would invite a second signature, so send the same request again.
+A breaker's refusal (below) isn't recorded.
+
 While a breaker is open (task 0024, "Breakers" above), a payment every other check accepted gets
 `/settle`'s reason early, so a seller doesn't serve what `/settle` would refuse. `invalidMessage`
 says which breaker, with no address, amount or reset time:
@@ -456,8 +471,8 @@ For the two trustline reasons, `invalidMessage` names the account, the asset and
 and `settled` logs carry it as `message`. The token must be a Stellar Asset Contract: any
 contract can emit the same error, and only a SAC's means a trustline. A SAC stops at its first
 failure, the payer's side first, so the payer's message adds that `payTo` wasn't checked: a seller
-missing one too shows up on the next try. Once the trustline is there, the same payment may be
-sent again until its auth expires. `/settle`'s check before the claim gives the same three reasons; a
+missing one too shows up on the next try. The refusal is recorded (task 0086), so once the
+trustline is there, sign a new payment after the refused one's `extra.expirationLedger`. `/settle`'s check before the claim gives the same three reasons; a
 trustline removed after it answers `settle_exact_stellar_simulation_failed` from the pool.
 
 The nonce is used when its entry exists on chain: the host keeps it until the auth entry expires.
@@ -538,11 +553,13 @@ below are worth repeating as they are. Any other failure gets the same answer ag
 needs a new payment (a new nonce), but only once this one can't land ("Ended", below), except for:
 
 - a refusal from the checks (`invalid_exact_stellar_*`, `invalid_network`) comes before the
-  claim and records nothing: the same payment may be sent again, and may succeed later, except
-  when its message names archived entries.
+  claim. For a payload that names a payer and nonce it is recorded as `refused` (task 0086): the
+  same payment never settles here, even once it would pass, and gets the same answer again, with
+  `extra.expirationLedger` and "sign a new payment once that ledger has closed", as for an ended
+  payment. A nothing-sent record whose repeat the checks refuse turns `refused` too. A store that
+  can't record the refusal is a 500: send the same payment again.
   `invalid_exact_stellar_payload_fee_exceeds_maximum` is our own fee estimate above our ceiling,
-  not a fault in the payment (0086: it can settle after its payer signed again, so ask for a new
-  signature only once it can't land). With the bid from fee stats (no `INCLUSION_FEE_STROOPS`),
+  not a fault in the payment. With the bid from fee stats (no `INCLUSION_FEE_STROOPS`),
   the bid adds at most 20,000 stroops of it (fee stats are capped at 10,000 and the estimate
   counts the bid twice), so rent is what usually puts it there, and waiting seldom helps. When the
   message names archived entries
@@ -552,8 +569,7 @@ needs a new payment (a new nonce), but only once this one can't land ("Ended", b
   `invalid_exact_stellar_signature_expiration_too_far` comes from our three checks: the resource's
   `maxTimeoutSeconds` above 300 s at the default cap ("at most 300 is allowed", which stays
   refused, so the resource must ask for less), the auth's own expiry past the cap ("at most 66 are
-  allowed": the client saw ledgers faster than 5 s; the refused payment may pass later too, so ask
-  for a new signature only once it can't land), or past the last ledger the pool can bound.
+  allowed": the client saw ledgers faster than 5 s), or past the last ledger the pool can bound.
   Upstream's own expiry check answers with it too, for one whose message names none of these,
   when our RPC is 3 or more ledgers behind the client's;
 - `…_payer_busy` recorded nothing: one payer's payments in one asset settle one at a time, and
@@ -654,7 +670,7 @@ the network, submitted the payer's entry first, or the payer spent the nonce on 
 `success` is never answered for a transaction we didn't submit: one entry raced through two
 facilitators to the same seller would be served twice. No action is needed for one; many of them
 mean someone grieves our fees. The same counter with `window: "verify"` counts a refusal in `/verify` or in `/settle`'s re-check
-before the claim, which writes no record: there the other transaction landed before ours was sent,
+before the claim, which records it `refused` (0086): there the other transaction landed before ours was sent,
 so it cost no fee. It counts requests, not payments: each `/verify`, each `/settle` retry and each
 reopen re-check of the same payload adds one, so a burst of retries is not a burst of front-runs.
 `/verify` keeps no record either, so a repeat of a payment we settled ourselves counts too.
