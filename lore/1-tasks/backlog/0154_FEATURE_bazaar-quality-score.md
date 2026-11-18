@@ -50,6 +50,8 @@ picks the listings that fit a query; this task orders them by a quality score an
 - Is the score kept apart per network, or off on testnet?
 - How a listing's settlements are linked to it, and how often the score is recomputed?
 - What makes a listing curated, and who decides it?
+- Is a results page capped per host, so one seller's many listings can't fill it? On 2026-11-18
+  the largest host held 586 of the 1,637 Stellar listings in the CDP catalog.
 
 ## Acceptance Criteria
 
