@@ -1,0 +1,66 @@
+# The metrics agent (ADR 0011, "Metrics" and "Host metrics"; lore 0139 step 5): Prometheus in agent
+# mode sends what it scrapes to the monitoring VM with `remote_write`, and node_exporter reports
+# the host. Its own project, run by `x402-metrics.service`; on the server this is
+# /srv/x402/metrics/compose.yaml, beside prometheus.yml and the agent's certificate. No port is
+# published: the connection to the VM is outbound.
+#
+#   SECRETS_DIR  the decrypted client key, /run/x402/metrics unless set (local runs)
+name: x402-metrics
+
+services:
+  agent:
+    image: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
+    command:
+      - --agent
+      - --config.file=/etc/prometheus/prometheus.yml
+      # The write-ahead log: a few hours of samples while the VM can't be reached.
+      - --storage.agent.path=/prometheus
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    cpus: 0.5
+    secrets:
+      - metrics-agent-key
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./metrics-agent.crt:/etc/prometheus/metrics-agent.crt:ro
+      - wal:/prometheus
+    networks:
+      - metrics
+
+  node-exporter:
+    image: prom/node-exporter:v1.12.1@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
+    command:
+      - --path.rootfs=/host
+      # The host probe's stamps (ADR 0011, "Host metrics").
+      - --collector.textfile.directory=/host/var/lib/x402/textfile
+    # ponytail: bridge network, so its network stats are the container's own; host network if
+    # they matter, which publishes 9100 on the host.
+    pid: host
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 64m
+    cpus: 0.25
+    volumes:
+      - /:/host:ro,rslave
+    networks:
+      - metrics
+
+volumes:
+  wal:
+    name: x402-metrics-wal
+
+networks:
+  # Its subnet set, as production's are (compose.yaml of the production environment): Docker's
+  # pool on the server has none left. The facilitator joins it at the switch (0139 step 7).
+  metrics:
+    name: x402-metrics
+    ipam:
+      config:
+        - subnet: 172.31.200.32/28
+
+secrets:
+  metrics-agent-key:
+    file: ${SECRETS_DIR:-/run/x402/metrics}/metrics-agent-key

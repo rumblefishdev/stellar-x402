@@ -43,6 +43,9 @@
     cwagent_etc: /opt/aws/amazon-cloudwatch-agent/etc
     # The agent's public certificate, committed once the CA holder has signed it (runbook).
     cwagent_cert: "{{ playbook_dir }}/files/cloudwatch-agent-{{ x402_environment }}.crt"
+    # The metrics agent's client certificate for the monitoring VM's ingest, committed the same way
+    # (runbook, The metrics agent).
+    metrics_agent_cert: "{{ playbook_dir }}/files/metrics-agent-{{ x402_environment }}.crt"
     # The files table of 0027's server-side spine; deploy/test checks both lists against it.
     x402_log_dirs:
       - /var/log/x402
@@ -50,6 +53,7 @@
       - "/var/log/x402/{{ x402_environment }}/emf"
       - /var/log/x402/openbao
       - /var/log/x402/host
+      - /var/log/x402/metrics
     x402_log_files:
       - "/var/log/x402/{{ x402_environment }}/facilitator.log"
       - "/var/log/x402/{{ x402_environment }}/facilitator.err.log"
@@ -60,6 +64,7 @@
       - "/var/log/x402/{{ x402_environment }}/portal-deploy.log"
       - /var/log/x402/openbao/openbao.log
       - /var/log/x402/host/metrics.log
+      - /var/log/x402/metrics/agent.log
 
   handlers:
     - name: Reload systemd
@@ -162,6 +167,8 @@
         - { path: "/srv/x402/{{ x402_environment }}/creds", owner: root, mode: "0700" }
         - { path: /srv/x402/openbao, owner: x402, mode: "0755" }
         - { path: /srv/x402/openbao/creds, owner: root, mode: "0700" }
+        - { path: /srv/x402/metrics, owner: x402, mode: "0755" }
+        - { path: /srv/x402/metrics/creds, owner: root, mode: "0700" }
         # The backup jobs' credentials: the Storage Box key, Borg's passphrase, the snapshot AppRole.
         - { path: /srv/x402/backup, owner: root, mode: "0700" }
         - { path: /srv/x402/backup/creds, owner: root, mode: "0700" }
@@ -173,6 +180,8 @@
         # A backup or snapshot job touches its stamp here after it succeeds, as root (0026).
         - { path: /var/lib/x402, owner: root, mode: "0755" }
         - { path: /var/lib/x402/last-ok, owner: root, mode: "0755" }
+        # node_exporter's textfile collector reads the host probe's files here (ADR 0011).
+        - { path: /var/lib/x402/textfile, owner: root, mode: "0755" }
         # Borg's cache and the repository's last-seen state, so a swapped repository is noticed.
         - { path: /var/lib/x402/borg, owner: root, mode: "0700" }
 
@@ -337,6 +346,58 @@
         # The snapshot job's policy, which the runbook's admin step writes into OpenBao.
         - x402-snapshot.hcl
 
+    # The metrics agent's own project (ADR 0011, lore 0139).
+    - name: The metrics agent's compose file and config
+      ansible.builtin.copy:
+        src: "{{ repo_deploy }}/metrics/{{ item }}"
+        dest: "/srv/x402/metrics/{{ item }}"
+        owner: x402
+        group: x402
+        mode: "0644"
+      loop:
+        - compose.yaml
+        - prometheus.yml
+
+    # Its CN is the one the VM's metrics_writer_cns lets write; checked here, on the admin's machine.
+    - name: The metrics agent's certificate, checked
+      ansible.builtin.command:
+        argv:
+          - "{{ repo_deploy }}/scripts/check-agent-certificate.sh"
+          - "{{ metrics_agent_cert }}"
+          - "x402-metrics-agent-{{ x402_environment }}"
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      check_mode: false
+      when: metrics_agent_cert is file
+
+    - name: The metrics agent's key's public half
+      ansible.builtin.shell: >-
+        systemd-creds decrypt --name=metrics-agent-key
+        /srv/x402/metrics/creds/metrics-agent-key.cred - < /dev/null
+        | openssl pkey -pubout
+      register: metrics_key_public
+      changed_when: false
+      check_mode: false
+      no_log: true
+      when: metrics_agent_cert is file
+
+    - name: The metrics agent's certificate is the key's
+      ansible.builtin.assert:
+        that: metrics_key_public.stdout == lookup('ansible.builtin.pipe', 'openssl x509 -pubkey -noout -in ' ~ metrics_agent_cert)
+        fail_msg: The committed certificate isn't for the metrics agent's active key (runbook, The metrics agent).
+        quiet: true
+      when: metrics_agent_cert is file
+
+    - name: The metrics agent's certificate
+      ansible.builtin.copy:
+        src: "{{ metrics_agent_cert }}"
+        dest: /srv/x402/metrics/metrics-agent.crt
+        owner: root
+        group: root
+        mode: "0644"
+      when: metrics_agent_cert is file
+
     # The Storage Box's host key, pinned: the snapshot job refuses any other (StrictHostKeyChecking).
     - name: The Storage Box's host key
       ansible.builtin.copy:
@@ -474,6 +535,14 @@
         name: x402-openbao.service
         enabled: true
       when: not ansible_check_mode
+
+    # Enabled, not started: the runbook's admin step starts it once its certificate is on the
+    # server. Not under --check while this run would add the unit.
+    - name: The metrics agent's unit, enabled at boot
+      ansible.builtin.systemd_service:
+        name: x402-metrics.service
+        enabled: true
+      when: not (ansible_check_mode and units is changed)
 
     # Started too: it acts only while x402@ is active, so before the first deploy it does nothing.
     - name: The watchdog's timer, enabled and started
