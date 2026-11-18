@@ -1650,8 +1650,10 @@ revoke last, or with a second Discord account.
 0011, "Metrics"). The agent scrapes node_exporter and itself every 15 s and sends the samples to
 the monitoring VM, `https://metrics.sorobanscan.com/api/v1/write`, with a client certificate from
 the ClickHouse project's CA. Its write-ahead log, the volume `x402-metrics-wal`, holds the samples
-while the VM can't be reached. The facilitator's `/metrics` joins at the switch (0139 step 7), and
-ClickHouse's endpoint once the explorer's config turns it on. The VM lets only the CNs in
+while the VM can't be reached. The facilitator's `/metrics` joins at the switch (0139 step 7).
+ClickHouse's own endpoint is on, but listens on 127.0.0.1 inside `app-clickhouse-1` (the
+explorer's `crates/db-clickhouse/config.d/prometheus.xml`), so the agent can't reach it yet: only
+`docker exec` or a scraper in that container's network namespace can. The VM lets only the CNs in
 `metrics_writer_cns` write (soroban-infrastructure, `monitoring/`).
 
 **The certificate,** as the CloudWatch agent's: the key was made on the server on 2026-11-18 as
