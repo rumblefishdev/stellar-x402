@@ -17,7 +17,7 @@ on:
   push:
     branches: [deploy/production]
     # What apps/portal/Dockerfile copies and builds. A promotion that changes none of it deploys
-    # no portal.
+    # no portal; the page (apps/portal-web) is a static bundle and never comes through here.
     paths:
       - apps/portal/**
       - packages/api-keys/**
