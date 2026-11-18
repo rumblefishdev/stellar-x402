@@ -75,6 +75,9 @@ From 0077 (ADR 0012 lists them):
   both networks, with an exact `total` and an `offset` up to 1 000 000, but each network's entries
   are in its own database. Merging two queries costs `offset + limit` rows from each; one database
   for the catalog keeps a testnet reset from wiping testnet's listings.
+  `/discovery/search` (0134) takes the same rule as `/discovery/resources`: with entries in two
+  databases, a search without a `network` filter ranks two candidate lists into one, and testnet
+  listings would sit among mainnet's.
 - **Which database holds the IP rate limiter's counters.** They are counted before the request's
   network is known, and `/supported` and `/discovery/*` may carry none.
 
