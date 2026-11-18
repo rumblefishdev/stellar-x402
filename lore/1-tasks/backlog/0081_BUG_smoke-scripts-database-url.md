@@ -3,7 +3,7 @@ id: "0081"
 title: "Pass DATABASE_URL to the verify smoke script"
 type: BUG
 status: backlog
-milestone: 1
+milestone: 2
 related_adr: []
 related_tasks: ["0064", "0073", "0021", "0128"]
 tags: [facilitator, scripts, testnet, priority-low, effort-small, dev-tools]

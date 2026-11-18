@@ -3,7 +3,7 @@ id: "0055"
 title: "Let mcp-local e2e and conformance servers pick their own port"
 type: BUG
 status: backlog
-milestone: 1
+milestone: 2
 related_adr: []
 related_tasks: ["0052"]
 tags: [tests, ci, priority-low, effort-small, dev-tools]

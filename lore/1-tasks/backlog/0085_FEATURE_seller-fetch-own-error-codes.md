@@ -3,7 +3,7 @@ id: "0085"
 title: "Give seller-fetch its own error codes, translated by the MCP"
 type: FEATURE
 status: backlog
-milestone: 1
+milestone: 2
 related_adr: ["0008"]
 related_tasks: ["0063", "0037", "0075"]
 tags: [seller-fetch, mcp, facilitator, priority-medium, effort-small, dev-tools]

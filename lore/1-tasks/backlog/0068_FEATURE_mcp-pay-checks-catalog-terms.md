@@ -3,7 +3,7 @@ id: "0068"
 title: "Refuse a paid call when the seller asks more than its catalog listing or names another payTo"
 type: FEATURE
 status: backlog
-milestone: 1
+milestone: 2
 related_adr: ["0008"]
 related_tasks: ["0063", "0037", "0137", "0044"]
 tags: [mcp, bazaar, security, before-pubnet, priority-medium, effort-small, dev-tools]

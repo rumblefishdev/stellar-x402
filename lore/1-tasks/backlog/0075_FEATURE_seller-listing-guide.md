@@ -3,6 +3,7 @@ id: "0075"
 title: "Seller guide to getting a service listed in the Bazaar"
 type: FEATURE
 status: backlog
+milestone: 3
 related_adr: ["0008"]
 related_tasks: ["0063", "0085"]
 tags: [docs, bazaar, dev-tools, priority-medium, effort-small]
