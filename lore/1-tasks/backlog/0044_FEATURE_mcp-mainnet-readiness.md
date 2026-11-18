@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 milestone: 2
 related_adr: []
-related_tasks: ["0037", "0043"]
+related_tasks: ["0037", "0043", "0068", "0092"]
 tags: [mcp, dev-tools, mainnet, security, priority-medium, effort-large]
 links: []
 history:
@@ -36,7 +36,7 @@ is decided with the owner (options and a recommendation) before it is built.
   USDC has another contract, and sellers accept others (EURC, XLM).
 - **Networks.** Only `stellar:testnet` is registered and the signer is bound to it; mainnet needs a
   configured network and passphrase.
-- **RPC URL.** `@x402/stellar` 2.28 requires an RPC URL for mainnet (`getRpcUrl` throws without
+- **RPC URL.** `@x402/stellar` 2.31 requires an RPC URL for mainnet (`getRpcUrl` throws without
   one; testnet has a default). The CLI has no setting for it.
 - **Choosing how to pay (W349 A).** Today the library pays the first offer our filter leaves. Add
   an optional `call_paid_http(…, pay_with: {network, asset})` the agent picks from `get_resource`;
@@ -86,7 +86,7 @@ is decided with the owner (options and a recommendation) before it is built.
 `pay.ts` detects paying by sniffing a header and failures by matching upstream's error prefixes, both
 because `wrapFetchWithPayment` runs the round trip. Run the public `x402HTTPClient` calls in order
 instead (upstream's `examples/typescript/clients/custom/index.ts:46-82`, a17c668), ~3 h, `[refactor]`,
-on the money path. The 36 `pay.test.ts` tests go through a fake seller and never mock the wrapper.
+on the money path. The `pay.test.ts` tests go through a fake seller and never mock the wrapper.
 
 - Goes: `paymentSent`, the header sniff, the prefix regex. Of three ordering fixes, it would have
   prevented one (be5d836). No ordering fix since 2026-10-15, so nothing here is breaking today.

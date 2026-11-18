@@ -32,7 +32,8 @@ can find a paid service and then call it with the paid-call tool.
 - The MCP server (`apps/mcp-local`) lists resources through
   `/discovery/resources` today (0037, 0046).
 - The tool depends only on the route's request and response types, which 0120 agrees first. It
-  can be built and tested against a fake of the route.
+  can be built and tested against a fake of the route. Until those types are agreed (not yet,
+  2026-11-18), this task can't start.
 
 ## Implementation Plan
 
@@ -51,4 +52,4 @@ can find a paid service and then call it with the paid-call tool.
       the results may be incomplete
 - [ ] Given a search result, when the agent passes it to the paid-call tool, then the call is paid
       and answered on testnet, and the run is recorded for 0132
-- [ ] 0120's acceptance criterion for the MCP tool points to this task
+- [x] 0120's acceptance criterion for the MCP tool points to this task
