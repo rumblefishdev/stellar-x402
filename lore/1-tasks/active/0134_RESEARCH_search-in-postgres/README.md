@@ -6,7 +6,7 @@ status: active
 owner: karolkow
 milestone: 2
 related_adr: ["0008", "0012"]
-related_tasks: ["0120", "0135", "0013"]
+related_tasks: ["0120", "0135", "0013", "0154"]
 tags: [bazaar, search, priority-high, effort-small, discovery]
 links:
   - ../../../../docs/adr/0012-facilitator-state-store.md
