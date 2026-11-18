@@ -23,8 +23,9 @@ history:
 
 Four live scripts fall back to `compose.yaml`'s database when `DATABASE_URL` is unset, each with
 its own copy of the URL and with `??`, so a blank `DATABASE_URL=` passes through and the config
-refuses it as "DATABASE_URL is required". Give them one shared URL and one reading of the variable
-that treats blank as unset, as the config does.
+refuses it as "DATABASE_URL is required". The URL is also copied into `test/database.ts` and
+quoted in two script headers. Give the code one shared URL, the headers one place to point at, and
+the four scripts one reading of the variable that treats blank as unset, as the config does.
 
 ## Context
 
@@ -46,12 +47,16 @@ that treats blank as unset, as the config does.
   exporting the compose URL, and a helper that returns `DATABASE_URL` trimmed, or the compose URL
   when it is unset or blank.
 - `test/database.ts` imports the URL from it; the four scripts use the helper.
-- The headers of `settle-smoke.ts` and `api-key-smoke.ts` keep naming the URL in prose, or point
-  at the module; decide which.
+- The headers of `settle-smoke.ts:29` and `api-key-smoke.ts:21`: point at the module instead of
+  carrying their own copy, or keep the URL in prose with the module named as its source; decide
+  which.
 
 ## Acceptance Criteria
 
 - [ ] The compose URL is defined once in code; `test/database.ts` and the four scripts use it
-- [ ] Given `DATABASE_URL=` (blank), when any of the four scripts starts, then it uses the compose URL
+- [ ] Given the headers of `settle-smoke.ts` and `api-key-smoke.ts`, when they are read, then they
+      name where the compose URL is defined
+- [ ] Given `DATABASE_URL=` (blank), when any of the four scripts starts, then it uses the
+      compose URL
 - [ ] The three scripts that require `DATABASE_URL` still require it
 - [ ] Typecheck, lint and format clean; `pnpm test` in `apps/facilitator` passes
