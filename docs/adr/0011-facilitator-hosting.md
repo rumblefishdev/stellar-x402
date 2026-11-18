@@ -939,4 +939,4 @@ One request or one stop must never outlast the layer in front of it:
   [CloudWatch agent](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Install-CloudWatch-Agent.html),
   [Compose `stop_grace_period`](https://docs.docker.com/reference/compose-file/services/#stop_grace_period)
 
-[cw-measurement]: ../../lore/1-tasks/active/0138_RESEARCH_monitoring-cost-and-grafana-decision/notes/R-cloudwatch-cost-measurement.md
+[cw-measurement]: ../../lore/1-tasks/archive/0138_RESEARCH_monitoring-cost-and-grafana-decision/notes/R-cloudwatch-cost-measurement.md

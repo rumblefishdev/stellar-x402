@@ -2,7 +2,7 @@
 id: "0138"
 title: "Measure what CloudWatch costs and decide: cut it down or move to Grafana"
 type: RESEARCH
-status: active
+status: completed
 owner: stkrolikiewicz
 milestone: 2
 related_adr: ["0011"]
@@ -33,6 +33,13 @@ history:
       Decided with the team: option B, Prometheus and Alertmanager on a separate Hetzner Cloud VM
       (CPX12 in Helsinki, bought the same day), recorded in the ADR 0011 amendment. Merging PR
       #186 is the team's agreement.
+  - date: "2026-11-18"
+    status: completed
+    who: stkrolikiewicz
+    note: >
+      Closed after #186 merged (e4dd1a1c, Oskar's approval): the ADR 0011 amendment, six notes
+      and 0139's $8 target. The announcement criterion was dropped by stkrolikiewicz; the format
+      is in the ADR and the team agreed to it by merging. Open choices D1–D30 went to 0151.
 ---
 
 # Measure what CloudWatch costs and decide: cut it down or move to Grafana
@@ -94,12 +101,70 @@ Hetzner Cloud VM, CloudWatch for what must outlive it. The record is the ADR 001
 
 ## Acceptance Criteria
 
-- [ ] The current monthly cost is measured and split by source, with the dates measured
-- [ ] The decision (cut CloudWatch, or Grafana and where it is hosted) is recorded as an amendment
+- [x] The current monthly cost is measured and split by source, with the dates measured
+      (`notes/R-cloudwatch-cost-measurement.md`, read on 2026-11-12)
+- [x] The decision (cut CloudWatch, or Grafana and where it is hosted) is recorded as an amendment
       to ADR 0011 with the options' costs
-- [ ] The metric format (EMF or Prometheus) is decided and announced before the end of M2's first
-      week, with the list of metrics and logs that stay
-- [ ] A target monthly amount is written into 0139 as its done signal
-- [ ] If Grafana is chosen, the amendment says what watches Grafana from outside
-- [ ] The task says whether moving the explorer's and the Prices API's monitoring is planned, and
-      that it is outside this project's work
+- [x] A target monthly amount is written into 0139 as its done signal ($8 a month)
+- [x] If Grafana is chosen, the amendment says what watches Grafana from outside (the Watchdog
+      heartbeat through Alertmanager to SNS, alarmed in CloudWatch)
+- [x] The task says whether moving the explorer's and the Prices API's monitoring is planned, and
+      that it is outside this project's work (Decision, last point)
+
+The criterion "the metric format is decided and announced before the end of M2's first week" was
+dropped on 2026-11-18: the format and the list of what stays are in the ADR 0011 amendment and the
+Decision above, and merging #186 was the team's agreement.
+
+## Implementation Notes
+
+- **#186** (merged 2026-11-18, 14 commits, docs only): the ADR 0011 amendment and six notes.
+  - `R-cloudwatch-cost-measurement`: the invoice from Cost Explorer (October $42.34, 86% custom
+    metrics and alarms) and the inventory: 165 custom metrics and 155 alarms across the account.
+  - `R-alarm-inventory-and-reductions`: every custom metric mapped to the alarms and dashboards
+    that read it (2026-11-13, read-only).
+  - `R-logs-cloudwatch-or-loki`: logs stay in CloudWatch for Milestone 2.
+  - `I-grafana-shape`, `S-decision-draft`: options A (stack on ch-prod-01), B (separate VM) and
+    C (Grafana Cloud Free); B chosen.
+  - `G-alarm-signals-and-triage-runbooks`: account-wide 155 → 29 CloudWatch alarms and about
+    $62.80 → $9.60 a month, plus about $4–5 of reads, with a triage runbook per signal.
+- The monitoring VM was bought on 2026-11-17 (CPX12, HEL1, $11.59 a month with IPv4, before VAT)
+  and is provisioned from soroban-infrastructure (#12, #13).
+
+## Issues Encountered
+
+- **The bill can't be split by project.** CloudWatch metrics and alarms take no cost-allocation
+  tags, so the per-project figures are the inventory times the invoice's rates, not invoiced
+  amounts. The uptime probe's Lambda cost was not measured.
+- **Numbers moved after the first draft.** #186's description and the team message of 2026-11-17
+  said about 24 alarms and $8.50; the final count in the G- note is 29 alarms and $9.60.
+- **The triage SQL has not run on live data.** The runbooks' ClickHouse queries had not run on live
+  data when #186 merged.
+
+## Design Decisions
+
+### From Plan
+
+1. **Measure before deciding**: the invoice and the inventory came first, so the options were
+   compared in dollars, not in preferences.
+2. **The decision is an ADR 0011 amendment**, since ADR 0011 had rejected Grafana Cloud Free.
+
+### Emerged
+
+3. **Option B over Grafana Cloud Free**: the draft started from Grafana Cloud Free; it moved to
+   our own stack on a separate VM once the 10,000-series and 14-day limits and the second vendor
+   were weighed (Marek for B).
+4. **Logs stay in CloudWatch**: Loki was compared and left out for Milestone 2, so the CloudWatch
+   agent stays and only the EMF lines stop.
+5. **No period running both systems**: the new rules switch on with the old alarms' removal in
+   one change (0139 AC3), so nobody gets paged twice.
+6. **The Prices API keeps its alarms until its Milestone 2 acceptance**, except 0344–0347 (Oskar's
+   review); its findings went to stellar-prices-api#420, the explorer's to
+   soroban-block-explorer#733.
+7. **The announcement criterion was dropped** (stkrolikiewicz, 2026-11-18): the ADR and the merge
+   carry the format to the team.
+
+## Future Work
+
+- Carry out the decision: 0139.
+- The open choices D1–D30 from the G- note §6 (phone route, pubnet gate, SNS credentials and the
+  rest) and the draft's "Still open" list: 0151.
