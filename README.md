@@ -10,6 +10,8 @@ package. Status: skeleton, nothing implemented yet.
 | ----------------------- | --------------------------------------------------------------------------- |
 | `apps/facilitator`      | HTTP service: `/verify`, `/settle`, `/supported`, `/health`, `/discovery/*` |
 | `apps/mcp-local`        | stdio MCP server: its tools (search, paid call), error codes and CLI        |
+| `apps/portal`           | the backend the API hub calls: a seller's pubnet API key                    |
+| `apps/portal-web`       | the page at `sorobanscan.com/api/x402-facilitator/` (in progress)           |
 | `packages/api-keys`     | the API key registry: a key's form and hash, owners, PostgreSQL store       |
 | `packages/bazaar`       | catalog validation, storage, ranking and search                             |
 | `packages/signer-pool`  | channel accounts: funding, sequence tracking, retry, fee bump               |

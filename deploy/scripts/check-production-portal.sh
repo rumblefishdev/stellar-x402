@@ -8,15 +8,17 @@
 # The secrets get the owners the units' x402-creds lines name, mode 0400. The database role gets
 # the runbook's own GRANT lines. Then: the deploy's probe answers within its 60 s, Docker's
 # healthcheck turns healthy, the container runs as the compose file limits it, a call to the
-# hub's contract with no bearer is refused with 401 invalid_token, the role issues, shows and revokes a key from inside the
-# container and reads no other table, and a stop ends the process with 0.
+# hub's contract with no bearer is refused with 401 invalid_token, the role issues, shows and
+# revokes a key from inside the container and reads no other table, and a stop ends the process
+# with 0.
 # Docker installed from a snap can't start a container with no-new-privileges (its AppArmor
 # profile refuses the exec: "operation not permitted"), so there the check takes that one option
 # off every service it starts and says so. CI's and the server's Docker keep it.
 # Not covered: the hub and its tokens, the tunnel, the units and the deploy script on a real systemd
 # (deploy/test/portal.test.ts runs that script with fakes), the server's own volume.
 #
-# Usage: deploy/scripts/check-production-portal.sh   (Docker, jq and openssl; root only if Docker needs it)
+# Usage: deploy/scripts/check-production-portal.sh
+# (Docker, jq and openssl; root only if Docker needs it)
 set -eu
 # No terminal on stdin, as in CI: from one, `docker compose run` and `exec` go interactive and
 # can be stopped by it. The one command that reads stdin, psql, gets a here-document.
