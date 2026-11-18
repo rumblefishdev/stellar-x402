@@ -2,7 +2,7 @@
 id: "0101"
 title: "Drop what the settlement modules no longer need"
 type: FEATURE
-status: active
+status: completed
 owner: karolkow
 related_adr: ["0001", "0004", "0012"]
 related_tasks: ["0036", "0102", "0063"]
@@ -19,6 +19,13 @@ history:
     status: active
     who: karolkow
     note: Starting with item 1, the packages with no importer.
+  - date: "2026-11-18"
+    status: completed
+    who: karolkow
+    note: >
+      Closed. Six items merged in #123, #135, #146, #147, #197 and #198; item 2 dropped with its
+      reason. Item 7 joined the task on 2026-11-17. Assertions unchanged in every PR; #135, #147 and
+      #198 added or replaced one test each.
 ---
 
 # Drop what the settlement modules no longer need
@@ -46,7 +53,7 @@ Figures are from `origin/develop` on 2026-11-03. Work each item from what is tru
    `stats()` for `queued`, `channels`, `busy` and `quarantined`. The other eleven counters have no
    production reader, but the signer pool's tests observe the submitter through them (38 calls),
    and 0138 may make metrics of them.
-3. **In #198. `[refactor]`, ~1 h. Attempts as a plain property on the error.** Delete the `WeakMap` behind
+3. **Merged in #198. `[refactor]`, ~1 h. Attempts as a plain property on the error.** Delete the `WeakMap` behind
    `attemptsOf` and the three `vi.mock`s of the package that exist because of it.
 4. **Merged in #146. `[structure only]`, ~1.5 h. What in `main.ts` isn't wiring.** Move `start()` to its own file,
    and `failureReason`, `upstreamDeadlineMs` and `buildUpstream` beside `upstream-failover.ts`.
@@ -114,5 +121,27 @@ Each was measured against the fixes it should have prevented, and dropped:
 
 ## Acceptance Criteria
 
-- [ ] Each item is merged or dropped with its reason here
-- [ ] Items 1, 3, 4 leave test assertions unchanged, apart from moved imports
+- [x] Each item is merged or dropped with its reason here
+- [x] Items 1, 3, 4 leave test assertions unchanged, apart from moved imports
+
+## Design Decisions
+
+### From Plan
+
+1. **One PR per item, each smaller than a day**, none changing what a client or a seller sees.
+
+### Emerged
+
+2. **Item 5 keeps the bound fallback** (decision 7): someone else's fee bump of ours is stored
+   without bounds, so dropping it would leave such a record open for good once the RPC forgets it.
+3. **Item 2 dropped** (decision 8): 0027's gauges started reading `stats()` the day after the
+   review.
+4. **Item 3 reverses 0016's decision 12**: an own `attempts` property changes no error's class, and
+   the map cost three mocks.
+5. **Item 7 and the M1 plan note added** (decisions 9 and 10), from the review's leftovers.
+
+## Future Work
+
+- The payer's auth expiry is stored per hash and read from the payload too; one column per record
+  would leave one copy (a schema change, not started).
+- If 0102's buyer helpers reuse `apps/mcp-local/src/pay.ts`, it moves out to a package again.
