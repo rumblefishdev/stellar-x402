@@ -67,6 +67,52 @@ describe("prometheus adapter", () => {
     ]);
   });
 
+  it("counts a line only when a when on a label that is no dim holds", () => {
+    // `budget` is no dim of spend_budget_nearing_total: payer and pay_to write no metric.
+    const { m, scrape } = setup();
+    const net = m.for({ network: NET });
+    net.increment("spend_budget_nearing_total", { budget: "payer" });
+    net.increment("spend_budget_nearing_total", { budget: "pay_to" });
+    net.increment("spend_budget_nearing_total", {});
+    const series = `spend_budget_nearing_total{network="${NET}"}`;
+    expect(scrape().get(series)).toBe(0);
+    net.increment("spend_budget_nearing_total", { budget: "global" });
+    net.increment("spend_budget_nearing_total", { budget: "asset" });
+    expect(scrape().get(series)).toBe(2);
+    // A when on a dim still counts every value, written as the label.
+    net.increment("settlement_refused_after_verify_total", { stage: "check" });
+    expect(
+      scrape().get(`settlement_refused_after_verify_total{network="${NET}",stage="check"}`),
+    ).toBe(1);
+  });
+
+  it("reports each distinct issue once, and at most 1000", () => {
+    const { m, issues } = setup();
+    for (let i = 0; i < 3; i++)
+      m.increment("http_requests_total", { route: "/nope", status: "200" });
+    expect(issues).toHaveLength(1);
+    for (let i = 0; i < 1_100; i++)
+      m.increment("http_requests_total", { route: `/r${i}`, status: "200" });
+    expect(issues).toHaveLength(1_000);
+  });
+
+  it("keeps counting and scraping when the issue logger throws", () => {
+    const m = prometheusMetrics({
+      networks: [NET],
+      onIssue: () => {
+        throw new Error("logger down");
+      },
+    });
+    const net = m.for({ network: NET });
+    net.registerGauge("pool_queued", () => {
+      throw new Error("read failed");
+    });
+    net.increment("settlement_outcomes_total", { result: "nope" });
+    const text = m.render();
+    expect(text).toContain(`settlement_outcomes_total{network="${NET}",result="other"} 1`);
+    expect(text).not.toContain("pool_queued{");
+  });
+
   it("ignores a negative or non-finite step and never throws", () => {
     const { m, scrape, issues } = setup();
     const net = m.for({ network: NET });
@@ -146,6 +192,21 @@ describe("prometheus adapter", () => {
       expect(await ok.text()).toContain("# TYPE settlement_outcomes_total counter");
       expect((await fetch(`${base}/health`)).status).toBe(404);
       expect((await fetch(`${base}/metrics`, { method: "POST" })).status).toBe(404);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it("answers 500 when render throws, so the scrape fails instead of reading empty", async () => {
+    const server = createServer(
+      metricsListener(() => {
+        throw new Error("render");
+      }),
+    );
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const res = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/metrics`);
+      expect(res.status).toBe(500);
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
