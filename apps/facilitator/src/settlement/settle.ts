@@ -211,7 +211,8 @@ export function createSettler(deps: SettlerDeps): Settle & {
       return failure(
         record.errorReason ?? SETTLE_REASONS.unexpected,
         record.payer,
-        undefined,
+        // Only a `refused` record has one: the checks' message (0086).
+        record.errorMessage,
         transaction,
       );
     }
@@ -816,7 +817,8 @@ export function createSettler(deps: SettlerDeps): Settle & {
     // nonce is used on chain and upstream's simulation fails, so a retry after
     // `settlement_pending` could never be answered. The fingerprint must still match (AD-6).
     // Before the claim, a store that fails or doesn't answer within the budget is a 500.
-    const known = requirements.network === network ? keyOf(payload, network) : undefined;
+    const identity = requirements.network === network ? identityOf(payload, network) : undefined;
+    const known = identity?.key;
     const existing = known && (await bounded(store.get(known), left()));
     // The identical payment, closed with nothing sent: it reopens if its auth entry can still land
     // and it passes the checks again, as a first payment would (0073 decisions 5, 13).
@@ -851,6 +853,49 @@ export function createSettler(deps: SettlerDeps): Settle & {
     const { response: verdict, verified } = checked;
     if (!verified) {
       flagDrift(undefined, verdict.invalidReason, "check");
+      // 0086: the refusal is recorded, so the same payment never settles here once it would pass,
+      // after its payer may have signed another. A reopen the checks refuse turns `refused` too.
+      // Before any claim, a store that fails or doesn't answer is a 500, as for the lookup.
+      if (identity) {
+        const errorReason = verdict.invalidReason ?? SETTLE_REASONS.unexpected;
+        const record = await bounded(
+          store.refuse(
+            {
+              key: identity.key,
+              network,
+              payer: identity.payer,
+              nonce: identity.nonce,
+              fingerprint,
+              paymentPayload: payload,
+              paymentRequirements: requirements,
+              createdAt: startedAt,
+            },
+            {
+              errorReason,
+              ...(verdict.invalidMessage !== undefined && { errorMessage: verdict.invalidMessage }),
+            },
+            UNSENT_REASONS,
+            now(),
+          ),
+          Math.max(left(), storeGraceMs),
+        );
+        if (record.state === "refused" && record.fingerprint === fingerprint) {
+          // A new refusal has version 0; a record it moved from `rejected`, more.
+          if (record.version > 0) {
+            logger.info("settlement_refused_reopen", {
+              network,
+              settlementKey: record.key,
+              errorReason,
+            });
+          }
+          // With the key, the answer gets the "ended" advice (`withRetry`): never "sign a new
+          // payment" while this one's auth entry can still land elsewhere.
+          return {
+            key: record.key,
+            response: failure(errorReason, verdict.payer, verdict.invalidMessage),
+          };
+        }
+      }
       return {
         ...untouched,
         reopenRefused: reopening !== undefined,
@@ -1169,23 +1214,47 @@ export function reasonFor(error: unknown): string {
   return SETTLE_REASONS.unexpected;
 }
 
+/** What a payload's transaction alone says about its settlement (AD-6). */
+export interface PayloadIdentity {
+  key: SettlementKey;
+  payer: string;
+  nonce: string;
+  /** The payer's `signatureExpirationLedger`, if it has exactly one address-credential entry. */
+  expiration?: number;
+}
+
 /**
  * The settlement key a payload claims, read from its transaction alone: the `transfer`'s `from`
  * (what upstream names the payer) and that payer's nonce. `undefined` if it can't be read.
  */
-export function keyOf(payload: PaymentPayload, network: StellarNetwork): SettlementKey | undefined {
+export function identityOf(
+  payload: PaymentPayload,
+  network: StellarNetwork,
+): PayloadIdentity | undefined {
   try {
     const transaction = new Transaction(
       (payload.payload as { transaction: string }).transaction,
       getNetworkPassphrase(network),
     );
-    const from = transferFrom(transaction);
-    if (from === undefined) return undefined;
-    const nonce = payerNonce({ transaction, payer: from });
-    return nonce === undefined ? undefined : `${network}:${from}:${nonce}`;
+    const payer = transferFrom(transaction);
+    if (payer === undefined) return undefined;
+    const nonce = payerNonce({ transaction, payer });
+    if (nonce === undefined) return undefined;
+    const expiration = payerExpiration(transaction, payer);
+    return {
+      key: `${network}:${payer}:${nonce}`,
+      payer,
+      nonce,
+      ...(expiration !== undefined && { expiration }),
+    };
   } catch {
     return undefined;
   }
+}
+
+/** {@link identityOf}'s key alone. */
+export function keyOf(payload: PaymentPayload, network: StellarNetwork): SettlementKey | undefined {
+  return identityOf(payload, network)?.key;
 }
 
 /** SHA-256 of the payload and requirements as canonical JSON (sorted keys), hex (AD-6). */

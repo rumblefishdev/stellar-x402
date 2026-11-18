@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LogFields, Logger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import type { SpendStore } from "../src/ports/index.js";
-import { createPruner, type PrunerDeps } from "../src/pruner.js";
+import { REFUSED_HORIZON_MS, createPruner, type PrunerDeps } from "../src/pruner.js";
 import { testDatabase } from "./database.js";
 
 const DAY = 86_400_000;
@@ -27,6 +27,7 @@ function recordingLogger() {
 
 function deps(overrides: Partial<PrunerDeps> = {}): PrunerDeps {
   return {
+    settlements: db.stores().settlements,
     spend: db.stores().spend,
     rateLimits: db.stores().rateLimits,
     catalogAttempts: db.stores().catalogAttempts,
@@ -90,6 +91,30 @@ describe("pruner", () => {
     await createPruner(deps({ catalogAttempts })).runOnce();
     const { rows } = await db.pool.query("SELECT at FROM catalog_attempts");
     expect(rows).toEqual([{ at: String(NOW - 30 * DAY) }]);
+  });
+
+  it("prunes refused settlements past their hour, and no other settlement (0086)", async () => {
+    const { settlements } = db.stores();
+    const settlement = (nonce: string, createdAt: number) => ({
+      key: `stellar:testnet:GPAYER:${nonce}` as const,
+      network: "stellar:testnet" as const,
+      payer: "GPAYER",
+      nonce,
+      fingerprint: `fp-${nonce}`,
+      paymentPayload: { x402Version: 2 } as never,
+      paymentRequirements: { asset: "CASSET" } as never,
+      createdAt,
+    });
+    const refusal = { errorReason: "invalid_exact_stellar_payload_fee_exceeds_maximum" };
+    await settlements.refuse(settlement("1", NOW - REFUSED_HORIZON_MS - 1), refusal, [], NOW);
+    await settlements.refuse(settlement("2", NOW - REFUSED_HORIZON_MS), refusal, [], NOW);
+    const old = settlement("3", NOW - DAY);
+    await settlements.claim(old);
+    await createPruner(deps({ settlements })).runOnce();
+    const { rows } = await db.pool.query<{ nonce: string }>(
+      "SELECT nonce FROM settlements ORDER BY nonce",
+    );
+    expect(rows.map((r) => r.nonce)).toEqual(["2", "3"]);
   });
 
   it("prunes quiescent spend_scopes rows, keeping those with an open breaker (0024)", async () => {
