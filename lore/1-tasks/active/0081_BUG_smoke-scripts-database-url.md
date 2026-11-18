@@ -2,7 +2,8 @@
 id: "0081"
 title: "Pass DATABASE_URL to the verify smoke script"
 type: BUG
-status: backlog
+status: active
+owner: bstruzyk
 milestone: 2
 related_adr: []
 related_tasks: ["0064", "0073", "0021", "0128"]
@@ -15,6 +16,11 @@ history:
     note: >
       Spawned from 0073's PR 1 review (deferred item): the settle smoke script got the fix in
       2cadd78, the other two scripts did not.
+  - date: "2026-11-18"
+    status: active
+    who: bstruzyk
+    note: >
+      Started: verify-smoke.ts passes DATABASE_URL to parseConfig(), with compose.yaml's URL as the fallback.
 ---
 
 # Pass DATABASE_URL to the verify smoke script
