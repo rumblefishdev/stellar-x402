@@ -3,17 +3,20 @@
 // (0139 AC3); until then nothing wires it in `main()`.
 //
 // - A series' labels are the union of its catalog sets' dims, plus `network` for a network-scoped
-//   metric. A set's `when` only limited what CloudWatch billed; here every label is always written.
+//   metric. A set's `when` on a dim only limited what CloudWatch billed, so every label is always
+//   written and a rule filters on it. A `when` on a label that is no dim still decides whether the
+//   line counts (`spend_budget_nearing_total`'s `budget`, as `seriesDims` says).
 // - `fields` are log fields, never labels (step 4 of 0139 decides where they go).
 // - Every counter starts at 0 for every closed label value, so a missing series is a fault.
 // - Gauges are read at scrape time; each series has `<name>_last_read_timestamp_seconds`, which
-//   stops moving when its read fails or hangs.
+//   stops moving when its read fails or has no value.
 // - `markStarted()` writes the liveness series once the service has started.
 import {
   byName,
   CATALOG,
   effectiveSets,
   isDimValue,
+  whenHolds,
   type MetricDef,
   type Network,
 } from "@stellar-x402/metrics-catalog";
@@ -21,6 +24,7 @@ import { isStellarNetwork } from "@stellar-x402/config";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   scoped,
+  seriesKey as keyOf,
   type GaugeRead,
   type Labels,
   type MetricsWriter,
@@ -54,6 +58,20 @@ export function labelKeys(def: MetricDef): string[] {
   return [...new Set(effectiveSets(def).flatMap((set) => set.dims))];
 }
 
+/**
+ * Whether the line counts: some set's `when`, on the labels that are no dim of the metric, holds.
+ * A `when` on a dim never filters here (the label is written instead), and a set without one holds.
+ */
+function counts(def: MetricDef, labels: Labels): boolean {
+  const dims = new Set(labelKeys(def));
+  return effectiveSets(def).some((set) =>
+    whenHolds(
+      { when: Object.fromEntries(Object.entries(set.when ?? {}).filter(([k]) => !dims.has(k))) },
+      (label) => (labels[label] === undefined ? undefined : String(labels[label])),
+    ),
+  );
+}
+
 /** Every combination of the closed values of `keys`, for the zero series. */
 function combinations(def: MetricDef, keys: string[], networks: readonly Network[]): Labels[] {
   return keys.reduce<Labels[]>(
@@ -70,17 +88,9 @@ const escape = (v: string) => v.replace(/\\/g, "\\\\").replace(/"/g, '\\"').repl
 /** One sample line; the labels are already in their written order. */
 function sampleLine(name: string, labels: Record<string, string>, value: number): string {
   const pairs = Object.entries(labels).map(([k, v]) => `${k}="${escape(v)}"`);
-  const text = Number.isNaN(value)
-    ? "NaN"
-    : value === Infinity
-      ? "+Inf"
-      : value === -Infinity
-        ? "-Inf"
-        : String(value);
-  return `${name}${pairs.length ? `{${pairs.join(",")}}` : ""} ${text}`;
+  // Finite only: `increment` and `readGauges` refuse anything else.
+  return `${name}${pairs.length ? `{${pairs.join(",")}}` : ""} ${value}`;
 }
-
-const keyOf = (name: string, labels: Record<string, string>) => `${name}${JSON.stringify(labels)}`;
 
 export function prometheusMetrics(opts: {
   /** The networks the process serves: the zero series of network-scoped counters. */
@@ -91,7 +101,10 @@ export function prometheusMetrics(opts: {
 }): ProcessMetrics & {
   /** Writes the liveness series: call it once the service has started. */
   markStarted(): void;
-  /** The exposition text: what `GET /metrics` answers. Reads every gauge. Never throws. */
+  /**
+   * The exposition text: what `GET /metrics` answers. Reads every gauge; a read that throws only
+   * loses its sample. Anything else that throws reaches `metricsListener`, which answers 500.
+   */
   render(): string;
 } {
   const now = opts.now ?? Date.now;
@@ -157,6 +170,7 @@ export function prometheusMetrics(opts: {
         if (by < 0) return report({ kind: "negative", name });
         const def = byName(name);
         if (!def) return report({ kind: "unknown-metric", name });
+        if (!counts(def, labels)) return;
         const w = written(def, labels);
         const key = keyOf(name, w);
         const series = counters.get(key);
@@ -202,33 +216,29 @@ export function prometheusMetrics(opts: {
   }
 
   function render(): string {
-    try {
-      const families = new Map<string, { type: "counter" | "gauge"; lines: string[] }>();
-      const add = (name: string, type: "counter" | "gauge", line: string) => {
-        const family = families.get(name) ?? { type, lines: [] };
-        family.lines.push(line);
-        families.set(name, family);
-      };
-      for (const s of counters.values())
-        add(s.name, "counter", sampleLine(s.name, s.labels, s.value));
-      for (const s of readGauges()) add(s.name, "gauge", sampleLine(s.name, s.labels, s.value));
-      for (const s of lastRead.values()) {
-        const name = s.name + LAST_READ_SUFFIX;
-        add(name, "gauge", sampleLine(name, s.labels, s.at));
-      }
-      if (startedAt !== undefined)
-        add(STARTED_METRIC, "gauge", sampleLine(STARTED_METRIC, {}, startedAt));
-      return [...families.keys()]
-        .sort()
-        .flatMap((name) => {
-          const f = families.get(name)!;
-          return [`# TYPE ${name} ${f.type}`, ...f.lines.sort()];
-        })
-        .join("\n")
-        .concat("\n");
-    } catch {
-      return "";
+    const families = new Map<string, { type: "counter" | "gauge"; lines: string[] }>();
+    const add = (name: string, type: "counter" | "gauge", line: string) => {
+      const family = families.get(name) ?? { type, lines: [] };
+      family.lines.push(line);
+      families.set(name, family);
+    };
+    for (const s of counters.values())
+      add(s.name, "counter", sampleLine(s.name, s.labels, s.value));
+    for (const s of readGauges()) add(s.name, "gauge", sampleLine(s.name, s.labels, s.value));
+    for (const s of lastRead.values()) {
+      const name = s.name + LAST_READ_SUFFIX;
+      add(name, "gauge", sampleLine(name, s.labels, s.at));
     }
+    if (startedAt !== undefined)
+      add(STARTED_METRIC, "gauge", sampleLine(STARTED_METRIC, {}, startedAt));
+    return [...families.keys()]
+      .sort()
+      .flatMap((name) => {
+        const f = families.get(name)!;
+        return [`# TYPE ${name} ${f.type}`, ...f.lines.sort()];
+      })
+      .join("\n")
+      .concat("\n");
   }
 
   return {
@@ -241,7 +251,10 @@ export function prometheusMetrics(opts: {
   };
 }
 
-/** A `node:http` listener answering `GET /metrics` with `render()`, and 404 to anything else. */
+/**
+ * A `node:http` listener answering `GET /metrics` with `render()`, and 404 to anything else. A
+ * render that throws answers 500, so the scrape fails (`up == 0`) instead of reading as no samples.
+ */
 export function metricsListener(render: () => string) {
   return (req: IncomingMessage, res: ServerResponse) => {
     const path = (req.url ?? "").split("?")[0];
@@ -249,6 +262,13 @@ export function metricsListener(render: () => string) {
       res.writeHead(404).end();
       return;
     }
-    res.writeHead(200, { "content-type": CONTENT_TYPE }).end(render());
+    let body: string;
+    try {
+      body = render();
+    } catch {
+      res.writeHead(500).end();
+      return;
+    }
+    res.writeHead(200, { "content-type": CONTENT_TYPE }).end(body);
   };
 }
