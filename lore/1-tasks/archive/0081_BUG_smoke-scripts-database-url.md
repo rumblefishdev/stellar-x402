@@ -2,7 +2,7 @@
 id: "0081"
 title: "Pass DATABASE_URL to the verify smoke script"
 type: BUG
-status: active
+status: completed
 owner: bstruzyk
 milestone: 2
 related_adr: []
@@ -21,6 +21,14 @@ history:
     who: bstruzyk
     note: >
       Started: verify-smoke.ts passes DATABASE_URL to parseConfig(), with compose.yaml's URL as the fallback.
+  - date: "2026-11-18"
+    status: completed
+    who: bstruzyk
+    note: >
+      PR #202 rebase-merged (324f7a48, 707bbae6), approved by adamkoot: verify-smoke.ts starts
+      with no DATABASE_URL set and checks its payments on testnet. One file, +6 lines; no tests
+      changed (facilitator 1165 passed, 3 skipped). Key decision: `??` with compose.yaml's URL,
+      as the other live scripts do.
 ---
 
 # Pass DATABASE_URL to the verify smoke script
