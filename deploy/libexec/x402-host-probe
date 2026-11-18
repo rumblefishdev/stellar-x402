@@ -1,7 +1,8 @@
 #!/bin/sh
 # Host signals as EMF lines in the file the CloudWatch agent ships to /x402/<env>/metrics (lore
-# 0027 decision 10; the server-side spine's AD-5 and AD-6). The only writer of the format: the
-# watchdog and x402@'s ExecStopPost call it too. Each check is independent; one that fails, or a
+# 0027 decision 10; the server-side spine's AD-5 and AD-6), and the same values as textfiles for
+# node_exporter, which the metrics agent sends to the monitoring VM (ADR 0011, "Host metrics";
+# 0139). The only writer of either: the watchdog and x402@'s ExecStopPost call it too. Each check is independent; one that fails, or a
 # job that never ran, writes a value past its alarm's threshold. Nothing goes to stdout;
 # diagnostics go to stderr (the journal, or the calling unit's file).
 #   x402-host-probe              every check once (x402-host-probe.timer, root, every minute)
@@ -16,11 +17,16 @@ set -u
 : "${X402_STAMPS:=/var/lib/x402/last-ok}"
 : "${X402_CERT:=/srv/x402/production/cloudwatch-agent.crt}"
 : "${X402_CREDENTIALS:=/run/x402-cloudwatch/credentials}"
+: "${X402_TEXTFILE:=/var/lib/x402/textfile}"
+: "${X402_METRICS_CERT:=/srv/x402/metrics/metrics-agent.crt}"
 
 NAMESPACE=x402-host
 NO_AGE=1000000000 # past every age threshold: the check failed or the job never ran
 NO_DAYS=-1        # under the certificate's threshold
 status=0
+# The run's gauges, as textfile lines, written whole at its end.
+prom=""
+COUNTERS="watchdog_restarts_total facilitator_failures_total"
 
 warn() { printf 'x402-host-probe: %s\n' "$*" >&2; }
 is_int() { case $1 in '' | - | *[!0-9-]* | ?*-*) return 1 ;; esac; }
@@ -46,6 +52,26 @@ emit() { # name value [timestamp-ms [log fields, each ,"key":"value"]]
   printf '{"_aws":{"Timestamp":%s,"CloudWatchMetrics":[{"Namespace":"%s","Dimensions":[[]],"Metrics":[{"Name":"%s","Unit":"%s"}]}]}%s,"%s":%s}\n' \
     "${3:-$(date +%s%3N)}" "$NAMESPACE" "$1" "$unit" "${4:-}" "$1" "$2" >> "$X402_HOST_EMF" ||
     { warn "can't append $1 to $X402_HOST_EMF"; status=1; }
+  [ "$unit" = Count ] || prom="$prom$1 $2
+"
+}
+
+# A textfile replaced whole, through a temporary file in the same directory, so node_exporter
+# never reads half of one. Its name ends in .prom, the only files the collector reads.
+textfile() { # name content
+  tmp="$X402_TEXTFILE/.$1.$$"
+  printf '%s' "$2" > "$tmp" && mv -f "$tmp" "$X402_TEXTFILE/$1.prom" ||
+    { warn "can't write $1.prom in $X402_TEXTFILE"; rm -f "$tmp"; status=1; }
+}
+
+# A counter's file: its total since the file was made, so a restart of node_exporter or the
+# server never resets it. Written only when its event happens: no age rule reads it.
+# ponytail: two writers in the same instant can lose one count; flock(1) if that ever matters.
+count_file() { # counter by
+  v=$(sed -n "s/^$1 \([0-9][0-9]*\)$/\1/p" "$X402_TEXTFILE/$1.prom" 2> /dev/null)
+  textfile "$1" "# TYPE $1 counter
+$1 $((${v:-0} + $2))
+"
 }
 
 # 1 when testnet's listener, the one the facilitator signs through, answers unsealed. sys/health
@@ -118,11 +144,12 @@ stamp_age() {
   fi
 }
 
-# Whole days the Roles Anywhere certificate has left, rounded down, so negative once expired.
-certificate_days_left() {
-  end=$(timeout 5 openssl x509 -noout -enddate -in "$X402_CERT" 2> /dev/null) &&
+# Whole days a certificate has left, rounded down, so negative once expired.
+certificate_days_left() { # path, the Roles Anywhere certificate's by default
+  cert=${1:-$X402_CERT}
+  end=$(timeout 5 openssl x509 -noout -enddate -in "$cert" 2> /dev/null) &&
     end=$(date -u -d "${end#notAfter=}" +%s 2> /dev/null) && is_int "$end" || {
-    warn "certificate: can't read the end date of $X402_CERT"
+    warn "certificate: can't read the end date of $cert"
     echo "$NO_DAYS"
     return
   }
@@ -134,6 +161,7 @@ case ${1:-} in
   count)
     [ $# -eq 2 ] && [ "$(unit_of "$2")" = Count ] || { warn "usage: $0 count <counter>"; exit 2; }
     emit "$2" 1
+    count_file "$2" 1
     exit "$status"
     ;;
   stopped)
@@ -143,6 +171,7 @@ case ${1:-} in
     fields=$(printf ',"result":"%s","exit_code":"%s","exit_status":"%s"' \
       "$(word "$SERVICE_RESULT")" "$(word "${EXIT_CODE:-}")" "$(word "${EXIT_STATUS:-}")")
     emit facilitator_failures_total 1 "$(date +%s%3N)" "$fields"
+    count_file facilitator_failures_total 1
     exit "$status"
     ;;
   '') ;;
@@ -159,8 +188,17 @@ emit wal_failing "$1" "$ts"
 emit wal_last_archived_age_seconds "$2" "$ts"
 emit backup_age_seconds "$(stamp_age pgbackrest-backup)" "$ts"
 emit snapshot_age_seconds "$(stamp_age openbao-snapshot)" "$ts"
-emit certificate_days_left "$(certificate_days_left)" "$ts"
+cloudwatch=$(certificate_days_left)
+emit certificate_days_left "$cloudwatch" "$ts"
 emit credentials_age_seconds "$(age_of "$X402_CREDENTIALS" credentials)" "$ts"
 # Last: a run that hangs before here writes no heartbeat, and probe-silent fires.
 emit host_probe_heartbeat 1 "$ts"
+# The textfiles. Each certificate by name: in CloudWatch the Roles Anywhere one is the only one.
+prom=$(printf '%s' "$prom" | grep -v '^certificate_days_left ')
+textfile host-probe "$prom
+certificate_days_left{certificate=\"cloudwatch-agent\"} $cloudwatch
+certificate_days_left{certificate=\"metrics-agent\"} $(certificate_days_left "$X402_METRICS_CERT")
+"
+# Every counter's file from the first run, at 0, so a missing one reads as a fault.
+for c in $COUNTERS; do [ -e "$X402_TEXTFILE/$c.prom" ] || count_file "$c" 0; done
 exit "$status"

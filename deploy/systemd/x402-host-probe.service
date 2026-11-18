@@ -1,6 +1,7 @@
 # One run of the host probe (lore 0027 decision 10), started by x402-host-probe.timer: OpenBao,
 # WAL archiving, the backup and snapshot stamps, the certificate and the agent's credentials, as
-# EMF lines in /var/log/x402/host/metrics.log. Root: it reads Docker and testnet's socket. It
+# EMF lines in /var/log/x402/host/metrics.log and as node_exporter's textfiles in
+# /var/lib/x402/textfile (0139). Root: it reads Docker and testnet's socket. It
 # writes its own file, so its stderr stays in the journal.
 [Unit]
 Description=x402 host probe
