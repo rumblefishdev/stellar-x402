@@ -73,13 +73,6 @@ import { testDatabase } from "./database.js";
 import measured from "./fixtures/nonce-consumed-elsewhere.json" with { type: "json" };
 import { holdLease } from "./port-contracts.js";
 
-// `attemptsOf` reads a private WeakMap that only the real submitter fills; these tests put the
-// attempts on the error instead. `settle-pool.test.ts` runs the real pool's.
-vi.mock("@stellar-x402/signer-pool", async (original) => ({
-  ...(await original<typeof import("@stellar-x402/signer-pool")>()),
-  attemptsOf: (error: unknown) => (error as { attempts?: unknown[] })?.attempts ?? [],
-}));
-
 const network = STELLAR_NETWORKS.testnet;
 const asset = StrKey.encodeContract(Buffer.alloc(32, 7));
 const payer = Keypair.random().publicKey();

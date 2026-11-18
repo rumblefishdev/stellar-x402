@@ -237,15 +237,14 @@ export class SigningError extends Error {
 /** A submission's outcome before its attempts are attached. */
 type Outcome = Omit<SubmitResult, "attempts">;
 
-const errorAttempts = new WeakMap<object, Attempt[]>();
-
 /**
  * The attempts of a submission that `submit()` rejected with `error`, so the caller can tell
- * whether anything may have reached the network (see `onSigned`). Empty when nothing was signed
- * for it, or for an error `submit()` did not throw.
+ * whether anything may have reached the network (see `onSigned`). `submit()` puts them on the
+ * error it rejects with, its own or one it rethrows, as `attempts`; this reads that property.
+ * Empty when nothing was signed for it, or when the error has no `attempts`.
  */
 export function attemptsOf(error: unknown): Attempt[] {
-  return (typeof error === "object" && error !== null && errorAttempts.get(error)) || [];
+  return (error as { attempts?: Attempt[] } | null)?.attempts ?? [];
 }
 
 const BAD_SEQ = new Set(["txBadSeq"]);
@@ -470,7 +469,8 @@ export class SettlementSubmitter {
       });
       return result;
     } catch (error) {
-      if (typeof error === "object" && error !== null) errorAttempts.set(error, [...hold.attempts]);
+      if (typeof error === "object" && error !== null)
+        (error as { attempts?: Attempt[] }).attempts = [...hold.attempts];
       this.refused(channel.address, error);
       throw error;
     } finally {
