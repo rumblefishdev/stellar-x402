@@ -13,7 +13,14 @@ name: Deploy production
 on:
   push:
     branches: [deploy/production]
-    paths-ignore: ["lore/**", "docs/**", "**/*.md"]
+    # The portal's backend has a deploy of its own (deploy-portal-production.yml): a push that
+    # changes nothing else starts none here, so the facilitator doesn't drain for it.
+    paths-ignore:
+      - lore/**
+      - docs/**
+      - "**/*.md"
+      - apps/portal/**
+      - .github/workflows/deploy-portal-production.yml
   workflow_dispatch:
     inputs:
       digest:

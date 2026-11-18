@@ -1,0 +1,69 @@
+# The portal's backend in the production environment (task 0106 decisions 1 and 5): one service,
+# in a Compose project of its own, so that nothing the facilitator's units read changes with it.
+# The hub's backend calls it through the Cloudflare tunnel, which reaches portal:4022 on `edge`;
+# it calls nobody but the database. It joins the facilitator project's two networks, which that
+# project makes: `edge`, for the tunnel, and `db`, for the registry. Its unit is
+# x402-portal@production (`deploy/systemd`), so it has no restart policy, and it publishes no
+# port. On the server this is /srv/x402/production/portal.compose.yaml.
+#
+#   PORTAL_IMAGE  the backend's image; `x402-portal-compose` sets it from `portal.digest`
+#   SECRETS_DIR   the decrypted credentials, /run/x402/production unless set
+name: x402-portal-production
+
+services:
+  portal:
+    image: ${PORTAL_IMAGE:?set from portal.digest by x402-portal-compose}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    cpus: 0.5
+    # Above the 10 s the backend gives open requests before it cuts them (`src/main.ts`).
+    stop_grace_period: 30s
+    environment:
+      # cloudflare/x402.tf in soroban-infrastructure routes x402-portal.sorobanscan.com to
+      # portal:4022: change both or neither.
+      PORT: "4022"
+      CLIENT_IP: cloudflare
+      HUB_TOKEN_SECRET_FILE: /run/secrets/portal-hub-token-secret
+      KEY_ENCRYPTION_KEY_FILE: /run/secrets/portal-key-encryption-key
+      # The role `x402_portal`, which reads and writes the registry's two tables and nothing else
+      # (runbook, The portal's backend).
+      DATABASE_URL_FILE: /run/secrets/portal-database-url
+    secrets:
+      - portal-database-url
+      - portal-hub-token-secret
+      - portal-key-encryption-key
+    networks:
+      - edge
+      - db
+    # 200 while the database answers; the deploy waits with the same one-liner.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:4022/health',{signal:AbortSignal.timeout(5000)}).then((r)=>process.exit(r.ok?0:1),()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+# The facilitator project's networks (compose.yaml), which fixes their subnets. External: this
+# project neither makes nor removes them, and the service starts only once they exist.
+networks:
+  edge:
+    external: true
+    name: x402-production-edge
+  db:
+    external: true
+    name: x402-production-db
+
+# Bind mounts outside swarm: each file keeps the owner and mode `x402-creds` gives it.
+secrets:
+  portal-database-url:
+    file: ${SECRETS_DIR:-/run/x402/production}/portal-database-url
+  portal-hub-token-secret:
+    file: ${SECRETS_DIR:-/run/x402/production}/portal-hub-token-secret
+  portal-key-encryption-key:
+    file: ${SECRETS_DIR:-/run/x402/production}/portal-key-encryption-key
