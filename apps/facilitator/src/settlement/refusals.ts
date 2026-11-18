@@ -70,6 +70,7 @@ export function verifyWithRefusals(verify: Verify, deps: RefusalDeps): Verify {
           invalidReason: existing.errorReason,
           ...(existing.errorMessage !== undefined && { invalidMessage: existing.errorMessage }),
           payer: existing.payer,
+          ...(existing.errorDetail !== undefined && { extra: { reason: existing.errorDetail } }),
         },
         identity,
       );
@@ -92,6 +93,7 @@ export function verifyWithRefusals(verify: Verify, deps: RefusalDeps): Verify {
         {
           errorReason: response.invalidReason!,
           ...(response.invalidMessage !== undefined && { errorMessage: response.invalidMessage }),
+          ...(typeof response.extra?.reason === "string" && { errorDetail: response.extra.reason }),
         },
         UNSENT_REASONS,
         at,

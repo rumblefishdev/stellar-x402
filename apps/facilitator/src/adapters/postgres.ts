@@ -167,6 +167,8 @@ interface SettlementRow {
   error_reason: string | null;
   /** Absent on a database `0015_settlement_refused` hasn't reached (`SELECT s.*`). */
   error_message?: string | null;
+  /** Absent on a database `0015_settlement_refused` hasn't reached (`SELECT s.*`). */
+  error_detail?: string | null;
   /** Absent on a database `0010_settlement_failure` hasn't reached (`SELECT s.*`). */
   failure?: SettlementRecord["failure"] | null;
   /** Absent on a database `0002_success_answered` hasn't reached (`SELECT s.*`). */
@@ -202,6 +204,7 @@ function toRecord(row: SettlementRow, hashes = row.hashes ?? []): SettlementReco
   if (row.fee_charged !== null) record.feeCharged = BigInt(row.fee_charged);
   if (row.error_reason !== null) record.errorReason = row.error_reason;
   if (row.error_message != null) record.errorMessage = row.error_message;
+  if (row.error_detail != null) record.errorDetail = row.error_detail;
   if (row.failure != null) record.failure = row.failure;
   if (row.success_answered_at != null) record.successAnsweredAt = Number(row.success_answered_at);
   return record;
@@ -626,16 +629,18 @@ export class PostgresSettlementStore implements SettlementStore {
    */
   async refuse(
     settlement: NewSettlement,
-    refusal: { errorReason: string; errorMessage?: string },
+    refusal: { errorReason: string; errorMessage?: string; errorDetail?: string },
     unsent: readonly string[],
     now: number,
   ): Promise<SettlementRecord> {
     const s = settlement;
     const message = refusal.errorMessage ?? null;
+    const detail = refusal.errorDetail ?? null;
     const { rows } = await this.pool.query<SettlementRow>(
       `INSERT INTO settlements (key, network, payer, nonce, fingerprint, state, payment_payload,
-         payment_requirements, error_reason, error_message, created_at, updated_at, reopened)
-       VALUES ($1, $2, $3, $4, $5, 'refused', $6, $7, $8, $9, $10, $11, 0)
+         payment_requirements, error_reason, error_message, error_detail, created_at, updated_at,
+         reopened)
+       VALUES ($1, $2, $3, $4, $5, 'refused', $6, $7, $8, $9, $10, $11, $12, 0)
        ON CONFLICT (key) DO NOTHING
        RETURNING *`,
       [
@@ -648,6 +653,7 @@ export class PostgresSettlementStore implements SettlementStore {
         JSON.stringify(s.paymentRequirements),
         refusal.errorReason,
         message,
+        detail,
         s.createdAt,
         now,
       ],
@@ -655,13 +661,13 @@ export class PostgresSettlementStore implements SettlementStore {
     if (rows[0]) return toRecord(rows[0], []);
     const moved = await this.pool.query<SettlementRow>(
       `UPDATE settlements s
-       SET state = 'refused', error_reason = $3, error_message = $4, version = s.version + 1,
-           updated_at = $6
+       SET state = 'refused', error_reason = $3, error_message = $4, error_detail = $7,
+           version = s.version + 1, updated_at = $6
        WHERE s.key = $1 AND s.state = 'rejected' AND s.fingerprint = $2
          AND s.error_reason = ANY ($5::text[])
          AND NOT EXISTS (SELECT 1 FROM settlement_hashes h WHERE h.key = s.key)
        RETURNING *`,
-      [s.key, s.fingerprint, refusal.errorReason, message, [...unsent], now],
+      [s.key, s.fingerprint, refusal.errorReason, message, [...unsent], now, detail],
     );
     if (moved.rows[0]) return toRecord(moved.rows[0], []);
     const existing = await this.get(s.key);

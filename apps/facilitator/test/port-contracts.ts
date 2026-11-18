@@ -538,7 +538,7 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
 
     describe("refuse (0086)", () => {
       const UNSENT = ["unsent_a"];
-      const FEE = { errorReason: "invalid_fee", errorMessage: "too high" };
+      const FEE = { errorReason: "invalid_fee", errorMessage: "too high", errorDetail: "our_code" };
 
       it("inserts a refused record with the checks' reason and message, no hash, never reopening", async () => {
         const s = settlement("1");
@@ -550,6 +550,7 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
           reopened: 0,
           errorReason: "invalid_fee",
           errorMessage: "too high",
+          errorDetail: "our_code",
           createdAt: 1_000,
           updatedAt: 2_000,
         };
@@ -569,6 +570,7 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
         const s = settlement("1");
         const record = await store.refuse(s, { errorReason: "invalid_x" }, UNSENT, 2_000);
         expect(record).not.toHaveProperty("errorMessage");
+        expect(record).not.toHaveProperty("errorDetail");
       });
 
       it("takes no payer and asset slot, and never waits for one", async () => {
