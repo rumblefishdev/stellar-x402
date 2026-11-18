@@ -3,9 +3,10 @@ id: "0131"
 title: "Ledger-time guesses in settlement: the channel wait estimate and the 66-ledger cap"
 type: FEATURE
 status: backlog
+milestone: 2
 related_adr: ["0011"]
 related_tasks: ["0046", "0073", "0074"]
-tags: ["effort-small", "priority-low", "money-path", "dev-tools"]
+tags: ["effort-small", "priority-low", "money-path", "payments"]
 links: []
 history:
   - date: "2026-11-10"

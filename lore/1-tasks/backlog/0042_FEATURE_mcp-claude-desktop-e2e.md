@@ -3,8 +3,9 @@ id: "0042"
 title: "Run the MCP CLI in Claude Desktop against our catalog, end to end on testnet"
 type: FEATURE
 status: backlog
+milestone: 2
 related_adr: []
-related_tasks: ["0037", "0032", "0041"]
+related_tasks: ["0037", "0032", "0041", "0063"]
 tags: [mcp, dev-tools, e2e, priority-medium, effort-small]
 links: []
 history:
@@ -26,8 +27,13 @@ code and stdio e2e are done.
 
 ## Context
 
-- The CLI needs `STELLAR_X402_DISCOVERY_URL`: a server with `GET /discovery/resources`. Today none
-  exists outside tests (0032 is in the backlog; x402.org has no catalog, measured 2026-10-13).
+- The CLI needs `STELLAR_X402_DISCOVERY_URL`: a server with `GET /discovery/resources`. Since 0032
+  our facilitator serves it in public: `https://x402-facilitator.sorobanscan.com`
+  (`docs/runbook.md`).
+- The catalog must list a seller that still answers. Checked 2026-11-18: the testnet catalog had
+  one listing, on a `trycloudflare.com` tunnel that no longer resolves. The run starts by putting
+  a seller (`examples/http-api`) on a public URL and getting it listed: since 0063 a settled
+  payment to it makes the facilitator read its 402 and write the listing.
 - 0037 proved the same flow over MCP stdio with the SDK client and a throwaway one-entry catalog
   (testnet transactions recorded in 0037), not in Claude Desktop.
 
@@ -36,4 +42,5 @@ code and stdio e2e are done.
 - [ ] Given the locally built `stellar-x402-mcp` CLI and the README's config pointing at our
       catalog (0032), when it is added to Claude Desktop, then an agent lists a resource and pays
       for it end to end on testnet; the transaction hash is recorded here
-- [ ] The README's catalog line names our catalog's testnet URL
+- [ ] The README's catalog line (`apps/mcp-local/README.md`, today
+      `https://your-catalog.example.com`) names our catalog's testnet URL

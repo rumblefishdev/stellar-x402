@@ -3,8 +3,9 @@ id: "0075"
 title: "Seller guide to getting a service listed in the Bazaar"
 type: FEATURE
 status: backlog
+milestone: 3
 related_adr: ["0008"]
-related_tasks: ["0063"]
+related_tasks: ["0063", "0085"]
 tags: [docs, bazaar, dev-tools, priority-medium, effort-small]
 links: []
 history:
@@ -51,12 +52,24 @@ check it did, so that a new service can be found without waiting for a buyer who
 - Not measured yet: whether a settle whose payer is its own `payTo` passes on Stellar. If not, the
   guide says to pay from a second account.
 
+## Open before starting (2026-11-18)
+
+- **Where the guide lives.** `docs/README.md` says "The role-based developer guide is written as
+  a PR to `stellar/stellar-docs`", while this task names `docs/` or the http-api example's README.
+  Settle it with the owner and name the place here.
+- **After 0085.** 0085 renames the seller-fetch codes (`unsafe_url` becomes `not_https`,
+  `not_public`, `redirect`, …) that the guide explains: write the reasons after it, or update them
+  when it lands.
+- The agent part points at the MCP server in `apps/mcp-local` (its README's codes table).
+
 ## Implementation
 
-- A seller guide (`docs/` or the http-api example's README): declare the route with
+- A seller guide (where: see "Open before starting"): declare the route with
   `declareDiscoveryExtension`; pay once for it with any x402 client; check
   `GET /discovery/resources?payTo=<account>`; what each listing refusal reason means and how to fix
-  it (reasons from ADR 0008).
+  it (reasons from ADR 0008, and the codes in `apps/facilitator/src/catalog/seller-check.ts` and
+  `cataloger.ts`: `not_402`, `unreadable_402`, `no_listing`, `other_pay_to`, `too_large` and the
+  seller-fetch codes).
 - Measure on testnet whether a self-payment settles and is cataloged; write the result into the
   guide.
 - Then the other roles of the developer guide: a client paying from code and an agent through the
