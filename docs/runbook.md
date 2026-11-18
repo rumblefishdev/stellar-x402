@@ -1650,9 +1650,13 @@ revoke last, or with a second Discord account.
 0011, "Metrics"). The agent scrapes node_exporter and itself every 15 s and sends the samples to
 the monitoring VM, `https://metrics.sorobanscan.com/api/v1/write`, with a client certificate from
 the ClickHouse project's CA. Its write-ahead log, the volume `x402-metrics-wal`, holds the samples
-while the VM can't be reached. The facilitator's `/metrics` joins at the switch (0139 step 7).
-ClickHouse's own endpoint is on, but listens on 127.0.0.1 inside `app-clickhouse-1` (the
-explorer's `crates/db-clickhouse/config.d/prometheus.xml`), so the agent can't reach it yet: only
+while the VM can't be reached. node_exporter's textfile collector reads the host probe's files in
+`/var/lib/x402/textfile`: `host-probe.prom`, the gauges of its last run, replaced whole each
+minute, so its age is the probe's; and one file per counter (`watchdog_restarts_total.prom`,
+`facilitator_failures_total.prom`), the total since the file was made, written only when the
+event happens. The facilitator's `/metrics` joins at the switch (0139 step 7). ClickHouse's own
+endpoint is on, but listens on 127.0.0.1 inside `app-clickhouse-1` (the explorer's
+`crates/db-clickhouse/config.d/prometheus.xml`), so the agent can't reach it yet: only
 `docker exec` or a scraper in that container's network namespace can. The VM lets only the CNs in
 `metrics_writer_cns` write (soroban-infrastructure, `monitoring/`).
 
