@@ -165,6 +165,8 @@ interface SettlementRow {
   ledger: string | null;
   fee_charged: string | null;
   error_reason: string | null;
+  /** Absent on a database `0015_settlement_refused` hasn't reached (`SELECT s.*`). */
+  error_message?: string | null;
   /** Absent on a database `0010_settlement_failure` hasn't reached (`SELECT s.*`). */
   failure?: SettlementRecord["failure"] | null;
   /** Absent on a database `0002_success_answered` hasn't reached (`SELECT s.*`). */
@@ -199,6 +201,7 @@ function toRecord(row: SettlementRow, hashes = row.hashes ?? []): SettlementReco
   if (row.ledger !== null) record.ledger = Number(row.ledger);
   if (row.fee_charged !== null) record.feeCharged = BigInt(row.fee_charged);
   if (row.error_reason !== null) record.errorReason = row.error_reason;
+  if (row.error_message != null) record.errorMessage = row.error_message;
   if (row.failure != null) record.failure = row.failure;
   if (row.success_answered_at != null) record.successAnsweredAt = Number(row.success_answered_at);
   return record;
@@ -613,6 +616,73 @@ export class PostgresSettlementStore implements SettlementStore {
       if (error instanceof PayerBusy) return { busy: error.blocker };
       throw error;
     }
+  }
+
+  /**
+   * Two statements, each atomic on its own: the insert-if-absent, then, if the key had a record,
+   * the conditional move of a reopenable `rejected` one to `refused`. Its row lock orders it
+   * against a concurrent `reopen`, whose condition then fails, or the other way round. Then the
+   * key's record as a new statement sees it.
+   */
+  async refuse(
+    settlement: NewSettlement,
+    refusal: { errorReason: string; errorMessage?: string },
+    unsent: readonly string[],
+    now: number,
+  ): Promise<SettlementRecord> {
+    const s = settlement;
+    const message = refusal.errorMessage ?? null;
+    const { rows } = await this.pool.query<SettlementRow>(
+      `INSERT INTO settlements (key, network, payer, nonce, fingerprint, state, payment_payload,
+         payment_requirements, error_reason, error_message, created_at, updated_at, reopened)
+       VALUES ($1, $2, $3, $4, $5, 'refused', $6, $7, $8, $9, $10, $11, 0)
+       ON CONFLICT (key) DO NOTHING
+       RETURNING *`,
+      [
+        s.key,
+        s.network,
+        s.payer,
+        s.nonce,
+        s.fingerprint,
+        JSON.stringify(s.paymentPayload),
+        JSON.stringify(s.paymentRequirements),
+        refusal.errorReason,
+        message,
+        s.createdAt,
+        now,
+      ],
+    );
+    if (rows[0]) return toRecord(rows[0], []);
+    const moved = await this.pool.query<SettlementRow>(
+      `UPDATE settlements s
+       SET state = 'refused', error_reason = $3, error_message = $4, version = s.version + 1,
+           updated_at = $6
+       WHERE s.key = $1 AND s.state = 'rejected' AND s.fingerprint = $2
+         AND s.error_reason = ANY ($5::text[])
+         AND NOT EXISTS (SELECT 1 FROM settlement_hashes h WHERE h.key = s.key)
+       RETURNING *`,
+      [s.key, s.fingerprint, refusal.errorReason, message, [...unsent], now],
+    );
+    if (moved.rows[0]) return toRecord(moved.rows[0], []);
+    const existing = await this.get(s.key);
+    if (!existing) throw new Error("settlement refusal conflicted but the existing record is gone");
+    return existing;
+  }
+
+  /**
+   * The partial index `settlements_refused` holds only these rows, oldest first. The batch is a
+   * materialized CTE: as a subquery of `IN`, Postgres may run the `LIMIT … SKIP LOCKED` more
+   * than once and delete more than `limit`.
+   */
+  async pruneRefusals(before: number, limit: number): Promise<number> {
+    const { rowCount } = await this.pool.query(
+      `WITH batch AS MATERIALIZED (
+         SELECT key FROM settlements WHERE state = 'refused' AND created_at < $1
+         ORDER BY created_at LIMIT $2 FOR UPDATE SKIP LOCKED)
+       DELETE FROM settlements s USING batch b WHERE s.key = b.key AND s.state = 'refused'`,
+      [before, limit],
+    );
+    return rowCount ?? 0;
   }
 
   async listNonFinal(network: StellarNetwork): Promise<SettlementRecord[]> {

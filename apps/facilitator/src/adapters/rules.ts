@@ -18,6 +18,8 @@ const ORDER: Record<SettlementState, number> = {
   failed: 3,
   rejected: 3,
   expired: 3,
+  // A second start (0086), final: nothing moves to or from it through `transition`.
+  refused: 3,
 };
 
 /** `claimed`, `signed`, `pending`: every state ranked below the final ones. */
@@ -29,10 +31,11 @@ export const isFinal = (state: SettlementState): boolean => FINAL_SETTLEMENT_STA
 
 /**
  * Whether a record in `expected` may move to `next`: never from a final state, and only forward,
- * since a same-state update would let two concurrent callers both win.
+ * since a same-state update would let two concurrent callers both win. Never to `refused`: only
+ * `refuse` writes it, before any claim (0086).
  */
 export const isForward = (expected: SettlementState, next: SettlementState): boolean =>
-  !isFinal(expected) && ORDER[next] > ORDER[expected];
+  !isFinal(expected) && next !== "refused" && ORDER[next] > ORDER[expected];
 
 const ATTEMPT_ORDER: Record<AttemptState, number> = {
   stored: 0,
