@@ -8,6 +8,7 @@ import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import { start, type Started } from "../src/start.js";
+import { StoreUnavailableError } from "../src/settlement/refusals.js";
 import { PAYTO_TRUSTLINE_REASON } from "../src/settlement/trustline.js";
 import { UpstreamTimeoutError, type Verify } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
@@ -279,5 +280,17 @@ describe("POST /verify", () => {
     expect(lines.join("")).not.toContain("http_error");
     // Counted when the response closes, which can come just after the client read it.
     await vi.waitFor(() => expect(metrics.value("http_requests_total", counted)).toBe(before + 1));
+  });
+
+  it("answers 503 store_unavailable when a refusal couldn't be recorded (0086)", async () => {
+    verify.mockRejectedValueOnce(new StoreUnavailableError("settlement store refuse failed"));
+    const response = await post(request);
+    expect([response.status, response.headers.get("retry-after"), await response.json()]).toEqual([
+      503,
+      `${RPC_UNAVAILABLE_RETRY_AFTER_S}`,
+      { error: "store_unavailable" },
+    ]);
+    expect(lines.join("")).toContain("verify_store_unavailable");
+    expect(lines.join("")).not.toContain("http_error");
   });
 });

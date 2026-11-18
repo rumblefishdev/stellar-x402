@@ -1,6 +1,11 @@
 import type { Logger } from "./logger.js";
 import type { ProcessMetrics } from "./metrics.js";
-import type { CatalogAttemptStore, RateLimitStore, SpendStore } from "./ports/index.js";
+import type {
+  CatalogAttemptStore,
+  RateLimitStore,
+  SettlementStore,
+  SpendStore,
+} from "./ports/index.js";
 
 const DAY_MS = 86_400_000;
 const INTERVAL_MS = 60_000;
@@ -17,10 +22,18 @@ const BUDGET_MS = 1_000;
  */
 export const spendHorizonMs = (windowMs: number) => Math.max(2 * windowMs, 7 * DAY_MS);
 
+/**
+ * How long a `refused` record is kept (0086): its auth entry expires at most 66 ledgers (about
+ * 5.5 min) after it was signed, before the refusal, and then it can't land anywhere. The rest is
+ * margin for clock skew between processes and slow ledgers.
+ */
+export const REFUSED_HORIZON_MS = 60 * 60_000;
+
 /** How long listing attempts are kept for analysis (0063, an assumption). */
 const CATALOG_ATTEMPTS_HORIZON_MS = 30 * DAY_MS;
 
 export interface PrunerDeps {
+  settlements: Pick<SettlementStore, "pruneRefusals">;
   spend: Pick<SpendStore, "prune" | "pruneScopes">;
   rateLimits: Pick<RateLimitStore, "prune">;
   catalogAttempts: Pick<CatalogAttemptStore, "prune">;
@@ -47,8 +60,8 @@ export interface Pruner {
 }
 
 /**
- * Deletes spend reservations and rate-limit windows no budget or limit counts any more (0050), and
- * listing attempts past their 30 days (0063).
+ * Deletes spend reservations and rate-limit windows no budget or limit counts any more (0050),
+ * listing attempts past their 30 days (0063), and `refused` settlements past their hour (0086).
  * Every process runs one: the deletes skip rows another holds, so pruners never wait on each
  * other or on a request, and a pruner that stops costs disk, not latency. A failure is logged
  * and counted, and the next tick tries again.
@@ -81,6 +94,14 @@ export function createPruner(deps: PrunerDeps): Pruner {
       table: "catalog_attempts",
       store: deps.catalogAttempts,
       horizonMs: CATALOG_ATTEMPTS_HORIZON_MS,
+    },
+    // Check refusals past their auth entry's expiry (0086); every other settlement stays.
+    {
+      table: "settlements_refused",
+      store: {
+        prune: (before: number, limit: number) => deps.settlements.pruneRefusals(before, limit),
+      },
+      horizonMs: REFUSED_HORIZON_MS,
     },
   ];
 

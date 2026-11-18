@@ -47,6 +47,7 @@ import {
 import { createAssetKinds } from "./spend/asset-kinds.js";
 import { BALANCE_STALE_ALARM_MS, createBalanceFloor } from "./spend/balance-floor.js";
 import { createSpendPolicy, verifyWithBreakers } from "./spend/policy.js";
+import { verifyWithRefusals } from "./settlement/refusals.js";
 import { start } from "./start.js";
 import {
   createChecker,
@@ -443,7 +444,15 @@ export function compose(
       // The HTTP app and discovery: a route serves every network.
       metrics: root,
       stores,
-      verify: verifyWithBreakers(createVerifier(checks), { policy, logger, metrics }),
+      // Refusals are recorded inside the breakers: only the checks' own (0086).
+      verify: verifyWithBreakers(
+        verifyWithRefusals(createVerifier(checks), {
+          network: config.network,
+          store: stores.settlements,
+          logger,
+        }),
+        { policy, logger, metrics },
+      ),
       settle,
       extensionResponses: cataloger.extensionResponses,
       supported: supportedResponse(config.network, checks.facilitator),
@@ -551,6 +560,7 @@ export async function main(
     void signer.check();
     // Every budget sums the one window (0024 S-design §5).
     const pruner = createPruner({
+      settlements: stores.settlements,
       spend: stores.spend,
       rateLimits: stores.rateLimits,
       catalogAttempts: stores.catalogAttempts,
