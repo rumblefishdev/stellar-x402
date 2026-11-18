@@ -2,7 +2,8 @@
 id: "0134"
 title: "Decide how the Bazaar search retrieves and ranks in PostgreSQL"
 type: RESEARCH
-status: backlog
+status: active
+owner: karolkow
 milestone: 2
 related_adr: ["0008", "0012"]
 related_tasks: ["0120", "0135", "0013"]
@@ -16,6 +17,11 @@ history:
     who: claude
     note: >
       Created with okarcz from the Milestone 2 plan, as the first step of 0120.
+  - date: "2026-11-18"
+    status: active
+    who: karolkow
+    note: >
+      Started.
 ---
 
 # Decide how the Bazaar search retrieves and ranks in PostgreSQL
