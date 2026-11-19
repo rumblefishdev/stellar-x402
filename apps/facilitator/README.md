@@ -333,9 +333,10 @@ Labels come from closed sets; addresses are in log lines only.
   release writes during the deploy, get -1 and never reopen. This release can't claim a payment
   on a database without it. `0011_settlement_in_flight`: `/settle` can't claim a payment without it. `0013_api_keys` adds the
   API key registry, a new table the release before it never reads. `0015_settlement_refused`
-  (0086) adds the checks' message column and the index the pruner reads `refused` records
-  through; a transactional migration, since online ones wait for 0080: building the index holds
-  writes to `settlements` for one scan of it. The release before never writes `refused`, and
+  (0086) adds the checks' message and detail columns, the payer's expiration ledger and the
+  index the pruner reads `refused` records through; a transactional migration, since online ones
+  wait for 0080: `ADD COLUMN` holds reads and writes of `settlements` until the group commits,
+  for one scan of it, and a group past its 1.5 s fails the run, unretried. The release before never writes `refused`, and
   reads such a record as not final: during the deploy, an old process answers a repeat of a
   refused payment `settlement_pending` until its budget ends, and never settles it.
 - An online migration (ADR 0012) commits step by step, so `pnpm migrate` after a stopped or
@@ -443,10 +444,13 @@ payment never settles through us once it would pass: fees drop, the payer tops u
 trustline. Its `invalidMessage` starts with what to do: `this payment will not settle here, but
 its auth entry may still land in ledger N: sign a new payment once that ledger has closed`, and
 `extra.expirationLedger` is N. The same payment sent again gets the recorded answer without the
-checks. When the settlement store doesn't answer within 2 s, `/verify` answers
-`503 {"error":"store_unavailable"}` with `Retry-After: 5`, logged as `verify_store_unavailable`:
-a refusal it couldn't record would invite a second signature, so send the same request again.
-A breaker's refusal (below) isn't recorded.
+checks. While a settlement of the same payment is under way, a refusal starts with `a settlement
+of this payment is under way: send this payment to /settle for its outcome before signing a new
+one`. When the settlement store doesn't answer the lookup within 2 s, `/verify` runs the checks as
+usual, logged as `verify_store_lookup_failed`. When it doesn't record a refusal within 2 s,
+`/verify` answers `503 {"error":"store_unavailable"}` with `Retry-After: 5`, logged as
+`verify_store_unavailable`: a refusal it couldn't record would invite a second signature, so send
+the same request again. A breaker's refusal (below) isn't recorded.
 
 While a breaker is open (task 0024, "Breakers" above), a payment every other check accepted gets
 `/settle`'s reason early, so a seller doesn't serve what `/settle` would refuse. `invalidMessage`

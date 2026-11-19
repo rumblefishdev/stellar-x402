@@ -331,7 +331,8 @@ Scope: the `exact` payer's auth entry and how long it stays landable (spine AD-6
   `refused` record (0086), in `/verify` and in `/settle`, so P1 never settles through us; the
   answer says to sign P2 only once P1's auth entry has expired. `/verify` answers 503 when it
   can't record the refusal. A resource asking for more than the cap fits stays refused on its
-  `maxTimeoutSeconds` anyway (0073 decision 22).
+  `maxTimeoutSeconds` anyway (0073 decision 22). The record is kept until P1's expiration ledger
+  has closed, however far it lies: the checks can refuse P1 for its fee before any expiry check.
 - **Residual risk:** Whoever holds P1 can submit it on chain without us until its auth entry
   expires; the answer's wait covers a seller that follows it. P1 with another payload under the
   same key (an edited `maxTimeoutSeconds`) is answered `…_nonce_already_used`, and its nonce
