@@ -737,7 +737,8 @@ export const CATALOG = [
     sets: PLAIN,
     emit: "aggregated",
   },
-  // Days, negative after expiry; CloudWatch has no day unit.
+  // Days, negative after expiry; CloudWatch has no day unit. Its EMF line is the CloudWatch
+  // agent's certificate only; the probe's textfile has one sample per certificate (0139 step 3).
   {
     namespace: HOST,
     name: "certificate_days_left",
@@ -745,6 +746,8 @@ export const CATALOG = [
     unit: "None",
     scope: "process",
     sets: PLAIN,
+    fields: ["certificate"],
+    fieldValues: { certificate: ["cloudwatch-agent", "metrics-agent", "other"] },
     emit: "aggregated",
   },
   {
