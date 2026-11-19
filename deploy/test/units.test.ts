@@ -121,6 +121,23 @@ describe("the signing helper's unit", () => {
     expect(flag("private-key")).toBe("%d/cloudwatch-agent-key");
   });
 
+  test("the probe writes its textfiles where node_exporter reads them", () => {
+    const dir = read("metrics/compose.yaml").match(
+      /--collector\.textfile\.directory=\/host(\S+)/,
+    )![1]!;
+    expect(read("ansible/playbook.yaml")).toContain(
+      `- { path: ${dir}, owner: root, mode: "0755" }`,
+    );
+    expect(read("libexec/x402-host-probe")).toContain(`: "\${X402_TEXTFILE:=${dir}}"`);
+  });
+
+  test("reads the metrics agent's certificate where the playbook puts it", () => {
+    const dest = read("ansible/playbook.yaml").match(
+      /- name: The metrics agent's certificate\n[\s\S]*?dest: (\S+)/,
+    )![1]!;
+    expect(read("libexec/x402-host-probe")).toContain(`: "\${X402_METRICS_CERT:=${dest}}"`);
+  });
+
   test("reads the one certificate path the probe watches", () => {
     expect(flag("certificate")).toBe("/srv/x402/production/cloudwatch-agent.crt");
     expect(read("libexec/x402-host-probe")).toContain(`: "\${X402_CERT:=${flag("certificate")}}"`);
