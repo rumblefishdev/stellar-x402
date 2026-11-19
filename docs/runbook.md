@@ -1654,8 +1654,9 @@ while the VM can't be reached. node_exporter's textfile collector reads the host
 `/var/lib/x402/textfile`: `host-probe.prom`, the gauges of its last run, replaced whole each
 minute, so its age is the probe's; and one file per counter (`watchdog_restarts_total.prom`,
 `facilitator_failures_total.prom`), the total since the file was made, written when the event
-happens and rewritten by every run, so every file's age is the probe's. The facilitator's `/metrics` joins at the switch (0139 step 7). ClickHouse's own
-endpoint is on, but listens on 127.0.0.1 inside `app-clickhouse-1` (the explorer's
+happens and rewritten by every run, so every file's age is the probe's. The facilitator's
+`/metrics` joins at the switch (0139 step 7). ClickHouse's own endpoint is on, but listens on
+127.0.0.1 inside `app-clickhouse-1` (the explorer's
 `crates/db-clickhouse/config.d/prometheus.xml`), so the agent can't reach it yet: only
 `docker exec` or a scraper in that container's network namespace can. The VM lets only the CNs in
 `metrics_writer_cns` write (soroban-infrastructure, `monitoring/`).
