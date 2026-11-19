@@ -1,7 +1,7 @@
 // G-alarm-list, "Settlement": the facilitator's EMF lines (#112), which reach CloudWatch with #113.
 import type { EnvironmentConfig } from "../config.js";
 import { networkSuffix } from "../names.js";
-import type { AlarmFactory } from "./factory.js";
+import type { Alarms } from "./factory.js";
 
 const SILENT_LEVEL = "Keeps its state; facilitator-silent covers a stopped process.";
 const SILENT_EVENT = "Nothing happened; facilitator-silent covers a stopped process.";
@@ -13,7 +13,7 @@ const BREAKERS = [
   ["asset", "one wasm token's transfers"],
 ] as const;
 
-export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
+export function addSettlementAlarms(f: Alarms, c: EnvironmentConfig): void {
   const t = c.thresholds;
 
   // On the first one (Karol's review of #114, point 3): `onError` takes anything unknown as ours,

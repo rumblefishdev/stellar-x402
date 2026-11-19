@@ -147,6 +147,16 @@ export function describe(base: string, d: Description, shape?: Shape): string {
 
 const isMath = (s: Signal | MathSignal): s is MathSignal => "expression" in s;
 
+/**
+ * What the alarm modules call: the CloudWatch factory below, or the Prometheus rules built from
+ * the same rows (`../rules.ts`, lore 0139 step 6).
+ */
+export interface Alarms {
+  event(base: string, spec: EventSpec): void;
+  level(base: string, spec: LevelSpec): void;
+  silence(base: string, spec: SilenceSpec): void;
+}
+
 export interface AlarmFactoryProps {
   readonly envName: string;
   readonly groups: Readonly<Record<AlarmGroup, boolean>>;
@@ -154,7 +164,7 @@ export interface AlarmFactoryProps {
   readonly action: cloudwatch.IAlarmAction;
 }
 
-export class AlarmFactory {
+export class AlarmFactory implements Alarms {
   /** The alarms made, in order: groups that are off make none. */
   readonly records: AlarmRecord[] = [];
 

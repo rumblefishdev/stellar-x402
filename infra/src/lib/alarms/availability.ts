@@ -1,10 +1,10 @@
 // G-alarm-list, "Availability".
 import type { EnvironmentConfig } from "../config.js";
-import type { AlarmFactory } from "./factory.js";
+import type { Alarms } from "./factory.js";
 
 const FACILITATOR_SILENT = "Keeps its state; facilitator-silent covers a stopped process.";
 
-export function addAvailabilityAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
+export function addAvailabilityAlarms(f: Alarms, c: EnvironmentConfig): void {
   const t = c.thresholds;
   f.level("uptime", {
     group: "uptime",
