@@ -13,6 +13,7 @@ import {
   type ClaimResult,
   type ReopenResult,
   type NewSettlement,
+  type Refusal,
   type RateLimitHit,
   type RateLimitStore,
   type ReserveResult,
@@ -629,18 +630,19 @@ export class PostgresSettlementStore implements SettlementStore {
    */
   async refuse(
     settlement: NewSettlement,
-    refusal: { errorReason: string; errorMessage?: string; errorDetail?: string },
+    refusal: Refusal,
     unsent: readonly string[],
     now: number,
   ): Promise<SettlementRecord> {
     const s = settlement;
     const message = refusal.errorMessage ?? null;
     const detail = refusal.errorDetail ?? null;
+    const expiration = refusal.expirationLedger ?? null;
     const { rows } = await this.pool.query<SettlementRow>(
       `INSERT INTO settlements (key, network, payer, nonce, fingerprint, state, payment_payload,
-         payment_requirements, error_reason, error_message, error_detail, created_at, updated_at,
-         reopened)
-       VALUES ($1, $2, $3, $4, $5, 'refused', $6, $7, $8, $9, $10, $11, $12, 0)
+         payment_requirements, error_reason, error_message, error_detail, expiration_ledger,
+         created_at, updated_at, reopened)
+       VALUES ($1, $2, $3, $4, $5, 'refused', $6, $7, $8, $9, $10, $13, $11, $12, 0)
        ON CONFLICT (key) DO NOTHING
        RETURNING *`,
       [
@@ -656,18 +658,19 @@ export class PostgresSettlementStore implements SettlementStore {
         detail,
         s.createdAt,
         now,
+        expiration,
       ],
     );
     if (rows[0]) return toRecord(rows[0], []);
     const moved = await this.pool.query<SettlementRow>(
       `UPDATE settlements s
        SET state = 'refused', error_reason = $3, error_message = $4, error_detail = $7,
-           version = s.version + 1, updated_at = $6
+           expiration_ledger = $8, version = s.version + 1, updated_at = $6
        WHERE s.key = $1 AND s.state = 'rejected' AND s.fingerprint = $2
-         AND s.error_reason = ANY ($5::text[])
+         AND s.error_reason = ANY ($5::text[]) AND s.reopened >= 0
          AND NOT EXISTS (SELECT 1 FROM settlement_hashes h WHERE h.key = s.key)
        RETURNING *`,
-      [s.key, s.fingerprint, refusal.errorReason, message, [...unsent], now, detail],
+      [s.key, s.fingerprint, refusal.errorReason, message, [...unsent], now, detail, expiration],
     );
     if (moved.rows[0]) return toRecord(moved.rows[0], []);
     const existing = await this.get(s.key);
@@ -676,17 +679,24 @@ export class PostgresSettlementStore implements SettlementStore {
   }
 
   /**
-   * The partial index `settlements_refused` holds only these rows, oldest first. The batch is a
+   * The partial index `settlements_refused` holds only these rows, oldest first; one whose
+   * expiration ledger is still open is read again on every tick, a few at most. The batch is a
    * materialized CTE: as a subquery of `IN`, Postgres may run the `LIMIT … SKIP LOCKED` more
    * than once and delete more than `limit`.
    */
-  async pruneRefusals(before: number, limit: number): Promise<number> {
+  async pruneRefusals(
+    before: number,
+    ledger: { network: StellarNetwork; latest: number } | undefined,
+    limit: number,
+  ): Promise<number> {
     const { rowCount } = await this.pool.query(
       `WITH batch AS MATERIALIZED (
-         SELECT key FROM settlements WHERE state = 'refused' AND created_at < $1
+         SELECT key FROM settlements
+         WHERE state = 'refused' AND created_at < $1
+           AND (expiration_ledger IS NULL OR (network = $3 AND expiration_ledger <= $4))
          ORDER BY created_at LIMIT $2 FOR UPDATE SKIP LOCKED)
        DELETE FROM settlements s USING batch b WHERE s.key = b.key AND s.state = 'refused'`,
-      [before, limit],
+      [before, limit, ledger?.network ?? null, ledger?.latest ?? null],
     );
     return rowCount ?? 0;
   }

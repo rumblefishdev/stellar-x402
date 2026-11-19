@@ -961,6 +961,10 @@ describe("PostgreSQL stores", () => {
     );
     expect(await settlements.get(s.key)).toMatchObject({ state: "rejected", reopened: -1 });
     expect(await settlements.reopen(s.key, s.fingerprint, ["unsent"], 5_000)).toBeUndefined();
+    // Nor does a refusal move it to `refused`, which the pruner would delete (0086).
+    expect(
+      await settlements.refuse(s, { errorReason: "invalid_fee" }, ["unsent"], 5_000),
+    ).toMatchObject({ state: "rejected", errorReason: "unsent", reopened: -1 });
     // This release's own claims start at 0, and reopen.
     const t = settlement("2");
     await settlements.claim(t);
