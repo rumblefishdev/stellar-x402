@@ -16,7 +16,8 @@
   2026-11-05 (task 0027 decision 4 amended: every metric in the catalog is billed) and
   2026-11-09 (task 0027 decision 73: OpenBao's audit log disk at 90%, the server's disk at 80%)
   and 2026-11-17 (task 0138: metrics and alerts move to Prometheus and Alertmanager on
-  a separate Hetzner Cloud VM; CloudWatch keeps the logs and the off-server checks)
+  a separate Hetzner Cloud VM; CloudWatch keeps the logs and the off-server checks) and
+  2026-11-19 (task 0134: a search-model container, 512 MiB, joins the totals)
 - Revised: 2026-10-13. ECS Fargate became the company Hetzner server (task 0039); the first
   version is in git history and task 0014. 2026-10-21: the key moved to OpenBao (ADR 0013), and
   deploys, reboots, backups, alarms and downtime were worked out in the PR #24 review.
@@ -68,8 +69,8 @@ The company already runs a Hetzner dedicated server for its production ClickHous
 - Docker Compose, and Caddy already terminates HTTPS for ClickHouse's mutual-TLS endpoint, in the
   same compose project as ClickHouse.
 
-Our containers are limited to 1.875 GiB of RAM with OpenBao while production serves testnet, and
-2.875 GiB once mainnet's database joins; on testnet they need about 2 GB of disk, WAL included.
+Our containers are limited to 2.375 GiB of RAM with OpenBao and the search model while production
+serves testnet, and 3.375 GiB once mainnet's database joins; on testnet they need about 2 GB of disk, WAL included.
 The company bought `sorobanscan.com` for sorobanscan and the Stellar Prices API and moves it, as
 a whole zone, to Cloudflare on the Free plan.
 
@@ -107,8 +108,12 @@ a whole zone, to Cloudflare on the Free plan.
     The facilitator mounts the socket of every network it serves, as external volumes from
     OpenBao's project, so one process can sign for both networks. ADR 0013 weighs what that
     costs.
-- **The limits add up to 1.625 GiB for production with testnet's database,** 1.875 GiB with
-  OpenBao; mainnet's database adds 1 GiB. They are ceilings; testnet uses less.
+- **A search-model container** (ADR 0014), memory limit 512 MiB: the embedding model used by
+  `/discovery/search`, measured at 371 MB peak.
+- **The limits add up to 2.125 GiB for production with testnet's database and the search model,**
+  2.375 GiB with OpenBao; mainnet's database adds 1 GiB. They are ceilings; testnet uses less. On
+  2026-11-19 the server had 125 GiB of RAM, every container's limit together came to about
+  110 GiB, and ours used 181 MiB.
 - **Testnet and mainnet share the facilitator process and OpenBao,** never a database, a key or a
   channel set (AD-12).
 - **No container publishes a port on the host,** and each environment gets two Docker networks
@@ -718,7 +723,7 @@ One request or one stop must never outlast the layer in front of it:
 ## Rationale
 
 - **The capacity is already paid for.** The server has a lot of free RAM and disk, and our
-  containers are limited to 1.875 GiB today and 2.875 GiB with mainnet's database. Running there
+  containers are limited to 2.375 GiB today and 3.375 GiB with mainnet's database. Running there
   costs about €0 more, against about $60–70 a month on testnet and $150 on mainnet for ECS
   Fargate.
 - **It meets both hard rules.** Compose stops the old container first, and the grace period has no

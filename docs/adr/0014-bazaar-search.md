@@ -25,8 +25,9 @@ What this has to fit:
 - All facilitator state is in PostgreSQL, a database per network
   ([ADR 0012](0012-facilitator-state-store.md)); which of them holds the catalog is still open
   (task 0126). The M1 evidence already told SCF that Tranche #2's search is planned on PostgreSQL.
-- The server is shared: our containers are limited to 1.875 GiB together while production serves
+- The server is shared: our containers were limited to 1.875 GiB together while production serves
   testnet, and the facilitator to 512 MiB and one CPU ([ADR 0011](0011-facilitator-hosting.md)).
+  The server itself has 125 GiB, so ADR 0011 now adds 512 MiB for the model.
 - The catalog is small. Testnet holds one listing; the largest public catalog, CDP's, held 34,782
   on 2026-11-18, 1,637 of them on Stellar pubnet from 21 hosts, all with English descriptions.
 
@@ -47,8 +48,14 @@ The measurements are in
   column. The words part, the meaning part and the text's hash all read that column, so they can't
   disagree about what a listing says.
 
-- **Filters.** `network`, `type`, `payTo`, `scheme` and `extensions` apply inside each part, before
-  its candidates are cut, so a filtered query ranks among the listings that pass.
+- **Matches.** A listing matches a query when its meaning is close enough: cosine similarity
+  0.60 or more (below). Words never add a listing; they only order the listings that match. On
+  the 0134 set this keeps 97% of the relevant listings and the same nDCG@10 (0.724 against 0.725),
+  with a median of 158 matches instead of 556, since OR-ed words match almost every listing
+  through words such as "api". When the model can't be used, the listings that hold a query word
+  match instead.
+- **Filters.** `network`, `type`, `payTo`, `scheme` and `extensions` apply before anything is
+  ranked, so a filtered query ranks among the listings that pass.
 - **Words.** PostgreSQL's own full-text search, the `english` configuration:
   - a weighted `tsvector` from the fields, with a GIN index. Weights start at name 1.0, tags 0.67,
     description 0.5, parameters 0.33;
@@ -87,7 +94,7 @@ The measurements are in
     their cause and counted in a metric, so monitoring can alert on a listing that keeps failing.
   - The runtime is ONNX Runtime; 0120 picks the library, with no LGPL dependency
     (`docs/scf/milestone-1-license-audit.md`).
-- **Fusion.** Weighted RRF over each part's top 50, k = 20: a listing scores
+- **Fusion.** Weighted RRF over the top 50 matches by each part, k = 20: a listing scores
   4 / (20 + its rank by meaning) + 1 / (20 + its rank by words). Ties go by the listing's key.
 - **Tuning.** These values sit on a flat part of the measured curve, within noise of meaning
   alone. Any tuning is done on 0134's set or a larger one of the same kind, never on 0135's
@@ -112,9 +119,7 @@ The measurements are in
   words alone, and the model: the two scores differ in scale, so a cursor from another ranking or
   model is refused with `400` and the client starts again.
 - **`partialResults`** keeps the spec's meaning: `true` when matches were cut that no page will
-  return. Only the words part has a set of matches, the listings that hold a query word; it is
-  `true` when that set is larger than the 50 candidates taken from it. The meaning part ranks
-  every listing, so it has no matches to cut.
+  return: when more listings match than the 50 each part takes.
 
 ## Rationale
 
@@ -161,9 +166,9 @@ The measurements are in
 - **`bge-small-en-v1.5`.** The same quality as granite at twice its time, and it needs a query
   prefix. Rejected.
 - **`bge-base-en-v1.5`.** +1.63 nDCG@10 on ToolRet over granite; on our test −0.023 nDCG@10 and
-  +0.013 R@20 (95% CI −0.052 .. +0.078), so no clear gain. Almost twice granite's memory (710 MB,
-  35% of today's container budget), six times its query time, and vectors twice the size.
-  Rejected.
+  +0.013 R@20 (95% CI −0.052 .. +0.078), so no clear gain. With the floor and fusion tuned for it
+  (its floor keeping 98% of relevant listings is 0.443), 0.702 nDCG@10 against granite's 0.725.
+  Memory no longer decides: the server has room for its 710 MB. Rejected on quality.
 - **An embedding API.** Puts an outside service on the request path, which §4 rules out. Rejected.
 - **The model inside the facilitator.** Its 512 MiB and one CPU serve `/settle`. Rejected.
 - **BM25 or TF-IDF over a token table of our own, as §4 describes.** It may rank words better than
@@ -177,8 +182,7 @@ The measurements are in
 ## Consequences
 
 - Production, CI and local compose switch to the pgvector image pinned as above, and one
-  more container whose memory limit is set from a measurement on the server. ADR 0011's totals
-  don't count it yet.
+  more container, limited to 512 MiB, which ADR 0011's totals now count.
 - Adding the stored generated column rewrites the catalog table. On today's catalog that is one
   row; changing how the fields are built later, on a large catalog, needs a plain column, a
   trigger and a backfill, to stay within ADR 0012's online-migration limits.
