@@ -18,8 +18,8 @@
 # It enables the units and starts none but the timers of the watchdog, the host probe and the
 # rotation: the units need their encrypted credentials first, and the agent its certificate
 # (runbook). A changed unit or compose file takes effect at that unit's next restart, so a run
-# never restarts the facilitator. The CloudWatch agent alone restarts, when its config changed:
-# no container waits on it.
+# never restarts the facilitator. The CloudWatch agent and the metrics agent alone restart, when
+# their config changed: no container waits on either, and the metrics agent's WAL covers the gap.
 - name: x402 on the server
   hosts: x402
   become: true
@@ -75,6 +75,10 @@
     # step starts it the first time.
     - name: Restart the CloudWatch agent if it runs
       ansible.builtin.command: systemctl try-restart amazon-cloudwatch-agent.service
+
+    # The same for the metrics agent: a new scrape target (0139 step 7) or certificate.
+    - name: Restart the metrics agent if it runs
+      ansible.builtin.command: systemctl try-restart x402-metrics.service
 
   tasks:
     - name: The x402 user, owner of /srv/x402; nobody logs in as it
@@ -357,6 +361,7 @@
       loop:
         - compose.yaml
         - prometheus.yml
+      notify: Restart the metrics agent if it runs
 
     # Its CN is the one the VM's metrics_writer_cns lets write; checked here, on the admin's machine.
     - name: The metrics agent's certificate, checked
@@ -397,6 +402,7 @@
         group: root
         mode: "0644"
       when: metrics_agent_cert is file
+      notify: Restart the metrics agent if it runs
 
     # The Storage Box's host key, pinned: the snapshot job refuses any other (StrictHostKeyChecking).
     - name: The Storage Box's host key
