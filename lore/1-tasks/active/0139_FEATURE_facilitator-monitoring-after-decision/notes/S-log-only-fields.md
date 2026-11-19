@@ -45,7 +45,7 @@ The values come from the code that writes them. A value the code adds later is w
 | `signer_failures_total` | `reason`, `step` | `SignerFailure` (7) × sign, check | 24 |
 | `settlement_budget_exhausted_total` | `signed` | true, false | 3 |
 | `settlement_reopened_total` | `reason` | `UNSENT_REASONS` (11) | 12 |
-| `settlement_hook_failures_total` | `hook` | beforeSubmit, onFinal, onSuccess | 4 |
+| `settlement_hook_failures_total` | `hook` | `keyof SettlementHooks` (4) | 5 |
 | `lease_changes_total` | `held` | true, false | 3 |
 | `store_prune_failures_total` | `table` | the pruner's 4 tables, and #205's `settlements_refused` | 6, process |
 | `catalog_internal_errors_total` | `stage`, `origin` | the cataloger's 11 steps × settle, resolved | 36, process |
@@ -56,8 +56,8 @@ The values come from the code that writes them. A value the code adds later is w
 | `spend_refused_total` | `reason` | the policy's 11 refusals | 12 |
 | `rpc_on_fallback` | `rpc` | the `RPC_URLS` index: 0, 1, 2 (`MAX_RPC_URLS` is 3) | gauge |
 
-Each count includes `other`. Measured from the adapter's zero series: **367 series with one
-network, 502 with both**. 232 of them are process-scoped, and `catalog_attempts_total` alone is
+Each count includes `other`. Measured from the adapter's zero series: **368 series with one
+network, 504 with both**. 232 of them are process-scoped, and `catalog_attempts_total` alone is
 108. The CPX12 estimate was 4,000 to 10,000.
 
 `fee_charged_stroops` keeps `state` as a label, so `increase(fee_charged_stroops[7d])` by `state`

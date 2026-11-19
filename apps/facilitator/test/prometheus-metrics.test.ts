@@ -7,6 +7,7 @@ import {
   prometheusMetrics,
   type MetricIssue,
 } from "../src/adapters/prometheus-metrics.js";
+import { rpcEndpointName } from "../src/logger.js";
 
 const NET = "stellar:testnet";
 const T = 1_700_000_000_000;
@@ -105,12 +106,32 @@ describe("prometheus adapter", () => {
     const net = m.for({ network: NET });
     net.registerGauge("rpc_on_fallback", () => ({
       value: 1,
-      labels: { rpc: "RPC_URLS[1]#ab12cd34" },
+      labels: { rpc: rpcEndpointName("https://rpc.example", 1) },
     }));
     net.registerGauge("pool_queued", () => ({ value: 2, labels: { channels: 5, busy: 3 } }));
     const s = scrape();
     expect(s.get(`rpc_on_fallback{network="${NET}",rpc="1"}`)).toBe(1);
     expect(s.get(`pool_queued{network="${NET}"}`)).toBe(2);
+  });
+
+  it("keeps one stamp per gauge registration when its labels change", () => {
+    // After a failover `rpc` reads another index: the old index's stamp must go, or its age rule
+    // would fire while the gauge reads fine.
+    const { m, scrape, tick } = setup();
+    let index = 0;
+    m.for({ network: NET }).registerGauge("rpc_on_fallback", () => ({
+      value: index === 0 ? 0 : 1,
+      labels: { rpc: rpcEndpointName("https://rpc.example", index) },
+    }));
+    scrape();
+    index = 1;
+    tick(60_000);
+    const s = scrape();
+    const stamps = [...s.keys()].filter((k) => k.startsWith("rpc_on_fallback_last_read"));
+    expect(stamps).toEqual([
+      `rpc_on_fallback_last_read_timestamp_seconds{network="${NET}",rpc="1"}`,
+    ]);
+    expect(s.get(stamps[0]!)).toBe((T + 60_000) / 1000);
   });
 
   it("counts a line only when a when on a label that is no dim holds", () => {

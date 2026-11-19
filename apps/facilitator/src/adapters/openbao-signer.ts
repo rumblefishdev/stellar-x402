@@ -45,6 +45,9 @@ export type SignerState = "unchecked" | "ok" | "failed";
 export type SignerFailure =
   "sealed" | "denied" | "refused" | "error" | "timeout" | "unreachable" | "address_mismatch";
 
+/** Where a failure happened: signing, or the start-up check of the key. */
+export type SignerStep = "sign" | "check";
+
 export class SignerError extends Error {
   override readonly name = "SignerError";
   constructor(
@@ -171,7 +174,7 @@ export function openBaoSigner(opts: OpenBaoSignerOptions): OpenBaoSigner {
     return bytes;
   }
 
-  function failed(step: "sign" | "check", error: unknown): void {
+  function failed(step: SignerStep, error: unknown): void {
     const reason = error instanceof SignerError ? error.reason : "error";
     metrics.increment("signer_failures_total", { reason, step });
     logger.error("signer_failed", { network, step, reason, error });

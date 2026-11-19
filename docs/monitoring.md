@@ -715,7 +715,8 @@ the AWS metrics the alarms read. What each one measures and where it comes from 
 [G-metrics](../lore/1-tasks/archive/0027_FEATURE_alerts-and-metrics/notes/G-metrics.md). A dimension
 set marked "only" is written for those values alone; "none" is a series with no dimension. A metric with no alarm is read in Logs Insights or in
 the weekly review. `infra/test/alarms.test.ts` fails when the catalog gains a metric this table
-lacks.
+lacks. The Dimensions column is CloudWatch's. In Prometheus (0139) a series also carries each field
+the catalog closes in `fieldValues` as a label, such as `settlement_outcomes_total`'s `replay`.
 
 | Metric                                      | Namespace          | Kind, unit     | Dimensions                                               | Alarms                                                                                                        |
 | ------------------------------------------- | ------------------ | -------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
