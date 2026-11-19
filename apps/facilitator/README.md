@@ -115,8 +115,14 @@ not `NETWORK`, so it holds in a process that serves both networks (0126).
   client throws `Facilitator verify failed (401): {"error":"missing_api_key"}`.
 
 - **A key is `x402_` and 43 base64url characters** (32 random bytes). The registry (`api_keys`,
-  migration `0013_api_keys`) stores its SHA-256, never the key, so a key is shown once, when it is
-  issued, and a lost one is replaced. A malformed key is refused without a read of the registry.
+  migration `0013_api_keys`) stores its SHA-256, never the key, so a key the operator's script
+  issues is shown once, when it is issued, and a lost one is replaced. A malformed key is refused
+  without a read of the registry. A key the portal issues (0106) also has a sealed copy in
+  `api_key_copies` (migration `0014_api_key_copies`), so the API hub can show it again:
+  AES-256-GCM under the portal's `KEY_ENCRYPTION_KEY`, which the database never holds, bound to
+  the key's owner and hash, and deleted when the portal revokes the key. The script's `revoke`
+  leaves it, never shown again, until the portal next revokes a key of that owner. The
+  facilitator never reads that table.
 - **A key has an owner**, `<kind>:<id>`: `operator:<name>` for a key the operator issues by hand,
   `discord:<id>` for one the portal issues (0106). An owner has one active key at a time. The rate
   limiter counts a pubnet request under its owner (`settle:key:operator:acme`), with the same

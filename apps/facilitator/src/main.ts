@@ -1,4 +1,5 @@
 import { rpc as stellarRpc } from "@stellar/stellar-sdk";
+import { apiKeyHash, isApiKeyOwner, newApiKey } from "@stellar-x402/api-keys";
 import {
   FallbackRpc,
   SettlementSubmitter,
@@ -12,12 +13,10 @@ import { emfMetrics } from "./adapters/emf-metrics.js";
 import { openBaoSigner, type OpenBaoSigner } from "./adapters/openbao-signer.js";
 import { MIGRATIONS, migrate, pendingMigrations } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
-import { isApiKeyOwner } from "./adapters/rules.js";
 import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
 import { parseConfig, parseMigrateConfig } from "./config.js";
 import type { Config } from "./config.js";
 import type { AppDeps } from "./http/app.js";
-import { apiKeyHash, newApiKey } from "./http/api-key.js";
 import { supportedResponse } from "./http/supported.js";
 import { captureConsoleError, jsonLogger, rpcEndpointName, type Logger } from "./logger.js";
 import { memoryMetrics, type NetworkMetrics, type ProcessMetrics } from "./metrics.js";

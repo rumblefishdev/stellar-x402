@@ -1,7 +1,8 @@
+import { apiKeyHash } from "@stellar-x402/api-keys";
 import type { RequestHandler, Response } from "express";
 import type { ApiKeyStore } from "../ports/index.js";
 import type { Caller } from "../settlement/hooks.js";
-import { apiKeyHash, bearerApiKey, requiresApiKey } from "./api-key.js";
+import { bearerApiKey, requiresApiKey } from "./api-key.js";
 import type { RateLimiter } from "./rate-limit.js";
 
 export interface Admission {

@@ -273,6 +273,20 @@ CREATE TABLE api_keys (
 CREATE UNIQUE INDEX api_keys_one_active ON api_keys (owner) WHERE state = 'active';
 `,
   },
+  {
+    // 0106: the portal shows an owner its key again, and the registry holds a hash, so each key
+    // the portal issues has a copy here, sealed with a key only the portal holds. The portal
+    // deletes it when the key is revoked. Nothing in the facilitator reads the table, and a key
+    // the operator's script issues has no row. A new table, so the release before it keeps
+    // working.
+    name: "0014_api_key_copies",
+    sql: `
+CREATE TABLE api_key_copies (
+  key_hash text PRIMARY KEY REFERENCES api_keys (key_hash),
+  sealed bytea NOT NULL CHECK (octet_length(sealed) BETWEEN 1 AND 1024)
+);
+`,
+  },
 ];
 
 /** Runs in one transaction with the transactional migrations next to it, as before 0067. */

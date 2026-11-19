@@ -1,3 +1,5 @@
+import { PostgresSealedKeyStore } from "@stellar-x402/api-keys";
+import { apiKeyStoreContract, sealedKeyStoreContract } from "@stellar-x402/api-keys/testing";
 import { CATALOG_KEY_VERSION } from "@stellar-x402/bazaar";
 import { Keypair, Networks, StrKey, Transaction } from "@stellar/stellar-sdk";
 import type { PaymentRequirements } from "@x402/core/types";
@@ -22,7 +24,6 @@ import type { Check } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
 import { transferPayload } from "./payment.js";
 import {
-  apiKeyStoreContract,
   catalogAttemptStoreContract,
   catalogStoreContract,
   rateLimitStoreContract,
@@ -201,6 +202,10 @@ describe("PostgreSQL stores", () => {
   catalogStoreContract(async () => (await stores()).catalog);
   catalogAttemptStoreContract(async () => (await stores()).catalogAttempts);
   apiKeyStoreContract(async () => (await stores()).apiKeys);
+  sealedKeyStoreContract(async () => ({
+    registry: (await stores()).apiKeys,
+    sealed: new PostgresSealedKeyStore(pool),
+  }));
 
   /**
    * Resolves the pid of a backend waiting on a lock `holder` holds, once one is. Other test files
@@ -888,6 +893,21 @@ describe("PostgreSQL stores", () => {
     expect(rows).toEqual([{ count: 3 }]);
   });
 
+  it("0014_api_key_copies: a copy belongs to a key the registry holds, and is neither empty nor long (0106)", async () => {
+    await db.empty();
+    const copy = (hash: string, sealed: Buffer) =>
+      pool.query("INSERT INTO api_key_copies (key_hash, sealed) VALUES ($1, $2)", [hash, sealed]);
+    await expect(copy("a".repeat(64), Buffer.from("x"))).rejects.toThrow(/foreign key/);
+    await pool.query(
+      "INSERT INTO api_keys (key_hash, owner, created_at) VALUES ($1, 'discord:1', 1)",
+      ["a".repeat(64)],
+    );
+    await expect(copy("a".repeat(64), Buffer.alloc(0))).rejects.toThrow(/check/);
+    await expect(copy("a".repeat(64), Buffer.alloc(1025))).rejects.toThrow(/check/);
+    await copy("a".repeat(64), Buffer.alloc(1024));
+    await expect(copy("a".repeat(64), Buffer.from("x"))).rejects.toThrow(/api_key_copies_pkey/);
+  });
+
   it("applies the migrations once when two runs race", async () => {
     const fresh = `${schema}_m`;
     await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
@@ -1016,6 +1036,7 @@ describe("PostgreSQL stores", () => {
           "0011_settlement_in_flight",
           "0012_settlement_inner_hash",
           "0013_api_keys",
+          "0014_api_key_copies",
         ]);
         expect(await typeIndex(old), built).toBe(1);
       } finally {
@@ -1048,6 +1069,7 @@ describe("PostgreSQL stores", () => {
         "0011_settlement_in_flight",
         "0012_settlement_inner_hash",
         "0013_api_keys",
+        "0014_api_key_copies",
       ]);
       const { rows } = await old.query(
         "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",

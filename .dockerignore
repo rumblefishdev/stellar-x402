@@ -1,5 +1,5 @@
-# The facilitator's image build context (apps/facilitator/Dockerfile). Never secrets, and
-# nothing the build makes itself.
+# The build context of the images (apps/facilitator/Dockerfile, apps/portal/Dockerfile). Never
+# secrets, and nothing a build makes itself.
 **/.env*
 **/.stellar
 **/*.pem

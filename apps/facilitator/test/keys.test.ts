@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { MIGRATIONS, migrate } from "../src/adapters/postgres-schema.js";
 import { ConfigError } from "../src/config.js";
-import { apiKeyHash } from "../src/http/api-key.js";
+import { apiKeyHash } from "@stellar-x402/api-keys";
 import { KeysError, keysMain } from "../src/main.js";
 import { testDatabase } from "./database.js";
 

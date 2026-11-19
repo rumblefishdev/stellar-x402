@@ -516,11 +516,38 @@ by its payer's signature. Who may get a key is the portal's rule (0106), not cov
 - **Mitigation:** The registry holds each key's SHA-256, never the key, and the table's own CHECK
   refuses anything but 64 hex digits in that column. A key is 32 random bytes, so its hash can't
   be searched back into the key, salted or not. The hash is not a credential: sent as a key it is
-  refused as malformed, without a read.
+  refused as malformed, without a read. Beside it, `api_key_copies` holds a sealed copy of each
+  key the portal issued, so the API hub can show it again (0106): AES-256-GCM under the portal's
+  `KEY_ENCRYPTION_KEY`, which the database never holds, bound to the key's owner and hash so a
+  copy moved to another row doesn't open, and deleted when the portal revokes the key. A dump
+  alone opens no copy.
 - **Residual risk:** The owners are readable, and from 0106 they are Discord account ids, which
-  its privacy policy has to cover. Whoever can write the database can add a key of their own;
-  that takes the database password, which only the facilitator and the migration service hold
-  (ADR 0012).
+  its privacy policy has to cover. A dump together with `KEY_ENCRYPTION_KEY`, an encrypted
+  credential on the server that only the portal's container reads, gives every active key the
+  portal issued. Grants don't close the copies to anyone else in the database: the facilitator
+  connects as its owner and could read them, so only the encryption keeps them (0106 decision
+  18). Whoever can write the database can add a key of their own; that takes the database
+  password, which only the facilitator and the migration service hold (ADR 0012), or the
+  password of the portal's role `x402_portal`, which may insert a key.
+
+#### Someone holds the hub's token secret
+
+- **Attack:** The portal's backend issues, shows and revokes a key on the word of a token the API
+  hub signs, an HMAC under the secret `sorobanscan-hub/production/x402-token` (0106). Whoever
+  holds the secret signs a token for any Discord account and any act: a key for an account that
+  never asked or that the hub would refuse, any account's key shown, or revoked.
+- **Mitigation:** The secret is in AWS Secrets Manager, where the hub's backend reads it, and on
+  the server in one file, the encrypted credential `portal-hub-token-secret`, decrypted for the
+  portal's container only. Neither side logs it or a token. A token lives 60 seconds, names one
+  account and one act, and is signed under x402's own audience and context, so a token for
+  another of the hub's products doesn't pass here. The secret can be changed with no moment in
+  which a good token is refused, apart from the seconds of each of the backend's two restarts
+  (runbook, The portal's backend).
+- **Residual risk:** The backend can't tell a token the hub signed from one signed with a stolen
+  secret, and a key issued with one is a real key for that account. Membership of Stellar
+  Developers and its screening are the hub's to check before it signs for `issue`; the backend
+  checks only the account's age. Whoever can read the secret in that AWS account holds this
+  power, and so does root on the server.
 
 #### Requests without a valid key, in bulk
 
