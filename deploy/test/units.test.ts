@@ -189,6 +189,7 @@ describe("the units' output", () => {
     "x402-deploy@.service": "deploy",
     "x402-portal@.service": "portal",
     "x402-portal-deploy@.service": "portal-deploy",
+    "x402-metrics.service": "metrics-agent",
   };
   /** The oneshots that start no container of their own. */
   const deploys = ["x402-deploy@.service", "x402-portal-deploy@.service"];
@@ -215,7 +216,11 @@ describe("the units' output", () => {
   });
 
   test("every docker compose up writes raw lines", () => {
-    for (const file of Object.keys(writers).filter((f) => !deploys.includes(f))) {
+    // The metrics agent's file runs two containers: the prefix says which one wrote a line.
+    const prefixed = ["x402-metrics.service"];
+    for (const file of Object.keys(writers).filter(
+      (f) => !deploys.includes(f) && !prefixed.includes(f),
+    )) {
       const ups = settings(unit(file), "ExecStart").filter((e) => / up /.test(e));
       expect(ups, file).toHaveLength(1);
       expect(ups[0], file).toMatch(/ up --no-log-prefix --no-color /);
